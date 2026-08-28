@@ -1,6 +1,6 @@
-//! Window lifecycle, key handling, and the glue between input and rendering.
+//! Window lifecycle, key handling, and building each frame's interface.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use winit::application::ApplicationHandler;
@@ -10,8 +10,9 @@ use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{Window, WindowId};
 
-use crate::formats::{self, DecodedImage};
-use crate::renderer::Renderer;
+use crate::image::display::{AutoWindow, Colormap, Display, Startup};
+use crate::image::{DecodedImage, Stats, decode};
+use crate::render::{Color, HdrPreference, Rect, Renderer, UiFrame};
 use crate::view::View;
 
 /// Window pixels moved per arrow-key press.
@@ -19,9 +20,25 @@ const PAN_STEP: f32 = 64.0;
 /// Fraction of the monitor a freshly opened window may occupy.
 const MAX_WINDOW_FRACTION: f64 = 0.85;
 
+const BAR_HEIGHT: f32 = 30.0;
+const TEXT_SIZE: f32 = 13.0;
+const PADDING: f32 = 12.0;
+const HISTOGRAM_SIZE: [f32; 2] = [320.0, 130.0];
+
+const BAR_BACKGROUND: Color = Color::rgba(0, 0, 0, 160);
+const PANEL_BACKGROUND: Color = Color::rgba(12, 12, 16, 214);
+const TEXT_PRIMARY: Color = Color::rgb(238, 238, 238);
+const TEXT_DIM: Color = Color::rgb(150, 152, 160);
+const ACCENT: Color = Color::rgb(120, 180, 255);
+
+/// The image on screen, with everything derived from it.
 struct Current {
     image: DecodedImage,
+    stats: Stats,
+    display: Display,
     label: String,
+    /// What the GPU actually stored it as, which is not always what we asked.
+    format: Option<wgpu::TextureFormat>,
 }
 
 impl Current {
@@ -34,58 +51,55 @@ pub struct App {
     files: Vec<PathBuf>,
     index: usize,
     current: Option<Current>,
+    overrides: decode::Overrides,
+    startup: Startup,
+    hdr: HdrPreference,
     view: View,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     modifiers: ModifiersState,
+    show_overlay: bool,
+    show_histogram: bool,
     /// Set if the last render failed, so we report it once rather than every frame.
     reported_error: bool,
 }
 
 impl App {
-    /// `first` is the already-decoded `files[0]`, loaded before the window
-    /// opened so that a bad path fails on the command line.
-    pub fn new(files: Vec<PathBuf>, first: DecodedImage) -> Self {
-        let label = file_label(&files[0]);
+    /// `first` is `files[index]`, already decoded before the window opened so
+    /// that a bad path fails on the command line.
+    pub fn new(
+        files: Vec<PathBuf>,
+        index: usize,
+        first: DecodedImage,
+        overrides: decode::Overrides,
+        startup: Startup,
+        hdr: HdrPreference,
+        show_histogram: bool,
+    ) -> Self {
+        let stats = Stats::scan(&first);
+        let display = Display::for_image_with(&first, &stats, startup);
+        let label = file_label(&files[index]);
         Self {
             files,
-            index: 0,
+            index,
             current: Some(Current {
                 image: first,
+                stats,
+                display,
                 label,
+                format: None,
             }),
+            overrides,
+            startup,
+            hdr,
             view: View::new(),
             window: None,
             renderer: None,
             modifiers: ModifiersState::empty(),
+            show_overlay: true,
+            show_histogram,
             reported_error: false,
         }
-    }
-
-    fn status_line(&self) -> String {
-        let Some(current) = &self.current else {
-            return String::new();
-        };
-        let mut line = format!(
-            "{}   {} \u{00d7} {}",
-            current.label, current.image.width, current.image.height
-        );
-        if let Some(renderer) = &self.renderer {
-            let zoom = self.view.zoom(current.size(), renderer.size());
-            line.push_str(&format!(
-                "   \u{00b7}   {:.0}%   \u{00b7}   {}",
-                zoom * 100.0,
-                self.view.mode_label()
-            ));
-        }
-        if self.files.len() > 1 {
-            line.push_str(&format!(
-                "   \u{00b7}   [{}/{}]",
-                self.index + 1,
-                self.files.len()
-            ));
-        }
-        line
     }
 
     fn image_size(&self) -> [f32; 2] {
@@ -106,7 +120,7 @@ impl App {
     /// decoded, leaving the current image on screen.
     fn show(&mut self, index: usize) -> bool {
         let path = &self.files[index];
-        let image = match formats::load(path) {
+        let image = match decode::load(path, self.overrides) {
             Ok(image) => image,
             Err(error) => {
                 eprintln!("image-view: {error:#}");
@@ -114,17 +128,36 @@ impl App {
             }
         };
 
+        let stats = Stats::scan(&image);
+        let display = Display::for_image_with(&image, &stats, self.startup);
         self.index = index;
+        self.view.reset();
+
+        let mut format = None;
+        if let Some(renderer) = &mut self.renderer {
+            match renderer.set_image(&image) {
+                Ok(note) => {
+                    if let Some(note) = note {
+                        eprintln!("image-view: {note}");
+                    }
+                    format = renderer.image_format();
+                }
+                Err(error) => {
+                    eprintln!("image-view: {error:#}");
+                    return false;
+                }
+            }
+        }
+
         self.current = Some(Current {
             image,
+            stats,
+            display,
             label: file_label(path),
+            format,
         });
-        self.view.reset();
-        if let (Some(renderer), Some(current)) = (&mut self.renderer, &self.current) {
-            renderer.set_image(&current.image);
-        }
         if let Some(window) = &self.window {
-            window.set_title(&window_title(&self.files[index]));
+            window.set_title(&window_title(path));
         }
         true
     }
@@ -172,35 +205,124 @@ impl App {
             Key::Named(NamedKey::ArrowDown) => self.view.pan_by(0.0, PAN_STEP, image, window),
             Key::Named(NamedKey::PageDown) => self.step(true),
             Key::Named(NamedKey::PageUp) => self.step(false),
-            Key::Character(text) => match text.as_str() {
-                "q" | "Q" => {
-                    event_loop.exit();
+            Key::Character(text) => return self.handle_character(event_loop, text, image, window),
+            _ => return false,
+        }
+        true
+    }
+
+    fn handle_character(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        text: &str,
+        image: [f32; 2],
+        window: [f32; 2],
+    ) -> bool {
+        // Everything below the view controls needs an image to act on.
+        match text {
+            "q" | "Q" => {
+                event_loop.exit();
+                return false;
+            }
+            "+" | "=" => {
+                self.view.zoom_in(image, window);
+                return true;
+            }
+            "-" | "_" => {
+                self.view.zoom_out(image, window);
+                return true;
+            }
+            "0" => {
+                self.view.actual_size(image, window);
+                return true;
+            }
+            "f" | "F" => {
+                self.view.cycle_fit();
+                return true;
+            }
+            "n" | "N" => {
+                self.step(true);
+                return true;
+            }
+            "p" | "P" => {
+                self.step(false);
+                return true;
+            }
+            "i" | "I" => {
+                self.show_overlay = !self.show_overlay;
+                return true;
+            }
+            "h" | "H" => {
+                self.show_histogram = !self.show_histogram;
+                return true;
+            }
+            _ => {}
+        }
+
+        let Some(current) = &mut self.current else {
+            return false;
+        };
+        match text {
+            "e" => current.display.adjust_exposure(-0.5),
+            "E" => current.display.adjust_exposure(0.5),
+            "a" | "A" => current.display.cycle_auto(&current.stats),
+            "t" | "T" => current.display.cycle_tone_map(),
+            "c" | "C" => {
+                if !current.image.is_gray() {
                     return false;
                 }
-                "+" | "=" => self.view.zoom_in(image, window),
-                "-" | "_" => self.view.zoom_out(image, window),
-                "0" => self.view.actual_size(image, window),
-                "f" | "F" => self.view.cycle_fit(),
-                "n" | "N" => self.step(true),
-                "p" | "P" => self.step(false),
-                _ => return false,
-            },
+                current.display.cycle_colormap();
+            }
+            "[" => current.display.shift_window(-0.05),
+            "]" => current.display.shift_window(0.05),
+            "," | "<" => current.display.adjust_contrast(0.8),
+            "." | ">" => current.display.adjust_contrast(1.25),
+            "r" | "R" => current
+                .display
+                .reset(&current.stats, &current.image, self.startup),
             _ => return false,
         }
         true
     }
 
     fn redraw(&mut self) {
-        let (Some(_), Some(window)) = (&self.renderer, &self.window) else {
+        let Some(window) = self.window.clone() else {
             return;
         };
-        let image = self.image_size();
-        let placement = self.view.placement(image, self.window_size());
-        let status = self.status_line();
-        let scale = window.scale_factor() as f32;
+        if self.renderer.is_none() {
+            return;
+        }
 
+        let scale = window.scale_factor() as f32;
+        let physical = self.window_size();
+        let logical = [physical[0] / scale, physical[1] / scale];
+        let placement = self.view.placement(self.image_size(), physical);
+
+        // Split borrow: the frame builder needs the renderer's font metrics
+        // while reading the rest of the application state.
         let renderer = self.renderer.as_mut().expect("checked above");
-        match renderer.render(placement, scale, &status) {
+        let frame = build_ui(
+            renderer,
+            Layout {
+                logical,
+                physical,
+                index: self.index,
+                file_count: self.files.len(),
+                show_overlay: self.show_overlay,
+                show_histogram: self.show_histogram,
+            },
+            self.current.as_ref(),
+            &self.view,
+        );
+
+        let fallback = Display::default();
+        let display = self
+            .current
+            .as_ref()
+            .map(|current| &current.display)
+            .unwrap_or(&fallback);
+
+        match renderer.render(placement, display, &frame, scale) {
             Ok(()) => self.reported_error = false,
             Err(error) => {
                 if !self.reported_error {
@@ -218,8 +340,7 @@ impl ApplicationHandler for App {
             return;
         }
 
-        let image = self.image_size();
-        let size = initial_window_size(event_loop, image);
+        let size = initial_window_size(event_loop, self.image_size());
         let attributes = Window::default_attributes()
             .with_title(window_title(&self.files[self.index]))
             .with_inner_size(size);
@@ -233,7 +354,7 @@ impl ApplicationHandler for App {
             }
         };
 
-        let mut renderer = match Renderer::new(window.clone()) {
+        let mut renderer = match Renderer::new(window.clone(), self.hdr) {
             Ok(renderer) => renderer,
             Err(error) => {
                 eprintln!("image-view: {error:#}");
@@ -241,8 +362,35 @@ impl ApplicationHandler for App {
                 return;
             }
         };
-        if let Some(current) = &self.current {
-            renderer.set_image(&current.image);
+
+        if let Some(current) = &mut self.current {
+            match renderer.set_image(&current.image) {
+                Ok(note) => {
+                    if let Some(note) = note {
+                        eprintln!("image-view: {note}");
+                    }
+                    current.format = renderer.image_format();
+                }
+                Err(error) => {
+                    eprintln!("image-view: {error:#}");
+                    event_loop.exit();
+                    return;
+                }
+            }
+        }
+
+        if self.hdr == HdrPreference::On {
+            let output = renderer.output();
+            eprintln!(
+                "image-view: {} \u{2192} {} output{}",
+                renderer.adapter_name(),
+                output.label,
+                if output.is_hdr {
+                    ""
+                } else {
+                    " (no HDR colour space offered for this surface)"
+                }
+            );
         }
 
         self.renderer = Some(renderer);
@@ -287,13 +435,238 @@ impl ApplicationHandler for App {
     }
 }
 
-fn file_label(path: &std::path::Path) -> String {
+/// Everything the frame builder needs that is not the image itself.
+struct Layout {
+    /// Window size in logical pixels, which is what the UI lays out in.
+    logical: [f32; 2],
+    /// Window size in physical pixels, which is what zoom is measured against.
+    physical: [f32; 2],
+    index: usize,
+    file_count: usize,
+    show_overlay: bool,
+    show_histogram: bool,
+}
+
+/// Builds one frame of interface.
+///
+/// A free function taking exactly what it needs, rather than a method, so that
+/// it can measure text through the renderer while reading application state.
+fn build_ui(
+    renderer: &mut Renderer,
+    layout: Layout,
+    current: Option<&Current>,
+    view: &View,
+) -> UiFrame {
+    let size = layout.logical;
+    let mut frame = UiFrame::new(size);
+    let Some(current) = current else {
+        return frame;
+    };
+
+    if layout.show_histogram {
+        draw_histogram(&mut frame, current, layout.show_overlay);
+    }
+    if !layout.show_overlay {
+        return frame;
+    }
+
+    let bar = Rect::new(0.0, size[1] - BAR_HEIGHT, size[0], BAR_HEIGHT);
+    frame.rect(bar, BAR_BACKGROUND);
+
+    let baseline = bar.y + (BAR_HEIGHT - TEXT_SIZE * 1.3) / 2.0;
+
+    let mut right = describe_state(current, view, &layout);
+    if renderer.output().is_hdr {
+        right = format!("{}   \u{00b7}   {}", renderer.output().label, right);
+    }
+    let right_width = renderer.measure_text(&right, TEXT_SIZE)[0];
+    let right_x = (bar.right() - PADDING - right_width).max(PADDING);
+
+    // Least to most disposable. Rather than clip whatever happens to overflow
+    // — which is how "18333 x 15667" becomes "18333" — drop whole facts from
+    // the end until what is left fits.
+    let left = fit_segments(
+        renderer,
+        &[
+            current.label.clone(),
+            format!("{} \u{00d7} {}", current.image.width, current.image.height),
+            describe_pixels(current),
+            current.image.color.label(),
+        ],
+        (right_x - PADDING * 2.0).max(1.0),
+    );
+
+    frame.text_clipped(
+        [PADDING, baseline],
+        TEXT_SIZE,
+        TEXT_PRIMARY,
+        (right_x - PADDING * 2.0).max(1.0),
+        left,
+    );
+    frame.text([right_x, baseline], TEXT_SIZE, TEXT_DIM, right);
+    frame
+}
+
+/// Joins as many leading segments as fit in `width`, keeping at least the
+/// first however narrow the window gets.
+fn fit_segments(renderer: &mut Renderer, segments: &[String], width: f32) -> String {
+    const SEPARATOR: &str = "   \u{00b7}   ";
+    let mut text = segments.first().cloned().unwrap_or_default();
+    for segment in &segments[1..] {
+        let candidate = format!("{text}{SEPARATOR}{segment}");
+        if renderer.measure_text(&candidate, TEXT_SIZE)[0] > width {
+            break;
+        }
+        text = candidate;
+    }
+    text
+}
+
+fn describe_pixels(current: &Current) -> String {
+    let channels = match current.image.channels() {
+        crate::image::Channels::Gray => "gray",
+        crate::image::Channels::GrayAlpha => "gray+alpha",
+        crate::image::Channels::Rgb => "rgb",
+        crate::image::Channels::Rgba => "rgba",
+    };
+    let stored = current
+        .format
+        .map(|format| format!(" \u{2192} {format:?}"))
+        .unwrap_or_default();
+    format!(
+        "{} {channels}{stored}",
+        current.image.samples.component_name()
+    )
+}
+
+fn describe_state(current: &Current, view: &View, layout: &Layout) -> String {
+    let zoom = view.zoom(current.size(), layout.physical);
+    let mut parts = vec![
+        format!("{:.0}%", zoom * 100.0),
+        view.mode_label().to_string(),
+    ];
+
+    if current.display.auto != AutoWindow::Off {
+        parts.push(format!(
+            "{} {}",
+            current.display.auto.label(),
+            format_window(current)
+        ));
+    }
+    if current.display.exposure_stops != 0.0 {
+        parts.push(format!("{:+.1} EV", current.display.exposure_stops));
+    }
+    if current.display.colormap != Colormap::Gray {
+        parts.push(current.display.colormap.label().to_string());
+    }
+    if current.image.is_high_dynamic_range() {
+        parts.push(current.display.tone_map.label().to_string());
+    }
+    if layout.file_count > 1 {
+        parts.push(format!("[{}/{}]", layout.index + 1, layout.file_count));
+    }
+    parts.join("   \u{00b7}   ")
+}
+
+/// Window bounds in the units of the source file where that is meaningful.
+/// Linear integer data reads back as counts, which is what measurement work
+/// wants; anything with a curve on it stays in normalised units.
+fn format_window(current: &Current) -> String {
+    let scale = if current.image.color.transfer.is_linear() {
+        current.image.samples.full_scale()
+    } else {
+        1.0
+    };
+    let low = current.display.low * scale;
+    let high = current.display.high * scale;
+    if scale > 1.0 {
+        format!("{low:.0}\u{2013}{high:.0}")
+    } else {
+        format!("{low:.3}\u{2013}{high:.3}")
+    }
+}
+
+fn draw_histogram(frame: &mut UiFrame, current: &Current, above_bar: bool) {
+    let size = frame.size();
+    let bottom = size[1] - if above_bar { BAR_HEIGHT } else { 0.0 } - PADDING;
+    let panel = Rect::new(
+        size[0] - HISTOGRAM_SIZE[0] - PADDING,
+        bottom - HISTOGRAM_SIZE[1],
+        HISTOGRAM_SIZE[0],
+        HISTOGRAM_SIZE[1],
+    );
+    frame.rounded_rect(panel, 6.0, PANEL_BACKGROUND);
+
+    let plot = panel.inset(10.0, 10.0);
+    let label_height = TEXT_SIZE * 1.4;
+    let bars = Rect::new(
+        plot.x,
+        plot.y + label_height,
+        plot.width,
+        plot.height - label_height,
+    );
+
+    frame.text(
+        [plot.x, plot.y],
+        TEXT_SIZE * 0.85,
+        TEXT_DIM,
+        format!(
+            "{:.4}  \u{2013}  {:.4}",
+            current.stats.min, current.stats.max
+        ),
+    );
+
+    let peak = current
+        .stats
+        .histogram
+        .iter()
+        .copied()
+        .max()
+        .unwrap_or(1)
+        .max(1) as f32;
+    let bin_width = bars.width / crate::image::stats::BINS as f32;
+    for (index, count) in current.stats.histogram.iter().enumerate() {
+        if *count == 0 {
+            continue;
+        }
+        // Log scale: a linear one is all noise once a single bin dominates.
+        let height = ((*count as f32).ln_1p() / peak.ln_1p()) * bars.height;
+        frame.rect(
+            Rect::new(
+                bars.x + index as f32 * bin_width,
+                bars.bottom() - height,
+                bin_width.max(1.0),
+                height,
+            ),
+            TEXT_DIM.with_alpha(200),
+        );
+    }
+
+    // Where the display window sits within the observed range.
+    let span = current.stats.max - current.stats.min;
+    if span > 0.0 {
+        for value in [current.display.low, current.display.high] {
+            let position = ((value - current.stats.min) / span).clamp(0.0, 1.0);
+            frame.rect(
+                Rect::new(
+                    bars.x + position * bars.width - 0.5,
+                    bars.y,
+                    1.5,
+                    bars.height,
+                ),
+                ACCENT,
+            );
+        }
+    }
+}
+
+fn file_label(path: &Path) -> String {
     path.file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string())
 }
 
-fn window_title(path: &std::path::Path) -> String {
+fn window_title(path: &Path) -> String {
     format!("{} — image-view", file_label(path))
 }
 

@@ -1,0 +1,825 @@
+//! Decoder coverage against the files in `test_images/`.
+//!
+//! Round-tripping through the `image` crate's own encoder only proves the
+//! crate agrees with itself. These are real files written by ImageMagick,
+//! covering every pixel layout the decoder can hand back and every per-format
+//! encoding that has its own code path — bit depths, palettes, interlacing,
+//! progressive JPEG, TIFF compressions, byte orders and tiling.
+//!
+//! Every fixture is the same pattern of four quadrants, so one table of
+//! expected values serves all of them. See `test_images/generate.sh`.
+
+use std::path::PathBuf;
+
+use super::{Overrides, load, supported_extensions};
+use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
+
+/// Centre of each quadrant, in the order the expectation tables use.
+const PROBES: [(u32, u32); 4] = [(8, 6), (24, 6), (8, 18), (24, 18)];
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+enum Kind {
+    U8,
+    U16,
+    F32,
+}
+
+/// What the quadrants hold, before alpha.
+#[derive(Clone, Copy)]
+enum Tone {
+    /// Red, green, blue, white.
+    Color,
+    /// 0, 1/3, 2/3, 1.
+    Gray,
+    /// What a one-bit image can represent of the grey pattern: the two middle
+    /// steps round to the ends.
+    GrayBilevel,
+    /// 0, 0.5, 1.0, 255/64 — the last one deliberately above SDR range.
+    Float,
+    /// As `Float`, but the first quadrant holds the no-data sentinel.
+    FloatWithNodata,
+    /// Signed 16-bit elevations, scaled to span negative and positive.
+    Int16,
+}
+
+/// What the alpha channel holds, where there is one.
+#[derive(Clone, Copy)]
+enum Coverage {
+    Opaque,
+    /// 1, 0.749, 0.502, 0.251.
+    Ramp,
+    /// A palette's `tRNS` is quantised to all-or-nothing by the encoder.
+    BinaryLastTransparent,
+}
+
+struct Fixture {
+    file: &'static str,
+    /// The decode path this file exists to cover.
+    covers: &'static str,
+    channels: Channels,
+    kind: Kind,
+    color: ColorSpace,
+    alpha: AlphaMode,
+    tone: Tone,
+    coverage: Coverage,
+    /// The no-data sentinel the decoder should have picked up, if any.
+    nodata: Option<f32>,
+    tolerance: f32,
+}
+
+/// Exact for lossless integer formats: 85/255 and 21845/65535 are both a
+/// third, so one table covers 8- and 16-bit alike.
+const EXACT: f32 = 1e-5;
+/// JPEG moves pure primaries by a code value or two.
+const LOSSY: f32 = 0.02;
+/// Radiance packs a shared exponent and an 8-bit mantissa.
+const RGBE: f32 = 0.01;
+
+const SRGB: ColorSpace = ColorSpace::SRGB;
+const LINEAR: ColorSpace = ColorSpace::LINEAR_BT709;
+
+const FIXTURES: &[Fixture] = &[
+    // ------------------------------------------------------------- PNG
+    Fixture {
+        file: "png-gray8.png",
+        covers: "PNG greyscale, 8-bit",
+        channels: Channels::Gray,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Gray,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "png-gray-alpha8.png",
+        covers: "PNG greyscale plus alpha, 8-bit",
+        channels: Channels::GrayAlpha,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Straight,
+        tone: Tone::Gray,
+        coverage: Coverage::Ramp,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "png-rgb8.png",
+        covers: "PNG truecolour, 8-bit",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "png-rgba8.png",
+        covers: "PNG truecolour plus alpha, 8-bit",
+        channels: Channels::Rgba,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Straight,
+        tone: Tone::Color,
+        coverage: Coverage::Ramp,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "png-gray16.png",
+        covers: "PNG greyscale, 16-bit",
+        channels: Channels::Gray,
+        kind: Kind::U16,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Gray,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "png-gray-alpha16.png",
+        covers: "PNG greyscale plus alpha, 16-bit",
+        channels: Channels::GrayAlpha,
+        kind: Kind::U16,
+        color: SRGB,
+        alpha: AlphaMode::Straight,
+        tone: Tone::Gray,
+        coverage: Coverage::Ramp,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "png-rgb16.png",
+        covers: "PNG truecolour, 16-bit",
+        channels: Channels::Rgb,
+        kind: Kind::U16,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "png-rgba16.png",
+        covers: "PNG truecolour plus alpha, 16-bit",
+        channels: Channels::Rgba,
+        kind: Kind::U16,
+        color: SRGB,
+        alpha: AlphaMode::Straight,
+        tone: Tone::Color,
+        coverage: Coverage::Ramp,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "png-gray1.png",
+        covers: "PNG sub-byte bit depth, 1-bit",
+        channels: Channels::Gray,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::GrayBilevel,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "png-gray4.png",
+        covers: "PNG sub-byte bit depth, 4-bit",
+        channels: Channels::Gray,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Gray,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "png-palette.png",
+        covers: "PNG indexed colour, expanded on decode",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "png-palette-alpha.png",
+        covers: "PNG indexed colour with a tRNS chunk",
+        channels: Channels::Rgba,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Straight,
+        tone: Tone::Color,
+        coverage: Coverage::BinaryLastTransparent,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "png-interlaced.png",
+        covers: "PNG Adam7 interlacing",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // ------------------------------------------------------------ JPEG
+    Fixture {
+        file: "jpeg-rgb.jpg",
+        covers: "JPEG baseline, no chroma subsampling",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: LOSSY,
+    },
+    Fixture {
+        file: "jpeg-gray.jpg",
+        covers: "JPEG single-component greyscale",
+        channels: Channels::Gray,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Gray,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: LOSSY,
+    },
+    Fixture {
+        file: "jpeg-progressive.jpeg",
+        covers: "JPEG progressive scan order, and the `.jpeg` extension",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: LOSSY,
+    },
+    Fixture {
+        file: "jpeg-subsampled.jpg",
+        covers: "JPEG 4:2:0 chroma subsampling",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: LOSSY,
+    },
+    // ------------------------------------------------------------ TIFF
+    Fixture {
+        file: "tiff-gray8.tif",
+        covers: "TIFF greyscale, 8-bit — guessed display-referred",
+        channels: Channels::Gray,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Gray,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "tiff-rgb8.tif",
+        covers: "TIFF truecolour, 8-bit",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "tiff-rgba8.tif",
+        covers: "TIFF truecolour plus alpha, 8-bit",
+        channels: Channels::Rgba,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Straight,
+        tone: Tone::Color,
+        coverage: Coverage::Ramp,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "tiff-gray16.tif",
+        covers: "TIFF greyscale, 16-bit — guessed scene-referred",
+        channels: Channels::Gray,
+        kind: Kind::U16,
+        color: LINEAR,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Gray,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "tiff-rgb16.tif",
+        covers: "TIFF truecolour, 16-bit",
+        channels: Channels::Rgb,
+        kind: Kind::U16,
+        color: LINEAR,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "tiff-float32.tif",
+        covers: "TIFF 32-bit floating point samples",
+        channels: Channels::Rgb,
+        kind: Kind::F32,
+        color: LINEAR,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Float,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "tiff-lzw.tif",
+        covers: "TIFF LZW compression",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "tiff-deflate.tiff",
+        covers: "TIFF Deflate compression, and the `.tiff` extension",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "tiff-packbits.tif",
+        covers: "TIFF PackBits compression",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "tiff-bigendian.tif",
+        covers: "TIFF big-endian byte order",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "tiff-tiled.tif",
+        covers: "TIFF tiled rather than stripped layout",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // TIFF as it turns up in mapping and science: single band, floating
+    // point, and encodings `image` cannot read at all.
+    Fixture {
+        file: "tiff-bigtiff.tif",
+        covers: "BigTIFF — a different magic number, invisible to image's sniffer",
+        channels: Channels::Gray,
+        kind: Kind::F32,
+        color: LINEAR,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Float,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "tiff-float-predictor.tif",
+        covers: "Deflate with the floating-point predictor, tiled — how DEMs ship",
+        channels: Channels::Gray,
+        kind: Kind::F32,
+        color: LINEAR,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Float,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "tiff-int16.tif",
+        covers: "signed 16-bit samples, widened to float with negatives intact",
+        channels: Channels::Gray,
+        kind: Kind::F32,
+        color: LINEAR,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Int16,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "tiff-nodata.tif",
+        covers: "a GDAL no-data sentinel, which must not reach the display window",
+        channels: Channels::Gray,
+        kind: Kind::F32,
+        color: LINEAR,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::FloatWithNodata,
+        coverage: Coverage::Opaque,
+        nodata: Some(-9999.0),
+        tolerance: EXACT,
+    },
+    // -------------------------------------------------------- Radiance
+    Fixture {
+        file: "hdr-rgbe.hdr",
+        covers: "Radiance RGBE, shared exponent",
+        channels: Channels::Rgb,
+        kind: Kind::F32,
+        color: LINEAR,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Float,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: RGBE,
+    },
+    // --------------------------------------------------------- OpenEXR
+    Fixture {
+        file: "exr-rgb.exr",
+        covers: "OpenEXR without alpha",
+        channels: Channels::Rgb,
+        kind: Kind::F32,
+        color: LINEAR,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Float,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "exr-rgba.exr",
+        covers: "OpenEXR with associated (premultiplied) alpha",
+        channels: Channels::Rgba,
+        kind: Kind::F32,
+        color: LINEAR,
+        alpha: AlphaMode::Premultiplied,
+        tone: Tone::Float,
+        coverage: Coverage::Ramp,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "exr-zip.exr",
+        covers: "OpenEXR zip compression",
+        channels: Channels::Rgb,
+        kind: Kind::F32,
+        color: LINEAR,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Float,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // A PNG under a TIFF name, decoded by sniffing rather than extension.
+    Fixture {
+        file: "mislabelled.tif",
+        covers: "content sniffing when the extension lies",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+];
+
+/// Files that are meant to fail, and the phrase the failure should contain.
+const REJECTED: &[(&str, &str)] = &[
+    ("unsupported.gif", "unsupported image format"),
+    ("bad-truncated.png", "decoding"),
+];
+
+/// Extensions the registry advertises that share a decode path with another
+/// fixture and so do not need one of their own.
+const ALIASES: &[&str] = &["jpe", "jfif"];
+
+fn directory() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_images")
+}
+
+fn kind_of(samples: &Samples) -> Kind {
+    match samples {
+        Samples::U8 { .. } => Kind::U8,
+        Samples::U16 { .. } => Kind::U16,
+        Samples::F32 { .. } => Kind::F32,
+    }
+}
+
+/// One pixel's components, integers normalised to 0..1 so that 8- and 16-bit
+/// fixtures can share a table of expected values.
+fn pixel(image: &DecodedImage, x: u32, y: u32) -> Vec<f32> {
+    let count = image.samples.channels().count();
+    let start = (y as usize * image.width as usize + x as usize) * count;
+    let scale = 1.0 / image.samples.full_scale();
+    match &image.samples {
+        Samples::U8 { data, .. } => data[start..start + count]
+            .iter()
+            .map(|value| *value as f32 * scale)
+            .collect(),
+        Samples::U16 { data, .. } => data[start..start + count]
+            .iter()
+            .map(|value| *value as f32 * scale)
+            .collect(),
+        Samples::F32 { data, .. } => data[start..start + count].to_vec(),
+    }
+}
+
+/// Expected RGBA for each quadrant. Grey fixtures put their value in the red
+/// slot, which is where the comparison looks for them.
+fn expected(tone: Tone, coverage: Coverage) -> [[f32; 4]; 4] {
+    let third = 1.0 / 3.0;
+    let mut quadrants = match tone {
+        Tone::Color => [
+            [1.0, 0.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0, 1.0],
+            [0.0, 0.0, 1.0, 1.0],
+            [1.0, 1.0, 1.0, 1.0],
+        ],
+        Tone::Gray => [[0.0; 4], [third; 4], [2.0 * third; 4], [1.0; 4]],
+        Tone::GrayBilevel => [[0.0; 4], [0.0; 4], [1.0; 4], [1.0; 4]],
+        Tone::Float => {
+            let peak = 255.0 / 64.0;
+            [[0.0; 4], [0.5; 4], [1.0; 4], [peak; 4]]
+        }
+        Tone::FloatWithNodata => {
+            let peak = 255.0 / 64.0;
+            [[-9999.0; 4], [0.5; 4], [1.0; 4], [peak; 4]]
+        }
+        Tone::Int16 => [[-1000.0; 4], [-498.0; 4], [4.0; 4], [3000.0; 4]],
+    };
+
+    let alphas = match coverage {
+        Coverage::Opaque => [1.0; 4],
+        Coverage::Ramp => [1.0, 191.0 / 255.0, 128.0 / 255.0, 64.0 / 255.0],
+        Coverage::BinaryLastTransparent => [1.0, 1.0, 1.0, 0.0],
+    };
+    for (quadrant, alpha) in quadrants.iter_mut().zip(alphas) {
+        quadrant[3] = alpha;
+    }
+    quadrants
+}
+
+#[test]
+fn every_fixture_decodes_to_what_it_says_it_does() {
+    for fixture in FIXTURES {
+        let path = directory().join(fixture.file);
+        let image = load(&path, Overrides::default())
+            .unwrap_or_else(|error| panic!("{}: {error:#}", fixture.file));
+
+        let name = format!("{} ({})", fixture.file, fixture.covers);
+        assert_eq!((image.width, image.height), (32, 24), "{name}");
+        assert_eq!(image.channels(), fixture.channels, "{name}");
+        assert_eq!(kind_of(&image.samples), fixture.kind, "{name}");
+        assert_eq!(image.color.transfer, fixture.color.transfer, "{name}");
+        assert_eq!(image.color.primaries, fixture.color.primaries, "{name}");
+        assert_eq!(image.alpha, fixture.alpha, "{name}");
+        assert_eq!(image.nodata, fixture.nodata, "{name}");
+        image
+            .validate()
+            .unwrap_or_else(|problem| panic!("{name}: {problem}"));
+
+        let table = expected(fixture.tone, fixture.coverage);
+        for (index, (x, y)) in PROBES.iter().copied().enumerate() {
+            let found = pixel(&image, x, y);
+            let want = table[index];
+
+            // Grey keeps its value in the red slot; alpha, where present, is
+            // always the last component.
+            let colour_slots = if fixture.channels.is_gray() { 1 } else { 3 };
+            for slot in 0..colour_slots {
+                assert!(
+                    (found[slot] - want[slot]).abs() <= fixture.tolerance,
+                    "{name} quadrant {index} channel {slot}: got {found:?}, want {want:?}"
+                );
+            }
+            if let Some(alpha) = fixture.channels.alpha_index() {
+                assert!(
+                    (found[alpha] - want[3]).abs() <= fixture.tolerance,
+                    "{name} quadrant {index} alpha: got {found:?}, want {want:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn rejected_fixtures_fail_with_a_useful_message() {
+    for (file, phrase) in REJECTED {
+        let path = directory().join(file);
+        match load(&path, Overrides::default()) {
+            Ok(_) => panic!("{file} should not have decoded"),
+            Err(error) => {
+                let message = format!("{error:#}");
+                assert!(
+                    message.contains(phrase),
+                    "{file}: expected `{phrase}` in `{message}`"
+                );
+            }
+        }
+    }
+}
+
+/// Guards against a fixture being added without a test, or a test outliving
+/// its fixture.
+#[test]
+fn the_fixture_directory_and_the_table_agree() {
+    let mut on_disk: Vec<String> = std::fs::read_dir(directory())
+        .expect("test_images/ is missing")
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| !name.ends_with(".sh") && !name.ends_with(".md"))
+        .collect();
+    on_disk.sort();
+
+    let mut claimed: Vec<String> = FIXTURES
+        .iter()
+        .map(|fixture| fixture.file.to_string())
+        .chain(REJECTED.iter().map(|(file, _)| file.to_string()))
+        .collect();
+    claimed.sort();
+
+    assert_eq!(
+        on_disk, claimed,
+        "test_images/ and the fixture tables have drifted apart"
+    );
+}
+
+/// Every advertised extension is either exercised by a fixture or explicitly
+/// noted as sharing another one's path, so adding a format cannot quietly go
+/// untested.
+#[test]
+fn every_advertised_extension_is_covered() {
+    for extension in supported_extensions() {
+        let covered = FIXTURES.iter().any(|fixture| {
+            std::path::Path::new(fixture.file)
+                .extension()
+                .and_then(|value| value.to_str())
+                == Some(extension)
+        });
+        assert!(
+            covered || ALIASES.contains(&extension),
+            "`{extension}` has no fixture and is not listed as an alias"
+        );
+    }
+}
+
+/// The fixtures between them must reach every branch of the data model, or
+/// the upload layer has untested inputs.
+#[test]
+fn the_fixtures_reach_every_pixel_layout() {
+    let mut channels = std::collections::HashSet::new();
+    let mut kinds = std::collections::HashSet::new();
+    let mut alphas = std::collections::HashSet::new();
+    for fixture in FIXTURES {
+        channels.insert(fixture.channels);
+        kinds.insert(fixture.kind);
+        alphas.insert(fixture.alpha);
+    }
+
+    for wanted in [
+        Channels::Gray,
+        Channels::GrayAlpha,
+        Channels::Rgb,
+        Channels::Rgba,
+    ] {
+        assert!(channels.contains(&wanted), "no fixture is {wanted:?}");
+    }
+    for wanted in [Kind::U8, Kind::U16, Kind::F32] {
+        assert!(kinds.contains(&wanted), "no fixture is {wanted:?}");
+    }
+    for wanted in [
+        AlphaMode::Opaque,
+        AlphaMode::Straight,
+        AlphaMode::Premultiplied,
+    ] {
+        assert!(alphas.contains(&wanted), "no fixture is {wanted:?}");
+    }
+}
+
+/// A no-data sentinel is not a measurement. Left in, it would set the bottom
+/// of the automatic window and squash the real data into a sliver at the top —
+/// which is how a clipped elevation model comes out looking blank.
+#[test]
+fn no_data_pixels_are_kept_out_of_the_statistics() {
+    let image = load(&directory().join("tiff-nodata.tif"), Overrides::default()).unwrap();
+    assert_eq!(image.nodata, Some(-9999.0));
+
+    // The sentinel is still in the pixels, where the shader will clamp it.
+    assert_eq!(pixel(&image, 8, 6)[0], -9999.0);
+
+    // But the range comes from the quadrants that hold real values.
+    let stats = crate::image::Stats::scan(&image);
+    assert!((stats.min - 0.5).abs() < 1e-5, "min was {}", stats.min);
+    assert!(
+        (stats.max - 255.0 / 64.0).abs() < 1e-5,
+        "max was {}",
+        stats.max
+    );
+}
+
+/// A 16-bit TIFF is guessed to be measurement data. When the guess is wrong —
+/// a scanned photograph in the same container — `--transfer` is the way out,
+/// and it has to reach the decoded image.
+#[test]
+fn command_line_overrides_replace_the_guess() {
+    let path = directory().join("tiff-gray16.tif");
+
+    let guessed = load(&path, Overrides::default()).unwrap();
+    assert_eq!(guessed.color.transfer, crate::image::Transfer::Linear);
+    assert_eq!(guessed.color.primaries, crate::image::Primaries::Bt709);
+
+    let overridden = load(
+        &path,
+        Overrides {
+            transfer: Some(crate::image::Transfer::Srgb),
+            primaries: Some(crate::image::Primaries::DisplayP3),
+        },
+    )
+    .unwrap();
+    assert_eq!(overridden.color.transfer, crate::image::Transfer::Srgb);
+    assert_eq!(
+        overridden.color.primaries,
+        crate::image::Primaries::DisplayP3
+    );
+
+    // The pixels are untouched: an override changes interpretation only.
+    assert_eq!(pixel(&guessed, 24, 6), pixel(&overridden, 24, 6));
+}
+
+/// Whatever the source layout, the upload layer has to produce a buffer the
+/// texture can accept. This runs the real fixtures through it.
+#[test]
+fn every_fixture_produces_a_valid_upload_plan() {
+    use crate::render::upload::{Capabilities, plan};
+
+    for capabilities in [
+        Capabilities {
+            norm16: true,
+            float32_filterable: true,
+        },
+        Capabilities {
+            norm16: false,
+            float32_filterable: false,
+        },
+    ] {
+        for fixture in FIXTURES {
+            let image = load(&directory().join(fixture.file), Overrides::default()).unwrap();
+            let plan = plan(&image, capabilities);
+            assert_eq!(
+                plan.pixels.as_bytes().len(),
+                plan.bytes_per_row as usize * image.height as usize,
+                "{} {capabilities:?}",
+                fixture.file
+            );
+        }
+    }
+}
