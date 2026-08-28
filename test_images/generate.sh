@@ -9,13 +9,14 @@
 #   alpha:   top-left 255     top-right 191      bottom-left 128    bottom-right 64
 #   float:   top-left 0.0     top-right 0.5      bottom-left 1.0    bottom-right 3.984
 #
-# Two files are deliberately spelled `.jpeg` and `.tiff` rather than `.jpg`
-# and `.tif`, so that both extension spellings are exercised by the router.
+# Three files are deliberately spelled `.jpeg`, `.tiff` and `.heif` rather
+# than `.jpg`, `.tif` and `.heic`, so that both extension spellings are
+# exercised by the router.
 #
 # The point is coverage of decode paths, not pretty pictures: every pixel
-# layout the `image` crate can hand back, plus the per-format encodings that
-# have their own code path (bit depths, palettes, interlacing, progressive
-# JPEG, TIFF compressions and byte orders).
+# layout a decoder can hand back, plus the per-format encodings that have
+# their own code path (bit depths, palettes, interlacing, progressive JPEG,
+# TIFF compressions and byte orders, HEIF colour tags and transformations).
 set -euo pipefail
 
 quad() { magick \( -size 16x12 "xc:$1" -size 16x12 "xc:$2" +append \) \
@@ -25,7 +26,8 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
 # Start clean, so a renamed fixture does not leave its predecessor behind.
-rm -f ./*.png ./*.jpg ./*.jpeg ./*.tif ./*.tiff ./*.hdr ./*.exr ./*.gif
+rm -f ./*.png ./*.jpg ./*.jpeg ./*.tif ./*.tiff ./*.hdr ./*.exr ./*.gif \
+      ./*.heic ./*.heif ./*.avif
 
 quad '#FF0000' '#00FF00' '#0000FF' '#FFFFFF' "$work/color.png"
 quad '#000000' '#555555' '#AAAAAA' '#FFFFFF' "$work/gray.png"
@@ -94,6 +96,36 @@ magick "$work/float.png" \( "$work/alpha.png" -set colorspace sRGB -channel R -s
 magick "$work/float.png" -set colorspace RGB -evaluate multiply 3.984375 \
   -define exr:compression=zip exr-zip.exr
 
+# ---------------------------------------------------------------- HEIF
+# `-L` is lossless, so the quadrants come back exactly and the same table of
+# expected values serves these as serves PNG. The nclx tags are what makes
+# this family different from every other format here: a HEIF file *states* its
+# transfer function and primaries in CICP codes rather than leaving them to
+# convention, so the colour-space fixtures below are testing a translation
+# rather than a guess.
+magick "$work/color.png"       -depth 16 -define png:bit-depth=16 "$work/color16.png"
+
+heif-enc -L --hevc -o heic-rgb8.heic        "$work/color.png"       > /dev/null
+heif-enc -L --hevc -o heic-rgba8.heic       "$work/color-alpha.png" > /dev/null
+# A greyscale input encodes as a monochrome image, and must stay one channel.
+heif-enc -L --hevc -o heic-gray8.heic       "$work/gray.png"        > /dev/null
+heif-enc -L --hevc -o heic-gray-alpha8.heic "$work/gray-alpha.png"  > /dev/null
+# 10-bit, tagged BT.2100 PQ on BT.2020 primaries: the HDR path, and the one
+# that has to be lifted from 0..1023 to the full 16-bit range on the way in.
+heif-enc -L --hevc -b 10 --colour_primaries 9 --transfer_characteristic 16 \
+  -o heic-pq10.heic "$work/color16.png" > /dev/null
+# Display P3 primaries (EG 432-1) with the sRGB curve: what a phone writes.
+heif-enc -L --hevc --colour_primaries 12 --transfer_characteristic 13 \
+  -o heif-p3.heif "$work/color.png" > /dev/null
+# An upside-down image that says it is upside down. `--rotate-cw` writes an
+# `irot` property rather than turning the pixels, so this decodes back to the
+# ordinary pattern only if the transformation is applied on the way out.
+magick "$work/color.png" -rotate 180 "$work/color-upside-down.png"
+heif-enc -L --hevc --rotate-cw 180 -o heic-rotated.heic \
+  "$work/color-upside-down.png" > /dev/null
+# The same container with AV1 inside instead of HEVC.
+heif-enc -L -A -o avif-rgb8.avif "$work/color.png" > /dev/null
+
 # -------------------------------------------- TIFF as measurement rasters
 # What elevation models and scientific output actually look like, and what
 # `image` cannot read at all: single-band floats, BigTIFF, the floating-point
@@ -136,4 +168,5 @@ magick "$work/color.png" unsupported.gif
 # A PNG called a TIFF, to exercise the content-sniffing fallback.
 cp png-rgb8.png mislabelled.tif
 
-echo "generated $(ls -1 *.png *.jpg *.tif *.hdr *.exr *.gif | wc -l) fixtures"
+echo "generated $(ls -1 *.png *.jpg *.jpeg *.tif *.tiff *.hdr *.exr *.gif \
+                    *.heic *.heif *.avif | wc -l) fixtures"

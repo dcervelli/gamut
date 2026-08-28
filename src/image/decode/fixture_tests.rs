@@ -77,6 +77,16 @@ const RGBE: f32 = 0.01;
 
 const SRGB: ColorSpace = ColorSpace::SRGB;
 const LINEAR: ColorSpace = ColorSpace::LINEAR_BT709;
+/// What a phone writes: sRGB's curve on the wider Display P3 primaries.
+const P3: ColorSpace = ColorSpace {
+    transfer: crate::image::Transfer::Srgb,
+    primaries: crate::image::Primaries::DisplayP3,
+};
+/// BT.2100 HDR, stated outright in the file's CICP tags.
+const PQ_2020: ColorSpace = ColorSpace {
+    transfer: crate::image::Transfer::Pq,
+    primaries: crate::image::Primaries::Bt2020,
+};
 
 const FIXTURES: &[Fixture] = &[
     // ------------------------------------------------------------- PNG
@@ -518,6 +528,110 @@ const FIXTURES: &[Fixture] = &[
         nodata: None,
         tolerance: EXACT,
     },
+    // ------------------------------------------------------------ HEIF
+    Fixture {
+        file: "heic-rgb8.heic",
+        covers: "HEIC truecolour, 8-bit",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "heic-rgba8.heic",
+        covers: "HEIC truecolour plus alpha, 8-bit",
+        channels: Channels::Rgba,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Straight,
+        tone: Tone::Color,
+        coverage: Coverage::Ramp,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // Monochrome HEIF decodes through its own path, and has to stay one
+    // channel rather than being tripled into RGB on the way to the GPU.
+    Fixture {
+        file: "heic-gray8.heic",
+        covers: "HEIC monochrome, 8-bit",
+        channels: Channels::Gray,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Gray,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // Grey and alpha arrive as two separate planes here, not interleaved.
+    Fixture {
+        file: "heic-gray-alpha8.heic",
+        covers: "HEIC monochrome plus a separate alpha plane, 8-bit",
+        channels: Channels::GrayAlpha,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Straight,
+        tone: Tone::Gray,
+        coverage: Coverage::Ramp,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // 10-bit samples arrive as 0..1023 in a 16-bit word and have to be lifted
+    // to full scale, or the picture displays a sixteenth as bright as it is.
+    Fixture {
+        file: "heic-pq10.heic",
+        covers: "HEIC 10-bit, tagged BT.2100 PQ on BT.2020 primaries",
+        channels: Channels::Rgb,
+        kind: Kind::U16,
+        color: PQ_2020,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "heif-p3.heif",
+        covers: "HEIF Display P3 primaries, and the `.heif` spelling",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: P3,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // Stored upside down with an `irot` property saying so. It reads as the
+    // ordinary pattern only because the transformation is applied on decode.
+    Fixture {
+        file: "heic-rotated.heic",
+        covers: "HEIC `irot` applied while decoding",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "avif-rgb8.avif",
+        covers: "the same container with AV1 inside instead of HEVC",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
     // A PNG under a TIFF name, decoded by sniffing rather than extension.
     Fixture {
         file: "mislabelled.tif",
@@ -541,7 +655,7 @@ const REJECTED: &[(&str, &str)] = &[
 
 /// Extensions the registry advertises that share a decode path with another
 /// fixture and so do not need one of their own.
-const ALIASES: &[&str] = &["jpe", "jfif"];
+const ALIASES: &[&str] = &["jpe", "jfif", "hif"];
 
 fn directory() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_images")
@@ -822,4 +936,42 @@ fn every_fixture_produces_a_valid_upload_plan() {
             );
         }
     }
+}
+
+/// HEIF stores rotation and mirroring as container properties rather than in
+/// the coded picture, so a phone photograph is upright only if they are
+/// applied on the way out. `heic-rotated.heic` holds the ordinary pattern
+/// upside down with an `irot` saying as much, so it should decode to exactly
+/// what the unrotated fixture does.
+#[test]
+fn heif_container_transformations_are_applied_on_decode() {
+    let upright = load(&directory().join("heic-rgb8.heic"), Overrides::default()).unwrap();
+    let rotated = load(&directory().join("heic-rotated.heic"), Overrides::default()).unwrap();
+
+    assert_eq!(
+        (rotated.width, rotated.height),
+        (upright.width, upright.height)
+    );
+    for (x, y) in PROBES {
+        assert_eq!(
+            pixel(&rotated, x, y),
+            pixel(&upright, x, y),
+            "at {x},{y}: the `irot` property was not applied"
+        );
+    }
+}
+
+/// A 10-bit HEIF holds 0..1023 in a 16-bit word, but `Samples::full_scale`
+/// says a `U16` image's white is 65535. Handed on unscaled, every 10-bit
+/// photograph would display at a sixteenth of its intended brightness.
+#[test]
+fn ten_bit_heif_samples_are_lifted_to_full_scale() {
+    let image = load(&directory().join("heic-pq10.heic"), Overrides::default()).unwrap();
+    let Samples::U16 { data, .. } = &image.samples else {
+        panic!(
+            "expected 16-bit samples, got {}",
+            image.samples.component_name()
+        );
+    };
+    assert_eq!(data.iter().copied().max(), Some(u16::MAX));
 }

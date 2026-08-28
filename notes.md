@@ -6,7 +6,6 @@ README:
 TODO:
 
 * Add GIF, ICO, BMP support
-* Support HEIC
 * HDR
 * Scan directory for image with/without -r
 * Each image maintains it's own pan/zoom, first time image is open, if same resolution as prior image, use that pan/zoom setting, otherwise fit

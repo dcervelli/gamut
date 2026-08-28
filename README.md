@@ -16,6 +16,12 @@ cargo run --release -- photo.jpg scan.tiff render.exr
 The first file is shown, stretched to fit the window, which opens at the
 image's own size shrunk to fit the monitor.
 
+Everything is pure Rust except HEIF, which links the system `libheif` (1.20 or
+newer) — `libheif-dev` on Debian, `libheif` on Arch, `brew install libheif` on
+macOS. Which HEIF *codecs* work then depends on that installation's plugins:
+HEVC (`.heic`) needs libde265 or ffmpeg, AV1 (`.avif`) needs dav1d or aom.
+Both ship as standard on the distributions above.
+
 ## Keys
 
 | Key | Action |
@@ -145,6 +151,13 @@ status bar and the histogram are the two clients that exist today.
 | --- | --- |
 | PNG, JPEG, Radiance HDR, OpenEXR | [`image`](https://crates.io/crates/image) |
 | TIFF | [`tiff`](https://crates.io/crates/tiff) directly |
+| HEIF — HEIC, AVIF | [`libheif-rs`](https://crates.io/crates/libheif-rs), onto the system `libheif` |
+
+The decoder is chosen by content, falling back to the file extension for
+formats without a recognisable header. Files are streamed rather than read
+into memory whole, so opening a 600 MB raster does not begin by copying it.
+
+### TIFF
 
 TIFF goes to the `tiff` crate rather than through `image` because `image`
 cannot carry the format's full range. `DynamicImage` has no single-band
@@ -162,15 +175,46 @@ something to normalise away. A no-data sentinel is read from the file and kept
 out of the statistics, so a clipped DEM's −9999 fill cannot set the bottom of
 the automatic window and squash the terrain into a sliver.
 
-The decoder is chosen by content, falling back to the file extension for
-formats without a recognisable header. Files are streamed rather than read
-into memory whole, so opening a 600 MB raster does not begin by copying it.
+### HEIF
+
+The only decoder that is not pure Rust, because there is no usable pure-Rust
+HEVC decoder to bind to instead. `libheif` also gets AVIF and whatever else
+its plugins can open for free, since HEIC and AVIF differ only in the codec
+inside the same container.
+
+HEIF is the one format here that does not have to be guessed at. Where a
+16-bit TIFF leaves you to work out whether it is a photograph or a frame of
+sensor counts, a HEIF file *states* its transfer function and primaries in
+CICP codes (H.273), so an iPhone's Display P3 photograph and a BT.2100 PQ
+frame both land in the right working space with no flag from the user. The
+decoder translates those codes and passes them on:
+
+| CICP | Read as |
+| --- | --- |
+| Transfer 13 (IEC 61966-2-1) | sRGB |
+| Transfer 1, 6, 14, 15 (BT.709 / 601 / 2020 OETF) | sRGB — not literally the same curve, but the display the content was graded for |
+| Transfer 16 / 18 | PQ / HLG |
+| Transfer 8 | Linear |
+| Primaries 9 | BT.2020 |
+| Primaries 11, 12 (DCI-P3, Display P3) | Display P3 |
+| Anything else, or nothing | sRGB on BT.709 |
+
+Depth and channel count survive the same way they do elsewhere: a 10- or
+12-bit file arrives as 16-bit samples lifted to full scale rather than
+flattened to bytes, and a monochrome file stays one channel all the way to the
+GPU rather than being tripled into RGB.
+
+`libheif` applies the container's own geometric properties — `irot`, `imir`,
+`clap` — while decoding, so a rotated phone photograph arrives upright. That
+is a property of the format, not of this program: JPEG's EXIF orientation is a
+separate tag in a separate decoder, and is still ignored.
 
 ### Size ceiling
 
-Both backends ship conservative allocation limits — 256 MiB in `tiff`, 512 MiB
-in `image` — which a survey-grade elevation model passes on the way out of the
-door. Both are raised to 4 GiB, which is not an arbitrary number:
+Every backend ships conservative allocation limits — 256 MiB in `tiff`,
+512 MiB in `image`, and `libheif`'s own security limits — which a survey-grade
+elevation model passes on the way out of the door. All are raised to 4 GiB,
+which is not an arbitrary number:
 `max_texture_dimension_2d` is 32768 on current hardware, and 32768 × 32768 × 4
 bytes is exactly 4 GiB, so the ceiling is the largest single-channel 32-bit
 image that could be displayed even in principle. Going over it is refused from
@@ -208,7 +252,14 @@ ready, and switching files blocks until the next one is. Mount Rainier at 3 m
 1.4 GB of resident memory against a 1.15 GB decoded buffer. Nothing is
 streamed to the GPU in tiles, so an image also has to fit in one texture.
 
-EXIF orientation is not applied, so a rotated phone JPEG shows unrotated.
+EXIF orientation is not applied, so a rotated phone JPEG shows unrotated. HEIF
+is the exception, and only because its rotation lives in the container rather
+than in a metadata tag.
+
+Embedded ICC profiles are ignored in every format. It costs nothing for PNG
+and JPEG, which are sRGB either way, but a HEIF tagged only with an ICC — some
+cameras write that instead of the CICP codes — reads as sRGB when it may be
+Display P3. `--primaries p3` is the way out until a profile parser exists.
 
 ## Tests
 
@@ -216,16 +267,18 @@ EXIF orientation is not applied, so a rotated phone JPEG shows unrotated.
 cargo test
 ```
 
-52 tests over the transfer functions and primaries matrices, texture format
+60 tests over the transfer functions and primaries matrices, texture format
 selection (including the device-capability fallbacks), the statistics and
-window logic, the decoder registry, and the view geometry. Rendering itself is
-not covered; it needs a GPU and a window.
+window logic, the decoder registry, the CICP translation, and the view
+geometry. Rendering itself is not covered; it needs a GPU and a window.
 
-`test_images/` holds 39 real fixtures — see its README — covering every pixel
+`test_images/` holds 47 real fixtures — see its README — covering every pixel
 layout the decoder can produce and every per-format encoding with its own code
 path: PNG bit depths, palettes and interlacing; progressive and subsampled
 JPEG; TIFF compressions, byte orders, tiling, BigTIFF, the floating-point
-predictor, signed samples and no-data; Radiance RGBE; EXR associated alpha. Each is checked for dimensions, channel layout, sample type, colour
+predictor, signed samples and no-data; Radiance RGBE; EXR associated alpha;
+HEIC monochrome, 10-bit, `irot` and its colour tags, and the same container
+with AV1 inside. Each is checked for dimensions, channel layout, sample type, colour
 space, alpha mode and actual pixel values, and then pushed through the upload
 planner under both GPU capability sets. A test asserts the directory and the
 fixture table stay in step, so a file cannot be added without a test.

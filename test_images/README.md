@@ -1,13 +1,13 @@
 # Decoder fixtures
 
-Real files, written by ImageMagick, for testing the decode paths in
-`src/image/decode/`. Round-tripping through the `image` crate's own encoder
-only proves the crate agrees with itself; these exercise encodings it has to
-read from the outside world.
+Real files, written by ImageMagick and `heif-enc`, for testing the decode
+paths in `src/image/decode/`. Round-tripping through a crate's own encoder
+only proves it agrees with itself; these exercise encodings it has to read
+from the outside world.
 
 Regenerate with `./generate.sh` — it is the authoritative description of how
-each file was made. Most fixtures need only ImageMagick; the measurement
-rasters at the end need GDAL.
+each file was made. Most fixtures need only ImageMagick; the HEIF ones need
+`heif-enc` from libheif, and the measurement rasters at the end need GDAL.
 
 ## The pattern
 
@@ -35,7 +35,9 @@ mapping.
 | TIFF as raster data | BigTIFF, Deflate + floating-point predictor + tiling (how DEMs ship), signed Int16, GDAL no-data sentinel |
 | Radiance | RGBE with its shared exponent |
 | OpenEXR | RGB, RGBA with associated alpha, zip compression |
-| Routing | `mislabelled.tif` (a PNG, found by sniffing), `.jpeg` and `.tiff` spellings |
+| HEIF | RGB / RGBA / monochrome / monochrome + a separate alpha plane at 8 bits, 10-bit, an `irot` rotation, and AV1 in the same container |
+| HEIF colour tags | BT.2100 PQ on BT.2020, and Display P3 — the CICP codes a HEIF states outright rather than leaving to convention |
+| Routing | `mislabelled.tif` (a PNG, found by sniffing), `.jpeg`, `.tiff` and `.heif` spellings |
 | Failure | `unsupported.gif`, `bad-truncated.png` |
 
 `src/image/decode/fixture_tests.rs` asserts that this directory and its

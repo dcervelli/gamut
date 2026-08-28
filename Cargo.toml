@@ -9,6 +9,10 @@ bytemuck = { version = "1.25.2", features = ["derive"] }
 glyphon = "0.12.0"
 half = { version = "2.7.1", features = ["bytemuck"] }
 image = { version = "0.25.10", default-features = false, features = ["exr", "hdr", "jpeg", "png", "tiff"] }
+# `v1_20` rather than the crate's default `latest`: it is the oldest `libheif`
+# whose security limits this build can all raise, and pinning to the newest
+# would refuse to compile against a perfectly capable older release.
+libheif-rs = { version = "3.0.0", default-features = false, features = ["v1_20"] }
 pollster = "1.0.1"
 tiff = "0.11.3"
 wgpu = "30.0.1"
