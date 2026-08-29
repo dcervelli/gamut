@@ -105,10 +105,41 @@ impl Color {
     }
 }
 
+/// How a shape combines with what the frame has already put down.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Blend {
+    /// Ordinary painter's compositing: the shape covers what is under it.
+    Over,
+    /// `source + destination * (1 - source)`, which climbs towards white
+    /// without ever clipping: red over green reads yellow, all three read
+    /// neutral. For overlapping plots that each want to stay visible.
+    ///
+    /// Meant for opaque colours. Alpha still controls coverage, so a
+    /// translucent shape screens proportionately less, but a colour dimmed by
+    /// its alpha rather than by its components will not read as intended.
+    Screen,
+}
+
 pub(crate) struct QuadItem {
     rect: Rect,
     color: Color,
     corner: f32,
+    blend: Blend,
+}
+
+/// A filled shape, already cut into triangles: three vertices per triangle,
+/// in logical pixels.
+pub(crate) struct PolyItem {
+    vertices: Vec<[f32; 2]>,
+    color: Color,
+    blend: Blend,
+}
+
+/// Geometry in the order it was emitted, so that a polygon drawn after a
+/// panel lands on top of it, the same as a quad would.
+pub(crate) enum Shape {
+    Quad(QuadItem),
+    Poly(PolyItem),
 }
 
 pub(crate) struct TextItem {
@@ -121,32 +152,66 @@ pub(crate) struct TextItem {
 
 /// One frame's worth of interface, in logical pixels.
 pub struct UiFrame {
-    quads: Vec<QuadItem>,
+    shapes: Vec<Shape>,
     texts: Vec<TextItem>,
 }
 
 impl UiFrame {
     pub fn new() -> Self {
         Self {
-            quads: Vec::new(),
+            shapes: Vec::new(),
             texts: Vec::new(),
         }
     }
 
     pub fn rect(&mut self, rect: Rect, color: Color) {
-        self.quads.push(QuadItem {
+        self.rect_blended(rect, color, Blend::Over);
+    }
+
+    /// As [`UiFrame::rect`], but combined with what is under it by `blend`
+    /// rather than simply covering it.
+    pub fn rect_blended(&mut self, rect: Rect, color: Color, blend: Blend) {
+        self.shapes.push(Shape::Quad(QuadItem {
             rect,
             color,
             corner: 0.0,
-        });
+            blend,
+        }));
     }
 
     pub fn rounded_rect(&mut self, rect: Rect, corner: f32, color: Color) {
-        self.quads.push(QuadItem {
+        self.shapes.push(Shape::Quad(QuadItem {
             rect,
             color,
             corner,
-        });
+            blend: Blend::Over,
+        }));
+    }
+
+    /// Fills the region between the polyline `top` — left to right, in
+    /// logical pixels — and the horizontal line `baseline`.
+    ///
+    /// The outline is triangulated here rather than approximated with a run
+    /// of rectangles: a plot drawn as one polygon has no interior edges to
+    /// feather, which is what otherwise leaves a column of seams down it.
+    pub fn area(&mut self, top: &[[f32; 2]], baseline: f32, color: Color, blend: Blend) {
+        let mut vertices = Vec::with_capacity((top.len().saturating_sub(1)) * 6);
+        for pair in top.windows(2) {
+            let (left, right) = (pair[0], pair[1]);
+            // Flat stretches sitting on the baseline enclose nothing.
+            if left[1] >= baseline && right[1] >= baseline {
+                continue;
+            }
+            let (left_foot, right_foot) = ([left[0], baseline], [right[0], baseline]);
+            vertices.extend_from_slice(&[left, left_foot, right_foot, left, right_foot, right]);
+        }
+        if !vertices.is_empty() {
+            self.shapes.push(Shape::Poly(PolyItem {
+                vertices,
+                color,
+                blend,
+            }));
+        }
     }
 
     /// Draws `text` with its top-left corner at `at`.
