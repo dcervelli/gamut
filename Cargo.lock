@@ -850,6 +850,7 @@ dependencies = [
  "image",
  "libheif-rs",
  "moxcms",
+ "png",
  "pollster",
  "tiff",
  "ultrahdr-rs",

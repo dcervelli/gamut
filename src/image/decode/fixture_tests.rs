@@ -74,6 +74,10 @@ const EXACT: f32 = 1e-5;
 const LOSSY: f32 = 0.02;
 /// Radiance packs a shared exponent and an 8-bit mantissa.
 const RGBE: f32 = 0.01;
+/// HEVC at quality 100 is near-lossless rather than lossless, and lands a
+/// code value away. Only the one fixture ImageMagick has to write, because
+/// `heif-enc` cannot embed an ICC profile.
+const NEAR_LOSSLESS: f32 = 0.01;
 
 const SRGB: ColorSpace = ColorSpace::SRGB;
 const LINEAR: ColorSpace = ColorSpace::LINEAR_BT709;
@@ -240,6 +244,32 @@ const FIXTURES: &[Fixture] = &[
         channels: Channels::Rgb,
         kind: Kind::U8,
         color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // A PNG says it is HDR with a `cICP` chunk and nothing else, so this is
+    // the fixture standing between the HDR PNG path and silence.
+    Fixture {
+        file: "png-cicp-pq.png",
+        covers: "PNG `cICP`: BT.2100 PQ on BT.2020 primaries",
+        channels: Channels::Rgb,
+        kind: Kind::U16,
+        color: PQ_2020,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "png-icc-p3.png",
+        covers: "PNG `iCCP`: Display P3 stated by profile rather than code points",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: P3,
         alpha: AlphaMode::Opaque,
         tone: Tone::Color,
         coverage: Coverage::Opaque,
@@ -606,6 +636,21 @@ const FIXTURES: &[Fixture] = &[
         nodata: None,
         tolerance: EXACT,
     },
+    // The same colour space said the other way: an ICC profile with no
+    // `nclx` box beside it, which is what some cameras write and what used to
+    // read as plain sRGB.
+    Fixture {
+        file: "heic-icc-p3.heic",
+        covers: "HEIF tagged by ICC profile rather than by `nclx`",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: P3,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: NEAR_LOSSLESS,
+    },
     // Stored upside down with an `irot` property saying so. It reads as the
     // ordinary pattern only because the transformation is applied on decode.
     Fixture {
@@ -790,7 +835,8 @@ fn the_fixture_directory_and_the_table_agree() {
     let mut on_disk: Vec<String> = std::fs::read_dir(directory())
         .expect("test_images/ is missing")
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-        .filter(|name| !name.ends_with(".sh") && !name.ends_with(".md"))
+        // `.icc` is an input to the generator, not a fixture in its own right.
+        .filter(|name| !name.ends_with(".sh") && !name.ends_with(".md") && !name.ends_with(".icc"))
         .collect();
     on_disk.sort();
 

@@ -175,10 +175,19 @@ impl Display {
     /// The distinction that matters is display-referred versus scene-referred.
     /// A JPEG or an sRGB PNG has already been graded by whoever produced it,
     /// so 0..1 is exactly right and touching it would be wrong. Linear sensor
-    /// counts and HDR frames have not, and showing them unwindowed is how you
-    /// get a black rectangle.
+    /// counts have not, and showing them unwindowed is how you get a black
+    /// rectangle.
+    ///
+    /// PQ and HLG belong with the graded ones. They are absolute curves —
+    /// 1.0 is reference white and the headroom above it is where the
+    /// highlights were put on purpose — so stretching their observed range
+    /// into 0..1 would undo exactly the grading they exist to carry, and
+    /// would do it differently for every frame of a sequence.
     pub fn for_image_with(image: &DecodedImage, stats: &Stats, startup: Startup) -> Self {
-        let display_referred = matches!(image.color.transfer, Transfer::Srgb | Transfer::Gamma(_));
+        let display_referred = matches!(
+            image.color.transfer,
+            Transfer::Srgb | Transfer::Gamma(_) | Transfer::Pq | Transfer::Hlg
+        );
         let auto = if display_referred {
             AutoWindow::Off
         } else {
@@ -340,6 +349,26 @@ mod tests {
             Display::for_image_with(&measurement, &Stats::scan(&measurement), Startup::default());
         assert_eq!(display.auto, AutoWindow::Percentile);
         assert!(display.high < 0.1, "12-bit data windowed to its own range");
+    }
+
+    /// PQ carries its grading in absolute luminance, so the window has to
+    /// stay at reference white and let the tone map deal with the headroom
+    /// above it. Stretching a PQ frame's observed range into 0..1 is how a
+    /// dim night shot comes out looking like noon.
+    #[test]
+    fn absolute_hdr_curves_open_at_reference_white_rather_than_stretched() {
+        for transfer in [Transfer::Pq, Transfer::Hlg] {
+            // A frame whose highlights reach far above reference white, and
+            // whose darkest sample is nowhere near zero.
+            let frame = gray(vec![30_000, 45_000, 60_000], transfer);
+            let stats = Stats::scan(&frame);
+            let display = Display::for_image_with(&frame, &stats, Startup::default());
+
+            assert!(stats.max > 1.0, "{transfer:?} should exceed SDR white");
+            assert_eq!(display.auto, AutoWindow::Off, "{transfer:?}");
+            assert_eq!((display.low, display.high), (0.0, 1.0), "{transfer:?}");
+            assert_eq!(display.tone_map, ToneMap::Neutral, "{transfer:?}");
+        }
     }
 
     #[test]
