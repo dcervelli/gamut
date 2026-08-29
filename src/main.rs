@@ -68,7 +68,7 @@ DISPLAY KEYS:
     c                Cycle false colour for single-channel images
     r                Reset display settings
     h                Toggle the histogram
-    i                Toggle the overlay
+    `                Toggle the interface panels
 ";
 
 fn main() -> ExitCode {

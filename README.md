@@ -13,8 +13,10 @@ on the way in.
 cargo run --release -- photo.jpg scan.tiff render.exr
 ```
 
-The first file is shown, stretched to fit the window, which opens at the
-image's own size shrunk to fit the monitor.
+The first file is shown, stretched to fit the space the interface panels
+leave in the middle; the window opens at the image's own size plus that
+chrome, shrunk to fit the monitor. `` ` `` hides the panels and gives the
+image the whole window, re-fitting it as it goes.
 
 Everything is pure Rust except HEIF, which links the system `libheif` (1.20 or
 newer) — `libheif-dev` on Debian, `libheif` on Arch, `brew install libheif` on
@@ -42,7 +44,12 @@ Both ship as standard on the distributions above.
 | `t` | Cycle tone mapping: clip → reinhard → neutral |
 | `c` | Cycle false colour (single-channel images) |
 | `r` | Reset display settings |
-| `h` / `i` | Toggle the histogram / the overlay |
+| `h` | Toggle the histogram |
+| `` ` `` | Toggle the interface panels |
+
+The panels are opaque and the image is fitted inside them rather than passing
+behind them, so `` ` `` changes how much room a fitted image has and it re-fits
+on the spot.
 
 Zooming leaves fit mode; panning does not, so `f` then Down scrolls through a
 tall image at fit-width. Keys held with Ctrl, Alt or Super are ignored, so
@@ -216,6 +223,12 @@ four from the window size alone, which is what lets the frame builder and the
 click handler agree on where a widget is without either of them owning it. The
 top bar carries the filename, the bottom bar the image and view facts, and the
 right strip the histogram toggle.
+
+They are opaque, and the image is drawn in the `Viewport` they leave rather
+than behind them: zoom, fit, pan limits and the wheel's anchor are all measured
+against that rectangle. It is derived per frame from the window and whether the
+panels are showing, never stored, so `` ` `` re-fits a fitted image without
+anything having to notice that it should.
 
 | File | Role |
 | --- | --- |

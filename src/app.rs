@@ -14,7 +14,7 @@ use winit::window::{Cursor, CursorIcon, Window, WindowId};
 use crate::image::display::{AutoWindow, Colormap, Display, Startup};
 use crate::image::{DecodedImage, Stats, decode};
 use crate::render::{Color, HdrPreference, Rect, Renderer, UiFrame};
-use crate::view::{Upscale, View};
+use crate::view::{Upscale, View, Viewport};
 use crate::watch::{self, Watch};
 
 /// Window pixels moved per arrow-key press.
@@ -37,7 +37,10 @@ const TEXT_SIZE: f32 = 13.0;
 const PADDING: f32 = 12.0;
 const HISTOGRAM_SIZE: [f32; 2] = [320.0, 130.0];
 
-const BAR_BACKGROUND: Color = Color::rgba(0, 0, 0, 160);
+/// The panels are opaque, not a tint over the image: the image is fitted
+/// inside them rather than passing behind them, so there is nothing back
+/// there to show through.
+const BAR_BACKGROUND: Color = Color::rgb(18, 18, 22);
 const PANEL_BACKGROUND: Color = Color::rgba(12, 12, 16, 214);
 const BUTTON_IDLE: Color = Color::rgba(255, 255, 255, 20);
 const BUTTON_HOVER: Color = Color::rgba(255, 255, 255, 45);
@@ -94,8 +97,9 @@ impl Chrome {
         }
     }
 
-    /// What the four panels leave in the middle, which is where anything that
-    /// floats over the image — the histogram, for now — has to fit.
+    /// What the four panels leave in the middle: the image is drawn in it,
+    /// and anything that floats over the image — the histogram, for now — has
+    /// to fit in it.
     fn content(&self) -> Rect {
         Rect::new(
             self.left.right(),
@@ -175,7 +179,9 @@ pub struct App {
     /// where the pointer is, and because leaving the window clears `cursor`
     /// without ending a drag the pointer grab is still delivering.
     drag_from: Option<[f32; 2]>,
-    show_overlay: bool,
+    /// Whether the four panels are on screen. They are opaque and the image
+    /// is fitted inside them, so hiding them gives it the whole window.
+    show_ui: bool,
     show_histogram: bool,
     /// Whether the pointer is over the histogram toggle. Held rather than
     /// recomputed while drawing so that motion knows when the highlight has
@@ -224,7 +230,7 @@ impl App {
             cursor: None,
             dragging: false,
             drag_from: None,
-            show_overlay: true,
+            show_ui: true,
             show_histogram: histogram,
             hover_histogram: false,
             reported_error: false,
@@ -259,6 +265,14 @@ impl App {
         let scale = self.scale_factor();
         let physical = self.window_size();
         Chrome::new([physical[0] / scale, physical[1] / scale])
+    }
+
+    /// Where the image is drawn, in physical pixels: what the panels leave in
+    /// the middle, or the whole window when they are hidden. Derived rather
+    /// than stored, so toggling the interface re-fits a fitted image without
+    /// anything having to remember to.
+    fn viewport(&self) -> Viewport {
+        image_viewport(self.window_size(), self.scale_factor(), self.show_ui)
     }
 
     /// The pointer in logical pixels, which is what the interface is laid out
@@ -383,20 +397,22 @@ impl App {
         }
 
         let image = self.image_size();
-        let window = self.window_size();
+        let viewport = self.viewport();
 
         match key {
             Key::Named(NamedKey::Escape) => {
                 event_loop.exit();
                 return false;
             }
-            Key::Named(NamedKey::ArrowLeft) => self.view.pan_by(-PAN_STEP, 0.0, image, window),
-            Key::Named(NamedKey::ArrowRight) => self.view.pan_by(PAN_STEP, 0.0, image, window),
-            Key::Named(NamedKey::ArrowUp) => self.view.pan_by(0.0, -PAN_STEP, image, window),
-            Key::Named(NamedKey::ArrowDown) => self.view.pan_by(0.0, PAN_STEP, image, window),
+            Key::Named(NamedKey::ArrowLeft) => self.view.pan_by(-PAN_STEP, 0.0, image, viewport),
+            Key::Named(NamedKey::ArrowRight) => self.view.pan_by(PAN_STEP, 0.0, image, viewport),
+            Key::Named(NamedKey::ArrowUp) => self.view.pan_by(0.0, -PAN_STEP, image, viewport),
+            Key::Named(NamedKey::ArrowDown) => self.view.pan_by(0.0, PAN_STEP, image, viewport),
             Key::Named(NamedKey::PageDown) => self.step(true),
             Key::Named(NamedKey::PageUp) => self.step(false),
-            Key::Character(text) => return self.handle_character(event_loop, text, image, window),
+            Key::Character(text) => {
+                return self.handle_character(event_loop, text, image, viewport);
+            }
             _ => return false,
         }
         true
@@ -407,7 +423,7 @@ impl App {
         event_loop: &ActiveEventLoop,
         text: &str,
         image: [f32; 2],
-        window: [f32; 2],
+        viewport: Viewport,
     ) -> bool {
         // Everything below the view controls needs an image to act on.
         match text {
@@ -416,15 +432,15 @@ impl App {
                 return false;
             }
             "+" | "=" => {
-                self.view.zoom_in(image, window);
+                self.view.zoom_in(image, viewport);
                 return true;
             }
             "-" | "_" => {
-                self.view.zoom_out(image, window);
+                self.view.zoom_out(image, viewport);
                 return true;
             }
             "0" => {
-                self.view.actual_size(image, window);
+                self.view.actual_size(image, viewport);
                 return true;
             }
             "f" | "F" => {
@@ -439,8 +455,11 @@ impl App {
                 self.step(false);
                 return true;
             }
-            "i" | "I" => {
-                self.show_overlay = !self.show_overlay;
+            "`" | "~" => {
+                self.show_ui = !self.show_ui;
+                // A fitted image re-fits on the next frame: the viewport it is
+                // measured against is the one the panels leave, and they have
+                // just come or gone.
                 return true;
             }
             "h" | "H" => {
@@ -499,7 +518,7 @@ impl App {
         // aimed at the interface, so it neither reaches a widget's neighbour
         // nor starts a drag of the image underneath.
         if state == ElementState::Pressed
-            && self.show_overlay
+            && self.show_ui
             && let Some(point) = self.logical_cursor()
         {
             let chrome = self.chrome();
@@ -518,7 +537,7 @@ impl App {
         if let Some(window) = &self.window {
             // The closed hand is a promise that dragging will move something,
             // so a fitted image — which has nowhere to go — does not make it.
-            let icon = if self.dragging && self.view.can_pan(self.image_size(), self.window_size())
+            let icon = if self.dragging && self.view.can_pan(self.image_size(), self.viewport())
             {
                 CursorIcon::Grabbing
             } else {
@@ -547,14 +566,14 @@ impl App {
             return false;
         }
         self.view
-            .pan_by(dx, dy, self.image_size(), self.window_size());
+            .pan_by(dx, dy, self.image_size(), self.viewport());
         true
     }
 
     /// Re-tests the pointer against the widgets. Returns `true` if the
     /// highlight moved, and so if the frame is now out of date.
     fn update_hover(&mut self) -> bool {
-        let hover = self.show_overlay
+        let hover = self.show_ui
             && self
                 .logical_cursor()
                 .is_some_and(|point| self.chrome().histogram_button.contains(point));
@@ -582,10 +601,13 @@ impl App {
             return false;
         }
 
-        let window = self.window_size();
-        let anchor = self.cursor.unwrap_or([window[0] / 2.0, window[1] / 2.0]);
+        let viewport = self.viewport();
+        let anchor = self.cursor.unwrap_or([
+            viewport.x + viewport.width / 2.0,
+            viewport.y + viewport.height / 2.0,
+        ]);
         self.view
-            .zoom_steps_at(steps, anchor, self.image_size(), window);
+            .zoom_steps_at(steps, anchor, self.image_size(), viewport);
         true
     }
 
@@ -600,7 +622,8 @@ impl App {
         let scale = window.scale_factor() as f32;
         let physical = self.window_size();
         let logical = [physical[0] / scale, physical[1] / scale];
-        let placement = self.view.placement(self.image_size(), physical);
+        let viewport = self.viewport();
+        let placement = self.view.placement(self.image_size(), viewport);
 
         // Split borrow: the frame builder needs the renderer's font metrics
         // while reading the rest of the application state.
@@ -609,10 +632,10 @@ impl App {
             renderer,
             Layout {
                 logical,
-                physical,
+                viewport,
                 index: self.index,
                 file_count: self.files.len(),
-                show_overlay: self.show_overlay,
+                show_ui: self.show_ui,
                 show_histogram: self.show_histogram,
                 hover_histogram: self.hover_histogram,
             },
@@ -797,11 +820,11 @@ impl ApplicationHandler for App {
 struct Layout {
     /// Window size in logical pixels, which is what the UI lays out in.
     logical: [f32; 2],
-    /// Window size in physical pixels, which is what zoom is measured against.
-    physical: [f32; 2],
+    /// Where the image is drawn, which is what zoom is measured against.
+    viewport: Viewport,
     index: usize,
     file_count: usize,
-    show_overlay: bool,
+    show_ui: bool,
     show_histogram: bool,
     hover_histogram: bool,
 }
@@ -826,7 +849,7 @@ fn build_ui(
     // With the panels hidden the whole window is the content area, so a
     // histogram on its own still sits in the corner rather than where the
     // panels that are not there would have put it.
-    let content = if layout.show_overlay {
+    let content = if layout.show_ui {
         chrome.content()
     } else {
         Rect::new(0.0, 0.0, size[0], size[1])
@@ -835,7 +858,7 @@ fn build_ui(
     if layout.show_histogram {
         draw_histogram(&mut frame, current, content);
     }
-    if !layout.show_overlay {
+    if !layout.show_ui {
         return frame;
     }
 
@@ -891,6 +914,26 @@ fn build_ui(
     );
     frame.text([right_x, baseline], TEXT_SIZE, TEXT_DIM, right);
     frame
+}
+
+/// Where the image is drawn, in physical pixels, for a window of `size`
+/// physical pixels at `scale`.
+///
+/// The panels are opaque, so with them on screen the image belongs in what
+/// they leave in the middle; with them off it has the window. Nothing caches
+/// this, which is why toggling the interface re-fits a fitted image on the
+/// very next frame.
+fn image_viewport(size: [f32; 2], scale: f32, show_ui: bool) -> Viewport {
+    if !show_ui {
+        return Viewport::whole(size);
+    }
+    let content = Chrome::new([size[0] / scale, size[1] / scale]).content();
+    Viewport::new(
+        content.x * scale,
+        content.y * scale,
+        content.width * scale,
+        content.height * scale,
+    )
 }
 
 /// Where text has to start to sit centred in a bar of `BAR_HEIGHT`.
@@ -963,7 +1006,7 @@ fn describe_pixels(current: &Current) -> String {
 }
 
 fn describe_state(current: &Current, view: &View, layout: &Layout) -> String {
-    let zoom = view.zoom(current.size(), layout.physical);
+    let zoom = view.zoom(current.size(), layout.viewport);
     let mut parts = vec![
         format!("{:.0}%", zoom * 100.0),
         view.mode_label().to_string(),
@@ -1099,16 +1142,24 @@ fn window_title(path: &Path) -> String {
 }
 
 /// Open at the image's own size, shrunk to fit comfortably on the monitor.
+///
+/// The panels take their room out of the image rather than lying over it, so
+/// the window asks for the image *plus* the chrome around it — otherwise a
+/// picture that used to open at 100% would open slightly reduced. The monitor
+/// fraction still applies to the image itself.
 fn initial_window_size(event_loop: &ActiveEventLoop, image: [f32; 2]) -> PhysicalSize<u32> {
+    let monitor = event_loop
+        .primary_monitor()
+        .or_else(|| event_loop.available_monitors().next());
+    let scale = monitor.as_ref().map_or(1.0, |monitor| monitor.scale_factor());
+    let chrome = [2.0 * SIDE_WIDTH as f64 * scale, 2.0 * BAR_HEIGHT as f64 * scale];
+
     let (mut width, mut height) = (image[0] as f64, image[1] as f64);
 
-    if let Some(monitor) = event_loop
-        .primary_monitor()
-        .or_else(|| event_loop.available_monitors().next())
-    {
+    if let Some(monitor) = monitor {
         let available = monitor.size();
-        let max_width = available.width as f64 * MAX_WINDOW_FRACTION;
-        let max_height = available.height as f64 * MAX_WINDOW_FRACTION;
+        let max_width = available.width as f64 * MAX_WINDOW_FRACTION - chrome[0];
+        let max_height = available.height as f64 * MAX_WINDOW_FRACTION - chrome[1];
         if max_width > 1.0 && max_height > 1.0 {
             let shrink = (max_width / width).min(max_height / height).min(1.0);
             width *= shrink;
@@ -1117,8 +1168,8 @@ fn initial_window_size(event_loop: &ActiveEventLoop, image: [f32; 2]) -> Physica
     }
 
     PhysicalSize::new(
-        (width.round() as u32).max(320),
-        (height.round() as u32).max(240),
+        ((width + chrome[0]).round() as u32).max(320),
+        ((height + chrome[1]).round() as u32).max(240),
     )
 }
 
@@ -1127,6 +1178,9 @@ mod tests {
     use super::*;
 
     const WINDOW: [f32; 2] = [1000.0, 700.0];
+    /// The same window with nothing taken out of it, for the tests that are
+    /// about stepping between files rather than about where the panels are.
+    const VIEWPORT: Viewport = Viewport::whole(WINDOW);
 
     #[test]
     fn the_side_panels_are_nested_between_the_bars() {
@@ -1215,6 +1269,41 @@ mod tests {
         }
     }
 
+    /// The panels are opaque, so the image is fitted into what they leave —
+    /// and gets the whole window back the moment they are hidden, without
+    /// anything having to re-fit it by hand.
+    #[test]
+    fn the_image_is_fitted_between_the_panels_and_re_fitted_without_them() {
+        // A 2x window, to catch a conversion that only holds at scale 1.
+        let physical = [2000.0, 1400.0];
+        let shown = image_viewport(physical, 2.0, true);
+        assert_eq!(
+            shown,
+            Viewport::new(
+                2.0 * SIDE_WIDTH,
+                2.0 * BAR_HEIGHT,
+                2000.0 - 4.0 * SIDE_WIDTH,
+                1400.0 - 4.0 * BAR_HEIGHT,
+            )
+        );
+
+        let hidden = image_viewport(physical, 2.0, false);
+        assert_eq!(hidden, Viewport::whole(physical));
+
+        let view = View::new();
+        let image = [900.0, 600.0];
+        assert_eq!(view.mode_label(), "fit");
+        assert!(view.zoom(image, hidden) > view.zoom(image, shown));
+
+        // Fitted between the panels means fitted *inside* them: the image is
+        // centred on the content area, not on the window.
+        let placement = view.placement(image, shown);
+        assert!(placement.x >= shown.x - 0.5);
+        assert!(placement.x + placement.width <= shown.x + shown.width + 0.5);
+        assert!(placement.y >= shown.y - 0.5);
+        assert!(placement.y + placement.height <= shown.y + shown.height + 0.5);
+    }
+
     /// A grey PNG of the given size, written where the test can step onto it.
     fn write_png(dir: &Path, name: &str, width: u32, height: u32) -> PathBuf {
         let path = dir.join(name);
@@ -1251,14 +1340,14 @@ mod tests {
     #[test]
     fn stepping_to_an_image_of_the_same_size_keeps_the_view() {
         let (mut app, dir) = app_over("same", &[("a.png", 64, 48), ("b.png", 64, 48)]);
-        app.view.actual_size(app.image_size(), WINDOW);
-        app.view.zoom_in(app.image_size(), WINDOW);
-        let zoom = app.view.zoom(app.image_size(), WINDOW);
+        app.view.actual_size(app.image_size(), VIEWPORT);
+        app.view.zoom_in(app.image_size(), VIEWPORT);
+        let zoom = app.view.zoom(app.image_size(), VIEWPORT);
 
         app.step(true);
         assert_eq!(app.index, 1);
         assert_eq!(app.view.mode_label(), "free");
-        assert_eq!(app.view.zoom(app.image_size(), WINDOW), zoom);
+        assert_eq!(app.view.zoom(app.image_size(), VIEWPORT), zoom);
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }
@@ -1267,8 +1356,8 @@ mod tests {
     #[test]
     fn stepping_to_an_image_of_another_size_fits_it() {
         let (mut app, dir) = app_over("other", &[("a.png", 64, 48), ("b.png", 32, 32)]);
-        app.view.actual_size(app.image_size(), WINDOW);
-        app.view.zoom_in(app.image_size(), WINDOW);
+        app.view.actual_size(app.image_size(), VIEWPORT);
+        app.view.zoom_in(app.image_size(), VIEWPORT);
 
         app.step(true);
         assert_eq!(app.index, 1);
