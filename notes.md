@@ -24,7 +24,6 @@ TODO:
 * Sane keys 
 * Formats
   * GIF
-  * ICO
   * BMP
   * DNG
   * Other raw files

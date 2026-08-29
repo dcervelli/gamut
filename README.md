@@ -270,6 +270,7 @@ anything having to notice that it should.
 | TIFF | [`tiff`](https://crates.io/crates/tiff) directly |
 | HEIF — HEIC, AVIF | [`libheif-rs`](https://crates.io/crates/libheif-rs), onto the system `libheif` |
 | WebP — lossy, lossless, animated | [`image-webp`](https://crates.io/crates/image-webp) directly |
+| ICO | own directory reader, onto the PNG path and [`image`](https://crates.io/crates/image)'s bitmap one |
 | Ultra HDR containers, ICC profiles | [`ultrahdr-rs`](https://crates.io/crates/ultrahdr-rs), [`moxcms`](https://crates.io/crates/moxcms) |
 | PNG `cICP` and `iCCP` chunks | [`png`](https://crates.io/crates/png), which `image` already carries |
 
@@ -419,6 +420,52 @@ decoder has a clock — an image is decoded once, uploaded once, and redrawn
 only when the view changes — so playing them would be a change to the event
 loop rather than to this decoder.
 
+### ICO
+
+An ICO is not an image but a folder of them — the same picture at 16, 32, 48
+and 256 pixels, so that Windows can pick the one that fits the slot it is
+drawing into. A viewer has no slot, so it has to choose, and the choice is the
+whole of what this decoder adds.
+
+It picks the **largest** entry, breaking a tie on the stated depth. `image`'s
+own ICO decoder scores the other way round, depth before size, which is right
+for a toolkit asked for the best-quality rendition and wrong here: an icon
+whose 256×256 entry is a palette image and whose 16×16 entry is 32-bit shows
+as a thumbnail. `ico-multi.ico` is that file, and the test that it decodes to
+the large entry is the one this module exists to pass.
+
+Each entry is a whole file in its own right, in one of two formats, and they
+take different routes:
+
+**PNG**, which is how every entry above 48 pixels has been written since
+Vista, goes through the same code a `.png` on disk does. So an `iCCP` chunk is
+read — an icon can be Display P3 — and any pixel layout is kept, greyscale
+included. `image` refuses anything but RGBA8 there, on the strength of a
+Microsoft blog post saying embedded PNGs must be 32-bit; browsers display the
+others, and so does this.
+
+**BMP** is a headerless DIB with two Windows-specific quirks: the height in
+its header counts the rows twice, and a 1-bit AND mask may follow the pixels
+carrying transparency the colour data has no room for — which is how a 4-bit
+palette icon has a transparent background. `image` handles both, but only from
+inside its own ICO decoder, whose hooks are `pub(crate)`, so the chosen entry
+is handed back to it wrapped in a 22-byte container holding nothing else.
+Rebuilding the DIB reader to avoid that would be the worse trade: it is a
+decade of Windows bitmap variants, already written and already tested. Every
+bitmap entry comes back RGBA whatever its stored depth, because the mask has
+nowhere else to go.
+
+Only type 1, the icon, is claimed. A cursor is the same container under the
+`.cur` extension, but its directory overloads the colour-plane and bit-depth
+fields with the hotspot coordinates, so the numbers the selection sorts on
+would mean something else entirely. One opened as `.ico` anyway is named as a
+cursor rather than mis-sorted.
+
+ICO also has no magic number worth the name — four bytes, three of them zero —
+so the directory's own structure stands in for one when sniffing: a file
+claiming entries it has no room for, or whose first entry starts inside the
+directory that lists it, is not an ICO however its first four bytes read.
+
 ### Size ceiling
 
 Every backend ships conservative allocation limits — 256 MiB in `tiff`,
@@ -467,12 +514,16 @@ and WebP are the exceptions: HEIF's rotation lives in the container rather than
 in a metadata tag, and WebP's tag sits in a chunk its decoder already opens for
 the colour profile.
 
+An ICO shows one entry of the several it holds — the largest — and the rest
+are not reachable. Showing them side by side is what the comparison view is
+for, but nothing below the decoder can return more than one image per file.
+
 Animated WebP shows its first frame and stops there. Playing the rest needs a
 clock in the event loop, which nothing else here wants; the frames themselves
 are already reachable through the decoder that reads the first one.
 
-Embedded ICC profiles are read for JPEG, PNG, HEIF and WebP, which is every
-format here that can carry one. TIFF can too, and does not.
+Embedded ICC profiles are read for JPEG, PNG, HEIF and WebP — and so for an
+ICO whose entry is a PNG — which is every format here that can carry one. TIFF can too, and does not.
 
 Gain maps are read for JPEG only. HEIF can carry one as an auxiliary image,
 which is how Apple stores HDR photographs, and that is not implemented; such a
@@ -495,7 +546,7 @@ crate.
 cargo test
 ```
 
-127 tests over the transfer functions and primaries matrices, texture format
+133 tests over the transfer functions and primaries matrices, texture format
 selection (including the device-capability fallbacks), the statistics and
 window logic, the decoder registry, the CICP translation, ICC profile
 recognition, gain map reconstruction, the view geometry, and the reload
