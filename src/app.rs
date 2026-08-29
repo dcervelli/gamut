@@ -143,7 +143,8 @@ impl Current {
 /// Why a file is being read, which decides what survives the reading.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Reload {
-    /// A different file: pan, zoom and display settings start over.
+    /// A different file: display settings start over, and so does the view
+    /// unless the new file happens to be the same size as the old one.
     Fresh,
     /// The file already on screen, changed on disk. The user is presumably
     /// looking at something in particular, so what they set up stays.
@@ -294,16 +295,21 @@ impl App {
 
         let stats = Stats::scan(&image);
         let size = [image.width as f32, image.height as f32];
+        // Images of the same size are almost always a set to be compared —
+        // frames of a sequence, or one exposure against another — and there
+        // the point is that the same detail stays under the same pixels, so
+        // the pan and zoom carry over. A file of another size is a new
+        // picture, so it is fitted afresh.
+        let same_size = self
+            .current
+            .as_ref()
+            .is_some_and(|current| current.size() == size);
         // Re-reading the same file keeps the user where they were, since they
-        // are watching one spot for the change: same pan and zoom, same
-        // exposure and tone map, with only an automatic window re-derived from
-        // the new pixels. A file of another size is a new picture, not an edit
-        // of the one being watched, so it gets the fresh treatment.
-        let in_place = mode == Reload::InPlace
-            && self
-                .current
-                .as_ref()
-                .is_some_and(|current| current.size() == size);
+        // are watching one spot for the change: same exposure and tone map,
+        // with only an automatic window re-derived from the new pixels.
+        // Stepping to a different file is a different picture, and gets the
+        // exposure its own pixels ask for.
+        let in_place = mode == Reload::InPlace && same_size;
         let display = match self.current.as_ref().filter(|_| in_place) {
             Some(current) => {
                 let mut display = current.display.clone();
@@ -314,7 +320,7 @@ impl App {
         };
         self.index = index;
         self.watch = watch;
-        if !in_place {
+        if !same_size {
             self.view.reset();
         }
 
@@ -1207,5 +1213,67 @@ mod tests {
                 "{content:?} at {size:?}"
             );
         }
+    }
+
+    /// A grey PNG of the given size, written where the test can step onto it.
+    fn write_png(dir: &Path, name: &str, width: u32, height: u32) -> PathBuf {
+        let path = dir.join(name);
+        let pixels = vec![128u8; (width * height * 3) as usize];
+        ::image::save_buffer(&path, &pixels, width, height, ::image::ColorType::Rgb8)
+            .expect("the temporary directory is writable");
+        path
+    }
+
+    /// The files are written under a directory of their own so that the tests,
+    /// which run alongside each other, cannot tread on each other's files.
+    fn app_over(name: &str, files: &[(&str, u32, u32)]) -> (App, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("image-view-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("the temporary directory is writable");
+        let paths: Vec<PathBuf> = files
+            .iter()
+            .map(|&(name, width, height)| write_png(&dir, name, width, height))
+            .collect();
+        let options = Options {
+            overrides: decode::Overrides::default(),
+            startup: Startup::default(),
+            hdr: HdrPreference::default(),
+            histogram: false,
+            upscale: Upscale::default(),
+        };
+        let first = decode::load(&paths[0], options.overrides).expect("we just wrote it");
+        let app = App::new(paths, 0, first, options);
+        (app, dir)
+    }
+
+    /// Stepping between frames of the same size is a comparison — the same
+    /// detail has to stay under the same pixels, or there is nothing to
+    /// compare.
+    #[test]
+    fn stepping_to_an_image_of_the_same_size_keeps_the_view() {
+        let (mut app, dir) = app_over("same", &[("a.png", 64, 48), ("b.png", 64, 48)]);
+        app.view.actual_size(app.image_size(), WINDOW);
+        app.view.zoom_in(app.image_size(), WINDOW);
+        let zoom = app.view.zoom(app.image_size(), WINDOW);
+
+        app.step(true);
+        assert_eq!(app.index, 1);
+        assert_eq!(app.view.mode_label(), "free");
+        assert_eq!(app.view.zoom(app.image_size(), WINDOW), zoom);
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// A file of another size is another picture, and gets the opening view.
+    #[test]
+    fn stepping_to_an_image_of_another_size_fits_it() {
+        let (mut app, dir) = app_over("other", &[("a.png", 64, 48), ("b.png", 32, 32)]);
+        app.view.actual_size(app.image_size(), WINDOW);
+        app.view.zoom_in(app.image_size(), WINDOW);
+
+        app.step(true);
+        assert_eq!(app.index, 1);
+        assert_eq!(app.view.mode_label(), "fit");
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
     }
 }
