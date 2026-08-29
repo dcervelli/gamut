@@ -2,7 +2,7 @@
 //! numbers do not conveniently fill 0..1 — 12-bit sensor data stored in
 //! 16-bit containers, or HDR frames with a few very bright highlights.
 
-use super::{Channels, ColorSpace, DecodedImage, Samples};
+use super::{Channels, ColorSpace, DecodedImage, Samples, Transfer};
 
 /// Bins are plenty for percentile work and cheap to keep around; the UI draws
 /// this directly as a histogram.
@@ -12,26 +12,56 @@ pub const BINS: usize = 256;
 /// stride. Enough for stable percentiles, fast enough to run on every load.
 const MAX_SAMPLED_PIXELS: usize = 1 << 21;
 
-/// Red, green, blue and luminance counts for a colour image, all binned over
-/// one shared axis so the four can be drawn on top of each other.
+/// Number of colour components a pixel carries, alpha aside.
+pub const COLOUR: usize = 3;
+
+/// The histogram the interface draws.
 ///
-/// This is a separate scan from [`Stats::histogram`], which stays on the
-/// luminance range because that is what the exposure controls read. Colour
-/// channels routinely run past it — a saturated red pixel is 1.0 in red but
-/// only 0.21 in luminance — so they need an axis wide enough to hold them.
+/// Binned on the curve the file stores its samples with, rather than on the
+/// linear values the rest of [`Stats`] is measured in. Two reasons, and the
+/// first is a correctness one:
+///
+/// Uniform bins over decoded values cannot be filled evenly by a quantised
+/// file. A code step near white is several times wider in linear terms than
+/// one near black — for 8-bit sRGB, 0.0089 against a bin width of 0.0039 — so
+/// the highlights come out as a comb of spikes with empty bins between them
+/// while a dozen shadow codes pile into bin zero. On the storage curve the
+/// codes land one to a bin, or denser, and the comb cannot arise.
+///
+/// The second is that the eye's response is close to the curve a
+/// display-referred file is encoded with, so plotting against it gives equal
+/// width to equal perceived steps: mid grey sits in the middle rather than a
+/// fifth of the way along. Scene-referred files store linear samples, so
+/// their plot stays linear, which is what measurement work wants.
+///
+/// The axis follows the same split. A curved file is display-referred, so it
+/// spans the range such a file can hold — 0..1, widened by any over-range
+/// float samples — which puts clipping at either end where you can see it and
+/// lands 8-bit codes one to a bin. Linear samples have no nominal range to
+/// speak of, since the case that matters is 12-bit data in a 16-bit
+/// container, so their axis is the range actually measured.
 #[derive(Clone, Debug)]
-pub struct ChannelStats {
-    /// Smallest and largest value seen in any of the three colour channels.
-    /// Luminance is a weighted average of them and so always falls inside.
+pub struct Plot {
+    /// What the bins span, in the file's own encoding.
     pub min: f32,
     pub max: f32,
-    /// Counts over `min..max`: red, green, blue, then luminance.
-    pub bins: [[u32; BINS]; 4],
+    /// Counts over `min..max` for the luminance of each sampled pixel.
+    pub luma: [u32; BINS],
+    /// Red, green and blue, for an image that carries colour. Their range is
+    /// what sets the axis; luminance is a weighted average of them and so
+    /// always falls inside it.
+    pub colour: Option<[[u32; BINS]; COLOUR]>,
 }
 
-impl ChannelStats {
-    /// Index of the luminance plane in [`ChannelStats::bins`].
-    pub const LUMA: usize = 3;
+impl Plot {
+    fn empty() -> Self {
+        Self {
+            min: 0.0,
+            max: 1.0,
+            luma: [0; BINS],
+            colour: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -39,11 +69,12 @@ pub struct Stats {
     /// Smallest and largest linear value seen, in working-space units.
     pub min: f32,
     pub max: f32,
-    /// Counts over `min..max`, for percentiles and for drawing.
+    /// Counts over `min..max`, in linear units, for percentiles.
     pub histogram: [u32; BINS],
     pub counted: u32,
-    /// Per-channel counts, for images that carry colour.
-    pub channels: Option<ChannelStats>,
+    /// The same pixels binned for drawing. See [`Plot`] for why it is a
+    /// second scan rather than the same one.
+    pub plot: Plot,
 }
 
 impl Stats {
@@ -58,25 +89,31 @@ impl Stats {
         let channels = image.samples.channels();
         let stride = Self::stride(image);
         let values = Values::new(image, channels, stride);
+        let transfer = image.color.transfer;
         let nodata = image.nodata;
         let is_data =
             move |value: f32| value.is_finite() && nodata.is_none_or(|sentinel| value != sentinel);
 
         let colour = !channels.is_gray();
+        let plotted = if colour { COLOUR } else { 1 };
         let (mut min, mut max) = (f32::INFINITY, f32::NEG_INFINITY);
-        let (mut channel_min, mut channel_max) = (f32::INFINITY, f32::NEG_INFINITY);
-        values.clone().for_each(|pixel| {
-            let value = luminance(pixel, channels);
+        let (mut axis_min, mut axis_max) = if transfer.is_linear() {
+            (f32::INFINITY, f32::NEG_INFINITY)
+        } else {
+            (0.0, 1.0)
+        };
+        values.clone().for_each(|encoded, linear| {
+            let value = luminance(linear, channels);
             if is_data(value) {
                 min = min.min(value);
                 max = max.max(value);
             }
-            if colour {
-                for &component in &pixel[..COLOUR] {
-                    if is_data(component) {
-                        channel_min = channel_min.min(component);
-                        channel_max = channel_max.max(component);
-                    }
+            // The axis spans the channels that get plotted, in the units they
+            // are plotted in.
+            for (stored, decoded) in encoded[..plotted].iter().zip(linear) {
+                if is_data(*decoded) {
+                    axis_min = axis_min.min(*stored);
+                    axis_max = axis_max.max(*stored);
                 }
             }
         });
@@ -89,7 +126,7 @@ impl Stats {
                 max: 1.0,
                 histogram: [0; BINS],
                 counted: 0,
-                channels: None,
+                plot: Plot::empty(),
             };
         }
 
@@ -98,41 +135,54 @@ impl Stats {
         let span = max - min;
         let scale = (span > 0.0).then(|| (BINS - 1) as f32 / span);
 
-        let channel_span = channel_max - channel_min;
-        let mut channel_stats = if colour && channel_span > 0.0 {
-            Some(ChannelStats {
-                min: channel_min,
-                max: channel_max,
-                bins: [[0; BINS]; 4],
-            })
-        } else {
-            None
+        let axis_span = axis_max - axis_min;
+        let mut plot = Plot {
+            min: axis_min,
+            max: axis_max,
+            luma: [0; BINS],
+            colour: if colour {
+                Some([[0; BINS]; COLOUR])
+            } else {
+                None
+            },
         };
-        let channel_scale = (BINS - 1) as f32 / channel_span;
+        // A flat image spans nothing to plot against; leaving the counts at
+        // zero draws an empty panel rather than one misleading spike.
+        let axis_scale = (axis_span > 0.0).then(|| (BINS - 1) as f32 / axis_span);
 
-        if scale.is_some() || channel_stats.is_some() {
-            values.for_each(|pixel| {
-                let value = luminance(pixel, channels);
+        if scale.is_some() || axis_scale.is_some() {
+            values.for_each(|encoded, linear| {
+                let value = luminance(linear, channels);
                 let counts = is_data(value);
                 if let Some(scale) = scale
                     && counts
                 {
-                    let bin = ((value - min) * scale) as usize;
+                    // Rounded, not truncated: bins are sample points spread
+                    // from `min` to `max`, which is how `percentile` reads
+                    // them back, and what lands a code on its own bin
+                    // without a rounding error stealing the boundary.
+                    let bin = ((value - min) * scale + 0.5) as usize;
                     histogram[bin.min(BINS - 1)] += 1;
                     counted += 1;
                 }
-                if let Some(stats) = channel_stats.as_mut() {
-                    let mut bin = |plane: usize, value: f32| {
-                        let index = ((value - channel_min) * channel_scale) as usize;
-                        stats.bins[plane][index.min(BINS - 1)] += 1;
+                if let Some(axis_scale) = axis_scale {
+                    let bin = |counts: &mut [u32; BINS], stored: f32| {
+                        let index = ((stored - axis_min) * axis_scale + 0.5) as usize;
+                        counts[index.min(BINS - 1)] += 1;
                     };
-                    for (plane, &component) in pixel[..COLOUR].iter().enumerate() {
-                        if is_data(component) {
-                            bin(plane, component);
-                        }
-                    }
                     if counts {
-                        bin(ChannelStats::LUMA, value);
+                        // Luminance is a linear quantity; it goes onto the
+                        // axis the same way the samples themselves did.
+                        bin(&mut plot.luma, encode(transfer, value));
+                    }
+                    if let Some(planes) = plot.colour.as_mut() {
+                        for (plane, (stored, decoded)) in
+                            encoded[..COLOUR].iter().zip(linear).enumerate()
+                        {
+                            if is_data(*decoded) {
+                                bin(&mut planes[plane], *stored);
+                            }
+                        }
                     }
                 }
             });
@@ -143,7 +193,7 @@ impl Stats {
             max,
             histogram,
             counted,
-            channels: channel_stats,
+            plot,
         }
     }
 
@@ -171,9 +221,6 @@ impl Stats {
     }
 }
 
-/// Number of colour components a pixel carries, alpha aside.
-const COLOUR: usize = 3;
-
 /// Grey uses its one channel; colour collapses to relative luminance,
 /// weighted for the BT.709 primaries the working space uses.
 fn luminance(pixel: &[f32], channels: Channels) -> f32 {
@@ -184,7 +231,17 @@ fn luminance(pixel: &[f32], channels: Channels) -> f32 {
     }
 }
 
-/// Iterator over the linear components of each sampled pixel.
+/// Puts a linear value back on the storage curve, for plotting alongside
+/// samples that never left it.
+fn encode(transfer: Transfer, value: f32) -> f32 {
+    if transfer.is_linear() {
+        value
+    } else {
+        transfer.to_encoded(value)
+    }
+}
+
+/// Iterator over each sampled pixel, as stored and as decoded.
 #[derive(Clone)]
 struct Values<'a> {
     samples: &'a Samples,
@@ -203,46 +260,53 @@ impl<'a> Values<'a> {
         }
     }
 
-    /// Calls `visit` with one pixel's worth of linear components, alpha
-    /// included where the image has one.
-    fn for_each(self, mut visit: impl FnMut(&[f32])) {
+    /// Calls `visit` with one pixel's components twice over: first as the
+    /// file holds them, normalised to 0..1 for integer samples, then decoded
+    /// to the linear working space. Alpha is included where the image has
+    /// one, since callers slice down to what they want.
+    fn for_each(self, mut visit: impl FnMut(&[f32], &[f32])) {
         let count = self.channels.count();
         let transfer = self.color.transfer;
+        let mut stored = [0.0f32; 4];
+        let mut linear = [0.0f32; 4];
 
         match self.samples {
             Samples::U8 { data, .. } => {
+                let scale = 1.0 / u8::MAX as f32;
+                // Only 256 codes, and every one of them needs the curve
+                // applied; a table beats calling it per component.
                 let lut: Vec<f32> = (0..=u8::MAX)
-                    .map(|v| transfer.to_linear(v as f32 / u8::MAX as f32))
+                    .map(|v| transfer.to_linear(v as f32 * scale))
                     .collect();
-                let mut pixel = [0.0f32; 4];
                 for chunk in data.chunks_exact(count).step_by(self.stride) {
-                    for (slot, raw) in pixel.iter_mut().zip(chunk) {
-                        *slot = lut[*raw as usize];
+                    for (index, raw) in chunk.iter().enumerate() {
+                        stored[index] = *raw as f32 * scale;
+                        linear[index] = lut[*raw as usize];
                     }
-                    visit(&pixel[..count]);
+                    visit(&stored[..count], &linear[..count]);
                 }
             }
             Samples::U16 { data, .. } => {
                 let scale = 1.0 / u16::MAX as f32;
-                let mut pixel = [0.0f32; 4];
                 for chunk in data.chunks_exact(count).step_by(self.stride) {
-                    for (slot, raw) in pixel.iter_mut().zip(chunk) {
-                        *slot = transfer.to_linear(*raw as f32 * scale);
+                    for (index, raw) in chunk.iter().enumerate() {
+                        stored[index] = *raw as f32 * scale;
+                        linear[index] = transfer.to_linear(stored[index]);
                     }
-                    visit(&pixel[..count]);
+                    visit(&stored[..count], &linear[..count]);
                 }
             }
             Samples::F32 { data, .. } => {
-                let mut pixel = [0.0f32; 4];
                 for chunk in data.chunks_exact(count).step_by(self.stride) {
-                    for (slot, raw) in pixel.iter_mut().zip(chunk) {
-                        *slot = if transfer.is_linear() {
+                    for (index, raw) in chunk.iter().enumerate() {
+                        stored[index] = *raw;
+                        linear[index] = if transfer.is_linear() {
                             *raw
                         } else {
                             transfer.to_linear(*raw)
                         };
                     }
-                    visit(&pixel[..count]);
+                    visit(&stored[..count], &linear[..count]);
                 }
             }
         }
@@ -350,30 +414,29 @@ mod tests {
     #[test]
     fn colour_channels_are_binned_over_their_own_range() {
         let stats = Stats::scan(&rgb_f32(vec![1.0, 0.0, 0.0]));
-        let channels = stats.channels.expect("an rgb image has channel counts");
+        let plot = &stats.plot;
+        let colour = plot.colour.expect("an rgb image has channel counts");
 
         assert!((stats.max - 0.2126).abs() < 1e-4, "luminance is unchanged");
-        assert!(channels.min.abs() < 1e-6);
-        assert!((channels.max - 1.0).abs() < 1e-6);
+        assert!(plot.min.abs() < 1e-6);
+        assert!((plot.max - 1.0).abs() < 1e-6);
         // Red at the top of the axis, green and blue at the bottom.
-        assert_eq!(channels.bins[0][BINS - 1], 1);
-        assert_eq!(channels.bins[1][0], 1);
-        assert_eq!(channels.bins[2][0], 1);
+        assert_eq!(colour[0][BINS - 1], 1);
+        assert_eq!(colour[1][0], 1);
+        assert_eq!(colour[2][0], 1);
         // Luminance sits between them, on the same axis as the rest.
-        assert_eq!(channels.bins[ChannelStats::LUMA].iter().sum::<u32>(), 1);
-        assert_eq!(
-            channels.bins[ChannelStats::LUMA][(0.2126 * 255.0) as usize],
-            1
-        );
+        assert_eq!(plot.luma.iter().sum::<u32>(), 1);
+        assert_eq!(plot.luma[(0.2126 * 255.0) as usize], 1);
     }
 
     #[test]
     fn every_plane_counts_every_pixel() {
         let stats = Stats::scan(&rgb_f32(vec![0.25, 0.5, 0.75, 0.0, 0.5, 1.0]));
-        let channels = stats.channels.expect("an rgb image has channel counts");
-        for plane in &channels.bins {
+        let colour = stats.plot.colour.expect("an rgb image has channel counts");
+        for plane in &colour {
             assert_eq!(plane.iter().sum::<u32>(), 2);
         }
+        assert_eq!(stats.plot.luma.iter().sum::<u32>(), 2);
         assert_eq!(stats.counted, 2);
     }
 
@@ -388,31 +451,96 @@ mod tests {
             width: 1,
             ..rgb_f32(vec![0.0, 0.0, 0.0])
         };
-        let with_alpha = Stats::scan(&image).channels.expect("rgba is colour");
-        let opaque = opaque.channels.expect("rgb is colour");
+        let with_alpha = Stats::scan(&image).plot;
+        let opaque = opaque.plot;
 
         assert_eq!(with_alpha.max, opaque.max, "alpha would have widened this");
-        assert_eq!(with_alpha.bins, opaque.bins);
+        assert_eq!(with_alpha.colour, opaque.colour);
     }
 
     #[test]
     fn grey_images_have_no_channel_histogram() {
         assert!(
             Stats::scan(&linear_gray(vec![0, 1000, 4095]))
-                .channels
+                .plot
+                .colour
                 .is_none()
         );
     }
 
-    /// A flat colour image has nothing to plot per channel, and binning it
-    /// would divide by a zero-width span.
+    /// A flat image spans nothing, and binning it would divide by a
+    /// zero-width axis.
     #[test]
-    fn a_flat_colour_image_gets_no_channel_histogram() {
+    fn a_flat_image_plots_nothing() {
+        let plot = Stats::scan(&rgb_f32(vec![0.5, 0.5, 0.5])).plot;
+        assert_eq!(plot.luma.iter().sum::<u32>(), 0);
         assert!(
-            Stats::scan(&rgb_f32(vec![0.5, 0.5, 0.5]))
-                .channels
-                .is_none()
+            plot.colour
+                .is_some_and(|planes| planes.iter().all(|plane| plane.iter().sum::<u32>() == 0))
         );
+    }
+
+    fn srgb_gray_u8(data: Vec<u8>) -> DecodedImage {
+        DecodedImage {
+            width: data.len() as u32,
+            height: 1,
+            samples: Samples::U8 {
+                channels: Channels::Gray,
+                data,
+            },
+            color: ColorSpace {
+                transfer: Transfer::Srgb,
+                ..ColorSpace::LINEAR_BT709
+            },
+            alpha: AlphaMode::Opaque,
+            value_range: None,
+            nodata: None,
+        }
+    }
+
+    /// The reason the plot is binned on the storage curve. Decoding first and
+    /// binning the linear values leaves two thirds of the highlight bins
+    /// unreachable, which draws as a comb of spikes.
+    #[test]
+    fn consecutive_eight_bit_codes_land_in_consecutive_bins() {
+        let codes: Vec<u8> = (200..=255).collect();
+        let expected = codes.len();
+        let plot = Stats::scan(&srgb_gray_u8(codes)).plot;
+
+        let occupied = plot.luma.iter().filter(|count| **count > 0).count();
+        assert_eq!(occupied, expected, "every code needs a bin of its own");
+        // And they are contiguous: no empty bin anywhere between the ends.
+        let first = plot.luma.iter().position(|count| *count > 0).unwrap();
+        let last = plot.luma.iter().rposition(|count| *count > 0).unwrap();
+        assert!(
+            plot.luma[first..=last].iter().all(|count| *count > 0),
+            "a gap between codes is the comb this binning exists to avoid"
+        );
+    }
+
+    /// A display-referred file plots against the range it can hold, so that
+    /// a low-contrast one reads as low contrast instead of being stretched
+    /// across the panel — and so its codes stay one to a bin.
+    #[test]
+    fn display_referred_images_plot_against_the_nominal_range() {
+        let plot = Stats::scan(&srgb_gray_u8(vec![200, 255])).plot;
+        assert!(plot.min.abs() < 1e-6);
+        assert!((plot.max - 1.0).abs() < 1e-6);
+        assert_eq!(plot.luma[200], 1);
+        assert_eq!(plot.luma[BINS - 1], 1);
+    }
+
+    /// Linear samples have no curve to plot against, so the axis stays in
+    /// the units the file measured in.
+    #[test]
+    fn scene_linear_images_keep_a_linear_axis() {
+        let stats = Stats::scan(&linear_gray(vec![0, 16384, 32768, 65535]));
+        assert!(stats.plot.min.abs() < 1e-6);
+        assert!((stats.plot.max - 1.0).abs() < 1e-6);
+        // A quarter of full scale bins a quarter of the way along, which on
+        // a curve it would not: sRGB would put it past the half way mark.
+        let quarter = (0.25 * (BINS - 1) as f32).round() as usize;
+        assert_eq!(stats.plot.luma[quarter], 1);
     }
 
     #[test]

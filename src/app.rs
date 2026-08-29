@@ -12,9 +12,9 @@ use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{Cursor, CursorIcon, Window, WindowId};
 
 use crate::image::display::{AutoWindow, Colormap, Display, Startup};
-use crate::image::stats::{BINS, ChannelStats};
+use crate::image::stats::{BINS, COLOUR};
 use crate::image::{DecodedImage, Stats, decode};
-use crate::render::{Color, HdrPreference, Rect, Renderer, UiFrame};
+use crate::render::{Blend, Color, HdrPreference, Rect, Renderer, UiFrame};
 use crate::view::{Upscale, View};
 use crate::watch::{self, Watch};
 
@@ -50,18 +50,20 @@ const BUTTON_HOVER: Color = Color::rgba(255, 255, 255, 45);
 const TEXT_PRIMARY: Color = Color::rgb(238, 238, 238);
 const TEXT_DIM: Color = Color::rgb(150, 152, 160);
 const ACCENT: Color = Color::rgb(120, 180, 255);
-// Histogram ink. The colour planes are translucent so that overlapping bars
-// read as a blend rather than as whichever happened to be drawn last, and the
-// luminance plane sits under them in the neutral the rest of the panel uses.
+// Histogram ink. The colour planes screen over one another, so overlaps come
+// out as the additive mix — red over green reads yellow, all three neutral —
+// the way a photo editor's RGB histogram does. Luminance goes underneath in
+// the neutral the rest of the panel uses.
 const HISTOGRAM_LUMA: Color = Color::rgba(150, 152, 160, 200);
-/// Red, green and blue, in the order the channels are stored.
-const COLOUR_PLANES: usize = 3;
-const HISTOGRAM_PLANES: [Color; COLOUR_PLANES] = [
-    Color::rgba(255, 96, 88, 170),
-    Color::rgba(88, 220, 120, 170),
-    Color::rgba(96, 150, 255, 170),
+/// What the luminance plane drops to once colour planes are drawn over it.
+const HISTOGRAM_LUMA_UNDER: u8 = 110;
+// Dimmer than they look on their own: screening all three has to land on a
+// neutral grey rather than blowing out to white.
+const HISTOGRAM_PLANES: [Color; COLOUR] = [
+    Color::rgb(184, 44, 44),
+    Color::rgb(44, 170, 52),
+    Color::rgb(52, 100, 186),
 ];
-
 /// The window chrome: four panels, and the widgets sitting in them.
 ///
 /// Top and bottom span the full width; left and right are nested between
@@ -1063,28 +1065,23 @@ fn draw_histogram(frame: &mut UiFrame, current: &Current, content: Rect) {
     // Luminance always goes down first, underneath the colour planes: it
     // runs as tall as the tallest of them about as often as not, and painting
     // it on top swamps the colour the panel exists to show.
-    let mut colour: &[[u32; BINS]] = &[];
-    let (luma, axis_min, axis_max) = match &current.stats.channels {
-        Some(channels) => {
-            colour = &channels.bins[..COLOUR_PLANES];
-            (
-                &channels.bins[ChannelStats::LUMA],
-                channels.min,
-                channels.max,
-            )
-        }
-        None => (
-            &current.stats.histogram,
-            current.stats.min,
-            current.stats.max,
-        ),
-    };
+    let plotted = &current.stats.plot;
+    let luma = &plotted.luma;
+    let colour: &[[u32; BINS]] = plotted.colour.as_ref().map_or(&[], |planes| planes);
+    let (axis_min, axis_max) = (plotted.min, plotted.max);
 
+    // The axis is in the file's own encoding; the label is not, since the
+    // numbers everything else quotes are the decoded ones.
+    let transfer = current.image.color.transfer;
     frame.text(
         [plot.x, plot.y],
         TEXT_SIZE * 0.85,
         TEXT_DIM,
-        format!("{axis_min:.4}  \u{2013}  {axis_max:.4}"),
+        format!(
+            "{:.4}  \u{2013}  {:.4}",
+            transfer.to_linear(axis_min),
+            transfer.to_linear(axis_max)
+        ),
     );
 
     // One peak across every plane, so their heights stay comparable.
@@ -1097,42 +1094,45 @@ fn draw_histogram(frame: &mut UiFrame, current: &Current, content: Rect) {
         .unwrap_or(1)
         .max(1) as f32;
     let bin_width = bars.width / BINS as f32;
-    // Log scale: a linear one is all noise once a single bin dominates.
-    let height_of = |count: u32| ((count as f32).ln_1p() / peak.ln_1p()) * bars.height;
-    let mut column: Vec<(f32, Color)> = Vec::with_capacity(COLOUR_PLANES);
-    for index in 0..BINS {
-        let bar = |height: f32| {
-            Rect::new(
-                bars.x + index as f32 * bin_width,
-                bars.bottom() - height,
-                bin_width.max(1.0),
-                height,
-            )
-        };
-        if luma[index] > 0 {
-            frame.rect(bar(height_of(luma[index])), HISTOGRAM_LUMA);
-        }
-        column.clear();
-        column.extend(
-            colour
-                .iter()
-                .zip(HISTOGRAM_PLANES)
-                .filter(|(counts, _)| counts[index] > 0)
-                .map(|(counts, color)| (height_of(counts[index]), color)),
-        );
-        // Tallest first: bars are filled to the baseline, so a colour drawn
-        // over a taller one would otherwise be lost behind it.
-        column.sort_by(|a, b| b.0.total_cmp(&a.0));
-        for (height, color) in &column {
-            frame.rect(bar(*height), *color);
-        }
+    // Strictly linear in the counts, the way a photo editor plots it: the
+    // height of a bin is its share of the fullest one. A single dominating
+    // bin — a nodata background, say — will flatten the rest, which is a
+    // measurement-data problem to solve separately.
+    let height_of = |count: u32| (count as f32 / peak) * bars.height;
+    // One point per bin, at its centre, with the ends carried out to the
+    // edges of the plot so the shape fills its width.
+    let curve = |counts: &[u32; BINS]| -> Vec<[f32; 2]> {
+        counts
+            .iter()
+            .enumerate()
+            .map(|(index, &count)| {
+                let x = match index {
+                    0 => bars.x,
+                    last if last == BINS - 1 => bars.right(),
+                    _ => bars.x + (index as f32 + 0.5) * bin_width,
+                };
+                [x, bars.bottom() - height_of(count)]
+            })
+            .collect()
+    };
+
+    // Dimmed only when it is a backdrop; on a grey image it is the plot.
+    let luma_ink = if colour.is_empty() {
+        HISTOGRAM_LUMA
+    } else {
+        HISTOGRAM_LUMA.with_alpha(HISTOGRAM_LUMA_UNDER)
+    };
+    frame.area(&curve(luma), bars.bottom(), luma_ink, Blend::Over);
+    for (counts, color) in colour.iter().zip(HISTOGRAM_PLANES) {
+        frame.area(&curve(counts), bars.bottom(), color, Blend::Screen);
     }
 
     // Where the display window sits within the plotted range.
     let span = axis_max - axis_min;
     if span > 0.0 {
         for value in [current.display.low, current.display.high] {
-            let position = ((value - axis_min) / span).clamp(0.0, 1.0);
+            let encoded = transfer.to_encoded(value);
+            let position = ((encoded - axis_min) / span).clamp(0.0, 1.0);
             frame.rect(
                 Rect::new(
                     bars.x + position * bars.width - 0.5,

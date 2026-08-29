@@ -61,5 +61,40 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     if coverage <= 0.0 {
         discard;
     }
-    return vec4<f32>(in.color.rgb, in.color.a * coverage);
+    // Premultiplied, so that a blend mode which weights the source by the
+    // destination — screen — still respects the feathering above.
+    let alpha = in.color.a * coverage;
+    return vec4<f32>(in.color.rgb * alpha, alpha);
+}
+
+// Triangulated fills: arbitrary geometry, one vertex at a time, for plots
+// whose shape is not a rectangle. No rounding and no feathering — the outline
+// is whatever the caller triangulated.
+
+struct PolyVertex {
+    @location(0) position: vec2<f32>,   // physical pixels
+    @location(1) color: vec4<f32>,      // linear, straight alpha
+};
+
+struct PolyOut {
+    @builtin(position) position: vec4<f32>,
+    @location(0) color: vec4<f32>,
+};
+
+@vertex
+fn vs_poly(vertex: PolyVertex) -> PolyOut {
+    var out: PolyOut;
+    out.position = vec4<f32>(
+        vertex.position.x / viewport.size.x * 2.0 - 1.0,
+        1.0 - vertex.position.y / viewport.size.y * 2.0,
+        0.0,
+        1.0,
+    );
+    out.color = vertex.color;
+    return out;
+}
+
+@fragment
+fn fs_poly(in: PolyOut) -> @location(0) vec4<f32> {
+    return vec4<f32>(in.color.rgb * in.color.a, in.color.a);
 }

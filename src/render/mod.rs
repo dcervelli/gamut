@@ -29,7 +29,7 @@ use crate::image::{DecodedImage, display::Display};
 use crate::view::Placement;
 
 pub use output::{HdrPreference, Output};
-pub use ui::{Color, Rect, UiFrame};
+pub use ui::{Blend, Color, Rect, UiFrame};
 
 use composite::Composite;
 use image_layer::ImageLayer;

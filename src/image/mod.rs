@@ -155,6 +155,51 @@ impl Transfer {
         }
     }
 
+    /// Encodes a linear component back the way the file stored it, the exact
+    /// inverse of [`Transfer::to_linear`].
+    ///
+    /// Used to plot histograms on the curve the samples were quantised
+    /// against: binning decoded values uniformly leaves gaps between the
+    /// codes of an 8-bit file, because a code step at the top of the range is
+    /// several times wider in linear terms than one at the bottom.
+    pub fn to_encoded(self, value: f32) -> f32 {
+        match self {
+            Transfer::Linear => value,
+            // Negative light has no encoding; the curves below are defined on
+            // 0.. only, and `powf` of a negative is NaN. Mirroring keeps such
+            // a value ordered relative to its neighbours instead.
+            _ if value < 0.0 => -self.to_encoded(-value),
+            Transfer::Srgb => {
+                if value <= 0.0031308 {
+                    value * 12.92
+                } else {
+                    1.055 * value.powf(1.0 / 2.4) - 0.055
+                }
+            }
+            Transfer::Pq => {
+                const M1: f32 = 2610.0 / 16384.0;
+                const M2: f32 = 128.0 * 2523.0 / 4096.0;
+                const C1: f32 = 3424.0 / 4096.0;
+                const C2: f32 = 32.0 * 2413.0 / 4096.0;
+                const C3: f32 = 32.0 * 2392.0 / 4096.0;
+                let normalised = (value * (203.0 / 10000.0)).powf(M1);
+                ((C1 + C2 * normalised) / (1.0 + C3 * normalised)).powf(M2)
+            }
+            Transfer::Hlg => {
+                const A: f32 = 0.17883277;
+                const B: f32 = 1.0 - 4.0 * A;
+                const C: f32 = 0.559_910_7;
+                let scene = value * (203.0 / 1000.0);
+                if scene <= 1.0 / 12.0 {
+                    (3.0 * scene).sqrt()
+                } else {
+                    A * (12.0 * scene - B).ln() + C
+                }
+            }
+            Transfer::Gamma(gamma) => value.powf(1.0 / gamma),
+        }
+    }
+
     /// True when the values are already linear and need no conversion.
     pub fn is_linear(self) -> bool {
         matches!(self, Transfer::Linear)
@@ -337,6 +382,40 @@ mod tests {
         assert!((white - 1.0).abs() < 0.02, "got {white}");
         // And it reaches far above SDR range at full scale.
         assert!(Transfer::Pq.to_linear(1.0) > 45.0);
+    }
+
+    /// Every curve has to round-trip, since the histogram plots samples on
+    /// the curve they were quantised against and reads the window back off it.
+    #[test]
+    fn every_transfer_encodes_back_to_where_it_started() {
+        let transfers = [
+            Transfer::Linear,
+            Transfer::Srgb,
+            Transfer::Pq,
+            Transfer::Hlg,
+            Transfer::Gamma(2.2),
+        ];
+        for transfer in transfers {
+            for encoded in [0.0, 0.02, 0.25, 0.5, 0.75, 1.0] {
+                let round_trip = transfer.to_encoded(transfer.to_linear(encoded));
+                assert!(
+                    (round_trip - encoded).abs() < 1e-3,
+                    "{transfer:?}: {encoded} came back as {round_trip}"
+                );
+            }
+        }
+    }
+
+    /// Windows can sit below zero once exposure and contrast have been at
+    /// them, and a NaN there would put a marker nowhere.
+    #[test]
+    fn encoding_a_negative_value_stays_finite_and_ordered() {
+        for transfer in [Transfer::Srgb, Transfer::Gamma(2.2), Transfer::Pq] {
+            let low = transfer.to_encoded(-0.5);
+            let high = transfer.to_encoded(-0.1);
+            assert!(low.is_finite() && high.is_finite(), "{transfer:?}");
+            assert!(low < high && high < 0.0, "{transfer:?}: {low} {high}");
+        }
     }
 
     #[test]
