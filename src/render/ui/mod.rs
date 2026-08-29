@@ -42,6 +42,15 @@ impl Rect {
         self.y + self.height
     }
 
+    /// Whether `point` is inside, for hit-testing a click against a widget.
+    /// Half-open, so abutting rectangles cannot both claim the same pixel.
+    pub fn contains(&self, point: [f32; 2]) -> bool {
+        point[0] >= self.x
+            && point[0] < self.right()
+            && point[1] >= self.y
+            && point[1] < self.bottom()
+    }
+
     pub fn inset(&self, dx: f32, dy: f32) -> Self {
         Self {
             x: self.x + dx,
@@ -112,23 +121,16 @@ pub(crate) struct TextItem {
 
 /// One frame's worth of interface, in logical pixels.
 pub struct UiFrame {
-    size: [f32; 2],
     quads: Vec<QuadItem>,
     texts: Vec<TextItem>,
 }
 
 impl UiFrame {
-    pub fn new(size: [f32; 2]) -> Self {
+    pub fn new() -> Self {
         Self {
-            size,
             quads: Vec::new(),
             texts: Vec::new(),
         }
-    }
-
-    /// The area available, in logical pixels.
-    pub fn size(&self) -> [f32; 2] {
-        self.size
     }
 
     pub fn rect(&mut self, rect: Rect, color: Color) {
@@ -175,5 +177,11 @@ impl UiFrame {
             color,
             max_width: Some(max_width),
         });
+    }
+}
+
+impl Default for UiFrame {
+    fn default() -> Self {
+        Self::new()
     }
 }

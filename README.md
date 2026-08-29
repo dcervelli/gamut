@@ -202,8 +202,15 @@ let width = renderer.measure_text("hello", 13.0)[0];   // for layout
 ```
 
 Adding panels, sliders or inspectors means emitting more primitives; the
-renderer does not change, and it all batches into the same two draws. The
-status bar and the histogram are the two clients that exist today.
+renderer does not change, and it all batches into the same two draws.
+
+The chrome is four panels: top and bottom bars spanning the full width, with
+skinny left and right strips nested between them, so the corners belong to the
+bars and the strips never reason about where one ends. `Chrome` derives all
+four from the window size alone, which is what lets the frame builder and the
+click handler agree on where a widget is without either of them owning it. The
+top bar carries the filename, the bottom bar the image and view facts, and the
+right strip the histogram toggle.
 
 | File | Role |
 | --- | --- |

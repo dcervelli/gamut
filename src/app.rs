@@ -26,16 +26,94 @@ const WHEEL_PIXELS_PER_STEP: f32 = 50.0;
 /// Fraction of the monitor a freshly opened window may occupy.
 const MAX_WINDOW_FRACTION: f64 = 0.85;
 
+/// Height of the top and bottom panels.
 const BAR_HEIGHT: f32 = 30.0;
+/// Width of the left and right panels. Wide enough for a square button and
+/// nothing else, which is the point: they hold tools, not content.
+const SIDE_WIDTH: f32 = 50.0;
+/// The square buttons that live in the side panels.
+const BUTTON_SIZE: f32 = 34.0;
 const TEXT_SIZE: f32 = 13.0;
 const PADDING: f32 = 12.0;
 const HISTOGRAM_SIZE: [f32; 2] = [320.0, 130.0];
 
 const BAR_BACKGROUND: Color = Color::rgba(0, 0, 0, 160);
 const PANEL_BACKGROUND: Color = Color::rgba(12, 12, 16, 214);
+const BUTTON_IDLE: Color = Color::rgba(255, 255, 255, 20);
+const BUTTON_HOVER: Color = Color::rgba(255, 255, 255, 45);
 const TEXT_PRIMARY: Color = Color::rgb(238, 238, 238);
 const TEXT_DIM: Color = Color::rgb(150, 152, 160);
 const ACCENT: Color = Color::rgb(120, 180, 255);
+
+/// The window chrome: four panels, and the widgets sitting in them.
+///
+/// Top and bottom span the full width; left and right are nested between
+/// them, so the corners belong to the horizontal bars and the vertical ones
+/// never have to reason about where a bar ends.
+///
+/// Laid out from the window size alone, so the frame builder and the click
+/// handler agree on where everything is without either owning it.
+#[derive(Clone, Copy)]
+struct Chrome {
+    top: Rect,
+    bottom: Rect,
+    left: Rect,
+    right: Rect,
+    /// The histogram toggle, at the top of the right panel.
+    histogram_button: Rect,
+}
+
+impl Chrome {
+    /// `size` is the window in logical pixels.
+    fn new(size: [f32; 2]) -> Self {
+        // Half the window each at the very smallest, so that a window dragged
+        // down to nothing shrinks the panels rather than letting the opposite
+        // pair pass through each other.
+        let bar = BAR_HEIGHT.min(size[1] / 2.0);
+        let side = SIDE_WIDTH.min(size[0] / 2.0);
+        let middle = (size[1] - 2.0 * bar).max(0.0);
+
+        let right = Rect::new(size[0] - side, bar, side, middle);
+        // The same inset on all four sides, so the button reads as centred in
+        // the strip rather than merely fitted into it — until the strip is
+        // shorter than that, at which point it goes flush to the top.
+        let button = BUTTON_SIZE.min(right.width).min(right.height);
+        let inset = (right.width - button) / 2.0;
+
+        Self {
+            top: Rect::new(0.0, 0.0, size[0], bar),
+            bottom: Rect::new(0.0, size[1] - bar, size[0], bar),
+            left: Rect::new(0.0, bar, side, middle),
+            right,
+            histogram_button: Rect::new(
+                right.x + inset,
+                right.y + inset.min(right.height - button),
+                button,
+                button,
+            ),
+        }
+    }
+
+    /// What the four panels leave in the middle, which is where anything that
+    /// floats over the image — the histogram, for now — has to fit.
+    fn content(&self) -> Rect {
+        Rect::new(
+            self.left.right(),
+            self.top.bottom(),
+            (self.right.x - self.left.right()).max(0.0),
+            (self.bottom.y - self.top.bottom()).max(0.0),
+        )
+    }
+
+    /// Whether a click at `point` belongs to the interface rather than to the
+    /// image behind it.
+    fn contains(&self, point: [f32; 2]) -> bool {
+        self.top.contains(point)
+            || self.bottom.contains(point)
+            || self.left.contains(point)
+            || self.right.contains(point)
+    }
+}
 
 /// What the command line asked for, beyond which files to show.
 pub struct Options {
@@ -98,6 +176,10 @@ pub struct App {
     drag_from: Option<[f32; 2]>,
     show_overlay: bool,
     show_histogram: bool,
+    /// Whether the pointer is over the histogram toggle. Held rather than
+    /// recomputed while drawing so that motion knows when the highlight has
+    /// changed and a redraw is actually owed.
+    hover_histogram: bool,
     /// Set if the last render failed, so we report it once rather than every frame.
     reported_error: bool,
 }
@@ -143,6 +225,7 @@ impl App {
             drag_from: None,
             show_overlay: true,
             show_histogram: histogram,
+            hover_histogram: false,
             reported_error: false,
         }
     }
@@ -159,6 +242,30 @@ impl App {
             .as_ref()
             .map(Renderer::size)
             .unwrap_or([1.0, 1.0])
+    }
+
+    fn scale_factor(&self) -> f32 {
+        self.window
+            .as_ref()
+            .map(|window| window.scale_factor() as f32)
+            .unwrap_or(1.0)
+    }
+
+    /// Where the panels are this frame. Cheap enough to derive on demand, and
+    /// deriving it means there is no cached layout to fall out of step with
+    /// the window.
+    fn chrome(&self) -> Chrome {
+        let scale = self.scale_factor();
+        let physical = self.window_size();
+        Chrome::new([physical[0] / scale, physical[1] / scale])
+    }
+
+    /// The pointer in logical pixels, which is what the interface is laid out
+    /// in. Events arrive in physical ones.
+    fn logical_cursor(&self) -> Option<[f32; 2]> {
+        let scale = self.scale_factor();
+        self.cursor
+            .map(|cursor| [cursor[0] / scale, cursor[1] / scale])
     }
 
     /// Re-reads the file on screen if something else has written to it, which
@@ -375,10 +482,30 @@ impl App {
     /// after it establishes the point the drag measures from. Waiting for that
     /// costs nothing, and a press can genuinely arrive with no position yet —
     /// the pointer entering the window and clicking without moving.
-    fn handle_button(&mut self, state: ElementState, button: MouseButton) {
+    /// Returns `true` if the click changed anything on screen, which a press
+    /// on a widget does and a press on the image does not.
+    fn handle_button(&mut self, state: ElementState, button: MouseButton) -> bool {
         if button != MouseButton::Left {
-            return;
+            return false;
         }
+
+        // The chrome gets first refusal. A press that lands on a panel is
+        // aimed at the interface, so it neither reaches a widget's neighbour
+        // nor starts a drag of the image underneath.
+        if state == ElementState::Pressed
+            && self.show_overlay
+            && let Some(point) = self.logical_cursor()
+        {
+            let chrome = self.chrome();
+            if chrome.histogram_button.contains(point) {
+                self.show_histogram = !self.show_histogram;
+                return true;
+            }
+            if chrome.contains(point) {
+                return false;
+            }
+        }
+
         self.dragging = state == ElementState::Pressed;
         self.drag_from = if self.dragging { self.cursor } else { None };
 
@@ -393,13 +520,16 @@ impl App {
             };
             window.set_cursor(Cursor::Icon(icon));
         }
+        false
     }
 
     /// Follows the pointer. Returns `true` if a drag moved the view.
     fn handle_motion(&mut self, position: [f32; 2]) -> bool {
         self.cursor = Some(position);
         if !self.dragging {
-            return false;
+            // Nothing else to do out here, so this is where the button's
+            // highlight gets to follow the pointer.
+            return self.update_hover();
         }
         let Some(from) = self.drag_from.replace(position) else {
             // First motion of this drag: nothing to measure from yet.
@@ -413,6 +543,18 @@ impl App {
         self.view
             .pan_by(dx, dy, self.image_size(), self.window_size());
         true
+    }
+
+    /// Re-tests the pointer against the widgets. Returns `true` if the
+    /// highlight moved, and so if the frame is now out of date.
+    fn update_hover(&mut self) -> bool {
+        let hover = self.show_overlay
+            && self
+                .logical_cursor()
+                .is_some_and(|point| self.chrome().histogram_button.contains(point));
+        let changed = hover != self.hover_histogram;
+        self.hover_histogram = hover;
+        changed
     }
 
     /// Returns `true` if the wheel changed anything on screen.
@@ -466,6 +608,7 @@ impl App {
                 file_count: self.files.len(),
                 show_overlay: self.show_overlay,
                 show_histogram: self.show_histogram,
+                hover_histogram: self.hover_histogram,
             },
             self.current.as_ref(),
             &self.view,
@@ -591,12 +734,25 @@ impl ApplicationHandler for App {
                     window.request_redraw();
                 }
             }
-            WindowEvent::CursorLeft { .. } => self.cursor = None,
-            WindowEvent::MouseInput { state, button, .. } => self.handle_button(state, button),
+            WindowEvent::CursorLeft { .. } => {
+                self.cursor = None;
+                if self.update_hover()
+                    && let Some(window) = &self.window
+                {
+                    window.request_redraw();
+                }
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                if self.handle_button(state, button)
+                    && let Some(window) = &self.window
+                {
+                    window.request_redraw();
+                }
+            }
             // A drag the window did not see end — the button came up over
             // another window, say — would otherwise resume on the next motion.
             WindowEvent::Focused(false) => {
-                self.handle_button(ElementState::Released, MouseButton::Left);
+                let _ = self.handle_button(ElementState::Released, MouseButton::Left);
             }
             WindowEvent::MouseWheel { delta, .. } => {
                 if self.handle_wheel(delta)
@@ -641,6 +797,7 @@ struct Layout {
     file_count: usize,
     show_overlay: bool,
     show_histogram: bool,
+    hover_histogram: bool,
 }
 
 /// Builds one frame of interface.
@@ -654,22 +811,50 @@ fn build_ui(
     view: &View,
 ) -> UiFrame {
     let size = layout.logical;
-    let mut frame = UiFrame::new(size);
+    let mut frame = UiFrame::new();
     let Some(current) = current else {
         return frame;
     };
 
+    let chrome = Chrome::new(size);
+    // With the panels hidden the whole window is the content area, so a
+    // histogram on its own still sits in the corner rather than where the
+    // panels that are not there would have put it.
+    let content = if layout.show_overlay {
+        chrome.content()
+    } else {
+        Rect::new(0.0, 0.0, size[0], size[1])
+    };
+
     if layout.show_histogram {
-        draw_histogram(&mut frame, current, layout.show_overlay);
+        draw_histogram(&mut frame, current, content);
     }
     if !layout.show_overlay {
         return frame;
     }
 
-    let bar = Rect::new(0.0, size[1] - BAR_HEIGHT, size[0], BAR_HEIGHT);
-    frame.rect(bar, BAR_BACKGROUND);
+    for panel in [chrome.top, chrome.bottom, chrome.left, chrome.right] {
+        frame.rect(panel, BAR_BACKGROUND);
+    }
 
-    let baseline = bar.y + (BAR_HEIGHT - TEXT_SIZE * 1.3) / 2.0;
+    // Top panel: what is on screen.
+    frame.text_clipped(
+        [PADDING, text_baseline(chrome.top)],
+        TEXT_SIZE,
+        TEXT_PRIMARY,
+        (size[0] - PADDING * 2.0).max(1.0),
+        current.label.clone(),
+    );
+
+    draw_histogram_button(
+        &mut frame,
+        chrome.histogram_button,
+        layout.show_histogram,
+        layout.hover_histogram,
+    );
+
+    let bar = chrome.bottom;
+    let baseline = text_baseline(bar);
 
     let mut right = describe_state(current, view, &layout);
     if renderer.output().is_hdr {
@@ -684,7 +869,6 @@ fn build_ui(
     let left = fit_segments(
         renderer,
         &[
-            current.label.clone(),
             format!("{} \u{00d7} {}", current.image.width, current.image.height),
             describe_pixels(current),
             current.image.color.label(),
@@ -701,6 +885,43 @@ fn build_ui(
     );
     frame.text([right_x, baseline], TEXT_SIZE, TEXT_DIM, right);
     frame
+}
+
+/// Where text has to start to sit centred in a bar of `BAR_HEIGHT`.
+fn text_baseline(bar: Rect) -> f32 {
+    bar.y + (bar.height - TEXT_SIZE * 1.3) / 2.0
+}
+
+/// The histogram toggle: a miniature of what it shows, rather than a letter,
+/// since the side panels are too narrow to label anything in words.
+fn draw_histogram_button(frame: &mut UiFrame, rect: Rect, active: bool, hover: bool) {
+    // A window too small to hold the button gets no button, rather than a
+    // smear of sub-pixel bars.
+    if rect.width < BUTTON_SIZE {
+        return;
+    }
+    let (background, ink) = match (active, hover) {
+        (true, _) => (ACCENT.with_alpha(64), ACCENT),
+        (false, true) => (BUTTON_HOVER, TEXT_PRIMARY),
+        (false, false) => (BUTTON_IDLE, TEXT_DIM),
+    };
+    frame.rounded_rect(rect, 5.0, background);
+
+    const BARS: [f32; 4] = [0.45, 1.0, 0.7, 0.3];
+    let plot = rect.inset(9.0, 9.0);
+    let step = plot.width / BARS.len() as f32;
+    for (index, fraction) in BARS.iter().enumerate() {
+        let height = plot.height * fraction;
+        frame.rect(
+            Rect::new(
+                plot.x + index as f32 * step,
+                plot.bottom() - height,
+                (step - 1.5).max(1.0),
+                height,
+            ),
+            ink,
+        );
+    }
 }
 
 /// Joins as many leading segments as fit in `width`, keeping at least the
@@ -787,12 +1008,12 @@ fn format_window(current: &Current) -> String {
     }
 }
 
-fn draw_histogram(frame: &mut UiFrame, current: &Current, above_bar: bool) {
-    let size = frame.size();
-    let bottom = size[1] - if above_bar { BAR_HEIGHT } else { 0.0 } - PADDING;
+/// Draws the histogram in the bottom-right of `content`, the area the panels
+/// leave free.
+fn draw_histogram(frame: &mut UiFrame, current: &Current, content: Rect) {
     let panel = Rect::new(
-        size[0] - HISTOGRAM_SIZE[0] - PADDING,
-        bottom - HISTOGRAM_SIZE[1],
+        (content.right() - HISTOGRAM_SIZE[0] - PADDING).max(content.x + PADDING),
+        (content.bottom() - HISTOGRAM_SIZE[1] - PADDING).max(content.y + PADDING),
         HISTOGRAM_SIZE[0],
         HISTOGRAM_SIZE[1],
     );
@@ -893,4 +1114,98 @@ fn initial_window_size(event_loop: &ActiveEventLoop, image: [f32; 2]) -> Physica
         (width.round() as u32).max(320),
         (height.round() as u32).max(240),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const WINDOW: [f32; 2] = [1000.0, 700.0];
+
+    #[test]
+    fn the_side_panels_are_nested_between_the_bars() {
+        let chrome = Chrome::new(WINDOW);
+
+        // The bars own the full width, and so the corners.
+        assert_eq!(chrome.top, Rect::new(0.0, 0.0, 1000.0, BAR_HEIGHT));
+        assert_eq!(
+            chrome.bottom,
+            Rect::new(0.0, 700.0 - BAR_HEIGHT, 1000.0, BAR_HEIGHT)
+        );
+
+        // The sides start where the top ends and stop where the bottom begins.
+        assert_eq!(chrome.left.y, chrome.top.bottom());
+        assert_eq!(chrome.left.bottom(), chrome.bottom.y);
+        assert_eq!(chrome.right.y, chrome.top.bottom());
+        assert_eq!(chrome.right.bottom(), chrome.bottom.y);
+
+        assert_eq!(chrome.left.x, 0.0);
+        assert_eq!(chrome.left.width, SIDE_WIDTH);
+        assert_eq!(chrome.right.right(), 1000.0);
+        assert_eq!(chrome.right.width, SIDE_WIDTH);
+    }
+
+    #[test]
+    fn the_content_area_is_what_the_four_leave_behind() {
+        let content = Chrome::new(WINDOW).content();
+        assert_eq!(
+            content,
+            Rect::new(
+                SIDE_WIDTH,
+                BAR_HEIGHT,
+                1000.0 - 2.0 * SIDE_WIDTH,
+                700.0 - 2.0 * BAR_HEIGHT
+            )
+        );
+    }
+
+    #[test]
+    fn the_histogram_toggle_sits_inside_the_right_panel() {
+        let chrome = Chrome::new(WINDOW);
+        let button = chrome.histogram_button;
+
+        assert!(button.x >= chrome.right.x);
+        assert!(button.right() <= chrome.right.right());
+        assert!(button.y >= chrome.right.y);
+        assert!(button.bottom() <= chrome.right.bottom());
+
+        // Centred in the strip rather than merely fitted into it.
+        assert_eq!(
+            button.x - chrome.right.x,
+            chrome.right.right() - button.right()
+        );
+
+        assert!(chrome.contains([button.x + 1.0, button.y + 1.0]));
+        assert!(!chrome.contains([chrome.right.x - 1.0, button.y + 1.0]));
+    }
+
+    #[test]
+    fn a_window_smaller_than_its_own_chrome_stays_within_itself() {
+        // Panels are laid out from the window size, so a window dragged down
+        // to nothing must not produce rectangles that escape it or run
+        // backwards — a negative width would be drawn as a flipped quad.
+        for size in [[10.0, 10.0], [0.0, 0.0], [200.0, 20.0]] {
+            let chrome = Chrome::new(size);
+            for panel in [chrome.top, chrome.bottom, chrome.left, chrome.right] {
+                assert!(
+                    panel.width >= 0.0 && panel.height >= 0.0,
+                    "{panel:?} at {size:?}"
+                );
+                assert!(panel.x >= 0.0 && panel.y >= 0.0, "{panel:?} at {size:?}");
+                assert!(
+                    panel.right() <= size[0] + f32::EPSILON,
+                    "{panel:?} at {size:?}"
+                );
+                assert!(
+                    panel.bottom() <= size[1] + f32::EPSILON,
+                    "{panel:?} at {size:?}"
+                );
+            }
+            let content = chrome.content();
+            assert!(
+                content.width >= 0.0 && content.height >= 0.0,
+                "{content:?} at {size:?}"
+            );
+        }
+    }
 }
