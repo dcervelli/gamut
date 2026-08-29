@@ -10,7 +10,7 @@
 use half::f16;
 
 use super::WORKING_FORMAT;
-use super::image_layer::ImageLayer;
+use super::image_layer::{Draw, ImageLayer};
 use super::upload::Capabilities;
 use crate::image::display::Display;
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
@@ -48,6 +48,19 @@ fn gpu() -> Option<Gpu> {
 /// Draws `image` into a `target`-sized working-space texture and reads it
 /// back, as RGBA rows of linear values.
 fn draw(gpu: &Gpu, image: &DecodedImage, target: [u32; 2], placement: Placement) -> Vec<[f32; 4]> {
+    draw_all(
+        gpu,
+        image,
+        target,
+        Draw {
+            view: placement,
+            thumbnail: None,
+        },
+    )
+}
+
+/// As [`draw`], for the frames that put down the minimap's thumbnail as well.
+fn draw_all(gpu: &Gpu, image: &DecodedImage, target: [u32; 2], quads: Draw) -> Vec<[f32; 4]> {
     let mut layer = ImageLayer::new(&gpu.device, WORKING_FORMAT);
     layer
         .set_image(&gpu.device, &gpu.queue, image, gpu.capabilities)
@@ -85,7 +98,7 @@ fn draw(gpu: &Gpu, image: &DecodedImage, target: [u32; 2], placement: Placement)
         &gpu.device,
         &gpu.queue,
         &mut encoder,
-        placement,
+        quads,
         [target[0] as f32, target[1] as f32],
         &Display::default(),
     );
@@ -349,4 +362,79 @@ fn a_transparent_texel_does_not_bleed_its_colour() {
     assert!(close(pixels[0][0], 0.5, 5e-3), "red: {:?}", pixels[0]);
     assert!(close(pixels[0][1], 0.0, 5e-3), "green: {:?}", pixels[0]);
     assert!(close(pixels[0][3], 0.5, 5e-3), "alpha: {:?}", pixels[0]);
+}
+
+/// The minimap's thumbnail is a second quad in the same pass, from the same
+/// texture, and it is what decides whether the coarse chain is built: here
+/// the view is at 1:1 and wants nothing of it, while the thumbnail is shrunk
+/// sixteen to one and cannot be drawn without it.
+#[test]
+fn the_thumbnail_is_drawn_beside_the_view_and_builds_the_chain_it_needs() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    const SIZE: u32 = 64;
+    const THUMBNAIL: u32 = 4;
+    let data: Vec<u8> = (0..SIZE * SIZE).map(|index| (index % 251) as u8).collect();
+    let image = gray_u8(SIZE, SIZE, data.clone());
+
+    let target = [SIZE + THUMBNAIL, SIZE + THUMBNAIL];
+    let pixels = draw_all(
+        &gpu,
+        &image,
+        target,
+        Draw {
+            view: Placement {
+                x: 0.0,
+                y: 0.0,
+                width: SIZE as f32,
+                height: SIZE as f32,
+                zoom: 1.0,
+                upscale: Upscale::Nearest,
+            },
+            thumbnail: Some(Placement {
+                x: SIZE as f32,
+                y: SIZE as f32,
+                width: THUMBNAIL as f32,
+                height: THUMBNAIL as f32,
+                zoom: THUMBNAIL as f32 / SIZE as f32,
+                upscale: Upscale::Nearest,
+            }),
+        },
+    );
+
+    let width = target[0] as usize;
+    // The view is untouched by the second draw: 1:1, texel for texel.
+    for (x, y) in [(0usize, 0usize), (17, 5), (63, 63)] {
+        let expected = data[y * SIZE as usize + x] as f32 / 255.0;
+        let got = at(&pixels, width, x, y);
+        assert!(close(got, expected, 2e-3), "view ({x}, {y}): {got}");
+    }
+
+    // And the thumbnail is the whole image averaged down, block by block.
+    for block_y in 0..THUMBNAIL as usize {
+        for block_x in 0..THUMBNAIL as usize {
+            let mut total = 0.0f32;
+            for y in 0..16usize {
+                for x in 0..16usize {
+                    let index = (block_y * 16 + y) * SIZE as usize + block_x * 16 + x;
+                    total += data[index] as f32 / 255.0;
+                }
+            }
+            let expected = total / 256.0;
+            let got = at(
+                &pixels,
+                width,
+                SIZE as usize + block_x,
+                SIZE as usize + block_y,
+            );
+            assert!(
+                close(got, expected, 2e-3),
+                "thumbnail ({block_x}, {block_y}): got {got}, expected {expected}"
+            );
+        }
+    }
+
+    // Nothing was drawn in the corner neither of them covers.
+    assert_eq!(at(&pixels, width, SIZE as usize + 1, 3), 0.0);
 }

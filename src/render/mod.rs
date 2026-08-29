@@ -32,7 +32,7 @@ pub use output::{HdrPreference, Output};
 pub use ui::{Color, Rect, UiFrame};
 
 use composite::Composite;
-use image_layer::ImageLayer;
+use image_layer::{Draw, ImageLayer};
 use ui::UiRenderer;
 use upload::Capabilities;
 
@@ -191,9 +191,15 @@ impl Renderer {
         self.image_layer.current().map(|image| image.format)
     }
 
+    /// `thumbnail`, when the minimap is on screen, is where the whole image
+    /// is to be drawn a second time. It goes into the image layer rather than
+    /// the interface's, since it is the image: the same window, tone map and
+    /// colormap apply to it without any of that having to be reimplemented in
+    /// sRGB.
     pub fn render(
         &mut self,
         placement: Placement,
+        thumbnail: Option<Placement>,
         display: &Display,
         frame: &UiFrame,
         scale: f32,
@@ -240,7 +246,10 @@ impl Renderer {
             &self.device,
             &self.queue,
             &mut encoder,
-            placement,
+            Draw {
+                view: placement,
+                thumbnail,
+            },
             size,
             display,
         );

@@ -45,6 +45,7 @@ Both ship as standard on the distributions above.
 | `c` | Cycle false colour (single-channel images) |
 | `r` | Reset display settings |
 | `h` | Toggle the histogram |
+| `m` | Toggle the minimap |
 | `` ` `` | Toggle the interface panels |
 
 The panels are opaque and the image is fitted inside them rather than passing
@@ -61,8 +62,25 @@ compared, and the comparison only works if the same detail stays under the
 same pixels. A file of another size is a different picture, and is fitted.
 
 Every display control is also a start-up flag — `--colormap viridis`,
-`--tone-map neutral`, `--window minmax`, `--exposure -1.5`, `--histogram` —
-which is handy for scripting and for comparing two files side by side.
+`--tone-map neutral`, `--window minmax`, `--exposure -1.5`, `--histogram`,
+`--minimap` — which is handy for scripting and for comparing two files side by
+side.
+
+## Minimap
+
+`m`, or the button at the top of the left strip, puts a thumbnail of the whole
+image in the top-left corner, with the part of it on screen picked out and
+the rest washed over. It is the map to read while zoomed in far enough that
+the image on screen no longer says where in the picture you are.
+
+The thumbnail is not a separate rendering of the image: it is a second quad in
+the image layer's pass, drawn from the same texture through the same shader as
+the view itself, reading whichever coarse level suits the size it is drawn at.
+Exposure, the display window, false colour and tone mapping therefore reach it
+without any of that being reimplemented for a widget, and it costs one more
+draw call and a second uniform. Only the border and the wash over what is off
+screen belong to the interface, which is why both are drawn hollow or
+translucent — the thumbnail underneath them is in the layer below.
 
 ## Live reload
 
@@ -221,8 +239,11 @@ skinny left and right strips nested between them, so the corners belong to the
 bars and the strips never reason about where one ends. `Chrome` derives all
 four from the window size alone, which is what lets the frame builder and the
 click handler agree on where a widget is without either of them owning it. The
-top bar carries the filename, the bottom bar the image and view facts, and the
-right strip the histogram toggle.
+top bar carries the file name and what the image is — its size, its pixels,
+its colour space, all fixed for as long as the file is on screen — while the
+bottom bar carries what changes: the pointer's position, and what the view is
+doing to the image. The left strip holds the minimap toggle and the right
+strip the histogram toggle.
 
 They are opaque, and the image is drawn in the `Viewport` they leave rather
 than behind them: zoom, fit, pan limits and the wheel's anchor are all measured
@@ -432,7 +453,7 @@ crate.
 cargo test
 ```
 
-108 tests over the transfer functions and primaries matrices, texture format
+122 tests over the transfer functions and primaries matrices, texture format
 selection (including the device-capability fallbacks), the statistics and
 window logic, the decoder registry, the CICP translation, ICC profile
 recognition, gain map reconstruction, the view geometry, and the reload
@@ -443,14 +464,17 @@ base image and a half-size map that leaves one half alone and asks the other
 for two stops, assembled with the same crate that reads it back, so the round
 trip is exercised without a binary fixture.
 
-Six of them run the real image pipeline on a real adapter — a headless device,
-no window — and check the resampling filters against arithmetic done on the
-CPU: that minification is the exact mean of the texels a pixel covers, that
+Seven of them run the real image pipeline on a real adapter — a headless
+device, no window — and check what the shader and the passes actually produce
+against arithmetic done on the CPU: that minification is the exact mean of the
+texels a pixel covers, that
 two levels of the coarse chain plus the draw's own filter come to the same
 number as averaging the source directly, that antialiased nearest is exactly
 nearest at a whole-number zoom, that Catmull-Rom passes texel centres through
-untouched, and that a transparent texel does not bleed its colour into its
-neighbour. Where no adapter can be had they report success rather than failing
+untouched, that a transparent texel does not bleed its colour into its
+neighbour, and that the minimap's thumbnail lands beside the view as a second
+draw of the same texture — building the coarse chain the view itself had no
+use for. Where no adapter can be had they report success rather than failing
 for a reason that has nothing to do with the code.
 
 `test_images/` holds 50 real fixtures — see its README — covering every pixel

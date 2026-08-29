@@ -51,16 +51,39 @@ pub struct GpuImage {
     pub precision_note: Option<&'static str>,
 }
 
+/// One draw's worth of constants, and the binding that points at them.
+///
+/// One per draw rather than one buffer rewritten between draws: the image and
+/// the minimap's thumbnail are two quads in the same pass, so both sets have
+/// to be live at once.
+struct Slot {
+    buffer: wgpu::Buffer,
+    group: wgpu::BindGroup,
+}
+
+/// What one frame draws: the view, and the minimap's thumbnail when it is on
+/// screen. Passed together because they share a pass, a texture and a coarse
+/// chain, and because whether the chain is needed at all is a question about
+/// the pair of them.
+#[derive(Clone, Copy)]
+pub struct Draw {
+    pub view: Placement,
+    pub thumbnail: Option<Placement>,
+}
+
 pub struct ImageLayer {
     pipeline: wgpu::RenderPipeline,
     texture_layout: wgpu::BindGroupLayout,
-    params: wgpu::Buffer,
-    params_group: wgpu::BindGroup,
+    main: Slot,
+    thumbnail: Slot,
     reducer: Reducer,
     image: Option<GpuImage>,
     /// Which of the current image's bind groups the next draw reads, decided
     /// in `prepare` from the zoom.
     level: usize,
+    /// The same for the thumbnail, and `None` on a frame with no minimap on
+    /// screen, which is what leaves its quad undrawn.
+    thumbnail_level: Option<usize>,
 }
 
 impl ImageLayer {
@@ -139,29 +162,15 @@ impl ImageLayer {
             cache: None,
         });
 
-        let params = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("image params"),
-            size: size_of::<Params>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let params_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("image params"),
-            layout: &params_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: params.as_entire_binding(),
-            }],
-        });
-
         Self {
             pipeline,
             texture_layout,
-            params,
-            params_group,
+            main: Slot::new(device, &params_layout, "image params"),
+            thumbnail: Slot::new(device, &params_layout, "thumbnail params"),
             reducer: Reducer::new(device),
             image: None,
             level: 0,
+            thumbnail_level: None,
         }
     }
 
@@ -230,33 +239,33 @@ impl ImageLayer {
             precision_note: plan.precision_note,
         });
         self.level = 0;
+        self.thumbnail_level = None;
         Ok(())
     }
 
+    /// `draw.thumbnail`, when there is one, is the minimap's copy of the same
+    /// image: a second quad, drawn from the same texture in the same pass, so
+    /// that it is tone mapped and windowed exactly as the image it stands for.
     pub fn prepare(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
-        placement: Placement,
+        draw: Draw,
         target: [f32; 2],
         display: &Display,
     ) {
+        let Draw { view, thumbnail } = draw;
         let Some(image) = &mut self.image else {
             return;
         };
-        let (low, gain) = display.transform();
+        let window = display.transform();
 
-        // How much the draw has to shrink the image by, in source texels per
-        // output pixel. Below one the view is magnifying and reads the image
-        // itself; above it, the coarse chain does everything past a factor of
-        // four so that the filter's tap count stays small.
-        let factor = if placement.zoom > 0.0 {
-            1.0 / placement.zoom
-        } else {
-            1.0
-        };
-        if factor > reduce::STEP as f32 && !image.chain_built {
+        let factor = shrink(view);
+        // The thumbnail is shrunk far harder than the view ever is, so it is
+        // what decides whether the chain is needed at all.
+        let coarsest = thumbnail.map_or(factor, |thumbnail| factor.max(shrink(thumbnail)));
+        if coarsest > reduce::STEP as f32 && !image.chain_built {
             image.levels = self.reducer.build(
                 device,
                 encoder,
@@ -276,68 +285,131 @@ impl ImageLayer {
             image.chain_built = true;
         }
 
-        let level = reduce::level_for(factor, image.levels.len());
-        self.level = level;
-
-        let divisor = (reduce::STEP as f32).powi(level as i32);
-        let extent = [
-            image.size[0] as f32 / divisor,
-            image.size[1] as f32 / divisor,
-        ];
-        // Read off the quad rather than from the zoom, so that the filters and
-        // the geometry cannot drift apart.
-        let texels_per_pixel = [
-            extent[0] / placement.width.max(1e-6),
-            extent[1] / placement.height.max(1e-6),
-        ];
-
-        queue.write_buffer(
-            &self.params,
-            0,
-            bytemuck::bytes_of(&Params {
-                offset: [
-                    placement.x / target[0] * 2.0 - 1.0,
-                    1.0 - placement.y / target[1] * 2.0,
-                ],
-                scale: [
-                    placement.width / target[0] * 2.0,
-                    placement.height / target[1] * 2.0,
-                ],
-                window: [low, gain],
-                texels_per_pixel,
-                extent,
-                _pad: [0.0; 2],
-                primaries: image.primaries,
-                swizzle: image.swizzle,
-                alpha_mode: if level == 0 {
-                    upload::alpha_code(image.alpha)
-                } else {
-                    reduce::level_alpha_code(image.alpha)
-                },
-                colormap: display.colormap.index(),
-                // Minification is an area average; magnification is whichever
-                // of the two the user asked for. At exactly 1:1 both come to
-                // the same thing, so the boundary is not a visible one.
-                resampler: if placement.zoom < 1.0 {
-                    0
-                } else {
-                    placement.upscale.index()
-                },
-            }),
+        self.level = reduce::level_for(factor, image.levels.len());
+        self.main.write(
+            queue,
+            params_for(image, view, target, display, window, self.level),
         );
+
+        self.thumbnail_level =
+            thumbnail.map(|thumbnail| reduce::level_for(shrink(thumbnail), image.levels.len()));
+        if let (Some(thumbnail), Some(level)) = (thumbnail, self.thumbnail_level) {
+            self.thumbnail.write(
+                queue,
+                params_for(image, thumbnail, target, display, window, level),
+            );
+        }
     }
 
     pub fn render(&self, pass: &mut wgpu::RenderPass<'_>) {
         let Some(image) = &self.image else {
             return;
         };
-        let Some(binding) = image.bindings.get(self.level) else {
-            return;
-        };
         pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, &self.params_group, &[]);
-        pass.set_bind_group(1, binding, &[]);
-        pass.draw(0..4, 0..1);
+        // The thumbnail goes down second: it sits over the content area, and
+        // a view zoomed in past the panels' edges is drawn under it.
+        let draws = [
+            Some((&self.main, self.level)),
+            self.thumbnail_level.map(|level| (&self.thumbnail, level)),
+        ];
+        for (slot, level) in draws.into_iter().flatten() {
+            let Some(binding) = image.bindings.get(level) else {
+                continue;
+            };
+            pass.set_bind_group(0, &slot.group, &[]);
+            pass.set_bind_group(1, binding, &[]);
+            pass.draw(0..4, 0..1);
+        }
+    }
+}
+
+impl Slot {
+    fn new(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, label: &str) -> Self {
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(label),
+            size: size_of::<Params>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(label),
+            layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: buffer.as_entire_binding(),
+            }],
+        });
+        Self { buffer, group }
+    }
+
+    fn write(&self, queue: &wgpu::Queue, params: Params) {
+        queue.write_buffer(&self.buffer, 0, bytemuck::bytes_of(&params));
+    }
+}
+
+/// How much a draw has to shrink the image by, in source texels per output
+/// pixel. Below one it is magnifying and reads the image itself; above it,
+/// the coarse chain does everything past a factor of four so that the
+/// filter's tap count stays small.
+fn shrink(placement: Placement) -> f32 {
+    if placement.zoom > 0.0 {
+        1.0 / placement.zoom
+    } else {
+        1.0
+    }
+}
+
+/// The constants for one quad: where it goes on the target, and how the
+/// shader is to read and resample the level it draws from.
+fn params_for(
+    image: &GpuImage,
+    placement: Placement,
+    target: [f32; 2],
+    display: &Display,
+    window: (f32, f32),
+    level: usize,
+) -> Params {
+    let divisor = (reduce::STEP as f32).powi(level as i32);
+    let extent = [
+        image.size[0] as f32 / divisor,
+        image.size[1] as f32 / divisor,
+    ];
+    // Read off the quad rather than from the zoom, so that the filters and
+    // the geometry cannot drift apart.
+    let texels_per_pixel = [
+        extent[0] / placement.width.max(1e-6),
+        extent[1] / placement.height.max(1e-6),
+    ];
+
+    Params {
+        offset: [
+            placement.x / target[0] * 2.0 - 1.0,
+            1.0 - placement.y / target[1] * 2.0,
+        ],
+        scale: [
+            placement.width / target[0] * 2.0,
+            placement.height / target[1] * 2.0,
+        ],
+        window: [window.0, window.1],
+        texels_per_pixel,
+        extent,
+        _pad: [0.0; 2],
+        primaries: image.primaries,
+        swizzle: image.swizzle,
+        alpha_mode: if level == 0 {
+            upload::alpha_code(image.alpha)
+        } else {
+            reduce::level_alpha_code(image.alpha)
+        },
+        colormap: display.colormap.index(),
+        // Minification is an area average; magnification is whichever of the
+        // two the user asked for. At exactly 1:1 both come to the same thing,
+        // so the boundary is not a visible one.
+        resampler: if placement.zoom < 1.0 {
+            0
+        } else {
+            placement.upscale.index()
+        },
     }
 }
 
