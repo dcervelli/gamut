@@ -48,6 +48,11 @@ Zooming leaves fit mode; panning does not, so `f` then Down scrolls through a
 tall image at fit-width. Keys held with Ctrl, Alt or Super are ignored, so
 window-manager chords such as `Super+0` do not disturb the view.
 
+`n` and `p` keep the pan and zoom when the file they land on is the same size
+as the one on screen — a directory of frames or of exposures is a set to be
+compared, and the comparison only works if the same detail stays under the
+same pixels. A file of another size is a different picture, and is fitted.
+
 Every display control is also a start-up flag — `--colormap viridis`,
 `--tone-map neutral`, `--window minmax`, `--exposure -1.5`, `--histogram` —
 which is handy for scripting and for comparing two files side by side.
