@@ -13,7 +13,12 @@ image = { version = "0.25.10", default-features = false, features = ["exr", "hdr
 # whose security limits this build can all raise, and pinning to the newest
 # would refuse to compile against a perfectly capable older release.
 libheif-rs = { version = "3.0.0", default-features = false, features = ["v1_20"] }
+moxcms = "0.8.1"
 pollster = "1.0.1"
 tiff = "0.11.3"
+# The container half of Ultra HDR: finds the gain map through MPF and XMP and
+# hands back raw JPEG bytes, leaving the decoding to whatever codec we already
+# have. `ultrahdr-core`, which does the gain map arithmetic, comes with it.
+ultrahdr-rs = "0.3.5"
 wgpu = "30.0.1"
 winit = "0.30.13"

@@ -235,10 +235,42 @@ right strip the histogram toggle.
 | PNG, JPEG, Radiance HDR, OpenEXR | [`image`](https://crates.io/crates/image) |
 | TIFF | [`tiff`](https://crates.io/crates/tiff) directly |
 | HEIF — HEIC, AVIF | [`libheif-rs`](https://crates.io/crates/libheif-rs), onto the system `libheif` |
+| Ultra HDR containers, ICC profiles | [`ultrahdr-rs`](https://crates.io/crates/ultrahdr-rs), [`moxcms`](https://crates.io/crates/moxcms) |
 
 The decoder is chosen by content, falling back to the file extension for
 formats without a recognisable header. Files are streamed rather than read
-into memory whole, so opening a 600 MB raster does not begin by copying it.
+into memory whole, so opening a 600 MB raster does not begin by copying it —
+JPEG excepted, because both the things below live in its container rather
+than in its pixels.
+
+### JPEG: gain maps and profiles
+
+A JPEG from a recent phone is two images. The first is the ordinary graded
+photograph every viewer has always shown; the second, typically a quarter of
+its size, is a **gain map** — a per-pixel log2 multiplier that, applied in
+linear light, puts back the highlights grading compressed. Ignore it and the
+HDR half of the file is invisible with nothing to say it was ever there.
+
+`ultrahdr-rs` walks the container — MPF and the XMP directory Google writes
+beside it — and hands back the two JPEGs as raw bytes, so `image` remains the
+only JPEG decoder in the build; `ultrahdr-core` does the arithmetic and the
+upsample. What comes out is linear light with 1.0 at SDR reference white,
+which is already the working space, so past the decoder an Ultra HDR
+photograph is simply an HDR image: tone mapped on an SDR surface, sent out
+untouched on an HDR one.
+
+The whole boost is applied rather than a share of it chosen for an assumed
+display. This viewer has an exposure control and a choice of tone mapping
+already, and guessing here how bright the monitor is would only take that
+choice away. `--no-gain-map` shows the SDR base image instead, which is worth
+having when the two need comparing.
+
+The same pass reads the **ICC profile**, because a phone JPEG is Display P3
+far more often than it is sRGB, and P3 numbers shown as sRGB come out
+visibly flat. Only what this program's colour model can act on is taken from
+the profile: the primaries, matched against the four it can name by comparing
+colorants rather than by reading description text, and a transfer function
+only where the profile states a plain power law.
 
 ### TIFF
 
@@ -339,10 +371,21 @@ EXIF orientation is not applied, so a rotated phone JPEG shows unrotated. HEIF
 is the exception, and only because its rotation lives in the container rather
 than in a metadata tag.
 
-Embedded ICC profiles are ignored in every format. It costs nothing for PNG
-and JPEG, which are sRGB either way, but a HEIF tagged only with an ICC — some
-cameras write that instead of the CICP codes — reads as sRGB when it may be
-Display P3. `--primaries p3` is the way out until a profile parser exists.
+Embedded ICC profiles are read for JPEG only. PNG carries one too, and a HEIF
+tagged with a profile instead of the CICP codes — some cameras write that —
+still reads as sRGB when it may be Display P3. `--primaries p3` remains the
+way out for both.
+
+Gain maps are read for JPEG only. HEIF can carry one as an auxiliary image,
+which is how Apple stores HDR photographs, and that is not implemented; such a
+file shows its SDR base. A gain map running the other way — where the stored
+image is the HDR one — is refused rather than applied, since applying it
+backwards would brighten what was already bright.
+
+Reconstruction costs memory: the result is four 32-bit floats per pixel, so a
+12-megapixel photograph is a 200 MB buffer where the base image alone was 12
+MB, with a transient copy of the same size on the way out of the gain map
+crate.
 
 ## Tests
 
@@ -350,10 +393,16 @@ Display P3. `--primaries p3` is the way out until a profile parser exists.
 cargo test
 ```
 
-83 tests over the transfer functions and primaries matrices, texture format
+100 tests over the transfer functions and primaries matrices, texture format
 selection (including the device-capability fallbacks), the statistics and
-window logic, the decoder registry, the CICP translation, the view geometry,
-and the reload watch's idea of when a write has finished.
+window logic, the decoder registry, the CICP translation, ICC profile
+recognition, gain map reconstruction, the view geometry, and the reload
+watch's idea of when a write has finished.
+
+The gain map tests build an Ultra HDR file rather than checking one in: a flat
+base image and a half-size map that leaves one half alone and asks the other
+for two stops, assembled with the same crate that reads it back, so the round
+trip is exercised without a binary fixture.
 
 Six of them run the real image pipeline on a real adapter — a headless device,
 no window — and check the resampling filters against arithmetic done on the

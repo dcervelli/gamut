@@ -14,8 +14,10 @@ use anyhow::{Context, Result, anyhow};
 use super::{ColorSpace, DecodedImage, Primaries, Transfer};
 
 mod heif;
+mod icc;
 mod image_rs;
 mod tiff_rs;
+mod ultra_hdr;
 
 #[cfg(test)]
 mod fixture_tests;
@@ -76,7 +78,10 @@ pub trait Decoder: Sync {
     /// bytes? Used to recover from a missing or misleading extension.
     fn sniff(&self, header: &[u8]) -> bool;
 
-    fn decode(&self, source: &mut dyn ReadSeek) -> Result<DecodedImage>;
+    /// `overrides` is passed in as well as applied afterwards, because one
+    /// of its settings — whether to reconstruct from a gain map — changes
+    /// what a decoder produces rather than how it is labelled.
+    fn decode(&self, source: &mut dyn ReadSeek, overrides: Overrides) -> Result<DecodedImage>;
 }
 
 /// Order matters only when two decoders claim the same extension, in which
@@ -86,10 +91,25 @@ static DECODERS: &[&dyn Decoder] = &[&tiff_rs::TiffRs, &heif::Heif, &image_rs::I
 /// Overrides for files whose headers cannot say what they mean. A 16-bit TIFF
 /// is the usual case: the same container holds both a scanned photograph and a
 /// frame of sensor counts, and only the person who made it knows which.
-#[derive(Clone, Copy, Default, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct Overrides {
     pub transfer: Option<Transfer>,
     pub primaries: Option<Primaries>,
+    /// Whether to reconstruct the HDR image an Ultra HDR JPEG describes.
+    /// Clearing it shows the SDR base image every other viewer shows, which
+    /// is worth having when the two need comparing — or when a gain map is
+    /// malformed enough to refuse.
+    pub gain_map: bool,
+}
+
+impl Default for Overrides {
+    fn default() -> Self {
+        Self {
+            transfer: None,
+            primaries: None,
+            gain_map: true,
+        }
+    }
 }
 
 impl Overrides {
@@ -151,7 +171,7 @@ pub fn load(path: &Path, overrides: Overrides) -> Result<DecodedImage> {
         })?;
 
     let mut image = decoder
-        .decode(&mut source)
+        .decode(&mut source, overrides)
         .with_context(|| format!("decoding {} as {}", path.display(), decoder.name()))?;
 
     image

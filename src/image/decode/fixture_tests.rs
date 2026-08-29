@@ -896,6 +896,7 @@ fn command_line_overrides_replace_the_guess() {
         Overrides {
             transfer: Some(crate::image::Transfer::Srgb),
             primaries: Some(crate::image::Primaries::DisplayP3),
+            ..Overrides::default()
         },
     )
     .unwrap();

@@ -40,7 +40,11 @@ impl super::Decoder for TiffRs {
             || header.starts_with(b"MM\x00\x2b")
     }
 
-    fn decode(&self, source: &mut dyn super::ReadSeek) -> Result<DecodedImage> {
+    fn decode(
+        &self,
+        source: &mut dyn super::ReadSeek,
+        _overrides: super::Overrides,
+    ) -> Result<DecodedImage> {
         // `Limits` is non-exhaustive, so start from the defaults and raise
         // only what needs raising.
         let mut limits = Limits::default();

@@ -36,6 +36,9 @@ OPTIONS:
                             to use: linear, srgb, pq, hlg, or gamma:<N>
         --primaries <P>     Override the colour primaries: bt709, p3, bt2020,
                             or adobe
+        --no-gain-map       Show the SDR base image of an Ultra HDR JPEG,
+                            rather than reconstructing the HDR one from the
+                            gain map beside it
         --colormap <MAP>    Start with false colour on single-channel images:
                             gray, viridis, magma, or turbo
         --tone-map <MAP>    Start with clip, reinhard, or neutral
@@ -156,6 +159,10 @@ fn parse_args() -> Result<Option<Args>> {
                 Some("--transfer") => {
                     let value = next_value(&mut arguments, "--transfer")?;
                     overrides.transfer = Some(parse_transfer(&value)?);
+                    continue;
+                }
+                Some("--no-gain-map") => {
+                    overrides.gain_map = false;
                     continue;
                 }
                 Some("--primaries") => {

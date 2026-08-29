@@ -54,7 +54,11 @@ impl super::Decoder for Heif {
         is_heif(header)
     }
 
-    fn decode(&self, source: &mut dyn super::ReadSeek) -> Result<DecodedImage> {
+    fn decode(
+        &self,
+        source: &mut dyn super::ReadSeek,
+        _overrides: super::Overrides,
+    ) -> Result<DecodedImage> {
         // Before the context, so that any external codec plugins are loaded
         // by the time one is asked for.
         let lib = lib_heif();
