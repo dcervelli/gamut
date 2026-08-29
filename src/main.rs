@@ -4,6 +4,7 @@ mod app;
 mod image;
 mod render;
 mod view;
+mod watch;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -24,7 +25,8 @@ image-view — preview images
 USAGE:
     image-view [OPTIONS] <FILE>...
 
-The first file is shown, stretched to fit the window.
+The first file is shown, stretched to fit the window, and re-read whenever
+something else writes to it.
 
 OPTIONS:
     -h, --help              Show this help

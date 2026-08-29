@@ -2,11 +2,12 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Instant;
 
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent};
-use winit::event_loop::ActiveEventLoop;
+use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{Cursor, CursorIcon, Window, WindowId};
 
@@ -14,6 +15,7 @@ use crate::image::display::{AutoWindow, Colormap, Display, Startup};
 use crate::image::{DecodedImage, Stats, decode};
 use crate::render::{Color, HdrPreference, Rect, Renderer, UiFrame};
 use crate::view::{Upscale, View};
+use crate::watch::{self, Watch};
 
 /// Window pixels moved per arrow-key press.
 const PAN_STEP: f32 = 64.0;
@@ -60,6 +62,16 @@ impl Current {
     }
 }
 
+/// Why a file is being read, which decides what survives the reading.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Reload {
+    /// A different file: pan, zoom and display settings start over.
+    Fresh,
+    /// The file already on screen, changed on disk. The user is presumably
+    /// looking at something in particular, so what they set up stays.
+    InPlace,
+}
+
 pub struct App {
     files: Vec<PathBuf>,
     index: usize,
@@ -68,6 +80,10 @@ pub struct App {
     startup: Startup,
     hdr: HdrPreference,
     view: View,
+    /// The file on screen, watched for writes by anything else.
+    watch: Watch,
+    /// When to look at it next.
+    next_poll: Instant,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     modifiers: ModifiersState,
@@ -100,6 +116,7 @@ impl App {
         let stats = Stats::scan(&first);
         let display = Display::for_image_with(&first, &stats, startup);
         let label = file_label(&files[index]);
+        let watch = Watch::new(&files[index]);
         let mut view = View::new();
         view.set_upscale(upscale);
         Self {
@@ -116,6 +133,8 @@ impl App {
             startup,
             hdr,
             view,
+            watch,
+            next_poll: Instant::now() + watch::INTERVAL,
             window: None,
             renderer: None,
             modifiers: ModifiersState::empty(),
@@ -142,10 +161,22 @@ impl App {
             .unwrap_or([1.0, 1.0])
     }
 
-    /// Loads and displays `files[index]`. Returns `false` if it could not be
-    /// decoded, leaving the current image on screen.
-    fn show(&mut self, index: usize) -> bool {
+    /// Re-reads the file on screen if something else has written to it, which
+    /// is what makes this usable next to whatever produced the image. Returns
+    /// `true` if the screen needs drawing again.
+    fn poll_file(&mut self) -> bool {
+        self.watch.poll() && self.load(self.index, Reload::InPlace)
+    }
+
+    /// Reads `files[index]` and puts it on screen. Returns `false` if it could
+    /// not be decoded, leaving the current image where it is: a file caught
+    /// mid-write is a failure we expect and one the next poll clears up.
+    fn load(&mut self, index: usize, mode: Reload) -> bool {
         let path = &self.files[index];
+        // Taken before the read rather than after it: a write that lands while
+        // we are decoding then shows up as another change, instead of being
+        // recorded as the version we are holding.
+        let watch = Watch::new(path);
         let image = match decode::load(path, self.overrides) {
             Ok(image) => image,
             Err(error) => {
@@ -155,9 +186,30 @@ impl App {
         };
 
         let stats = Stats::scan(&image);
-        let display = Display::for_image_with(&image, &stats, self.startup);
+        let size = [image.width as f32, image.height as f32];
+        // Re-reading the same file keeps the user where they were, since they
+        // are watching one spot for the change: same pan and zoom, same
+        // exposure and tone map, with only an automatic window re-derived from
+        // the new pixels. A file of another size is a new picture, not an edit
+        // of the one being watched, so it gets the fresh treatment.
+        let in_place = mode == Reload::InPlace
+            && self
+                .current
+                .as_ref()
+                .is_some_and(|current| current.size() == size);
+        let display = match self.current.as_ref().filter(|_| in_place) {
+            Some(current) => {
+                let mut display = current.display.clone();
+                display.refresh_auto(&stats);
+                display
+            }
+            None => Display::for_image_with(&image, &stats, self.startup),
+        };
         self.index = index;
-        self.view.reset();
+        self.watch = watch;
+        if !in_place {
+            self.view.reset();
+        }
 
         let mut format = None;
         if let Some(renderer) = &mut self.renderer {
@@ -202,7 +254,7 @@ impl App {
             } else {
                 (index + count - 1) % count
             };
-            if self.show(index) {
+            if self.load(index, Reload::Fresh) {
                 return;
             }
         }
@@ -439,6 +491,25 @@ impl App {
 }
 
 impl ApplicationHandler for App {
+    /// Look at the file, then sleep until it is time to look again rather than
+    /// until the next event: nothing tells us about a write, so we go and ask.
+    ///
+    /// The deadline is a fixed cadence rather than an interval from here, so
+    /// that a stream of events — a drag, a resize — cannot keep pushing the
+    /// next look out of reach.
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let now = Instant::now();
+        if now >= self.next_poll {
+            self.next_poll = now + watch::INTERVAL;
+            if self.poll_file()
+                && let Some(window) = &self.window
+            {
+                window.request_redraw();
+            }
+        }
+        event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_poll));
+    }
+
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return;

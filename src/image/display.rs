@@ -237,6 +237,13 @@ impl Display {
         self.high = if high > low { high } else { low + 1.0 };
     }
 
+    /// Re-derives the window from a fresh scan of the same image's pixels,
+    /// for when the file has changed underneath a view the user has already
+    /// set up. A hand-set window is left exactly where they put it.
+    pub fn refresh_auto(&mut self, stats: &Stats) {
+        self.apply_auto(stats);
+    }
+
     pub fn cycle_auto(&mut self, stats: &Stats) {
         self.auto = self.auto.next();
         self.apply_auto(stats);

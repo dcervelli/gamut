@@ -52,6 +52,26 @@ Every display control is also a start-up flag — `--colormap viridis`,
 `--tone-map neutral`, `--window minmax`, `--exposure -1.5`, `--histogram` —
 which is handy for scripting and for comparing two files side by side.
 
+## Live reload
+
+The file on screen is watched, and a write to it by anything else — a render
+finishing, a script rewriting its output, an editor saving — is picked up and
+shown within about half a second. Nothing has to be pressed.
+
+A reload keeps you where you were: the same pan and zoom, the same exposure
+and tone map, with only an automatic window re-derived from the new pixels.
+The point is watching one spot as the numbers under it change. A file that
+comes back a different size is treated as a different picture and gets a fresh
+fit. `n` and `p` move the watch along with the view.
+
+It is a `stat` every 250 ms, not `inotify`. That costs nothing measurable, and
+it is the version that works over NFS and SSHFS and that survives the way most
+editors save — a temporary file renamed over the original, which leaves a
+watch on the original inode looking at a file nobody will ever write to again.
+A change is read only once the size and timestamp have held still for a whole
+interval, so a file caught halfway through being written is waited out rather
+than decoded and reported as corrupt.
+
 ## Colour management
 
 The one invariant everything else follows from:
@@ -190,6 +210,7 @@ status bar and the histogram are the two clients that exist today.
 | `src/main.rs` | Argument parsing, event-loop setup |
 | `src/app.rs` | Window lifecycle, key handling, building each frame's UI |
 | `src/view.rs` | Zoom / pan / fit geometry — pure maths |
+| `src/watch.rs` | Noticing that the file on screen has been rewritten |
 | `src/image/` | The data model: `Samples`, `ColorSpace`, stats, display state |
 | `src/image/decode/` | The decoder trait and its registry |
 | `src/render/` | Upload planning, the three layers, output selection |
@@ -317,10 +338,10 @@ Display P3. `--primaries p3` is the way out until a profile parser exists.
 cargo test
 ```
 
-76 tests over the transfer functions and primaries matrices, texture format
+83 tests over the transfer functions and primaries matrices, texture format
 selection (including the device-capability fallbacks), the statistics and
-window logic, the decoder registry, the CICP translation, and the view
-geometry.
+window logic, the decoder registry, the CICP translation, the view geometry,
+and the reload watch's idea of when a write has finished.
 
 Six of them run the real image pipeline on a real adapter — a headless device,
 no window — and check the resampling filters against arithmetic done on the
