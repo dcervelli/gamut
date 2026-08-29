@@ -123,6 +123,15 @@ impl Viewport {
     fn centre(&self) -> [f32; 2] {
         [self.x + self.width / 2.0, self.y + self.height / 2.0]
     }
+
+    /// Whether `point`, in physical window pixels, is inside. Half-open, so
+    /// the panels and the image never both claim the same pixel.
+    pub fn contains(&self, point: [f32; 2]) -> bool {
+        point[0] >= self.x
+            && point[0] < self.x + self.width
+            && point[1] >= self.y
+            && point[1] < self.y + self.height
+    }
 }
 
 /// Where the image sits in the window, in physical pixels, origin top-left.
@@ -134,6 +143,18 @@ pub struct Placement {
     pub height: f32,
     pub zoom: f32,
     pub upscale: Upscale,
+}
+
+impl Placement {
+    /// Where `point`, in physical window pixels, falls on the image, in image
+    /// pixels. Fractional, and not clamped: the caller knows whether it wants
+    /// the texel the point lands in and whether being off the image matters.
+    pub fn image_point(&self, point: [f32; 2]) -> [f32; 2] {
+        [
+            (point[0] - self.x) / self.zoom,
+            (point[1] - self.y) / self.zoom,
+        ]
+    }
 }
 
 pub struct View {
@@ -356,6 +377,61 @@ mod tests {
         assert!(close(placement.width, 1200.0));
         assert!(close(placement.height, 800.0));
         assert!(close(placement.y, 200.0));
+    }
+
+    /// The readout in the bar is this mapping run backwards from the pointer,
+    /// so it has to invert `placement` exactly — including the half-pixel the
+    /// centring leaves when the image does not fill the window.
+    #[test]
+    fn a_window_point_maps_back_to_the_image_pixel_under_it() {
+        let view = View::new();
+        let placement = view.placement(IMAGE, WINDOW);
+
+        // The corners of the drawn image are the corners of the image.
+        let top_left = placement.image_point([placement.x, placement.y]);
+        assert!(close(top_left[0], 0.0) && close(top_left[1], 0.0));
+        let bottom_right = placement.image_point([
+            placement.x + placement.width,
+            placement.y + placement.height,
+        ]);
+        assert!(close(bottom_right[0], IMAGE[0]) && close(bottom_right[1], IMAGE[1]));
+
+        // And the middle of the window is the middle of a centred image.
+        let centre = placement.image_point([600.0, 600.0]);
+        assert!(close(centre[0], IMAGE[0] / 2.0) && close(centre[1], IMAGE[1] / 2.0));
+    }
+
+    /// Zoomed in and panned, the point under the pointer is wherever the pan
+    /// has put it, not where the fitted view had it.
+    #[test]
+    fn the_mapping_follows_zoom_and_pan() {
+        // A viewport smaller than the image, so there is somewhere to pan to.
+        let viewport = Viewport::whole([400.0, 300.0]);
+        let mut view = View::new();
+        view.actual_size(IMAGE, viewport);
+        view.pan_by(100.0, 50.0, IMAGE, viewport);
+
+        let placement = view.placement(IMAGE, viewport);
+        let point = placement.image_point([200.0, 150.0]);
+        // 1:1, so the viewport centre sits over the image centre plus the pan.
+        assert!(close(point[0], IMAGE[0] / 2.0 + 100.0));
+        assert!(close(point[1], IMAGE[1] / 2.0 + 50.0));
+
+        // Off the top-left of the image reads negative rather than clamping,
+        // which is what lets the bar tell "on the image" from "beside it".
+        let outside = placement.image_point([placement.x - 10.0, placement.y - 1.0]);
+        assert!(outside[0] < 0.0 && outside[1] < 0.0);
+    }
+
+    #[test]
+    fn a_viewport_holds_its_own_pixels_only() {
+        let viewport = Viewport::new(50.0, 30.0, 100.0, 60.0);
+        assert!(viewport.contains([50.0, 30.0]));
+        assert!(viewport.contains([149.0, 89.0]));
+        // Half-open: the far edge belongs to whatever is next to it.
+        assert!(!viewport.contains([150.0, 60.0]));
+        assert!(!viewport.contains([100.0, 90.0]));
+        assert!(!viewport.contains([49.0, 60.0]));
     }
 
     #[test]

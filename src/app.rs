@@ -300,6 +300,27 @@ impl App {
             .map(|cursor| [cursor[0] / scale, cursor[1] / scale])
     }
 
+    /// The image pixel under the pointer, or `None` when there is not one:
+    /// the pointer is outside the window, over a panel, or past the edge of
+    /// an image that does not fill the viewport it sits in.
+    ///
+    /// Tested against the viewport as well as the image because a zoomed-in
+    /// image runs on underneath the panels, where it is not drawn and so has
+    /// no pixel to report.
+    fn pointer_pixel(&self) -> Option<[u32; 2]> {
+        let cursor = self.cursor?;
+        let viewport = self.viewport();
+        if !viewport.contains(cursor) {
+            return None;
+        }
+        let image = self.current.as_ref()?.size();
+        let point = self.view.placement(image, viewport).image_point(cursor);
+        if point[0] < 0.0 || point[1] < 0.0 || point[0] >= image[0] || point[1] >= image[1] {
+            return None;
+        }
+        Some([point[0] as u32, point[1] as u32])
+    }
+
     /// Re-reads the file on screen if something else has written to it, which
     /// is what makes this usable next to whatever produced the image. Returns
     /// `true` if the screen needs drawing again.
@@ -565,13 +586,17 @@ impl App {
         false
     }
 
-    /// Follows the pointer. Returns `true` if a drag moved the view.
+    /// Follows the pointer. Returns `true` if the frame is now out of date —
+    /// because a drag moved the view, or because the bar is reporting a pixel
+    /// the pointer has since left.
     fn handle_motion(&mut self, position: [f32; 2]) -> bool {
+        let was_over = self.pointer_pixel();
         self.cursor = Some(position);
+        let moved_pixel = self.show_ui && self.pointer_pixel() != was_over;
         if !self.dragging {
             // Nothing else to do out here, so this is where the button's
             // highlight gets to follow the pointer.
-            return self.update_hover();
+            return self.update_hover() || moved_pixel;
         }
         let Some(from) = self.drag_from.replace(position) else {
             // First motion of this drag: nothing to measure from yet.
@@ -642,6 +667,8 @@ impl App {
         let viewport = self.viewport();
         let placement = self.view.placement(self.image_size(), viewport);
 
+        let pointer = self.pointer_pixel();
+
         // Split borrow: the frame builder needs the renderer's font metrics
         // while reading the rest of the application state.
         let renderer = self.renderer.as_mut().expect("checked above");
@@ -655,6 +682,7 @@ impl App {
                 show_ui: self.show_ui,
                 show_histogram: self.show_histogram,
                 hover_histogram: self.hover_histogram,
+                pointer,
             },
             self.current.as_ref(),
             &self.view,
@@ -781,8 +809,9 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::CursorLeft { .. } => {
+                let was_over = self.pointer_pixel().is_some();
                 self.cursor = None;
-                if self.update_hover()
+                if (self.update_hover() || was_over)
                     && let Some(window) = &self.window
                 {
                     window.request_redraw();
@@ -844,6 +873,8 @@ struct Layout {
     show_ui: bool,
     show_histogram: bool,
     hover_histogram: bool,
+    /// The image pixel under the pointer, when it is over one.
+    pointer: Option<[u32; 2]>,
 }
 
 /// Builds one frame of interface.
@@ -912,15 +943,19 @@ fn build_ui(
     // Least to most disposable. Rather than clip whatever happens to overflow
     // — which is how "18333 x 15667" becomes "18333" — drop whole facts from
     // the end until what is left fits.
-    let left = fit_segments(
-        renderer,
-        &[
-            format!("{} \u{00d7} {}", current.image.width, current.image.height),
-            describe_pixels(current),
-            current.image.color.label(),
-        ],
-        (right_x - PADDING * 2.0).max(1.0),
-    );
+    //
+    // The pointer goes last: it is the one fact that comes and goes on its
+    // own, so at the end it appears and disappears without shifting anything
+    // that was already there.
+    let mut segments = vec![
+        format!("{} \u{00d7} {}", current.image.width, current.image.height),
+        describe_pixels(current),
+        current.image.color.label(),
+    ];
+    if let Some([x, y]) = layout.pointer {
+        segments.push(format!("({x}, {y})"));
+    }
+    let left = fit_segments(renderer, &segments, (right_x - PADDING * 2.0).max(1.0));
 
     frame.text_clipped(
         [PADDING, baseline],
