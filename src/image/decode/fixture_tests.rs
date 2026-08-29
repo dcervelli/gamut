@@ -677,6 +677,101 @@ const FIXTURES: &[Fixture] = &[
         nodata: None,
         tolerance: EXACT,
     },
+    // ------------------------------------------------------------ WebP
+    Fixture {
+        file: "webp-lossless-rgb8.webp",
+        covers: "WebP lossless (VP8L), no alpha",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // The alpha here is stated by a bit in the VP8L header rather than by an
+    // extended container, which is the one place WebP hides it.
+    Fixture {
+        file: "webp-lossless-rgba8.webp",
+        covers: "WebP lossless with alpha, no `VP8X`",
+        channels: Channels::Rgba,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Straight,
+        tone: Tone::Color,
+        coverage: Coverage::Ramp,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "webp-lossy-rgb8.webp",
+        covers: "WebP lossy (VP8), through YCbCr 4:2:0",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: LOSSY,
+    },
+    // Lossy plus alpha is two bitstreams: an `ALPH` chunk for the coverage
+    // and a `VP8` chunk for the colour, which only the extended container can
+    // hold together.
+    Fixture {
+        file: "webp-lossy-rgba8.webp",
+        covers: "WebP lossy with an `ALPH` chunk beside it",
+        channels: Channels::Rgba,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Straight,
+        tone: Tone::Color,
+        coverage: Coverage::Ramp,
+        nodata: None,
+        tolerance: LOSSY,
+    },
+    // The only thing a WebP has to say about its own colour.
+    Fixture {
+        file: "webp-icc-p3.webp",
+        covers: "WebP `ICCP` chunk naming Display P3",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: P3,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // Stored upside down with an `EXIF` chunk saying so, the WebP counterpart
+    // of `heic-rotated.heic`.
+    Fixture {
+        file: "webp-exif-rotated.webp",
+        covers: "WebP EXIF orientation applied while decoding",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // Two frames, the pattern first and a rotated one second. Passing this
+    // table means the first frame was the one composited onto the canvas.
+    Fixture {
+        file: "webp-animated.webp",
+        covers: "animated WebP, first frame onto the `ANIM` canvas",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
     // A PNG under a TIFF name, decoded by sniffing rather than extension.
     Fixture {
         file: "mislabelled.tif",
@@ -1005,6 +1100,62 @@ fn heif_container_transformations_are_applied_on_decode() {
             pixel(&upright, x, y),
             "at {x},{y}: the `irot` property was not applied"
         );
+    }
+}
+
+/// WebP's rotation lives in an `EXIF` chunk rather than in the container
+/// proper, so nothing below this decoder would apply it. `webp-exif-rotated`
+/// holds the ordinary pattern upside down with a tag saying so, and should
+/// decode to exactly what the untagged fixture does.
+#[test]
+fn webp_exif_orientation_is_applied_on_decode() {
+    let upright = load(
+        &directory().join("webp-lossless-rgb8.webp"),
+        Overrides::default(),
+    )
+    .unwrap();
+    let rotated = load(
+        &directory().join("webp-exif-rotated.webp"),
+        Overrides::default(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        (rotated.width, rotated.height),
+        (upright.width, upright.height)
+    );
+    for (x, y) in PROBES {
+        assert_eq!(
+            pixel(&rotated, x, y),
+            pixel(&upright, x, y),
+            "at {x},{y}: the EXIF orientation was not applied"
+        );
+    }
+}
+
+/// An animated WebP's frames are patches composited onto a canvas, and the
+/// one worth showing is the first. `webp-animated` puts the ordinary pattern
+/// there and a quarter-turned one after it, so running the animation to its
+/// end would be visible rather than silent.
+#[test]
+fn an_animated_webp_shows_its_first_frame() {
+    let animated = load(
+        &directory().join("webp-animated.webp"),
+        Overrides::default(),
+    )
+    .unwrap();
+    let still = load(
+        &directory().join("webp-lossless-rgb8.webp"),
+        Overrides::default(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        (animated.width, animated.height),
+        (still.width, still.height)
+    );
+    for (x, y) in PROBES {
+        assert_eq!(pixel(&animated, x, y), pixel(&still, x, y), "at {x},{y}");
     }
 }
 
