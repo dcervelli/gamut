@@ -5,10 +5,10 @@ use std::sync::Arc;
 
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
-use winit::event::{ElementState, KeyEvent, MouseScrollDelta, WindowEvent};
+use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::{Key, ModifiersState, NamedKey};
-use winit::window::{Window, WindowId};
+use winit::window::{Cursor, CursorIcon, Window, WindowId};
 
 use crate::image::display::{AutoWindow, Colormap, Display, Startup};
 use crate::image::{DecodedImage, Stats, decode};
@@ -73,6 +73,13 @@ pub struct App {
     modifiers: ModifiersState,
     /// Physical window pixels, and the point a wheel zoom works about.
     cursor: Option<[f32; 2]>,
+    /// Whether the left button is down, which is what a drag is.
+    dragging: bool,
+    /// Where the pointer was when the drag last moved the view. Held apart
+    /// from `cursor` because a press can arrive before any motion has told us
+    /// where the pointer is, and because leaving the window clears `cursor`
+    /// without ending a drag the pointer grab is still delivering.
+    drag_from: Option<[f32; 2]>,
     show_overlay: bool,
     show_histogram: bool,
     /// Set if the last render failed, so we report it once rather than every frame.
@@ -113,6 +120,8 @@ impl App {
             renderer: None,
             modifiers: ModifiersState::empty(),
             cursor: None,
+            dragging: false,
+            drag_from: None,
             show_overlay: true,
             show_histogram: histogram,
             reported_error: false,
@@ -306,6 +315,54 @@ impl App {
         true
     }
 
+    /// Starts or ends a drag of the image with the left button. The pointer
+    /// keeps its grab until the button comes back up, so a drag that leaves
+    /// the window goes on working.
+    ///
+    /// A press does not need to know where the pointer is: the first motion
+    /// after it establishes the point the drag measures from. Waiting for that
+    /// costs nothing, and a press can genuinely arrive with no position yet —
+    /// the pointer entering the window and clicking without moving.
+    fn handle_button(&mut self, state: ElementState, button: MouseButton) {
+        if button != MouseButton::Left {
+            return;
+        }
+        self.dragging = state == ElementState::Pressed;
+        self.drag_from = if self.dragging { self.cursor } else { None };
+
+        if let Some(window) = &self.window {
+            // The closed hand is a promise that dragging will move something,
+            // so a fitted image — which has nowhere to go — does not make it.
+            let icon = if self.dragging && self.view.can_pan(self.image_size(), self.window_size())
+            {
+                CursorIcon::Grabbing
+            } else {
+                CursorIcon::Default
+            };
+            window.set_cursor(Cursor::Icon(icon));
+        }
+    }
+
+    /// Follows the pointer. Returns `true` if a drag moved the view.
+    fn handle_motion(&mut self, position: [f32; 2]) -> bool {
+        self.cursor = Some(position);
+        if !self.dragging {
+            return false;
+        }
+        let Some(from) = self.drag_from.replace(position) else {
+            // First motion of this drag: nothing to measure from yet.
+            return false;
+        };
+        // The image follows the pointer, so the viewport moves the other way.
+        let (dx, dy) = (from[0] - position[0], from[1] - position[1]);
+        if dx == 0.0 && dy == 0.0 {
+            return false;
+        }
+        self.view
+            .pan_by(dx, dy, self.image_size(), self.window_size());
+        true
+    }
+
     /// Returns `true` if the wheel changed anything on screen.
     fn handle_wheel(&mut self, delta: MouseScrollDelta) -> bool {
         // Same reasoning as `handle_key`: Ctrl+wheel and friends belong to the
@@ -457,9 +514,19 @@ impl ApplicationHandler for App {
             }
             WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
             WindowEvent::CursorMoved { position, .. } => {
-                self.cursor = Some([position.x as f32, position.y as f32]);
+                if self.handle_motion([position.x as f32, position.y as f32])
+                    && let Some(window) = &self.window
+                {
+                    window.request_redraw();
+                }
             }
             WindowEvent::CursorLeft { .. } => self.cursor = None,
+            WindowEvent::MouseInput { state, button, .. } => self.handle_button(state, button),
+            // A drag the window did not see end — the button came up over
+            // another window, say — would otherwise resume on the next motion.
+            WindowEvent::Focused(false) => {
+                self.handle_button(ElementState::Released, MouseButton::Left);
+            }
             WindowEvent::MouseWheel { delta, .. } => {
                 if self.handle_wheel(delta)
                     && let Some(window) = &self.window

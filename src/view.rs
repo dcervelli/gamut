@@ -173,6 +173,15 @@ impl View {
         [pan[0].clamp(-lx, lx), pan[1].clamp(-ly, ly)]
     }
 
+    /// Whether the view has anywhere to pan to. False when the whole image is
+    /// on screen — at `Fit::Whole`, or for anything smaller than the window —
+    /// which is the one state where a drag can do nothing at all.
+    pub fn can_pan(&self, image: [f32; 2], window: [f32; 2]) -> bool {
+        let zoom = self.zoom(image, window);
+        // Half a pixel of overflow is not worth offering to drag.
+        image[0] * zoom > window[0] + 0.5 || image[1] * zoom > window[1] + 0.5
+    }
+
     pub fn placement(&self, image: [f32; 2], window: [f32; 2]) -> Placement {
         let zoom = self.zoom(image, window);
         let pan = Self::clamp_pan(self.pan, image, window, zoom);
@@ -489,6 +498,26 @@ mod tests {
         let placement = view.placement([4000.0, 4000.0], window);
         assert!(placement.zoom < 1.0);
         assert!(close(placement.x, 0.0));
+    }
+
+    /// What a grab cursor is offered on: a fitted image has nowhere to go, and
+    /// fit-width leaves only the axis that overflows.
+    #[test]
+    fn there_is_nothing_to_pan_while_the_whole_image_is_visible() {
+        let mut view = View::new();
+        assert!(!view.can_pan(IMAGE, WINDOW));
+
+        view.actual_size(IMAGE, WINDOW);
+        assert!(!view.can_pan(IMAGE, WINDOW));
+        view.zoom_in(IMAGE, WINDOW);
+        view.zoom_in(IMAGE, WINDOW);
+        assert!(view.can_pan(IMAGE, WINDOW));
+
+        // 900x600 at fit-width in a 1200x600 window is 1200x800: taller than
+        // the window, so the vertical axis has somewhere to go.
+        view.reset();
+        view.cycle_fit();
+        assert!(view.can_pan(IMAGE, [1200.0, 600.0]));
     }
 
     #[test]

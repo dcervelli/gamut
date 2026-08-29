@@ -31,6 +31,7 @@ Both ship as standard on the distributions above.
 | Wheel | Zoom about the pointer |
 | `0` | Actual size (100%) |
 | Arrows | Pan |
+| Drag | Pan, with the image following the pointer |
 | `f` | Cycle fit → fit width → fit height |
 | `u` | Cycle the filter used above 100%: nearest → bicubic |
 | `n`, `p` | Next / previous file |
