@@ -12,6 +12,28 @@ pub const BINS: usize = 256;
 /// stride. Enough for stable percentiles, fast enough to run on every load.
 const MAX_SAMPLED_PIXELS: usize = 1 << 21;
 
+/// Red, green, blue and luminance counts for a colour image, all binned over
+/// one shared axis so the four can be drawn on top of each other.
+///
+/// This is a separate scan from [`Stats::histogram`], which stays on the
+/// luminance range because that is what the exposure controls read. Colour
+/// channels routinely run past it — a saturated red pixel is 1.0 in red but
+/// only 0.21 in luminance — so they need an axis wide enough to hold them.
+#[derive(Clone, Debug)]
+pub struct ChannelStats {
+    /// Smallest and largest value seen in any of the three colour channels.
+    /// Luminance is a weighted average of them and so always falls inside.
+    pub min: f32,
+    pub max: f32,
+    /// Counts over `min..max`: red, green, blue, then luminance.
+    pub bins: [[u32; BINS]; 4],
+}
+
+impl ChannelStats {
+    /// Index of the luminance plane in [`ChannelStats::bins`].
+    pub const LUMA: usize = 3;
+}
+
 #[derive(Clone, Debug)]
 pub struct Stats {
     /// Smallest and largest linear value seen, in working-space units.
@@ -20,6 +42,8 @@ pub struct Stats {
     /// Counts over `min..max`, for percentiles and for drawing.
     pub histogram: [u32; BINS],
     pub counted: u32,
+    /// Per-channel counts, for images that carry colour.
+    pub channels: Option<ChannelStats>,
 }
 
 impl Stats {
@@ -28,6 +52,8 @@ impl Stats {
     ///
     /// Grey images are measured on their single channel; colour images on
     /// relative luminance, which is what an exposure control should track.
+    /// Colour images additionally get per-channel counts, which the UI draws
+    /// as a four-channel histogram.
     pub fn scan(image: &DecodedImage) -> Self {
         let channels = image.samples.channels();
         let stride = Self::stride(image);
@@ -36,11 +62,22 @@ impl Stats {
         let is_data =
             move |value: f32| value.is_finite() && nodata.is_none_or(|sentinel| value != sentinel);
 
+        let colour = !channels.is_gray();
         let (mut min, mut max) = (f32::INFINITY, f32::NEG_INFINITY);
-        values.clone().for_each(|value| {
+        let (mut channel_min, mut channel_max) = (f32::INFINITY, f32::NEG_INFINITY);
+        values.clone().for_each(|pixel| {
+            let value = luminance(pixel, channels);
             if is_data(value) {
                 min = min.min(value);
                 max = max.max(value);
+            }
+            if colour {
+                for &component in &pixel[..COLOUR] {
+                    if is_data(component) {
+                        channel_min = channel_min.min(component);
+                        channel_max = channel_max.max(component);
+                    }
+                }
             }
         });
 
@@ -52,19 +89,51 @@ impl Stats {
                 max: 1.0,
                 histogram: [0; BINS],
                 counted: 0,
+                channels: None,
             };
         }
 
         let mut histogram = [0u32; BINS];
         let mut counted = 0u32;
         let span = max - min;
-        if span > 0.0 {
-            let scale = (BINS - 1) as f32 / span;
-            values.for_each(|value| {
-                if is_data(value) {
+        let scale = (span > 0.0).then(|| (BINS - 1) as f32 / span);
+
+        let channel_span = channel_max - channel_min;
+        let mut channel_stats = if colour && channel_span > 0.0 {
+            Some(ChannelStats {
+                min: channel_min,
+                max: channel_max,
+                bins: [[0; BINS]; 4],
+            })
+        } else {
+            None
+        };
+        let channel_scale = (BINS - 1) as f32 / channel_span;
+
+        if scale.is_some() || channel_stats.is_some() {
+            values.for_each(|pixel| {
+                let value = luminance(pixel, channels);
+                let counts = is_data(value);
+                if let Some(scale) = scale
+                    && counts
+                {
                     let bin = ((value - min) * scale) as usize;
                     histogram[bin.min(BINS - 1)] += 1;
                     counted += 1;
+                }
+                if let Some(stats) = channel_stats.as_mut() {
+                    let mut bin = |plane: usize, value: f32| {
+                        let index = ((value - channel_min) * channel_scale) as usize;
+                        stats.bins[plane][index.min(BINS - 1)] += 1;
+                    };
+                    for (plane, &component) in pixel[..COLOUR].iter().enumerate() {
+                        if is_data(component) {
+                            bin(plane, component);
+                        }
+                    }
+                    if counts {
+                        bin(ChannelStats::LUMA, value);
+                    }
                 }
             });
         }
@@ -74,6 +143,7 @@ impl Stats {
             max,
             histogram,
             counted,
+            channels: channel_stats,
         }
     }
 
@@ -101,7 +171,20 @@ impl Stats {
     }
 }
 
-/// Iterator over one representative linear value per sampled pixel.
+/// Number of colour components a pixel carries, alpha aside.
+const COLOUR: usize = 3;
+
+/// Grey uses its one channel; colour collapses to relative luminance,
+/// weighted for the BT.709 primaries the working space uses.
+fn luminance(pixel: &[f32], channels: Channels) -> f32 {
+    if channels.is_gray() {
+        pixel[0]
+    } else {
+        0.2126 * pixel[0] + 0.7152 * pixel[1] + 0.0722 * pixel[2]
+    }
+}
+
+/// Iterator over the linear components of each sampled pixel.
 #[derive(Clone)]
 struct Values<'a> {
     samples: &'a Samples,
@@ -120,21 +203,11 @@ impl<'a> Values<'a> {
         }
     }
 
-    fn for_each(self, mut visit: impl FnMut(f32)) {
+    /// Calls `visit` with one pixel's worth of linear components, alpha
+    /// included where the image has one.
+    fn for_each(self, mut visit: impl FnMut(&[f32])) {
         let count = self.channels.count();
-        let step = count * self.stride;
         let transfer = self.color.transfer;
-
-        // Grey uses its one channel; colour collapses to relative luminance,
-        // weighted for the BT.709 primaries the working space uses.
-        let mut combine = |pixel: &[f32]| {
-            let value = if self.channels.is_gray() {
-                pixel[0]
-            } else {
-                0.2126 * pixel[0] + 0.7152 * pixel[1] + 0.0722 * pixel[2]
-            };
-            visit(value);
-        };
 
         match self.samples {
             Samples::U8 { data, .. } => {
@@ -146,9 +219,8 @@ impl<'a> Values<'a> {
                     for (slot, raw) in pixel.iter_mut().zip(chunk) {
                         *slot = lut[*raw as usize];
                     }
-                    combine(&pixel);
+                    visit(&pixel[..count]);
                 }
-                let _ = step;
             }
             Samples::U16 { data, .. } => {
                 let scale = 1.0 / u16::MAX as f32;
@@ -157,7 +229,7 @@ impl<'a> Values<'a> {
                     for (slot, raw) in pixel.iter_mut().zip(chunk) {
                         *slot = transfer.to_linear(*raw as f32 * scale);
                     }
-                    combine(&pixel);
+                    visit(&pixel[..count]);
                 }
             }
             Samples::F32 { data, .. } => {
@@ -170,7 +242,7 @@ impl<'a> Values<'a> {
                             transfer.to_linear(*raw)
                         };
                     }
-                    combine(&pixel);
+                    visit(&pixel[..count]);
                 }
             }
         }
@@ -256,6 +328,91 @@ mod tests {
         };
         // BT.709 luminance weights green at 0.7152.
         assert!((Stats::scan(&green).max - 0.7152).abs() < 1e-4);
+    }
+
+    fn rgb_f32(data: Vec<f32>) -> DecodedImage {
+        DecodedImage {
+            width: (data.len() / 3) as u32,
+            height: 1,
+            samples: Samples::F32 {
+                channels: Channels::Rgb,
+                data,
+            },
+            color: ColorSpace::LINEAR_BT709,
+            alpha: AlphaMode::Opaque,
+            value_range: None,
+            nodata: None,
+        }
+    }
+
+    /// The point of the separate axis: saturated colour runs well past the
+    /// luminance range, and binning it there would pile it into the last bin.
+    #[test]
+    fn colour_channels_are_binned_over_their_own_range() {
+        let stats = Stats::scan(&rgb_f32(vec![1.0, 0.0, 0.0]));
+        let channels = stats.channels.expect("an rgb image has channel counts");
+
+        assert!((stats.max - 0.2126).abs() < 1e-4, "luminance is unchanged");
+        assert!(channels.min.abs() < 1e-6);
+        assert!((channels.max - 1.0).abs() < 1e-6);
+        // Red at the top of the axis, green and blue at the bottom.
+        assert_eq!(channels.bins[0][BINS - 1], 1);
+        assert_eq!(channels.bins[1][0], 1);
+        assert_eq!(channels.bins[2][0], 1);
+        // Luminance sits between them, on the same axis as the rest.
+        assert_eq!(channels.bins[ChannelStats::LUMA].iter().sum::<u32>(), 1);
+        assert_eq!(
+            channels.bins[ChannelStats::LUMA][(0.2126 * 255.0) as usize],
+            1
+        );
+    }
+
+    #[test]
+    fn every_plane_counts_every_pixel() {
+        let stats = Stats::scan(&rgb_f32(vec![0.25, 0.5, 0.75, 0.0, 0.5, 1.0]));
+        let channels = stats.channels.expect("an rgb image has channel counts");
+        for plane in &channels.bins {
+            assert_eq!(plane.iter().sum::<u32>(), 2);
+        }
+        assert_eq!(stats.counted, 2);
+    }
+
+    #[test]
+    fn alpha_is_left_out_of_the_channel_histogram() {
+        let opaque = Stats::scan(&rgb_f32(vec![0.25, 0.5, 0.75]));
+        let image = DecodedImage {
+            samples: Samples::F32 {
+                channels: Channels::Rgba,
+                data: vec![0.25, 0.5, 0.75, 1.0],
+            },
+            width: 1,
+            ..rgb_f32(vec![0.0, 0.0, 0.0])
+        };
+        let with_alpha = Stats::scan(&image).channels.expect("rgba is colour");
+        let opaque = opaque.channels.expect("rgb is colour");
+
+        assert_eq!(with_alpha.max, opaque.max, "alpha would have widened this");
+        assert_eq!(with_alpha.bins, opaque.bins);
+    }
+
+    #[test]
+    fn grey_images_have_no_channel_histogram() {
+        assert!(
+            Stats::scan(&linear_gray(vec![0, 1000, 4095]))
+                .channels
+                .is_none()
+        );
+    }
+
+    /// A flat colour image has nothing to plot per channel, and binning it
+    /// would divide by a zero-width span.
+    #[test]
+    fn a_flat_colour_image_gets_no_channel_histogram() {
+        assert!(
+            Stats::scan(&rgb_f32(vec![0.5, 0.5, 0.5]))
+                .channels
+                .is_none()
+        );
     }
 
     #[test]

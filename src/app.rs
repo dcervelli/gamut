@@ -12,6 +12,7 @@ use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{Cursor, CursorIcon, Window, WindowId};
 
 use crate::image::display::{AutoWindow, Colormap, Display, Startup};
+use crate::image::stats::{BINS, ChannelStats};
 use crate::image::{DecodedImage, Stats, decode};
 use crate::render::{Color, HdrPreference, Rect, Renderer, UiFrame};
 use crate::view::{Upscale, View, Viewport};
@@ -35,7 +36,12 @@ const SIDE_WIDTH: f32 = 50.0;
 const BUTTON_SIZE: f32 = 34.0;
 const TEXT_SIZE: f32 = 13.0;
 const PADDING: f32 = 12.0;
-const HISTOGRAM_SIZE: [f32; 2] = [320.0, 130.0];
+/// The gap between the histogram panel's edge and its plot.
+const HISTOGRAM_INSET: f32 = 10.0;
+/// Wide enough that a bin is exactly one logical pixel, which is what keeps
+/// the bars evenly spaced instead of some of them landing astride a pixel
+/// boundary and coming out fatter than their neighbours.
+const HISTOGRAM_SIZE: [f32; 2] = [BINS as f32 + 2.0 * HISTOGRAM_INSET, 130.0];
 
 /// The panels are opaque, not a tint over the image: the image is fitted
 /// inside them rather than passing behind them, so there is nothing back
@@ -47,6 +53,17 @@ const BUTTON_HOVER: Color = Color::rgba(255, 255, 255, 45);
 const TEXT_PRIMARY: Color = Color::rgb(238, 238, 238);
 const TEXT_DIM: Color = Color::rgb(150, 152, 160);
 const ACCENT: Color = Color::rgb(120, 180, 255);
+// Histogram ink. The colour planes are translucent so that overlapping bars
+// read as a blend rather than as whichever happened to be drawn last, and the
+// luminance plane sits under them in the neutral the rest of the panel uses.
+const HISTOGRAM_LUMA: Color = Color::rgba(150, 152, 160, 200);
+/// Red, green and blue, in the order the channels are stored.
+const COLOUR_PLANES: usize = 3;
+const HISTOGRAM_PLANES: [Color; COLOUR_PLANES] = [
+    Color::rgba(255, 96, 88, 170),
+    Color::rgba(88, 220, 120, 170),
+    Color::rgba(96, 150, 255, 170),
+];
 
 /// The window chrome: four panels, and the widgets sitting in them.
 ///
@@ -1059,16 +1076,25 @@ fn format_window(current: &Current) -> String {
 
 /// Draws the histogram in the bottom-right of `content`, the area the panels
 /// leave free.
+///
+/// Colour images get four planes — red, green, blue and luminance — over the
+/// range their colour channels span; grey images keep the single luminance
+/// plane over theirs.
 fn draw_histogram(frame: &mut UiFrame, current: &Current, content: Rect) {
+    // Rounded, so that the whole-pixel bin spacing starts on a pixel edge.
     let panel = Rect::new(
-        (content.right() - HISTOGRAM_SIZE[0] - PADDING).max(content.x + PADDING),
-        (content.bottom() - HISTOGRAM_SIZE[1] - PADDING).max(content.y + PADDING),
+        (content.right() - HISTOGRAM_SIZE[0] - PADDING)
+            .max(content.x + PADDING)
+            .round(),
+        (content.bottom() - HISTOGRAM_SIZE[1] - PADDING)
+            .max(content.y + PADDING)
+            .round(),
         HISTOGRAM_SIZE[0],
         HISTOGRAM_SIZE[1],
     );
     frame.rounded_rect(panel, 6.0, PANEL_BACKGROUND);
 
-    let plot = panel.inset(10.0, 10.0);
+    let plot = panel.inset(HISTOGRAM_INSET, HISTOGRAM_INSET);
     let label_height = TEXT_SIZE * 1.4;
     let bars = Rect::new(
         plot.x,
@@ -1077,47 +1103,79 @@ fn draw_histogram(frame: &mut UiFrame, current: &Current, content: Rect) {
         plot.height - label_height,
     );
 
+    // Luminance always goes down first, underneath the colour planes: it
+    // runs as tall as the tallest of them about as often as not, and painting
+    // it on top swamps the colour the panel exists to show.
+    let mut colour: &[[u32; BINS]] = &[];
+    let (luma, axis_min, axis_max) = match &current.stats.channels {
+        Some(channels) => {
+            colour = &channels.bins[..COLOUR_PLANES];
+            (
+                &channels.bins[ChannelStats::LUMA],
+                channels.min,
+                channels.max,
+            )
+        }
+        None => (
+            &current.stats.histogram,
+            current.stats.min,
+            current.stats.max,
+        ),
+    };
+
     frame.text(
         [plot.x, plot.y],
         TEXT_SIZE * 0.85,
         TEXT_DIM,
-        format!(
-            "{:.4}  \u{2013}  {:.4}",
-            current.stats.min, current.stats.max
-        ),
+        format!("{axis_min:.4}  \u{2013}  {axis_max:.4}"),
     );
 
-    let peak = current
-        .stats
-        .histogram
+    // One peak across every plane, so their heights stay comparable.
+    let peak = colour
         .iter()
+        .flatten()
+        .chain(luma)
         .copied()
         .max()
         .unwrap_or(1)
         .max(1) as f32;
-    let bin_width = bars.width / crate::image::stats::BINS as f32;
-    for (index, count) in current.stats.histogram.iter().enumerate() {
-        if *count == 0 {
-            continue;
-        }
-        // Log scale: a linear one is all noise once a single bin dominates.
-        let height = ((*count as f32).ln_1p() / peak.ln_1p()) * bars.height;
-        frame.rect(
+    let bin_width = bars.width / BINS as f32;
+    // Log scale: a linear one is all noise once a single bin dominates.
+    let height_of = |count: u32| ((count as f32).ln_1p() / peak.ln_1p()) * bars.height;
+    let mut column: Vec<(f32, Color)> = Vec::with_capacity(COLOUR_PLANES);
+    for index in 0..BINS {
+        let bar = |height: f32| {
             Rect::new(
                 bars.x + index as f32 * bin_width,
                 bars.bottom() - height,
                 bin_width.max(1.0),
                 height,
-            ),
-            TEXT_DIM.with_alpha(200),
+            )
+        };
+        if luma[index] > 0 {
+            frame.rect(bar(height_of(luma[index])), HISTOGRAM_LUMA);
+        }
+        column.clear();
+        column.extend(
+            colour
+                .iter()
+                .zip(HISTOGRAM_PLANES)
+                .filter(|(counts, _)| counts[index] > 0)
+                .map(|(counts, color)| (height_of(counts[index]), color)),
         );
+        // Tallest first: bars are filled to the baseline, so a colour drawn
+        // over a taller one would otherwise be lost behind it.
+        column.sort_by(|a, b| b.0.total_cmp(&a.0));
+        for (height, color) in &column {
+            frame.rect(bar(*height), *color);
+        }
     }
 
-    // Where the display window sits within the observed range.
-    let span = current.stats.max - current.stats.min;
+    // Where the display window sits within the plotted range.
+    let span = axis_max - axis_min;
     if span > 0.0 {
         for value in [current.display.low, current.display.high] {
-            let position = ((value - current.stats.min) / span).clamp(0.0, 1.0);
+            let position = ((value - axis_min) / span).clamp(0.0, 1.0);
             frame.rect(
                 Rect::new(
                     bars.x + position * bars.width - 0.5,
