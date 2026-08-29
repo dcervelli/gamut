@@ -269,6 +269,7 @@ anything having to notice that it should.
 | PNG, JPEG, Radiance HDR, OpenEXR | [`image`](https://crates.io/crates/image) |
 | TIFF | [`tiff`](https://crates.io/crates/tiff) directly |
 | HEIF — HEIC, AVIF | [`libheif-rs`](https://crates.io/crates/libheif-rs), onto the system `libheif` |
+| WebP — lossy, lossless, animated | [`image-webp`](https://crates.io/crates/image-webp) directly |
 | Ultra HDR containers, ICC profiles | [`ultrahdr-rs`](https://crates.io/crates/ultrahdr-rs), [`moxcms`](https://crates.io/crates/moxcms) |
 | PNG `cICP` and `iCCP` chunks | [`png`](https://crates.io/crates/png), which `image` already carries |
 
@@ -280,7 +281,7 @@ finds it needs the file as one slice.
 
 ### Saying what the numbers mean
 
-Three formats state their colour space rather than leaving it to convention,
+Four formats state their colour space rather than leaving it to convention,
 and they do it in two vocabularies.
 
 **CICP code points** — the small integers of ITU-T H.273 — are the precise
@@ -291,7 +292,8 @@ reading two bytes. A `cICP` chunk is the whole of how a PNG says it is BT.2100
 PQ or HLG, and `image` surfaces nothing of it, which is why `png` is a direct
 dependency for the header pass.
 
-**ICC profiles** are the other form, and the one a phone JPEG uses. Only what
+**ICC profiles** are the other form, and the one a phone JPEG uses — and the
+only form WebP has. Only what
 this program's colour model can act on is taken from a profile: the primaries,
 matched against the four it can name by comparing colorants rather than by
 reading description text, and a transfer function only where the profile
@@ -382,6 +384,41 @@ GPU rather than being tripled into RGB.
 is a property of the format, not of this program: JPEG's EXIF orientation is a
 separate tag in a separate decoder, and is still ignored.
 
+### WebP
+
+Both bitstreams, and the container that can hold either. VP8 is lossy, coded
+as YCbCr 4:2:0 and upsampled on the way out; VP8L is lossless and exact. Alpha
+arrives two ways — a bit in the VP8L header, or an `ALPH` chunk beside a lossy
+frame — and is straight in both. Neither bitstream has anything above eight
+bits or outside three colour channels, so a WebP is always `U8` and always
+RGB or RGBA; there is no depth to preserve and no monochrome encoding to keep
+one channel wide.
+
+`image-webp` is a direct dependency rather than a feature of `image`, for the
+same reason `png` is: everything worth having beyond the pixels lives in the
+RIFF container, and `ImageReader` hands back only the pixels. Three chunks are
+read.
+
+`ICCP` is the only thing a WebP has to say about its own colour — the format
+carries no CICP code points — and it goes through the same profile reader
+JPEG, PNG and HEIF use. Without one the file means sRGB.
+
+`EXIF` carries the orientation, and it is applied. This is the one place a
+metadata tag is honoured rather than ignored, and it is a deliberate
+exception: the tag sits in a chunk this decoder is already opening for the
+profile, and reading it costs a rotation of a buffer that is already in hand.
+JPEG's EXIF orientation still is not applied — same tag, different decoder,
+and that one would have to grow a container pass to reach it.
+
+`ANIM` and `ANMF` make the file an animation, and the first frame is what is
+shown. That frame is not necessarily a picture: the format lets it be a patch
+at an offset, composited onto a canvas the `ANIM` chunk colours, so it is
+decoded through the animation path rather than read out directly and arrives
+whole either way. The frames after it are not shown. Nothing downstream of the
+decoder has a clock — an image is decoded once, uploaded once, and redrawn
+only when the view changes — so playing them would be a change to the event
+loop rather than to this decoder.
+
 ### Size ceiling
 
 Every backend ships conservative allocation limits — 256 MiB in `tiff`,
@@ -426,11 +463,16 @@ ready, and switching files blocks until the next one is. Mount Rainier at 3 m
 streamed to the GPU in tiles, so an image also has to fit in one texture.
 
 EXIF orientation is not applied, so a rotated phone JPEG shows unrotated. HEIF
-is the exception, and only because its rotation lives in the container rather
-than in a metadata tag.
+and WebP are the exceptions: HEIF's rotation lives in the container rather than
+in a metadata tag, and WebP's tag sits in a chunk its decoder already opens for
+the colour profile.
 
-Embedded ICC profiles are read for JPEG, PNG and HEIF, which is every format
-here that can carry one. TIFF can too, and does not.
+Animated WebP shows its first frame and stops there. Playing the rest needs a
+clock in the event loop, which nothing else here wants; the frames themselves
+are already reachable through the decoder that reads the first one.
+
+Embedded ICC profiles are read for JPEG, PNG, HEIF and WebP, which is every
+format here that can carry one. TIFF can too, and does not.
 
 Gain maps are read for JPEG only. HEIF can carry one as an auxiliary image,
 which is how Apple stores HDR photographs, and that is not implemented; such a
@@ -453,7 +495,7 @@ crate.
 cargo test
 ```
 
-122 tests over the transfer functions and primaries matrices, texture format
+127 tests over the transfer functions and primaries matrices, texture format
 selection (including the device-capability fallbacks), the statistics and
 window logic, the decoder registry, the CICP translation, ICC profile
 recognition, gain map reconstruction, the view geometry, and the reload
@@ -477,15 +519,17 @@ draw of the same texture — building the coarse chain the view itself had no
 use for. Where no adapter can be had they report success rather than failing
 for a reason that has nothing to do with the code.
 
-`test_images/` holds 50 real fixtures — see its README — covering every pixel
+`test_images/` holds 57 real fixtures — see its README — covering every pixel
 layout the decoder can produce and every per-format encoding with its own code
 path: PNG bit depths, palettes and interlacing; progressive and subsampled
 JPEG; TIFF compressions, byte orders, tiling, BigTIFF, the floating-point
 predictor, signed samples and no-data; Radiance RGBE; EXR associated alpha;
 HEIC monochrome, 10-bit, `irot` and its colour tags, and the same container
-with AV1 inside. Three of them exist for the colour tags in particular: a PNG
-carrying `cICP` for BT.2100 PQ, a PNG carrying `iCCP` for Display P3, and a
-HEIF tagged by ICC profile with no `nclx` box beside it. Each is checked for
+with AV1 inside; WebP in both bitstreams, with and without alpha, tagged,
+rotated and animated. Four of them exist for the colour tags in particular: a
+PNG carrying `cICP` for BT.2100 PQ, a PNG carrying `iCCP` for Display P3, a
+HEIF tagged by ICC profile with no `nclx` box beside it, and a WebP carrying
+`ICCP`. Each is checked for
 dimensions, channel layout, sample type, colour space, alpha mode and actual
 pixel values, and then pushed through the upload planner under both GPU
 capability sets. A test asserts the directory and the fixture table stay in
@@ -493,6 +537,8 @@ step, so a file cannot be added without a test.
 
 Regenerate them with `test_images/generate.sh`, which needs ImageMagick,
 `heif-enc`, GDAL and Python. Neither `cICP` nor `iCCP` is a chunk ImageMagick
-will write, so those two are spliced in afterwards with their CRCs computed.
+will write, so those two are spliced in afterwards with their CRCs computed,
+and its WebP writer emits neither an `EXIF` chunk nor an animation, so those
+two fixtures are assembled around the bitstreams it did write.
 `display-p3.icc` sits beside the fixtures as an input rather than an output;
 `examples/make-icc.rs` is what produced it.

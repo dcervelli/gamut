@@ -19,6 +19,7 @@ mod icc;
 mod image_rs;
 mod tiff_rs;
 mod ultra_hdr;
+mod webp;
 
 #[cfg(test)]
 mod fixture_tests;
@@ -87,7 +88,12 @@ pub trait Decoder: Sync {
 
 /// Order matters only when two decoders claim the same extension, in which
 /// case the first wins.
-static DECODERS: &[&dyn Decoder] = &[&tiff_rs::TiffRs, &heif::Heif, &image_rs::ImageRs];
+static DECODERS: &[&dyn Decoder] = &[
+    &tiff_rs::TiffRs,
+    &heif::Heif,
+    &webp::Webp,
+    &image_rs::ImageRs,
+];
 
 /// Overrides for files whose headers cannot say what they mean. A 16-bit TIFF
 /// is the usual case: the same container holds both a scanned photograph and a

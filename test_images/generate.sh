@@ -30,7 +30,7 @@ trap 'rm -rf "$work"' EXIT
 
 # Start clean, so a renamed fixture does not leave its predecessor behind.
 rm -f ./*.png ./*.jpg ./*.jpeg ./*.tif ./*.tiff ./*.hdr ./*.exr ./*.gif \
-      ./*.heic ./*.heif ./*.avif
+      ./*.heic ./*.heif ./*.avif ./*.webp
 
 quad '#FF0000' '#00FF00' '#0000FF' '#FFFFFF' "$work/color.png"
 quad '#000000' '#555555' '#AAAAAA' '#FFFFFF' "$work/gray.png"
@@ -177,6 +177,90 @@ heif-enc -L -A -o avif-rgb8.avif "$work/color.png" > /dev/null
 # this one fixture.
 magick png-icc-p3.png -quality 100 heic-icc-p3.heic
 
+# ---------------------------------------------------------------- WebP
+# Both bitstreams, with and without alpha. VP8L is exact, so it shares the
+# table of expected values with PNG; VP8 goes through YCbCr 4:2:0 and lands
+# within a code value or two, like JPEG.
+magick "$work/color.png"       -define webp:lossless=true webp-lossless-rgb8.webp
+magick "$work/color-alpha.png" -define webp:lossless=true webp-lossless-rgba8.webp
+magick "$work/color.png"       -quality 95 webp-lossy-rgb8.webp
+# Lossy plus alpha is the one layout that needs the extended container: an
+# `ALPH` chunk carrying the coverage beside a `VP8` chunk carrying the colour.
+magick "$work/color-alpha.png" -quality 95 webp-lossy-rgba8.webp
+# Display P3 by ICC profile, carried through from the tagged PNG the same way
+# `heic-icc-p3.heic` is. Lossless, so this one stays exact.
+magick png-icc-p3.png -define webp:lossless=true webp-icc-p3.webp
+
+# ImageMagick's WebP writer emits neither an `EXIF` chunk nor an animation, so
+# the two container fixtures that need them are assembled here from bitstreams
+# it did write — the same approach the PNG colour tags above take.
+webp_tag() {  # exif src dst orientation  |  anim dst frame...
+  python3 - "$@" <<'TAG'
+import struct, sys
+
+def chunk(fourcc, payload):
+    return fourcc + struct.pack("<I", len(payload)) + payload + (b"\0" if len(payload) & 1 else b"")
+
+def riff(payload):
+    return b"RIFF" + struct.pack("<I", len(payload) + 4) + b"WEBP" + payload
+
+def chunks(data):
+    assert data[:4] == b"RIFF" and data[8:12] == b"WEBP", "not a WebP"
+    out, offset = [], 12
+    while offset + 8 <= len(data):
+        fourcc = data[offset : offset + 4]
+        (size,) = struct.unpack_from("<I", data, offset + 4)
+        out.append((fourcc, data[offset + 8 : offset + 8 + size]))
+        offset += 8 + size + (size & 1)
+    return out
+
+def bitstream(path):
+    """The coded picture of a still WebP, as whole chunks."""
+    kept = [(fourcc, payload) for fourcc, payload in chunks(open(path, "rb").read())
+            if fourcc in (b"VP8 ", b"VP8L", b"ALPH")]
+    assert kept, path
+    return b"".join(chunk(fourcc, payload) for fourcc, payload in kept)
+
+def vp8x(flags, width, height):
+    # Feature flags, three reserved bytes, then the canvas size less one.
+    return chunk(b"VP8X", bytes([flags]) + b"\0\0\0" + three(width - 1) + three(height - 1))
+
+def three(value):
+    return value.to_bytes(3, "little")
+
+EXIF, ANIM = 0x08, 0x02
+WIDTH, HEIGHT = 32, 24
+
+mode = sys.argv[1]
+if mode == "exif":
+    src, dst, orientation = sys.argv[2], sys.argv[3], int(sys.argv[4])
+    # The chunk holds a bare TIFF header with one IFD entry: tag 0x0112,
+    # SHORT, the orientation. Nothing else in EXIF is read.
+    tiff = (b"II\x2a\x00" + struct.pack("<I", 8) + struct.pack("<H", 1)
+            + struct.pack("<HHIHH", 0x0112, 3, 1, orientation, 0) + struct.pack("<I", 0))
+    body = vp8x(EXIF, WIDTH, HEIGHT) + bitstream(src) + chunk(b"EXIF", tiff)
+else:
+    dst, frames = sys.argv[2], sys.argv[3:]
+    # Transparent background, looping forever.
+    body = vp8x(ANIM, WIDTH, HEIGHT) + chunk(b"ANIM", b"\0\0\0\0" + struct.pack("<H", 0))
+    for frame in frames:
+        # A full-canvas frame at the origin, 100 ms, no blending, no disposal.
+        header = (three(0) + three(0) + three(WIDTH - 1) + three(HEIGHT - 1)
+                  + three(100) + bytes([0b10]))
+        body += chunk(b"ANMF", header + bitstream(frame))
+open(dst, "wb").write(riff(body))
+TAG
+}
+
+# The ordinary pattern stored upside down, with an `EXIF` chunk saying so.
+# It decodes back to the ordinary pattern only if the tag is applied.
+magick "$work/color-upside-down.png" -define webp:lossless=true "$work/upside-down.webp"
+webp_tag exif "$work/upside-down.webp" webp-exif-rotated.webp 3
+# Two frames, the pattern first and the upside-down one second, so a decoder
+# that ran the animation to its end would fail the same table the rest pass.
+# Both are full-canvas, which is what the `ANMF` headers written above say.
+webp_tag anim webp-animated.webp webp-lossless-rgb8.webp "$work/upside-down.webp"
+
 # -------------------------------------------- TIFF as measurement rasters
 # What elevation models and scientific output actually look like, and what
 # `image` cannot read at all: single-band floats, BigTIFF, the floating-point
@@ -220,4 +304,4 @@ magick "$work/color.png" unsupported.gif
 cp png-rgb8.png mislabelled.tif
 
 echo "generated $(ls -1 *.png *.jpg *.jpeg *.tif *.tiff *.hdr *.exr *.gif \
-                    *.heic *.heif *.avif | wc -l) fixtures"
+                    *.heic *.heif *.avif *.webp | wc -l) fixtures"
