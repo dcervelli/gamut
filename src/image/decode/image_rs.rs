@@ -65,20 +65,7 @@ impl super::Decoder for ImageRs {
             // PNG keeps the streaming that every other format here gets: the
             // chunks that say what the numbers mean all precede the pixels,
             // so they are read on the way past and the file is then rewound.
-            Some(Tagged::Png) => {
-                let color = png_color_space(&mut *source).unwrap_or(ColorSpace::SRGB);
-                source
-                    .seek(SeekFrom::Start(0))
-                    .context("reading the file")?;
-
-                let mut reader = ::image::ImageReader::with_format(
-                    BufReader::new(source),
-                    ::image::ImageFormat::Png,
-                );
-                limit(&mut reader);
-                let decoded = reader.decode()?;
-                return describe(decoded, Some(::image::ImageFormat::Png), color);
-            }
+            Some(Tagged::Png) => return png(source),
             None => {}
         }
 
@@ -156,6 +143,27 @@ fn jpeg(bytes: &[u8], overrides: Overrides) -> Result<DecodedImage> {
     )
 }
 
+/// PNG, container and all.
+///
+/// `source` must be positioned at the start of the PNG, which is not always
+/// the start of a file: an ICO entry holds one at an offset, and reaches this
+/// through a cursor over just those bytes.
+pub(super) fn png(source: &mut dyn super::ReadSeek) -> Result<DecodedImage> {
+    // The chunks that say what the numbers mean all precede the pixels, so
+    // they are read on the way past and the source is then rewound.
+    let start = source.stream_position().context("reading the file")?;
+    let color = png_color_space(&mut *source).unwrap_or(ColorSpace::SRGB);
+    source
+        .seek(SeekFrom::Start(start))
+        .context("reading the file")?;
+
+    let mut reader =
+        ::image::ImageReader::with_format(BufReader::new(source), ::image::ImageFormat::Png);
+    limit(&mut reader);
+    let decoded = reader.decode()?;
+    describe(decoded, Some(::image::ImageFormat::Png), color)
+}
+
 /// What a PNG says about its own colour, read from the chunks up to the first
 /// `IDAT` and no further.
 ///
@@ -191,7 +199,7 @@ fn decode_as(bytes: &[u8], format: ::image::ImageFormat) -> Result<DynamicImage>
 /// Wraps a decoded buffer in what we know about it. `stated` is the colour
 /// space the container claimed, used wherever the pixel type does not settle
 /// the question by itself.
-fn describe(
+pub(super) fn describe(
     decoded: DynamicImage,
     format: Option<ImageFormat>,
     stated: ColorSpace,

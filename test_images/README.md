@@ -8,10 +8,11 @@ from the outside world.
 Regenerate with `./generate.sh` — it is the authoritative description of how
 each file was made. Most fixtures need only ImageMagick; the HEIF ones need
 `heif-enc` from libheif, and the measurement rasters at the end need GDAL.
-Four fixtures need Python as well, because ImageMagick will not write the
-chunks they exist for: neither `cICP` nor `iCCP` for PNG, and neither an
-`EXIF` chunk nor an animation for WebP. Each is assembled afterwards around
-output ImageMagick did write.
+Eight fixtures need Python as well, because ImageMagick will not write what
+they exist for: neither `cICP` nor `iCCP` for PNG, neither an `EXIF` chunk nor
+an animation for WebP, and for ICO neither a PNG-compressed entry nor a
+directory that mixes depths. Each is assembled afterwards around output
+ImageMagick did write.
 
 `display-p3.icc` is an input rather than a fixture: it is the profile the three
 ICC-tagged files are tagged with, checked in beside them and not regenerated
@@ -48,6 +49,8 @@ mapping.
 | HEIF colour tags | BT.2100 PQ on BT.2020, and Display P3 — the CICP codes a HEIF states outright rather than leaving to convention — plus one tagged by ICC profile with no `nclx` box, which is what some cameras write |
 | WebP | lossless (VP8L) with and without alpha, lossy (VP8) with and without an `ALPH` chunk beside it |
 | WebP container | `ICCP` for Display P3 — the only thing a WebP has to say about its colour — an `EXIF` orientation applied on decode, and a two-frame animation whose second frame is upside down |
+| ICO | a 32-bit bitmap entry, a 4-bit palette entry with its AND mask, and a PNG entry — the two formats an entry can hold |
+| ICO directory | a PNG entry that is not RGBA and one carrying an `iCCP` profile, both of which `image`'s own ICO decoder refuses, and a two-size directory whose larger entry is the shallower |
 | Routing | `mislabelled.tif` (a PNG, found by sniffing), `.jpeg`, `.tiff` and `.heif` spellings |
 | Failure | `unsupported.gif`, `bad-truncated.png` |
 

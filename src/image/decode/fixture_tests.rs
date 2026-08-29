@@ -772,6 +772,94 @@ const FIXTURES: &[Fixture] = &[
         nodata: None,
         tolerance: EXACT,
     },
+    // ------------------------------------------------------------- ICO
+    // The two formats an entry can hold, and what each one costs. A bitmap
+    // entry always comes back RGBA whatever its stored depth, because the
+    // AND mask that carries an icon's transparency has nowhere else to go.
+    Fixture {
+        file: "ico-bmp-rgba8.ico",
+        covers: "ICO bitmap entry, 32-bit with alpha",
+        channels: Channels::Rgba,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Straight,
+        tone: Tone::Color,
+        coverage: Coverage::Ramp,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // A 4-bit palette with a fully opaque AND mask beside it: the shallow
+    // bitmap path, and the one an icon written before 32-bit colour takes.
+    Fixture {
+        file: "ico-bmp-palette.ico",
+        covers: "ICO bitmap entry, 4-bit palette plus AND mask",
+        channels: Channels::Rgba,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Straight,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // How every entry above 48 pixels has been stored since Vista.
+    Fixture {
+        file: "ico-png-rgba8.ico",
+        covers: "ICO PNG entry",
+        channels: Channels::Rgba,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Straight,
+        tone: Tone::Color,
+        coverage: Coverage::Ramp,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // A layout `image`'s own ICO decoder refuses outright, on the strength of
+    // a note saying embedded PNGs must be 32-bit. Passing as `Gray` means the
+    // entry went through the PNG path whole rather than being taken for
+    // icon pixels.
+    Fixture {
+        file: "ico-png-gray8.ico",
+        covers: "ICO PNG entry that is not RGBA",
+        channels: Channels::Gray,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Gray,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // The same path's other payoff: a PNG entry's `iCCP` chunk is read, so an
+    // icon can say it is Display P3 like any other PNG.
+    Fixture {
+        file: "ico-png-icc-p3.ico",
+        covers: "ICO PNG entry carrying an `iCCP` profile",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: P3,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // Two entries: the pattern at 32x24 in 4 bits, and a 16x12 thumbnail in
+    // 32. Passing this table at all means the larger one was chosen — see
+    // `the_largest_ico_entry_is_the_one_shown`.
+    Fixture {
+        file: "ico-multi.ico",
+        covers: "ICO directory of several sizes",
+        channels: Channels::Rgba,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Straight,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
     // A PNG under a TIFF name, decoded by sniffing rather than extension.
     Fixture {
         file: "mislabelled.tif",
@@ -1156,6 +1244,29 @@ fn an_animated_webp_shows_its_first_frame() {
     );
     for (x, y) in PROBES {
         assert_eq!(pixel(&animated, x, y), pixel(&still, x, y), "at {x},{y}");
+    }
+}
+
+/// An ICO is a folder of the same picture at several sizes, and a viewer has
+/// to pick one. `image` scores depth before size and answers with the 16x12
+/// thumbnail here; what someone opening an icon wants to see is the biggest
+/// picture in it, which `ico-multi.ico` deliberately makes the shallowest.
+#[test]
+fn the_largest_ico_entry_is_the_one_shown() {
+    let chosen = load(&directory().join("ico-multi.ico"), Overrides::default()).unwrap();
+    let expected = load(
+        &directory().join("ico-bmp-palette.ico"),
+        Overrides::default(),
+    )
+    .unwrap();
+
+    assert_eq!((chosen.width, chosen.height), (32, 24));
+    assert_eq!(
+        (chosen.width, chosen.height),
+        (expected.width, expected.height)
+    );
+    for (x, y) in PROBES {
+        assert_eq!(pixel(&chosen, x, y), pixel(&expected, x, y), "at {x},{y}");
     }
 }
 

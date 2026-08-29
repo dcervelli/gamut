@@ -16,6 +16,7 @@ use super::{ColorSpace, DecodedImage, Primaries, Transfer};
 mod cicp;
 mod heif;
 mod icc;
+mod ico;
 mod image_rs;
 mod tiff_rs;
 mod ultra_hdr;
@@ -92,6 +93,7 @@ static DECODERS: &[&dyn Decoder] = &[
     &tiff_rs::TiffRs,
     &heif::Heif,
     &webp::Webp,
+    &ico::Ico,
     &image_rs::ImageRs,
 ];
 

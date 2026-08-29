@@ -30,7 +30,7 @@ trap 'rm -rf "$work"' EXIT
 
 # Start clean, so a renamed fixture does not leave its predecessor behind.
 rm -f ./*.png ./*.jpg ./*.jpeg ./*.tif ./*.tiff ./*.hdr ./*.exr ./*.gif \
-      ./*.heic ./*.heif ./*.avif ./*.webp
+      ./*.heic ./*.heif ./*.avif ./*.webp ./*.ico
 
 quad '#FF0000' '#00FF00' '#0000FF' '#FFFFFF' "$work/color.png"
 quad '#000000' '#555555' '#AAAAAA' '#FFFFFF' "$work/gray.png"
@@ -261,6 +261,69 @@ webp_tag exif "$work/upside-down.webp" webp-exif-rotated.webp 3
 # Both are full-canvas, which is what the `ANMF` headers written above say.
 webp_tag anim webp-animated.webp webp-lossless-rgb8.webp "$work/upside-down.webp"
 
+# ----------------------------------------------------------------- ICO
+# A directory of icons rather than one image, in the two formats an entry can
+# hold. `-type TrueColorAlpha` forces the 32-bit bitmap that carries the alpha
+# ramp; left alone, ImageMagick quantises the four-colour pattern to a 4-bit
+# palette, which is the other bitmap path and gets a fixture of its own.
+magick "$work/color-alpha.png" -type TrueColorAlpha ico-bmp-rgba8.ico
+magick "$work/color.png"                            ico-bmp-palette.ico
+
+# ImageMagick writes neither a PNG-compressed entry — how every icon above 48
+# pixels has been stored since Vista — nor a directory mixing depths, so those
+# are packed here around files it did write. A `.png` source is embedded
+# whole; a `.ico` source has its entries lifted across unchanged.
+ico_pack() {  # dst src...
+  python3 - "$@" <<'PACK'
+import struct, sys
+
+SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+def entries(path):
+    """Every image in a source file, as (directory bytes, payload)."""
+    data = open(path, "rb").read()
+    if data.startswith(SIGNATURE):
+        width, height = struct.unpack_from(">II", data, 16)
+        # A dimension of 256 is stored as 0: the field is one byte wide. The
+        # stated depth is a convention only — a PNG entry states its own.
+        return [(bytes([width % 256, height % 256, 0, 0])
+                 + struct.pack("<HH", 1, 32), data)]
+
+    reserved, kind, count = struct.unpack_from("<HHH", data, 0)
+    assert reserved == 0 and kind == 1, f"{path} is not an icon"
+    lifted = []
+    for index in range(count):
+        head = data[6 + 16 * index : 22 + 16 * index]
+        size, offset = struct.unpack_from("<II", head, 8)
+        lifted.append((head[:8], data[offset : offset + size]))
+    return lifted
+
+dst, sources = sys.argv[1], sys.argv[2:]
+packed = [entry for source in sources for entry in entries(source)]
+
+directory = b"\0\0\1\0" + struct.pack("<H", len(packed))
+offset, body = 6 + 16 * len(packed), b""
+for head, payload in packed:
+    directory += head + struct.pack("<II", len(payload), offset)
+    offset += len(payload)
+    body += payload
+open(dst, "wb").write(directory + body)
+PACK
+}
+
+# The PNG entries. `png-gray8.png` is one `image`'s own ICO decoder refuses
+# outright, on the strength of a note saying embedded PNGs must be 32-bit;
+# `png-icc-p3.png` carries a profile that only survives if the entry goes
+# through the PNG path rather than being flattened to icon pixels.
+ico_pack ico-png-rgba8.ico  png-rgba8.png
+ico_pack ico-png-gray8.ico  png-gray8.png
+ico_pack ico-png-icc-p3.ico png-icc-p3.png
+
+# The selection fixture: the picture is the largest entry and also the
+# shallowest, so a decoder scoring depth before size shows the thumbnail.
+magick "$work/color-alpha.png" -resize 16x12\! -type TrueColorAlpha "$work/thumbnail.ico"
+ico_pack ico-multi.ico ico-bmp-palette.ico "$work/thumbnail.ico"
+
 # -------------------------------------------- TIFF as measurement rasters
 # What elevation models and scientific output actually look like, and what
 # `image` cannot read at all: single-band floats, BigTIFF, the floating-point
@@ -304,4 +367,4 @@ magick "$work/color.png" unsupported.gif
 cp png-rgb8.png mislabelled.tif
 
 echo "generated $(ls -1 *.png *.jpg *.jpeg *.tif *.tiff *.hdr *.exr *.gif \
-                    *.heic *.heif *.avif *.webp | wc -l) fixtures"
+                    *.heic *.heif *.avif *.webp *.ico | wc -l) fixtures"
