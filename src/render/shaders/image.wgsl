@@ -1,25 +1,35 @@
 // Draws the image into the linear working-space target.
 //
 // The texture is guaranteed to hold linear values (see render::upload), so
-// there is no transfer function here. What remains is: expand whatever
-// component layout we uploaded to RGBA, get into the BT.709 working space,
-// apply the display window, and optionally false-colour a single channel.
+// there is no transfer function here. What remains is: resample to the size
+// the view asks for, expand whatever component layout we uploaded to RGBA, get
+// into the BT.709 working space, apply the display window, and optionally
+// false-colour a single channel.
+//
+// Resampling is done here with explicit texel loads rather than by a sampler.
+// A sampler offers one bilinear tap, which neither shows the pixel grid a
+// measurement image is read on nor covers more than four texels when the view
+// is minifying; the three filters below do. `source` is level 0 of the image
+// when magnifying and a coarse level (see render::reduce) when the view is
+// zoomed far enough out to need one, so `extent` rather than the texture's own
+// size says how much of it the image occupies.
 
 struct Params {
-    offset: vec2<f32>,      // top-left of the quad, in clip space
-    scale: vec2<f32>,       // its size, in clip space
-    window: vec2<f32>,      // (low, gain): displayed = (value - low) * gain
+    offset: vec2<f32>,           // top-left of the quad, in clip space
+    scale: vec2<f32>,            // its size, in clip space
+    window: vec2<f32>,           // (low, gain): displayed = (value - low) * gain
+    texels_per_pixel: vec2<f32>, // source texels covered by one output pixel
+    extent: vec2<f32>,           // image size, in the bound texture's texels
     _pad: vec2<f32>,
-    primaries: mat3x3<f32>, // source primaries -> BT.709
-    swizzle: u32,           // 0 gray, 1 gray+alpha, 2 rgb, 3 rgba
-    alpha_mode: u32,        // 0 opaque, 1 straight, 2 premultiplied
-    colormap: u32,          // 0 none, 1 viridis, 2 magma, 3 turbo
-    _pad2: u32,
+    primaries: mat3x3<f32>,      // source primaries -> BT.709
+    swizzle: u32,                // 0 gray, 1 gray+alpha, 2 rgb, 3 rgba
+    alpha_mode: u32,             // 0 opaque, 1 straight, 2 premultiplied
+    colormap: u32,               // 0 none, 1 viridis, 2 magma, 3 turbo
+    resampler: u32,                // 0 area, 1 antialiased nearest, 2 bicubic
 };
 
 @group(0) @binding(0) var<uniform> params: Params;
 @group(1) @binding(0) var source: texture_2d<f32>;
-@group(1) @binding(1) var source_sampler: sampler;
 
 struct VertexOut {
     @builtin(position) position: vec4<f32>,
@@ -38,6 +48,118 @@ fn vs_main(@builtin(vertex_index) index: u32) -> VertexOut {
         1.0,
     );
     return out;
+}
+
+// Colour premultiplied by alpha, in the component layout the texture stores.
+// Every filter below is a weighted sum of texels, and weighting straight alpha
+// would drag the colour of fully transparent texels into their neighbours,
+// which is what shows as haloing along a hard edge. Coarse levels are already
+// premultiplied, so this is a no-op for them.
+fn premultiplied(texel: vec4<f32>) -> vec4<f32> {
+    if params.alpha_mode != 1u {
+        return texel;
+    }
+    switch params.swizzle {
+        case 1u: { return vec4<f32>(texel.r * texel.g, texel.g, texel.ba); }
+        case 3u: { return vec4<f32>(texel.rgb * texel.a, texel.a); }
+        default: { return texel; }
+    }
+}
+
+fn load(coord: vec2<i32>) -> vec4<f32> {
+    let limit = vec2<i32>(textureDimensions(source)) - vec2<i32>(1);
+    return premultiplied(textureLoad(source, clamp(coord, vec2<i32>(0), limit), 0));
+}
+
+// Exact area average: every source texel under the output pixel, each weighted
+// by how much of it the pixel actually covers. The count of taps is bounded by
+// the coarse chain, which keeps `texels_per_pixel` at four or under however far
+// the view zooms out; the clamp is a backstop, not a working limit.
+fn area(uv: vec2<f32>) -> vec4<f32> {
+    let half = min(params.texels_per_pixel, vec2<f32>(64.0)) * 0.5;
+    let centre = uv * params.extent;
+    let low = centre - half;
+    let high = centre + half;
+
+    let first = vec2<i32>(floor(low));
+    let last = vec2<i32>(ceil(high)) - vec2<i32>(1);
+
+    var sum = vec4<f32>(0.0);
+    var total = 0.0;
+    for (var y = first.y; y <= last.y; y = y + 1) {
+        let wy = min(high.y, f32(y + 1)) - max(low.y, f32(y));
+        if wy <= 0.0 {
+            continue;
+        }
+        for (var x = first.x; x <= last.x; x = x + 1) {
+            let wx = min(high.x, f32(x + 1)) - max(low.x, f32(x));
+            if wx <= 0.0 {
+                continue;
+            }
+            let weight = wx * wy;
+            sum = sum + load(vec2<i32>(x, y)) * weight;
+            total = total + weight;
+        }
+    }
+    return sum / max(total, 1e-8);
+}
+
+// Nearest neighbour, except across the one output pixel that straddles a texel
+// boundary, where it ramps instead of stepping. Keeps the pixel grid a
+// measurement image is read on, without the uneven column doubling plain
+// nearest gives at a zoom that is not a whole number.
+fn antialiased_nearest(uv: vec2<f32>) -> vec4<f32> {
+    let position = uv * params.extent - vec2<f32>(0.5);
+    let base = floor(position);
+    let offset = position - base;
+    let width = max(params.texels_per_pixel, vec2<f32>(1e-6));
+    let t = clamp((offset - vec2<f32>(0.5)) / width + vec2<f32>(0.5), vec2<f32>(0.0), vec2<f32>(1.0));
+
+    let corner = vec2<i32>(base);
+    let top = mix(load(corner), load(corner + vec2<i32>(1, 0)), t.x);
+    let bottom = mix(load(corner + vec2<i32>(0, 1)), load(corner + vec2<i32>(1, 1)), t.x);
+    return mix(top, bottom, t.y);
+}
+
+// Catmull-Rom, the B = 0, C = 1/2 member of the cubic family: interpolating,
+// so texel centres come through untouched, and sharper than bilinear at the
+// cost of a little ringing either side of a hard edge.
+fn catmull_rom(offset: f32) -> array<f32, 4> {
+    let f2 = offset * offset;
+    let f3 = f2 * offset;
+    return array<f32, 4>(
+        (-f3 + 2.0 * f2 - offset) * 0.5,
+        (3.0 * f3 - 5.0 * f2 + 2.0) * 0.5,
+        (-3.0 * f3 + 4.0 * f2 + offset) * 0.5,
+        (f3 - f2) * 0.5,
+    );
+}
+
+fn bicubic(uv: vec2<f32>) -> vec4<f32> {
+    let position = uv * params.extent - vec2<f32>(0.5);
+    let base = floor(position);
+    let offset = position - base;
+    let wx = catmull_rom(offset.x);
+    let wy = catmull_rom(offset.y);
+    let corner = vec2<i32>(base) - vec2<i32>(1);
+
+    var sum = vec4<f32>(0.0);
+    for (var y = 0; y < 4; y = y + 1) {
+        var row = vec4<f32>(0.0);
+        for (var x = 0; x < 4; x = x + 1) {
+            row = row + load(corner + vec2<i32>(x, y)) * wx[x];
+        }
+        sum = sum + row * wy[y];
+    }
+    return sum;
+}
+
+fn resample(uv: vec2<f32>) -> vec4<f32> {
+    switch params.resampler {
+        case 1u: { return antialiased_nearest(uv); }
+        case 2u: { return bicubic(uv); }
+        default: { return area(uv); }
+    }
 }
 
 fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
@@ -103,7 +225,7 @@ fn false_color(which: u32, t: f32) -> vec3<f32> {
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-    let texel = textureSample(source, source_sampler, in.uv);
+    let texel = resample(in.uv);
 
     // Expand whatever we uploaded to RGBA. Grey replicates; alpha defaults
     // to opaque when the source had none.
@@ -116,13 +238,20 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         default: { color = texel.rgb; alpha = texel.a; }
     }
 
-    // Undo premultiplication before the colour maths, so windowing and the
-    // primaries matrix act on the actual colour rather than a faded one.
-    if params.alpha_mode == 2u && alpha > 0.0 {
-        color = color / alpha;
-    }
+    // Undo the premultiplication `resample` worked in, so that windowing and
+    // the primaries matrix act on the actual colour rather than a faded one.
+    // Bicubic's negative lobes can undershoot, so a texel that has resolved to
+    // near-nothing is taken as nothing rather than divided into a wild colour.
     if params.alpha_mode == 0u {
         alpha = 1.0;
+    } else {
+        alpha = clamp(alpha, 0.0, 1.0);
+        if alpha > 1e-4 {
+            color = color / alpha;
+        } else {
+            color = vec3<f32>(0.0);
+            alpha = 0.0;
+        }
     }
 
     let is_gray = params.swizzle < 2u;

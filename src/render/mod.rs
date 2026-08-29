@@ -13,7 +13,11 @@
 mod composite;
 mod image_layer;
 mod output;
+mod reduce;
 pub mod ui;
+
+#[cfg(test)]
+mod filter_tests;
 pub(crate) mod upload;
 
 use std::sync::Arc;
@@ -224,8 +228,22 @@ impl Renderer {
             .create_view(&wgpu::TextureViewDescriptor::default());
         let size = self.size();
 
-        self.image_layer
-            .prepare(&self.queue, placement, size, display);
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("frame"),
+            });
+
+        // Before the passes below, since a view that has just zoomed out past
+        // what the coarse chain covers builds the rest of it here.
+        self.image_layer.prepare(
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            placement,
+            size,
+            display,
+        );
         self.ui.prepare(
             &self.device,
             &self.queue,
@@ -234,12 +252,6 @@ impl Renderer {
             scale,
         )?;
         self.composite.prepare(&self.queue, display, &self.output);
-
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("frame"),
-            });
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -250,7 +262,7 @@ impl Renderer {
                 ))],
                 ..Default::default()
             });
-            self.image_layer.render(&mut pass, placement);
+            self.image_layer.render(&mut pass);
         }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

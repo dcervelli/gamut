@@ -32,6 +32,58 @@ impl Fit {
     }
 }
 
+/// How the image is resampled when it is shown larger than life.
+///
+/// Minification has one right answer — average what the pixel covers — but
+/// magnification is a judgement about what the image is for, so it is the
+/// user's to make. Neither is a smoothing filter in the ordinary sense: both
+/// leave a texel centre exactly as it was found.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Upscale {
+    /// Nearest neighbour, ramped across the single output pixel that straddles
+    /// a texel edge. Shows the pixel grid a measurement image is read on, and
+    /// unlike plain nearest it does not double columns unevenly at a zoom that
+    /// is not a whole number.
+    #[default]
+    Nearest,
+    /// Catmull-Rom. Smooth, noticeably sharper than bilinear, and worth having
+    /// when the subject is a photograph rather than a grid of measurements.
+    Bicubic,
+}
+
+impl Upscale {
+    pub fn label(self) -> &'static str {
+        match self {
+            Upscale::Nearest => "nearest",
+            Upscale::Bicubic => "bicubic",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        Some(match value.to_ascii_lowercase().as_str() {
+            "nearest" | "point" | "pixel" => Upscale::Nearest,
+            "bicubic" | "cubic" | "catmull" | "catmull-rom" => Upscale::Bicubic,
+            _ => return None,
+        })
+    }
+
+    fn next(self) -> Self {
+        match self {
+            Upscale::Nearest => Upscale::Bicubic,
+            Upscale::Bicubic => Upscale::Nearest,
+        }
+    }
+
+    /// Matches the `filter` codes in shaders/image.wgsl, where 0 is the area
+    /// filter minification uses.
+    pub fn index(self) -> u32 {
+        match self {
+            Upscale::Nearest => 1,
+            Upscale::Bicubic => 2,
+        }
+    }
+}
+
 /// Where the image sits in the window, in physical pixels, origin top-left.
 #[derive(Clone, Copy, Debug)]
 pub struct Placement {
@@ -40,6 +92,7 @@ pub struct Placement {
     pub width: f32,
     pub height: f32,
     pub zoom: f32,
+    pub upscale: Upscale,
 }
 
 pub struct View {
@@ -50,6 +103,7 @@ pub struct View {
     /// The image-space point, relative to the image centre, shown at the
     /// centre of the window.
     pan: [f32; 2],
+    upscale: Upscale,
 }
 
 impl View {
@@ -58,12 +112,29 @@ impl View {
             fit: Some(Fit::Whole),
             zoom: 1.0,
             pan: [0.0, 0.0],
+            upscale: Upscale::default(),
         }
     }
 
-    /// Back to the state a freshly opened image gets.
+    /// Back to the state a freshly opened image gets. The upscale filter is a
+    /// standing preference rather than part of the view, so it survives.
     pub fn reset(&mut self) {
-        *self = Self::new();
+        *self = Self {
+            upscale: self.upscale,
+            ..Self::new()
+        };
+    }
+
+    pub fn upscale(&self) -> Upscale {
+        self.upscale
+    }
+
+    pub fn set_upscale(&mut self, upscale: Upscale) {
+        self.upscale = upscale;
+    }
+
+    pub fn cycle_upscale(&mut self) {
+        self.upscale = self.upscale.next();
     }
 
     pub fn mode_label(&self) -> &'static str {
@@ -107,12 +178,28 @@ impl View {
         let pan = Self::clamp_pan(self.pan, image, window, zoom);
         let width = image[0] * zoom;
         let height = image[1] * zoom;
+        let x = window[0] / 2.0 - pan[0] * zoom - width / 2.0;
+        let y = window[1] / 2.0 - pan[1] * zoom - height / 2.0;
+
+        // At and above 1:1 the pixel grid is the whole point, so the image goes
+        // on whole pixels. Centring an odd difference otherwise leaves the
+        // quad half a pixel off the grid, which puts every texel edge through
+        // the middle of a pixel and costs the 100% view its crispness. Below
+        // 1:1 there is no grid to line up with, and rounding would make the
+        // image twitch as the zoom changed.
+        let (x, y) = if zoom >= 1.0 {
+            (x.round(), y.round())
+        } else {
+            (x, y)
+        };
+
         Placement {
-            x: window[0] / 2.0 - pan[0] * zoom - width / 2.0,
-            y: window[1] / 2.0 - pan[1] * zoom - height / 2.0,
+            x,
+            y,
             width,
             height,
             zoom,
+            upscale: self.upscale,
         }
     }
 
@@ -131,6 +218,44 @@ impl View {
 
     pub fn zoom_out(&mut self, image: [f32; 2], window: [f32; 2]) {
         self.zoom_by(1.0 / ZOOM_STEP, image, window);
+    }
+
+    /// Zooms by `steps` of the keyboard's zoom increment, keeping whatever is
+    /// under `anchor` — a point in window pixels — where it is. Fractional
+    /// steps are what a trackpad sends, so this takes a float rather than a
+    /// count of notches.
+    ///
+    /// The anchor cannot always be honoured: an image smaller than the window
+    /// stays centred on that axis, and one panned to its edge stops there.
+    /// `clamp_pan` decides that, exactly as it does for a drag.
+    pub fn zoom_steps_at(
+        &mut self,
+        steps: f32,
+        anchor: [f32; 2],
+        image: [f32; 2],
+        window: [f32; 2],
+    ) {
+        let before = self.zoom(image, window);
+        let after = (before * ZOOM_STEP.powf(steps)).clamp(MIN_ZOOM, MAX_ZOOM);
+        if after == before {
+            return;
+        }
+
+        // Where the anchor sits over the image, from the pan actually on
+        // screen rather than the one held: they differ whenever the view is
+        // against an edge, and zooming from the held one would jump.
+        let pan = Self::clamp_pan(self.pan, image, window, before);
+        let offset = [anchor[0] - window[0] / 2.0, anchor[1] - window[1] / 2.0];
+        let point = [pan[0] + offset[0] / before, pan[1] + offset[1] / before];
+
+        self.zoom = after;
+        self.fit = None;
+        self.pan = Self::clamp_pan(
+            [point[0] - offset[0] / after, point[1] - offset[1] / after],
+            image,
+            window,
+            after,
+        );
     }
 
     pub fn actual_size(&mut self, image: [f32; 2], window: [f32; 2]) {
@@ -280,6 +405,90 @@ mod tests {
         let placement = view.placement(IMAGE, window);
         assert!(close(placement.x, 0.0));
         assert!(close(placement.y + placement.height, window[1]));
+    }
+
+    /// What a wheel zoom is for: the pixel under the pointer is still under it
+    /// afterwards, so zooming in on a detail does not also require panning back
+    /// to it.
+    #[test]
+    fn a_wheel_zoom_keeps_the_point_under_the_pointer() {
+        let mut view = View::new();
+        view.actual_size(IMAGE, WINDOW);
+        // 4x makes the image larger than the window, so there is pan to give.
+        view.zoom = 4.0;
+
+        let anchor = [300.0, 900.0];
+        let under = |view: &View| {
+            let placement = view.placement(IMAGE, WINDOW);
+            [
+                (anchor[0] - placement.x) / placement.zoom,
+                (anchor[1] - placement.y) / placement.zoom,
+            ]
+        };
+
+        let before = under(&view);
+        view.zoom_steps_at(1.0, anchor, IMAGE, WINDOW);
+        assert!(view.zoom(IMAGE, WINDOW) > 4.0);
+        let after = under(&view);
+        assert!(close(before[0], after[0]), "{before:?} -> {after:?}");
+        assert!(close(before[1], after[1]), "{before:?} -> {after:?}");
+    }
+
+    /// A trackpad sends fractions of a notch rather than whole ones.
+    #[test]
+    fn a_wheel_zoom_takes_fractional_steps() {
+        let mut view = View::new();
+        view.actual_size(IMAGE, WINDOW);
+        view.zoom_steps_at(0.5, [600.0, 600.0], IMAGE, WINDOW);
+        assert!(close(view.zoom(IMAGE, WINDOW), ZOOM_STEP.powf(0.5)));
+    }
+
+    #[test]
+    fn a_wheel_zoom_stops_at_the_same_limits_as_the_keyboard() {
+        let mut view = View::new();
+        view.zoom_steps_at(-200.0, [0.0, 0.0], IMAGE, WINDOW);
+        assert!(close(view.zoom(IMAGE, WINDOW), MIN_ZOOM));
+        view.zoom_steps_at(400.0, [0.0, 0.0], IMAGE, WINDOW);
+        assert!(close(view.zoom(IMAGE, WINDOW), MAX_ZOOM));
+    }
+
+    /// The filter is a preference about how to read images, not part of where
+    /// this one is scrolled to, so stepping to the next file keeps it.
+    #[test]
+    fn the_upscale_filter_outlives_the_image() {
+        let mut view = View::new();
+        assert_eq!(view.upscale(), Upscale::Nearest);
+        view.cycle_upscale();
+        assert_eq!(view.upscale(), Upscale::Bicubic);
+
+        view.zoom_in(IMAGE, WINDOW);
+        view.reset();
+        assert_eq!(view.mode_label(), "fit");
+        assert_eq!(view.upscale(), Upscale::Bicubic);
+        assert_eq!(view.placement(IMAGE, WINDOW).upscale, Upscale::Bicubic);
+    }
+
+    /// Antialiased nearest resolves a texel edge that lands mid-pixel, which
+    /// is right at 4.5:1 and wrong at 1:1 — there every texel edge would land
+    /// mid-pixel, and the 100% view would come out uniformly soft.
+    #[test]
+    fn magnified_views_land_on_whole_pixels() {
+        let mut view = View::new();
+        // An odd window against an even image is what puts the centre on a
+        // half pixel.
+        let window = [1201.0, 1201.0];
+        view.actual_size(IMAGE, window);
+        let placement = view.placement(IMAGE, window);
+        assert_eq!(placement.x, placement.x.round());
+        assert_eq!(placement.y, placement.y.round());
+
+        // Below 1:1 it is left alone.
+        view.cycle_fit();
+        view.cycle_fit();
+        view.cycle_fit();
+        let placement = view.placement([4000.0, 4000.0], window);
+        assert!(placement.zoom < 1.0);
+        assert!(close(placement.x, 0.0));
     }
 
     #[test]

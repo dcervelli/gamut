@@ -11,11 +11,12 @@ use std::process::ExitCode;
 use anyhow::{Result, bail};
 use winit::event_loop::{ControlFlow, EventLoop};
 
-use app::App;
+use app::{App, Options};
 use image::decode::Overrides;
 use image::display::{AutoWindow, Colormap, Startup, ToneMap};
 use image::{Primaries, Transfer};
 use render::HdrPreference;
+use view::Upscale;
 
 const USAGE: &str = "\
 image-view — preview images
@@ -38,6 +39,7 @@ OPTIONS:
         --tone-map <MAP>    Start with clip, reinhard, or neutral
         --window <MODE>     Start with the window set to unit, minmax, or pct
         --exposure <STOPS>  Start at this exposure, in stops
+        --upscale <FILTER>  How to resample above 100%: nearest or bicubic
         --histogram         Start with the histogram showing
     --                      Treat every later argument as a file name
 
@@ -45,9 +47,11 @@ VIEW KEYS:
     q, Esc           Quit
     +, =             Zoom in
     -, _             Zoom out
+    Wheel            Zoom about the pointer
     0                Actual size (100%)
     Arrows           Pan
     f                Cycle fit / fit width / fit height
+    u                Cycle the filter used above 100%: nearest, bicubic
     n, p             Next / previous file
 
 DISPLAY KEYS:
@@ -81,19 +85,11 @@ fn run() -> Result<()> {
     // command-line error rather than an empty window. With several files,
     // step over the ones that fail exactly as `n` and `p` do later, rather
     // than refusing to start because the first of thirty is broken.
-    let (index, first) = open_first(&args.files, args.overrides)?;
+    let (index, first) = open_first(&args.files, args.options.overrides)?;
 
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Wait);
-    let mut app = App::new(
-        args.files,
-        index,
-        first,
-        args.overrides,
-        args.startup,
-        args.hdr,
-        args.histogram,
-    );
+    let mut app = App::new(args.files, index, first, args.options);
     event_loop.run_app(&mut app)?;
     Ok(())
 }
@@ -126,10 +122,7 @@ fn open_first(files: &[PathBuf], overrides: Overrides) -> Result<(usize, image::
 
 struct Args {
     files: Vec<PathBuf>,
-    overrides: Overrides,
-    startup: Startup,
-    hdr: HdrPreference,
-    histogram: bool,
+    options: Options,
 }
 
 /// `Ok(None)` means we printed help or the version and should exit quietly.
@@ -139,6 +132,7 @@ fn parse_args() -> Result<Option<Args>> {
     let mut startup = Startup::default();
     let mut hdr = HdrPreference::Off;
     let mut histogram = false;
+    let mut upscale = Upscale::default();
     let mut only_files = false;
 
     let mut arguments = std::env::args_os().skip(1);
@@ -195,6 +189,12 @@ fn parse_args() -> Result<Option<Args>> {
                     })?);
                     continue;
                 }
+                Some("--upscale") => {
+                    let value = next_value(&mut arguments, "--upscale")?;
+                    upscale = Upscale::parse(&value)
+                        .ok_or_else(|| anyhow::anyhow!("unknown upscale filter `{value}`"))?;
+                    continue;
+                }
                 Some("--histogram") => {
                     histogram = true;
                     continue;
@@ -218,10 +218,13 @@ fn parse_args() -> Result<Option<Args>> {
     }
     Ok(Some(Args {
         files,
-        overrides,
-        startup,
-        hdr,
-        histogram,
+        options: Options {
+            overrides,
+            startup,
+            hdr,
+            histogram,
+            upscale,
+        },
     }))
 }
 

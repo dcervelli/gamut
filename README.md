@@ -28,9 +28,11 @@ Both ship as standard on the distributions above.
 | --- | --- |
 | `q`, `Esc` | Quit |
 | `+`, `=` / `-`, `_` | Zoom in / out |
+| Wheel | Zoom about the pointer |
 | `0` | Actual size (100%) |
 | Arrows | Pan |
 | `f` | Cycle fit → fit width → fit height |
+| `u` | Cycle the filter used above 100%: nearest → bicubic |
 | `n`, `p` | Next / previous file |
 | `e`, `E` | Exposure down / up, half a stop |
 | `a` | Cycle the automatic window: unit → min/max → 99.8% |
@@ -57,11 +59,13 @@ The one invariant everything else follows from:
 > was linear already, because the format's hardware decode produces it, or
 > because we linearised on the way in.
 
-It matters because hardware sRGB decode happens *before* texture filtering
-while a shader decode necessarily happens after. Decoding in the shader would
-mean filtering in encoded space — the classic gamma-incorrect downscale — and
-this viewer minifies constantly, since fit is the default. So the transfer
-function is resolved once per image at upload, never per frame.
+It matters because a format's own decode — sRGB or otherwise — happens as part
+of reading a texel, before anything is weighted against anything else, while a
+decode written into the shader necessarily happens after. Decoding in the
+shader would mean resampling in encoded space — the classic gamma-incorrect
+downscale — and this viewer minifies constantly, since fit is the default. So
+the transfer function is resolved once per image at upload, never per frame,
+and every weighted sum in [Resampling](#resampling) is over linear light.
 
 The working space is linear BT.709 in `Rgba16Float`, with room above 1.0 for
 HDR content to survive until tone mapping.
@@ -108,6 +112,50 @@ False colour (`c`, or `--colormap`) applies to single-channel images, and
 suppresses tone mapping while active — a curve on top of a colormap would
 distort the mapping you are reading values off.
 
+## Resampling
+
+Below 100% an output pixel covers more than one texel, and the only right
+answer is the average of what it actually covers — weighted by the fraction of
+each edge texel the pixel overlaps, so that the result does not shimmer as the
+zoom changes. Above 100% there is no right answer, only a question about what
+the image is for, so it is a setting:
+
+| Filter | What it is for |
+| --- | --- |
+| `nearest` (default) | Nearest neighbour, ramped across the single output pixel that straddles a texel edge. Shows the pixel grid a measurement image is read on. At a whole-number zoom it is exactly nearest neighbour; at 4.5:1 it resolves the half-covered pixel rather than doubling columns unevenly, which is what plain nearest does. |
+| `bicubic` | Catmull-Rom. Interpolating, so texel centres come through untouched, and noticeably sharper than bilinear. What you want when the subject is a photograph. |
+
+At and above 1:1 the quad is put on whole pixels, so a texel edge falls on a
+pixel edge and `nearest` is exactly nearest. Centring an odd difference
+otherwise leaves it half a pixel off the grid, which would put every texel edge
+through the middle of a pixel and cost the 100% view its crispness.
+
+All three filters are weighted sums of texel loads in `shaders/image.wgsl`
+rather than sampler taps — one bilinear tap is neither of the two above, and it
+covers four texels however far out the view is zoomed. Because the shader does
+the weighting, it can also multiply straight alpha through first, so a
+transparent texel no longer bleeds its colour into the edge beside it.
+
+### What it costs, and the coarse chain
+
+An exact area filter reads every source texel the window covers, which is a
+constant — one pass over the visible image — whatever the zoom. That is
+pleasant at 24 megapixels and gigabytes a frame at the texture size limit, and
+with a wheel to zoom by it would be paid again on every notch.
+
+So each image gets a chain of coarse levels, each an exact 4×4 area average of
+the one above it. A draw starts from the level within a factor of four of the
+size it wants, which bounds it at sixteen texels per output pixel however far
+out the view is. Stepping by four per axis rather than a mipmap's two is what
+makes that affordable: levels shrink by sixteen in area, so the whole chain is
+a *fifteenth* of the image's own texture where a mip chain is a third of it.
+
+It is built the first time a view zooms out past 4:1 — most never do — and it
+is dropped with the image, so only one is ever alive. Levels are float, which
+keeps them linear with no transfer function to think about and no 8-bit floor
+under premultiplied colour: half floats, or 32-bit ones above a 32-bit float
+source, where the range and the low bits are the point of the file.
+
 ## Architecture
 
 Rendering is three separable layers:
@@ -144,6 +192,7 @@ status bar and the histogram are the two clients that exist today.
 | `src/image/` | The data model: `Samples`, `ColorSpace`, stats, display state |
 | `src/image/decode/` | The decoder trait and its registry |
 | `src/render/` | Upload planning, the three layers, output selection |
+| `src/render/reduce.rs` | The coarse chain a minifying draw reads from |
 
 ## Formats
 
@@ -267,10 +316,20 @@ Display P3. `--primaries p3` is the way out until a profile parser exists.
 cargo test
 ```
 
-60 tests over the transfer functions and primaries matrices, texture format
+76 tests over the transfer functions and primaries matrices, texture format
 selection (including the device-capability fallbacks), the statistics and
 window logic, the decoder registry, the CICP translation, and the view
-geometry. Rendering itself is not covered; it needs a GPU and a window.
+geometry.
+
+Six of them run the real image pipeline on a real adapter — a headless device,
+no window — and check the resampling filters against arithmetic done on the
+CPU: that minification is the exact mean of the texels a pixel covers, that
+two levels of the coarse chain plus the draw's own filter come to the same
+number as averaging the source directly, that antialiased nearest is exactly
+nearest at a whole-number zoom, that Catmull-Rom passes texel centres through
+untouched, and that a transparent texel does not bleed its colour into its
+neighbour. Where no adapter can be had they report success rather than failing
+for a reason that has nothing to do with the code.
 
 `test_images/` holds 47 real fixtures — see its README — covering every pixel
 layout the decoder can produce and every per-format encoding with its own code

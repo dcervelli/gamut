@@ -6,12 +6,13 @@
 //! > because the data was linear already, or because the format's hardware
 //! > decode produces it, or because we linearised on the way in.
 //!
-//! It matters because hardware sRGB decode happens *before* texture
-//! filtering, while a shader decode necessarily happens after. Decoding in
-//! the shader would mean filtering in encoded space, which is the classic
-//! gamma-incorrect downscale — and this viewer minifies constantly, since fit
-//! is the default. So the transfer function is resolved here, once per image,
-//! never per frame.
+//! It matters because a format's own decode happens as part of reading a
+//! texel, before anything is weighted against anything else, while a shader
+//! decode necessarily happens after. Decoding in the shader would mean
+//! resampling in encoded space, which is the classic gamma-incorrect
+//! downscale — and this viewer minifies constantly, since fit is the default.
+//! So the transfer function is resolved here, once per image, never per frame,
+//! and every weighted sum in `image_layer` is over linear light.
 
 use half::f16;
 

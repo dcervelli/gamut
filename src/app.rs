@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
-use winit::event::{ElementState, KeyEvent, WindowEvent};
+use winit::event::{ElementState, KeyEvent, MouseScrollDelta, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{Window, WindowId};
@@ -13,10 +13,14 @@ use winit::window::{Window, WindowId};
 use crate::image::display::{AutoWindow, Colormap, Display, Startup};
 use crate::image::{DecodedImage, Stats, decode};
 use crate::render::{Color, HdrPreference, Rect, Renderer, UiFrame};
-use crate::view::View;
+use crate::view::{Upscale, View};
 
 /// Window pixels moved per arrow-key press.
 const PAN_STEP: f32 = 64.0;
+/// Trackpad pixels that add up to one notch of the wheel. Wheels report whole
+/// lines and need no conversion; a trackpad reports the scroll it would have
+/// done, and this is what turns that into the same zoom increment.
+const WHEEL_PIXELS_PER_STEP: f32 = 50.0;
 /// Fraction of the monitor a freshly opened window may occupy.
 const MAX_WINDOW_FRACTION: f64 = 0.85;
 
@@ -30,6 +34,15 @@ const PANEL_BACKGROUND: Color = Color::rgba(12, 12, 16, 214);
 const TEXT_PRIMARY: Color = Color::rgb(238, 238, 238);
 const TEXT_DIM: Color = Color::rgb(150, 152, 160);
 const ACCENT: Color = Color::rgb(120, 180, 255);
+
+/// What the command line asked for, beyond which files to show.
+pub struct Options {
+    pub overrides: decode::Overrides,
+    pub startup: Startup,
+    pub hdr: HdrPreference,
+    pub histogram: bool,
+    pub upscale: Upscale,
+}
 
 /// The image on screen, with everything derived from it.
 struct Current {
@@ -58,6 +71,8 @@ pub struct App {
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     modifiers: ModifiersState,
+    /// Physical window pixels, and the point a wheel zoom works about.
+    cursor: Option<[f32; 2]>,
     show_overlay: bool,
     show_histogram: bool,
     /// Set if the last render failed, so we report it once rather than every frame.
@@ -67,18 +82,19 @@ pub struct App {
 impl App {
     /// `first` is `files[index]`, already decoded before the window opened so
     /// that a bad path fails on the command line.
-    pub fn new(
-        files: Vec<PathBuf>,
-        index: usize,
-        first: DecodedImage,
-        overrides: decode::Overrides,
-        startup: Startup,
-        hdr: HdrPreference,
-        show_histogram: bool,
-    ) -> Self {
+    pub fn new(files: Vec<PathBuf>, index: usize, first: DecodedImage, options: Options) -> Self {
+        let Options {
+            overrides,
+            startup,
+            hdr,
+            histogram,
+            upscale,
+        } = options;
         let stats = Stats::scan(&first);
         let display = Display::for_image_with(&first, &stats, startup);
         let label = file_label(&files[index]);
+        let mut view = View::new();
+        view.set_upscale(upscale);
         Self {
             files,
             index,
@@ -92,12 +108,13 @@ impl App {
             overrides,
             startup,
             hdr,
-            view: View::new(),
+            view,
             window: None,
             renderer: None,
             modifiers: ModifiersState::empty(),
+            cursor: None,
             show_overlay: true,
-            show_histogram,
+            show_histogram: histogram,
             reported_error: false,
         }
     }
@@ -256,6 +273,10 @@ impl App {
                 self.show_histogram = !self.show_histogram;
                 return true;
             }
+            "u" | "U" => {
+                self.view.cycle_upscale();
+                return true;
+            }
             _ => {}
         }
 
@@ -282,6 +303,32 @@ impl App {
                 .reset(&current.stats, &current.image, self.startup),
             _ => return false,
         }
+        true
+    }
+
+    /// Returns `true` if the wheel changed anything on screen.
+    fn handle_wheel(&mut self, delta: MouseScrollDelta) -> bool {
+        // Same reasoning as `handle_key`: Ctrl+wheel and friends belong to the
+        // compositor, and acting on them as well would zoom behind its back.
+        if self.modifiers.control_key() || self.modifiers.alt_key() || self.modifiers.super_key() {
+            return false;
+        }
+
+        let steps = match delta {
+            MouseScrollDelta::LineDelta(_, lines) => lines,
+            MouseScrollDelta::PixelDelta(pixels) => pixels.y as f32 / WHEEL_PIXELS_PER_STEP,
+        };
+        // A trackpad emits a long tail of all but motionless events at the end
+        // of a gesture, which would leave the view drifting after the finger
+        // has stopped.
+        if !steps.is_finite() || steps.abs() < 1e-3 {
+            return false;
+        }
+
+        let window = self.window_size();
+        let anchor = self.cursor.unwrap_or([window[0] / 2.0, window[1] / 2.0]);
+        self.view
+            .zoom_steps_at(steps, anchor, self.image_size(), window);
         true
     }
 
@@ -409,6 +456,17 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
+            WindowEvent::CursorMoved { position, .. } => {
+                self.cursor = Some([position.x as f32, position.y as f32]);
+            }
+            WindowEvent::CursorLeft { .. } => self.cursor = None,
+            WindowEvent::MouseWheel { delta, .. } => {
+                if self.handle_wheel(delta)
+                    && let Some(window) = &self.window
+                {
+                    window.request_redraw();
+                }
+            }
             WindowEvent::ScaleFactorChanged { .. } => {
                 if let Some(window) = &self.window {
                     window.request_redraw();
@@ -546,6 +604,11 @@ fn describe_state(current: &Current, view: &View, layout: &Layout) -> String {
         view.mode_label().to_string(),
     ];
 
+    // Only while it is doing something. Below 1:1 the filter in use is the
+    // area average, which is not a choice and so not worth a word in the bar.
+    if zoom > 1.0 {
+        parts.push(view.upscale().label().to_string());
+    }
     if current.display.auto != AutoWindow::Off {
         parts.push(format!(
             "{} {}",
