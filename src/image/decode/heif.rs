@@ -23,11 +23,11 @@ use std::sync::OnceLock;
 
 use anyhow::{Result, anyhow, bail};
 use libheif_rs::{
-    ColorPrimaries, ColorSpace as HeifColorSpace, HeifContext, ImageHandle, LibHeif, Plane,
-    RgbChroma, SecurityLimits, StreamReader, TransferCharacteristics,
+    ColorSpace as HeifColorSpace, HeifContext, ImageHandle, LibHeif, Plane, RgbChroma,
+    SecurityLimits, StreamReader,
 };
 
-use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Primaries, Samples, Transfer};
+use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
 
 /// `libheif`'s global initialisation, done once.
 ///
@@ -376,61 +376,42 @@ impl Scale {
 
 /// What the file says its numbers mean.
 ///
-/// HEIF carries CICP codes, so this is a translation rather than a guess. An
-/// untagged file, or one carrying only an ICC profile — which nothing in this
-/// program reads yet — falls back to sRGB, which is what an untagged still
-/// image is by convention and what every other decoder here assumes.
+/// HEIF states this outright rather than leaving it to convention, in one of
+/// two ways. `nclx` is the usual one and the more precise, being CICP codes
+/// that name a transfer function this program models exactly. Some cameras
+/// write an ICC profile instead, which says the same thing less directly, and
+/// is read only when there is no `nclx` to prefer.
+///
+/// A file carrying neither falls back to sRGB, which is what an untagged
+/// still image means by convention and what every other decoder here assumes.
 fn color_space(handle: &ImageHandle) -> ColorSpace {
-    let Some(nclx) = handle.color_profile_nclx() else {
-        return ColorSpace::SRGB;
-    };
-    ColorSpace {
-        transfer: transfer(nclx.transfer_characteristics()),
-        primaries: primaries(nclx.color_primaries()),
+    if let Some(nclx) = handle.color_profile_nclx() {
+        return super::cicp::color_space(
+            code(nclx.color_primaries() as i32),
+            code(nclx.transfer_characteristics() as i32),
+        );
+    }
+    match handle.color_profile_raw() {
+        Some(profile) => super::icc::color_space(&profile.data, ColorSpace::SRGB),
+        None => ColorSpace::SRGB,
     }
 }
 
-fn transfer(characteristics: TransferCharacteristics) -> Transfer {
-    use TransferCharacteristics::*;
-    match characteristics {
-        // The one exact match: sRGB's own curve.
-        IEC_61966_2_1 => Transfer::Srgb,
-        // The BT.709 camera OETF and its BT.601 and BT.2020 relatives. They
-        // are not literally the sRGB curve, but content tagged with them is
-        // graded on, and meant for, an sRGB-like display; treating them as
-        // sRGB is what every viewer does and what the grader saw.
-        ITU_R_BT_709_5 | ITU_R_BT_601_6 | ITU_R_BT_2020_2_10bit | ITU_R_BT_2020_2_12bit => {
-            Transfer::Srgb
-        }
-        ITU_R_BT_2100_0_PQ => Transfer::Pq,
-        ITU_R_BT_2100_0_HLG => Transfer::Hlg,
-        Linear => Transfer::Linear,
-        ITU_R_BT_470_6_System_M => Transfer::Gamma(2.2),
-        ITU_R_BT_470_6_System_B_G => Transfer::Gamma(2.8),
-        // Unspecified is the common case for a file written without a care;
-        // sRGB is the convention for a still image, and `--transfer` is there
-        // for when the convention is wrong.
-        _ => Transfer::Srgb,
-    }
-}
-
-fn primaries(color_primaries: ColorPrimaries) -> Primaries {
-    use ColorPrimaries::*;
-    match color_primaries {
-        ITU_R_BT_2020_2_and_2100_0 => Primaries::Bt2020,
-        // EG 432-1 is Display P3. RP 431-2 is the same three primaries with
-        // the DCI projector white point rather than D65; nothing here models
-        // that white point, and P3 is far closer than BT.709 would be.
-        SMPTE_EG_432_1 | SMPTE_RP_431_2 => Primaries::DisplayP3,
-        // BT.601 and the rest differ from BT.709 by less than the primaries
-        // this program can name, so they round to it.
-        _ => Primaries::Bt709,
-    }
+/// `libheif-rs` gives back C enums whose discriminants are the CICP code
+/// points themselves, except for the `Unknown` variant it invents when
+/// `libheif` reports a number it does not know. That one has no code point,
+/// so it becomes the one H.273 reserves for saying nothing.
+fn code(discriminant: i32) -> u8 {
+    u8::try_from(discriminant).unwrap_or(super::cicp::UNSPECIFIED)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use libheif_rs::{ColorPrimaries, TransferCharacteristics};
+
+    use crate::image::{Primaries, Transfer};
 
     #[test]
     fn ten_bit_white_reaches_full_scale() {
@@ -456,25 +437,32 @@ mod tests {
         assert_eq!(Scale::new(8).to_full(4000), u16::MAX);
     }
 
+    /// The enum discriminants have to *be* the CICP code points, or the
+    /// shared translation is handed the wrong numbers and every tagged HEIF
+    /// silently reads as sRGB.
     #[test]
-    fn cicp_codes_become_the_colour_space_they_name() {
+    fn the_enum_discriminants_are_the_cicp_code_points() {
         use ColorPrimaries as P;
         use TransferCharacteristics as T;
 
-        assert_eq!(transfer(T::IEC_61966_2_1), Transfer::Srgb);
-        assert_eq!(transfer(T::ITU_R_BT_709_5), Transfer::Srgb);
-        assert_eq!(transfer(T::ITU_R_BT_2100_0_PQ), Transfer::Pq);
-        assert_eq!(transfer(T::ITU_R_BT_2100_0_HLG), Transfer::Hlg);
-        assert_eq!(transfer(T::Linear), Transfer::Linear);
-        assert_eq!(transfer(T::ITU_R_BT_470_6_System_M), Transfer::Gamma(2.2));
-        // Anything unnamed falls back to what an untagged still image means.
-        assert_eq!(transfer(T::Unspecified), Transfer::Srgb);
-        assert_eq!(transfer(T::Unknown), Transfer::Srgb);
+        assert_eq!(code(T::IEC_61966_2_1 as i32), 13);
+        assert_eq!(code(T::ITU_R_BT_2100_0_PQ as i32), 16);
+        assert_eq!(code(T::ITU_R_BT_2100_0_HLG as i32), 18);
+        assert_eq!(code(T::Linear as i32), 8);
+        assert_eq!(code(P::ITU_R_BT_709_5 as i32), 1);
+        assert_eq!(code(P::ITU_R_BT_2020_2_and_2100_0 as i32), 9);
+        assert_eq!(code(P::SMPTE_EG_432_1 as i32), 12);
 
-        assert_eq!(primaries(P::ITU_R_BT_709_5), Primaries::Bt709);
-        assert_eq!(primaries(P::SMPTE_EG_432_1), Primaries::DisplayP3);
-        assert_eq!(primaries(P::ITU_R_BT_2020_2_and_2100_0), Primaries::Bt2020);
-        assert_eq!(primaries(P::Unspecified), Primaries::Bt709);
+        // And the invented variants, which stand for no code point at all,
+        // must land on "unspecified" rather than on a real space.
+        assert_eq!(
+            super::super::cicp::transfer(code(T::Unknown as i32)),
+            Transfer::Srgb
+        );
+        assert_eq!(
+            super::super::cicp::primaries(code(P::Unknown as i32)),
+            Primaries::Bt709
+        );
     }
 
     /// Grey must not be widened to RGB, and a deep file must not be asked for

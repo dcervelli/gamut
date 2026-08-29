@@ -236,14 +236,41 @@ right strip the histogram toggle.
 | TIFF | [`tiff`](https://crates.io/crates/tiff) directly |
 | HEIF — HEIC, AVIF | [`libheif-rs`](https://crates.io/crates/libheif-rs), onto the system `libheif` |
 | Ultra HDR containers, ICC profiles | [`ultrahdr-rs`](https://crates.io/crates/ultrahdr-rs), [`moxcms`](https://crates.io/crates/moxcms) |
+| PNG `cICP` and `iCCP` chunks | [`png`](https://crates.io/crates/png), which `image` already carries |
 
 The decoder is chosen by content, falling back to the file extension for
 formats without a recognisable header. Files are streamed rather than read
 into memory whole, so opening a 600 MB raster does not begin by copying it —
-JPEG excepted, because both the things below live in its container rather
-than in its pixels.
+JPEG excepted, because its gain map sits past the pixels and the reader that
+finds it needs the file as one slice.
 
-### JPEG: gain maps and profiles
+### Saying what the numbers mean
+
+Three formats state their colour space rather than leaving it to convention,
+and they do it in two vocabularies.
+
+**CICP code points** — the small integers of ITU-T H.273 — are the precise
+form, because they name a transfer function this program models exactly. HEIF
+carries them in an `nclx` box, PNG in a `cICP` chunk; one translation in
+`decode::cicp` serves both, so a third format that carries them is a matter of
+reading two bytes. A `cICP` chunk is the whole of how a PNG says it is BT.2100
+PQ or HLG, and `image` surfaces nothing of it, which is why `png` is a direct
+dependency for the header pass.
+
+**ICC profiles** are the other form, and the one a phone JPEG uses. Only what
+this program's colour model can act on is taken from a profile: the primaries,
+matched against the four it can name by comparing colorants rather than by
+reading description text, and a transfer function only where the profile
+states a plain power law. Where a file carries both vocabularies the code
+points win.
+
+PQ and HLG are treated as display-referred alongside sRGB. They are absolute
+curves — 1.0 is reference white and the headroom above it was put there on
+purpose — so the startup window stays at 0..1 and the tone map deals with what
+is above, rather than stretching each frame's observed range and undoing the
+grading.
+
+### JPEG: gain maps
 
 A JPEG from a recent phone is two images. The first is the ordinary graded
 photograph every viewer has always shown; the second, typically a quarter of
@@ -265,12 +292,9 @@ already, and guessing here how bright the monitor is would only take that
 choice away. `--no-gain-map` shows the SDR base image instead, which is worth
 having when the two need comparing.
 
-The same pass reads the **ICC profile**, because a phone JPEG is Display P3
-far more often than it is sRGB, and P3 numbers shown as sRGB come out
-visibly flat. Only what this program's colour model can act on is taken from
-the profile: the primaries, matched against the four it can name by comparing
-colorants rather than by reading description text, and a transfer function
-only where the profile states a plain power law.
+The same pass reads the ICC profile, because a phone JPEG is Display P3 far
+more often than it is sRGB, and P3 numbers shown as sRGB come out visibly
+flat.
 
 ### TIFF
 
@@ -371,16 +395,18 @@ EXIF orientation is not applied, so a rotated phone JPEG shows unrotated. HEIF
 is the exception, and only because its rotation lives in the container rather
 than in a metadata tag.
 
-Embedded ICC profiles are read for JPEG only. PNG carries one too, and a HEIF
-tagged with a profile instead of the CICP codes — some cameras write that —
-still reads as sRGB when it may be Display P3. `--primaries p3` remains the
-way out for both.
+Embedded ICC profiles are read for JPEG, PNG and HEIF, which is every format
+here that can carry one. TIFF can too, and does not.
 
 Gain maps are read for JPEG only. HEIF can carry one as an auxiliary image,
 which is how Apple stores HDR photographs, and that is not implemented; such a
-file shows its SDR base. A gain map running the other way — where the stored
-image is the HDR one — is refused rather than applied, since applying it
-backwards would brighten what was already bright.
+file shows its SDR base. The obstacle is not the arithmetic, which is the same
+code the JPEG path already runs, but the metadata: `libheif` 1.23 exposes no
+gain map API at all, so reaching it would mean either walking the ISOBMFF
+boxes for an ISO 21496-1 `tmap` item or reverse-engineering Apple's maker
+note. Worth revisiting when `libheif` exposes it. A gain map running the other
+way — where the stored image is the HDR one — is refused rather than applied,
+since applying it backwards would brighten what was already bright.
 
 Reconstruction costs memory: the result is four 32-bit floats per pixel, so a
 12-megapixel photograph is a 200 MB buffer where the base image alone was 12
@@ -393,7 +419,7 @@ crate.
 cargo test
 ```
 
-100 tests over the transfer functions and primaries matrices, texture format
+108 tests over the transfer functions and primaries matrices, texture format
 selection (including the device-capability fallbacks), the statistics and
 window logic, the decoder registry, the CICP translation, ICC profile
 recognition, gain map reconstruction, the view geometry, and the reload
@@ -414,14 +440,22 @@ untouched, and that a transparent texel does not bleed its colour into its
 neighbour. Where no adapter can be had they report success rather than failing
 for a reason that has nothing to do with the code.
 
-`test_images/` holds 47 real fixtures — see its README — covering every pixel
+`test_images/` holds 50 real fixtures — see its README — covering every pixel
 layout the decoder can produce and every per-format encoding with its own code
 path: PNG bit depths, palettes and interlacing; progressive and subsampled
 JPEG; TIFF compressions, byte orders, tiling, BigTIFF, the floating-point
 predictor, signed samples and no-data; Radiance RGBE; EXR associated alpha;
 HEIC monochrome, 10-bit, `irot` and its colour tags, and the same container
-with AV1 inside. Each is checked for dimensions, channel layout, sample type, colour
-space, alpha mode and actual pixel values, and then pushed through the upload
-planner under both GPU capability sets. A test asserts the directory and the
-fixture table stay in step, so a file cannot be added without a test.
-Regenerate them with `test_images/generate.sh`.
+with AV1 inside. Three of them exist for the colour tags in particular: a PNG
+carrying `cICP` for BT.2100 PQ, a PNG carrying `iCCP` for Display P3, and a
+HEIF tagged by ICC profile with no `nclx` box beside it. Each is checked for
+dimensions, channel layout, sample type, colour space, alpha mode and actual
+pixel values, and then pushed through the upload planner under both GPU
+capability sets. A test asserts the directory and the fixture table stay in
+step, so a file cannot be added without a test.
+
+Regenerate them with `test_images/generate.sh`, which needs ImageMagick,
+`heif-enc`, GDAL and Python. Neither `cICP` nor `iCCP` is a chunk ImageMagick
+will write, so those two are spliced in afterwards with their CRCs computed.
+`display-p3.icc` sits beside the fixtures as an input rather than an output;
+`examples/make-icc.rs` is what produced it.

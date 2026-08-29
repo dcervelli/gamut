@@ -13,6 +13,7 @@ use anyhow::{Context, Result, anyhow};
 
 use super::{ColorSpace, DecodedImage, Primaries, Transfer};
 
+mod cicp;
 mod heif;
 mod icc;
 mod image_rs;

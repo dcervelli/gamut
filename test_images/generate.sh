@@ -17,6 +17,9 @@
 # layout a decoder can hand back, plus the per-format encodings that have
 # their own code path (bit depths, palettes, interlacing, progressive JPEG,
 # TIFF compressions and byte orders, HEIF colour tags and transformations).
+#
+# `display-p3.icc` is an input rather than an output: it is checked in beside
+# the fixtures and is not regenerated here. See `examples/make-icc.rs`.
 set -euo pipefail
 
 quad() { magick \( -size 16x12 "xc:$1" -size 16x12 "xc:$2" +append \) \
@@ -62,6 +65,47 @@ magick "$work/color-alpha.png" PNG8:png-palette-alpha.png
 magick "$work/gray.png" -depth 1 -define png:bit-depth=1 -define png:color-type=0 png-gray1.png
 magick "$work/gray.png" -depth 4 -define png:bit-depth=4 -define png:color-type=0 png-gray4.png
 magick "$work/color.png" -interlace PNG png-interlaced.png
+
+# Neither `cICP` nor `iCCP` is a chunk ImageMagick will write, and between
+# them they are the whole of how a PNG says what its numbers mean, so both are
+# spliced in after `IHDR` with their CRCs computed.
+png_tag() {  # cicp src dst p t m r  |  iccp src dst profile
+  python3 - "$@" <<'TAG'
+import struct, sys, zlib
+
+mode, src, dst = sys.argv[1:4]
+if mode == "cicp":
+    # Colour primaries, transfer function, matrix coefficients, full range.
+    kind, body = b"cICP", bytes(int(value) for value in sys.argv[4:8])
+else:
+    profile = open(sys.argv[4], "rb").read()
+    kind = b"iCCP"
+    # Profile name, its terminator, the compression method, then the stream.
+    body = b"ICC profile\x00\x00" + zlib.compress(profile, 9)
+
+data = open(src, "rb").read()
+assert data[:8] == b"\x89PNG\r\n\x1a\n", src
+out, offset, done = bytearray(data[:8]), 8, False
+while offset < len(data):
+    (length,) = struct.unpack_from(">I", data, offset)
+    chunk = data[offset : offset + 12 + length]
+    out += chunk
+    offset += 12 + length
+    if chunk[4:8] == b"IHDR":
+        out += struct.pack(">I", len(body)) + kind + body
+        out += struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
+        done = True
+assert done, "no IHDR"
+open(dst, "wb").write(bytes(out))
+TAG
+}
+
+# 16-bit tagged BT.2100 PQ on BT.2020 primaries: the HDR path for PNG, and the
+# only way a PNG has of saying so.
+png_tag cicp png-rgb16.png png-cicp-pq.png 9 16 0 1
+# Display P3 with the sRGB curve, stated by a profile rather than by code
+# points: what a phone writes, and what the ICC reader is for.
+png_tag iccp png-rgb8.png png-icc-p3.png display-p3.icc
 
 # ---------------------------------------------------------------- JPEG
 magick "$work/color.png" -quality 95 -sampling-factor 4:4:4 jpeg-rgb.jpg
@@ -125,6 +169,13 @@ heif-enc -L --hevc --rotate-cw 180 -o heic-rotated.heic \
   "$work/color-upside-down.png" > /dev/null
 # The same container with AV1 inside instead of HEVC.
 heif-enc -L -A -o avif-rgb8.avif "$work/color.png" > /dev/null
+# A HEIF that states its colour space with an ICC profile and no `nclx` box,
+# which is what some cameras write. `heif-enc` has no way to embed a profile,
+# but ImageMagick carries the source PNG's through untouched — the pixels are
+# not converted, because there is no target profile to convert to. HEVC at
+# quality 100 is near-lossless rather than lossless, hence the tolerance on
+# this one fixture.
+magick png-icc-p3.png -quality 100 heic-icc-p3.heic
 
 # -------------------------------------------- TIFF as measurement rasters
 # What elevation models and scientific output actually look like, and what

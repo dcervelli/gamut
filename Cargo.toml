@@ -14,6 +14,10 @@ image = { version = "0.25.10", default-features = false, features = ["exr", "hdr
 # would refuse to compile against a perfectly capable older release.
 libheif-rs = { version = "3.0.0", default-features = false, features = ["v1_20"] }
 moxcms = "0.8.1"
+# Header parsing only: `image` decodes the pixels but surfaces nothing of a
+# PNG's `cICP` chunk, which is the whole of how a PNG says it is HDR. Already
+# in the tree as `image`'s own decoder, so this costs no new dependency.
+png = "0.18.1"
 pollster = "1.0.1"
 tiff = "0.11.3"
 # The container half of Ultra HDR: finds the gain map through MPF and XMP and
