@@ -77,7 +77,14 @@ impl super::Decoder for TiffRs {
             .ok()
             .and_then(|value| value.trim().parse::<f32>().ok());
 
-        let samples = into_samples(decoder.read_image()?, channels)?;
+        let result = decoder.read_image()?;
+        // The check above was against the *stored* depth; `into_samples`
+        // widens every signed or wide type to `f32`, up to four times as
+        // large. Re-check against what will actually be held before the
+        // widening allocates it, so a signed 8-bit raster at the ceiling
+        // cannot balloon four times past it.
+        super::check_decoded_size(width, height, channels.count(), resident_bits(&result))?;
+        let samples = into_samples(result, channels)?;
 
         let expected = width as usize * height as usize * channels.count();
         if samples.len() != expected {
@@ -97,6 +104,18 @@ impl super::Decoder for TiffRs {
         );
         image.nodata = nodata;
         Ok(image)
+    }
+}
+
+/// The bit depth `into_samples` will actually hold a result at, which is the
+/// stored depth only for the three types it keeps as they are; every other
+/// type is widened to `f32`.
+fn resident_bits(result: &DecodingResult) -> u8 {
+    match result {
+        DecodingResult::U8(_) => 8,
+        DecodingResult::U16(_) => 16,
+        // F32 stays 32; everything else is widened to f32 (also 32).
+        _ => 32,
     }
 }
 

@@ -11,6 +11,7 @@ mod ui;
 mod view;
 mod watch;
 
+use std::path::Path;
 use std::process::ExitCode;
 
 use anyhow::Result;
@@ -19,12 +20,28 @@ use winit::event_loop::{ControlFlow, EventLoop};
 use app::App;
 use loader::Loader;
 
+/// Replaces control characters with the replacement character before a string
+/// reaches a terminal. A filename is attacker-chosen data, and a terminal
+/// reads bytes like `\e]0;…\a` (retitle) or `\e[2J` (clear) or an OSC 52
+/// clipboard write as commands; nothing this program prints should be able to
+/// carry one. Ordinary names pass through unchanged.
+pub(crate) fn escape_controls(text: &str) -> String {
+    text.chars()
+        .map(|c| if c.is_control() { '\u{FFFD}' } else { c })
+        .collect()
+}
+
+/// A path rendered for a message, with any control characters defused.
+pub(crate) fn shown_path(path: &Path) -> String {
+    escape_controls(&path.display().to_string())
+}
+
 fn main() -> ExitCode {
     timing::begin();
     match run() {
         Ok(code) => code,
         Err(error) => {
-            eprintln!("image-view: {error:#}");
+            eprintln!("image-view: {}", escape_controls(&format!("{error:#}")));
             ExitCode::FAILURE
         }
     }

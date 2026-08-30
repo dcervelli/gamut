@@ -40,6 +40,13 @@ impl Transfer {
                 }
             }
             Transfer::Pq => {
+                // `value.max(0.0)` below would fold a NaN to 0.0 (`f32::max`
+                // returns the non-NaN operand), which then bins and windows as
+                // real data. Kept as NaN, it is filtered by the stats scan
+                // exactly as an sRGB or HLG NaN already is.
+                if value.is_nan() {
+                    return value;
+                }
                 const M1: f32 = 2610.0 / 16384.0;
                 const M2: f32 = 128.0 * 2523.0 / 4096.0;
                 const C1: f32 = 3424.0 / 4096.0;
@@ -64,7 +71,12 @@ impl Transfer {
                 // Nominal 1000 nit system gamma, normalised to reference white.
                 scene * (1000.0 / 203.0)
             }
-            Transfer::Gamma(gamma) => value.max(0.0).powf(gamma),
+            Transfer::Gamma(gamma) => {
+                if value.is_nan() {
+                    return value;
+                }
+                value.max(0.0).powf(gamma)
+            }
         }
     }
 
@@ -126,7 +138,18 @@ impl Transfer {
             "srgb" => Transfer::Srgb,
             "pq" => Transfer::Pq,
             "hlg" => Transfer::Hlg,
-            other => Transfer::Gamma(other.strip_prefix("gamma:")?.parse().ok()?),
+            other => {
+                let gamma: f32 = other.strip_prefix("gamma:")?.parse().ok()?;
+                // A non-positive or non-finite exponent is not a transfer
+                // function: `gamma:0` maps every sample to 1.0, and `gamma:nan`
+                // poisons the lookup table built from it. `icc.rs` already
+                // guards the exponent it reads from a profile; the command
+                // line gets the same guard.
+                if !gamma.is_finite() || gamma <= 0.0 {
+                    return None;
+                }
+                Transfer::Gamma(gamma)
+            }
         })
     }
 }

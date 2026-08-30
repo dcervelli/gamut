@@ -20,7 +20,7 @@
 //! first frame is a partial patch still arrives whole; the frames after it
 //! are not shown, because nothing downstream of here has a clock.
 
-use std::io::BufReader;
+use std::io::{BufReader, SeekFrom};
 
 use anyhow::{Context, Result, anyhow, bail};
 
@@ -70,15 +70,21 @@ impl super::Decoder for Webp {
         source: &mut dyn super::ReadSeek,
         _overrides: super::Overrides,
     ) -> Result<DecodedImage> {
+        // The length settles how much a metadata chunk may claim: a chunk
+        // lives in the file, so it cannot be larger than the file, however
+        // large its declared size says. Taken before the decoder borrows the
+        // source.
+        let length = source
+            .seek(SeekFrom::End(0))
+            .context("reading the WebP container")?;
+        source
+            .seek(SeekFrom::Start(0))
+            .context("reading the WebP container")?;
+
         // The decoder reads the container in small pieces — chunk headers,
         // then a seek to each one — so it wants a buffer in front of it.
         let mut decoder =
             WebPDecoder::new(BufReader::new(source)).context("reading the WebP container")?;
-        // The stock limit is `usize::MAX`. Match the ceiling every other
-        // decoder here uses, so one format is not quietly laxer than another.
-        // The ceiling is 4 GiB and does not fit a 32-bit `usize`, where the
-        // address space is the tighter limit of the two anyway.
-        decoder.set_memory_limit(usize::try_from(super::MAX_DECODED_BYTES).unwrap_or(usize::MAX));
 
         let (width, height) = decoder.dimensions();
         // Both bitstreams are 8-bit, and alpha is the only thing that varies:
@@ -90,6 +96,15 @@ impl super::Decoder for Webp {
             Channels::Rgb
         };
         super::check_decoded_size(width, height, channels.count(), 8)?;
+
+        // The stock limit is `usize::MAX`; the decoder zeroes a chunk's
+        // declared size before reading it, so a tiny file declaring a 4 GiB
+        // `ICCP` chunk would otherwise allocate 4 GiB. Bound it by what the
+        // file could hold or the pixels need, whichever is larger — never the
+        // global ceiling, which a 30-byte file has no business reaching.
+        let decoded = u64::from(width) * u64::from(height) * channels.count() as u64;
+        let budget = length.max(decoded).min(super::MAX_DECODED_BYTES);
+        decoder.set_memory_limit(usize::try_from(budget).unwrap_or(usize::MAX));
 
         // Read the metadata chunks before the pixels. Both seek away from
         // where the bitstream sits, and doing it first keeps the one

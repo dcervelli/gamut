@@ -261,7 +261,21 @@ impl DecodedImage {
         if self.width == 0 || self.height == 0 {
             return Err("image has zero size".into());
         }
-        let expected = self.width as usize * self.height as usize * self.samples.channels().count();
+        // Checked, since this is the last guard before the sample count is
+        // trusted by the upload path; a wrapping product could make a short
+        // buffer look the right length. Nothing that reaches here has dodged
+        // the size ceiling, so the overflow is a belt-and-braces case.
+        let expected = (self.width as usize)
+            .checked_mul(self.height as usize)
+            .and_then(|pixels| pixels.checked_mul(self.samples.channels().count()));
+        let Some(expected) = expected else {
+            return Err(format!(
+                "{}x{} {:?} overflows the addressable range",
+                self.width,
+                self.height,
+                self.samples.channels(),
+            ));
+        };
         if self.samples.len() != expected {
             return Err(format!(
                 "decoder produced {} components, expected {expected} for {}x{} {:?}",

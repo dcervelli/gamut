@@ -133,7 +133,11 @@ impl Stats {
         let mut histogram = [0u32; BINS];
         let mut counted = 0u32;
         let span = max - min;
-        let scale = (span > 0.0).then(|| (BINS - 1) as f32 / span);
+        // A span at or below the smallest normal float is treated as flat:
+        // dividing by a subnormal gives an infinite scale, which then bins
+        // every sample into the two ends. The clamps downstream keep it from
+        // going out of range, but the plot it draws is a lie.
+        let scale = (span > f32::MIN_POSITIVE).then(|| (BINS - 1) as f32 / span);
 
         let axis_span = axis_max - axis_min;
         let mut plot = Plot {
@@ -148,7 +152,7 @@ impl Stats {
         };
         // A flat image spans nothing to plot against; leaving the counts at
         // zero draws an empty panel rather than one misleading spike.
-        let axis_scale = (axis_span > 0.0).then(|| (BINS - 1) as f32 / axis_span);
+        let axis_scale = (axis_span > f32::MIN_POSITIVE).then(|| (BINS - 1) as f32 / axis_span);
 
         if scale.is_some() || axis_scale.is_some() {
             values.for_each(|encoded, linear| {

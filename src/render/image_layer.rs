@@ -242,6 +242,11 @@ impl ImageLayer {
     }
 }
 
+/// How much of an image `write_texture` stages at once. 64 MiB keeps the
+/// mappable staging buffer small while still copying in few enough calls that
+/// the per-call overhead is nothing beside the decode that produced the bytes.
+const BAND_BYTES: usize = 64 * 1024 * 1024;
+
 /// The GPU half of opening a file: everything needed to turn decoded samples
 /// into a texture, and nothing that has to stay on one thread. Every field is
 /// a handle wgpu shares internally, so a clone costs a reference count.
@@ -288,21 +293,58 @@ impl Upload {
         // The bytes are copied into staging here and reach the texture at the
         // next submit, whichever thread makes it. That is always a later one
         // than this: the image is installed before it is ever drawn from.
-        self.queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            plan.pixels.as_bytes(),
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(plan.bytes_per_row),
-                rows_per_image: Some(image.height),
-            },
-            size,
-        );
+        //
+        // Written in horizontal bands rather than in one call. `write_texture`
+        // stages a buffer the size of the copy, so a single call for a
+        // multi-gigabyte image would ask the driver for a multi-gigabyte
+        // mappable buffer — over `max_buffer_size` on most devices, and a
+        // needless allocation spike even where it fits. A band is bounded no
+        // matter how large the image. The error scope turns a driver refusal
+        // (out of memory, or a size still past a limit) into an error the
+        // loader walks past, rather than the uncaptured-error panic it would
+        // otherwise be.
+        let oom_scope = self.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+        let validation_scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
+
+        let bytes = plan.pixels.as_bytes();
+        let row = plan.bytes_per_row as usize;
+        let rows_per_band = (BAND_BYTES / row.max(1)).clamp(1, image.height as usize);
+        let mut y = 0u32;
+        while y < image.height {
+            let band = rows_per_band.min((image.height - y) as usize) as u32;
+            let start = y as usize * row;
+            let end = start + band as usize * row;
+            self.queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d { x: 0, y, z: 0 },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &bytes[start..end],
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(plan.bytes_per_row),
+                    rows_per_image: Some(band),
+                },
+                wgpu::Extent3d {
+                    width: image.width,
+                    height: band,
+                    depth_or_array_layers: 1,
+                },
+            );
+            y += band;
+        }
+
+        // Popped in reverse order to creation, as the scope stack requires.
+        let validation = pollster::block_on(validation_scope.pop());
+        let out_of_memory = pollster::block_on(oom_scope.pop());
+        if let Some(error) = validation {
+            return Err(anyhow!("the GPU rejected the image: {error}"));
+        }
+        if let Some(error) = out_of_memory {
+            return Err(anyhow!("not enough GPU memory for the image: {error}"));
+        }
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let bindings = vec![binding(&self.device, &self.layout, &view)];

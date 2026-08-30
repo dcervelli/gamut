@@ -12,8 +12,11 @@ use super::{Current, FrameInput, Reading, TEXT_SIZE};
 /// first however narrow the window gets.
 pub(super) fn fit_segments(text: &mut dyn TextMeasure, segments: &[String], width: f32) -> String {
     const SEPARATOR: &str = "   \u{00b7}   ";
-    let mut joined = segments.first().cloned().unwrap_or_default();
-    for segment in &segments[1..] {
+    let Some((first, rest)) = segments.split_first() else {
+        return String::new();
+    };
+    let mut joined = first.clone();
+    for segment in rest {
         let candidate = format!("{joined}{SEPARATOR}{segment}");
         if text.measure_text(&candidate, TEXT_SIZE)[0] > width {
             break;

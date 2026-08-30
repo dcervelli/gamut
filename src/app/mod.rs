@@ -206,7 +206,12 @@ impl App {
         }
         let image = self.current.as_ref()?.size();
         let point = self.view.placement(image, viewport).image_point(cursor);
-        if point[0] < 0.0 || point[1] < 0.0 || point[0] >= image[0] || point[1] >= image[1] {
+        // Written as a positive range test rather than four negated bounds so
+        // that a NaN coordinate is rejected: every `<`/`>=` comparison is
+        // false for NaN, so the old form let a NaN through to read as pixel
+        // (0, 0) — a coordinate the readout must never invent.
+        let inside = (0.0..image[0]).contains(&point[0]) && (0.0..image[1]).contains(&point[1]);
+        if !inside {
             return None;
         }
         Some([point[0] as u32, point[1] as u32])
@@ -355,7 +360,7 @@ impl App {
                 None => match renderer.uploader().run(&image) {
                     Ok(uploaded) => uploaded,
                     Err(error) => {
-                        eprintln!("image-view: {error:#}");
+                        eprintln!("image-view: {}", crate::escape_controls(&format!("{error:#}")));
                         return false;
                     }
                 },
@@ -399,7 +404,7 @@ impl App {
         let failed = match decoded.outcome {
             Ok(ready) => !self.apply(decoded.file, ready),
             Err(error) => {
-                eprintln!("image-view: {error:#}");
+                eprintln!("image-view: {}", crate::escape_controls(&format!("{error:#}")));
                 true
             }
         };
@@ -493,7 +498,7 @@ impl App {
             Ok(()) => self.reported_error = false,
             Err(error) => {
                 if !self.reported_error {
-                    eprintln!("image-view: {error:#}");
+                    eprintln!("image-view: {}", crate::escape_controls(&format!("{error:#}")));
                     self.reported_error = true;
                 }
             }
@@ -570,7 +575,7 @@ impl ApplicationHandler<Decoded> for App {
         let mut renderer = match Renderer::new(window.clone(), self.hdr) {
             Ok(renderer) => renderer,
             Err(error) => {
-                eprintln!("image-view: {error:#}");
+                eprintln!("image-view: {}", crate::escape_controls(&format!("{error:#}")));
                 event_loop.exit();
                 return;
             }
@@ -585,7 +590,7 @@ impl ApplicationHandler<Decoded> for App {
                     current.stored = renderer.image_format_label();
                 }
                 Err(error) => {
-                    eprintln!("image-view: {error:#}");
+                    eprintln!("image-view: {}", crate::escape_controls(&format!("{error:#}")));
                     event_loop.exit();
                     return;
                 }

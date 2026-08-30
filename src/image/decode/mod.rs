@@ -13,7 +13,7 @@ use anyhow::{Context, Result, anyhow};
 
 use super::{ColorSpace, DecodedImage, Primaries, Transfer};
 
-use limits::{MAX_DECODED_BYTES, check_decoded_size};
+use limits::{MAX_DECODED_BYTES, MAX_TEXTURE_DIMENSION, check_decoded_size};
 
 mod dynamic;
 mod heif;
@@ -126,6 +126,19 @@ pub fn supported_extensions() -> Vec<&'static str> {
 /// Opens `path` and works out which decoder owns it, reading only the header.
 /// The cheap half of [`load`], and all of [`probe`].
 fn open(path: &Path) -> Result<(BufReader<File>, &'static dyn Decoder)> {
+    // Only a regular file, decided by a `stat` before the open. A directory, a
+    // device such as `/dev/zero`, or a FIFO would each otherwise reach a
+    // decoder: `/dev/zero` feeds a decoder that reads to the end (JPEG) until
+    // it exhausts memory, and — the reason this comes before `File::open`
+    // rather than after — opening a FIFO with no writer blocks in `open(2)`
+    // itself, with no window and no way out. `stat` follows symlinks and does
+    // not block, so it settles the question first. This is the one place every
+    // format passes through, so the check need only live here.
+    let metadata = std::fs::metadata(path)
+        .with_context(|| format!("reading {}", path.display()))?;
+    if !metadata.is_file() {
+        return Err(anyhow!("{} is not a regular file", path.display()));
+    }
     let file = File::open(path).with_context(|| format!("opening {}", path.display()))?;
     let mut source = BufReader::new(file);
 
@@ -214,6 +227,20 @@ fn fill(source: &mut impl Read, buffer: &mut [u8]) -> std::io::Result<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A directory, a FIFO or a device is not something to hand a decoder:
+    /// `/dev/zero` would be read until memory ran out, and a FIFO would block
+    /// the reader for ever. The `stat` in `open` turns each into a plain
+    /// error. A directory is the case a test can make portably.
+    #[test]
+    fn a_non_regular_file_is_refused() {
+        let error = load(Path::new("test_images"), Overrides::default())
+            .expect_err("a directory is not an image");
+        assert!(
+            format!("{error:#}").contains("not a regular file"),
+            "{error:#}"
+        );
+    }
 
     /// Two decoders claiming the same extension would make the choice depend
     /// on registry order, which nobody would think to check.

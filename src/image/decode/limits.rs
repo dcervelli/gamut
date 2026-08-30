@@ -15,6 +15,11 @@ use anyhow::{Result, anyhow};
 /// the OOM killer.
 pub(crate) const MAX_DECODED_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
+/// The largest extent along one axis this build can display, matching
+/// `max_texture_dimension_2d` on current hardware. Used to bound the
+/// dimensions a decoder will accept, independently of the byte ceiling.
+pub(crate) const MAX_TEXTURE_DIMENSION: u32 = 32768;
+
 /// Refuses an image too large to hold, using only what the header states, so
 /// that nothing is decoded before the decision is made.
 pub(crate) fn check_decoded_size(

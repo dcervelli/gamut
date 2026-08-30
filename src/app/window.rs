@@ -16,10 +16,21 @@ const MAX_WINDOW_FRACTION: f64 = 0.85;
 /// reaches today.
 const DEFAULT_IMAGE: [f32; 2] = [960.0, 640.0];
 
+/// The most characters of a name to keep in the title and status bar. A name
+/// is laid out unwrapped and reshaped every frame, so a pathological one — the
+/// `path.display()` fallback can be as long as the command line allows — would
+/// cost real time. Ordinary names are far shorter than this.
+const MAX_LABEL_CHARS: usize = 256;
+
 pub(super) fn file_label(path: &Path) -> String {
-    path.file_name()
+    let name = path
+        .file_name()
         .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.display().to_string())
+        .unwrap_or_else(|| path.display().to_string());
+    match name.char_indices().nth(MAX_LABEL_CHARS) {
+        Some((cut, _)) => format!("{}\u{2026}", &name[..cut]),
+        None => name,
+    }
 }
 
 pub(super) fn window_title(path: &Path) -> String {

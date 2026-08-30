@@ -19,10 +19,16 @@ image = { version = "0.25.10", default-features = false, features = ["bmp", "exr
 # the EXIF orientation and the animation canvas all live in the RIFF container
 # beside the pixels, and `ImageReader` hands back only the pixels.
 image-webp = "0.2.4"
-# `v1_20` rather than the crate's default `latest`: it is the oldest `libheif`
-# whose security limits this build can all raise, and pinning to the newest
-# would refuse to compile against a perfectly capable older release.
-libheif-rs = { version = "3.0.0", default-features = false, features = ["v1_20"] }
+# `v1_23` to match the security-limits struct of the libheif this links
+# against. `SecurityLimits::new()` copies the C library's global limits, which
+# carry that library's own `version` field (4 for libheif 1.23); a binding
+# older than the library then hands that version-4 struct back to
+# `heif_context_set_security_limits`, which reads the version-3/4 fields from
+# past the end of the shorter Rust struct — an out-of-bounds read across FFI.
+# The binding must therefore be at least as new as the library: an older
+# library than the binding fails cleanly at build time via `system-deps`,
+# which is the safe direction to err in.
+libheif-rs = { version = "3.0.0", default-features = false, features = ["v1_23"] }
 moxcms = "0.8.1"
 # Header parsing only: `image` decodes the pixels but surfaces nothing of a
 # PNG's `cICP` chunk, which is the whole of how a PNG says it is HDR. Already

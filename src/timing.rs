@@ -20,6 +20,21 @@ use std::time::{Duration, Instant};
 /// there is no process start to speak of and the marks below stay quiet.
 static START: OnceLock<Instant> = OnceLock::new();
 
+/// Whether the timing marks are printed at all. Off unless `--timing` asks for
+/// them: a viewer should be silent on stdout, not narrate every file it opens
+/// — and the names it would print are attacker-chosen.
+static ENABLED: AtomicBool = AtomicBool::new(false);
+
+/// Turns the timing marks on. Called from argument parsing when `--timing` is
+/// given, before any mark is reached.
+pub fn enable() {
+    ENABLED.store(true, Ordering::Relaxed);
+}
+
+fn enabled() -> bool {
+    ENABLED.load(Ordering::Relaxed)
+}
+
 /// Cleared by the first presented frame that had an image in it.
 static FIRST_FRAME: AtomicBool = AtomicBool::new(false);
 
@@ -45,12 +60,12 @@ pub fn window_open() {
 /// One file read and turned into pixels, however it was reached: the file the
 /// command line named, a step to the next one, or a re-read after a write.
 pub fn decoded(path: &Path, elapsed: Duration) {
-    if START.get().is_some() {
+    if enabled() {
         let name = path
             .file_name()
             .unwrap_or(path.as_os_str())
             .to_string_lossy();
-        report(&format!("decode {name}"), elapsed);
+        report(&format!("decode {}", crate::escape_controls(&name)), elapsed);
     }
 }
 
@@ -67,5 +82,8 @@ pub fn first_image_frame() {
 }
 
 fn report(event: &str, elapsed: Duration) {
+    if !enabled() {
+        return;
+    }
     println!("[timing] {event}: {:.2} ms", elapsed.as_secs_f64() * 1e3);
 }

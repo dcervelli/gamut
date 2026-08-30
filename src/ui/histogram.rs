@@ -116,7 +116,13 @@ pub(super) fn draw(frame: &mut UiFrame, current: &Current, content: Rect, theme:
     if span > 0.0 {
         for value in [current.display.low, current.display.high] {
             let encoded = transfer.to_encoded(value);
+            // `clamp` passes a NaN straight through, so a non-finite window
+            // would put a NaN rectangle into the vertex buffer. Skip it: the
+            // marker for a degenerate window is simply not drawn.
             let position = ((encoded - axis_min) / span).clamp(0.0, 1.0);
+            if !position.is_finite() {
+                continue;
+            }
             frame.rect(
                 Rect::new(
                     bars.x + position * bars.width - 0.5,

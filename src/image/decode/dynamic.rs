@@ -27,6 +27,12 @@ pub(super) fn dimensions(source: &mut dyn ReadSeek) -> Result<Option<(u32, u32)>
 pub(super) fn limit<R: std::io::BufRead + Seek>(reader: &mut ::image::ImageReader<R>) {
     let mut limits = ::image::Limits::default();
     limits.max_alloc = Some(super::MAX_DECODED_BYTES);
+    // `max_alloc` is documented as advisory — some decoders honour it, some do
+    // not — while the dimension limits are strict for every one. Set them to
+    // the same ceiling the GPU imposes, so a format `image` decodes without
+    // consulting `max_alloc` (EXR, HDR) still cannot claim an unbounded size.
+    limits.max_image_width = Some(super::MAX_TEXTURE_DIMENSION);
+    limits.max_image_height = Some(super::MAX_TEXTURE_DIMENSION);
     reader.limits(limits);
 }
 

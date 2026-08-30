@@ -81,4 +81,10 @@ cargo test
 cargo clippy --all-targets    # clean
 cargo doc --no-deps           # no warnings
 cargo run --release -- test_images/png-rgb8.png --histogram
+cargo audit                   # no advisories against the pinned dependency versions
 ```
+
+Decoders parse untrusted files, so treat a panic on a malformed input as a
+bug: the loader turns one into a recoverable decode error, but every decode
+path should be size-checked before it allocates, and a new format wants a
+malformed fixture as well as a valid one.

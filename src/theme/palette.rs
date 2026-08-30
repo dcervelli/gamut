@@ -78,7 +78,21 @@ impl Palette {
 
     /// As [`Palette::load`], but from a named file, which is what makes the
     /// cascade testable against a palette other than this machine's.
+    /// The largest a palette file may be before it is ignored. A real
+    /// `colors.toml` is a few hundred bytes; the cap keeps this read — which
+    /// runs on the event-loop thread every time the theme changes — from
+    /// stalling on a huge file, a FIFO, or a device someone pointed the theme
+    /// directory at.
+    const MAX_BYTES: u64 = 64 * 1024;
+
     pub fn read(path: &Path) -> Option<Self> {
+        // A regular file, and a small one. `read_to_string` on a FIFO or
+        // `/dev/zero` would block the interface or exhaust memory, and it has
+        // no length of its own to stop at.
+        let metadata = fs::metadata(path).ok()?;
+        if !metadata.is_file() || metadata.len() > Self::MAX_BYTES {
+            return None;
+        }
         let text = fs::read_to_string(path).ok()?;
         let light_marker = path
             .parent()

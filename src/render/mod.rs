@@ -24,6 +24,7 @@ mod filter_tests;
 pub(crate) mod upload;
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context, Result, anyhow};
 use winit::window::Window;
@@ -94,11 +95,49 @@ pub struct Renderer {
     composite: Composite,
 }
 
+/// A GPU driver error would otherwise be a process-fatal panic (wgpu's default
+/// uncaptured-error handler), and on the loader thread that silently strands
+/// the app. Reported once instead: a hostile file that trips a device limit,
+/// or a driver reset, leaves a line on stderr rather than taking the window
+/// down.
+static GPU_ERROR_REPORTED: AtomicBool = AtomicBool::new(false);
+
+fn report_gpu_error(what: &str, detail: impl std::fmt::Display) {
+    if !GPU_ERROR_REPORTED.swap(true, Ordering::Relaxed) {
+        eprintln!("image-view: {what}: {detail}");
+    }
+}
+
+/// Installs the handlers that keep a GPU error from aborting the process, and
+/// clamps a size to what the device can actually hold.
+fn install_error_handlers(device: &wgpu::Device) {
+    device.on_uncaptured_error(Arc::new(|error| {
+        report_gpu_error("the GPU driver reported an error", error);
+    }));
+    device.set_device_lost_callback(|_reason, message| {
+        report_gpu_error("the GPU device was lost", message);
+    });
+}
+
+/// Clamps a surface size to the device's maximum texture dimension. A window
+/// dragged wider than the GPU can hold would otherwise make the offscreen
+/// targets fail to allocate, and with them the whole frame. Clamping scales
+/// the output down instead of crashing — a rare, graceful degradation.
+fn clamp_to_device(device: &wgpu::Device, width: u32, height: u32) -> (u32, u32) {
+    let limit = device.limits().max_texture_dimension_2d;
+    (width.min(limit).max(1), height.min(limit).max(1))
+}
+
 impl Renderer {
     pub fn new(window: Arc<Window>, hdr: HdrPreference) -> Result<Self> {
         let size = window.inner_size();
         let (width, height) = (size.width.max(1), size.height.max(1));
 
+        // `..._from_env` reads `WGPU_BACKEND`, `WGPU_ADAPTER_NAME`,
+        // `WGPU_POWER_PREF`, `WGPU_DEBUG`, `WGPU_VALIDATION` and
+        // `WGPU_GPU_BASED_VALIDATION` from the environment. They select the
+        // backend and toggle the driver's validation layers — the user's to
+        // set, but named here so the configuration is not invisible.
         let instance =
             wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
         let surface = instance
@@ -122,6 +161,8 @@ impl Renderer {
             ..Default::default()
         }))
         .context("requesting a GPU device")?;
+        install_error_handlers(&device);
+        let (width, height) = clamp_to_device(&device, width, height);
 
         let surface_capabilities = surface.get_capabilities(&adapter);
         let output = Output::choose(&surface_capabilities, hdr)
@@ -172,6 +213,7 @@ impl Renderer {
         if width == 0 || height == 0 {
             return;
         }
+        let (width, height) = clamp_to_device(&self.device, width, height);
         if width == self.config.width && height == self.config.height {
             return;
         }
@@ -266,8 +308,24 @@ impl Renderer {
                 label: Some("frame"),
             });
 
-        // Before the passes below, since a view that has just zoomed out past
-        // what the coarse chain covers builds the rest of it here.
+        // The interface is staged first, before the image layer records
+        // anything into the encoder. `ui.prepare` is the one step here that
+        // can fail — a full glyph atlas — and the image layer's `prepare`
+        // marks its coarse chain built as a side effect of recording it. Were
+        // that to run first, a text-atlas failure would drop the encoder
+        // unsubmitted while the chain still counted as built, and the image
+        // would go blank when zoomed out until the file was reloaded. Ordered
+        // this way, a failure here returns before the image layer touches its
+        // state. The two are otherwise independent.
+        self.ui.prepare(
+            &self.device,
+            &self.queue,
+            frame,
+            [self.config.width, self.config.height],
+            scale,
+        )?;
+        // A view that has just zoomed out past what the coarse chain covers
+        // builds the rest of it here.
         self.image_layer.prepare(
             &self.device,
             &self.queue,
@@ -279,13 +337,6 @@ impl Renderer {
             size,
             display,
         );
-        self.ui.prepare(
-            &self.device,
-            &self.queue,
-            frame,
-            [self.config.width, self.config.height],
-            scale,
-        )?;
         // Where an image quad lands, and so where transparency has to read as
         // a checkerboard rather than as the plain backdrop. Asked of the image
         // layer rather than assumed from `placement`, since a frame drawn

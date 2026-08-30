@@ -44,6 +44,7 @@ OPTIONS:
         --upscale <FILTER>  How to resample above 100%: nearest or bicubic
         --histogram         Start with the histogram showing
         --no-minimap        Start with the minimap off; it is on by default
+        --timing            Print decode and startup timings to stdout
     --                      Treat every later argument as a path
 ";
 
@@ -68,14 +69,26 @@ pub fn usage() -> String {
 pub fn first_readable(files: &[PathBuf]) -> Result<(usize, Option<[f32; 2]>)> {
     let mut skipped = Vec::new();
     for (index, path) in files.iter().enumerate() {
-        match crate::image::decode::probe(path) {
+        // `probe` runs a real header parser on the main thread before any
+        // window exists; a panic in one would take the process down before it
+        // drew anything. Caught, it is just another file that would not read.
+        let probed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            crate::image::decode::probe(path)
+        }))
+        .unwrap_or_else(|_| {
+            Err(anyhow::anyhow!(
+                "panicked while reading the header of {}",
+                path.display()
+            ))
+        });
+        match probed {
             Ok(size) => {
                 // Worth mentioning only once we know we are carrying on
                 // without them. If nothing can be read at all, the error we
                 // return is reported by `main`, and saying it here as well
                 // would print it twice.
                 for problem in &skipped {
-                    eprintln!("image-view: {problem:#}");
+                    eprintln!("image-view: {}", crate::escape_controls(&format!("{problem:#}")));
                 }
                 return Ok((index, size.map(|(w, h)| [w as f32, h as f32])));
             }
@@ -134,7 +147,7 @@ fn expand_directories(named: Vec<PathBuf>) -> Result<Vec<PathBuf>> {
         // Worth mentioning only once we know we are carrying on without them,
         // as with a file whose header will not read.
         for path in empty {
-            eprintln!("image-view: no images in {}", path.display());
+            eprintln!("image-view: no images in {}", crate::shown_path(&path));
         }
         return Ok(files);
     }
@@ -227,9 +240,18 @@ pub fn parse_args() -> Result<Option<Args>> {
                 }
                 Some("--exposure") => {
                     let value = next_value(&mut arguments, "--exposure")?;
-                    startup.exposure_stops = Some(value.parse().map_err(|_| {
+                    let stops: f32 = value.parse().map_err(|_| {
                         anyhow::anyhow!("`--exposure` needs a number, got `{value}`")
-                    })?);
+                    })?;
+                    // `nan` and `inf` both parse as `f32`, and unclamped they
+                    // would put a non-finite gain into the shader uniform, the
+                    // pixel readout and the status bar. The keyboard path
+                    // clamps to +/-16 stops; the command line gets the same
+                    // ceiling, and rejects a value that is not a number at all.
+                    if !stops.is_finite() {
+                        anyhow::bail!("`--exposure` needs a finite number, got `{value}`");
+                    }
+                    startup.exposure_stops = Some(stops.clamp(-16.0, 16.0));
                     continue;
                 }
                 Some("--upscale") => {
@@ -240,6 +262,10 @@ pub fn parse_args() -> Result<Option<Args>> {
                 }
                 Some("--histogram") => {
                     histogram = true;
+                    continue;
+                }
+                Some("--timing") => {
+                    crate::timing::enable();
                     continue;
                 }
                 Some("--no-minimap") => {

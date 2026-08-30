@@ -12,11 +12,13 @@
 
 mod gain_map;
 
-use anyhow::{Context, Result};
+use std::io::{Read, SeekFrom};
+
+use anyhow::{Context, Result, bail};
 
 use crate::image::{ColorSpace, DecodedImage};
 
-use super::{Overrides, ReadSeek, dynamic};
+use super::{MAX_DECODED_BYTES, Overrides, ReadSeek, dynamic};
 
 pub struct Jpeg;
 
@@ -40,8 +42,25 @@ impl super::Decoder for Jpeg {
     }
 
     fn decode(&self, source: &mut dyn ReadSeek, overrides: Overrides) -> Result<DecodedImage> {
-        let mut bytes = Vec::new();
-        source.read_to_end(&mut bytes).context("reading the file")?;
+        // JPEG is the one format read whole (the gain-map reader borrows a
+        // slice of the tail), so the length is bounded before the read: a
+        // decoded JPEG cannot exceed its file, so the same ceiling that caps
+        // the decoded image caps the bytes held. Without this a huge `.jpg`
+        // is read entirely into memory before anything looks at it.
+        let length = source.seek(SeekFrom::End(0)).context("reading the file")?;
+        if length > MAX_DECODED_BYTES {
+            bail!(
+                "{:.1} GB is too large to read, over the {:.1} GB this build will hold",
+                length as f64 / 1e9,
+                MAX_DECODED_BYTES as f64 / 1e9,
+            );
+        }
+        source.seek(SeekFrom::Start(0)).context("reading the file")?;
+        let mut bytes = Vec::with_capacity(length as usize);
+        source
+            .take(length)
+            .read_to_end(&mut bytes)
+            .context("reading the file")?;
         decode(&bytes, overrides)
     }
 }

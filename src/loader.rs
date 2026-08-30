@@ -17,7 +17,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::Instant;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use winit::event_loop::EventLoopProxy;
 
 use crate::image::decode::{self, Overrides};
@@ -209,6 +209,23 @@ fn absorb(command: Command, queued: &mut Option<Request>, upload: &mut Option<Up
     }
 }
 
+/// Runs one fallible stage, turning a panic into an error rather than letting
+/// it unwind the loader thread. A panic elsewhere is a bug and still aborts;
+/// this is only for the decoders, which must survive a hostile file.
+fn guard<T>(stage: &str, work: impl FnOnce() -> Result<T>) -> Result<T> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)) {
+        Ok(result) => result,
+        Err(payload) => {
+            let detail = payload
+                .downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| payload.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "no further detail".to_string());
+            Err(anyhow!("panicked while {stage}: {detail}"))
+        }
+    }
+}
+
 /// Reads one file, or gives up and returns `None` if the application went
 /// away while it was working.
 ///
@@ -227,22 +244,31 @@ fn read(request: Request, upload: Option<&Upload>, cancelled: &AtomicBool) -> Op
 
     let watch = Watch::new(&path);
     let started = Instant::now();
-    let decoded = decode::load(&path, overrides);
+    // Each stage runs behind a panic guard. Decoders here run C and Rust
+    // library code on bytes chosen by whoever wrote the file, and a panic in
+    // one of them would otherwise unwind the whole thread: the loader would
+    // then answer nothing ever again, and the window would sit in "loading"
+    // for good. Caught, a panic becomes an ordinary decode failure, which the
+    // event loop already knows how to step over.
+    let decoded = guard("decoding", || decode::load(&path, overrides));
     if cancelled.load(Ordering::Relaxed) {
         return None;
     }
 
-    let scanned = decoded.map(|image| {
+    let scanned = decoded.and_then(|image| {
         timing::decoded(&path, started.elapsed());
-        let stats = Stats::scan(&image);
-        (image, stats)
+        let stats = guard("scanning", || Ok(Stats::scan(&image)))?;
+        Ok((image, stats))
     });
     if cancelled.load(Ordering::Relaxed) {
         return None;
     }
 
     let outcome = scanned.and_then(|(image, stats)| {
-        let gpu = upload.map(|upload| upload.run(&image)).transpose()?;
+        let gpu = match upload {
+            Some(upload) => Some(guard("uploading to the GPU", || upload.run(&image))?),
+            None => None,
+        };
         Ok(Ready { image, stats, gpu })
     });
 
@@ -256,4 +282,26 @@ fn read(request: Request, upload: Option<&Upload>, cancelled: &AtomicBool) -> Op
         },
         outcome,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::guard;
+
+    #[test]
+    fn a_panic_in_a_stage_becomes_an_error_rather_than_unwinding() {
+        let ok = guard("working", || Ok::<u8, anyhow::Error>(7));
+        assert_eq!(ok.unwrap(), 7);
+
+        // The default hook still prints the panic; the point is that the
+        // thread survives it and hands back a description instead.
+        let hushed = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let caught = guard::<()>("decoding", || panic!("bad file"));
+        std::panic::set_hook(hushed);
+
+        let message = format!("{:#}", caught.unwrap_err());
+        assert!(message.contains("panicked while decoding"), "{message}");
+        assert!(message.contains("bad file"), "{message}");
+    }
 }

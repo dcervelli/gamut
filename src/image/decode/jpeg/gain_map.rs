@@ -97,10 +97,21 @@ impl<'a> Container<'a> {
 
         let map = decode(map_jpeg).context("decoding the gain map")?;
         let (map_width, map_height) = (map.width(), map.height());
-        let (channels, data) = if map.color().has_color() {
-            (3, map.to_rgb8().into_raw())
+        // The gain map's size is independent of the base's — a tiny picture
+        // may carry a huge map — so it is checked in its own right rather than
+        // trusted to be "about a quarter of the base". A zero dimension is
+        // refused outright: `GainMap` is built here by struct literal, which
+        // skips the library's own constructor, and `apply_gainmap` would then
+        // compute `width - 1` and index past the end of a zero-size buffer.
+        if map_width == 0 || map_height == 0 {
+            bail!("the gain map has a zero dimension");
+        }
+        let channels = if map.color().has_color() { 3 } else { 1 };
+        crate::image::decode::check_decoded_size(map_width, map_height, channels as usize, 8)?;
+        let data = if channels == 3 {
+            map.to_rgb8().into_raw()
         } else {
-            (1, map.to_luma8().into_raw())
+            map.to_luma8().into_raw()
         };
         let map = GainMap {
             width: map_width,
@@ -127,6 +138,10 @@ impl<'a> Container<'a> {
         )
         .map_err(|problem| anyhow!("applying the gain map: {problem}"))?;
 
+        // A copy, not a reinterpret: `hdr.data` is a `Vec<u8>` (alignment 1)
+        // and the samples are `f32` (alignment 4), so `bytemuck` cannot reuse
+        // the allocation. Both are bounded by the RGBA-f32 ceiling checked
+        // above, so the transient second buffer is bounded too.
         let samples: Vec<f32> = bytemuck::cast_slice(&hdr.data).to_vec();
         drop(hdr);
 
