@@ -138,7 +138,10 @@ fn expand_directories(named: Vec<PathBuf>) -> Result<Vec<PathBuf>> {
         }
         return Ok(files);
     }
-    let names: Vec<String> = empty.iter().map(|path| path.display().to_string()).collect();
+    let names: Vec<String> = empty
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect();
     bail!("no images in {}", names.join(", "))
 }
 
@@ -334,7 +337,7 @@ mod tests {
             );
         }
         assert!(
-            !files.contains(&fixtures().join("unsupported.ppm")),
+            !files.contains(&fixtures().join("unsupported.tga")),
             "a format we cannot read is not worth stepping through"
         );
     }
@@ -345,7 +348,7 @@ mod tests {
     #[test]
     fn files_are_left_as_they_were_named() {
         let named = vec![
-            fixtures().join("unsupported.ppm"),
+            fixtures().join("unsupported.tga"),
             PathBuf::from("no-such-file"),
         ];
         assert_eq!(

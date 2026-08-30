@@ -12,12 +12,14 @@ pixels, and where each format will surprise you.
 | WebP | `.webp` | 8-bit | ICC profile; orientation |
 | HEIF | `.heic` `.heif` `.hif` `.avif` | 8, 10 and 12-bit | Colour space, including HDR; ICC profile; orientation |
 | ICO | `.ico` | Whatever the chosen icon holds | ICC profile, for the larger icons |
+| BMP | `.bmp` | 8-bit | Nothing — always sRGB |
+| Netpbm | `.pnm` `.pbm` `.pgm` `.ppm` `.pam` | 8 and 16-bit | Nothing — always sRGB |
 | Radiance HDR | `.hdr` | 32-bit float | Nothing — linear by definition |
 | OpenEXR | `.exr` | 32-bit float | Nothing — linear by definition |
 
 Anything else is refused, with a message listing the extensions above. There
-is no support for camera raw or DNG, SVG, PSD, JPEG 2000, JPEG XL, PNM/PPM,
-TGA, DDS, ICNS, or a plain `.bmp` — BMP is read only as an icon inside an ICO.
+is no support for camera raw or DNG, SVG, PSD, JPEG 2000, JPEG XL, TGA, DDS
+or ICNS.
 
 ## True of every format
 
@@ -257,6 +259,33 @@ icon always arrives with an alpha channel whatever its stored depth.
 
 A cursor (`.cur`) uses the same container with different fields and is not
 shown. One renamed to `.ico` is reported as a cursor rather than misread.
+
+## BMP
+
+Opens, whatever the variant: 1, 4, 8, 16, 24 and 32 bits per pixel, palettes,
+run-length compression, and rows stored either way up. Files with an alpha
+channel keep it.
+
+The format carries no colour information this program reads, so a BMP is
+always taken as sRGB. Some are written with a colour space recorded in the
+header, and that is ignored; if you know a particular file means something
+else, `--transfer` and `--primaries` are the way to say so.
+
+## Netpbm — PBM, PGM, PPM and PAM
+
+Opens in every member of the family, in both the ASCII and the binary
+spellings, at 8 or 16 bits per sample, greyscale or colour. PAM files carrying
+an alpha channel keep it; the other three have no alpha to carry.
+
+Any brightness scale is honoured. Netpbm lets a file declare what a fully
+bright sample is, and instrument output often says 1023 or 4095 rather than
+the full width of the sample — a file like that is read at the brightness it
+was meant to have rather than a fraction of it.
+
+The format says nothing about colour, so its files are taken as sRGB. That is
+what the specification calls for, but a pipeline writing linear measurements
+into a greyscale file is common and looks no different from the inside: if a
+`.pgm` opens looking washed out, `--transfer linear` is the correction.
 
 ## Radiance HDR
 

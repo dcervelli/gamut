@@ -26,8 +26,6 @@ TODO:
   * Color picker
 * Sane keys
 * Formats
-  * PPM
-  * BMP
   * DNG
   * Other raw files
   * Animated GIF support

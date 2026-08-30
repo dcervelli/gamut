@@ -12,8 +12,9 @@ half = { version = "2.7.1", features = ["bytemuck"] }
 # headerless bitmap and apply its AND mask are `pub(crate)` behind that
 # feature, so `IcoDecoder` is the only way to reach them. Which entry to show,
 # and what a PNG entry means, are decided in `decode::ico`. `ico` implies
-# `bmp`, which nothing else here uses.
-image = { version = "0.25.10", default-features = false, features = ["exr", "gif", "hdr", "ico", "jpeg", "png", "tiff"] }
+# `bmp`, which `decode::image_rs` now reads in its own right; it is named here
+# anyway, so that dropping `ico` could not quietly take `.bmp` with it.
+image = { version = "0.25.10", default-features = false, features = ["bmp", "exr", "gif", "hdr", "ico", "jpeg", "png", "pnm", "tiff"] }
 # WebP, direct rather than through `image`'s `webp` feature: the ICC profile,
 # the EXIF orientation and the animation canvas all live in the RIFF container
 # beside the pixels, and `ImageReader` hands back only the pixels.
