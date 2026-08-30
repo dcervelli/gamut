@@ -112,7 +112,7 @@ than decoded and reported as corrupt.
 
 The interface takes its colours from the desktop rather than carrying its own.
 On [Omarchy](https://omarchy.org) the active theme is materialised as a
-palette file, and `src/theme.rs` reads it, resolves it, and derives the
+palette file, and `src/theme/` reads it, resolves it, and derives the
 handful of roles the chrome actually needs — panel, hairline, primary and dim
 text, accent, the floating panel and the ink on it, the histogram's planes.
 Switching the desktop's theme is picked up on the same 250 ms poll as the file
@@ -128,7 +128,7 @@ The palette is not read literally. Omarchy resolves it through an alias and
 derivation cascade before any consumer sees it — short names, ANSI `color0`
 through `color15` in both directions, shades mixed out of the base colours —
 and a theme is free to define only one side of any of those pairs.
-`src/theme.rs` reimplements that cascade rather than shelling out to
+`src/theme/palette.rs` reimplements that cascade rather than shelling out to
 `omarchy-theme-color`, which would cost a process per read and is not there to
 be called on a machine that has no Omarchy on it. Its tests check the result
 against what that script prints for the same file, so the two cannot drift
@@ -302,14 +302,16 @@ anything having to notice that it should.
 
 | File | Role |
 | --- | --- |
-| `src/main.rs` | Argument parsing, event-loop setup |
-| `src/app.rs` | Window lifecycle, key handling, building each frame's UI |
+| `src/main.rs` | Event-loop setup |
+| `src/cli.rs` | Argument parsing and `--help`, whose key sections come from the keymap |
+| `src/app/` | Window lifecycle and the event loop's state: `files.rs` is the file list and the read in flight, `input.rs` the keymap and pointer, `window.rs` titles and opening size |
+| `src/ui/` | Building each frame's interface: `chrome.rs` the panels, one file per widget, `status.rs` the words in the bars |
 | `src/view.rs` | Zoom / pan / fit geometry — pure maths |
 | `src/watch.rs` | Noticing that the file on screen has been rewritten |
-| `src/theme.rs` | Reading the desktop's palette, and the colours drawn from it |
-| `src/image/` | The data model: `Samples`, `ColorSpace`, stats, display state |
-| `src/image/decode/` | The decoder trait and its registry |
-| `src/render/` | Upload planning, the three layers, output selection |
+| `src/theme/` | `palette.rs` reads the desktop's palette; `mod.rs` derives the colours drawn from it |
+| `src/image/` | The data model: `Samples`, `color/` (transfer functions, primaries, ICC and CICP), stats, display state |
+| `src/image/decode/` | The decoder trait and its registry, one file per format |
+| `src/render/` | Upload planning, the three layers, output selection; `shader_codes.rs` is every integer the shaders switch on |
 | `src/render/reduce.rs` | The coarse chain a minifying draw reads from |
 
 ## Formats
@@ -552,20 +554,25 @@ pub trait Decoder: Sync {
     fn name(&self) -> &'static str;
     fn extensions(&self) -> &'static [&'static str];
     fn sniff(&self, header: &[u8]) -> bool;
-    fn decode(&self, bytes: &[u8]) -> Result<DecodedImage>;
+    fn decode(&self, source: &mut dyn ReadSeek, overrides: Overrides) -> Result<DecodedImage>;
+    fn dimensions(&self, source: &mut dyn ReadSeek) -> Result<Option<(u32, u32)>> { Ok(None) }
 }
 ```
 
 `DecodedImage` carries `Samples` (U8/U16/F32 × gray/gray+alpha/rgb/rgba),
-a `ColorSpace` (transfer function and primaries), an `AlphaMode`, and an
-optional `value_range` for files that state their own.
+a `ColorSpace` (transfer function and primaries), an `AlphaMode`, and, for
+files that state their own, an optional `value_range` and `nodata` sentinel.
+`DecodedImage::new` fills in the two optionals and `AlphaMode::of` picks the
+alpha mode from the channel layout, so a decoder only has to say what it found.
 
 To add one: write a module in `src/image/decode/` implementing `Decoder`, and
 add it to the `DECODERS` slice — `src/image/decode/tiff_rs.rs` is a worked
-example that reaches past `image` to a lower-level crate. Nothing else changes — the upload layer picks
-a texture format from the description, `--help` and the error messages pick up
-the new extensions, and a test guards against two decoders claiming the same
-one.
+example that reaches past `image` to a lower-level crate, and
+`src/image/decode/png.rs` one that goes through `image` with a container pass
+of its own. Nothing else changes — the upload layer picks a texture format from
+the description, the error messages pick up the new extensions, and a test
+guards against two decoders claiming the same one. The fixture test will ask
+for a file in `test_images/` exercising it.
 
 ## Known limits
 
@@ -614,7 +621,7 @@ crate.
 cargo test
 ```
 
-139 tests over the transfer functions and primaries matrices, texture format
+173 tests over the transfer functions and primaries matrices, texture format
 selection (including the device-capability fallbacks), the statistics and
 window logic, the decoder registry, the CICP translation, ICC profile
 recognition, gain map reconstruction, the view geometry, and the reload
