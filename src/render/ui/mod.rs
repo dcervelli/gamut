@@ -85,9 +85,10 @@ impl Color {
         Self { a, ..self }
     }
 
-    /// Linear components, straight alpha. The quad shader writes into an sRGB
-    /// target, which re-encodes on write.
-    fn to_linear(self) -> [f32; 4] {
+    /// Linear components, straight alpha: what both the quad shader — which
+    /// writes into an sRGB target and so re-encodes on write — and the
+    /// compositor's backdrop want.
+    pub(crate) fn to_linear(self) -> [f32; 4] {
         fn channel(value: u8) -> f32 {
             let v = value as f32 / 255.0;
             if v <= 0.04045 {

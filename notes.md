@@ -19,7 +19,6 @@ TODO:
   * Pixel color
 * Changable background
   * Color picker
-  * Checkerboard for alpha
 * Hide UI key
 * Sane keys 
 * Formats

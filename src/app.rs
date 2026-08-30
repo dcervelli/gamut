@@ -14,7 +14,7 @@ use winit::window::{Cursor, CursorIcon, Window, WindowId};
 use crate::image::display::{AutoWindow, Colormap, Display, Startup};
 use crate::image::stats::{BINS, COLOUR};
 use crate::image::{DecodedImage, Stats, decode};
-use crate::render::{Blend, Color, HdrPreference, Rect, Renderer, UiFrame};
+use crate::render::{Backdrop, Blend, Color, HdrPreference, Rect, Renderer, UiFrame};
 use crate::view::{Placement, Upscale, View, Viewport};
 use crate::watch::{self, Watch};
 
@@ -52,8 +52,19 @@ const HISTOGRAM_SIZE: [f32; 2] = [BINS as f32 + 2.0 * HISTOGRAM_INSET, 130.0];
 
 /// The panels are opaque, not a tint over the image: the image is fitted
 /// inside them rather than passing behind them, so there is nothing back
-/// there to show through.
+/// there to show through. The same neutral fills the window behind the image,
+/// so the two never read as separate surfaces.
 const BAR_BACKGROUND: Color = Color::rgb(18, 18, 22);
+/// The hairline along a panel's inner edge, and the other square of the
+/// checkerboard behind the image. Far enough off the panel colour to place
+/// the edge, close enough that neither the line nor the checks become
+/// something the eye keeps going back to.
+const BORDER: Color = Color::rgb(38, 38, 46);
+/// The hairline's width, in logical pixels.
+const BORDER_WIDTH: f32 = 1.0;
+/// Side of one checkerboard square, in logical pixels. Small enough to read
+/// as a texture behind the image rather than as a pattern competing with it.
+const CHECKER_SQUARE: f32 = 8.0;
 const PANEL_BACKGROUND: Color = Color::rgba(12, 12, 16, 214);
 const BUTTON_IDLE: Color = Color::rgba(255, 255, 255, 20);
 const BUTTON_HOVER: Color = Color::rgba(255, 255, 255, 45);
@@ -141,6 +152,26 @@ impl Chrome {
             (self.right.x - self.left.right()).max(0.0),
             (self.bottom.y - self.top.bottom()).max(0.0),
         )
+    }
+
+    /// The hairline along each panel's inner edge: the bottom of the top
+    /// panel, the right of the left one, and so on.
+    ///
+    /// Inside the panel rather than beside it, so that adding the line does
+    /// not move the edge the image is fitted against.
+    fn borders(&self) -> [Rect; 4] {
+        let width = BORDER_WIDTH.min(self.top.height).min(self.left.width);
+        [
+            Rect::new(self.top.x, self.top.bottom() - width, self.top.width, width),
+            Rect::new(self.bottom.x, self.bottom.y, self.bottom.width, width),
+            Rect::new(
+                self.left.right() - width,
+                self.left.y,
+                width,
+                self.left.height,
+            ),
+            Rect::new(self.right.x, self.right.y, width, self.right.height),
+        ]
     }
 
     /// Which toggle a point lands on, if any.
@@ -778,7 +809,13 @@ impl App {
             .map(|current| &current.display)
             .unwrap_or(&fallback);
 
-        match renderer.render(placement, thumbnail, display, &frame, scale) {
+        let backdrop = Backdrop {
+            base: BAR_BACKGROUND,
+            alternate: BORDER,
+            square: CHECKER_SQUARE,
+        };
+
+        match renderer.render(placement, thumbnail, display, &frame, scale, backdrop) {
             Ok(()) => self.reported_error = false,
             Err(error) => {
                 if !self.reported_error {
@@ -992,6 +1029,9 @@ fn build_ui(
 
     for panel in [chrome.top, chrome.bottom, chrome.left, chrome.right] {
         frame.rect(panel, BAR_BACKGROUND);
+    }
+    for border in chrome.borders() {
+        frame.rect(border, BORDER);
     }
 
     // Top panel: what the image is. Everything here is a property of the

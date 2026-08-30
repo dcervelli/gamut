@@ -28,6 +28,7 @@ use winit::window::Window;
 use crate::image::{DecodedImage, display::Display};
 use crate::view::Placement;
 
+pub use composite::Backdrop;
 pub use output::{HdrPreference, Output};
 pub use ui::{Blend, Color, Rect, UiFrame};
 
@@ -43,14 +44,6 @@ const WORKING_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 /// The UI's own target. sRGB so that blending happens in linear and so that
 /// glyphon's colour handling is correct without it knowing anything.
 const UI_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
-
-/// Behind the image, in linear working-space units.
-const BACKGROUND: wgpu::Color = wgpu::Color {
-    r: 0.06,
-    g: 0.06,
-    b: 0.07,
-    a: 1.0,
-};
 
 struct Targets {
     image: wgpu::TextureView,
@@ -203,6 +196,7 @@ impl Renderer {
         display: &Display,
         frame: &UiFrame,
         scale: f32,
+        backdrop: Backdrop,
     ) -> Result<()> {
         use wgpu::CurrentSurfaceTexture as Acquired;
 
@@ -260,14 +254,33 @@ impl Renderer {
             [self.config.width, self.config.height],
             scale,
         )?;
-        self.composite.prepare(&self.queue, display, &self.output);
+        // Where an image quad lands, and so where transparency has to read as
+        // a checkerboard rather than as the plain backdrop. Asked of the image
+        // layer rather than assumed from `placement`, since a frame drawn
+        // before the first file has decoded has a placement but no image.
+        let checkered = if self.image_layer.current().is_some() {
+            [Some(placement), thumbnail]
+        } else {
+            [None, None]
+        };
+        self.composite.prepare(
+            &self.queue,
+            display,
+            &self.output,
+            backdrop,
+            scale,
+            checkered,
+        );
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("image layer"),
+                // Transparent, not a colour: what is behind the image is the
+                // compositor's business, since it belongs to the interface
+                // and must not go through the tone curve with the image.
                 color_attachments: &[Some(attachment(
                     &self.targets.image,
-                    wgpu::LoadOp::Clear(BACKGROUND),
+                    wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                 ))],
                 ..Default::default()
             });

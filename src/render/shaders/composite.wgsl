@@ -10,7 +10,17 @@ struct Params {
     // Global output gain, applied after compositing. 1.0 means "1.0 is SDR
     // reference white", which is what both sRGB and scRGB want.
     white_scale: f32,
-    _pad: f32,
+    // Side of one checkerboard square, in surface pixels.
+    checker: f32,
+    // The backdrop, in the same linear units the UI target holds: `base`
+    // everywhere, with `alternate` taking every other square inside a region.
+    base: vec4<f32>,
+    alternate: vec4<f32>,
+    // Where the checkerboard shows through: the image, and the minimap's
+    // thumbnail when it is on screen. (left, top, right, bottom) in surface
+    // pixels; an empty rectangle is one that is not being drawn this frame,
+    // which the half-open test below rejects without needing a count.
+    regions: array<vec4<f32>, 2>,
 };
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -84,12 +94,14 @@ fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     let image = textureLoad(image_target, coord, 0);
     let ui = textureLoad(ui_target, coord, 0);
 
-    // Tone mapping only ever applies to the image. The UI is authored at
-    // display brightness and must not be squashed along with it.
-    var color = tone_map(image.rgb);
+    // The backdrop is authored at display brightness, like the interface, so
+    // it goes under the image rather than through the tone curve with it.
+    var color = backdrop(position.xy);
 
-    // The UI target accumulated premultiplied colour, so this is a plain
-    // source-over in linear space.
+    // Both layers arrive premultiplied, so each is a plain source-over in
+    // linear space. Tone mapping only ever applies to the image: the
+    // interface must not be squashed along with it.
+    color = color * (1.0 - image.a) + tone_map_premultiplied(image);
     color = color * (1.0 - ui.a) + ui.rgb;
     color = color * params.white_scale;
 
@@ -100,4 +112,38 @@ fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
         case 1u: { return vec4<f32>(color, 1.0); }
         default: { return vec4<f32>(pq_encode(color), 1.0); }
     }
+}
+
+// What shows through wherever the image is transparent. The squares are laid
+// out on the surface rather than on the image, so panning slides the image
+// over a pattern that stays put instead of dragging it along.
+fn backdrop(point: vec2<f32>) -> vec3<f32> {
+    // A guard on the division below, not a case that arises: the caller sends
+    // at least one pixel.
+    if params.checker <= 0.0 {
+        return params.base.rgb;
+    }
+    for (var index = 0u; index < 2u; index = index + 1u) {
+        let region = params.regions[index];
+        if all(point >= region.xy) && all(point < region.zw) {
+            let cell = vec2<i32>(floor(point / params.checker));
+            if ((cell.x + cell.y) & 1) == 1 {
+                return params.alternate.rgb;
+            }
+            return params.base.rgb;
+        }
+    }
+    return params.base.rgb;
+}
+
+// The curve acts on the colour, not on the colour faded by its coverage, so a
+// half-transparent highlight tone maps to the same shade as an opaque one.
+fn tone_map_premultiplied(texel: vec4<f32>) -> vec3<f32> {
+    if texel.a <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+    if texel.a >= 1.0 {
+        return tone_map(texel.rgb);
+    }
+    return tone_map(texel.rgb / texel.a) * texel.a;
 }
