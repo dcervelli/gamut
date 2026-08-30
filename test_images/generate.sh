@@ -30,7 +30,7 @@ trap 'rm -rf "$work"' EXIT
 
 # Start clean, so a renamed fixture does not leave its predecessor behind.
 rm -f ./*.png ./*.jpg ./*.jpeg ./*.tif ./*.tiff ./*.hdr ./*.exr ./*.gif \
-      ./*.heic ./*.heif ./*.avif ./*.webp ./*.ico
+      ./*.heic ./*.heif ./*.avif ./*.webp ./*.ico ./*.ppm
 
 quad '#FF0000' '#00FF00' '#0000FF' '#FFFFFF' "$work/color.png"
 quad '#000000' '#555555' '#AAAAAA' '#FFFFFF' "$work/gray.png"
@@ -49,6 +49,11 @@ with_alpha() {  # base -> base with the alpha quadrants applied
 }
 with_alpha "$work/color.png" "$work/color-alpha.png"
 with_alpha "$work/gray.png"  "$work/gray-alpha.png"
+
+# The pattern the wrong way up, for the three fixtures that hold it and claim
+# otherwise: an animated GIF's second frame, a HEIF `irot`, and a WebP `EXIF`
+# orientation beside an animation of its own.
+magick "$work/color.png" -rotate 180 "$work/color-upside-down.png"
 
 # ---------------------------------------------------------------- PNG
 magick "$work/gray.png"        -depth 8  -define png:color-type=0 png-gray8.png
@@ -113,6 +118,21 @@ magick "$work/gray.png"  -colorspace gray -quality 95 jpeg-gray.jpg
 magick "$work/color.png" -quality 95 -interlace JPEG jpeg-progressive.jpeg
 magick "$work/color.png" -quality 95 -sampling-factor 4:2:0 jpeg-subsampled.jpg
 
+# ----------------------------------------------------------------- GIF
+# Always a palette, always 8-bit, and always RGBA once decoded: the crate's
+# GIF decoder has one output layout and the transparent index has to go
+# somewhere. The four here are the encodings with their own code path.
+magick "$work/color.png" gif-palette.gif
+magick "$work/color.png" -interlace GIF gif-interlaced.gif
+# Transparency is a palette index rather than a channel, so it is all or
+# nothing and the pixel behind it carries no colour: white is named as the
+# transparent one, and the quadrant comes back as four zeroes.
+magick "$work/color.png" -transparent white gif-transparent.gif
+# Two frames, the pattern first and the upside-down one second, so a decoder
+# that ran the animation to its end would fail the table the rest pass.
+magick -delay 10 -loop 0 \
+  "$work/color.png" "$work/color-upside-down.png" gif-animated.gif
+
 # ---------------------------------------------------------------- TIFF
 magick "$work/gray.png"        -depth 8  -type Grayscale -compress None tiff-gray8.tif
 magick "$work/color.png"       -depth 8  -type TrueColor -compress None tiff-rgb8.tif
@@ -164,7 +184,6 @@ heif-enc -L --hevc --colour_primaries 12 --transfer_characteristic 13 \
 # An upside-down image that says it is upside down. `--rotate-cw` writes an
 # `irot` property rather than turning the pixels, so this decodes back to the
 # ordinary pattern only if the transformation is applied on the way out.
-magick "$work/color.png" -rotate 180 "$work/color-upside-down.png"
 heif-enc -L --hevc --rotate-cw 180 -o heic-rotated.heic \
   "$work/color-upside-down.png" > /dev/null
 # The same container with AV1 inside instead of HEVC.
@@ -361,10 +380,12 @@ gdal_translate -q -of GTiff -a_nodata -9999 -co COMPRESS=NONE \
 # ------------------------------------------------------- negative fixtures
 # A PNG header followed by rubbish: the decoder is chosen, then fails.
 { printf '\211PNG\r\n\032\n'; head -c 64 /dev/zero | tr '\0' 'X'; } > bad-truncated.png
-# A real image in a format this build does not include.
-magick "$work/color.png" unsupported.gif
+# A real image in a format this build does not include. Netpbm has no
+# decoder here and no sniff claims its header, so it is turned away by the
+# registry rather than by a backend.
+magick "$work/color.png" unsupported.ppm
 # A PNG called a TIFF, to exercise the content-sniffing fallback.
 cp png-rgb8.png mislabelled.tif
 
 echo "generated $(ls -1 *.png *.jpg *.jpeg *.tif *.tiff *.hdr *.exr *.gif \
-                    *.heic *.heif *.avif *.webp *.ico | wc -l) fixtures"
+                    *.heic *.heif *.avif *.webp *.ico *.ppm | wc -l) fixtures"

@@ -25,7 +25,6 @@ TODO:
   * Color picker
 * Sane keys 
 * Formats
-  * GIF
   * BMP
   * DNG
   * Other raw files

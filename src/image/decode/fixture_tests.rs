@@ -40,6 +40,12 @@ enum Tone {
     FloatWithNodata,
     /// Signed 16-bit elevations, scaled to span negative and positive.
     Int16,
+    /// As `Color`, but the last quadrant carries no colour at all. A GIF's
+    /// transparency is a palette index rather than a channel, so the pixel
+    /// behind it has nothing to hold a colour in and the decoder hands back
+    /// four zeroes where that index sat. A PNG's `tRNS` keeps the colour
+    /// under the hole, which is why `Color` cannot serve both.
+    ColorLastCleared,
 }
 
 /// What the alpha channel holds, where there is one.
@@ -324,6 +330,64 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: LOSSY,
+    },
+    // ------------------------------------------------------------- GIF
+    // Always a palette and always 8-bit, and always RGBA once decoded: the
+    // crate's GIF decoder has one output layout, and the transparent index
+    // has to go somewhere.
+    Fixture {
+        file: "gif-palette.gif",
+        covers: "GIF palette, no transparent index",
+        channels: Channels::Rgba,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Straight,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // The rows stored in four passes rather than in order, GIF's counterpart
+    // of Adam7.
+    Fixture {
+        file: "gif-interlaced.gif",
+        covers: "GIF interlaced row order",
+        channels: Channels::Rgba,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Straight,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // White is the transparent index here, so the last quadrant comes back
+    // cleared rather than white behind a hole: see `Tone::ColorLastCleared`.
+    Fixture {
+        file: "gif-transparent.gif",
+        covers: "GIF transparent palette index",
+        channels: Channels::Rgba,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Straight,
+        tone: Tone::ColorLastCleared,
+        coverage: Coverage::BinaryLastTransparent,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // Two frames, the pattern first and an upside-down one second. Passing
+    // this table means the first frame is the one shown.
+    Fixture {
+        file: "gif-animated.gif",
+        covers: "animated GIF, first frame onto the logical screen",
+        channels: Channels::Rgba,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Straight,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
     },
     // ------------------------------------------------------------ TIFF
     Fixture {
@@ -877,7 +941,7 @@ const FIXTURES: &[Fixture] = &[
 
 /// Files that are meant to fail, and the phrase the failure should contain.
 const REJECTED: &[(&str, &str)] = &[
-    ("unsupported.gif", "unsupported image format"),
+    ("unsupported.ppm", "unsupported image format"),
     ("bad-truncated.png", "decoding"),
 ];
 
@@ -938,6 +1002,12 @@ fn expected(tone: Tone, coverage: Coverage) -> [[f32; 4]; 4] {
             [[-9999.0; 4], [0.5; 4], [1.0; 4], [peak; 4]]
         }
         Tone::Int16 => [[-1000.0; 4], [-498.0; 4], [4.0; 4], [3000.0; 4]],
+        Tone::ColorLastCleared => [
+            [1.0, 0.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0, 1.0],
+            [0.0, 0.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0, 0.0],
+        ],
     };
 
     let alphas = match coverage {
@@ -1237,6 +1307,25 @@ fn an_animated_webp_shows_its_first_frame() {
         Overrides::default(),
     )
     .unwrap();
+
+    assert_eq!(
+        (animated.width, animated.height),
+        (still.width, still.height)
+    );
+    for (x, y) in PROBES {
+        assert_eq!(pixel(&animated, x, y), pixel(&still, x, y), "at {x},{y}");
+    }
+}
+
+/// An animated GIF is shown as its first frame, the same choice an animated
+/// WebP gets and for the same reason: nothing below the decoder has a clock.
+/// `gif-animated` puts the ordinary pattern first and a half-turned one after
+/// it, so running the animation to its end would be visible rather than
+/// silent.
+#[test]
+fn an_animated_gif_shows_its_first_frame() {
+    let animated = load(&directory().join("gif-animated.gif"), Overrides::default()).unwrap();
+    let still = load(&directory().join("gif-palette.gif"), Overrides::default()).unwrap();
 
     assert_eq!(
         (animated.width, animated.height),
