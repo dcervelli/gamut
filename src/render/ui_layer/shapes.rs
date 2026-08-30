@@ -4,6 +4,7 @@
 use bytemuck::{Pod, Zeroable};
 
 use super::{Blend, Shape};
+use crate::render::gpu::{self, GrowableBuffer};
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -56,10 +57,8 @@ pub(super) struct Shapes {
     poly_pipelines: [wgpu::RenderPipeline; 2],
     viewport_buffer: wgpu::Buffer,
     viewport_group: wgpu::BindGroup,
-    instances: wgpu::Buffer,
-    instance_capacity: usize,
-    vertices: wgpu::Buffer,
-    vertex_capacity: usize,
+    instances: GrowableBuffer,
+    vertices: GrowableBuffer,
     /// Contiguous stretches of geometry sharing a kind and a blend mode, in
     /// the order the frame emitted them. Splitting the draw this way rather
     /// than batching by mode is what keeps shapes painting in the order they
@@ -74,40 +73,12 @@ impl Shapes {
             source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/ui.wgsl").into()),
         });
 
-        let viewport_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("ui viewport"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-        });
-
-        let viewport_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("ui viewport"),
-            size: size_of::<ViewportUniform>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let viewport_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("ui viewport"),
-            layout: &viewport_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: viewport_buffer.as_entire_binding(),
-            }],
-        });
-
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("ui quads"),
-            bind_group_layouts: &[Some(&viewport_layout)],
-            immediate_size: 0,
-        });
+        let viewport_layout =
+            gpu::uniform_layout(device, "ui viewport", wgpu::ShaderStages::VERTEX);
+        let viewport_buffer = gpu::uniform_buffer::<ViewportUniform>(device, "ui viewport");
+        let viewport_group =
+            gpu::buffer_group(device, "ui viewport", &viewport_layout, &viewport_buffer);
+        let pipeline_layout = gpu::pipeline_layout(device, "ui quads", &[&viewport_layout]);
 
         let quad_attributes =
             wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32];
@@ -192,28 +163,13 @@ impl Shapes {
             pipeline_for("ui polygons (screen)", SCREEN, Kind::Poly),
         ];
 
-        let instances = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("ui instances"),
-            size: (INITIAL_QUADS * size_of::<QuadInstance>()) as u64,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let vertices = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("ui vertices"),
-            size: (INITIAL_VERTICES * size_of::<PolyVertex>()) as u64,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
         Self {
             pipelines,
             poly_pipelines,
             viewport_buffer,
             viewport_group,
-            instances,
-            instance_capacity: INITIAL_QUADS,
-            vertices,
-            vertex_capacity: INITIAL_VERTICES,
+            instances: GrowableBuffer::new::<QuadInstance>(device, "ui instances", INITIAL_QUADS),
+            vertices: GrowableBuffer::new::<PolyVertex>(device, "ui vertices", INITIAL_VERTICES),
             runs: Vec::new(),
         }
     }
@@ -280,30 +236,8 @@ impl Shapes {
             }
         }
 
-        if instances.len() > self.instance_capacity {
-            self.instance_capacity = instances.len().next_power_of_two();
-            self.instances = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("ui instances"),
-                size: (self.instance_capacity * size_of::<QuadInstance>()) as u64,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-        }
-        if vertices.len() > self.vertex_capacity {
-            self.vertex_capacity = vertices.len().next_power_of_two();
-            self.vertices = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("ui vertices"),
-                size: (self.vertex_capacity * size_of::<PolyVertex>()) as u64,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-        }
-        if !instances.is_empty() {
-            queue.write_buffer(&self.instances, 0, bytemuck::cast_slice(&instances));
-        }
-        if !vertices.is_empty() {
-            queue.write_buffer(&self.vertices, 0, bytemuck::cast_slice(&vertices));
-        }
+        self.instances.write(device, queue, &instances);
+        self.vertices.write(device, queue, &vertices);
     }
 
     pub(super) fn render(&self, pass: &mut wgpu::RenderPass<'_>) {
@@ -313,13 +247,13 @@ impl Shapes {
                 match run.kind {
                     Kind::Quad => {
                         pass.set_pipeline(&self.pipelines[run.blend as usize]);
-                        pass.set_vertex_buffer(0, self.instances.slice(..));
+                        pass.set_vertex_buffer(0, self.instances.slice());
                         // One instance per quad, four corners each.
                         pass.draw(0..4, run.start..run.end);
                     }
                     Kind::Poly => {
                         pass.set_pipeline(&self.poly_pipelines[run.blend as usize]);
-                        pass.set_vertex_buffer(0, self.vertices.slice(..));
+                        pass.set_vertex_buffer(0, self.vertices.slice());
                         pass.draw(run.start..run.end, 0..1);
                     }
                 }

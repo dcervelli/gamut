@@ -11,6 +11,7 @@
 //! glyphon has no idea what an HDR surface is.
 
 mod composite;
+mod gpu;
 mod image_layer;
 mod output;
 mod placement;
@@ -36,6 +37,7 @@ pub use placement::{Placement, Upscale};
 pub use ui_layer::{Blend, Color, Rect, UiFrame};
 
 use composite::Composite;
+use gpu::attachment;
 use image_layer::{Draw, ImageLayer};
 pub use image_layer::{GpuImage, Upload};
 use ui_layer::UiRenderer;
@@ -385,20 +387,5 @@ impl Targets {
             image: make("image target", WORKING_FORMAT),
             ui: make("ui target", UI_FORMAT),
         }
-    }
-}
-
-fn attachment(
-    view: &wgpu::TextureView,
-    load: wgpu::LoadOp<wgpu::Color>,
-) -> wgpu::RenderPassColorAttachment<'_> {
-    wgpu::RenderPassColorAttachment {
-        view,
-        depth_slice: None,
-        resolve_target: None,
-        ops: wgpu::Operations {
-            load,
-            store: wgpu::StoreOp::Store,
-        },
     }
 }

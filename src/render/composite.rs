@@ -4,6 +4,7 @@
 
 use bytemuck::{Pod, Zeroable};
 
+use super::gpu::{self, Fullscreen};
 use super::output::Output;
 use super::placement::Placement;
 use super::shader_codes;
@@ -56,87 +57,27 @@ impl Composite {
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/composite.wgsl").into()),
         });
 
-        let params_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("composite params"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-        });
-
-        // Both targets are read with `textureLoad`, so no sampler and no
-        // filterability requirement.
-        let entry = |binding: u32| wgpu::BindGroupLayoutEntry {
-            binding,
-            visibility: wgpu::ShaderStages::FRAGMENT,
-            ty: wgpu::BindingType::Texture {
-                sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                view_dimension: wgpu::TextureViewDimension::D2,
-                multisampled: false,
-            },
-            count: None,
-        };
-        let targets_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("composite targets"),
-            entries: &[entry(0), entry(1)],
-        });
-
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("composite"),
-            bind_group_layouts: &[Some(&params_layout), Some(&targets_layout)],
-            immediate_size: 0,
-        });
-
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("composite"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                compilation_options: Default::default(),
-                buffers: &[],
-            },
-            primitive: wgpu::PrimitiveState {
+        let params_layout =
+            gpu::uniform_layout(device, "composite params", wgpu::ShaderStages::FRAGMENT);
+        // Both targets are read with `textureLoad`, so no filterability
+        // requirement.
+        let targets_layout = gpu::texture_layout(device, "composite targets", 2, false);
+        let pipeline_layout =
+            gpu::pipeline_layout(device, "composite", &[&params_layout, &targets_layout]);
+        let pipeline = gpu::fullscreen_pipeline(
+            device,
+            Fullscreen {
+                label: "composite",
+                shader: &shader,
+                layout: &pipeline_layout,
                 topology: wgpu::PrimitiveTopology::TriangleList,
-                cull_mode: None,
-                ..Default::default()
+                format: surface_format,
+                blend: None,
             },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: surface_format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        );
 
-        let params = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("composite params"),
-            size: size_of::<Params>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let params_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("composite params"),
-            layout: &params_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: params.as_entire_binding(),
-            }],
-        });
+        let params = gpu::uniform_buffer::<Params>(device, "composite params");
+        let params_group = gpu::buffer_group(device, "composite params", &params_layout, &params);
 
         Self {
             pipeline,
@@ -154,20 +95,12 @@ impl Composite {
         image_target: &wgpu::TextureView,
         ui_target: &wgpu::TextureView,
     ) {
-        self.targets_group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("composite targets"),
-            layout: &self.targets_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(image_target),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(ui_target),
-                },
-            ],
-        }));
+        self.targets_group = Some(gpu::texture_group(
+            device,
+            "composite targets",
+            &self.targets_layout,
+            &[image_target, ui_target],
+        ));
     }
 
     /// `regions` is where the checkerboard shows: the image quads this frame

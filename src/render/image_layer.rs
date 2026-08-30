@@ -8,6 +8,7 @@
 use anyhow::{Result, anyhow};
 use bytemuck::{Pod, Zeroable};
 
+use super::gpu::{self, Fullscreen};
 use super::placement::Placement;
 use super::reduce::{self, Level, Reducer};
 use super::shader_codes;
@@ -94,74 +95,27 @@ impl ImageLayer {
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/image.wgsl").into()),
         });
 
-        let params_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("image params"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-        });
-
+        let params_layout =
+            gpu::uniform_layout(device, "image params", wgpu::ShaderStages::VERTEX_FRAGMENT);
         // No sampler: the shader loads texels and weights them itself, which
         // is what lets one pipeline serve an area filter, an antialiased
         // nearest and a bicubic. Every format `upload::plan` can produce is
         // filterable all the same, and so is every format `reduce` writes.
-        let texture_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("image texture"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: false,
-                },
-                count: None,
-            }],
-        });
-
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("image layer"),
-            bind_group_layouts: &[Some(&params_layout), Some(&texture_layout)],
-            immediate_size: 0,
-        });
-
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("image layer"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                compilation_options: Default::default(),
-                buffers: &[],
-            },
-            primitive: wgpu::PrimitiveState {
+        let texture_layout = gpu::texture_layout(device, "image texture", 1, true);
+        let pipeline_layout =
+            gpu::pipeline_layout(device, "image layer", &[&params_layout, &texture_layout]);
+        let pipeline = gpu::fullscreen_pipeline(
+            device,
+            Fullscreen {
+                label: "image layer",
+                shader: &shader,
+                layout: &pipeline_layout,
                 topology: wgpu::PrimitiveTopology::TriangleStrip,
-                cull_mode: None,
-                ..Default::default()
+                format: target_format,
+                // The shader emits premultiplied colour.
+                blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
             },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: target_format,
-                    // The shader emits premultiplied colour.
-                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        );
 
         Self {
             pipeline,
@@ -371,20 +325,8 @@ impl Upload {
 
 impl Slot {
     fn new(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, label: &str) -> Self {
-        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(label),
-            size: size_of::<Params>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(label),
-            layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: buffer.as_entire_binding(),
-            }],
-        });
+        let buffer = gpu::uniform_buffer::<Params>(device, label);
+        let group = gpu::buffer_group(device, label, layout, &buffer);
         Self { buffer, group }
     }
 
@@ -457,14 +399,7 @@ fn binding(
     layout: &wgpu::BindGroupLayout,
     view: &wgpu::TextureView,
 ) -> wgpu::BindGroup {
-    device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("image texture"),
-        layout,
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: wgpu::BindingResource::TextureView(view),
-        }],
-    })
+    gpu::texture_group(device, "image texture", layout, &[view])
 }
 
 /// WGSL matrices are column-major with 16-byte column stride, while

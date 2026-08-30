@@ -10,6 +10,7 @@
 use half::f16;
 
 use super::WORKING_FORMAT;
+use super::gpu;
 use super::image_layer::{Draw, ImageLayer};
 use super::upload::Capabilities;
 use super::{Placement, Upscale};
@@ -107,15 +108,10 @@ fn draw_all(gpu: &Gpu, image: &DecodedImage, target: [u32; 2], quads: Draw) -> V
     {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("filter test"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &view,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
+            color_attachments: &[Some(gpu::attachment(
+                &view,
+                wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+            ))],
             ..Default::default()
         });
         layer.render(&mut pass);

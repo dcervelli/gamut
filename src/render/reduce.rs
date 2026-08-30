@@ -16,6 +16,7 @@ use bytemuck::{Pod, Zeroable};
 
 use crate::image::AlphaMode;
 
+use super::gpu::{self, Fullscreen};
 use super::shader_codes;
 
 /// Size ratio between one level and the next, per axis.
@@ -67,39 +68,11 @@ impl Reducer {
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/reduce.wgsl").into()),
         });
 
-        let params_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("reduce params"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-        });
-
-        let texture_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("reduce source"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: false,
-                },
-                count: None,
-            }],
-        });
-
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("reduce"),
-            bind_group_layouts: &[Some(&params_layout), Some(&texture_layout)],
-            immediate_size: 0,
-        });
+        let params_layout =
+            gpu::uniform_layout(device, "reduce params", wgpu::ShaderStages::FRAGMENT);
+        let texture_layout = gpu::texture_layout(device, "reduce source", 1, true);
+        let pipeline_layout =
+            gpu::pipeline_layout(device, "reduce", &[&params_layout, &texture_layout]);
 
         Self {
             shader,
@@ -118,35 +91,17 @@ impl Reducer {
         {
             return index;
         }
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("reduce"),
-            layout: Some(&self.pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &self.shader,
-                entry_point: Some("vs_main"),
-                compilation_options: Default::default(),
-                buffers: &[],
-            },
-            primitive: wgpu::PrimitiveState {
+        let pipeline = gpu::fullscreen_pipeline(
+            device,
+            Fullscreen {
+                label: "reduce",
+                shader: &self.shader,
+                layout: &self.pipeline_layout,
                 topology: wgpu::PrimitiveTopology::TriangleStrip,
-                cull_mode: None,
-                ..Default::default()
+                format,
+                blend: None,
             },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &self.shader,
-                entry_point: Some("fs_main"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        );
         self.pipelines.push((format, pipeline));
         self.pipelines.len() - 1
     }
@@ -209,14 +164,8 @@ impl Reducer {
                 }));
             params.unmap();
 
-            let params_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("reduce params"),
-                layout: &self.params_layout,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: params.as_entire_binding(),
-                }],
-            });
+            let params_group =
+                gpu::buffer_group(device, "reduce params", &self.params_layout, &params);
 
             let texture = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("coarse level"),
@@ -237,26 +186,15 @@ impl Reducer {
 
             {
                 let input = levels.last().map_or(input, |level| &level.view);
-                let texture_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("reduce source"),
-                    layout: &self.texture_layout,
-                    entries: &[wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(input),
-                    }],
-                });
+                let texture_group =
+                    gpu::texture_group(device, "reduce source", &self.texture_layout, &[input]);
 
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("reduce"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &view,
-                        depth_slice: None,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
+                    color_attachments: &[Some(gpu::attachment(
+                        &view,
+                        wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                    ))],
                     ..Default::default()
                 });
                 pass.set_pipeline(&self.pipelines[pipeline].1);

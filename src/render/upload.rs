@@ -135,7 +135,7 @@ pub fn plan(image: &DecodedImage, capabilities: Capabilities) -> Plan<'_> {
             let lut: Vec<f16> = (0..=u8::MAX)
                 .map(|v| f16::from_f32(transfer.to_linear(v as f32 / u8::MAX as f32)))
                 .collect();
-            let values = map_u8_to_f16(data, channels, components, &lut);
+            let values = map_to_f16(data, channels, components, &lut, u8::MAX as f32);
             Plan {
                 format: float16_format(components),
                 pixels: Pixels::F16(values),
@@ -163,7 +163,7 @@ pub fn plan(image: &DecodedImage, capabilities: Capabilities) -> Plan<'_> {
             let lut: Vec<f16> = (0..=u16::MAX)
                 .map(|v| f16::from_f32(transfer.to_linear(v as f32 / u16::MAX as f32)))
                 .collect();
-            let values = map_u16_to_f16(data, channels, components, &lut);
+            let values = map_to_f16(data, channels, components, &lut, u16::MAX as f32);
             Plan {
                 format: float16_format(components),
                 pixels: Pixels::F16(values),
@@ -215,59 +215,54 @@ fn float16_format(components: usize) -> wgpu::TextureFormat {
 }
 
 /// Widens each pixel to `components`, filling any added alpha with `opaque`.
-/// Only ever grows 3 to 4; 1 and 2 stay as they are.
-fn expand_u8(data: &[u8], channels: Channels, components: usize, opaque: u8) -> Pixels<'_> {
+/// Only ever grows 3 to 4; 1 and 2 stay as they are, and `None` says the
+/// source can be uploaded as it is.
+fn expand<T: Copy>(data: &[T], channels: Channels, components: usize, opaque: T) -> Option<Vec<T>> {
     let source = channels.count();
     if source == components {
-        return Pixels::Borrowed(data);
+        return None;
     }
     let mut out = vec![opaque; data.len() / source * components];
     for (pixel, chunk) in data.chunks_exact(source).enumerate() {
         out[pixel * components..pixel * components + source].copy_from_slice(chunk);
     }
-    Pixels::U8(out)
+    Some(out)
+}
+
+fn expand_u8(data: &[u8], channels: Channels, components: usize, opaque: u8) -> Pixels<'_> {
+    match expand(data, channels, components, opaque) {
+        Some(out) => Pixels::U8(out),
+        None => Pixels::Borrowed(data),
+    }
 }
 
 fn expand_u16(data: &[u16], channels: Channels, components: usize, opaque: u16) -> Pixels<'_> {
-    let source = channels.count();
-    if source == components {
-        return Pixels::Borrowed(bytemuck::cast_slice(data));
+    match expand(data, channels, components, opaque) {
+        Some(out) => Pixels::U16(out),
+        None => Pixels::Borrowed(bytemuck::cast_slice(data)),
     }
-    let mut out = vec![opaque; data.len() / source * components];
-    for (pixel, chunk) in data.chunks_exact(source).enumerate() {
-        out[pixel * components..pixel * components + source].copy_from_slice(chunk);
-    }
-    Pixels::U16(out)
 }
 
-/// Alpha is a coverage fraction, never a light measurement, so it is copied
-/// through the transfer function untouched.
-fn map_u8_to_f16(data: &[u8], channels: Channels, components: usize, lut: &[f16]) -> Vec<f16> {
+/// Linearises integer samples through `lut`, widening to `components`.
+/// Alpha is a coverage fraction, never a light measurement, so it is scaled
+/// by `full_scale` and never put through the curve.
+fn map_to_f16<T: Copy + Into<u32>>(
+    data: &[T],
+    channels: Channels,
+    components: usize,
+    lut: &[f16],
+    full_scale: f32,
+) -> Vec<f16> {
     let source = channels.count();
     let alpha = channels.alpha_index();
     let mut out = vec![f16::ONE; data.len() / source * components];
     for (pixel, chunk) in data.chunks_exact(source).enumerate() {
         for (index, raw) in chunk.iter().enumerate() {
+            let raw: u32 = (*raw).into();
             out[pixel * components + index] = if Some(index) == alpha {
-                f16::from_f32(*raw as f32 / u8::MAX as f32)
+                f16::from_f32(raw as f32 / full_scale)
             } else {
-                lut[*raw as usize]
-            };
-        }
-    }
-    out
-}
-
-fn map_u16_to_f16(data: &[u16], channels: Channels, components: usize, lut: &[f16]) -> Vec<f16> {
-    let source = channels.count();
-    let alpha = channels.alpha_index();
-    let mut out = vec![f16::ONE; data.len() / source * components];
-    for (pixel, chunk) in data.chunks_exact(source).enumerate() {
-        for (index, raw) in chunk.iter().enumerate() {
-            out[pixel * components + index] = if Some(index) == alpha {
-                f16::from_f32(*raw as f32 / u16::MAX as f32)
-            } else {
-                lut[*raw as usize]
+                lut[raw as usize]
             };
         }
     }
