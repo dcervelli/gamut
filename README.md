@@ -311,8 +311,16 @@ four from the window size alone, which is what lets the frame builder and the
 click handler agree on where a widget is without either of them owning it. The
 top bar carries the file name and what the image is — its size, its pixels,
 its colour space, all fixed for as long as the file is on screen — while the
-bottom bar carries what changes: the pointer's position, and what the view is
-doing to the image. The left strip holds the minimap toggle, the right strip
+bottom bar carries what changes: what is under the pointer, and what the view
+is doing to the image. The pointer's end of it is a readout of one pixel —
+where it is, the components the file holds there in the file's own units, the
+values the display window maps them to, and a swatch of the colour they come
+out as. The two numbers answer different questions, which is why both are
+there: the stored one is the measurement, the mapped one is why it looks the
+way it does. Saying what the screen is showing means running the display
+transform on the CPU, so `ToneMap::apply` and `Colormap::color` in
+`image/display.rs` mirror the shader functions of the same names — a swatch
+that disagreed with the image beside it would be worse than none. The left strip holds the minimap toggle, the right strip
 the histogram toggle, and the end of the bottom bar the zoom readout — which
 is a button: pressing it opens a menu of zooms in the lower right of the
 content area, the ladder from 10% to 1600% and the three fits as icons. The
@@ -341,7 +349,7 @@ anything having to notice that it should.
 | `src/main.rs` | Event-loop setup |
 | `src/cli.rs` | Argument parsing and `--help`, whose key sections come from the keymap |
 | `src/app/` | Window lifecycle and the event loop's state: `files.rs` is the file list and the read in flight, `input.rs` the keymap and pointer, `window.rs` titles and opening size |
-| `src/ui/` | Building each frame's interface: `chrome.rs` the panels, one file per widget, `status.rs` the words in the bars |
+| `src/ui/` | Building each frame's interface: `chrome.rs` the panels, one file per widget, `pixel.rs` the pointer's readout, `status.rs` the words in the bars |
 | `src/view.rs` | Zoom / pan / fit geometry — pure maths |
 | `src/watch.rs` | Noticing that the file on screen has been rewritten |
 | `src/theme/` | `palette.rs` reads the desktop's palette; `mod.rs` derives the colours drawn from it |
@@ -658,11 +666,12 @@ crate.
 cargo test
 ```
 
-182 tests over the transfer functions and primaries matrices, texture format
+196 tests over the transfer functions and primaries matrices, texture format
 selection (including the device-capability fallbacks), the statistics and
-window logic, the decoder registry, the CICP translation, ICC profile
-recognition, gain map reconstruction, the view geometry, and the reload
-watch's idea of when a write has finished.
+window logic, the pixel readout's two halves and the colormaps behind its
+swatch, the decoder registry, the CICP translation, ICC profile recognition,
+gain map reconstruction, the view geometry, and the reload watch's idea of
+when a write has finished.
 
 The gain map tests build an Ultra HDR file rather than checking one in: a flat
 base image and a half-size map that leaves one half alone and asks the other

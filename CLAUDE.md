@@ -19,6 +19,7 @@ ui/            builds each frame's display list; no wgpu or winit imports
   mod.rs         Current, Panels, FrameInput, build_frame(), backdrop()
   chrome.rs      the four panels and their buttons; content_area(), image_viewport()
   histogram.rs / minimap.rs / buttons.rs   one widget each
+  pixel.rs       the pointer's readout: coordinate, stored and mapped values, swatch
   menu.rs        Menu (which popup is open), the zoom menu's choices, and how its cells are drawn
   status.rs      the words in the top and bottom bars
 theme/         palette.rs reads Omarchy's colors.toml and resolves its cascade; mod.rs derives Theme's colour roles
@@ -27,10 +28,11 @@ loader.rs      the decode + upload thread; replies arrive as winit user events
 watch.rs       polling a file for a settled change
 timing.rs      startup instrumentation
 image/         the data model, nothing GPU
-  mod.rs         Channels, Samples, AlphaMode, DecodedImage
+  mod.rs         Channels, Samples, AlphaMode, DecodedImage, Sample (one pixel read back)
   color/         Transfer, Primaries, ColorSpace; icc.rs and cicp.rs translate what files say into them
   stats.rs       the scan an image gets on load: min/max, histogram, plot
-  display.rs     Display: window, exposure, tone map, colormap — uniform state, never re-decodes
+  display.rs     Display: window, exposure, tone map, colormap — uniform state, never re-decodes;
+                 map() and the CPU twins of the shaders' tone curves and colormaps
   decode/        Decoder trait + DECODERS registry in mod.rs; one file per format; limits.rs the size ceiling;
                  dynamic.rs the shared DynamicImage bridge; fixture_tests.rs runs every file in test_images/
 render/        the GPU
@@ -48,7 +50,8 @@ render/        the GPU
 | Change | Edit |
 | --- | --- |
 | A key binding | `app/input.rs`: one `KEYS` entry and one `perform` arm. `--help` follows. |
-| A status-bar segment | `ui/status.rs` |
+| A status-bar segment | `ui/status.rs`; the pointer's pixel readout is `ui/pixel.rs` |
+| What a pixel reads as under the pointer | `image/mod.rs::sample` for what the file holds, `image/display.rs::map` for what the screen shows |
 | A panel or overlay | a new `ui/<name>.rs` and one call in `ui/mod.rs::build_frame`; a new colour role goes in `theme/mod.rs` |
 | A popup menu | a `Menu` variant in `ui/menu.rs` with its choices, `items`/`grid`/`choose` arms and a `draw` arm; `Chrome::popup` places it, `App::press` opens it |
 | A CLI flag | `cli.rs`, and the `Options` / `Startup` / `Overrides` field it sets |
@@ -74,7 +77,7 @@ render/        the GPU
 ## Checks
 
 ```sh
-cargo test                    # 182 tests; the 7 GPU ones pass vacuously without an adapter
+cargo test                    # 196 tests; the 7 GPU ones pass vacuously without an adapter
 cargo clippy --all-targets    # clean
 cargo doc --no-deps           # no warnings
 cargo run --release -- test_images/png-rgb8.png --histogram --minimap

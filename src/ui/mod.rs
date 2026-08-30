@@ -12,6 +12,7 @@ pub mod minimap;
 
 mod buttons;
 mod histogram;
+mod pixel;
 mod status;
 
 use crate::image::display::Display;
@@ -236,13 +237,15 @@ pub fn build_frame(
     let right_width = text.measure_text(&right, TEXT_SIZE)[0];
     let right_x = (chrome.zoom_button.x - PADDING - right_width).max(PADDING);
 
-    if let Some([x, y]) = input.pointer {
-        frame.text_clipped(
-            [PADDING, baseline],
-            TEXT_SIZE,
-            theme.text_primary,
-            (right_x - PADDING * 2.0).max(1.0),
-            format!("({x}, {y})"),
+    if let Some(at) = input.pointer {
+        pixel::draw(
+            &mut frame,
+            text,
+            current,
+            at,
+            bar,
+            (right_x - PADDING).max(PADDING),
+            theme,
         );
     }
     frame.text([right_x, baseline], TEXT_SIZE, theme.text_dim, right);

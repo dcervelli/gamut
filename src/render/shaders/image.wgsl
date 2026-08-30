@@ -172,6 +172,10 @@ fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
 // Polynomial fits to the matplotlib colormaps. Approximations, but well
 // within what the eye resolves in a false-colour display. They produce
 // sRGB-encoded values, so the caller linearises.
+//
+// Mirrored on the CPU by `Colormap::color` in image/display.rs, which the
+// pointer readout uses to say what colour a pixel came out. Change one, change
+// the other: a swatch that disagrees with the screen is worse than no swatch.
 fn viridis(t: f32) -> vec3<f32> {
     let c0 = vec3<f32>(0.2777273, 0.00540734, 0.33409980);
     let c1 = vec3<f32>(0.10509304, 1.40461353, 1.38459016);

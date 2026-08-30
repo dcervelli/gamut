@@ -68,6 +68,8 @@ fn neutral(color_in: vec3<f32>) -> vec3<f32> {
     return mix(color, vec3<f32>(new_peak), g);
 }
 
+// Mirrored on the CPU by `ToneMap::apply` in image/display.rs, for the one
+// pixel the readout in the bottom bar has to describe.
 fn tone_map(color: vec3<f32>) -> vec3<f32> {
     switch params.tone_map {
         case 1u: { return reinhard(max(color, vec3<f32>(0.0))); }
