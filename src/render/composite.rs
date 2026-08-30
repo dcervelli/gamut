@@ -5,9 +5,10 @@
 use bytemuck::{Pod, Zeroable};
 
 use super::output::Output;
-use super::ui::Color;
+use super::placement::Placement;
+use super::shader_codes;
+use super::ui_layer::Color;
 use crate::image::display::{Colormap, Display};
-use crate::view::Placement;
 
 /// The most regions the checkerboard can be cut into: the image, and the
 /// minimap's thumbnail.
@@ -183,7 +184,7 @@ impl Composite {
         // False colour is already display-referred: a tone curve on top of a
         // colormap would distort the mapping the viewer is reading values off.
         let tone_map = if display.colormap == Colormap::Gray {
-            display.tone_map.index()
+            shader_codes::tone_map(display.tone_map)
         } else {
             0
         };
@@ -205,7 +206,7 @@ impl Composite {
             0,
             bytemuck::bytes_of(&Params {
                 tone_map,
-                encoding: output.encoding,
+                encoding: shader_codes::encoding(output.encoding),
                 white_scale: 1.0,
                 checker: (backdrop.square * scale).max(1.0),
                 base: backdrop.base.to_linear(),

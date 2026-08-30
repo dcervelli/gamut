@@ -1,14 +1,9 @@
-//! GPU side of the UI layer: one instanced draw for every rectangle, then
-//! glyphon for the text, both into the UI target.
+//! The geometry half of the UI layer: every quad and polygon in the frame,
+//! in the order it was emitted, as runs of one instanced draw each.
 
-use anyhow::Result;
 use bytemuck::{Pod, Zeroable};
-use glyphon::{
-    Attrs, Cache, Family, FontSystem, Metrics, Resolution, Shaping, SwashCache, TextArea,
-    TextAtlas, TextBounds, TextRenderer, Viewport, Wrap,
-};
 
-use super::{Blend, Shape, UiFrame};
+use super::{Blend, Shape};
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -55,7 +50,7 @@ struct ViewportUniform {
 const INITIAL_QUADS: usize = 64;
 const INITIAL_VERTICES: usize = 1024;
 
-pub struct UiRenderer {
+pub(super) struct Shapes {
     /// One per [`Blend`], indexed by it.
     pipelines: [wgpu::RenderPipeline; 2],
     poly_pipelines: [wgpu::RenderPipeline; 2],
@@ -70,26 +65,10 @@ pub struct UiRenderer {
     /// than batching by mode is what keeps shapes painting in the order they
     /// were added; a frame of plain quads still gets a single draw.
     runs: Vec<Run>,
-
-    font_system: FontSystem,
-    swash: SwashCache,
-    text_viewport: Viewport,
-    atlas: TextAtlas,
-    text_renderer: TextRenderer,
-    /// Reused across frames; glyphon needs a live `Buffer` per text run for
-    /// the duration of `prepare`.
-    text_buffers: Vec<glyphon::Buffer>,
-    text_count: usize,
-    /// Scratch buffer for measurement, kept out of the drawn set.
-    measure_buffer: glyphon::Buffer,
 }
 
-impl UiRenderer {
-    pub fn new(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        target_format: wgpu::TextureFormat,
-    ) -> Self {
+impl Shapes {
+    pub(super) fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("ui quads"),
             source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/ui.wgsl").into()),
@@ -226,14 +205,6 @@ impl UiRenderer {
             mapped_at_creation: false,
         });
 
-        let mut font_system = FontSystem::new();
-        let cache = Cache::new(device);
-        let text_viewport = Viewport::new(device, &cache);
-        let mut atlas = TextAtlas::new(device, queue, &cache, target_format);
-        let text_renderer =
-            TextRenderer::new(&mut atlas, device, wgpu::MultisampleState::default(), None);
-        let measure_buffer = glyphon::Buffer::new(&mut font_system, Metrics::new(14.0, 18.0));
-
         Self {
             pipelines,
             poly_pipelines,
@@ -244,50 +215,17 @@ impl UiRenderer {
             vertices,
             vertex_capacity: INITIAL_VERTICES,
             runs: Vec::new(),
-            font_system,
-            swash: SwashCache::new(),
-            text_viewport,
-            atlas,
-            text_renderer,
-            text_buffers: Vec::new(),
-            text_count: 0,
-            measure_buffer,
         }
     }
 
-    /// Width and height of `text` in logical pixels, for laying out anything
-    /// that has to sit next to it.
-    pub fn measure(&mut self, text: &str, size: f32) -> [f32; 2] {
-        self.measure_buffer
-            .set_metrics(Metrics::new(size, size * 1.3));
-        self.measure_buffer.set_size(None, None);
-        self.measure_buffer.set_wrap(Wrap::None);
-        self.measure_buffer.set_text(
-            text,
-            &Attrs::new().family(Family::SansSerif),
-            Shaping::Advanced,
-            None,
-        );
-        self.measure_buffer
-            .shape_until_scroll(&mut self.font_system, false);
-
-        let mut width: f32 = 0.0;
-        let mut height: f32 = 0.0;
-        for run in self.measure_buffer.layout_runs() {
-            width = width.max(run.line_w);
-            height += run.line_height;
-        }
-        [width, height]
-    }
-
-    pub fn prepare(
+    pub(super) fn prepare(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        frame: &UiFrame,
+        shapes: &[Shape],
         physical: [u32; 2],
         scale: f32,
-    ) -> Result<()> {
+    ) {
         queue.write_buffer(
             &self.viewport_buffer,
             0,
@@ -300,7 +238,7 @@ impl UiRenderer {
         let mut instances: Vec<QuadInstance> = Vec::new();
         let mut vertices: Vec<PolyVertex> = Vec::new();
         self.runs.clear();
-        for shape in &frame.shapes {
+        for shape in shapes {
             let (kind, blend, added) = match shape {
                 Shape::Quad(quad) => {
                     instances.push(QuadInstance {
@@ -366,99 +304,9 @@ impl UiRenderer {
         if !vertices.is_empty() {
             queue.write_buffer(&self.vertices, 0, bytemuck::cast_slice(&vertices));
         }
-
-        self.prepare_text(device, queue, frame, physical, scale)
     }
 
-    fn prepare_text(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        frame: &UiFrame,
-        physical: [u32; 2],
-        scale: f32,
-    ) -> Result<()> {
-        // Disjoint field borrows: shaping needs the font system mutably while
-        // the text areas below hold the buffers immutably.
-        let Self {
-            font_system,
-            swash,
-            atlas,
-            text_renderer,
-            text_viewport,
-            text_buffers,
-            text_count,
-            ..
-        } = self;
-
-        while text_buffers.len() < frame.texts.len() {
-            text_buffers.push(glyphon::Buffer::new(font_system, Metrics::new(14.0, 18.0)));
-        }
-        *text_count = frame.texts.len();
-
-        let attrs = Attrs::new().family(Family::SansSerif);
-        for (buffer, item) in text_buffers.iter_mut().zip(&frame.texts) {
-            let size = item.size * scale;
-            buffer.set_metrics(Metrics::new(size, size * 1.3));
-            buffer.set_wrap(Wrap::None);
-            buffer.set_size(item.max_width.map(|w| w * scale), None);
-            buffer.set_text(&item.text, &attrs, Shaping::Advanced, None);
-            buffer.shape_until_scroll(font_system, false);
-        }
-
-        text_viewport.update(
-            queue,
-            Resolution {
-                width: physical[0],
-                height: physical[1],
-            },
-        );
-
-        let areas = text_buffers
-            .iter()
-            .take(frame.texts.len())
-            .zip(&frame.texts)
-            .map(|(buffer, item)| {
-                let left = item.at[0] * scale;
-                let top = item.at[1] * scale;
-                let right = item
-                    .max_width
-                    .map(|w| left + w * scale)
-                    .unwrap_or(physical[0] as f32);
-                TextArea {
-                    buffer,
-                    left,
-                    top,
-                    scale: 1.0,
-                    bounds: TextBounds {
-                        left: left.floor() as i32,
-                        top: top.floor() as i32,
-                        right: right.ceil() as i32,
-                        bottom: physical[1] as i32,
-                    },
-                    default_color: glyphon::Color::rgba(
-                        item.color.r,
-                        item.color.g,
-                        item.color.b,
-                        item.color.a,
-                    ),
-                    custom_glyphs: &[],
-                }
-            });
-
-        text_renderer.prepare(
-            device,
-            queue,
-            font_system,
-            atlas,
-            text_viewport,
-            areas,
-            swash,
-        )?;
-        Ok(())
-    }
-
-    pub fn render(&self, pass: &mut wgpu::RenderPass<'_>) -> Result<()> {
+    pub(super) fn render(&self, pass: &mut wgpu::RenderPass<'_>) {
         if !self.runs.is_empty() {
             pass.set_bind_group(0, &self.viewport_group, &[]);
             for run in &self.runs {
@@ -477,14 +325,5 @@ impl UiRenderer {
                 }
             }
         }
-        if self.text_count > 0 {
-            self.text_renderer
-                .render(&self.atlas, &self.text_viewport, pass)?;
-        }
-        Ok(())
-    }
-
-    pub fn trim(&mut self) {
-        self.atlas.trim();
     }
 }

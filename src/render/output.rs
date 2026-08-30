@@ -16,14 +16,25 @@ pub enum HdrPreference {
     On,
 }
 
+/// The transfer encoding the composite shader applies on the way out, to
+/// match what the surface expects to receive.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Encoding {
+    /// The hardware encodes; the shader writes linear values.
+    Srgb,
+    /// scRGB: linear values straight out, 1.0 being SDR reference white.
+    ScRgbLinear,
+    /// HDR10: the shader applies the PQ curve itself.
+    Pq,
+}
+
 /// The surface configuration, and the encoding the composite shader must
 /// apply to match it.
 #[derive(Clone, Copy, Debug)]
 pub struct Output {
     pub format: wgpu::TextureFormat,
     pub color_space: wgpu::SurfaceColorSpace,
-    /// Matches the `encoding` switch in composite.wgsl.
-    pub encoding: u32,
+    pub encoding: Encoding,
     pub label: &'static str,
     pub is_hdr: bool,
 }
@@ -68,7 +79,7 @@ impl Output {
         .then_some(Self {
             format,
             color_space: wgpu::SurfaceColorSpace::ExtendedSrgbLinear,
-            encoding: 1,
+            encoding: Encoding::ScRgbLinear,
             label: "scRGB linear (HDR)",
             is_hdr: true,
         })
@@ -81,7 +92,7 @@ impl Output {
         Self::supports(capabilities, format, wgpu::SurfaceColorSpaces::BT2100_PQ).then_some(Self {
             format,
             color_space: wgpu::SurfaceColorSpace::Bt2100Pq,
-            encoding: 2,
+            encoding: Encoding::Pq,
             label: "BT.2100 PQ (HDR10)",
             is_hdr: true,
         })
@@ -99,7 +110,7 @@ impl Output {
         Some(Self {
             format,
             color_space: wgpu::SurfaceColorSpace::Srgb,
-            encoding: 0,
+            encoding: Encoding::Srgb,
             label: "sRGB",
             is_hdr: false,
         })

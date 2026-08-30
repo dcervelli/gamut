@@ -12,9 +12,9 @@ use half::f16;
 use super::WORKING_FORMAT;
 use super::image_layer::{Draw, ImageLayer};
 use super::upload::Capabilities;
+use super::{Placement, Upscale};
 use crate::image::display::Display;
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
-use crate::view::{Placement, Upscale};
 
 struct Gpu {
     device: wgpu::Device,

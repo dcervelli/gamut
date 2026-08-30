@@ -15,10 +15,13 @@ use crate::image::display::{AutoWindow, Colormap, Display, Startup};
 use crate::image::stats::BINS;
 use crate::image::{DecodedImage, Stats, decode};
 use crate::loader::{Decoded, Loader, Opened, Ready, Reload, Request};
-use crate::render::{Backdrop, Blend, Color, HdrPreference, Rect, Renderer, UiFrame};
+use crate::render::{
+    Backdrop, Blend, Color, HdrPreference, Placement, Rect, Renderer, Scene, TextMeasure, UiFrame,
+    Upscale,
+};
 use crate::theme::{self, Theme};
 use crate::timing;
-use crate::view::{Placement, Upscale, View, Viewport};
+use crate::view::{View, Viewport};
 use crate::watch::{self, Watch};
 
 /// Window pixels moved per arrow-key press.
@@ -211,7 +214,7 @@ struct Current {
     display: Display,
     label: String,
     /// What the GPU actually stored it as, which is not always what we asked.
-    format: Option<wgpu::TextureFormat>,
+    stored: Option<String>,
 }
 
 impl Current {
@@ -614,7 +617,7 @@ impl App {
             None => Display::for_image_with(&image, &stats, self.startup),
         };
 
-        let mut format = None;
+        let mut stored = None;
         if let Some(renderer) = &mut self.renderer {
             // Already across whenever the window was open when the read
             // started, which is every file but the one named on the command
@@ -632,7 +635,7 @@ impl App {
             if let Some(note) = renderer.install_image(uploaded) {
                 eprintln!("image-view: {note}");
             }
-            format = renderer.image_format();
+            stored = renderer.image_format_label();
         }
 
         self.index = file.index;
@@ -645,7 +648,7 @@ impl App {
             stats,
             display,
             label: file_label(&file.path),
-            format,
+            stored,
         });
         if let Some(window) = &self.window {
             window.set_title(&window_title(&file.path));
@@ -1071,7 +1074,15 @@ impl App {
             square: CHECKER_SQUARE,
         };
 
-        match renderer.render(placement, thumbnail, display, &frame, scale, backdrop) {
+        let scene = Scene {
+            placement,
+            thumbnail,
+            display,
+            frame: &frame,
+            scale,
+            backdrop,
+        };
+        match renderer.render(scene) {
             Ok(()) => self.reported_error = false,
             Err(error) => {
                 if !self.reported_error {
@@ -1164,7 +1175,7 @@ impl ApplicationHandler<Decoded> for App {
                     if let Some(note) = note {
                         eprintln!("image-view: {note}");
                     }
-                    current.format = renderer.image_format();
+                    current.stored = renderer.image_format_label();
                 }
                 Err(error) => {
                     eprintln!("image-view: {error:#}");
@@ -1526,8 +1537,9 @@ fn describe_pixels(current: &Current) -> String {
         crate::image::Channels::Rgba => "rgba",
     };
     let stored = current
-        .format
-        .map(|format| format!(" \u{2192} {format:?}"))
+        .stored
+        .as_ref()
+        .map(|stored| format!(" \u{2192} {stored}"))
         .unwrap_or_default();
     format!(
         "{} {channels}{stored}",

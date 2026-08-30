@@ -76,14 +76,6 @@ impl ToneMap {
             ToneMap::Neutral => ToneMap::Clip,
         }
     }
-
-    pub fn index(self) -> u32 {
-        match self {
-            ToneMap::Clip => 0,
-            ToneMap::Reinhard => 1,
-            ToneMap::Neutral => 2,
-        }
-    }
 }
 
 /// False colour for single-channel images. Ignored for colour images.
@@ -121,15 +113,6 @@ impl Colormap {
             Colormap::Viridis => Colormap::Magma,
             Colormap::Magma => Colormap::Turbo,
             Colormap::Turbo => Colormap::Gray,
-        }
-    }
-
-    pub fn index(self) -> u32 {
-        match self {
-            Colormap::Gray => 0,
-            Colormap::Viridis => 1,
-            Colormap::Magma => 2,
-            Colormap::Turbo => 3,
         }
     }
 }

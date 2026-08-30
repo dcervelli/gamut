@@ -20,8 +20,7 @@ use image::decode::Overrides;
 use image::display::{AutoWindow, Colormap, Startup, ToneMap};
 use image::{Primaries, Transfer};
 use loader::Loader;
-use render::HdrPreference;
-use view::Upscale;
+use render::{HdrPreference, Upscale};
 
 const USAGE: &str = "\
 image-view — preview images

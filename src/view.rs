@@ -1,5 +1,7 @@
 //! Zoom, pan and fit state. Pure geometry, no GPU or windowing types.
 
+use crate::render::{Placement, Upscale};
+
 const ZOOM_STEP: f32 = 1.25;
 const MIN_ZOOM: f32 = 0.02;
 const MAX_ZOOM: f32 = 64.0;
@@ -28,58 +30,6 @@ impl Fit {
             Fit::Whole => Fit::Width,
             Fit::Width => Fit::Height,
             Fit::Height => Fit::Whole,
-        }
-    }
-}
-
-/// How the image is resampled when it is shown larger than life.
-///
-/// Minification has one right answer — average what the pixel covers — but
-/// magnification is a judgement about what the image is for, so it is the
-/// user's to make. Neither is a smoothing filter in the ordinary sense: both
-/// leave a texel centre exactly as it was found.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub enum Upscale {
-    /// Nearest neighbour, ramped across the single output pixel that straddles
-    /// a texel edge. Shows the pixel grid a measurement image is read on, and
-    /// unlike plain nearest it does not double columns unevenly at a zoom that
-    /// is not a whole number.
-    #[default]
-    Nearest,
-    /// Catmull-Rom. Smooth, noticeably sharper than bilinear, and worth having
-    /// when the subject is a photograph rather than a grid of measurements.
-    Bicubic,
-}
-
-impl Upscale {
-    pub fn label(self) -> &'static str {
-        match self {
-            Upscale::Nearest => "nearest",
-            Upscale::Bicubic => "bicubic",
-        }
-    }
-
-    pub fn parse(value: &str) -> Option<Self> {
-        Some(match value.to_ascii_lowercase().as_str() {
-            "nearest" | "point" | "pixel" => Upscale::Nearest,
-            "bicubic" | "cubic" | "catmull" | "catmull-rom" => Upscale::Bicubic,
-            _ => return None,
-        })
-    }
-
-    fn next(self) -> Self {
-        match self {
-            Upscale::Nearest => Upscale::Bicubic,
-            Upscale::Bicubic => Upscale::Nearest,
-        }
-    }
-
-    /// Matches the `filter` codes in shaders/image.wgsl, where 0 is the area
-    /// filter minification uses.
-    pub fn index(self) -> u32 {
-        match self {
-            Upscale::Nearest => 1,
-            Upscale::Bicubic => 2,
         }
     }
 }
@@ -131,29 +81,6 @@ impl Viewport {
             && point[0] < self.x + self.width
             && point[1] >= self.y
             && point[1] < self.y + self.height
-    }
-}
-
-/// Where the image sits in the window, in physical pixels, origin top-left.
-#[derive(Clone, Copy, Debug)]
-pub struct Placement {
-    pub x: f32,
-    pub y: f32,
-    pub width: f32,
-    pub height: f32,
-    pub zoom: f32,
-    pub upscale: Upscale,
-}
-
-impl Placement {
-    /// Where `point`, in physical window pixels, falls on the image, in image
-    /// pixels. Fractional, and not clamped: the caller knows whether it wants
-    /// the texel the point lands in and whether being off the image matters.
-    pub fn image_point(&self, point: [f32; 2]) -> [f32; 2] {
-        [
-            (point[0] - self.x) / self.zoom,
-            (point[1] - self.y) / self.zoom,
-        ]
     }
 }
 

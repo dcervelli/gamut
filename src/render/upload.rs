@@ -16,7 +16,7 @@
 
 use half::f16;
 
-use crate::image::{AlphaMode, Channels, DecodedImage, Samples, Transfer};
+use crate::image::{Channels, DecodedImage, Samples, Transfer};
 
 /// How many components the texture carries. Never three: no graphics API has
 /// a three-component sampled texture format.
@@ -293,29 +293,10 @@ fn map_f32(data: &[f32], channels: Channels, components: usize, transfer: Transf
     Pixels::F32(out)
 }
 
-/// How the shader should treat the alpha channel it samples.
-pub fn alpha_code(alpha: AlphaMode) -> u32 {
-    match alpha {
-        AlphaMode::Opaque => 0,
-        AlphaMode::Straight => 1,
-        AlphaMode::Premultiplied => 2,
-    }
-}
-
-/// How the shader should expand the sampled components to RGBA.
-pub fn swizzle_code(channels: Channels) -> u32 {
-    match channels {
-        Channels::Gray => 0,
-        Channels::GrayAlpha => 1,
-        Channels::Rgb => 2,
-        Channels::Rgba => 3,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::image::{ColorSpace, DecodedImage, Primaries, Samples};
+    use crate::image::{AlphaMode, ColorSpace, DecodedImage, Primaries, Samples};
 
     const FULL: Capabilities = Capabilities {
         norm16: true,

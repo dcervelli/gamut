@@ -1,7 +1,7 @@
 //! Rendering, in three separable layers.
 //!
 //! 1. [`image_layer`] draws the image into a linear working-space target.
-//! 2. [`ui`] draws the interface into its own sRGB target.
+//! 2. [`ui_layer`] draws the interface into its own sRGB target.
 //! 3. [`composite`] tone maps the first, lays the second over it, and encodes
 //!    the result for whatever the surface turned out to be.
 //!
@@ -13,8 +13,10 @@
 mod composite;
 mod image_layer;
 mod output;
+mod placement;
 mod reduce;
-pub mod ui;
+mod shader_codes;
+pub mod ui_layer;
 
 #[cfg(test)]
 mod filter_tests;
@@ -27,16 +29,16 @@ use winit::window::Window;
 
 use crate::image::{DecodedImage, display::Display};
 use crate::timing;
-use crate::view::Placement;
 
 pub use composite::Backdrop;
 pub use output::{HdrPreference, Output};
-pub use ui::{Blend, Color, Rect, UiFrame};
+pub use placement::{Placement, Upscale};
+pub use ui_layer::{Blend, Color, Rect, UiFrame};
 
 use composite::Composite;
 use image_layer::{Draw, ImageLayer};
 pub use image_layer::{GpuImage, Upload};
-use ui::UiRenderer;
+use ui_layer::UiRenderer;
 use upload::Capabilities;
 
 /// The working space every layer meets in: linear, BT.709 primaries, with
@@ -50,6 +52,29 @@ const UI_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 struct Targets {
     image: wgpu::TextureView,
     ui: wgpu::TextureView,
+}
+
+/// Everything one frame draws. `thumbnail`, when the minimap is on screen,
+/// is where the whole image is drawn a second time. It goes into the image
+/// layer rather than the interface's, since it is the image: the same window,
+/// tone map and colormap apply to it without any of that having to be
+/// reimplemented in sRGB.
+pub struct Scene<'a> {
+    pub placement: Placement,
+    pub thumbnail: Option<Placement>,
+    pub display: &'a Display,
+    pub frame: &'a UiFrame,
+    /// Physical pixels to the logical one the interface is laid out in.
+    pub scale: f32,
+    pub backdrop: Backdrop,
+}
+
+/// Text measurement, for interface code that has to lay something out next
+/// to a label. A trait rather than a method on [`Renderer`] so that the
+/// interface can be built against something that is not a GPU.
+pub trait TextMeasure {
+    /// Width and height of `text` at `size`, in logical pixels.
+    fn measure_text(&mut self, text: &str, size: f32) -> [f32; 2];
 }
 
 pub struct Renderer {
@@ -141,12 +166,6 @@ impl Renderer {
         &self.adapter_name
     }
 
-    /// Text measurement, for UI code that needs to lay something out next to
-    /// a label.
-    pub fn measure_text(&mut self, text: &str, size: f32) -> [f32; 2] {
-        self.ui.measure(text, size)
-    }
-
     pub fn resize(&mut self, width: u32, height: u32) {
         if width == 0 || height == 0 {
             return;
@@ -190,26 +209,26 @@ impl Renderer {
         note
     }
 
-    /// The texture format the current image ended up in, for the UI to report.
-    pub fn image_format(&self) -> Option<wgpu::TextureFormat> {
-        self.image_layer.current().map(|image| image.format)
+    /// What the current image was stored as on the device, for the interface
+    /// to report. A label rather than the format itself, so that nothing above
+    /// the renderer has to name a GPU type.
+    pub fn image_format_label(&self) -> Option<String> {
+        self.image_layer
+            .current()
+            .map(|image| format!("{:?}", image.format))
     }
 
-    /// `thumbnail`, when the minimap is on screen, is where the whole image
-    /// is to be drawn a second time. It goes into the image layer rather than
-    /// the interface's, since it is the image: the same window, tone map and
-    /// colormap apply to it without any of that having to be reimplemented in
-    /// sRGB.
-    pub fn render(
-        &mut self,
-        placement: Placement,
-        thumbnail: Option<Placement>,
-        display: &Display,
-        frame: &UiFrame,
-        scale: f32,
-        backdrop: Backdrop,
-    ) -> Result<()> {
+    pub fn render(&mut self, scene: Scene<'_>) -> Result<()> {
         use wgpu::CurrentSurfaceTexture as Acquired;
+
+        let Scene {
+            placement,
+            thumbnail,
+            display,
+            frame,
+            scale,
+            backdrop,
+        } = scene;
 
         let surface_texture = match self.surface.get_current_texture() {
             Acquired::Success(texture) => texture,
@@ -331,6 +350,12 @@ impl Renderer {
             timing::first_image_frame();
         }
         Ok(())
+    }
+}
+
+impl TextMeasure for Renderer {
+    fn measure_text(&mut self, text: &str, size: f32) -> [f32; 2] {
+        self.ui.measure(text, size)
     }
 }
 

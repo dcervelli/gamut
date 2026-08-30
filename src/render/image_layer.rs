@@ -8,10 +8,11 @@
 use anyhow::{Result, anyhow};
 use bytemuck::{Pod, Zeroable};
 
+use super::placement::Placement;
 use super::reduce::{self, Level, Reducer};
+use super::shader_codes;
 use super::upload::{self, Capabilities};
 use crate::image::{AlphaMode, DecodedImage, display::Display};
-use crate::view::Placement;
 
 /// Layout must match `struct Params` in shaders/image.wgsl.
 #[repr(C)]
@@ -359,7 +360,7 @@ impl Upload {
             levels: Vec::new(),
             chain_built: false,
             level_format: reduce::level_format(plan.format),
-            swizzle: upload::swizzle_code(image.channels()),
+            swizzle: shader_codes::swizzle(image.channels()),
             alpha: image.alpha,
             primaries: to_columns(image.color.primaries.to_bt709()),
             format: plan.format,
@@ -442,19 +443,12 @@ fn params_for(
         primaries: image.primaries,
         swizzle: image.swizzle,
         alpha_mode: if level == 0 {
-            upload::alpha_code(image.alpha)
+            shader_codes::alpha(image.alpha)
         } else {
-            reduce::level_alpha_code(image.alpha)
+            shader_codes::level_alpha(image.alpha)
         },
-        colormap: display.colormap.index(),
-        // Minification is an area average; magnification is whichever of the
-        // two the user asked for. At exactly 1:1 both come to the same thing,
-        // so the boundary is not a visible one.
-        resampler: if placement.zoom < 1.0 {
-            0
-        } else {
-            placement.upscale.index()
-        },
+        colormap: shader_codes::colormap(display.colormap),
+        resampler: shader_codes::resampler(placement.zoom, placement.upscale),
     }
 }
 

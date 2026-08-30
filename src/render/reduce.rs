@@ -16,7 +16,7 @@ use bytemuck::{Pod, Zeroable};
 
 use crate::image::AlphaMode;
 
-use super::upload::alpha_code;
+use super::shader_codes;
 
 /// Size ratio between one level and the next, per axis.
 pub const STEP: u32 = 4;
@@ -201,9 +201,9 @@ impl Reducer {
                     // Only the first pass reads the image as it was uploaded;
                     // every level it writes is premultiplied already.
                     alpha_mode: if levels.is_empty() {
-                        alpha_code(alpha)
+                        shader_codes::alpha(alpha)
                     } else {
-                        level_alpha_code(alpha)
+                        shader_codes::level_alpha(alpha)
                     },
                     _pad: [0; 3],
                 }));
@@ -304,16 +304,6 @@ pub fn level_for(factor: f32, available: usize) -> usize {
     }
     let level = (factor.log2() / (STEP as f32).log2()).floor().max(0.0) as usize;
     level.min(available)
-}
-
-/// What a coarse level holds. Straight alpha has been multiplied through on
-/// the way in; an image whose alpha channel is meaningless keeps it that way,
-/// since dividing the colour back out by it would be nonsense.
-pub fn level_alpha_code(alpha: AlphaMode) -> u32 {
-    match alpha {
-        AlphaMode::Opaque => 0,
-        AlphaMode::Straight | AlphaMode::Premultiplied => 2,
-    }
 }
 
 #[cfg(test)]

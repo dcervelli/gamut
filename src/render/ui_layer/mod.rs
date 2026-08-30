@@ -11,9 +11,13 @@
 //! adding panels, sliders or histograms later is a matter of emitting more
 //! primitives, not of touching the renderer.
 
-mod renderer;
+mod shapes;
+mod text;
 
-pub use renderer::UiRenderer;
+use anyhow::Result;
+
+use shapes::Shapes;
+use text::Text;
 
 /// A rectangle in logical pixels, origin top-left.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -249,5 +253,56 @@ impl UiFrame {
 impl Default for UiFrame {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// The GPU side of the layer: every shape in one instanced draw, then the
+/// text on top of it, both into the UI target.
+pub struct UiRenderer {
+    shapes: Shapes,
+    text: Text,
+}
+
+impl UiRenderer {
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        target_format: wgpu::TextureFormat,
+    ) -> Self {
+        Self {
+            shapes: Shapes::new(device, target_format),
+            text: Text::new(device, queue, target_format),
+        }
+    }
+
+    /// Width and height of `text` in logical pixels, for laying out anything
+    /// that has to sit next to it.
+    pub fn measure(&mut self, text: &str, size: f32) -> [f32; 2] {
+        self.text.measure(text, size)
+    }
+
+    /// `physical` is the target size in device pixels; `scale` takes the
+    /// frame's logical coordinates to it.
+    pub fn prepare(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        frame: &UiFrame,
+        physical: [u32; 2],
+        scale: f32,
+    ) -> Result<()> {
+        self.shapes
+            .prepare(device, queue, &frame.shapes, physical, scale);
+        self.text
+            .prepare(device, queue, &frame.texts, physical, scale)
+    }
+
+    pub fn render(&self, pass: &mut wgpu::RenderPass<'_>) -> Result<()> {
+        self.shapes.render(pass);
+        self.text.render(pass)
+    }
+
+    pub fn trim(&mut self) {
+        self.text.trim();
     }
 }
