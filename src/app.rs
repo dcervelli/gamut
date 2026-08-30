@@ -11,16 +11,14 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{Cursor, CursorIcon, Window, WindowId};
 
-use crate::image::display::{AutoWindow, Colormap, Display, Startup};
-use crate::image::stats::BINS;
-use crate::image::{DecodedImage, Stats, decode};
+use crate::image::decode;
+use crate::image::display::{Display, Startup};
 use crate::loader::{Decoded, Loader, Opened, Ready, Reload, Request};
-use crate::render::{
-    Backdrop, Blend, Color, HdrPreference, Placement, Rect, Renderer, Scene, TextMeasure, UiFrame,
-    Upscale,
-};
+use crate::render::{HdrPreference, Placement, Renderer, Scene, Upscale};
 use crate::theme::{self, Theme};
 use crate::timing;
+use crate::ui::chrome::{BAR_HEIGHT, Chrome, SIDE_WIDTH, image_viewport};
+use crate::ui::{self, Current, FrameInput, Panels, Reading, Widget};
 use crate::view::{View, Viewport};
 use crate::watch::{self, Watch};
 
@@ -42,161 +40,6 @@ const DEFAULT_IMAGE: [f32; 2] = [960.0, 640.0];
 /// word into the interface and out again.
 const SLOW_READ: Duration = Duration::from_millis(120);
 
-/// Height of the top and bottom panels.
-const BAR_HEIGHT: f32 = 30.0;
-/// Width of the left and right panels. Wide enough for a square button and
-/// nothing else, which is the point: they hold tools, not content.
-const SIDE_WIDTH: f32 = 50.0;
-/// The square buttons that live in the side panels.
-const BUTTON_SIZE: f32 = 34.0;
-const TEXT_SIZE: f32 = 13.0;
-const PADDING: f32 = 12.0;
-/// The largest the minimap's thumbnail may be. It keeps the image's own
-/// shape inside this, so a panorama gets a wide short one and a portrait a
-/// narrow tall one.
-const MINIMAP_SIZE: [f32; 2] = [168.0, 132.0];
-/// Below this on either side there is no room for a map worth reading, and
-/// the minimap stays off rather than shrinking to a smudge.
-const MINIMAP_MIN: f32 = 48.0;
-/// The gap between the histogram panel's edge and its plot.
-const HISTOGRAM_INSET: f32 = 10.0;
-/// Wide enough that a bin is exactly one logical pixel, which is what keeps
-/// the bars evenly spaced instead of some of them landing astride a pixel
-/// boundary and coming out fatter than their neighbours.
-const HISTOGRAM_SIZE: [f32; 2] = [BINS as f32 + 2.0 * HISTOGRAM_INSET, 130.0];
-
-/// Width of the hairline along a panel's inner edge, in logical pixels. What
-/// it is drawn in is the theme's `border`.
-const BORDER_WIDTH: f32 = 1.0;
-/// Side of one checkerboard square, in logical pixels. Small enough to read
-/// as a texture behind the image rather than as a pattern competing with it.
-const CHECKER_SQUARE: f32 = 8.0;
-/// What the luminance plane drops to once colour planes are drawn over it.
-const HISTOGRAM_LUMA_UNDER: u8 = 110;
-/// How much of the accent is left behind a switched-on toggle. Enough to read
-/// as lit from across the window, little enough that the icon on top of it
-/// stays the thing being looked at.
-const ACTIVE_BUTTON_WASH: u8 = 64;
-
-/// The interface's toggles. One value rather than a flag each, so that
-/// hit-testing, hover and drawing all go through the same test.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Widget {
-    Minimap,
-    Histogram,
-}
-
-/// The window chrome: four panels, and the widgets sitting in them.
-///
-/// Top and bottom span the full width; left and right are nested between
-/// them, so the corners belong to the horizontal bars and the vertical ones
-/// never have to reason about where a bar ends.
-///
-/// Laid out from the window size alone, so the frame builder and the click
-/// handler agree on where everything is without either owning it.
-#[derive(Clone, Copy)]
-struct Chrome {
-    top: Rect,
-    bottom: Rect,
-    left: Rect,
-    right: Rect,
-    /// The minimap toggle, at the top of the left panel.
-    minimap_button: Rect,
-    /// The histogram toggle, at the top of the right panel.
-    histogram_button: Rect,
-}
-
-impl Chrome {
-    /// `size` is the window in logical pixels.
-    fn new(size: [f32; 2]) -> Self {
-        // Half the window each at the very smallest, so that a window dragged
-        // down to nothing shrinks the panels rather than letting the opposite
-        // pair pass through each other.
-        let bar = BAR_HEIGHT.min(size[1] / 2.0);
-        let side = SIDE_WIDTH.min(size[0] / 2.0);
-        let middle = (size[1] - 2.0 * bar).max(0.0);
-
-        let left = Rect::new(0.0, bar, side, middle);
-        let right = Rect::new(size[0] - side, bar, side, middle);
-
-        Self {
-            top: Rect::new(0.0, 0.0, size[0], bar),
-            bottom: Rect::new(0.0, size[1] - bar, size[0], bar),
-            minimap_button: top_button(left),
-            histogram_button: top_button(right),
-            left,
-            right,
-        }
-    }
-
-    /// What the four panels leave in the middle: the image is drawn in it,
-    /// and anything that floats over the image — the histogram, for now — has
-    /// to fit in it.
-    fn content(&self) -> Rect {
-        Rect::new(
-            self.left.right(),
-            self.top.bottom(),
-            (self.right.x - self.left.right()).max(0.0),
-            (self.bottom.y - self.top.bottom()).max(0.0),
-        )
-    }
-
-    /// The hairline along each panel's inner edge: the bottom of the top
-    /// panel, the right of the left one, and so on.
-    ///
-    /// Inside the panel rather than beside it, so that adding the line does
-    /// not move the edge the image is fitted against.
-    fn borders(&self) -> [Rect; 4] {
-        let width = BORDER_WIDTH.min(self.top.height).min(self.left.width);
-        [
-            Rect::new(self.top.x, self.top.bottom() - width, self.top.width, width),
-            Rect::new(self.bottom.x, self.bottom.y, self.bottom.width, width),
-            Rect::new(
-                self.left.right() - width,
-                self.left.y,
-                width,
-                self.left.height,
-            ),
-            Rect::new(self.right.x, self.right.y, width, self.right.height),
-        ]
-    }
-
-    /// Which toggle a point lands on, if any.
-    fn widget_at(&self, point: [f32; 2]) -> Option<Widget> {
-        if self.minimap_button.contains(point) {
-            Some(Widget::Minimap)
-        } else if self.histogram_button.contains(point) {
-            Some(Widget::Histogram)
-        } else {
-            None
-        }
-    }
-
-    /// Whether a click at `point` belongs to the interface rather than to the
-    /// image behind it.
-    fn contains(&self, point: [f32; 2]) -> bool {
-        self.top.contains(point)
-            || self.bottom.contains(point)
-            || self.left.contains(point)
-            || self.right.contains(point)
-    }
-}
-
-/// A square button at the top of a side panel. The same inset on all four
-/// sides, so it reads as centred in the strip rather than merely fitted into
-/// it — until the strip is shorter than that, at which point it goes flush to
-/// the top.
-fn top_button(panel: Rect) -> Rect {
-    let size = BUTTON_SIZE.min(panel.width).min(panel.height);
-    let inset = (panel.width - size) / 2.0;
-    Rect::new(
-        panel.x + inset,
-        panel.y + inset.min(panel.height - size),
-        size,
-        size,
-    )
-}
-
 /// What the command line asked for, beyond which files to show.
 pub struct Options {
     pub overrides: decode::Overrides,
@@ -207,22 +50,6 @@ pub struct Options {
     pub upscale: Upscale,
 }
 
-/// The image on screen, with everything derived from it.
-struct Current {
-    image: DecodedImage,
-    stats: Stats,
-    display: Display,
-    label: String,
-    /// What the GPU actually stored it as, which is not always what we asked.
-    stored: Option<String>,
-}
-
-impl Current {
-    fn size(&self) -> [f32; 2] {
-        [self.image.width as f32, self.image.height as f32]
-    }
-}
-
 /// What [`App::announce_slow_read`] found: a read to say something about now,
 /// one to look at again at a given moment, or nothing worth a word.
 #[derive(PartialEq, Eq, Debug)]
@@ -230,15 +57,6 @@ enum Announce {
     Now,
     Waiting(Instant),
     Nothing,
-}
-
-/// What the top bar says about a read that is taking its time.
-enum Reading {
-    /// Another file, on its way in.
-    File(String),
-    /// The file already on screen, being read again after something wrote to
-    /// it. There is no new name to show, only the fact that we are busy.
-    Again,
 }
 
 /// A read that has been asked for and not yet answered.
@@ -312,19 +130,7 @@ pub struct App {
     /// where the pointer is, and because leaving the window clears `cursor`
     /// without ending a drag the pointer grab is still delivering.
     drag_from: Option<[f32; 2]>,
-    /// Whether the four panels are on screen. They are opaque and the image
-    /// is fitted inside them, so hiding them gives it the whole window.
-    show_ui: bool,
-    show_histogram: bool,
-    /// Whether the minimap is switched on: a thumbnail of the whole image,
-    /// with the part of it the viewport is showing marked out. Whether it is
-    /// actually on screen is `minimap_on_screen`, which also asks whether
-    /// there is anything off screen for it to point out.
-    show_minimap: bool,
-    /// Which toggle the pointer is over. Held rather than recomputed while
-    /// drawing so that motion knows when the highlight has changed and a
-    /// redraw is actually owed.
-    hover: Option<Widget>,
+    panels: Panels,
     /// Set if the last render failed, so we report it once rather than every frame.
     reported_error: bool,
     /// Numbers the requests. Only the newest one's reply is acted on.
@@ -377,10 +183,12 @@ impl App {
             cursor: None,
             dragging: false,
             drag_from: None,
-            show_ui: true,
-            show_histogram: histogram,
-            show_minimap: minimap,
-            hover: None,
+            panels: Panels {
+                show_ui: true,
+                show_histogram: histogram,
+                show_minimap: minimap,
+                hover: None,
+            },
             reported_error: false,
             generation: 0,
             pending: None,
@@ -449,7 +257,7 @@ impl App {
     /// than stored, so toggling the interface re-fits a fitted image without
     /// anything having to remember to.
     fn viewport(&self) -> Viewport {
-        image_viewport(self.window_size(), self.scale_factor(), self.show_ui)
+        image_viewport(self.window_size(), self.scale_factor(), self.panels.show_ui)
     }
 
     /// The pointer in logical pixels, which is what the interface is laid out
@@ -492,7 +300,7 @@ impl App {
         // Panning and the minimap answer the same question: whether any of the
         // image is off screen. Pan is clamped to the image, so a view with
         // nowhere to go is one showing all of it.
-        self.show_minimap && self.view.can_pan(self.image_size(), self.viewport())
+        self.panels.show_minimap && self.view.can_pan(self.image_size(), self.viewport())
     }
 
     /// Where the minimap's thumbnail goes, in physical pixels: the whole
@@ -507,15 +315,13 @@ impl App {
             return None;
         }
         let image = self.current.as_ref()?.size();
-        let rect = minimap_rect(content_area(logical, self.show_ui), image)?;
-        Some(Placement {
-            x: rect.x * scale,
-            y: rect.y * scale,
-            width: rect.width * scale,
-            height: rect.height * scale,
-            zoom: rect.width * scale / image[0].max(1.0),
-            upscale: self.view.upscale(),
-        })
+        ui::minimap::placement(
+            logical,
+            scale,
+            self.panels.show_ui,
+            image,
+            self.view.upscale(),
+        )
     }
 
     /// Re-reads the file on screen if something else has written to it, which
@@ -838,18 +644,18 @@ impl App {
                 return false;
             }
             "`" | "~" => {
-                self.show_ui = !self.show_ui;
+                self.panels.show_ui = !self.panels.show_ui;
                 // A fitted image re-fits on the next frame: the viewport it is
                 // measured against is the one the panels leave, and they have
                 // just come or gone.
                 return true;
             }
             "h" | "H" => {
-                self.toggle(Widget::Histogram);
+                self.panels.toggle(Widget::Histogram);
                 return true;
             }
             "m" | "M" => {
-                self.toggle(Widget::Minimap);
+                self.panels.toggle(Widget::Minimap);
                 return true;
             }
             "u" | "U" => {
@@ -904,12 +710,12 @@ impl App {
         // aimed at the interface, so it neither reaches a widget's neighbour
         // nor starts a drag of the image underneath.
         if state == ElementState::Pressed
-            && self.show_ui
+            && self.panels.show_ui
             && let Some(point) = self.logical_cursor()
         {
             let chrome = self.chrome();
             if let Some(widget) = chrome.widget_at(point) {
-                self.toggle(widget);
+                self.panels.toggle(widget);
                 return true;
             }
             if chrome.contains(point) {
@@ -939,7 +745,7 @@ impl App {
     fn handle_motion(&mut self, position: [f32; 2]) -> bool {
         let was_over = self.pointer_pixel();
         self.cursor = Some(position);
-        let moved_pixel = self.show_ui && self.pointer_pixel() != was_over;
+        let moved_pixel = self.panels.show_ui && self.pointer_pixel() != was_over;
         if !self.dragging {
             // Nothing else to do out here, so this is where the button's
             // highlight gets to follow the pointer.
@@ -963,18 +769,11 @@ impl App {
     fn update_hover(&mut self) -> bool {
         let hover = self
             .logical_cursor()
-            .filter(|_| self.show_ui)
+            .filter(|_| self.panels.show_ui)
             .and_then(|point| self.chrome().widget_at(point));
-        let changed = hover != self.hover;
-        self.hover = hover;
+        let changed = hover != self.panels.hover;
+        self.panels.hover = hover;
         changed
-    }
-
-    fn toggle(&mut self, widget: Widget) {
-        match widget {
-            Widget::Minimap => self.show_minimap = !self.show_minimap,
-            Widget::Histogram => self.show_histogram = !self.show_histogram,
-        }
     }
 
     /// Returns `true` if the wheel changed anything on screen.
@@ -1023,7 +822,7 @@ impl App {
         let pointer = self.pointer_pixel();
         let thumbnail = self.minimap_placement(logical, scale);
         let minimap = self.minimap_on_screen();
-        let pending = self
+        let reading = self
             .pending
             .as_ref()
             // With nothing on screen there is no flicker to guard against and
@@ -1036,26 +835,29 @@ impl App {
                     Reading::File(file_label(&self.files[pending.index]))
                 }
             });
+        let hdr_output = {
+            let output = self.renderer.as_ref().expect("checked above").output();
+            output.is_hdr.then_some(output.label)
+        };
+        let input = FrameInput {
+            logical,
+            scale,
+            viewport,
+            pointer,
+            minimap_on_screen: minimap,
+            reading,
+            index: self.index,
+            count: self.files.len(),
+            hdr_output,
+        };
 
         // Split borrow: the frame builder needs the renderer's font metrics
         // while reading the rest of the application state.
         let renderer = self.renderer.as_mut().expect("checked above");
-        let frame = build_ui(
+        let frame = ui::build_frame(
             renderer,
-            Layout {
-                logical,
-                scale,
-                viewport,
-                index: self.index,
-                file_count: self.files.len(),
-                show_ui: self.show_ui,
-                show_histogram: self.show_histogram,
-                show_minimap: self.show_minimap,
-                minimap,
-                hover: self.hover,
-                pointer,
-                pending,
-            },
+            &input,
+            &self.panels,
             self.current.as_ref(),
             &self.view,
             &self.theme,
@@ -1068,11 +870,7 @@ impl App {
             .map(|current| &current.display)
             .unwrap_or(&fallback);
 
-        let backdrop = Backdrop {
-            base: self.theme.bar_background,
-            alternate: self.theme.border,
-            square: CHECKER_SQUARE,
-        };
+        let backdrop = ui::backdrop(&self.theme);
 
         let scene = Scene {
             placement,
@@ -1279,621 +1077,6 @@ impl ApplicationHandler<Decoded> for App {
     }
 }
 
-/// Everything the frame builder needs that is not the image itself.
-struct Layout {
-    /// Window size in logical pixels, which is what the UI lays out in.
-    logical: [f32; 2],
-    /// Physical pixels to the logical one, for the few places that have to
-    /// land on the device's grid rather than on the layout's.
-    scale: f32,
-    /// Where the image is drawn, which is what zoom is measured against.
-    viewport: Viewport,
-    index: usize,
-    file_count: usize,
-    show_ui: bool,
-    show_histogram: bool,
-    /// Whether the minimap is switched on, which is what its button shows.
-    show_minimap: bool,
-    /// Whether the minimap is on screen, which also takes a view with part of
-    /// the image off it.
-    minimap: bool,
-    hover: Option<Widget>,
-    /// The image pixel under the pointer, when it is over one.
-    pointer: Option<[u32; 2]>,
-    /// The read in progress, once it has taken long enough to be worth saying.
-    /// Kept apart from the label rather than replacing it: everything else in
-    /// the interface describes the image on screen, and so must that.
-    pending: Option<Reading>,
-}
-
-/// Builds one frame of interface.
-///
-/// A free function taking exactly what it needs, rather than a method, so that
-/// it can measure text through the renderer while reading application state.
-fn build_ui(
-    renderer: &mut Renderer,
-    layout: Layout,
-    current: Option<&Current>,
-    view: &View,
-    theme: &Theme,
-) -> UiFrame {
-    let size = layout.logical;
-    let mut frame = UiFrame::new();
-    let chrome = Chrome::new(size);
-
-    let Some(current) = current else {
-        // Nothing has been decoded yet. The panels still go down, so that the
-        // window reads as the application waiting rather than as a hole, with
-        // the file being read where the image's own name will go.
-        if layout.show_ui {
-            for panel in [chrome.top, chrome.bottom, chrome.left, chrome.right] {
-                frame.rect(panel, theme.bar_background);
-            }
-            if let Some(Reading::File(name)) = &layout.pending {
-                frame.text_clipped(
-                    [PADDING, text_baseline(chrome.top)],
-                    TEXT_SIZE,
-                    theme.text_dim,
-                    (chrome.top.width - PADDING * 2.0).max(1.0),
-                    format!("loading {name}"),
-                );
-            }
-        }
-        return frame;
-    };
-    let content = content_area(size, layout.show_ui);
-
-    if layout.show_histogram {
-        draw_histogram(&mut frame, current, content, theme);
-    }
-    if layout.minimap {
-        draw_minimap(&mut frame, current, view, &layout, content, theme);
-    }
-    if !layout.show_ui {
-        return frame;
-    }
-
-    for panel in [chrome.top, chrome.bottom, chrome.left, chrome.right] {
-        frame.rect(panel, theme.bar_background);
-    }
-    for border in chrome.borders() {
-        frame.rect(border, theme.border);
-    }
-
-    // Top panel: what the image is. Everything here is a property of the
-    // file, so it is written once when the image opens and does not move
-    // again while it is on screen.
-    let top = chrome.top;
-    let top_baseline = text_baseline(top);
-
-    // Least to most disposable, and dropped whole rather than clipped: half
-    // of "18333 x 15667" is worse than none of it. Half the bar at most, so
-    // that the name it is sharing the bar with keeps the other half.
-    let facts = [
-        format!("{} \u{00d7} {}", current.image.width, current.image.height),
-        describe_pixels(current),
-        current.image.color.label(),
-    ];
-    let facts = fit_segments(renderer, &facts, (top.width / 2.0 - PADDING * 2.0).max(1.0));
-    let facts_width = renderer.measure_text(&facts, TEXT_SIZE)[0];
-    let facts_x = (top.right() - PADDING - facts_width).max(PADDING);
-
-    frame.text_clipped(
-        [PADDING, top_baseline],
-        TEXT_SIZE,
-        theme.text_primary,
-        (facts_x - PADDING * 2.0).max(1.0),
-        top_label(&current.label, layout.pending.as_ref()),
-    );
-    frame.text([facts_x, top_baseline], TEXT_SIZE, theme.text_dim, facts);
-
-    draw_minimap_button(
-        &mut frame,
-        chrome.minimap_button,
-        layout.show_minimap,
-        layout.hover == Some(Widget::Minimap),
-        theme,
-    );
-    draw_histogram_button(
-        &mut frame,
-        chrome.histogram_button,
-        layout.show_histogram,
-        layout.hover == Some(Widget::Histogram),
-        theme,
-    );
-
-    // Bottom panel: what is happening to the image. The pointer comes and
-    // goes on its own, and the rest changes as the view is worked.
-    let bar = chrome.bottom;
-    let baseline = text_baseline(bar);
-
-    let mut right = describe_state(current, view, &layout);
-    if renderer.output().is_hdr {
-        right = format!("{}   \u{00b7}   {}", renderer.output().label, right);
-    }
-    let right_width = renderer.measure_text(&right, TEXT_SIZE)[0];
-    let right_x = (bar.right() - PADDING - right_width).max(PADDING);
-
-    if let Some([x, y]) = layout.pointer {
-        frame.text_clipped(
-            [PADDING, baseline],
-            TEXT_SIZE,
-            theme.text_primary,
-            (right_x - PADDING * 2.0).max(1.0),
-            format!("({x}, {y})"),
-        );
-    }
-    frame.text([right_x, baseline], TEXT_SIZE, theme.text_dim, right);
-    frame
-}
-
-/// What the interface leaves for the image, in logical pixels: the middle
-/// when the panels are showing, the whole window when they are not.
-///
-/// With the panels hidden a floating panel still sits in the corner of the
-/// window rather than where the panels that are not there would have put it.
-/// The frame builder and the minimap's placement both lay out against this,
-/// which is what keeps the thumbnail under the border drawn around it.
-fn content_area(logical: [f32; 2], show_ui: bool) -> Rect {
-    if show_ui {
-        Chrome::new(logical).content()
-    } else {
-        Rect::new(0.0, 0.0, logical[0], logical[1])
-    }
-}
-
-/// Where the image is drawn, in physical pixels, for a window of `size`
-/// physical pixels at `scale`.
-///
-/// The panels are opaque, so with them on screen the image belongs in what
-/// they leave in the middle; with them off it has the window. Nothing caches
-/// this, which is why toggling the interface re-fits a fitted image on the
-/// very next frame.
-fn image_viewport(size: [f32; 2], scale: f32, show_ui: bool) -> Viewport {
-    if !show_ui {
-        return Viewport::whole(size);
-    }
-    let content = Chrome::new([size[0] / scale, size[1] / scale]).content();
-    Viewport::new(
-        content.x * scale,
-        content.y * scale,
-        content.width * scale,
-        content.height * scale,
-    )
-}
-
-/// Where text has to start to sit centred in a bar of `BAR_HEIGHT`.
-fn text_baseline(bar: Rect) -> f32 {
-    bar.y + (bar.height - TEXT_SIZE * 1.3) / 2.0
-}
-
-/// The histogram toggle: a miniature of what it shows, rather than a letter,
-/// since the side panels are too narrow to label anything in words.
-fn draw_histogram_button(
-    frame: &mut UiFrame,
-    rect: Rect,
-    active: bool,
-    hover: bool,
-    theme: &Theme,
-) {
-    // A window too small to hold the button gets no button, rather than a
-    // smear of sub-pixel bars.
-    if rect.width < BUTTON_SIZE {
-        return;
-    }
-    let (background, ink) = button_ink(active, hover, theme);
-    frame.rounded_rect(rect, 5.0, background);
-
-    const BARS: [f32; 4] = [0.45, 1.0, 0.7, 0.3];
-    let plot = rect.inset(9.0, 9.0);
-    let step = plot.width / BARS.len() as f32;
-    for (index, fraction) in BARS.iter().enumerate() {
-        let height = plot.height * fraction;
-        frame.rect(
-            Rect::new(
-                plot.x + index as f32 * step,
-                plot.bottom() - height,
-                (step - 1.5).max(1.0),
-                height,
-            ),
-            ink,
-        );
-    }
-}
-
-/// Joins as many leading segments as fit in `width`, keeping at least the
-/// first however narrow the window gets.
-fn fit_segments(renderer: &mut Renderer, segments: &[String], width: f32) -> String {
-    const SEPARATOR: &str = "   \u{00b7}   ";
-    let mut text = segments.first().cloned().unwrap_or_default();
-    for segment in &segments[1..] {
-        let candidate = format!("{text}{SEPARATOR}{segment}");
-        if renderer.measure_text(&candidate, TEXT_SIZE)[0] > width {
-            break;
-        }
-        text = candidate;
-    }
-    text
-}
-
-/// The name of the image on screen, and after it whatever the loader is busy
-/// with when that has taken long enough to notice.
-///
-/// One string, clipped as one piece: where there is no room for both, the file
-/// you are actually looking at is the one worth keeping.
-fn top_label(shown: &str, reading: Option<&Reading>) -> String {
-    match reading {
-        Some(Reading::File(next)) => format!("{shown}, loading {next}"),
-        Some(Reading::Again) => format!("{shown}, reloading"),
-        None => shown.to_string(),
-    }
-}
-
-fn describe_pixels(current: &Current) -> String {
-    let channels = match current.image.channels() {
-        crate::image::Channels::Gray => "gray",
-        crate::image::Channels::GrayAlpha => "gray+alpha",
-        crate::image::Channels::Rgb => "rgb",
-        crate::image::Channels::Rgba => "rgba",
-    };
-    let stored = current
-        .stored
-        .as_ref()
-        .map(|stored| format!(" \u{2192} {stored}"))
-        .unwrap_or_default();
-    format!(
-        "{} {channels}{stored}",
-        current.image.samples.component_name()
-    )
-}
-
-fn describe_state(current: &Current, view: &View, layout: &Layout) -> String {
-    let zoom = view.zoom(current.size(), layout.viewport);
-    let mut parts = vec![
-        format!("{:.0}%", zoom * 100.0),
-        view.mode_label().to_string(),
-    ];
-
-    // Only while it is doing something. Below 1:1 the filter in use is the
-    // area average, which is not a choice and so not worth a word in the bar.
-    if zoom > 1.0 {
-        parts.push(view.upscale().label().to_string());
-    }
-    if current.display.auto != AutoWindow::Off {
-        parts.push(format!(
-            "{} {}",
-            current.display.auto.label(),
-            format_window(current)
-        ));
-    }
-    if current.display.exposure_stops != 0.0 {
-        parts.push(format!("{:+.1} EV", current.display.exposure_stops));
-    }
-    if current.display.colormap != Colormap::Gray {
-        parts.push(current.display.colormap.label().to_string());
-    }
-    if current.image.is_high_dynamic_range() {
-        parts.push(current.display.tone_map.label().to_string());
-    }
-    if layout.file_count > 1 {
-        parts.push(format!("[{}/{}]", layout.index + 1, layout.file_count));
-    }
-    parts.join("   \u{00b7}   ")
-}
-
-/// Window bounds in the units of the source file where that is meaningful.
-/// Linear integer data reads back as counts, which is what measurement work
-/// wants; anything with a curve on it stays in normalised units.
-fn format_window(current: &Current) -> String {
-    let scale = if current.image.color.transfer.is_linear() {
-        current.image.samples.full_scale()
-    } else {
-        1.0
-    };
-    let low = current.display.low * scale;
-    let high = current.display.high * scale;
-    if scale > 1.0 {
-        format!("{low:.0}\u{2013}{high:.0}")
-    } else {
-        format!("{low:.3}\u{2013}{high:.3}")
-    }
-}
-
-/// The minimap toggle: the panel itself in miniature, a frame for the image
-/// with the viewport sitting in a corner of it.
-fn draw_minimap_button(frame: &mut UiFrame, rect: Rect, active: bool, hover: bool, theme: &Theme) {
-    if rect.width < BUTTON_SIZE {
-        return;
-    }
-    let (background, ink) = button_ink(active, hover, theme);
-    frame.rounded_rect(rect, 5.0, background);
-
-    let icon = rect.inset(8.0, 10.0);
-    outline(frame, icon, 1.5, ink);
-    frame.rect(
-        Rect::new(
-            icon.x + 3.5,
-            icon.y + 3.5,
-            icon.width * 0.5,
-            icon.height * 0.5,
-        ),
-        ink,
-    );
-}
-
-/// A toggle's background and ink. Active outranks hover: what is on says more
-/// than what the pointer happens to be over.
-fn button_ink(active: bool, hover: bool, theme: &Theme) -> (Color, Color) {
-    match (active, hover) {
-        (true, _) => (theme.accent.with_alpha(ACTIVE_BUTTON_WASH), theme.accent),
-        (false, true) => (theme.button_hover, theme.text_primary),
-        (false, false) => (theme.button_idle, theme.text_dim),
-    }
-}
-
-/// A rectangle drawn as four edges. What is behind an outline stays visible,
-/// which is the whole point for anything laid over the minimap: the thumbnail
-/// under it belongs to the image layer, and a filled quad would hide it.
-fn outline(frame: &mut UiFrame, rect: Rect, thickness: f32, color: Color) {
-    let edge = thickness.min(rect.width / 2.0).min(rect.height / 2.0);
-    if edge <= 0.0 {
-        return;
-    }
-    let middle = rect.height - 2.0 * edge;
-    frame.rect(Rect::new(rect.x, rect.y, rect.width, edge), color);
-    frame.rect(
-        Rect::new(rect.x, rect.bottom() - edge, rect.width, edge),
-        color,
-    );
-    frame.rect(Rect::new(rect.x, rect.y + edge, edge, middle), color);
-    frame.rect(
-        Rect::new(rect.right() - edge, rect.y + edge, edge, middle),
-        color,
-    );
-}
-
-/// Where the minimap's thumbnail goes: the image's own shape, fitted into the
-/// top-left of `content` and never enlarged past life size, since a map of a
-/// thirty-pixel image blown up to fill the box would be a map of nothing.
-///
-/// `None` when there is no room for one worth reading, which is what keeps it
-/// off screen in a window dragged down small.
-fn minimap_rect(content: Rect, image: [f32; 2]) -> Option<Rect> {
-    if image[0] <= 0.0 || image[1] <= 0.0 {
-        return None;
-    }
-    // A third of the content area at most, as well as the fixed cap: the
-    // minimap is a guide to the image, and must not take the room the image
-    // itself is being looked at in.
-    let room = [
-        MINIMAP_SIZE[0].min(content.width / 3.0),
-        MINIMAP_SIZE[1].min(content.height / 3.0),
-    ];
-    if room[0] < MINIMAP_MIN || room[1] < MINIMAP_MIN {
-        return None;
-    }
-    // Whole logical pixels, so the border sits on the thumbnail's edge rather
-    // than half a pixel inside it.
-    let scale = (room[0] / image[0]).min(room[1] / image[1]).min(1.0);
-    let size = [
-        (image[0] * scale).round().max(1.0),
-        (image[1] * scale).round().max(1.0),
-    ];
-    Some(Rect::new(
-        (content.x + PADDING).round(),
-        (content.y + PADDING).round(),
-        size[0],
-        size[1],
-    ))
-}
-
-/// The part of `rect` standing for what the viewport is showing.
-///
-/// The viewport's corners in image pixels, clamped to the image and scaled
-/// into the thumbnail. Clamped because a view zoomed out sees past the
-/// image's edges, and this marks out part of the image rather than part of
-/// the window.
-fn minimap_marker(rect: Rect, image: [f32; 2], placement: Placement, viewport: Viewport) -> Rect {
-    let corner = |point: [f32; 2]| {
-        let point = placement.image_point(point);
-        [
-            rect.x + (point[0] / image[0]).clamp(0.0, 1.0) * rect.width,
-            rect.y + (point[1] / image[1]).clamp(0.0, 1.0) * rect.height,
-        ]
-    };
-    let start = corner([viewport.x, viewport.y]);
-    let end = corner([viewport.x + viewport.width, viewport.y + viewport.height]);
-    Rect::new(start[0], start[1], end[0] - start[0], end[1] - start[1])
-}
-
-/// `rect` with its edges on whole physical pixels.
-///
-/// The quad shader feathers every edge over a pixel, which is what keeps the
-/// interface's corners and thin lines smooth. Two feathered edges that meet
-/// part-way through a pixel each cover part of it, and two translucent fills
-/// covering a pixel between them do not add up to one covering all of it: the
-/// join stays visible as a lighter line. The wash around the marker is four
-/// quads meeting along the marker's edges, so those edges go on the grid and
-/// the four pieces tile exactly.
-fn snap_to_pixels(rect: Rect, scale: f32) -> Rect {
-    let snap = |value: f32| (value * scale).round() / scale;
-    let x = snap(rect.x);
-    let y = snap(rect.y);
-    // A marker smaller than a pixel — the view into a very large image — still
-    // has to be somewhere on the map, so an edge never rounds onto the one
-    // opposite it.
-    let right = snap(rect.right()).max(x + 1.0 / scale);
-    let bottom = snap(rect.bottom()).max(y + 1.0 / scale);
-    Rect::new(x, y, right - x, bottom - y)
-}
-
-/// Draws the minimap over the thumbnail the image layer has already put in
-/// the top-left of `content`: a border around the whole image, and the part
-/// of it the viewport is showing left bright while the rest is washed over.
-///
-/// Nothing here is filled where the thumbnail shows through, and the frame
-/// this draws into is composited over the image layer, so the two halves of
-/// the widget meet on screen without either knowing about the other.
-///
-/// Only called with part of the image off screen — see `minimap_on_screen` —
-/// so the marked-out part is always smaller than the thumbnail on at least
-/// one axis, and there is always something to wash over.
-fn draw_minimap(
-    frame: &mut UiFrame,
-    current: &Current,
-    view: &View,
-    layout: &Layout,
-    content: Rect,
-    theme: &Theme,
-) {
-    let image = current.size();
-    let Some(rect) = minimap_rect(content, image) else {
-        return;
-    };
-    outline(frame, rect, 1.0, theme.minimap_edge);
-
-    let placement = view.placement(image, layout.viewport);
-    let shown = snap_to_pixels(
-        minimap_marker(rect, image, placement, layout.viewport),
-        layout.scale,
-    );
-
-    for aside in [
-        Rect::new(rect.x, rect.y, rect.width, shown.y - rect.y),
-        Rect::new(
-            rect.x,
-            shown.bottom(),
-            rect.width,
-            rect.bottom() - shown.bottom(),
-        ),
-        Rect::new(rect.x, shown.y, shown.x - rect.x, shown.height),
-        Rect::new(
-            shown.right(),
-            shown.y,
-            rect.right() - shown.right(),
-            shown.height,
-        ),
-    ] {
-        if aside.width > 0.0 && aside.height > 0.0 {
-            frame.rect(aside, theme.minimap_dim);
-        }
-    }
-    outline(frame, shown, 1.5, theme.accent);
-}
-
-/// Draws the histogram in the bottom-right of `content`, the area the panels
-/// leave free.
-///
-/// Colour images get four planes — red, green, blue and luminance — over the
-/// range their colour channels span; grey images keep the single luminance
-/// plane over theirs.
-fn draw_histogram(frame: &mut UiFrame, current: &Current, content: Rect, theme: &Theme) {
-    // Rounded, so that the whole-pixel bin spacing starts on a pixel edge.
-    let panel = Rect::new(
-        (content.right() - HISTOGRAM_SIZE[0] - PADDING)
-            .max(content.x + PADDING)
-            .round(),
-        (content.bottom() - HISTOGRAM_SIZE[1] - PADDING)
-            .max(content.y + PADDING)
-            .round(),
-        HISTOGRAM_SIZE[0],
-        HISTOGRAM_SIZE[1],
-    );
-    frame.rounded_rect(panel, 6.0, theme.panel_background);
-
-    let plot = panel.inset(HISTOGRAM_INSET, HISTOGRAM_INSET);
-    let label_height = TEXT_SIZE * 1.4;
-    let bars = Rect::new(
-        plot.x,
-        plot.y + label_height,
-        plot.width,
-        plot.height - label_height,
-    );
-
-    // Luminance always goes down first, underneath the colour planes: it
-    // runs as tall as the tallest of them about as often as not, and painting
-    // it on top swamps the colour the panel exists to show.
-    let plotted = &current.stats.plot;
-    let luma = &plotted.luma;
-    let colour: &[[u32; BINS]] = plotted.colour.as_ref().map_or(&[], |planes| planes);
-    let (axis_min, axis_max) = (plotted.min, plotted.max);
-
-    // The axis is in the file's own encoding; the label is not, since the
-    // numbers everything else quotes are the decoded ones.
-    let transfer = current.image.color.transfer;
-    frame.text(
-        [plot.x, plot.y],
-        TEXT_SIZE * 0.85,
-        theme.panel_text,
-        format!(
-            "{:.4}  \u{2013}  {:.4}",
-            transfer.to_linear(axis_min),
-            transfer.to_linear(axis_max)
-        ),
-    );
-
-    // One peak across every plane, so their heights stay comparable.
-    let peak = colour
-        .iter()
-        .flatten()
-        .chain(luma)
-        .copied()
-        .max()
-        .unwrap_or(1)
-        .max(1) as f32;
-    let bin_width = bars.width / BINS as f32;
-    // Strictly linear in the counts, the way a photo editor plots it: the
-    // height of a bin is its share of the fullest one. A single dominating
-    // bin — a nodata background, say — will flatten the rest, which is a
-    // measurement-data problem to solve separately.
-    let height_of = |count: u32| (count as f32 / peak) * bars.height;
-    // One point per bin, at its centre, with the ends carried out to the
-    // edges of the plot so the shape fills its width.
-    let curve = |counts: &[u32; BINS]| -> Vec<[f32; 2]> {
-        counts
-            .iter()
-            .enumerate()
-            .map(|(index, &count)| {
-                let x = match index {
-                    0 => bars.x,
-                    last if last == BINS - 1 => bars.right(),
-                    _ => bars.x + (index as f32 + 0.5) * bin_width,
-                };
-                [x, bars.bottom() - height_of(count)]
-            })
-            .collect()
-    };
-
-    // Dimmed only when it is a backdrop; on a grey image it is the plot.
-    let luma_ink = if colour.is_empty() {
-        theme.histogram_luma
-    } else {
-        theme.histogram_luma.with_alpha(HISTOGRAM_LUMA_UNDER)
-    };
-    frame.area(&curve(luma), bars.bottom(), luma_ink, Blend::Over);
-    for (counts, color) in colour.iter().zip(theme.histogram_planes) {
-        frame.area(&curve(counts), bars.bottom(), color, Blend::Screen);
-    }
-
-    // Where the display window sits within the plotted range.
-    let span = axis_max - axis_min;
-    if span > 0.0 {
-        for value in [current.display.low, current.display.high] {
-            let encoded = transfer.to_encoded(value);
-            let position = ((encoded - axis_min) / span).clamp(0.0, 1.0);
-            frame.rect(
-                Rect::new(
-                    bars.x + position * bars.width - 0.5,
-                    bars.y,
-                    1.5,
-                    bars.height,
-                ),
-                theme.accent,
-            );
-        }
-    }
-}
-
 fn file_label(path: &Path) -> String {
     path.file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -1954,270 +1137,12 @@ fn initial_window_size(event_loop: &ActiveEventLoop, image: Option<[f32; 2]>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::image::Stats;
 
     const WINDOW: [f32; 2] = [1000.0, 700.0];
     /// The same window with nothing taken out of it, for the tests that are
     /// about stepping between files rather than about where the panels are.
     const VIEWPORT: Viewport = Viewport::whole(WINDOW);
-
-    #[test]
-    fn the_side_panels_are_nested_between_the_bars() {
-        let chrome = Chrome::new(WINDOW);
-
-        // The bars own the full width, and so the corners.
-        assert_eq!(chrome.top, Rect::new(0.0, 0.0, 1000.0, BAR_HEIGHT));
-        assert_eq!(
-            chrome.bottom,
-            Rect::new(0.0, 700.0 - BAR_HEIGHT, 1000.0, BAR_HEIGHT)
-        );
-
-        // The sides start where the top ends and stop where the bottom begins.
-        assert_eq!(chrome.left.y, chrome.top.bottom());
-        assert_eq!(chrome.left.bottom(), chrome.bottom.y);
-        assert_eq!(chrome.right.y, chrome.top.bottom());
-        assert_eq!(chrome.right.bottom(), chrome.bottom.y);
-
-        assert_eq!(chrome.left.x, 0.0);
-        assert_eq!(chrome.left.width, SIDE_WIDTH);
-        assert_eq!(chrome.right.right(), 1000.0);
-        assert_eq!(chrome.right.width, SIDE_WIDTH);
-    }
-
-    #[test]
-    fn the_content_area_is_what_the_four_leave_behind() {
-        let content = Chrome::new(WINDOW).content();
-        assert_eq!(
-            content,
-            Rect::new(
-                SIDE_WIDTH,
-                BAR_HEIGHT,
-                1000.0 - 2.0 * SIDE_WIDTH,
-                700.0 - 2.0 * BAR_HEIGHT
-            )
-        );
-    }
-
-    #[test]
-    fn the_histogram_toggle_sits_inside_the_right_panel() {
-        let chrome = Chrome::new(WINDOW);
-        let button = chrome.histogram_button;
-
-        assert!(button.x >= chrome.right.x);
-        assert!(button.right() <= chrome.right.right());
-        assert!(button.y >= chrome.right.y);
-        assert!(button.bottom() <= chrome.right.bottom());
-
-        // Centred in the strip rather than merely fitted into it.
-        assert_eq!(
-            button.x - chrome.right.x,
-            chrome.right.right() - button.right()
-        );
-
-        assert!(chrome.contains([button.x + 1.0, button.y + 1.0]));
-        assert!(!chrome.contains([chrome.right.x - 1.0, button.y + 1.0]));
-    }
-
-    #[test]
-    fn the_minimap_toggle_sits_inside_the_left_panel() {
-        let chrome = Chrome::new(WINDOW);
-        let button = chrome.minimap_button;
-
-        assert!(button.x >= chrome.left.x);
-        assert!(button.right() <= chrome.left.right());
-        assert!(button.y >= chrome.left.y);
-        assert!(button.bottom() <= chrome.left.bottom());
-
-        // The two toggles are the same button on opposite strips, and each
-        // click lands on its own.
-        assert_eq!(button.width, chrome.histogram_button.width);
-        assert_eq!(button.y, chrome.histogram_button.y);
-        assert_eq!(
-            chrome.widget_at([button.x + 1.0, button.y + 1.0]),
-            Some(Widget::Minimap)
-        );
-        assert_eq!(
-            chrome.widget_at([
-                chrome.histogram_button.x + 1.0,
-                chrome.histogram_button.y + 1.0
-            ]),
-            Some(Widget::Histogram)
-        );
-        assert_eq!(chrome.widget_at([WINDOW[0] / 2.0, WINDOW[1] / 2.0]), None);
-    }
-
-    /// The thumbnail is the image in miniature, so its shape is the image's
-    /// and not the box it is fitted into.
-    #[test]
-    fn the_minimap_keeps_the_image_shape_and_never_enlarges_it() {
-        let content = Chrome::new(WINDOW).content();
-
-        let wide = minimap_rect(content, [4000.0, 1000.0]).expect("room in a 1000x700 window");
-        assert!(wide.width <= MINIMAP_SIZE[0] && wide.height <= MINIMAP_SIZE[1]);
-        assert!((wide.width / wide.height - 4.0).abs() < 0.1);
-
-        let tall = minimap_rect(content, [1000.0, 4000.0]).expect("room in a 1000x700 window");
-        assert!(tall.width <= MINIMAP_SIZE[0] && tall.height <= MINIMAP_SIZE[1]);
-        assert!((tall.height / tall.width - 4.0).abs() < 0.1);
-
-        // Life size at most: a tiny image gets a tiny map.
-        assert_eq!(
-            minimap_rect(content, [24.0, 18.0]),
-            Some(Rect::new(
-                (content.x + PADDING).round(),
-                (content.y + PADDING).round(),
-                24.0,
-                18.0
-            ))
-        );
-
-        // Top-left of the content area, and clear of its far edges.
-        let rect = minimap_rect(content, [4000.0, 1000.0]).expect("room");
-        assert!(rect.x >= content.x + PADDING - 0.5);
-        assert!(rect.y >= content.y + PADDING - 0.5);
-        assert!(rect.right() < content.right() && rect.bottom() < content.bottom());
-
-        // And nothing at all when the window has no room to spare: a map
-        // taking a third of a small content area would be in the way.
-        assert_eq!(
-            minimap_rect(Chrome::new([200.0, 160.0]).content(), [800.0, 600.0]),
-            None
-        );
-    }
-
-    /// What the marker is for: it says where you are, so it has to agree with
-    /// the view it is drawn from.
-    #[test]
-    fn the_minimap_marker_follows_the_viewport() {
-        let image = [800.0, 600.0];
-        let viewport = Viewport::whole(WINDOW);
-        let rect = Rect::new(100.0, 20.0, 160.0, 120.0);
-        let close = |a: f32, b: f32| (a - b).abs() < 0.5;
-
-        // Fitted, the whole image is on screen and the marker covers the map.
-        let view = View::new();
-        let marker = minimap_marker(rect, image, view.placement(image, viewport), viewport);
-        assert_eq!(marker, rect);
-
-        // At 1:1 in a window half the image's size, half of it in each
-        // direction is on screen, and centred that is the middle of the map.
-        let half = Viewport::whole([400.0, 300.0]);
-        let mut view = View::new();
-        view.actual_size(image, half);
-        let marker = minimap_marker(rect, image, view.placement(image, half), half);
-        assert!(close(marker.width, rect.width / 2.0), "{marker:?}");
-        assert!(close(marker.height, rect.height / 2.0), "{marker:?}");
-        assert!(close(
-            marker.x + marker.width / 2.0,
-            rect.x + rect.width / 2.0
-        ));
-
-        // Panned into the top-left corner it goes to the corner of the map,
-        // and stops there rather than running off it.
-        view.pan_by(-10_000.0, -10_000.0, image, half);
-        let marker = minimap_marker(rect, image, view.placement(image, half), half);
-        assert!(
-            close(marker.x, rect.x) && close(marker.y, rect.y),
-            "{marker:?}"
-        );
-        assert!(marker.right() <= rect.right() + 0.5 && marker.bottom() <= rect.bottom() + 0.5);
-    }
-
-    /// The wash around the marker is four quads meeting along its edges, and
-    /// feathered edges only tile without a seam where they fall on the device
-    /// grid.
-    #[test]
-    fn the_marker_lands_on_whole_physical_pixels() {
-        for scale in [1.0, 1.5, 2.0] {
-            let snapped = snap_to_pixels(Rect::new(10.3, 20.7, 40.4, 30.9), scale);
-            for edge in [snapped.x, snapped.y, snapped.right(), snapped.bottom()] {
-                let physical = edge * scale;
-                assert!(
-                    (physical - physical.round()).abs() < 1e-3,
-                    "{edge} at scale {scale} is not on the grid"
-                );
-            }
-            // Rounded to the nearest pixel rather than grown to cover one.
-            assert!((snapped.x - 10.0).abs() <= 1.0 / scale);
-        }
-
-        // The view into a very large image marks out less than a pixel of the
-        // map, and still has to be somewhere on it.
-        let thin = snap_to_pixels(Rect::new(10.1, 20.1, 0.05, 0.05), 2.0);
-        assert_eq!(thin.width, 0.5);
-        assert_eq!(thin.height, 0.5);
-    }
-
-    #[test]
-    fn a_window_smaller_than_its_own_chrome_stays_within_itself() {
-        // Panels are laid out from the window size, so a window dragged down
-        // to nothing must not produce rectangles that escape it or run
-        // backwards — a negative width would be drawn as a flipped quad.
-        for size in [[10.0, 10.0], [0.0, 0.0], [200.0, 20.0]] {
-            let chrome = Chrome::new(size);
-            for panel in [chrome.top, chrome.bottom, chrome.left, chrome.right] {
-                assert!(
-                    panel.width >= 0.0 && panel.height >= 0.0,
-                    "{panel:?} at {size:?}"
-                );
-                assert!(panel.x >= 0.0 && panel.y >= 0.0, "{panel:?} at {size:?}");
-                assert!(
-                    panel.right() <= size[0] + f32::EPSILON,
-                    "{panel:?} at {size:?}"
-                );
-                assert!(
-                    panel.bottom() <= size[1] + f32::EPSILON,
-                    "{panel:?} at {size:?}"
-                );
-            }
-            for button in [chrome.minimap_button, chrome.histogram_button] {
-                assert!(
-                    button.width >= 0.0 && button.height >= 0.0,
-                    "{button:?} at {size:?}"
-                );
-                assert!(button.x >= 0.0 && button.y >= 0.0, "{button:?} at {size:?}");
-            }
-            let content = chrome.content();
-            assert!(
-                content.width >= 0.0 && content.height >= 0.0,
-                "{content:?} at {size:?}"
-            );
-        }
-    }
-
-    /// The panels are opaque, so the image is fitted into what they leave —
-    /// and gets the whole window back the moment they are hidden, without
-    /// anything having to re-fit it by hand.
-    #[test]
-    fn the_image_is_fitted_between_the_panels_and_re_fitted_without_them() {
-        // A 2x window, to catch a conversion that only holds at scale 1.
-        let physical = [2000.0, 1400.0];
-        let shown = image_viewport(physical, 2.0, true);
-        assert_eq!(
-            shown,
-            Viewport::new(
-                2.0 * SIDE_WIDTH,
-                2.0 * BAR_HEIGHT,
-                2000.0 - 4.0 * SIDE_WIDTH,
-                1400.0 - 4.0 * BAR_HEIGHT,
-            )
-        );
-
-        let hidden = image_viewport(physical, 2.0, false);
-        assert_eq!(hidden, Viewport::whole(physical));
-
-        let view = View::new();
-        let image = [900.0, 600.0];
-        assert_eq!(view.mode_label(), "fit");
-        assert!(view.zoom(image, hidden) > view.zoom(image, shown));
-
-        // Fitted between the panels means fitted *inside* them: the image is
-        // centred on the content area, not on the window.
-        let placement = view.placement(image, shown);
-        assert!(placement.x >= shown.x - 0.5);
-        assert!(placement.x + placement.width <= shown.x + shown.width + 0.5);
-        assert!(placement.y >= shown.y - 0.5);
-        assert!(placement.y + placement.height <= shown.y + shown.height + 0.5);
-    }
 
     /// A grey PNG of the given size, written where the test can step onto it.
     fn write_png(dir: &Path, name: &str, width: u32, height: u32) -> PathBuf {
@@ -2531,23 +1456,6 @@ mod tests {
         );
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
-    }
-
-    /// The bar names the image on screen first and always. A file on its way
-    /// in is mentioned after it, never in place of it: captioning one picture
-    /// with another's name is the one thing an image viewer must not do.
-    #[test]
-    fn the_bar_names_what_is_on_screen_before_what_is_coming() {
-        assert_eq!(top_label("a.png", None), "a.png");
-        assert_eq!(
-            top_label("a.png", Some(&Reading::File("b.heic".into()))),
-            "a.png, loading b.heic"
-        );
-        assert_eq!(
-            top_label("a.png", Some(&Reading::Again)),
-            "a.png, reloading",
-            "a file being re-read has no new name to show, only the wait"
-        );
     }
 
     /// A file of another size is another picture, and gets the opening view.

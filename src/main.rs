@@ -6,6 +6,7 @@ mod loader;
 mod render;
 mod theme;
 mod timing;
+mod ui;
 mod view;
 mod watch;
 
