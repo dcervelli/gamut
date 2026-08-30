@@ -74,7 +74,7 @@ render/        the GPU
 ## Checks
 
 ```sh
-cargo test                    # 186 tests; the 7 GPU ones pass vacuously without an adapter
+cargo test
 cargo clippy --all-targets    # clean
 cargo doc --no-deps           # no warnings
 cargo run --release -- test_images/png-rgb8.png --histogram --minimap

@@ -5,13 +5,14 @@ README:
 * No main thread work
 
 TODO:
+* Cursor color tracking
+* --recursive directory scan
 * Clean steps on zoom
 * Logging
   * ICO → largest image chosen
   * Errors
 * Performance
 * Grid display when zoomed in
-* Cursor color tracking
 * Region selection
   * Nudges
 * Copy
@@ -20,6 +21,7 @@ TODO:
   * Image (raw)
   * Region (raw)
   * Pixel color
+* Paste image
 * Changable background
   * Color picker
 * Sane keys
@@ -30,7 +32,6 @@ TODO:
   * Other raw files
   * Animated GIF support
   * SVG rasterizer?
-* Scan directory for image with/without -r
 * If window is small, auto hide side panels
 * Modifications
   * 90° rotations
