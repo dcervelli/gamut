@@ -11,6 +11,7 @@ pub mod menu;
 pub mod minimap;
 
 mod buttons;
+mod grid;
 mod histogram;
 mod pixel;
 mod status;
@@ -40,6 +41,7 @@ const CHECKER_SQUARE: f32 = 8.0;
 pub enum Widget {
     Minimap,
     Histogram,
+    Grid,
     Zoom,
     /// A cell of whichever menu is open. Which menu that is is
     /// [`Panels::menu`], so a cell needs only its place in the grid.
@@ -83,6 +85,10 @@ pub struct Panels {
     /// also asks whether there is anything off screen for it to point out —
     /// see [`FrameInput::minimap_on_screen`].
     pub show_minimap: bool,
+    /// Whether the grid is laid over the image. How far apart its lines are
+    /// is not held: it follows the zoom, and is worked out afresh each frame
+    /// by [`grid::step`].
+    pub show_grid: bool,
     /// Which widget the pointer is over. Held rather than recomputed while
     /// drawing so that motion knows when the highlight has changed and a
     /// redraw is actually owed.
@@ -154,7 +160,14 @@ pub fn build_frame(
         return frame;
     };
     let content = chrome::content_area(size, panels.show_ui);
+    let zoom = view.zoom(current.size(), input.viewport);
+    let grid_step = grid::step(zoom, input.scale);
 
+    // Under the floating panels, which are read against the image and would
+    // be harder to read over a grid as well.
+    if panels.show_grid {
+        grid::draw(&mut frame, current, view, input, content, grid_step, theme);
+    }
     if panels.show_histogram {
         histogram::draw(&mut frame, current, content, theme);
     }
@@ -188,7 +201,10 @@ pub fn build_frame(
     ];
     let facts = status::fit_segments(text, &facts, (top.width / 2.0 - PADDING * 2.0).max(1.0));
     let facts_width = text.measure_text(&facts, TEXT_SIZE)[0];
-    let facts_x = (top.right() - PADDING - facts_width).max(PADDING);
+    // Clear of the grid toggle at the end of the bar, the way the state
+    // readout in the bottom bar keeps clear of the zoom button.
+    let grid_button = chrome.grid_button(panels.show_grid);
+    let facts_x = (grid_button.x - PADDING - facts_width).max(PADDING);
 
     frame.text_clipped(
         [PADDING, top_baseline],
@@ -199,6 +215,15 @@ pub fn build_frame(
     );
     frame.text([facts_x, top_baseline], TEXT_SIZE, theme.text_dim, facts);
 
+    let spacing = panels.show_grid.then(|| grid::label(grid_step));
+    buttons::grid_button(
+        &mut frame,
+        text,
+        grid_button,
+        spacing.as_deref(),
+        panels.hover == Some(Widget::Grid),
+        theme,
+    );
     buttons::minimap_button(
         &mut frame,
         chrome.minimap_button,
@@ -219,7 +244,6 @@ pub fn build_frame(
     let bar = chrome.bottom;
     let baseline = text_baseline(bar);
 
-    let zoom = view.zoom(current.size(), input.viewport);
     buttons::zoom_button(
         &mut frame,
         text,

@@ -5,7 +5,7 @@ use crate::render::{Color, Rect, TextMeasure, UiFrame};
 use crate::theme::Theme;
 
 use super::TEXT_SIZE;
-use super::chrome::{BUTTON_SIZE, ZOOM_BUTTON};
+use super::chrome::{BUTTON_SIZE, GRID_BUTTON_OFF, GRID_BUTTON_ON, ZOOM_BUTTON};
 use super::menu::CELL_RADIUS;
 
 /// How much of the accent is left behind a switched-on toggle. Enough to read
@@ -126,6 +126,92 @@ pub(super) fn zoom_button(
     let (background, ink) = button_ink(open, hover, theme);
     frame.rounded_rect(rect, CELL_RADIUS, background);
     centred_text(frame, text, rect, ink, &percent(zoom));
+}
+
+/// Side of the grid icon, and the room between it and the spacing beside it.
+const GRID_ICON: f32 = 14.0;
+const GRID_ICON_GAP: f32 = 7.0;
+
+/// The grid toggle: the icon always, and — while the grid is on — how far
+/// apart its lines are, in `spacing`. The reading is worth the room because
+/// the spacing follows the zoom rather than being chosen, so a grid whose
+/// size is not stated is a grid that cannot be measured with; switched off
+/// there is no spacing in force, and the icon says the rest.
+pub(super) fn grid_button(
+    frame: &mut UiFrame,
+    text: &mut dyn TextMeasure,
+    rect: Rect,
+    spacing: Option<&str>,
+    hover: bool,
+    theme: &Theme,
+) {
+    // As with the toggles: a window too narrow for the whole button gets no
+    // button rather than a label spilling out of one.
+    let least = if spacing.is_some() {
+        GRID_BUTTON_ON
+    } else {
+        GRID_BUTTON_OFF
+    };
+    if rect.width < least[0] || rect.height < least[1] {
+        return;
+    }
+    let (background, ink) = button_ink(spacing.is_some(), hover, theme);
+    frame.rounded_rect(rect, CELL_RADIUS, background);
+
+    // Icon and reading are centred as one, so that the button reads as a
+    // label with a mark in front of it rather than as two things in a row.
+    let label = spacing.map(|spacing| (spacing, text.measure_text(spacing, TEXT_SIZE)[0]));
+    let width = GRID_ICON + label.map_or(0.0, |(_, width)| GRID_ICON_GAP + width);
+    let x = (rect.x + (rect.width - width) / 2.0).round();
+
+    grid_icon(
+        frame,
+        Rect::new(
+            x,
+            (rect.y + (rect.height - GRID_ICON) / 2.0).round(),
+            GRID_ICON,
+            GRID_ICON,
+        ),
+        ink,
+    );
+    if let Some((spacing, _)) = label {
+        frame.text(
+            [
+                x + GRID_ICON + GRID_ICON_GAP,
+                (rect.y + (rect.height - TEXT_SIZE * 1.3) / 2.0).round(),
+            ],
+            TEXT_SIZE,
+            ink,
+            spacing,
+        );
+    }
+}
+
+/// The grid in miniature: a frame with two lines each way through it, which
+/// is the smallest thing that reads as squares rather than as a hash.
+fn grid_icon(frame: &mut UiFrame, rect: Rect, ink: Color) {
+    const LINE: f32 = 1.0;
+    outline(frame, rect, LINE, ink);
+    for fraction in [1.0 / 3.0, 2.0 / 3.0] {
+        frame.rect(
+            Rect::new(
+                (rect.x + rect.width * fraction).round(),
+                rect.y,
+                LINE,
+                rect.height,
+            ),
+            ink,
+        );
+        frame.rect(
+            Rect::new(
+                rect.x,
+                (rect.y + rect.height * fraction).round(),
+                rect.width,
+                LINE,
+            ),
+            ink,
+        );
+    }
 }
 
 pub(super) fn percent(zoom: f32) -> String {

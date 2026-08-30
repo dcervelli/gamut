@@ -55,10 +55,17 @@ top of a colormap would distort the values you are reading off it.
 | --- | --- |
 | `h` | Show or hide the histogram |
 | `m` | Show or hide the minimap |
+| `g` | Show or hide the grid over the image |
 | `` ` `` | Show or hide the panels around the image |
 
 The panels are opaque and the image is fitted inside them, so hiding them
 gives a fitted image more room and it re-fits immediately.
+
+The grid divides the image into squares of a round number of image pixels —
+1, 2, 5, 10, 20, 50 and so on — chosen so that the lines land about fifty
+screen pixels apart at whatever zoom the view is at. The button at the end of
+the top bar says which spacing is in force, so a distance on screen can be
+counted off in the image's own pixels.
 
 ## The mouse
 
@@ -68,6 +75,7 @@ gives a fitted image more room and it re-fits immediately.
 | Wheel | Zoom about the pointer |
 | Trackpad scroll | The same, by fractions of a notch |
 | Click a panel button | Show or hide the histogram or the minimap |
+| Click the grid button | Show or hide the grid |
 | Click the zoom percentage | Open the zoom menu |
 
 The percentage at the end of the bottom bar is a button. Pressing it opens a

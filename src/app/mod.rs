@@ -119,6 +119,7 @@ impl App {
                 show_ui: true,
                 show_histogram: histogram,
                 show_minimap: minimap,
+                show_grid: false,
                 hover: None,
                 menu: None,
             },

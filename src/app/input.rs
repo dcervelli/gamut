@@ -35,6 +35,7 @@ pub enum Action {
     ToggleInterface,
     ToggleHistogram,
     ToggleMinimap,
+    ToggleGrid,
     /// Exposure, by this many stops.
     Exposure(f32),
     CycleAutoWindow,
@@ -231,6 +232,12 @@ pub const KEYS: &[Binding] = &[
     },
     Binding {
         section: Section::Display,
+        shown: "g",
+        help: "Toggle the grid over the image",
+        keys: &[(Char("g"), ToggleGrid), (Char("G"), ToggleGrid)],
+    },
+    Binding {
+        section: Section::Display,
         shown: "`",
         help: "Toggle the interface panels",
         keys: &[(Char("`"), ToggleInterface), (Char("~"), ToggleInterface)],
@@ -350,6 +357,7 @@ impl App {
             }
             ToggleHistogram => self.press(Widget::Histogram),
             ToggleMinimap => self.press(Widget::Minimap),
+            ToggleGrid => self.press(Widget::Grid),
             Exposure(stops) => {
                 return self.adjust(|current, _| {
                     current.display.adjust_exposure(stops);
@@ -454,7 +462,7 @@ impl App {
             }
 
             let chrome = self.chrome();
-            if let Some(widget) = chrome.widget_at(point) {
+            if let Some(widget) = chrome.widget_at(point, self.panels.show_grid) {
                 self.press(widget);
                 // The zoom readout keeps the pointer over it as it opens its
                 // menu, and the highlight belongs to the menu from here on.
@@ -535,7 +543,7 @@ impl App {
                 .popup(menu)
                 .and_then(|popup| popup.item_at(point))
                 .map(Widget::Cell),
-            None => chrome.widget_at(point),
+            None => chrome.widget_at(point, self.panels.show_grid),
         }
     }
 
@@ -545,6 +553,7 @@ impl App {
         match widget {
             Widget::Minimap => self.panels.show_minimap = !self.panels.show_minimap,
             Widget::Histogram => self.panels.show_histogram = !self.panels.show_histogram,
+            Widget::Grid => self.panels.show_grid = !self.panels.show_grid,
             // Only ever opens one: the press that closes a menu is answered
             // by the menu itself, before the widgets underneath are asked.
             // A window with no room for the panel gets no menu rather than a

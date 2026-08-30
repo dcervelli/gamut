@@ -18,7 +18,7 @@ app/           the event loop's state and winit handlers
 ui/            builds each frame's display list; no wgpu or winit imports
   mod.rs         Current, Panels, FrameInput, build_frame(), backdrop()
   chrome.rs      the four panels and their buttons; content_area(), image_viewport()
-  histogram.rs / minimap.rs / buttons.rs   one widget each
+  histogram.rs / minimap.rs / grid.rs / buttons.rs   one widget each
   pixel.rs       the pointer's readout: coordinate, stored and mapped values, swatch
   menu.rs        Menu (which popup is open), the zoom menu's choices, and how its cells are drawn
   status.rs      the words in the top and bottom bars
