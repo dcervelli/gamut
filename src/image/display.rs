@@ -4,7 +4,7 @@
 //! All of it is uniform state — changing any of it re-renders, it never
 //! re-decodes or re-uploads.
 
-use super::{DecodedImage, Stats, Transfer};
+use super::{DecodedImage, Sample, Stats, Transfer};
 
 /// How the display window is chosen.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -86,6 +86,51 @@ impl ToneMap {
             ToneMap::Neutral => ToneMap::Clip,
         }
     }
+
+    /// The curve itself, applied to one linear colour.
+    ///
+    /// The GPU runs this on every pixel of every frame as `tone_map` in
+    /// `shaders/composite.wgsl`; this is the same arithmetic for the one pixel
+    /// a readout has to describe. Keep the two in step — the point of a
+    /// readout is that it agrees with the screen.
+    pub fn apply(self, color: [f32; 3]) -> [f32; 3] {
+        match self {
+            ToneMap::Clip => color.map(|c| c.clamp(0.0, 1.0)),
+            ToneMap::Reinhard => color.map(|c| {
+                let c = c.max(0.0);
+                c / (c + 1.0)
+            }),
+            ToneMap::Neutral => neutral(color.map(|c| c.max(0.0))),
+        }
+    }
+}
+
+/// Khronos PBR Neutral, the twin of `neutral()` in `shaders/composite.wgsl`.
+fn neutral(color: [f32; 3]) -> [f32; 3] {
+    const START_COMPRESSION: f32 = 0.8 - 0.04;
+    const DESATURATION: f32 = 0.15;
+
+    let darkest = color[0].min(color[1]).min(color[2]);
+    let offset = if darkest < 0.08 {
+        darkest - 6.25 * darkest * darkest
+    } else {
+        0.04
+    };
+    let color = color.map(|c| c - offset);
+
+    let peak = color[0].max(color[1]).max(color[2]);
+    if peak < START_COMPRESSION {
+        return color;
+    }
+
+    let d = 1.0 - START_COMPRESSION;
+    let new_peak = 1.0 - d * d / (peak + d - START_COMPRESSION);
+    let color = color.map(|c| c * (new_peak / peak));
+
+    // Highlights desaturate towards the peak rather than clipping a channel
+    // at a time, which is what keeps the hue.
+    let g = 1.0 - 1.0 / (DESATURATION * (peak - new_peak) + 1.0);
+    color.map(|c| c + (new_peak - c) * g)
 }
 
 /// False colour for single-channel images. Ignored for colour images.
@@ -125,7 +170,75 @@ impl Colormap {
             Colormap::Turbo => Colormap::Gray,
         }
     }
+
+    /// The colour this map gives to a windowed value, in the linear working
+    /// space. Out-of-window values take the end of the ramp, as they do on
+    /// screen.
+    ///
+    /// The same fits `false_color` runs in `shaders/image.wgsl`, and the same
+    /// linearisation after them — the polynomials produce sRGB-encoded
+    /// values. Two copies of a table is a thing to keep an eye on; the
+    /// alternative is a readout that names a colour the screen is not
+    /// showing.
+    pub fn color(self, value: f32) -> [f32; 3] {
+        let t = value.clamp(0.0, 1.0);
+        let encoded = match self {
+            Colormap::Gray => [t; 3],
+            Colormap::Viridis => ramp(&VIRIDIS, t),
+            Colormap::Magma => ramp(&MAGMA, t),
+            Colormap::Turbo => ramp(&TURBO, t),
+        };
+        encoded.map(|c| Transfer::Srgb.to_linear(c.clamp(0.0, 1.0)))
+    }
 }
+
+/// A colormap as its coefficients: one RGB triple per power of the ramp
+/// position, lowest first, evaluated by Horner's method.
+fn ramp(coefficients: &[[f32; 3]], t: f32) -> [f32; 3] {
+    let mut out = [0.0; 3];
+    for triple in coefficients.iter().rev() {
+        for (slot, coefficient) in out.iter_mut().zip(triple) {
+            *slot = *slot * t + coefficient;
+        }
+    }
+    out
+}
+
+// Written out to the digit as the shader has them, so that the two tables can
+// be checked against each other by eye; f32 keeps rather fewer of them.
+#[allow(clippy::excessive_precision)]
+const VIRIDIS: [[f32; 3]; 7] = [
+    [0.2777273, 0.00540734, 0.33409980],
+    [0.10509304, 1.40461353, 1.38459016],
+    [-0.33086183, 0.21484756, 0.09509516],
+    [-4.63423050, -5.79910097, -19.33244096],
+    [6.22826994, 14.17993337, 56.69055260],
+    [4.77638500, -13.74514538, -65.35303263],
+    [-5.43545586, 4.64585261, 26.31241433],
+];
+
+#[allow(clippy::excessive_precision)]
+const MAGMA: [[f32; 3]; 7] = [
+    [-0.00213649, -0.00074966, -0.00538613],
+    [0.25166054, 0.67752324, 2.49402660],
+    [8.35371728, -3.57771951, 0.31446790],
+    [-27.66873309, 14.26473078, -13.64921319],
+    [52.17613981, -27.94360607, 12.94416944],
+    [-50.76852536, 29.04658282, 4.23415299],
+    [18.65570507, -11.48977352, -5.60196151],
+];
+
+/// The shader writes this one as two dot products per channel; it is the same
+/// degree-five polynomial, transposed to a triple per power.
+#[allow(clippy::excessive_precision)]
+const TURBO: [[f32; 3]; 6] = [
+    [0.13572138, 0.09140261, 0.10667330],
+    [4.61539260, 2.19418839, 12.64194608],
+    [-42.66032258, 4.84296658, -60.58204836],
+    [132.13108234, -14.18503333, 110.36276771],
+    [-152.94239396, 4.27729857, -89.90310912],
+    [59.28637943, 2.82956604, 27.34824973],
+];
 
 /// Display state requested on the command line, applied on top of whatever
 /// each image's own defaults work out to.
@@ -287,6 +400,33 @@ impl Display {
         *self = Self::for_image_with(image, stats, startup);
     }
 
+    /// What this display state makes of one pixel: the number it becomes and
+    /// the colour it comes out as. The readout in the bottom bar is this run
+    /// for whichever pixel the pointer is over.
+    pub fn map(&self, sample: &Sample) -> Mapped {
+        let (offset, gain) = self.transform();
+        let mut values = [0.0; 3];
+        for (slot, value) in values.iter_mut().zip(sample.color()) {
+            *slot = (value - offset) * gain;
+        }
+        let count = sample.channels.color_count();
+
+        // The order the pipeline uses: window, then false colour for a single
+        // channel, then the tone curve over whatever that produced.
+        let color = match (sample.channels.is_gray(), self.colormap) {
+            (true, Colormap::Gray) => [values[0]; 3],
+            (true, colormap) => colormap.color(values[0]),
+            (false, _) => values,
+        };
+
+        Mapped {
+            values,
+            count,
+            color: self.tone_map.apply(color),
+            alpha: sample.alpha,
+        }
+    }
+
     /// `(offset, gain)` such that `(value - offset) * gain` is the displayed
     /// 0..1 value, exposure included.
     pub fn transform(&self) -> (f32, f32) {
@@ -297,6 +437,31 @@ impl Display {
             self.exposure_stops.exp2()
         };
         (self.low, gain)
+    }
+}
+
+/// One pixel as the display transform leaves it.
+#[derive(Clone, Copy, Debug)]
+pub struct Mapped {
+    values: [f32; 3],
+    count: usize,
+    /// The colour on screen, in the linear BT.709 the compositor works in.
+    ///
+    /// Not simply [`Mapped::values`] repeated: a false colour is three
+    /// components where the value is one, and the tone curve has moved both
+    /// by the time they reach the surface.
+    pub color: [f32; 3],
+    /// Coverage, carried through from the sample. Nothing above windows it.
+    pub alpha: f32,
+}
+
+impl Mapped {
+    /// `(value - low) * gain` per colour channel, before the tone curve: a
+    /// highlight over the window reads as the number it is rather than as the
+    /// 1.0 it is about to be clipped to, which is the whole use of a readout
+    /// on measurement work.
+    pub fn values(&self) -> &[f32] {
+        &self.values[..self.count]
     }
 }
 
@@ -371,6 +536,153 @@ mod tests {
         let display = Display::for_image_with(&image, &Stats::scan(&image), Startup::default());
         assert_eq!(display.auto, AutoWindow::Manual);
         assert_eq!((display.low, display.high), (0.1, 0.2));
+    }
+
+    /// The number a readout shows is the window's own scale: whatever was set
+    /// as `low` reads 0 and whatever was set as `high` reads 1, which is what
+    /// lets someone check a pixel against the bounds the bar is naming.
+    #[test]
+    fn mapping_a_pixel_puts_the_window_ends_at_zero_and_one() {
+        let image = gray(vec![0, u16::MAX / 2, u16::MAX], Transfer::Linear);
+        let display = Display {
+            low: 0.0,
+            high: 0.5,
+            ..Default::default()
+        };
+
+        let low = display.map(&image.sample(0, 0).expect("inside"));
+        assert!(low.values()[0].abs() < 1e-6);
+
+        let middle = display.map(&image.sample(1, 0).expect("inside"));
+        assert!(
+            (middle.values()[0] - 1.0).abs() < 1e-3,
+            "{:?}",
+            middle.values()
+        );
+    }
+
+    /// The two halves of a readout answer different questions, so they are
+    /// allowed to disagree: the value says how far above the window the pixel
+    /// is, and the colour says what the screen did about it.
+    #[test]
+    fn a_clipped_highlight_reads_as_the_number_it_is_and_shows_as_white() {
+        let image = DecodedImage {
+            width: 1,
+            height: 1,
+            samples: Samples::F32 {
+                channels: Channels::Rgb,
+                data: vec![4.0, 4.0, 4.0],
+            },
+            color: ColorSpace::LINEAR_BT709,
+            alpha: AlphaMode::Opaque,
+            value_range: None,
+            nodata: None,
+        };
+        let sample = image.sample(0, 0).expect("inside");
+
+        let clipped = Display::default().map(&sample);
+        assert_eq!(clipped.values(), [4.0, 4.0, 4.0]);
+        assert_eq!(clipped.color, [1.0, 1.0, 1.0]);
+
+        // A curve keeps it below white instead, and says so in the swatch
+        // while leaving the measurement alone.
+        let rolled = Display {
+            tone_map: ToneMap::Neutral,
+            ..Default::default()
+        }
+        .map(&sample);
+        assert_eq!(rolled.values(), [4.0, 4.0, 4.0]);
+        assert!(
+            rolled.color[0] < 1.0 && rolled.color[0] > 0.8,
+            "{:?}",
+            rolled.color
+        );
+    }
+
+    /// A false-coloured pixel has one value and three components of colour,
+    /// and only the swatch can say what the second is.
+    #[test]
+    fn false_colour_leaves_the_value_alone_and_changes_the_colour() {
+        let image = gray(vec![0, u16::MAX], Transfer::Linear);
+        let mut display = Display::default();
+        let dark = image.sample(0, 0).expect("inside");
+
+        assert_eq!(display.map(&dark).color, [0.0; 3], "grey stays grey");
+
+        display.colormap = Colormap::Viridis;
+        let mapped = display.map(&dark);
+        assert_eq!(mapped.values(), [0.0], "the measurement is untouched");
+        assert!(
+            mapped.color[2] > mapped.color[1],
+            "the bottom of viridis is purple"
+        );
+    }
+
+    /// The fits are transcribed from `shaders/image.wgsl`, where a mistyped
+    /// coefficient would be invisible; against matplotlib's own colours they
+    /// are not. Loose, because a seven-term fit is an approximation of a
+    /// 256-entry table, but nowhere near loose enough to hide a typo.
+    #[test]
+    fn the_colormaps_land_on_the_colours_they_are_named_after() {
+        let encoded = |map: Colormap, t: f32| {
+            map.color(t)
+                .map(|channel| Transfer::Srgb.to_encoded(channel))
+        };
+        let close =
+            |got: [f32; 3], want: [f32; 3]| got.iter().zip(want).all(|(a, b)| (a - b).abs() < 0.06);
+
+        // matplotlib: viridis runs #440154 -> #21918c -> #fde725.
+        assert!(close(
+            encoded(Colormap::Viridis, 0.0),
+            [0.267, 0.005, 0.329]
+        ));
+        assert!(close(
+            encoded(Colormap::Viridis, 0.5),
+            [0.129, 0.569, 0.549]
+        ));
+        assert!(close(
+            encoded(Colormap::Viridis, 1.0),
+            [0.993, 0.906, 0.144]
+        ));
+
+        // magma runs #000004 -> #b5367a -> #fcfdbf.
+        assert!(close(encoded(Colormap::Magma, 0.0), [0.001, 0.000, 0.014]));
+        assert!(close(encoded(Colormap::Magma, 0.5), [0.716, 0.215, 0.475]));
+        assert!(close(encoded(Colormap::Magma, 1.0), [0.987, 0.991, 0.749]));
+
+        // turbo runs dark blue -> green -> dark red.
+        let middle = encoded(Colormap::Turbo, 0.5);
+        assert!(middle[1] > middle[0] && middle[1] > middle[2], "{middle:?}");
+        let top = encoded(Colormap::Turbo, 1.0);
+        assert!(top[0] > 0.4 && top[2] < 0.2, "{top:?}");
+
+        // Past either end of the window the ramp stops rather than running on
+        // into whatever the polynomial does out there.
+        assert_eq!(Colormap::Viridis.color(-3.0), Colormap::Viridis.color(0.0));
+        assert_eq!(Colormap::Viridis.color(9.0), Colormap::Viridis.color(1.0));
+    }
+
+    /// Mirrors of shader code are worth pinning to their anchors: clip is a
+    /// clamp, Reinhard sends infinity to one, and the neutral curve leaves
+    /// ordinary values where they are before rolling off the top.
+    #[test]
+    fn the_tone_curves_match_what_the_compositor_does() {
+        assert_eq!(ToneMap::Clip.apply([-1.0, 0.5, 2.0]), [0.0, 0.5, 1.0]);
+
+        let reinhard = ToneMap::Reinhard.apply([-1.0, 1.0, 3.0]);
+        assert_eq!(reinhard[0], 0.0);
+        assert!((reinhard[1] - 0.5).abs() < 1e-6);
+        assert!((reinhard[2] - 0.75).abs() < 1e-6);
+
+        let neutral = ToneMap::Neutral.apply([0.2, 0.4, 0.6]);
+        for (got, want) in neutral.iter().zip([0.2, 0.4, 0.6]) {
+            assert!((got - want).abs() < 0.05, "{neutral:?}");
+        }
+        // Everything above the shoulder stays inside the display's range.
+        for value in [1.0, 4.0, 100.0] {
+            let peak = ToneMap::Neutral.apply([value; 3])[0];
+            assert!((0.8..=1.0).contains(&peak), "{value} -> {peak}");
+        }
     }
 
     #[test]

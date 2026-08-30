@@ -47,6 +47,13 @@ impl Channels {
     pub fn is_gray(self) -> bool {
         matches!(self, Channels::Gray | Channels::GrayAlpha)
     }
+
+    /// How many components carry colour, alpha aside: one for grey, three
+    /// otherwise. Grey is replicated across the three on the way to the
+    /// screen, so one value is the whole of what the file said.
+    pub fn color_count(self) -> usize {
+        if self.is_gray() { 1 } else { 3 }
+    }
 }
 
 /// Pixel data, row-major from the top, tightly packed, in the component type
@@ -171,6 +178,76 @@ impl DecodedImage {
         self.channels().is_gray()
     }
 
+    /// The pixel at `(x, y)`, or `None` when that is outside the image.
+    ///
+    /// Reads one pixel the way `render::upload` and `shaders/image.wgsl`
+    /// between them read every pixel — the transfer curve resolved, any
+    /// premultiplication divided back out, the primaries taken to the working
+    /// space — so that what comes back is the value the display window acts
+    /// on. Alpha never gets the curve, here or there.
+    ///
+    /// One pixel at a time: this is for a readout following the pointer, not
+    /// for anything that walks the image.
+    pub fn sample(&self, x: u32, y: u32) -> Option<Sample> {
+        if x >= self.width || y >= self.height {
+            return None;
+        }
+        let channels = self.channels();
+        let count = channels.count();
+        let base = (y as usize * self.width as usize + x as usize) * count;
+
+        let mut stored = [0.0f32; 4];
+        match &self.samples {
+            Samples::U8 { data, .. } => {
+                for (slot, raw) in stored.iter_mut().zip(&data[base..base + count]) {
+                    *slot = *raw as f32;
+                }
+            }
+            Samples::U16 { data, .. } => {
+                for (slot, raw) in stored.iter_mut().zip(&data[base..base + count]) {
+                    *slot = *raw as f32;
+                }
+            }
+            Samples::F32 { data, .. } => {
+                for (slot, raw) in stored.iter_mut().zip(&data[base..base + count]) {
+                    *slot = *raw;
+                }
+            }
+        }
+
+        let scale = 1.0 / self.samples.full_scale();
+        let mut color = [0.0f32; 3];
+        for (slot, value) in color.iter_mut().zip(&stored[..channels.color_count()]) {
+            *slot = self.color.transfer.to_linear(value * scale);
+        }
+        let alpha = match channels.alpha_index() {
+            Some(index) => (stored[index] * scale).clamp(0.0, 1.0),
+            None => 1.0,
+        };
+        if self.alpha == AlphaMode::Premultiplied {
+            // The shader's threshold as well as its division: a texel that has
+            // resolved to nearly nothing is nothing, rather than a wild colour
+            // divided out of it.
+            if alpha > 1e-4 {
+                for value in &mut color {
+                    *value /= alpha;
+                }
+            } else {
+                color = [0.0; 3];
+            }
+        }
+        if !channels.is_gray() {
+            color = to_working_space(self.color.primaries.to_bt709(), color);
+        }
+
+        Some(Sample {
+            channels,
+            stored,
+            color,
+            alpha,
+        })
+    }
+
     /// True when the content can exceed the SDR range and so needs either
     /// tone mapping or an HDR output.
     pub fn is_high_dynamic_range(&self) -> bool {
@@ -196,6 +273,48 @@ impl DecodedImage {
         }
         Ok(())
     }
+}
+
+/// One pixel read back out of an image, in both the terms it can be read in.
+///
+/// The distinction is the one the whole model rests on: what the file holds
+/// is a measurement, and what the screen shows is that measurement decoded,
+/// converted and windowed. A readout wants to say both, so this carries the
+/// file's own numbers alongside the values the display pipeline starts from.
+/// [`display::Display::map`] takes it the rest of the way.
+#[derive(Clone, Copy, Debug)]
+pub struct Sample {
+    pub channels: Channels,
+    stored: [f32; 4],
+    color: [f32; 3],
+    /// Coverage as a fraction; 1.0 where the image has no alpha channel.
+    pub alpha: f32,
+}
+
+impl Sample {
+    /// Every component the file carries, alpha included, in the units it
+    /// stores them in: counts for integer samples, the value itself for float
+    /// ones.
+    pub fn stored(&self) -> &[f32] {
+        &self.stored[..self.channels.count()]
+    }
+
+    /// The colour, in the linear BT.709 working space with premultiplication
+    /// undone: one component for grey, three for colour. This is what
+    /// `shaders/image.wgsl` has in hand at the moment it applies the window.
+    pub fn color(&self) -> &[f32] {
+        &self.color[..self.channels.color_count()]
+    }
+}
+
+/// Row-major 3x3 times a colour, the CPU-side twin of the `primaries` matrix
+/// multiply in `shaders/image.wgsl`.
+fn to_working_space(matrix: [[f32; 3]; 3], color: [f32; 3]) -> [f32; 3] {
+    let mut out = [0.0; 3];
+    for (slot, row) in out.iter_mut().zip(matrix) {
+        *slot = row[0] * color[0] + row[1] * color[1] + row[2] * color[2];
+    }
+    out
 }
 
 #[cfg(test)]
@@ -232,6 +351,105 @@ mod tests {
             value_range: None,
             nodata: None,
         }
+    }
+
+    /// The readout the pointer drives has to say two things at once: what the
+    /// file holds, in the units the file holds it in, and what the pipeline
+    /// will make of that. So a sample carries both, and the file's own numbers
+    /// come back unscaled — a 16-bit count reads as a count.
+    #[test]
+    fn a_sample_reports_the_file_s_own_numbers_and_the_decoded_ones() {
+        let image = gray16(vec![0, 1000, 2000, 3000, 4000, 5000], 3, 2);
+        let sample = image.sample(1, 1).expect("inside the image");
+
+        assert_eq!(
+            sample.stored(),
+            [4000.0],
+            "the count, not a fraction of one"
+        );
+        assert!((sample.color()[0] - 4000.0 / 65535.0).abs() < 1e-6);
+        assert_eq!(sample.alpha, 1.0, "an image with no alpha is opaque");
+
+        // Row-major from the top, so the last pixel is the bottom right one.
+        assert_eq!(image.sample(2, 1).expect("inside").stored(), [5000.0]);
+        assert!(image.sample(3, 1).is_none());
+        assert!(image.sample(0, 2).is_none());
+    }
+
+    #[test]
+    fn a_sample_decodes_the_transfer_curve_but_never_the_alpha() {
+        let image = DecodedImage::new(
+            1,
+            1,
+            Samples::U8 {
+                channels: Channels::GrayAlpha,
+                data: vec![128, 128],
+            },
+            ColorSpace::SRGB,
+            AlphaMode::Straight,
+        );
+
+        let sample = image.sample(0, 0).expect("inside the image");
+        assert_eq!(sample.stored(), [128.0, 128.0]);
+        // The same code in both components, and only one of them curved.
+        assert!(
+            (sample.color()[0] - 0.2158).abs() < 1e-3,
+            "{:?}",
+            sample.color()
+        );
+        assert!((sample.alpha - 128.0 / 255.0).abs() < 1e-6);
+    }
+
+    /// What the shader has in hand when it applies the window is the straight
+    /// colour, so that is what a sample reports — while `stored` keeps the
+    /// faded numbers the file actually contains.
+    #[test]
+    fn a_premultiplied_sample_is_divided_back_out_the_way_the_shader_does_it() {
+        let image = DecodedImage {
+            width: 2,
+            height: 1,
+            samples: Samples::F32 {
+                channels: Channels::Rgba,
+                data: vec![0.25, 0.5, 0.75, 0.5, 0.0, 0.0, 0.0, 0.0],
+            },
+            color: ColorSpace::LINEAR_BT709,
+            alpha: AlphaMode::Premultiplied,
+            value_range: None,
+            nodata: None,
+        };
+
+        let sample = image.sample(0, 0).expect("inside the image");
+        assert_eq!(sample.stored(), [0.25, 0.5, 0.75, 0.5]);
+        assert_eq!(sample.color(), [0.5, 1.0, 1.5]);
+
+        // A texel that has resolved to nothing is nothing, rather than a wild
+        // colour divided out of an alpha of zero.
+        let empty = image.sample(1, 0).expect("inside the image");
+        assert_eq!(empty.color(), [0.0, 0.0, 0.0]);
+        assert_eq!(empty.alpha, 0.0);
+    }
+
+    /// Colour comes back in the working space, since that is where the window
+    /// and everything after it happens. Grey has no primaries to convert.
+    #[test]
+    fn a_sample_is_taken_to_the_working_space() {
+        let mut image = DecodedImage::new(
+            1,
+            1,
+            Samples::F32 {
+                channels: Channels::Rgb,
+                data: vec![0.0, 1.0, 0.0],
+            },
+            ColorSpace::LINEAR_BT709,
+            AlphaMode::Opaque,
+        );
+        assert_eq!(image.sample(0, 0).expect("inside").color(), [0.0, 1.0, 0.0]);
+
+        image.color.primaries = Primaries::DisplayP3;
+        let converted = image.sample(0, 0).expect("inside").color().to_vec();
+        // P3 green is outside BT.709, which shows as a negative red.
+        assert!(converted[0] < 0.0, "{converted:?}");
+        assert!(converted[1] > 1.0, "{converted:?}");
     }
 
     #[test]

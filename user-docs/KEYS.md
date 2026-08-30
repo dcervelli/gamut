@@ -77,6 +77,16 @@ fills the window. Whichever the view is in is lit. Choosing sets the zoom;
 pressing anywhere outside the menu, or `Esc`, closes it without changing
 anything. A window too small to hold the menu does not open one.
 
+Pointing at the image reads that pixel out in the bottom left corner: its
+coordinates, the numbers the file holds there, an arrow, and what the display
+settings map those numbers to. The numbers are in the file's own units — codes
+for an 8-bit image, counts for a 16-bit one, the value itself for floating
+point — so they are the numbers whatever wrote the file put there. The mapped
+values are what the window, the exposure and the tone curve have made of them,
+where 0 and 1 are the ends of the window the bar names on the right. The
+swatch at the front is the colour the pixel comes out on screen, false colour
+included. In a window too narrow for all of it, the coordinates stay.
+
 The pointer keeps its grab until the button comes up, so a drag that leaves
 the window goes on working. The cursor becomes a closed hand only when there
 is somewhere to drag to.
