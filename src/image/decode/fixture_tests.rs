@@ -924,6 +924,169 @@ const FIXTURES: &[Fixture] = &[
         nodata: None,
         tolerance: EXACT,
     },
+    // ------------------------------------------------------------- BMP
+    Fixture {
+        file: "bmp-rgb8.bmp",
+        covers: "BMP 24-bit, bottom-up rows",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // Carrying alpha is what forces the `BITMAPV5HEADER` and the bitfield
+    // masks that describe where each channel sits in the word.
+    Fixture {
+        file: "bmp-rgba8.bmp",
+        covers: "BMP 32-bit with bitfield masks and alpha",
+        channels: Channels::Rgba,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Straight,
+        tone: Tone::Color,
+        coverage: Coverage::Ramp,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "bmp-palette.bmp",
+        covers: "BMP 4-bit palette",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // The other palette width, and with it the run-length coding that only a
+    // palette can use.
+    Fixture {
+        file: "bmp-rle8.bmp",
+        covers: "BMP 8-bit palette, `BI_RLE8` runs",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // The same picture with its rows reversed and a negative height saying
+    // so, which is how screen capture writes one. Passing this table means
+    // the sign was honoured; ignoring it would turn the picture upside down.
+    Fixture {
+        file: "bmp-topdown.bmp",
+        covers: "BMP top-down row order",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // ---------------------------------------------------------- netpbm
+    Fixture {
+        file: "pnm-rgb8.ppm",
+        covers: "netpbm binary PPM, 8-bit",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "pnm-gray8.pgm",
+        covers: "netpbm binary PGM, 8-bit",
+        channels: Channels::Gray,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Gray,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // 16-bit samples, which netpbm stores big-endian whatever wrote them.
+    Fixture {
+        file: "pnm-rgb16.ppm",
+        covers: "netpbm binary PPM, 16-bit big-endian samples",
+        channels: Channels::Rgb,
+        kind: Kind::U16,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // The ASCII member of the family, under the extension that names no
+    // member in particular.
+    Fixture {
+        file: "pnm-ascii.pnm",
+        covers: "netpbm ASCII PPM, and the generic `.pnm` extension",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // `MAXVAL 1023` in a 16-bit word, which has to be lifted to 65535 or the
+    // picture shows at a sixteenth of its brightness. Passing the ordinary
+    // grey table is what says it was.
+    Fixture {
+        file: "pnm-maxval1023.pgm",
+        covers: "netpbm PGM whose MAXVAL is not the sample width",
+        channels: Channels::Gray,
+        kind: Kind::U16,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Gray,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // `MAXVAL 1` at the other end, where a sample is one bit and white is
+    // whatever the lift makes of it.
+    Fixture {
+        file: "pnm-bilevel.pbm",
+        covers: "netpbm bitmap, one bit per pixel",
+        channels: Channels::Gray,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::GrayBilevel,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // PAM generalises the three above, states its fields as keyword lines
+    // rather than bare numbers, and is the only one that carries alpha.
+    Fixture {
+        file: "pnm-rgba8.pam",
+        covers: "netpbm PAM with an alpha channel",
+        channels: Channels::Rgba,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Straight,
+        tone: Tone::Color,
+        coverage: Coverage::Ramp,
+        nodata: None,
+        tolerance: EXACT,
+    },
     // A PNG under a TIFF name, decoded by sniffing rather than extension.
     Fixture {
         file: "mislabelled.tif",
@@ -941,7 +1104,7 @@ const FIXTURES: &[Fixture] = &[
 
 /// Files that are meant to fail, and the phrase the failure should contain.
 const REJECTED: &[(&str, &str)] = &[
-    ("unsupported.ppm", "unsupported image format"),
+    ("unsupported.tga", "unsupported image format"),
     ("bad-truncated.png", "decoding"),
 ];
 

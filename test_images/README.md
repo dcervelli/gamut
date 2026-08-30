@@ -8,11 +8,11 @@ from the outside world.
 Regenerate with `./generate.sh` — it is the authoritative description of how
 each file was made. Most fixtures need only ImageMagick; the HEIF ones need
 `heif-enc` from libheif, and the measurement rasters at the end need GDAL.
-Eight fixtures need Python as well, because ImageMagick will not write what
+Nine fixtures need Python as well, because ImageMagick will not write what
 they exist for: neither `cICP` nor `iCCP` for PNG, neither an `EXIF` chunk nor
-an animation for WebP, and for ICO neither a PNG-compressed entry nor a
-directory that mixes depths. Each is assembled afterwards around output
-ImageMagick did write.
+an animation for WebP, for ICO neither a PNG-compressed entry nor a directory
+that mixes depths, and for BMP no top-down row order. Each is assembled
+afterwards around output ImageMagick did write.
 
 `display-p3.icc` is an input rather than a fixture: it is the profile the three
 ICC-tagged files are tagged with, checked in beside them and not regenerated
@@ -52,8 +52,10 @@ mapping.
 | WebP container | `ICCP` for Display P3 — the only thing a WebP has to say about its colour — an `EXIF` orientation applied on decode, and a two-frame animation whose second frame is upside down |
 | ICO | a 32-bit bitmap entry, a 4-bit palette entry with its AND mask, and a PNG entry — the two formats an entry can hold |
 | ICO directory | a PNG entry that is not RGBA and one carrying an `iCCP` profile, both of which `image`'s own ICO decoder refuses, and a two-size directory whose larger entry is the shallower |
-| Routing | `mislabelled.tif` (a PNG, found by sniffing), `.jpeg`, `.tiff` and `.heif` spellings |
-| Failure | `unsupported.ppm`, `bad-truncated.png` |
+| BMP | 24-bit, 32-bit with bitfield masks and alpha, a 4-bit palette, an 8-bit palette with `BI_RLE8` runs, and one whose rows are stored top-down |
+| netpbm | binary PPM and PGM at 8 bits, binary PPM at 16, an ASCII PPM, a bitmap at one bit per pixel, a PAM with alpha, and a PGM whose `MAXVAL` is 1023 rather than the width of its samples |
+| Routing | `mislabelled.tif` (a PNG, found by sniffing), `.jpeg`, `.tiff`, `.heif` and `.pnm` spellings |
+| Failure | `unsupported.tga`, `bad-truncated.png` |
 
 `src/image/decode/fixture_tests.rs` asserts that this directory and its
 fixture table stay in step, so a file cannot be added without a test and a

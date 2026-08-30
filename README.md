@@ -367,7 +367,7 @@ anything having to notice that it should.
 
 | Format | Backend |
 | --- | --- |
-| PNG, JPEG, GIF, Radiance HDR, OpenEXR | [`image`](https://crates.io/crates/image) |
+| PNG, JPEG, GIF, Radiance HDR, OpenEXR, BMP, netpbm | [`image`](https://crates.io/crates/image) |
 | TIFF | [`tiff`](https://crates.io/crates/tiff) directly |
 | HEIF — HEIC, AVIF | [`libheif-rs`](https://crates.io/crates/libheif-rs), onto the system `libheif` |
 | WebP — lossy, lossless, animated | [`image-webp`](https://crates.io/crates/image-webp) directly |
@@ -536,6 +536,32 @@ An animated GIF shows its first frame, the same choice an animated WebP gets.
 The crate composites that frame onto the logical screen the file declares, so
 a first frame stored as a patch at an offset still arrives at the full size
 rather than cropped to the patch.
+
+### BMP and netpbm
+
+Both take the plain route through `image`, for the same reason GIF does, and
+both needed a sniff written with more care than a signature usually asks for.
+
+BMP's magic number is the two letters `BM`, which plain English wears often
+enough to matter; netpbm's is `P` and a digit. Neither is worth trusting on
+its own, so each is checked against what has to follow it — for BMP the size
+of the DIB header, a small number from a known set, and for netpbm the
+whitespace that has to separate the magic number from the width. Everything
+else the two formats vary — bit depths, palettes, run-length codings, bitfield
+masks, rows stored bottom-up or top-down, ASCII and binary spellings — the
+crate resolves before it answers.
+
+Netpbm's header does state one thing worth acting on: `MAXVAL`, the value a
+fully bright sample has, which need not be the full width of the sample.
+Instrument pipelines write 1023 or 4095, and a bitmap writes 1. That is the
+same problem a 10-bit HEIF poses — `Samples::full_scale` says a `U16` image's
+white is 65535, so a raster stated against 1023 would show at a sixteenth of
+its brightness — but here the crate already rescales every sample before
+handing the buffer over, so there is nothing to add beyond a fixture that
+keeps it true. A `BITMAPV5HEADER`'s colour space is the one thing genuinely
+left on the floor; the crate does not surface it, and BMPs that carry one are
+rare enough that reading the header a second time to find it would be work
+spent on almost nothing.
 
 ### ICO
 

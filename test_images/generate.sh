@@ -30,7 +30,8 @@ trap 'rm -rf "$work"' EXIT
 
 # Start clean, so a renamed fixture does not leave its predecessor behind.
 rm -f ./*.png ./*.jpg ./*.jpeg ./*.tif ./*.tiff ./*.hdr ./*.exr ./*.gif \
-      ./*.heic ./*.heif ./*.avif ./*.webp ./*.ico ./*.ppm
+      ./*.heic ./*.heif ./*.avif ./*.webp ./*.ico ./*.bmp ./*.tga \
+      ./*.pnm ./*.pbm ./*.pgm ./*.ppm ./*.pam
 
 quad '#FF0000' '#00FF00' '#0000FF' '#FFFFFF' "$work/color.png"
 quad '#000000' '#555555' '#AAAAAA' '#FFFFFF' "$work/gray.png"
@@ -343,6 +344,66 @@ ico_pack ico-png-icc-p3.ico png-icc-p3.png
 magick "$work/color-alpha.png" -resize 16x12\! -type TrueColorAlpha "$work/thumbnail.ico"
 ico_pack ico-multi.ico ico-bmp-palette.ico "$work/thumbnail.ico"
 
+# ----------------------------------------------------------------- BMP
+# The DIB the ICO fixtures carry, in a file of its own. `BMP3:` pins the
+# ordinary `BITMAPINFOHEADER`; the alpha fixture is left to choose for itself,
+# because carrying alpha is what forces the `BITMAPV5HEADER` and the bitfield
+# masks that come with it. `-type Palette` on a four-colour pattern lands on
+# 4-bit, and adding RLE to it lands on 8-bit, so the two palette widths and
+# both of the format's run-length codings are covered between them.
+magick "$work/color.png"       -type TrueColor      BMP3:bmp-rgb8.bmp
+magick "$work/color-alpha.png" -type TrueColorAlpha bmp-rgba8.bmp
+magick "$work/color.png"       -type Palette        BMP3:bmp-palette.bmp
+magick "$work/color.png" -depth 8 -type Palette -compress RLE BMP3:bmp-rle8.bmp
+
+# A BMP stores its rows bottom-up unless its height is negative, and screen
+# capture is where the other kind comes from. ImageMagick writes only the
+# usual way round, so the rows are reversed here and the height negated to
+# say so: it decodes to the ordinary pattern only if the sign is honoured.
+bmp_topdown() {  # src dst
+  python3 - "$@" <<'FLIP'
+import struct, sys
+
+src, dst = sys.argv[1:3]
+data = bytearray(open(src, "rb").read())
+(start,) = struct.unpack_from("<I", data, 10)
+width, height = struct.unpack_from("<ii", data, 18)
+(bpp,) = struct.unpack_from("<H", data, 28)
+assert height > 0, f"{src} is top-down already"
+
+# Rows are padded out to a multiple of four bytes.
+stride = ((width * bpp + 31) // 32) * 4
+rows = [bytes(data[start + y * stride : start + (y + 1) * stride]) for y in range(height)]
+data[start : start + stride * height] = b"".join(reversed(rows))
+struct.pack_into("<i", data, 22, -height)
+open(dst, "wb").write(bytes(data))
+FLIP
+}
+bmp_topdown bmp-rgb8.bmp bmp-topdown.bmp
+
+# -------------------------------------------------------------- netpbm
+# `-depth` is not optional here. Left to itself ImageMagick picks the smallest
+# MAXVAL that represents the colours present, so the four-colour pattern comes
+# out as `MAXVAL 3` — which is a fine netpbm file and a good demonstration of
+# why the decoder reads MAXVAL, but not the fixture wanted at full range.
+magick "$work/color.png" -depth 8  ppm:pnm-rgb8.ppm
+magick "$work/gray.png"  -depth 8  -colorspace gray pgm:pnm-gray8.pgm
+# 16-bit samples, which netpbm stores big-endian whatever the machine is.
+magick "$work/color.png" -depth 16 ppm:pnm-rgb16.ppm
+# The ASCII member of the family, under the extension that names no member in
+# particular. `-compress None` is what selects `P3` over `P6`.
+magick "$work/color.png" -depth 8 -compress None ppm:pnm-ascii.pnm
+# The reason netpbm has a decoder of its own rather than joining the plain
+# path: MAXVAL 1023 in a 16-bit word, which has to be lifted to full scale or
+# the picture shows at a sixteenth of its brightness.
+magick "$work/gray.png" -depth 10 -colorspace gray pgm:pnm-maxval1023.pgm
+# MAXVAL 1, at the other end: one bit per pixel, and `+dither` so the two
+# middle steps of the grey pattern round to the ends rather than stippling.
+magick "$work/gray.png" -colorspace gray -threshold 50% +dither pbm:pnm-bilevel.pbm
+# PAM, which generalises the three above and is the only one of them that can
+# carry alpha.
+magick "$work/color-alpha.png" -depth 8 pam:pnm-rgba8.pam
+
 # -------------------------------------------- TIFF as measurement rasters
 # What elevation models and scientific output actually look like, and what
 # `image` cannot read at all: single-band floats, BigTIFF, the floating-point
@@ -380,12 +441,14 @@ gdal_translate -q -of GTiff -a_nodata -9999 -co COMPRESS=NONE \
 # ------------------------------------------------------- negative fixtures
 # A PNG header followed by rubbish: the decoder is chosen, then fails.
 { printf '\211PNG\r\n\032\n'; head -c 64 /dev/zero | tr '\0' 'X'; } > bad-truncated.png
-# A real image in a format this build does not include. Netpbm has no
-# decoder here and no sniff claims its header, so it is turned away by the
-# registry rather than by a backend.
-magick "$work/color.png" unsupported.ppm
+# A real image in a format this build does not include. Targa has no decoder
+# here, and its header is a length and two type codes with no signature in it
+# for any sniff to claim, so it is turned away by the registry rather than by
+# a backend.
+magick "$work/color.png" unsupported.tga
 # A PNG called a TIFF, to exercise the content-sniffing fallback.
 cp png-rgb8.png mislabelled.tif
 
 echo "generated $(ls -1 *.png *.jpg *.jpeg *.tif *.tiff *.hdr *.exr *.gif \
-                    *.heic *.heif *.avif *.webp *.ico *.ppm | wc -l) fixtures"
+                    *.heic *.heif *.avif *.webp *.ico *.bmp *.tga \
+                    *.pnm *.pbm *.pgm *.ppm *.pam | wc -l) fixtures"
