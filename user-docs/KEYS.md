@@ -23,7 +23,9 @@ and then Down scrolls through a tall image at fit-width.
 `n` and `p` keep the pan and zoom when the next file is the same size as the
 one on screen, so a directory of frames or exposures stays comparable under
 the same pixels. A file of a different size is a different picture, and is
-fitted. Files that cannot be decoded are stepped over.
+fitted. Files that cannot be decoded are stepped over. The list is whatever
+was named at startup, in that order; naming a directory puts the images in it
+on the list.
 
 ## The display
 

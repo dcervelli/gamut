@@ -13,6 +13,10 @@ on the way in.
 cargo run --release -- photo.jpg scan.tiff render.exr
 ```
 
+A directory named instead of a file stands for the images directly inside it,
+in name order — one level, and by extension, since the alternative is opening
+every file in the directory to see what it is.
+
 The first file is shown, stretched to fit the space the interface panels
 leave in the middle; the window opens at the image's own size plus that
 chrome, shrunk to fit the monitor. `` ` `` hides the panels and gives the

@@ -25,6 +25,13 @@ TGA, DDS, ICNS, or a plain `.bmp` — BMP is read only as an icon inside an ICO.
 JPEG, and a file with no extension at all is fine. The extension is a fallback
 for the one format whose first bytes are not distinctive, which is ICO.
 
+**A directory stands for the images in it.** Name a directory instead of a
+file and everything in it that looks like an image joins the list, in name
+order, ready to step through. Only that directory is read, not the
+directories inside it, and here the name is all there is to go on: a file is
+taken for an image if its extension is one of those above, so a JPEG saved as
+`photo.txt` is passed over where naming it yourself would have opened it.
+
 **One picture per file.** Nothing here shows more than one:
 
 - an animated GIF or WebP shows its first frame and stops — there is no
