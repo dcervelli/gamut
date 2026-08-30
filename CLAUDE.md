@@ -80,5 +80,5 @@ render/        the GPU
 cargo test
 cargo clippy --all-targets    # clean
 cargo doc --no-deps           # no warnings
-cargo run --release -- test_images/png-rgb8.png --histogram --minimap
+cargo run --release -- test_images/png-rgb8.png --histogram
 ```

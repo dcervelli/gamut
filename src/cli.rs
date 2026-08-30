@@ -43,7 +43,7 @@ OPTIONS:
         --exposure <STOPS>  Start at this exposure, in stops
         --upscale <FILTER>  How to resample above 100%: nearest or bicubic
         --histogram         Start with the histogram showing
-        --minimap           Start with the minimap on
+        --no-minimap        Start with the minimap off; it is on by default
     --                      Treat every later argument as a path
 ";
 
@@ -157,7 +157,7 @@ pub fn parse_args() -> Result<Option<Args>> {
     let mut startup = Startup::default();
     let mut hdr = HdrPreference::Off;
     let mut histogram = false;
-    let mut minimap = false;
+    let mut minimap = true;
     let mut upscale = Upscale::default();
     let mut only_files = false;
 
@@ -242,8 +242,8 @@ pub fn parse_args() -> Result<Option<Args>> {
                     histogram = true;
                     continue;
                 }
-                Some("--minimap") => {
-                    minimap = true;
+                Some("--no-minimap") => {
+                    minimap = false;
                     continue;
                 }
                 Some("--") => {
