@@ -266,7 +266,7 @@ anything having to notice that it should.
 
 | Format | Backend |
 | --- | --- |
-| PNG, JPEG, Radiance HDR, OpenEXR | [`image`](https://crates.io/crates/image) |
+| PNG, JPEG, GIF, Radiance HDR, OpenEXR | [`image`](https://crates.io/crates/image) |
 | TIFF | [`tiff`](https://crates.io/crates/tiff) directly |
 | HEIF — HEIC, AVIF | [`libheif-rs`](https://crates.io/crates/libheif-rs), onto the system `libheif` |
 | WebP — lossy, lossless, animated | [`image-webp`](https://crates.io/crates/image-webp) directly |
@@ -420,6 +420,22 @@ decoder has a clock — an image is decoded once, uploaded once, and redrawn
 only when the view changes — so playing them would be a change to the event
 loop rather than to this decoder.
 
+### GIF
+
+GIF takes the plain route through `image`, because its container has nothing
+to say that this program could act on: no profile, no code points, no
+orientation, and a palette of sRGB bytes by definition. Every GIF comes back
+RGBA whatever its palette holds — the crate's decoder has one output layout,
+and the transparent index has to go somewhere. That index is also all the
+transparency the format has: one palette entry is a hole, the rest are opaque,
+and the pixel behind the hole carries no colour at all rather than a colour
+with zero alpha the way a PNG's `tRNS` does.
+
+An animated GIF shows its first frame, the same choice an animated WebP gets.
+The crate composites that frame onto the logical screen the file declares, so
+a first frame stored as a patch at an offset still arrives at the full size
+rather than cropped to the patch.
+
 ### ICO
 
 An ICO is not an image but a folder of them — the same picture at 16, 32, 48
@@ -518,12 +534,14 @@ An ICO shows one entry of the several it holds — the largest — and the rest
 are not reachable. Showing them side by side is what the comparison view is
 for, but nothing below the decoder can return more than one image per file.
 
-Animated WebP shows its first frame and stops there. Playing the rest needs a
-clock in the event loop, which nothing else here wants; the frames themselves
-are already reachable through the decoder that reads the first one.
+Animated WebP and animated GIF show their first frame and stop there. Playing
+the rest needs a clock in the event loop, which nothing else here wants; the
+frames themselves are already reachable through the decoders that read the
+first one.
 
 Embedded ICC profiles are read for JPEG, PNG, HEIF and WebP — and so for an
-ICO whose entry is a PNG — which is every format here that can carry one. TIFF can too, and does not.
+ICO whose entry is a PNG — which is every format here that can carry one
+except TIFF, which can and does not. GIF has no way of carrying one.
 
 Gain maps are read for JPEG only. HEIF can carry one as an auxiliary image,
 which is how Apple stores HDR photographs, and that is not implemented; such a
@@ -546,7 +564,7 @@ crate.
 cargo test
 ```
 
-133 tests over the transfer functions and primaries matrices, texture format
+139 tests over the transfer functions and primaries matrices, texture format
 selection (including the device-capability fallbacks), the statistics and
 window logic, the decoder registry, the CICP translation, ICC profile
 recognition, gain map reconstruction, the view geometry, and the reload
@@ -570,14 +588,15 @@ draw of the same texture — building the coarse chain the view itself had no
 use for. Where no adapter can be had they report success rather than failing
 for a reason that has nothing to do with the code.
 
-`test_images/` holds 57 real fixtures — see its README — covering every pixel
+`test_images/` holds 67 real fixtures — see its README — covering every pixel
 layout the decoder can produce and every per-format encoding with its own code
 path: PNG bit depths, palettes and interlacing; progressive and subsampled
 JPEG; TIFF compressions, byte orders, tiling, BigTIFF, the floating-point
 predictor, signed samples and no-data; Radiance RGBE; EXR associated alpha;
 HEIC monochrome, 10-bit, `irot` and its colour tags, and the same container
 with AV1 inside; WebP in both bitstreams, with and without alpha, tagged,
-rotated and animated. Four of them exist for the colour tags in particular: a
+rotated and animated; GIF interlaced, transparent and animated. Four of them
+exist for the colour tags in particular: a
 PNG carrying `cICP` for BT.2100 PQ, a PNG carrying `iCCP` for Display P3, a
 HEIF tagged by ICC profile with no `nclx` box beside it, and a WebP carrying
 `ICCP`. Each is checked for
