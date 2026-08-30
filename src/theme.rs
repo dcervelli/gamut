@@ -420,6 +420,14 @@ pub struct Theme {
     /// The hairline along a panel's inner edge, and the other square of the
     /// checkerboard behind a transparent image.
     pub border: Color,
+    /// The panel a popup's cells sit on. The bars' colour rather than the
+    /// floating panel's, and for the same reason the cells are drawn like the
+    /// toggles in the side panels: what is on a menu are buttons, and the ink
+    /// buttons are drawn in is made to read against the bars. Near enough to
+    /// opaque to be read through — a menu is what is being looked at while it
+    /// is open — but not quite, so that it still reads as lying over the
+    /// image rather than as another piece of the chrome.
+    pub menu_background: Color,
     /// The floating histogram panel: dark whatever the mode, since the plot
     /// on it is drawn by screening the colour planes over one another and
     /// that only reads on a dark ground. Kept off full opacity so that what
@@ -460,6 +468,12 @@ const SEPARATION: u32 = 18;
 /// theme's own ink rather than out of its background, which is the wrong end
 /// of the palette for a surface that has to stay dark.
 const LIGHT_PANEL_DEPTH: f32 = 0.25;
+/// How opaque a popup's panel is. Higher than the panels that float over the
+/// image permanently: the picture coming through a menu competes with the
+/// choices on it. Not mode-dependent the way the floating panel's alpha is,
+/// the surface being the theme's own background either way round.
+const MENU_ALPHA: u8 = 246;
+
 /// How opaque that panel is, against the interface's usual alpha for it.
 ///
 /// Higher because the interface's quads blend in light, not in encoded
@@ -489,6 +503,7 @@ impl Theme {
         mode: Mode::Dark,
         bar_background: Color::rgb(18, 18, 22),
         border: Color::rgb(38, 38, 46),
+        menu_background: Color::rgba(18, 18, 22, MENU_ALPHA),
         panel_background: Color::rgba(12, 12, 16, 214),
         panel_text: Color::rgb(150, 152, 160),
         button_idle: Color::rgba(255, 255, 255, 20),
@@ -580,6 +595,7 @@ impl Theme {
             mode: palette.mode(),
             bar_background: background,
             border,
+            menu_background: background.with_alpha(MENU_ALPHA),
             panel_background: deep.with_alpha(panel_alpha),
             panel_text: on_deep,
             button_idle: foreground.with_alpha(Theme::FALLBACK.button_idle.a),
@@ -895,6 +911,24 @@ yellow = \"#e0af68\"
         // The washes are the panel colours at the interface's own alphas.
         assert_eq!(theme.button_idle, theme.text_dim.with_alpha(20));
         assert_eq!(theme.minimap_edge, theme.text_dim.with_alpha(70));
+    }
+
+    /// A menu is a handful of buttons, and buttons are drawn in ink made to
+    /// read against the bars — so a menu's panel is the bars' surface, which
+    /// on a light theme means a light one. The floating histogram panel is
+    /// the one that stays dark either way, and for a reason a menu does not
+    /// share.
+    #[test]
+    fn a_menu_sits_on_the_bars_surface_whichever_way_the_theme_runs() {
+        for source in [TOKYO, SPARSE] {
+            let theme = Theme::from_palette(&palette(source));
+            assert_eq!(
+                theme.menu_background,
+                theme.bar_background.with_alpha(MENU_ALPHA)
+            );
+            // Read through, but only just.
+            assert!(theme.menu_background.a > theme.panel_background.a);
+        }
     }
 
     #[test]

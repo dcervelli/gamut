@@ -84,12 +84,6 @@ const BORDER_WIDTH: f32 = 1.0;
 /// Side of one checkerboard square, in logical pixels. Small enough to read
 /// as a texture behind the image rather than as a pattern competing with it.
 const CHECKER_SQUARE: f32 = 8.0;
-/// A popup's panel, which is more nearly opaque than the panels that float
-/// over the image permanently: a menu is what is being read while it is open,
-/// and the picture coming through it competes with the choices on it. Not
-/// quite opaque, so that it still reads as lying over the image rather than
-/// as another piece of the chrome.
-const MENU_BACKGROUND: Color = Color::rgba(12, 12, 16, 246);
 /// What the luminance plane drops to once colour planes are drawn over it.
 const HISTOGRAM_LUMA_UNDER: u8 = 110;
 /// How much of the accent is left behind a switched-on toggle. Enough to read
@@ -1692,7 +1686,7 @@ fn draw_menu(
     let Some(menu) = layout.menu else {
         return;
     };
-    popup.draw(frame, MENU_BACKGROUND);
+    popup.draw(frame, theme.menu_background);
     for (index, cell) in popup.cells() {
         let hover = layout.hover == Some(Widget::Cell(index));
         match menu {

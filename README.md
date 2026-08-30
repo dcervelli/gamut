@@ -114,10 +114,10 @@ The interface takes its colours from the desktop rather than carrying its own.
 On [Omarchy](https://omarchy.org) the active theme is materialised as a
 palette file, and `src/theme.rs` reads it, resolves it, and derives the
 handful of roles the chrome actually needs — panel, hairline, primary and dim
-text, accent, the floating panel and the ink on it, the histogram's planes.
-Switching the desktop's theme is picked up on the same 250 ms poll as the file
-on screen, so an open window changes with everything else rather than staying
-in the theme it opened under.
+text, accent, the menu panel, the floating panel and the ink on it, the
+histogram's planes. Switching the desktop's theme is picked up on the same
+250 ms poll as the file on screen, so an open window changes with everything
+else rather than staying in the theme it opened under.
 
 Off Omarchy there is nothing to read and nothing happens: the neutral dark set
 the interface was designed in is used instead. The same set fills in for a
@@ -150,6 +150,13 @@ Two things resist being themed directly and are derived instead:
   theme that names no colours keeps the planes the interface was designed
   with, since one themed plane beside two default ones would read as three
   unrelated colours.
+
+A popup's panel is not one of those two. Its cells are buttons, drawn in the
+same ink as the toggles in the side panels, and that ink is made to read
+against the bars — so the panel is the bars' own surface and follows the theme
+either way round. It is held nearer to opaque than the floating panel is,
+since the picture coming through a menu is what the choices on it compete
+with.
 
 ## Colour management
 
