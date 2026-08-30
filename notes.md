@@ -1,20 +1,23 @@
-README:
+# Notes
+
+## THEMES
+
 * GPU powered to the extent possible
-* Image comparison is first class
+* Image comparison (same image size) is first class
 * Limited by CPU/GPU RAM
 * No main thread work
+* Performance is a differentiator
 
-TODO:
-* Cursor color tracking
-* --recursive directory scan
-* Clean steps on zoom
-* Logging
-  * ICO → largest image chosen
-  * Errors
-* Performance
+## INITIAL RELEASE
+
+* Full UI pass
+  * Cursor swatch to right of coordinate
+* Theme font
+* License review
+* Minimap on by default
+* Security pass with Fable
 * Grid display when zoomed in
 * Region selection
-  * Nudges
 * Copy
   * File path
   * Image (file content)
@@ -22,22 +25,18 @@ TODO:
   * Region (raw)
   * Pixel color
 * Paste image
-* Changable background
-  * Color picker
-* Sane keys
-* Formats
-  * DNG
-  * Other raw files
-  * Animated GIF support
-  * SVG rasterizer?
-* If window is small, auto hide side panels
+* Hotkey choices
 * Modifications
   * 90° rotations
   * Crop to region
   * Gamma
 * Wayland app_id
-* Security pass
+* Package
 * Info
+  * File date/time
+  * Resolution
+  * File size
+  * Color
   * EXIF
   * TIFF tags
   * Other?
@@ -45,6 +44,26 @@ TODO:
   * Usage
   * CLI
   * Man page
-* For the filename, if all files are in the same directory, just display the file name; if not, display a minimum disambiguated file path.
+
+## FUTURE
+
+* Export/Save as...
+* Multiframe
+  * GIF
+  * WebP
+  * ICO
+* --recursive directory scan
 * File list/filmstrip
 * Ctrl+P to open file
+* Clean steps on zoom
+* Logging
+  * ICO → largest image chosen
+  * Errors
+* Changable background
+  * Color picker
+* SVG rasterizer
+* For the filename, if all files are in the same directory, just display the file name; if not, display a minimum disambiguated file path.
+* Formats
+  * JPEG XL
+  * DNG
+  * Other raw files
