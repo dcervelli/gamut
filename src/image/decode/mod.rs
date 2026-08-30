@@ -85,6 +85,19 @@ pub trait Decoder: Sync {
     /// of its settings — whether to reconstruct from a gain map — changes
     /// what a decoder produces rather than how it is labelled.
     fn decode(&self, source: &mut dyn ReadSeek, overrides: Overrides) -> Result<DecodedImage>;
+
+    /// The image's size, taken from the header rather than by decoding it.
+    ///
+    /// Answers before the pixels exist, so that the window can open at the
+    /// right size while the file is still being read. `None` where the format
+    /// cannot say cheaply, or cannot say correctly — the window then takes a
+    /// plain default rather than a wrong shape.
+    ///
+    /// Whatever this returns has to match what [`Decoder::decode`] goes on to
+    /// produce, orientation and all. Every fixture is checked for that.
+    fn dimensions(&self, _source: &mut dyn ReadSeek) -> Result<Option<(u32, u32)>> {
+        Ok(None)
+    }
 }
 
 /// Order matters only when two decoders claim the same extension, in which
@@ -141,9 +154,9 @@ pub fn supported_extensions() -> Vec<&'static str> {
     extensions
 }
 
-/// Reads and decodes `path`, picking a decoder by extension and falling back
-/// to content sniffing.
-pub fn load(path: &Path, overrides: Overrides) -> Result<DecodedImage> {
+/// Opens `path` and works out which decoder owns it, reading only the header.
+/// The cheap half of [`load`], and all of [`probe`].
+fn open(path: &Path) -> Result<(BufReader<File>, &'static dyn Decoder)> {
     let file = File::open(path).with_context(|| format!("opening {}", path.display()))?;
     let mut source = BufReader::new(file);
 
@@ -179,6 +192,14 @@ pub fn load(path: &Path, overrides: Overrides) -> Result<DecodedImage> {
             )
         })?;
 
+    Ok((source, *decoder))
+}
+
+/// Reads and decodes `path`, picking a decoder by extension and falling back
+/// to content sniffing.
+pub fn load(path: &Path, overrides: Overrides) -> Result<DecodedImage> {
+    let (mut source, decoder) = open(path)?;
+
     let mut image = decoder
         .decode(&mut source, overrides)
         .with_context(|| format!("decoding {} as {}", path.display(), decoder.name()))?;
@@ -189,6 +210,24 @@ pub fn load(path: &Path, overrides: Overrides) -> Result<DecodedImage> {
 
     image.color = overrides.apply(image.color);
     Ok(image)
+}
+
+/// Checks that `path` exists and holds a format we know, and asks that format
+/// how large it is — all from the header, without decoding a pixel.
+///
+/// This is what lets the window open before the file has been read. The error
+/// is the point of it as much as the size: a missing path or an unknown format
+/// stays a plain command-line failure, rather than a window that appears only
+/// to close again.
+pub fn probe(path: &Path) -> Result<Option<(u32, u32)>> {
+    let (mut source, decoder) = open(path)?;
+    decoder.dimensions(&mut source).with_context(|| {
+        format!(
+            "reading the header of {} as {}",
+            path.display(),
+            decoder.name()
+        )
+    })
 }
 
 /// Reads as much as `buffer` holds, tolerating a file shorter than that.

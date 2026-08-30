@@ -1,0 +1,259 @@
+//! Reading files off the event loop.
+//!
+//! One thread, one file at a time, newest request wins. Everything that costs
+//! time in proportion to the pixel count happens there — the decode, the
+//! statistics scan, the repack into a texture format and the copy to the GPU —
+//! so that the event loop is free to pan, zoom and draw while a file opens.
+//!
+//! Replies come back as winit user events rather than through a channel the
+//! event loop would have to poll: the loop is asleep almost all of the time,
+//! and a proxy wakes it the moment an image is ready instead of leaving it to
+//! be noticed at the next file-watch tick.
+
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::thread::{self, JoinHandle};
+use std::time::Instant;
+
+use anyhow::Result;
+use winit::event_loop::EventLoopProxy;
+
+use crate::image::decode::{self, Overrides};
+use crate::image::{DecodedImage, Stats};
+use crate::render::{GpuImage, Upload};
+use crate::timing;
+use crate::watch::Watch;
+
+/// Why a file is being read, which decides what survives the reading.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Reload {
+    /// A different file: display settings start over, and so does the view
+    /// unless the new file happens to be the same size as the old one.
+    Fresh,
+    /// The file already on screen, changed on disk. The user is presumably
+    /// looking at something in particular, so what they set up stays.
+    InPlace,
+}
+
+/// One file to read.
+pub struct Request {
+    /// Which request this is. Replies carry it back so the event loop can tell
+    /// the answer it is waiting for from one it has already stepped past.
+    pub generation: u64,
+    pub index: usize,
+    pub path: PathBuf,
+    pub overrides: Overrides,
+    pub mode: Reload,
+}
+
+/// A finished read, whether or not it produced an image.
+pub struct Decoded {
+    pub generation: u64,
+    pub file: Opened,
+    pub outcome: Result<Ready>,
+}
+
+/// Which file a reply is about, and what it looked like when we opened it.
+pub struct Opened {
+    pub index: usize,
+    pub path: PathBuf,
+    pub mode: Reload,
+    /// Taken immediately before the file was read rather than after: a write
+    /// that lands while we are decoding then shows up as another change,
+    /// instead of being recorded as the version we are holding.
+    pub watch: Watch,
+}
+
+/// An image ready to go on screen, with the work already done.
+pub struct Ready {
+    pub image: DecodedImage,
+    pub stats: Stats,
+    /// The texture, when the window was open in time to give us somewhere to
+    /// put it. `None` only for a file requested before the renderer existed,
+    /// which the event loop then uploads itself.
+    pub gpu: Option<GpuImage>,
+}
+
+/// The handle the event loop keeps. Dropping it stops the thread and waits
+/// for it, which the process cannot leave `main` without: see [`Loader::drop`].
+pub struct Loader {
+    /// Taken on the way out. The thread returns only once its end of the
+    /// channel fails, so shutting down means dropping this before waiting.
+    commands: Option<Sender<Command>>,
+    thread: Option<JoinHandle<()>>,
+    /// Asks a read under way to stop between stages rather than see itself
+    /// out, so that quitting does not wait on work nobody will look at.
+    cancelled: Arc<AtomicBool>,
+}
+
+enum Command {
+    Load(Request),
+    /// The renderer exists; from here on the thread can upload as well as
+    /// decode. Sent once, when the window opens.
+    Attach(Upload),
+}
+
+impl Loader {
+    pub fn new(proxy: EventLoopProxy<Decoded>) -> Self {
+        let (commands, incoming) = mpsc::channel();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&cancelled);
+        let thread = thread::Builder::new()
+            .name("image-view loader".into())
+            .spawn(move || run(incoming, proxy, &flag))
+            .expect("the loader thread can be spawned");
+        Self {
+            commands: Some(commands),
+            thread: Some(thread),
+            cancelled,
+        }
+    }
+
+    /// Asks for a file. Returns at once; the answer arrives as a user event.
+    pub fn request(&self, request: Request) {
+        self.send(Command::Load(request));
+    }
+
+    /// Hands over the GPU side, so that later reads arrive uploaded.
+    pub fn attach(&self, upload: Upload) {
+        self.send(Command::Attach(upload));
+    }
+
+    fn send(&self, command: Command) {
+        // No channel means we are shutting down, and a closed one means the
+        // thread has already gone. Nothing is waiting on a reply by then.
+        if let Some(commands) = &self.commands {
+            let _ = commands.send(command);
+        }
+    }
+
+    /// A loader that answers nothing, for tests that hand replies to the
+    /// application directly rather than round-tripping through a thread and an
+    /// event loop they have no way to run.
+    #[cfg(test)]
+    pub fn detached() -> Self {
+        let (commands, _) = mpsc::channel();
+        Self {
+            commands: Some(commands),
+            thread: None,
+            cancelled: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
+impl Drop for Loader {
+    /// Waits for the thread before letting the process go.
+    ///
+    /// The [`Upload`] handed over at start-up holds the wgpu device, so the
+    /// thread can be the last owner of it. Detached, it would then be calling
+    /// into the graphics driver to destroy the device at the same moment the
+    /// main thread is running that driver's own `atexit` handlers on its way
+    /// out of `main` — two threads dismantling the same global state, which
+    /// the NVIDIA driver answers with a null dereference. Joining removes the
+    /// race outright: nothing else runs while we wait, and by the time the
+    /// process leaves `main` the thread is gone.
+    fn drop(&mut self) {
+        self.cancelled.store(true, Ordering::Relaxed);
+        // The channel goes first. The thread returns only when `recv` fails,
+        // so joining while we still held the sender would wait for ever.
+        self.commands = None;
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+fn run(incoming: Receiver<Command>, proxy: EventLoopProxy<Decoded>, cancelled: &AtomicBool) {
+    let mut upload = None;
+    let mut queued: Option<Request> = None;
+
+    loop {
+        // Block for one command, then take everything else already waiting.
+        // A request overtaken while we were busy is a file the user has
+        // stepped past, and decoding it would only delay the one they are
+        // actually waiting for — so only the newest survives the drain.
+        let Ok(first) = incoming.recv() else {
+            return;
+        };
+        absorb(first, &mut queued, &mut upload);
+        while let Ok(next) = incoming.try_recv() {
+            absorb(next, &mut queued, &mut upload);
+        }
+
+        // Between commands rather than only at `recv`: a request sent just
+        // before the sender was dropped is still sitting in the channel, and
+        // reading it would hold up the quit for a file nobody will see.
+        if cancelled.load(Ordering::Relaxed) {
+            return;
+        }
+
+        if let Some(request) = queued.take() {
+            let Some(decoded) = read(request, upload.as_ref(), cancelled) else {
+                return;
+            };
+            // A closed loop means the window has gone; stop rather than
+            // decode for nobody.
+            if proxy.send_event(decoded).is_err() {
+                return;
+            }
+        }
+    }
+}
+
+fn absorb(command: Command, queued: &mut Option<Request>, upload: &mut Option<Upload>) {
+    match command {
+        Command::Load(request) => *queued = Some(request),
+        Command::Attach(handle) => *upload = Some(handle),
+    }
+}
+
+/// Reads one file, or gives up and returns `None` if the application went
+/// away while it was working.
+///
+/// Cancellation is checked between the stages rather than inside them: no
+/// decoder here can be interrupted part way through, but the two stages after
+/// the decode need never be started — and the upload in particular must not
+/// reach for a device the main thread is on its way to destroying.
+fn read(request: Request, upload: Option<&Upload>, cancelled: &AtomicBool) -> Option<Decoded> {
+    let Request {
+        generation,
+        index,
+        path,
+        overrides,
+        mode,
+    } = request;
+
+    let watch = Watch::new(&path);
+    let started = Instant::now();
+    let decoded = decode::load(&path, overrides);
+    if cancelled.load(Ordering::Relaxed) {
+        return None;
+    }
+
+    let scanned = decoded.map(|image| {
+        timing::decoded(&path, started.elapsed());
+        let stats = Stats::scan(&image);
+        (image, stats)
+    });
+    if cancelled.load(Ordering::Relaxed) {
+        return None;
+    }
+
+    let outcome = scanned.and_then(|(image, stats)| {
+        let gpu = upload.map(|upload| upload.run(&image)).transpose()?;
+        Ok(Ready { image, stats, gpu })
+    });
+
+    Some(Decoded {
+        generation,
+        file: Opened {
+            index,
+            path,
+            mode,
+            watch,
+        },
+        outcome,
+    })
+}

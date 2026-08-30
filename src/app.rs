@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -14,7 +14,9 @@ use winit::window::{Cursor, CursorIcon, Window, WindowId};
 use crate::image::display::{AutoWindow, Colormap, Display, Startup};
 use crate::image::stats::{BINS, COLOUR};
 use crate::image::{DecodedImage, Stats, decode};
+use crate::loader::{Decoded, Loader, Opened, Ready, Reload, Request};
 use crate::render::{Blend, Color, HdrPreference, Rect, Renderer, UiFrame};
+use crate::timing;
 use crate::view::{Placement, Upscale, View, Viewport};
 use crate::watch::{self, Watch};
 
@@ -26,6 +28,15 @@ const PAN_STEP: f32 = 64.0;
 const WHEEL_PIXELS_PER_STEP: f32 = 50.0;
 /// Fraction of the monitor a freshly opened window may occupy.
 const MAX_WINDOW_FRACTION: f64 = 0.85;
+/// What a window opens at when the first file's header will not say how large
+/// its image is. Every format read here does say, so this is a fallback for a
+/// decoder added later without a header probe rather than a size anything
+/// reaches today.
+const DEFAULT_IMAGE: [f32; 2] = [960.0, 640.0];
+/// How long a file may take to open before the bar says so. Long enough that
+/// the ordinary case — a file that opens between two frames — never flickers a
+/// word into the interface and out again.
+const SLOW_READ: Duration = Duration::from_millis(120);
 
 /// Height of the top and bottom panels.
 const BAR_HEIGHT: f32 = 30.0;
@@ -205,15 +216,49 @@ impl Current {
     }
 }
 
-/// Why a file is being read, which decides what survives the reading.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Reload {
-    /// A different file: display settings start over, and so does the view
-    /// unless the new file happens to be the same size as the old one.
-    Fresh,
-    /// The file already on screen, changed on disk. The user is presumably
-    /// looking at something in particular, so what they set up stays.
-    InPlace,
+/// What [`App::announce_slow_read`] found: a read to say something about now,
+/// one to look at again at a given moment, or nothing worth a word.
+#[derive(PartialEq, Eq, Debug)]
+enum Announce {
+    Now,
+    Waiting(Instant),
+    Nothing,
+}
+
+/// What the top bar says about a read that is taking its time.
+enum Reading {
+    /// Another file, on its way in.
+    File(String),
+    /// The file already on screen, being read again after something wrote to
+    /// it. There is no new name to show, only the fact that we are busy.
+    Again,
+}
+
+/// A read that has been asked for and not yet answered.
+struct Pending {
+    /// Which request it is, so that a reply arriving after the user has moved
+    /// on can be recognised and dropped.
+    generation: u64,
+    index: usize,
+    /// Set when the request came from `n` or `p`, so that a file that will not
+    /// decode can be stepped over rather than stopping the walk.
+    step: Option<Step>,
+    since: Instant,
+    /// Whether the bar has been told to mention it. Latched so that the wait
+    /// is announced once rather than on every frame it spans.
+    announced: bool,
+}
+
+/// A walk through the file list, carried along so that it can continue past a
+/// file that fails to decode.
+#[derive(Clone, Copy)]
+struct Step {
+    forward: bool,
+    /// How many further files this walk may ask for if the one in flight
+    /// fails. Counted down rather than up because the two walks start with
+    /// different budgets: stepping has the rest of the list to try, while the
+    /// walk that opens the first file has the whole of it.
+    remaining: usize,
 }
 
 pub struct App {
@@ -228,6 +273,20 @@ pub struct App {
     watch: Watch,
     /// When to look at it next.
     next_poll: Instant,
+    /// What the header said the first file's size was, so that the window can
+    /// open at the right shape before the pixels arrive. Only ever consulted
+    /// while `current` is empty, and `None` for a format whose header would
+    /// not say.
+    header_size: Option<[f32; 2]>,
+    /// The thread that reads files.
+    ///
+    /// Declared before the renderer on purpose: fields are dropped in the
+    /// order they are written, and the loader has been given a handle on the
+    /// GPU device. Shutting the thread down first means the last reference to
+    /// that device is the renderer's, and so the device is destroyed here on
+    /// the thread that made it. See [`Loader::drop`] for what goes wrong when
+    /// the thread is still running as the process leaves `main`.
+    loader: Loader,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     modifiers: ModifiersState,
@@ -253,12 +312,23 @@ pub struct App {
     hover: Option<Widget>,
     /// Set if the last render failed, so we report it once rather than every frame.
     reported_error: bool,
+    /// Numbers the requests. Only the newest one's reply is acted on.
+    generation: u64,
+    pending: Option<Pending>,
 }
 
 impl App {
-    /// `first` is `files[index]`, already decoded before the window opened so
-    /// that a bad path fails on the command line.
-    pub fn new(files: Vec<PathBuf>, index: usize, first: DecodedImage, options: Options) -> Self {
+    /// `size` is what the header of `files[index]` said, where it would say:
+    /// enough to open the window at the right shape before the pixels exist.
+    /// The file itself is asked for here, so that it is being read while the
+    /// window and the GPU are still being set up.
+    pub fn new(
+        files: Vec<PathBuf>,
+        index: usize,
+        size: Option<[f32; 2]>,
+        options: Options,
+        loader: Loader,
+    ) -> Self {
         let Options {
             overrides,
             startup,
@@ -267,28 +337,22 @@ impl App {
             minimap,
             upscale,
         } = options;
-        let stats = Stats::scan(&first);
-        let display = Display::for_image_with(&first, &stats, startup);
-        let label = file_label(&files[index]);
         let watch = Watch::new(&files[index]);
         let mut view = View::new();
         view.set_upscale(upscale);
-        Self {
+        let count = files.len();
+        let mut app = Self {
             files,
             index,
-            current: Some(Current {
-                image: first,
-                stats,
-                display,
-                label,
-                format: None,
-            }),
+            current: None,
+            header_size: size,
             overrides,
             startup,
             hdr,
             view,
             watch,
             next_poll: Instant::now() + watch::INTERVAL,
+            loader,
             window: None,
             renderer: None,
             modifiers: ModifiersState::empty(),
@@ -300,7 +364,36 @@ impl App {
             show_minimap: minimap,
             hover: None,
             reported_error: false,
-        }
+            generation: 0,
+            pending: None,
+        };
+        // As a walk, so that a file which passes the header check and then
+        // fails to decode is stepped over exactly as `n` would step over it.
+        // Nothing is on screen yet, so every file in the list is a candidate.
+        app.request(
+            index,
+            Reload::Fresh,
+            Some(Step {
+                forward: true,
+                remaining: count - 1,
+            }),
+        );
+        app
+    }
+
+    /// Whether anything ever reached the screen. False only when every file
+    /// named on the command line failed to decode.
+    pub fn showed_nothing(&self) -> bool {
+        self.current.is_none()
+    }
+
+    /// The size to open the window at: the image's, once there is one, and
+    /// otherwise whatever the header claimed on the way past.
+    fn opening_size(&self) -> Option<[f32; 2]> {
+        self.current
+            .as_ref()
+            .map(Current::size)
+            .or(self.header_size)
     }
 
     fn image_size(&self) -> [f32; 2] {
@@ -394,30 +487,66 @@ impl App {
     }
 
     /// Re-reads the file on screen if something else has written to it, which
-    /// is what makes this usable next to whatever produced the image. Returns
-    /// `true` if the screen needs drawing again.
-    fn poll_file(&mut self) -> bool {
-        self.watch.poll() && self.load(self.index, Reload::InPlace)
+    /// is what makes this usable next to whatever produced the image.
+    fn poll_file(&mut self) {
+        // Not while a read is already in flight. A file being written
+        // continuously would otherwise stack up a decode every interval, and
+        // the reply already on its way carries a watch taken later than this
+        // one anyway.
+        if self.pending.is_none() && self.watch.poll() {
+            self.request(self.index, Reload::InPlace, None);
+        }
     }
 
-    /// Reads `files[index]` and puts it on screen. Returns `false` if it could
-    /// not be decoded, leaving the current image where it is: a file caught
-    /// mid-write is a failure we expect and one the next poll clears up.
-    fn load(&mut self, index: usize, mode: Reload) -> bool {
-        let path = &self.files[index];
-        // Taken before the read rather than after it: a write that lands while
-        // we are decoding then shows up as another change, instead of being
-        // recorded as the version we are holding.
-        let watch = Watch::new(path);
-        let image = match decode::load(path, self.overrides) {
-            Ok(image) => image,
-            Err(error) => {
-                eprintln!("image-view: {error:#}");
-                return false;
+    /// What the window is called: the image on screen, or the file being read
+    /// while there is nothing on screen to name.
+    fn title(&self) -> String {
+        match &self.current {
+            Some(_) => window_title(&self.files[self.index]),
+            None => {
+                let index = self.pending.as_ref().map_or(self.index, |p| p.index);
+                loading_title(&self.files[index])
             }
-        };
+        }
+    }
 
-        let stats = Stats::scan(&image);
+    /// Asks the loader for `files[index]`.
+    ///
+    /// Nothing changes on screen here. The image already up stays where it is,
+    /// still pannable and zoomable, until the reply arrives at
+    /// [`App::user_event`] — which is the whole point of the exercise, and the
+    /// reason everything the interface says about the image goes on describing
+    /// the one being shown rather than the one being fetched.
+    fn request(&mut self, index: usize, mode: Reload, step: Option<Step>) {
+        self.generation += 1;
+        self.pending = Some(Pending {
+            generation: self.generation,
+            index,
+            step,
+            since: Instant::now(),
+            announced: false,
+        });
+        self.loader.request(Request {
+            generation: self.generation,
+            index,
+            path: self.files[index].clone(),
+            overrides: self.overrides,
+            mode,
+        });
+        // With nothing on screen the title is the only thing naming the file,
+        // so it follows the request rather than the pixels — including when a
+        // walk moves on past one that would not decode.
+        if self.current.is_none()
+            && let Some(window) = &self.window
+        {
+            window.set_title(&self.title());
+        }
+    }
+
+    /// Puts a finished read on screen. Returns `false` if the upload failed,
+    /// which leaves the current image where it is.
+    fn apply(&mut self, file: Opened, ready: Ready) -> bool {
+        let Ready { image, stats, gpu } = ready;
         let size = [image.width as f32, image.height as f32];
         // Images of the same size are almost always a set to be compared —
         // frames of a sequence, or one exposure against another — and there
@@ -433,7 +562,7 @@ impl App {
         // with only an automatic window re-derived from the new pixels.
         // Stepping to a different file is a different picture, and gets the
         // exposure its own pixels ask for.
-        let in_place = mode == Reload::InPlace && same_size;
+        let in_place = file.mode == Reload::InPlace && same_size;
         let display = match self.current.as_ref().filter(|_| in_place) {
             Some(current) => {
                 let mut display = current.display.clone();
@@ -442,58 +571,148 @@ impl App {
             }
             None => Display::for_image_with(&image, &stats, self.startup),
         };
-        self.index = index;
-        self.watch = watch;
-        if !same_size {
-            self.view.reset();
-        }
 
         let mut format = None;
         if let Some(renderer) = &mut self.renderer {
-            match renderer.set_image(&image) {
-                Ok(note) => {
-                    if let Some(note) = note {
-                        eprintln!("image-view: {note}");
+            // Already across whenever the window was open when the read
+            // started, which is every file but the one named on the command
+            // line. The fallback covers only that gap.
+            let uploaded = match gpu {
+                Some(uploaded) => uploaded,
+                None => match renderer.uploader().run(&image) {
+                    Ok(uploaded) => uploaded,
+                    Err(error) => {
+                        eprintln!("image-view: {error:#}");
+                        return false;
                     }
-                    format = renderer.image_format();
-                }
-                Err(error) => {
-                    eprintln!("image-view: {error:#}");
-                    return false;
-                }
+                },
+            };
+            if let Some(note) = renderer.install_image(uploaded) {
+                eprintln!("image-view: {note}");
             }
+            format = renderer.image_format();
         }
 
+        self.index = file.index;
+        self.watch = file.watch;
+        if !same_size {
+            self.view.reset();
+        }
         self.current = Some(Current {
             image,
             stats,
             display,
-            label: file_label(path),
+            label: file_label(&file.path),
             format,
         });
         if let Some(window) = &self.window {
-            window.set_title(&window_title(path));
+            window.set_title(&window_title(&file.path));
         }
         true
     }
 
-    /// Moves to the next or previous file, stepping over any that fail to
-    /// decode so that one bad file cannot trap navigation.
+    /// Moves to the next or previous file.
+    ///
+    /// From wherever the last request was aimed rather than from what is on
+    /// screen, so that holding `n` walks the list instead of asking for the
+    /// same neighbour over and over while a slow file opens. Only the last of
+    /// those requests is decoded; the ones passed over are files the user has
+    /// already scrolled past.
     fn step(&mut self, forward: bool) {
-        let count = self.files.len();
-        if count < 2 {
+        if self.files.len() < 2 {
             return;
         }
-        let mut index = self.index;
-        for _ in 0..count - 1 {
-            index = if forward {
-                (index + 1) % count
-            } else {
-                (index + count - 1) % count
-            };
-            if self.load(index, Reload::Fresh) {
-                return;
+        let from = self
+            .pending
+            .as_ref()
+            .map_or(self.index, |pending| pending.index);
+        let next = self.neighbour(from, forward);
+        self.request(
+            next,
+            Reload::Fresh,
+            Some(Step {
+                forward,
+                // Everything but the file being asked for and the one already
+                // on screen.
+                remaining: self.files.len() - 2,
+            }),
+        );
+    }
+
+    /// Carries a walk on past a file that would not decode, so that one bad
+    /// file cannot trap navigation. Gives up once it has tried them all.
+    fn step_again(&mut self, from: usize, step: Step) {
+        if step.remaining == 0 {
+            return;
+        }
+        let next = self.neighbour(from, step.forward);
+        self.request(
+            next,
+            Reload::Fresh,
+            Some(Step {
+                forward: step.forward,
+                remaining: step.remaining - 1,
+            }),
+        );
+    }
+
+    fn neighbour(&self, index: usize, forward: bool) -> usize {
+        let count = self.files.len();
+        if forward {
+            (index + 1) % count
+        } else {
+            (index + count - 1) % count
+        }
+    }
+
+    /// Decides whether a read still in flight has been going long enough to
+    /// earn a word in the bar. Latches, so that a wait is announced once
+    /// rather than on every frame it spans.
+    fn announce_slow_read(&mut self, now: Instant) -> Announce {
+        let Some(pending) = &mut self.pending else {
+            return Announce::Nothing;
+        };
+        let due = pending.since + SLOW_READ;
+        if now < due {
+            Announce::Waiting(due)
+        } else if pending.announced {
+            Announce::Nothing
+        } else {
+            pending.announced = true;
+            Announce::Now
+        }
+    }
+
+    /// Takes in a file the loader has finished with. Held apart from the
+    /// handler that receives it, since nothing here needs the event loop.
+    fn deliver(&mut self, decoded: Decoded) {
+        // Anything but the newest request is a file the user has stepped past
+        // while it was being read. Its pixels are correct and unwanted.
+        let Some(pending) = self
+            .pending
+            .take_if(|pending| pending.generation == decoded.generation)
+        else {
+            return;
+        };
+
+        let index = decoded.file.index;
+        // A file that will not go on screen is a file to step over, whether it
+        // was the decode or the upload that would not have it.
+        let failed = match decoded.outcome {
+            Ok(ready) => !self.apply(decoded.file, ready),
+            Err(error) => {
+                eprintln!("image-view: {error:#}");
+                true
             }
+        };
+        if failed && let Some(step) = pending.step {
+            self.step_again(index, step);
+        }
+
+        // Owed either way: on success for the new image, and on failure
+        // because the bar may have been saying that a read was under way.
+        if let Some(window) = &self.window {
+            window.request_redraw();
         }
     }
 
@@ -518,8 +737,16 @@ impl App {
             Key::Named(NamedKey::ArrowRight) => self.view.pan_by(PAN_STEP, 0.0, image, viewport),
             Key::Named(NamedKey::ArrowUp) => self.view.pan_by(0.0, -PAN_STEP, image, viewport),
             Key::Named(NamedKey::ArrowDown) => self.view.pan_by(0.0, PAN_STEP, image, viewport),
-            Key::Named(NamedKey::PageDown) => self.step(true),
-            Key::Named(NamedKey::PageUp) => self.step(false),
+            // Nothing to draw yet: the file is only being asked for, and what
+            // is on screen stays until it arrives.
+            Key::Named(NamedKey::PageDown) => {
+                self.step(true);
+                return false;
+            }
+            Key::Named(NamedKey::PageUp) => {
+                self.step(false);
+                return false;
+            }
             Key::Character(text) => {
                 return self.handle_character(event_loop, text, image, viewport);
             }
@@ -559,11 +786,11 @@ impl App {
             }
             "n" | "N" => {
                 self.step(true);
-                return true;
+                return false;
             }
             "p" | "P" => {
                 self.step(false);
-                return true;
+                return false;
             }
             "`" | "~" => {
                 self.show_ui = !self.show_ui;
@@ -750,6 +977,19 @@ impl App {
 
         let pointer = self.pointer_pixel();
         let thumbnail = self.minimap_placement(logical, scale);
+        let pending = self
+            .pending
+            .as_ref()
+            // With nothing on screen there is no flicker to guard against and
+            // nothing else to say, so the wait is worth naming immediately.
+            .filter(|pending| pending.announced || self.current.is_none())
+            .map(|pending| {
+                if self.current.is_some() && pending.index == self.index {
+                    Reading::Again
+                } else {
+                    Reading::File(file_label(&self.files[pending.index]))
+                }
+            });
 
         // Split borrow: the frame builder needs the renderer's font metrics
         // while reading the rest of the application state.
@@ -766,6 +1006,7 @@ impl App {
                 show_minimap: self.show_minimap,
                 hover: self.hover,
                 pointer,
+                pending,
             },
             self.current.as_ref(),
             &self.view,
@@ -790,7 +1031,7 @@ impl App {
     }
 }
 
-impl ApplicationHandler for App {
+impl ApplicationHandler<Decoded> for App {
     /// Look at the file, then sleep until it is time to look again rather than
     /// until the next event: nothing tells us about a write, so we go and ask.
     ///
@@ -801,13 +1042,34 @@ impl ApplicationHandler for App {
         let now = Instant::now();
         if now >= self.next_poll {
             self.next_poll = now + watch::INTERVAL;
-            if self.poll_file()
-                && let Some(window) = &self.window
-            {
-                window.request_redraw();
-            }
+            self.poll_file();
         }
-        event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_poll));
+
+        // Sleep until the next thing with a time on it: the file check, or the
+        // moment a read that is still going becomes worth mentioning. A read
+        // that finishes first wakes us through the proxy instead.
+        let mut deadline = self.next_poll;
+        match self.announce_slow_read(now) {
+            Announce::Waiting(due) => deadline = deadline.min(due),
+            Announce::Now => {
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+            }
+            Announce::Nothing => {}
+        }
+        event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
+    }
+
+    /// A file the loader has finished with.
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, decoded: Decoded) {
+        self.deliver(decoded);
+        // Nothing ever reached the screen and nothing else is coming: every
+        // file named on the command line failed to decode. Stop, rather than
+        // sit in an empty window with nothing on the way.
+        if self.current.is_none() && self.pending.is_none() {
+            event_loop.exit();
+        }
     }
 
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
@@ -815,9 +1077,9 @@ impl ApplicationHandler for App {
             return;
         }
 
-        let size = initial_window_size(event_loop, self.image_size());
+        let size = initial_window_size(event_loop, self.opening_size());
         let attributes = Window::default_attributes()
-            .with_title(window_title(&self.files[self.index]))
+            .with_title(self.title())
             .with_inner_size(size);
 
         let window = match event_loop.create_window(attributes) {
@@ -828,6 +1090,7 @@ impl ApplicationHandler for App {
                 return;
             }
         };
+        timing::window_open();
 
         let mut renderer = match Renderer::new(window.clone(), self.hdr) {
             Ok(renderer) => renderer,
@@ -868,6 +1131,9 @@ impl ApplicationHandler for App {
             );
         }
 
+        // From here on the loader uploads as well as decodes, so that
+        // stepping to the next file costs the event loop nothing but the swap.
+        self.loader.attach(renderer.uploader());
         self.renderer = Some(renderer);
         self.window = Some(window);
     }
@@ -959,6 +1225,10 @@ struct Layout {
     hover: Option<Widget>,
     /// The image pixel under the pointer, when it is over one.
     pointer: Option<[u32; 2]>,
+    /// The read in progress, once it has taken long enough to be worth saying.
+    /// Kept apart from the label rather than replacing it: everything else in
+    /// the interface describes the image on screen, and so must that.
+    pending: Option<Reading>,
 }
 
 /// Builds one frame of interface.
@@ -973,11 +1243,28 @@ fn build_ui(
 ) -> UiFrame {
     let size = layout.logical;
     let mut frame = UiFrame::new();
+    let chrome = Chrome::new(size);
+
     let Some(current) = current else {
+        // Nothing has been decoded yet. The panels still go down, so that the
+        // window reads as the application waiting rather than as a hole, with
+        // the file being read where the image's own name will go.
+        if layout.show_ui {
+            for panel in [chrome.top, chrome.bottom, chrome.left, chrome.right] {
+                frame.rect(panel, BAR_BACKGROUND);
+            }
+            if let Some(Reading::File(name)) = &layout.pending {
+                frame.text_clipped(
+                    [PADDING, text_baseline(chrome.top)],
+                    TEXT_SIZE,
+                    TEXT_DIM,
+                    (chrome.top.width - PADDING * 2.0).max(1.0),
+                    format!("loading {name}"),
+                );
+            }
+        }
         return frame;
     };
-
-    let chrome = Chrome::new(size);
     let content = content_area(size, layout.show_ui);
 
     if layout.show_histogram {
@@ -1017,7 +1304,7 @@ fn build_ui(
         TEXT_SIZE,
         TEXT_PRIMARY,
         (facts_x - PADDING * 2.0).max(1.0),
-        current.label.clone(),
+        top_label(&current.label, layout.pending.as_ref()),
     );
     frame.text([facts_x, top_baseline], TEXT_SIZE, TEXT_DIM, facts);
 
@@ -1140,6 +1427,19 @@ fn fit_segments(renderer: &mut Renderer, segments: &[String], width: f32) -> Str
         text = candidate;
     }
     text
+}
+
+/// The name of the image on screen, and after it whatever the loader is busy
+/// with when that has taken long enough to notice.
+///
+/// One string, clipped as one piece: where there is no room for both, the file
+/// you are actually looking at is the one worth keeping.
+fn top_label(shown: &str, reading: Option<&Reading>) -> String {
+    match reading {
+        Some(Reading::File(next)) => format!("{shown}, loading {next}"),
+        Some(Reading::Again) => format!("{shown}, reloading"),
+        None => shown.to_string(),
+    }
 }
 
 fn describe_pixels(current: &Current) -> String {
@@ -1493,13 +1793,20 @@ fn window_title(path: &Path) -> String {
     format!("{} — image-view", file_label(path))
 }
 
+/// Before there is anything to look at, the title carries the file being read.
+/// Titling an empty window with a file it is not yet showing would be saying
+/// something untrue, and the title is the only place the name can go.
+fn loading_title(path: &Path) -> String {
+    format!("loading {} — image-view", file_label(path))
+}
+
 /// Open at the image's own size, shrunk to fit comfortably on the monitor.
 ///
 /// The panels take their room out of the image rather than lying over it, so
 /// the window asks for the image *plus* the chrome around it — otherwise a
 /// picture that used to open at 100% would open slightly reduced. The monitor
 /// fraction still applies to the image itself.
-fn initial_window_size(event_loop: &ActiveEventLoop, image: [f32; 2]) -> PhysicalSize<u32> {
+fn initial_window_size(event_loop: &ActiveEventLoop, image: Option<[f32; 2]>) -> PhysicalSize<u32> {
     let monitor = event_loop
         .primary_monitor()
         .or_else(|| event_loop.available_monitors().next());
@@ -1511,6 +1818,9 @@ fn initial_window_size(event_loop: &ActiveEventLoop, image: [f32; 2]) -> Physica
         2.0 * BAR_HEIGHT as f64 * scale,
     ];
 
+    // Only a file whose header would not say how large it is arrives here
+    // with nothing, and then a plain rectangle is the best that can be done.
+    let image = image.unwrap_or(DEFAULT_IMAGE);
     let (mut width, mut height) = (image[0] as f64, image[1] as f64);
 
     if let Some(monitor) = monitor {
@@ -1784,7 +2094,7 @@ mod tests {
 
     /// The files are written under a directory of their own so that the tests,
     /// which run alongside each other, cannot tread on each other's files.
-    fn app_over(name: &str, files: &[(&str, u32, u32)]) -> (App, PathBuf) {
+    fn opening(name: &str, files: &[(&str, u32, u32)]) -> (App, PathBuf) {
         let dir = std::env::temp_dir().join(format!("image-view-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("the temporary directory is writable");
         let paths: Vec<PathBuf> = files
@@ -1799,9 +2109,75 @@ mod tests {
             minimap: false,
             upscale: Upscale::default(),
         };
-        let first = decode::load(&paths[0], options.overrides).expect("we just wrote it");
-        let app = App::new(paths, 0, first, options);
+        let size = decode::probe(&paths[0]).expect("we just wrote it");
+        let app = App::new(
+            paths,
+            0,
+            size.map(|(w, h)| [w as f32, h as f32]),
+            options,
+            Loader::detached(),
+        );
         (app, dir)
+    }
+
+    /// As [`opening`], with the application's own opening request answered:
+    /// the state the tests about later behaviour want to start from.
+    fn app_over(name: &str, files: &[(&str, u32, u32)]) -> (App, PathBuf) {
+        let (mut app, dir) = opening(name, files);
+        answer(&mut app, Reload::Fresh);
+        (app, dir)
+    }
+
+    /// Cuts a file off part way through its pixel data: it still says what
+    /// format it is and how large, so the header check passes, and only the
+    /// decode fails. That is the case start-up cannot catch up front, and the
+    /// reason the first file is asked for as a walk.
+    ///
+    /// Both halves are asserted here rather than assumed, so that a change in
+    /// what the header check reads fails loudly instead of quietly leaving
+    /// the tests below testing nothing.
+    fn corrupt(path: &Path) {
+        let length = std::fs::metadata(path).expect("we just wrote it").len();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .expect("we just wrote it")
+            .set_len(length / 2)
+            .expect("the file is writable");
+        assert!(
+            decode::probe(path).is_ok_and(|size| size.is_some()),
+            "the header has to survive, or this is not the case being tested"
+        );
+        assert!(
+            decode::load(path, decode::Overrides::default()).is_err(),
+            "the pixels have to be beyond saving, or this is not the case being tested"
+        );
+    }
+
+    /// The round trip a request makes through the loader, made here instead:
+    /// a test has no event loop to carry one. Reads whatever the application
+    /// last asked for, under the generation it asked for it with, so that the
+    /// staleness check sees exactly what it would in the running program.
+    fn answer(app: &mut App, mode: Reload) {
+        let pending = app.pending.as_ref().expect("a request is in flight");
+        let (generation, index) = (pending.generation, pending.index);
+        let path = app.files[index].clone();
+        let watch = Watch::new(&path);
+        let outcome = decode::load(&path, app.overrides).map(|image| Ready {
+            stats: Stats::scan(&image),
+            image,
+            gpu: None,
+        });
+        app.deliver(Decoded {
+            generation,
+            file: Opened {
+                index,
+                path,
+                mode,
+                watch,
+            },
+            outcome,
+        });
     }
 
     /// Stepping between frames of the same size is a comparison — the same
@@ -1815,11 +2191,227 @@ mod tests {
         let zoom = app.view.zoom(app.image_size(), VIEWPORT);
 
         app.step(true);
+        // Nothing has moved yet: the file has only been asked for.
+        assert_eq!(app.index, 0);
+
+        answer(&mut app, Reload::Fresh);
         assert_eq!(app.index, 1);
         assert_eq!(app.view.mode_label(), "free");
         assert_eq!(app.view.zoom(app.image_size(), VIEWPORT), zoom);
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// Holding `n` through a directory asks for each file in turn without
+    /// waiting for the last, and only the file the user stopped on is shown.
+    /// Anything else would be a picture they have already scrolled past.
+    #[test]
+    fn a_reply_the_user_has_stepped_past_is_dropped() {
+        let (mut app, dir) = app_over(
+            "stale",
+            &[("a.png", 64, 48), ("b.png", 32, 32), ("c.png", 16, 16)],
+        );
+
+        app.step(true);
+        let overtaken = app
+            .pending
+            .as_ref()
+            .expect("a request is in flight")
+            .generation;
+        app.step(true);
+        assert_eq!(app.pending.as_ref().map(|pending| pending.index), Some(2));
+
+        // The first file arrives late, after the user has moved past it.
+        let path = app.files[1].clone();
+        let image = decode::load(&path, app.overrides).expect("we just wrote it");
+        app.deliver(Decoded {
+            generation: overtaken,
+            file: Opened {
+                index: 1,
+                watch: Watch::new(&path),
+                path,
+                mode: Reload::Fresh,
+            },
+            outcome: Ok(Ready {
+                stats: Stats::scan(&image),
+                image,
+                gpu: None,
+            }),
+        });
+        assert_eq!(app.index, 0, "an overtaken file must not reach the screen");
+
+        // The one actually waited for still lands.
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.index, 2);
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// A file whose header reads cleanly and whose pixels do not gets past
+    /// the check that happens before the window opens. Opening asks for the
+    /// first file as a walk for exactly that reason, so start-up steps over it
+    /// as `n` would step over it later.
+    #[test]
+    fn a_first_file_that_will_not_decode_is_stepped_over() {
+        let (mut app, dir) = opening(
+            "first-broken",
+            &[("a.png", 64, 48), ("b.png", 32, 32), ("c.png", 16, 16)],
+        );
+        corrupt(&app.files[0]);
+
+        assert_eq!(app.pending.as_ref().map(|p| p.index), Some(0));
+        answer(&mut app, Reload::Fresh);
+        assert!(app.current.is_none(), "nothing can be shown yet");
+        assert_eq!(
+            app.pending.as_ref().map(|p| p.index),
+            Some(1),
+            "the walk carries on to the next file"
+        );
+
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.index, 1);
+        assert!(!app.showed_nothing());
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// When none of them decode there is nothing to look at, and the caller
+    /// needs to know so it can leave with a failing status rather than sit in
+    /// an empty window.
+    #[test]
+    fn nothing_decoding_at_all_is_reported_as_having_shown_nothing() {
+        let (mut app, dir) = opening("all-broken", &[("a.png", 64, 48), ("b.png", 32, 32)]);
+        for path in &app.files {
+            corrupt(path);
+        }
+
+        for _ in 0..app.files.len() {
+            if app.pending.is_none() {
+                break;
+            }
+            answer(&mut app, Reload::Fresh);
+        }
+        assert!(app.pending.is_none(), "the walk has to stop asking");
+        assert!(app.showed_nothing());
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// While nothing is on screen the title names the file being read, and it
+    /// follows the walk rather than staying on a file that would not open.
+    #[test]
+    fn the_title_names_the_file_being_read_until_there_is_one_to_show() {
+        let (mut app, dir) = opening("title", &[("a.png", 64, 48), ("b.png", 32, 32)]);
+        corrupt(&app.files[0]);
+
+        assert_eq!(app.title(), "loading a.png — image-view");
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.title(), "loading b.png — image-view");
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.title(), "b.png — image-view");
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// A file that will not decode must not trap navigation: the walk carries
+    /// on in the direction it was going.
+    #[test]
+    fn a_file_that_will_not_decode_is_stepped_over() {
+        let (mut app, dir) = app_over(
+            "broken",
+            &[("a.png", 64, 48), ("b.png", 32, 32), ("c.png", 16, 16)],
+        );
+        std::fs::write(&app.files[1], b"not a png at all").expect("the file is writable");
+
+        app.step(true);
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.index, 0, "the broken file cannot be shown");
+        assert_eq!(
+            app.pending.as_ref().map(|pending| pending.index),
+            Some(2),
+            "and the walk carries on past it"
+        );
+
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.index, 2);
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// And it gives up once it has been all the way round, rather than asking
+    /// for files for ever when none of them will open.
+    #[test]
+    fn a_walk_through_files_that_all_fail_comes_to_a_stop() {
+        let (mut app, dir) = app_over(
+            "hopeless",
+            &[("a.png", 64, 48), ("b.png", 32, 32), ("c.png", 16, 16)],
+        );
+        for path in &app.files[1..] {
+            std::fs::write(path, b"not a png at all").expect("the file is writable");
+        }
+
+        app.step(true);
+        for _ in 0..app.files.len() {
+            if app.pending.is_none() {
+                break;
+            }
+            answer(&mut app, Reload::Fresh);
+        }
+        assert!(app.pending.is_none(), "the walk has to stop asking");
+        assert_eq!(app.index, 0);
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// A file that opens between two frames must not flicker a word into the
+    /// interface and out again; one that keeps the user waiting has to say so,
+    /// and say it once.
+    #[test]
+    fn only_a_read_that_keeps_the_user_waiting_is_announced() {
+        let (mut app, dir) = app_over("slow", &[("a.png", 64, 48), ("b.png", 32, 32)]);
+        let start = Instant::now();
+
+        assert_eq!(app.announce_slow_read(start), Announce::Nothing);
+
+        app.step(true);
+        let since = app.pending.as_ref().expect("a request is in flight").since;
+        assert_eq!(
+            app.announce_slow_read(since),
+            Announce::Waiting(since + SLOW_READ),
+            "a read that has just started is not worth mentioning yet"
+        );
+
+        assert_eq!(app.announce_slow_read(since + SLOW_READ), Announce::Now);
+        assert_eq!(
+            app.announce_slow_read(since + SLOW_READ * 2),
+            Announce::Nothing,
+            "and having been said once it is not said again"
+        );
+
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(
+            app.announce_slow_read(since + SLOW_READ * 2),
+            Announce::Nothing
+        );
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// The bar names the image on screen first and always. A file on its way
+    /// in is mentioned after it, never in place of it: captioning one picture
+    /// with another's name is the one thing an image viewer must not do.
+    #[test]
+    fn the_bar_names_what_is_on_screen_before_what_is_coming() {
+        assert_eq!(top_label("a.png", None), "a.png");
+        assert_eq!(
+            top_label("a.png", Some(&Reading::File("b.heic".into()))),
+            "a.png, loading b.heic"
+        );
+        assert_eq!(
+            top_label("a.png", Some(&Reading::Again)),
+            "a.png, reloading",
+            "a file being re-read has no new name to show, only the wait"
+        );
     }
 
     /// A file of another size is another picture, and gets the opening view.
@@ -1830,6 +2422,7 @@ mod tests {
         app.view.zoom_in(app.image_size(), VIEWPORT);
 
         app.step(true);
+        answer(&mut app, Reload::Fresh);
         assert_eq!(app.index, 1);
         assert_eq!(app.view.mode_label(), "fit");
 

@@ -5,7 +5,7 @@
 //! than a re-decode. Resampling is chosen the same way: which filter to run
 //! and which level of the coarse chain to read are two more fields in it.
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use bytemuck::{Pod, Zeroable};
 
 use super::reduce::{self, Level, Reducer};
@@ -178,69 +178,33 @@ impl ImageLayer {
         self.image.as_ref()
     }
 
-    pub fn set_image(
-        &mut self,
+    /// A handle that turns decoded images into [`GpuImage`]s. Held apart from
+    /// the layer so it can be sent to the thread doing the decoding: the
+    /// repack and the copy across are both proportional to the pixel count,
+    /// and neither belongs on the thread drawing frames.
+    pub fn uploader(
+        &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        image: &DecodedImage,
         capabilities: Capabilities,
-    ) -> Result<()> {
-        let plan = upload::plan(image, capabilities);
+    ) -> Upload {
+        Upload {
+            device: device.clone(),
+            queue: queue.clone(),
+            layout: self.texture_layout.clone(),
+            capabilities,
+        }
+    }
 
-        let size = wgpu::Extent3d {
-            width: image.width,
-            height: image.height,
-            depth_or_array_layers: 1,
-        };
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("image"),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: plan.format,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            plan.pixels.as_bytes(),
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(plan.bytes_per_row),
-                rows_per_image: Some(image.height),
-            },
-            size,
-        );
-
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let bindings = vec![binding(device, &self.texture_layout, &view)];
-
-        // Dropping the previous image here is what keeps the coarse chain
-        // bounded: only one is ever alive, and it goes with the image it
-        // describes rather than accumulating as files are stepped through.
-        self.image = Some(GpuImage {
-            size: [image.width, image.height],
-            view,
-            bindings,
-            levels: Vec::new(),
-            chain_built: false,
-            level_format: reduce::level_format(plan.format),
-            swizzle: upload::swizzle_code(image.channels()),
-            alpha: image.alpha,
-            primaries: to_columns(image.color.primaries.to_bt709()),
-            format: plan.format,
-            precision_note: plan.precision_note,
-        });
+    /// Puts an uploaded image on screen, replacing whatever was there.
+    ///
+    /// Dropping the previous image here is what keeps the coarse chain
+    /// bounded: only one is ever alive, and it goes with the image it
+    /// describes rather than accumulating as files are stepped through.
+    pub fn install(&mut self, image: GpuImage) {
+        self.image = Some(image);
         self.level = 0;
         self.thumbnail_level = None;
-        Ok(())
     }
 
     /// `draw.thumbnail`, when there is one, is the minimap's copy of the same
@@ -320,6 +284,87 @@ impl ImageLayer {
             pass.set_bind_group(1, binding, &[]);
             pass.draw(0..4, 0..1);
         }
+    }
+}
+
+/// The GPU half of opening a file: everything needed to turn decoded samples
+/// into a texture, and nothing that has to stay on one thread. Every field is
+/// a handle wgpu shares internally, so a clone costs a reference count.
+#[derive(Clone)]
+pub struct Upload {
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    layout: wgpu::BindGroupLayout,
+    capabilities: Capabilities,
+}
+
+impl Upload {
+    /// Repacks `image` into a format the device can filter and copies it
+    /// across. The result draws nothing until [`ImageLayer::install`] takes
+    /// it, which is what lets this run while another image is on screen.
+    pub fn run(&self, image: &DecodedImage) -> Result<GpuImage> {
+        let limit = self.device.limits().max_texture_dimension_2d;
+        if image.width > limit || image.height > limit {
+            return Err(anyhow!(
+                "{}x{} exceeds this GPU's {limit}x{limit} texture limit",
+                image.width,
+                image.height
+            ));
+        }
+
+        let plan = upload::plan(image, self.capabilities);
+
+        let size = wgpu::Extent3d {
+            width: image.width,
+            height: image.height,
+            depth_or_array_layers: 1,
+        };
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("image"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: plan.format,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        // The bytes are copied into staging here and reach the texture at the
+        // next submit, whichever thread makes it. That is always a later one
+        // than this: the image is installed before it is ever drawn from.
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            plan.pixels.as_bytes(),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(plan.bytes_per_row),
+                rows_per_image: Some(image.height),
+            },
+            size,
+        );
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let bindings = vec![binding(&self.device, &self.layout, &view)];
+
+        Ok(GpuImage {
+            size: [image.width, image.height],
+            view,
+            bindings,
+            levels: Vec::new(),
+            chain_built: false,
+            level_format: reduce::level_format(plan.format),
+            swizzle: upload::swizzle_code(image.channels()),
+            alpha: image.alpha,
+            primaries: to_columns(image.color.primaries.to_bt709()),
+            format: plan.format,
+            precision_note: plan.precision_note,
+        })
     }
 }
 

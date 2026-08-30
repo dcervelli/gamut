@@ -40,6 +40,10 @@ impl super::Decoder for TiffRs {
             || header.starts_with(b"MM\x00\x2b")
     }
 
+    fn dimensions(&self, source: &mut dyn super::ReadSeek) -> Result<Option<(u32, u32)>> {
+        Ok(Some(Decoder::new(source)?.dimensions()?))
+    }
+
     fn decode(
         &self,
         source: &mut dyn super::ReadSeek,
