@@ -275,8 +275,10 @@ pub struct App {
     /// is fitted inside them, so hiding them gives it the whole window.
     show_ui: bool,
     show_histogram: bool,
-    /// Whether the minimap is on screen: a thumbnail of the whole image, with
-    /// the part of it the viewport is showing marked out.
+    /// Whether the minimap is switched on: a thumbnail of the whole image,
+    /// with the part of it the viewport is showing marked out. Whether it is
+    /// actually on screen is `minimap_on_screen`, which also asks whether
+    /// there is anything off screen for it to point out.
     show_minimap: bool,
     /// Which toggle the pointer is over. Held rather than recomputed while
     /// drawing so that motion knows when the highlight has changed and a
@@ -401,6 +403,20 @@ impl App {
         Some([point[0] as u32, point[1] as u32])
     }
 
+    /// Whether the minimap is on screen, which takes the toggle and a view
+    /// that has something to point out. A view holding the whole image is
+    /// already its own map, so the widget would be a second copy of what the
+    /// window is showing, over the corner of it; it goes away instead, and
+    /// comes back on the zoom that first cuts something off. The toggle keeps
+    /// its state through that, so the button stays lit and the minimap
+    /// returns without being asked for again.
+    fn minimap_on_screen(&self) -> bool {
+        // Panning and the minimap answer the same question: whether any of the
+        // image is off screen. Pan is clamped to the image, so a view with
+        // nowhere to go is one showing all of it.
+        self.show_minimap && self.view.can_pan(self.image_size(), self.viewport())
+    }
+
     /// Where the minimap's thumbnail goes, in physical pixels: the whole
     /// image, drawn small in the corner the interface will then mark up.
     ///
@@ -409,7 +425,7 @@ impl App {
     /// applies to the image — the window, the colormap, the tone map — comes
     /// with it for nothing.
     fn minimap_placement(&self, logical: [f32; 2], scale: f32) -> Option<Placement> {
-        if !self.show_minimap {
+        if !self.minimap_on_screen() {
             return None;
         }
         let image = self.current.as_ref()?.size();
@@ -781,6 +797,7 @@ impl App {
 
         let pointer = self.pointer_pixel();
         let thumbnail = self.minimap_placement(logical, scale);
+        let minimap = self.minimap_on_screen();
 
         // Split borrow: the frame builder needs the renderer's font metrics
         // while reading the rest of the application state.
@@ -789,12 +806,14 @@ impl App {
             renderer,
             Layout {
                 logical,
+                scale,
                 viewport,
                 index: self.index,
                 file_count: self.files.len(),
                 show_ui: self.show_ui,
                 show_histogram: self.show_histogram,
                 show_minimap: self.show_minimap,
+                minimap,
                 hover: self.hover,
                 pointer,
             },
@@ -986,13 +1005,20 @@ impl ApplicationHandler for App {
 struct Layout {
     /// Window size in logical pixels, which is what the UI lays out in.
     logical: [f32; 2],
+    /// Physical pixels to the logical one, for the few places that have to
+    /// land on the device's grid rather than on the layout's.
+    scale: f32,
     /// Where the image is drawn, which is what zoom is measured against.
     viewport: Viewport,
     index: usize,
     file_count: usize,
     show_ui: bool,
     show_histogram: bool,
+    /// Whether the minimap is switched on, which is what its button shows.
     show_minimap: bool,
+    /// Whether the minimap is on screen, which also takes a view with part of
+    /// the image off it.
+    minimap: bool,
     hover: Option<Widget>,
     /// The image pixel under the pointer, when it is over one.
     pointer: Option<[u32; 2]>,
@@ -1020,7 +1046,7 @@ fn build_ui(
     if layout.show_histogram {
         draw_histogram(&mut frame, current, content);
     }
-    if layout.show_minimap {
+    if layout.minimap {
         draw_minimap(&mut frame, current, view, &layout, content);
     }
     if !layout.show_ui {
@@ -1358,6 +1384,27 @@ fn minimap_marker(rect: Rect, image: [f32; 2], placement: Placement, viewport: V
     Rect::new(start[0], start[1], end[0] - start[0], end[1] - start[1])
 }
 
+/// `rect` with its edges on whole physical pixels.
+///
+/// The quad shader feathers every edge over a pixel, which is what keeps the
+/// interface's corners and thin lines smooth. Two feathered edges that meet
+/// part-way through a pixel each cover part of it, and two translucent fills
+/// covering a pixel between them do not add up to one covering all of it: the
+/// join stays visible as a lighter line. The wash around the marker is four
+/// quads meeting along the marker's edges, so those edges go on the grid and
+/// the four pieces tile exactly.
+fn snap_to_pixels(rect: Rect, scale: f32) -> Rect {
+    let snap = |value: f32| (value * scale).round() / scale;
+    let x = snap(rect.x);
+    let y = snap(rect.y);
+    // A marker smaller than a pixel — the view into a very large image — still
+    // has to be somewhere on the map, so an edge never rounds onto the one
+    // opposite it.
+    let right = snap(rect.right()).max(x + 1.0 / scale);
+    let bottom = snap(rect.bottom()).max(y + 1.0 / scale);
+    Rect::new(x, y, right - x, bottom - y)
+}
+
 /// Draws the minimap over the thumbnail the image layer has already put in
 /// the top-left of `content`: a border around the whole image, and the part
 /// of it the viewport is showing left bright while the rest is washed over.
@@ -1365,6 +1412,10 @@ fn minimap_marker(rect: Rect, image: [f32; 2], placement: Placement, viewport: V
 /// Nothing here is filled where the thumbnail shows through, and the frame
 /// this draws into is composited over the image layer, so the two halves of
 /// the widget meet on screen without either knowing about the other.
+///
+/// Only called with part of the image off screen — see `minimap_on_screen` —
+/// so the marked-out part is always smaller than the thumbnail on at least
+/// one axis, and there is always something to wash over.
 fn draw_minimap(
     frame: &mut UiFrame,
     current: &Current,
@@ -1379,13 +1430,10 @@ fn draw_minimap(
     outline(frame, rect, 1.0, MINIMAP_EDGE);
 
     let placement = view.placement(image, layout.viewport);
-    let shown = minimap_marker(rect, image, placement, layout.viewport);
-
-    // The whole image on screen is the ordinary case, and there is nothing to
-    // point out about it: marking it up would only be a box around a box.
-    if shown.width >= rect.width - 0.5 && shown.height >= rect.height - 0.5 {
-        return;
-    }
+    let shown = snap_to_pixels(
+        minimap_marker(rect, image, placement, layout.viewport),
+        layout.scale,
+    );
 
     for aside in [
         Rect::new(rect.x, rect.y, rect.width, shown.y - rect.y),
@@ -1739,6 +1787,31 @@ mod tests {
             "{marker:?}"
         );
         assert!(marker.right() <= rect.right() + 0.5 && marker.bottom() <= rect.bottom() + 0.5);
+    }
+
+    /// The wash around the marker is four quads meeting along its edges, and
+    /// feathered edges only tile without a seam where they fall on the device
+    /// grid.
+    #[test]
+    fn the_marker_lands_on_whole_physical_pixels() {
+        for scale in [1.0, 1.5, 2.0] {
+            let snapped = snap_to_pixels(Rect::new(10.3, 20.7, 40.4, 30.9), scale);
+            for edge in [snapped.x, snapped.y, snapped.right(), snapped.bottom()] {
+                let physical = edge * scale;
+                assert!(
+                    (physical - physical.round()).abs() < 1e-3,
+                    "{edge} at scale {scale} is not on the grid"
+                );
+            }
+            // Rounded to the nearest pixel rather than grown to cover one.
+            assert!((snapped.x - 10.0).abs() <= 1.0 / scale);
+        }
+
+        // The view into a very large image marks out less than a pixel of the
+        // map, and still has to be somewhere on it.
+        let thin = snap_to_pixels(Rect::new(10.1, 20.1, 0.05, 0.05), 2.0);
+        assert_eq!(thin.width, 0.5);
+        assert_eq!(thin.height, 0.5);
     }
 
     #[test]

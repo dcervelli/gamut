@@ -73,6 +73,12 @@ image in the top-left corner, with the part of it on screen picked out and
 the rest washed over. It is the map to read while zoomed in far enough that
 the image on screen no longer says where in the picture you are.
 
+It only appears while some of the image is off screen. A view holding all of
+it is already its own map, and the thumbnail would be a smaller copy of the
+window laid over the corner of it, so the widget leaves and comes back on the
+zoom that first cuts something off. The toggle keeps its state through that:
+the button stays lit, and the minimap returns without being asked for again.
+
 The thumbnail is not a separate rendering of the image: it is a second quad in
 the image layer's pass, drawn from the same texture through the same shader as
 the view itself, reading whichever coarse level suits the size it is drawn at.

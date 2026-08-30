@@ -46,7 +46,7 @@ OPTIONS:
         --exposure <STOPS>  Start at this exposure, in stops
         --upscale <FILTER>  How to resample above 100%: nearest or bicubic
         --histogram         Start with the histogram showing
-        --minimap           Start with the minimap showing
+        --minimap           Start with the minimap on
     --                      Treat every later argument as a file name
 
 VIEW KEYS:
