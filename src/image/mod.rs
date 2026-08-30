@@ -12,6 +12,7 @@ pub mod color;
 pub mod decode;
 pub mod display;
 pub mod exif;
+pub mod geo;
 pub mod stats;
 
 pub use color::{ColorSpace, Primaries, Transfer};

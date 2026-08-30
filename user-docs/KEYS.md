@@ -66,8 +66,15 @@ itself — what it is called, where it is, how large the image is, and when the
 file was last written and to what size — and then, for a file that carries
 any, what its metadata says: the camera and lens, when the photograph was
 taken, the exposure it was made at, the focal length, and where the camera
-was. Everything else the metadata holds is listed under that, field by field,
-as the file gives it.
+was. A georeferenced raster — a scanned map, an elevation model — gets its own
+section instead: the coordinate system it names, the size of a pixel on the
+ground, where its corner sits, the ground it covers, and the value that stands
+for nothing measured. Everything else the metadata holds is listed under that,
+field by field, as the file gives it.
+
+Coordinate systems are quoted as the file gives them, by name and by EPSG
+code. Turning a code into a projection and a datum needs a register this does
+not carry, so what you get is what was written.
 
 The file's own date is in UTC; the date the photograph was taken is whatever
 the camera recorded, with the offset from UTC it was set to where it recorded

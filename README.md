@@ -366,6 +366,33 @@ focal length with its equivalent, the coordinates in degrees a map will take —
 and then every other field the file carries, in the order it carries them.
 Nothing there is a tag number or an offset by the time the interface sees it.
 
+A raster is read through a different handful of fields, and they are not EXIF
+at all. GeoTIFF shares the TIFF directory rather than taking a container of
+its own, and packs a directory of *keys* into one tag with two more holding
+the values that will not fit in a short, so `src/image/geo.rs` takes that
+apart: the coordinate system as the file names it and files it, the size of a
+pixel on the ground, the corner the raster hangs from, and the ground it
+covers — which is the corner and the pixel count multiplied out, and comes to
+the same four numbers `gdalinfo` prints. The extent goes down the panel as one
+row per axis, named for what the axes are: a pair of seven-figure spans will
+not fit on a line this wide, and a coordinate broken across two lines is a
+coordinate misread. The tiepoint is walked back to the
+corner where it is not already there, the matrix form is read where a file has
+that instead, and a raster whose axes are turned off the model's is given its
+corner and told plainly that there is no rectangle to quote. Nothing consults
+a coordinate-system register: EPSG:2056 is quoted as EPSG:2056, beside
+whatever the file calls it, because turning that into a datum and a projection
+means shipping the register that defines them.
+
+The other half of reading a raster is naming what it holds. The metadata
+standard describes what a photograph carries and no more, so the rest of TIFF
+6, the tags GeoTIFF and GDAL park in the same directory, and the compression a
+raster is actually stored in all arrive as numbers — a column of `TIFF tag
+33550` says what is in the file without saying what any of it is. A table of
+names covers them, and the compression codes are named here rather than left
+as "reserved compression 5", which is what the EXIF renderer calls the LZW the
+format has meant since 1992.
+
 Three things had to be decided rather than read. Numbers are rewritten to the
 digits they are worth: a file storing an aperture as 89/50 means exactly 1.78,
 and quoting it back as f/1.7799999713880652 says only that a rational went

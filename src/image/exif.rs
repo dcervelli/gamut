@@ -5,18 +5,23 @@
 //! read on the loader thread beside the decode, because it is one more parse
 //! of a file whoever wrote it chose the bytes of.
 //!
-//! The two sections are the two ways the block is read. A photograph is
+//! The sections are the ways the block is read. A photograph is
 //! looked at through a handful of fields — what took it, when, at what
 //! exposure, where — and those are gathered, combined and given their units
-//! in [`Exif::summary`]. Everything else the file carries is listed after it,
-//! in the order the file carries it, because this is a viewer for looking at
-//! what is actually in a file rather than for a tidy précis of it.
+//! in [`Exif::summary`]. A raster is looked at through a different handful,
+//! which are not EXIF at all but GeoTIFF keys packed into the same directory,
+//! and [`super::geo`] takes those apart into [`Exif::geo`]. Everything else
+//! the file carries is listed after both, in the order the file carries it,
+//! because this is a viewer for looking at what is actually in a file rather
+//! than for a tidy précis of it.
 
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
 use exif::{Context, In, Rational, Tag, Value};
+
+use super::geo;
 
 /// How much of a TIFF is read to find its metadata.
 ///
@@ -61,7 +66,7 @@ pub struct Entry {
 }
 
 impl Entry {
-    fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
+    pub(super) fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
             name: name.into(),
             value: value.into(),
@@ -77,6 +82,9 @@ impl Entry {
 pub struct Exif {
     /// The fields a photograph is read by, combined and in a fixed order.
     pub summary: Vec<Entry>,
+    /// Where the pixels are on the ground, for a file that says: the same
+    /// directory, a different standard. See [`super::geo`].
+    pub geo: Vec<Entry>,
     /// Everything else, in the order the file carries it.
     pub other: Vec<Entry>,
 }
@@ -125,10 +133,16 @@ impl Exif {
 
     fn from_block(exif: &exif::Exif) -> Self {
         let summary = summarise(exif);
-        // Whatever the summary has already said is not said again: the
+        let geo = geo::describe(&geo_tags(exif));
+        // Whatever a section above has already said is not said again: the
         // listing is what is left in the file, not a second copy of the top
-        // of the panel.
-        let told: Vec<Tag> = SUMMARISED.to_vec();
+        // of the panel. The georeference speaks for its tags only when it
+        // came to something — a directory nothing could be read out of is
+        // better listed raw than dropped.
+        let mut told: Vec<Tag> = SUMMARISED.to_vec();
+        if !geo.is_empty() {
+            told.extend(GEOREFERENCED.map(|number| Tag(Context::Tiff, number)));
+        }
         let other = exif
             .fields()
             .filter(|field| field.ifd_num == In::PRIMARY)
@@ -143,7 +157,11 @@ impl Exif {
             // A field whose value is nothing but padding has nothing to say.
             .filter(|entry| !entry.value.is_empty())
             .collect();
-        Self { summary, other }
+        Self {
+            summary,
+            geo,
+            other,
+        }
     }
 }
 
@@ -165,6 +183,51 @@ const SUMMARISED: [Tag; 15] = [
     Tag::GPSLongitude,
     Tag::GPSLongitudeRef,
 ];
+
+/// The tags the georeference speaks for: the two that place the raster, the
+/// matrix form of the same thing, the directory of keys and the pool of names
+/// it points into, and the value that means nothing was measured.
+///
+/// Not the pool of doubles, 34736: a key that points into it is a projection
+/// parameter nothing above reads, so it stays in the listing.
+const GEOREFERENCED: [u16; 6] = [33550, 33922, 34264, 34735, 34737, 42113];
+
+/// The tags a georeference is built from, as the parser hands them over.
+/// Reading them here rather than in [`geo`] keeps that module to arithmetic
+/// on numbers, with none of the parser's types in it.
+fn geo_tags(exif: &exif::Exif) -> geo::Tags {
+    let tiff = |number| primary(exif, Tag(Context::Tiff, number)).map(|field| &field.value);
+    let doubles = |number| match tiff(number) {
+        Some(Value::Double(values)) => values.clone(),
+        _ => Vec::new(),
+    };
+    let size = |number| primary(exif, Tag(Context::Tiff, number))?.value.get_uint(0);
+    geo::Tags {
+        directory: match tiff(34735) {
+            Some(Value::Short(values)) => values.clone(),
+            _ => Vec::new(),
+        },
+        // The parser splits a text value on its nulls and drops them, and the
+        // keys index the pool as it was written, so the nulls go back.
+        ascii: match tiff(34737) {
+            Some(Value::Ascii(parts)) => parts.join(&0u8),
+            _ => Vec::new(),
+        },
+        scale: doubles(33550),
+        tiepoint: doubles(33922),
+        transform: doubles(34264),
+        size: size(256)
+            .zip(size(257))
+            .map(|(width, height)| [width, height]),
+        nodata: match tiff(42113) {
+            Some(Value::Ascii(parts)) => parts
+                .first()
+                .map(|text| String::from_utf8_lossy(text).trim().to_string())
+                .filter(|text| !text.is_empty()),
+            _ => None,
+        },
+    }
+}
 
 /// The handful of fields a photograph is read by, in the order they are read.
 fn summarise(exif: &exif::Exif) -> Vec<Entry> {
@@ -280,6 +343,16 @@ fn primary(exif: &exif::Exif, tag: Tag) -> Option<&exif::Field> {
 /// therefore unwrapped: `Make` is Apple, not "Apple". A date is left as it
 /// comes, since the renderer has already turned it into one.
 fn display(exif: &exif::Exif, field: &exif::Field) -> String {
+    // The renderer knows the compressions a photograph is stored in and calls
+    // the rest reserved. A raster is usually one of the rest, and "reserved
+    // compression 5" is a worse answer than LZW for a code the format has
+    // meant LZW since 1992.
+    if field.tag == Tag::Compression
+        && let Some(code) = field.value.get_uint(0)
+        && let Some(name) = compression(code)
+    {
+        return name.to_string();
+    }
     let shown = field.display_value().with_unit(exif).to_string();
     let single = matches!(&field.value, Value::Ascii(parts) if parts.len() == 1);
     match shown
@@ -301,12 +374,55 @@ fn join(parts: &[String]) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join("   \u{00b7}   "))
 }
 
+/// Names for tags the metadata standard does not describe.
+///
+/// It covers what a photograph carries and no more, so the rest of TIFF 6,
+/// the tags GeoTIFF and GDAL park in the same directory, and the blocks other
+/// standards park there too all arrive as numbers. A raster is mostly these,
+/// and a column of numbered tags says what is in the file without saying what
+/// any of it is.
+const TIFF_NAMES: [(u16, &str); 26] = [
+    (266, "FillOrder"),
+    (269, "DocumentName"),
+    (285, "PageName"),
+    (316, "HostComputer"),
+    (317, "Predictor"),
+    (320, "ColorMap"),
+    (322, "TileWidth"),
+    (323, "TileLength"),
+    (324, "TileOffsets"),
+    (325, "TileByteCounts"),
+    (338, "ExtraSamples"),
+    (339, "SampleFormat"),
+    (340, "SMinSampleValue"),
+    (341, "SMaxSampleValue"),
+    (347, "JPEGTables"),
+    (700, "XMP"),
+    (33550, "ModelPixelScale"),
+    (33723, "IPTC"),
+    (33922, "ModelTiepoint"),
+    (34264, "ModelTransformation"),
+    (34675, "ICCProfile"),
+    (34735, "GeoKeyDirectory"),
+    (34736, "GeoDoubleParams"),
+    (34737, "GeoAsciiParams"),
+    (42112, "GdalMetadata"),
+    (42113, "GdalNoData"),
+];
+
 /// What a field is called, for a reader: its name where the tag is one the
-/// standards describe, and otherwise the number it is filed under, which is
-/// the only honest thing to call it.
+/// standards describe or one of [`TIFF_NAMES`], and otherwise the number it
+/// is filed under, which is the only honest thing to call it.
 fn tag_name(tag: Tag) -> String {
     if tag.description().is_some() {
         return tag.to_string();
+    }
+    if tag.context() == Context::Tiff
+        && let Some((_, name)) = TIFF_NAMES
+            .iter()
+            .find(|(number, _)| *number == tag.number())
+    {
+        return name.to_string();
     }
     let context = match tag.context() {
         Context::Tiff => "TIFF",
@@ -316,6 +432,31 @@ fn tag_name(tag: Tag) -> String {
         _ => "Unknown",
     };
     format!("{context} tag {}", tag.number())
+}
+
+/// What a compression code means, where it is one this says anything about.
+/// `None` leaves the answer to the renderer, which knows the ones a JPEG or a
+/// TIFF thumbnail uses.
+fn compression(code: u32) -> Option<&'static str> {
+    Some(match code {
+        1 => "uncompressed",
+        2 => "CCITT modified Huffman",
+        3 => "CCITT Group 3 fax",
+        4 => "CCITT Group 4 fax",
+        5 => "LZW",
+        6 => "JPEG (old-style)",
+        7 => "JPEG",
+        8 => "Deflate",
+        32773 => "PackBits",
+        32946 => "Deflate (old-style)",
+        34712 => "JPEG 2000",
+        34887 => "LERC",
+        34925 => "LZMA",
+        50000 => "Zstandard",
+        50001 => "WebP",
+        50002 => "JPEG XL",
+        _ => return None,
+    })
 }
 
 /// Whether a value is bulk rather than a fact: a maker note, a colour map, a
@@ -390,7 +531,9 @@ fn tidy_numbers(text: &str) -> String {
 }
 
 /// One number, at [`SIGNIFICANT_DIGITS`] and without the zeroes that leaves.
-fn tidy(number: &str) -> String {
+/// One rounding policy for the whole panel: [`super::geo`] writes its
+/// coordinates through this as well.
+pub(super) fn tidy(number: &str) -> String {
     // Only a plain decimal is rewritten. Anything else — a version, a date,
     // a number with two points in it — is left exactly as it was written.
     let Some((whole, fraction)) = number.split_once('.') else {
@@ -662,16 +805,40 @@ mod tests {
         assert!(empty(&Exif::read(Path::new("/nonexistent/image.jpg"))));
     }
 
+    fn fixture(name: &str) -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("test_images")
+            .join(name)
+    }
+
     /// A real file, read through the container it arrives in: the fixture
     /// carries an orientation and nothing else.
     #[test]
     fn a_files_own_block_is_found_through_its_container() {
-        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("test_images")
-            .join("webp-exif-rotated.webp");
-        let exif = Exif::read(&path);
+        let exif = Exif::read(&fixture("webp-exif-rotated.webp"));
         assert!(
             exif.other.iter().any(|entry| entry.name == "Orientation"),
+            "{exif:?}"
+        );
+    }
+
+    /// A measurement raster, read out of a real TIFF: the value that stands
+    /// for nothing measured belongs to the georeference rather than to the
+    /// listing, and having been said there it is not said twice.
+    #[test]
+    fn a_rasters_own_facts_are_taken_out_of_the_listing() {
+        let exif = Exif::read(&fixture("tiff-nodata.tif"));
+        assert_eq!(exif.geo, vec![Entry::new("No data", "-9999")], "{exif:?}");
+        assert!(
+            !exif.other.iter().any(|entry| entry.name.contains("42113")),
+            "{exif:?}"
+        );
+        // And the tags the standard does not describe are named rather than
+        // numbered: this one says its pixels are floating point.
+        assert!(
+            exif.other
+                .iter()
+                .any(|entry| entry.name == "SampleFormat" && entry.value == "3"),
             "{exif:?}"
         );
     }

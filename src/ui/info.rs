@@ -270,6 +270,7 @@ fn column(text: &mut dyn TextMeasure, current: &Current, width: f32) -> Column {
 
     for (heading, entries) in [
         ("Photo", &current.exif.summary),
+        ("Georeference", &current.exif.geo),
         ("Metadata", &current.exif.other),
     ] {
         if entries.is_empty() {
@@ -439,6 +440,7 @@ mod tests {
             value: value.to_string(),
         };
         Exif {
+            geo: Vec::new(),
             summary: vec![
                 entry("Camera", "Apple iPhone 16 Pro"),
                 entry(
