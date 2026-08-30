@@ -384,6 +384,22 @@ a coordinate-system register: EPSG:2056 is quoted as EPSG:2056, beside
 whatever the file calls it, because turning that into a datum and a projection
 means shipping the register that defines them.
 
+Two kinds of raster need one more step to be read at all, and both take the
+same one. A BigTIFF — the same tags and types with eight-byte offsets, which
+is how anything that might pass four gigabytes is written, and how a plain
+elevation model is written whether or not it needs to be — is a form the
+metadata reader does not know, EXIF being defined on the original; and an
+ordinary TIFF written straight through, with its directory after its pixels,
+keeps that directory past the end of the prefix. `src/image/directory.rs`
+answers both the same way: the TIFF decoder is already in the tree, reads both
+forms, and seeks to the directory wherever it is, so it reads the directory
+and this writes what it found back out as an ordinary block in memory — the
+values, none of the pixels. Everything downstream is then one path for every
+file rather than a second kind of directory rendered a second way. What
+cannot survive the trip is left out rather than written wrongly: a pointer to
+another directory in a file the block is not, a number too wide for the type
+it would have to be written as, a list that cannot agree what it holds.
+
 The other half of reading a raster is naming what it holds. The metadata
 standard describes what a photograph carries and no more, so the rest of TIFF
 6, the tags GeoTIFF and GDAL park in the same directory, and the compression a

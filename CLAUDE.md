@@ -34,6 +34,8 @@ image/         the data model, nothing GPU
   stats.rs       the scan an image gets on load: min/max, histogram, plot
   exif.rs        the file's own metadata, read and rendered for the info panel
   geo.rs         GeoTIFF's keys: where a raster's pixels are on the ground
+  directory.rs   a TIFF directory the metadata reader cannot reach, rewritten
+                 as a block it can: BigTIFF, or a directory past the prefix
   display.rs     Display: window, exposure, tone map, colormap — uniform state, never re-decodes;
                  map() and the CPU twins of the shaders' tone curves and colormaps
   decode/        Decoder trait + DECODERS registry in mod.rs; one file per format; limits.rs the size ceiling;

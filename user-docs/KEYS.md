@@ -78,9 +78,8 @@ not carry, so what you get is what was written.
 
 The file's own date is in UTC; the date the photograph was taken is whatever
 the camera recorded, with the offset from UTC it was set to where it recorded
-one. Metadata is read from JPEG, TIFF, PNG, WebP and HEIF files. In a TIFF it is
-looked for at the front of the file, which is where it is written; a TIFF that
-keeps it somewhere else, past the first few megabytes, shows none. Where it has more to say than
+one. Metadata is read from JPEG, TIFF, PNG, WebP and HEIF files, and from a TIFF
+however large it is and wherever in the file it keeps it. Where it has more to say than
 fits, the wheel scrolls it — point at the panel rather than at the image, and
 the wheel moves the words instead of the zoom. Dragging the panel scrolls it
 as well, the words following the pointer the way the image does under a pan.

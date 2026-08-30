@@ -21,7 +21,7 @@ use std::path::Path;
 
 use exif::{Context, In, Rational, Tag, Value};
 
-use super::geo;
+use super::{directory, geo};
 
 /// How much of a TIFF is read to find its metadata.
 ///
@@ -43,10 +43,16 @@ const TIFF_PREFIX: u64 = 8 << 20;
 /// takes the prefix is told apart from the ones that do not.
 const TIFF_SIGNATURES: [[u8; 4]; 2] = [[0x4d, 0x4d, 0x00, 0x2a], [0x49, 0x49, 0x2a, 0x00]];
 
+/// The same two for BigTIFF, whose version number is 43 rather than 42. This
+/// reader is an EXIF reader and EXIF is defined on the original format, so a
+/// file that says this goes through [`directory`] and comes back as a block
+/// the reader knows.
+const BIGTIFF_SIGNATURES: [[u8; 4]; 2] = [[0x4d, 0x4d, 0x00, 0x2b], [0x49, 0x49, 0x2b, 0x00]];
+
 /// How many components a field may have before it is left out of the listing.
 /// A TIFF's strip offsets run to thousands of numbers, which is a fact about
 /// how the file is laid out rather than one about the photograph.
-const MAX_COMPONENTS: usize = 32;
+pub(super) const MAX_COMPONENTS: usize = 32;
 
 /// How long a rendered value may be before it is cut short. Long enough for a
 /// lens name or a comment, short enough that one field cannot become the
@@ -104,8 +110,9 @@ impl Exif {
         // enough to be a TIFF would send it down the path that reads the
         // whole of it, which is the one thing here that must not happen.
         let mut signature = [0u8; 4];
-        let tiff =
-            source.read_exact(&mut signature).is_ok() && TIFF_SIGNATURES.contains(&signature);
+        let read = source.read_exact(&mut signature).is_ok();
+        let tiff = read && TIFF_SIGNATURES.contains(&signature);
+        let bigtiff = read && BIGTIFF_SIGNATURES.contains(&signature);
         source.seek(SeekFrom::Start(0)).ok()?;
 
         let mut reader = exif::Reader::new();
@@ -115,7 +122,11 @@ impl Exif {
         // Either way, what could be read is worth showing.
         reader.continue_on_error(true);
 
-        let block = if tiff {
+        let block = if bigtiff {
+            // Not a form this reader knows: what it is handed is the same
+            // directory written back out as the form it does.
+            reader.read_raw(directory::block(path)?)
+        } else if tiff {
             // The file is the block, so as much of it as the prefix allows is
             // read and parsed as one, rather than handed back to a container
             // scan that would read the rest of it looking for a chunk.
@@ -127,7 +138,16 @@ impl Exif {
         };
         let block = block
             .or_else(|error| error.distill_partial_result(|_| ()))
-            .ok()?;
+            .ok()
+            // A TIFF whose directory is past the end of the prefix — which is
+            // what a file written straight through, with its directory after
+            // its pixels, has — is read the long way round instead. The
+            // decoder seeks to it wherever it is.
+            .filter(|block| block.fields().len() > 0)
+            .or_else(|| {
+                tiff.then(|| reader.read_raw(directory::block(path)?).ok())
+                    .flatten()
+            })?;
         Some(Self::from_block(&block))
     }
 
@@ -820,6 +840,28 @@ mod tests {
             exif.other.iter().any(|entry| entry.name == "Orientation"),
             "{exif:?}"
         );
+    }
+
+    /// A BigTIFF has to go the long way round — the reader knows the
+    /// original format only — and comes back with the same fields under the
+    /// same names as the file it is a bigger version of.
+    #[test]
+    fn a_bigtiff_is_read_through_its_directory() {
+        let big = Exif::read(&fixture("tiff-bigtiff.tif"));
+        // The same image in the ordinary form: both fixtures are the 32x24
+        // float raster, one written each way.
+        let ordinary = Exif::read(&fixture("tiff-nodata.tif"));
+        let named = |exif: &Exif, name: &str| {
+            exif.other
+                .iter()
+                .find(|entry| entry.name == name)
+                .map(|entry| entry.value.clone())
+        };
+        for name in ["ImageWidth", "ImageLength", "SampleFormat", "BitsPerSample"] {
+            assert_eq!(named(&big, name), named(&ordinary, name), "{name}");
+            assert!(named(&big, name).is_some(), "{name} is missing");
+        }
+        assert_eq!(named(&big, "ImageWidth").as_deref(), Some("32 pixels"));
     }
 
     /// A measurement raster, read out of a real TIFF: the value that stands
