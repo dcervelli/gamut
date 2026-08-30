@@ -138,10 +138,24 @@ Two things resist being themed directly and are derived instead:
 
 * **The floating histogram panel stays dark whichever way round the theme
   is.** The plot is drawn by screening the colour planes over one another, and
-  screening only reads on a dark ground. On a light theme the panel is mixed
-  out of the theme's *ink* rather than its background, and the label on it out
-  of the background — an inverted panel, which is the usual answer for a
-  tooltip over a light page.
+  screening only reads on a dark ground: ground under the plot is added to
+  every plane, so a panel light enough to see lifts each plane's darkest
+  channel several times over and three overlapping planes come out as three
+  washes of the same pale colour. The panel is therefore the darkest colour
+  the theme has — its `darker_background` where it is a dark theme, its *ink*
+  where it is a light one, with the label on it drawn in the background — and
+  that colour is then taken down in value until it is dark enough to screen
+  onto. Scaled whole, so the theme's hue and saturation are exactly what they
+  were, and only when it is above the ceiling, so a theme that has picked its
+  own dark end keeps it: every dark theme tried against this passes through
+  untouched, and what the ceiling catches is the light theme, whose darkest
+  colour is nothing of the kind.
+
+  A light panel with the plot *multiplied* onto it instead — the arithmetic
+  dual, and the theme-compliant answer if it worked — was tried and does not:
+  three subtractive inks that overlap in a neutral mid grey have to be pale
+  ones, so the channels stop being tellable apart, and a near-white panel over
+  a bright picture loses its own edges.
 * **The colour planes are pulled towards their own primaries and then
   balanced.** A palette's red is a pastel with green and blue in it, and three
   pastels screened together climb towards white, which loses the overlaps the

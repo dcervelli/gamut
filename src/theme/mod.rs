@@ -50,11 +50,12 @@ pub struct Theme {
     /// is open — but not quite, so that it still reads as lying over the
     /// image rather than as another piece of the chrome.
     pub menu_background: Color,
-    /// The floating histogram panel: dark whatever the mode, since the plot
-    /// on it is drawn by screening the colour planes over one another and
-    /// that only reads on a dark ground. Kept off full opacity so that what
-    /// it is covering is still there, though how far off depends on the mode
-    /// — a light page shows through far more of a given alpha than its bytes
+    /// The floating histogram panel: the theme's own deepest colour, taken
+    /// down in value until it is dark whatever the mode, since the plot on it
+    /// is drawn by screening the colour planes over one another and that only
+    /// reads on a dark ground. Kept off full opacity so that what it is
+    /// covering is still there, though how far off depends on the mode — a
+    /// light page shows through far more of a given alpha than its bytes
     /// suggest, the blend being done in light.
     pub panel_background: Color,
     /// Ink on that panel, which is therefore light whatever the mode.
@@ -86,10 +87,21 @@ const BORDER_LIFT: f32 = 0.15;
 /// resolves back to its `background` — which is what happens when it defines
 /// neither — would otherwise draw the hairline invisibly.
 const SEPARATION: u32 = 18;
-/// How deep the floating panel goes on a light theme, mixed out of the
-/// theme's own ink rather than out of its background, which is the wrong end
-/// of the palette for a surface that has to stay dark.
-const LIGHT_PANEL_DEPTH: f32 = 0.25;
+/// The most light the floating panel may carry, as an HSV value.
+///
+/// The plot is screened, so every bit of ground under it is added to every
+/// plane: a panel at value 0.3 lifts the darkest channel of a plane several
+/// times over, and three planes that used to overlap in a readable mid grey
+/// come out as three washes of the same pale colour. Capping the value rather
+/// than replacing the colour keeps the theme's hue and saturation exactly,
+/// and bounds what the ground contributes whatever hue that is, since a
+/// neutral is the brightest thing any given value can be.
+///
+/// Set above the deepest surface every theme the interface was tried against
+/// defines — the highest was 0.137 — so a theme that has thought about its
+/// own dark end is never overridden; what the cap catches is the light theme,
+/// whose deepest colour is nothing of the kind.
+const PANEL_VALUE_CEIL: f32 = 0.14;
 /// How opaque a popup's panel is. Higher than the panels that float over the
 /// image permanently: the picture coming through a menu competes with the
 /// choices on it. Not mode-dependent the way the floating panel's alpha is,
@@ -180,12 +192,17 @@ impl Theme {
         // The deepest surface the theme can offer, for the things that have
         // to sit under light ink whichever way round the theme is: the
         // floating panel, and the wash over what the minimap is not showing.
-        let deep = match palette.mode() {
+        //
+        // A light theme has no such surface to name — its own darkest colour
+        // is its ink, and how deep a theme takes its ink is a matter of taste
+        // it was free to settle either way — so whichever colour the mode
+        // arrives at is then taken down to a value the plot can be drawn on.
+        let deep = darkened(match palette.mode() {
             Mode::Dark => palette
                 .color("darker_background")
                 .unwrap_or_else(|| mix(background, BLACK, 0.5)),
-            Mode::Light => mix(foreground, BLACK, LIGHT_PANEL_DEPTH),
-        };
+            Mode::Light => foreground,
+        });
         let on_deep = match palette.mode() {
             Mode::Dark => foreground,
             Mode::Light => background,
@@ -231,6 +248,17 @@ impl Theme {
             histogram_planes,
         }
     }
+}
+
+/// A colour taken down to [`PANEL_VALUE_CEIL`] if it is above it, scaled
+/// whole so that its hue and saturation are exactly what they were. Anything
+/// already that deep is its own theme's business and is left alone.
+fn darkened(color: Color) -> Color {
+    let peak = color.r.max(color.g).max(color.b) as f32 / 255.0;
+    if peak <= PANEL_VALUE_CEIL {
+        return color;
+    }
+    scale(color, PANEL_VALUE_CEIL / peak)
 }
 
 /// Whether `shade` can be told apart from `against` at hairline width.
@@ -366,15 +394,51 @@ mod tests {
         let theme = Theme::from_palette(&palette(SPARSE));
         assert_eq!(theme.mode, Mode::Light);
         assert_eq!(theme.bar_background, Color::rgb(0xf5, 0xf0, 0xe8));
-        // Mixed out of the theme's ink rather than its background, which is
-        // the wrong end of a light palette for a surface the histogram is
-        // screened onto.
+        // The theme's ink rather than its background, which is the wrong end
+        // of a light palette for a surface the histogram is screened onto,
+        // taken down to a value the plot reads on and no further.
         assert_eq!(
             theme.panel_background,
-            Color::rgba(0x26, 0x26, 0x23, LIGHT_PANEL_ALPHA)
+            Color::rgba(0x24, 0x23, 0x20, LIGHT_PANEL_ALPHA)
         );
         assert_eq!(theme.panel_text, theme.bar_background);
         assert!(separated(theme.border, theme.bar_background));
+    }
+
+    /// The panel is the one surface with a job that outranks matching the
+    /// desktop: a screened plot has to have a dark ground under it or its
+    /// planes stop being three colours. Whatever the theme offers is
+    /// therefore taken down to a value that leaves the plot readable — but
+    /// scaled whole, so it is still recognisably the theme's colour, and only
+    /// when it is above that value, so a theme that has picked its own dark
+    /// end keeps it.
+    #[test]
+    fn the_floating_panel_is_dark_enough_to_screen_a_plot_onto_whatever_the_theme() {
+        // A light theme whose ink is barely darker than its page, and one
+        // declaring itself dark over a background that is not.
+        const PALE_INK: &str = "background = \"#fdfdfb\"\nforeground = \"#8a6f4e\"\n";
+        const NAMED_DARK: &str = "\
+mode = \"dark\"
+background = \"#c8ccd4\"
+foreground = \"#101218\"
+darker_background = \"#b0b4bc\"
+";
+        for source in [SPARSE, PALE_INK, NAMED_DARK, TOKYO, SEMANTIC, ANSI] {
+            let panel = Theme::from_palette(&palette(source)).panel_background;
+            let value = panel.r.max(panel.g).max(panel.b) as f32 / 255.0;
+            assert!(value <= PANEL_VALUE_CEIL + 0.005, "{source}: {panel:?}");
+        }
+
+        // Hue and saturation survive the trip down: the panel of a theme
+        // whose ink is a warm brown is a warm brown.
+        let panel = Theme::from_palette(&palette(PALE_INK)).panel_background;
+        assert!(panel.r > panel.g && panel.g > panel.b, "{panel:?}");
+
+        // And a theme that named its own deepest surface is left holding it.
+        assert_eq!(
+            Theme::from_palette(&palette(TOKYO)).panel_background,
+            Color::rgba(0x0e, 0x0e, 0x14, Theme::FALLBACK.panel_background.a)
+        );
     }
 
     #[test]
