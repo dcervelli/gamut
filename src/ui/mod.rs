@@ -7,6 +7,7 @@
 //! measure text.
 
 pub mod chrome;
+pub mod info;
 pub mod menu;
 pub mod minimap;
 
@@ -17,17 +18,34 @@ mod pixel;
 mod status;
 
 use crate::image::display::Display;
+use crate::image::exif::Exif;
+use crate::image::stats::BINS;
 use crate::image::{DecodedImage, Stats};
 use crate::render::{Backdrop, Rect, TextMeasure, UiFrame};
 use crate::theme::Theme;
 use crate::view::{View, Viewport};
 
 use chrome::Chrome;
+pub use info::FileFacts;
 pub use menu::Menu;
 
 const TEXT_SIZE: f32 = 13.0;
 
 const PADDING: f32 = 12.0;
+
+/// The gap between a floating panel's edge and what is on it.
+const PANEL_INSET: f32 = 10.0;
+
+/// How wide the panels that float over the content area are. The histogram
+/// fixes it: wide enough that a bin is exactly one logical pixel, which is
+/// what keeps its bars evenly spaced instead of some of them landing astride
+/// a pixel boundary and coming out fatter than their neighbours. The
+/// information panel takes the same width so that the two line up down the
+/// right of the window, whether or not either has anything else on it.
+const PANEL_WIDTH: f32 = BINS as f32 + 2.0 * PANEL_INSET;
+
+/// The corner radius of a floating panel.
+const PANEL_RADIUS: f32 = 6.0;
 
 /// Side of one checkerboard square, in logical pixels. Small enough to read
 /// as a texture behind the image rather than as a pattern competing with it.
@@ -40,6 +58,7 @@ const CHECKER_SQUARE: f32 = 8.0;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Widget {
     Minimap,
+    Info,
     Histogram,
     Grid,
     Zoom,
@@ -54,6 +73,10 @@ pub struct Current {
     pub stats: Stats,
     pub display: Display,
     pub label: String,
+    /// What the file it came from says about itself, for the info panel.
+    pub file: FileFacts,
+    /// And what its metadata says about the photograph, if it carries any.
+    pub exif: Exif,
     /// What the GPU actually stored it as, which is not always what we asked.
     pub stored: Option<String>,
 }
@@ -81,6 +104,12 @@ pub struct Panels {
     /// is fitted inside them, so hiding them gives it the whole window.
     pub show_ui: bool,
     pub show_histogram: bool,
+    pub show_info: bool,
+    /// How far the info panel's column has been scrolled, in logical pixels.
+    /// Kept here rather than in the panel because the panel is rebuilt every
+    /// frame, and clamped where it is used: what it may run to depends on how
+    /// tall the text comes out in the window as it is now.
+    pub info_scroll: f32,
     /// Whether the minimap is switched on. Whether it is actually on screen
     /// also asks whether there is anything off screen for it to point out —
     /// see [`FrameInput::minimap_on_screen`].
@@ -124,6 +153,38 @@ pub struct FrameInput {
     /// The output's label when it is an HDR surface, which is worth a word in
     /// the bar; `None` on an ordinary one.
     pub hdr_output: Option<&'static str>,
+}
+
+/// A stand-in for the renderer's fonts, for the tests that lay something out
+/// without a GPU: every glyph one `size` square, so that a test can say how
+/// much room a string has in whole characters.
+#[cfg(test)]
+pub(super) struct Monospace;
+
+#[cfg(test)]
+impl TextMeasure for Monospace {
+    fn measure_text(&mut self, text: &str, size: f32) -> [f32; 2] {
+        [text.chars().count() as f32 * size, size]
+    }
+
+    fn measure_wrapped(&mut self, text: &str, size: f32, width: f32) -> [f32; 2] {
+        // Broken between words, as glyphon breaks it, and at the same line
+        // height the text layer sets its metrics to.
+        let columns = (width / size).floor().max(1.0) as usize;
+        let (mut lines, mut used) = (1usize, 0usize);
+        for word in text.split_whitespace() {
+            let length = word.chars().count();
+            if used == 0 {
+                used = length;
+            } else if used + 1 + length <= columns {
+                used += 1 + length;
+            } else {
+                lines += 1;
+                used = length;
+            }
+        }
+        [width, lines as f32 * size * 1.3]
+    }
 }
 
 /// Builds one frame of interface.
@@ -173,6 +234,17 @@ pub fn build_frame(
     }
     if input.minimap_on_screen {
         minimap::draw(&mut frame, current, view, input, content, theme);
+    }
+    if panels.show_info {
+        info::draw(
+            &mut frame,
+            text,
+            current,
+            panels.info_scroll,
+            content,
+            panels.show_histogram,
+            theme,
+        );
     }
     if !panels.show_ui {
         return frame;
@@ -229,6 +301,13 @@ pub fn build_frame(
         chrome.minimap_button,
         panels.show_minimap,
         panels.hover == Some(Widget::Minimap),
+        theme,
+    );
+    buttons::info_button(
+        &mut frame,
+        chrome.info_button,
+        panels.show_info,
+        panels.hover == Some(Widget::Info),
         theme,
     );
     buttons::histogram_button(

@@ -4,15 +4,11 @@ use crate::image::stats::BINS;
 use crate::render::{Blend, Rect, UiFrame};
 use crate::theme::Theme;
 
-use super::{Current, PADDING, TEXT_SIZE};
+use super::{Current, PADDING, PANEL_INSET, PANEL_RADIUS, PANEL_WIDTH, TEXT_SIZE};
 
-/// The gap between the histogram panel's edge and its plot.
-const HISTOGRAM_INSET: f32 = 10.0;
-
-/// Wide enough that a bin is exactly one logical pixel, which is what keeps
-/// the bars evenly spaced instead of some of them landing astride a pixel
-/// boundary and coming out fatter than their neighbours.
-const HISTOGRAM_SIZE: [f32; 2] = [BINS as f32 + 2.0 * HISTOGRAM_INSET, 130.0];
+/// The panel: as wide as anything else floating over the content area, and
+/// tall enough for a plot with its axis label above it.
+pub(super) const HISTOGRAM_SIZE: [f32; 2] = [PANEL_WIDTH, 130.0];
 
 /// What the luminance plane drops to once colour planes are drawn over it.
 const HISTOGRAM_LUMA_UNDER: u8 = 110;
@@ -35,9 +31,9 @@ pub(super) fn draw(frame: &mut UiFrame, current: &Current, content: Rect, theme:
         HISTOGRAM_SIZE[0],
         HISTOGRAM_SIZE[1],
     );
-    frame.rounded_rect(panel, 6.0, theme.panel_background);
+    frame.rounded_rect(panel, PANEL_RADIUS, theme.panel_background);
 
-    let plot = panel.inset(HISTOGRAM_INSET, HISTOGRAM_INSET);
+    let plot = panel.inset(PANEL_INSET, PANEL_INSET);
     let label_height = TEXT_SIZE * 1.4;
     let bars = Rect::new(
         plot.x,

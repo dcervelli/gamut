@@ -9,14 +9,17 @@
 * Performance is a differentiator
 
 ## INITIAL RELEASE
-
+* Info cleanup
+  * Section cleaning
+  * Specific tag renderers?
+  * Copy
+  * Color
 * Full UI pass
   * Cursor swatch to right of coordinate
+  * Move histogram to UR (or button to LR)
+  * Icons have px shifts
 * Theme font
 * License review
-* Minimap on by default
-* Security pass with Fable
-* Grid display when zoomed in
 * Region selection
 * Copy
   * File path
@@ -24,6 +27,7 @@
   * Image (raw)
   * Region (raw)
   * Pixel color
+  * EXIF/info
 * Paste image
 * Hotkey choices
 * Modifications
@@ -32,14 +36,6 @@
   * Gamma
 * Wayland app_id
 * Package
-* Info
-  * File date/time
-  * Resolution
-  * File size
-  * Color
-  * EXIF
-  * TIFF tags
-  * Other?
 * Docs
   * Usage
   * CLI

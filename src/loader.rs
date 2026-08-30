@@ -21,6 +21,7 @@ use anyhow::{Result, anyhow};
 use winit::event_loop::EventLoopProxy;
 
 use crate::image::decode::{self, Overrides};
+use crate::image::exif::Exif;
 use crate::image::{DecodedImage, Stats};
 use crate::render::{GpuImage, Upload};
 use crate::timing;
@@ -70,6 +71,11 @@ pub struct Opened {
 pub struct Ready {
     pub image: DecodedImage,
     pub stats: Stats,
+    /// What the file says about the photograph, for the info panel. Read
+    /// here rather than on the event loop because it is one more parse of a
+    /// file whoever wrote it chose the bytes of, and this is the thread with
+    /// the guard around it.
+    pub exif: Exif,
     /// The texture, when the window was open in time to give us somewhere to
     /// put it. `None` only for a file requested before the renderer existed,
     /// which the event loop then uploads itself.
@@ -258,18 +264,26 @@ fn read(request: Request, upload: Option<&Upload>, cancelled: &AtomicBool) -> Op
     let scanned = decoded.and_then(|image| {
         timing::decoded(&path, started.elapsed());
         let stats = guard("scanning", || Ok(Stats::scan(&image)))?;
-        Ok((image, stats))
+        // A file with no metadata, or with metadata that will not parse, is
+        // not a failure: the panel simply has less to say about it.
+        let exif = guard("reading the metadata", || Ok(Exif::read(&path)))?;
+        Ok((image, stats, exif))
     });
     if cancelled.load(Ordering::Relaxed) {
         return None;
     }
 
-    let outcome = scanned.and_then(|(image, stats)| {
+    let outcome = scanned.and_then(|(image, stats, exif)| {
         let gpu = match upload {
             Some(upload) => Some(guard("uploading to the GPU", || upload.run(&image))?),
             None => None,
         };
-        Ok(Ready { image, stats, gpu })
+        Ok(Ready {
+            image,
+            stats,
+            exif,
+            gpu,
+        })
     });
 
     Some(Decoded {

@@ -50,12 +50,17 @@ impl Text {
     }
 
     /// Width and height of `text` in logical pixels, for laying out anything
-    /// that has to sit next to it.
-    pub(super) fn measure(&mut self, text: &str, size: f32) -> [f32; 2] {
+    /// that has to sit next to it. `wrap_at` breaks it across lines the way
+    /// [`UiFrame::text_wrapped`](super::UiFrame::text_wrapped) will, for
+    /// anything that has to know how tall a paragraph comes out.
+    pub(super) fn measure(&mut self, text: &str, size: f32, wrap_at: Option<f32>) -> [f32; 2] {
         self.measure_buffer
             .set_metrics(Metrics::new(size, size * 1.3));
-        self.measure_buffer.set_size(None, None);
-        self.measure_buffer.set_wrap(Wrap::None);
+        self.measure_buffer.set_size(wrap_at, None);
+        self.measure_buffer.set_wrap(match wrap_at {
+            Some(_) => Wrap::Word,
+            None => Wrap::None,
+        });
         self.measure_buffer.set_text(
             text,
             &Attrs::new().family(Family::SansSerif),
@@ -104,7 +109,7 @@ impl Text {
         for (buffer, item) in buffers.iter_mut().zip(texts) {
             let size = item.size * scale;
             buffer.set_metrics(Metrics::new(size, size * 1.3));
-            buffer.set_wrap(Wrap::None);
+            buffer.set_wrap(if item.wrap { Wrap::Word } else { Wrap::None });
             buffer.set_size(item.max_width.map(|w| w * scale), None);
             buffer.set_text(&item.text, &attrs, Shaping::Advanced, None);
             buffer.shape_until_scroll(font_system, false);
@@ -129,17 +134,30 @@ impl Text {
                     .max_width
                     .map(|w| left + w * scale)
                     .unwrap_or(physical[0] as f32);
-                TextArea {
-                    buffer,
-                    left,
-                    top,
-                    scale: 1.0,
-                    bounds: TextBounds {
+                // Glyphs are cut to the run's own width, or to the panel the
+                // run scrolls inside where it has one. Partly cut: glyphon
+                // trims the quad and its texture coordinates together, so a
+                // line half over the edge is drawn half rather than dropped.
+                let bounds = match item.clip {
+                    Some(clip) => TextBounds {
+                        left: (clip.x * scale).floor() as i32,
+                        top: (clip.y * scale).floor() as i32,
+                        right: (clip.right() * scale).ceil() as i32,
+                        bottom: (clip.bottom() * scale).ceil() as i32,
+                    },
+                    None => TextBounds {
                         left: left.floor() as i32,
                         top: top.floor() as i32,
                         right: right.ceil() as i32,
                         bottom: physical[1] as i32,
                     },
+                };
+                TextArea {
+                    buffer,
+                    left,
+                    top,
+                    scale: 1.0,
+                    bounds,
                     default_color: glyphon::Color::rgba(
                         item.color.r,
                         item.color.g,

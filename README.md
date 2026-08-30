@@ -49,6 +49,7 @@ Both ship as standard on the distributions above.
 | `c` | Cycle false colour (single-channel images) |
 | `r` | Reset display settings |
 | `h` | Toggle the histogram |
+| `i` | Toggle the file information panel |
 | `m` | Toggle the minimap |
 | `` ` `` | Toggle the interface panels |
 
@@ -67,8 +68,8 @@ same pixels. A file of another size is a different picture, and is fitted.
 
 Every display control is also a start-up flag — `--colormap viridis`,
 `--tone-map neutral`, `--window minmax`, `--exposure -1.5`, `--histogram`,
-`--no-minimap` — which is handy for scripting and for comparing two files side
-by side.
+`--info`, `--no-minimap` — which is handy for scripting and for comparing two
+files side by side.
 
 ## Minimap
 
@@ -124,7 +125,7 @@ On [Omarchy](https://omarchy.org) the active theme is materialised as a
 palette file, and `src/theme/` reads it, resolves it, and derives the
 handful of roles the chrome actually needs — panel, hairline, primary and dim
 text, accent, the menu panel, the floating panel and the ink on it, the
-histogram's planes. Switching the desktop's theme is picked up on the same
+information panel's ground, the histogram's planes. Switching the desktop's theme is picked up on the same
 250 ms poll as the file on screen, so an open window changes with everything
 else rather than staying in the theme it opened under.
 
@@ -329,13 +330,122 @@ there: the stored one is the measurement, the mapped one is why it looks the
 way it does. Saying what the screen is showing means running the display
 transform on the CPU, so `ToneMap::apply` and `Colormap::color` in
 `image/display.rs` mirror the shader functions of the same names — a swatch
-that disagreed with the image beside it would be worse than none. The left strip holds the minimap toggle, the right strip
-the histogram toggle, and the end of the bottom bar the zoom readout — which
+that disagreed with the image beside it would be worse than none. The left strip holds the minimap toggle, the right strip a
+column of two — the file information panel and the histogram — and the end of
+the bottom bar the zoom readout — which
 is a button: pressing it opens a menu of zooms in the lower right of the
 content area, the ladder from 10% to 1600% and the three fits as icons. The
 readout is a fixed width so that the click handler knows where it is without
 measuring what it says, and so that it does not shuffle along the bar as the
 zoom changes.
+
+The information panel (`src/ui/info.rs`) is as wide as the histogram — one
+constant, fixed by the histogram's need for a bin to the logical pixel — so
+the two line up down the right of the window, and its column is measured
+inside a gutter kept clear for the scrollbar whether or not there is anything
+to scroll: text that reflowed the moment the bar appeared would be text that
+reflowed as it was being read. Unlike the histogram it takes the theme's own
+background rather than the forced-dark one: nothing is screened onto it, so it
+has no reason to be dark, and the words on it are the bars' own ink. The
+pointer belongs to it while it is over it: the wheel scrolls the column
+instead of zooming, and a press starts a drag of the words rather than of the
+picture — one thing or the other for as long as the button is held, so a drag
+that runs off the panel goes on scrolling rather than beginning to pan
+half-way through. A column with nothing left to scroll to still takes the
+gesture rather than handing it back, and makes no closed hand for a drag that
+would move nothing.
+
+What it says comes from two places. The file's own facts — its name, its
+path, when it was written and how large it is — are one `stat` taken as the
+image goes on screen. The rest is its EXIF, read by `src/image/exif.rs` on the
+loader thread beside the decode, because it is one more parse of a file
+somebody else chose the bytes of and that is the thread with the panic guard
+around it. What comes back is already words: a summary of the fields a
+photograph is read by — camera, lens, when, the exposure as one line, the
+focal length with its equivalent, the coordinates in degrees a map will take —
+and then every other field the file carries, in the order it carries them.
+Nothing there is a tag number or an offset by the time the interface sees it.
+
+A raster is read through a different handful of fields, and they are not EXIF
+at all. GeoTIFF shares the TIFF directory rather than taking a container of
+its own, and packs a directory of *keys* into one tag with two more holding
+the values that will not fit in a short, so `src/image/geo.rs` takes that
+apart: the coordinate system as the file names it and files it, the size of a
+pixel on the ground, the corner the raster hangs from, and the ground it
+covers — which is the corner and the pixel count multiplied out, and comes to
+the same four numbers `gdalinfo` prints. The extent goes down the panel as one
+row per axis, named for what the axes are: a pair of seven-figure spans will
+not fit on a line this wide, and a coordinate broken across two lines is a
+coordinate misread. The tiepoint is walked back to the
+corner where it is not already there, the matrix form is read where a file has
+that instead, and a raster whose axes are turned off the model's is given its
+corner and told plainly that there is no rectangle to quote. Nothing consults
+a coordinate-system register: EPSG:2056 is quoted as EPSG:2056, beside
+whatever the file calls it, because turning that into a datum and a projection
+means shipping the register that defines them.
+
+Two kinds of raster need one more step to be read at all, and both take the
+same one. A BigTIFF — the same tags and types with eight-byte offsets, which
+is how anything that might pass four gigabytes is written, and how a plain
+elevation model is written whether or not it needs to be — is a form the
+metadata reader does not know, EXIF being defined on the original; and an
+ordinary TIFF written straight through, with its directory after its pixels,
+keeps that directory past the end of the prefix. `src/image/directory.rs`
+answers both the same way: the TIFF decoder is already in the tree, reads both
+forms, and seeks to the directory wherever it is, so it reads the directory
+and this writes what it found back out as an ordinary block in memory — the
+values, none of the pixels. Everything downstream is then one path for every
+file rather than a second kind of directory rendered a second way. What
+cannot survive the trip is left out rather than written wrongly: a pointer to
+another directory in a file the block is not, a number too wide for the type
+it would have to be written as, a list that cannot agree what it holds.
+
+The other half of reading a raster is naming what it holds. The metadata
+standard describes what a photograph carries and no more, so the rest of TIFF
+6, the tags GeoTIFF and GDAL park in the same directory, and the compression a
+raster is actually stored in all arrive as numbers — a column of `TIFF tag
+33550` says what is in the file without saying what any of it is. A table of
+names covers them, and the compression codes are named here rather than left
+as "reserved compression 5", which is what the EXIF renderer calls the LZW the
+format has meant since 1992.
+
+Three things had to be decided rather than read. Numbers are rewritten to the
+digits they are worth: a file storing an aperture as 89/50 means exactly 1.78,
+and quoting it back as f/1.7799999713880652 says only that a rational went
+through binary floating point. Bulk values are left out — a maker note or a
+table of strip offsets is a fact about the file's layout, not about the
+photograph, and rendering one costs the memory of the string as well as the
+room. And a TIFF is read as a prefix rather than as a file: a TIFF *is* its
+own metadata block, with no chunk to seek to, so the parser reads the whole of
+whatever it is handed and an elevation model would be pulled into memory for a
+date. What it is handed is the first 8 MB, which is enough because of where a
+directory goes — a 443 MB scanned map keeps its first directory at byte 8 with
+every value inside the first 10 kB, which is what any writer that means the
+file to be read out of order does, and the fields come back in four
+milliseconds. Offsets that run past the prefix are expected rather than
+exceptional, so the parse is asked to continue through them and hand back what
+it did read. Every other container carries the block in a chunk that is found
+by scanning headers, and costs a few hundred microseconds.
+
+Taking the block from the decode instead was the obvious other answer, and it
+is worse. The decoders that could give one cheaply — WebP already reads it for
+the orientation, JPEG holds the file whole — are the ones that cost nothing to
+re-read. The one that would benefit cannot: the TIFF decoder has the directory
+parsed, but the crate behind it will not follow the sub-directory pointers the
+exposure, the lens and the coordinates live behind, so a camera TIFF would
+come back with less than a second read gets, and its values would arrive as
+numbers needing a second renderer to say what they mean.
+
+It is the one part of the interface with more to say than fits, and so the
+only part that scrolls. Its column is laid out in full every frame and the
+scroll is subtracted from each row's place down it, which leaves rows lying
+above and below the panel. Nothing here clips them: the text
+layer takes a rectangle to cut the glyphs to, which glyphon trims the quad and
+its texture coordinates against together, so a line sliding under the panel's
+edge is drawn as much of a line as is still inside. Measuring a paragraph
+before drawing it is the same call that draws it, one width and one wrap, so
+what the scroll is clamped against is the height the text actually comes out
+at rather than an estimate of it.
 
 Popups are `render::ui_layer::Popup`: a panel of uniform cells anchored to a corner
 of an area, which answers where the panel goes, where each cell landed, and

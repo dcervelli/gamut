@@ -43,6 +43,7 @@ OPTIONS:
         --exposure <STOPS>  Start at this exposure, in stops
         --upscale <FILTER>  How to resample above 100%: nearest or bicubic
         --histogram         Start with the histogram showing
+        --info              Start with the file information panel showing
         --no-minimap        Start with the minimap off; it is on by default
         --timing            Print decode and startup timings to stdout
     --                      Treat every later argument as a path
@@ -88,7 +89,10 @@ pub fn first_readable(files: &[PathBuf]) -> Result<(usize, Option<[f32; 2]>)> {
                 // return is reported by `main`, and saying it here as well
                 // would print it twice.
                 for problem in &skipped {
-                    eprintln!("image-view: {}", crate::escape_controls(&format!("{problem:#}")));
+                    eprintln!(
+                        "image-view: {}",
+                        crate::escape_controls(&format!("{problem:#}"))
+                    );
                 }
                 return Ok((index, size.map(|(w, h)| [w as f32, h as f32])));
             }
@@ -170,6 +174,7 @@ pub fn parse_args() -> Result<Option<Args>> {
     let mut startup = Startup::default();
     let mut hdr = HdrPreference::Off;
     let mut histogram = false;
+    let mut info = false;
     let mut minimap = true;
     let mut upscale = Upscale::default();
     let mut only_files = false;
@@ -264,6 +269,10 @@ pub fn parse_args() -> Result<Option<Args>> {
                     histogram = true;
                     continue;
                 }
+                Some("--info") => {
+                    info = true;
+                    continue;
+                }
                 Some("--timing") => {
                     crate::timing::enable();
                     continue;
@@ -297,6 +306,7 @@ pub fn parse_args() -> Result<Option<Args>> {
             startup,
             hdr,
             histogram,
+            info,
             minimap,
             upscale,
         },

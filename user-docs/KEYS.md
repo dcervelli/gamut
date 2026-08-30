@@ -54,12 +54,38 @@ top of a colormap would distort the values you are reading off it.
 | Key | What it does |
 | --- | --- |
 | `h` | Show or hide the histogram |
+| `i` | Show or hide the file information |
 | `m` | Show or hide the minimap |
 | `g` | Show or hide the grid over the image |
 | `` ` `` | Show or hide the panels around the image |
 
 The panels are opaque and the image is fitted inside them, so hiding them
 gives a fitted image more room and it re-fits immediately.
+
+The file information sits down the right of the image. It opens with the file
+itself — what it is called, where it is, how large the image is, and when the
+file was last written and to what size — and then, for a file that carries
+any, what its metadata says: the camera and lens, when the photograph was
+taken, the exposure it was made at, the focal length, and where the camera
+was. A georeferenced raster — a scanned map, an elevation model — gets its own
+section instead: the coordinate system it names, the size of a pixel on the
+ground, where its corner sits, the ground it covers, and the value that stands
+for nothing measured. Everything else the metadata holds is listed under that,
+field by field, as the file gives it.
+
+Coordinate systems are quoted as the file gives them, by name and by EPSG
+code. Turning a code into a projection and a datum needs a register this does
+not carry, so what you get is what was written.
+
+The file's own date is in UTC; the date the photograph was taken is whatever
+the camera recorded, with the offset from UTC it was set to where it recorded
+one. Metadata is read from JPEG, TIFF, PNG, WebP and HEIF files, and from a TIFF
+however large it is and wherever in the file it keeps it. Where it has more to say than
+fits, the wheel scrolls it — point at the panel rather than at the image, and
+the wheel moves the words instead of the zoom. Dragging the panel scrolls it
+as well, the words following the pointer the way the image does under a pan.
+The pointer belongs to the panel while it is over it, so neither gesture
+reaches the picture behind.
 
 The grid divides the image into squares of a round number of image pixels —
 1, 2, 5, 10, 20, 50 and so on — chosen so that the lines land about fifty
@@ -74,8 +100,10 @@ counted off in the image's own pixels.
 | Drag | Pan, with the image following the pointer |
 | Wheel | Zoom about the pointer |
 | Trackpad scroll | The same, by fractions of a notch |
-| Click a panel button | Show or hide the histogram or the minimap |
+| Click a panel button | Show or hide the histogram, the file information, or the minimap |
 | Click the grid button | Show or hide the grid |
+| Wheel over the file information | Scroll it |
+| Drag the file information | Scroll it, the words following the pointer |
 | Click the zoom percentage | Open the zoom menu |
 
 The percentage at the end of the bottom bar is a button. Pressing it opens a
@@ -103,8 +131,9 @@ is somewhere to drag to.
 
 Most of what these keys reach can be set before the first file opens, which is
 what scripting wants and what comparing two files on equal terms needs:
-`--exposure`, `--window`, `--tone-map`, `--colormap`, `--upscale` and
-`--histogram`. The minimap starts on; `--no-minimap` starts without it.
+`--exposure`, `--window`, `--tone-map`, `--colormap`, `--upscale`,
+`--histogram` and `--info`. The minimap starts on; `--no-minimap` starts
+without it.
 
 ## Keys that are deliberately ignored
 

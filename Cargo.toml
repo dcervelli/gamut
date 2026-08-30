@@ -19,6 +19,14 @@ image = { version = "0.25.10", default-features = false, features = ["bmp", "exr
 # the EXIF orientation and the animation canvas all live in the RIFF container
 # beside the pixels, and `ImageReader` hands back only the pixels.
 image-webp = "0.2.4"
+# The EXIF block, for the info panel: the metadata a photograph carries about
+# how it was taken, which no decoder here surfaces and which lives in a
+# different place in every container. This reads it out of JPEG, TIFF, PNG,
+# WebP and HEIF alike, and renders a field's units, fractions and enumerated
+# values — a table that would otherwise have to be carried here. Pure Rust,
+# and careful with the files it is given: a chunk is read with `take`, so a
+# length claimed by a broken file allocates only what the file actually holds.
+kamadak-exif = "0.6.1"
 # `v1_23` to match the security-limits struct of the libheif this links
 # against. `SecurityLimits::new()` copies the C library's global limits, which
 # carry that library's own `version` field (4 for libheif 1.23); a binding

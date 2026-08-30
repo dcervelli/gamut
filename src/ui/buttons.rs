@@ -47,6 +47,35 @@ pub(super) fn histogram_button(
     }
 }
 
+/// The info toggle: the letter i, which is what the panel it opens is — a
+/// column of words about the file, rather than a picture of anything the way
+/// the other two toggles are.
+pub(super) fn info_button(
+    frame: &mut UiFrame,
+    rect: Rect,
+    active: bool,
+    hover: bool,
+    theme: &Theme,
+) {
+    if rect.width < BUTTON_SIZE {
+        return;
+    }
+    let (background, ink) = button_ink(active, hover, theme);
+    frame.rounded_rect(rect, 5.0, background);
+
+    const STROKE: f32 = 4.0;
+    const TITTLE_GAP: f32 = 3.0;
+    let icon = rect.inset(0.0, 8.0);
+    let x = (rect.x + (rect.width - STROKE) / 2.0).round();
+    frame.rounded_rect(Rect::new(x, icon.y, STROKE, STROKE), STROKE / 2.0, ink);
+    let stem = icon.y + STROKE + TITTLE_GAP;
+    frame.rounded_rect(
+        Rect::new(x, stem, STROKE, (icon.bottom() - stem).max(0.0)),
+        STROKE / 2.0,
+        ink,
+    );
+}
+
 /// The minimap toggle: the panel itself in miniature, a frame for the image
 /// with the viewport sitting in a corner of it.
 pub(super) fn minimap_button(

@@ -78,6 +78,11 @@ pub struct Scene<'a> {
 pub trait TextMeasure {
     /// Width and height of `text` at `size`, in logical pixels.
     fn measure_text(&mut self, text: &str, size: f32) -> [f32; 2];
+
+    /// Width and height of `text` at `size` once it is broken across lines at
+    /// `width`, in logical pixels: how much room a paragraph will take, for
+    /// anything stacking one under another.
+    fn measure_wrapped(&mut self, text: &str, size: f32, width: f32) -> [f32; 2];
 }
 
 pub struct Renderer {
@@ -409,6 +414,10 @@ impl Renderer {
 impl TextMeasure for Renderer {
     fn measure_text(&mut self, text: &str, size: f32) -> [f32; 2] {
         self.ui.measure(text, size)
+    }
+
+    fn measure_wrapped(&mut self, text: &str, size: f32, width: f32) -> [f32; 2] {
+        self.ui.measure_wrapped(text, size, width)
     }
 }
 

@@ -15,6 +15,10 @@ use crate::ui::{Current, Menu, Widget};
 /// Window pixels moved per arrow-key press.
 const PAN_STEP: f32 = 64.0;
 
+/// How far one notch of the wheel scrolls a panel that has more to show than
+/// fits, in logical pixels: about three lines of it.
+const WHEEL_SCROLL_STEP: f32 = 48.0;
+
 /// Trackpad pixels that add up to one notch of the wheel. Wheels report whole
 /// lines and need no conversion; a trackpad reports the scroll it would have
 /// done, and this is what turns that into the same zoom increment.
@@ -34,6 +38,7 @@ pub enum Action {
     PreviousFile,
     ToggleInterface,
     ToggleHistogram,
+    ToggleInfo,
     ToggleMinimap,
     ToggleGrid,
     /// Exposure, by this many stops.
@@ -226,6 +231,12 @@ pub const KEYS: &[Binding] = &[
     },
     Binding {
         section: Section::Display,
+        shown: "i",
+        help: "Toggle the file information panel",
+        keys: &[(Char("i"), ToggleInfo), (Char("I"), ToggleInfo)],
+    },
+    Binding {
+        section: Section::Display,
         shown: "m",
         help: "Toggle the minimap",
         keys: &[(Char("m"), ToggleMinimap), (Char("M"), ToggleMinimap)],
@@ -285,6 +296,12 @@ pub(super) struct Pointer {
     pub(super) cursor: Option<[f32; 2]>,
     /// Whether the left button is down, which is what a drag is.
     pub(super) dragging: bool,
+    /// Set instead when the button went down on the info panel: the drag then
+    /// belongs to that column and moves it, wherever the pointer goes while
+    /// the button is held. Held apart from `dragging` so that a drag is one
+    /// thing or the other for as long as it lasts, rather than changing what
+    /// it moves the moment the pointer leaves the panel.
+    pub(super) scrolling: bool,
     /// Where the pointer was when the drag last moved the view. Held apart
     /// from `cursor` because a press can arrive before any motion has told us
     /// where the pointer is, and because leaving the window clears `cursor`
@@ -356,6 +373,7 @@ impl App {
                 self.panels.hover = None;
             }
             ToggleHistogram => self.press(Widget::Histogram),
+            ToggleInfo => self.press(Widget::Info),
             ToggleMinimap => self.press(Widget::Minimap),
             ToggleGrid => self.press(Widget::Grid),
             Exposure(stops) => {
@@ -435,6 +453,30 @@ impl App {
             return false;
         }
 
+        // The info panel floats over the image and inside the chrome, so it
+        // is asked before either: the press starts a drag of the column
+        // instead of one of the picture underneath. It can be on screen with
+        // the chrome hidden, so this is outside the test for that below.
+        if state == ElementState::Pressed
+            && let Some(panel) = self.pointer_over_info()
+        {
+            self.pointer.scrolling = true;
+            // As with a drag of the image: the first motion after the press
+            // establishes the point the drag is measured from.
+            self.pointer.drag_from = self.pointer.cursor;
+            // The closed hand is a promise that dragging will move something,
+            // so a column with nothing left to scroll does not make it.
+            let icon = if self.info_overflow(panel) > 0.0 {
+                CursorIcon::Grabbing
+            } else {
+                CursorIcon::Default
+            };
+            if let Some(window) = &self.window {
+                window.set_cursor(Cursor::Icon(icon));
+            }
+            return false;
+        }
+
         // The chrome gets first refusal. A press that lands on a panel is
         // aimed at the interface, so it neither reaches a widget's neighbour
         // nor starts a drag of the image underneath.
@@ -475,6 +517,7 @@ impl App {
         }
 
         self.pointer.dragging = state == ElementState::Pressed;
+        self.pointer.scrolling = false;
         self.pointer.drag_from = if self.pointer.dragging {
             self.pointer.cursor
         } else {
@@ -502,6 +545,22 @@ impl App {
         let was_over = self.pointer_pixel();
         self.pointer.cursor = Some(position);
         let moved_pixel = self.panels.show_ui && self.pointer_pixel() != was_over;
+        if self.pointer.scrolling {
+            let Some(from) = self.pointer.drag_from.replace(position) else {
+                // First motion of this drag: nothing to measure from yet.
+                return false;
+            };
+            // The words follow the pointer, as the image does under a pan, so
+            // dragging up runs down the column. Motion arrives in physical
+            // pixels and the column is laid out in logical ones.
+            let by = (from[1] - position[1]) / self.scale_factor();
+            let Some(panel) = self.info_panel() else {
+                return false;
+            };
+            // The readout in the bar is owed a redraw too, for a drag that
+            // has carried the pointer off the panel and onto the image.
+            return self.scroll_info_by(panel, by) || moved_pixel;
+        }
         if !self.pointer.dragging {
             // Nothing else to do out here, so this is where the button's
             // highlight gets to follow the pointer.
@@ -554,6 +613,7 @@ impl App {
             Widget::Minimap => self.panels.show_minimap = !self.panels.show_minimap,
             Widget::Histogram => self.panels.show_histogram = !self.panels.show_histogram,
             Widget::Grid => self.panels.show_grid = !self.panels.show_grid,
+            Widget::Info => self.panels.show_info = !self.panels.show_info,
             // Only ever opens one: the press that closes a menu is answered
             // by the menu itself, before the widgets underneath are asked.
             // A window with no room for the panel gets no menu rather than a
@@ -572,12 +632,38 @@ impl App {
         }
     }
 
+    /// Scrolls the info panel with the wheel.
+    ///
+    /// `None` when the pointer is not over the panel, and the wheel is the
+    /// image's to zoom with; `Some` when it is, whether or not the column
+    /// actually moved — a panel with nothing left to scroll to has still
+    /// taken the gesture, and must not hand a spin at its last line back to
+    /// the image underneath.
+    fn scroll_info(&mut self, delta: MouseScrollDelta) -> Option<bool> {
+        let panel = self.pointer_over_info()?;
+
+        // A wheel turned away from the reader moves the column up the panel,
+        // which is the scroll running down the text.
+        let by = match delta {
+            MouseScrollDelta::LineDelta(_, lines) => -lines * WHEEL_SCROLL_STEP,
+            MouseScrollDelta::PixelDelta(pixels) => -pixels.y as f32,
+        };
+        Some(self.scroll_info_by(panel, by))
+    }
+
     /// Returns `true` if the wheel changed anything on screen.
     pub(super) fn handle_wheel(&mut self, delta: MouseScrollDelta) -> bool {
         // Same reasoning as `handle_key`: Ctrl+wheel and friends belong to the
         // compositor, and acting on them as well would zoom behind its back.
         if self.pointer.chorded() {
             return false;
+        }
+
+        // The info panel takes the wheel while the pointer is over it: a
+        // column with more to say than fits is what a wheel is for, and the
+        // image behind the panel is not what the gesture was aimed at.
+        if let Some(scrolled) = self.scroll_info(delta) {
+            return scrolled;
         }
 
         let steps = match delta {

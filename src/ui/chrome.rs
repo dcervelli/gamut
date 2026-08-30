@@ -15,6 +15,8 @@ pub(crate) const SIDE_WIDTH: f32 = 50.0;
 
 /// The square buttons that live in the side panels.
 pub(super) const BUTTON_SIZE: f32 = 34.0;
+/// The gap between two buttons stacked down the same panel.
+const BUTTON_GAP: f32 = 8.0;
 /// The zoom readout at the right of the bottom bar, which is also the button
 /// that opens the zoom menu. Wide enough for the longest reading it takes.
 pub(super) const ZOOM_BUTTON: [f32; 2] = [58.0, 22.0];
@@ -47,7 +49,9 @@ pub struct Chrome {
     pub right: Rect,
     /// The minimap toggle, at the top of the left panel.
     pub minimap_button: Rect,
-    /// The histogram toggle, at the top of the right panel.
+    /// The info toggle, at the top of the right panel, and the histogram
+    /// toggle under it.
+    pub info_button: Rect,
     pub histogram_button: Rect,
     /// The zoom readout, at the right of the bottom bar. Fixed width rather
     /// than fitted to what it says, so that it neither moves as the zoom
@@ -71,8 +75,9 @@ impl Chrome {
         let bottom = Rect::new(0.0, size[1] - bar, size[0], bar);
 
         Self {
-            minimap_button: top_button(left),
-            histogram_button: top_button(right),
+            minimap_button: side_button(left, 0),
+            info_button: side_button(right, 0),
+            histogram_button: side_button(right, 1),
             zoom_button: bar_button(bottom, ZOOM_BUTTON),
             top,
             bottom,
@@ -137,6 +142,8 @@ impl Chrome {
     pub fn widget_at(&self, point: [f32; 2], grid_on: bool) -> Option<Widget> {
         if self.minimap_button.contains(point) {
             Some(Widget::Minimap)
+        } else if self.info_button.contains(point) {
+            Some(Widget::Info)
         } else if self.histogram_button.contains(point) {
             Some(Widget::Histogram)
         } else if self.grid_button(grid_on).contains(point) {
@@ -172,19 +179,22 @@ impl Chrome {
     }
 }
 
-/// A square button at the top of a side panel. The same inset on all four
-/// sides, so it reads as centred in the strip rather than merely fitted into
-/// it — until the strip is shorter than that, at which point it goes flush to
-/// the top.
-fn top_button(panel: Rect) -> Rect {
-    let size = BUTTON_SIZE.min(panel.width).min(panel.height);
+/// The `index`-th square button down a side panel, counting from the top.
+/// The inset that centres it across the strip is also the gap above the first
+/// one, so a column of buttons reads as set into the panel rather than as
+/// merely fitted to it.
+///
+/// Empty when the panel is too short for that many buttons — a window dragged
+/// down small loses them from the bottom up. Neither drawn nor pressable
+/// then: both go through the rectangle, and an empty one contains nothing.
+fn side_button(panel: Rect, index: usize) -> Rect {
+    let size = BUTTON_SIZE.min(panel.width);
     let inset = (panel.width - size) / 2.0;
-    Rect::new(
-        panel.x + inset,
-        panel.y + inset.min(panel.height - size),
-        size,
-        size,
-    )
+    let top = inset + index as f32 * (size + BUTTON_GAP);
+    if top + size > panel.height {
+        return Rect::new(panel.x, panel.y, 0.0, 0.0);
+    }
+    Rect::new(panel.x + inset, panel.y + top, size, size)
 }
 
 /// A button at the right-hand end of a bar, centred across it. Clamped to the
@@ -310,26 +320,50 @@ mod tests {
         assert!(button.y >= chrome.left.y);
         assert!(button.bottom() <= chrome.left.bottom());
 
-        // The two toggles are the same button on opposite strips, and each
-        // click lands on its own.
-        assert_eq!(button.width, chrome.histogram_button.width);
-        assert_eq!(button.y, chrome.histogram_button.y);
-        assert_eq!(
-            chrome.widget_at([button.x + 1.0, button.y + 1.0], false),
-            Some(Widget::Minimap)
-        );
-        assert_eq!(
-            chrome.widget_at(
-                [
-                    chrome.histogram_button.x + 1.0,
-                    chrome.histogram_button.y + 1.0
-                ],
-                false
-            ),
-            Some(Widget::Histogram)
-        );
+        // The minimap toggle and the first of the right-hand pair are the
+        // same button on opposite strips, and each click lands on its own.
+        assert_eq!(button.width, chrome.info_button.width);
+        assert_eq!(button.y, chrome.info_button.y);
+        for (widget, rect) in [
+            (Widget::Minimap, button),
+            (Widget::Info, chrome.info_button),
+            (Widget::Histogram, chrome.histogram_button),
+        ] {
+            assert_eq!(
+                chrome.widget_at([rect.x + 1.0, rect.y + 1.0], false),
+                Some(widget),
+                "{widget:?}"
+            );
+        }
         assert_eq!(
             chrome.widget_at([WINDOW[0] / 2.0, WINDOW[1] / 2.0], false),
+            None
+        );
+    }
+
+    /// The right panel holds a column of toggles, and a window too short for
+    /// one of them drops it rather than stacking it over its neighbour.
+    #[test]
+    fn the_side_toggles_stack_down_the_panel_and_stop_when_it_runs_out() {
+        let chrome = Chrome::new(WINDOW);
+        let (info, histogram) = (chrome.info_button, chrome.histogram_button);
+
+        assert_eq!(info.x, histogram.x);
+        assert!(info.bottom() <= histogram.y, "{info:?} over {histogram:?}");
+        assert!(histogram.bottom() <= chrome.right.bottom());
+        // Set into the panel by the same inset that centres them across it.
+        assert_eq!(info.y - chrome.right.y, info.x - chrome.right.x);
+
+        // A window with room for the first and not the second keeps the
+        // first, and the second is neither drawn nor pressable.
+        let short = Chrome::new([WINDOW[0], 2.0 * BAR_HEIGHT + BUTTON_SIZE + 16.0]);
+        assert_eq!(short.info_button.width, BUTTON_SIZE);
+        assert_eq!(short.histogram_button.width, 0.0);
+        assert_eq!(
+            short.widget_at(
+                [short.histogram_button.x, short.histogram_button.y],
+                false
+            ),
             None
         );
     }
@@ -358,6 +392,7 @@ mod tests {
             }
             for button in [
                 chrome.minimap_button,
+                chrome.info_button,
                 chrome.histogram_button,
                 chrome.grid_button(true),
                 chrome.grid_button(false),
