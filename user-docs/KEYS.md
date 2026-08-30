@@ -85,8 +85,8 @@ is somewhere to drag to.
 
 Most of what these keys reach can be set before the first file opens, which is
 what scripting wants and what comparing two files on equal terms needs:
-`--exposure`, `--window`, `--tone-map`, `--colormap`, `--upscale`,
-`--histogram` and `--minimap`.
+`--exposure`, `--window`, `--tone-map`, `--colormap`, `--upscale` and
+`--histogram`. The minimap starts on; `--no-minimap` starts without it.
 
 ## Keys that are deliberately ignored
 

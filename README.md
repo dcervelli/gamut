@@ -67,15 +67,20 @@ same pixels. A file of another size is a different picture, and is fitted.
 
 Every display control is also a start-up flag — `--colormap viridis`,
 `--tone-map neutral`, `--window minmax`, `--exposure -1.5`, `--histogram`,
-`--minimap` — which is handy for scripting and for comparing two files side by
-side.
+`--no-minimap` — which is handy for scripting and for comparing two files side
+by side.
 
 ## Minimap
 
-`m`, or the button at the top of the left strip, puts a thumbnail of the whole
-image in the top-left corner, with the part of it on screen picked out and
-the rest washed over. It is the map to read while zoomed in far enough that
-the image on screen no longer says where in the picture you are.
+The minimap is on unless `--no-minimap` turns it off. `m`, or the button at
+the top of the left strip, puts a thumbnail of the whole image in the top-left
+corner, with the part of it on screen picked out and the rest washed over. It
+is the map to read while zoomed in far enough that the image on screen no
+longer says where in the picture you are.
+
+On by default because it costs nothing until it is wanted: it stays off screen
+for as long as the whole image is in view, so the first zoom that cuts
+something off is the moment it appears, and that is the moment it is useful.
 
 It only appears while some of the image is off screen. A view holding all of
 it is already its own map, and the thumbnail would be a smaller copy of the
