@@ -4,6 +4,7 @@ mod app;
 mod image;
 mod loader;
 mod render;
+mod theme;
 mod timing;
 mod view;
 mod watch;

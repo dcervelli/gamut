@@ -108,6 +108,49 @@ A change is read only once the size and timestamp have held still for a whole
 interval, so a file caught halfway through being written is waited out rather
 than decoded and reported as corrupt.
 
+## Theme
+
+The interface takes its colours from the desktop rather than carrying its own.
+On [Omarchy](https://omarchy.org) the active theme is materialised as a
+palette file, and `src/theme.rs` reads it, resolves it, and derives the
+handful of roles the chrome actually needs — panel, hairline, primary and dim
+text, accent, the floating panel and the ink on it, the histogram's planes.
+Switching the desktop's theme is picked up on the same 250 ms poll as the file
+on screen, so an open window changes with everything else rather than staying
+in the theme it opened under.
+
+Off Omarchy there is nothing to read and nothing happens: the neutral dark set
+the interface was designed in is used instead. The same set fills in for a
+palette too sparse to build on, so a half-written theme degrades to something
+wearable rather than to black on black.
+
+The palette is not read literally. Omarchy resolves it through an alias and
+derivation cascade before any consumer sees it — short names, ANSI `color0`
+through `color15` in both directions, shades mixed out of the base colours —
+and a theme is free to define only one side of any of those pairs.
+`src/theme.rs` reimplements that cascade rather than shelling out to
+`omarchy-theme-color`, which would cost a process per read and is not there to
+be called on a machine that has no Omarchy on it. Its tests check the result
+against what that script prints for the same file, so the two cannot drift
+apart quietly.
+
+Two things resist being themed directly and are derived instead:
+
+* **The floating histogram panel stays dark whichever way round the theme
+  is.** The plot is drawn by screening the colour planes over one another, and
+  screening only reads on a dark ground. On a light theme the panel is mixed
+  out of the theme's *ink* rather than its background, and the label on it out
+  of the background — an inverted panel, which is the usual answer for a
+  tooltip over a light page.
+* **The colour planes are pulled towards their own primaries and then
+  balanced.** A palette's red is a pastel with green and blue in it, and three
+  pastels screened together climb towards white, which loses the overlaps the
+  plot exists to show. Each plane is scaled — whole, so the theme's hue
+  survives — until all three screened together land on a neutral mid grey. A
+  theme that names no colours keeps the planes the interface was designed
+  with, since one themed plane beside two default ones would read as three
+  unrelated colours.
+
 ## Colour management
 
 The one invariant everything else follows from:
@@ -232,8 +275,8 @@ glyphon has no idea what an HDR surface is.
 `UiFrame` is a display list, not a widget toolkit:
 
 ```rust
-frame.rounded_rect(Rect::new(x, y, w, h), 6.0, PANEL_BACKGROUND);
-frame.text([x, y], 13.0, TEXT_PRIMARY, "hello");
+frame.rounded_rect(Rect::new(x, y, w, h), 6.0, theme.panel_background);
+frame.text([x, y], 13.0, theme.text_primary, "hello");
 let width = renderer.measure_text("hello", 13.0)[0];   // for layout
 ```
 
@@ -263,6 +306,7 @@ anything having to notice that it should.
 | `src/app.rs` | Window lifecycle, key handling, building each frame's UI |
 | `src/view.rs` | Zoom / pan / fit geometry — pure maths |
 | `src/watch.rs` | Noticing that the file on screen has been rewritten |
+| `src/theme.rs` | Reading the desktop's palette, and the colours drawn from it |
 | `src/image/` | The data model: `Samples`, `ColorSpace`, stats, display state |
 | `src/image/decode/` | The decoder trait and its registry |
 | `src/render/` | Upload planning, the three layers, output selection |

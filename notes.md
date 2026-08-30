@@ -42,7 +42,6 @@ TODO:
   * EXIF
   * TIFF tags
   * Other?
-* UI theme colors
 * Docs
   * Usage
   * CLI

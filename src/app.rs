@@ -12,10 +12,11 @@ use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{Cursor, CursorIcon, Window, WindowId};
 
 use crate::image::display::{AutoWindow, Colormap, Display, Startup};
-use crate::image::stats::{BINS, COLOUR};
+use crate::image::stats::BINS;
 use crate::image::{DecodedImage, Stats, decode};
 use crate::loader::{Decoded, Loader, Opened, Ready, Reload, Request};
 use crate::render::{Backdrop, Blend, Color, HdrPreference, Rect, Renderer, UiFrame};
+use crate::theme::{self, Theme};
 use crate::timing;
 use crate::view::{Placement, Upscale, View, Viewport};
 use crate::watch::{self, Watch};
@@ -61,46 +62,18 @@ const HISTOGRAM_INSET: f32 = 10.0;
 /// boundary and coming out fatter than their neighbours.
 const HISTOGRAM_SIZE: [f32; 2] = [BINS as f32 + 2.0 * HISTOGRAM_INSET, 130.0];
 
-/// The panels are opaque, not a tint over the image: the image is fitted
-/// inside them rather than passing behind them, so there is nothing back
-/// there to show through. The same neutral fills the window behind the image,
-/// so the two never read as separate surfaces.
-const BAR_BACKGROUND: Color = Color::rgb(18, 18, 22);
-/// The hairline along a panel's inner edge, and the other square of the
-/// checkerboard behind the image. Far enough off the panel colour to place
-/// the edge, close enough that neither the line nor the checks become
-/// something the eye keeps going back to.
-const BORDER: Color = Color::rgb(38, 38, 46);
-/// The hairline's width, in logical pixels.
+/// Width of the hairline along a panel's inner edge, in logical pixels. What
+/// it is drawn in is the theme's `border`.
 const BORDER_WIDTH: f32 = 1.0;
 /// Side of one checkerboard square, in logical pixels. Small enough to read
 /// as a texture behind the image rather than as a pattern competing with it.
 const CHECKER_SQUARE: f32 = 8.0;
-const PANEL_BACKGROUND: Color = Color::rgba(12, 12, 16, 214);
-const BUTTON_IDLE: Color = Color::rgba(255, 255, 255, 20);
-const BUTTON_HOVER: Color = Color::rgba(255, 255, 255, 45);
-const TEXT_PRIMARY: Color = Color::rgb(238, 238, 238);
-const TEXT_DIM: Color = Color::rgb(150, 152, 160);
-const ACCENT: Color = Color::rgb(120, 180, 255);
-/// The minimap's border, and the wash over the part of the image that is not
-/// on screen. Both go over a thumbnail drawn by the image layer, so they are
-/// the only things in the interface that have to stay translucent.
-const MINIMAP_EDGE: Color = Color::rgba(255, 255, 255, 70);
-const MINIMAP_DIM: Color = Color::rgba(6, 6, 10, 150);
-// Histogram ink. The colour planes screen over one another, so overlaps come
-// out as the additive mix — red over green reads yellow, all three neutral —
-// the way a photo editor's RGB histogram does. Luminance goes underneath in
-// the neutral the rest of the panel uses.
-const HISTOGRAM_LUMA: Color = Color::rgba(150, 152, 160, 200);
 /// What the luminance plane drops to once colour planes are drawn over it.
 const HISTOGRAM_LUMA_UNDER: u8 = 110;
-// Dimmer than they look on their own: screening all three has to land on a
-// neutral grey rather than blowing out to white.
-const HISTOGRAM_PLANES: [Color; COLOUR] = [
-    Color::rgb(184, 44, 44),
-    Color::rgb(44, 170, 52),
-    Color::rgb(52, 100, 186),
-];
+/// How much of the accent is left behind a switched-on toggle. Enough to read
+/// as lit from across the window, little enough that the icon on top of it
+/// stays the thing being looked at.
+const ACTIVE_BUTTON_WASH: u8 = 64;
 
 /// The interface's toggles. One value rather than a flag each, so that
 /// hit-testing, hover and drawing all go through the same test.
@@ -302,6 +275,12 @@ pub struct App {
     view: View,
     /// The file on screen, watched for writes by anything else.
     watch: Watch,
+    /// The colours everything is drawn in, and the palette file they came
+    /// from, watched on the same cadence as the image: Omarchy rewrites it
+    /// wholesale when the desktop's theme changes, and the window should
+    /// follow rather than stay in the theme it opened under.
+    theme: Theme,
+    theme_watch: Watch,
     /// When to look at it next.
     next_poll: Instant,
     /// What the header said the first file's size was, so that the window can
@@ -371,6 +350,7 @@ impl App {
             upscale,
         } = options;
         let watch = Watch::new(&files[index]);
+        let theme_watch = theme::watch();
         let mut view = View::new();
         view.set_upscale(upscale);
         let count = files.len();
@@ -384,6 +364,8 @@ impl App {
             hdr,
             view,
             watch,
+            theme: Theme::detect(),
+            theme_watch,
             next_poll: Instant::now() + watch::INTERVAL,
             loader,
             window: None,
@@ -543,6 +525,19 @@ impl App {
         if self.pending.is_none() && self.watch.poll() {
             self.request(self.index, Reload::InPlace, None);
         }
+    }
+
+    /// Notices that the desktop's theme has changed. Returns whether the
+    /// window owes a redraw, which it does only when the new palette actually
+    /// resolves to different colours.
+    fn poll_theme(&mut self) -> bool {
+        if !self.theme_watch.poll() {
+            return false;
+        }
+        let theme = Theme::detect();
+        let changed = theme != self.theme;
+        self.theme = theme;
+        changed
     }
 
     /// What the window is called: the image on screen, or the file being read
@@ -1060,6 +1055,7 @@ impl App {
             },
             self.current.as_ref(),
             &self.view,
+            &self.theme,
         );
 
         let fallback = Display::default();
@@ -1070,8 +1066,8 @@ impl App {
             .unwrap_or(&fallback);
 
         let backdrop = Backdrop {
-            base: BAR_BACKGROUND,
-            alternate: BORDER,
+            base: self.theme.bar_background,
+            alternate: self.theme.border,
             square: CHECKER_SQUARE,
         };
 
@@ -1099,6 +1095,11 @@ impl ApplicationHandler<Decoded> for App {
         if now >= self.next_poll {
             self.next_poll = now + watch::INTERVAL;
             self.poll_file();
+            if self.poll_theme()
+                && let Some(window) = &self.window
+            {
+                window.request_redraw();
+            }
         }
 
         // Sleep until the next thing with a time on it: the file check, or the
@@ -1303,6 +1304,7 @@ fn build_ui(
     layout: Layout,
     current: Option<&Current>,
     view: &View,
+    theme: &Theme,
 ) -> UiFrame {
     let size = layout.logical;
     let mut frame = UiFrame::new();
@@ -1314,13 +1316,13 @@ fn build_ui(
         // the file being read where the image's own name will go.
         if layout.show_ui {
             for panel in [chrome.top, chrome.bottom, chrome.left, chrome.right] {
-                frame.rect(panel, BAR_BACKGROUND);
+                frame.rect(panel, theme.bar_background);
             }
             if let Some(Reading::File(name)) = &layout.pending {
                 frame.text_clipped(
                     [PADDING, text_baseline(chrome.top)],
                     TEXT_SIZE,
-                    TEXT_DIM,
+                    theme.text_dim,
                     (chrome.top.width - PADDING * 2.0).max(1.0),
                     format!("loading {name}"),
                 );
@@ -1331,20 +1333,20 @@ fn build_ui(
     let content = content_area(size, layout.show_ui);
 
     if layout.show_histogram {
-        draw_histogram(&mut frame, current, content);
+        draw_histogram(&mut frame, current, content, theme);
     }
     if layout.minimap {
-        draw_minimap(&mut frame, current, view, &layout, content);
+        draw_minimap(&mut frame, current, view, &layout, content, theme);
     }
     if !layout.show_ui {
         return frame;
     }
 
     for panel in [chrome.top, chrome.bottom, chrome.left, chrome.right] {
-        frame.rect(panel, BAR_BACKGROUND);
+        frame.rect(panel, theme.bar_background);
     }
     for border in chrome.borders() {
-        frame.rect(border, BORDER);
+        frame.rect(border, theme.border);
     }
 
     // Top panel: what the image is. Everything here is a property of the
@@ -1368,23 +1370,25 @@ fn build_ui(
     frame.text_clipped(
         [PADDING, top_baseline],
         TEXT_SIZE,
-        TEXT_PRIMARY,
+        theme.text_primary,
         (facts_x - PADDING * 2.0).max(1.0),
         top_label(&current.label, layout.pending.as_ref()),
     );
-    frame.text([facts_x, top_baseline], TEXT_SIZE, TEXT_DIM, facts);
+    frame.text([facts_x, top_baseline], TEXT_SIZE, theme.text_dim, facts);
 
     draw_minimap_button(
         &mut frame,
         chrome.minimap_button,
         layout.show_minimap,
         layout.hover == Some(Widget::Minimap),
+        theme,
     );
     draw_histogram_button(
         &mut frame,
         chrome.histogram_button,
         layout.show_histogram,
         layout.hover == Some(Widget::Histogram),
+        theme,
     );
 
     // Bottom panel: what is happening to the image. The pointer comes and
@@ -1403,12 +1407,12 @@ fn build_ui(
         frame.text_clipped(
             [PADDING, baseline],
             TEXT_SIZE,
-            TEXT_PRIMARY,
+            theme.text_primary,
             (right_x - PADDING * 2.0).max(1.0),
             format!("({x}, {y})"),
         );
     }
-    frame.text([right_x, baseline], TEXT_SIZE, TEXT_DIM, right);
+    frame.text([right_x, baseline], TEXT_SIZE, theme.text_dim, right);
     frame
 }
 
@@ -1454,13 +1458,19 @@ fn text_baseline(bar: Rect) -> f32 {
 
 /// The histogram toggle: a miniature of what it shows, rather than a letter,
 /// since the side panels are too narrow to label anything in words.
-fn draw_histogram_button(frame: &mut UiFrame, rect: Rect, active: bool, hover: bool) {
+fn draw_histogram_button(
+    frame: &mut UiFrame,
+    rect: Rect,
+    active: bool,
+    hover: bool,
+    theme: &Theme,
+) {
     // A window too small to hold the button gets no button, rather than a
     // smear of sub-pixel bars.
     if rect.width < BUTTON_SIZE {
         return;
     }
-    let (background, ink) = button_ink(active, hover);
+    let (background, ink) = button_ink(active, hover, theme);
     frame.rounded_rect(rect, 5.0, background);
 
     const BARS: [f32; 4] = [0.45, 1.0, 0.7, 0.3];
@@ -1579,11 +1589,11 @@ fn format_window(current: &Current) -> String {
 
 /// The minimap toggle: the panel itself in miniature, a frame for the image
 /// with the viewport sitting in a corner of it.
-fn draw_minimap_button(frame: &mut UiFrame, rect: Rect, active: bool, hover: bool) {
+fn draw_minimap_button(frame: &mut UiFrame, rect: Rect, active: bool, hover: bool, theme: &Theme) {
     if rect.width < BUTTON_SIZE {
         return;
     }
-    let (background, ink) = button_ink(active, hover);
+    let (background, ink) = button_ink(active, hover, theme);
     frame.rounded_rect(rect, 5.0, background);
 
     let icon = rect.inset(8.0, 10.0);
@@ -1601,11 +1611,11 @@ fn draw_minimap_button(frame: &mut UiFrame, rect: Rect, active: bool, hover: boo
 
 /// A toggle's background and ink. Active outranks hover: what is on says more
 /// than what the pointer happens to be over.
-fn button_ink(active: bool, hover: bool) -> (Color, Color) {
+fn button_ink(active: bool, hover: bool, theme: &Theme) -> (Color, Color) {
     match (active, hover) {
-        (true, _) => (ACCENT.with_alpha(64), ACCENT),
-        (false, true) => (BUTTON_HOVER, TEXT_PRIMARY),
-        (false, false) => (BUTTON_IDLE, TEXT_DIM),
+        (true, _) => (theme.accent.with_alpha(ACTIVE_BUTTON_WASH), theme.accent),
+        (false, true) => (theme.button_hover, theme.text_primary),
+        (false, false) => (theme.button_idle, theme.text_dim),
     }
 }
 
@@ -1722,12 +1732,13 @@ fn draw_minimap(
     view: &View,
     layout: &Layout,
     content: Rect,
+    theme: &Theme,
 ) {
     let image = current.size();
     let Some(rect) = minimap_rect(content, image) else {
         return;
     };
-    outline(frame, rect, 1.0, MINIMAP_EDGE);
+    outline(frame, rect, 1.0, theme.minimap_edge);
 
     let placement = view.placement(image, layout.viewport);
     let shown = snap_to_pixels(
@@ -1752,10 +1763,10 @@ fn draw_minimap(
         ),
     ] {
         if aside.width > 0.0 && aside.height > 0.0 {
-            frame.rect(aside, MINIMAP_DIM);
+            frame.rect(aside, theme.minimap_dim);
         }
     }
-    outline(frame, shown, 1.5, ACCENT);
+    outline(frame, shown, 1.5, theme.accent);
 }
 
 /// Draws the histogram in the bottom-right of `content`, the area the panels
@@ -1764,7 +1775,7 @@ fn draw_minimap(
 /// Colour images get four planes — red, green, blue and luminance — over the
 /// range their colour channels span; grey images keep the single luminance
 /// plane over theirs.
-fn draw_histogram(frame: &mut UiFrame, current: &Current, content: Rect) {
+fn draw_histogram(frame: &mut UiFrame, current: &Current, content: Rect, theme: &Theme) {
     // Rounded, so that the whole-pixel bin spacing starts on a pixel edge.
     let panel = Rect::new(
         (content.right() - HISTOGRAM_SIZE[0] - PADDING)
@@ -1776,7 +1787,7 @@ fn draw_histogram(frame: &mut UiFrame, current: &Current, content: Rect) {
         HISTOGRAM_SIZE[0],
         HISTOGRAM_SIZE[1],
     );
-    frame.rounded_rect(panel, 6.0, PANEL_BACKGROUND);
+    frame.rounded_rect(panel, 6.0, theme.panel_background);
 
     let plot = panel.inset(HISTOGRAM_INSET, HISTOGRAM_INSET);
     let label_height = TEXT_SIZE * 1.4;
@@ -1801,7 +1812,7 @@ fn draw_histogram(frame: &mut UiFrame, current: &Current, content: Rect) {
     frame.text(
         [plot.x, plot.y],
         TEXT_SIZE * 0.85,
-        TEXT_DIM,
+        theme.panel_text,
         format!(
             "{:.4}  \u{2013}  {:.4}",
             transfer.to_linear(axis_min),
@@ -1843,12 +1854,12 @@ fn draw_histogram(frame: &mut UiFrame, current: &Current, content: Rect) {
 
     // Dimmed only when it is a backdrop; on a grey image it is the plot.
     let luma_ink = if colour.is_empty() {
-        HISTOGRAM_LUMA
+        theme.histogram_luma
     } else {
-        HISTOGRAM_LUMA.with_alpha(HISTOGRAM_LUMA_UNDER)
+        theme.histogram_luma.with_alpha(HISTOGRAM_LUMA_UNDER)
     };
     frame.area(&curve(luma), bars.bottom(), luma_ink, Blend::Over);
-    for (counts, color) in colour.iter().zip(HISTOGRAM_PLANES) {
+    for (counts, color) in colour.iter().zip(theme.histogram_planes) {
         frame.area(&curve(counts), bars.bottom(), color, Blend::Screen);
     }
 
@@ -1865,7 +1876,7 @@ fn draw_histogram(frame: &mut UiFrame, current: &Current, content: Rect) {
                     1.5,
                     bars.height,
                 ),
-                ACCENT,
+                theme.accent,
             );
         }
     }
