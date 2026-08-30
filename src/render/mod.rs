@@ -26,6 +26,7 @@ use anyhow::{Context, Result, anyhow};
 use winit::window::Window;
 
 use crate::image::{DecodedImage, display::Display};
+use crate::timing;
 use crate::view::Placement;
 
 pub use composite::Backdrop;
@@ -34,6 +35,7 @@ pub use ui::{Blend, Color, Rect, UiFrame};
 
 use composite::Composite;
 use image_layer::{Draw, ImageLayer};
+pub use image_layer::{GpuImage, Upload};
 use ui::UiRenderer;
 use upload::Capabilities;
 
@@ -160,23 +162,32 @@ impl Renderer {
             .bind_targets(&self.device, &self.targets.image, &self.targets.ui);
     }
 
-    /// Uploads `image`, replacing whatever was shown before. Returns a note
-    /// when the device forced a lossy storage format.
+    /// Uploads `image` and puts it on screen, replacing whatever was there.
+    /// Returns a note when the device forced a lossy storage format.
+    ///
+    /// The synchronous path, for the file named on the command line: it is
+    /// already decoded by the time the window exists, and there is nothing on
+    /// screen yet for the wait to interrupt. Everything opened afterwards
+    /// goes through [`Renderer::uploader`] instead.
     pub fn set_image(&mut self, image: &DecodedImage) -> Result<Option<&'static str>> {
-        let limit = self.device.limits().max_texture_dimension_2d;
-        if image.width > limit || image.height > limit {
-            return Err(anyhow!(
-                "{}x{} exceeds this GPU's {limit}x{limit} texture limit",
-                image.width,
-                image.height
-            ));
-        }
+        let uploaded = self.uploader().run(image)?;
+        Ok(self.install_image(uploaded))
+    }
+
+    /// A handle for uploading images from another thread. Safe to keep: it
+    /// holds the device, the queue and the bind group layout, all of which
+    /// outlive any one image.
+    pub fn uploader(&self) -> Upload {
         self.image_layer
-            .set_image(&self.device, &self.queue, image, self.capabilities)?;
-        Ok(self
-            .image_layer
-            .current()
-            .and_then(|image| image.precision_note))
+            .uploader(&self.device, &self.queue, self.capabilities)
+    }
+
+    /// Puts an image uploaded elsewhere on screen, returning its precision
+    /// note. Cheap: the pixels are already across, and this is the swap.
+    pub fn install_image(&mut self, image: GpuImage) -> Option<&'static str> {
+        let note = image.precision_note;
+        self.image_layer.install(image);
+        note
     }
 
     /// The texture format the current image ended up in, for the UI to report.
@@ -312,6 +323,13 @@ impl Renderer {
         self.queue.submit(Some(encoder.finish()));
         self.queue.present(surface_texture);
         self.ui.trim();
+        // Here rather than at the call site because the paths above that give
+        // up on acquiring a surface texture also return `Ok`, and a frame that
+        // was never drawn is not the frame anyone is timing. Handing it to the
+        // presentation engine is as close to "on screen" as this side gets.
+        if self.image_layer.current().is_some() {
+            timing::first_image_frame();
+        }
         Ok(())
     }
 }

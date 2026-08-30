@@ -45,6 +45,26 @@ impl super::Decoder for Webp {
         is_webp(header)
     }
 
+    fn dimensions(&self, source: &mut dyn super::ReadSeek) -> Result<Option<(u32, u32)>> {
+        let mut decoder =
+            WebPDecoder::new(BufReader::new(source)).context("reading the WebP container")?;
+        let (width, height) = decoder.dimensions();
+        // A quarter turn swaps them, exactly as `reorient` will once the
+        // pixels are read. Reporting the stored size for a rotated file would
+        // open the window in the wrong shape.
+        let orientation = decoder
+            .exif_metadata()
+            .context("reading the EXIF chunk")?
+            .as_deref()
+            .and_then(Orientation::from_exif_chunk)
+            .unwrap_or(Orientation::NoTransforms);
+        Ok(Some(if quarter_turn(orientation) {
+            (height, width)
+        } else {
+            (width, height)
+        }))
+    }
+
     fn decode(
         &self,
         source: &mut dyn super::ReadSeek,
@@ -120,6 +140,18 @@ impl super::Decoder for Webp {
 /// "unsupported image format".
 fn is_webp(header: &[u8]) -> bool {
     header.len() >= 12 && &header[..4] == b"RIFF" && &header[8..12] == b"WEBP"
+}
+
+/// Whether an orientation turns the image on its side, and so swaps its
+/// width and height.
+fn quarter_turn(orientation: Orientation) -> bool {
+    matches!(
+        orientation,
+        Orientation::Rotate90
+            | Orientation::Rotate270
+            | Orientation::Rotate90FlipH
+            | Orientation::Rotate270FlipH
+    )
 }
 
 /// Applies the EXIF orientation, returning the buffer and the dimensions the

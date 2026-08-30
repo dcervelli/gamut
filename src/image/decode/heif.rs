@@ -41,6 +41,25 @@ fn lib_heif() -> &'static LibHeif {
 
 pub struct Heif;
 
+/// Reads the container's structure — its boxes, not its pixels — which is
+/// enough to ask what the image is before deciding to decode it.
+fn container<'a>(source: &'a mut dyn super::ReadSeek) -> Result<HeifContext<'a>> {
+    let length = source.seek(SeekFrom::End(0))?;
+    source.seek(SeekFrom::Start(0))?;
+
+    // Raise the stock limits to the same ceiling the other decoders use, so
+    // one format is not quietly stricter than another.
+    let mut limits = SecurityLimits::new();
+    limits.set_max_image_size_pixels(MAX_PIXELS);
+    limits.set_max_memory_block_size(super::MAX_DECODED_BYTES);
+    limits.set_max_total_memory(super::MAX_DECODED_BYTES);
+
+    let mut context = HeifContext::new()?;
+    context.set_security_limits(&limits)?;
+    context.read_reader(Box::new(StreamReader::new(source, length)))?;
+    Ok(context)
+}
+
 impl super::Decoder for Heif {
     fn name(&self) -> &'static str {
         "heif/heic/avif"
@@ -54,6 +73,14 @@ impl super::Decoder for Heif {
         is_heif(header)
     }
 
+    fn dimensions(&self, source: &mut dyn super::ReadSeek) -> Result<Option<(u32, u32)>> {
+        // The handle's size is the size after any rotation the container asks
+        // for — `libheif` accounts for that itself, which is why nothing here
+        // has to swap anything the way the WebP decoder does.
+        let handle = container(source)?.primary_image_handle()?;
+        Ok(Some((handle.width(), handle.height())))
+    }
+
     fn decode(
         &self,
         source: &mut dyn super::ReadSeek,
@@ -63,20 +90,7 @@ impl super::Decoder for Heif {
         // by the time one is asked for.
         let lib = lib_heif();
 
-        let length = source.seek(SeekFrom::End(0))?;
-        source.seek(SeekFrom::Start(0))?;
-
-        // Raise the stock limits to the same ceiling the other decoders use,
-        // so one format is not quietly stricter than another.
-        let mut limits = SecurityLimits::new();
-        limits.set_max_image_size_pixels(MAX_PIXELS);
-        limits.set_max_memory_block_size(super::MAX_DECODED_BYTES);
-        limits.set_max_total_memory(super::MAX_DECODED_BYTES);
-
-        let mut context = HeifContext::new()?;
-        context.set_security_limits(&limits)?;
-        context.read_reader(Box::new(StreamReader::new(source, length)))?;
-
+        let context = container(source)?;
         let handle = context.primary_image_handle()?;
         let (width, height) = (handle.width(), handle.height());
         // Caught here rather than by `DecodedImage::validate`, because the

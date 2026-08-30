@@ -83,16 +83,21 @@ impl super::Decoder for Ico {
         offset as u64 >= (DIRECTORY + ENTRY * count as usize) as u64
     }
 
+    fn dimensions(&self, source: &mut dyn super::ReadSeek) -> Result<Option<(u32, u32)>> {
+        // The directory states each entry's size, so the one we are going to
+        // show can be measured without unpacking it.
+        let entries = directory(source)?;
+        let chosen = choose(&entries);
+        Ok(Some((chosen.width as u32, chosen.height as u32)))
+    }
+
     fn decode(
         &self,
         source: &mut dyn super::ReadSeek,
         _overrides: super::Overrides,
     ) -> Result<DecodedImage> {
         let entries = directory(source)?;
-        let chosen = entries
-            .iter()
-            .max_by_key(|entry| (entry.width as u32 * entry.height as u32, entry.depth))
-            .expect("the directory is never empty");
+        let chosen = choose(&entries);
 
         let payload = payload(source, chosen)?;
 
@@ -119,6 +124,16 @@ struct Entry {
     raw: [u8; ENTRY],
     offset: u32,
     length: u32,
+}
+
+/// The entry to show: the largest, and the deepest of any that tie. An icon
+/// file is one image at several sizes, and the biggest is the one worth the
+/// screen it is being given.
+fn choose(entries: &[Entry]) -> &Entry {
+    entries
+        .iter()
+        .max_by_key(|entry| (entry.width as u32 * entry.height as u32, entry.depth))
+        .expect("the directory is never empty")
 }
 
 impl std::fmt::Display for Entry {

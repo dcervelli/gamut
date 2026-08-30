@@ -5,7 +5,6 @@ README:
 * No main thread work
 
 TODO:
-
 * Clean steps on zoom
 * Logging
   * ICO → largest image chosen
@@ -23,8 +22,9 @@ TODO:
   * Pixel color
 * Changable background
   * Color picker
-* Sane keys 
+* Sane keys
 * Formats
+  * PPM
   * BMP
   * DNG
   * Other raw files
@@ -32,8 +32,10 @@ TODO:
   * SVG rasterizer?
 * Scan directory for image with/without -r
 * If window is small, auto hide side panels
-* Basic modifications
+* Modifications
+  * 90° rotations
   * Crop to region
+  * Gamma
 * Wayland app_id
 * Security pass
 * Info
@@ -42,4 +44,9 @@ TODO:
   * Other?
 * UI theme colors
 * Docs
+  * Usage
+  * CLI
+  * Man page
 * For the filename, if all files are in the same directory, just display the file name; if not, display a minimum disambiguated file path.
+* File list/filmstrip
+* Ctrl+P to open file

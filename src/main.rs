@@ -2,7 +2,9 @@
 
 mod app;
 mod image;
+mod loader;
 mod render;
+mod timing;
 mod view;
 mod watch;
 
@@ -16,6 +18,7 @@ use app::{App, Options};
 use image::decode::Overrides;
 use image::display::{AutoWindow, Colormap, Startup, ToneMap};
 use image::{Primaries, Transfer};
+use loader::Loader;
 use render::HdrPreference;
 use view::Upscale;
 
@@ -74,8 +77,9 @@ DISPLAY KEYS:
 ";
 
 fn main() -> ExitCode {
+    timing::begin();
     match run() {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(code) => code,
         Err(error) => {
             eprintln!("image-view: {error:#}");
             ExitCode::FAILURE
@@ -83,40 +87,53 @@ fn main() -> ExitCode {
     }
 }
 
-fn run() -> Result<()> {
+fn run() -> Result<ExitCode> {
     let Some(args) = parse_args()? else {
-        return Ok(());
+        return Ok(ExitCode::SUCCESS);
     };
 
-    // Decode up front, so a bad path or unsupported format is a plain
-    // command-line error rather than an empty window. With several files,
-    // step over the ones that fail exactly as `n` and `p` do later, rather
-    // than refusing to start because the first of thirty is broken.
-    let (index, first) = open_first(&args.files, args.options.overrides)?;
+    // Only the header, which is cheap for every format we read. A bad path or
+    // an unsupported format is still a plain command-line error rather than a
+    // window that opens and closes, and the size it reports opens the window
+    // at the right shape — but the pixels are left to the loader thread, so
+    // that a large file no longer holds the window shut while it is read.
+    let (index, size) = first_readable(&args.files)?;
 
-    let event_loop = EventLoop::new()?;
+    // With a user event: it is how the loader hands finished images back, and
+    // how it wakes a loop that is otherwise asleep between one file check and
+    // the next.
+    let event_loop = EventLoop::<loader::Decoded>::with_user_event().build()?;
     event_loop.set_control_flow(ControlFlow::Wait);
-    let mut app = App::new(args.files, index, first, args.options);
+    let loader = Loader::new(event_loop.create_proxy());
+    let mut app = App::new(args.files, index, size, args.options, loader);
     event_loop.run_app(&mut app)?;
-    Ok(())
+
+    // Every file passed the header check and then failed to decode. Each
+    // failure was reported as it happened, so the status is all that is left
+    // to say.
+    Ok(if app.showed_nothing() {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    })
 }
 
-/// The first file that decodes, and where in the list it was. Fails only if
-/// none of them do, reporting the first file's error since that is the one
-/// the user most likely meant.
-fn open_first(files: &[PathBuf], overrides: Overrides) -> Result<(usize, image::DecodedImage)> {
+/// The first file whose header can be read, where in the list it was, and the
+/// size it claims to be. Fails only if none of them can be read, reporting the
+/// first file's error since that is the one the user most likely meant.
+fn first_readable(files: &[PathBuf]) -> Result<(usize, Option<[f32; 2]>)> {
     let mut skipped = Vec::new();
     for (index, path) in files.iter().enumerate() {
-        match image::decode::load(path, overrides) {
-            Ok(image) => {
+        match image::decode::probe(path) {
+            Ok(size) => {
                 // Worth mentioning only once we know we are carrying on
-                // without them. If nothing loads at all, the error we return
-                // is reported by `main`, and saying it here as well would
-                // print it twice.
+                // without them. If nothing can be read at all, the error we
+                // return is reported by `main`, and saying it here as well
+                // would print it twice.
                 for problem in &skipped {
                     eprintln!("image-view: {problem:#}");
                 }
-                return Ok((index, image));
+                return Ok((index, size.map(|(w, h)| [w as f32, h as f32])));
             }
             Err(error) => skipped.push(error),
         }

@@ -62,6 +62,15 @@ impl super::Decoder for ImageRs {
             || header.starts_with(b"\x76\x2f\x31\x01")
     }
 
+    fn dimensions(&self, source: &mut dyn super::ReadSeek) -> Result<Option<(u32, u32)>> {
+        // The same guess `decode` makes, stopped at the header. Both of the
+        // special paths below end up at the size stated there: an Ultra HDR
+        // JPEG is reconstructed onto its own base image, and the PNG path
+        // differs only in which chunks it reads on the way past.
+        let reader = ::image::ImageReader::new(BufReader::new(source)).with_guessed_format()?;
+        Ok(Some(reader.into_dimensions()?))
+    }
+
     fn decode(
         &self,
         source: &mut dyn super::ReadSeek,

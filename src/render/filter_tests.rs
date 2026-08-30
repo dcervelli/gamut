@@ -62,9 +62,11 @@ fn draw(gpu: &Gpu, image: &DecodedImage, target: [u32; 2], placement: Placement)
 /// As [`draw`], for the frames that put down the minimap's thumbnail as well.
 fn draw_all(gpu: &Gpu, image: &DecodedImage, target: [u32; 2], quads: Draw) -> Vec<[f32; 4]> {
     let mut layer = ImageLayer::new(&gpu.device, WORKING_FORMAT);
-    layer
-        .set_image(&gpu.device, &gpu.queue, image, gpu.capabilities)
+    let uploaded = layer
+        .uploader(&gpu.device, &gpu.queue, gpu.capabilities)
+        .run(image)
         .expect("the image uploads");
+    layer.install(uploaded);
 
     let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
         label: Some("filter test target"),

@@ -11,7 +11,7 @@
 
 use std::path::PathBuf;
 
-use super::{Overrides, load, supported_extensions};
+use super::{Overrides, load, probe, supported_extensions};
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
 
 /// Centre of each quadrant, in the order the expectation tables use.
@@ -1019,6 +1019,30 @@ fn expected(tone: Tone, coverage: Coverage) -> [[f32; 4]; 4] {
         quadrant[3] = alpha;
     }
     quadrants
+}
+
+#[test]
+/// The window opens at the size the probe reports, before a single pixel has
+/// been decoded — so a probe that disagrees with its own decoder opens the
+/// window in the wrong shape. Anything the header will not say is `None` and
+/// falls back to a default, which is fine; saying the wrong thing is not.
+fn every_fixture_probes_to_the_size_it_decodes_to() {
+    for fixture in FIXTURES {
+        let path = directory().join(fixture.file);
+        let image = load(&path, Overrides::default())
+            .unwrap_or_else(|error| panic!("{}: {error:#}", fixture.file));
+        let probed = probe(&path).unwrap_or_else(|error| panic!("{}: {error:#}", fixture.file));
+
+        if let Some(size) = probed {
+            assert_eq!(
+                size,
+                (image.width, image.height),
+                "{} ({}) probes to a different size than it decodes to",
+                fixture.file,
+                fixture.covers
+            );
+        }
+    }
 }
 
 #[test]
