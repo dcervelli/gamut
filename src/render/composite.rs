@@ -5,7 +5,13 @@
 use bytemuck::{Pod, Zeroable};
 
 use super::output::Output;
+use super::ui::Color;
 use crate::image::display::{Colormap, Display};
+use crate::view::Placement;
+
+/// The most regions the checkerboard can be cut into: the image, and the
+/// minimap's thumbnail.
+const REGIONS: usize = 2;
 
 /// Layout must match `struct Params` in shaders/composite.wgsl.
 #[repr(C)]
@@ -14,7 +20,24 @@ struct Params {
     tone_map: u32,
     encoding: u32,
     white_scale: f32,
-    _pad: f32,
+    checker: f32,
+    base: [f32; 4],
+    alternate: [f32; 4],
+    regions: [[f32; 4]; REGIONS],
+}
+
+/// What is behind the image: the interface's own colour everywhere, turning
+/// into a checkerboard of it and `alternate` wherever an image is drawn, so
+/// that transparency reads as transparency rather than as dark pixels.
+///
+/// The colours come from the interface rather than being chosen here, so that
+/// the backdrop and the panels around it cannot drift apart.
+#[derive(Clone, Copy)]
+pub struct Backdrop {
+    pub base: Color,
+    pub alternate: Color,
+    /// Side of one square, in logical pixels.
+    pub square: f32,
 }
 
 pub struct Composite {
@@ -146,7 +169,17 @@ impl Composite {
         }));
     }
 
-    pub fn prepare(&self, queue: &wgpu::Queue, display: &Display, output: &Output) {
+    /// `regions` is where the checkerboard shows: the image quads this frame
+    /// draws, and nothing at all on a frame with no image on screen.
+    pub fn prepare(
+        &self,
+        queue: &wgpu::Queue,
+        display: &Display,
+        output: &Output,
+        backdrop: Backdrop,
+        scale: f32,
+        regions: [Option<Placement>; REGIONS],
+    ) {
         // False colour is already display-referred: a tone curve on top of a
         // colormap would distort the mapping the viewer is reading values off.
         let tone_map = if display.colormap == Colormap::Gray {
@@ -155,6 +188,18 @@ impl Composite {
             0
         };
 
+        // A region that is not drawn stays the empty rectangle it starts as,
+        // which the shader's half-open test never matches.
+        let mut bounds = [[0.0f32; 4]; REGIONS];
+        for (slot, region) in bounds.iter_mut().zip(regions.into_iter().flatten()) {
+            *slot = [
+                region.x,
+                region.y,
+                region.x + region.width,
+                region.y + region.height,
+            ];
+        }
+
         queue.write_buffer(
             &self.params,
             0,
@@ -162,7 +207,10 @@ impl Composite {
                 tone_map,
                 encoding: output.encoding,
                 white_scale: 1.0,
-                _pad: 0.0,
+                checker: (backdrop.square * scale).max(1.0),
+                base: backdrop.base.to_linear(),
+                alternate: backdrop.alternate.to_linear(),
+                regions: bounds,
             }),
         );
     }

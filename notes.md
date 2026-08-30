@@ -23,7 +23,6 @@ TODO:
   * Pixel color
 * Changable background
   * Color picker
-  * Checkerboard for alpha
 * Sane keys 
 * Formats
   * GIF
