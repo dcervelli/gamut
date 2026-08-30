@@ -355,10 +355,48 @@ half-way through. A column with nothing left to scroll to still takes the
 gesture rather than handing it back, and makes no closed hand for a drag that
 would move nothing.
 
+What it says comes from two places. The file's own facts — its name, its
+path, when it was written and how large it is — are one `stat` taken as the
+image goes on screen. The rest is its EXIF, read by `src/image/exif.rs` on the
+loader thread beside the decode, because it is one more parse of a file
+somebody else chose the bytes of and that is the thread with the panic guard
+around it. What comes back is already words: a summary of the fields a
+photograph is read by — camera, lens, when, the exposure as one line, the
+focal length with its equivalent, the coordinates in degrees a map will take —
+and then every other field the file carries, in the order it carries them.
+Nothing there is a tag number or an offset by the time the interface sees it.
+
+Three things had to be decided rather than read. Numbers are rewritten to the
+digits they are worth: a file storing an aperture as 89/50 means exactly 1.78,
+and quoting it back as f/1.7799999713880652 says only that a rational went
+through binary floating point. Bulk values are left out — a maker note or a
+table of strip offsets is a fact about the file's layout, not about the
+photograph, and rendering one costs the memory of the string as well as the
+room. And a TIFF is read as a prefix rather than as a file: a TIFF *is* its
+own metadata block, with no chunk to seek to, so the parser reads the whole of
+whatever it is handed and an elevation model would be pulled into memory for a
+date. What it is handed is the first 8 MB, which is enough because of where a
+directory goes — a 443 MB scanned map keeps its first directory at byte 8 with
+every value inside the first 10 kB, which is what any writer that means the
+file to be read out of order does, and the fields come back in four
+milliseconds. Offsets that run past the prefix are expected rather than
+exceptional, so the parse is asked to continue through them and hand back what
+it did read. Every other container carries the block in a chunk that is found
+by scanning headers, and costs a few hundred microseconds.
+
+Taking the block from the decode instead was the obvious other answer, and it
+is worse. The decoders that could give one cheaply — WebP already reads it for
+the orientation, JPEG holds the file whole — are the ones that cost nothing to
+re-read. The one that would benefit cannot: the TIFF decoder has the directory
+parsed, but the crate behind it will not follow the sub-directory pointers the
+exposure, the lens and the coordinates live behind, so a camera TIFF would
+come back with less than a second read gets, and its values would arrive as
+numbers needing a second renderer to say what they mean.
+
 It is the one part of the interface with more to say than fits, and so the
-only part that scrolls. Its column is laid out in full every frame — the file's name, path, size and date, then the body
-text — and the scroll is subtracted from each row's place down it, which
-leaves rows lying above and below the panel. Nothing here clips them: the text
+only part that scrolls. Its column is laid out in full every frame and the
+scroll is subtracted from each row's place down it, which leaves rows lying
+above and below the panel. Nothing here clips them: the text
 layer takes a rectangle to cut the glyphs to, which glyphon trims the quad and
 its texture coordinates against together, so a line sliding under the panel's
 edge is drawn as much of a line as is still inside. Measuring a paragraph

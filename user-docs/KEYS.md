@@ -61,9 +61,19 @@ top of a colormap would distort the values you are reading off it.
 The panels are opaque and the image is fitted inside them, so hiding them
 gives a fitted image more room and it re-fits immediately.
 
-The file information sits down the right of the image: what the file is
-called, where it is, how large the image is, and when the file was last
-written and to what size. Its dates are in UTC. Where it has more to say than
+The file information sits down the right of the image. It opens with the file
+itself — what it is called, where it is, how large the image is, and when the
+file was last written and to what size — and then, for a file that carries
+any, what its metadata says: the camera and lens, when the photograph was
+taken, the exposure it was made at, the focal length, and where the camera
+was. Everything else the metadata holds is listed under that, field by field,
+as the file gives it.
+
+The file's own date is in UTC; the date the photograph was taken is whatever
+the camera recorded, with the offset from UTC it was set to where it recorded
+one. Metadata is read from JPEG, TIFF, PNG, WebP and HEIF files. In a TIFF it is
+looked for at the front of the file, which is where it is written; a TIFF that
+keeps it somewhere else, past the first few megabytes, shows none. Where it has more to say than
 fits, the wheel scrolls it — point at the panel rather than at the image, and
 the wheel moves the words instead of the zoom. Dragging the panel scrolls it
 as well, the words following the pointer the way the image does under a pan.

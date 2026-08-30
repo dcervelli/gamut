@@ -17,6 +17,7 @@ mod pixel;
 mod status;
 
 use crate::image::display::Display;
+use crate::image::exif::Exif;
 use crate::image::stats::BINS;
 use crate::image::{DecodedImage, Stats};
 use crate::render::{Backdrop, Rect, TextMeasure, UiFrame};
@@ -72,6 +73,8 @@ pub struct Current {
     pub label: String,
     /// What the file it came from says about itself, for the info panel.
     pub file: FileFacts,
+    /// And what its metadata says about the photograph, if it carries any.
+    pub exif: Exif,
     /// What the GPU actually stored it as, which is not always what we asked.
     pub stored: Option<String>,
 }

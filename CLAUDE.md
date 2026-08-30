@@ -32,6 +32,7 @@ image/         the data model, nothing GPU
   mod.rs         Channels, Samples, AlphaMode, DecodedImage, Sample (one pixel read back)
   color/         Transfer, Primaries, ColorSpace; icc.rs and cicp.rs translate what files say into them
   stats.rs       the scan an image gets on load: min/max, histogram, plot
+  exif.rs        the file's own metadata, read and rendered for the info panel
   display.rs     Display: window, exposure, tone map, colormap — uniform state, never re-decodes;
                  map() and the CPU twins of the shaders' tone curves and colormaps
   decode/        Decoder trait + DECODERS registry in mod.rs; one file per format; limits.rs the size ceiling;
@@ -54,7 +55,7 @@ render/        the GPU
 | A status-bar segment | `ui/status.rs`; the pointer's pixel readout is `ui/pixel.rs` |
 | What a pixel reads as under the pointer | `image/mod.rs::sample` for what the file holds, `image/display.rs::map` for what the screen shows |
 | A panel or overlay | a new `ui/<name>.rs` and one call in `ui/mod.rs::build_frame`; a new colour role goes in `theme/mod.rs` |
-| What the info panel says about a file | `ui/info.rs`; anything it has to read off disk is gathered in `app/mod.rs::file_facts` |
+| What the info panel says about a file | `ui/info.rs` for the layout; the file's own facts are gathered in `app/mod.rs::file_facts` and its metadata in `image/exif.rs` |
 | A popup menu | a `Menu` variant in `ui/menu.rs` with its choices, `items`/`grid`/`choose` arms and a `draw` arm; `Chrome::popup` places it, `App::press` opens it |
 | A CLI flag | `cli.rs`, and the `Options` / `Startup` / `Overrides` field it sets |
 | An image format | `image/decode/<fmt>.rs` implementing `Decoder`, one line in `DECODERS`, a fixture in `test_images/` (see its README and `generate.sh`) |

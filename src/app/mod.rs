@@ -378,7 +378,12 @@ impl App {
     /// Puts a finished read on screen. Returns `false` if the upload failed,
     /// which leaves the current image where it is.
     fn apply(&mut self, file: Opened, ready: Ready) -> bool {
-        let Ready { image, stats, gpu } = ready;
+        let Ready {
+            image,
+            stats,
+            exif,
+            gpu,
+        } = ready;
         let size = [image.width as f32, image.height as f32];
         // Images of the same size are almost always a set to be compared —
         // frames of a sequence, or one exposure against another — and there
@@ -444,6 +449,7 @@ impl App {
             display,
             label: file_label(&file.path),
             file: file_facts(&file.path),
+            exif,
             stored,
         });
         if let Some(window) = &self.window {
@@ -772,7 +778,7 @@ mod tests {
     use std::path::Path;
 
     use super::*;
-    use crate::image::Stats;
+    use crate::image::{Stats, exif};
 
     const WINDOW: [f32; 2] = [1000.0, 700.0];
     /// The same window with nothing taken out of it, for the tests that are
@@ -862,6 +868,7 @@ mod tests {
         let watch = Watch::new(&path);
         let outcome = decode::load(&path, app.files.overrides()).map(|image| Ready {
             stats: Stats::scan(&image),
+            exif: exif::Exif::read(&path),
             image,
             gpu: None,
         });
@@ -931,6 +938,7 @@ mod tests {
             },
             outcome: Ok(Ready {
                 stats: Stats::scan(&image),
+                exif: exif::Exif::default(),
                 image,
                 gpu: None,
             }),

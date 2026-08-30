@@ -9,7 +9,7 @@
 
 use std::time::SystemTime;
 
-use crate::render::{Rect, TextMeasure, UiFrame};
+use crate::render::{Color, Rect, TextMeasure, UiFrame};
 use crate::theme::Theme;
 
 use super::histogram::HISTOGRAM_SIZE;
@@ -25,10 +25,12 @@ const INFO_MIN_HEIGHT: f32 = 120.0;
 /// which.
 const LABEL_SIZE: f32 = TEXT_SIZE * 0.85;
 
-/// The space above a field's name, and above a paragraph. Enough that a name
-/// reads as belonging to the value under it rather than to the one above.
+/// The space above a field's name. Enough that a name reads as belonging to
+/// the value under it rather than to the one above.
 const FIELD_GAP: f32 = 10.0;
-const PARAGRAPH_GAP: f32 = 12.0;
+/// The space above a section's name, which has to part two sections more
+/// plainly than a field parts two fields.
+const SECTION_GAP: f32 = 22.0;
 /// The space between a field's name and its value, which is only enough to
 /// keep the two lines apart.
 const LABEL_GAP: f32 = 2.0;
@@ -56,13 +58,36 @@ pub struct FileFacts {
     pub modified: Option<SystemTime>,
 }
 
-/// Placeholder body text, until there is something real to put here.
-const LOREM: [&str; 4] = [
-    "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.",
-    "Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.",
-    "Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo.",
-    "Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt.",
-];
+/// What a row of the column is, which is what it is drawn as: the name of a
+/// section, the name of a field, or what that field says.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Kind {
+    Heading,
+    Label,
+    Value,
+}
+
+impl Kind {
+    /// The size it is written at, and the space above it. A section is set
+    /// off from the one before it, a name sits close to the value under it.
+    fn style(self) -> (f32, f32) {
+        match self {
+            Kind::Heading => (TEXT_SIZE, SECTION_GAP),
+            Kind::Label => (LABEL_SIZE, FIELD_GAP),
+            Kind::Value => (TEXT_SIZE, LABEL_GAP),
+        }
+    }
+
+    fn ink(self, theme: &Theme) -> Color {
+        // The panel is the bars' own ground, so the words on it are the bars'
+        // own ink; a heading is the one thing on it that is picked out.
+        match self {
+            Kind::Heading => theme.accent,
+            Kind::Label => theme.text_dim,
+            Kind::Value => theme.text_primary,
+        }
+    }
+}
 
 /// One run of text in the column, at its place down it. `y` is measured from
 /// the top of the column, not of the window: the panel subtracts the scroll
@@ -70,9 +95,7 @@ const LOREM: [&str; 4] = [
 /// far it may be scrolled.
 struct Row {
     text: String,
-    size: f32,
-    /// Whether it is a field's name rather than something being said.
-    label: bool,
+    kind: Kind,
     y: f32,
     height: f32,
 }
@@ -86,7 +109,8 @@ struct Column {
 }
 
 impl Column {
-    fn add(&mut self, text: &mut dyn TextMeasure, body: String, size: f32, label: bool, gap: f32) {
+    fn add(&mut self, text: &mut dyn TextMeasure, kind: Kind, body: String) {
+        let (size, gap) = kind.style();
         let height = text.measure_wrapped(&body, size, self.width)[1];
         let y = if self.rows.is_empty() {
             0.0
@@ -96,11 +120,21 @@ impl Column {
         self.height = y + height;
         self.rows.push(Row {
             text: body,
-            size,
-            label,
+            kind,
             y,
             height,
         });
+    }
+
+    /// A field: its name, and under it what it says. A field with nothing to
+    /// say is left out altogether — a name with a blank under it says less
+    /// than nothing.
+    fn field(&mut self, text: &mut dyn TextMeasure, name: &str, value: &str) {
+        if value.is_empty() {
+            return;
+        }
+        self.add(text, Kind::Label, name.to_string());
+        self.add(text, Kind::Value, value.to_string());
     }
 }
 
@@ -183,17 +217,10 @@ pub(super) fn draw(
         if y + row.height < view.y || y > view.bottom() {
             continue;
         }
-        // The panel is the bars' own ground, so the words on it are the bars'
-        // own ink: a field's name dim, its value in the primary.
-        let ink = if row.label {
-            theme.text_dim
-        } else {
-            theme.text_primary
-        };
         frame.text_wrapped(
             [view.x, y],
-            row.size,
-            ink,
+            row.kind.style().0,
+            row.kind.ink(theme),
             clip.width,
             clip,
             row.text.clone(),
@@ -223,25 +250,35 @@ pub(super) fn draw(
     }
 }
 
-/// The whole column, laid out into a panel `width` wide: the file's facts,
-/// and then the body text.
+/// The whole column, laid out into a panel `width` wide.
+///
+/// Three sections, nearest first: the file itself, then what its metadata
+/// says the photograph is, then every other field the file carries. A section
+/// with nothing in it is not named — an empty heading is a question about
+/// where the rest of it went.
 fn column(text: &mut dyn TextMeasure, current: &Current, width: f32) -> Column {
     let mut column = Column {
         rows: Vec::new(),
         height: 0.0,
         width: (width - SCROLLBAR_GUTTER).max(1.0),
     };
+
+    column.add(text, Kind::Heading, "File".to_string());
     for (name, value) in facts(current) {
-        // A fact the file will not give up is left out rather than written as
-        // a name with a blank under it.
-        if value.is_empty() {
+        column.field(text, name, &value);
+    }
+
+    for (heading, entries) in [
+        ("Photo", &current.exif.summary),
+        ("Metadata", &current.exif.other),
+    ] {
+        if entries.is_empty() {
             continue;
         }
-        column.add(text, name.to_string(), LABEL_SIZE, true, FIELD_GAP);
-        column.add(text, value, TEXT_SIZE, false, LABEL_GAP);
-    }
-    for paragraph in LOREM {
-        column.add(text, paragraph.to_string(), TEXT_SIZE, false, PARAGRAPH_GAP);
+        column.add(text, Kind::Heading, heading.to_string());
+        for entry in entries {
+            column.field(text, &entry.name, &entry.value);
+        }
     }
     column
 }
@@ -355,6 +392,7 @@ mod tests {
     use std::time::Duration;
 
     use crate::image::display::{Display, Startup};
+    use crate::image::exif::{Entry, Exif};
     use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples, Stats};
     use crate::ui::Monospace;
 
@@ -388,7 +426,29 @@ mod tests {
                 bytes: Some(1_258_291),
                 modified: Some(SystemTime::UNIX_EPOCH + Duration::from_secs(1_756_632_722)),
             },
+            exif: photograph(),
             stored: None,
+        }
+    }
+
+    /// What a photograph's metadata comes to the panel as: a summary, and a
+    /// listing long enough to have to be scrolled.
+    fn photograph() -> Exif {
+        let entry = |name: &str, value: &str| Entry {
+            name: name.to_string(),
+            value: value.to_string(),
+        };
+        Exif {
+            summary: vec![
+                entry("Camera", "Apple iPhone 16 Pro"),
+                entry(
+                    "Exposure",
+                    "1/50 s   \u{00b7}   f/1.78   \u{00b7}   ISO 200",
+                ),
+            ],
+            other: (0..24)
+                .map(|index| entry(&format!("Field {index}"), &format!("value {index}")))
+                .collect(),
         }
     }
 
@@ -401,7 +461,7 @@ mod tests {
     }
 
     /// Every fact the panel exists to show, written out rather than merely
-    /// headed.
+    /// headed, and the metadata after the file's own facts.
     #[test]
     fn the_column_says_what_the_file_is() {
         let written = written(&current(), 300.0);
@@ -411,15 +471,33 @@ mod tests {
             "4 \u{00d7} 5",
             "2025-08-31 09:32:02 UTC",
             "1.26 MB (1,258,291 bytes)",
+            "Apple iPhone 16 Pro",
+            "value 23",
         ] {
             assert!(
                 written.iter().any(|row| row == expected),
                 "{expected:?} is missing from {written:?}"
             );
         }
-        // Each fact is named, and the name comes before its value.
+        // Each fact is named, and the name comes before its value; each
+        // section is headed, and the sections come in the order they are read.
         let index = |text: &str| written.iter().position(|row| row == text);
         assert!(index("Path") < index("/home/reader/pictures/kingfisher.png"));
+        assert!(index("File") < index("Photo"));
+        assert!(index("Photo") < index("Camera"));
+        assert!(index("Camera") < index("Metadata"));
+        assert!(index("Metadata") < index("Field 0"));
+    }
+
+    /// A file that carries no metadata is not given empty headings to explain.
+    #[test]
+    fn a_file_with_no_metadata_is_all_file_and_no_headings_for_the_rest() {
+        let mut current = current();
+        current.exif = Exif::default();
+        let written = written(&current, 300.0);
+        assert!(written.contains(&"File".to_string()), "{written:?}");
+        assert!(!written.contains(&"Photo".to_string()), "{written:?}");
+        assert!(!written.contains(&"Metadata".to_string()), "{written:?}");
     }
 
     /// A fact the file will not give up is left out altogether: a name with a
@@ -444,7 +522,7 @@ mod tests {
         let view = panel.inset(PANEL_INSET, PANEL_INSET);
         let height = column(&mut Monospace, &current, view.width).height;
 
-        assert!(height > view.height, "the placeholder text overflows");
+        assert!(height > view.height, "a photograph's metadata overflows");
         assert_eq!(
             max_scroll(&mut Monospace, &current, panel),
             height - view.height
