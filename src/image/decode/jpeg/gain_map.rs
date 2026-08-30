@@ -29,11 +29,11 @@ use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Primaries, Sam
 
 /// A JPEG, examined for the things the `image` crate throws away: the ICC
 /// profile, and a gain map if there is one.
-pub struct Jpeg<'a> {
+pub struct Container<'a> {
     decoder: Decoder<'a>,
 }
 
-impl<'a> Jpeg<'a> {
+impl<'a> Container<'a> {
     /// `None` for anything that is not a JPEG at all. Every real JPEG opens,
     /// gain map or not.
     pub fn open(bytes: &'a [u8]) -> Option<Self> {
@@ -83,7 +83,7 @@ impl<'a> Jpeg<'a> {
         let (width, height) = (base.width(), base.height());
         // Four 32-bit components per pixel is what comes back below, and it
         // is four times the base, so this is the size worth checking.
-        super::check_decoded_size(width, height, 4, 32)?;
+        crate::image::decode::check_decoded_size(width, height, 4, 32)?;
 
         let base = RawImage {
             width,
@@ -130,29 +130,29 @@ impl<'a> Jpeg<'a> {
         let samples: Vec<f32> = bytemuck::cast_slice(&hdr.data).to_vec();
         drop(hdr);
 
-        Ok(Some(DecodedImage {
+        let mut image = DecodedImage::new(
             width,
             height,
-            samples: Samples::F32 {
+            Samples::F32 {
                 // Four components rather than three, so that the upload path
                 // can hand the buffer to the GPU without widening it first.
                 channels: Channels::Rgba,
                 data: samples,
             },
-            color: ColorSpace {
+            ColorSpace {
                 transfer: Transfer::Linear,
                 primaries: color.primaries,
             },
             // The base is a JPEG, so there was never an alpha channel; the
             // fourth component is padding the shader must not read.
-            alpha: AlphaMode::Opaque,
-            // The photograph was graded to sit in 0..1 and the gain map is
-            // what puts the highlights above it. Saying so keeps the startup
-            // window off the percentile stretch that linear float otherwise
-            // asks for, which would undo the grading the moment it loaded.
-            value_range: Some((0.0, 1.0)),
-            nodata: None,
-        }))
+            AlphaMode::Opaque,
+        );
+        // The photograph was graded to sit in 0..1 and the gain map is what
+        // puts the highlights above it. Saying so keeps the startup window
+        // off the percentile stretch that linear float otherwise asks for,
+        // which would undo the grading the moment it loaded.
+        image.value_range = Some((0.0, 1.0));
+        Ok(Some(image))
     }
 }
 
@@ -194,7 +194,7 @@ fn decode(bytes: &[u8]) -> Result<::image::DynamicImage> {
     let mut reader =
         ::image::ImageReader::with_format(std::io::Cursor::new(bytes), ::image::ImageFormat::Jpeg);
     let mut limits = ::image::Limits::default();
-    limits.max_alloc = Some(super::MAX_DECODED_BYTES);
+    limits.max_alloc = Some(crate::image::decode::MAX_DECODED_BYTES);
     reader.limits(limits);
     Ok(reader.decode()?)
 }
@@ -269,7 +269,7 @@ mod tests {
 
     fn reconstructed() -> DecodedImage {
         let bytes = sample();
-        Jpeg::open(&bytes)
+        Container::open(&bytes)
             .expect("a JPEG opens")
             .gain_mapped(ColorSpace {
                 transfer: Transfer::Srgb,
@@ -356,7 +356,7 @@ mod tests {
     #[test]
     fn an_ordinary_jpeg_has_no_gain_map() {
         let plain = jpeg(&[200u8; 48], 4, 4, ::image::ExtendedColorType::Rgb8);
-        let opened = Jpeg::open(&plain).expect("a JPEG opens");
+        let opened = Container::open(&plain).expect("a JPEG opens");
         assert!(opened.gain_mapped(ColorSpace::SRGB).unwrap().is_none());
         assert!(opened.icc_profile().is_none());
     }
@@ -381,7 +381,7 @@ mod tests {
         let mut bytes = bytes;
         bytes[at..at + backward.len()].copy_from_slice(backward);
 
-        let error = Jpeg::open(&bytes)
+        let error = Container::open(&bytes)
             .expect("a JPEG opens")
             .gain_mapped(ColorSpace::SRGB)
             .expect_err("a backward gain map is refused");
@@ -395,7 +395,7 @@ mod tests {
         let bytes = sample();
         assert!(!states_hdr_base(&bytes));
         assert!(
-            Jpeg::open(&bytes)
+            Container::open(&bytes)
                 .expect("a JPEG opens")
                 .gain_mapped(ColorSpace::SRGB)
                 .expect("a forward gain map applies")

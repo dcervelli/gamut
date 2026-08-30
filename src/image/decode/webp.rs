@@ -95,7 +95,7 @@ impl super::Decoder for Webp {
         // where the bitstream sits, and doing it first keeps the one
         // expensive read last.
         let color = match decoder.icc_profile().context("reading the ICCP chunk")? {
-            Some(profile) => super::icc::color_space(&profile, ColorSpace::SRGB),
+            Some(profile) => crate::image::color::icc::color_space(&profile, ColorSpace::SRGB),
             None => ColorSpace::SRGB,
         };
         let orientation = decoder
@@ -115,20 +115,15 @@ impl super::Decoder for Webp {
 
         let (data, width, height) = reorient(data, width, height, channels, orientation)?;
 
-        Ok(DecodedImage {
+        // WebP's alpha is straight, in both bitstreams and in the blending
+        // the animation chunks describe.
+        Ok(DecodedImage::new(
             width,
             height,
-            samples: Samples::U8 { channels, data },
+            Samples::U8 { channels, data },
             color,
-            // WebP's alpha is straight, in both bitstreams and in the
-            // blending the animation chunks describe.
-            alpha: match channels.alpha_index() {
-                None => AlphaMode::Opaque,
-                Some(_) => AlphaMode::Straight,
-            },
-            value_range: None,
-            nodata: None,
-        })
+            AlphaMode::of(channels, false),
+        ))
     }
 }
 

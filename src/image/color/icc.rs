@@ -15,7 +15,7 @@
 
 use moxcms::{ColorProfile, ToneReprCurve};
 
-use crate::image::{ColorSpace, Primaries, Transfer};
+use super::{ColorSpace, Primaries, Transfer};
 
 /// How far apart two colorant matrices may be and still be taken as the same
 /// space. The four candidates are far more different from each other than

@@ -87,18 +87,16 @@ impl super::Decoder for TiffRs {
             ));
         }
 
-        Ok(DecodedImage {
+        let color = color_space(&samples);
+        let mut image = DecodedImage::new(
             width,
             height,
-            color: color_space(&samples),
-            alpha: match channels.alpha_index() {
-                Some(_) => AlphaMode::Straight,
-                None => AlphaMode::Opaque,
-            },
             samples,
-            value_range: None,
-            nodata,
-        })
+            color,
+            AlphaMode::of(channels, false),
+        );
+        image.nodata = nodata;
+        Ok(image)
     }
 }
 

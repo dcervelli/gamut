@@ -16,7 +16,7 @@
 //! they take different routes:
 //!
 //! - **PNG**, which is how every entry above 48 pixels has been written since
-//!   Vista. It goes through [`image_rs::png`], the same path a `.png` on disk
+//!   Vista. It goes through [`png::decode`], the same path a `.png` on disk
 //!   takes, so an `iCCP` or `cICP` chunk is read and any pixel layout is kept.
 //!   `image` would refuse anything but RGBA8 here, on the strength of a
 //!   Microsoft blog post saying embedded PNGs must be 32-bit; browsers display
@@ -44,7 +44,7 @@ use ::image::{ImageDecoder, ImageFormat};
 
 use crate::image::{ColorSpace, DecodedImage};
 
-use super::image_rs;
+use super::{dynamic, png};
 
 pub struct Ico;
 
@@ -102,7 +102,7 @@ impl super::Decoder for Ico {
         let payload = payload(source, chosen)?;
 
         if payload.starts_with(b"\x89PNG\r\n\x1a\n") {
-            return image_rs::png(&mut Cursor::new(&payload[..]))
+            return png::decode(&mut Cursor::new(&payload[..]))
                 .with_context(|| format!("the {chosen} entry, which holds a PNG"));
         }
         bitmap(&payload, chosen).with_context(|| format!("the {chosen} entry, which holds a BMP"))
@@ -246,7 +246,7 @@ fn bitmap(payload: &[u8], entry: &Entry) -> Result<DecodedImage> {
     let decoded = ::image::DynamicImage::from_decoder(decoder).context("decoding the bitmap")?;
     // A BMP has nothing to say about colour that this program can act on, so
     // sRGB stands — the same default a PNG entry without a profile gets.
-    image_rs::describe(decoded, Some(ImageFormat::Ico), ColorSpace::SRGB)
+    dynamic::describe(decoded, Some(ImageFormat::Ico), ColorSpace::SRGB)
 }
 
 #[cfg(test)]

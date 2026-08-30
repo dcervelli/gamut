@@ -154,19 +154,13 @@ impl super::Decoder for Heif {
             pack_interleaved(&interleaved, width, height, channels)?
         };
 
-        Ok(DecodedImage {
+        Ok(DecodedImage::new(
             width,
             height,
             samples,
-            color: color_space(&handle),
-            alpha: match (channels.alpha_index(), handle.is_premultiplied_alpha()) {
-                (None, _) => AlphaMode::Opaque,
-                (Some(_), true) => AlphaMode::Premultiplied,
-                (Some(_), false) => AlphaMode::Straight,
-            },
-            value_range: None,
-            nodata: None,
-        })
+            color_space(&handle),
+            AlphaMode::of(channels, handle.is_premultiplied_alpha()),
+        ))
     }
 }
 
@@ -400,13 +394,13 @@ impl Scale {
 /// still image means by convention and what every other decoder here assumes.
 fn color_space(handle: &ImageHandle) -> ColorSpace {
     if let Some(nclx) = handle.color_profile_nclx() {
-        return super::cicp::color_space(
+        return crate::image::color::cicp::color_space(
             code(nclx.color_primaries() as i32),
             code(nclx.transfer_characteristics() as i32),
         );
     }
     match handle.color_profile_raw() {
-        Some(profile) => super::icc::color_space(&profile.data, ColorSpace::SRGB),
+        Some(profile) => crate::image::color::icc::color_space(&profile.data, ColorSpace::SRGB),
         None => ColorSpace::SRGB,
     }
 }
@@ -416,7 +410,7 @@ fn color_space(handle: &ImageHandle) -> ColorSpace {
 /// `libheif` reports a number it does not know. That one has no code point,
 /// so it becomes the one H.273 reserves for saying nothing.
 fn code(discriminant: i32) -> u8 {
-    u8::try_from(discriminant).unwrap_or(super::cicp::UNSPECIFIED)
+    u8::try_from(discriminant).unwrap_or(crate::image::color::cicp::UNSPECIFIED)
 }
 
 #[cfg(test)]
@@ -470,11 +464,11 @@ mod tests {
         // And the invented variants, which stand for no code point at all,
         // must land on "unspecified" rather than on a real space.
         assert_eq!(
-            super::super::cicp::transfer(code(T::Unknown as i32)),
+            crate::image::color::cicp::transfer(code(T::Unknown as i32)),
             Transfer::Srgb
         );
         assert_eq!(
-            super::super::cicp::primaries(code(P::Unknown as i32)),
+            crate::image::color::cicp::primaries(code(P::Unknown as i32)),
             Primaries::Bt709
         );
     }

@@ -9,7 +9,7 @@
 //! this program's colour model does not draw. Everything it can name comes
 //! through exactly.
 
-use crate::image::{ColorSpace, Primaries, Transfer};
+use super::{ColorSpace, Primaries, Transfer};
 
 /// H.273 reserves 2 for "unspecified" in both tables, which is what a file
 /// written without a care says, and what we substitute when a decoder hands
