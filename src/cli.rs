@@ -121,7 +121,16 @@ pub fn parse_args() -> Result<Option<Args>> {
                 }
                 Some("--transfer") => {
                     let value = next_value(&mut arguments, "--transfer")?;
-                    overrides.transfer = Some(parse_transfer(&value)?);
+                    overrides.transfer = Some(Transfer::parse(&value).ok_or_else(|| {
+                        match value.strip_prefix("gamma:") {
+                            Some(exponent) => anyhow::anyhow!(
+                                "`--transfer gamma:` needs a number, got `{exponent}`"
+                            ),
+                            None => {
+                                anyhow::anyhow!("unknown transfer function `{value}` (try --help)")
+                            }
+                        }
+                    })?);
                     continue;
                 }
                 Some("--no-gain-map") => {
@@ -130,7 +139,9 @@ pub fn parse_args() -> Result<Option<Args>> {
                 }
                 Some("--primaries") => {
                     let value = next_value(&mut arguments, "--primaries")?;
-                    overrides.primaries = Some(parse_primaries(&value)?);
+                    overrides.primaries = Some(Primaries::parse(&value).ok_or_else(|| {
+                        anyhow::anyhow!("unknown primaries `{value}` (try --help)")
+                    })?);
                     continue;
                 }
                 Some("--colormap") => {
@@ -151,7 +162,9 @@ pub fn parse_args() -> Result<Option<Args>> {
                 }
                 Some("--window") => {
                     let value = next_value(&mut arguments, "--window")?;
-                    startup.auto = Some(parse_window(&value)?);
+                    startup.auto = Some(AutoWindow::parse(&value).ok_or_else(|| {
+                        anyhow::anyhow!("unknown window mode `{value}` (try --help)")
+                    })?);
                     continue;
                 }
                 Some("--exposure") => {
@@ -213,40 +226,6 @@ fn next_value(
         Some(value) => Ok(value),
         None => bail!("`{option}` needs a value (try --help)"),
     }
-}
-
-fn parse_transfer(value: &str) -> Result<Transfer> {
-    Ok(match value.to_ascii_lowercase().as_str() {
-        "linear" => Transfer::Linear,
-        "srgb" => Transfer::Srgb,
-        "pq" => Transfer::Pq,
-        "hlg" => Transfer::Hlg,
-        other => match other.strip_prefix("gamma:") {
-            Some(exponent) => Transfer::Gamma(exponent.parse().map_err(|_| {
-                anyhow::anyhow!("`--transfer gamma:` needs a number, got `{exponent}`")
-            })?),
-            None => bail!("unknown transfer function `{value}` (try --help)"),
-        },
-    })
-}
-
-fn parse_window(value: &str) -> Result<AutoWindow> {
-    Ok(match value.to_ascii_lowercase().as_str() {
-        "unit" | "off" => AutoWindow::Off,
-        "minmax" | "min-max" => AutoWindow::MinMax,
-        "pct" | "percentile" => AutoWindow::Percentile,
-        other => bail!("unknown window mode `{other}` (try --help)"),
-    })
-}
-
-fn parse_primaries(value: &str) -> Result<Primaries> {
-    Ok(match value.to_ascii_lowercase().as_str() {
-        "bt709" | "srgb" | "rec709" => Primaries::Bt709,
-        "p3" | "displayp3" => Primaries::DisplayP3,
-        "bt2020" | "rec2020" => Primaries::Bt2020,
-        "adobe" | "adobergb" => Primaries::AdobeRgb,
-        other => bail!("unknown primaries `{other}` (try --help)"),
-    })
 }
 
 #[cfg(test)]

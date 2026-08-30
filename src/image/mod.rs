@@ -204,6 +204,18 @@ impl Transfer {
     pub fn is_linear(self) -> bool {
         matches!(self, Transfer::Linear)
     }
+
+    /// `linear`, `srgb`, `pq`, `hlg`, or `gamma:<N>`, as the command line
+    /// names them.
+    pub fn parse(value: &str) -> Option<Self> {
+        Some(match value.to_ascii_lowercase().as_str() {
+            "linear" => Transfer::Linear,
+            "srgb" => Transfer::Srgb,
+            "pq" => Transfer::Pq,
+            "hlg" => Transfer::Hlg,
+            other => Transfer::Gamma(other.strip_prefix("gamma:")?.parse().ok()?),
+        })
+    }
 }
 
 /// The chromaticities the RGB components are expressed in.
@@ -217,6 +229,18 @@ pub enum Primaries {
 }
 
 impl Primaries {
+    /// `bt709`, `p3`, `bt2020`, or `adobe`, as the command line names them,
+    /// with the aliases people actually type.
+    pub fn parse(value: &str) -> Option<Self> {
+        Some(match value.to_ascii_lowercase().as_str() {
+            "bt709" | "srgb" | "rec709" => Primaries::Bt709,
+            "p3" | "displayp3" => Primaries::DisplayP3,
+            "bt2020" | "rec2020" => Primaries::Bt2020,
+            "adobe" | "adobergb" => Primaries::AdobeRgb,
+            _ => return None,
+        })
+    }
+
     /// Row-major 3x3 taking these primaries to the linear BT.709 working
     /// space, both with a D65 white point.
     pub fn to_bt709(self) -> [[f32; 3]; 3] {

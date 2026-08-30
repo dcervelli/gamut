@@ -21,6 +21,16 @@ pub enum AutoWindow {
 }
 
 impl AutoWindow {
+    /// `unit`, `minmax`, or `pct`, as the command line names them.
+    pub fn parse(value: &str) -> Option<Self> {
+        Some(match value.to_ascii_lowercase().as_str() {
+            "unit" | "off" => AutoWindow::Off,
+            "minmax" | "min-max" => AutoWindow::MinMax,
+            "pct" | "percentile" => AutoWindow::Percentile,
+            _ => return None,
+        })
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             AutoWindow::Off => "unit",
