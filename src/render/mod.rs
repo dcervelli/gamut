@@ -31,7 +31,7 @@ use crate::view::Placement;
 
 pub use composite::Backdrop;
 pub use output::{HdrPreference, Output};
-pub use ui::{Blend, Color, Rect, UiFrame};
+pub use ui::{Blend, Color, Corner, Popup, PopupGrid, Rect, UiFrame};
 
 use composite::Composite;
 use image_layer::{Draw, ImageLayer};

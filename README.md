@@ -28,7 +28,7 @@ Both ship as standard on the distributions above.
 
 | Key | Action |
 | --- | --- |
-| `q`, `Esc` | Quit |
+| `q`, `Esc` | Quit — `Esc` first closes an open popup |
 | `+`, `=` / `-`, `_` | Zoom in / out |
 | Wheel | Zoom about the pointer |
 | `0` | Actual size (100%) |
@@ -248,8 +248,23 @@ click handler agree on where a widget is without either of them owning it. The
 top bar carries the file name and what the image is — its size, its pixels,
 its colour space, all fixed for as long as the file is on screen — while the
 bottom bar carries what changes: the pointer's position, and what the view is
-doing to the image. The left strip holds the minimap toggle and the right
-strip the histogram toggle.
+doing to the image. The left strip holds the minimap toggle, the right strip
+the histogram toggle, and the end of the bottom bar the zoom readout — which
+is a button: pressing it opens a menu of zooms in the lower right of the
+content area, the ladder from 10% to 1600% and the three fits as icons. The
+readout is a fixed width so that the click handler knows where it is without
+measuring what it says, and so that it does not shuffle along the bar as the
+zoom changes.
+
+Popups are `render::ui::Popup`: a panel of uniform cells anchored to a corner
+of an area, which answers where the panel goes, where each cell landed, and
+which cell a point is over. What a cell has in it and what pressing one does
+stay with the caller, so a second menu is a `Menu` variant, a grid, and the
+code that draws its cells. Only one can be open, which is what makes
+dismissing one unambiguous: an open menu takes every press before the chrome
+and the image do, a press on a cell chooses and closes, and a press anywhere
+off the panel is spent closing it. `Esc` closes it too, in front of the quit
+it would otherwise be.
 
 They are opaque, and the image is drawn in the `Viewport` they leave rather
 than behind them: zoom, fit, pan limits and the wheel's anchor are all measured
@@ -266,6 +281,7 @@ anything having to notice that it should.
 | `src/image/` | The data model: `Samples`, `ColorSpace`, stats, display state |
 | `src/image/decode/` | The decoder trait and its registry |
 | `src/render/` | Upload planning, the three layers, output selection |
+| `src/render/ui/popup.rs` | Where a popup menu's panel and cells go, and what a press lands on |
 | `src/render/reduce.rs` | The coarse chain a minifying draw reads from |
 
 ## Formats

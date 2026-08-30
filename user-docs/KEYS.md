@@ -7,7 +7,7 @@ where the two cases move exposure in opposite directions.
 
 | Key | What it does |
 | --- | --- |
-| `q`, `Esc` | Quit |
+| `q`, `Esc` | Quit. `Esc` closes an open popup first |
 | `+`, `=` | Zoom in one step, a factor of 1.25 |
 | `-`, `_` | Zoom out one step |
 | `0` | Actual size, one image pixel per screen pixel |
@@ -66,6 +66,14 @@ gives a fitted image more room and it re-fits immediately.
 | Wheel | Zoom about the pointer |
 | Trackpad scroll | The same, by fractions of a notch |
 | Click a panel button | Show or hide the histogram or the minimap |
+| Click the zoom percentage | Open the zoom menu |
+
+The percentage at the end of the bottom bar is a button. Pressing it opens a
+menu in the lower right corner: 10% through 1600%, and the three fits — the
+whole image, its width, its height — as arrows pointing the way each one
+fills the window. Whichever the view is in is lit. Choosing sets the zoom;
+pressing anywhere outside the menu, or `Esc`, closes it without changing
+anything. A window too small to hold the menu does not open one.
 
 The pointer keeps its grab until the button comes up, so a drag that leaves
 the window goes on working. The cursor becomes a closed hand only when there

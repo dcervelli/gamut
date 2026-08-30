@@ -15,9 +15,11 @@ use crate::image::display::{AutoWindow, Colormap, Display, Startup};
 use crate::image::stats::{BINS, COLOUR};
 use crate::image::{DecodedImage, Stats, decode};
 use crate::loader::{Decoded, Loader, Opened, Ready, Reload, Request};
-use crate::render::{Backdrop, Blend, Color, HdrPreference, Rect, Renderer, UiFrame};
+use crate::render::{
+    Backdrop, Blend, Color, Corner, HdrPreference, Popup, PopupGrid, Rect, Renderer, UiFrame,
+};
 use crate::timing;
-use crate::view::{Placement, Upscale, View, Viewport};
+use crate::view::{Fit, Placement, Upscale, View, Viewport};
 use crate::watch::{self, Watch};
 
 /// Window pixels moved per arrow-key press.
@@ -45,6 +47,17 @@ const BAR_HEIGHT: f32 = 30.0;
 const SIDE_WIDTH: f32 = 50.0;
 /// The square buttons that live in the side panels.
 const BUTTON_SIZE: f32 = 34.0;
+/// The zoom readout at the right of the bottom bar, which is also the button
+/// that opens the zoom menu. Wide enough for the longest reading it takes.
+const ZOOM_BUTTON: [f32; 2] = [58.0, 22.0];
+/// One cell of a popup menu, and the room around them. A cell is a little
+/// wider than it is tall because the widest thing in one is "1600%".
+const MENU_CELL: [f32; 2] = [56.0, 34.0];
+const MENU_GAP: f32 = 6.0;
+const MENU_PADDING: f32 = 8.0;
+/// The corner radius of a popup's panel, and of the cells inside it.
+const MENU_RADIUS: f32 = 8.0;
+const CELL_RADIUS: f32 = 5.0;
 const TEXT_SIZE: f32 = 13.0;
 const PADDING: f32 = 12.0;
 /// The largest the minimap's thumbnail may be. It keeps the image's own
@@ -54,6 +67,9 @@ const MINIMAP_SIZE: [f32; 2] = [168.0, 132.0];
 /// Below this on either side there is no room for a map worth reading, and
 /// the minimap stays off rather than shrinking to a smudge.
 const MINIMAP_MIN: f32 = 48.0;
+/// The frame drawn in a fit cell of the zoom menu, which the arrows point out
+/// to the edges of.
+const FIT_ICON: [f32; 2] = [28.0, 22.0];
 /// The gap between the histogram panel's edge and its plot.
 const HISTOGRAM_INSET: f32 = 10.0;
 /// Wide enough that a bin is exactly one logical pixel, which is what keeps
@@ -77,6 +93,12 @@ const BORDER_WIDTH: f32 = 1.0;
 /// as a texture behind the image rather than as a pattern competing with it.
 const CHECKER_SQUARE: f32 = 8.0;
 const PANEL_BACKGROUND: Color = Color::rgba(12, 12, 16, 214);
+/// A popup's panel, which is more nearly opaque than the panels that float
+/// over the image permanently: a menu is what is being read while it is open,
+/// and the picture coming through it competes with the choices on it. Not
+/// quite opaque, so that it still reads as lying over the image rather than
+/// as another piece of the chrome.
+const MENU_BACKGROUND: Color = Color::rgba(12, 12, 16, 246);
 const BUTTON_IDLE: Color = Color::rgba(255, 255, 255, 20);
 const BUTTON_HOVER: Color = Color::rgba(255, 255, 255, 45);
 const TEXT_PRIMARY: Color = Color::rgb(238, 238, 238);
@@ -102,12 +124,99 @@ const HISTOGRAM_PLANES: [Color; COLOUR] = [
     Color::rgb(52, 100, 186),
 ];
 
-/// The interface's toggles. One value rather than a flag each, so that
+/// Something in the interface the pointer can be over and press: a toggle in
+/// a side panel, the zoom readout in the bottom bar, or a cell of the menu
+/// that readout opens. One value rather than a flag each, so that
 /// hit-testing, hover and drawing all go through the same test.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Widget {
     Minimap,
     Histogram,
+    Zoom,
+    /// A cell of whichever menu is open. Which menu that is is the
+    /// application's `menu`, so a cell needs only its place in the grid.
+    Cell(usize),
+}
+
+/// A popup the interface can have open, and so what it is a menu of.
+///
+/// One at a time: a second would have to say which of the two a press outside
+/// dismisses. Adding another is a variant, the two matches below, and the
+/// code that draws its cells — where the panel goes, what a press lands on
+/// and how it is dismissed are the same for every menu.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Menu {
+    Zoom,
+}
+
+impl Menu {
+    fn items(self) -> usize {
+        match self {
+            Menu::Zoom => ZOOM_CHOICES.len(),
+        }
+    }
+
+    fn grid(self) -> PopupGrid {
+        let columns = match self {
+            // Eight percentages and three fits: two full rows of powers of
+            // two, and the fits along the bottom.
+            Menu::Zoom => 4,
+        };
+        PopupGrid {
+            cell: MENU_CELL,
+            columns,
+            gap: MENU_GAP,
+            padding: MENU_PADDING,
+            margin: PADDING,
+            radius: MENU_RADIUS,
+        }
+    }
+}
+
+/// What the zoom menu offers. The order is the order the cells are laid out
+/// in, left to right and top to bottom.
+const ZOOM_CHOICES: [ZoomChoice; 11] = [
+    ZoomChoice::Scale(0.10),
+    ZoomChoice::Scale(0.25),
+    ZoomChoice::Scale(0.50),
+    ZoomChoice::Scale(1.0),
+    ZoomChoice::Scale(2.0),
+    ZoomChoice::Scale(4.0),
+    ZoomChoice::Scale(8.0),
+    ZoomChoice::Scale(16.0),
+    ZoomChoice::Fit(Fit::Whole),
+    ZoomChoice::Fit(Fit::Width),
+    ZoomChoice::Fit(Fit::Height),
+];
+
+/// One cell of the zoom menu: a zoom to go to, or a fit to hand the view back
+/// to.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum ZoomChoice {
+    Scale(f32),
+    Fit(Fit),
+}
+
+impl ZoomChoice {
+    /// Whether this is what the view is already doing, which is what lights
+    /// the cell. A fit is only itself; a scale counts as matched when it is
+    /// the zoom on screen and the view is not in a fit that happens to have
+    /// landed there, since pressing it would then mean something.
+    fn active(self, view: &View, image: [f32; 2], viewport: Viewport) -> bool {
+        match self {
+            ZoomChoice::Scale(scale) => {
+                view.fit().is_none() && (view.zoom(image, viewport) - scale).abs() < scale * 1e-3
+            }
+            ZoomChoice::Fit(fit) => view.fit() == Some(fit),
+        }
+    }
+
+    fn apply(self, view: &mut View, image: [f32; 2], viewport: Viewport) {
+        match self {
+            ZoomChoice::Scale(scale) => view.set_zoom(scale, image, viewport),
+            ZoomChoice::Fit(fit) => view.set_fit(fit),
+        }
+    }
 }
 
 /// The window chrome: four panels, and the widgets sitting in them.
@@ -128,6 +237,10 @@ struct Chrome {
     minimap_button: Rect,
     /// The histogram toggle, at the top of the right panel.
     histogram_button: Rect,
+    /// The zoom readout, at the right of the bottom bar. Fixed width rather
+    /// than fitted to what it says, so that it neither moves as the zoom
+    /// changes nor has to be measured to be pressed.
+    zoom_button: Rect,
 }
 
 impl Chrome {
@@ -142,12 +255,14 @@ impl Chrome {
 
         let left = Rect::new(0.0, bar, side, middle);
         let right = Rect::new(size[0] - side, bar, side, middle);
+        let bottom = Rect::new(0.0, size[1] - bar, size[0], bar);
 
         Self {
             top: Rect::new(0.0, 0.0, size[0], bar),
-            bottom: Rect::new(0.0, size[1] - bar, size[0], bar),
             minimap_button: top_button(left),
             histogram_button: top_button(right),
+            zoom_button: bar_button(bottom, ZOOM_BUTTON),
+            bottom,
             left,
             right,
         }
@@ -185,15 +300,33 @@ impl Chrome {
         ]
     }
 
-    /// Which toggle a point lands on, if any.
+    /// Which of the widgets fixed to the panels a point lands on, if any.
+    /// The cells of an open menu float above these and are tested first, by
+    /// [`App::widget_at`].
     fn widget_at(&self, point: [f32; 2]) -> Option<Widget> {
         if self.minimap_button.contains(point) {
             Some(Widget::Minimap)
         } else if self.histogram_button.contains(point) {
             Some(Widget::Histogram)
+        } else if self.zoom_button.contains(point) {
+            Some(Widget::Zoom)
         } else {
             None
         }
+    }
+
+    /// Where `menu` goes when it is open: the lower right of the content
+    /// area, over the image and just above the button that opens it.
+    ///
+    /// `None` when the window has no room for the whole grid, which is also
+    /// what keeps the menu from being opened at all in a window that small.
+    fn popup(&self, menu: Menu) -> Option<Popup> {
+        Popup::new(
+            menu.items(),
+            menu.grid(),
+            self.content(),
+            Corner::BottomRight,
+        )
     }
 
     /// Whether a click at `point` belongs to the interface rather than to the
@@ -218,6 +351,20 @@ fn top_button(panel: Rect) -> Rect {
         panel.y + inset.min(panel.height - size),
         size,
         size,
+    )
+}
+
+/// A button at the right-hand end of a bar, centred across it. Clamped to the
+/// bar, so a window dragged narrow shrinks the button rather than pushing it
+/// out of the window.
+fn bar_button(bar: Rect, size: [f32; 2]) -> Rect {
+    let width = size[0].min(bar.width);
+    let height = size[1].min(bar.height);
+    Rect::new(
+        (bar.right() - PADDING - width).max(bar.x),
+        bar.y + (bar.height - height) / 2.0,
+        width,
+        height,
     )
 }
 
@@ -339,10 +486,14 @@ pub struct App {
     /// actually on screen is `minimap_on_screen`, which also asks whether
     /// there is anything off screen for it to point out.
     show_minimap: bool,
-    /// Which toggle the pointer is over. Held rather than recomputed while
+    /// Which widget the pointer is over. Held rather than recomputed while
     /// drawing so that motion knows when the highlight has changed and a
     /// redraw is actually owed.
     hover: Option<Widget>,
+    /// The menu popped up over the interface, if any. It takes every press
+    /// while it is open: one on a cell chooses, one anywhere else dismisses
+    /// it.
+    menu: Option<Menu>,
     /// Set if the last render failed, so we report it once rather than every frame.
     reported_error: bool,
     /// Numbers the requests. Only the newest one's reply is acted on.
@@ -396,6 +547,7 @@ impl App {
             show_histogram: histogram,
             show_minimap: minimap,
             hover: None,
+            menu: None,
             reported_error: false,
             generation: 0,
             pending: None,
@@ -777,6 +929,13 @@ impl App {
 
         match key {
             Key::Named(NamedKey::Escape) => {
+                // An open menu takes the key: dismissing a popup is what
+                // Escape is for, and quitting out from under one is not what
+                // was being asked for.
+                if self.menu.take().is_some() {
+                    self.update_hover();
+                    return true;
+                }
                 event_loop.exit();
                 return false;
             }
@@ -841,17 +1000,20 @@ impl App {
             }
             "`" | "~" => {
                 self.show_ui = !self.show_ui;
+                // The menu is part of the interface, and goes with it.
+                self.menu = None;
+                self.hover = None;
                 // A fitted image re-fits on the next frame: the viewport it is
                 // measured against is the one the panels leave, and they have
                 // just come or gone.
                 return true;
             }
             "h" | "H" => {
-                self.toggle(Widget::Histogram);
+                self.press(Widget::Histogram);
                 return true;
             }
             "m" | "M" => {
-                self.toggle(Widget::Minimap);
+                self.press(Widget::Minimap);
                 return true;
             }
             "u" | "U" => {
@@ -909,9 +1071,31 @@ impl App {
             && self.show_ui
             && let Some(point) = self.logical_cursor()
         {
+            // An open menu comes before the chrome and before the image: a
+            // press on a cell chooses and closes, one anywhere off the panel
+            // closes and is spent doing exactly that, and one on the panel
+            // but between cells lands on nothing at all.
+            if let Some(menu) = self.menu {
+                let popup = self.chrome().popup(menu);
+                match popup.as_ref().and_then(|popup| popup.item_at(point)) {
+                    Some(index) => self.press(Widget::Cell(index)),
+                    None if popup.as_ref().is_none_or(|popup| !popup.contains(point)) => {
+                        self.menu = None;
+                    }
+                    None => return false,
+                }
+                // The cell that had the highlight is no longer under the
+                // pointer, or no longer there at all.
+                self.update_hover();
+                return true;
+            }
+
             let chrome = self.chrome();
             if let Some(widget) = chrome.widget_at(point) {
-                self.toggle(widget);
+                self.press(widget);
+                // The zoom readout keeps the pointer over it as it opens its
+                // menu, and the highlight belongs to the menu from here on.
+                self.update_hover();
                 return true;
             }
             if chrome.contains(point) {
@@ -966,16 +1150,61 @@ impl App {
         let hover = self
             .logical_cursor()
             .filter(|_| self.show_ui)
-            .and_then(|point| self.chrome().widget_at(point));
+            .and_then(|point| self.widget_at(point));
         let changed = hover != self.hover;
         self.hover = hover;
         changed
     }
 
-    fn toggle(&mut self, widget: Widget) {
+    /// Which widget a point lands on. An open menu floats over the interface,
+    /// so its cells are tested instead of what is underneath them — including
+    /// the button that opened it, which a press dismisses the menu from
+    /// rather than opening a second one.
+    fn widget_at(&self, point: [f32; 2]) -> Option<Widget> {
+        let chrome = self.chrome();
+        match self.menu {
+            Some(menu) => chrome
+                .popup(menu)
+                .and_then(|popup| popup.item_at(point))
+                .map(Widget::Cell),
+            None => chrome.widget_at(point),
+        }
+    }
+
+    /// Acts on a press. The keys that stand in for the toggles come through
+    /// here too, so that a key and a click cannot drift apart.
+    fn press(&mut self, widget: Widget) {
         match widget {
             Widget::Minimap => self.show_minimap = !self.show_minimap,
             Widget::Histogram => self.show_histogram = !self.show_histogram,
+            // Only ever opens one: the press that closes a menu is answered
+            // by the menu itself, before the widgets underneath are asked.
+            // A window with no room for the panel gets no menu rather than a
+            // state nothing on screen accounts for.
+            Widget::Zoom => {
+                if self.current.is_some() && self.chrome().popup(Menu::Zoom).is_some() {
+                    self.menu = Some(Menu::Zoom);
+                }
+            }
+            Widget::Cell(index) => {
+                if let Some(menu) = self.menu.take() {
+                    self.choose(menu, index);
+                }
+            }
+        }
+    }
+
+    /// Acts on cell `index` of `menu`. Out-of-range indices cannot arrive —
+    /// the popup only hands back cells it laid out — but a menu that has
+    /// nothing to say about a cell simply says nothing.
+    fn choose(&mut self, menu: Menu, index: usize) {
+        let (image, viewport) = (self.image_size(), self.viewport());
+        match menu {
+            Menu::Zoom => {
+                if let Some(choice) = ZOOM_CHOICES.get(index) {
+                    choice.apply(&mut self.view, image, viewport);
+                }
+            }
         }
     }
 
@@ -1055,6 +1284,7 @@ impl App {
                 show_minimap: self.show_minimap,
                 minimap,
                 hover: self.hover,
+                menu: self.menu,
                 pointer,
                 pending,
             },
@@ -1286,6 +1516,8 @@ struct Layout {
     /// the image off it.
     minimap: bool,
     hover: Option<Widget>,
+    /// The menu popped up over the interface, if any.
+    menu: Option<Menu>,
     /// The image pixel under the pointer, when it is over one.
     pointer: Option<[u32; 2]>,
     /// The read in progress, once it has taken long enough to be worth saying.
@@ -1392,12 +1624,21 @@ fn build_ui(
     let bar = chrome.bottom;
     let baseline = text_baseline(bar);
 
+    draw_zoom_button(
+        &mut frame,
+        renderer,
+        chrome.zoom_button,
+        view.zoom(current.size(), layout.viewport),
+        layout.menu == Some(Menu::Zoom),
+        layout.hover == Some(Widget::Zoom),
+    );
+
     let mut right = describe_state(current, view, &layout);
     if renderer.output().is_hdr {
         right = format!("{}   \u{00b7}   {}", renderer.output().label, right);
     }
     let right_width = renderer.measure_text(&right, TEXT_SIZE)[0];
-    let right_x = (bar.right() - PADDING - right_width).max(PADDING);
+    let right_x = (chrome.zoom_button.x - PADDING - right_width).max(PADDING);
 
     if let Some([x, y]) = layout.pointer {
         frame.text_clipped(
@@ -1409,7 +1650,198 @@ fn build_ui(
         );
     }
     frame.text([right_x, baseline], TEXT_SIZE, TEXT_DIM, right);
+
+    // Last, so that it lies over the panels and over anything floating in the
+    // content area: a popup is the thing being looked at while it is open.
+    if let Some(menu) = layout.menu
+        && let Some(popup) = chrome.popup(menu)
+    {
+        draw_menu(
+            &mut frame,
+            renderer,
+            &popup,
+            menu,
+            view,
+            current.size(),
+            &layout,
+        );
+    }
     frame
+}
+
+/// Draws the open menu: its panel, and a cell for each choice in it.
+///
+/// The cells are drawn like the toggles in the side panels, and for the same
+/// reason: each is a press, and a state it is either in or not.
+fn draw_menu(
+    frame: &mut UiFrame,
+    renderer: &mut Renderer,
+    popup: &Popup,
+    menu: Menu,
+    view: &View,
+    image: [f32; 2],
+    layout: &Layout,
+) {
+    popup.draw(frame, MENU_BACKGROUND);
+    for (index, cell) in popup.cells() {
+        let hover = layout.hover == Some(Widget::Cell(index));
+        match menu {
+            Menu::Zoom => {
+                let choice = ZOOM_CHOICES[index];
+                let (background, ink) =
+                    button_ink(choice.active(view, image, layout.viewport), hover);
+                frame.rounded_rect(cell, CELL_RADIUS, background);
+                match choice {
+                    ZoomChoice::Scale(scale) => {
+                        centred_text(frame, renderer, cell, ink, &percent(scale))
+                    }
+                    ZoomChoice::Fit(fit) => draw_fit_icon(frame, cell, fit, ink),
+                }
+            }
+        }
+    }
+}
+
+/// The zoom readout, drawn as the button it is: what the view is doing now,
+/// and one press from a menu of what it could be doing instead. Lit while
+/// that menu is open, the way a toggle is lit while it is on.
+fn draw_zoom_button(
+    frame: &mut UiFrame,
+    renderer: &mut Renderer,
+    rect: Rect,
+    zoom: f32,
+    open: bool,
+    hover: bool,
+) {
+    // As with the toggles: a window too narrow for the whole button gets no
+    // button rather than a label spilling out of one.
+    if rect.width < ZOOM_BUTTON[0] || rect.height < ZOOM_BUTTON[1] {
+        return;
+    }
+    let (background, ink) = button_ink(open, hover);
+    frame.rounded_rect(rect, CELL_RADIUS, background);
+    centred_text(frame, renderer, rect, ink, &percent(zoom));
+}
+
+fn percent(zoom: f32) -> String {
+    format!("{:.0}%", zoom * 100.0)
+}
+
+/// Draws `text` centred in `rect`, the way a button wears its label. Whole
+/// logical pixels, since a glyph laid out on a half one is a blurred glyph.
+fn centred_text(
+    frame: &mut UiFrame,
+    renderer: &mut Renderer,
+    rect: Rect,
+    color: Color,
+    text: &str,
+) {
+    let width = renderer.measure_text(text, TEXT_SIZE)[0];
+    frame.text(
+        [
+            (rect.x + (rect.width - width) / 2.0).round(),
+            (rect.y + (rect.height - TEXT_SIZE * 1.3) / 2.0).round(),
+        ],
+        TEXT_SIZE,
+        color,
+        text,
+    );
+}
+
+/// A box of `size` centred in `rect`: where an icon goes in a cell it is not
+/// meant to fill.
+fn centred(rect: Rect, size: [f32; 2]) -> Rect {
+    Rect::new(
+        (rect.x + (rect.width - size[0]) / 2.0).round(),
+        (rect.y + (rect.height - size[1]) / 2.0).round(),
+        size[0].min(rect.width),
+        size[1].min(rect.height),
+    )
+}
+
+/// The three fits, as the frame each of them fills and the directions it
+/// fills it in: arrows out to left and right for a fit to the width, up and
+/// down for one to the height, and both for the fit that takes in the whole
+/// image.
+fn draw_fit_icon(frame: &mut UiFrame, cell: Rect, fit: Fit, ink: Color) {
+    let icon = centred(cell, FIT_ICON);
+    outline(frame, icon, 1.5, ink);
+    let inner = icon.inset(3.0, 3.0);
+    if fit != Fit::Height {
+        double_arrow(frame, inner, true, ink);
+    }
+    if fit != Fit::Width {
+        double_arrow(frame, inner, false, ink);
+    }
+}
+
+/// A double-headed arrow spanning `rect` along one axis and centred across
+/// the other: a shaft with a triangle pointing out at each end.
+fn double_arrow(frame: &mut UiFrame, rect: Rect, horizontal: bool, color: Color) {
+    /// How far back from the point an arrowhead reaches, and how wide it is
+    /// there.
+    const HEAD: [f32; 2] = [5.0, 7.0];
+    const SHAFT: f32 = 1.5;
+
+    let (span, across) = if horizontal {
+        (rect.width, rect.height)
+    } else {
+        (rect.height, rect.width)
+    };
+    // Two heads and nothing between them is still an arrow; less than that is
+    // a smudge, and the cell is better left with just its frame.
+    let head = HEAD[0].min(span / 2.0);
+    if span <= 0.0 || across < HEAD[1] {
+        return;
+    }
+    let middle = |low: f32, extent: f32, width: f32| low + (extent - width) / 2.0;
+
+    if horizontal {
+        let centre = rect.y + rect.height / 2.0;
+        frame.rect(
+            Rect::new(
+                rect.x + head,
+                middle(rect.y, rect.height, SHAFT),
+                span - 2.0 * head,
+                SHAFT,
+            ),
+            color,
+        );
+        for (point, back) in [(rect.x, rect.x + head), (rect.right(), rect.right() - head)] {
+            frame.triangle(
+                [
+                    [point, centre],
+                    [back, centre - HEAD[1] / 2.0],
+                    [back, centre + HEAD[1] / 2.0],
+                ],
+                color,
+            );
+        }
+    } else {
+        let centre = rect.x + rect.width / 2.0;
+        frame.rect(
+            Rect::new(
+                middle(rect.x, rect.width, SHAFT),
+                rect.y + head,
+                SHAFT,
+                span - 2.0 * head,
+            ),
+            color,
+        );
+        for (point, back) in [
+            (rect.y, rect.y + head),
+            (rect.bottom(), rect.bottom() - head),
+        ] {
+            frame.triangle(
+                [
+                    [centre, point],
+                    [centre - HEAD[1] / 2.0, back],
+                    [centre + HEAD[1] / 2.0, back],
+                ],
+                color,
+            );
+        }
+    }
 }
 
 /// What the interface leaves for the image, in logical pixels: the middle
@@ -1527,10 +1959,9 @@ fn describe_pixels(current: &Current) -> String {
 
 fn describe_state(current: &Current, view: &View, layout: &Layout) -> String {
     let zoom = view.zoom(current.size(), layout.viewport);
-    let mut parts = vec![
-        format!("{:.0}%", zoom * 100.0),
-        view.mode_label().to_string(),
-    ];
+    // Not the percentage: that is the button at the end of the bar, and
+    // saying it twice would only make the reader wonder which one to believe.
+    let mut parts = vec![view.mode_label().to_string()];
 
     // Only while it is doing something. Below 1:1 the filter in use is the
     // area average, which is not a choice and so not worth a word in the bar.
@@ -2022,6 +2453,94 @@ mod tests {
         assert_eq!(chrome.widget_at([WINDOW[0] / 2.0, WINDOW[1] / 2.0]), None);
     }
 
+    #[test]
+    fn the_zoom_readout_is_a_button_at_the_end_of_the_bottom_bar() {
+        let chrome = Chrome::new(WINDOW);
+        let button = chrome.zoom_button;
+
+        assert_eq!(button.width, ZOOM_BUTTON[0]);
+        assert_eq!(button.right(), chrome.bottom.right() - PADDING);
+        // Centred across the bar, and inside it.
+        assert_eq!(
+            button.y - chrome.bottom.y,
+            chrome.bottom.bottom() - button.bottom()
+        );
+        assert!(button.y >= chrome.bottom.y && button.bottom() <= chrome.bottom.bottom());
+
+        assert_eq!(
+            chrome.widget_at([button.x + 1.0, button.y + 1.0]),
+            Some(Widget::Zoom)
+        );
+        // The bar it sits in is still the interface, so a press beside it
+        // does not reach the image behind.
+        assert_eq!(chrome.widget_at([button.x - 2.0, button.y + 1.0]), None);
+        assert!(chrome.contains([button.x - 2.0, button.y + 1.0]));
+    }
+
+    #[test]
+    fn the_zoom_menu_pops_up_in_the_lower_right_of_the_content_area() {
+        let chrome = Chrome::new(WINDOW);
+        let content = chrome.content();
+        let popup = chrome.popup(Menu::Zoom).expect("a window with room for it");
+
+        assert_eq!(popup.cells().count(), ZOOM_CHOICES.len());
+        // Over the image, clear of the panels: the menu is drawn on the frame
+        // the image is in, and half of it under the bottom bar would be half
+        // a menu.
+        let panel = popup.panel();
+        assert!(panel.x >= content.x && panel.right() <= content.right());
+        assert!(panel.y >= content.y && panel.bottom() <= content.bottom());
+        // In the corner nearest the button that opens it.
+        assert_eq!(panel.right(), content.right() - PADDING);
+        assert_eq!(panel.bottom(), content.bottom() - PADDING);
+
+        // A window with no room for the whole of it gets no menu at all,
+        // which is also what stops one being opened there.
+        assert!(Chrome::new([220.0, 200.0]).popup(Menu::Zoom).is_none());
+    }
+
+    /// What a cell says it does is what pressing it does: the state each one
+    /// puts the view in is the state that lights that cell and no other.
+    #[test]
+    fn every_zoom_choice_lands_on_itself() {
+        let image = [900.0, 600.0];
+        let viewport = Viewport::whole(WINDOW);
+
+        for choice in ZOOM_CHOICES {
+            let mut view = View::new();
+            choice.apply(&mut view, image, viewport);
+            assert!(choice.active(&view, image, viewport), "{choice:?}");
+
+            for other in ZOOM_CHOICES {
+                assert_eq!(
+                    other.active(&view, image, viewport),
+                    other == choice,
+                    "{other:?} after {choice:?}"
+                );
+            }
+            if let ZoomChoice::Scale(scale) = choice {
+                assert!((view.zoom(image, viewport) - scale).abs() < 1e-4);
+            }
+        }
+    }
+
+    /// The button reads out the same zoom the cells are chosen from, so the
+    /// two have to agree on how a zoom is written down.
+    #[test]
+    fn the_readout_is_written_the_way_the_menu_writes_it() {
+        assert_eq!(percent(0.1), "10%");
+        assert_eq!(percent(1.0), "100%");
+        assert_eq!(percent(16.0), "1600%");
+        let widest = ZOOM_CHOICES
+            .iter()
+            .filter_map(|choice| match choice {
+                ZoomChoice::Scale(scale) => Some(percent(*scale).len()),
+                ZoomChoice::Fit(_) => None,
+            })
+            .max();
+        assert_eq!(widest, Some("1600%".len()));
+    }
+
     /// The thumbnail is the image in miniature, so its shape is the image's
     /// and not the box it is fitted into.
     #[test]
@@ -2146,7 +2665,11 @@ mod tests {
                     "{panel:?} at {size:?}"
                 );
             }
-            for button in [chrome.minimap_button, chrome.histogram_button] {
+            for button in [
+                chrome.minimap_button,
+                chrome.histogram_button,
+                chrome.zoom_button,
+            ] {
                 assert!(
                     button.width >= 0.0 && button.height >= 0.0,
                     "{button:?} at {size:?}"
