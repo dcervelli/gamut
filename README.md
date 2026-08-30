@@ -49,6 +49,7 @@ Both ship as standard on the distributions above.
 | `c` | Cycle false colour (single-channel images) |
 | `r` | Reset display settings |
 | `h` | Toggle the histogram |
+| `i` | Toggle the file information panel |
 | `m` | Toggle the minimap |
 | `` ` `` | Toggle the interface panels |
 
@@ -67,8 +68,8 @@ same pixels. A file of another size is a different picture, and is fitted.
 
 Every display control is also a start-up flag — `--colormap viridis`,
 `--tone-map neutral`, `--window minmax`, `--exposure -1.5`, `--histogram`,
-`--no-minimap` — which is handy for scripting and for comparing two files side
-by side.
+`--info`, `--no-minimap` — which is handy for scripting and for comparing two
+files side by side.
 
 ## Minimap
 
@@ -124,7 +125,7 @@ On [Omarchy](https://omarchy.org) the active theme is materialised as a
 palette file, and `src/theme/` reads it, resolves it, and derives the
 handful of roles the chrome actually needs — panel, hairline, primary and dim
 text, accent, the menu panel, the floating panel and the ink on it, the
-histogram's planes. Switching the desktop's theme is picked up on the same
+information panel's ground, the histogram's planes. Switching the desktop's theme is picked up on the same
 250 ms poll as the file on screen, so an open window changes with everything
 else rather than staying in the theme it opened under.
 
@@ -329,13 +330,41 @@ there: the stored one is the measurement, the mapped one is why it looks the
 way it does. Saying what the screen is showing means running the display
 transform on the CPU, so `ToneMap::apply` and `Colormap::color` in
 `image/display.rs` mirror the shader functions of the same names — a swatch
-that disagreed with the image beside it would be worse than none. The left strip holds the minimap toggle, the right strip
-the histogram toggle, and the end of the bottom bar the zoom readout — which
+that disagreed with the image beside it would be worse than none. The left strip holds the minimap toggle, the right strip a
+column of two — the file information panel and the histogram — and the end of
+the bottom bar the zoom readout — which
 is a button: pressing it opens a menu of zooms in the lower right of the
 content area, the ladder from 10% to 1600% and the three fits as icons. The
 readout is a fixed width so that the click handler knows where it is without
 measuring what it says, and so that it does not shuffle along the bar as the
 zoom changes.
+
+The information panel (`src/ui/info.rs`) is as wide as the histogram — one
+constant, fixed by the histogram's need for a bin to the logical pixel — so
+the two line up down the right of the window, and its column is measured
+inside a gutter kept clear for the scrollbar whether or not there is anything
+to scroll: text that reflowed the moment the bar appeared would be text that
+reflowed as it was being read. Unlike the histogram it takes the theme's own
+background rather than the forced-dark one: nothing is screened onto it, so it
+has no reason to be dark, and the words on it are the bars' own ink. The
+pointer belongs to it while it is over it: the wheel scrolls the column
+instead of zooming, and a press starts a drag of the words rather than of the
+picture — one thing or the other for as long as the button is held, so a drag
+that runs off the panel goes on scrolling rather than beginning to pan
+half-way through. A column with nothing left to scroll to still takes the
+gesture rather than handing it back, and makes no closed hand for a drag that
+would move nothing.
+
+It is the one part of the interface with more to say than fits, and so the
+only part that scrolls. Its column is laid out in full every frame — the file's name, path, size and date, then the body
+text — and the scroll is subtracted from each row's place down it, which
+leaves rows lying above and below the panel. Nothing here clips them: the text
+layer takes a rectangle to cut the glyphs to, which glyphon trims the quad and
+its texture coordinates against together, so a line sliding under the panel's
+edge is drawn as much of a line as is still inside. Measuring a paragraph
+before drawing it is the same call that draws it, one width and one wrap, so
+what the scroll is clamped against is the height the text actually comes out
+at rather than an estimate of it.
 
 Popups are `render::ui_layer::Popup`: a panel of uniform cells anchored to a corner
 of an area, which answers where the panel goes, where each cell landed, and

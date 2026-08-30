@@ -16,11 +16,11 @@ use winit::window::{Window, WindowId};
 use crate::image::decode;
 use crate::image::display::{Display, Startup};
 use crate::loader::{Decoded, Loader, Opened, Ready, Reload, Request};
-use crate::render::{HdrPreference, Placement, Renderer, Scene, Upscale};
+use crate::render::{HdrPreference, Placement, Rect, Renderer, Scene, Upscale};
 use crate::theme::{self, Theme};
 use crate::timing;
-use crate::ui::chrome::{Chrome, image_viewport};
-use crate::ui::{self, Current, FrameInput, Panels, Reading};
+use crate::ui::chrome::{Chrome, content_area, image_viewport};
+use crate::ui::{self, Current, FileFacts, FrameInput, Panels, Reading};
 use crate::view::{View, Viewport};
 use crate::watch::{self, Watch};
 
@@ -34,6 +34,7 @@ pub struct Options {
     pub startup: Startup,
     pub hdr: HdrPreference,
     pub histogram: bool,
+    pub info: bool,
     pub minimap: bool,
     pub upscale: Upscale,
 }
@@ -93,6 +94,7 @@ impl App {
             startup,
             hdr,
             histogram,
+            info,
             minimap,
             upscale,
         } = options;
@@ -118,6 +120,8 @@ impl App {
             panels: Panels {
                 show_ui: true,
                 show_histogram: histogram,
+                show_info: info,
+                info_scroll: 0.0,
                 show_minimap: minimap,
                 hover: None,
                 menu: None,
@@ -172,6 +176,56 @@ impl App {
         let scale = self.scale_factor();
         let physical = self.window_size();
         Chrome::new([physical[0] / scale, physical[1] / scale])
+    }
+
+    /// Where the info panel is, when it is on screen. The one thing floating
+    /// over the image that takes the pointer for itself, so the pointer has
+    /// to be able to ask where it is.
+    fn info_panel(&self) -> Option<Rect> {
+        if !self.panels.show_info || self.current.is_none() {
+            return None;
+        }
+        let scale = self.scale_factor();
+        let physical = self.window_size();
+        let content = content_area(
+            [physical[0] / scale, physical[1] / scale],
+            self.panels.show_ui,
+        );
+        ui::info::panel(content, self.panels.show_histogram)
+    }
+
+    /// Whether the pointer is over that panel, and so whether what it does
+    /// next belongs to the panel rather than to the image behind it.
+    pub(super) fn pointer_over_info(&self) -> Option<Rect> {
+        let point = self.logical_cursor()?;
+        self.info_panel().filter(|panel| panel.contains(point))
+    }
+
+    /// How far the column in `panel` may still be scrolled, measured with the
+    /// fonts the frame will draw it with. Zero when it all fits, and when
+    /// there is nothing on screen to describe.
+    pub(super) fn info_overflow(&mut self, panel: Rect) -> f32 {
+        // Split borrow: the measurement needs the renderer while it reads the
+        // image the column is about.
+        let (Some(renderer), Some(current)) = (self.renderer.as_mut(), self.current.as_ref())
+        else {
+            return 0.0;
+        };
+        ui::info::max_scroll(renderer, current, panel)
+    }
+
+    /// Moves the info panel's column by `by` logical pixels, clamped to what
+    /// there is left to scroll. Returns whether it moved, and so whether the
+    /// frame is now out of date.
+    pub(super) fn scroll_info_by(&mut self, panel: Rect, by: f32) -> bool {
+        if !by.is_finite() || by == 0.0 {
+            return false;
+        }
+        let limit = self.info_overflow(panel);
+        let scrolled = (self.panels.info_scroll + by).clamp(0.0, limit);
+        let moved = scrolled != self.panels.info_scroll;
+        self.panels.info_scroll = scrolled;
+        moved
     }
 
     /// Where the image is drawn, in physical pixels: what the panels leave in
@@ -360,7 +414,10 @@ impl App {
                 None => match renderer.uploader().run(&image) {
                     Ok(uploaded) => uploaded,
                     Err(error) => {
-                        eprintln!("image-view: {}", crate::escape_controls(&format!("{error:#}")));
+                        eprintln!(
+                            "image-view: {}",
+                            crate::escape_controls(&format!("{error:#}"))
+                        );
                         return false;
                     }
                 },
@@ -376,11 +433,17 @@ impl App {
         if !same_size {
             self.view.reset();
         }
+        // A different picture is a different column of words about it, and it
+        // is read from the top.
+        if !in_place {
+            self.panels.info_scroll = 0.0;
+        }
         self.current = Some(Current {
             image,
             stats,
             display,
             label: file_label(&file.path),
+            file: file_facts(&file.path),
             stored,
         });
         if let Some(window) = &self.window {
@@ -404,7 +467,10 @@ impl App {
         let failed = match decoded.outcome {
             Ok(ready) => !self.apply(decoded.file, ready),
             Err(error) => {
-                eprintln!("image-view: {}", crate::escape_controls(&format!("{error:#}")));
+                eprintln!(
+                    "image-view: {}",
+                    crate::escape_controls(&format!("{error:#}"))
+                );
                 true
             }
         };
@@ -498,11 +564,29 @@ impl App {
             Ok(()) => self.reported_error = false,
             Err(error) => {
                 if !self.reported_error {
-                    eprintln!("image-view: {}", crate::escape_controls(&format!("{error:#}")));
+                    eprintln!(
+                        "image-view: {}",
+                        crate::escape_controls(&format!("{error:#}"))
+                    );
                     self.reported_error = true;
                 }
             }
         }
+    }
+}
+
+/// What the file system says about the file on screen, for the info panel.
+///
+/// One look at it as the image goes up, rather than a look per frame: none of
+/// this changes while the image is on screen, and a file being written to is
+/// re-read whole anyway. Nothing is owed if it cannot be had — the file may
+/// have been replaced between being read and being asked about.
+fn file_facts(path: &std::path::Path) -> FileFacts {
+    let metadata = std::fs::metadata(path).ok();
+    FileFacts {
+        path: path.display().to_string(),
+        bytes: metadata.as_ref().map(|metadata| metadata.len()),
+        modified: metadata.and_then(|metadata| metadata.modified().ok()),
     }
 }
 
@@ -575,7 +659,10 @@ impl ApplicationHandler<Decoded> for App {
         let mut renderer = match Renderer::new(window.clone(), self.hdr) {
             Ok(renderer) => renderer,
             Err(error) => {
-                eprintln!("image-view: {}", crate::escape_controls(&format!("{error:#}")));
+                eprintln!(
+                    "image-view: {}",
+                    crate::escape_controls(&format!("{error:#}"))
+                );
                 event_loop.exit();
                 return;
             }
@@ -590,7 +677,10 @@ impl ApplicationHandler<Decoded> for App {
                     current.stored = renderer.image_format_label();
                 }
                 Err(error) => {
-                    eprintln!("image-view: {}", crate::escape_controls(&format!("{error:#}")));
+                    eprintln!(
+                        "image-view: {}",
+                        crate::escape_controls(&format!("{error:#}"))
+                    );
                     event_loop.exit();
                     return;
                 }
@@ -712,6 +802,7 @@ mod tests {
             startup: Startup::default(),
             hdr: HdrPreference::default(),
             histogram: false,
+            info: false,
             minimap: false,
             upscale: Upscale::default(),
         };

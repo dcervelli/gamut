@@ -133,15 +133,7 @@ mod tests {
     use crate::image::display::{Colormap, Display};
     use crate::image::{AlphaMode, Channels, ColorSpace};
 
-    /// Every glyph the same width, so that a test can say how much room a
-    /// string has in whole characters.
-    struct Monospace;
-
-    impl TextMeasure for Monospace {
-        fn measure_text(&mut self, text: &str, size: f32) -> [f32; 2] {
-            [text.chars().count() as f32 * size, size]
-        }
-    }
+    use crate::ui::Monospace;
 
     /// A 4x5 sRGB image, black but for `pixel` in its bottom right corner at
     /// (3, 4) — which is the pixel every test below points at.

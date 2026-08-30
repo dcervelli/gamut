@@ -60,6 +60,14 @@ pub struct Theme {
     pub panel_background: Color,
     /// Ink on that panel, which is therefore light whatever the mode.
     pub panel_text: Color,
+    /// The panel the file's information is read on. The bars' own colour,
+    /// unlike `panel_background`: nothing is screened onto this one, so it
+    /// has no reason to be dark, and words over the image should be read on
+    /// the same ground as the words in the bars — in `text_primary` and
+    /// `text_dim`, which are made to sit on it. Mildly transparent, so that
+    /// it reads as lying over the picture rather than as another piece of the
+    /// chrome.
+    pub info_background: Color,
     pub button_idle: Color,
     pub button_hover: Color,
     /// Text in the bars: what the image is, and what is being done to it.
@@ -102,6 +110,10 @@ const SEPARATION: u32 = 18;
 /// own dark end is never overridden; what the cap catches is the light theme,
 /// whose deepest colour is nothing of the kind.
 const PANEL_VALUE_CEIL: f32 = 0.14;
+/// How opaque the information panel is. Enough of the image comes through to
+/// place the panel over it; not enough to compete with the words.
+const INFO_ALPHA: u8 = 232;
+
 /// How opaque a popup's panel is. Higher than the panels that float over the
 /// image permanently: the picture coming through a menu competes with the
 /// choices on it. Not mode-dependent the way the floating panel's alpha is,
@@ -140,6 +152,7 @@ impl Theme {
         menu_background: Color::rgba(18, 18, 22, MENU_ALPHA),
         panel_background: Color::rgba(12, 12, 16, 214),
         panel_text: Color::rgb(150, 152, 160),
+        info_background: Color::rgba(18, 18, 22, INFO_ALPHA),
         button_idle: Color::rgba(255, 255, 255, 20),
         button_hover: Color::rgba(255, 255, 255, 45),
         text_primary: Color::rgb(238, 238, 238),
@@ -237,6 +250,7 @@ impl Theme {
             menu_background: background.with_alpha(MENU_ALPHA),
             panel_background: deep.with_alpha(panel_alpha),
             panel_text: on_deep,
+            info_background: background.with_alpha(INFO_ALPHA),
             button_idle: foreground.with_alpha(Theme::FALLBACK.button_idle.a),
             button_hover: foreground.with_alpha(Theme::FALLBACK.button_hover.a),
             text_primary: bright,
@@ -374,6 +388,31 @@ mod tests {
             // Read through, but only just.
             assert!(theme.menu_background.a > theme.panel_background.a);
         }
+    }
+
+    /// The information panel carries words, not a screened plot, so it
+    /// follows the theme both ways round: the bars' own surface, kept mildly
+    /// transparent. The floating panel is the one that has to stay dark, for
+    /// a reason a column of text does not share.
+    #[test]
+    fn the_information_panel_takes_the_bars_surface_whichever_way_the_theme_runs() {
+        for source in [TOKYO, SPARSE] {
+            let theme = Theme::from_palette(&palette(source));
+            assert_eq!(
+                theme.info_background,
+                theme.bar_background.with_alpha(INFO_ALPHA)
+            );
+            // Between the two: more of the image comes through than through a
+            // menu, less than through the panel the plot is drawn on.
+            assert!(theme.info_background.a < theme.menu_background.a);
+            assert!(theme.info_background.a > Theme::FALLBACK.panel_background.a);
+        }
+
+        // On a light theme it is light, which is exactly what the panel the
+        // histogram is drawn on may not be.
+        let light = Theme::from_palette(&palette(SPARSE));
+        assert_eq!(light.mode, Mode::Light);
+        assert!(light.info_background.r > light.panel_background.r);
     }
 
     #[test]

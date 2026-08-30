@@ -54,11 +54,21 @@ top of a colormap would distort the values you are reading off it.
 | Key | What it does |
 | --- | --- |
 | `h` | Show or hide the histogram |
+| `i` | Show or hide the file information |
 | `m` | Show or hide the minimap |
 | `` ` `` | Show or hide the panels around the image |
 
 The panels are opaque and the image is fitted inside them, so hiding them
 gives a fitted image more room and it re-fits immediately.
+
+The file information sits down the right of the image: what the file is
+called, where it is, how large the image is, and when the file was last
+written and to what size. Its dates are in UTC. Where it has more to say than
+fits, the wheel scrolls it — point at the panel rather than at the image, and
+the wheel moves the words instead of the zoom. Dragging the panel scrolls it
+as well, the words following the pointer the way the image does under a pan.
+The pointer belongs to the panel while it is over it, so neither gesture
+reaches the picture behind.
 
 ## The mouse
 
@@ -67,7 +77,9 @@ gives a fitted image more room and it re-fits immediately.
 | Drag | Pan, with the image following the pointer |
 | Wheel | Zoom about the pointer |
 | Trackpad scroll | The same, by fractions of a notch |
-| Click a panel button | Show or hide the histogram or the minimap |
+| Click a panel button | Show or hide the histogram, the file information, or the minimap |
+| Wheel over the file information | Scroll it |
+| Drag the file information | Scroll it, the words following the pointer |
 | Click the zoom percentage | Open the zoom menu |
 
 The percentage at the end of the bottom bar is a button. Pressing it opens a
@@ -95,8 +107,9 @@ is somewhere to drag to.
 
 Most of what these keys reach can be set before the first file opens, which is
 what scripting wants and what comparing two files on equal terms needs:
-`--exposure`, `--window`, `--tone-map`, `--colormap`, `--upscale` and
-`--histogram`. The minimap starts on; `--no-minimap` starts without it.
+`--exposure`, `--window`, `--tone-map`, `--colormap`, `--upscale`,
+`--histogram` and `--info`. The minimap starts on; `--no-minimap` starts
+without it.
 
 ## Keys that are deliberately ignored
 

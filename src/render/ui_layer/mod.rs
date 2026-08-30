@@ -155,7 +155,13 @@ pub(crate) struct TextItem {
     at: [f32; 2],
     size: f32,
     color: Color,
+    /// The width the text is laid out into: it breaks at this when `wrap` is
+    /// set, and is cut off at it when not.
     max_width: Option<f32>,
+    wrap: bool,
+    /// What the glyphs are cut to, when that is not simply the run's own
+    /// width: a panel whose text scrolls under its own edges.
+    clip: Option<Rect>,
 }
 
 /// One frame's worth of interface, in logical pixels.
@@ -241,6 +247,8 @@ impl UiFrame {
             size,
             color,
             max_width: None,
+            wrap: false,
+            clip: None,
         });
     }
 
@@ -260,6 +268,35 @@ impl UiFrame {
             size,
             color,
             max_width: Some(max_width),
+            wrap: false,
+            clip: None,
+        });
+    }
+
+    /// Draws `text` broken across lines at `width`, with its first line's
+    /// top-left corner at `at`, showing only what falls inside `clip`.
+    ///
+    /// The clip is what makes a panel scrollable: the run is laid out at its
+    /// true position, which may be above or below the panel it belongs to,
+    /// and the glyphs are cut to the panel's edges — including partly, so a
+    /// line half out of view is drawn half.
+    pub fn text_wrapped(
+        &mut self,
+        at: [f32; 2],
+        size: f32,
+        color: Color,
+        width: f32,
+        clip: Rect,
+        text: impl Into<String>,
+    ) {
+        self.texts.push(TextItem {
+            text: text.into(),
+            at,
+            size,
+            color,
+            max_width: Some(width),
+            wrap: true,
+            clip: Some(clip),
         });
     }
 }
@@ -292,7 +329,14 @@ impl UiRenderer {
     /// Width and height of `text` in logical pixels, for laying out anything
     /// that has to sit next to it.
     pub fn measure(&mut self, text: &str, size: f32) -> [f32; 2] {
-        self.text.measure(text, size)
+        self.text.measure(text, size, None)
+    }
+
+    /// As [`UiRenderer::measure`], but for text broken across lines at
+    /// `width`: how tall a paragraph will come out, for anything stacking one
+    /// under another.
+    pub fn measure_wrapped(&mut self, text: &str, size: f32, width: f32) -> [f32; 2] {
+        self.text.measure(text, size, Some(width))
     }
 
     /// `physical` is the target size in device pixels; `scale` takes the

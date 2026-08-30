@@ -19,6 +19,7 @@ ui/            builds each frame's display list; no wgpu or winit imports
   mod.rs         Current, Panels, FrameInput, build_frame(), backdrop()
   chrome.rs      the four panels and their buttons; content_area(), image_viewport()
   histogram.rs / minimap.rs / buttons.rs   one widget each
+  info.rs        the file's own facts, in a column that scrolls
   pixel.rs       the pointer's readout: coordinate, stored and mapped values, swatch
   menu.rs        Menu (which popup is open), the zoom menu's choices, and how its cells are drawn
   status.rs      the words in the top and bottom bars
@@ -53,6 +54,7 @@ render/        the GPU
 | A status-bar segment | `ui/status.rs`; the pointer's pixel readout is `ui/pixel.rs` |
 | What a pixel reads as under the pointer | `image/mod.rs::sample` for what the file holds, `image/display.rs::map` for what the screen shows |
 | A panel or overlay | a new `ui/<name>.rs` and one call in `ui/mod.rs::build_frame`; a new colour role goes in `theme/mod.rs` |
+| What the info panel says about a file | `ui/info.rs`; anything it has to read off disk is gathered in `app/mod.rs::file_facts` |
 | A popup menu | a `Menu` variant in `ui/menu.rs` with its choices, `items`/`grid`/`choose` arms and a `draw` arm; `Chrome::popup` places it, `App::press` opens it |
 | A CLI flag | `cli.rs`, and the `Options` / `Startup` / `Overrides` field it sets |
 | An image format | `image/decode/<fmt>.rs` implementing `Decoder`, one line in `DECODERS`, a fixture in `test_images/` (see its README and `generate.sh`) |
