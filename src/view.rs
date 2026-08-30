@@ -258,10 +258,31 @@ impl View {
         );
     }
 
-    pub fn actual_size(&mut self, image: [f32; 2], viewport: Viewport) {
-        self.zoom = 1.0;
+    /// Zooms to `zoom` about the centre of the viewport, leaving fit mode.
+    /// What was in the middle stays in the middle, which is what a zoom asked
+    /// for by name — rather than at a point — means.
+    pub fn set_zoom(&mut self, zoom: f32, image: [f32; 2], viewport: Viewport) {
+        self.zoom = zoom.clamp(MIN_ZOOM, MAX_ZOOM);
         self.fit = None;
         self.pan = Self::clamp_pan(self.pan, image, viewport.size(), self.zoom);
+    }
+
+    pub fn actual_size(&mut self, image: [f32; 2], viewport: Viewport) {
+        self.set_zoom(1.0, image, viewport);
+    }
+
+    /// Which fit the view is in, and `None` once it has been zoomed by hand.
+    /// What tells a menu of zooms which of its choices is the one in force.
+    pub fn fit(&self) -> Option<Fit> {
+        self.fit
+    }
+
+    /// The image goes back to being fitted, centred: a fit with the view left
+    /// panned off to one side would show a corner of an image it has just
+    /// been asked to fit.
+    pub fn set_fit(&mut self, fit: Fit) {
+        self.fit = Some(fit);
+        self.pan = [0.0, 0.0];
     }
 
     /// `dx`/`dy` are in physical pixels: positive moves the viewport
@@ -273,11 +294,10 @@ impl View {
     }
 
     pub fn cycle_fit(&mut self) {
-        self.fit = Some(match self.fit {
+        self.set_fit(match self.fit {
             None => Fit::Whole,
             Some(fit) => fit.next(),
         });
-        self.pan = [0.0, 0.0];
     }
 }
 

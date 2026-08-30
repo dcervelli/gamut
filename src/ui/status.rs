@@ -56,10 +56,9 @@ pub(super) fn describe_pixels(current: &Current) -> String {
 
 pub(super) fn describe_state(current: &Current, view: &View, input: &FrameInput) -> String {
     let zoom = view.zoom(current.size(), input.viewport);
-    let mut parts = vec![
-        format!("{:.0}%", zoom * 100.0),
-        view.mode_label().to_string(),
-    ];
+    // Not the percentage: that is the button at the end of the bar, and
+    // saying it twice would only make the reader wonder which one to believe.
+    let mut parts = vec![view.mode_label().to_string()];
 
     // Only while it is doing something. Below 1:1 the filter in use is the
     // area average, which is not a choice and so not worth a word in the bar.

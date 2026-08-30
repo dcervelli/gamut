@@ -10,7 +10,7 @@ use winit::window::{Cursor, CursorIcon};
 
 use super::App;
 use crate::image::display::Startup;
-use crate::ui::{Current, Widget};
+use crate::ui::{Current, Menu, Widget};
 
 /// Window pixels moved per arrow-key press.
 const PAN_STEP: f32 = 64.0;
@@ -310,7 +310,16 @@ impl App {
         let image = self.image_size();
         let viewport = self.viewport();
         match action {
-            Quit => return Effect::Quit,
+            // An open menu takes the key: dismissing a popup is what Escape
+            // is for, and quitting out from under one is not what was being
+            // asked for.
+            Quit => {
+                if self.panels.menu.take().is_some() {
+                    self.update_hover();
+                    return Effect::Redraw;
+                }
+                return Effect::Quit;
+            }
             ZoomIn => self.view.zoom_in(image, viewport),
             ZoomOut => self.view.zoom_out(image, viewport),
             ActualSize => self.view.actual_size(image, viewport),
@@ -333,9 +342,14 @@ impl App {
             // A fitted image re-fits on the next frame: the viewport it is
             // measured against is the one the panels leave, and they have
             // just come or gone.
-            ToggleInterface => self.panels.show_ui = !self.panels.show_ui,
-            ToggleHistogram => self.panels.toggle(Widget::Histogram),
-            ToggleMinimap => self.panels.toggle(Widget::Minimap),
+            ToggleInterface => {
+                self.panels.show_ui = !self.panels.show_ui;
+                // The menu is part of the interface, and goes with it.
+                self.panels.menu = None;
+                self.panels.hover = None;
+            }
+            ToggleHistogram => self.press(Widget::Histogram),
+            ToggleMinimap => self.press(Widget::Minimap),
             Exposure(stops) => {
                 return self.adjust(|current, _| {
                     current.display.adjust_exposure(stops);
@@ -420,9 +434,31 @@ impl App {
             && self.panels.show_ui
             && let Some(point) = self.logical_cursor()
         {
+            // An open menu comes before the chrome and before the image: a
+            // press on a cell chooses and closes, one anywhere off the panel
+            // closes and is spent doing exactly that, and one on the panel
+            // but between cells lands on nothing at all.
+            if let Some(menu) = self.panels.menu {
+                let popup = self.chrome().popup(menu);
+                match popup.as_ref().and_then(|popup| popup.item_at(point)) {
+                    Some(index) => self.press(Widget::Cell(index)),
+                    None if popup.as_ref().is_none_or(|popup| !popup.contains(point)) => {
+                        self.panels.menu = None;
+                    }
+                    None => return false,
+                }
+                // The cell that had the highlight is no longer under the
+                // pointer, or no longer there at all.
+                self.update_hover();
+                return true;
+            }
+
             let chrome = self.chrome();
             if let Some(widget) = chrome.widget_at(point) {
-                self.panels.toggle(widget);
+                self.press(widget);
+                // The zoom readout keeps the pointer over it as it opens its
+                // menu, and the highlight belongs to the menu from here on.
+                self.update_hover();
                 return true;
             }
             if chrome.contains(point) {
@@ -482,10 +518,49 @@ impl App {
         let hover = self
             .logical_cursor()
             .filter(|_| self.panels.show_ui)
-            .and_then(|point| self.chrome().widget_at(point));
+            .and_then(|point| self.widget_at(point));
         let changed = hover != self.panels.hover;
         self.panels.hover = hover;
         changed
+    }
+
+    /// Which widget a point lands on. An open menu floats over the interface,
+    /// so its cells are tested instead of what is underneath them — including
+    /// the button that opened it, which a press dismisses the menu from
+    /// rather than opening a second one.
+    fn widget_at(&self, point: [f32; 2]) -> Option<Widget> {
+        let chrome = self.chrome();
+        match self.panels.menu {
+            Some(menu) => chrome
+                .popup(menu)
+                .and_then(|popup| popup.item_at(point))
+                .map(Widget::Cell),
+            None => chrome.widget_at(point),
+        }
+    }
+
+    /// Acts on a press. The keys that stand in for the toggles come through
+    /// here too, so that a key and a click cannot drift apart.
+    fn press(&mut self, widget: Widget) {
+        match widget {
+            Widget::Minimap => self.panels.show_minimap = !self.panels.show_minimap,
+            Widget::Histogram => self.panels.show_histogram = !self.panels.show_histogram,
+            // Only ever opens one: the press that closes a menu is answered
+            // by the menu itself, before the widgets underneath are asked.
+            // A window with no room for the panel gets no menu rather than a
+            // state nothing on screen accounts for.
+            Widget::Zoom => {
+                if self.current.is_some() && self.chrome().popup(Menu::Zoom).is_some() {
+                    self.panels.menu = Some(Menu::Zoom);
+                }
+            }
+            Widget::Cell(index) => {
+                if let Some(menu) = self.panels.menu.take() {
+                    let (image, viewport) = (self.image_size(), self.viewport());
+                    menu.choose(index, &mut self.view, image, viewport);
+                }
+            }
+        }
     }
 
     /// Returns `true` if the wheel changed anything on screen.

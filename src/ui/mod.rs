@@ -7,6 +7,7 @@
 //! measure text.
 
 pub mod chrome;
+pub mod menu;
 pub mod minimap;
 
 mod buttons;
@@ -20,6 +21,7 @@ use crate::theme::Theme;
 use crate::view::{View, Viewport};
 
 use chrome::Chrome;
+pub use menu::Menu;
 
 const TEXT_SIZE: f32 = 13.0;
 
@@ -29,12 +31,18 @@ const PADDING: f32 = 12.0;
 /// as a texture behind the image rather than as a pattern competing with it.
 const CHECKER_SQUARE: f32 = 8.0;
 
-/// The interface's toggles. One value rather than a flag each, so that
+/// Something in the interface the pointer can be over and press: a toggle in
+/// a side panel, the zoom readout in the bottom bar, or a cell of the menu
+/// that readout opens. One value rather than a flag each, so that
 /// hit-testing, hover and drawing all go through the same test.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Widget {
     Minimap,
     Histogram,
+    Zoom,
+    /// A cell of whichever menu is open. Which menu that is is
+    /// [`Panels::menu`], so a cell needs only its place in the grid.
+    Cell(usize),
 }
 
 /// The image on screen, with everything derived from it.
@@ -74,19 +82,14 @@ pub struct Panels {
     /// also asks whether there is anything off screen for it to point out —
     /// see [`FrameInput::minimap_on_screen`].
     pub show_minimap: bool,
-    /// Which toggle the pointer is over. Held rather than recomputed while
+    /// Which widget the pointer is over. Held rather than recomputed while
     /// drawing so that motion knows when the highlight has changed and a
     /// redraw is actually owed.
     pub hover: Option<Widget>,
-}
-
-impl Panels {
-    pub fn toggle(&mut self, widget: Widget) {
-        match widget {
-            Widget::Minimap => self.show_minimap = !self.show_minimap,
-            Widget::Histogram => self.show_histogram = !self.show_histogram,
-        }
-    }
+    /// The menu popped up over the interface, if any. It takes every press
+    /// while it is open: one on a cell chooses, one anywhere else dismisses
+    /// it.
+    pub menu: Option<Menu>,
 }
 
 /// What this frame looks like, beyond the image and the panels: the values
@@ -215,12 +218,23 @@ pub fn build_frame(
     let bar = chrome.bottom;
     let baseline = text_baseline(bar);
 
+    let zoom = view.zoom(current.size(), input.viewport);
+    buttons::zoom_button(
+        &mut frame,
+        text,
+        chrome.zoom_button,
+        zoom,
+        panels.menu == Some(Menu::Zoom),
+        panels.hover == Some(Widget::Zoom),
+        theme,
+    );
+
     let mut right = status::describe_state(current, view, input);
     if let Some(label) = input.hdr_output {
         right = format!("{label}   \u{00b7}   {right}");
     }
     let right_width = text.measure_text(&right, TEXT_SIZE)[0];
-    let right_x = (bar.right() - PADDING - right_width).max(PADDING);
+    let right_x = (chrome.zoom_button.x - PADDING - right_width).max(PADDING);
 
     if let Some([x, y]) = input.pointer {
         frame.text_clipped(
@@ -232,6 +246,14 @@ pub fn build_frame(
         );
     }
     frame.text([right_x, baseline], TEXT_SIZE, theme.text_dim, right);
+
+    // Last, so that it lies over the panels and over anything floating in the
+    // content area: a popup is the thing being looked at while it is open.
+    if let Some(open) = panels.menu
+        && let Some(popup) = chrome.popup(open)
+    {
+        menu::draw(&mut frame, text, &popup, view.fit(), zoom, panels, theme);
+    }
     frame
 }
 

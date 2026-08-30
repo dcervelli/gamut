@@ -1,10 +1,10 @@
 //! The window chrome: four panels, the toggles sitting in them, and what
 //! they leave in the middle for the image.
 
-use crate::render::Rect;
+use crate::render::{Corner, Popup, Rect};
 use crate::view::Viewport;
 
-use super::Widget;
+use super::{Menu, PADDING, Widget};
 
 /// Height of the top and bottom panels.
 pub(crate) const BAR_HEIGHT: f32 = 30.0;
@@ -15,6 +15,9 @@ pub(crate) const SIDE_WIDTH: f32 = 50.0;
 
 /// The square buttons that live in the side panels.
 pub(super) const BUTTON_SIZE: f32 = 34.0;
+/// The zoom readout at the right of the bottom bar, which is also the button
+/// that opens the zoom menu. Wide enough for the longest reading it takes.
+pub(super) const ZOOM_BUTTON: [f32; 2] = [58.0, 22.0];
 
 /// Width of the hairline along a panel's inner edge, in logical pixels. What
 /// it is drawn in is the theme's `border`.
@@ -38,6 +41,10 @@ pub struct Chrome {
     pub minimap_button: Rect,
     /// The histogram toggle, at the top of the right panel.
     pub histogram_button: Rect,
+    /// The zoom readout, at the right of the bottom bar. Fixed width rather
+    /// than fitted to what it says, so that it neither moves as the zoom
+    /// changes nor has to be measured to be pressed.
+    pub zoom_button: Rect,
 }
 
 impl Chrome {
@@ -52,12 +59,14 @@ impl Chrome {
 
         let left = Rect::new(0.0, bar, side, middle);
         let right = Rect::new(size[0] - side, bar, side, middle);
+        let bottom = Rect::new(0.0, size[1] - bar, size[0], bar);
 
         Self {
             top: Rect::new(0.0, 0.0, size[0], bar),
-            bottom: Rect::new(0.0, size[1] - bar, size[0], bar),
             minimap_button: top_button(left),
             histogram_button: top_button(right),
+            zoom_button: bar_button(bottom, ZOOM_BUTTON),
+            bottom,
             left,
             right,
         }
@@ -100,15 +109,33 @@ impl Chrome {
         ]
     }
 
-    /// Which toggle a point lands on, if any.
+    /// Which of the widgets fixed to the panels a point lands on, if any.
+    /// The cells of an open menu float above these and are tested first, by
+    /// the application.
     pub fn widget_at(&self, point: [f32; 2]) -> Option<Widget> {
         if self.minimap_button.contains(point) {
             Some(Widget::Minimap)
         } else if self.histogram_button.contains(point) {
             Some(Widget::Histogram)
+        } else if self.zoom_button.contains(point) {
+            Some(Widget::Zoom)
         } else {
             None
         }
+    }
+
+    /// Where `menu` goes when it is open: the lower right of the content
+    /// area, over the image and just above the button that opens it.
+    ///
+    /// `None` when the window has no room for the whole grid, which is also
+    /// what keeps the menu from being opened at all in a window that small.
+    pub fn popup(&self, menu: Menu) -> Option<Popup> {
+        Popup::new(
+            menu.items(),
+            menu.grid(),
+            self.content(),
+            Corner::BottomRight,
+        )
     }
 
     /// Whether a click at `point` belongs to the interface rather than to the
@@ -133,6 +160,20 @@ fn top_button(panel: Rect) -> Rect {
         panel.y + inset.min(panel.height - size),
         size,
         size,
+    )
+}
+
+/// A button at the right-hand end of a bar, centred across it. Clamped to the
+/// bar, so a window dragged narrow shrinks the button rather than pushing it
+/// out of the window.
+fn bar_button(bar: Rect, size: [f32; 2]) -> Rect {
+    let width = size[0].min(bar.width);
+    let height = size[1].min(bar.height);
+    Rect::new(
+        (bar.right() - PADDING - width).max(bar.x),
+        bar.y + (bar.height - height) / 2.0,
+        width,
+        height,
     )
 }
 
@@ -285,7 +326,11 @@ mod tests {
                     "{panel:?} at {size:?}"
                 );
             }
-            for button in [chrome.minimap_button, chrome.histogram_button] {
+            for button in [
+                chrome.minimap_button,
+                chrome.histogram_button,
+                chrome.zoom_button,
+            ] {
                 assert!(
                     button.width >= 0.0 && button.height >= 0.0,
                     "{button:?} at {size:?}"
@@ -298,6 +343,30 @@ mod tests {
                 "{content:?} at {size:?}"
             );
         }
+    }
+
+    #[test]
+    fn the_zoom_readout_is_a_button_at_the_end_of_the_bottom_bar() {
+        let chrome = Chrome::new(WINDOW);
+        let button = chrome.zoom_button;
+
+        assert_eq!(button.width, ZOOM_BUTTON[0]);
+        assert_eq!(button.right(), chrome.bottom.right() - PADDING);
+        // Centred across the bar, and inside it.
+        assert_eq!(
+            button.y - chrome.bottom.y,
+            chrome.bottom.bottom() - button.bottom()
+        );
+        assert!(button.y >= chrome.bottom.y && button.bottom() <= chrome.bottom.bottom());
+
+        assert_eq!(
+            chrome.widget_at([button.x + 1.0, button.y + 1.0]),
+            Some(Widget::Zoom)
+        );
+        // The bar it sits in is still the interface, so a press beside it
+        // does not reach the image behind.
+        assert_eq!(chrome.widget_at([button.x - 2.0, button.y + 1.0]), None);
+        assert!(chrome.contains([button.x - 2.0, button.y + 1.0]));
     }
 
     /// The panels are opaque, so the image is fitted into what they leave —

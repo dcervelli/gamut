@@ -1,10 +1,12 @@
 //! The square toggles in the side panels, and the outline primitive shared
 //! with the minimap.
 
-use crate::render::{Color, Rect, UiFrame};
+use crate::render::{Color, Rect, TextMeasure, UiFrame};
 use crate::theme::Theme;
 
-use super::chrome::BUTTON_SIZE;
+use super::TEXT_SIZE;
+use super::chrome::{BUTTON_SIZE, ZOOM_BUTTON};
+use super::menu::CELL_RADIUS;
 
 /// How much of the accent is left behind a switched-on toggle. Enough to read
 /// as lit from across the window, little enough that the icon on top of it
@@ -75,7 +77,7 @@ pub(super) fn minimap_button(
 
 /// A toggle's background and ink. Active outranks hover: what is on says more
 /// than what the pointer happens to be over.
-fn button_ink(active: bool, hover: bool, theme: &Theme) -> (Color, Color) {
+pub(super) fn button_ink(active: bool, hover: bool, theme: &Theme) -> (Color, Color) {
     match (active, hover) {
         (true, _) => (theme.accent.with_alpha(ACTIVE_BUTTON_WASH), theme.accent),
         (false, true) => (theme.button_hover, theme.text_primary),
@@ -101,5 +103,52 @@ pub(super) fn outline(frame: &mut UiFrame, rect: Rect, thickness: f32, color: Co
     frame.rect(
         Rect::new(rect.right() - edge, rect.y + edge, edge, middle),
         color,
+    );
+}
+
+/// The zoom readout, drawn as the button it is: what the view is doing now,
+/// and one press from a menu of what it could be doing instead. Lit while
+/// that menu is open, the way a toggle is lit while it is on.
+pub(super) fn zoom_button(
+    frame: &mut UiFrame,
+    text: &mut dyn TextMeasure,
+    rect: Rect,
+    zoom: f32,
+    open: bool,
+    hover: bool,
+    theme: &Theme,
+) {
+    // As with the toggles: a window too narrow for the whole button gets no
+    // button rather than a label spilling out of one.
+    if rect.width < ZOOM_BUTTON[0] || rect.height < ZOOM_BUTTON[1] {
+        return;
+    }
+    let (background, ink) = button_ink(open, hover, theme);
+    frame.rounded_rect(rect, CELL_RADIUS, background);
+    centred_text(frame, text, rect, ink, &percent(zoom));
+}
+
+pub(super) fn percent(zoom: f32) -> String {
+    format!("{:.0}%", zoom * 100.0)
+}
+
+/// Draws `label` centred in `rect`, the way a button wears its label. Whole
+/// logical pixels, since a glyph laid out on a half one is a blurred glyph.
+pub(super) fn centred_text(
+    frame: &mut UiFrame,
+    text: &mut dyn TextMeasure,
+    rect: Rect,
+    color: Color,
+    label: &str,
+) {
+    let width = text.measure_text(label, TEXT_SIZE)[0];
+    frame.text(
+        [
+            (rect.x + (rect.width - width) / 2.0).round(),
+            (rect.y + (rect.height - TEXT_SIZE * 1.3) / 2.0).round(),
+        ],
+        TEXT_SIZE,
+        color,
+        label,
     );
 }

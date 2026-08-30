@@ -11,10 +11,13 @@
 //! adding panels, sliders or histograms later is a matter of emitting more
 //! primitives, not of touching the renderer.
 
+mod popup;
 mod shapes;
 mod text;
 
 use anyhow::Result;
+
+pub use popup::{Corner, Popup, PopupGrid};
 
 use shapes::Shapes;
 use text::Text;
@@ -217,6 +220,17 @@ impl UiFrame {
                 blend,
             }));
         }
+    }
+
+    /// A filled triangle, in logical pixels: what the arrowheads and
+    /// chevrons an icon is drawn from are made of, since a rectangle cannot
+    /// point anywhere.
+    pub fn triangle(&mut self, vertices: [[f32; 2]; 3], color: Color) {
+        self.shapes.push(Shape::Poly(PolyItem {
+            vertices: vertices.to_vec(),
+            color,
+            blend: Blend::Over,
+        }));
     }
 
     /// Draws `text` with its top-left corner at `at`.

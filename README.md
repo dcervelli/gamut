@@ -28,7 +28,7 @@ Both ship as standard on the distributions above.
 
 | Key | Action |
 | --- | --- |
-| `q`, `Esc` | Quit |
+| `q`, `Esc` | Quit — `Esc` first closes an open popup |
 | `+`, `=` / `-`, `_` | Zoom in / out |
 | Wheel | Zoom about the pointer |
 | `0` | Actual size (100%) |
@@ -114,10 +114,10 @@ The interface takes its colours from the desktop rather than carrying its own.
 On [Omarchy](https://omarchy.org) the active theme is materialised as a
 palette file, and `src/theme/` reads it, resolves it, and derives the
 handful of roles the chrome actually needs — panel, hairline, primary and dim
-text, accent, the floating panel and the ink on it, the histogram's planes.
-Switching the desktop's theme is picked up on the same 250 ms poll as the file
-on screen, so an open window changes with everything else rather than staying
-in the theme it opened under.
+text, accent, the menu panel, the floating panel and the ink on it, the
+histogram's planes. Switching the desktop's theme is picked up on the same
+250 ms poll as the file on screen, so an open window changes with everything
+else rather than staying in the theme it opened under.
 
 Off Omarchy there is nothing to read and nothing happens: the neutral dark set
 the interface was designed in is used instead. The same set fills in for a
@@ -150,6 +150,13 @@ Two things resist being themed directly and are derived instead:
   theme that names no colours keeps the planes the interface was designed
   with, since one themed plane beside two default ones would read as three
   unrelated colours.
+
+A popup's panel is not one of those two. Its cells are buttons, drawn in the
+same ink as the toggles in the side panels, and that ink is made to read
+against the bars — so the panel is the bars' own surface and follows the theme
+either way round. It is held nearer to opaque than the floating panel is,
+since the picture coming through a menu is what the choices on it compete
+with.
 
 ## Colour management
 
@@ -291,8 +298,23 @@ click handler agree on where a widget is without either of them owning it. The
 top bar carries the file name and what the image is — its size, its pixels,
 its colour space, all fixed for as long as the file is on screen — while the
 bottom bar carries what changes: the pointer's position, and what the view is
-doing to the image. The left strip holds the minimap toggle and the right
-strip the histogram toggle.
+doing to the image. The left strip holds the minimap toggle, the right strip
+the histogram toggle, and the end of the bottom bar the zoom readout — which
+is a button: pressing it opens a menu of zooms in the lower right of the
+content area, the ladder from 10% to 1600% and the three fits as icons. The
+readout is a fixed width so that the click handler knows where it is without
+measuring what it says, and so that it does not shuffle along the bar as the
+zoom changes.
+
+Popups are `render::ui_layer::Popup`: a panel of uniform cells anchored to a corner
+of an area, which answers where the panel goes, where each cell landed, and
+which cell a point is over. What a cell has in it and what pressing one does
+stay with the caller (`src/ui/menu.rs`), so a second menu is a `Menu` variant,
+a grid, and the code that draws its cells. Only one can be open, which is what makes
+dismissing one unambiguous: an open menu takes every press before the chrome
+and the image do, a press on a cell chooses and closes, and a press anywhere
+off the panel is spent closing it. `Esc` closes it too, in front of the quit
+it would otherwise be.
 
 They are opaque, and the image is drawn in the `Viewport` they leave rather
 than behind them: zoom, fit, pan limits and the wheel's anchor are all measured
@@ -312,6 +334,7 @@ anything having to notice that it should.
 | `src/image/` | The data model: `Samples`, `color/` (transfer functions, primaries, ICC and CICP), stats, display state |
 | `src/image/decode/` | The decoder trait and its registry, one file per format |
 | `src/render/` | Upload planning, the three layers, output selection; `shader_codes.rs` is every integer the shaders switch on |
+| `src/render/ui_layer/popup.rs` | Where a popup menu's panel and cells go, and what a press lands on |
 | `src/render/reduce.rs` | The coarse chain a minifying draw reads from |
 
 ## Formats
@@ -621,7 +644,7 @@ crate.
 cargo test
 ```
 
-173 tests over the transfer functions and primaries matrices, texture format
+182 tests over the transfer functions and primaries matrices, texture format
 selection (including the device-capability fallbacks), the statistics and
 window logic, the decoder registry, the CICP translation, ICC profile
 recognition, gain map reconstruction, the view geometry, and the reload

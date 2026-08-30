@@ -19,6 +19,7 @@ ui/            builds each frame's display list; no wgpu or winit imports
   mod.rs         Current, Panels, FrameInput, build_frame(), backdrop()
   chrome.rs      the four panels and their buttons; content_area(), image_viewport()
   histogram.rs / minimap.rs / buttons.rs   one widget each
+  menu.rs        Menu (which popup is open), the zoom menu's choices, and how its cells are drawn
   status.rs      the words in the top and bottom bars
 theme/         palette.rs reads Omarchy's colors.toml and resolves its cascade; mod.rs derives Theme's colour roles
 view.rs        zoom / pan / fit geometry, pure maths (View, Viewport, Fit)
@@ -36,7 +37,7 @@ render/        the GPU
   mod.rs         Renderer: surface, device, the three passes; Scene is what a frame draws; TextMeasure trait
   placement.rs   Placement (where the image lands) and Upscale (the magnification filter)
   upload.rs      texture format choice and the transfer-function LUTs; the "sampled texel is linear" invariant
-  image_layer.rs / reduce.rs / composite.rs / ui_layer/   the passes; ui_layer holds Rect, Color, UiFrame
+  image_layer.rs / reduce.rs / composite.rs / ui_layer/   the passes; ui_layer holds Rect, Color, UiFrame, and popup.rs (a grid of cells anchored to a corner)
   shader_codes.rs  every Rust<->WGSL integer code, one fn per shader switch
   gpu.rs         wgpu boilerplate helpers (layouts, uniform buffers, full-screen pipelines, GrowableBuffer)
   shaders/       WGSL; each Params struct is mirrored by a #[repr(C)] struct in the .rs file that loads it
@@ -49,6 +50,7 @@ render/        the GPU
 | A key binding | `app/input.rs`: one `KEYS` entry and one `perform` arm. `--help` follows. |
 | A status-bar segment | `ui/status.rs` |
 | A panel or overlay | a new `ui/<name>.rs` and one call in `ui/mod.rs::build_frame`; a new colour role goes in `theme/mod.rs` |
+| A popup menu | a `Menu` variant in `ui/menu.rs` with its choices, `items`/`grid`/`choose` arms and a `draw` arm; `Chrome::popup` places it, `App::press` opens it |
 | A CLI flag | `cli.rs`, and the `Options` / `Startup` / `Overrides` field it sets |
 | An image format | `image/decode/<fmt>.rs` implementing `Decoder`, one line in `DECODERS`, a fixture in `test_images/` (see its README and `generate.sh`) |
 | A colour-space source (a new tag a format carries) | `image/color/` |
@@ -72,7 +74,7 @@ render/        the GPU
 ## Checks
 
 ```sh
-cargo test                    # 173 tests; the 7 GPU ones pass vacuously without an adapter
+cargo test                    # 182 tests; the 7 GPU ones pass vacuously without an adapter
 cargo clippy --all-targets    # clean
 cargo doc --no-deps           # no warnings
 cargo run --release -- test_images/png-rgb8.png --histogram --minimap

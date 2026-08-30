@@ -120,6 +120,7 @@ impl App {
                 show_histogram: histogram,
                 show_minimap: minimap,
                 hover: None,
+                menu: None,
             },
             reported_error: false,
         };
