@@ -6,11 +6,15 @@ README:
 
 TODO:
 
+* Clean steps on zoom
+* Logging
+  * ICO → largest image chosen
+  * Errors
+* Performance
 * Grid display when zoomed in
 * Cursor color tracking
 * Region selection
   * Nudges
-* Crop to region
 * Copy
   * File path
   * Image (file content)
@@ -20,7 +24,6 @@ TODO:
 * Changable background
   * Color picker
   * Checkerboard for alpha
-* Hide UI key
 * Sane keys 
 * Formats
   * GIF
@@ -32,6 +35,7 @@ TODO:
 * Scan directory for image with/without -r
 * If window is small, auto hide side panels
 * Basic modifications
+  * Crop to region
 * Wayland app_id
 * Security pass
 * Info
@@ -39,8 +43,5 @@ TODO:
   * TIFF tags
   * Other?
 * UI theme colors
-
-UI:
-
+* Docs
 * For the filename, if all files are in the same directory, just display the file name; if not, display a minimum disambiguated file path.
-* As the mouse moves around the image, display the pixel coordinate of the mouse, or "-, -" if not in bounds.
