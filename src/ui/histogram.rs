@@ -1,7 +1,7 @@
 //! The floating histogram panel.
 
 use crate::image::stats::BINS;
-use crate::render::{Blend, Rect, UiFrame};
+use crate::render::{Blend, Rect, TextMeasure, UiFrame};
 use crate::theme::Theme;
 
 use super::{Current, PADDING, PANEL_INSET, PANEL_RADIUS, PANEL_WIDTH, TEXT_SIZE};
@@ -20,6 +20,117 @@ const PLOT_INSET: f32 = 4.0;
 /// What the luminance plane drops to once colour planes are drawn over it.
 const HISTOGRAM_LUMA_UNDER: u8 = 110;
 
+/// The response curve's stroke, in logical pixels.
+const CURVE_WIDTH: f32 = 1.5;
+/// The window's ticks: how far one stands, and how wide. Tall enough to be
+/// found along the axis, short enough not to be read as a second plot.
+const TICK_HEIGHT: f32 = 5.0;
+const TICK_WIDTH: f32 = 1.5;
+/// How far a tick rises above the baseline, the rest of it standing in the
+/// margin below. Enough to join the axis rather than float under it.
+const TICK_RISE: f32 = 1.0;
+
+/// The rule that marks a value, and how wide it is. The accent, like the
+/// curve and the window's ticks: everything the panel draws over the bins is
+/// the interface talking about them rather than more measurement, and one ink
+/// for all of it says so. Held back to translucent, which is what keeps it
+/// under the curve it crosses in the reading as well as in the drawing.
+const CURSOR_ALPHA: u8 = 190;
+const CURSOR_WIDTH: f32 = 1.0;
+
+/// The least room left between the pointer's readout and the axis ends it is
+/// set between, before they give way to it.
+const LABEL_GAP: f32 = 8.0;
+
+/// Where the pointer's readout goes on the label line — the middle of it —
+/// and whether the two ends of the axis still fit either side of it.
+///
+/// The ends give way rather than the other way about: they are two constants
+/// of the image, and the readout is what the pointer was moved there to read.
+/// They are only ever in the way on a file whose numbers are wide enough to
+/// fill the line between them, and both go together, one end dropped on its
+/// own being a line that reads as lopsided rather than as full.
+fn readout_placement(bars: Rect, width: f32, ends: [f32; 2]) -> (f32, bool) {
+    let x = bars.x + (bars.width - width) / 2.0;
+    let fits = x - LABEL_GAP >= bars.x + ends[0] && x + width + LABEL_GAP <= bars.right() - ends[1];
+    (x, fits)
+}
+
+/// The panel's own rectangle inside `content`: the top right corner, inside
+/// the padding everything floating over the image keeps.
+fn panel(content: Rect) -> Rect {
+    // Rounded, so that the whole-pixel bin spacing starts on a pixel edge.
+    Rect::new(
+        (content.right() - HISTOGRAM_SIZE[0] - PADDING)
+            .max(content.x + PADDING)
+            .round(),
+        (content.y + PADDING).round(),
+        HISTOGRAM_SIZE[0],
+        HISTOGRAM_SIZE[1],
+    )
+}
+
+/// The ground the bins stand on inside that panel, with the axis label's line
+/// above it. The bins are one logical pixel each, so this is the full width of
+/// the plot and the room around it is drawn outside it.
+fn bars(panel: Rect) -> Rect {
+    let plot = panel.inset(PANEL_INSET, PANEL_INSET);
+    let label_height = TEXT_SIZE * 1.4;
+    Rect::new(
+        plot.x,
+        plot.y + label_height + PLOT_INSET,
+        plot.width,
+        plot.height - label_height - PLOT_INSET,
+    )
+}
+
+/// Where a bin's bar is drawn across the plot, from 0 at the left edge to 1
+/// at the right. The two end bins are carried out to the edges so that the
+/// shape fills the plot's width; the rest stand at their centres.
+fn bin_across(index: usize) -> f32 {
+    match index {
+        0 => 0.0,
+        last if last == BINS - 1 => 1.0,
+        _ => (index as f32 + 0.5) / BINS as f32,
+    }
+}
+
+/// Which bin the pointer is over, or `None` when it is not over the plot.
+fn hovered_bin(bars: Rect, cursor: Option<[f32; 2]>) -> Option<usize> {
+    let cursor = cursor.filter(|point| bars.contains(*point))?;
+    let bin = (cursor[0] - bars.x) / bars.width * BINS as f32;
+    Some((bin as usize).min(BINS - 1))
+}
+
+/// Which bin the panel is marking: the one under the pointer while it is over
+/// the plot, and otherwise the one that counted the pixel it is over on the
+/// picture. `None` when it is over neither.
+///
+/// The plot comes first because the panel floats over the picture, so a
+/// pointer on the panel is on the axis and not on the pixel behind it.
+///
+/// One bin either way, and so one rule and one reading either way: the panel
+/// draws bars, and a marker on it can only honestly point at one of them. The
+/// pixel's own exact numbers are the bottom bar's to report — that readout is
+/// about a pixel, and this one is about a bar.
+///
+/// Public because the pointer is tested against the plot from outside the
+/// frame as well: a mark that follows the pointer has to be able to say when
+/// the frame it was drawn in has gone out of date.
+pub fn marked(
+    current: &Current,
+    content: Rect,
+    cursor: Option<[f32; 2]>,
+    pointer: Option<[u32; 2]>,
+) -> Option<usize> {
+    if let Some(bin) = hovered_bin(bars(panel(content)), cursor) {
+        return Some(bin);
+    }
+    let at = pointer?;
+    let sample = current.image.sample(at[0], at[1])?;
+    current.stats.plot.bin_of(&current.image, &sample)
+}
+
 /// Draws the histogram in the top-right of `content`, the area the panels
 /// leave free — above the information panel, the order the two toggles that
 /// open them are stacked in.
@@ -27,28 +138,19 @@ const HISTOGRAM_LUMA_UNDER: u8 = 110;
 /// Colour images get four planes — red, green, blue and luminance — over the
 /// range their colour channels span; grey images keep the single luminance
 /// plane over theirs.
-pub(super) fn draw(frame: &mut UiFrame, current: &Current, content: Rect, theme: &Theme) {
-    // Rounded, so that the whole-pixel bin spacing starts on a pixel edge.
-    let panel = Rect::new(
-        (content.right() - HISTOGRAM_SIZE[0] - PADDING)
-            .max(content.x + PADDING)
-            .round(),
-        (content.y + PADDING).round(),
-        HISTOGRAM_SIZE[0],
-        HISTOGRAM_SIZE[1],
-    );
+pub(super) fn draw(
+    frame: &mut UiFrame,
+    text: &mut dyn TextMeasure,
+    current: &Current,
+    content: Rect,
+    cursor: Option<[f32; 2]>,
+    pointer: Option<[u32; 2]>,
+    theme: &Theme,
+) {
+    let panel = panel(content);
     frame.rounded_rect(panel, PANEL_RADIUS, theme.panel_background);
 
-    let plot = panel.inset(PANEL_INSET, PANEL_INSET);
-    let label_height = TEXT_SIZE * 1.4;
-    // The bins are one logical pixel each, so the ground under them is the
-    // full width of the plot and the room around it is drawn outside that.
-    let bars = Rect::new(
-        plot.x,
-        plot.y + label_height + PLOT_INSET,
-        plot.width,
-        plot.height - label_height - PLOT_INSET,
-    );
+    let bars = bars(panel);
     frame.rounded_rect(
         bars.inset(-PLOT_INSET, -PLOT_INSET),
         PLOT_RADIUS,
@@ -62,20 +164,62 @@ pub(super) fn draw(frame: &mut UiFrame, current: &Current, content: Rect, theme:
     let luma = &plotted.luma;
     let colour: &[[u32; BINS]] = plotted.colour.as_ref().map_or(&[], |planes| planes);
     let (axis_min, axis_max) = (plotted.min, plotted.max);
+    let span = axis_max - axis_min;
 
-    // The axis is in the file's own encoding; the label is not, since the
+    // The axis is in the file's own encoding; the labels are not, since the
     // numbers everything else quotes are the decoded ones.
     let transfer = current.image.color.transfer;
-    frame.text(
-        [plot.x, plot.y],
-        TEXT_SIZE * 0.85,
-        theme.text_dim,
-        format!(
-            "{:.4}  \u{2013}  {:.4}",
-            transfer.to_linear(axis_min),
-            transfer.to_linear(axis_max)
-        ),
-    );
+    let label_size = TEXT_SIZE * 0.85;
+    let label_y = panel.y + PANEL_INSET;
+
+    // The pointer's readout, in the middle of the line the two ends of the
+    // axis are pinned to. Two numbers, because the panel draws two things and
+    // a column of it belongs to both: the value the bins under the rule were
+    // counted at, and what the display makes of that value — the height of
+    // the response curve where the rule crosses it, which is the one number a
+    // curve on its own cannot be read off by eye.
+    //
+    // Both of them decoded, as the ends of the axis are. Neither will measure
+    // against the plot underneath with a ruler, because both of the plot's
+    // axes are spaced in the file's own encoding — the bins across, so that a
+    // quantised file does not comb, and the response up, so that a display
+    // doing nothing is the diagonal. The positions are the file's units and
+    // the numbers are the ones every other readout quotes; a curve that is
+    // straight and a value that is comparable cannot both be had, and the
+    // shape is what the plot is for.
+    let marked = marked(current, content, cursor, pointer);
+    let across = marked.map(bin_across);
+    let mut ends_fit = true;
+    if let Some(across) = across {
+        let value = transfer.to_linear(axis_min + across * span);
+        let mapped = current.display.response(value).clamp(0.0, 1.0);
+        let readout = format!("{value:.4}  \u{2192}  {mapped:.4}");
+        let ends_width = [axis_min, axis_max].map(|end| {
+            text.measure_text(&format!("{:.4}", transfer.to_linear(end)), label_size)[0]
+        });
+        let width = text.measure_text(&readout, label_size)[0];
+        let (x, fits) = readout_placement(bars, width, ends_width);
+        ends_fit = fits;
+        frame.text([x, label_y], label_size, theme.text_primary, readout);
+    }
+    if ends_fit {
+        // Pinned to the ends of the axis they name rather than set together
+        // in the corner: each is the value of the plot directly below it.
+        let high = format!("{:.4}", transfer.to_linear(axis_max));
+        let high_width = text.measure_text(&high, label_size)[0];
+        frame.text(
+            [bars.x, label_y],
+            label_size,
+            theme.text_dim,
+            format!("{:.4}", transfer.to_linear(axis_min)),
+        );
+        frame.text(
+            [bars.right() - high_width, label_y],
+            label_size,
+            theme.text_dim,
+            high,
+        );
+    }
 
     // One peak across every plane, so their heights stay comparable.
     let peak = colour
@@ -86,7 +230,6 @@ pub(super) fn draw(frame: &mut UiFrame, current: &Current, content: Rect, theme:
         .max()
         .unwrap_or(1)
         .max(1) as f32;
-    let bin_width = bars.width / BINS as f32;
     // Strictly linear in the counts, the way a photo editor plots it: the
     // height of a bin is its share of the fullest one. A single dominating
     // bin — a nodata background, say — will flatten the rest, which is a
@@ -99,11 +242,7 @@ pub(super) fn draw(frame: &mut UiFrame, current: &Current, content: Rect, theme:
             .iter()
             .enumerate()
             .map(|(index, &count)| {
-                let x = match index {
-                    0 => bars.x,
-                    last if last == BINS - 1 => bars.right(),
-                    _ => bars.x + (index as f32 + 0.5) * bin_width,
-                };
+                let x = bars.x + bin_across(index) * bars.width;
                 [x, bars.bottom() - height_of(count)]
             })
             .collect()
@@ -120,27 +259,175 @@ pub(super) fn draw(frame: &mut UiFrame, current: &Current, content: Rect, theme:
         frame.area(&curve(counts), bars.bottom(), color, Blend::Screen);
     }
 
-    // Where the display window sits within the plotted range.
-    let span = axis_max - axis_min;
+    // The pointer's rule: over the bins it is picking one of, and under the
+    // response curve, since where that curve runs at this value is half of
+    // what the readout above says and the line must not cover it.
+    //
+    // Full height, where the window's own marks are ticks against the axis.
+    // A rule standing through the plot is what a pointer wants and what a
+    // permanent annotation does not: this one is only there while it is being
+    // aimed, and it has to be followed up from the axis to the curve.
+    if let Some(across) = across {
+        frame.rect(
+            Rect::new(
+                bars.x + across * bars.width - CURSOR_WIDTH / 2.0,
+                bars.y,
+                CURSOR_WIDTH,
+                bars.height,
+            ),
+            theme.accent.with_alpha(CURSOR_ALPHA),
+        );
+    }
+
+    // What the display is doing to the values underneath, drawn over them.
+    //
+    // The curve is the whole of it, and the only part that can show a tone
+    // map at all: a shoulder is a shape, not a threshold, and there is no
+    // line that means "reinhard". The ticks under it place the two ends of
+    // the window — the values that come out black and white, exposure
+    // included, rather than the window's own bounds, exposure living in the
+    // gain rather than in them.
+    //
+    // Ticks rather than the full-height rules they used to be. The curve
+    // draws both of those points already, leaving the floor at one and, under
+    // a clip, turning its corner at the other; what the ticks add is where
+    // exactly, since a curve meeting a floor tangentially cannot be read
+    // along the axis by eye, and where the window's top is under a tone map,
+    // which nothing on the curve marks because the curve never reaches it.
+    // That is a job for a tick against the axis, not for a rule standing
+    // through the plot in the ink the curve is drawn in.
     if span > 0.0 {
-        for value in [current.display.low, current.display.high] {
-            let encoded = transfer.to_encoded(value);
-            // `clamp` passes a NaN straight through, so a non-finite window
-            // would put a NaN rectangle into the vertex buffer. Skip it: the
-            // marker for a degenerate window is simply not drawn.
-            let position = ((encoded - axis_min) / span).clamp(0.0, 1.0);
-            if !position.is_finite() {
+        let (black, white) = current.display.displayed_bounds();
+        for value in [black, white] {
+            let position = (transfer.to_encoded(value) - axis_min) / span;
+            // Dropped rather than pinned to the edge when the window ends
+            // beyond what is plotted, which a few stops of exposure is enough
+            // to do: a tick held at the edge reads as a boundary that is
+            // there, and the curve running on past it says otherwise. A NaN
+            // fails this test as well, so a degenerate window draws nothing.
+            if !(0.0..=1.0).contains(&position) {
                 continue;
             }
             frame.rect(
                 Rect::new(
-                    bars.x + position * bars.width - 0.5,
-                    bars.y,
-                    1.5,
-                    bars.height,
+                    bars.x + position * bars.width - TICK_WIDTH / 2.0,
+                    bars.bottom() - TICK_RISE,
+                    TICK_WIDTH,
+                    TICK_HEIGHT,
                 ),
                 theme.accent,
             );
         }
+
+        // Sampled per column rather than per bin: the response is a
+        // continuous function of the value, and stepping it where the
+        // transform does not step would draw a stair that is not there.
+        //
+        // The same one check for every column, the arithmetic being the same
+        // for all of them: a window left non-finite would otherwise put NaN
+        // vertices in the buffer, which no clamp downstream can undo.
+        let (offset, gain) = current.display.transform();
+        if offset.is_finite() && gain.is_finite() {
+            let columns = bars.width.max(1.0) as usize;
+            let curve: Vec<[f32; 2]> = (0..=columns)
+                .map(|column| {
+                    let across = column as f32 / columns as f32;
+                    // Decoded to run the transform on, then encoded again to
+                    // be drawn: both axes are in the file's own units, so a
+                    // display doing nothing is the diagonal. Plotting the
+                    // linear response against an encoded axis would bend the
+                    // curve by the transfer function alone, and draw a
+                    // shoulder into an image nobody had touched.
+                    let value = transfer.to_linear(axis_min + across * span);
+                    let response = current.display.response(value).clamp(0.0, 1.0);
+                    let response = transfer.to_encoded(response).clamp(0.0, 1.0);
+                    [
+                        bars.x + across * bars.width,
+                        bars.bottom() - response * bars.height,
+                    ]
+                })
+                .collect();
+            frame.polyline(&curve, CURVE_WIDTH, theme.accent, Blend::Over);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The pointer reads a bin of the plot and nothing outside it — not the
+    /// panel around it, and not the line the axis labels are set on.
+    #[test]
+    fn only_the_plot_itself_answers_the_pointer() {
+        let bars = bars(panel(Rect::new(0.0, 0.0, 800.0, 600.0)));
+
+        assert_eq!(hovered_bin(bars, None), None, "no pointer, no mark");
+        assert_eq!(hovered_bin(bars, Some([bars.x - 1.0, bars.y + 1.0])), None);
+        assert_eq!(
+            hovered_bin(bars, Some([bars.x + 1.0, bars.y - 1.0])),
+            None,
+            "the labels' line is above the plot, not part of it"
+        );
+        assert_eq!(
+            hovered_bin(bars, Some([bars.right(), bars.y + 1.0])),
+            None,
+            "half-open at the far edge, as every other hit test here is"
+        );
+        assert_eq!(hovered_bin(bars, Some([bars.x + 1.0, bars.bottom()])), None);
+    }
+
+    /// And it reads the bin the bar under it was drawn from, so that the rule
+    /// and the bar it stands on cannot part company.
+    #[test]
+    fn the_pointer_marks_the_bar_it_is_over() {
+        let bars = bars(panel(Rect::new(0.0, 0.0, 800.0, 600.0)));
+        let at = |x: f32| hovered_bin(bars, Some([bars.x + x, bars.y + 1.0]));
+
+        assert_eq!(at(0.0), Some(0), "the first pixel of the plot is bin zero");
+        assert_eq!(
+            at(bars.width - 0.5),
+            Some(BINS - 1),
+            "and the last of it is the last bin"
+        );
+        assert_eq!(at(3.1), at(3.9), "one pixel of pointer, one bin");
+        assert_ne!(at(3.1), at(4.1), "the next pixel is the next bin");
+
+        // Every bin the pointer can name has a bar drawn inside the plot for
+        // it to stand on, the two ends included.
+        for bin in [0, 1, BINS / 2, BINS - 2, BINS - 1] {
+            let across = bin_across(bin);
+            assert!((0.0..=1.0).contains(&across), "bin {bin} at {across}");
+        }
+        assert_eq!(bin_across(0), 0.0);
+        assert_eq!(bin_across(BINS - 1), 1.0);
+    }
+
+    /// The readout is set in the middle of the line, and the ends of the axis
+    /// keep their corners until it actually reaches them — at which point
+    /// both go, rather than one.
+    #[test]
+    fn the_axis_ends_give_the_line_up_to_the_readout_and_not_before() {
+        let bars = bars(panel(Rect::new(0.0, 0.0, 800.0, 600.0)));
+        let centred = |width: f32| bars.x + (bars.width - width) / 2.0;
+
+        let (x, fits) = readout_placement(bars, 80.0, [40.0, 40.0]);
+        assert_eq!(x, centred(80.0), "centred on the plot, not on the panel");
+        assert!(fits, "80 in the middle and 40 either side of 256 is room");
+
+        let room = (bars.width - 80.0) / 2.0 - LABEL_GAP;
+        assert!(
+            readout_placement(bars, 80.0, [room, room]).1,
+            "exactly room"
+        );
+        assert!(
+            !readout_placement(bars, 80.0, [room + 0.5, room]).1,
+            "and a hair less is not — the left end alone decides for both"
+        );
+        assert!(!readout_placement(bars, 80.0, [room, room + 0.5]).1);
+        assert!(
+            !readout_placement(bars, bars.width + 1.0, [0.0, 0.0]).1,
+            "a readout wider than the plot leaves no line to share"
+        );
     }
 }

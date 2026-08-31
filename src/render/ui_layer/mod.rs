@@ -277,6 +277,52 @@ impl UiFrame {
         }
     }
 
+    /// Strokes the polyline `points` — in logical pixels — `width` wide.
+    ///
+    /// Each segment is a quad about its own centre line, with a square patch
+    /// at every interior joint. Mitring would be the tidier construction, but
+    /// a patch the width of the stroke fills the notch on the outside of a
+    /// bend at any angle, and the one curve drawn with this turns over
+    /// hundreds of short segments where the difference cannot be seen.
+    pub fn polyline(&mut self, points: &[[f32; 2]], width: f32, color: Color, blend: Blend) {
+        let half = width / 2.0;
+        let mut vertices = Vec::with_capacity(points.len() * 12);
+        for pair in points.windows(2) {
+            let (from, to) = (pair[0], pair[1]);
+            let (dx, dy) = (to[0] - from[0], to[1] - from[1]);
+            let length = dx.hypot(dy);
+            // A repeated point has no direction to stand perpendicular to,
+            // and a non-finite one would put a NaN vertex in the buffer.
+            if !length.is_finite() || length <= f32::EPSILON {
+                continue;
+            }
+            let (nx, ny) = (-dy / length * half, dx / length * half);
+            let (a, b) = ([from[0] + nx, from[1] + ny], [from[0] - nx, from[1] - ny]);
+            let (c, d) = ([to[0] - nx, to[1] - ny], [to[0] + nx, to[1] + ny]);
+            vertices.extend_from_slice(&[a, b, c, a, c, d]);
+        }
+        // The joints, once the segments they sit between are known to exist.
+        if !vertices.is_empty() {
+            for point in &points[1..points.len().saturating_sub(1)] {
+                let (left, right) = (point[0] - half, point[0] + half);
+                let (top, bottom) = (point[1] - half, point[1] + half);
+                vertices.extend_from_slice(&[
+                    [left, top],
+                    [left, bottom],
+                    [right, bottom],
+                    [left, top],
+                    [right, bottom],
+                    [right, top],
+                ]);
+            }
+            self.layer().shapes.push(Shape::Poly(PolyItem {
+                vertices,
+                color,
+                blend,
+            }));
+        }
+    }
+
     /// A filled triangle, in logical pixels: what the arrowheads and
     /// chevrons an icon is drawn from are made of, since a rectangle cannot
     /// point anywhere.

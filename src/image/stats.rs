@@ -2,7 +2,7 @@
 //! numbers do not conveniently fill 0..1 — 12-bit sensor data stored in
 //! 16-bit containers, or HDR frames with a few very bright highlights.
 
-use super::{Channels, ColorSpace, DecodedImage, Samples, Transfer};
+use super::{Channels, ColorSpace, DecodedImage, Sample, Samples, Transfer};
 
 /// Bins are plenty for percentile work and cheap to keep around; the UI draws
 /// this directly as a histogram.
@@ -54,6 +54,57 @@ pub struct Plot {
 }
 
 impl Plot {
+    /// Which bin of the luminance plane one pixel read back out of `image`
+    /// was counted in, so that a marker can point at the bar its own pixel is
+    /// part of.
+    ///
+    /// The twin of the luminance pass in [`Stats::scan`], and it has to be
+    /// worked out from the file's components rather than from
+    /// [`Sample::color`]: the scan bins what the transfer function alone
+    /// makes of them, where that colour has also been carried into the
+    /// working space and had its premultiplication undone. On a P3 file, or
+    /// one with premultiplied alpha, a bin taken from the colour would name a
+    /// bar the pixel is not in.
+    ///
+    /// `None` where there is no bar to point at: an axis with no span, a
+    /// value the scan would have thrown out as nodata, or one outside the
+    /// range it measured — which a strided scan can miss, and which the plot
+    /// therefore does not cover.
+    pub fn bin_of(&self, image: &DecodedImage, sample: &Sample) -> Option<usize> {
+        let transfer = image.color.transfer;
+        let scale = 1.0 / image.samples.full_scale();
+        let mut linear = [0.0f32; 4];
+        for (slot, stored) in linear.iter_mut().zip(sample.stored()) {
+            *slot = transfer.to_linear(stored * scale);
+        }
+        let channels = sample.channels;
+        let value = luminance(&linear[..channels.count()], channels);
+        if !value.is_finite() || image.nodata.is_some_and(|sentinel| value == sentinel) {
+            return None;
+        }
+        self.bin(encode(transfer, value))
+    }
+
+    /// Which bin a value already on the plot's own axis falls in: the same
+    /// arithmetic the scan bins with, so the two cannot drift apart.
+    ///
+    /// Out of range is `None` rather than the end bin the scan clamps to. The
+    /// scan clamps because every value it sees is one the axis was measured
+    /// from and a clamp there is only guarding the arithmetic; a marker asked
+    /// about a value off the axis has genuinely nowhere to stand, and one
+    /// held at the edge would claim a bar that is not the pixel's.
+    fn bin(&self, stored: f32) -> Option<usize> {
+        // Written so that a non-finite axis fails the test as well: every
+        // comparison against a NaN is false, and the positive form would let
+        // one through to divide by it.
+        let span = self.max - self.min;
+        if !span.is_finite() || span <= f32::MIN_POSITIVE {
+            return None;
+        }
+        let bin = (stored - self.min) * ((BINS - 1) as f32 / span) + 0.5;
+        (0.0..BINS as f32).contains(&bin).then_some(bin as usize)
+    }
+
     fn empty() -> Self {
         Self {
             min: 0.0,
@@ -320,7 +371,7 @@ impl<'a> Values<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::image::{AlphaMode, ColorSpace, Transfer};
+    use crate::image::{AlphaMode, ColorSpace, Primaries, Transfer};
 
     fn linear_gray(data: Vec<u16>) -> DecodedImage {
         DecodedImage {
@@ -378,6 +429,62 @@ mod tests {
 
         assert!((linear - 0.5).abs() < 1e-3, "{linear}");
         assert!((decoded - 0.2140).abs() < 1e-3, "{decoded}");
+    }
+
+    /// Every pixel's marker lands on a bar that actually has the pixel in it.
+    ///
+    /// The one that would go wrong quietly: this image is P3 with
+    /// premultiplied alpha, so the colour a readout gets back from
+    /// [`DecodedImage::sample`] has been through a primaries matrix and a
+    /// divide by alpha that the scan never applied. A bin taken from that
+    /// would point at an empty bar beside the pixel's own.
+    #[test]
+    fn a_pixels_bin_is_the_bar_that_counted_it() {
+        let image = DecodedImage {
+            width: 4,
+            height: 1,
+            samples: Samples::U8 {
+                channels: Channels::Rgba,
+                data: vec![
+                    10, 20, 30, 255, // opaque, so the divide is a no-op
+                    9, 40, 60, 128, // and these three are not
+                    60, 30, 15, 128, //
+                    128, 128, 128, 128,
+                ],
+            },
+            color: ColorSpace {
+                transfer: Transfer::Srgb,
+                primaries: Primaries::DisplayP3,
+            },
+            alpha: AlphaMode::Premultiplied,
+            value_range: None,
+            nodata: None,
+        };
+        let plot = Stats::scan(&image).plot;
+
+        for x in 0..image.width {
+            let sample = image.sample(x, 0).expect("inside the image");
+            let bin = plot.bin_of(&image, &sample).expect("on the axis");
+            assert!(
+                plot.luma[bin] > 0,
+                "pixel {x} marked at bin {bin}, which counted nothing"
+            );
+        }
+    }
+
+    /// A value the plot does not cover has no bar to stand on, and is told so
+    /// rather than being pushed onto the bar at the end.
+    #[test]
+    fn a_value_off_the_axis_gets_no_bin() {
+        let plot = Stats::scan(&linear_gray(vec![1000, 2000])).plot;
+        assert_eq!(plot.bin(plot.min), Some(0));
+        assert_eq!(plot.bin(plot.max), Some(BINS - 1));
+        assert_eq!(plot.bin(plot.min - (plot.max - plot.min)), None);
+        assert_eq!(plot.bin(plot.max + (plot.max - plot.min)), None);
+        assert_eq!(plot.bin(f32::NAN), None);
+
+        let flat = Stats::scan(&linear_gray(vec![500; 4])).plot;
+        assert_eq!(flat.bin(500.0 / 65535.0), None, "no span, no bars");
     }
 
     #[test]

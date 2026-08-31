@@ -438,6 +438,32 @@ impl Display {
         };
         (self.low, gain)
     }
+
+    /// The two values on the image's own scale that come out as displayed 0
+    /// and 1: the window as the shader actually applies it.
+    ///
+    /// Not `(low, high)`. Exposure is folded into the gain rather than into
+    /// the bounds, so a stop of it halves the distance to white while leaving
+    /// both where they were. The histogram's markers are drawn from this, and
+    /// a marker taken from the bounds would name a value the shader is not
+    /// clipping at.
+    pub fn displayed_bounds(&self) -> (f32, f32) {
+        let (offset, gain) = self.transform();
+        (offset, offset + 1.0 / gain)
+    }
+
+    /// What the screen makes of one value on the image's own linear scale:
+    /// the window, the exposure and the tone curve, as a number from 0 to 1.
+    ///
+    /// The neutral axis of the pipeline — a grey fed through it — which is
+    /// what the histogram draws as its response curve. [`Display::map`] is
+    /// the same arithmetic for a whole pixel, where the false colour and a
+    /// tone curve's cross-channel terms also come in; a curve for those would
+    /// be three curves, and the panel is asking a one-dimensional question.
+    pub fn response(&self, value: f32) -> f32 {
+        let (offset, gain) = self.transform();
+        self.tone_map.apply([(value - offset) * gain; 3])[0]
+    }
 }
 
 /// One pixel as the display transform leaves it.
@@ -708,6 +734,61 @@ mod tests {
         display.adjust_exposure(-2.0);
         let (_, dimmer) = display.transform();
         assert!((dimmer / base - 0.5).abs() < 1e-5);
+    }
+
+    /// Exposure moves where white falls without moving the window, so the
+    /// markers that say where the window lands have to be taken from the
+    /// transform rather than from `low` and `high`.
+    #[test]
+    fn the_displayed_bounds_follow_exposure() {
+        let mut display = Display {
+            low: 0.25,
+            high: 0.75,
+            ..Default::default()
+        };
+        assert_eq!(display.displayed_bounds(), (0.25, 0.75));
+
+        display.adjust_exposure(1.0);
+        let (black, white) = display.displayed_bounds();
+        assert_eq!(black, 0.25, "black stays at the foot of the window");
+        assert!((white - 0.5).abs() < 1e-6, "a stop halves the way to white");
+
+        // Whatever the state, they are the transform run backwards.
+        display.adjust_exposure(-3.0);
+        let (offset, gain) = display.transform();
+        let (black, white) = display.displayed_bounds();
+        assert!(((black - offset) * gain).abs() < 1e-6);
+        assert!(((white - offset) * gain - 1.0).abs() < 1e-6);
+    }
+
+    /// The curve the histogram draws has to be the pipeline, not a sketch of
+    /// it: the window's foot comes out black, its head comes out white under
+    /// a clip, and a tone curve bends the top down instead without ever
+    /// letting it back below what came before.
+    #[test]
+    fn the_response_is_the_whole_pipeline_run_on_one_value() {
+        let mut display = Display {
+            low: 0.25,
+            high: 0.75,
+            ..Default::default()
+        };
+        let (black, white) = display.displayed_bounds();
+        assert!(display.response(black).abs() < 1e-6);
+        assert!((display.response(white) - 1.0).abs() < 1e-6);
+        // Clipping is flat on both sides of the window, which is the corner
+        // the curve is drawn to show.
+        assert_eq!(display.response(0.0), 0.0);
+        assert_eq!(display.response(4.0), 1.0);
+
+        display.tone_map = ToneMap::Neutral;
+        assert!(display.response(white) < 1.0, "the shoulder rolls off");
+        let mut previous = f32::NEG_INFINITY;
+        for step in 0..64 {
+            let response = display.response(step as f32 / 16.0);
+            assert!(response >= previous, "step {step}: {response} < {previous}");
+            assert!((0.0..=1.0).contains(&response), "step {step}: {response}");
+            previous = response;
+        }
     }
 
     #[test]
