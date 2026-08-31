@@ -29,6 +29,17 @@ pub enum Channels {
 }
 
 impl Channels {
+    /// The word for the layout, which the bottom bar and the info panel both
+    /// write out.
+    pub fn label(self) -> &'static str {
+        match self {
+            Channels::Gray => "gray",
+            Channels::GrayAlpha => "gray+alpha",
+            Channels::Rgb => "rgb",
+            Channels::Rgba => "rgba",
+        }
+    }
+
     pub fn count(self) -> usize {
         match self {
             Channels::Gray => 1,

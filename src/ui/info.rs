@@ -9,6 +9,7 @@
 
 use std::time::SystemTime;
 
+use crate::image::AlphaMode;
 use crate::render::{Color, Rect, TextMeasure, UiFrame};
 use crate::theme::Theme;
 
@@ -26,14 +27,25 @@ const INFO_MIN_HEIGHT: f32 = 120.0;
 const LABEL_SIZE: f32 = TEXT_SIZE * 0.85;
 
 /// The space above a field's name. Enough that a name reads as belonging to
-/// the value under it rather than to the one above.
-const FIELD_GAP: f32 = 10.0;
+/// the value under it rather than to the one above, and no more: the column
+/// is long, and every pixel spent parting two fields is a pixel of some
+/// further field pushed off the bottom of the panel.
+const FIELD_GAP: f32 = 6.0;
 /// The space above a section's name, which has to part two sections more
-/// plainly than a field parts two fields.
-const SECTION_GAP: f32 = 22.0;
-/// The space between a field's name and its value, which is only enough to
-/// keep the two lines apart.
-const LABEL_GAP: f32 = 2.0;
+/// plainly than a field parts two fields — near enough twice as plainly, with
+/// a hairline drawn through the middle of it doing the parting that the space
+/// used to have to do alone.
+const SECTION_GAP: f32 = 11.0;
+/// The space between a field's name and its value. Less than nothing: a line
+/// box carries its own leading above the glyphs, so the two lines are pulled
+/// a pixel into one another's boxes without their ink coming any closer, and
+/// a name and what it names read as one thing rather than as two.
+const LABEL_GAP: f32 = -1.0;
+
+/// The hairline drawn across the column above every section but the first.
+/// The same width as the hairline along a panel's edge, being the same kind
+/// of thing.
+const RULE_WIDTH: f32 = 1.0;
 
 /// The scrollbar down the panel's inner edge, and the room kept clear for it
 /// whether or not there is anything to scroll — text that reflowed the moment
@@ -56,6 +68,10 @@ pub struct FileFacts {
     /// between being read and being asked about.
     pub bytes: Option<u64>,
     pub modified: Option<SystemTime>,
+    /// The decoder that claimed the file, which is chosen by what its bytes
+    /// say rather than by what its name does. `None` on the same terms as the
+    /// two above.
+    pub reader: Option<&'static str>,
 }
 
 /// What a row of the column is, which is what it is drawn as: the name of a
@@ -204,6 +220,24 @@ pub fn scroll_per_drag(text: &mut dyn TextMeasure, current: &Current, panel: Rec
     overflow / travel
 }
 
+/// The hairline parting a section from the one before it, given where that
+/// section's heading landed: across the column, in the middle of the space
+/// above the heading, so that the gap reads as belonging to neither section
+/// more than the other.
+///
+/// `None` for a line that would fall outside the panel. A rule is one pixel
+/// and cannot be drawn half, so unlike the words — which slide under the
+/// panel's edge — it is either on screen or it is not.
+fn rule(y: f32, clip: Rect) -> Option<Rect> {
+    let rule = Rect::new(
+        clip.x,
+        (y - SECTION_GAP / 2.0).round(),
+        clip.width,
+        RULE_WIDTH,
+    );
+    (rule.y >= clip.y && rule.bottom() <= clip.bottom()).then_some(rule)
+}
+
 /// The scrollbar's thumb: how tall it is, and how far down the track it
 /// travels between the top of the column and the end of it. Long columns
 /// stop shortening it at [`THUMB_MIN`], which is why the two are not simply
@@ -239,8 +273,17 @@ pub(super) fn draw(
     // Everything is clipped to the column rather than to the panel, so a line
     // slides under the inset edge instead of touching the rounded corner.
     let clip = Rect::new(view.x, view.y, view.width - SCROLLBAR_GUTTER, view.height);
-    for row in &column.rows {
+    for (index, row) in column.rows.iter().enumerate() {
         let y = view.y + row.y - scroll;
+        // The first heading opens the column and has nothing above it to be
+        // parted from; every one after it is a section starting, which is
+        // what a reader scrolling this column is looking for.
+        if row.kind == Kind::Heading
+            && index > 0
+            && let Some(rule) = rule(y, clip)
+        {
+            frame.rect(rule, theme.border);
+        }
         // Cheap enough to hand every row to the text layer, which clips them,
         // but a long column would then be reshaped in full every frame.
         if y + row.height < view.y || y > view.bottom() {
@@ -280,10 +323,12 @@ pub(super) fn draw(
 
 /// The whole column, laid out into a panel `width` wide.
 ///
-/// Three sections, nearest first: the file itself, then what its metadata
-/// says the photograph is, then every other field the file carries. A section
-/// with nothing in it is not named — an empty heading is a question about
-/// where the rest of it went.
+/// Sections, nearest first: the file on disk, then the picture in it, then
+/// whatever its metadata has to say — the camera, the place, the ground, the
+/// words, and last the fields nothing above spoke for. A section with nothing
+/// in it is not named, an empty heading being a question about where the rest
+/// of it went; only the first two are certain, since a file always has a size
+/// and a picture always has a size and a colour space.
 fn column(text: &mut dyn TextMeasure, current: &Current, width: f32) -> Column {
     let mut column = Column {
         rows: Vec::new(),
@@ -291,43 +336,87 @@ fn column(text: &mut dyn TextMeasure, current: &Current, width: f32) -> Column {
         width: (width - SCROLLBAR_GUTTER).max(1.0),
     };
 
-    column.add(text, Kind::Heading, "File".to_string());
-    for (name, value) in facts(current) {
-        column.field(text, name, &value);
+    for (heading, facts) in [
+        ("File", file_facts(current)),
+        ("Image", image_facts(current)),
+    ] {
+        column.add(text, Kind::Heading, heading.to_string());
+        for (name, value) in facts {
+            column.field(text, name, &value);
+        }
     }
 
-    for (heading, entries) in [
-        ("Photo", &current.exif.summary),
-        ("Georeference", &current.exif.geo),
-        ("Metadata", &current.exif.other),
-    ] {
-        if entries.is_empty() {
-            continue;
-        }
-        column.add(text, Kind::Heading, heading.to_string());
-        for entry in entries {
+    for section in &current.exif.sections {
+        column.add(text, Kind::Heading, section.name.to_string());
+        for entry in &section.entries {
             column.field(text, &entry.name, &entry.value);
         }
     }
     column
 }
 
-/// What the panel says about the file, in the order it says it: what it is
-/// and where, then how big, then when it was written.
-fn facts(current: &Current) -> Vec<(&'static str, String)> {
+/// What the panel says about the file as a file: what it is called and where
+/// it lives, which decoder turned out to own it, then how big it is and when
+/// it was last written. Nothing here is about the picture.
+fn file_facts(current: &Current) -> Vec<(&'static str, String)> {
     let file = &current.file;
     vec![
         ("Name", current.label.clone()),
         ("Path", file.path.clone()),
-        (
-            "Resolution",
-            format!("{} \u{00d7} {}", current.image.width, current.image.height),
-        ),
+        ("Read by", file.reader.unwrap_or_default().to_string()),
+        ("Size", file.bytes.map(format_bytes).unwrap_or_default()),
         (
             "Modified",
             file.modified.map(format_time).unwrap_or_default(),
         ),
-        ("Size", file.bytes.map(format_bytes).unwrap_or_default()),
+    ]
+}
+
+/// And what it says about the picture: how large it is, what each pixel holds,
+/// and what those numbers are meant as light. The bars say some of this too,
+/// but they say it in passing and drop it when the window narrows; this is
+/// where it is written out and stays written.
+fn image_facts(current: &Current) -> Vec<(&'static str, String)> {
+    let image = &current.image;
+    vec![
+        (
+            "Resolution",
+            format!("{} \u{00d7} {}", image.width, image.height),
+        ),
+        (
+            "Samples",
+            format!(
+                "{} {}",
+                image.samples.component_name(),
+                image.channels().label()
+            ),
+        ),
+        // What we asked the GPU for is not always what it had: a 16-bit image
+        // on a device without the format lands somewhere wider or narrower,
+        // and the difference belongs beside what the file holds.
+        ("Stored as", current.stored.clone().unwrap_or_default()),
+        ("Colour space", image.color.label()),
+        // Only where there is an alpha channel to have been multiplied
+        // through or not: "opaque" under an image the line above already
+        // called rgb is a word about nothing.
+        (
+            "Alpha",
+            match image.alpha {
+                AlphaMode::Opaque => String::new(),
+                AlphaMode::Straight => "straight".to_string(),
+                AlphaMode::Premultiplied => "premultiplied".to_string(),
+            },
+        ),
+        // The range the file declared, as against the one its pixels turned
+        // out to occupy: the histogram shows the second, and only the file
+        // can say the first.
+        (
+            "Declared range",
+            image
+                .value_range
+                .map(|(low, high)| format!("{low} \u{2013} {high}"))
+                .unwrap_or_default(),
+        ),
     ]
 }
 
@@ -421,7 +510,7 @@ mod tests {
     use std::time::Duration;
 
     use crate::image::display::{Display, Startup};
-    use crate::image::exif::{Entry, Exif};
+    use crate::image::exif::{Entry, Exif, Section};
     use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples, Stats};
     use crate::ui::Monospace;
 
@@ -454,31 +543,39 @@ mod tests {
                 path: "/home/reader/pictures/kingfisher.png".into(),
                 bytes: Some(1_258_291),
                 modified: Some(SystemTime::UNIX_EPOCH + Duration::from_secs(1_756_632_722)),
+                reader: Some("png"),
             },
             exif: photograph(),
             stored: None,
         }
     }
 
-    /// What a photograph's metadata comes to the panel as: a summary, and a
-    /// listing long enough to have to be scrolled.
+    /// What a photograph's metadata comes to the panel as: the groups it was
+    /// read into, the last of them long enough to have to be scrolled.
     fn photograph() -> Exif {
         let entry = |name: &str, value: &str| Entry {
             name: name.to_string(),
             value: value.to_string(),
         };
         Exif {
-            geo: Vec::new(),
-            summary: vec![
-                entry("Camera", "Apple iPhone 16 Pro"),
-                entry(
-                    "Exposure",
-                    "1/50 s   \u{00b7}   f/1.78   \u{00b7}   ISO 200",
-                ),
+            sections: vec![
+                Section {
+                    name: "Camera",
+                    entries: vec![
+                        entry("Camera", "Apple iPhone 16 Pro"),
+                        entry(
+                            "Exposure",
+                            "1/50 s   \u{00b7}   f/1.78   \u{00b7}   ISO 200",
+                        ),
+                    ],
+                },
+                Section {
+                    name: "Capture metadata",
+                    entries: (0..24)
+                        .map(|index| entry(&format!("Field {index}"), &format!("value {index}")))
+                        .collect(),
+                },
             ],
-            other: (0..24)
-                .map(|index| entry(&format!("Field {index}"), &format!("value {index}")))
-                .collect(),
         }
     }
 
@@ -491,16 +588,20 @@ mod tests {
     }
 
     /// Every fact the panel exists to show, written out rather than merely
-    /// headed, and the metadata after the file's own facts.
+    /// headed: what the file is, then what the picture in it is, then the
+    /// metadata's own groups after both.
     #[test]
     fn the_column_says_what_the_file_is() {
         let written = written(&current(), 300.0);
         for expected in [
             "kingfisher.png",
             "/home/reader/pictures/kingfisher.png",
-            "4 \u{00d7} 5",
-            "2025-08-31 09:32:02 UTC",
+            "png",
             "1.26 MB (1,258,291 bytes)",
+            "2025-08-31 09:32:02 UTC",
+            "4 \u{00d7} 5",
+            "8-bit rgb",
+            "BT.709 / sRGB",
             "Apple iPhone 16 Pro",
             "value 23",
         ] {
@@ -513,21 +614,30 @@ mod tests {
         // section is headed, and the sections come in the order they are read.
         let index = |text: &str| written.iter().position(|row| row == text);
         assert!(index("Path") < index("/home/reader/pictures/kingfisher.png"));
-        assert!(index("File") < index("Photo"));
-        assert!(index("Photo") < index("Camera"));
-        assert!(index("Camera") < index("Metadata"));
-        assert!(index("Metadata") < index("Field 0"));
+        assert!(index("File") < index("Image"));
+        assert!(index("Image") < index("Resolution"));
+        // The picture's size is a fact about the picture, not about the file
+        // it arrived in, and is read under the heading that says so.
+        assert!(index("Size") < index("Image"));
+        assert!(index("Resolution") < index("Camera"));
+        assert!(index("Camera") < index("Capture metadata"));
+        assert!(index("Capture metadata") < index("Field 0"));
     }
 
-    /// A file that carries no metadata is not given empty headings to explain.
+    /// A file that carries no metadata still has a file and a picture to
+    /// describe, and is not given empty headings to explain the rest.
     #[test]
     fn a_file_with_no_metadata_is_all_file_and_no_headings_for_the_rest() {
         let mut current = current();
         current.exif = Exif::default();
         let written = written(&current, 300.0);
         assert!(written.contains(&"File".to_string()), "{written:?}");
-        assert!(!written.contains(&"Photo".to_string()), "{written:?}");
-        assert!(!written.contains(&"Metadata".to_string()), "{written:?}");
+        assert!(written.contains(&"Image".to_string()), "{written:?}");
+        assert!(!written.contains(&"Camera".to_string()), "{written:?}");
+        assert!(
+            !written.contains(&"Capture metadata".to_string()),
+            "{written:?}"
+        );
     }
 
     /// A fact the file will not give up is left out altogether: a name with a
@@ -537,10 +647,42 @@ mod tests {
         let mut current = current();
         current.file.bytes = None;
         current.file.modified = None;
+        current.file.reader = None;
         let written = written(&current, 300.0);
-        assert!(!written.iter().any(|row| row == "Size"), "{written:?}");
-        assert!(!written.iter().any(|row| row == "Modified"), "{written:?}");
+        for absent in [
+            "Size",
+            "Modified",
+            "Read by",
+            "Alpha",
+            "Declared range",
+            "Stored as",
+        ] {
+            assert!(!written.iter().any(|row| row == absent), "{written:?}");
+        }
         assert!(written.iter().any(|row| row == "kingfisher.png"));
+    }
+
+    /// The hairline that parts two sections sits in the space above the
+    /// heading, belonging to neither section, and is dropped rather than
+    /// drawn half when that space falls off the end of the panel.
+    #[test]
+    fn a_section_is_parted_from_the_one_before_it_by_a_line() {
+        let clip = Rect::new(10.0, 100.0, 200.0, 300.0);
+        let heading = 240.0;
+        let line = rule(heading, clip).expect("a heading in the middle of the panel");
+        assert!(line.bottom() <= heading && line.y >= heading - SECTION_GAP);
+        assert_eq!(line.x, clip.x, "across the whole column");
+        assert_eq!(line.width, clip.width);
+        assert_eq!(line.height, RULE_WIDTH, "a hairline, not a band");
+
+        // A heading scrolled to the very top of the panel has taken its gap
+        // off the top with it, and there is nothing left to draw a line in.
+        // The same at the bottom — though a heading only just past the end
+        // still has its gap on screen, and is announced by the line before
+        // the words themselves come up.
+        assert_eq!(rule(clip.y, clip), None);
+        assert!(rule(clip.bottom() + 1.0, clip).is_some());
+        assert_eq!(rule(clip.bottom() + SECTION_GAP, clip), None);
     }
 
     /// What the wheel is clamped against: enough to bring the last line up to
@@ -558,10 +700,15 @@ mod tests {
             height - view.height
         );
 
-        // Rows are stacked in the order they were added, each below the last.
+        // Rows are stacked in the order they were added, each below the last
+        // by exactly the gap its kind asks for — a value included, which is
+        // pulled a pixel up into its label's line box rather than set below
+        // it, that pixel being leading and not ink.
         let rows = column(&mut Monospace, &current, view.width).rows;
         for pair in rows.windows(2) {
-            assert!(pair[0].y + pair[0].height <= pair[1].y, "rows overlap");
+            let gap = pair[1].kind.style().1;
+            assert_eq!(pair[1].y, pair[0].y + pair[0].height + gap);
+            assert!(pair[0].y < pair[1].y, "rows go down the column");
         }
         assert_eq!(rows[0].y, 0.0, "the column starts at the top of the panel");
 

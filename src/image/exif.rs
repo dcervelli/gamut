@@ -5,15 +5,17 @@
 //! read on the loader thread beside the decode, because it is one more parse
 //! of a file whoever wrote it chose the bytes of.
 //!
-//! The sections are the ways the block is read. A photograph is
-//! looked at through a handful of fields — what took it, when, at what
-//! exposure, where — and those are gathered, combined and given their units
-//! in [`Exif::summary`]. A raster is looked at through a different handful,
-//! which are not EXIF at all but GeoTIFF keys packed into the same directory,
-//! and [`super::geo`] takes those apart into [`Exif::geo`]. Everything else
-//! the file carries is listed after both, in the order the file carries it,
-//! because this is a viewer for looking at what is actually in a file rather
-//! than for a tidy précis of it.
+//! What comes back is [`Section`]s, in the order the panel reads them. A
+//! photograph is looked at through a handful of fields — what took it, when,
+//! at what exposure — and those are gathered, combined and given their units
+//! under `Camera`, with the GPS directory becoming `Location`. A raster is
+//! looked at through a different handful, which are not EXIF at all but
+//! GeoTIFF keys packed into the same directory, and [`super::geo`] takes
+//! those apart into `Georeference`. The fields somebody wrote in words are
+//! pulled out as `Description`, and whatever is left is listed under the
+//! directory it came out of, in the order the file carries it — because this
+//! is a viewer for looking at what is actually in a file rather than for a
+//! tidy précis of it.
 
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
@@ -80,19 +82,25 @@ impl Entry {
     }
 }
 
+/// One group of fields under the heading it is read by. Never empty: a
+/// heading with a blank under it is a question about where the rest of it
+/// went, so a group that came to nothing is not carried at all.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Section {
+    pub name: &'static str,
+    pub entries: Vec<Entry>,
+}
+
 /// A file's EXIF, ready to be read: no tags, no types, no offsets, only what
 /// the fields say. Empty when the file carries none, or carries one that will
 /// not parse — a photograph with unreadable metadata is still a photograph,
 /// so nothing here is an error anything else has to handle.
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default, PartialEq, Eq, Debug)]
 pub struct Exif {
-    /// The fields a photograph is read by, combined and in a fixed order.
-    pub summary: Vec<Entry>,
-    /// Where the pixels are on the ground, for a file that says: the same
-    /// directory, a different standard. See [`super::geo`].
-    pub geo: Vec<Entry>,
-    /// Everything else, in the order the file carries it.
-    pub other: Vec<Entry>,
+    /// The groups the file's fields fall into, in the order they are read:
+    /// what took the picture, where it was taken, where its pixels are on the
+    /// ground, what was written about it, then everything left over.
+    pub sections: Vec<Section>,
 }
 
 impl Exif {
@@ -152,41 +160,67 @@ impl Exif {
     }
 
     fn from_block(exif: &exif::Exif) -> Self {
-        let summary = summarise(exif);
         let geo = geo::describe(&geo_tags(exif));
-        // Whatever a section above has already said is not said again: the
+        // Whatever a group below has already said is not said again: the
         // listing is what is left in the file, not a second copy of the top
         // of the panel. The georeference speaks for its tags only when it
         // came to something — a directory nothing could be read out of is
         // better listed raw than dropped.
         let mut told: Vec<Tag> = SUMMARISED.to_vec();
+        told.extend(DESCRIBED.map(|(tag, _)| tag));
         if !geo.is_empty() {
             told.extend(GEOREFERENCED.map(|number| Tag(Context::Tiff, number)));
         }
-        let other = exif
-            .fields()
-            .filter(|field| field.ifd_num == In::PRIMARY)
-            .filter(|field| !told.contains(&field.tag))
-            .filter(|field| !is_bulk(&field.value))
-            .map(|field| {
-                Entry::new(
-                    tag_name(field.tag),
-                    shorten(&tidy_numbers(&display(exif, field))),
-                )
-            })
+
+        // What is left, under the directory it came out of. The block is
+        // already sorted that way — TIFF's own tags describe the file, the
+        // Exif directory describes the shot, the GPS directory describes the
+        // place — so the listing is grouped by asking each tag where it came
+        // from rather than by a table saying where each one belongs. The
+        // place carries on from the coordinate the summary drew out of it.
+        let mut place = location(exif);
+        let mut image = Vec::new();
+        let mut capture = Vec::new();
+        for field in exif.fields() {
+            if field.ifd_num != In::PRIMARY || told.contains(&field.tag) || is_bulk(&field.value) {
+                continue;
+            }
+            let entry = Entry::new(
+                tag_name(field.tag),
+                shorten(&tidy_numbers(&display(exif, field))),
+            );
             // A field whose value is nothing but padding has nothing to say.
-            .filter(|entry| !entry.value.is_empty())
-            .collect();
-        Self {
-            summary,
-            geo,
-            other,
+            if entry.value.is_empty() {
+                continue;
+            }
+            match field.tag.0 {
+                Context::Gps => place.push(entry),
+                Context::Tiff => image.push(entry),
+                // The interoperability directory is a corner of the Exif one
+                // and reads as more of the same.
+                _ => capture.push(entry),
+            }
         }
+
+        let sections = [
+            ("Camera", camera(exif)),
+            ("Location", place),
+            ("Georeference", geo),
+            ("Description", described(exif)),
+            ("Image metadata", image),
+            ("Capture metadata", capture),
+        ]
+        .into_iter()
+        .filter(|(_, entries)| !entries.is_empty())
+        .map(|(name, entries)| Section { name, entries })
+        .collect();
+        Self { sections }
     }
 }
 
-/// The tags the summary speaks for, and so the ones the listing leaves out.
-const SUMMARISED: [Tag; 15] = [
+/// The tags `Camera` and `Location` speak for, and so the ones the listing
+/// leaves out.
+const SUMMARISED: [Tag; 17] = [
     Tag::Make,
     Tag::Model,
     Tag::LensModel,
@@ -202,6 +236,22 @@ const SUMMARISED: [Tag; 15] = [
     Tag::GPSLatitudeRef,
     Tag::GPSLongitude,
     Tag::GPSLongitudeRef,
+    Tag::GPSAltitude,
+    Tag::GPSAltitudeRef,
+];
+
+/// The fields somebody wrote in words, or that the program writing the file
+/// wrote on their behalf: what the picture is of, who made it, what may be
+/// done with it. They are what a reader looking for sentences rather than
+/// numbers is looking for, and the listing below is long enough to lose them
+/// in — so they are pulled out of it and named as they would be spoken.
+const DESCRIBED: [(Tag, &str); 6] = [
+    (Tag::ImageDescription, "Description"),
+    (Tag::UserComment, "Comment"),
+    (Tag::Artist, "Artist"),
+    (Tag::Copyright, "Copyright"),
+    (Tag::Software, "Software"),
+    (Tag::DateTime, "Written"),
 ];
 
 /// The tags the georeference speaks for: the two that place the raster, the
@@ -249,8 +299,12 @@ fn geo_tags(exif: &exif::Exif) -> geo::Tags {
     }
 }
 
-/// The handful of fields a photograph is read by, in the order they are read.
-fn summarise(exif: &exif::Exif) -> Vec<Entry> {
+/// The handful of fields a photograph is read by, in the order they are read:
+/// what took it, then when, then at what settings. The exposure belongs with
+/// the camera rather than under a heading of its own — a shutter speed and
+/// the body it was set on are read as one thought, and two headings over
+/// five fields is more furniture than the panel can carry.
+fn camera(exif: &exif::Exif) -> Vec<Entry> {
     let mut rows = Vec::new();
     let text = |tag| primary(exif, tag).map(|field| tidy_numbers(&display(exif, field)));
 
@@ -299,11 +353,73 @@ fn summarise(exif: &exif::Exif) -> Vec<Entry> {
     };
     push(&mut rows, "Focal length", focal);
 
-    let mut place: Vec<String> = coordinates(exif).into_iter().collect();
-    place.extend(altitude(exif));
-    push(&mut rows, "Location", join(&place));
-
     rows
+}
+
+/// Where the camera stood, as the two facts a map wants of it. The rest of
+/// the GPS directory is listed under these rather than beside them: this is
+/// the head of a section, not the whole of one.
+fn location(exif: &exif::Exif) -> Vec<Entry> {
+    let mut rows = Vec::new();
+    push(&mut rows, "Coordinates", coordinates(exif));
+    push(&mut rows, "Altitude", altitude(exif));
+    rows
+}
+
+/// What the file says in words, under the names those fields are spoken by
+/// rather than the ones the standard files them under.
+fn described(exif: &exif::Exif) -> Vec<Entry> {
+    let mut rows = Vec::new();
+    for (tag, name) in DESCRIBED {
+        let value = match tag {
+            Tag::UserComment => comment(exif),
+            tag => primary(exif, tag).map(|field| tidy_numbers(&display(exif, field))),
+        };
+        push(&mut rows, name, value);
+    }
+    rows
+}
+
+/// What `UserComment` says, which the renderer will not tell us. The field is
+/// eight bytes naming a character code and then the text in it, and a
+/// renderer that knows only that the type is undefined writes the whole thing
+/// out as hex. Hex is not a comment, so it is read here or it is left out.
+///
+/// The two codes anything writes are ASCII and UTF-16. JIS is left alone
+/// because nothing here can read it. The all-zero code means the writer did
+/// not say which — but almost every writer that leaves it blank wrote text
+/// anyway, so those bytes are taken as text where they will bear it and
+/// dropped where they will not.
+fn comment(exif: &exif::Exif) -> Option<String> {
+    let Value::Undefined(bytes, _) = &primary(exif, Tag::UserComment)?.value else {
+        return None;
+    };
+    let (code, text) = bytes.split_at_checked(8)?;
+    let decoded = match code {
+        b"ASCII\0\0\0" => String::from_utf8_lossy(text).into_owned(),
+        b"UNICODE\0" => {
+            // In the byte order of the block it came out of, which is the
+            // only thing that says which way round the pairs go.
+            let units: Vec<u16> = text
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|&pair| {
+                    if exif.little_endian() {
+                        u16::from_le_bytes(pair)
+                    } else {
+                        u16::from_be_bytes(pair)
+                    }
+                })
+                .collect();
+            String::from_utf16_lossy(&units)
+        }
+        [0, 0, 0, 0, 0, 0, 0, 0] => std::str::from_utf8(text).ok()?.to_string(),
+        _ => return None,
+    };
+    // Padded out to a round length with nulls, as often as not.
+    let trimmed = decoded.trim_matches('\0').trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
 /// Where the camera was, in the degrees a map will take: the sexagesimal the
@@ -664,6 +780,10 @@ mod tests {
             self.pooled(tag, 2, bytes.len() as u32, &bytes);
         }
 
+        fn undefined(&mut self, tag: u16, bytes: &[u8]) {
+            self.pooled(tag, 7, bytes.len() as u32, bytes);
+        }
+
         fn rational(&mut self, tag: u16, parts: &[(u32, u32)]) {
             let mut bytes = Vec::new();
             for (numerator, denominator) in parts {
@@ -706,7 +826,25 @@ mod tests {
     }
 
     fn empty(exif: &Exif) -> bool {
-        exif.summary.is_empty() && exif.other.is_empty()
+        exif.sections.is_empty()
+    }
+
+    /// What one group holds, and nothing where the file gave that group no
+    /// fields and it was therefore never made.
+    fn section<'a>(exif: &'a Exif, name: &str) -> &'a [Entry] {
+        match exif.sections.iter().find(|section| section.name == name) {
+            Some(section) => &section.entries,
+            None => &[],
+        }
+    }
+
+    /// Every field the file came back with, whichever group it landed in:
+    /// for the tests that care that a fact is there rather than where.
+    fn all(exif: &Exif) -> Vec<&Entry> {
+        exif.sections
+            .iter()
+            .flat_map(|section| section.entries.iter())
+            .collect()
     }
 
     fn written(name: &str, bytes: &[u8]) -> std::path::PathBuf {
@@ -727,6 +865,8 @@ mod tests {
         exif.rational(0x920a, &[(6765, 1000)]); // FocalLength
         exif.short(0xa405, 24); // FocalLengthIn35mmFilm
         exif.ascii(0xa434, "A Lens 6.765mm f/1.78"); // LensModel
+        // UserComment: eight bytes of character code, then the words.
+        exif.undefined(0x9286, b"ASCII\0\0\0On a post by the jetty\0");
 
         let mut gps = Block::new();
         gps.ascii(0x0001, "S"); // GPSLatitudeRef
@@ -764,22 +904,33 @@ mod tests {
         block
     }
 
-    /// The panel's top section: the fields a photograph is read by, combined
-    /// into the lines they are read as, in units a reader can use.
+    /// The panel's top sections: the fields a photograph is read by, combined
+    /// into the lines they are read as, in units a reader can use, and under
+    /// the headings they are looked for beneath.
     #[test]
     fn a_photograph_is_summarised_as_it_would_be_read() {
         let path = written("photograph.jpg", &jpeg_with(photograph()));
         let exif = Exif::read(&path);
         let _ = std::fs::remove_file(&path);
 
-        let summary: Vec<(&str, &str)> = exif
-            .summary
-            .iter()
-            .map(|entry| (entry.name.as_str(), entry.value.as_str()))
-            .collect();
+        let rows = |name: &str| -> Vec<(String, String)> {
+            section(&exif, name)
+                .iter()
+                .map(|entry| (entry.name.clone(), entry.value.clone()))
+                .collect()
+        };
+        let pairs = |listed: &[(&str, &str)]| -> Vec<(String, String)> {
+            listed
+                .iter()
+                .map(|(name, value)| (name.to_string(), value.to_string()))
+                .collect()
+        };
+
+        // The exposure is read together with the body it was set on, so the
+        // two are one section rather than two.
         assert_eq!(
-            summary,
-            [
+            rows("Camera"),
+            pairs(&[
                 // The maker is not said twice, though the file says it twice.
                 ("Camera", "Apple iPhone 16 Pro"),
                 ("Lens", "A Lens 6.765mm f/1.78"),
@@ -790,19 +941,36 @@ mod tests {
                     "1/50 s   \u{00b7}   f/1.78   \u{00b7}   ISO 200"
                 ),
                 ("Focal length", "6.765 mm (24 mm equivalent)"),
-                (
-                    "Location",
-                    "44.68202\u{00b0} S, 169.16196\u{00b0} E   \u{00b7}   333 m"
-                ),
-            ]
+            ])
+        );
+        assert_eq!(
+            rows("Location"),
+            pairs(&[
+                ("Coordinates", "44.68202\u{00b0} S, 169.16196\u{00b0} E"),
+                ("Altitude", "333 m"),
+            ])
         );
 
-        // What the summary spoke for is not listed again; what it did not is.
-        let listed: Vec<&str> = exif.other.iter().map(|e| e.name.as_str()).collect();
-        assert!(listed.contains(&"Orientation"), "{listed:?}");
-        assert!(listed.contains(&"Software"), "{listed:?}");
-        assert!(!listed.contains(&"Model"), "{listed:?}");
-        assert!(!listed.contains(&"FNumber"), "{listed:?}");
+        // What a section above spoke for is not listed again; what none of
+        // them did is, under the directory it came out of. The software that
+        // wrote the file is one of the fields worth reading in words, so it
+        // is drawn out of the listing rather than left in it.
+        let listing: Vec<&str> = section(&exif, "Image metadata")
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect();
+        assert_eq!(listing, ["Orientation"], "{listing:?}");
+        // The comment is read out of its character code rather than written
+        // out as the hex the renderer would make of an undefined type.
+        assert_eq!(
+            rows("Description"),
+            pairs(&[("Comment", "On a post by the jetty"), ("Software", "26.6")]),
+            "{exif:?}"
+        );
+        let every: Vec<&str> = all(&exif).iter().map(|e| e.name.as_str()).collect();
+        assert!(!every.contains(&"Model"), "{every:?}");
+        assert!(!every.contains(&"FNumber"), "{every:?}");
+        assert!(!every.contains(&"GPSAltitude"), "{every:?}");
     }
 
     /// A file with no metadata, and one whose metadata is nonsense, are the
@@ -837,7 +1005,7 @@ mod tests {
     fn a_files_own_block_is_found_through_its_container() {
         let exif = Exif::read(&fixture("webp-exif-rotated.webp"));
         assert!(
-            exif.other.iter().any(|entry| entry.name == "Orientation"),
+            all(&exif).iter().any(|entry| entry.name == "Orientation"),
             "{exif:?}"
         );
     }
@@ -852,8 +1020,8 @@ mod tests {
         // float raster, one written each way.
         let ordinary = Exif::read(&fixture("tiff-nodata.tif"));
         let named = |exif: &Exif, name: &str| {
-            exif.other
-                .iter()
+            all(exif)
+                .into_iter()
                 .find(|entry| entry.name == name)
                 .map(|entry| entry.value.clone())
         };
@@ -870,15 +1038,19 @@ mod tests {
     #[test]
     fn a_rasters_own_facts_are_taken_out_of_the_listing() {
         let exif = Exif::read(&fixture("tiff-nodata.tif"));
-        assert_eq!(exif.geo, vec![Entry::new("No data", "-9999")], "{exif:?}");
+        assert_eq!(
+            section(&exif, "Georeference"),
+            [Entry::new("No data", "-9999")],
+            "{exif:?}"
+        );
         assert!(
-            !exif.other.iter().any(|entry| entry.name.contains("42113")),
+            !all(&exif).iter().any(|entry| entry.name.contains("42113")),
             "{exif:?}"
         );
         // And the tags the standard does not describe are named rather than
         // numbered: this one says its pixels are floating point.
         assert!(
-            exif.other
+            all(&exif)
                 .iter()
                 .any(|entry| entry.name == "SampleFormat" && entry.value == "3"),
             "{exif:?}"
@@ -903,9 +1075,8 @@ mod tests {
         let bounded = Exif::parse(&path, directory as u64).expect("the directory parses");
         let whole = Exif::parse(&path, u64::MAX).expect("the whole file parses");
         let _ = std::fs::remove_file(&path);
-        assert_eq!(bounded.summary, whole.summary);
-        assert_eq!(bounded.other, whole.other);
-        assert!(!bounded.summary.is_empty());
+        assert_eq!(bounded.sections, whole.sections);
+        assert!(!bounded.sections.is_empty());
 
         // And a prefix that stops short of it is a file with nothing to say,
         // rather than an error anything upstream has to handle.

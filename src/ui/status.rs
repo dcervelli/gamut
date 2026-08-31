@@ -1,7 +1,6 @@
 //! The words in the bars: what the image is, and what the view is doing to
 //! it.
 
-use crate::image::Channels;
 use crate::image::display::{AutoWindow, Colormap};
 use crate::render::TextMeasure;
 use crate::view::View;
@@ -53,12 +52,7 @@ pub(super) fn counter(index: usize, count: usize) -> Option<String> {
 }
 
 pub(super) fn describe_pixels(current: &Current) -> String {
-    let channels = match current.image.channels() {
-        Channels::Gray => "gray",
-        Channels::GrayAlpha => "gray+alpha",
-        Channels::Rgb => "rgb",
-        Channels::Rgba => "rgba",
-    };
+    let channels = current.image.channels().label();
     let stored = current
         .stored
         .as_ref()
