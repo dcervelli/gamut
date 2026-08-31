@@ -4,11 +4,14 @@
 //! a binding added here is documented by the same edit. Each key names an
 //! [`Action`], and [`App::perform`] is the one place an action happens.
 
+use std::path::PathBuf;
+
 use winit::event::{ElementState, MouseButton, MouseScrollDelta};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{Cursor, CursorIcon};
 
 use super::App;
+use crate::clipboard;
 use crate::image::display::Startup;
 use crate::ui::{Current, Menu, Widget};
 
@@ -51,8 +54,11 @@ pub enum Action {
     CycleToneMap,
     CycleColormap,
     ResetDisplay,
-    /// Put the path of the file on screen on the system clipboard.
+    /// Put the absolute path of the file on screen on the clipboard.
     CopyPath,
+    /// Put the file on screen on the clipboard as a `file:` URI, under the
+    /// MIME type a program that wants the file itself asks for.
+    CopyUri,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -83,26 +89,27 @@ pub enum KeyName {
     Named(NamedKey),
 }
 
-/// The modifiers a binding is held with.
+/// What a binding is held with, over and above whatever Shift the character
+/// itself already implies.
 ///
 /// Ctrl, Alt and Super must be held exactly as written: a chord this table
 /// does not bind belongs to the window manager, and acting on `Super+0` as
-/// well would move the view behind its back. Shift is asked for and not
-/// forbidden, because a binding that differs by case says so with the
-/// character itself — the Shift that turned `e` into `E` must not read as a
-/// chord.
+/// well would move the view behind its back.
+///
+/// Shift is never among them. A key that reaches us has already had Shift
+/// applied — the table says `e` and `E`, not `e` and Shift+`e` — so asking
+/// for it again would be asking twice, and asking for it where the character
+/// is a capital would refuse the same capital typed under Caps Lock. What the
+/// user presses is spelled out in [`Binding::shown`] instead.
 pub type Mods = ModifiersState;
 
-/// Held with nothing.
+/// Held with nothing but Shift, if anything.
 const PLAIN: Mods = Mods::empty();
-const CTRL_SHIFT: Mods = Mods::CONTROL.union(Mods::SHIFT);
+const CTRL: Mods = Mods::CONTROL;
 
 /// Whether the modifiers `held` are the ones a binding asked for.
 fn satisfies(required: Mods, held: Mods) -> bool {
-    held.control_key() == required.control_key()
-        && held.alt_key() == required.alt_key()
-        && held.super_key() == required.super_key()
-        && (!required.shift_key() || held.shift_key())
+    held.difference(Mods::SHIFT) == required
 }
 
 /// Which heading a binding is listed under in `--help`.
@@ -208,12 +215,22 @@ pub const KEYS: &[Binding] = &[
             (Named(NamedKey::PageUp), PreviousFile),
         ],
     },
+    // Both are the capital, so both are typed with Shift held; only the Ctrl
+    // that parts one from the other is a modifier as far as the table is
+    // concerned. `shown` says what the fingers do.
     Binding {
         section: Section::View,
-        mods: CTRL_SHIFT,
+        mods: PLAIN,
+        shown: "Shift+C",
+        help: "Copy the absolute path of the file on screen",
+        keys: &[(Char("C"), CopyPath)],
+    },
+    Binding {
+        section: Section::View,
+        mods: CTRL,
         shown: "Ctrl+Shift+C",
-        help: "Copy the path of the file on screen to the clipboard",
-        keys: &[(Char("C"), CopyPath), (Char("c"), CopyPath)],
+        help: "Copy the file on screen as a URI another program can open",
+        keys: &[(Char("C"), CopyUri)],
     },
     Binding {
         section: Section::Display,
@@ -263,7 +280,8 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "c",
         help: "Cycle false colour for single-channel images",
-        keys: &[(Char("c"), CycleColormap), (Char("C"), CycleColormap)],
+        // Lower case only: Shift+C copies the path.
+        keys: &[(Char("c"), CycleColormap)],
     },
     Binding {
         section: Section::Display,
@@ -469,10 +487,16 @@ impl App {
                     true
                 });
             }
-            // Nothing on screen changes; the copy is reported only when it
+            // Nothing on screen changes; a copy is reported only when it
             // could not be made.
             CopyPath => {
-                self.copy_path();
+                let path = self.shown_path();
+                self.copy(&path.to_string_lossy(), clipboard::TEXT);
+                return Effect::Nothing;
+            }
+            CopyUri => {
+                let list = clipboard::uri_list(&self.shown_path());
+                self.copy(&list, clipboard::URI_LIST);
                 return Effect::Nothing;
             }
             ResetDisplay => {
@@ -498,18 +522,27 @@ impl App {
         Effect::redraw_if(change(current, startup))
     }
 
-    /// Puts the path of the file on screen on the clipboard.
+    /// The absolute path of the file on screen. Absolute because what is
+    /// copied is bound for somewhere else, where the directory this was
+    /// started in means nothing — and because a URI has no other kind. The
+    /// path as given stands in if it cannot be made absolute, which needs the
+    /// working directory and so can fail.
+    fn shown_path(&self) -> PathBuf {
+        let path = self.files.shown_path();
+        std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf())
+    }
+
+    /// Puts `text` on the clipboard under `mime_type`.
     ///
     /// The copy is served by a process of its own, so that it survives this
     /// window closing. Any earlier one that has since exited — the compositor
     /// cancels the last copy as soon as this one takes the selection — is
     /// reaped here, so that a session of copying does not leave a zombie
     /// behind each time.
-    fn copy_path(&mut self) {
+    fn copy(&mut self, text: &str, mime_type: &str) {
         self.clipboard
             .retain_mut(|held| !matches!(held.try_wait(), Ok(Some(_))));
-        let path = self.files.shown_path().to_string_lossy().into_owned();
-        match crate::clipboard::copy_text(&path) {
+        match clipboard::copy(text, mime_type) {
             Ok(child) => self.clipboard.push(child),
             Err(error) => eprintln!(
                 "image-view: {}",
@@ -784,15 +817,29 @@ mod tests {
     #[test]
     fn no_chord_is_bound_twice() {
         let mut seen: Vec<(Mods, KeyName)> = Vec::new();
-        for (mods, name) in KEYS
-            .iter()
-            .flat_map(|binding| binding.keys.iter().map(|(name, _)| (binding.mods, *name)))
-        {
+        for binding in KEYS {
+            for (name, _) in binding.keys {
+                assert!(
+                    !seen.contains(&(binding.mods, *name)),
+                    "{name:?} with {:?} is bound more than once",
+                    binding.mods
+                );
+                seen.push((binding.mods, *name));
+            }
+        }
+    }
+
+    /// Shift belongs to the character, not to the modifiers: a binding that
+    /// asked for it as well would never match, since `satisfies` takes it out
+    /// of what is held before comparing.
+    #[test]
+    fn no_binding_asks_for_shift() {
+        for binding in KEYS {
             assert!(
-                !seen.contains(&(mods, name)),
-                "{name:?} with {mods:?} is bound more than once"
+                !binding.mods.shift_key(),
+                "`{}` asks for Shift; say it with the character instead",
+                binding.shown
             );
-            seen.push((mods, name));
         }
     }
 
@@ -810,17 +857,27 @@ mod tests {
         assert_eq!(plain("z"), None);
     }
 
-    /// The modifiers pick the chord out from the plain key of the same name,
+    /// The three things `c` does are told apart by what is held with it,
     /// and a chord nothing binds is still left to the window manager.
     #[test]
     fn modifiers_tell_chords_apart() {
         use winit::keyboard::SmolStr;
-        let c = Key::Character(SmolStr::new("C"));
-        assert_eq!(action_for(&c, PLAIN), Some(CycleColormap));
-        assert_eq!(action_for(&c, Mods::SHIFT), Some(CycleColormap));
-        assert_eq!(action_for(&c, CTRL_SHIFT), Some(CopyPath));
-        assert_eq!(action_for(&c, Mods::CONTROL), None);
-        assert_eq!(action_for(&c, CTRL_SHIFT | Mods::ALT), None);
+        // Shift is what turns the character upper case in the first place,
+        // so it is held for every reading of `C`.
+        let lower = Key::Character(SmolStr::new("c"));
+        let upper = Key::Character(SmolStr::new("C"));
+        assert_eq!(action_for(&lower, PLAIN), Some(CycleColormap));
+        assert_eq!(action_for(&upper, Mods::SHIFT), Some(CopyPath));
+        assert_eq!(
+            action_for(&upper, Mods::CONTROL | Mods::SHIFT),
+            Some(CopyUri)
+        );
+        // The same capitals under Caps Lock, which reports no Shift at all.
+        assert_eq!(action_for(&upper, PLAIN), Some(CopyPath));
+        assert_eq!(action_for(&upper, CTRL), Some(CopyUri));
+        // Chords the table does not bind belong to the window manager.
+        assert_eq!(action_for(&lower, Mods::CONTROL), None);
+        assert_eq!(action_for(&upper, Mods::CONTROL | Mods::ALT), None);
         assert_eq!(
             action_for(&Key::Character(SmolStr::new("0")), Mods::SUPER),
             None

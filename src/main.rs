@@ -52,11 +52,12 @@ fn run() -> Result<ExitCode> {
     // Not a command line the user writes: it is how a copy re-runs this
     // program to hold the clipboard after the window has gone. Answered
     // before the arguments are parsed, since there is no image to show.
-    if std::env::args_os()
-        .nth(1)
+    let mut arguments = std::env::args_os().skip(1);
+    if arguments
+        .next()
         .is_some_and(|first| first == clipboard::SERVE_ARGUMENT)
     {
-        clipboard::serve()?;
+        clipboard::serve(arguments.next())?;
         return Ok(ExitCode::SUCCESS);
     }
 

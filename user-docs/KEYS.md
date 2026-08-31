@@ -1,7 +1,7 @@
 # Keys and mouse
 
-Every control `image-view` has. Letter keys work in either case except `e`,
-where the two cases move exposure in opposite directions.
+Every control `image-view` has. Letter keys work in either case except `e`
+and `c`, where the two cases do different things.
 
 ## The view
 
@@ -16,7 +16,8 @@ where the two cases move exposure in opposite directions.
 | Arrows | Pan by 64 pixels |
 | `n`, `Page Down` | Next file |
 | `p`, `Page Up` | Previous file |
-| `Ctrl+Shift+C` | Copy the path of the file on screen |
+| `Shift+C` | Copy the absolute path of the file on screen |
+| `Ctrl+Shift+C` | Copy the file on screen as a URI |
 
 Zoom runs from 2% to 6400%. Zooming leaves fit mode; panning does not, so `f`
 and then Down scrolls through a tall image at fit-width.
@@ -28,10 +29,18 @@ fitted. Files that cannot be decoded are stepped over. The list is whatever
 was named at startup, in that order; naming a directory puts the images in it
 on the list.
 
-`Ctrl+Shift+C` copies the path as the program was given it, so a file named
-relative to where you started stays relative. The copy outlives the window:
-closing `image-view` leaves it on the clipboard, and it stays there until
-something else copies over it.
+`Shift+C` copies the path in full, from the root down, whichever way the file
+was named when the program was started — a relative name is of no use in
+another window, which is where a copied path is going.
+
+`Ctrl+Shift+C` copies the same file as a URI instead: `file://` and the path,
+with spaces and punctuation escaped. This is what a file manager, a browser or
+another program's open dialog asks for when it wants the file itself rather
+than words about it, so pasting into one of those opens the picture rather
+than typing its name. Pasting into a text field still yields the URI.
+
+Either copy outlives the window: closing `image-view` leaves it on the
+clipboard, and it stays there until something else copies over it.
 
 ## The display
 
@@ -45,7 +54,7 @@ something else copies over it.
 | `,` | Narrow the window, raising contrast |
 | `.` | Widen the window, lowering contrast |
 | `t` | Cycle tone mapping: clip → Reinhard → neutral |
-| `c` | Cycle false colour: grey → viridis → magma → turbo |
+| `c` | Cycle false colour: grey → viridis → magma → turbo. Lower case only |
 | `r` | Reset every display setting |
 
 Sliding or resizing the window by hand takes it out of whichever automatic

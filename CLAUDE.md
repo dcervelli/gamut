@@ -27,7 +27,7 @@ theme/         palette.rs reads Omarchy's colors.toml and resolves its cascade; 
 view.rs        zoom / pan / fit geometry, pure maths (View, Viewport, Fit)
 loader.rs      the decode + upload thread; replies arrive as winit user events
 watch.rs       polling a file for a settled change
-clipboard.rs   putting text on the clipboard, in a process that outlives the window
+clipboard.rs   putting text or a file: URI on the clipboard, in a process that outlives the window
 timing.rs      startup instrumentation
 image/         the data model, nothing GPU
   mod.rs         Channels, Samples, AlphaMode, DecodedImage, Sample (one pixel read back)
