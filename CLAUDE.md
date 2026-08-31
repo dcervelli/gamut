@@ -27,6 +27,7 @@ theme/         palette.rs reads Omarchy's colors.toml and resolves its cascade; 
 view.rs        zoom / pan / fit geometry, pure maths (View, Viewport, Fit)
 loader.rs      the decode + upload thread; replies arrive as winit user events
 watch.rs       polling a file for a settled change
+clipboard.rs   putting text on the clipboard, in a process that outlives the window
 timing.rs      startup instrumentation
 image/         the data model, nothing GPU
   mod.rs         Channels, Samples, AlphaMode, DecodedImage, Sample (one pixel read back)
@@ -54,7 +55,7 @@ render/        the GPU
 
 | Change | Edit |
 | --- | --- |
-| A key binding | `app/input.rs`: one `KEYS` entry and one `perform` arm. `--help` follows. |
+| A key binding | `app/input.rs`: one `KEYS` entry, with the `mods` it is held with, and one `perform` arm. `--help` follows. |
 | A status-bar segment | `ui/status.rs`; the pointer's pixel readout is `ui/pixel.rs` |
 | What a pixel reads as under the pointer | `image/mod.rs::sample` for what the file holds, `image/display.rs::map` for what the screen shows |
 | A panel or overlay | a new `ui/<name>.rs` and one call in `ui/mod.rs::build_frame`; a new colour role goes in `theme/mod.rs` |

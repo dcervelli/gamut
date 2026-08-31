@@ -50,3 +50,8 @@ tiff = "0.11.3"
 ultrahdr-rs = "0.3.5"
 wgpu = "30.0.1"
 winit = "0.30.13"
+# The clipboard, which Wayland leaves to the client: there is no store to put
+# a string in, only a promise to hand the bytes over when someone later asks.
+# This speaks that protocol directly rather than shelling out to `wl-copy`,
+# which would be a runtime dependency on a package the user may not have.
+wl-clipboard-rs = "0.9.3"

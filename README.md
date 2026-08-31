@@ -505,6 +505,7 @@ anything having to notice that it should.
 | `src/ui/` | Building each frame's interface: `chrome.rs` the panels, one file per widget, `pixel.rs` the pointer's readout, `status.rs` the words in the bars |
 | `src/view.rs` | Zoom / pan / fit geometry — pure maths |
 | `src/watch.rs` | Noticing that the file on screen has been rewritten |
+| `src/clipboard.rs` | The clipboard, held by a process of its own so a copy outlives the window |
 | `src/theme/` | `palette.rs` reads the desktop's palette; `mod.rs` derives the colours drawn from it |
 | `src/image/` | The data model: `Samples`, `color/` (transfer functions, primaries, ICC and CICP), stats, display state |
 | `src/image/decode/` | The decoder trait and its registry, one file per format |

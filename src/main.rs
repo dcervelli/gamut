@@ -2,6 +2,7 @@
 
 mod app;
 mod cli;
+mod clipboard;
 mod image;
 mod loader;
 mod render;
@@ -48,6 +49,17 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<ExitCode> {
+    // Not a command line the user writes: it is how a copy re-runs this
+    // program to hold the clipboard after the window has gone. Answered
+    // before the arguments are parsed, since there is no image to show.
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|first| first == clipboard::SERVE_ARGUMENT)
+    {
+        clipboard::serve()?;
+        return Ok(ExitCode::SUCCESS);
+    }
+
     let Some(args) = cli::parse_args()? else {
         return Ok(ExitCode::SUCCESS);
     };

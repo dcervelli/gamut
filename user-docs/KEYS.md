@@ -16,6 +16,7 @@ where the two cases move exposure in opposite directions.
 | Arrows | Pan by 64 pixels |
 | `n`, `Page Down` | Next file |
 | `p`, `Page Up` | Previous file |
+| `Ctrl+Shift+C` | Copy the path of the file on screen |
 
 Zoom runs from 2% to 6400%. Zooming leaves fit mode; panning does not, so `f`
 and then Down scrolls through a tall image at fit-width.
@@ -26,6 +27,11 @@ the same pixels. A file of a different size is a different picture, and is
 fitted. Files that cannot be decoded are stepped over. The list is whatever
 was named at startup, in that order; naming a directory puts the images in it
 on the list.
+
+`Ctrl+Shift+C` copies the path as the program was given it, so a file named
+relative to where you started stays relative. The copy outlives the window:
+closing `image-view` leaves it on the clipboard, and it stays there until
+something else copies over it.
 
 ## The display
 
@@ -138,7 +144,7 @@ without it.
 
 ## Keys that are deliberately ignored
 
-Anything held with `Ctrl`, `Alt` or a `Super`/`Command` key does nothing here,
-and neither does `Ctrl` with the wheel. Those combinations belong to the
-window manager, and a chord such as `Super+0` would otherwise move the view
-behind its back.
+Apart from `Ctrl+Shift+C`, anything held with `Ctrl`, `Alt` or a
+`Super`/`Command` key does nothing here, and neither does `Ctrl` with the
+wheel. Those combinations belong to the window manager, and a chord such as
+`Super+0` would otherwise move the view behind its back.

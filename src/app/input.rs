@@ -51,6 +51,8 @@ pub enum Action {
     CycleToneMap,
     CycleColormap,
     ResetDisplay,
+    /// Put the path of the file on screen on the system clipboard.
+    CopyPath,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -81,6 +83,28 @@ pub enum KeyName {
     Named(NamedKey),
 }
 
+/// The modifiers a binding is held with.
+///
+/// Ctrl, Alt and Super must be held exactly as written: a chord this table
+/// does not bind belongs to the window manager, and acting on `Super+0` as
+/// well would move the view behind its back. Shift is asked for and not
+/// forbidden, because a binding that differs by case says so with the
+/// character itself — the Shift that turned `e` into `E` must not read as a
+/// chord.
+pub type Mods = ModifiersState;
+
+/// Held with nothing.
+const PLAIN: Mods = Mods::empty();
+const CTRL_SHIFT: Mods = Mods::CONTROL.union(Mods::SHIFT);
+
+/// Whether the modifiers `held` are the ones a binding asked for.
+fn satisfies(required: Mods, held: Mods) -> bool {
+    held.control_key() == required.control_key()
+        && held.alt_key() == required.alt_key()
+        && held.super_key() == required.super_key()
+        && (!required.shift_key() || held.shift_key())
+}
+
 /// Which heading a binding is listed under in `--help`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Section {
@@ -92,6 +116,8 @@ pub enum Section {
 /// keys to several actions (`n, p`), and a line may bind none (`Wheel`).
 pub struct Binding {
     pub section: Section,
+    /// What is held down with the keys below.
+    pub mods: Mods,
     /// The key column, as written for people: `q, Esc`, `Arrows`.
     pub shown: &'static str,
     pub help: &'static str,
@@ -105,6 +131,7 @@ use KeyName::{Char, Named};
 pub const KEYS: &[Binding] = &[
     Binding {
         section: Section::View,
+        mods: PLAIN,
         shown: "q, Esc",
         help: "Quit",
         keys: &[
@@ -115,30 +142,35 @@ pub const KEYS: &[Binding] = &[
     },
     Binding {
         section: Section::View,
+        mods: PLAIN,
         shown: "+, =",
         help: "Zoom in",
         keys: &[(Char("+"), ZoomIn), (Char("="), ZoomIn)],
     },
     Binding {
         section: Section::View,
+        mods: PLAIN,
         shown: "-, _",
         help: "Zoom out",
         keys: &[(Char("-"), ZoomOut), (Char("_"), ZoomOut)],
     },
     Binding {
         section: Section::View,
+        mods: PLAIN,
         shown: "Wheel",
         help: "Zoom about the pointer",
         keys: &[],
     },
     Binding {
         section: Section::View,
+        mods: PLAIN,
         shown: "0",
         help: "Actual size (100%)",
         keys: &[(Char("0"), ActualSize)],
     },
     Binding {
         section: Section::View,
+        mods: PLAIN,
         shown: "Arrows",
         help: "Pan",
         keys: &[
@@ -150,18 +182,21 @@ pub const KEYS: &[Binding] = &[
     },
     Binding {
         section: Section::View,
+        mods: PLAIN,
         shown: "f",
         help: "Cycle fit / fit width / fit height",
         keys: &[(Char("f"), CycleFit), (Char("F"), CycleFit)],
     },
     Binding {
         section: Section::View,
+        mods: PLAIN,
         shown: "u",
         help: "Cycle the filter used above 100%: nearest, bicubic",
         keys: &[(Char("u"), CycleUpscale), (Char("U"), CycleUpscale)],
     },
     Binding {
         section: Section::View,
+        mods: PLAIN,
         shown: "n, p",
         help: "Next / previous file",
         keys: &[
@@ -174,19 +209,29 @@ pub const KEYS: &[Binding] = &[
         ],
     },
     Binding {
+        section: Section::View,
+        mods: CTRL_SHIFT,
+        shown: "Ctrl+Shift+C",
+        help: "Copy the path of the file on screen to the clipboard",
+        keys: &[(Char("C"), CopyPath), (Char("c"), CopyPath)],
+    },
+    Binding {
         section: Section::Display,
+        mods: PLAIN,
         shown: "e, E",
         help: "Exposure down / up, half a stop",
         keys: &[(Char("e"), Exposure(-0.5)), (Char("E"), Exposure(0.5))],
     },
     Binding {
         section: Section::Display,
+        mods: PLAIN,
         shown: "a",
         help: "Cycle the automatic window: unit, min/max, 99.8%",
         keys: &[(Char("a"), CycleAutoWindow), (Char("A"), CycleAutoWindow)],
     },
     Binding {
         section: Section::Display,
+        mods: PLAIN,
         shown: "[, ]",
         help: "Slide the window down / up",
         keys: &[
@@ -196,6 +241,7 @@ pub const KEYS: &[Binding] = &[
     },
     Binding {
         section: Section::Display,
+        mods: PLAIN,
         shown: ", .",
         help: "Narrow / widen the window",
         keys: &[
@@ -207,57 +253,66 @@ pub const KEYS: &[Binding] = &[
     },
     Binding {
         section: Section::Display,
+        mods: PLAIN,
         shown: "t",
         help: "Cycle tone mapping: clip, reinhard, neutral",
         keys: &[(Char("t"), CycleToneMap), (Char("T"), CycleToneMap)],
     },
     Binding {
         section: Section::Display,
+        mods: PLAIN,
         shown: "c",
         help: "Cycle false colour for single-channel images",
         keys: &[(Char("c"), CycleColormap), (Char("C"), CycleColormap)],
     },
     Binding {
         section: Section::Display,
+        mods: PLAIN,
         shown: "r",
         help: "Reset display settings",
         keys: &[(Char("r"), ResetDisplay), (Char("R"), ResetDisplay)],
     },
     Binding {
         section: Section::Display,
+        mods: PLAIN,
         shown: "h",
         help: "Toggle the histogram",
         keys: &[(Char("h"), ToggleHistogram), (Char("H"), ToggleHistogram)],
     },
     Binding {
         section: Section::Display,
+        mods: PLAIN,
         shown: "i",
         help: "Toggle the file information panel",
         keys: &[(Char("i"), ToggleInfo), (Char("I"), ToggleInfo)],
     },
     Binding {
         section: Section::Display,
+        mods: PLAIN,
         shown: "m",
         help: "Toggle the minimap",
         keys: &[(Char("m"), ToggleMinimap), (Char("M"), ToggleMinimap)],
     },
     Binding {
         section: Section::Display,
+        mods: PLAIN,
         shown: "g",
         help: "Toggle the grid over the image",
         keys: &[(Char("g"), ToggleGrid), (Char("G"), ToggleGrid)],
     },
     Binding {
         section: Section::Display,
+        mods: PLAIN,
         shown: "`",
         help: "Toggle the interface panels",
         keys: &[(Char("`"), ToggleInterface), (Char("~"), ToggleInterface)],
     },
 ];
 
-/// What `key` asks for, if anything.
-pub fn action_for(key: &Key) -> Option<Action> {
+/// What `key` held with `mods` asks for, if anything.
+pub fn action_for(key: &Key, mods: Mods) -> Option<Action> {
     KEYS.iter()
+        .filter(|binding| satisfies(binding.mods, mods))
         .flat_map(|binding| binding.keys)
         .find(|(name, _)| match (name, key) {
             (Char(text), Key::Character(typed)) => typed.as_str() == *text,
@@ -310,9 +365,11 @@ pub(super) struct Pointer {
 }
 
 impl Pointer {
-    /// Whether a key or wheel event belongs to the window manager rather than
-    /// to us: a compositor binding such as Super+0 still delivers its key
-    /// here, and acting on it would move the view behind the user's back.
+    /// Whether a wheel event belongs to the window manager rather than to us:
+    /// Ctrl with the wheel is a compositor gesture, and zooming on it as well
+    /// would move the view behind the user's back. Keys answer the same
+    /// question through [`satisfies`], which lets a chord this table does
+    /// bind through.
     fn chorded(&self) -> bool {
         self.modifiers.control_key() || self.modifiers.alt_key() || self.modifiers.super_key()
     }
@@ -320,10 +377,7 @@ impl Pointer {
 
 impl App {
     pub(super) fn handle_key(&mut self, key: &Key) -> Effect {
-        if self.pointer.chorded() {
-            return Effect::Nothing;
-        }
-        match action_for(key) {
+        match action_for(key, self.pointer.modifiers) {
             Some(action) => self.perform(action),
             None => Effect::Nothing,
         }
@@ -415,6 +469,12 @@ impl App {
                     true
                 });
             }
+            // Nothing on screen changes; the copy is reported only when it
+            // could not be made.
+            CopyPath => {
+                self.copy_path();
+                return Effect::Nothing;
+            }
             ResetDisplay => {
                 return self.adjust(|current, startup| {
                     current
@@ -436,6 +496,26 @@ impl App {
             return Effect::Nothing;
         };
         Effect::redraw_if(change(current, startup))
+    }
+
+    /// Puts the path of the file on screen on the clipboard.
+    ///
+    /// The copy is served by a process of its own, so that it survives this
+    /// window closing. Any earlier one that has since exited — the compositor
+    /// cancels the last copy as soon as this one takes the selection — is
+    /// reaped here, so that a session of copying does not leave a zombie
+    /// behind each time.
+    fn copy_path(&mut self) {
+        self.clipboard
+            .retain_mut(|held| !matches!(held.try_wait(), Ok(Some(_))));
+        let path = self.files.shown_path().to_string_lossy().into_owned();
+        match crate::clipboard::copy_text(&path) {
+            Ok(child) => self.clipboard.push(child),
+            Err(error) => eprintln!(
+                "image-view: {}",
+                crate::escape_controls(&format!("{error:#}"))
+            ),
+        }
     }
 
     /// Starts or ends a drag of the image with the left button. The pointer
@@ -559,8 +639,8 @@ impl App {
             // for a long column is a good deal further than the pointer went.
             // Motion arrives in physical pixels and the column is laid out in
             // logical ones.
-            let by = (position[1] - from[1]) / self.scale_factor()
-                * self.info_scroll_per_drag(panel);
+            let by =
+                (position[1] - from[1]) / self.scale_factor() * self.info_scroll_per_drag(panel);
             // The readout in the bar is owed a redraw too, for a drag that
             // has carried the pointer off the panel and onto the image.
             return self.scroll_info_by(panel, by) || moved_pixel;
@@ -699,26 +779,51 @@ impl App {
 mod tests {
     use super::*;
 
-    /// A key bound twice would do whichever came first in the table, silently.
+    /// A chord bound twice would do whichever came first in the table,
+    /// silently. The same key under different modifiers is a different chord.
     #[test]
-    fn no_key_is_bound_twice() {
-        let mut seen: Vec<KeyName> = Vec::new();
-        for (name, _) in KEYS.iter().flat_map(|binding| binding.keys) {
-            assert!(!seen.contains(name), "{name:?} is bound more than once");
-            seen.push(*name);
+    fn no_chord_is_bound_twice() {
+        let mut seen: Vec<(Mods, KeyName)> = Vec::new();
+        for (mods, name) in KEYS
+            .iter()
+            .flat_map(|binding| binding.keys.iter().map(|(name, _)| (binding.mods, *name)))
+        {
+            assert!(
+                !seen.contains(&(mods, name)),
+                "{name:?} with {mods:?} is bound more than once"
+            );
+            seen.push((mods, name));
         }
     }
 
     #[test]
     fn keys_resolve_to_their_actions() {
         use winit::keyboard::SmolStr;
-        assert_eq!(action_for(&Key::Character(SmolStr::new("q"))), Some(Quit));
-        assert_eq!(action_for(&Key::Named(NamedKey::Escape)), Some(Quit));
-        assert_eq!(action_for(&Key::Named(NamedKey::PageDown)), Some(NextFile));
+        let plain = |text: &str| action_for(&Key::Character(SmolStr::new(text)), PLAIN);
+        assert_eq!(plain("q"), Some(Quit));
+        assert_eq!(action_for(&Key::Named(NamedKey::Escape), PLAIN), Some(Quit));
         assert_eq!(
-            action_for(&Key::Character(SmolStr::new("E"))),
-            Some(Exposure(0.5))
+            action_for(&Key::Named(NamedKey::PageDown), PLAIN),
+            Some(NextFile)
         );
-        assert_eq!(action_for(&Key::Character(SmolStr::new("z"))), None);
+        assert_eq!(plain("E"), Some(Exposure(0.5)));
+        assert_eq!(plain("z"), None);
+    }
+
+    /// The modifiers pick the chord out from the plain key of the same name,
+    /// and a chord nothing binds is still left to the window manager.
+    #[test]
+    fn modifiers_tell_chords_apart() {
+        use winit::keyboard::SmolStr;
+        let c = Key::Character(SmolStr::new("C"));
+        assert_eq!(action_for(&c, PLAIN), Some(CycleColormap));
+        assert_eq!(action_for(&c, Mods::SHIFT), Some(CycleColormap));
+        assert_eq!(action_for(&c, CTRL_SHIFT), Some(CopyPath));
+        assert_eq!(action_for(&c, Mods::CONTROL), None);
+        assert_eq!(action_for(&c, CTRL_SHIFT | Mods::ALT), None);
+        assert_eq!(
+            action_for(&Key::Character(SmolStr::new("0")), Mods::SUPER),
+            None
+        );
     }
 }

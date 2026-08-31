@@ -5,6 +5,7 @@ pub mod input;
 mod window;
 
 use std::path::PathBuf;
+use std::process::Child;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -73,6 +74,11 @@ pub struct App {
     renderer: Option<Renderer>,
     pointer: Pointer,
     panels: Panels,
+    /// The processes holding what has been copied to the clipboard, kept only
+    /// so that they can be reaped once they exit. They are meant to outlive
+    /// this one, so nothing here ever waits for or kills them; see
+    /// [`crate::clipboard`].
+    clipboard: Vec<Child>,
     /// Set if the last render failed, so we report it once rather than every frame.
     reported_error: bool,
 }
@@ -117,6 +123,7 @@ impl App {
             window: None,
             renderer: None,
             pointer: Pointer::default(),
+            clipboard: Vec::new(),
             panels: Panels {
                 show_ui: true,
                 show_histogram: histogram,
