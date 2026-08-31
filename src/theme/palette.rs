@@ -363,7 +363,7 @@ fn resolve_mode(values: &HashMap<String, String>, light_marker: bool) -> Mode {
 }
 
 pub(super) const BLACK: Color = Color::rgb(0, 0, 0);
-const WHITE: Color = Color::rgb(255, 255, 255);
+pub(super) const WHITE: Color = Color::rgb(255, 255, 255);
 
 /// `amount` of the way from `from` to `to`, per channel, on the encoded
 /// values rather than on light. Not a colour-managed blend on purpose: it has

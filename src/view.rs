@@ -17,14 +17,6 @@ pub enum Fit {
 }
 
 impl Fit {
-    pub fn label(self) -> &'static str {
-        match self {
-            Fit::Whole => "fit",
-            Fit::Width => "fit width",
-            Fit::Height => "fit height",
-        }
-    }
-
     fn next(self) -> Fit {
         match self {
             Fit::Whole => Fit::Width,
@@ -124,13 +116,6 @@ impl View {
 
     pub fn cycle_upscale(&mut self) {
         self.upscale = self.upscale.next();
-    }
-
-    pub fn mode_label(&self) -> &'static str {
-        match self.fit {
-            Some(f) => f.label(),
-            None => "free",
-        }
     }
 
     fn fit_zoom(fit: Fit, image: [f32; 2], viewport: [f32; 2]) -> f32 {
@@ -315,7 +300,7 @@ mod tests {
     #[test]
     fn opens_fitted_and_centred() {
         let view = View::new();
-        assert_eq!(view.mode_label(), "fit");
+        assert_eq!(view.fit(), Some(Fit::Whole));
 
         // Width is the tighter constraint, so the image spans the window.
         let placement = view.placement(IMAGE, WINDOW);
@@ -384,13 +369,13 @@ mod tests {
     #[test]
     fn fit_cycles_whole_width_height() {
         let mut view = View::new();
-        assert_eq!(view.mode_label(), "fit");
+        assert_eq!(view.fit(), Some(Fit::Whole));
         view.cycle_fit();
-        assert_eq!(view.mode_label(), "fit width");
+        assert_eq!(view.fit(), Some(Fit::Width));
         view.cycle_fit();
-        assert_eq!(view.mode_label(), "fit height");
+        assert_eq!(view.fit(), Some(Fit::Height));
         view.cycle_fit();
-        assert_eq!(view.mode_label(), "fit");
+        assert_eq!(view.fit(), Some(Fit::Whole));
     }
 
     #[test]
@@ -407,7 +392,7 @@ mod tests {
         let mut view = View::new();
         let fitted = view.zoom(IMAGE, WINDOW);
         view.zoom_in(IMAGE, WINDOW);
-        assert_eq!(view.mode_label(), "free");
+        assert_eq!(view.fit(), None);
         assert!(close(view.zoom(IMAGE, WINDOW), fitted * ZOOM_STEP));
 
         view.zoom_out(IMAGE, WINDOW);
@@ -418,7 +403,7 @@ mod tests {
     fn actual_size_is_one_to_one() {
         let mut view = View::new();
         view.actual_size(IMAGE, WINDOW);
-        assert_eq!(view.mode_label(), "free");
+        assert_eq!(view.fit(), None);
         let placement = view.placement(IMAGE, WINDOW);
         assert!(close(placement.zoom, 1.0));
         assert!(close(placement.width, IMAGE[0]));
@@ -471,12 +456,12 @@ mod tests {
     fn fit_width_still_pans_vertically() {
         let mut view = View::new();
         view.cycle_fit();
-        assert_eq!(view.mode_label(), "fit width");
+        assert_eq!(view.fit(), Some(Fit::Width));
         // 900x600 at fit-width in a 1200x600 window is 1200x800: taller than the
         // window, so there is room to scroll down but not sideways.
         let window = Viewport::whole([1200.0, 600.0]);
         view.pan_by(400.0, 400.0, IMAGE, window);
-        assert_eq!(view.mode_label(), "fit width");
+        assert_eq!(view.fit(), Some(Fit::Width));
         let placement = view.placement(IMAGE, window);
         assert!(close(placement.x, 0.0));
         assert!(close(placement.y + placement.height, window.height));
@@ -590,7 +575,7 @@ mod tests {
 
         view.zoom_in(IMAGE, WINDOW);
         view.reset();
-        assert_eq!(view.mode_label(), "fit");
+        assert_eq!(view.fit(), Some(Fit::Whole));
         assert_eq!(view.upscale(), Upscale::Bicubic);
         assert_eq!(view.placement(IMAGE, WINDOW).upscale, Upscale::Bicubic);
     }
@@ -644,7 +629,7 @@ mod tests {
         view.zoom_in(IMAGE, WINDOW);
         view.pan_by(300.0, 300.0, IMAGE, WINDOW);
         view.reset();
-        assert_eq!(view.mode_label(), "fit");
+        assert_eq!(view.fit(), Some(Fit::Whole));
         let placement = view.placement(IMAGE, WINDOW);
         assert!(close(placement.x, 0.0));
     }

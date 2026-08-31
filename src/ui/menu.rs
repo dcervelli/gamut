@@ -254,26 +254,37 @@ mod tests {
 
     const WINDOW: [f32; 2] = [1000.0, 700.0];
 
+    /// The menu hangs from the readout that opens it: under it, and with the
+    /// two right edges in line. Where it lands is settled by the button and
+    /// by the window, never by the frame the picture is in.
     #[test]
-    fn the_zoom_menu_pops_up_in_the_lower_right_of_the_content_area() {
+    fn the_zoom_menu_hangs_from_the_readout_that_opens_it() {
         let chrome = Chrome::new(WINDOW);
-        let content = chrome.content();
-        let popup = chrome.popup(Menu::Zoom).expect("a window with room for it");
+        for grid_on in [false, true] {
+            let button = chrome.zoom_button(grid_on);
+            let popup = chrome
+                .popup(Menu::Zoom, grid_on)
+                .expect("a window with room for it");
 
-        assert_eq!(popup.cells().count(), ZOOM_CHOICES.len());
-        // Over the image, clear of the panels: the menu is drawn on the frame
-        // the image is in, and half of it under the bottom bar would be half
-        // a menu.
-        let panel = popup.panel();
-        assert!(panel.x >= content.x && panel.right() <= content.right());
-        assert!(panel.y >= content.y && panel.bottom() <= content.bottom());
-        // In the corner nearest the button that opens it.
-        assert_eq!(panel.right(), content.right() - PADDING);
-        assert_eq!(panel.bottom(), content.bottom() - PADDING);
+            assert_eq!(popup.cells().count(), ZOOM_CHOICES.len());
+            // Right edges in line, and hanging by the grid's own margin: the
+            // whole placement comes from the button, so the menu goes
+            // wherever the button has gone rather than to a fixed corner.
+            let panel = popup.panel();
+            assert_eq!(panel.right(), button.right());
+            assert_eq!(panel.y, button.bottom() + PADDING);
+            // Clear of the bar it hangs from, and inside the window.
+            assert!(panel.y >= chrome.top.bottom());
+            assert!(panel.bottom() <= WINDOW[1] - PADDING);
+        }
 
         // A window with no room for the whole of it gets no menu at all,
         // which is also what stops one being opened there.
-        assert!(Chrome::new([220.0, 200.0]).popup(Menu::Zoom).is_none());
+        assert!(
+            Chrome::new([220.0, 200.0])
+                .popup(Menu::Zoom, false)
+                .is_none()
+        );
     }
 
     /// What a cell says it does is what pressing it does: the state each one

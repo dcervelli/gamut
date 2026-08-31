@@ -489,7 +489,7 @@ impl App {
             // closes and is spent doing exactly that, and one on the panel
             // but between cells lands on nothing at all.
             if let Some(menu) = self.panels.menu {
-                let popup = self.chrome().popup(menu);
+                let popup = self.chrome().popup(menu, self.panels.show_grid);
                 match popup.as_ref().and_then(|popup| popup.item_at(point)) {
                     Some(index) => self.press(Widget::Cell(index)),
                     None if popup.as_ref().is_none_or(|popup| !popup.contains(point)) => {
@@ -599,7 +599,7 @@ impl App {
         let chrome = self.chrome();
         match self.panels.menu {
             Some(menu) => chrome
-                .popup(menu)
+                .popup(menu, self.panels.show_grid)
                 .and_then(|popup| popup.item_at(point))
                 .map(Widget::Cell),
             None => chrome.widget_at(point, self.panels.show_grid),
@@ -619,7 +619,10 @@ impl App {
             // A window with no room for the panel gets no menu rather than a
             // state nothing on screen accounts for.
             Widget::Zoom => {
-                if self.current.is_some() && self.chrome().popup(Menu::Zoom).is_some() {
+                let chrome = self.chrome();
+                if self.current.is_some()
+                    && chrome.popup(Menu::Zoom, self.panels.show_grid).is_some()
+                {
                     self.panels.menu = Some(Menu::Zoom);
                 }
             }

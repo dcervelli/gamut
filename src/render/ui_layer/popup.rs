@@ -8,22 +8,6 @@
 
 use super::{Color, Rect, UiFrame};
 
-/// Which corner of the area a popup is anchored to. It grows inwards from
-/// there, so the corner it is pinned to is the one that stays put as the
-/// window is resized.
-///
-/// All four are here although the only popup written so far anchors to one of
-/// them: a corner the caller cannot ask for is a trap for the next popup, and
-/// the arithmetic for it is one line.
-#[allow(dead_code)]
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Corner {
-    TopLeft,
-    TopRight,
-    BottomLeft,
-    BottomRight,
-}
-
 /// How a popup's cells are sized and spaced, in logical pixels.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct PopupGrid {
@@ -36,7 +20,8 @@ pub struct PopupGrid {
     pub gap: f32,
     /// Between the outermost cells and the panel's edge.
     pub padding: f32,
-    /// Between the panel and the edge of the area it is anchored in.
+    /// Between the panel and the thing it hangs from, and the least it may
+    /// come to the edge of the area it is placed in.
     pub margin: f32,
     /// The panel's corner radius.
     pub radius: f32,
@@ -51,12 +36,19 @@ pub struct Popup {
 }
 
 impl Popup {
-    /// Places a popup of `items` cells in the corner `at` of `area`.
+    /// Places a popup of `items` cells under `anchor` — the button that opens
+    /// it — with its right edge in line with the anchor's, kept within
+    /// `area`.
+    ///
+    /// Hung from the button rather than pinned to a corner of the window: a
+    /// menu that appears somewhere other than under the thing pressed makes
+    /// the reader look for it. `area` is only the bound it may not leave, so
+    /// a menu is free to lie over whatever its button's neighbours are.
     ///
     /// `None` when `area` has no room for the whole of it, which is what
     /// keeps a popup off a window dragged down small: half a menu answers
     /// nothing, and shrinking the cells would only make them unreadable.
-    pub fn new(items: usize, grid: PopupGrid, area: Rect, at: Corner) -> Option<Self> {
+    pub fn below(items: usize, grid: PopupGrid, anchor: Rect, area: Rect) -> Option<Self> {
         if items == 0 || grid.columns == 0 {
             return None;
         }
@@ -69,18 +61,16 @@ impl Popup {
         };
         let width = span(columns, grid.cell[0]);
         let height = span(rows, grid.cell[1]);
-        if width + 2.0 * grid.margin > area.width || height + 2.0 * grid.margin > area.height {
+        let bounds = area.inset(grid.margin, grid.margin);
+        if width > bounds.width || height > bounds.height {
             return None;
         }
 
-        let x = match at {
-            Corner::TopLeft | Corner::BottomLeft => area.x + grid.margin,
-            Corner::TopRight | Corner::BottomRight => area.right() - grid.margin - width,
-        };
-        let y = match at {
-            Corner::TopLeft | Corner::TopRight => area.y + grid.margin,
-            Corner::BottomLeft | Corner::BottomRight => area.bottom() - grid.margin - height,
-        };
+        // Justified with the anchor, then slid back inside the bound; a menu
+        // hanging off a button near the edge stays whole rather than running
+        // off the window.
+        let x = (anchor.right() - width).clamp(bounds.x, bounds.right() - width);
+        let y = (anchor.bottom() + grid.margin).clamp(bounds.y, bounds.bottom() - height);
 
         Some(Self {
             // Whole logical pixels: everything inside is placed from this
@@ -150,10 +140,18 @@ mod tests {
     use super::*;
 
     const AREA: Rect = Rect {
-        x: 50.0,
-        y: 30.0,
+        x: 0.0,
+        y: 0.0,
         width: 900.0,
         height: 640.0,
+    };
+
+    /// The button the menu hangs from, near the right of the area.
+    const ANCHOR: Rect = Rect {
+        x: 800.0,
+        y: 4.0,
+        width: 60.0,
+        height: 22.0,
     };
 
     fn grid() -> PopupGrid {
@@ -168,15 +166,16 @@ mod tests {
     }
 
     #[test]
-    fn the_panel_wraps_the_cells_and_sits_in_the_corner_asked_for() {
-        let popup = Popup::new(11, grid(), AREA, Corner::BottomRight).expect("room enough");
+    fn the_panel_wraps_the_cells_and_hangs_from_the_anchor() {
+        let popup = Popup::below(11, grid(), ANCHOR, AREA).expect("room enough");
         let panel = popup.panel();
 
         // Four to a row and eleven of them is three rows, the last short.
         assert_eq!(panel.width, 4.0 * 50.0 + 3.0 * 5.0 + 2.0 * 10.0);
         assert_eq!(panel.height, 3.0 * 30.0 + 2.0 * 5.0 + 2.0 * 10.0);
-        assert_eq!(panel.right(), AREA.right() - 12.0);
-        assert_eq!(panel.bottom(), AREA.bottom() - 12.0);
+        // Right edges in line, and clear of the button by the margin.
+        assert_eq!(panel.right(), ANCHOR.right());
+        assert_eq!(panel.y, ANCHOR.bottom() + 12.0);
 
         // Every cell is inside the panel, and the padding is even.
         for (_, cell) in popup.cells() {
@@ -195,22 +194,23 @@ mod tests {
         assert_eq!(first.y - panel.y, 10.0);
     }
 
+    /// A button hard against an edge would justify the panel off the window,
+    /// so the panel slides back inside and stops at the margin.
     #[test]
-    fn each_corner_pins_the_panel_to_itself() {
-        let of = |at| {
-            Popup::new(8, grid(), AREA, at)
-                .expect("room enough")
-                .panel()
-        };
-        assert_eq!((of(Corner::TopLeft).x, of(Corner::TopLeft).y), (62.0, 42.0));
-        assert_eq!(of(Corner::TopRight).right(), AREA.right() - 12.0);
-        assert_eq!(of(Corner::BottomLeft).bottom(), AREA.bottom() - 12.0);
-        assert_eq!(of(Corner::BottomLeft).x, 62.0);
+    fn a_panel_that_would_hang_off_the_area_is_slid_back_inside_it() {
+        let edge = Rect::new(AREA.right() - 20.0, 4.0, 20.0, 22.0);
+        let popup = Popup::below(11, grid(), edge, AREA).expect("room enough");
+        assert_eq!(popup.panel().right(), AREA.right() - 12.0);
+
+        // And one near the bottom is lifted rather than run off it.
+        let low = Rect::new(800.0, AREA.bottom() - 30.0, 60.0, 22.0);
+        let popup = Popup::below(11, grid(), low, AREA).expect("room enough");
+        assert_eq!(popup.panel().bottom(), AREA.bottom() - 12.0);
     }
 
     #[test]
     fn a_point_finds_the_cell_it_is_over_and_nothing_in_the_gaps() {
-        let popup = Popup::new(11, grid(), AREA, Corner::BottomRight).expect("room enough");
+        let popup = Popup::below(11, grid(), ANCHOR, AREA).expect("room enough");
 
         for (index, cell) in popup.cells() {
             let middle = [cell.x + cell.width / 2.0, cell.y + cell.height / 2.0];
@@ -235,9 +235,9 @@ mod tests {
     #[test]
     fn a_cramped_area_has_no_room_for_one() {
         let tiny = Rect::new(0.0, 0.0, 120.0, 400.0);
-        assert!(Popup::new(11, grid(), tiny, Corner::BottomRight).is_none());
+        assert!(Popup::below(11, grid(), ANCHOR, tiny).is_none());
         let short = Rect::new(0.0, 0.0, 400.0, 60.0);
-        assert!(Popup::new(11, grid(), short, Corner::BottomRight).is_none());
-        assert!(Popup::new(0, grid(), AREA, Corner::BottomRight).is_none());
+        assert!(Popup::below(11, grid(), ANCHOR, short).is_none());
+        assert!(Popup::below(0, grid(), ANCHOR, AREA).is_none());
     }
 }

@@ -3,7 +3,7 @@
 
 use bytemuck::{Pod, Zeroable};
 
-use super::{Blend, Shape};
+use super::{Blend, LAYERS, Shape};
 use crate::render::gpu::{self, GrowableBuffer};
 
 #[repr(C)]
@@ -64,6 +64,8 @@ pub(super) struct Shapes {
     /// than batching by mode is what keeps shapes painting in the order they
     /// were added; a frame of plain quads still gets a single draw.
     runs: Vec<Run>,
+    /// Which of `runs` belong to each layer, in drawing order.
+    layers: [std::ops::Range<usize>; LAYERS],
 }
 
 impl Shapes {
@@ -171,14 +173,18 @@ impl Shapes {
             instances: GrowableBuffer::new::<QuadInstance>(device, "ui instances", INITIAL_QUADS),
             vertices: GrowableBuffer::new::<PolyVertex>(device, "ui vertices", INITIAL_VERTICES),
             runs: Vec::new(),
+            layers: [const { 0..0 }; LAYERS],
         }
     }
 
+    /// `layers` is one slice of shapes per layer of the frame, in the order
+    /// they are drawn. Runs never merge across a layer boundary — the text of
+    /// the layer below goes down between them.
     pub(super) fn prepare(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        shapes: &[Shape],
+        layers: [&[Shape]; LAYERS],
         physical: [u32; 2],
         scale: f32,
     ) {
@@ -194,68 +200,78 @@ impl Shapes {
         let mut instances: Vec<QuadInstance> = Vec::new();
         let mut vertices: Vec<PolyVertex> = Vec::new();
         self.runs.clear();
-        for shape in shapes {
-            let (kind, blend, added) = match shape {
-                Shape::Quad(quad) => {
-                    instances.push(QuadInstance {
-                        rect: [
-                            quad.rect.x * scale,
-                            quad.rect.y * scale,
-                            quad.rect.width * scale,
-                            quad.rect.height * scale,
-                        ],
-                        color: quad.color.to_linear(),
-                        corner: quad.corner * scale,
-                        _pad: [0.0; 3],
-                    });
-                    (Kind::Quad, quad.blend, 1)
-                }
-                Shape::Poly(poly) => {
-                    let color = poly.color.to_linear();
-                    vertices.extend(poly.vertices.iter().map(|point| PolyVertex {
-                        position: [point[0] * scale, point[1] * scale],
-                        color,
-                    }));
-                    (Kind::Poly, poly.blend, poly.vertices.len() as u32)
-                }
-            };
-            match self.runs.last_mut() {
-                Some(run) if run.kind == kind && run.blend == blend => run.end += added,
-                _ => {
-                    let start = match kind {
-                        Kind::Quad => instances.len() as u32 - added,
-                        Kind::Poly => vertices.len() as u32 - added,
-                    };
-                    self.runs.push(Run {
-                        kind,
-                        blend,
-                        start,
-                        end: start + added,
-                    });
+        for (layer, shapes) in layers.iter().enumerate() {
+            let first = self.runs.len();
+            for shape in *shapes {
+                let (kind, blend, added) = match shape {
+                    Shape::Quad(quad) => {
+                        instances.push(QuadInstance {
+                            rect: [
+                                quad.rect.x * scale,
+                                quad.rect.y * scale,
+                                quad.rect.width * scale,
+                                quad.rect.height * scale,
+                            ],
+                            color: quad.color.to_linear(),
+                            corner: quad.corner * scale,
+                            _pad: [0.0; 3],
+                        });
+                        (Kind::Quad, quad.blend, 1)
+                    }
+                    Shape::Poly(poly) => {
+                        let color = poly.color.to_linear();
+                        vertices.extend(poly.vertices.iter().map(|point| PolyVertex {
+                            position: [point[0] * scale, point[1] * scale],
+                            color,
+                        }));
+                        (Kind::Poly, poly.blend, poly.vertices.len() as u32)
+                    }
+                };
+                // Only ever into a run this layer opened: the layer below's
+                // words are drawn between the two, so a run carried across
+                // the boundary would put its shapes on the wrong side of them.
+                let open = self.runs.len() > first;
+                match self.runs.last_mut() {
+                    Some(run) if open && run.kind == kind && run.blend == blend => run.end += added,
+                    _ => {
+                        let start = match kind {
+                            Kind::Quad => instances.len() as u32 - added,
+                            Kind::Poly => vertices.len() as u32 - added,
+                        };
+                        self.runs.push(Run {
+                            kind,
+                            blend,
+                            start,
+                            end: start + added,
+                        });
+                    }
                 }
             }
+            self.layers[layer] = first..self.runs.len();
         }
 
         self.instances.write(device, queue, &instances);
         self.vertices.write(device, queue, &vertices);
     }
 
-    pub(super) fn render(&self, pass: &mut wgpu::RenderPass<'_>) {
-        if !self.runs.is_empty() {
-            pass.set_bind_group(0, &self.viewport_group, &[]);
-            for run in &self.runs {
-                match run.kind {
-                    Kind::Quad => {
-                        pass.set_pipeline(&self.pipelines[run.blend as usize]);
-                        pass.set_vertex_buffer(0, self.instances.slice());
-                        // One instance per quad, four corners each.
-                        pass.draw(0..4, run.start..run.end);
-                    }
-                    Kind::Poly => {
-                        pass.set_pipeline(&self.poly_pipelines[run.blend as usize]);
-                        pass.set_vertex_buffer(0, self.vertices.slice());
-                        pass.draw(run.start..run.end, 0..1);
-                    }
+    pub(super) fn render(&self, pass: &mut wgpu::RenderPass<'_>, layer: usize) {
+        let runs = &self.runs[self.layers[layer].clone()];
+        if runs.is_empty() {
+            return;
+        }
+        pass.set_bind_group(0, &self.viewport_group, &[]);
+        for run in runs {
+            match run.kind {
+                Kind::Quad => {
+                    pass.set_pipeline(&self.pipelines[run.blend as usize]);
+                    pass.set_vertex_buffer(0, self.instances.slice());
+                    // One instance per quad, four corners each.
+                    pass.draw(0..4, run.start..run.end);
+                }
+                Kind::Poly => {
+                    pass.set_pipeline(&self.poly_pipelines[run.blend as usize]);
+                    pass.set_vertex_buffer(0, self.vertices.slice());
+                    pass.draw(run.start..run.end, 0..1);
                 }
             }
         }

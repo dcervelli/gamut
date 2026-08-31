@@ -16,7 +16,8 @@ use crate::render::{Color, Rect, TextMeasure, UiFrame};
 use crate::theme::Theme;
 
 use super::buttons::outline;
-use super::{Current, PADDING, TEXT_SIZE, status, text_baseline};
+use super::chrome::BAR_PADDING;
+use super::{Current, TEXT_SIZE, status, text_baseline};
 
 /// Side of the colour swatch, in logical pixels: the height of a line of
 /// text, so that it reads as part of the sentence beside it.
@@ -25,7 +26,7 @@ const SWATCH: f32 = 13.0;
 /// Between the swatch and the words it belongs to.
 const GAP: f32 = 8.0;
 
-/// Draws the readout at the left of the bottom bar, from [`PADDING`] up to
+/// Draws the readout at the left of the bottom bar, from [`BAR_PADDING`] up to
 /// `limit` — where the state text at the other end of the bar begins.
 ///
 /// The swatch stands at the front rather than beside the numbers it depicts:
@@ -46,7 +47,7 @@ pub(super) fn draw(
     };
     let mapped = current.display.map(&sample);
 
-    let mut x = PADDING;
+    let mut x = BAR_PADDING;
     // A bar too short for the swatch gets the words alone, the way a panel
     // too narrow for a button gets no button.
     if bar.height >= SWATCH && x + SWATCH < limit {

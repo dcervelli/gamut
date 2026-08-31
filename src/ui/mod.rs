@@ -25,12 +25,23 @@ use crate::render::{Backdrop, Rect, TextMeasure, UiFrame};
 use crate::theme::Theme;
 use crate::view::{View, Viewport};
 
-use chrome::Chrome;
+use chrome::{BAR_PADDING, Chrome};
 pub use info::FileFacts;
 pub use menu::Menu;
 
 const TEXT_SIZE: f32 = 13.0;
 
+/// The gap between the file count and the name it belongs to. Tighter than
+/// the gap between two unrelated things in a bar, the two being one line
+/// about one file.
+const COUNTER_GAP: f32 = 8.0;
+
+/// The gap between two neighbours: what floats over the content area from the
+/// edge of that area, and one thing in a bar from the next.
+///
+/// Not what a bar is inset by at its ends — that is
+/// [`chrome::BAR_PADDING`], which is tighter, so that the bars
+/// and the side panels share one line down each edge of the window.
 const PADDING: f32 = 12.0;
 
 /// The gap between a floating panel's edge and what is on it.
@@ -52,14 +63,14 @@ const PANEL_RADIUS: f32 = 6.0;
 const CHECKER_SQUARE: f32 = 8.0;
 
 /// Something in the interface the pointer can be over and press: a toggle in
-/// a side panel, the zoom readout in the bottom bar, or a cell of the menu
-/// that readout opens. One value rather than a flag each, so that
+/// a side panel, one of the two buttons at the end of the top bar, or a cell
+/// of the menu the zoom readout opens. One value rather than a flag each, so that
 /// hit-testing, hover and drawing all go through the same test.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Widget {
     Minimap,
-    Info,
     Histogram,
+    Info,
     Grid,
     Zoom,
     /// A cell of whichever menu is open. Which menu that is is
@@ -210,10 +221,10 @@ pub fn build_frame(
             }
             if let Some(Reading::File(name)) = &input.reading {
                 frame.text_clipped(
-                    [PADDING, text_baseline(chrome.top)],
+                    [BAR_PADDING, text_baseline(chrome.top)],
                     TEXT_SIZE,
                     theme.text_dim,
-                    (chrome.top.width - PADDING * 2.0).max(1.0),
+                    (chrome.top.width - BAR_PADDING * 2.0).max(1.0),
                     format!("loading {name}"),
                 );
             }
@@ -271,21 +282,47 @@ pub fn build_frame(
         status::describe_pixels(current),
         current.image.color.label(),
     ];
-    let facts = status::fit_segments(text, &facts, (top.width / 2.0 - PADDING * 2.0).max(1.0));
+    let facts = status::fit_segments(text, &facts, (top.width / 2.0 - BAR_PADDING * 2.0).max(1.0));
     let facts_width = text.measure_text(&facts, TEXT_SIZE)[0];
-    // Clear of the grid toggle at the end of the bar, the way the state
-    // readout in the bottom bar keeps clear of the zoom button.
+    // Clear of the two buttons at the end of the bar, the innermost of which
+    // is the zoom readout.
     let grid_button = chrome.grid_button(panels.show_grid);
-    let facts_x = (grid_button.x - PADDING - facts_width).max(PADDING);
+    let zoom_button = chrome.zoom_button(panels.show_grid);
+    let facts_x = (zoom_button.x - PADDING - facts_width).max(BAR_PADDING);
 
-    frame.text_clipped(
-        [PADDING, top_baseline],
+    // The count is a fact about the list, not part of the name, and is set
+    // like the other facts in the bar: the name is the one thing here worth
+    // picking out, and picking out two things picks out neither.
+    let mut name_x = BAR_PADDING;
+    if let Some(counter) = status::counter(input.index, input.count) {
+        let width = text.measure_text(&counter, TEXT_SIZE)[0];
+        frame.text_clipped(
+            [BAR_PADDING, top_baseline],
+            TEXT_SIZE,
+            theme.text_dim,
+            (facts_x - BAR_PADDING).max(1.0),
+            counter,
+        );
+        name_x += width + COUNTER_GAP;
+    }
+    frame.text_clipped_bold(
+        [name_x, top_baseline],
         TEXT_SIZE,
-        theme.text_primary,
-        (facts_x - PADDING * 2.0).max(1.0),
+        theme.text_bright,
+        (facts_x - PADDING - name_x).max(1.0),
         status::top_label(&current.label, input.reading.as_ref()),
     );
     frame.text([facts_x, top_baseline], TEXT_SIZE, theme.text_dim, facts);
+
+    buttons::zoom_button(
+        &mut frame,
+        text,
+        zoom_button,
+        zoom,
+        panels.menu == Some(Menu::Zoom),
+        panels.hover == Some(Widget::Zoom),
+        theme,
+    );
 
     let spacing = panels.show_grid.then(|| grid::label(grid_step));
     buttons::grid_button(
@@ -303,18 +340,18 @@ pub fn build_frame(
         panels.hover == Some(Widget::Minimap),
         theme,
     );
-    buttons::info_button(
-        &mut frame,
-        chrome.info_button,
-        panels.show_info,
-        panels.hover == Some(Widget::Info),
-        theme,
-    );
     buttons::histogram_button(
         &mut frame,
         chrome.histogram_button,
         panels.show_histogram,
         panels.hover == Some(Widget::Histogram),
+        theme,
+    );
+    buttons::info_button(
+        &mut frame,
+        chrome.info_button,
+        panels.show_info,
+        panels.hover == Some(Widget::Info),
         theme,
     );
 
@@ -323,22 +360,9 @@ pub fn build_frame(
     let bar = chrome.bottom;
     let baseline = text_baseline(bar);
 
-    buttons::zoom_button(
-        &mut frame,
-        text,
-        chrome.zoom_button,
-        zoom,
-        panels.menu == Some(Menu::Zoom),
-        panels.hover == Some(Widget::Zoom),
-        theme,
-    );
-
-    let mut right = status::describe_state(current, view, input);
-    if let Some(label) = input.hdr_output {
-        right = format!("{label}   \u{00b7}   {right}");
-    }
+    let right = status::describe_state(current, view, input);
     let right_width = text.measure_text(&right, TEXT_SIZE)[0];
-    let right_x = (chrome.zoom_button.x - PADDING - right_width).max(PADDING);
+    let right_x = (bar.right() - BAR_PADDING - right_width).max(BAR_PADDING);
 
     if let Some(at) = input.pointer {
         pixel::draw(
@@ -347,17 +371,19 @@ pub fn build_frame(
             current,
             at,
             bar,
-            (right_x - PADDING).max(PADDING),
+            (right_x - PADDING).max(BAR_PADDING),
             theme,
         );
     }
     frame.text([right_x, baseline], TEXT_SIZE, theme.text_dim, right);
 
-    // Last, so that it lies over the panels and over anything floating in the
-    // content area: a popup is the thing being looked at while it is open.
+    // On the layer above everything else, so that it covers not only the
+    // panels and what floats over the content area but the words on them: a
+    // popup is the thing being looked at while it is open.
     if let Some(open) = panels.menu
-        && let Some(popup) = chrome.popup(open)
+        && let Some(popup) = chrome.popup(open, panels.show_grid)
     {
+        frame.overlay();
         menu::draw(&mut frame, text, &popup, view.fit(), zoom, panels, theme);
     }
     frame

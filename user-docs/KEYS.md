@@ -106,10 +106,10 @@ counted off in the image's own pixels.
 | Drag the file information | Scroll it, the words following the pointer |
 | Click the zoom percentage | Open the zoom menu |
 
-The percentage at the end of the bottom bar is a button. Pressing it opens a
-menu in the lower right corner: 10% through 1600%, and the three fits — the
-whole image, its width, its height — as arrows pointing the way each one
-fills the window. Whichever the view is in is lit. Choosing sets the zoom;
+The percentage in the top bar, just inside the grid button, is itself a
+button. Pressing it opens a menu hanging under it: 10% through 1600%, and the
+three fits — the whole image, its width, its height — as arrows pointing the
+way each one fills the window. Whichever the view is in is lit. Choosing sets the zoom;
 pressing anywhere outside the menu, or `Esc`, closes it without changing
 anything. A window too small to hold the menu does not open one.
 

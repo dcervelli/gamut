@@ -35,7 +35,7 @@ use crate::timing;
 pub use composite::Backdrop;
 pub use output::{HdrPreference, Output};
 pub use placement::{Placement, Upscale};
-pub use ui_layer::{Blend, Color, Corner, Popup, PopupGrid, Rect, UiFrame};
+pub use ui_layer::{Blend, Color, Popup, PopupGrid, Rect, UiFrame};
 
 use composite::Composite;
 use gpu::attachment;

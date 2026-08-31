@@ -124,8 +124,8 @@ The interface takes its colours from the desktop rather than carrying its own.
 On [Omarchy](https://omarchy.org) the active theme is materialised as a
 palette file, and `src/theme/` reads it, resolves it, and derives the
 handful of roles the chrome actually needs — panel, hairline, primary and dim
-text, accent, the menu panel, the floating panel and the ink on it, the
-information panel's ground, the histogram's planes. Switching the desktop's theme is picked up on the same
+text, accent, the menu panel, the ground the panels that float over the image
+are read on. Switching the desktop's theme is picked up on the same
 250 ms poll as the file on screen, so an open window changes with everything
 else rather than staying in the theme it opened under.
 
@@ -144,43 +144,45 @@ be called on a machine that has no Omarchy on it. Its tests check the result
 against what that script prints for the same file, so the two cannot drift
 apart quietly.
 
-Two things resist being themed directly and are derived instead:
+One role is derived rather than read: **the ink the file's name is written
+in.** It is the theme's `bright_foreground`, but only where a theme has
+actually parted that from its ordinary `foreground` — several define the two
+identically, which would leave the name reading exactly like the facts it
+shares the bar with, and the name is the one thing in the window that says
+what is being looked at. Where they collapse, the name's ink is carried away
+from the page instead: towards white on a dark theme, towards black on a
+light one, "bright" meaning further from the ground than the ordinary text
+rather than lighter in itself. It is the same shape of fallback the hairline
+gets when `lighter_background` resolves back to the background it sits on.
 
-* **The floating histogram panel stays dark whichever way round the theme
-  is.** The plot is drawn by screening the colour planes over one another, and
-  screening only reads on a dark ground: ground under the plot is added to
-  every plane, so a panel light enough to see lifts each plane's darkest
-  channel several times over and three overlapping planes come out as three
-  washes of the same pale colour. The panel is therefore the darkest colour
-  the theme has — its `darker_background` where it is a dark theme, its *ink*
-  where it is a light one, with the label on it drawn in the background — and
-  that colour is then taken down in value until it is dark enough to screen
-  onto. Scaled whole, so the theme's hue and saturation are exactly what they
-  were, and only when it is above the ceiling, so a theme that has picked its
-  own dark end keeps it: every dark theme tried against this passes through
-  untouched, and what the ceiling catches is the light theme, whose darkest
-  colour is nothing of the kind.
+Two more resist being themed and are not:
 
-  A light panel with the plot *multiplied* onto it instead — the arithmetic
-  dual, and the theme-compliant answer if it worked — was tried and does not:
-  three subtractive inks that overlap in a neutral mid grey have to be pale
-  ones, so the channels stop being tellable apart, and a near-white panel over
-  a bright picture loses its own edges.
-* **The colour planes are pulled towards their own primaries and then
-  balanced.** A palette's red is a pastel with green and blue in it, and three
-  pastels screened together climb towards white, which loses the overlaps the
-  plot exists to show. Each plane is scaled — whole, so the theme's hue
-  survives — until all three screened together land on a neutral mid grey. A
-  theme that names no colours keeps the planes the interface was designed
-  with, since one themed plane beside two default ones would read as three
-  unrelated colours.
+* **The histogram's plot is drawn on a near-black ground, in the primaries
+  themselves.** The plot is drawn by screening the colour planes over one
+  another, and screening only reads on a dark ground: what is under the plot
+  is added to every plane, so a ground light enough to see lifts each plane's
+  darkest channel several times over and three overlapping planes come out as
+  three washes of the same pale colour. Pure red, green and blue on a
+  near-black are the one set that behaves: two planes overlapping give the
+  secondary between them and all three give white, which is the reading a
+  channel histogram is looked at for — and is the same reading in every
+  theme, which a plot made of a palette's own pastels is not.
 
-A popup's panel is not one of those two. Its cells are buttons, drawn in the
-same ink as the toggles in the side panels, and that ink is made to read
-against the bars — so the panel is the bars' own surface and follows the theme
-either way round. It is held nearer to opaque than the floating panel is,
-since the picture coming through a menu is what the choices on it compete
-with.
+  Themed planes were tried: each pulled towards its own primary and then
+  scaled, whole, until the three screened together landed on a neutral mid
+  grey. It works, in the sense that no theme blows the plot out — but the
+  overlaps come out muddier the further a palette sits from the primaries, so
+  how much a histogram can be read depends on the desktop's taste in reds.
+  That is the wrong thing to make themeable.
+
+  The panel *around* the plot is not one of these. Nothing is screened onto
+  it, so it is the bars' own surface, mildly transparent, with the same ink on
+  it as the bars carry — the same panel the file's information is read on, and
+  the same one a popup's cells sit on, that last held nearer to opaque since
+  the picture coming through a menu is what the choices on it compete with.
+* **The luminance plane is a neutral grey.** It stands for a pixel's value
+  rather than for one of its channels, so a hue on it would read as a fourth
+  colour.
 
 ## Colour management
 
@@ -319,10 +321,16 @@ skinny left and right strips nested between them, so the corners belong to the
 bars and the strips never reason about where one ends. `Chrome` derives all
 four from the window size alone, which is what lets the frame builder and the
 click handler agree on where a widget is without either of them owning it. The
-top bar carries the file name and what the image is — its size, its pixels,
-its colour space, all fixed for as long as the file is on screen — while the
-bottom bar carries what changes: what is under the pointer, and what the view
-is doing to the image. The pointer's end of it is a readout of one pixel —
+top bar carries which file it is — its place in the list, in front of its
+name, so that the count is always in the same place whatever the name is — and
+what the image is: its size, its pixels, its colour space, all fixed for as
+long as the file is on screen. The name is the only thing in the window set
+bold, and the only thing drawn in the ink the theme keeps for it; the count in
+front of it is set like the facts at the other end of the bar, since it is one
+of them. Picking out two things picks out neither, and what a reader wants
+from that bar at a glance is the name. The bottom bar carries what changes: what is
+under the pointer, and what the view is doing to the image, the last of which
+says nothing at all while nothing is being done. The pointer's end of it is a readout of one pixel —
 where it is, the components the file holds there in the file's own units, the
 values the display window maps them to, and a swatch of the colour they come
 out as. The two numbers answer different questions, which is why both are
@@ -330,23 +338,48 @@ there: the stored one is the measurement, the mapped one is why it looks the
 way it does. Saying what the screen is showing means running the display
 transform on the CPU, so `ToneMap::apply` and `Colormap::color` in
 `image/display.rs` mirror the shader functions of the same names — a swatch
-that disagreed with the image beside it would be worse than none. The left strip holds the minimap toggle, the right strip a
-column of two — the file information panel and the histogram — and the end of
-the bottom bar the zoom readout — which
-is a button: pressing it opens a menu of zooms in the lower right of the
-content area, the ladder from 10% to 1600% and the three fits as icons. The
-readout is a fixed width so that the click handler knows where it is without
-measuring what it says, and so that it does not shuffle along the bar as the
-zoom changes.
+that disagreed with the image beside it would be worse than none.
+
+The strips are a bar's thickness wide — they hold a column of square toggles
+and nothing else, so a frame of even weight is the right one — and the left
+one holds the minimap toggle, the right one the histogram above the file
+information, the order the two panels they open are stacked in over the
+picture. The end of the top bar holds the two readouts that are also buttons:
+the grid toggle, and just inside it the zoom percentage. Both are measurements
+of the picture, which is what the top bar is for. The bars are inset at their
+ends by the same margin that centres a toggle across a side panel — derived
+from it, not merely equal to it — so the grid toggle ends on the same line the
+column of toggles below it ends on, and the file name starts on the line the
+minimap toggle starts on. Two edges a few pixels apart read as a mistake in a
+way that one shared edge does not, and deriving the margin is what keeps them
+from drifting apart when a button size is retuned. Pressing the percentage
+opens a menu of zooms — the ladder from 10% to 1600% and the three fits as
+icons — hung from the button, its right edge in line with the button's, placed
+against the window rather than against the frame the picture is in: a menu
+pushed around by where the image happens to be would not stay under the thing
+that opened it. The readout is a fixed width so that the click handler knows
+where it is without measuring what it says, and so that it does not shuffle
+along the bar as the zoom changes; it does move when the grid toggle beside it
+widens to read out its spacing, which is the press that was just made on it.
+
+A frame is drawn in two layers, and the menu is the only thing on the second.
+Shapes keep the order they were emitted in, but a layer's glyphs go down after
+all of its shapes — the text pass is prepared whole, and one per layer is what
+it costs — so without a layer above them the words on a panel would show
+through anything laid over that panel, which is what an open menu does to the
+histogram's axis label. Two layers is as far as this goes on purpose: it is
+the smallest thing that gives the interface a front, and each one costs a
+glyph pass whether or not it has any words on it.
 
 The information panel (`src/ui/info.rs`) is as wide as the histogram — one
 constant, fixed by the histogram's need for a bin to the logical pixel — so
 the two line up down the right of the window, and its column is measured
 inside a gutter kept clear for the scrollbar whether or not there is anything
 to scroll: text that reflowed the moment the bar appeared would be text that
-reflowed as it was being read. Unlike the histogram it takes the theme's own
-background rather than the forced-dark one: nothing is screened onto it, so it
-has no reason to be dark, and the words on it are the bars' own ink. The
+reflowed as it was being read. It starts under the histogram when that is
+showing and at the top of the content when it is not, and the two share one
+ground — the bars' own surface, mildly transparent, carrying the bars' own
+ink. The
 pointer belongs to it while it is over it: the wheel scrolls the column
 instead of zooming, and a press starts a drag of the words rather than of the
 picture — one thing or the other for as long as the button is held, so a drag

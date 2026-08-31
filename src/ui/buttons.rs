@@ -13,6 +13,13 @@ use super::menu::CELL_RADIUS;
 /// stays the thing being looked at.
 const ACTIVE_BUTTON_WASH: u8 = 64;
 
+/// The corner radius of a side-panel toggle.
+const TOGGLE_RADIUS: f32 = 5.0;
+/// What is left around a toggle's icon, across and down. The side panels are
+/// a bar's thickness wide and the buttons fill them, so the icons are small:
+/// what these are set against is legibility at that size, not the button.
+const ICON_INSET: f32 = 6.0;
+
 /// The histogram toggle: a miniature of what it shows, rather than a letter,
 /// since the side panels are too narrow to label anything in words.
 pub(super) fn histogram_button(
@@ -28,18 +35,18 @@ pub(super) fn histogram_button(
         return;
     }
     let (background, ink) = button_ink(active, hover, theme);
-    frame.rounded_rect(rect, 5.0, background);
+    frame.rounded_rect(rect, TOGGLE_RADIUS, background);
 
     const BARS: [f32; 4] = [0.45, 1.0, 0.7, 0.3];
-    let plot = rect.inset(9.0, 9.0);
+    let plot = rect.inset(ICON_INSET, ICON_INSET);
     let step = plot.width / BARS.len() as f32;
     for (index, fraction) in BARS.iter().enumerate() {
         let height = plot.height * fraction;
         frame.rect(
             Rect::new(
-                plot.x + index as f32 * step,
+                (plot.x + index as f32 * step).round(),
                 plot.bottom() - height,
-                (step - 1.5).max(1.0),
+                (step - 1.0).max(1.0),
                 height,
             ),
             ink,
@@ -61,11 +68,11 @@ pub(super) fn info_button(
         return;
     }
     let (background, ink) = button_ink(active, hover, theme);
-    frame.rounded_rect(rect, 5.0, background);
+    frame.rounded_rect(rect, TOGGLE_RADIUS, background);
 
-    const STROKE: f32 = 4.0;
-    const TITTLE_GAP: f32 = 3.0;
-    let icon = rect.inset(0.0, 8.0);
+    const STROKE: f32 = 3.0;
+    const TITTLE_GAP: f32 = 2.5;
+    let icon = rect.inset(0.0, ICON_INSET - 1.0);
     let x = (rect.x + (rect.width - STROKE) / 2.0).round();
     frame.rounded_rect(Rect::new(x, icon.y, STROKE, STROKE), STROKE / 2.0, ink);
     let stem = icon.y + STROKE + TITTLE_GAP;
@@ -89,14 +96,16 @@ pub(super) fn minimap_button(
         return;
     }
     let (background, ink) = button_ink(active, hover, theme);
-    frame.rounded_rect(rect, 5.0, background);
+    frame.rounded_rect(rect, TOGGLE_RADIUS, background);
 
-    let icon = rect.inset(8.0, 10.0);
-    outline(frame, icon, 1.5, ink);
+    // Wider than it is tall, the way a window is, and so inset further across
+    // than down.
+    let icon = rect.inset(ICON_INSET - 1.0, ICON_INSET);
+    outline(frame, icon, 1.0, ink);
     frame.rect(
         Rect::new(
-            icon.x + 3.5,
-            icon.y + 3.5,
+            icon.x + 2.0,
+            icon.y + 2.0,
             icon.width * 0.5,
             icon.height * 0.5,
         ),
@@ -158,7 +167,11 @@ pub(super) fn zoom_button(
 }
 
 /// Side of the grid icon, and the room between it and the spacing beside it.
-const GRID_ICON: f32 = 14.0;
+/// Smaller than the button it sits in by about what a side toggle's icon is
+/// smaller than its own, so that the two read as the same weight where they
+/// meet in the corner of the window — a lattice needs more room than a bar
+/// chart to stay a lattice, which is why it is not simply the same size.
+const GRID_ICON: f32 = 12.0;
 const GRID_ICON_GAP: f32 = 7.0;
 
 /// The grid toggle: the icon always, and — while the grid is on — how far
@@ -188,32 +201,34 @@ pub(super) fn grid_button(
     frame.rounded_rect(rect, CELL_RADIUS, background);
 
     // Icon and reading are centred as one, so that the button reads as a
-    // label with a mark in front of it rather than as two things in a row.
+    // label with a mark after it rather than as two things in a row.
+    //
+    // The mark comes last so that it stays at the end of the bar as the
+    // button grows leftwards to make room for the reading: the icon is what
+    // says which toggle this is, and a toggle that swapped ends with its own
+    // label every time it was pressed would be a toggle you had to find again.
     let label = spacing.map(|spacing| (spacing, text.measure_text(spacing, TEXT_SIZE)[0]));
     let width = GRID_ICON + label.map_or(0.0, |(_, width)| GRID_ICON_GAP + width);
     let x = (rect.x + (rect.width - width) / 2.0).round();
 
+    if let Some((spacing, _)) = label {
+        frame.text(
+            [x, (rect.y + (rect.height - TEXT_SIZE * 1.3) / 2.0).round()],
+            TEXT_SIZE,
+            ink,
+            spacing,
+        );
+    }
     grid_icon(
         frame,
         Rect::new(
-            x,
+            x + label.map_or(0.0, |(_, width)| width + GRID_ICON_GAP),
             (rect.y + (rect.height - GRID_ICON) / 2.0).round(),
             GRID_ICON,
             GRID_ICON,
         ),
         ink,
     );
-    if let Some((spacing, _)) = label {
-        frame.text(
-            [
-                x + GRID_ICON + GRID_ICON_GAP,
-                (rect.y + (rect.height - TEXT_SIZE * 1.3) / 2.0).round(),
-            ],
-            TEXT_SIZE,
-            ink,
-            spacing,
-        );
-    }
 }
 
 /// The grid in miniature: a frame with two lines each way through it, which

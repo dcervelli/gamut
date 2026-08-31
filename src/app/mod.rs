@@ -780,6 +780,7 @@ mod tests {
 
     use super::*;
     use crate::image::{Stats, exif};
+    use crate::view::Fit;
 
     const WINDOW: [f32; 2] = [1000.0, 700.0];
     /// The same window with nothing taken out of it, for the tests that are
@@ -901,7 +902,7 @@ mod tests {
 
         answer(&mut app, Reload::Fresh);
         assert_eq!(app.files.index(), 1);
-        assert_eq!(app.view.mode_label(), "free");
+        assert_eq!(app.view.fit(), None);
         assert_eq!(app.view.zoom(app.image_size(), VIEWPORT), zoom);
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
@@ -1084,7 +1085,7 @@ mod tests {
         app.step(true);
         answer(&mut app, Reload::Fresh);
         assert_eq!(app.files.index(), 1);
-        assert_eq!(app.view.mode_label(), "fit");
+        assert_eq!(app.view.fit(), Some(Fit::Whole));
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }

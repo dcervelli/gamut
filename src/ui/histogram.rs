@@ -10,11 +10,19 @@ use super::{Current, PADDING, PANEL_INSET, PANEL_RADIUS, PANEL_WIDTH, TEXT_SIZE}
 /// tall enough for a plot with its axis label above it.
 pub(super) const HISTOGRAM_SIZE: [f32; 2] = [PANEL_WIDTH, 130.0];
 
+/// The corner radius of the plot's own ground inside the panel. Smaller than
+/// the panel's, the way an inner corner always is.
+const PLOT_RADIUS: f32 = 3.0;
+/// The room left around that ground, so the plot reads as set into the panel
+/// rather than as a hole cut in it.
+const PLOT_INSET: f32 = 4.0;
+
 /// What the luminance plane drops to once colour planes are drawn over it.
 const HISTOGRAM_LUMA_UNDER: u8 = 110;
 
-/// Draws the histogram in the bottom-right of `content`, the area the panels
-/// leave free.
+/// Draws the histogram in the top-right of `content`, the area the panels
+/// leave free — above the information panel, the order the two toggles that
+/// open them are stacked in.
 ///
 /// Colour images get four planes — red, green, blue and luminance — over the
 /// range their colour channels span; grey images keep the single luminance
@@ -25,9 +33,7 @@ pub(super) fn draw(frame: &mut UiFrame, current: &Current, content: Rect, theme:
         (content.right() - HISTOGRAM_SIZE[0] - PADDING)
             .max(content.x + PADDING)
             .round(),
-        (content.bottom() - HISTOGRAM_SIZE[1] - PADDING)
-            .max(content.y + PADDING)
-            .round(),
+        (content.y + PADDING).round(),
         HISTOGRAM_SIZE[0],
         HISTOGRAM_SIZE[1],
     );
@@ -35,11 +41,18 @@ pub(super) fn draw(frame: &mut UiFrame, current: &Current, content: Rect, theme:
 
     let plot = panel.inset(PANEL_INSET, PANEL_INSET);
     let label_height = TEXT_SIZE * 1.4;
+    // The bins are one logical pixel each, so the ground under them is the
+    // full width of the plot and the room around it is drawn outside that.
     let bars = Rect::new(
         plot.x,
-        plot.y + label_height,
+        plot.y + label_height + PLOT_INSET,
         plot.width,
-        plot.height - label_height,
+        plot.height - label_height - PLOT_INSET,
+    );
+    frame.rounded_rect(
+        bars.inset(-PLOT_INSET, -PLOT_INSET),
+        PLOT_RADIUS,
+        theme.plot_background,
     );
 
     // Luminance always goes down first, underneath the colour planes: it
@@ -56,7 +69,7 @@ pub(super) fn draw(frame: &mut UiFrame, current: &Current, content: Rect, theme:
     frame.text(
         [plot.x, plot.y],
         TEXT_SIZE * 0.85,
-        theme.panel_text,
+        theme.text_dim,
         format!(
             "{:.4}  \u{2013}  {:.4}",
             transfer.to_linear(axis_min),

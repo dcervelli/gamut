@@ -39,6 +39,19 @@ pub(super) fn top_label(shown: &str, reading: Option<&Reading>) -> String {
     }
 }
 
+/// Where the file on screen comes in the list it was opened with, for in
+/// front of its name — or `None` for a single file, "[1/1]" being a count of
+/// nothing.
+///
+/// It leads the bar because it is the one part of the line whose width does
+/// not depend on the file, so a reader looking for it always finds it in the
+/// same place. It is drawn as its own run rather than as part of the name:
+/// the name is what is being looked at and the count is a fact about the
+/// list, and the two are set apart to say so.
+pub(super) fn counter(index: usize, count: usize) -> Option<String> {
+    (count > 1).then(|| format!("[{}/{}]", index + 1, count))
+}
+
 pub(super) fn describe_pixels(current: &Current) -> String {
     let channels = match current.image.channels() {
         Channels::Gray => "gray",
@@ -57,11 +70,17 @@ pub(super) fn describe_pixels(current: &Current) -> String {
     )
 }
 
+/// What is being done to the image, for the bottom bar: only the things
+/// actually in force, so a viewer left alone says nothing here.
+///
+/// Neither the zoom nor the fit it came from: both are the button in the top
+/// bar, which reads out the one and opens a menu of the other.
 pub(super) fn describe_state(current: &Current, view: &View, input: &FrameInput) -> String {
     let zoom = view.zoom(current.size(), input.viewport);
-    // Not the percentage: that is the button at the end of the bar, and
-    // saying it twice would only make the reader wonder which one to believe.
-    let mut parts = vec![view.mode_label().to_string()];
+    let mut parts = Vec::new();
+    if let Some(label) = input.hdr_output {
+        parts.push(label.to_string());
+    }
 
     // Only while it is doing something. Below 1:1 the filter in use is the
     // area average, which is not a choice and so not worth a word in the bar.
@@ -83,9 +102,6 @@ pub(super) fn describe_state(current: &Current, view: &View, input: &FrameInput)
     }
     if current.image.is_high_dynamic_range() {
         parts.push(current.display.tone_map.label().to_string());
-    }
-    if input.count > 1 {
-        parts.push(format!("[{}/{}]", input.index + 1, input.count));
     }
     parts.join("   \u{00b7}   ")
 }
@@ -127,5 +143,15 @@ mod tests {
             "a.png, reloading",
             "a file being re-read has no new name to show, only the wait"
         );
+    }
+
+    /// Which of the list you are looking at — and nothing at all when the
+    /// list is one file long.
+    #[test]
+    fn a_file_out_of_several_is_counted_and_a_file_on_its_own_is_not() {
+        assert_eq!(counter(0, 6).as_deref(), Some("[1/6]"));
+        assert_eq!(counter(5, 6).as_deref(), Some("[6/6]"));
+        assert_eq!(counter(0, 1), None);
+        assert_eq!(counter(0, 0), None);
     }
 }

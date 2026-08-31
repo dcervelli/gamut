@@ -7,9 +7,9 @@
 //! the only thing that sees both.
 //!
 //! There is no widget toolkit here on purpose. [`UiFrame`] is a display list
-//! that batches into a single instanced draw call plus one text pass, so
-//! adding panels, sliders or histograms later is a matter of emitting more
-//! primitives, not of touching the renderer.
+//! that batches into a handful of instanced draw calls and a text pass per
+//! layer, so adding panels, sliders or histograms later is a matter of
+//! emitting more primitives, not of touching the renderer.
 
 mod popup;
 mod shapes;
@@ -17,7 +17,7 @@ mod text;
 
 use anyhow::Result;
 
-pub use popup::{Corner, Popup, PopupGrid};
+pub use popup::{Popup, PopupGrid};
 
 use shapes::Shapes;
 use text::Text;
@@ -150,11 +150,21 @@ pub(crate) enum Shape {
     Poly(PolyItem),
 }
 
+/// How heavily a run is set. Almost everything is [`Weight::Regular`]: the
+/// interface talking about itself. Bold is for the file's own name, which is
+/// the one thing in the window that is not.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Weight {
+    Regular,
+    Bold,
+}
+
 pub(crate) struct TextItem {
     text: String,
     at: [f32; 2],
     size: f32,
     color: Color,
+    weight: Weight,
     /// The width the text is laid out into: it breaks at this when `wrap` is
     /// set, and is cut off at it when not.
     max_width: Option<f32>,
@@ -164,18 +174,47 @@ pub(crate) struct TextItem {
     clip: Option<Rect>,
 }
 
-/// One frame's worth of interface, in logical pixels.
-pub struct UiFrame {
+/// How many layers a frame is drawn in. Two: what the interface is, and
+/// whatever is floating over it at the moment.
+pub(crate) const LAYERS: usize = 2;
+
+/// One layer of a frame. Shapes keep the order they were added in, but the
+/// text of a layer is drawn after all of its shapes — the glyph pass is
+/// prepared whole, and one per layer is what it costs — so a shape can only
+/// cover words that are on a layer below it.
+#[derive(Default)]
+struct Layer {
     shapes: Vec<Shape>,
     texts: Vec<TextItem>,
+}
+
+/// One frame's worth of interface, in logical pixels.
+pub struct UiFrame {
+    layers: [Layer; LAYERS],
+    /// Which layer primitives are being added to.
+    current: usize,
 }
 
 impl UiFrame {
     pub fn new() -> Self {
         Self {
-            shapes: Vec::new(),
-            texts: Vec::new(),
+            layers: Default::default(),
+            current: 0,
         }
+    }
+
+    /// Moves to the layer that floats over everything emitted so far.
+    ///
+    /// What is drawn after this covers the words on the panels underneath as
+    /// well as the panels themselves, which is what an open menu has to do:
+    /// it is the thing being looked at while it is open, and a histogram's
+    /// axis label showing through it would say otherwise.
+    pub fn overlay(&mut self) {
+        self.current = LAYERS - 1;
+    }
+
+    fn layer(&mut self) -> &mut Layer {
+        &mut self.layers[self.current]
     }
 
     pub fn rect(&mut self, rect: Rect, color: Color) {
@@ -185,7 +224,7 @@ impl UiFrame {
     /// As [`UiFrame::rect`], but combined with what is under it by `blend`
     /// rather than simply covering it.
     pub fn rect_blended(&mut self, rect: Rect, color: Color, blend: Blend) {
-        self.shapes.push(Shape::Quad(QuadItem {
+        self.layer().shapes.push(Shape::Quad(QuadItem {
             rect,
             color,
             corner: 0.0,
@@ -194,7 +233,7 @@ impl UiFrame {
     }
 
     pub fn rounded_rect(&mut self, rect: Rect, corner: f32, color: Color) {
-        self.shapes.push(Shape::Quad(QuadItem {
+        self.layer().shapes.push(Shape::Quad(QuadItem {
             rect,
             color,
             corner,
@@ -220,7 +259,7 @@ impl UiFrame {
             vertices.extend_from_slice(&[left, left_foot, right_foot, left, right_foot, right]);
         }
         if !vertices.is_empty() {
-            self.shapes.push(Shape::Poly(PolyItem {
+            self.layer().shapes.push(Shape::Poly(PolyItem {
                 vertices,
                 color,
                 blend,
@@ -232,7 +271,7 @@ impl UiFrame {
     /// chevrons an icon is drawn from are made of, since a rectangle cannot
     /// point anywhere.
     pub fn triangle(&mut self, vertices: [[f32; 2]; 3], color: Color) {
-        self.shapes.push(Shape::Poly(PolyItem {
+        self.layer().shapes.push(Shape::Poly(PolyItem {
             vertices: vertices.to_vec(),
             color,
             blend: Blend::Over,
@@ -241,11 +280,12 @@ impl UiFrame {
 
     /// Draws `text` with its top-left corner at `at`.
     pub fn text(&mut self, at: [f32; 2], size: f32, color: Color, text: impl Into<String>) {
-        self.texts.push(TextItem {
+        self.layer().texts.push(TextItem {
             text: text.into(),
             at,
             size,
             color,
+            weight: Weight::Regular,
             max_width: None,
             wrap: false,
             clip: None,
@@ -262,11 +302,36 @@ impl UiFrame {
         max_width: f32,
         text: impl Into<String>,
     ) {
-        self.texts.push(TextItem {
+        self.clipped(at, size, color, Weight::Regular, max_width, text);
+    }
+
+    /// As [`UiFrame::text_clipped`], set bold.
+    pub fn text_clipped_bold(
+        &mut self,
+        at: [f32; 2],
+        size: f32,
+        color: Color,
+        max_width: f32,
+        text: impl Into<String>,
+    ) {
+        self.clipped(at, size, color, Weight::Bold, max_width, text);
+    }
+
+    fn clipped(
+        &mut self,
+        at: [f32; 2],
+        size: f32,
+        color: Color,
+        weight: Weight,
+        max_width: f32,
+        text: impl Into<String>,
+    ) {
+        self.layer().texts.push(TextItem {
             text: text.into(),
             at,
             size,
             color,
+            weight,
             max_width: Some(max_width),
             wrap: false,
             clip: None,
@@ -289,11 +354,12 @@ impl UiFrame {
         clip: Rect,
         text: impl Into<String>,
     ) {
-        self.texts.push(TextItem {
+        self.layer().texts.push(TextItem {
             text: text.into(),
             at,
             size,
             color,
+            weight: Weight::Regular,
             max_width: Some(width),
             wrap: true,
             clip: Some(clip),
@@ -349,15 +415,20 @@ impl UiRenderer {
         physical: [u32; 2],
         scale: f32,
     ) -> Result<()> {
-        self.shapes
-            .prepare(device, queue, &frame.shapes, physical, scale);
-        self.text
-            .prepare(device, queue, &frame.texts, physical, scale)
+        let shapes = frame.layers.each_ref().map(|layer| layer.shapes.as_slice());
+        let texts = frame.layers.each_ref().map(|layer| layer.texts.as_slice());
+        self.shapes.prepare(device, queue, shapes, physical, scale);
+        self.text.prepare(device, queue, texts, physical, scale)
     }
 
+    /// Each layer's shapes, then its words, then the layer above it: the one
+    /// point in the frame where the two halves of the draw list interleave.
     pub fn render(&self, pass: &mut wgpu::RenderPass<'_>) -> Result<()> {
-        self.shapes.render(pass);
-        self.text.render(pass)
+        for layer in 0..LAYERS {
+            self.shapes.render(pass, layer);
+            self.text.render(pass, layer)?;
+        }
+        Ok(())
     }
 
     pub fn trim(&mut self) {

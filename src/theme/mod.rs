@@ -23,7 +23,7 @@ pub use palette::{Mode, Palette, watch};
 use crate::image::stats::COLOUR;
 use crate::render::Color;
 
-use palette::{BLACK, mix};
+use palette::{BLACK, WHITE, mix};
 
 /// Every colour the interface draws with.
 ///
@@ -33,9 +33,9 @@ use palette::{BLACK, mix};
 /// roles that a theme can be reasoned about whole.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Theme {
-    /// Whether the palette reads light-on-dark or dark-on-light. The floating
-    /// panels stay dark either way — see `panel_background` — so this is what
-    /// tells the ink on them which way to go.
+    /// Whether the palette reads light-on-dark or dark-on-light. Nothing here
+    /// branches on it any more, the surfaces having been derived to work
+    /// either way round, but it is what the derivation itself reads.
     pub mode: Mode,
     /// The four panels, and the window behind the image.
     pub bar_background: Color,
@@ -50,29 +50,35 @@ pub struct Theme {
     /// is open — but not quite, so that it still reads as lying over the
     /// image rather than as another piece of the chrome.
     pub menu_background: Color,
-    /// The floating histogram panel: the theme's own deepest colour, taken
-    /// down in value until it is dark whatever the mode, since the plot on it
-    /// is drawn by screening the colour planes over one another and that only
-    /// reads on a dark ground. Kept off full opacity so that what it is
-    /// covering is still there, though how far off depends on the mode — a
-    /// light page shows through far more of a given alpha than its bytes
-    /// suggest, the blend being done in light.
+    /// The panels that float over the image: the histogram and the file's
+    /// information. The bars' own colour, so that words over the picture are
+    /// read on the same ground as the words in the bars — in `text_primary`
+    /// and `text_dim`, which are made to sit on it. Mildly transparent, so
+    /// that it reads as lying over the picture rather than as another piece
+    /// of the chrome.
     pub panel_background: Color,
-    /// Ink on that panel, which is therefore light whatever the mode.
-    pub panel_text: Color,
-    /// The panel the file's information is read on. The bars' own colour,
-    /// unlike `panel_background`: nothing is screened onto this one, so it
-    /// has no reason to be dark, and words over the image should be read on
-    /// the same ground as the words in the bars — in `text_primary` and
-    /// `text_dim`, which are made to sit on it. Mildly transparent, so that
-    /// it reads as lying over the picture rather than as another piece of the
-    /// chrome.
-    pub info_background: Color,
+    /// The ground the histogram's plot itself is drawn on, inside that panel.
+    /// Near-black whatever the theme: the plot is drawn by screening the
+    /// colour planes over one another, and that only reads as three colours
+    /// on a dark ground. Opaque, since it is the one surface here that has a
+    /// measurement on it rather than words.
+    pub plot_background: Color,
     pub button_idle: Color,
     pub button_hover: Color,
     /// Text in the bars: what the image is, and what is being done to it.
     pub text_primary: Color,
     pub text_dim: Color,
+    /// The ink that leads, for the one thing in the window that answers
+    /// "what am I looking at": the file's own name.
+    ///
+    /// The theme's `bright_foreground`, where that is actually parted from
+    /// the text beside it. A palette is free to define the two the same and
+    /// several do, which would leave the name reading exactly like the facts
+    /// it shares the bar with; where they collapse this is carried away from
+    /// the page until it does not — towards white on a dark theme and
+    /// towards black on a light one, "bright" here meaning further from the
+    /// ground than the ordinary text rather than lighter in itself.
+    pub text_bright: Color,
     /// What is switched on, and where the display window sits.
     pub accent: Color,
     /// The minimap's border, and the wash over the part of the image that is
@@ -80,9 +86,14 @@ pub struct Theme {
     /// stay translucent.
     pub minimap_edge: Color,
     pub minimap_dim: Color,
-    /// The luminance plane, under the colour ones.
+    /// The luminance plane, under the colour ones: a neutral grey, since it
+    /// is the value of a pixel and not one of its channels.
     pub histogram_luma: Color,
-    /// Red, green and blue channel ink, in that order.
+    /// Red, green and blue channel ink, in that order. The primaries
+    /// themselves rather than anything of the theme's: screened over one
+    /// another on a near-black ground they give the secondaries where two
+    /// planes meet and white where all three do, which is what makes a
+    /// channel histogram readable at a glance.
     pub histogram_planes: [Color; COLOUR],
 }
 
@@ -90,57 +101,51 @@ pub struct Theme {
 /// shade of its own to use. Enough to place an edge, little enough that the
 /// eye does not keep going back to it.
 const BORDER_LIFT: f32 = 0.15;
+/// How far the file name's ink is carried away from the page when the theme's
+/// own bright text is not parted from its ordinary text. Enough that the name
+/// leads the bar it is in, little enough that it is still the theme's colour
+/// and not simply the end it was carried towards.
+const BRIGHT_LIFT: f32 = 0.45;
 /// How far apart, summed over the three channels, two colours have to be
 /// before one can be seen against the other. A theme whose `lighter_background`
 /// resolves back to its `background` — which is what happens when it defines
 /// neither — would otherwise draw the hairline invisibly.
 const SEPARATION: u32 = 18;
-/// The most light the floating panel may carry, as an HSV value.
-///
-/// The plot is screened, so every bit of ground under it is added to every
-/// plane: a panel at value 0.3 lifts the darkest channel of a plane several
-/// times over, and three planes that used to overlap in a readable mid grey
-/// come out as three washes of the same pale colour. Capping the value rather
-/// than replacing the colour keeps the theme's hue and saturation exactly,
-/// and bounds what the ground contributes whatever hue that is, since a
-/// neutral is the brightest thing any given value can be.
+/// The most light the wash over the minimap may carry, as an HSV value. It
+/// goes over the part of the image the view is not showing, and has to read
+/// as "not this" whichever way round the theme runs, so whatever colour the
+/// theme offers is taken down until it is dark.
 ///
 /// Set above the deepest surface every theme the interface was tried against
 /// defines — the highest was 0.137 — so a theme that has thought about its
 /// own dark end is never overridden; what the cap catches is the light theme,
 /// whose deepest colour is nothing of the kind.
-const PANEL_VALUE_CEIL: f32 = 0.14;
-/// How opaque the information panel is. Enough of the image comes through to
-/// place the panel over it; not enough to compete with the words.
-const INFO_ALPHA: u8 = 232;
+const DEEP_VALUE_CEIL: f32 = 0.14;
+/// How opaque a floating panel is. Enough of the image comes through to place
+/// the panel over it; not enough to compete with what is written on it.
+const PANEL_ALPHA: u8 = 232;
 
 /// How opaque a popup's panel is. Higher than the panels that float over the
 /// image permanently: the picture coming through a menu competes with the
-/// choices on it. Not mode-dependent the way the floating panel's alpha is,
-/// the surface being the theme's own background either way round.
+/// choices on it.
 const MENU_ALPHA: u8 = 246;
 
-/// How opaque that panel is, against the interface's usual alpha for it.
-///
-/// Higher because the interface's quads blend in light, not in encoded
-/// values, and a light backdrop carries far more light than its byte suggests:
-/// the interface's usual alpha over a near-white page leaves a dark panel
-/// reading as a mid grey, which is not a ground a screened plot shows up on.
-const LIGHT_PANEL_ALPHA: u8 = 242;
-
-/// How far each channel plane is pulled towards its own primary before it is
-/// balanced. A palette's red is a pastel with green and blue in it, and three
-/// pastels screened together climb towards white; some of the theme's
-/// character is traded here for the purity that leaves the overlaps readable.
-const PLANE_PURITY: f32 = 0.4;
-/// What the three planes screened together come to, as light. Mid grey:
-/// bright enough that an overlap plainly is not one plane, dark enough that
-/// it plainly is not white.
-const PLANE_MIX: f32 = 0.5;
-/// How many times the three are balanced against one another. Each pass
-/// settles what the previous one's adjustments did to the other two channels,
-/// and the correction is small by the third.
-const PLANE_PASSES: usize = 4;
+/// The ground the plot is drawn on. Not quite black, so that the panel's own
+/// edge is still an edge rather than a hole in it.
+const PLOT_BACKGROUND: Color = Color::rgb(8, 8, 10);
+/// The luminance plane. Neutral, and no theme's business: it is the one plane
+/// that stands for a pixel's value rather than for a channel, and a value
+/// with a hue on it would read as a fourth colour.
+const HISTOGRAM_LUMA: Color = Color::rgba(170, 170, 170, 200);
+/// The colour planes: the primaries themselves. Screened over one another on
+/// [`PLOT_BACKGROUND`] these give yellow, cyan and magenta where two overlap
+/// and white where all three do, which is the reading a channel histogram is
+/// looked at for — and is the same reading in every theme.
+const HISTOGRAM_PLANES: [Color; COLOUR] = [
+    Color::rgb(255, 0, 0),
+    Color::rgb(0, 255, 0),
+    Color::rgb(0, 0, 255),
+];
 
 impl Theme {
     /// The neutral dark set the interface was designed in, and what is used
@@ -150,22 +155,20 @@ impl Theme {
         bar_background: Color::rgb(18, 18, 22),
         border: Color::rgb(38, 38, 46),
         menu_background: Color::rgba(18, 18, 22, MENU_ALPHA),
-        panel_background: Color::rgba(12, 12, 16, 214),
-        panel_text: Color::rgb(150, 152, 160),
-        info_background: Color::rgba(18, 18, 22, INFO_ALPHA),
+        panel_background: Color::rgba(18, 18, 22, PANEL_ALPHA),
+        plot_background: PLOT_BACKGROUND,
         button_idle: Color::rgba(255, 255, 255, 20),
         button_hover: Color::rgba(255, 255, 255, 45),
         text_primary: Color::rgb(238, 238, 238),
         text_dim: Color::rgb(150, 152, 160),
+        // The set the interface was designed in already parts its two inks,
+        // so the name is the primary taken the last step to white.
+        text_bright: Color::rgb(255, 255, 255),
         accent: Color::rgb(120, 180, 255),
         minimap_edge: Color::rgba(255, 255, 255, 70),
         minimap_dim: Color::rgba(6, 6, 10, 150),
-        histogram_luma: Color::rgba(150, 152, 160, 200),
-        histogram_planes: [
-            Color::rgb(184, 44, 44),
-            Color::rgb(44, 170, 52),
-            Color::rgb(52, 100, 186),
-        ],
+        histogram_luma: HISTOGRAM_LUMA,
+        histogram_planes: HISTOGRAM_PLANES,
     };
 
     /// The theme to draw with: the desktop's, where there is one to read.
@@ -189,6 +192,23 @@ impl Theme {
             return Theme::FALLBACK;
         };
         let bright = palette.color("bright_foreground").unwrap_or(foreground);
+        // A theme that names its bright text no different from its ordinary
+        // text has not parted the two, and the name in the bar has to lead
+        // whatever the theme did — the same fallback the hairline gets when
+        // `lighter_background` resolves back to the background it sits on.
+        // Away from the page, not simply towards white: on a light theme the
+        // ink that leads is the darker one.
+        let text_bright = match separated(bright, foreground) {
+            true => bright,
+            false => mix(
+                bright,
+                match palette.mode() {
+                    Mode::Dark => WHITE,
+                    Mode::Light => BLACK,
+                },
+                BRIGHT_LIFT,
+            ),
+        };
         let accent = palette
             .color("accent")
             .or_else(|| palette.color("blue"))
@@ -202,77 +222,51 @@ impl Theme {
             .filter(|shade| separated(*shade, background))
             .unwrap_or_else(|| mix(background, foreground, BORDER_LIFT));
 
-        // The deepest surface the theme can offer, for the things that have
-        // to sit under light ink whichever way round the theme is: the
-        // floating panel, and the wash over what the minimap is not showing.
+        // The deepest surface the theme can offer, for the one wash that has
+        // to read as dark whichever way round the theme is: what the minimap
+        // lays over the part of the image the view is not showing.
         //
         // A light theme has no such surface to name — its own darkest colour
         // is its ink, and how deep a theme takes its ink is a matter of taste
         // it was free to settle either way — so whichever colour the mode
-        // arrives at is then taken down to a value the plot can be drawn on.
+        // arrives at is then taken down until it is dark.
         let deep = darkened(match palette.mode() {
             Mode::Dark => palette
                 .color("darker_background")
                 .unwrap_or_else(|| mix(background, BLACK, 0.5)),
             Mode::Light => foreground,
         });
-        let on_deep = match palette.mode() {
-            Mode::Dark => foreground,
-            Mode::Light => background,
-        };
-        let panel_alpha = match palette.mode() {
-            Mode::Dark => Theme::FALLBACK.panel_background.a,
-            Mode::Light => LIGHT_PANEL_ALPHA,
-        };
-
-        let planes = [
-            palette.color("red"),
-            palette.color("green"),
-            palette.color("blue"),
-        ];
-        // All three or none: a plot with one themed plane beside two default
-        // ones would read as three unrelated colours.
-        let histogram_planes = match planes {
-            [Some(red), Some(green), Some(blue)] => {
-                let mut ink = [red, green, blue];
-                for (channel, plane) in ink.iter_mut().enumerate() {
-                    *plane = channel_ink(*plane, channel);
-                }
-                balance(ink)
-            }
-            _ => Theme::FALLBACK.histogram_planes,
-        };
 
         Theme {
             mode: palette.mode(),
             bar_background: background,
             border,
             menu_background: background.with_alpha(MENU_ALPHA),
-            panel_background: deep.with_alpha(panel_alpha),
-            panel_text: on_deep,
-            info_background: background.with_alpha(INFO_ALPHA),
+            panel_background: background.with_alpha(PANEL_ALPHA),
+            plot_background: PLOT_BACKGROUND,
             button_idle: foreground.with_alpha(Theme::FALLBACK.button_idle.a),
             button_hover: foreground.with_alpha(Theme::FALLBACK.button_hover.a),
             text_primary: bright,
             text_dim: foreground,
+            text_bright,
             accent,
             minimap_edge: foreground.with_alpha(Theme::FALLBACK.minimap_edge.a),
             minimap_dim: deep.with_alpha(Theme::FALLBACK.minimap_dim.a),
-            histogram_luma: on_deep.with_alpha(Theme::FALLBACK.histogram_luma.a),
-            histogram_planes,
+            histogram_luma: HISTOGRAM_LUMA,
+            histogram_planes: HISTOGRAM_PLANES,
         }
     }
 }
 
-/// A colour taken down to [`PANEL_VALUE_CEIL`] if it is above it, scaled
-/// whole so that its hue and saturation are exactly what they were. Anything
+/// A colour taken down to [`DEEP_VALUE_CEIL`] if it is above it, scaled whole
+/// so that its hue and saturation are exactly what they were. Anything
 /// already that deep is its own theme's business and is left alone.
 fn darkened(color: Color) -> Color {
     let peak = color.r.max(color.g).max(color.b) as f32 / 255.0;
-    if peak <= PANEL_VALUE_CEIL {
+    if peak <= DEEP_VALUE_CEIL {
         return color;
     }
-    scale(color, PANEL_VALUE_CEIL / peak)
+    scale(color, DEEP_VALUE_CEIL / peak)
 }
 
 /// Whether `shade` can be told apart from `against` at hairline width.
@@ -280,50 +274,6 @@ fn separated(shade: Color, against: Color) -> bool {
     let distance = |a: u8, b: u8| a.abs_diff(b) as u32;
     distance(shade.r, against.r) + distance(shade.g, against.g) + distance(shade.b, against.b)
         >= SEPARATION
-}
-
-/// Turns a palette colour into ink for one histogram channel: pulled towards
-/// its own primary, then opened up to full strength, which is what leaves
-/// [`balance`] room to bring it down to where the mix wants it.
-fn channel_ink(color: Color, channel: usize) -> Color {
-    let mut pure = [0u8; COLOUR];
-    pure[channel] = 255;
-    let tinted = mix(color, Color::rgb(pure[0], pure[1], pure[2]), PLANE_PURITY);
-    let peak = tinted.r.max(tinted.g).max(tinted.b);
-    if peak == 0 {
-        return Theme::FALLBACK.histogram_planes[channel];
-    }
-    scale(tinted, 255.0 / peak as f32)
-}
-
-/// Dims each plane until all three screened together come out neutral.
-///
-/// A plane is scaled whole, so its hue — the theme's — survives; only its
-/// strength moves. Each plane dominates its own channel of the mix and barely
-/// touches the other two, so one pass very nearly settles it and the rest
-/// clean up the crosstalk. Without this a palette of pastels screens to a
-/// tinted grey, and which way it is tinted depends on the theme, which is
-/// exactly the thing a channel histogram must not do.
-fn balance(mut planes: [Color; COLOUR]) -> [Color; COLOUR] {
-    for _ in 0..PLANE_PASSES {
-        for channel in 0..COLOUR {
-            let others: f32 = planes
-                .iter()
-                .enumerate()
-                .filter(|(plane, _)| *plane != channel)
-                .map(|(_, plane)| 1.0 - plane.to_linear()[channel])
-                .product();
-            let have = planes[channel].to_linear()[channel];
-            // What this plane's own channel has to be for the three of them
-            // to multiply out to the target.
-            let wanted = 1.0 - (1.0 - PLANE_MIX) / others;
-            if wanted <= 0.0 || have <= 0.0 || !wanted.is_finite() {
-                continue;
-            }
-            planes[channel] = scale(planes[channel], encode(wanted) / encode(have));
-        }
-    }
-    planes
 }
 
 /// Multiplies a colour's channels, leaving its alpha and — since all three
@@ -336,18 +286,6 @@ fn scale(color: Color, by: f32) -> Color {
         channel(color.b),
         color.a,
     )
-}
-
-/// Light back to the sRGB value that carries it: the inverse of what
-/// [`Color::to_linear`] does, for the one place that has to work backwards
-/// from a brightness to the colour that would produce it.
-fn encode(linear: f32) -> f32 {
-    let linear = linear.clamp(0.0, 1.0);
-    if linear <= 0.003_130_8 {
-        linear * 12.92
-    } else {
-        1.055 * linear.powf(1.0 / 2.4) - 0.055
-    }
 }
 
 #[cfg(test)]
@@ -364,55 +302,92 @@ mod tests {
         assert_eq!(theme.text_primary, Color::rgb(0xc0, 0xca, 0xf5));
         assert_eq!(theme.text_dim, Color::rgb(0xa9, 0xb1, 0xd6));
         assert_eq!(theme.accent, Color::rgb(0x7a, 0xa2, 0xf7));
-        // The floating panel is the theme's deepest surface, kept translucent.
-        assert_eq!(theme.panel_background, Color::rgba(0x0e, 0x0e, 0x14, 214));
-        assert_eq!(theme.panel_text, theme.text_dim);
         // The washes are the panel colours at the interface's own alphas.
         assert_eq!(theme.button_idle, theme.text_dim.with_alpha(20));
         assert_eq!(theme.minimap_edge, theme.text_dim.with_alpha(70));
     }
 
     /// A menu is a handful of buttons, and buttons are drawn in ink made to
-    /// read against the bars — so a menu's panel is the bars' surface, which
-    /// on a light theme means a light one. The floating histogram panel is
-    /// the one that stays dark either way, and for a reason a menu does not
-    /// share.
+    /// read against the bars — so a menu's panel is the bars' surface, and so
+    /// is a floating panel's. The menu is only the more opaque of the two:
+    /// the picture coming through it competes with the choices on it.
     #[test]
-    fn a_menu_sits_on_the_bars_surface_whichever_way_the_theme_runs() {
+    fn every_panel_over_the_image_sits_on_the_bars_own_surface() {
         for source in [TOKYO, SPARSE] {
             let theme = Theme::from_palette(&palette(source));
             assert_eq!(
                 theme.menu_background,
                 theme.bar_background.with_alpha(MENU_ALPHA)
             );
+            assert_eq!(
+                theme.panel_background,
+                theme.bar_background.with_alpha(PANEL_ALPHA)
+            );
             // Read through, but only just.
             assert!(theme.menu_background.a > theme.panel_background.a);
         }
-    }
 
-    /// The information panel carries words, not a screened plot, so it
-    /// follows the theme both ways round: the bars' own surface, kept mildly
-    /// transparent. The floating panel is the one that has to stay dark, for
-    /// a reason a column of text does not share.
-    #[test]
-    fn the_information_panel_takes_the_bars_surface_whichever_way_the_theme_runs() {
-        for source in [TOKYO, SPARSE] {
-            let theme = Theme::from_palette(&palette(source));
-            assert_eq!(
-                theme.info_background,
-                theme.bar_background.with_alpha(INFO_ALPHA)
-            );
-            // Between the two: more of the image comes through than through a
-            // menu, less than through the panel the plot is drawn on.
-            assert!(theme.info_background.a < theme.menu_background.a);
-            assert!(theme.info_background.a > Theme::FALLBACK.panel_background.a);
-        }
-
-        // On a light theme it is light, which is exactly what the panel the
-        // histogram is drawn on may not be.
+        // Including on a light theme, where they are light: nothing is
+        // screened onto either, so neither has a reason to be dark.
         let light = Theme::from_palette(&palette(SPARSE));
         assert_eq!(light.mode, Mode::Light);
-        assert!(light.info_background.r > light.panel_background.r);
+        assert!(light.panel_background.r > light.plot_background.r);
+    }
+
+    /// The file's name is the one thing in the window that says what is being
+    /// looked at, so it has to lead the facts it shares the bar with. A theme
+    /// that parts its bright text from its ordinary text is taken at its
+    /// word; one that defines them the same is not left saying nothing.
+    #[test]
+    fn the_file_names_ink_leads_the_text_beside_it_whatever_the_theme() {
+        // A palette that parts them keeps its own.
+        let theme = Theme::from_palette(&palette(TOKYO));
+        assert_eq!(theme.text_bright, Color::rgb(0xc0, 0xca, 0xf5));
+        assert_eq!(theme.text_bright, theme.text_primary);
+
+        // One that defines both the same is carried away from its own page
+        // rather than left reading exactly like the facts beside it.
+        const FLAT: &str = "\
+background = \"#121212\"
+foreground = \"#bebebe\"
+bright_foreground = \"#bebebe\"
+";
+        let flat = Theme::from_palette(&palette(FLAT));
+        assert_eq!(
+            flat.text_primary, flat.text_dim,
+            "the theme did collapse them"
+        );
+        assert!(
+            flat.text_bright.r > flat.text_dim.r,
+            "{:?}",
+            flat.text_bright
+        );
+
+        // On a light theme that is downwards: the ink that leads on a pale
+        // page is the darker one, not the lighter.
+        const FLAT_LIGHT: &str = "\
+background = \"#f5f0e8\"
+foreground = \"#4a4a4a\"
+bright_foreground = \"#4a4a4a\"
+";
+        let light = Theme::from_palette(&palette(FLAT_LIGHT));
+        assert_eq!(light.mode, Mode::Light);
+        assert!(
+            light.text_bright.r < light.text_dim.r,
+            "{:?}",
+            light.text_bright
+        );
+
+        // Whichever way round, and whatever the theme, it is tellable from
+        // the text it sits beside.
+        for source in [TOKYO, SEMANTIC, ANSI, SPARSE, FLAT, FLAT_LIGHT] {
+            let theme = Theme::from_palette(&palette(source));
+            assert!(
+                separated(theme.text_bright, theme.text_dim),
+                "{source}: {:?}",
+                theme.text_bright
+            );
+        }
     }
 
     #[test]
@@ -428,31 +403,13 @@ mod tests {
         );
     }
 
+    /// The plot's ground is the one surface with a job that outranks matching
+    /// the desktop: a screened plot has to have a dark ground under it or its
+    /// planes stop being three colours. So it is the same near-black in every
+    /// theme, and the wash the minimap lays over what it is not showing is
+    /// taken down to a dark whatever the theme offered.
     #[test]
-    fn a_light_theme_keeps_the_floating_panel_dark_and_the_ink_on_it_light() {
-        let theme = Theme::from_palette(&palette(SPARSE));
-        assert_eq!(theme.mode, Mode::Light);
-        assert_eq!(theme.bar_background, Color::rgb(0xf5, 0xf0, 0xe8));
-        // The theme's ink rather than its background, which is the wrong end
-        // of a light palette for a surface the histogram is screened onto,
-        // taken down to a value the plot reads on and no further.
-        assert_eq!(
-            theme.panel_background,
-            Color::rgba(0x24, 0x23, 0x20, LIGHT_PANEL_ALPHA)
-        );
-        assert_eq!(theme.panel_text, theme.bar_background);
-        assert!(separated(theme.border, theme.bar_background));
-    }
-
-    /// The panel is the one surface with a job that outranks matching the
-    /// desktop: a screened plot has to have a dark ground under it or its
-    /// planes stop being three colours. Whatever the theme offers is
-    /// therefore taken down to a value that leaves the plot readable — but
-    /// scaled whole, so it is still recognisably the theme's colour, and only
-    /// when it is above that value, so a theme that has picked its own dark
-    /// end keeps it.
-    #[test]
-    fn the_floating_panel_is_dark_enough_to_screen_a_plot_onto_whatever_the_theme() {
+    fn the_plot_is_drawn_on_a_dark_ground_whatever_the_theme() {
         // A light theme whose ink is barely darker than its page, and one
         // declaring itself dark over a background that is not.
         const PALE_INK: &str = "background = \"#fdfdfb\"\nforeground = \"#8a6f4e\"\n";
@@ -463,21 +420,17 @@ foreground = \"#101218\"
 darker_background = \"#b0b4bc\"
 ";
         for source in [SPARSE, PALE_INK, NAMED_DARK, TOKYO, SEMANTIC, ANSI] {
-            let panel = Theme::from_palette(&palette(source)).panel_background;
-            let value = panel.r.max(panel.g).max(panel.b) as f32 / 255.0;
-            assert!(value <= PANEL_VALUE_CEIL + 0.005, "{source}: {panel:?}");
+            let theme = Theme::from_palette(&palette(source));
+            assert_eq!(theme.plot_background, PLOT_BACKGROUND, "{source}");
+            let dim = theme.minimap_dim;
+            let value = dim.r.max(dim.g).max(dim.b) as f32 / 255.0;
+            assert!(value <= DEEP_VALUE_CEIL + 0.005, "{source}: {dim:?}");
         }
 
-        // Hue and saturation survive the trip down: the panel of a theme
-        // whose ink is a warm brown is a warm brown.
-        let panel = Theme::from_palette(&palette(PALE_INK)).panel_background;
-        assert!(panel.r > panel.g && panel.g > panel.b, "{panel:?}");
-
-        // And a theme that named its own deepest surface is left holding it.
-        assert_eq!(
-            Theme::from_palette(&palette(TOKYO)).panel_background,
-            Color::rgba(0x0e, 0x0e, 0x14, Theme::FALLBACK.panel_background.a)
-        );
+        // Hue and saturation survive the trip down: the wash of a theme whose
+        // ink is a warm brown is a warm brown.
+        let dim = Theme::from_palette(&palette(PALE_INK)).minimap_dim;
+        assert!(dim.r > dim.g && dim.g > dim.b, "{dim:?}");
     }
 
     #[test]
@@ -503,55 +456,33 @@ darker_background = \"#b0b4bc\"
         out
     }
 
-    /// The plot's whole point is that overlaps read as the mix. Three pastels
-    /// screened together climb to white and lose it, so a themed plane is
-    /// pulled towards its own primary first; this is what says by how much.
+    /// The planes are the primaries and the same in every theme, which is
+    /// what makes the plot read the same everywhere: each plane owns one
+    /// channel outright, so two overlapping give a secondary and all three
+    /// give white.
     #[test]
-    fn the_colour_planes_screen_to_a_neutral_rather_than_to_white() {
-        for (name, planes) in [
-            ("fallback", Theme::FALLBACK.histogram_planes),
-            (
-                "tokyo",
-                Theme::from_palette(&palette(TOKYO)).histogram_planes,
-            ),
-            (
-                "semantic",
-                Theme::from_palette(&palette(SEMANTIC)).histogram_planes,
-            ),
-            ("ansi", Theme::from_palette(&palette(ANSI)).histogram_planes),
-        ] {
-            let mix = screened(planes);
-            let high = mix.iter().copied().fold(f32::MIN, f32::max);
-            let low = mix.iter().copied().fold(f32::MAX, f32::min);
-            assert!(high < 0.6, "{name} screens to {mix:?}, which is blown out");
-            assert!(
-                high - low < 0.03,
-                "{name} screens to {mix:?}, which is tinted"
-            );
+    fn the_colour_planes_are_the_primaries_in_every_theme() {
+        for source in [TOKYO, SEMANTIC, ANSI, SPARSE] {
+            let planes = Theme::from_palette(&palette(source)).histogram_planes;
+            assert_eq!(planes, HISTOGRAM_PLANES, "{source}");
         }
-    }
-
-    /// Each plane still has to say which channel it is.
-    #[test]
-    fn a_themed_plane_stays_recognisably_its_own_channel() {
-        for (name, text) in [("tokyo", TOKYO), ("semantic", SEMANTIC), ("ansi", ANSI)] {
-            let planes = Theme::from_palette(&palette(text)).histogram_planes;
-            for (channel, plane) in planes.iter().enumerate() {
-                let levels = [plane.r, plane.g, plane.b];
-                let dominant = levels
-                    .iter()
-                    .enumerate()
-                    .max_by_key(|(_, v)| **v)
-                    .unwrap()
-                    .0;
-                assert_eq!(dominant, channel, "{name} plane {channel}: {plane:?}");
+        assert_eq!(screened(HISTOGRAM_PLANES), [1.0, 1.0, 1.0]);
+        for (channel, plane) in HISTOGRAM_PLANES.iter().enumerate() {
+            let levels = [plane.r, plane.g, plane.b];
+            for (other, level) in levels.iter().enumerate() {
+                assert_eq!(*level, if other == channel { 255 } else { 0 }, "{plane:?}");
             }
         }
     }
 
+    /// And the plane under them stands for a pixel's value, not for one of
+    /// its channels, so it carries no hue in any theme.
     #[test]
-    fn a_theme_that_names_no_colours_keeps_the_planes_it_was_designed_with() {
-        let theme = Theme::from_palette(&palette(SPARSE));
-        assert_eq!(theme.histogram_planes, Theme::FALLBACK.histogram_planes);
+    fn the_luminance_plane_is_neutral_in_every_theme() {
+        for source in [TOKYO, SEMANTIC, ANSI, SPARSE] {
+            let luma = Theme::from_palette(&palette(source)).histogram_luma;
+            assert_eq!(luma, HISTOGRAM_LUMA, "{source}");
+            assert!(luma.r == luma.g && luma.g == luma.b, "{luma:?}");
+        }
     }
 }

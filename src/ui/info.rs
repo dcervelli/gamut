@@ -138,8 +138,9 @@ impl Column {
     }
 }
 
-/// Where the panel goes: down the right of `content`, under the button that
-/// opens it, stopping above the histogram when that is showing as well.
+/// Where the panel goes: down the right of `content`, starting under the
+/// histogram when that is showing as well and at the top of the content when
+/// it is not — the order the two toggles are stacked in.
 ///
 /// `None` when the window has no room for a column worth reading, which is
 /// also what keeps the panel off screen rather than shrunk to nothing.
@@ -154,8 +155,8 @@ pub fn panel(content: Rect, show_histogram: bool) -> Option<Rect> {
     if width + 2.0 * PADDING > content.width {
         return None;
     }
-    // The histogram keeps the bottom-right corner it has always had; the
-    // column stops above it rather than being drawn over it.
+    // The histogram takes the top of the column's strip; the panel starts
+    // below it rather than being drawn over it.
     let taken = if show_histogram {
         HISTOGRAM_SIZE[1] + PADDING
     } else {
@@ -167,7 +168,7 @@ pub fn panel(content: Rect, show_histogram: bool) -> Option<Rect> {
     }
     Some(Rect::new(
         (content.right() - width - PADDING).round(),
-        (content.y + PADDING).round(),
+        (content.y + PADDING + taken).round(),
         width,
         height,
     ))
@@ -197,7 +198,7 @@ pub(super) fn draw(
     let Some(panel) = panel(content, show_histogram) else {
         return;
     };
-    frame.rounded_rect(panel, PANEL_RADIUS, theme.info_background);
+    frame.rounded_rect(panel, PANEL_RADIUS, theme.panel_background);
 
     let view = panel.inset(PANEL_INSET, PANEL_INSET);
     let column = column(text, current, view.width);
@@ -548,19 +549,18 @@ mod tests {
     fn the_panel_gives_way_to_the_histogram_and_to_a_small_window() {
         let with = panel(CONTENT, true).expect("room");
         let without = panel(CONTENT, false).expect("room");
-        assert_eq!(with.y, without.y);
         // The same width as the histogram, and the same width whether or not
         // the column it holds is long enough to need a scrollbar.
         assert_eq!(with.width, HISTOGRAM_SIZE[0]);
         assert_eq!(with.width, without.width);
         assert_eq!(with.right(), without.right());
-        assert!(
-            with.bottom() + HISTOGRAM_SIZE[1] <= without.bottom(),
-            "{with:?} runs into the histogram"
-        );
-        // Top right of the content area.
-        assert_eq!(with.right(), CONTENT.right() - PADDING);
-        assert_eq!(with.y, CONTENT.y + PADDING);
+        // The histogram has the top of the strip; the column starts below it
+        // and the two end together.
+        assert_eq!(with.y, without.y + HISTOGRAM_SIZE[1] + PADDING);
+        assert_eq!(with.bottom(), without.bottom());
+        // Top right of the content area, when the histogram is not there.
+        assert_eq!(without.right(), CONTENT.right() - PADDING);
+        assert_eq!(without.y, CONTENT.y + PADDING);
 
         // It shows wherever it fits with its margins — a window that holds
         // the panel and not much else still holds the panel — and nowhere
