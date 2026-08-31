@@ -178,6 +178,10 @@ impl TextMeasure for Monospace {
         [text.chars().count() as f32 * size, size]
     }
 
+    fn measure_mono(&mut self, text: &str, size: f32) -> [f32; 2] {
+        self.measure_text(text, size)
+    }
+
     fn measure_wrapped(&mut self, text: &str, size: f32, width: f32) -> [f32; 2] {
         // Broken between words, as glyphon breaks it, and at the same line
         // height the text layer sets its metrics to.

@@ -159,11 +159,21 @@ pub enum Weight {
     Bold,
 }
 
+/// Which face a run is set in. The interface is sans throughout but for the
+/// numbers that change under the pointer: a run whose glyphs must not shift
+/// sideways as its digits change asks for [`Face::Mono`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Face {
+    Sans,
+    Mono,
+}
+
 pub(crate) struct TextItem {
     text: String,
     at: [f32; 2],
     size: f32,
     color: Color,
+    face: Face,
     weight: Weight,
     /// The width the text is laid out into: it breaks at this when `wrap` is
     /// set, and is cut off at it when not.
@@ -285,6 +295,7 @@ impl UiFrame {
             at,
             size,
             color,
+            face: Face::Sans,
             weight: Weight::Regular,
             max_width: None,
             wrap: false,
@@ -302,7 +313,15 @@ impl UiFrame {
         max_width: f32,
         text: impl Into<String>,
     ) {
-        self.clipped(at, size, color, Weight::Regular, max_width, text);
+        self.clipped(
+            at,
+            size,
+            color,
+            Face::Sans,
+            Weight::Regular,
+            max_width,
+            text,
+        );
     }
 
     /// As [`UiFrame::text_clipped`], set bold.
@@ -314,14 +333,36 @@ impl UiFrame {
         max_width: f32,
         text: impl Into<String>,
     ) {
-        self.clipped(at, size, color, Weight::Bold, max_width, text);
+        self.clipped(at, size, color, Face::Sans, Weight::Bold, max_width, text);
     }
 
+    /// As [`UiFrame::text_clipped`], set in the monospace face.
+    pub fn text_clipped_mono(
+        &mut self,
+        at: [f32; 2],
+        size: f32,
+        color: Color,
+        max_width: f32,
+        text: impl Into<String>,
+    ) {
+        self.clipped(
+            at,
+            size,
+            color,
+            Face::Mono,
+            Weight::Regular,
+            max_width,
+            text,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn clipped(
         &mut self,
         at: [f32; 2],
         size: f32,
         color: Color,
+        face: Face,
         weight: Weight,
         max_width: f32,
         text: impl Into<String>,
@@ -331,6 +372,7 @@ impl UiFrame {
             at,
             size,
             color,
+            face,
             weight,
             max_width: Some(max_width),
             wrap: false,
@@ -359,6 +401,7 @@ impl UiFrame {
             at,
             size,
             color,
+            face: Face::Sans,
             weight: Weight::Regular,
             max_width: Some(width),
             wrap: true,
@@ -395,14 +438,19 @@ impl UiRenderer {
     /// Width and height of `text` in logical pixels, for laying out anything
     /// that has to sit next to it.
     pub fn measure(&mut self, text: &str, size: f32) -> [f32; 2] {
-        self.text.measure(text, size, None)
+        self.text.measure(text, size, Face::Sans, None)
+    }
+
+    /// As [`UiRenderer::measure`], for a run set in the monospace face.
+    pub fn measure_mono(&mut self, text: &str, size: f32) -> [f32; 2] {
+        self.text.measure(text, size, Face::Mono, None)
     }
 
     /// As [`UiRenderer::measure`], but for text broken across lines at
     /// `width`: how tall a paragraph will come out, for anything stacking one
     /// under another.
     pub fn measure_wrapped(&mut self, text: &str, size: f32, width: f32) -> [f32; 2] {
-        self.text.measure(text, size, Some(width))
+        self.text.measure(text, size, Face::Sans, Some(width))
     }
 
     /// `physical` is the target size in device pixels; `scale` takes the
