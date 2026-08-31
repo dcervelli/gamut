@@ -83,9 +83,10 @@ one. Metadata is read from JPEG, TIFF, PNG, WebP and HEIF files, and from a TIFF
 however large it is and wherever in the file it keeps it. Where it has more to say than
 fits, the wheel scrolls it — point at the panel rather than at the image, and
 the wheel moves the words instead of the zoom. Dragging the panel scrolls it
-as well, the words following the pointer the way the image does under a pan.
-The pointer belongs to the panel while it is over it, so neither gesture
-reaches the picture behind.
+as well, the drag holding the scrollbar's handle rather than the words: drag
+down to move down the column, and a short drag carries a long column a long
+way — as far as putting the handle there would. The pointer belongs to the
+panel while it is over it, so neither gesture reaches the picture behind.
 
 The grid divides the image into squares of a round number of image pixels —
 1, 2, 5, 10, 20, 50 and so on — chosen so that the lines land about fifty
@@ -103,7 +104,7 @@ counted off in the image's own pixels.
 | Click a panel button | Show or hide the histogram, the file information, or the minimap |
 | Click the grid button | Show or hide the grid |
 | Wheel over the file information | Scroll it |
-| Drag the file information | Scroll it, the words following the pointer |
+| Drag the file information | Scroll it, as if dragging the scrollbar's handle |
 | Click the zoom percentage | Open the zoom menu |
 
 The percentage in the top bar, just inside the grid button, is itself a

@@ -215,6 +215,18 @@ impl App {
         ui::info::max_scroll(renderer, current, panel)
     }
 
+    /// How far the column in `panel` moves for each logical pixel a drag of
+    /// its scrollbar travels, measured with the fonts the frame will draw it
+    /// with. One where there is nothing on screen to describe.
+    pub(super) fn info_scroll_per_drag(&mut self, panel: Rect) -> f32 {
+        // Split borrow, as in `info_overflow`.
+        let (Some(renderer), Some(current)) = (self.renderer.as_mut(), self.current.as_ref())
+        else {
+            return 1.0;
+        };
+        ui::info::scroll_per_drag(renderer, current, panel)
+    }
+
     /// Moves the info panel's column by `by` logical pixels, clamped to what
     /// there is left to scroll. Returns whether it moved, and so whether the
     /// frame is now out of date.

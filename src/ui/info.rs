@@ -185,6 +185,34 @@ pub fn max_scroll(text: &mut dyn TextMeasure, current: &Current, panel: Rect) ->
     (column(text, current, view.width).height - view.height).max(0.0)
 }
 
+/// How far the column moves for each logical pixel a drag travels, the drag
+/// being of the scrollbar's thumb rather than of the words: a thumb that
+/// crosses its track in a short distance carries a long column past in that
+/// same distance, so the words run faster than the pointer.
+///
+/// One where there is nothing to scroll and so no thumb to measure: the
+/// scroll is clamped against the overflow in any case, so a column that all
+/// fits stays where it is whatever the drag is multiplied by.
+pub fn scroll_per_drag(text: &mut dyn TextMeasure, current: &Current, panel: Rect) -> f32 {
+    let view = panel.inset(PANEL_INSET, PANEL_INSET);
+    let column = column(text, current, view.width);
+    let overflow = (column.height - view.height).max(0.0);
+    let travel = thumb(view.height, column.height).1;
+    if overflow <= 0.0 || travel <= 0.0 {
+        return 1.0;
+    }
+    overflow / travel
+}
+
+/// The scrollbar's thumb: how tall it is, and how far down the track it
+/// travels between the top of the column and the end of it. Long columns
+/// stop shortening it at [`THUMB_MIN`], which is why the two are not simply
+/// proportional to what the panel shows.
+fn thumb(view_height: f32, column_height: f32) -> (f32, f32) {
+    let height = (view_height * (view_height / column_height)).max(THUMB_MIN);
+    (height, (view_height - height).max(0.0))
+}
+
 /// Draws the panel, with the column scrolled by `scroll` logical pixels.
 pub(super) fn draw(
     frame: &mut UiFrame,
@@ -236,8 +264,7 @@ pub(super) fn draw(
             view.height,
         );
         frame.rounded_rect(track, SCROLLBAR_WIDTH / 2.0, theme.border);
-        let height = (view.height * (view.height / column.height)).max(THUMB_MIN);
-        let travel = (view.height - height).max(0.0);
+        let (height, travel) = thumb(view.height, column.height);
         frame.rounded_rect(
             Rect::new(
                 track.x,
@@ -541,6 +568,34 @@ mod tests {
         // Nowhere to scroll to when the panel is taller than its column.
         let roomy = Rect::new(0.0, 0.0, PANEL_WIDTH, height + 2.0 * PANEL_INSET);
         assert_eq!(max_scroll(&mut Monospace, &current, roomy), 0.0);
+    }
+
+    /// What a drag of the scrollbar is multiplied by: dragging the thumb the
+    /// length of its track scrolls the column from its first line to its
+    /// last, however much longer than the track the column is.
+    #[test]
+    fn dragging_the_thumb_across_its_track_scrolls_the_whole_column() {
+        let current = current();
+        let panel = panel(CONTENT, false).expect("room in a 900x640 content area");
+        let view = panel.inset(PANEL_INSET, PANEL_INSET);
+        let height = column(&mut Monospace, &current, view.width).height;
+
+        let per_pixel = scroll_per_drag(&mut Monospace, &current, panel);
+        let travel = thumb(view.height, height).1;
+        assert!(travel > 0.0, "a thumb with somewhere to go");
+        assert!(
+            (per_pixel * travel - max_scroll(&mut Monospace, &current, panel)).abs() < 0.01,
+            "{per_pixel} per pixel over {travel} does not cross the column"
+        );
+        assert!(
+            per_pixel > 1.0,
+            "a column longer than its panel outruns the pointer"
+        );
+
+        // Nothing to scroll: the drag is left as it comes, and the clamp on
+        // the scroll is what keeps the column still.
+        let roomy = Rect::new(0.0, 0.0, PANEL_WIDTH, height + 2.0 * PANEL_INSET);
+        assert_eq!(scroll_per_drag(&mut Monospace, &current, roomy), 1.0);
     }
 
     /// The panel keeps out of the way of the two widgets it shares the

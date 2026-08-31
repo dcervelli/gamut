@@ -381,12 +381,13 @@ showing and at the top of the content when it is not, and the two share one
 ground — the bars' own surface, mildly transparent, carrying the bars' own
 ink. The
 pointer belongs to it while it is over it: the wheel scrolls the column
-instead of zooming, and a press starts a drag of the words rather than of the
-picture — one thing or the other for as long as the button is held, so a drag
-that runs off the panel goes on scrolling rather than beginning to pan
-half-way through. A column with nothing left to scroll to still takes the
-gesture rather than handing it back, and makes no closed hand for a drag that
-would move nothing.
+instead of zooming, and a press starts a drag of the scrollbar's thumb
+rather than of the picture, moving the column by what putting the thumb there
+would rather than by what the pointer travelled — one thing or the other for
+as long as the button is held, so a drag that runs off the panel goes on
+scrolling rather than beginning to pan half-way through. A column with nothing
+left to scroll to still takes the gesture rather than handing it back, and
+makes no closed hand for a drag that would move nothing.
 
 What it says comes from two places. The file's own facts — its name, its
 path, when it was written and how large it is — are one `stat` taken as the

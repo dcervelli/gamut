@@ -550,13 +550,17 @@ impl App {
                 // First motion of this drag: nothing to measure from yet.
                 return false;
             };
-            // The words follow the pointer, as the image does under a pan, so
-            // dragging up runs down the column. Motion arrives in physical
-            // pixels and the column is laid out in logical ones.
-            let by = (from[1] - position[1]) / self.scale_factor();
             let Some(panel) = self.info_panel() else {
                 return false;
             };
+            // The drag holds the scrollbar's thumb rather than the words:
+            // dragging down runs down the column, as pulling the thumb down
+            // would, and by as much as pulling it that far would move — which
+            // for a long column is a good deal further than the pointer went.
+            // Motion arrives in physical pixels and the column is laid out in
+            // logical ones.
+            let by = (position[1] - from[1]) / self.scale_factor()
+                * self.info_scroll_per_drag(panel);
             // The readout in the bar is owed a redraw too, for a drag that
             // has carried the pointer off the panel and onto the image.
             return self.scroll_info_by(panel, by) || moved_pixel;
