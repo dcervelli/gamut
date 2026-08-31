@@ -186,13 +186,40 @@ impl App {
         if !self.panels.show_info || self.current.is_none() {
             return None;
         }
+        ui::info::panel(self.content(), self.panels.show_histogram)
+    }
+
+    /// What the panels leave free for the image and for whatever floats over
+    /// it, in the logical pixels those are laid out in. The frame builder
+    /// works this out for itself; it is worked out here as well for the hit
+    /// tests, which have to answer between frames.
+    fn content(&self) -> Rect {
         let scale = self.scale_factor();
         let physical = self.window_size();
-        let content = content_area(
+        content_area(
             [physical[0] / scale, physical[1] / scale],
             self.panels.show_ui,
-        );
-        ui::info::panel(content, self.panels.show_histogram)
+        )
+    }
+
+    /// Which bin of the histogram the panel is marking, or `None` when it is
+    /// marking none.
+    ///
+    /// What the panel draws its rule and its readout from, and so what a
+    /// motion compares before and after to decide whether the frame on screen
+    /// has gone out of date. It answers for the pointer over the plot and for
+    /// the pixel under it alike, so either one moving on is caught here.
+    pub(super) fn histogram_mark(&self) -> Option<usize> {
+        if !self.panels.show_histogram {
+            return None;
+        }
+        let current = self.current.as_ref()?;
+        ui::histogram::marked(
+            current,
+            self.content(),
+            self.logical_cursor(),
+            self.pointer_pixel(),
+        )
     }
 
     /// Whether the pointer is over that panel, and so whether what it does
@@ -519,6 +546,7 @@ impl App {
         let placement = self.view.placement(self.image_size(), viewport);
 
         let pointer = self.pointer_pixel();
+        let cursor = self.logical_cursor();
         let thumbnail = self.minimap_placement(logical, scale);
         let minimap = self.minimap_on_screen();
         let reading = self
@@ -543,6 +571,7 @@ impl App {
             scale,
             viewport,
             pointer,
+            cursor,
             minimap_on_screen: minimap,
             reading,
             index: self.files.index(),
@@ -744,7 +773,7 @@ impl ApplicationHandler<Decoded> for App {
                 Effect::redraw_if(self.handle_motion([position.x as f32, position.y as f32]))
             }
             WindowEvent::CursorLeft { .. } => {
-                let was_over = self.pointer_pixel().is_some();
+                let was_over = self.pointer_pixel().is_some() || self.histogram_mark().is_some();
                 self.pointer.cursor = None;
                 Effect::redraw_if(self.update_hover() || was_over)
             }

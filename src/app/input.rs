@@ -543,8 +543,16 @@ impl App {
     /// the pointer has since left.
     pub(super) fn handle_motion(&mut self, position: [f32; 2]) -> bool {
         let was_over = self.pointer_pixel();
+        let was_marked = self.histogram_mark();
         self.pointer.cursor = Some(position);
-        let moved_pixel = self.panels.show_ui && self.pointer_pixel() != was_over;
+        // Either readout having moved on is a frame out of date: the pixel in
+        // the bar, and the bin the histogram is marking — that one on a panel
+        // floating over the image rather than in a bar, so it counts whether
+        // or not the bars are showing. It follows the pixel as well as the
+        // pointer, and a pointer that has crossed into a new bin without
+        // leaving its pixel still owes a frame.
+        let moved_pixel = (self.panels.show_ui && self.pointer_pixel() != was_over)
+            || self.histogram_mark() != was_marked;
         if self.pointer.scrolling {
             let Some(from) = self.pointer.drag_from.replace(position) else {
                 // First motion of this drag: nothing to measure from yet.
@@ -561,8 +569,8 @@ impl App {
             // logical ones.
             let by = (position[1] - from[1]) / self.scale_factor()
                 * self.info_scroll_per_drag(panel);
-            // The readout in the bar is owed a redraw too, for a drag that
-            // has carried the pointer off the panel and onto the image.
+            // The readouts are owed a redraw too, for a drag that has
+            // carried the pointer off the panel and onto the image.
             return self.scroll_info_by(panel, by) || moved_pixel;
         }
         if !self.pointer.dragging {

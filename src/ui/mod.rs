@@ -13,7 +13,7 @@ pub mod minimap;
 
 mod buttons;
 mod grid;
-mod histogram;
+pub mod histogram;
 mod pixel;
 mod status;
 
@@ -151,6 +151,11 @@ pub struct FrameInput {
     pub viewport: Viewport,
     /// The image pixel under the pointer, when it is over one.
     pub pointer: Option<[u32; 2]>,
+    /// And where the pointer itself is, in the logical pixels the interface
+    /// is laid out in, for the widgets that read it against their own
+    /// geometry rather than against the image. `None` once it has left the
+    /// window, which is what takes those readouts back off the screen.
+    pub cursor: Option<[f32; 2]>,
     /// Whether the minimap is on screen, which takes the toggle and a view
     /// with part of the image off it.
     pub minimap_on_screen: bool,
@@ -245,7 +250,15 @@ pub fn build_frame(
         grid::draw(&mut frame, current, view, input, content, grid_step, theme);
     }
     if panels.show_histogram {
-        histogram::draw(&mut frame, current, content, theme);
+        histogram::draw(
+            &mut frame,
+            text,
+            current,
+            content,
+            input.cursor,
+            input.pointer,
+            theme,
+        );
     }
     if input.minimap_on_screen {
         minimap::draw(&mut frame, current, view, input, content, theme);
