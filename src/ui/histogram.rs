@@ -22,10 +22,13 @@ const HISTOGRAM_LUMA_UNDER: u8 = 110;
 
 /// The response curve's stroke, in logical pixels.
 const CURVE_WIDTH: f32 = 1.5;
-/// What the window's markers drop to beside that curve. They place its two
-/// ends, and are drawn in the same ink for that reason, but the curve is the
-/// thing being read.
-const MARKER_ALPHA: u8 = 110;
+/// The window's ticks: how far one stands, and how wide. Tall enough to be
+/// found along the axis, short enough not to be read as a second plot.
+const TICK_HEIGHT: f32 = 5.0;
+const TICK_WIDTH: f32 = 1.5;
+/// How far a tick rises above the baseline, the rest of it standing in the
+/// margin below. Enough to join the axis rather than float under it.
+const TICK_RISE: f32 = 1.0;
 
 /// Draws the histogram in the top-right of `content`, the area the panels
 /// leave free — above the information panel, the order the two toggles that
@@ -129,33 +132,42 @@ pub(super) fn draw(frame: &mut UiFrame, current: &Current, content: Rect, theme:
 
     // What the display is doing to the values underneath, drawn over them.
     //
-    // The markers place the two ends of the window: the values that come out
-    // black and white, exposure included, rather than the window's own
-    // bounds — exposure lives in the gain, so it moves white without moving
-    // `high`, and a marker taken from the bounds would sit where nothing is
-    // happening. The curve between them is the rest of the answer, and the
-    // only part that can show a tone curve at all: a shoulder is a shape, not
-    // a threshold, and there is no line that means "reinhard".
+    // The curve is the whole of it, and the only part that can show a tone
+    // map at all: a shoulder is a shape, not a threshold, and there is no
+    // line that means "reinhard". The ticks under it place the two ends of
+    // the window — the values that come out black and white, exposure
+    // included, rather than the window's own bounds, exposure living in the
+    // gain rather than in them.
+    //
+    // Ticks rather than the full-height rules they used to be. The curve
+    // draws both of those points already, leaving the floor at one and, under
+    // a clip, turning its corner at the other; what the ticks add is where
+    // exactly, since a curve meeting a floor tangentially cannot be read
+    // along the axis by eye, and where the window's top is under a tone map,
+    // which nothing on the curve marks because the curve never reaches it.
+    // That is a job for a tick against the axis, not for a rule standing
+    // through the plot in the ink the curve is drawn in.
     let span = axis_max - axis_min;
     if span > 0.0 {
         let (black, white) = current.display.displayed_bounds();
         for value in [black, white] {
-            let encoded = transfer.to_encoded(value);
-            // `clamp` passes a NaN straight through, so a non-finite window
-            // would put a NaN rectangle into the vertex buffer. Skip it: the
-            // marker for a degenerate window is simply not drawn.
-            let position = ((encoded - axis_min) / span).clamp(0.0, 1.0);
-            if !position.is_finite() {
+            let position = (transfer.to_encoded(value) - axis_min) / span;
+            // Dropped rather than pinned to the edge when the window ends
+            // beyond what is plotted, which a few stops of exposure is enough
+            // to do: a tick held at the edge reads as a boundary that is
+            // there, and the curve running on past it says otherwise. A NaN
+            // fails this test as well, so a degenerate window draws nothing.
+            if !(0.0..=1.0).contains(&position) {
                 continue;
             }
             frame.rect(
                 Rect::new(
-                    bars.x + position * bars.width - 0.5,
-                    bars.y,
-                    1.5,
-                    bars.height,
+                    bars.x + position * bars.width - TICK_WIDTH / 2.0,
+                    bars.bottom() - TICK_RISE,
+                    TICK_WIDTH,
+                    TICK_HEIGHT,
                 ),
-                theme.accent.with_alpha(MARKER_ALPHA),
+                theme.accent,
             );
         }
 
