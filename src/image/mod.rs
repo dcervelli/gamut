@@ -12,6 +12,7 @@ pub mod color;
 pub mod decode;
 pub mod directory;
 pub mod display;
+pub mod encode;
 pub mod exif;
 pub mod geo;
 pub mod stats;

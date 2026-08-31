@@ -524,6 +524,7 @@ anything having to notice that it should.
 | `src/theme/` | `palette.rs` reads the desktop's palette; `mod.rs` derives the colours drawn from it |
 | `src/image/` | The data model: `Samples`, `color/` (transfer functions, primaries, ICC and CICP), stats, display state |
 | `src/image/decode/` | The decoder trait and its registry, one file per format |
+| `src/image/encode.rs` | The display pipeline run over every pixel, out to an 8-bit sRGB PNG |
 | `src/render/` | Upload planning, the three layers, output selection; `shader_codes.rs` is every integer the shaders switch on |
 | `src/render/ui_layer/popup.rs` | Where a popup menu's panel and cells go, and what a press lands on |
 | `src/render/reduce.rs` | The coarse chain a minifying draw reads from |

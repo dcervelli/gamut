@@ -37,6 +37,9 @@ pub const TEXT: &str = "text/plain";
 /// `wl-copy`, so a paste into a text field still yields the URI.
 pub const URI_LIST: &str = "text/uri-list";
 
+/// The picture itself. Nothing text-like is offered alongside this one.
+pub const PNG: &str = "image/png";
+
 /// The `file:` URI naming `path`, which must be absolute.
 ///
 /// Every byte outside RFC 3986's unreserved set is percent-encoded, the
@@ -64,15 +67,16 @@ pub fn uri_list(path: &Path) -> String {
     format!("{}\r\n", file_uri(path))
 }
 
-/// Puts `text` on the clipboard under `mime_type`, and returns the process
+/// Puts `content` on the clipboard under `mime_type`, and returns the process
 /// that will keep it there. The caller holds on to the handle only to reap it
 /// once it exits; dropping it leaves the process running, which is the point.
-pub fn copy(text: &str, mime_type: &str) -> Result<Child> {
+pub fn copy(content: &[u8], mime_type: &str) -> Result<Child> {
     let program = std::env::current_exe().context("finding this program's own path")?;
-    // Down the pipe rather than in an argument: a path can be longer than the
-    // argument list allows, and need not be valid UTF-8 to be spelled out on
-    // a command line. Standard error is left as it is, so that a failure on
-    // the far side is reported where every other message goes.
+    // Down the pipe rather than in an argument: what is copied runs from a
+    // path to a whole PNG, is longer than the argument list allows well
+    // before that, and need not be text at all. Standard error is left as it
+    // is, so that a failure on the far side is reported where every other
+    // message goes.
     let mut child = Command::new(program)
         .args([SERVE_ARGUMENT, mime_type])
         .stdin(Stdio::piped())
@@ -81,9 +85,9 @@ pub fn copy(text: &str, mime_type: &str) -> Result<Child> {
         .context("starting the process that holds the clipboard")?;
     let mut stdin = child.stdin.take().expect("stdin was asked for as a pipe");
     let written = stdin
-        .write_all(text.as_bytes())
+        .write_all(content)
         .and_then(|()| stdin.flush())
-        .context("handing the text to the clipboard process");
+        .context("handing the content to the clipboard process");
     // Closed here rather than at the end of the call: the far side reads to
     // end of file before it offers anything, so it would otherwise wait for
     // a pipe that is still open on this side.
@@ -92,19 +96,20 @@ pub fn copy(text: &str, mime_type: &str) -> Result<Child> {
     Ok(child)
 }
 
-/// The [`SERVE_ARGUMENT`] half: takes the text on standard input, offers it
-/// as the selection under `mime_type`, and stays to answer pastes. Returns
+/// The [`SERVE_ARGUMENT`] half: takes the content on standard input, offers
+/// it as the selection under `mime_type`, and stays to answer pastes. Returns
 /// when the selection has been taken over by somebody else.
 pub fn serve(mime_type: Option<OsString>) -> Result<()> {
     let mime_type = mime_type
         .as_deref()
         .and_then(OsStr::to_str)
-        .context("`--serve-clipboard` needs the MIME type to offer the text under")?
+        .context("`--serve-clipboard` needs the MIME type to offer the content under")?
         .to_owned();
     let mut options = Options::new();
     // In the foreground because there is nothing else for this process to do,
-    // and because `prepare_copy` requires it. A path is copied as it is: a
-    // trailing newline is part of a filename where a file has one.
+    // and because `prepare_copy` requires it. Nothing is trimmed: a trailing
+    // newline is part of a filename where a file has one, and a PNG is not
+    // text to be tidied at all.
     options.foreground(true).trim_newline(false);
     options
         .prepare_copy(Source::StdIn, MimeType::Specific(mime_type))

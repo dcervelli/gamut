@@ -5,6 +5,7 @@
 //! [`Action`], and [`App::perform`] is the one place an action happens.
 
 use std::path::PathBuf;
+use std::time::Instant;
 
 use winit::event::{ElementState, MouseButton, MouseScrollDelta};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
@@ -13,6 +14,8 @@ use winit::window::{Cursor, CursorIcon};
 use super::App;
 use crate::clipboard;
 use crate::image::display::Startup;
+use crate::image::encode;
+use crate::timing;
 use crate::ui::{Current, Menu, Widget};
 
 /// Window pixels moved per arrow-key press.
@@ -59,6 +62,8 @@ pub enum Action {
     /// Put the file on screen on the clipboard as a `file:` URI, under the
     /// MIME type a program that wants the file itself asks for.
     CopyUri,
+    /// Put the picture on screen on the clipboard as a PNG.
+    CopyImage,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -231,6 +236,13 @@ pub const KEYS: &[Binding] = &[
         shown: "Ctrl+Shift+C",
         help: "Copy the file on screen as a URI another program can open",
         keys: &[(Char("C"), CopyUri)],
+    },
+    Binding {
+        section: Section::View,
+        mods: CTRL,
+        shown: "Ctrl+C",
+        help: "Copy the picture itself, as the display settings show it",
+        keys: &[(Char("c"), CopyImage)],
     },
     Binding {
         section: Section::Display,
@@ -491,12 +503,16 @@ impl App {
             // could not be made.
             CopyPath => {
                 let path = self.shown_path();
-                self.copy(&path.to_string_lossy(), clipboard::TEXT);
+                self.copy(path.to_string_lossy().as_bytes(), clipboard::TEXT);
                 return Effect::Nothing;
             }
             CopyUri => {
                 let list = clipboard::uri_list(&self.shown_path());
-                self.copy(&list, clipboard::URI_LIST);
+                self.copy(list.as_bytes(), clipboard::URI_LIST);
+                return Effect::Nothing;
+            }
+            CopyImage => {
+                self.copy_image();
                 return Effect::Nothing;
             }
             ResetDisplay => {
@@ -532,17 +548,51 @@ impl App {
         std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf())
     }
 
-    /// Puts `text` on the clipboard under `mime_type`.
+    /// Puts the picture on screen on the clipboard as a PNG.
+    ///
+    /// The image at its own size with the display settings baked in, not a
+    /// picture of the window: the zoom, the pan and the panels are how this
+    /// is being looked at, and none of them belong to what is being copied.
+    ///
+    /// Both halves are done here on the main thread, so a large image is felt
+    /// as the window going quiet under the key. `--timing` says how long each
+    /// took, which is the number to look at before moving them off it.
+    fn copy_image(&mut self) {
+        let Some(current) = &self.current else {
+            return;
+        };
+        let (width, height) = (current.image.width, current.image.height);
+
+        let walked = Instant::now();
+        let raster = encode::displayed(&current.image, &current.display);
+        timing::mapped_image(width, height, walked.elapsed());
+
+        let encoded = Instant::now();
+        let png = match encode::png(&raster) {
+            Ok(png) => png,
+            Err(error) => {
+                eprintln!(
+                    "image-view: {}",
+                    crate::escape_controls(&format!("{error:#}"))
+                );
+                return;
+            }
+        };
+        timing::encoded_png(width, height, png.len(), encoded.elapsed());
+        self.copy(&png, clipboard::PNG);
+    }
+
+    /// Puts `content` on the clipboard under `mime_type`.
     ///
     /// The copy is served by a process of its own, so that it survives this
     /// window closing. Any earlier one that has since exited — the compositor
     /// cancels the last copy as soon as this one takes the selection — is
     /// reaped here, so that a session of copying does not leave a zombie
     /// behind each time.
-    fn copy(&mut self, text: &str, mime_type: &str) {
+    fn copy(&mut self, content: &[u8], mime_type: &str) {
         self.clipboard
             .retain_mut(|held| !matches!(held.try_wait(), Ok(Some(_))));
-        match clipboard::copy(text, mime_type) {
+        match clipboard::copy(content, mime_type) {
             Ok(child) => self.clipboard.push(child),
             Err(error) => eprintln!(
                 "image-view: {}",
@@ -857,7 +907,7 @@ mod tests {
         assert_eq!(plain("z"), None);
     }
 
-    /// The three things `c` does are told apart by what is held with it,
+    /// The four things `c` does are told apart by what is held with it,
     /// and a chord nothing binds is still left to the window manager.
     #[test]
     fn modifiers_tell_chords_apart() {
@@ -875,8 +925,9 @@ mod tests {
         // The same capitals under Caps Lock, which reports no Shift at all.
         assert_eq!(action_for(&upper, PLAIN), Some(CopyPath));
         assert_eq!(action_for(&upper, CTRL), Some(CopyUri));
+        assert_eq!(action_for(&lower, Mods::CONTROL), Some(CopyImage));
         // Chords the table does not bind belong to the window manager.
-        assert_eq!(action_for(&lower, Mods::CONTROL), None);
+        assert_eq!(action_for(&lower, Mods::ALT), None);
         assert_eq!(action_for(&upper, Mods::CONTROL | Mods::ALT), None);
         assert_eq!(
             action_for(&Key::Character(SmolStr::new("0")), Mods::SUPER),

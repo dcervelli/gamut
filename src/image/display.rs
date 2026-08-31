@@ -413,16 +413,28 @@ impl Display {
 
         // The order the pipeline uses: window, then false colour for a single
         // channel, then the tone curve over whatever that produced.
+        let false_colored = sample.channels.is_gray() && self.colormap != Colormap::Gray;
         let color = match (sample.channels.is_gray(), self.colormap) {
             (true, Colormap::Gray) => [values[0]; 3],
             (true, colormap) => colormap.color(values[0]),
             (false, _) => values,
         };
 
+        // False colour is already display-referred, so `composite.rs` holds
+        // the curve at `Clip` over it — a tone curve on top of a colormap
+        // would distort the mapping the viewer is reading values off. The
+        // readout has to make the same choice, or it stops describing the
+        // screen it is meant to be describing.
+        let tone_map = if false_colored {
+            ToneMap::Clip
+        } else {
+            self.tone_map
+        };
+
         Mapped {
             values,
             count,
-            color: self.tone_map.apply(color),
+            color: tone_map.apply(color),
             alpha: sample.alpha,
         }
     }
