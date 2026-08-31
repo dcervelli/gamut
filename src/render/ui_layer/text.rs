@@ -7,7 +7,7 @@ use glyphon::{
     TextAtlas, TextBounds, TextRenderer, Viewport, Wrap,
 };
 
-use super::{LAYERS, TextItem, Weight};
+use super::{Face, LAYERS, TextItem, Weight};
 
 pub(super) struct Text {
     font_system: FontSystem,
@@ -68,7 +68,13 @@ impl Text {
     /// that has to sit next to it. `wrap_at` breaks it across lines the way
     /// [`UiFrame::text_wrapped`](super::UiFrame::text_wrapped) will, for
     /// anything that has to know how tall a paragraph comes out.
-    pub(super) fn measure(&mut self, text: &str, size: f32, wrap_at: Option<f32>) -> [f32; 2] {
+    pub(super) fn measure(
+        &mut self,
+        text: &str,
+        size: f32,
+        face: Face,
+        wrap_at: Option<f32>,
+    ) -> [f32; 2] {
         self.measure_buffer
             .set_metrics(Metrics::new(size, size * 1.3));
         self.measure_buffer.set_size(wrap_at, None);
@@ -78,7 +84,7 @@ impl Text {
         });
         self.measure_buffer.set_text(
             text,
-            &Attrs::new().family(Family::SansSerif),
+            &Attrs::new().family(family(face)),
             Shaping::Advanced,
             None,
         );
@@ -152,6 +158,15 @@ impl Text {
     }
 }
 
+/// The font family a face asks for. Both are whatever the system offers
+/// under the name; nothing is shipped with the binary.
+fn family(face: Face) -> Family<'static> {
+    match face {
+        Face::Sans => Family::SansSerif,
+        Face::Mono => Family::Monospace,
+    }
+}
+
 impl Layer {
     #[allow(clippy::too_many_arguments)]
     fn prepare(
@@ -182,7 +197,7 @@ impl Layer {
             buffer.set_metrics(Metrics::new(size, size * 1.3));
             buffer.set_wrap(if item.wrap { Wrap::Word } else { Wrap::None });
             buffer.set_size(item.max_width.map(|w| w * scale), None);
-            let attrs = Attrs::new().family(Family::SansSerif);
+            let attrs = Attrs::new().family(family(item.face));
             let attrs = match item.weight {
                 Weight::Regular => attrs,
                 Weight::Bold => attrs.weight(glyphon::Weight::BOLD),

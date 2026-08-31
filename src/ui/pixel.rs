@@ -17,22 +17,27 @@ use crate::theme::Theme;
 
 use super::buttons::outline;
 use super::chrome::BAR_PADDING;
-use super::{Current, TEXT_SIZE, status, text_baseline};
+use super::{Current, TEXT_SIZE, text_baseline};
 
 /// Side of the colour swatch, in logical pixels: the height of a line of
 /// text, so that it reads as part of the sentence beside it.
 const SWATCH: f32 = 13.0;
 
-/// Between the swatch and the words it belongs to.
+/// Between the swatch and the words on either side of it.
 const GAP: f32 = 8.0;
+
+/// What parts the coordinate from the colour: the same middot the bars use
+/// between one segment and the next, so that the readout reads as two things
+/// the way the rest of the bar does.
+const SEPARATOR: &str = "\u{00b7}";
 
 /// Draws the readout at the left of the bottom bar, from [`BAR_PADDING`] up to
 /// `limit` — where the state text at the other end of the bar begins.
 ///
-/// The swatch stands at the front rather than beside the numbers it depicts:
-/// the numbers change with every pixel the pointer crosses, and a swatch
-/// pinned to the end of them would jitter along the bar as they got longer
-/// and shorter.
+/// The coordinate leads, then the swatch, then the numbers it stands for. The
+/// swatch belongs to the colour it depicts rather than to the pixel's address,
+/// so it sits in front of the values and moves with them — and the coordinate
+/// is set to a fixed width so that they stay put while the pointer moves.
 pub(super) fn draw(
     frame: &mut UiFrame,
     text: &mut dyn TextMeasure,
@@ -46,11 +51,41 @@ pub(super) fn draw(
         return;
     };
     let mapped = current.display.map(&sample);
+    let baseline = text_baseline(bar);
 
-    let mut x = BAR_PADDING;
+    // Whatever else has to go, the coordinate stays: it is the one thing the
+    // readout says that nothing else in the window says.
+    let coordinate = coordinate(at, [current.image.width, current.image.height]);
+    let end = BAR_PADDING + text.measure_mono(&coordinate, TEXT_SIZE)[0];
+    frame.text_clipped_mono(
+        [BAR_PADDING, baseline],
+        TEXT_SIZE,
+        theme.text_primary,
+        (limit - BAR_PADDING).max(1.0),
+        coordinate,
+    );
+
+    let values = values(&current.image, &sample, &mapped);
+    let values_width = text.measure_text(&values, TEXT_SIZE)[0];
+    let separator_width = text.measure_text(SEPARATOR, TEXT_SIZE)[0];
     // A bar too short for the swatch gets the words alone, the way a panel
     // too narrow for a button gets no button.
-    if bar.height >= SWATCH && x + SWATCH < limit {
+    let Some((separator_x, swatch_x, values_x)) = place(
+        end,
+        separator_width,
+        values_width,
+        limit,
+        bar.height >= SWATCH,
+    ) else {
+        return;
+    };
+    frame.text(
+        [separator_x, baseline],
+        TEXT_SIZE,
+        theme.text_primary,
+        SEPARATOR,
+    );
+    if let Some(x) = swatch_x {
         let swatch = Rect::new(
             x,
             (bar.y + (bar.height - SWATCH) / 2.0).round(),
@@ -61,23 +96,53 @@ pub(super) fn draw(
         // An outline, so that a transparent or near-black pixel still reads as
         // a swatch showing something rather than as a gap in the bar.
         outline(frame, swatch, 1.0, theme.border);
-        x += SWATCH + GAP;
     }
-
-    let width = (limit - x).max(1.0);
     frame.text_clipped(
-        [x, text_baseline(bar)],
+        [values_x, baseline],
         TEXT_SIZE,
         theme.text_primary,
-        width,
-        status::fit_segments(text, &segments(at, &current.image, &sample, &mapped), width),
+        (limit - values_x).max(1.0),
+        values,
     );
 }
 
-/// Where the pointer is, and what is there: two segments, so that a bar with
-/// no room for the values keeps the coordinate rather than clipping the
-/// numbers in half.
-fn segments(at: [u32; 2], image: &DecodedImage, sample: &Sample, mapped: &Mapped) -> [String; 2] {
+/// Where the separator, the swatch and the values go once the coordinate has
+/// ended at `end` — or `None` when what is left of the bar before `limit` has
+/// no room for the values, in which case the separator and the swatch go with
+/// them rather than standing after the coordinate parting it from nothing.
+fn place(
+    end: f32,
+    separator_width: f32,
+    values_width: f32,
+    limit: f32,
+    swatch: bool,
+) -> Option<(f32, Option<f32>, f32)> {
+    let separator_x = end + GAP;
+    let after = separator_x + separator_width + GAP;
+    let values_x = if swatch { after + SWATCH + GAP } else { after };
+    (values_x + values_width <= limit).then(|| (separator_x, swatch.then_some(after), values_x))
+}
+
+/// Where the pointer is, padded out to the widest coordinate `size` can
+/// produce and set monospaced by the caller.
+///
+/// Both together are what hold the swatch and the numbers after it still: the
+/// padding keeps the digit count fixed as the pointer crosses a power of ten,
+/// and the face keeps every digit the same width as the last.
+fn coordinate(at: [u32; 2], size: [u32; 2]) -> String {
+    let places = |extent: u32| extent.saturating_sub(1).max(1).ilog10() as usize + 1;
+    format!(
+        "({:0>x$}, {:0>y$})",
+        at[0],
+        at[1],
+        x = places(size[0]),
+        y = places(size[1])
+    )
+}
+
+/// What is there: the numbers the file holds, and beside them what the
+/// display has made of them.
+fn values(image: &DecodedImage, sample: &Sample, mapped: &Mapped) -> String {
     let float = matches!(image.samples, Samples::F32 { .. });
     let stored: Vec<String> = sample
         .stored()
@@ -89,10 +154,7 @@ fn segments(at: [u32; 2], image: &DecodedImage, sample: &Sample, mapped: &Mapped
         .iter()
         .map(|value| format!("{value:.3}"))
         .collect();
-    [
-        format!("({}, {})", at[0], at[1]),
-        format!("{}   \u{2192}   {}", stored.join(" "), displayed.join(" ")),
-    ]
+    format!("{}   \u{2192}   {}", stored.join(" "), displayed.join(" "))
 }
 
 /// One stored component, in the units the file keeps it in. Integer samples
@@ -153,9 +215,9 @@ mod tests {
         )
     }
 
-    fn read(image: &DecodedImage, display: &Display, at: [u32; 2]) -> [String; 2] {
+    fn read(image: &DecodedImage, display: &Display, at: [u32; 2]) -> String {
         let sample = image.sample(at[0], at[1]).expect("inside the image");
-        segments(at, image, &sample, &display.map(&sample))
+        values(image, &sample, &display.map(&sample))
     }
 
     /// The file's numbers in the file's units, and beside them what the
@@ -163,11 +225,13 @@ mod tests {
     /// fractions of one: 231 is what a dropper in any other tool would say.
     #[test]
     fn the_readout_names_the_codes_the_file_holds_and_the_values_they_map_to() {
-        let words = read(&rgb8([231, 128, 64]), &Display::default(), [3, 4]);
-        assert_eq!(words[0], "(3, 4)");
+        assert_eq!(coordinate([3, 4], [4, 5]), "(3, 4)");
         // The mapped side is linear light, which is the space the window and
         // everything after it works in — sRGB 231 is 80% of the way up.
-        assert_eq!(words[1], "231 128 64   \u{2192}   0.799 0.216 0.051");
+        assert_eq!(
+            read(&rgb8([231, 128, 64]), &Display::default(), [3, 4]),
+            "231 128 64   \u{2192}   0.799 0.216 0.051"
+        );
     }
 
     /// Measurement work is why anyone points at a pixel, so float samples
@@ -186,31 +250,60 @@ mod tests {
         );
         let display = Display::default();
 
+        assert_eq!(read(&image, &display, [0, 0]), "0.1250   \u{2192}   0.125");
         assert_eq!(
-            read(&image, &display, [0, 0])[1],
-            "0.1250   \u{2192}   0.125"
-        );
-        assert_eq!(
-            read(&image, &display, [1, 0])[1],
+            read(&image, &display, [1, 0]),
             "2.500e-6   \u{2192}   0.000"
         );
         assert_eq!(
-            read(&image, &display, [2, 0])[1],
+            read(&image, &display, [2, 0]),
             "1.000e7   \u{2192}   10000000.000"
         );
     }
 
-    /// Whatever else has to go, the coordinate stays: it is the one thing the
-    /// readout says that nothing else in the window says.
+    /// The coordinate is as wide at (0, 0) as it is at the far corner, so
+    /// that nothing after it moves as the pointer crosses a power of ten.
+    /// One column per digit the image can actually reach: a 1000-wide image
+    /// counts to 999.
     #[test]
-    fn a_narrow_bar_keeps_the_coordinate_and_drops_the_values() {
-        let words = read(&rgb8([231, 128, 64]), &Display::default(), [3, 4]);
+    fn the_coordinate_is_padded_to_the_widest_the_image_can_read() {
+        assert_eq!(coordinate([7, 9], [1920, 1080]), "(0007, 0009)");
+        assert_eq!(coordinate([1919, 1079], [1920, 1080]), "(1919, 1079)");
+        assert_eq!(coordinate([999, 0], [1000, 1000]), "(999, 000)");
+        assert_eq!(coordinate([0, 0], [1, 1]), "(0, 0)", "a one-pixel image");
+    }
 
-        let roomy = status::fit_segments(&mut Monospace, &words, 1000.0);
-        assert!(roomy.contains("231 128 64"), "{roomy}");
+    /// Whatever else has to go, the coordinate stays: it is the one thing the
+    /// readout says that nothing else in the window says. The separator and
+    /// the swatch go with the values, having nothing to say once they are
+    /// gone.
+    #[test]
+    fn a_narrow_bar_keeps_the_coordinate_and_drops_the_swatch_with_the_values() {
+        let values = read(&rgb8([231, 128, 64]), &Display::default(), [3, 4]);
+        let width = Monospace.measure_text(&values, TEXT_SIZE)[0];
+        let dot = Monospace.measure_text(SEPARATOR, TEXT_SIZE)[0];
+        let end = BAR_PADDING + Monospace.measure_mono(&coordinate([3, 4], [4, 5]), TEXT_SIZE)[0];
 
-        let cramped = status::fit_segments(&mut Monospace, &words, 100.0);
-        assert_eq!(cramped, "(3, 4)");
+        let roomy = place(end, dot, width, end + 1000.0, true).expect("room for all of it");
+        let after_dot = end + GAP + dot + GAP;
+        assert_eq!(
+            roomy,
+            (end + GAP, Some(after_dot), after_dot + SWATCH + GAP)
+        );
+
+        assert_eq!(place(end, dot, width, end + width, true), None);
+    }
+
+    /// A bar too short to draw a swatch in still reads out the numbers, and
+    /// closes the space the swatch would have taken. The separator stays: it
+    /// parts the coordinate from the values, not from the swatch.
+    #[test]
+    fn a_short_bar_gives_the_values_the_swatch_s_place() {
+        let (separator_x, swatch, values_x) =
+            place(100.0, 4.0, 50.0, 1000.0, false).expect("room for the values");
+        assert_eq!(separator_x, 100.0 + GAP);
+        assert_eq!(swatch, None);
+        assert_eq!(values_x, 100.0 + GAP + 4.0 + GAP);
     }
 
     /// The swatch is there to answer the question the numbers cannot: a
