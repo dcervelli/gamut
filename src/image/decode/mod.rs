@@ -212,6 +212,24 @@ pub fn probe(path: &Path) -> Result<Option<(u32, u32)>> {
     })
 }
 
+/// Which decoder owns `path`, chosen the way [`load`] chooses it: by what the
+/// leading bytes say first, and by the extension only where they say nothing.
+/// So this answers what the file turned out to *be* rather than what it is
+/// called, which is worth saying out loud for a file whose name was wrong.
+///
+/// A decoder's name, not a format's: most read one format and are named for
+/// it, but the two that read several are named for all of them. Naming the
+/// one format in hand would mean asking every decoder to report what it found
+/// as well as what it can find, which is a great deal of machinery for one
+/// line of a panel.
+///
+/// `None` where nothing claims it, or where it cannot be opened at all — the
+/// panel then says nothing rather than something wrong, which is what it
+/// does with every other fact it asks the file for after the event.
+pub fn reader(path: &Path) -> Option<&'static str> {
+    Some(open(path).ok()?.1.name())
+}
+
 /// Reads as much as `buffer` holds, tolerating a file shorter than that.
 fn fill(source: &mut impl Read, buffer: &mut [u8]) -> std::io::Result<usize> {
     let mut filled = 0;

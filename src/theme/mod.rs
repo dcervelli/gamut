@@ -122,8 +122,10 @@ const SEPARATION: u32 = 18;
 /// whose deepest colour is nothing of the kind.
 const DEEP_VALUE_CEIL: f32 = 0.14;
 /// How opaque a floating panel is. Enough of the image comes through to place
-/// the panel over it; not enough to compete with what is written on it.
-const PANEL_ALPHA: u8 = 232;
+/// the panel over it; not enough to compete with what is written on it — and
+/// the information panel is a long column of small words, which is the most
+/// that is ever asked of this ground.
+const PANEL_ALPHA: u8 = 240;
 
 /// How opaque a popup's panel is. Higher than the panels that float over the
 /// image permanently: the picture coming through a menu competes with the

@@ -389,16 +389,31 @@ scrolling rather than beginning to pan half-way through. A column with nothing
 left to scroll to still takes the gesture rather than handing it back, and
 makes no closed hand for a drag that would move nothing.
 
-What it says comes from two places. The file's own facts — its name, its
-path, when it was written and how large it is — are one `stat` taken as the
-image goes on screen. The rest is its EXIF, read by `src/image/exif.rs` on the
-loader thread beside the decode, because it is one more parse of a file
-somebody else chose the bytes of and that is the thread with the panic guard
-around it. What comes back is already words: a summary of the fields a
-photograph is read by — camera, lens, when, the exposure as one line, the
-focal length with its equivalent, the coordinates in degrees a map will take —
-and then every other field the file carries, in the order it carries them.
-Nothing there is a tag number or an offset by the time the interface sees it.
+What it says comes from three places, and is written under headings that keep
+them apart — a column this long is read by looking for a thing rather than by
+starting at the top. The file's own facts — its name, its path, which decoder
+turned out to own it, when it was written and how large it is — are one `stat`
+and one look at the header, taken as the image goes on screen. The picture's
+own are what the decoder already said: its size, what each pixel holds, the
+colour space those numbers are meant in, and what the GPU stored them as. The
+bars say some of that as well, but they say it in passing and drop it when the
+window narrows, and a fact worth reading is a fact worth being able to go back
+to.
+
+The rest is its EXIF, read by `src/image/exif.rs` on the loader thread beside
+the decode, because it is one more parse of a file somebody else chose the
+bytes of and that is the thread with the panic guard around it. What comes
+back is already words, and already grouped: the fields a photograph is read by
+— camera, lens, when, the exposure as one line, the focal length with its
+equivalent — then where it was taken, the coordinates in degrees a map will
+take with the rest of the GPS directory under them, then whatever somebody
+wrote in words, and last everything left over. That last split is had for
+nothing: TIFF's own tags describe the file and the Exif directory describes
+the shot, and every tag says which directory it came from — so the long tail
+is grouped by asking each one rather than by a table of where each belongs. A
+group that came to nothing is not carried at all, an empty heading being a
+question about where the rest of it went. Nothing there is a tag number or an
+offset by the time the interface sees it.
 
 A raster is read through a different handful of fields, and they are not EXIF
 at all. GeoTIFF shares the TIFF directory rather than taking a container of

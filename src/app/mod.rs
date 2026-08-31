@@ -613,6 +613,7 @@ fn file_facts(path: &std::path::Path) -> FileFacts {
         path: path.display().to_string(),
         bytes: metadata.as_ref().map(|metadata| metadata.len()),
         modified: metadata.and_then(|metadata| metadata.modified().ok()),
+        reader: decode::reader(path),
     }
 }
 
