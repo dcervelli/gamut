@@ -7,24 +7,38 @@
 //! in [`draw`] — where the panel goes, what a press lands on and how it is
 //! dismissed are the same for every menu.
 
-use crate::render::{Color, Popup, PopupGrid, Rect, TextMeasure, UiFrame};
+use crate::render::{Color, Popup, PopupGrid, PopupSection, Rect, TextMeasure, UiFrame, Upscale};
 use crate::theme::Theme;
 use crate::view::{Fit, View, Viewport};
 
 use super::buttons::{button_ink, centred_text, outline, percent};
-use super::{PADDING, Panels, Widget};
+use super::{PADDING, Panels, TEXT_SIZE, Widget};
 
-/// One cell of a popup menu, and the room around them. A cell is a little
-/// wider than it is tall because the widest thing in one is "1600%".
-const MENU_CELL: [f32; 2] = [56.0, 34.0];
+/// An ordinary cell of a popup menu, and the room around them. Wider than it
+/// is tall because the widest thing in one is "1600%", and no taller than the
+/// word in it needs: a cell with room to spare above and below reads as a
+/// panel rather than as a button.
+const MENU_CELL: [f32; 2] = [56.0, 27.0];
+/// A cell in a section that is named in words rather than numbered or drawn.
+/// Wide enough for the longest of them at [`TEXT_SIZE`] with room around it,
+/// and no wider: these sit under the numbered cells and are meant to read as
+/// the same kind of button, not as a wider one.
+const MENU_WORD_CELL: f32 = 84.0;
 const MENU_GAP: f32 = 6.0;
 const MENU_PADDING: f32 = 8.0;
+/// The line a section's name is set on, the space under it, and the space
+/// between one section and the next. The gap above a name is the wider of the
+/// two, so the name reads as belonging to the cells beneath it — the same
+/// arrangement, and for the same reason, as the information panel's.
+const MENU_HEADING: f32 = 15.0;
+const MENU_HEADING_GAP: f32 = 3.0;
+const MENU_SECTION_GAP: f32 = 10.0;
 /// The corner radius of a popup's panel, and of the cells inside it.
 const MENU_RADIUS: f32 = 8.0;
 pub(super) const CELL_RADIUS: f32 = 5.0;
 /// The frame drawn in a fit cell of the zoom menu, which the arrows point out
 /// to the edges of.
-const FIT_ICON: [f32; 2] = [28.0, 22.0];
+const FIT_ICON: [f32; 2] = [26.0, 17.0];
 
 /// A popup the interface can have open, and so what it is a menu of.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -33,25 +47,22 @@ pub enum Menu {
 }
 
 impl Menu {
-    pub fn items(self) -> usize {
+    pub fn sections(self) -> &'static [PopupSection] {
         match self {
-            Menu::Zoom => ZOOM_CHOICES.len(),
+            Menu::Zoom => &ZOOM_SECTIONS,
         }
     }
 
     pub fn grid(self) -> PopupGrid {
-        let columns = match self {
-            // Eight percentages and three fits: two full rows of powers of
-            // two, and the fits along the bottom.
-            Menu::Zoom => 4,
-        };
         PopupGrid {
-            cell: MENU_CELL,
-            columns,
+            cell_height: MENU_CELL[1],
             gap: MENU_GAP,
             padding: MENU_PADDING,
             margin: PADDING,
             radius: MENU_RADIUS,
+            heading: MENU_HEADING,
+            heading_gap: MENU_HEADING_GAP,
+            section_gap: MENU_SECTION_GAP,
         }
     }
 
@@ -69,9 +80,43 @@ impl Menu {
     }
 }
 
+/// How the zoom menu is divided. Three things are chosen from it and they
+/// are not the same kind of thing: a zoom to go to, a rule for the view to
+/// keep, and how the magnified image is resampled. Undivided, the last of
+/// them read as a fourth fit.
+///
+/// The counts are [`ZOOM_CHOICES`] split up, in that order, and the columns
+/// are what each group wants: eight numbers in fours, three fits abreast, and
+/// two filters named in words rather than drawn as icons.
+///
+/// Only the last takes a cell of its own width, and only because a word needs
+/// more room than a number. The rest keep the ordinary cell and stop where
+/// their own cells stop, so the fits sit under the first three percentages
+/// rather than being spread across the panel to fill it.
+const ZOOM_SECTIONS: [PopupSection; 3] = [
+    PopupSection {
+        title: "Zoom",
+        items: 8,
+        columns: 4,
+        cell_width: MENU_CELL[0],
+    },
+    PopupSection {
+        title: "Fit",
+        items: 3,
+        columns: 3,
+        cell_width: MENU_CELL[0],
+    },
+    PopupSection {
+        title: "Up-scaling",
+        items: Upscale::ALL.len(),
+        columns: Upscale::ALL.len(),
+        cell_width: MENU_WORD_CELL,
+    },
+];
+
 /// What the zoom menu offers. The order is the order the cells are laid out
-/// in, left to right and top to bottom.
-const ZOOM_CHOICES: [ZoomChoice; 11] = [
+/// in, section by section and left to right within each.
+const ZOOM_CHOICES: [ZoomChoice; 13] = [
     ZoomChoice::Scale(0.10),
     ZoomChoice::Scale(0.25),
     ZoomChoice::Scale(0.50),
@@ -83,26 +128,31 @@ const ZOOM_CHOICES: [ZoomChoice; 11] = [
     ZoomChoice::Fit(Fit::Whole),
     ZoomChoice::Fit(Fit::Width),
     ZoomChoice::Fit(Fit::Height),
+    ZoomChoice::Filter(Upscale::Nearest),
+    ZoomChoice::Filter(Upscale::Bicubic),
 ];
 
-/// One cell of the zoom menu: a zoom to go to, or a fit to hand the view back
-/// to.
+/// One cell of the zoom menu: a zoom to go to, a fit to hand the view back
+/// to, or the filter the image is magnified with.
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum ZoomChoice {
     Scale(f32),
     Fit(Fit),
+    Filter(Upscale),
 }
 
 impl ZoomChoice {
-    /// Whether this is what the view is already doing — `fit` and `zoom`
-    /// being what it is doing — which is what lights the cell. A fit is only
-    /// itself; a scale counts as matched when it is the zoom on screen and
-    /// the view is not in a fit that happens to have landed there, since
-    /// pressing it would then mean something.
-    fn active(self, fit: Option<Fit>, zoom: f32) -> bool {
+    /// Whether this is what the view is already doing — `fit`, `zoom` and
+    /// `upscale` being what it is doing — which is what lights the cell. A
+    /// fit is only itself; a scale counts as matched when it is the zoom on
+    /// screen and the view is not in a fit that happens to have landed there,
+    /// since pressing it would then mean something. A filter is always one of
+    /// the two, so one of that section's cells is always lit.
+    fn active(self, fit: Option<Fit>, zoom: f32, upscale: Upscale) -> bool {
         match self {
             ZoomChoice::Scale(scale) => fit.is_none() && (zoom - scale).abs() < scale * 1e-3,
             ZoomChoice::Fit(fit_choice) => fit == Some(fit_choice),
+            ZoomChoice::Filter(filter) => filter == upscale,
         }
     }
 
@@ -110,13 +160,16 @@ impl ZoomChoice {
         match self {
             ZoomChoice::Scale(scale) => view.set_zoom(scale, image, viewport),
             ZoomChoice::Fit(fit) => view.set_fit(fit),
+            ZoomChoice::Filter(filter) => view.set_upscale(filter),
         }
     }
 }
 
-/// Draws the open menu — [`Panels::menu`], which `popup` was placed for —
-/// as its panel and a cell for each choice in it. `fit` and `zoom` are what
-/// the view is doing, so that the cell it matches can be lit.
+/// Draws the open menu — [`Panels::menu`], which `popup` was placed for — as
+/// its panel, the name of each section, and a cell for each choice in it.
+/// The view is what every cell is measured against, so that the one it
+/// matches can be lit; `zoom` comes with it because working it out needs the
+/// image and the viewport, which the caller has already had to hand.
 ///
 /// The cells are drawn like the toggles in the side panels, and for the same
 /// reason: each is a press, and a state it is either in or not.
@@ -124,7 +177,7 @@ pub(super) fn draw(
     frame: &mut UiFrame,
     text: &mut dyn TextMeasure,
     popup: &Popup,
-    fit: Option<Fit>,
+    view: &View,
     zoom: f32,
     panels: &Panels,
     theme: &Theme,
@@ -132,19 +185,41 @@ pub(super) fn draw(
     let Some(menu) = panels.menu else {
         return;
     };
+    let (fit, upscale) = (view.fit(), view.upscale());
     popup.draw(frame, theme.menu_background);
+
+    // The names, in the accent the information panel sets its own headings
+    // in: a heading is the one thing on a panel that is picked out, and the
+    // two panels should not disagree about how that is done.
+    for (title, line) in popup.headings() {
+        frame.text(
+            [line.x, (line.bottom() - TEXT_SIZE * 1.15).round()],
+            TEXT_SIZE,
+            theme.accent,
+            title,
+        );
+    }
+
     for (index, cell) in popup.cells() {
         let hover = panels.hover == Some(Widget::Cell(index));
         match menu {
             Menu::Zoom => {
                 let choice = ZOOM_CHOICES[index];
-                let (background, ink) = button_ink(choice.active(fit, zoom), hover, theme);
+                let active = choice.active(fit, zoom, upscale);
+                let (background, ink) = button_ink(active, hover, theme);
                 frame.rounded_rect(cell, CELL_RADIUS, background);
                 match choice {
                     ZoomChoice::Scale(scale) => {
                         centred_text(frame, text, cell, ink, &percent(scale))
                     }
                     ZoomChoice::Fit(fit) => fit_icon(frame, cell, fit, ink),
+                    // In words, where the fits above are in arrows: the two
+                    // filters are not a direction or a size, and there is no
+                    // picture of "bicubic" a reader would arrive at unaided.
+                    // Their cells are cut wider so there is room to say so.
+                    ZoomChoice::Filter(filter) => {
+                        centred_text(frame, text, cell, ink, filter.label())
+                    }
                 }
             }
         }
@@ -287,8 +362,20 @@ mod tests {
         );
     }
 
+    /// Which section a choice belongs to, which is also which other choices
+    /// it is exclusive with: picking a filter says nothing about the zoom,
+    /// and picking a zoom says nothing about the filter.
+    fn section_of(choice: ZoomChoice) -> usize {
+        match choice {
+            ZoomChoice::Scale(_) => 0,
+            ZoomChoice::Fit(_) => 1,
+            ZoomChoice::Filter(_) => 2,
+        }
+    }
+
     /// What a cell says it does is what pressing it does: the state each one
-    /// puts the view in is the state that lights that cell and no other.
+    /// puts the view in is the state that lights that cell and no other in
+    /// its own section.
     #[test]
     fn every_zoom_choice_lands_on_itself() {
         let image = [900.0, 600.0];
@@ -297,12 +384,15 @@ mod tests {
         for choice in ZOOM_CHOICES {
             let mut view = View::new();
             choice.apply(&mut view, image, viewport);
-            let (fit, zoom) = (view.fit(), view.zoom(image, viewport));
-            assert!(choice.active(fit, zoom), "{choice:?}");
+            let (fit, zoom, upscale) = (view.fit(), view.zoom(image, viewport), view.upscale());
+            assert!(choice.active(fit, zoom, upscale), "{choice:?}");
 
             for other in ZOOM_CHOICES {
+                if section_of(other) != section_of(choice) {
+                    continue;
+                }
                 assert_eq!(
-                    other.active(fit, zoom),
+                    other.active(fit, zoom, upscale),
                     other == choice,
                     "{other:?} after {choice:?}"
                 );
@@ -311,6 +401,66 @@ mod tests {
                 assert!((view.zoom(image, viewport) - scale).abs() < 1e-4);
             }
         }
+    }
+
+    /// The sections are [`ZOOM_CHOICES`] cut into three, and the cut has to
+    /// stay in step with it: a choice in no section could never be pressed,
+    /// and a section reaching past its own kind would light a cell that
+    /// stands for something else.
+    #[test]
+    fn the_sections_account_for_every_choice_in_order() {
+        assert_eq!(
+            ZOOM_SECTIONS
+                .iter()
+                .map(|section| section.items)
+                .sum::<usize>(),
+            ZOOM_CHOICES.len()
+        );
+
+        let mut first = 0;
+        for (index, section) in ZOOM_SECTIONS.iter().enumerate() {
+            for choice in &ZOOM_CHOICES[first..first + section.items] {
+                assert_eq!(
+                    section_of(*choice),
+                    index,
+                    "{choice:?} in {}",
+                    section.title
+                );
+            }
+            first += section.items;
+        }
+
+        // And the up-scaling section is exactly the filters on offer, in the
+        // order the key cycles them.
+        let up_scaling = &ZOOM_CHOICES[ZOOM_CHOICES.len() - ZOOM_SECTIONS[2].items..];
+        let filters: Vec<Upscale> = up_scaling
+            .iter()
+            .map(|choice| match choice {
+                ZoomChoice::Filter(filter) => *filter,
+                other => panic!("{other:?} is not a filter"),
+            })
+            .collect();
+        assert_eq!(filters, Upscale::ALL);
+    }
+
+    /// Two to a row is what makes room for the words, so the cells that wear
+    /// them are wider than the numbered ones — and wide enough for the
+    /// longest name at the size it is set in.
+    #[test]
+    fn the_filters_are_named_in_cells_cut_wide_enough_for_the_words() {
+        let chrome = Chrome::new(WINDOW);
+        let popup = chrome.popup(Menu::Zoom, false).expect("room for it");
+        let scale = popup.cell(0);
+        let filter = popup.cell(ZOOM_CHOICES.len() - 1);
+
+        assert!(filter.width > scale.width, "{filter:?} vs {scale:?}");
+        // Written out, not drawn: the longest of them, with room to spare.
+        let longest = Upscale::ALL
+            .iter()
+            .map(|filter| filter.label().len())
+            .max()
+            .expect("two filters");
+        assert!(filter.width > longest as f32 * TEXT_SIZE * 0.7);
     }
 
     /// The button reads out the same zoom the cells are chosen from, so the
@@ -324,7 +474,7 @@ mod tests {
             .iter()
             .filter_map(|choice| match choice {
                 ZoomChoice::Scale(scale) => Some(percent(*scale).len()),
-                ZoomChoice::Fit(_) => None,
+                ZoomChoice::Fit(_) | ZoomChoice::Filter(_) => None,
             })
             .max();
         assert_eq!(widest, Some("1600%".len()));

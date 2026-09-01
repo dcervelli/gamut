@@ -47,7 +47,7 @@ render/        the GPU
   mod.rs         Renderer: surface, device, the three passes; Scene is what a frame draws; TextMeasure trait
   placement.rs   Placement (where the image lands) and Upscale (the magnification filter)
   upload.rs      texture format choice and the transfer-function LUTs; the "sampled texel is linear" invariant
-  image_layer.rs / reduce.rs / composite.rs / ui_layer/   the passes; ui_layer holds Rect, Color, UiFrame, and popup.rs (a grid of cells anchored to a corner)
+  image_layer.rs / reduce.rs / composite.rs / ui_layer/   the passes; ui_layer holds Rect, Color, UiFrame, and popup.rs (sections of cells anchored to a corner)
   shader_codes.rs  every Rust<->WGSL integer code, one fn per shader switch
   gpu.rs         wgpu boilerplate helpers (layouts, uniform buffers, full-screen pipelines, GrowableBuffer)
   shaders/       WGSL; each Params struct is mirrored by a #[repr(C)] struct in the .rs file that loads it
@@ -62,7 +62,7 @@ render/        the GPU
 | What a pixel reads as under the pointer | `image/mod.rs::sample` for what the file holds, `image/display.rs::map` for what the screen shows |
 | A panel or overlay | a new `ui/<name>.rs` and one call in `ui/mod.rs::build_frame`; if the pointer can be on it, a `Hit` variant and one test in `ui/layers.rs` at the same height in the stack it is drawn at; a new colour role goes in `theme/mod.rs` |
 | What the info panel says about a file | `ui/info.rs` for the layout; the file's own facts are gathered in `app/mod.rs::file_facts`, its metadata in `image/exif.rs`, and its georeference in `image/geo.rs` |
-| A popup menu | a `Menu` variant in `ui/menu.rs` with its choices, `items`/`grid`/`choose` arms and a `draw` arm; `Chrome::popup` places it, `App::press` opens it, and `ui/layers.rs` puts it over everything |
+| A popup menu | a `Menu` variant in `ui/menu.rs` with its choices, `sections`/`grid`/`choose` arms and a `draw` arm; `Chrome::popup` places it, `App::press` opens it, and `ui/layers.rs` puts it over everything |
 | A CLI flag | `cli.rs`, and the `Options` / `Startup` / `Overrides` field it sets |
 | An image format | `image/decode/<fmt>.rs` implementing `Decoder`, one line in `DECODERS`, a fixture in `test_images/` (see its README and `generate.sh`) |
 | What a copy of the image contains | `image/encode.rs`; the chord that asks for it is in `app/input.rs` |

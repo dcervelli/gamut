@@ -172,14 +172,17 @@ counted off in the image's own pixels.
 | Click the grid button | Show or hide the grid |
 | Wheel over the file information | Scroll it |
 | Drag the file information | Scroll it, as if dragging the scrollbar's handle |
-| Click the zoom percentage | Open the zoom menu |
+| Click the zoom percentage | Open the zoom menu: scale, fit and the magnification filter |
 
 The percentage in the top bar, just inside the grid button, is itself a
-button. Pressing it opens a menu hanging under it: 10% through 1600%, and the
-three fits — the whole image, its width, its height — as arrows pointing the
-way each one fills the window. Whichever the view is in is lit. Choosing sets the zoom;
-pressing anywhere outside the menu, or `Esc`, closes it without changing
-anything. A window too small to hold the menu does not open one.
+button. Pressing it opens a menu hanging under it, under three headings.
+**Zoom** is 10% through 1600%. **Fit** is the three fits — the whole image,
+its width, its height — as arrows pointing the way each one fills the window.
+**Up-scaling** is the filter the image is magnified with, `Nearest` or
+`Bicubic`, the same choice `u` cycles. Whichever of each the view is in is
+lit, and choosing acts at once; pressing anywhere outside the menu, or `Esc`,
+closes it without changing anything. A window too small to hold the menu does
+not open one.
 
 Pointing at the image reads that pixel out in the bottom left corner: its
 coordinates, the numbers the file holds there, an arrow, and what the display

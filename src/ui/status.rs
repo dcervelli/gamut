@@ -3,7 +3,6 @@
 
 use crate::image::display::{AutoWindow, Colormap};
 use crate::render::TextMeasure;
-use crate::view::View;
 
 use super::{Current, FrameInput, Reading, TEXT_SIZE};
 
@@ -67,19 +66,15 @@ pub(super) fn describe_pixels(current: &Current) -> String {
 /// What is being done to the image, for the bottom bar: only the things
 /// actually in force, so a viewer left alone says nothing here.
 ///
-/// Neither the zoom nor the fit it came from: both are the button in the top
-/// bar, which reads out the one and opens a menu of the other.
-pub(super) fn describe_state(current: &Current, view: &View, input: &FrameInput) -> String {
-    let zoom = view.zoom(current.size(), input.viewport);
+/// Neither the zoom nor the fit it came from, nor the filter the image is
+/// magnified with: all three are the button in the top bar, which reads the
+/// zoom out and opens a menu of the rest. The bar named the filter once, but
+/// naming a thing it could not be used to change is worth less than a cell
+/// that both says and sets it.
+pub(super) fn describe_state(current: &Current, input: &FrameInput) -> String {
     let mut parts = Vec::new();
     if let Some(label) = input.hdr_output {
         parts.push(label.to_string());
-    }
-
-    // Only while it is doing something. Below 1:1 the filter in use is the
-    // area average, which is not a choice and so not worth a word in the bar.
-    if zoom > 1.0 {
-        parts.push(view.upscale().label().to_string());
     }
     if current.display.auto != AutoWindow::Off {
         parts.push(format!(

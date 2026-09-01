@@ -553,15 +553,31 @@ before drawing it is the same call that draws it, one width and one wrap, so
 what the scroll is clamped against is the height the text actually comes out
 at rather than an estimate of it.
 
-Popups are `render::ui_layer::Popup`: a panel of uniform cells anchored to a corner
-of an area, which answers where the panel goes, where each cell landed, and
-which cell a point is over. What a cell has in it and what pressing one does
-stay with the caller (`src/ui/menu.rs`), so a second menu is a `Menu` variant,
-a grid, and the code that draws its cells. Only one can be open, which is what makes
+Popups are `render::ui_layer::Popup`: a panel of cells under named headings,
+anchored to a corner of an area, which answers where the panel goes, where
+each section's name is set, where each cell landed, and which cell a point is
+over. What a cell has in it and what pressing one does stay with the caller
+(`src/ui/menu.rs`), so a second menu is a `Menu` variant, its sections, and
+the code that draws its cells. Only one can be open, which is what makes
 dismissing one unambiguous: an open menu takes every press before the chrome
 and the image do, a press on a cell chooses and closes, and a press anywhere
 off the panel is spent closing it. `Esc` closes it too, in front of the quit
 it would otherwise be.
+
+A cell's width belongs to its section rather than to the panel: the panel is
+cut for the widest row any section asks for, and every other section lays its
+own cells from the same left edge and stops where they stop. A short row is a
+short row, not three cells stretched to the width of four. The height is the
+one thing held uniform, since cells of a height read as one panel.
+
+That is what lets one menu hold things that are not the same kind of thing.
+The zoom menu holds three: **Zoom**, eight percentages four to a row; **Fit**,
+the three fits as arrows; and **Up-scaling**, the magnification filter as the
+two words `Nearest` and `Bicubic`. Undivided, those last two read as a fourth
+fit — and there is no picture of "bicubic" a reader arrives at unaided, so
+theirs are the one pair of cells cut wider than the rest, by exactly what the
+words need. `ZOOM_SECTIONS` is `ZOOM_CHOICES` cut into three and a test holds
+the two in step, since a choice in no section could never be pressed.
 
 They are opaque, and the image is drawn in the `Viewport` they leave rather
 than behind them: zoom, fit, pan limits and the wheel's anchor are all measured
@@ -583,7 +599,7 @@ anything having to notice that it should.
 | `src/image/decode/` | The decoder trait and its registry, one file per format |
 | `src/image/encode.rs` | The display pipeline run over every pixel, out to an 8-bit sRGB PNG |
 | `src/render/` | Upload planning, the three layers, output selection; `shader_codes.rs` is every integer the shaders switch on |
-| `src/render/ui_layer/popup.rs` | Where a popup menu's panel and cells go, and what a press lands on |
+| `src/render/ui_layer/popup.rs` | Where a popup menu's panel, headings and cells go, and what a press lands on |
 | `src/render/reduce.rs` | The coarse chain a minifying draw reads from |
 
 ## Formats
