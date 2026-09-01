@@ -18,6 +18,7 @@ use crate::clipboard;
 use crate::image::display::{Colormap, Startup};
 use crate::image::encode;
 use crate::timing;
+use crate::ui::info::Copyable;
 use crate::ui::{self, Current, Menu, Widget};
 
 /// Window pixels moved per arrow-key press.
@@ -66,6 +67,9 @@ pub enum Action {
     CopyUri,
     /// Put the picture on screen on the clipboard as a PNG.
     CopyImage,
+    /// Put everything the info panel says about the file on the clipboard,
+    /// as the rows a click on its topmost button would copy.
+    CopyMetadata,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -247,6 +251,13 @@ pub const KEYS: &[Binding] = &[
         keys: &[(Char("c"), CopyImage)],
     },
     Binding {
+        section: Section::View,
+        mods: CTRL,
+        shown: "Ctrl+M",
+        help: "Copy everything the info panel says about the file",
+        keys: &[(Char("m"), CopyMetadata), (Char("M"), CopyMetadata)],
+    },
+    Binding {
         section: Section::Display,
         mods: PLAIN,
         shown: "e, E",
@@ -394,7 +405,21 @@ pub(super) struct Pointer {
     /// where the pointer is, and because leaving the window clears `cursor`
     /// without ending a drag the pointer grab is still delivering.
     pub(super) drag_from: Option<[f32; 2]>,
+    /// What the press that is down would copy out of the info panel, and
+    /// where it went down.
+    ///
+    /// A press there starts a scroll as well, the two gestures being
+    /// indistinguishable at the moment the button goes down; so the copy is
+    /// only made if the button comes back up without the pointer having gone
+    /// anywhere, and any real travel drops it and leaves a drag behind.
+    pub(super) copying: Option<(Copyable, [f32; 2])>,
 }
+
+/// How far the pointer may wander between a press on the info panel and the
+/// release that follows it and still be a click rather than a drag. Physical
+/// pixels, being what the pointer reports: this is about the hand holding
+/// still, which it does to within about this much whatever the display.
+const COPY_SLOP: f32 = 4.0;
 
 impl Pointer {
     /// Whether a wheel event belongs to the window manager rather than to us:
@@ -527,6 +552,13 @@ impl App {
                 self.copy_image();
                 return Effect::Nothing;
             }
+            // Whether or not the panel is open: what it says is a fact about
+            // the file, and asking for it should not mean first arranging to
+            // look at it.
+            CopyMetadata => {
+                self.copy_facts(Copyable::All);
+                return Effect::Nothing;
+            }
             ResetDisplay => {
                 return self.adjust(|current, _| {
                     current.display.reset(&current.stats, &current.image);
@@ -607,6 +639,24 @@ impl App {
         }));
     }
 
+    /// Puts what the info panel says on the clipboard: as much of a table as
+    /// what was clicked actually is — see [`ui::info::copied`].
+    ///
+    /// Plain text under the hood, whatever the rows are shaped like: a copy
+    /// is bound for somewhere else, and every place words can be pasted takes
+    /// those. Offered as CSV alone it would paste into a spreadsheet and
+    /// nowhere else.
+    fn copy_facts(&mut self, copies: Copyable) {
+        let Some(current) = &self.current else {
+            return;
+        };
+        let rows = ui::info::copied(current, copies);
+        if rows.is_empty() {
+            return;
+        }
+        self.copy(rows.as_bytes(), clipboard::TEXT);
+    }
+
     /// Puts `content` on the clipboard under `mime_type`.
     ///
     /// Done in line, unlike the picture: there is nothing here to prepare, and
@@ -641,6 +691,16 @@ impl App {
             return false;
         }
 
+        // A press that went down on something the info panel copies and has
+        // not travelled since is a click on it, and this is where it is
+        // answered: the release ends the drag it also started, and only one
+        // of the two gestures can have been meant.
+        if state == ElementState::Released
+            && let Some((copies, _)) = self.pointer.copying.take()
+        {
+            self.copy_facts(copies);
+        }
+
         // The info panel floats over the image and inside the chrome, so it
         // is asked before either: the press starts a drag of the column
         // instead of one of the picture underneath. It can be on screen with
@@ -648,6 +708,7 @@ impl App {
         if state == ElementState::Pressed
             && let Some(panel) = self.pointer_over_info()
         {
+            self.pointer.copying = self.info_copyable().zip(self.pointer.cursor);
             self.pointer.scrolling = true;
             // As with a drag of the image: the first motion after the press
             // establishes the point the drag is measured from.
@@ -664,6 +725,9 @@ impl App {
             }
             return false;
         }
+
+        // Anywhere but the info panel, so nothing to copy.
+        self.pointer.copying = None;
 
         // And the histogram panel on the same terms, for the same reason: a
         // press on it is aimed at it, and one that misses its buttons is
@@ -758,6 +822,14 @@ impl App {
         let moved_pixel = (self.panels.show_ui && self.pointer_pixel() != was_over)
             || self.histogram_mark() != was_marked;
         if self.pointer.scrolling {
+            // Far enough from where the button went down and this is a drag
+            // of the column, not a click on what was under it.
+            if let Some((_, at)) = self.pointer.copying
+                && ((position[0] - at[0]).abs() > COPY_SLOP
+                    || (position[1] - at[1]).abs() > COPY_SLOP)
+            {
+                self.pointer.copying = None;
+            }
             let Some(from) = self.pointer.drag_from.replace(position) else {
                 // First motion of this drag: nothing to measure from yet.
                 return false;
@@ -775,7 +847,8 @@ impl App {
                 (position[1] - from[1]) / self.scale_factor() * self.info_scroll_per_drag(panel);
             // The readouts are owed a redraw too, for a drag that has
             // carried the pointer off the panel and onto the image.
-            return self.scroll_info_by(panel, by) || moved_pixel;
+            let scrolled = self.scroll_info_by(panel, by);
+            return self.forget_info_hover() || scrolled || moved_pixel;
         }
         if !self.pointer.dragging {
             // Nothing else to do out here, so this is where the button's
@@ -795,14 +868,35 @@ impl App {
         true
     }
 
-    /// Re-tests the pointer against the widgets. Returns `true` if the
-    /// highlight moved, and so if the frame is now out of date.
+    /// Takes the copy button off the info panel while the column is being
+    /// scrolled. Returns `true` if there was one to take off.
+    ///
+    /// The pointer is not moving; the words under it are, and a button that
+    /// followed whichever of them happened to be passing would blink from
+    /// field to field all the way down the column. It comes back on the next
+    /// motion, which is when the reader is pointing at something again rather
+    /// than reading past it.
+    fn forget_info_hover(&mut self) -> bool {
+        self.panels.info_hover.take().is_some()
+    }
+
+    /// Re-tests the pointer against the widgets, and against the info
+    /// panel's column. Returns `true` if either highlight moved, and so if
+    /// the frame is now out of date.
+    ///
+    /// The two are asked together because they answer the same question — is
+    /// anything under the pointer lit that was not, or dark that was — and
+    /// because a press or a scroll that moves one can move the other.
     pub(super) fn update_hover(&mut self) -> bool {
         let hover = self
             .logical_cursor()
             .and_then(|point| self.widget_at(point));
-        let changed = hover != self.panels.hover;
+        // Not gated on the bars: the panel can be on screen with the chrome
+        // hidden, and its buttons go with it.
+        let info = self.info_copyable();
+        let changed = hover != self.panels.hover || info != self.panels.info_hover;
         self.panels.hover = hover;
+        self.panels.info_hover = info;
         changed
     }
 
@@ -918,7 +1012,7 @@ impl App {
         // column with more to say than fits is what a wheel is for, and the
         // image behind the panel is not what the gesture was aimed at.
         if let Some(scrolled) = self.scroll_info(delta) {
-            return scrolled;
+            return self.forget_info_hover() || scrolled;
         }
 
         let steps = match delta {

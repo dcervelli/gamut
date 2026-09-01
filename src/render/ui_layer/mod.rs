@@ -223,24 +223,41 @@ pub struct UiFrame {
     layers: [Layer; LAYERS],
     /// Which layer primitives are being added to.
     current: usize,
+    /// Device pixels to the logical one. Everything here is laid out in
+    /// logical pixels and converted on the way to the GPU; this is kept only
+    /// so that [`UiFrame::hairline`] can put a line on the device's own grid,
+    /// which is the one place the difference between the two is visible.
+    scale: f32,
 }
 
 impl UiFrame {
-    pub fn new() -> Self {
+    pub fn new(scale: f32) -> Self {
         Self {
             layers: Default::default(),
             current: 0,
+            scale,
         }
     }
 
-    /// Moves to the layer that floats over everything emitted so far.
+    /// Runs `draw` on the layer that floats over everything emitted so far,
+    /// and returns to the layer that was current.
     ///
-    /// What is drawn after this covers the words on the panels underneath as
-    /// well as the panels themselves, which is what an open menu has to do:
-    /// it is the thing being looked at while it is open, and a histogram's
-    /// axis label showing through it would say otherwise.
-    pub fn overlay(&mut self) {
+    /// What is drawn inside covers the words on the panels underneath as well
+    /// as the panels themselves, which is what an open menu has to do — it is
+    /// the thing being looked at while it is open, and a histogram's axis
+    /// label showing through it would say otherwise — and what a button that
+    /// appears over the words it acts on has to do for the same reason.
+    ///
+    /// Scoped rather than a switch, because the interface is not built in the
+    /// order it is stacked: the info panel floats over the content area but is
+    /// drawn before the bars, so a button of its own that simply moved to the
+    /// top layer would take the bars up there with it.
+    pub fn over<T>(&mut self, draw: impl FnOnce(&mut Self) -> T) -> T {
+        let was = self.current;
         self.current = LAYERS - 1;
+        let drawn = draw(self);
+        self.current = was;
+        drawn
     }
 
     fn layer(&mut self) -> &mut Layer {
@@ -260,6 +277,63 @@ impl UiFrame {
             corner: 0.0,
             blend,
         }));
+    }
+
+    /// What a line `thickness` logical pixels thick is actually drawn: the
+    /// nearest whole number of device pixels to it, given back in logical
+    /// ones, and never fewer than one — a line thinner than a device pixel is
+    /// not a fainter line but a line drawn at random.
+    ///
+    /// Anything laying one line against another needs this, since the answer
+    /// is not what was asked for.
+    pub fn line_width(&self, thickness: f32) -> f32 {
+        if self.scale.is_finite() && self.scale > 0.0 {
+            (thickness * self.scale).round().max(1.0) / self.scale
+        } else {
+            thickness
+        }
+    }
+
+    /// Draws a line `thickness` logical pixels thick, on the device's own
+    /// grid.
+    ///
+    /// A display need not have a whole number of device pixels to the logical
+    /// one — 1.6 of them is an ordinary scale — so a line a logical pixel
+    /// thick falls across two device pixels in whatever proportion its
+    /// position happens to give, and the shader's half-pixel feather then
+    /// takes a bite out of both. How much is left depends on where the line
+    /// landed, which is why two rules drawn to the same width come out at two
+    /// weights, and why the fainter of them reads as a mistake.
+    ///
+    /// Snapped, a line is a whole number of device pixels at a whole device
+    /// pixel: the feather has nothing to work on and every line in the window
+    /// drawn to one width is the same line. It keeps the weight it was asked
+    /// for rather than being cut to a single device pixel, so that a display
+    /// with two device pixels to the logical one does not draw the whole
+    /// interface at half strength.
+    ///
+    /// Which way the line runs is taken from the rectangle: the long side is
+    /// its length, and the short one is replaced by the snapped thickness.
+    pub fn line(&mut self, rect: Rect, thickness: f32, color: Color) {
+        if !(self.scale.is_finite() && self.scale > 0.0) {
+            self.rect(rect, color);
+            return;
+        }
+        let device = |value: f32| (value * self.scale).round() / self.scale;
+        let thickness = self.line_width(thickness);
+        let (x, y) = (device(rect.x), device(rect.y));
+        let snapped = if rect.width >= rect.height {
+            Rect::new(x, y, device(rect.right()) - x, thickness)
+        } else {
+            Rect::new(x, y, thickness, device(rect.bottom()) - y)
+        };
+        self.rect(snapped, color);
+    }
+
+    /// A rule one logical pixel thick: what parts a bar from the content, or
+    /// one section of the info panel's column from the next.
+    pub fn hairline(&mut self, rect: Rect, color: Color) {
+        self.line(rect, 1.0, color);
     }
 
     pub fn rounded_rect(&mut self, rect: Rect, corner: f32, color: Color) {
@@ -473,12 +547,6 @@ impl UiFrame {
             wrap: true,
             clip: Some(clip),
         });
-    }
-}
-
-impl Default for UiFrame {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

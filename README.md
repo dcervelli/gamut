@@ -415,6 +415,38 @@ group that came to nothing is not carried at all, an empty heading being a
 question about where the rest of it went. Nothing there is a tag number or an
 offset by the time the interface sees it.
 
+The panel is also the one part of the interface that is read out rather than
+merely read. A click on a field copies it, a click on a heading copies the
+section under it, and a button in a header above the column copies the lot.
+Each takes as much of a table as what was clicked actually is: the whole
+panel is three columns, a row of it having to name its section to be worth
+anything beside a row from another; a section is two, every row of it having
+come from the one that was clicked, so that naming it down the column would
+be saying once per row what the click already said; and one field is not a
+table at all but the value, as it is written. What is offered is plain text:
+it is CSV in what it says rather than in how it is offered, because a copy is
+bound for somewhere else and every place words can be pasted takes those,
+where CSV alone would paste into a spreadsheet and nowhere else. Where there
+are columns to keep apart, a value holding a comma — a size with its digits
+grouped, a coordinate, half of what a raster says about its ground — is
+quoted, or the row would not survive being read back; a field copied on its
+own is not, there being nothing for it to run into.
+
+Which means three lists rather than one, each derived from the last: the
+words, then where they go, then what can be pointed at. One index runs
+through all three, so what is under the pointer, what is drawn lit and what
+lands on the clipboard cannot come to disagree. The button that says what a
+click would take appears over the words rather than beside them, on the layer
+above so that it covers them — the column is as wide as the panel lets it be,
+and there is no margin to stand a button in — and nudged back inside the panel
+where being centred on what it copies would hang it over an edge. A press on
+the panel starts a scroll of the column as well, the two gestures being one
+and the same at the moment the button goes down, so the copy is made only if
+the button comes back up without the pointer having gone anywhere. And the
+button goes away while the column is scrolling: the pointer is not moving,
+the words under it are, and a button that followed whichever of them happened
+to be passing would blink from field to field all the way down.
+
 A raster is read through a different handful of fields, and they are not EXIF
 at all. GeoTIFF shares the TIFF directory rather than taking a container of
 its own, and packs a directory of *keys* into one tag with two more holding

@@ -142,6 +142,7 @@ impl App {
                 show_minimap: minimap,
                 show_grid: false,
                 hover: None,
+                info_hover: None,
                 menu: None,
             },
             reported_error: false,
@@ -267,6 +268,21 @@ impl App {
             return 0.0;
         };
         ui::info::max_scroll(renderer, current, panel)
+    }
+
+    /// What clicking where the pointer is would copy out of the info panel,
+    /// and so which of its copy buttons is showing. `None` when the pointer
+    /// is somewhere else, or on a part of the panel that copies nothing.
+    pub(super) fn info_copyable(&mut self) -> Option<ui::info::Copyable> {
+        let panel = self.pointer_over_info()?;
+        let point = self.logical_cursor()?;
+        let scroll = self.panels.info_scroll;
+        // Split borrow, as in `info_overflow`.
+        let (Some(renderer), Some(current)) = (self.renderer.as_mut(), self.current.as_ref())
+        else {
+            return None;
+        };
+        ui::info::copyable_at(renderer, current, panel, scroll, point)
     }
 
     /// How far the column in `panel` moves for each logical pixel a drag of
@@ -818,7 +834,13 @@ impl ApplicationHandler<Decoded> for App {
             }
             // A drag the window did not see end — the button came up over
             // another window, say — would otherwise resume on the next motion.
+            //
+            // Whatever the press had hold of on the info panel is dropped
+            // rather than copied: losing the window is not a click, and a
+            // copy is bound for somewhere else, where an unasked-for one
+            // would be pasted in place of whatever the user had meant to keep.
             WindowEvent::Focused(false) => {
+                self.pointer.copying = None;
                 let _ = self.handle_button(ElementState::Released, MouseButton::Left);
                 Effect::Nothing
             }
