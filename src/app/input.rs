@@ -17,8 +17,10 @@ use super::App;
 use crate::clipboard;
 use crate::image::display::{Colormap, Startup};
 use crate::image::encode;
+use crate::render::Rect;
 use crate::timing;
 use crate::ui::info::Copyable;
+use crate::ui::layers::Hit;
 use crate::ui::{self, Current, Menu, Widget};
 
 /// Window pixels moved per arrow-key press.
@@ -723,86 +725,55 @@ impl App {
             self.copy_facts(copies);
         }
 
-        // The info panel floats over the image and inside the chrome, so it
-        // is asked before either: the press starts a drag of the column
-        // instead of one of the picture underneath. It can be on screen with
-        // the chrome hidden, so this is outside the test for that below.
+        if state == ElementState::Pressed {
+            // Wherever this one is going, it is not the press that went down
+            // on the info panel, so there is nothing left to copy.
+            self.pointer.copying = None;
+        }
+
+        // A press goes to the layer it lands on and no further: the panels
+        // are opaque to the pointer, so exactly one of them answers, and one
+        // that misses a button is still spent where it landed rather than
+        // reaching the picture behind it. A press that arrives before any
+        // motion has said where the pointer is has no layer to land on, and
+        // belongs to the image — as a release always does.
         if state == ElementState::Pressed
-            && let Some(panel) = self.pointer_over_info()
+            && let Some(hit) = self.pointer_hit()
         {
-            self.pointer.copying = self.info_copyable().zip(self.pointer.cursor);
-            self.pointer.scrolling = true;
-            // As with a drag of the image: the first motion after the press
-            // establishes the point the drag is measured from.
-            self.pointer.drag_from = self.pointer.cursor;
-            // The closed hand is a promise that dragging will move something,
-            // so a column with nothing left to scroll does not make it.
-            let icon = if self.info_overflow(panel) > 0.0 {
-                CursorIcon::Grabbing
-            } else {
-                CursorIcon::Default
-            };
-            if let Some(window) = &self.window {
-                window.set_cursor(Cursor::Icon(icon));
+            // The menu that is open takes it first, wherever it is: a press
+            // on a cell chooses and closes, one anywhere else dismisses and
+            // is spent doing exactly that.
+            if self.menu_has_pointer(Some(hit)) {
+                self.panels.menu = None;
+                // The cell that had the highlight is no longer there at all.
+                self.update_hover();
+                return true;
             }
-            return false;
-        }
-
-        // Anywhere but the info panel, so nothing to copy.
-        self.pointer.copying = None;
-
-        // And the histogram panel on the same terms, for the same reason: a
-        // press on it is aimed at it, and one that misses its buttons is
-        // still spent there rather than starting a drag of the picture behind
-        // it.
-        if state == ElementState::Pressed
-            && self.pointer_over_histogram()
-            && let Some(point) = self.logical_cursor()
-        {
-            let Some(widget) = self.histogram_widget_at(point) else {
-                return false;
-            };
-            self.press(widget);
-            self.update_hover();
-            return true;
-        }
-
-        // The chrome gets first refusal. A press that lands on a panel is
-        // aimed at the interface, so it neither reaches a widget's neighbour
-        // nor starts a drag of the image underneath.
-        if state == ElementState::Pressed
-            && self.panels.show_ui
-            && let Some(point) = self.logical_cursor()
-        {
-            // An open menu comes before the chrome and before the image: a
-            // press on a cell chooses and closes, one anywhere off the panel
-            // closes and is spent doing exactly that, and one on the panel
-            // but between cells lands on nothing at all.
-            if let Some(menu) = self.panels.menu {
-                let popup = self.chrome().popup(menu, self.panels.show_grid);
-                match popup.as_ref().and_then(|popup| popup.item_at(point)) {
-                    Some(index) => self.press(Widget::Cell(index)),
-                    None if popup.as_ref().is_none_or(|popup| !popup.contains(point)) => {
-                        self.panels.menu = None;
+            match hit {
+                // The picture: on to the drag below.
+                Hit::Image => {}
+                // The info panel's column, which the press starts a drag of
+                // instead of one of the picture underneath.
+                Hit::Info => {
+                    // The layer that answered is the panel, so it is on
+                    // screen and has a rectangle to be dragged against.
+                    if let Some(panel) = self.info_panel() {
+                        self.press_info(panel);
                     }
-                    None => return false,
+                    return false;
                 }
-                // The cell that had the highlight is no longer under the
-                // pointer, or no longer there at all.
-                self.update_hover();
-                return true;
-            }
-
-            let chrome = self.chrome();
-            if let Some(widget) = chrome.widget_at(point, self.panels.show_grid) {
-                self.press(widget);
-                // The zoom readout keeps the pointer over it as it opens its
-                // menu, and the highlight belongs to the menu from here on.
-                self.update_hover();
-                return true;
-            }
-            if chrome.contains(point) {
-                return false;
+                _ => match hit.widget() {
+                    Some(widget) => {
+                        self.press(widget);
+                        // The zoom readout keeps the pointer over it as it
+                        // opens its menu, and the highlight belongs to the
+                        // menu from here on.
+                        self.update_hover();
+                        return true;
+                    }
+                    // A panel, between its buttons or with none at all.
+                    None => return false,
+                },
             }
         }
 
@@ -826,6 +797,28 @@ impl App {
             window.set_cursor(Cursor::Icon(icon));
         }
         false
+    }
+
+    /// Takes a press on the info panel: it starts a drag of the column, and
+    /// may turn out to have been a click on one of its copy buttons — the two
+    /// are indistinguishable at the moment the button goes down, so both are
+    /// begun and the release decides which it was.
+    fn press_info(&mut self, panel: Rect) {
+        self.pointer.copying = self.info_copyable().zip(self.pointer.cursor);
+        self.pointer.scrolling = true;
+        // As with a drag of the image: the first motion after the press
+        // establishes the point the drag is measured from.
+        self.pointer.drag_from = self.pointer.cursor;
+        // The closed hand is a promise that dragging will move something, so
+        // a column with nothing left to scroll does not make it.
+        let icon = if self.info_overflow(panel) > 0.0 {
+            CursorIcon::Grabbing
+        } else {
+            CursorIcon::Default
+        };
+        if let Some(window) = &self.window {
+            window.set_cursor(Cursor::Icon(icon));
+        }
     }
 
     /// Follows the pointer. Returns `true` if the frame is now out of date —
@@ -910,50 +903,24 @@ impl App {
     /// anything under the pointer lit that was not, or dark that was — and
     /// because a press or a scroll that moves one can move the other.
     pub(super) fn update_hover(&mut self) -> bool {
-        let hover = self
-            .logical_cursor()
-            .and_then(|point| self.widget_at(point));
-        // Not gated on the bars: the panel can be on screen with the chrome
-        // hidden, and its buttons go with it.
-        let info = self.info_copyable();
+        let hit = self.pointer_hit();
+        // Nothing behind an open menu lights up: the press that would land
+        // there dismisses the menu rather than reaching the button under it,
+        // and a button that lights for a press it will not get is a lie.
+        //
+        // The info panel's rows are asked separately because they are not
+        // chrome widgets: which one the pointer is on takes the fonts to
+        // answer. Not gated on the bars either — the panel can be on screen
+        // with the chrome hidden, and its buttons go with it.
+        let (hover, info) = if self.menu_has_pointer(hit) {
+            (None, None)
+        } else {
+            (hit.and_then(Hit::widget), self.info_copyable())
+        };
         let changed = hover != self.panels.hover || info != self.panels.info_hover;
         self.panels.hover = hover;
         self.panels.info_hover = info;
         changed
-    }
-
-    /// Which widget a point lands on. An open menu floats over the interface,
-    /// so its cells are tested instead of what is underneath them — including
-    /// the button that opened it, which a press dismisses the menu from
-    /// rather than opening a second one.
-    fn widget_at(&self, point: [f32; 2]) -> Option<Widget> {
-        let chrome = self.chrome();
-        if let Some(menu) = self.panels.menu {
-            return chrome
-                .popup(menu, self.panels.show_grid)
-                .and_then(|popup| popup.item_at(point))
-                .map(Widget::Cell);
-        }
-        // The histogram's own controls come before the chrome behind them,
-        // the panel being over the picture and inside the bars — and they are
-        // asked whether or not the bars are showing, since the panel is.
-        if let Some(widget) = self.histogram_widget_at(point) {
-            return Some(widget);
-        }
-        if !self.panels.show_ui {
-            return None;
-        }
-        chrome.widget_at(point, self.panels.show_grid)
-    }
-
-    /// Which button of the histogram panel a point lands on, if the panel is
-    /// on screen and has an image to be about.
-    fn histogram_widget_at(&self, point: [f32; 2]) -> Option<Widget> {
-        if !self.panels.show_histogram {
-            return None;
-        }
-        let gray = self.current.as_ref()?.image.channels().is_gray();
-        ui::histogram::widget_at(self.content(), point, gray)
     }
 
     /// Acts on a press. The keys that stand in for the toggles come through
@@ -1030,11 +997,27 @@ impl App {
             return false;
         }
 
-        // The info panel takes the wheel while the pointer is over it: a
-        // column with more to say than fits is what a wheel is for, and the
-        // image behind the panel is not what the gesture was aimed at.
-        if let Some(scrolled) = self.scroll_info(delta) {
-            return self.forget_info_hover() || scrolled;
+        // The wheel goes to the layer the pointer is on, as a press does.
+        let hit = self.pointer_hit();
+        if self.menu_has_pointer(hit) {
+            return false;
+        }
+        match hit {
+            // The info panel takes it: a column with more to say than fits is
+            // what a wheel is for, and the image behind the panel is not what
+            // the gesture was aimed at.
+            Some(Hit::Info) => {
+                let scrolled = self.scroll_info(delta).unwrap_or(false);
+                return self.forget_info_hover() || scrolled;
+            }
+            // Every other panel is opaque to the wheel as it is to a press,
+            // and has nothing to do with one: the spin is spent there rather
+            // than zooming the picture it is floating over.
+            Some(Hit::Cell(_) | Hit::Menu | Hit::Minimap | Hit::Histogram(_) | Hit::Chrome(_)) => {
+                return false;
+            }
+            // The picture, or a pointer that has not yet said where it is.
+            Some(Hit::Image) | None => {}
         }
 
         let steps = match delta {
