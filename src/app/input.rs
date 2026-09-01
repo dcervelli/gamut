@@ -9,8 +9,8 @@ use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{Cursor, CursorIcon};
 
 use super::App;
-use crate::image::display::Startup;
-use crate::ui::{Current, Menu, Widget};
+use crate::image::display::{Colormap, Startup};
+use crate::ui::{self, Current, Menu, Widget};
 
 /// Window pixels moved per arrow-key press.
 const PAN_STEP: f32 = 64.0;
@@ -220,7 +220,7 @@ pub const KEYS: &[Binding] = &[
     Binding {
         section: Section::Display,
         shown: "r",
-        help: "Reset display settings",
+        help: "Reset the window, exposure and tone map",
         keys: &[(Char("r"), ResetDisplay), (Char("R"), ResetDisplay)],
     },
     Binding {
@@ -416,10 +416,8 @@ impl App {
                 });
             }
             ResetDisplay => {
-                return self.adjust(|current, startup| {
-                    current
-                        .display
-                        .reset(&current.stats, &current.image, startup);
+                return self.adjust(|current, _| {
+                    current.display.reset(&current.stats, &current.image);
                     true
                 });
             }
@@ -475,6 +473,22 @@ impl App {
                 window.set_cursor(Cursor::Icon(icon));
             }
             return false;
+        }
+
+        // And the histogram panel on the same terms, for the same reason: a
+        // press on it is aimed at it, and one that misses its buttons is
+        // still spent there rather than starting a drag of the picture behind
+        // it.
+        if state == ElementState::Pressed
+            && self.pointer_over_histogram()
+            && let Some(point) = self.logical_cursor()
+        {
+            let Some(widget) = self.histogram_widget_at(point) else {
+                return false;
+            };
+            self.press(widget);
+            self.update_hover();
+            return true;
         }
 
         // The chrome gets first refusal. A press that lands on a panel is
@@ -567,8 +581,8 @@ impl App {
             // for a long column is a good deal further than the pointer went.
             // Motion arrives in physical pixels and the column is laid out in
             // logical ones.
-            let by = (position[1] - from[1]) / self.scale_factor()
-                * self.info_scroll_per_drag(panel);
+            let by =
+                (position[1] - from[1]) / self.scale_factor() * self.info_scroll_per_drag(panel);
             // The readouts are owed a redraw too, for a drag that has
             // carried the pointer off the panel and onto the image.
             return self.scroll_info_by(panel, by) || moved_pixel;
@@ -596,7 +610,6 @@ impl App {
     pub(super) fn update_hover(&mut self) -> bool {
         let hover = self
             .logical_cursor()
-            .filter(|_| self.panels.show_ui)
             .and_then(|point| self.widget_at(point));
         let changed = hover != self.panels.hover;
         self.panels.hover = hover;
@@ -609,13 +622,32 @@ impl App {
     /// rather than opening a second one.
     fn widget_at(&self, point: [f32; 2]) -> Option<Widget> {
         let chrome = self.chrome();
-        match self.panels.menu {
-            Some(menu) => chrome
+        if let Some(menu) = self.panels.menu {
+            return chrome
                 .popup(menu, self.panels.show_grid)
                 .and_then(|popup| popup.item_at(point))
-                .map(Widget::Cell),
-            None => chrome.widget_at(point, self.panels.show_grid),
+                .map(Widget::Cell);
         }
+        // The histogram's own controls come before the chrome behind them,
+        // the panel being over the picture and inside the bars — and they are
+        // asked whether or not the bars are showing, since the panel is.
+        if let Some(widget) = self.histogram_widget_at(point) {
+            return Some(widget);
+        }
+        if !self.panels.show_ui {
+            return None;
+        }
+        chrome.widget_at(point, self.panels.show_grid)
+    }
+
+    /// Which button of the histogram panel a point lands on, if the panel is
+    /// on screen and has an image to be about.
+    fn histogram_widget_at(&self, point: [f32; 2]) -> Option<Widget> {
+        if !self.panels.show_histogram {
+            return None;
+        }
+        let gray = self.current.as_ref()?.image.channels().is_gray();
+        ui::histogram::widget_at(self.content(), point, gray)
     }
 
     /// Acts on a press. The keys that stand in for the toggles come through
@@ -636,6 +668,24 @@ impl App {
                     && chrome.popup(Menu::Zoom, self.panels.show_grid).is_some()
                 {
                     self.panels.menu = Some(Menu::Zoom);
+                }
+            }
+            Widget::Luma => self.panels.show_luma = !self.panels.show_luma,
+            Widget::Planes => self.panels.show_planes = !self.panels.show_planes,
+            // The action the key runs, rather than a second reading of what
+            // "reset" means: two of them would answer differently the first
+            // time either was touched, and a button and a key that disagree
+            // about one word are worse than either alone.
+            Widget::Reset => {
+                // The caller redraws for every press, so the effect this
+                // hands back says nothing the caller does not already know.
+                let _ = self.perform(ResetDisplay);
+            }
+            Widget::Ramp(index) => {
+                if let Some(current) = self.current.as_mut()
+                    && let Some(map) = Colormap::ALL.get(index)
+                {
+                    current.display.colormap = *map;
                 }
             }
             Widget::Cell(index) => {

@@ -53,7 +53,7 @@ const PANEL_INSET: f32 = 10.0;
 /// a pixel boundary and coming out fatter than their neighbours. The
 /// information panel takes the same width so that the two line up down the
 /// right of the window, whether or not either has anything else on it.
-const PANEL_WIDTH: f32 = BINS as f32 + 2.0 * PANEL_INSET;
+const PANEL_WIDTH: f32 = histogram::TOOLBAR_WIDTH + BINS as f32 + 2.0 * PANEL_INSET;
 
 /// The corner radius of a floating panel.
 const PANEL_RADIUS: f32 = 6.0;
@@ -76,6 +76,14 @@ pub enum Widget {
     /// A cell of whichever menu is open. Which menu that is is
     /// [`Panels::menu`], so a cell needs only its place in the grid.
     Cell(usize),
+    /// The two plane toggles and the button that puts the rendering back,
+    /// down the left of the histogram panel.
+    Luma,
+    Planes,
+    Reset,
+    /// One of the false colours offered under that panel's ramp, by its place
+    /// in [`crate::image::display::Colormap::ALL`].
+    Ramp(usize),
 }
 
 /// The image on screen, with everything derived from it.
@@ -121,6 +129,11 @@ pub struct Panels {
     /// frame, and clamped where it is used: what it may run to depends on how
     /// tall the text comes out in the window as it is now.
     pub info_scroll: f32,
+    /// Which of the histogram's planes are drawn. Both can be off: the panel
+    /// still has its response curve and its ramp to read, and a toggle that
+    /// refuses to switch off is a toggle that owes an explanation.
+    pub show_luma: bool,
+    pub show_planes: bool,
     /// Whether the minimap is switched on. Whether it is actually on screen
     /// also asks whether there is anything off screen for it to point out —
     /// see [`FrameInput::minimap_on_screen`].
@@ -250,7 +263,7 @@ pub fn build_frame(
         grid::draw(&mut frame, current, view, input, content, grid_step, theme);
     }
     if panels.show_histogram {
-        histogram::draw(&mut frame, text, current, input, content, theme);
+        histogram::draw(&mut frame, text, current, input, panels, content, theme);
     }
     if input.minimap_on_screen {
         minimap::draw(&mut frame, current, view, input, content, theme);

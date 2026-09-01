@@ -143,6 +143,16 @@ pub enum Colormap {
 }
 
 impl Colormap {
+    /// Every map, in the order the key cycles them — which is the order the
+    /// buttons under the histogram's ramp are laid out in, so that the two
+    /// ways of choosing one agree about what comes after what.
+    pub const ALL: [Colormap; 4] = [
+        Colormap::Gray,
+        Colormap::Viridis,
+        Colormap::Magma,
+        Colormap::Turbo,
+    ];
+
     pub fn label(self) -> &'static str {
         match self {
             Colormap::Gray => "gray",
@@ -396,8 +406,23 @@ impl Display {
         self.auto = AutoWindow::Manual;
     }
 
-    pub fn reset(&mut self, stats: &Stats, image: &DecodedImage, startup: Startup) {
-        *self = Self::for_image_with(image, stats, startup);
+    /// Puts the rendering back to what this image would open with if nothing
+    /// had been asked for: the window, the exposure and the tone curve as
+    /// [`Display::for_image_with`] chooses them for the file itself.
+    ///
+    /// Not back to what was asked for on the command line. An exposure given
+    /// there is a setting like any other, and a reset that answered to it
+    /// would do nothing at all for whoever had passed one — which is the one
+    /// person who has most reason to press it.
+    ///
+    /// The false colour is left where it is, being the one thing here that is
+    /// not a rendering decision: it says which of the file's numbers you are
+    /// trying to read, and a reset that threw that away would take the answer
+    /// with it. There is a key and a row of buttons for changing it.
+    pub fn reset(&mut self, stats: &Stats, image: &DecodedImage) {
+        let colormap = self.colormap;
+        *self = Self::for_image_with(image, stats, Startup::default());
+        self.colormap = colormap;
     }
 
     /// What this display state makes of one pixel: the number it becomes and
@@ -630,6 +655,17 @@ mod tests {
 
         assert_eq!(shaded, read_first);
         assert_ne!(read_first, curved_first, "the order is not a free choice");
+    }
+
+    /// The key and the row of buttons offer the same maps in the same order.
+    #[test]
+    fn cycling_the_false_colour_walks_the_row_of_them() {
+        let mut map = Colormap::ALL[0];
+        for expected in Colormap::ALL.into_iter().skip(1) {
+            map = map.next();
+            assert_eq!(map, expected);
+        }
+        assert_eq!(map.next(), Colormap::ALL[0], "and round again");
     }
 
     #[test]

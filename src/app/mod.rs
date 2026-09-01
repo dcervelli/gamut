@@ -120,6 +120,8 @@ impl App {
             panels: Panels {
                 show_ui: true,
                 show_histogram: histogram,
+                show_luma: true,
+                show_planes: true,
                 show_info: info,
                 info_scroll: 0.0,
                 show_minimap: minimap,
@@ -209,6 +211,16 @@ impl App {
     /// motion compares before and after to decide whether the frame on screen
     /// has gone out of date. It answers for the pointer over the plot and for
     /// the pixel under it alike, so either one moving on is caught here.
+    /// Whether the pointer is over the histogram panel, and so whether what
+    /// it is doing belongs to the panel rather than to the image behind it.
+    pub(super) fn pointer_over_histogram(&self) -> bool {
+        self.panels.show_histogram
+            && self.current.is_some()
+            && self
+                .logical_cursor()
+                .is_some_and(|point| ui::histogram::panel(self.content()).contains(point))
+    }
+
     pub(super) fn histogram_mark(&self) -> Option<usize> {
         if !self.panels.show_histogram {
             return None;
@@ -293,6 +305,14 @@ impl App {
     /// image runs on underneath the panels, where it is not drawn and so has
     /// no pixel to report.
     fn pointer_pixel(&self) -> Option<[u32; 2]> {
+        // A panel floating over the picture takes the pointer rather than
+        // letting it through: the bar would otherwise read out a pixel nobody
+        // can see, and the histogram's own mark would follow the pointer
+        // across its ramp and its buttons to whatever happened to be behind
+        // them.
+        if self.pointer_over_histogram() {
+            return None;
+        }
         let cursor = self.pointer.cursor?;
         let viewport = self.viewport();
         if !viewport.contains(cursor) {
