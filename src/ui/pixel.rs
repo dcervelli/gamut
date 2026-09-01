@@ -11,7 +11,7 @@
 //! and imagine a colour.
 
 use crate::image::display::Mapped;
-use crate::image::{DecodedImage, Sample, Samples, Transfer};
+use crate::image::{DecodedImage, Sample, Samples};
 use crate::render::{Color, Rect, TextMeasure, UiFrame};
 use crate::theme::Theme;
 
@@ -180,14 +180,8 @@ fn component(value: f32, float: bool) -> String {
 /// a swatch in a panel can show, and the panel is the thing it has to sit
 /// beside without glowing.
 fn swatch_color(mapped: &Mapped) -> Color {
-    let channel =
-        |value: f32| (Transfer::Srgb.to_encoded(value.clamp(0.0, 1.0)) * 255.0).round() as u8;
-    Color::rgba(
-        channel(mapped.color[0]),
-        channel(mapped.color[1]),
-        channel(mapped.color[2]),
-        (mapped.alpha.clamp(0.0, 1.0) * 255.0).round() as u8,
-    )
+    Color::from_linear(mapped.color)
+        .with_alpha((mapped.alpha.clamp(0.0, 1.0) * 255.0).round() as u8)
 }
 
 #[cfg(test)]
