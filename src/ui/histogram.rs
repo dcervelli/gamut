@@ -151,8 +151,8 @@ fn plot_area(panel: Rect, gray: bool) -> Rect {
 /// close the gap up. Hiding rather than dimming is the panel's rule for both
 /// of these — see [`swatch_button`] for the other one.
 fn toolbar(gray: bool) -> &'static [Widget] {
-    const GRAY: [Widget; 2] = [Widget::Luma, Widget::Reset];
-    const COLOUR: [Widget; 3] = [Widget::Luma, Widget::Planes, Widget::Reset];
+    const GRAY: [Widget; 3] = [Widget::Luma, Widget::Log, Widget::Reset];
+    const COLOUR: [Widget; 4] = [Widget::Luma, Widget::Planes, Widget::Log, Widget::Reset];
     if gray { &GRAY } else { &COLOUR }
 }
 
@@ -231,6 +231,33 @@ fn bin_across(index: usize) -> f32 {
         0 => 0.0,
         last if last == BINS - 1 => 1.0,
         _ => (index as f32 + 0.5) / BINS as f32,
+    }
+}
+
+/// How tall a bin's bar stands, from 0 on the axis to 1 at the top of the
+/// plot, against the fullest bin drawn beside it.
+///
+/// Linear is what a photograph wants and what a photo editor draws: the
+/// height of a bin is its share of the fullest one, and the shape read off
+/// the plot is the distribution itself. It is the wrong plot for measurement
+/// data, where one bin often holds most of the image — a masked sea, the
+/// surround of a scan — and flattens everything the rest of the range is
+/// doing into the axis. A value the file declares as nodata is already
+/// thrown out by [`crate::image::Stats::scan`], so the bin that does this is
+/// a background the file says nothing about. Logarithmic is that same plot
+/// with the tall bin cut down to where the short ones can be seen beside it.
+///
+/// `ln(1 + n)` rather than `ln(n)`: an empty bin stays flat on the axis,
+/// where a floored logarithm would lift it off and draw a count that is not
+/// there, and the fullest bin still reaches the top either way. What is lost
+/// is that two bars can no longer be compared by their heights — which is the
+/// switch's whole point, and why it is a switch and not the plot.
+fn bar_fraction(count: u32, peak: u32, log: bool) -> f32 {
+    let (count, peak) = (count as f32, peak.max(1) as f32);
+    if log {
+        count.ln_1p() / peak.ln_1p()
+    } else {
+        count / peak
     }
 }
 
@@ -411,13 +438,8 @@ pub(super) fn draw(
         .flatten()
         .copied()
         .max()
-        .unwrap_or(1)
-        .max(1) as f32;
-    // Strictly linear in the counts, the way a photo editor plots it: the
-    // height of a bin is its share of the fullest one. A single dominating
-    // bin — a nodata background, say — will flatten the rest, which is a
-    // measurement-data problem to solve separately.
-    let height_of = |count: u32| (count as f32 / peak) * bars.height;
+        .unwrap_or(1);
+    let height_of = |count: u32| bar_fraction(count, peak, panels.log_counts) * bars.height;
     // One point per bin, at its centre, with the ends carried out to the
     // edges of the plot so the shape fills its width.
     let curve = |counts: &[u32; BINS]| -> Vec<[f32; 2]> {
@@ -621,6 +643,7 @@ fn controls(
         let active = match widget {
             Widget::Luma => panels.show_luma,
             Widget::Planes => panels.show_planes,
+            Widget::Log => panels.log_counts,
             // The reset is never lit, where the two above it are: it does
             // something rather than being something, and a momentary button
             // holding a state is a button that has to explain itself.
@@ -669,6 +692,24 @@ fn controls(
                         *plane,
                     );
                 }
+            }
+            // The count axis as the shape it takes: a curve that climbs fast
+            // and then flattens, which is the log of a straight line and is
+            // what the switch does to the bars. Stroked rather than filled,
+            // the way the response curve on the plot beside it is — this is a
+            // line about the plot, not a plane drawn on it.
+            Widget::Log => {
+                let icon = button.inset(ICON_INSET, ICON_INSET);
+                let curve: Vec<[f32; 2]> = (0..=8)
+                    .map(|step| {
+                        let across = step as f32 / 8.0;
+                        [
+                            icon.x + across * icon.width,
+                            icon.bottom() - across.powf(0.42) * icon.height,
+                        ]
+                    })
+                    .collect();
+                frame.polyline(&curve, CURVE_WIDTH, ink, Blend::Over);
             }
             // Back to the start: the bar and the triangle a transport control
             // uses, which is what this does to the rendering.
@@ -793,6 +834,14 @@ mod tests {
             assert!(button.right() <= bars.x, "the strip clears the plot");
             assert!(toolbar_button(panel, gray, 0).y >= panel.y);
             assert!(button.bottom() <= panel.bottom(), "{button:?}");
+            // And it ends above the band of colour, which is what the room
+            // under the plot is for: a button beside the ramp would read as
+            // belonging to it rather than to the plot it acts on.
+            assert!(
+                button.bottom() <= ramp(bars).y,
+                "gray {gray}: {button:?} against the band at {:?}",
+                ramp(bars)
+            );
             assert!(ramp(bars).y >= bars.bottom(), "the band is under the plot");
             assert!(ramp(bars).bottom() <= panel.bottom());
         }
@@ -860,10 +909,10 @@ mod tests {
         let content = Rect::new(0.0, 0.0, 800.0, 600.0);
         let panel = panel(content);
 
-        assert_eq!(toolbar(true), [Widget::Luma, Widget::Reset]);
+        assert_eq!(toolbar(true), [Widget::Luma, Widget::Log, Widget::Reset]);
         assert_eq!(
             toolbar(false),
-            [Widget::Luma, Widget::Planes, Widget::Reset],
+            [Widget::Luma, Widget::Planes, Widget::Log, Widget::Reset],
             "three channels have planes to toggle"
         );
         // The reset moves up into the room the planes toggle is not taking.
@@ -882,6 +931,48 @@ mod tests {
             None,
             "three channels are their own colour, and the false ones are not applied"
         );
+    }
+
+    /// Either way of scaling the plot draws an empty bin flat on the axis and
+    /// the fullest one at the top of it: what changes is only what the bins
+    /// between them do with the room.
+    #[test]
+    fn both_count_axes_run_from_the_axis_to_the_top_of_the_plot() {
+        for log in [false, true] {
+            assert_eq!(bar_fraction(0, 1000, log), 0.0, "an empty bin is flat");
+            assert_eq!(bar_fraction(1000, 1000, log), 1.0, "the peak fills it");
+            // A plot of nothing at all, which a blank image gives: no bar is
+            // drawn off the top of it.
+            assert_eq!(bar_fraction(0, 0, log), 0.0);
+        }
+    }
+
+    /// And the logarithm lifts the short bars towards the tall one, which is
+    /// the whole reason to reach for it: a bin holding a thousandth of what
+    /// the fullest one holds is a hair off the axis linearly, and half the
+    /// height of the plot once the axis is logarithmic.
+    #[test]
+    fn the_logarithm_lifts_the_bins_a_dominating_one_flattens() {
+        let (linear, log) = (
+            bar_fraction(1_000, 1_000_000, false),
+            bar_fraction(1_000, 1_000_000, true),
+        );
+        assert!(linear < 0.01, "{linear}");
+        assert!((0.4..0.6).contains(&log), "{log}");
+
+        // Monotone either way: a fuller bin is never drawn shorter than an
+        // emptier one, which is what keeps the shape on the plot readable as
+        // the distribution however it is scaled.
+        for log in [false, true] {
+            let heights: Vec<f32> = [0, 1, 2, 10, 500, 999, 1000]
+                .into_iter()
+                .map(|count| bar_fraction(count, 1000, log))
+                .collect();
+            assert!(
+                heights.windows(2).all(|pair| pair[0] < pair[1]),
+                "log {log}: {heights:?}"
+            );
+        }
     }
 
     /// The readout is set in the middle of the line, and the ends of the axis

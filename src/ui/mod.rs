@@ -79,10 +79,12 @@ pub enum Widget {
     /// A cell of whichever menu is open. Which menu that is is
     /// [`Panels::menu`], so a cell needs only its place in the grid.
     Cell(usize),
-    /// The two plane toggles and the button that puts the rendering back,
-    /// down the left of the histogram panel.
+    /// The two plane toggles, the switch between a linear and a logarithmic
+    /// count axis, and the button that puts the rendering back, down the left
+    /// of the histogram panel.
     Luma,
     Planes,
+    Log,
     Reset,
     /// One of the false colours offered under that panel's ramp, by its place
     /// in [`crate::image::display::Colormap::ALL`].
@@ -140,6 +142,11 @@ pub struct Panels {
     /// refuses to switch off is a toggle that owes an explanation.
     pub show_luma: bool,
     pub show_planes: bool,
+    /// Whether the plot's bars are as tall as the logarithm of their counts
+    /// rather than as tall as the counts themselves. Off by default, which is
+    /// what a photograph wants; on, a measurement's one dominating bin — a
+    /// masked sea, the surround of a scan — stops flattening everything else.
+    pub log_counts: bool,
     /// Whether the minimap is switched on. Whether it is actually on screen
     /// also asks whether there is anything off screen for it to point out —
     /// see [`FrameInput::minimap_on_screen`].

@@ -100,6 +100,7 @@ top of a colormap would distort the values you are reading off it.
 | Key | What it does |
 | --- | --- |
 | `h` | Show or hide the histogram |
+| `l` | Count the histogram's bars up its axis, or the logarithm of them |
 | `i` | Show or hide the file information |
 | `m` | Show or hide the minimap |
 | `g` | Show or hide the grid over the image |
@@ -108,6 +109,17 @@ top of a colormap would distort the values you are reading off it.
 
 The panels are opaque and the image is fitted inside them, so hiding them
 gives a fitted image more room and it re-fits immediately.
+
+The histogram plots each bar as its share of the fullest one, which is the
+plot a photograph wants. It is the wrong plot for measurement data, where one
+value often covers most of the image — a masked sea, the black surround of a
+scan — and that one bar flattens everything the rest of the range is doing
+into the axis. `l`, or the curve button beside the plot, counts the
+logarithm instead: the tall bar stays at the top and the short ones rise to
+where they can be read beside it. Heights can no longer be compared with each
+other once it is on, which is the point of it being a switch. It applies to
+whichever image is on screen and stays as you set it, and setting it while the
+histogram is closed leaves it that way for when you open it.
 
 The histogram, the file information and the minimap float over the image
 rather than sitting in the bars, so `` ` `` leaves them where they are.

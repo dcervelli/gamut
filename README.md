@@ -49,6 +49,7 @@ Both ship as standard on the distributions above.
 | `c` | Cycle false colour (single-channel images) |
 | `r` | Reset display settings |
 | `h` | Toggle the histogram |
+| `l` | Toggle a logarithmic count axis on it |
 | `i` | Toggle the file information panel |
 | `m` | Toggle the minimap |
 | `` ` `` | Toggle the interface panels |

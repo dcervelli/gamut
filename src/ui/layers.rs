@@ -165,6 +165,7 @@ mod tests {
             info_scroll: 0.0,
             show_luma: true,
             show_planes: true,
+            log_counts: false,
             show_minimap: true,
             show_grid: false,
             hover: None,

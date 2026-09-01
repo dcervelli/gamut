@@ -138,6 +138,7 @@ impl App {
                 show_histogram: histogram,
                 show_luma: true,
                 show_planes: true,
+                log_counts: false,
                 show_info: info,
                 info_scroll: 0.0,
                 show_minimap: minimap,

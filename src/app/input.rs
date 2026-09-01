@@ -53,6 +53,10 @@ pub enum Action {
     /// histogram and information panel are closed on the way past.
     ToggleInterfaceAndPanels,
     ToggleHistogram,
+    /// Whether that panel's plot counts up its axis or the logarithm of its
+    /// counts. About the plot rather than about the image, which is why it
+    /// is not one of the things [`Action::ResetDisplay`] puts back.
+    ToggleLogCounts,
     ToggleInfo,
     ToggleMinimap,
     ToggleGrid,
@@ -331,6 +335,13 @@ pub const KEYS: &[Binding] = &[
     Binding {
         section: Section::Display,
         mods: PLAIN,
+        shown: "l",
+        help: "Toggle a logarithmic count axis on the histogram",
+        keys: &[(Char("l"), ToggleLogCounts), (Char("L"), ToggleLogCounts)],
+    },
+    Binding {
+        section: Section::Display,
+        mods: PLAIN,
         shown: "i",
         help: "Toggle the file information panel",
         keys: &[(Char("i"), ToggleInfo), (Char("I"), ToggleInfo)],
@@ -518,6 +529,7 @@ impl App {
                 return self.perform(ToggleInterface);
             }
             ToggleHistogram => self.press(Widget::Histogram),
+            ToggleLogCounts => self.press(Widget::Log),
             ToggleInfo => self.press(Widget::Info),
             ToggleMinimap => self.press(Widget::Minimap),
             ToggleGrid => self.press(Widget::Grid),
@@ -945,6 +957,10 @@ impl App {
             }
             Widget::Luma => self.panels.show_luma = !self.panels.show_luma,
             Widget::Planes => self.panels.show_planes = !self.panels.show_planes,
+            // The plot's own axis rather than anything about the rendering,
+            // which is why the reset below leaves it alone: it is how the
+            // measurement is being read, not what is being read.
+            Widget::Log => self.panels.log_counts = !self.panels.log_counts,
             // The action the key runs, rather than a second reading of what
             // "reset" means: two of them would answer differently the first
             // time either was touched, and a button and a key that disagree
