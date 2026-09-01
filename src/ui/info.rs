@@ -536,7 +536,7 @@ mod tests {
         let stats = Stats::scan(&image);
         Current {
             display: Display::for_image_with(&image, &stats, Startup::default()),
-            image,
+            image: std::sync::Arc::new(image),
             stats,
             label: "kingfisher.png".into(),
             file: FileFacts {

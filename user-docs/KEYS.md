@@ -53,8 +53,16 @@ widens it. Transparency comes along only where the file had some; an opaque
 picture arrives opaque rather than carrying an empty channel. Everything
 arrives 8-bit, which is the depth the screen was showing it at.
 
+The picture is prepared in the background, so the window keeps answering while
+a large one is being got ready — a photograph of some tens of megapixels takes
+a fraction of a second, and only then is there anything to paste. Copying
+something else in the meantime wins: whichever copy you asked for last is the
+one you get, not whichever happened to finish last.
+
 Any of the three copies outlives the window: closing `image-view` leaves it on
-the clipboard, and it stays there until something else copies over it.
+the clipboard, and it stays there until something else copies over it. Quitting
+straight after copying is safe — a picture still being prepared is finished
+before the window goes.
 
 ## The display
 

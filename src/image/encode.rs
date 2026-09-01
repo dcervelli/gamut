@@ -15,12 +15,25 @@
 //! What comes out is 8-bit sRGB, which is what the screen was showing and what
 //! anything receiving a PNG expects. The tone curve has already decided what
 //! becomes of anything brighter than white.
+//!
+//! Running a per-pixel pipeline over every pixel is the slow way round, and it
+//! is sped up only in ways that cannot change the answer: the sRGB curve on
+//! the way out is a table rather than a `powf` ([`levels`]), and the rows are
+//! divided between threads, which changes who does the arithmetic and not what
+//! it is.
+
+use std::num::NonZero;
+use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
 use png::{BitDepth, ColorType, Compression, Encoder, SrgbRenderingIntent};
 
 use super::display::{Colormap, Display};
 use super::{Channels, DecodedImage, Transfer};
+
+/// Pixels below which the walk is not worth dividing: the threads cost more to
+/// start than they save on a picture this small.
+const PARALLEL_FROM: usize = 1 << 16;
 
 /// A displayed image reduced to the bytes a PNG stores.
 pub struct Raster {
@@ -53,26 +66,25 @@ pub fn displayed(image: &DecodedImage, display: &Display) -> Raster {
         (false, true) => Channels::Rgba,
     };
 
-    let pixels = image.width as usize * image.height as usize;
-    let mut data = Vec::with_capacity(pixels * channels.count());
-    for y in 0..image.height {
-        for x in 0..image.width {
-            // Only `None` outside the image, which this walk never goes.
-            let Some(sample) = image.sample(x, y) else {
-                continue;
-            };
-            let mapped = display.map(&sample);
-            if gray {
-                // Grey reaches the screen as the same number in all three, so
-                // any one of them is the whole of it.
-                data.push(quantise(mapped.color[0]));
-            } else {
-                data.extend(mapped.color.map(quantise));
+    let stride = image.width as usize * channels.count();
+    let height = image.height as usize;
+    let mut data = vec![0u8; stride * height];
+
+    // Divided by rows. Every pixel is decided by the file and the display
+    // state alone, so a band reads nothing another band writes and needs
+    // nothing from it; the split is over who does the work, not over what
+    // the work is.
+    let bands = bands(stride, height);
+    if bands == 1 {
+        fill(&mut data, 0, image, display, channels);
+    } else {
+        let rows = height.div_ceil(bands);
+        std::thread::scope(|scope| {
+            for (index, band) in data.chunks_mut(stride * rows).enumerate() {
+                let first = (index * rows) as u32;
+                scope.spawn(move || fill(band, first, image, display, channels));
             }
-            if alpha {
-                data.push(byte(mapped.alpha));
-            }
-        }
+        });
     }
 
     Raster {
@@ -80,6 +92,47 @@ pub fn displayed(image: &DecodedImage, display: &Display) -> Raster {
         height: image.height,
         channels,
         data,
+    }
+}
+
+/// How many ways to split the walk. One for a picture too small to be worth
+/// the threads, and never more bands than there are rows to put in them.
+fn bands(stride: usize, height: usize) -> usize {
+    if stride == 0 || height == 0 || stride * height < PARALLEL_FROM {
+        return 1;
+    }
+    std::thread::available_parallelism()
+        .map_or(1, NonZero::get)
+        .min(height)
+}
+
+/// Writes the rows of `band`, which start at row `first` of the image.
+fn fill(band: &mut [u8], first: u32, image: &DecodedImage, display: &Display, channels: Channels) {
+    let levels = levels();
+    let count = channels.count();
+    let gray = channels.is_gray();
+    let stride = image.width as usize * count;
+    for (offset, row) in band.chunks_exact_mut(stride).enumerate() {
+        let y = first + offset as u32;
+        for (x, pixel) in row.chunks_exact_mut(count).enumerate() {
+            // Only `None` outside the image, which this walk never goes.
+            let Some(sample) = image.sample(x as u32, y) else {
+                continue;
+            };
+            let mapped = display.map(&sample);
+            if gray {
+                // Grey reaches the screen as the same number in all three, so
+                // any one of them is the whole of it.
+                pixel[0] = quantise(mapped.color[0], levels);
+            } else {
+                for (slot, value) in pixel.iter_mut().zip(mapped.color) {
+                    *slot = quantise(value, levels);
+                }
+            }
+            if let Some(index) = channels.alpha_index() {
+                pixel[index] = byte(mapped.alpha);
+            }
+        }
     }
 }
 
@@ -100,6 +153,12 @@ pub fn png(raster: &Raster) -> Result<Vec<u8>> {
     });
     encoder.set_depth(BitDepth::Eight);
     encoder.set_compression(Compression::Fast);
+    // Which brings `Filter::Adaptive` with it, and it is left to. Fixing the
+    // filter instead is faster on some pictures — measured over 12 megapixels
+    // here, Paeth alone matched Adaptive's size in three quarters of its time
+    // — but only because Adaptive was choosing Paeth for that content anyway.
+    // On content it would have chosen differently, the same fixed filter cost
+    // half as much again in bytes, and the bytes are what the paste waits on.
     // Said outright rather than left to be assumed. Whatever the file's own
     // colour space was, the window and the tone curve have taken it to what
     // the screen was showing, and that was resolved against sRGB.
@@ -113,13 +172,37 @@ pub fn png(raster: &Raster) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
+/// Where each output byte begins, in linear light: `levels()[i]` is the
+/// smallest value that rounds to byte `i + 1`.
+///
+/// Read the other way round, this is the sRGB curve as a table. Only 256
+/// answers exist, so rather than run `to_encoded` on every component of every
+/// pixel and round what comes back, ask which of the 256 the value falls in.
+///
+/// This is not an approximation of the curve: the thresholds are
+/// [`Transfer::to_linear`] of the very midpoints the rounding would have
+/// used, so what comes back is always the nearest code. It parts from running
+/// the curve forwards only where a value lands exactly between two codes and
+/// the two ways round the tie fall on either side of it — twice in a sweep of
+/// a million, and by the one code that was a coin toss to begin with.
+fn levels() -> &'static [f32; 255] {
+    static LEVELS: OnceLock<[f32; 255]> = OnceLock::new();
+    LEVELS.get_or_init(|| {
+        std::array::from_fn(|index| Transfer::Srgb.to_linear((index as f32 + 0.5) / 255.0))
+    })
+}
+
 /// One linear working-space component as the byte a PNG stores.
 ///
 /// The sRGB curve is applied here and nowhere earlier: everything upstream of
 /// this works in linear light, which is the invariant `render::upload` states
 /// and the shaders rely on.
-fn quantise(linear: f32) -> u8 {
-    byte(Transfer::Srgb.to_encoded(linear.clamp(0.0, 1.0)))
+fn quantise(linear: f32, levels: &[f32; 255]) -> u8 {
+    // How many thresholds the value has passed is the code it lands on, which
+    // clamps both ends by itself: nothing under the first is 0, everything
+    // over the last is 255. A NaN passes none of them and comes out 0, which
+    // is where the arithmetic form put it too.
+    levels.partition_point(|&level| level <= linear) as u8
 }
 
 /// A 0..1 fraction rounded to a byte. Coverage comes through here untouched by
@@ -275,6 +358,79 @@ mod tests {
             rolled_byte < 255,
             "Reinhard should pull 4.0 back under white, got {rolled_byte}"
         );
+    }
+
+    /// The table is meant to be the sRGB curve and not a likeness of it, so
+    /// what it returns has to be the nearest of the 256 codes to where the
+    /// curve actually puts the value — never a code out, which would be a
+    /// copy quietly a shade off what was on screen.
+    #[test]
+    fn the_level_table_returns_the_nearest_code() {
+        let levels = levels();
+        for step in 0..=200_000u32 {
+            let linear = step as f32 / 200_000.0;
+            let code = quantise(linear, levels);
+            let exact = Transfer::Srgb.to_encoded(linear) * 255.0;
+            // Half a code is the whole of the allowance, and the slack on top
+            // of it is float error at a boundary rather than room to be wrong.
+            assert!(
+                (exact - f32::from(code)).abs() <= 0.5 + 1e-3,
+                "{linear} encodes to {exact}, which is not code {code}"
+            );
+        }
+
+        // The 256 codes of an 8-bit sRGB file, which is the case that has to
+        // be exact: shown unwindowed, every one of them comes back itself.
+        for code in 0..=u8::MAX {
+            let linear = Transfer::Srgb.to_linear(f32::from(code) / 255.0);
+            assert_eq!(quantise(linear, levels), code);
+        }
+
+        // Both ends clamp by themselves, having either no threshold passed or
+        // every one of them.
+        assert_eq!(quantise(-1.0, levels), 0);
+        assert_eq!(quantise(4.0, levels), 255);
+        assert_eq!(quantise(f32::NAN, levels), 0);
+    }
+
+    /// Dividing the walk between threads must not move a single pixel of it.
+    /// Checked against the same pipeline written out in the obvious way, one
+    /// pixel after another on one thread, over an image large enough that
+    /// `displayed` really does split it.
+    #[test]
+    fn a_divided_walk_agrees_with_a_plain_one() {
+        let (width, height) = (320u32, 256u32);
+        assert!(
+            (width * height) as usize >= PARALLEL_FROM,
+            "the test image has to be big enough to be split"
+        );
+        let data = (0..width * height * 4)
+            .map(|index| (index % 251) as u8)
+            .collect();
+        let mut source = image(Channels::Rgba, data);
+        source.width = width;
+        source.height = height;
+
+        let mut display = plain();
+        display.exposure_stops = 0.7;
+        display.high = 0.8;
+
+        let mut expected = Vec::with_capacity((width * height * 4) as usize);
+        for y in 0..height {
+            for x in 0..width {
+                let mapped = display.map(&source.sample(x, y).unwrap());
+                for value in mapped.color {
+                    expected.push(quantise(value, levels()));
+                }
+                expected.push(byte(mapped.alpha));
+            }
+        }
+
+        assert!(
+            bands(width as usize * 4, height as usize) > 1,
+            "the walk has to actually be divided for this to be testing anything"
+        );
+        assert_eq!(displayed(&source, &display).data, expected);
     }
 
     /// Sizes come from the image, not from the window it is being viewed in.

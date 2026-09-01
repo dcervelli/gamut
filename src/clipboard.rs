@@ -6,17 +6,17 @@
 //! quitting would leave the paste with nobody to answer it.
 //!
 //! So the promise is made by somebody else: a second copy of this program,
-//! started with [`SERVE_ARGUMENT`], which takes the text on its standard
+//! started with [`SERVE_ARGUMENT`], which takes the content on its standard
 //! input, owns the selection and answers pastes until the compositor cancels
-//! it — which is when something else copies. It is not waited for, and it
-//! outlives the window that asked for it. This is what `wl-copy` does, for
-//! the same reason.
+//! it — which is when something else copies. It is not waited for in line,
+//! and it outlives the window that asked for it. This is what `wl-copy` does,
+//! for the same reason.
 
 use std::ffi::{OsStr, OsString};
 use std::io::Write as _;
 use std::os::unix::ffi::OsStrExt as _;
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result};
 use wl_clipboard_rs::copy::{MimeType, Options, Source};
@@ -67,10 +67,13 @@ pub fn uri_list(path: &Path) -> String {
     format!("{}\r\n", file_uri(path))
 }
 
-/// Puts `content` on the clipboard under `mime_type`, and returns the process
-/// that will keep it there. The caller holds on to the handle only to reap it
-/// once it exits; dropping it leaves the process running, which is the point.
-pub fn copy(content: &[u8], mime_type: &str) -> Result<Child> {
+/// Puts `content` on the clipboard under `mime_type`.
+///
+/// Returns as soon as the content has been handed over, the process that
+/// holds it being left to run. Nobody is waiting on it in line — a thread of
+/// its own does that, and does nothing else — so this costs a spawn and a
+/// write, whatever is being copied and however long it stays copied.
+pub fn copy(content: &[u8], mime_type: &str) -> Result<()> {
     let program = std::env::current_exe().context("finding this program's own path")?;
     // Down the pipe rather than in an argument: what is copied runs from a
     // path to a whole PNG, is longer than the argument list allows well
@@ -93,7 +96,16 @@ pub fn copy(content: &[u8], mime_type: &str) -> Result<Child> {
     // a pipe that is still open on this side.
     drop(stdin);
     written?;
-    Ok(child)
+
+    // Somebody has to collect it when the compositor finally cancels the
+    // selection, or every copy in a session leaves a zombie behind. A thread
+    // parked in `wait` is the cheapest place to do that, and it goes away
+    // with the process if the window is closed first — leaving the child to
+    // be adopted and to go on serving, which is the whole point of it.
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
 }
 
 /// The [`SERVE_ARGUMENT`] half: takes the content on standard input, offers

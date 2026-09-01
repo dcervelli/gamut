@@ -5,6 +5,8 @@
 //! [`Action`], and [`App::perform`] is the one place an action happens.
 
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use winit::event::{ElementState, MouseButton, MouseScrollDelta};
@@ -405,6 +407,16 @@ impl Pointer {
     }
 }
 
+/// Says that a copy could not be made. Copies happen because a key was
+/// pressed and show nothing on screen when they work, so the only thing worth
+/// saying is when one did not.
+fn report(error: &anyhow::Error) {
+    eprintln!(
+        "image-view: {}",
+        crate::escape_controls(&format!("{error:#}"))
+    );
+}
+
 impl App {
     pub(super) fn handle_key(&mut self, key: &Key) -> Effect {
         match action_for(key, self.pointer.modifiers) {
@@ -554,51 +566,66 @@ impl App {
     /// picture of the window: the zoom, the pan and the panels are how this
     /// is being looked at, and none of them belong to what is being copied.
     ///
-    /// Both halves are done here on the main thread, so a large image is felt
-    /// as the window going quiet under the key. `--timing` says how long each
-    /// took, which is the number to look at before moving them off it.
+    /// Done on a thread of its own. Walking every pixel takes long enough on
+    /// a large image to be felt as the window going quiet, and a viewer that
+    /// stops answering the pointer is a viewer that looks broken. The image
+    /// is shared rather than copied, and the display state is a handful of
+    /// numbers, so handing the work over costs nothing worth measuring.
     fn copy_image(&mut self) {
         let Some(current) = &self.current else {
             return;
         };
-        let (width, height) = (current.image.width, current.image.height);
+        let image = Arc::clone(&current.image);
+        let display = current.display.clone();
+        let (asked, copies) = (self.claim_copy(), Arc::clone(&self.copies));
 
-        let walked = Instant::now();
-        let raster = encode::displayed(&current.image, &current.display);
-        timing::mapped_image(width, height, walked.elapsed());
+        // Threads that have already handed their bytes over are dropped as
+        // each new copy is asked for, so the list is what is still in flight
+        // rather than every copy the session has ever made.
+        self.copying.retain(|thread| !thread.is_finished());
+        self.copying.push(std::thread::spawn(move || {
+            let (width, height) = (image.width, image.height);
 
-        let encoded = Instant::now();
-        let png = match encode::png(&raster) {
-            Ok(png) => png,
-            Err(error) => {
-                eprintln!(
-                    "image-view: {}",
-                    crate::escape_controls(&format!("{error:#}"))
-                );
+            let walked = Instant::now();
+            let raster = encode::displayed(&image, &display);
+            timing::mapped_image(width, height, walked.elapsed());
+
+            let encoded = Instant::now();
+            let png = match encode::png(&raster) {
+                Ok(png) => png,
+                Err(error) => return report(&error),
+            };
+            timing::encoded_png(width, height, png.len(), encoded.elapsed());
+
+            // Something has been copied since this was asked for, and taking
+            // the selection now would put back a picture the user has already
+            // moved on from.
+            if copies.load(Ordering::Relaxed) != asked {
                 return;
             }
-        };
-        timing::encoded_png(width, height, png.len(), encoded.elapsed());
-        self.copy(&png, clipboard::PNG);
+            if let Err(error) = clipboard::copy(&png, clipboard::PNG) {
+                report(&error);
+            }
+        }));
     }
 
     /// Puts `content` on the clipboard under `mime_type`.
     ///
-    /// The copy is served by a process of its own, so that it survives this
-    /// window closing. Any earlier one that has since exited — the compositor
-    /// cancels the last copy as soon as this one takes the selection — is
-    /// reaped here, so that a session of copying does not leave a zombie
-    /// behind each time.
+    /// Done in line, unlike the picture: there is nothing here to prepare, and
+    /// a copy the user follows straight away with `q` should be on the
+    /// clipboard before the window goes.
     fn copy(&mut self, content: &[u8], mime_type: &str) {
-        self.clipboard
-            .retain_mut(|held| !matches!(held.try_wait(), Ok(Some(_))));
-        match clipboard::copy(content, mime_type) {
-            Ok(child) => self.clipboard.push(child),
-            Err(error) => eprintln!(
-                "image-view: {}",
-                crate::escape_controls(&format!("{error:#}"))
-            ),
+        self.claim_copy();
+        if let Err(error) = clipboard::copy(content, mime_type) {
+            report(&error);
         }
+    }
+
+    /// Marks a copy as the one most recently asked for, and says which number
+    /// it is. A copy that has to go away and prepare itself compares this
+    /// against the counter when it comes back.
+    fn claim_copy(&self) -> u64 {
+        self.copies.fetch_add(1, Ordering::Relaxed) + 1
     }
 
     /// Starts or ends a drag of the image with the left button. The pointer

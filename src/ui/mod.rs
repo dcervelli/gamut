@@ -17,6 +17,8 @@ mod histogram;
 mod pixel;
 mod status;
 
+use std::sync::Arc;
+
 use crate::image::display::Display;
 use crate::image::exif::Exif;
 use crate::image::stats::BINS;
@@ -80,7 +82,10 @@ pub enum Widget {
 
 /// The image on screen, with everything derived from it.
 pub struct Current {
-    pub image: DecodedImage,
+    /// Shared rather than owned: copying the picture to the clipboard walks
+    /// every pixel on a thread of its own, and handing that thread the image
+    /// must not mean duplicating however many hundred megabytes it is.
+    pub image: Arc<DecodedImage>,
     pub stats: Stats,
     pub display: Display,
     pub label: String,
