@@ -1,14 +1,16 @@
 //! The floating histogram panel.
 
 use crate::image::stats::BINS;
-use crate::render::{Blend, Rect, TextMeasure, UiFrame};
+use crate::render::{Blend, Color, Rect, TextMeasure, UiFrame};
 use crate::theme::Theme;
 
-use super::{Current, PADDING, PANEL_INSET, PANEL_RADIUS, PANEL_WIDTH, TEXT_SIZE};
+use super::buttons::outline;
+use super::{Current, FrameInput, PADDING, PANEL_INSET, PANEL_RADIUS, PANEL_WIDTH, TEXT_SIZE};
 
 /// The panel: as wide as anything else floating over the content area, and
-/// tall enough for a plot with its axis label above it.
-pub(super) const HISTOGRAM_SIZE: [f32; 2] = [PANEL_WIDTH, 130.0];
+/// tall enough for a plot with its axis label above it and the ramp of what
+/// the display makes of that axis below.
+pub(super) const HISTOGRAM_SIZE: [f32; 2] = [PANEL_WIDTH, 130.0 + RAMP_GAP + RAMP_HEIGHT];
 
 /// The corner radius of the plot's own ground inside the panel. Smaller than
 /// the panel's, the way an inner corner always is.
@@ -37,6 +39,12 @@ const TICK_RISE: f32 = 1.0;
 /// under the curve it crosses in the reading as well as in the drawing.
 const CURSOR_ALPHA: u8 = 190;
 const CURSOR_WIDTH: f32 = 1.0;
+
+/// The ramp under the plot: how deep the band of colour is, and how far it
+/// stands off the plot's ground. Deep enough to read a colour off and no
+/// deeper — it is a legend along the axis, not a second plot.
+const RAMP_HEIGHT: f32 = 8.0;
+const RAMP_GAP: f32 = 4.0;
 
 /// The least room left between the pointer's readout and the axis ends it is
 /// set between, before they give way to it.
@@ -80,7 +88,19 @@ fn bars(panel: Rect) -> Rect {
         plot.x,
         plot.y + label_height + PLOT_INSET,
         plot.width,
-        plot.height - label_height - PLOT_INSET,
+        plot.height - label_height - PLOT_INSET - RAMP_GAP - RAMP_HEIGHT,
+    )
+}
+
+/// The band of colour under the plot, aligned with the bins so that a cell of
+/// it sits under the bar it belongs to. Below the plot's ground, and so below
+/// the ticks that stand in the ground's lower margin.
+fn ramp(bars: Rect) -> Rect {
+    Rect::new(
+        bars.x,
+        bars.bottom() + PLOT_INSET + RAMP_GAP,
+        bars.width,
+        RAMP_HEIGHT,
     )
 }
 
@@ -93,6 +113,36 @@ fn bin_across(index: usize) -> f32 {
         last if last == BINS - 1 => 1.0,
         _ => (index as f32 + 0.5) / BINS as f32,
     }
+}
+
+/// `value` moved onto the device's own pixel grid.
+///
+/// The interface is laid out in logical pixels, which is right for a panel
+/// and the words on it. The marks on this plot are the exception: they are a
+/// pixel or two wide, and shapes are drawn with a pixel of feathering at
+/// their edges, so an edge landing mid-pixel makes a mark that is mostly
+/// edge. On its own that is a soft line; in a row of them it is a ripple at
+/// the beat of the scale factor, which on a 1.6 display is every fifth pixel.
+/// Snapped, the feather resolves to fully in or fully out at each pixel
+/// centre and a mark comes out as the shape it is.
+fn device(value: f32, scale: f32) -> f32 {
+    (value * scale).round() / scale
+}
+
+/// One mark moved onto that grid, kept at least a whole pixel so that
+/// something thinner than one is still drawn rather than rounded away.
+///
+/// Not what the ramp's cells use: they tile, so what matters there is that
+/// each shares an edge exactly with its neighbour, and a floor under their
+/// width would make them overlap and run past the end of the band.
+fn on_device(rect: Rect, scale: f32) -> Rect {
+    let (x, y) = (device(rect.x, scale), device(rect.y, scale));
+    Rect::new(
+        x,
+        y,
+        (device(rect.right(), scale) - x).max(1.0 / scale),
+        (device(rect.bottom(), scale) - y).max(1.0 / scale),
+    )
 }
 
 /// Which bin the pointer is over, or `None` when it is not over the plot.
@@ -142,9 +192,8 @@ pub(super) fn draw(
     frame: &mut UiFrame,
     text: &mut dyn TextMeasure,
     current: &Current,
+    input: &FrameInput,
     content: Rect,
-    cursor: Option<[f32; 2]>,
-    pointer: Option<[u32; 2]>,
     theme: &Theme,
 ) {
     let panel = panel(content);
@@ -187,7 +236,7 @@ pub(super) fn draw(
     // the numbers are the ones every other readout quotes; a curve that is
     // straight and a value that is comparable cannot both be had, and the
     // shape is what the plot is for.
-    let marked = marked(current, content, cursor, pointer);
+    let marked = marked(current, content, input.cursor, input.pointer);
     let across = marked.map(bin_across);
     let mut ends_fit = true;
     if let Some(across) = across {
@@ -269,11 +318,14 @@ pub(super) fn draw(
     // aimed, and it has to be followed up from the axis to the curve.
     if let Some(across) = across {
         frame.rect(
-            Rect::new(
-                bars.x + across * bars.width - CURSOR_WIDTH / 2.0,
-                bars.y,
-                CURSOR_WIDTH,
-                bars.height,
+            on_device(
+                Rect::new(
+                    bars.x + across * bars.width - CURSOR_WIDTH / 2.0,
+                    bars.y,
+                    CURSOR_WIDTH,
+                    bars.height,
+                ),
+                input.scale,
             ),
             theme.accent.with_alpha(CURSOR_ALPHA),
         );
@@ -309,15 +361,69 @@ pub(super) fn draw(
                 continue;
             }
             frame.rect(
-                Rect::new(
-                    bars.x + position * bars.width - TICK_WIDTH / 2.0,
-                    bars.bottom() - TICK_RISE,
-                    TICK_WIDTH,
-                    TICK_HEIGHT,
+                on_device(
+                    Rect::new(
+                        bars.x + position * bars.width - TICK_WIDTH / 2.0,
+                        bars.bottom() - TICK_RISE,
+                        TICK_WIDTH,
+                        TICK_HEIGHT,
+                    ),
+                    input.scale,
                 ),
                 theme.accent,
             );
         }
+
+        // And what the display turns each of those values into, in a band
+        // along the foot of the plot: the bin above a cell, and the colour it
+        // comes out as under it.
+        //
+        // The curve says how much and this says what of, which are different
+        // questions on a false-coloured image — a curve cannot draw viridis —
+        // and the same question answered twice on a grey one, where the band
+        // is the tone curve as a wedge and the curve is it as a shape. It is
+        // where clipping stops being an inference: everything left of the
+        // window comes out black and everything right of it comes out at the
+        // top of the ramp, so the two flat runs at the ends are the range the
+        // display is throwing away, drawn at the width they occupy.
+        //
+        // One cell per bin, over the bin's own middle, so a cell is the
+        // colour of the bar standing above it.
+        // On the device's pixels, like every other mark here: a cell is
+        // about one logical pixel wide, so unsnapped the band ripples at the
+        // beat of the scale factor. See [`device`].
+        let band = ramp(bars);
+        let snap = |value: f32| device(value, input.scale);
+        let (top, bottom) = (snap(band.y), snap(band.bottom()));
+        let edge = |index: usize| snap(band.x + band.width * index as f32 / BINS as f32);
+
+        let channels = current.image.channels();
+        for index in 0..BINS {
+            let (left, right) = (edge(index), edge(index + 1));
+            let across = (index as f32 + 0.5) / BINS as f32;
+            let value = transfer.to_linear(axis_min + across * span);
+            frame.rect(
+                Rect::new(left, top, right - left, bottom - top),
+                Color::from_linear(current.display.shade(value, channels)),
+            );
+        }
+        // Outside the colour rather than over it, so that the band keeps its
+        // full depth. A window left of everything makes the whole ramp black,
+        // and a black band on a dark panel is a gap in it without this. One
+        // physical pixel, snapped like the band it rings.
+        let hair = 1.0 / input.scale;
+        let (left, right) = (edge(0), edge(BINS));
+        outline(
+            frame,
+            Rect::new(
+                left - hair,
+                top - hair,
+                right - left + 2.0 * hair,
+                bottom - top + 2.0 * hair,
+            ),
+            hair,
+            theme.border,
+        );
 
         // Sampled per column rather than per bin: the response is a
         // continuous function of the value, and stepping it where the

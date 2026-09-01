@@ -250,15 +250,7 @@ pub fn build_frame(
         grid::draw(&mut frame, current, view, input, content, grid_step, theme);
     }
     if panels.show_histogram {
-        histogram::draw(
-            &mut frame,
-            text,
-            current,
-            content,
-            input.cursor,
-            input.pointer,
-            theme,
-        );
+        histogram::draw(&mut frame, text, current, input, content, theme);
     }
     if input.minimap_on_screen {
         minimap::draw(&mut frame, current, view, input, content, theme);

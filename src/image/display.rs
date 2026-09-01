@@ -4,7 +4,7 @@
 //! All of it is uniform state — changing any of it re-renders, it never
 //! re-decodes or re-uploads.
 
-use super::{DecodedImage, Sample, Stats, Transfer};
+use super::{Channels, DecodedImage, Sample, Stats, Transfer};
 
 /// How the display window is chosen.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -461,8 +461,35 @@ impl Display {
     /// tone curve's cross-channel terms also come in; a curve for those would
     /// be three curves, and the panel is asking a one-dimensional question.
     pub fn response(&self, value: f32) -> f32 {
+        self.tone_map.apply([self.windowed(value); 3])[0]
+    }
+
+    /// And the colour it comes out as: the window, the false colour and the
+    /// tone curve, in the order [`Display::map`] runs them.
+    ///
+    /// The same arithmetic as `map`, asked about a value rather than about a
+    /// pixel, which is what lets the histogram paint the display's own output
+    /// under the values it is plotting instead of a second drawing of it.
+    ///
+    /// It needs the channels because the false colour is a reading of one:
+    /// it is what a grey image is looked at through, and a colour image's
+    /// three are colours already. Everything outside 0..1 comes back as the
+    /// end it went past — black below, the top of the ramp above — because
+    /// that is what the screen does with it.
+    pub fn shade(&self, value: f32, channels: Channels) -> [f32; 3] {
+        let windowed = self.windowed(value);
+        let color = match (channels.is_gray(), self.colormap) {
+            (true, Colormap::Gray) | (false, _) => [windowed; 3],
+            (true, colormap) => colormap.color(windowed),
+        };
+        self.tone_map.apply(color)
+    }
+
+    /// `(value - low) * gain`: one value through the window with its
+    /// exposure, which is where everything the display does begins.
+    fn windowed(&self, value: f32) -> f32 {
         let (offset, gain) = self.transform();
-        self.tone_map.apply([(value - offset) * gain; 3])[0]
+        (value - offset) * gain
     }
 }
 
@@ -553,6 +580,56 @@ mod tests {
             assert_eq!((display.low, display.high), (0.0, 1.0), "{transfer:?}");
             assert_eq!(display.tone_map, ToneMap::Neutral, "{transfer:?}");
         }
+    }
+
+    /// What the histogram's ramp is painted with. The ends are the reason it
+    /// is worth drawing: past either edge of the window the screen has one
+    /// colour and no more, and the band shows how much of the axis that is.
+    #[test]
+    fn a_value_is_shaded_the_way_the_screen_shows_it() {
+        let mut display = Display::default();
+        (display.low, display.high) = (0.25, 0.75);
+
+        let grey = |v: f32| display.shade(v, Channels::Rgb);
+        assert_eq!(grey(0.25), [0.0; 3], "the window's floor comes out black");
+        assert_eq!(grey(0.5), [0.5; 3]);
+        assert_eq!(grey(0.75), [1.0; 3], "and its ceiling comes out white");
+        assert_eq!(grey(0.0), [0.0; 3], "everything below it, clipped to one");
+        assert_eq!(grey(1.0), [1.0; 3], "and everything above it, to the other");
+
+        // A colour image is three colours already, so the false colour is not
+        // for it however it is set.
+        display.colormap = Colormap::Viridis;
+        assert_eq!(display.shade(0.5, Channels::Rgb), [0.5; 3]);
+        assert_eq!(display.shade(0.5, Channels::Rgba), [0.5; 3]);
+
+        // On a grey one it is, and it clips to the ends of its own ramp
+        // rather than to black and white.
+        let mapped = |v: f32| display.shade(v, Channels::Gray);
+        assert_eq!(mapped(0.5), Colormap::Viridis.color(0.5));
+        assert_eq!(mapped(-1.0), Colormap::Viridis.color(0.0));
+        assert_eq!(mapped(9.0), Colormap::Viridis.color(1.0));
+        assert_ne!(mapped(0.5), [0.5; 3], "viridis is not grey at mid ramp");
+    }
+
+    /// And the false colour goes on before the tone curve, as the pipeline
+    /// runs it: a curve applied to the value first would pick a different
+    /// colour off the ramp, not merely a dimmer one.
+    #[test]
+    fn the_ramp_is_read_before_the_tone_curve_bends_it() {
+        let mut display = Display {
+            colormap: Colormap::Magma,
+            tone_map: ToneMap::Reinhard,
+            ..Default::default()
+        };
+        (display.low, display.high) = (0.0, 2.0);
+
+        let shaded = display.shade(1.0, Channels::Gray);
+        let read_first = ToneMap::Reinhard.apply(Colormap::Magma.color(0.5));
+        let curved_first = Colormap::Magma.color(ToneMap::Reinhard.apply([0.5; 3])[0]);
+
+        assert_eq!(shaded, read_first);
+        assert_ne!(read_first, curved_first, "the order is not a free choice");
     }
 
     #[test]
