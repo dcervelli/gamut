@@ -19,6 +19,7 @@ and `c`, where the two cases do different things.
 | `Shift+C` | Copy the absolute path of the file on screen |
 | `Ctrl+Shift+C` | Copy the file on screen as a URI |
 | `Ctrl+C` | Copy the picture itself, as you are seeing it |
+| `Ctrl+M` | Copy everything the file information says about the file |
 
 Zoom runs from 2% to 6400%. Zooming leaves fit mode; panning does not, so `f`
 and then Down scrolls through a tall image at fit-width.
@@ -52,6 +53,14 @@ arrive as three copies of itself, and false colour is the one thing that
 widens it. Transparency comes along only where the file had some; an opaque
 picture arrives opaque rather than carrying an empty channel. Everything
 arrives 8-bit, which is the depth the screen was showing it at.
+
+`Ctrl+M` copies everything the file information panel says, one line per
+field: the section it stands under, its name, and what it says, separated by
+commas so that it opens as a table in a spreadsheet and reads as plain lines
+anywhere else. It works whether or not the panel is showing — what it says is
+a fact about the file, and asking for it should not mean first arranging to
+look at it. Single fields and single sections can be copied from the panel
+itself; see below.
 
 The picture is prepared in the background, so the window keeps answering while
 a large one is being got ready — a photograph of some tens of megapixels takes
@@ -99,16 +108,31 @@ top of a colormap would distort the values you are reading off it.
 The panels are opaque and the image is fitted inside them, so hiding them
 gives a fitted image more room and it re-fits immediately.
 
-The file information sits down the right of the image. It opens with the file
-itself — what it is called, where it is, how large the image is, and when the
-file was last written and to what size — and then, for a file that carries
-any, what its metadata says: the camera and lens, when the photograph was
-taken, the exposure it was made at, the focal length, and where the camera
-was. A georeferenced raster — a scanned map, an elevation model — gets its own
-section instead: the coordinate system it names, the size of a pixel on the
-ground, where its corner sits, the ground it covers, and the value that stands
-for nothing measured. Everything else the metadata holds is listed under that,
-field by field, as the file gives it.
+The file information sits down the right of the image, under headings, so
+that a long column can be read by looking for a thing rather than from the
+top. It opens with the file itself — what it is called, where it is, what it
+turned out to be, how large it is and when it was last written — and then the
+picture in it: how many pixels across and down, what each pixel holds, the
+colour space those numbers are meant in, and whether it carries transparency.
+
+After those comes what the file's own metadata says, for a file that carries
+any: the camera and lens, when the photograph was taken, the exposure it was
+made at and the focal length; then where the camera stood, in degrees a map
+will take, with whatever else it recorded about the place. A georeferenced
+raster — a scanned map, an elevation model — gets a section of its own: the
+coordinate system it names, the size of a pixel on the ground, where its
+corner sits, the ground it covers, and the value that stands for nothing
+measured. Anything somebody wrote in words — a description, a comment, who
+made the file and what may be done with it — is drawn out into a section of
+its own too, and everything left over is listed after all of them, field by
+field, as the file gives it.
+
+Clicking copies. A click on a field copies what it says; a click on a heading
+copies that whole section, one line per field as a name and a value; and the
+button at the top of the panel copies the lot, with the section named on each
+line as well — the same thing `Ctrl+M` does. A mark appears over whatever the
+pointer is on to show what a click would take. It goes away while the column
+is being scrolled, since the pointer is then resting rather than pointing.
 
 Coordinate systems are quoted as the file gives them, by name and by EPSG
 code. Turning a code into a projection and a datum needs a register this does

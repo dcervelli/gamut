@@ -138,6 +138,11 @@ pub struct Panels {
     /// drawing so that motion knows when the highlight has changed and a
     /// redraw is actually owed.
     pub hover: Option<Widget>,
+    /// And which part of the info panel's column, for the same reason. Held
+    /// apart from `hover` because the column is not one of the chrome's
+    /// widgets: it moves as the panel scrolls, and it is there whether or not
+    /// the bars are.
+    pub info_hover: Option<info::Copyable>,
     /// The menu popped up over the interface, if any. It takes every press
     /// while it is open: one on a cell chooses, one anywhere else dismisses
     /// it.
@@ -222,7 +227,7 @@ pub fn build_frame(
     theme: &Theme,
 ) -> UiFrame {
     let size = input.logical;
-    let mut frame = UiFrame::new();
+    let mut frame = UiFrame::new(input.scale);
     let chrome = Chrome::new(size);
 
     let Some(current) = current else {
@@ -269,15 +274,7 @@ pub fn build_frame(
         minimap::draw(&mut frame, current, view, input, content, theme);
     }
     if panels.show_info {
-        info::draw(
-            &mut frame,
-            text,
-            current,
-            panels.info_scroll,
-            content,
-            panels.show_histogram,
-            theme,
-        );
+        info::draw(&mut frame, text, current, panels, content, theme);
     }
     if !panels.show_ui {
         return frame;
@@ -287,7 +284,7 @@ pub fn build_frame(
         frame.rect(panel, theme.bar_background);
     }
     for border in chrome.borders() {
-        frame.rect(border, theme.border);
+        frame.hairline(border, theme.border);
     }
 
     // Top panel: what the image is. Everything here is a property of the
@@ -405,8 +402,7 @@ pub fn build_frame(
     if let Some(open) = panels.menu
         && let Some(popup) = chrome.popup(open, panels.show_grid)
     {
-        frame.overlay();
-        menu::draw(&mut frame, text, &popup, view.fit(), zoom, panels, theme);
+        frame.over(|frame| menu::draw(frame, text, &popup, view.fit(), zoom, panels, theme));
     }
     frame
 }

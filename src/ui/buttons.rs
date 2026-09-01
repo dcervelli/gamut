@@ -126,20 +126,38 @@ pub(super) fn button_ink(active: bool, hover: bool, theme: &Theme) -> (Color, Co
 /// A rectangle drawn as four edges. What is behind an outline stays visible,
 /// which is the whole point for anything laid over the minimap: the thumbnail
 /// under it belongs to the image layer, and a filled quad would hide it.
+///
+/// Four snapped lines, so that an outline is the same weight as itself
+/// wherever on the device's grid it lands, and — at the one pixel most of
+/// them ask for — the same weight as the rules that part the bars from the
+/// content and one section of the info panel from the next.
 pub(super) fn outline(frame: &mut UiFrame, rect: Rect, thickness: f32, color: Color) {
-    let edge = thickness.min(rect.width / 2.0).min(rect.height / 2.0);
-    if edge <= 0.0 {
+    if rect.width <= 0.0 || rect.height <= 0.0 {
         return;
     }
-    let middle = rect.height - 2.0 * edge;
-    frame.rect(Rect::new(rect.x, rect.y, rect.width, edge), color);
-    frame.rect(
-        Rect::new(rect.x, rect.bottom() - edge, rect.width, edge),
+    let edge = frame.line_width(thickness);
+    // The two down the sides stop where the two across meet them, so that a
+    // colour with anything less than full alpha is not laid twice at the
+    // corners and drawn darker there.
+    let middle = (rect.height - 2.0 * edge).max(0.0);
+    frame.line(
+        Rect::new(rect.x, rect.y, rect.width, edge),
+        thickness,
         color,
     );
-    frame.rect(Rect::new(rect.x, rect.y + edge, edge, middle), color);
-    frame.rect(
+    frame.line(
+        Rect::new(rect.x, rect.bottom() - edge, rect.width, edge),
+        thickness,
+        color,
+    );
+    frame.line(
+        Rect::new(rect.x, rect.y + edge, edge, middle),
+        thickness,
+        color,
+    );
+    frame.line(
         Rect::new(rect.right() - edge, rect.y + edge, edge, middle),
+        thickness,
         color,
     );
 }
