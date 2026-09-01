@@ -55,7 +55,9 @@ impl super::Decoder for Jpeg {
                 MAX_DECODED_BYTES as f64 / 1e9,
             );
         }
-        source.seek(SeekFrom::Start(0)).context("reading the file")?;
+        source
+            .seek(SeekFrom::Start(0))
+            .context("reading the file")?;
         let mut bytes = Vec::with_capacity(length as usize);
         source
             .take(length)

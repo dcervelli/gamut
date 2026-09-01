@@ -134,8 +134,8 @@ fn open(path: &Path) -> Result<(BufReader<File>, &'static dyn Decoder)> {
     // itself, with no window and no way out. `stat` follows symlinks and does
     // not block, so it settles the question first. This is the one place every
     // format passes through, so the check need only live here.
-    let metadata = std::fs::metadata(path)
-        .with_context(|| format!("reading {}", path.display()))?;
+    let metadata =
+        std::fs::metadata(path).with_context(|| format!("reading {}", path.display()))?;
     if !metadata.is_file() {
         return Err(anyhow!("{} is not a regular file", path.display()));
     }

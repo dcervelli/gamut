@@ -65,7 +65,10 @@ pub fn decoded(path: &Path, elapsed: Duration) {
             .file_name()
             .unwrap_or(path.as_os_str())
             .to_string_lossy();
-        report(&format!("decode {}", crate::escape_controls(&name)), elapsed);
+        report(
+            &format!("decode {}", crate::escape_controls(&name)),
+            elapsed,
+        );
     }
 }
 
