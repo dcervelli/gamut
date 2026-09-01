@@ -1,0 +1,94 @@
+#!/bin/sh
+# Cut a release: check, bump, tag, push.
+#
+# Pushing the tag is all this does at the far end. The `Release` workflow turns
+# it into a GitHub release, and that release's source tarball is what the
+# PKGBUILD names. Updating the PKGBUILD's checksum is a separate step, because
+# it can only happen once the tarball exists — see `bin/pkgbuild-sha`.
+#
+#   bin/release           bump the patch level of the last tag
+#   bin/release 0.2.0     release exactly this version
+
+set -eu
+
+usage() {
+    echo "usage: bin/release [VERSION]" >&2
+    exit 2
+}
+
+[ $# -le 1 ] || usage
+
+cd "$(dirname "$0")/.."
+
+for tool in cargo git; do
+    command -v "$tool" >/dev/null || { echo "$tool is not installed" >&2; exit 1; }
+done
+
+[ -z "$(git status --porcelain)" ] || {
+    echo "the tree has uncommitted changes" >&2
+    exit 1
+}
+
+PREV=$(git tag -l 'v*' --sort=-v:refname | head -1)
+if [ $# -eq 1 ]; then
+    VERSION=$1
+elif [ -n "$PREV" ]; then
+    VERSION=$(echo "${PREV#v}" | awk -F. -v OFS=. '{ $NF += 1; print }')
+else
+    echo "no tag to bump from; give the version explicitly" >&2
+    exit 1
+fi
+
+echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || {
+    echo "$VERSION is not a three-part version" >&2
+    exit 1
+}
+
+TAG="v$VERSION"
+git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && {
+    echo "$TAG already exists" >&2
+    exit 1
+}
+
+# Cargo.toml and the PKGBUILD are put back if anything below fails, so a failed
+# release leaves no half-bumped tree behind.
+restore() { git checkout -- Cargo.toml Cargo.lock packaging/PKGBUILD 2>/dev/null || true; }
+trap restore EXIT
+
+awk -v v="$VERSION" '
+    !done && /^version = "/ { print "version = \"" v "\""; done = 1; next }
+    { print }
+' Cargo.toml >Cargo.toml.new && mv Cargo.toml.new Cargo.toml
+
+awk -v v="$VERSION" '
+    /^pkgver=/ { print "pkgver=" v; next }
+    /^pkgrel=/ { print "pkgrel=1"; next }
+    { print }
+' packaging/PKGBUILD >packaging/PKGBUILD.new && mv packaging/PKGBUILD.new packaging/PKGBUILD
+
+# Refreshes Cargo.lock's own record of the version, and runs the same checks CI
+# will. `cargo test` covers the packaging drift tests, so a stale desktop entry
+# or completion stops the release here rather than after the tag.
+cargo build --quiet
+cargo fmt --check
+cargo clippy --quiet --all-targets -- -D warnings
+cargo test --quiet
+
+NAME=$(sed -n 's/^name = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+BUILT=$(./target/debug/"$NAME" --version)
+[ "$BUILT" = "$NAME $VERSION" ] || {
+    echo "the binary reports '$BUILT', not '$NAME $VERSION'" >&2
+    exit 1
+}
+
+trap - EXIT
+
+git add Cargo.toml Cargo.lock packaging/PKGBUILD
+git commit -m "Release $TAG"
+git tag "$TAG"
+
+echo
+echo "Committed and tagged $TAG. To publish it:"
+echo "    git push && git push origin $TAG"
+echo "Then, once the release exists, update the PKGBUILD checksum:"
+echo "    bin/pkgbuild-sha $TAG"

@@ -1,0 +1,54 @@
+#!/bin/sh
+# Point the PKGBUILD at a published release and record its checksum.
+#
+# Separate from `bin/release` because it can only run once the tag has been
+# pushed and the release workflow has produced the source tarball. GitHub can
+# lag a few seconds behind the tag, so the download is retried.
+#
+#   bin/pkgbuild-sha v0.1.0
+
+set -eu
+
+[ $# -eq 1 ] || { echo "usage: bin/pkgbuild-sha vX.Y.Z" >&2; exit 2; }
+
+cd "$(dirname "$0")/.."
+
+TAG=$1
+VERSION=${TAG#v}
+NAME=$(sed -n 's/^name = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+URL=$(sed -n 's/^url="\(.*\)"$/\1/p' packaging/PKGBUILD | head -1)
+TARBALL="$URL/archive/refs/tags/$TAG.tar.gz"
+
+for tool in curl sha256sum tar awk; do
+    command -v "$tool" >/dev/null || { echo "$tool is not installed" >&2; exit 1; }
+done
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+
+echo "fetching $TARBALL"
+n=0
+until curl -fsSL "$TARBALL" -o "$TMP/src.tar.gz"; do
+    n=$((n + 1))
+    [ "$n" -lt 5 ] || { echo "could not download the tarball" >&2; exit 1; }
+    sleep 3
+done
+
+# What makepkg will unpack has to be the directory the PKGBUILD cd's into.
+tar tzf "$TMP/src.tar.gz" | head -1 | grep -q "^$NAME-$VERSION/" || {
+    echo "the tarball does not open into $NAME-$VERSION/" >&2
+    exit 1
+}
+
+SHA=$(sha256sum "$TMP/src.tar.gz" | cut -d' ' -f1)
+echo "sha256 $SHA"
+
+# Only the first sha256sums entry belongs to the tarball.
+awk -v v="$VERSION" -v sha="$SHA" -v q="'" '
+    /^pkgver=/ { print "pkgver=" v; next }
+    !hashed && /^sha256sums=/ { sub(q "[^" q "]*" q, q sha q); hashed = 1 }
+    { print }
+' packaging/PKGBUILD >packaging/PKGBUILD.new && mv packaging/PKGBUILD.new packaging/PKGBUILD
+
+bash -n packaging/PKGBUILD
+echo "packaging/PKGBUILD now points at $TAG"

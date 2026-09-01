@@ -2,6 +2,27 @@
 name = "image-view"
 version = "0.1.0"
 edition = "2024"
+# Not the edition's own floor of 1.85 but the oldest toolchain that has every
+# library item used here: `as_chunks` (`exif.rs`, `geo.rs`) landed in 1.88.
+# Nothing is pinned by this — Arch tracks current Rust — but clippy checks the
+# code against it, so it stays honest.
+rust-version = "1.88"
+description = "A GPU image viewer with real colour management, for photographs, measurement data and HDR"
+repository = "https://github.com/closedcontour/image-view"
+homepage = "https://github.com/closedcontour/image-view"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+keywords = ["image", "viewer", "hdr", "color-management", "wgpu"]
+categories = ["graphics", "multimedia::images", "command-line-utilities"]
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+# `panic` stays at its default of "unwind". The loader turns a decoder panic on
+# a malformed file into a recoverable error, and it does that with
+# `catch_unwind` (`loader.rs`, and `cli.rs` while probing); aborting instead
+# would take the whole window down every time a broken image was opened.
 
 [dependencies]
 anyhow = "1.0.104"

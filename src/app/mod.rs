@@ -779,9 +779,11 @@ impl ApplicationHandler<Decoded> for App {
         }
 
         let size = initial_window_size(event_loop, self.opening_size());
-        let attributes = Window::default_attributes()
-            .with_title(self.title())
-            .with_inner_size(size);
+        let attributes = window::with_app_id(
+            Window::default_attributes()
+                .with_title(self.title())
+                .with_inner_size(size),
+        );
 
         let window = match event_loop.create_window(attributes) {
             Ok(window) => Arc::new(window),

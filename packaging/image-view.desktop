@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=Image View
+GenericName=Image Viewer
+Comment=Preview images with real colour management
+Exec=image-view %F
+TryExec=image-view
+Icon=image-view
+Terminal=false
+Categories=Graphics;Viewer;2DGraphics;RasterGraphics;
+Keywords=image;photo;picture;viewer;hdr;exr;tiff;raw;colour;color;
+StartupNotify=true
+StartupWMClass=image-view
+MimeType=image/jpeg;image/png;image/apng;image/gif;image/bmp;image/tiff;image/webp;image/avif;image/heif;image/heic;image/vnd.microsoft.icon;image/vnd.radiance;image/x-hdr;image/x-exr;image/x-portable-anymap;image/x-portable-bitmap;image/x-portable-graymap;image/x-portable-pixmap;image/x-portable-arbitrarymap;
