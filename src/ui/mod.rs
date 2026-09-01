@@ -393,7 +393,7 @@ pub fn build_frame(
     let bar = chrome.bottom;
     let baseline = text_baseline(bar);
 
-    let right = status::describe_state(current, view, input);
+    let right = status::describe_state(current, input);
     let right_width = text.measure_text(&right, TEXT_SIZE)[0];
     let right_x = (bar.right() - BAR_PADDING - right_width).max(BAR_PADDING);
 
@@ -416,7 +416,7 @@ pub fn build_frame(
     if let Some(open) = panels.menu
         && let Some(popup) = chrome.popup(open, panels.show_grid)
     {
-        frame.over(|frame| menu::draw(frame, text, &popup, view.fit(), zoom, panels, theme));
+        frame.over(|frame| menu::draw(frame, text, &popup, view, zoom, panels, theme));
     }
     frame
 }

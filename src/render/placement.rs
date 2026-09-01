@@ -24,10 +24,20 @@ pub enum Upscale {
 }
 
 impl Upscale {
+    /// Every filter, in the order the interface offers them — the same order
+    /// [`Upscale::next`] cycles through, so the key and the cells of the zoom
+    /// menu agree about what comes after what.
+    pub const ALL: [Upscale; 2] = [Upscale::Nearest, Upscale::Bicubic];
+
+    /// What the interface calls this filter, for the cell that chooses it.
+    ///
+    /// Title case, like every other name the interface writes out and unlike
+    /// the value `--upscale` is given on the command line; [`Upscale::parse`]
+    /// folds case, so the two are still the same word.
     pub fn label(self) -> &'static str {
         match self {
-            Upscale::Nearest => "nearest",
-            Upscale::Bicubic => "bicubic",
+            Upscale::Nearest => "Nearest",
+            Upscale::Bicubic => "Bicubic",
         }
     }
 

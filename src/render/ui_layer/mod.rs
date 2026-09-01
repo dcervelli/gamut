@@ -17,7 +17,7 @@ mod text;
 
 use anyhow::Result;
 
-pub use popup::{Popup, PopupGrid};
+pub use popup::{Popup, PopupGrid, PopupSection};
 
 use shapes::Shapes;
 use text::Text;

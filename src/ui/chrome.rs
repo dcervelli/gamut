@@ -201,7 +201,7 @@ impl Chrome {
     /// what keeps the menu from being opened at all in a window that small.
     pub fn popup(&self, menu: Menu, grid_on: bool) -> Option<Popup> {
         Popup::below(
-            menu.items(),
+            menu.sections(),
             menu.grid(),
             self.zoom_button(grid_on),
             self.window(),
