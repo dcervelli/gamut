@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+# Arch, not Ubuntu. `libheif-rs` is built against the `v1_23` feature, and
+# `system-deps` checks that against the libheif it finds at build time: the
+# hosted Ubuntu images carry 1.17 and the build simply will not start. This is
+# also the distribution the package is built for, so CI and the Omarchy
+# builder see the same libraries.
+jobs:
+  check:
+    name: Checks
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+
+    steps:
+      - name: Install the toolchain and the libraries it links
+        run: |
+          pacman -Syu --noconfirm --needed \
+            git rust cargo-audit libheif vulkan-icd-loader fontconfig pkgconf
+
+      - uses: actions/checkout@v4
+
+      - name: Formatting
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test
+        # The tests that want a GPU report success where no adapter can be had,
+        # so nothing here needs one.
+
+      - name: Documentation
+        run: cargo doc --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+      - name: Advisories
+        run: cargo audit
+
+      - name: The PKGBUILD is at the version Cargo.toml says
+        # ttfx keeps a PKGBUILD in its own tree that fell three releases behind
+        # the one that actually ships. This is the check that would have caught
+        # it. `cargo test` asserts the same thing, but this says so plainly.
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+          pkgver=$(sed -n 's/^pkgver=//p' packaging/PKGBUILD | head -1)
+          test "$version" = "$pkgver" \
+            || { echo "Cargo.toml is $version but the PKGBUILD is $pkgver"; exit 1; }
+
+      - name: The desktop entry and the PKGBUILD are well formed
+        run: |
+          pacman -S --noconfirm --needed desktop-file-utils namcap
+          desktop-file-validate packaging/*.desktop
+          # namcap on the PKGBUILD alone: a static read, so it needs neither a
+          # released tarball nor a build.
+          namcap packaging/PKGBUILD

@@ -21,6 +21,13 @@ use winit::event_loop::{ControlFlow, EventLoop};
 use app::App;
 use loader::Loader;
 
+/// The name this program is known by outside itself: the Wayland `app_id` and
+/// the class half of the X11 `WM_CLASS`, the basename of the desktop entry and
+/// of the icon, and the Arch package. It is the crate's own name so that
+/// `Cargo.toml` is the single place to change it; `cli`'s tests check that
+/// everything in `packaging/` still agrees.
+pub(crate) const APP_ID: &str = env!("CARGO_PKG_NAME");
+
 /// Replaces control characters with the replacement character before a string
 /// reaches a terminal. A filename is attacker-chosen data, and a terminal
 /// reads bytes like `\e]0;…\a` (retitle) or `\e[2J` (clear) or an OSC 52

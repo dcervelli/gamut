@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 
+use crate::APP_ID;
 use crate::app::Options;
 use crate::app::input::{KEYS, Section};
 use crate::image::decode::Overrides;
@@ -61,6 +62,122 @@ pub fn usage() -> String {
             let _ = writeln!(text, "    {:<17}{}", binding.shown, binding.help);
         }
     }
+    text
+}
+
+/// Where the description column of `OPTIONS` begins. Both the option lines and
+/// their continuations are laid out against it, so it is the one number the
+/// manual page has to know to take that block apart again.
+const DESCRIPTION_COLUMN: usize = 28;
+
+/// Text with the three characters roff reads as instructions defused: a
+/// backslash starts an escape, a hyphen is a typographic minus that renderers
+/// are free to break a line on, and a leading dot or apostrophe makes the line
+/// a request rather than words.
+fn roff(text: &str) -> String {
+    let escaped = text.replace('\\', r"\e").replace('-', r"\-");
+    match escaped.starts_with('.') || escaped.starts_with('\'') {
+        true => format!(r"\&{escaped}"),
+        false => escaped,
+    }
+}
+
+/// `OPTIONS` taken apart into one entry per option: the flag column, and the
+/// description gathered back into a single line from however many it was
+/// wrapped over.
+///
+/// The block is written for a terminal, where the wrapping is the layout. A
+/// manual page sets its own width, so the wrapping has to be undone rather
+/// than carried across.
+fn option_entries() -> Vec<(String, String)> {
+    let body = OPTIONS
+        .split_once("\nOPTIONS:\n")
+        .expect("OPTIONS has its heading")
+        .1;
+    let mut entries: Vec<(String, String)> = Vec::new();
+    for line in body.lines().filter(|line| !line.trim().is_empty()) {
+        match line.len() > DESCRIPTION_COLUMN && line[..DESCRIPTION_COLUMN].trim().is_empty() {
+            // A continuation: it belongs to the option above it.
+            true => {
+                let entry = entries
+                    .last_mut()
+                    .expect("a continuation follows an option");
+                entry.1.push(' ');
+                entry.1.push_str(line[DESCRIPTION_COLUMN..].trim());
+            }
+            false => {
+                let (flags, description) = line.split_at(DESCRIPTION_COLUMN.min(line.len()));
+                entries.push((flags.trim().to_string(), description.trim().to_string()));
+            }
+        }
+    }
+    entries
+}
+
+/// The manual page, in roff.
+///
+/// Rendered from `OPTIONS` and [`KEYS`] rather than written out beside them,
+/// for the reason `--help` is: there is one list of options and one list of
+/// keys, and a second copy would be a second thing to keep in step. `--help`
+/// and `image-view(1)` therefore cannot disagree.
+pub fn man() -> String {
+    let mut text = String::new();
+    let version = env!("CARGO_PKG_VERSION");
+    let upper = APP_ID.to_uppercase();
+    let tagline = OPTIONS
+        .lines()
+        .next()
+        .and_then(|line| line.split_once('\u{2014}'))
+        .map(|(_, rest)| rest.trim())
+        .unwrap_or("preview images");
+
+    let _ = writeln!(
+        text,
+        r#".TH {} 1 "" "{} {}" "User Commands""#,
+        roff(&upper),
+        roff(APP_ID),
+        roff(version)
+    );
+    let _ = writeln!(text, ".SH NAME\n{} \\- {}", roff(APP_ID), roff(tagline));
+
+    let _ = writeln!(text, ".SH SYNOPSIS\n.B {}", roff(APP_ID));
+    let _ = writeln!(text, r"[\fIOPTIONS\fR] \fIPATH\fR\&...");
+
+    // The prose between the usage line and the options list, as its own
+    // paragraphs; blank lines in the block are the paragraph breaks.
+    let _ = writeln!(text, ".SH DESCRIPTION");
+    let header = OPTIONS
+        .split_once("\nOPTIONS:\n")
+        .expect("OPTIONS has its heading")
+        .0;
+    let prose = header
+        .split_once("<PATH>...\n")
+        .map(|(_, rest)| rest)
+        .unwrap_or("");
+    for paragraph in prose.split("\n\n").filter(|p| !p.trim().is_empty()) {
+        let _ = writeln!(text, ".PP\n{}", roff(paragraph.trim()));
+    }
+
+    let _ = writeln!(text, ".SH OPTIONS");
+    for (flags, description) in option_entries() {
+        let _ = writeln!(text, ".TP\n.B {}\n{}", roff(&flags), roff(&description));
+    }
+
+    for (section, heading) in [
+        (Section::View, "VIEW KEYS"),
+        (Section::Display, "DISPLAY KEYS"),
+    ] {
+        let _ = writeln!(text, ".SH {heading}");
+        for binding in KEYS.iter().filter(|binding| binding.section == section) {
+            let _ = writeln!(
+                text,
+                ".TP\n.B {}\n{}",
+                roff(binding.shown),
+                roff(binding.help)
+            );
+        }
+    }
+
     text
 }
 
@@ -188,7 +305,13 @@ pub fn parse_args() -> Result<Option<Args>> {
                     return Ok(None);
                 }
                 Some("-V") | Some("--version") => {
-                    println!("image-view {}", env!("CARGO_PKG_VERSION"));
+                    println!("{APP_ID} {}", env!("CARGO_PKG_VERSION"));
+                    return Ok(None);
+                }
+                // Undocumented, like `--serve-clipboard`: this is how the
+                // package build gets a manual page, not something to press.
+                Some("--print-man") => {
+                    print!("{}", man());
                     return Ok(None);
                 }
                 Some("--hdr") => {
@@ -342,6 +465,218 @@ mod tests {
             );
         }
         assert!(text.contains("VIEW KEYS:\n") && text.contains("DISPLAY KEYS:\n"));
+    }
+
+    fn packaging() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("packaging")
+    }
+
+    /// Every long option, as `--help` spells them.
+    fn long_options() -> Vec<String> {
+        option_entries()
+            .iter()
+            .flat_map(|(flags, _)| {
+                flags
+                    .split(',')
+                    .map(|flag| {
+                        flag.trim()
+                            .split(' ')
+                            .next()
+                            .unwrap_or_default()
+                            .to_string()
+                    })
+                    .filter(|flag| flag.starts_with("--") && flag.len() > 2)
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    /// The manual page is the help text in another notation, so it says the
+    /// same things: every option and every key, once each.
+    #[test]
+    fn the_manual_page_lists_every_option_and_binding() {
+        let page = man();
+        for (flags, description) in option_entries() {
+            assert!(
+                page.contains(&roff(&flags)),
+                "{flags:?} should reach the manual page"
+            );
+            assert!(
+                page.contains(&roff(&description)),
+                "the description of {flags:?} should reach the manual page"
+            );
+        }
+        for binding in KEYS {
+            assert!(
+                page.contains(&roff(binding.help)),
+                "{:?} should reach the manual page",
+                binding.shown
+            );
+        }
+        assert!(
+            page.starts_with(".TH "),
+            "a manual page opens with its title"
+        );
+    }
+
+    /// Taking `OPTIONS` apart must not lose a line of it: every option line
+    /// becomes an entry, and every continuation joins the entry above it.
+    #[test]
+    fn every_option_line_is_accounted_for() {
+        let body = OPTIONS.split_once("\nOPTIONS:\n").expect("a heading").1;
+        let lines = body.lines().filter(|line| !line.trim().is_empty()).count();
+        let entries = option_entries();
+        assert!(entries.len() >= 15, "every option should be found");
+        assert!(
+            entries.len() <= lines,
+            "an entry cannot come from no line at all"
+        );
+        for (flags, description) in &entries {
+            assert!(!flags.is_empty(), "an entry has a flag column");
+            assert!(!description.is_empty(), "{flags:?} should say what it does");
+            assert!(
+                !description.starts_with(char::is_lowercase) || flags == "--",
+                "{flags:?}: a description starts where the column does"
+            );
+        }
+    }
+
+    /// The completions offer what the program actually accepts. They are
+    /// written by hand — there is no `clap` here to generate them — so this is
+    /// what stops a new flag from reaching `--help` alone.
+    #[test]
+    fn the_completions_offer_every_long_option() {
+        for file in [
+            format!("{APP_ID}.bash"),
+            format!("_{APP_ID}"),
+            format!("{APP_ID}.fish"),
+        ] {
+            let path = packaging().join("completions").join(&file);
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+            for option in long_options() {
+                // fish spells a long option without its dashes.
+                let spelt = match file.ends_with(".fish") {
+                    true => format!("-l {}", option.trim_start_matches('-')),
+                    false => option.clone(),
+                };
+                assert!(text.contains(&spelt), "{file} should offer {option}");
+            }
+        }
+    }
+
+    /// The desktop entry claims every format the decoders can actually read.
+    /// A file manager offers this program for a picture because of this list,
+    /// so a format added without touching it would silently not be offered.
+    #[test]
+    fn the_desktop_entry_claims_every_format() {
+        // The extension a file carries, and the media type a file manager
+        // knows it by. Taken from shared-mime-info, which is what decides
+        // which application a desktop offers for a file.
+        const TYPES: &[(&str, &str)] = &[
+            ("jpg", "image/jpeg"),
+            ("jpeg", "image/jpeg"),
+            ("jpe", "image/jpeg"),
+            ("jfif", "image/jpeg"),
+            ("png", "image/png"),
+            ("gif", "image/gif"),
+            ("bmp", "image/bmp"),
+            ("tif", "image/tiff"),
+            ("tiff", "image/tiff"),
+            ("webp", "image/webp"),
+            ("avif", "image/avif"),
+            ("heic", "image/heif"),
+            ("heif", "image/heif"),
+            ("hif", "image/heif"),
+            ("ico", "image/vnd.microsoft.icon"),
+            ("hdr", "image/vnd.radiance"),
+            ("exr", "image/x-exr"),
+            ("pnm", "image/x-portable-anymap"),
+            ("pbm", "image/x-portable-bitmap"),
+            ("pgm", "image/x-portable-graymap"),
+            ("ppm", "image/x-portable-pixmap"),
+            ("pam", "image/x-portable-arbitrarymap"),
+        ];
+
+        let path = packaging().join(format!("{APP_ID}.desktop"));
+        let entry = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        let claimed = entry
+            .lines()
+            .find_map(|line| line.strip_prefix("MimeType="))
+            .expect("the desktop entry has a MimeType line");
+
+        for extension in crate::image::decode::supported_extensions() {
+            let media = TYPES
+                .iter()
+                .find(|(name, _)| *name == extension)
+                .unwrap_or_else(|| panic!("{extension} has no media type in this table"))
+                .1;
+            assert!(
+                claimed.contains(&format!("{media};")),
+                ".{extension} is decoded but {media} is not claimed in the desktop entry"
+            );
+        }
+    }
+
+    /// One name, in one place.
+    ///
+    /// The Wayland `app_id`, the desktop entry, the icon and the Arch package
+    /// all have to be the same word for a taskbar to pair a window with its
+    /// icon and for a file manager to launch the right thing. That word is the
+    /// crate's own name, so renaming the program is editing `Cargo.toml` and
+    /// moving the files this test names — and forgetting one is a failure here
+    /// rather than a wrong icon on somebody's desktop.
+    #[test]
+    fn everything_is_named_after_the_crate() {
+        let entry = packaging().join(format!("{APP_ID}.desktop"));
+        let icon = packaging().join(format!("{APP_ID}.svg"));
+        let pkgbuild = packaging().join("PKGBUILD");
+        for path in [&entry, &icon, &pkgbuild] {
+            assert!(path.exists(), "{} is missing", path.display());
+        }
+        assert!(
+            packaging()
+                .join("completions")
+                .join(format!("{APP_ID}.bash"))
+                .exists()
+                && packaging()
+                    .join("completions")
+                    .join(format!("_{APP_ID}"))
+                    .exists()
+                && packaging()
+                    .join("completions")
+                    .join(format!("{APP_ID}.fish"))
+                    .exists(),
+            "the completions are named after the crate too"
+        );
+
+        let text = std::fs::read_to_string(&entry).expect("the desktop entry reads");
+        for field in ["Exec", "TryExec", "Icon", "StartupWMClass"] {
+            let value = text
+                .lines()
+                .find_map(|line| line.strip_prefix(&format!("{field}=")))
+                .unwrap_or_else(|| panic!("the desktop entry has no {field}"));
+            assert!(
+                value.split(' ').next() == Some(APP_ID),
+                "{field}={value} should name {APP_ID}"
+            );
+        }
+
+        let text = std::fs::read_to_string(&pkgbuild).expect("the PKGBUILD reads");
+        assert!(
+            text.contains(&format!("pkgname={APP_ID}")),
+            "the PKGBUILD packages {APP_ID}"
+        );
+        assert!(
+            text.contains(&format!("pkgver={}", env!("CARGO_PKG_VERSION"))),
+            "the PKGBUILD is at the version Cargo.toml says"
+        );
+
+        assert!(
+            OPTIONS.contains(APP_ID),
+            "the help text still calls the program {APP_ID}"
+        );
     }
 
     fn fixtures() -> PathBuf {

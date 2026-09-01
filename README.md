@@ -7,6 +7,22 @@ Handles ordinary photographs, 16-bit and floating-point measurement data, and
 HDR frames through one pipeline, without flattening any of them to 8-bit sRGB
 on the way in.
 
+## Install
+
+There is no published package yet. Build it from source as below; the pieces
+an Arch package is made of are in `packaging/`, and `makepkg` will build one
+from a tagged release:
+
+```sh
+cd packaging && makepkg -si
+```
+
+That installs the desktop entry and the icon as well as the binary, so a file
+manager offers `image-view` for a picture and `xdg-open` reaches it.
+
+There are no prebuilt binaries, and none are planned: the package is compiled
+from the source of a tagged release.
+
 ## Build and run
 
 ```sh
@@ -22,8 +38,8 @@ leave in the middle; the window opens at the image's own size plus that
 chrome, shrunk to fit the monitor. `` ` `` hides the panels and gives the
 image the whole window, re-fitting it as it goes.
 
-Everything is pure Rust except HEIF, which links the system `libheif` (1.20 or
-newer) — `libheif-dev` on Debian, `libheif` on Arch, `brew install libheif` on
+Everything is pure Rust except HEIF, which links the system `libheif` (1.23 or
+newer, matching the `v1_23` security-limits ABI the binding is built against) — `libheif-dev` on Debian, `libheif` on Arch, `brew install libheif` on
 macOS. Which HEIF *codecs* work then depends on that installation's plugins:
 HEVC (`.heic`) needs libde265 or ffmpeg, AV1 (`.avif`) needs dav1d or aom.
 Both ship as standard on the distributions above.
@@ -968,3 +984,14 @@ and its WebP writer emits neither an `EXIF` chunk nor an animation, so those
 two fixtures are assembled around the bitstreams it did write.
 `display-p3.icc` sits beside the fixtures as an input rather than an output;
 `examples/make-icc.rs` is what produced it.
+
+## Licence
+
+Dual-licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT licence ([LICENSE-MIT](LICENSE-MIT))
+
+at your option. Unless you state otherwise, any contribution you intentionally
+submit for inclusion in this work shall be dual-licensed as above, without any
+additional terms or conditions.

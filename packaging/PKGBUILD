@@ -1,0 +1,73 @@
+# Maintainer: TODO <TODO>
+
+pkgname=image-view
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="A GPU image viewer with real colour management, for photographs, measurement data and HDR"
+arch=('x86_64' 'aarch64')
+url="https://github.com/closedcontour/image-view"
+license=('MIT OR Apache-2.0')
+# libheif reads HEIC and AVIF, and its codec plugins decide which of the two
+# actually work: libde265 or ffmpeg for HEVC, dav1d or aom for AV1. Both are
+# ordinary on Arch, so they are left to libheif's own dependencies.
+# vulkan-icd-loader finds the driver wgpu draws through; fontconfig is how the
+# interface finds a sans and a mono face to set its text in.
+depends=('gcc-libs' 'glibc' 'libheif' 'vulkan-icd-loader' 'fontconfig')
+makedepends=('cargo' 'pkgconf')
+options=('!debug')
+
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "$pkgname-$pkgver"
+
+  cargo fetch --locked --target "$CARCH-unknown-linux-gnu"
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+
+  # The tests that want a GPU report success where no adapter can be had, so
+  # this is safe in a build container. `test_images/` ships in the tarball
+  # because the tests reach for it by path.
+  export CARGO_TARGET_DIR=target
+  cargo test --frozen --release
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+
+  install -Dm755 "target/release/$pkgname" "$pkgdir/usr/bin/$pkgname"
+
+  install -Dm644 LICENSE-MIT "$pkgdir/usr/share/licenses/$pkgname/LICENSE-MIT"
+  install -Dm644 LICENSE-APACHE "$pkgdir/usr/share/licenses/$pkgname/LICENSE-APACHE"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 user-docs/KEYS.md "$pkgdir/usr/share/doc/$pkgname/KEYS.md"
+  install -Dm644 user-docs/FORMATS.md "$pkgdir/usr/share/doc/$pkgname/FORMATS.md"
+
+  install -Dm644 "packaging/$pkgname.desktop" \
+    "$pkgdir/usr/share/applications/$pkgname.desktop"
+  install -Dm644 "packaging/$pkgname.svg" \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/$pkgname.svg"
+
+  # The manual page and the completions come out of the binary just built, so
+  # they cannot describe a different version of the program than the one being
+  # packaged.
+  "target/release/$pkgname" --print-man |
+    install -Dm644 /dev/stdin "$pkgdir/usr/share/man/man1/$pkgname.1"
+
+  install -Dm644 "packaging/completions/$pkgname.bash" \
+    "$pkgdir/usr/share/bash-completion/completions/$pkgname"
+  install -Dm644 "packaging/completions/_$pkgname" \
+    "$pkgdir/usr/share/zsh/site-functions/_$pkgname"
+  install -Dm644 "packaging/completions/$pkgname.fish" \
+    "$pkgdir/usr/share/fish/vendor_completions.d/$pkgname.fish"
+}

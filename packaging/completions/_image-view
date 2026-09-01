@@ -1,0 +1,29 @@
+#compdef image-view
+
+# zsh completion for image-view
+#
+# The option list here is checked against `--help` by a test in src/cli.rs, so
+# a flag cannot be added to one without the other.
+
+_image-view() {
+  _arguments -s -S \
+    '(-h --help)'{-h,--help}'[Show this help]' \
+    '(-V --version)'{-V,--version}'[Show the version]' \
+    '--hdr[Use an HDR surface when the display offers one]' \
+    '--transfer[Override the transfer function the file is assumed to use]:function:(linear srgb pq hlg gamma:)' \
+    '--primaries[Override the colour primaries]:primaries:(bt709 p3 bt2020 adobe)' \
+    '--no-gain-map[Show the SDR base image of an Ultra HDR JPEG]' \
+    '--colormap[Start with false colour on single-channel images]:map:(gray viridis magma turbo)' \
+    '--tone-map[Start with this tone map]:map:(clip reinhard neutral)' \
+    '--window[Start with the window set this way]:mode:(unit minmax pct)' \
+    '--exposure[Start at this exposure, in stops]:stops:' \
+    '--upscale[How to resample above 100%]:filter:(nearest bicubic)' \
+    '--histogram[Start with the histogram showing]' \
+    '--info[Start with the file information panel showing]' \
+    '--no-minimap[Start with the minimap off]' \
+    '--timing[Print decode and startup timings to stdout]' \
+    '--[Treat every later argument as a path]' \
+    '*:image:_files -g "*.(#i)(jpg|jpeg|jpe|jfif|png|gif|bmp|tif|tiff|webp|avif|heic|heif|hif|ico|hdr|exr|pnm|pbm|pgm|ppm|pam)"'
+}
+
+_image-view "$@"

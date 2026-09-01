@@ -4,7 +4,9 @@ use std::path::Path;
 
 use winit::dpi::PhysicalSize;
 use winit::event_loop::ActiveEventLoop;
+use winit::window::WindowAttributes;
 
+use crate::APP_ID;
 use crate::ui::chrome::{BAR_HEIGHT, SIDE_WIDTH};
 
 /// Fraction of the monitor a freshly opened window may occupy.
@@ -34,14 +36,51 @@ pub(super) fn file_label(path: &Path) -> String {
 }
 
 pub(super) fn window_title(path: &Path) -> String {
-    format!("{} — image-view", file_label(path))
+    format!("{} — {APP_ID}", file_label(path))
 }
 
 /// Before there is anything to look at, the title carries the file being read.
 /// Titling an empty window with a file it is not yet showing would be saying
 /// something untrue, and the title is the only place the name can go.
 pub(super) fn loading_title(path: &Path) -> String {
-    format!("loading {} — image-view", file_label(path))
+    format!("loading {} — {APP_ID}", file_label(path))
+}
+
+/// Give the window an identity before it opens.
+///
+/// A title alone tells a compositor what to write in the bar and nothing more.
+/// Pairing the window with its desktop entry — for the icon a taskbar shows,
+/// for the entry a file manager launches, and for a `class:` a Hyprland rule
+/// can match — needs the application's name as well. Wayland calls it the
+/// `app_id` and X11 the class half of `WM_CLASS`; winit spells both `with_name`
+/// on a per-backend extension trait, so both are set and whichever backend is
+/// in use reads its own.
+///
+/// The instance name is left empty: it exists to tell several windows of one
+/// application apart, and there is only ever the one here.
+pub(super) fn with_app_id(attributes: WindowAttributes) -> WindowAttributes {
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    ))]
+    {
+        use winit::platform::wayland::WindowAttributesExtWayland;
+        use winit::platform::x11::WindowAttributesExtX11;
+
+        let attributes = WindowAttributesExtWayland::with_name(attributes, APP_ID, "");
+        WindowAttributesExtX11::with_name(attributes, APP_ID, "")
+    }
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    )))]
+    attributes
 }
 
 /// Open at the image's own size, shrunk to fit comfortably on the monitor.

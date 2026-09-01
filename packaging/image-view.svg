@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <title>Image View</title>
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b3a67"/>
+      <stop offset="0.55" stop-color="#7b4a8c"/>
+      <stop offset="1" stop-color="#e8834a"/>
+    </linearGradient>
+    <linearGradient id="gamut" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#e04a4a"/>
+      <stop offset="0.33" stop-color="#e8c34a"/>
+      <stop offset="0.66" stop-color="#4ad08c"/>
+      <stop offset="1" stop-color="#4a8fe0"/>
+    </linearGradient>
+    <clipPath id="frame">
+      <rect x="20" y="24" width="88" height="66" rx="6"/>
+    </clipPath>
+  </defs>
+
+  <!-- The body: a rounded tile, so the icon reads on a panel of any colour. -->
+  <rect x="6" y="6" width="116" height="116" rx="26" fill="#151a24"/>
+  <rect x="6.5" y="6.5" width="115" height="115" rx="25.5" fill="none"
+        stroke="#ffffff" stroke-opacity="0.10" stroke-width="1"/>
+
+  <!-- The picture itself: a horizon under a wide-gamut sky. -->
+  <g clip-path="url(#frame)">
+    <rect x="20" y="24" width="88" height="66" fill="url(#sky)"/>
+    <circle cx="46" cy="49" r="11" fill="#ffe6b0" opacity="0.95"/>
+    <path d="M20 90 L45 62 L62 79 L78 58 L108 90 Z" fill="#16202e" opacity="0.92"/>
+    <path d="M20 90 L45 62 L62 79 L78 58 L108 90 Z" fill="none"
+          stroke="#7fd4ff" stroke-opacity="0.35" stroke-width="1.5"/>
+  </g>
+  <rect x="20" y="24" width="88" height="66" rx="6" fill="none"
+        stroke="#ffffff" stroke-opacity="0.55" stroke-width="2.5"/>
+
+  <!-- The strip beneath: the colour the viewer is careful about. -->
+  <rect x="20" y="100" width="88" height="8" rx="4" fill="url(#gamut)"/>
+</svg>
