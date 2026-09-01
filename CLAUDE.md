@@ -27,11 +27,13 @@ theme/         palette.rs reads Omarchy's colors.toml and resolves its cascade; 
 view.rs        zoom / pan / fit geometry, pure maths (View, Viewport, Fit)
 loader.rs      the decode + upload thread; replies arrive as winit user events
 watch.rs       polling a file for a settled change
+clipboard.rs   putting text or a file: URI on the clipboard, in a process that outlives the window
 timing.rs      startup instrumentation
 image/         the data model, nothing GPU
   mod.rs         Channels, Samples, AlphaMode, DecodedImage, Sample (one pixel read back)
   color/         Transfer, Primaries, ColorSpace; icc.rs and cicp.rs translate what files say into them
   stats.rs       the scan an image gets on load: min/max, histogram, plot
+  encode.rs      the displayed image walked back out to an 8-bit sRGB PNG, for the clipboard
   exif.rs        the file's own metadata, read and rendered for the info panel
   geo.rs         GeoTIFF's keys: where a raster's pixels are on the ground
   directory.rs   a TIFF directory the metadata reader cannot reach, rewritten
@@ -54,7 +56,7 @@ render/        the GPU
 
 | Change | Edit |
 | --- | --- |
-| A key binding | `app/input.rs`: one `KEYS` entry and one `perform` arm. `--help` follows. |
+| A key binding | `app/input.rs`: one `KEYS` entry, with the `mods` it is held with, and one `perform` arm. `--help` follows. |
 | A status-bar segment | `ui/status.rs`; the pointer's pixel readout is `ui/pixel.rs` |
 | What a pixel reads as under the pointer | `image/mod.rs::sample` for what the file holds, `image/display.rs::map` for what the screen shows |
 | A panel or overlay | a new `ui/<name>.rs` and one call in `ui/mod.rs::build_frame`; a new colour role goes in `theme/mod.rs` |
@@ -62,6 +64,7 @@ render/        the GPU
 | A popup menu | a `Menu` variant in `ui/menu.rs` with its choices, `items`/`grid`/`choose` arms and a `draw` arm; `Chrome::popup` places it, `App::press` opens it |
 | A CLI flag | `cli.rs`, and the `Options` / `Startup` / `Overrides` field it sets |
 | An image format | `image/decode/<fmt>.rs` implementing `Decoder`, one line in `DECODERS`, a fixture in `test_images/` (see its README and `generate.sh`) |
+| What a copy of the image contains | `image/encode.rs`; the chord that asks for it is in `app/input.rs` |
 | A colour-space source (a new tag a format carries) | `image/color/` |
 | An upscale filter or tone map | the WGSL function, one arm in `render/shader_codes.rs`, one enum variant with its `label`/`parse`/`next` |
 | A new render pass | build it from `render/gpu.rs`; add its target to `Renderer::render` |

@@ -4,12 +4,20 @@
 //! a binding added here is documented by the same edit. Each key names an
 //! [`Action`], and [`App::perform`] is the one place an action happens.
 
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
+use std::time::Instant;
+
 use winit::event::{ElementState, MouseButton, MouseScrollDelta};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{Cursor, CursorIcon};
 
 use super::App;
+use crate::clipboard;
 use crate::image::display::Startup;
+use crate::image::encode;
+use crate::timing;
 use crate::ui::{Current, Menu, Widget};
 
 /// Window pixels moved per arrow-key press.
@@ -51,6 +59,13 @@ pub enum Action {
     CycleToneMap,
     CycleColormap,
     ResetDisplay,
+    /// Put the absolute path of the file on screen on the clipboard.
+    CopyPath,
+    /// Put the file on screen on the clipboard as a `file:` URI, under the
+    /// MIME type a program that wants the file itself asks for.
+    CopyUri,
+    /// Put the picture on screen on the clipboard as a PNG.
+    CopyImage,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -81,6 +96,29 @@ pub enum KeyName {
     Named(NamedKey),
 }
 
+/// What a binding is held with, over and above whatever Shift the character
+/// itself already implies.
+///
+/// Ctrl, Alt and Super must be held exactly as written: a chord this table
+/// does not bind belongs to the window manager, and acting on `Super+0` as
+/// well would move the view behind its back.
+///
+/// Shift is never among them. A key that reaches us has already had Shift
+/// applied — the table says `e` and `E`, not `e` and Shift+`e` — so asking
+/// for it again would be asking twice, and asking for it where the character
+/// is a capital would refuse the same capital typed under Caps Lock. What the
+/// user presses is spelled out in [`Binding::shown`] instead.
+pub type Mods = ModifiersState;
+
+/// Held with nothing but Shift, if anything.
+const PLAIN: Mods = Mods::empty();
+const CTRL: Mods = Mods::CONTROL;
+
+/// Whether the modifiers `held` are the ones a binding asked for.
+fn satisfies(required: Mods, held: Mods) -> bool {
+    held.difference(Mods::SHIFT) == required
+}
+
 /// Which heading a binding is listed under in `--help`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Section {
@@ -92,6 +130,8 @@ pub enum Section {
 /// keys to several actions (`n, p`), and a line may bind none (`Wheel`).
 pub struct Binding {
     pub section: Section,
+    /// What is held down with the keys below.
+    pub mods: Mods,
     /// The key column, as written for people: `q, Esc`, `Arrows`.
     pub shown: &'static str,
     pub help: &'static str,
@@ -105,6 +145,7 @@ use KeyName::{Char, Named};
 pub const KEYS: &[Binding] = &[
     Binding {
         section: Section::View,
+        mods: PLAIN,
         shown: "q, Esc",
         help: "Quit",
         keys: &[
@@ -115,30 +156,35 @@ pub const KEYS: &[Binding] = &[
     },
     Binding {
         section: Section::View,
+        mods: PLAIN,
         shown: "+, =",
         help: "Zoom in",
         keys: &[(Char("+"), ZoomIn), (Char("="), ZoomIn)],
     },
     Binding {
         section: Section::View,
+        mods: PLAIN,
         shown: "-, _",
         help: "Zoom out",
         keys: &[(Char("-"), ZoomOut), (Char("_"), ZoomOut)],
     },
     Binding {
         section: Section::View,
+        mods: PLAIN,
         shown: "Wheel",
         help: "Zoom about the pointer",
         keys: &[],
     },
     Binding {
         section: Section::View,
+        mods: PLAIN,
         shown: "0",
         help: "Actual size (100%)",
         keys: &[(Char("0"), ActualSize)],
     },
     Binding {
         section: Section::View,
+        mods: PLAIN,
         shown: "Arrows",
         help: "Pan",
         keys: &[
@@ -150,18 +196,21 @@ pub const KEYS: &[Binding] = &[
     },
     Binding {
         section: Section::View,
+        mods: PLAIN,
         shown: "f",
         help: "Cycle fit / fit width / fit height",
         keys: &[(Char("f"), CycleFit), (Char("F"), CycleFit)],
     },
     Binding {
         section: Section::View,
+        mods: PLAIN,
         shown: "u",
         help: "Cycle the filter used above 100%: nearest, bicubic",
         keys: &[(Char("u"), CycleUpscale), (Char("U"), CycleUpscale)],
     },
     Binding {
         section: Section::View,
+        mods: PLAIN,
         shown: "n, p",
         help: "Next / previous file",
         keys: &[
@@ -173,20 +222,47 @@ pub const KEYS: &[Binding] = &[
             (Named(NamedKey::PageUp), PreviousFile),
         ],
     },
+    // Both are the capital, so both are typed with Shift held; only the Ctrl
+    // that parts one from the other is a modifier as far as the table is
+    // concerned. `shown` says what the fingers do.
+    Binding {
+        section: Section::View,
+        mods: PLAIN,
+        shown: "Shift+C",
+        help: "Copy the absolute path of the file on screen",
+        keys: &[(Char("C"), CopyPath)],
+    },
+    Binding {
+        section: Section::View,
+        mods: CTRL,
+        shown: "Ctrl+Shift+C",
+        help: "Copy the file on screen as a URI another program can open",
+        keys: &[(Char("C"), CopyUri)],
+    },
+    Binding {
+        section: Section::View,
+        mods: CTRL,
+        shown: "Ctrl+C",
+        help: "Copy the picture itself, as the display settings show it",
+        keys: &[(Char("c"), CopyImage)],
+    },
     Binding {
         section: Section::Display,
+        mods: PLAIN,
         shown: "e, E",
         help: "Exposure down / up, half a stop",
         keys: &[(Char("e"), Exposure(-0.5)), (Char("E"), Exposure(0.5))],
     },
     Binding {
         section: Section::Display,
+        mods: PLAIN,
         shown: "a",
         help: "Cycle the automatic window: unit, min/max, 99.8%",
         keys: &[(Char("a"), CycleAutoWindow), (Char("A"), CycleAutoWindow)],
     },
     Binding {
         section: Section::Display,
+        mods: PLAIN,
         shown: "[, ]",
         help: "Slide the window down / up",
         keys: &[
@@ -196,6 +272,7 @@ pub const KEYS: &[Binding] = &[
     },
     Binding {
         section: Section::Display,
+        mods: PLAIN,
         shown: ", .",
         help: "Narrow / widen the window",
         keys: &[
@@ -207,57 +284,67 @@ pub const KEYS: &[Binding] = &[
     },
     Binding {
         section: Section::Display,
+        mods: PLAIN,
         shown: "t",
         help: "Cycle tone mapping: clip, reinhard, neutral",
         keys: &[(Char("t"), CycleToneMap), (Char("T"), CycleToneMap)],
     },
     Binding {
         section: Section::Display,
+        mods: PLAIN,
         shown: "c",
         help: "Cycle false colour for single-channel images",
-        keys: &[(Char("c"), CycleColormap), (Char("C"), CycleColormap)],
+        // Lower case only: Shift+C copies the path.
+        keys: &[(Char("c"), CycleColormap)],
     },
     Binding {
         section: Section::Display,
+        mods: PLAIN,
         shown: "r",
         help: "Reset display settings",
         keys: &[(Char("r"), ResetDisplay), (Char("R"), ResetDisplay)],
     },
     Binding {
         section: Section::Display,
+        mods: PLAIN,
         shown: "h",
         help: "Toggle the histogram",
         keys: &[(Char("h"), ToggleHistogram), (Char("H"), ToggleHistogram)],
     },
     Binding {
         section: Section::Display,
+        mods: PLAIN,
         shown: "i",
         help: "Toggle the file information panel",
         keys: &[(Char("i"), ToggleInfo), (Char("I"), ToggleInfo)],
     },
     Binding {
         section: Section::Display,
+        mods: PLAIN,
         shown: "m",
         help: "Toggle the minimap",
         keys: &[(Char("m"), ToggleMinimap), (Char("M"), ToggleMinimap)],
     },
     Binding {
         section: Section::Display,
+        mods: PLAIN,
         shown: "g",
         help: "Toggle the grid over the image",
         keys: &[(Char("g"), ToggleGrid), (Char("G"), ToggleGrid)],
     },
     Binding {
         section: Section::Display,
+        mods: PLAIN,
         shown: "`",
         help: "Toggle the interface panels",
         keys: &[(Char("`"), ToggleInterface), (Char("~"), ToggleInterface)],
     },
 ];
 
-/// What `key` asks for, if anything.
-pub fn action_for(key: &Key) -> Option<Action> {
+/// What `key` held with `mods` asks for, if anything.
+pub fn action_for(key: &Key, mods: Mods) -> Option<Action> {
     KEYS.iter()
+        .filter(|binding| satisfies(binding.mods, mods))
         .flat_map(|binding| binding.keys)
         .find(|(name, _)| match (name, key) {
             (Char(text), Key::Character(typed)) => typed.as_str() == *text,
@@ -310,20 +397,29 @@ pub(super) struct Pointer {
 }
 
 impl Pointer {
-    /// Whether a key or wheel event belongs to the window manager rather than
-    /// to us: a compositor binding such as Super+0 still delivers its key
-    /// here, and acting on it would move the view behind the user's back.
+    /// Whether a wheel event belongs to the window manager rather than to us:
+    /// Ctrl with the wheel is a compositor gesture, and zooming on it as well
+    /// would move the view behind the user's back. Keys answer the same
+    /// question through [`satisfies`], which lets a chord this table does
+    /// bind through.
     fn chorded(&self) -> bool {
         self.modifiers.control_key() || self.modifiers.alt_key() || self.modifiers.super_key()
     }
 }
 
+/// Says that a copy could not be made. Copies happen because a key was
+/// pressed and show nothing on screen when they work, so the only thing worth
+/// saying is when one did not.
+fn report(error: &anyhow::Error) {
+    eprintln!(
+        "image-view: {}",
+        crate::escape_controls(&format!("{error:#}"))
+    );
+}
+
 impl App {
     pub(super) fn handle_key(&mut self, key: &Key) -> Effect {
-        if self.pointer.chorded() {
-            return Effect::Nothing;
-        }
-        match action_for(key) {
+        match action_for(key, self.pointer.modifiers) {
             Some(action) => self.perform(action),
             None => Effect::Nothing,
         }
@@ -415,6 +511,22 @@ impl App {
                     true
                 });
             }
+            // Nothing on screen changes; a copy is reported only when it
+            // could not be made.
+            CopyPath => {
+                let path = self.shown_path();
+                self.copy(path.to_string_lossy().as_bytes(), clipboard::TEXT);
+                return Effect::Nothing;
+            }
+            CopyUri => {
+                let list = clipboard::uri_list(&self.shown_path());
+                self.copy(list.as_bytes(), clipboard::URI_LIST);
+                return Effect::Nothing;
+            }
+            CopyImage => {
+                self.copy_image();
+                return Effect::Nothing;
+            }
             ResetDisplay => {
                 return self.adjust(|current, startup| {
                     current
@@ -436,6 +548,84 @@ impl App {
             return Effect::Nothing;
         };
         Effect::redraw_if(change(current, startup))
+    }
+
+    /// The absolute path of the file on screen. Absolute because what is
+    /// copied is bound for somewhere else, where the directory this was
+    /// started in means nothing — and because a URI has no other kind. The
+    /// path as given stands in if it cannot be made absolute, which needs the
+    /// working directory and so can fail.
+    fn shown_path(&self) -> PathBuf {
+        let path = self.files.shown_path();
+        std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf())
+    }
+
+    /// Puts the picture on screen on the clipboard as a PNG.
+    ///
+    /// The image at its own size with the display settings baked in, not a
+    /// picture of the window: the zoom, the pan and the panels are how this
+    /// is being looked at, and none of them belong to what is being copied.
+    ///
+    /// Done on a thread of its own. Walking every pixel takes long enough on
+    /// a large image to be felt as the window going quiet, and a viewer that
+    /// stops answering the pointer is a viewer that looks broken. The image
+    /// is shared rather than copied, and the display state is a handful of
+    /// numbers, so handing the work over costs nothing worth measuring.
+    fn copy_image(&mut self) {
+        let Some(current) = &self.current else {
+            return;
+        };
+        let image = Arc::clone(&current.image);
+        let display = current.display.clone();
+        let (asked, copies) = (self.claim_copy(), Arc::clone(&self.copies));
+
+        // Threads that have already handed their bytes over are dropped as
+        // each new copy is asked for, so the list is what is still in flight
+        // rather than every copy the session has ever made.
+        self.copying.retain(|thread| !thread.is_finished());
+        self.copying.push(std::thread::spawn(move || {
+            let (width, height) = (image.width, image.height);
+
+            let walked = Instant::now();
+            let raster = encode::displayed(&image, &display);
+            timing::mapped_image(width, height, walked.elapsed());
+
+            let encoded = Instant::now();
+            let png = match encode::png(&raster) {
+                Ok(png) => png,
+                Err(error) => return report(&error),
+            };
+            timing::encoded_png(width, height, png.len(), encoded.elapsed());
+
+            // Something has been copied since this was asked for, and taking
+            // the selection now would put back a picture the user has already
+            // moved on from.
+            if copies.load(Ordering::Relaxed) != asked {
+                return;
+            }
+            if let Err(error) = clipboard::copy(&png, clipboard::PNG) {
+                report(&error);
+            }
+        }));
+    }
+
+    /// Puts `content` on the clipboard under `mime_type`.
+    ///
+    /// Done in line, unlike the picture: there is nothing here to prepare, and
+    /// a copy the user follows straight away with `q` should be on the
+    /// clipboard before the window goes.
+    fn copy(&mut self, content: &[u8], mime_type: &str) {
+        self.claim_copy();
+        if let Err(error) = clipboard::copy(content, mime_type) {
+            report(&error);
+        }
+    }
+
+    /// Marks a copy as the one most recently asked for, and says which number
+    /// it is. A copy that has to go away and prepare itself compares this
+    /// against the counter when it comes back.
+    fn claim_copy(&self) -> u64 {
+        self.copies.fetch_add(1, Ordering::Relaxed) + 1
     }
 
     /// Starts or ends a drag of the image with the left button. The pointer
@@ -567,8 +757,8 @@ impl App {
             // for a long column is a good deal further than the pointer went.
             // Motion arrives in physical pixels and the column is laid out in
             // logical ones.
-            let by = (position[1] - from[1]) / self.scale_factor()
-                * self.info_scroll_per_drag(panel);
+            let by =
+                (position[1] - from[1]) / self.scale_factor() * self.info_scroll_per_drag(panel);
             // The readouts are owed a redraw too, for a drag that has
             // carried the pointer off the panel and onto the image.
             return self.scroll_info_by(panel, by) || moved_pixel;
@@ -707,26 +897,76 @@ impl App {
 mod tests {
     use super::*;
 
-    /// A key bound twice would do whichever came first in the table, silently.
+    /// A chord bound twice would do whichever came first in the table,
+    /// silently. The same key under different modifiers is a different chord.
     #[test]
-    fn no_key_is_bound_twice() {
-        let mut seen: Vec<KeyName> = Vec::new();
-        for (name, _) in KEYS.iter().flat_map(|binding| binding.keys) {
-            assert!(!seen.contains(name), "{name:?} is bound more than once");
-            seen.push(*name);
+    fn no_chord_is_bound_twice() {
+        let mut seen: Vec<(Mods, KeyName)> = Vec::new();
+        for binding in KEYS {
+            for (name, _) in binding.keys {
+                assert!(
+                    !seen.contains(&(binding.mods, *name)),
+                    "{name:?} with {:?} is bound more than once",
+                    binding.mods
+                );
+                seen.push((binding.mods, *name));
+            }
+        }
+    }
+
+    /// Shift belongs to the character, not to the modifiers: a binding that
+    /// asked for it as well would never match, since `satisfies` takes it out
+    /// of what is held before comparing.
+    #[test]
+    fn no_binding_asks_for_shift() {
+        for binding in KEYS {
+            assert!(
+                !binding.mods.shift_key(),
+                "`{}` asks for Shift; say it with the character instead",
+                binding.shown
+            );
         }
     }
 
     #[test]
     fn keys_resolve_to_their_actions() {
         use winit::keyboard::SmolStr;
-        assert_eq!(action_for(&Key::Character(SmolStr::new("q"))), Some(Quit));
-        assert_eq!(action_for(&Key::Named(NamedKey::Escape)), Some(Quit));
-        assert_eq!(action_for(&Key::Named(NamedKey::PageDown)), Some(NextFile));
+        let plain = |text: &str| action_for(&Key::Character(SmolStr::new(text)), PLAIN);
+        assert_eq!(plain("q"), Some(Quit));
+        assert_eq!(action_for(&Key::Named(NamedKey::Escape), PLAIN), Some(Quit));
         assert_eq!(
-            action_for(&Key::Character(SmolStr::new("E"))),
-            Some(Exposure(0.5))
+            action_for(&Key::Named(NamedKey::PageDown), PLAIN),
+            Some(NextFile)
         );
-        assert_eq!(action_for(&Key::Character(SmolStr::new("z"))), None);
+        assert_eq!(plain("E"), Some(Exposure(0.5)));
+        assert_eq!(plain("z"), None);
+    }
+
+    /// The four things `c` does are told apart by what is held with it,
+    /// and a chord nothing binds is still left to the window manager.
+    #[test]
+    fn modifiers_tell_chords_apart() {
+        use winit::keyboard::SmolStr;
+        // Shift is what turns the character upper case in the first place,
+        // so it is held for every reading of `C`.
+        let lower = Key::Character(SmolStr::new("c"));
+        let upper = Key::Character(SmolStr::new("C"));
+        assert_eq!(action_for(&lower, PLAIN), Some(CycleColormap));
+        assert_eq!(action_for(&upper, Mods::SHIFT), Some(CopyPath));
+        assert_eq!(
+            action_for(&upper, Mods::CONTROL | Mods::SHIFT),
+            Some(CopyUri)
+        );
+        // The same capitals under Caps Lock, which reports no Shift at all.
+        assert_eq!(action_for(&upper, PLAIN), Some(CopyPath));
+        assert_eq!(action_for(&upper, CTRL), Some(CopyUri));
+        assert_eq!(action_for(&lower, Mods::CONTROL), Some(CopyImage));
+        // Chords the table does not bind belong to the window manager.
+        assert_eq!(action_for(&lower, Mods::ALT), None);
+        assert_eq!(action_for(&upper, Mods::CONTROL | Mods::ALT), None);
+        assert_eq!(
+            action_for(&Key::Character(SmolStr::new("0")), Mods::SUPER),
+            None
+        );
     }
 }

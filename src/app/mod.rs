@@ -6,6 +6,8 @@ mod window;
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+use std::thread::JoinHandle;
 use std::time::Instant;
 
 use winit::application::ApplicationHandler;
@@ -73,6 +75,17 @@ pub struct App {
     renderer: Option<Renderer>,
     pointer: Pointer,
     panels: Panels,
+    /// Copies of the picture still being prepared, joined before the loop
+    /// leaves. A copy is often followed straight away by `q`, and a thread
+    /// that has not yet handed its bytes over dies with the process — the
+    /// copy would go missing for no reason the user could see.
+    copying: Vec<JoinHandle<()>>,
+    /// Counts copies asked for, so that one still being prepared can tell it
+    /// has been superseded. Copying the picture takes long enough on a large
+    /// image for a second press to arrive while the first is still working,
+    /// and the clipboard should end up holding the one asked for last rather
+    /// than whichever finished last. Shared with the threads doing the work.
+    copies: Arc<AtomicU64>,
     /// Set if the last render failed, so we report it once rather than every frame.
     reported_error: bool,
 }
@@ -117,6 +130,8 @@ impl App {
             window: None,
             renderer: None,
             pointer: Pointer::default(),
+            copying: Vec::new(),
+            copies: Arc::new(AtomicU64::new(0)),
             panels: Panels {
                 show_ui: true,
                 show_histogram: histogram,
@@ -484,7 +499,7 @@ impl App {
             self.panels.info_scroll = 0.0;
         }
         self.current = Some(Current {
-            image,
+            image: Arc::new(image),
             stats,
             display,
             label: file_label(&file.path),
@@ -812,6 +827,16 @@ impl ApplicationHandler<Decoded> for App {
             }
             Effect::Quit => event_loop.exit(),
             Effect::Nothing => {}
+        }
+    }
+
+    /// The loop is done. A copy that is still being prepared gets to finish
+    /// handing its bytes over first: the thread doing it would otherwise go
+    /// down with the process, and the whole point of copying here is that it
+    /// outlasts the window.
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        for thread in self.copying.drain(..) {
+            let _ = thread.join();
         }
     }
 }

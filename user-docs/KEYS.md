@@ -1,7 +1,7 @@
 # Keys and mouse
 
-Every control `image-view` has. Letter keys work in either case except `e`,
-where the two cases move exposure in opposite directions.
+Every control `image-view` has. Letter keys work in either case except `e`
+and `c`, where the two cases do different things.
 
 ## The view
 
@@ -16,6 +16,9 @@ where the two cases move exposure in opposite directions.
 | Arrows | Pan by 64 pixels |
 | `n`, `Page Down` | Next file |
 | `p`, `Page Up` | Previous file |
+| `Shift+C` | Copy the absolute path of the file on screen |
+| `Ctrl+Shift+C` | Copy the file on screen as a URI |
+| `Ctrl+C` | Copy the picture itself, as you are seeing it |
 
 Zoom runs from 2% to 6400%. Zooming leaves fit mode; panning does not, so `f`
 and then Down scrolls through a tall image at fit-width.
@@ -26,6 +29,40 @@ the same pixels. A file of a different size is a different picture, and is
 fitted. Files that cannot be decoded are stepped over. The list is whatever
 was named at startup, in that order; naming a directory puts the images in it
 on the list.
+
+`Shift+C` copies the path in full, from the root down, whichever way the file
+was named when the program was started — a relative name is of no use in
+another window, which is where a copied path is going.
+
+`Ctrl+Shift+C` copies the same file as a URI instead: `file://` and the path,
+with spaces and punctuation escaped. This is what a file manager, a browser or
+another program's open dialog asks for when it wants the file itself rather
+than words about it, so pasting into one of those opens the picture rather
+than typing its name. Pasting into a text field still yields the URI.
+
+`Ctrl+C` copies the picture rather than a name for it, ready to paste into an
+editor, a document or a chat window. What travels is what you are looking at:
+the window, the exposure, the tone curve and any false colour are all applied,
+so a raw scan you have brought up out of the shadows arrives brought up. It is
+the image at its own size, not a photograph of the window — the zoom, the pan
+and the panels are how you are looking at it and none of them are copied.
+
+A single-channel image stays single-channel, so a greyscale scan does not
+arrive as three copies of itself, and false colour is the one thing that
+widens it. Transparency comes along only where the file had some; an opaque
+picture arrives opaque rather than carrying an empty channel. Everything
+arrives 8-bit, which is the depth the screen was showing it at.
+
+The picture is prepared in the background, so the window keeps answering while
+a large one is being got ready — a photograph of some tens of megapixels takes
+a fraction of a second, and only then is there anything to paste. Copying
+something else in the meantime wins: whichever copy you asked for last is the
+one you get, not whichever happened to finish last.
+
+Any of the three copies outlives the window: closing `image-view` leaves it on
+the clipboard, and it stays there until something else copies over it. Quitting
+straight after copying is safe — a picture still being prepared is finished
+before the window goes.
 
 ## The display
 
@@ -39,7 +76,7 @@ on the list.
 | `,` | Narrow the window, raising contrast |
 | `.` | Widen the window, lowering contrast |
 | `t` | Cycle tone mapping: clip → Reinhard → neutral |
-| `c` | Cycle false colour: grey → viridis → magma → turbo |
+| `c` | Cycle false colour: grey → viridis → magma → turbo. Lower case only |
 | `r` | Reset every display setting |
 
 Sliding or resizing the window by hand takes it out of whichever automatic
@@ -138,7 +175,7 @@ without it.
 
 ## Keys that are deliberately ignored
 
-Anything held with `Ctrl`, `Alt` or a `Super`/`Command` key does nothing here,
-and neither does `Ctrl` with the wheel. Those combinations belong to the
-window manager, and a chord such as `Super+0` would otherwise move the view
-behind its back.
+Apart from the two copying chords above, anything held with `Ctrl`, `Alt` or a
+`Super`/`Command` key does nothing here, and neither does `Ctrl` with the
+wheel. Those combinations belong to the window manager, and a chord such as
+`Super+0` would otherwise move the view behind its back.

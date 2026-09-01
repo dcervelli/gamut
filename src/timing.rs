@@ -69,6 +69,34 @@ pub fn decoded(path: &Path, elapsed: Duration) {
     }
 }
 
+/// One image encoded as a PNG for the clipboard. Measured over the encoder
+/// alone, the walk that maps the pixels being reported beside it: this is the
+/// half the compression setting decides, and the other is the half every
+/// display setting does.
+///
+/// On the copy's own thread rather than the main one, so unlike the marks
+/// above this is not time the window spent unable to answer. It is how long
+/// the user waits before a paste has anything to give.
+pub fn encoded_png(width: u32, height: u32, bytes: usize, elapsed: Duration) {
+    if enabled() {
+        report(
+            &format!("encode png {width}x{height} \u{2192} {bytes} bytes"),
+            elapsed,
+        );
+    }
+}
+
+/// The same image walked through the display pipeline on the way to that PNG:
+/// one `sample` and one `map` per pixel, divided between as many threads as
+/// the machine has. Reported apart from the encoding because the two are
+/// answerable to different things — this one to the display state and the
+/// image's size, that one to the compression setting.
+pub fn mapped_image(width: u32, height: u32, elapsed: Duration) {
+    if enabled() {
+        report(&format!("map {width}x{height} for copy"), elapsed);
+    }
+}
+
 /// The first frame with an image in it, handed to the presentation engine.
 /// Called on every frame and prints on one, so the caller does not have to
 /// carry the "has it happened yet" itself.
