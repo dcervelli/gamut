@@ -9,40 +9,40 @@
 * Performance is a differentiator
 
 ## INITIAL RELEASE
-* Info cleanup
-  * Section cleaning
-  * Specific tag renderers?
-  * Copy
-  * Color
 * Full UI pass
-  * Cursor swatch to right of coordinate
-  * Move histogram to UR (or button to LR)
+  * Settings icon LR for cursor interaction
+  * Color spectrum chooser
   * Icons have px shifts
-* Theme font
-* License review
+  * Scaling chooser
+  * Toast for messages ("Copied filename")
+* Histogram
+  * Vertical scale
+  * Log/linear
+  * EV slider
 * Region selection
 * Copy
-  * File path
-  * Image (file content)
-  * Image (raw)
   * Region (raw)
   * Pixel color
-  * EXIF/info
-* Paste image
-* Hotkey choices
 * Modifications
   * 90° rotations
   * Crop to region
-  * Gamma
-* Wayland app_id
-* Package
+* Paste image
+* Hotkey choices
+  * Keys for magnifications
+* Rewrite history with @closedcontour.com email
 * Docs
   * Usage
-  * CLI
-  * Man page
 
 ## FUTURE
 
+* Settings
+  * Pixel format
+  * Geospatial format
+  * Date time format
+* Color scale: alpha mask
+* Thumbnail integration
+  * Background thumbnail generation (show that instead of waiting on prev/next)
+* Loupe
 * Export/Save as...
 * Multiframe
   * GIF
@@ -63,3 +63,6 @@
   * JPEG XL
   * DNG
   * Other raw files
+* Info cleanup
+  * Info / Specific tag renderers?
+  * Perf on scroll up/down by drag
