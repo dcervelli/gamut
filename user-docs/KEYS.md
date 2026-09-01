@@ -104,9 +104,15 @@ top of a colormap would distort the values you are reading off it.
 | `m` | Show or hide the minimap |
 | `g` | Show or hide the grid over the image |
 | `` ` `` | Show or hide the panels around the image |
+| `~` | The same, and closes the histogram, information and minimap |
 
 The panels are opaque and the image is fitted inside them, so hiding them
 gives a fitted image more room and it re-fits immediately.
+
+The histogram, the file information and the minimap float over the image
+rather than sitting in the bars, so `` ` `` leaves them where they are.
+`Shift` with it closes all three as well, for the picture on its own; they
+stay closed when the bars come back.
 
 The file information sits down the right of the image, under headings, so
 that a long column can be read by looking for a thing rather than from the

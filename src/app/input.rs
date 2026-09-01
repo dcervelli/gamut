@@ -46,6 +46,10 @@ pub enum Action {
     NextFile,
     PreviousFile,
     ToggleInterface,
+    /// The interface, and the panels floating over the image with it: the
+    /// bars come and go as [`Action::ToggleInterface`], and the map,
+    /// histogram and information panel are closed on the way past.
+    ToggleInterfaceAndPanels,
     ToggleHistogram,
     ToggleInfo,
     ToggleMinimap,
@@ -348,7 +352,14 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "`",
         help: "Toggle the interface panels",
-        keys: &[(Char("`"), ToggleInterface), (Char("~"), ToggleInterface)],
+        keys: &[(Char("`"), ToggleInterface)],
+    },
+    Binding {
+        section: Section::Display,
+        mods: PLAIN,
+        shown: "~",
+        help: "Toggle the panels, closing the map, histogram and information",
+        keys: &[(Char("~"), ToggleInterfaceAndPanels)],
     },
 ];
 
@@ -492,6 +503,17 @@ impl App {
                 // The menu is part of the interface, and goes with it.
                 self.panels.menu = None;
                 self.panels.hover = None;
+            }
+            // The three panels float over the image rather than inside the
+            // bars, so hiding the interface leaves them behind. This asks for
+            // the picture on its own, and closes them on the way. They stay
+            // closed when the bars come back: what the key put away, it is
+            // not the key's business to bring out again.
+            ToggleInterfaceAndPanels => {
+                self.panels.show_minimap = false;
+                self.panels.show_histogram = false;
+                self.panels.show_info = false;
+                return self.perform(ToggleInterface);
             }
             ToggleHistogram => self.press(Widget::Histogram),
             ToggleInfo => self.press(Widget::Info),
@@ -1084,6 +1106,13 @@ mod tests {
         );
         assert_eq!(plain("E"), Some(Exposure(0.5)));
         assert_eq!(plain("z"), None);
+        // The backquote and the tilde are the same key, and Shift is the
+        // difference between hiding the bars and clearing the screen.
+        assert_eq!(plain("`"), Some(ToggleInterface));
+        assert_eq!(
+            action_for(&Key::Character(SmolStr::new("~")), Mods::SHIFT),
+            Some(ToggleInterfaceAndPanels)
+        );
     }
 
     /// The four things `c` does are told apart by what is held with it,
