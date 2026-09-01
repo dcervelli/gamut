@@ -18,6 +18,7 @@ app/           the event loop's state and winit handlers
 ui/            builds each frame's display list; no wgpu or winit imports
   mod.rs         Current, Panels, FrameInput, build_frame(), backdrop()
   chrome.rs      the four panels and their buttons; content_area(), image_viewport()
+  layers.rs      which layer the pointer is on: Hit, hit() — one answer for hover, press, wheel and readout
   histogram.rs / minimap.rs / grid.rs / buttons.rs   one widget each
   info.rs        the file's own facts, in a column that scrolls
   pixel.rs       the pointer's readout: coordinate, stored and mapped values, swatch
@@ -59,9 +60,9 @@ render/        the GPU
 | A key binding | `app/input.rs`: one `KEYS` entry, with the `mods` it is held with, and one `perform` arm. `--help` follows. |
 | A status-bar segment | `ui/status.rs`; the pointer's pixel readout is `ui/pixel.rs` |
 | What a pixel reads as under the pointer | `image/mod.rs::sample` for what the file holds, `image/display.rs::map` for what the screen shows |
-| A panel or overlay | a new `ui/<name>.rs` and one call in `ui/mod.rs::build_frame`; a new colour role goes in `theme/mod.rs` |
+| A panel or overlay | a new `ui/<name>.rs` and one call in `ui/mod.rs::build_frame`; if the pointer can be on it, a `Hit` variant and one test in `ui/layers.rs` at the same height in the stack it is drawn at; a new colour role goes in `theme/mod.rs` |
 | What the info panel says about a file | `ui/info.rs` for the layout; the file's own facts are gathered in `app/mod.rs::file_facts`, its metadata in `image/exif.rs`, and its georeference in `image/geo.rs` |
-| A popup menu | a `Menu` variant in `ui/menu.rs` with its choices, `items`/`grid`/`choose` arms and a `draw` arm; `Chrome::popup` places it, `App::press` opens it |
+| A popup menu | a `Menu` variant in `ui/menu.rs` with its choices, `items`/`grid`/`choose` arms and a `draw` arm; `Chrome::popup` places it, `App::press` opens it, and `ui/layers.rs` puts it over everything |
 | A CLI flag | `cli.rs`, and the `Options` / `Startup` / `Overrides` field it sets |
 | An image format | `image/decode/<fmt>.rs` implementing `Decoder`, one line in `DECODERS`, a fixture in `test_images/` (see its README and `generate.sh`) |
 | What a copy of the image contains | `image/encode.rs`; the chord that asks for it is in `app/input.rs` |

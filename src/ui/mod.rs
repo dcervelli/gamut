@@ -8,6 +8,7 @@
 
 pub mod chrome;
 pub mod info;
+pub mod layers;
 pub mod menu;
 pub mod minimap;
 
@@ -156,9 +157,10 @@ pub struct Panels {
     /// widgets: it moves as the panel scrolls, and it is there whether or not
     /// the bars are.
     pub info_hover: Option<info::Copyable>,
-    /// The menu popped up over the interface, if any. It takes every press
-    /// while it is open: one on a cell chooses, one anywhere else dismisses
-    /// it.
+    /// The menu popped up over the interface, if any. It is drawn over
+    /// everything and takes the pointer while it is open: a press on a cell
+    /// chooses, one anywhere else dismisses it, and the wheel is spent on it
+    /// — see [`layers`].
     pub menu: Option<Menu>,
 }
 

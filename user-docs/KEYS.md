@@ -189,6 +189,13 @@ The pointer keeps its grab until the button comes up, so a drag that leaves
 the window goes on working. The cursor becomes a closed hand only when there
 is somewhere to drag to.
 
+The panels come between the pointer and the picture. Anything on screen over
+the image — the histogram, the file information, the minimap, an open menu —
+takes what the pointer does while it is over it, so a click there never starts
+a drag of the picture behind, the wheel there never zooms, and the readout in
+the bottom bar goes quiet rather than naming a pixel the panel is covering.
+Hide a panel to get that ground back, or point at the image somewhere else.
+
 ## Starting somewhere other than the default
 
 Most of what these keys reach can be set before the first file opens, which is

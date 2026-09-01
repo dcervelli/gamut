@@ -371,6 +371,31 @@ histogram's axis label. Two layers is as far as this goes on purpose: it is
 the smallest thing that gives the interface a front, and each one costs a
 glyph pass whether or not it has any words on it.
 
+The pointer reads that stack back. `src/ui/layers.rs` puts the window in
+order — the picture at the bottom, the panels that float over it, the chrome
+around it, and whatever menu is open on top — and `hit` walks it from the top
+down and names the first layer to claim the point. One answer serves the
+highlight, the press, the wheel and the bar's pixel readout, so the four
+cannot disagree about what is under the pointer; before there was one, they
+were four orderings written out separately, and they did disagree — the zoom
+menu is drawn over the two panels down the right of the window, and a click on
+a cell that happened to be over one of them went to the panel instead. Every
+layer is opaque: a press that lands on a panel is spent there whether or not
+it hit one of that panel's buttons, so nothing reaches what is drawn behind,
+one gesture never acts on two things, and a widget that lights up under the
+pointer is a widget the next click will actually press. The stack is derived
+from the window size and what is on screen, the same few numbers the frame
+builder lays out from, so what the pointer reaches is what was drawn under it
+without either side owning a cached layout.
+
+Being over a layer and being taken by one are still two things. A menu takes
+the pointer for as long as it is open, as menus do everywhere: a press
+anywhere off it dismisses it rather than reaching what it landed on, the wheel
+is spent on it, and nothing behind it lights up. That grab is applied by the
+handlers over the top of the stack's answer rather than folded into it, which
+is why the bar goes on reading out the pixel under the pointer while a menu is
+open — what the pointer is over has not changed, only what may be pressed.
+
 The information panel (`src/ui/info.rs`) is as wide as the histogram — one
 constant, fixed by the histogram's need for a bin to the logical pixel — so
 the two line up down the right of the window, and its column is measured

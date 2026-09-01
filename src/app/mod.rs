@@ -22,6 +22,7 @@ use crate::render::{HdrPreference, Placement, Rect, Renderer, Scene, Upscale};
 use crate::theme::{self, Theme};
 use crate::timing;
 use crate::ui::chrome::{Chrome, content_area, image_viewport};
+use crate::ui::layers::{Hit, Shown};
 use crate::ui::{self, Current, FileFacts, FrameInput, Panels, Reading};
 use crate::view::{View, Viewport};
 use crate::watch::{self, Watch};
@@ -188,13 +189,19 @@ impl App {
             .unwrap_or(1.0)
     }
 
+    /// The window in the logical pixels the interface is laid out in. Events
+    /// and the surface are both in physical ones.
+    fn logical_size(&self) -> [f32; 2] {
+        let scale = self.scale_factor();
+        let physical = self.window_size();
+        [physical[0] / scale, physical[1] / scale]
+    }
+
     /// Where the panels are this frame. Cheap enough to derive on demand, and
     /// deriving it means there is no cached layout to fall out of step with
     /// the window.
     fn chrome(&self) -> Chrome {
-        let scale = self.scale_factor();
-        let physical = self.window_size();
-        Chrome::new([physical[0] / scale, physical[1] / scale])
+        Chrome::new(self.logical_size())
     }
 
     /// Where the info panel is, when it is on screen. The one thing floating
@@ -212,12 +219,46 @@ impl App {
     /// works this out for itself; it is worked out here as well for the hit
     /// tests, which have to answer between frames.
     fn content(&self) -> Rect {
-        let scale = self.scale_factor();
-        let physical = self.window_size();
-        content_area(
-            [physical[0] / scale, physical[1] / scale],
-            self.panels.show_ui,
-        )
+        content_area(self.logical_size(), self.panels.show_ui)
+    }
+
+    /// The image on screen, as the layers need to know it. `None` before the
+    /// first decode, when the panels that describe an image are not drawn.
+    fn shown(&self) -> Option<Shown> {
+        let current = self.current.as_ref()?;
+        Some(Shown {
+            size: current.size(),
+            gray: current.image.channels().is_gray(),
+            minimap: self.minimap_on_screen(),
+        })
+    }
+
+    /// Which layer of the interface the pointer is on: the one question every
+    /// pointer handler asks, so that the highlight, the press, the wheel and
+    /// the bar's readout cannot disagree about what is under it.
+    ///
+    /// `None` before the pointer has said where it is — a press can genuinely
+    /// arrive first — and once it has left the window.
+    pub(super) fn pointer_hit(&self) -> Option<Hit> {
+        let point = self.logical_cursor()?;
+        Some(ui::layers::hit(
+            point,
+            &self.panels,
+            self.logical_size(),
+            self.shown(),
+        ))
+    }
+
+    /// Whether the menu that is open has the pointer, rather than the layer
+    /// the pointer happens to be over.
+    ///
+    /// A menu takes the pointer for as long as it is open, as menus do
+    /// everywhere: a press anywhere off it dismisses it instead of reaching
+    /// what it landed on, the wheel is spent on it, and nothing behind it
+    /// lights up under the pointer. What the pointer is *over* is unaffected,
+    /// which is why the bar goes on reading out the pixel under it.
+    pub(super) fn menu_has_pointer(&self, hit: Option<Hit>) -> bool {
+        self.panels.menu.is_some() && !hit.is_some_and(Hit::is_menu)
     }
 
     /// Which bin of the histogram the panel is marking, or `None` when it is
@@ -227,16 +268,6 @@ impl App {
     /// motion compares before and after to decide whether the frame on screen
     /// has gone out of date. It answers for the pointer over the plot and for
     /// the pixel under it alike, so either one moving on is caught here.
-    /// Whether the pointer is over the histogram panel, and so whether what
-    /// it is doing belongs to the panel rather than to the image behind it.
-    pub(super) fn pointer_over_histogram(&self) -> bool {
-        self.panels.show_histogram
-            && self.current.is_some()
-            && self
-                .logical_cursor()
-                .is_some_and(|point| ui::histogram::panel(self.content()).contains(point))
-    }
-
     pub(super) fn histogram_mark(&self) -> Option<usize> {
         if !self.panels.show_histogram {
             return None;
@@ -250,11 +281,16 @@ impl App {
         )
     }
 
-    /// Whether the pointer is over that panel, and so whether what it does
-    /// next belongs to the panel rather than to the image behind it.
+    /// Where the info panel is when the pointer is on it, and so when what it
+    /// does next belongs to the panel rather than to the image behind it.
+    ///
+    /// Asked of the layers rather than of the panel's own rectangle, so that
+    /// a menu drawn over the panel keeps the pointer it is covering.
     pub(super) fn pointer_over_info(&self) -> Option<Rect> {
-        let point = self.logical_cursor()?;
-        self.info_panel().filter(|panel| panel.contains(point))
+        if self.pointer_hit()? != Hit::Info {
+            return None;
+        }
+        self.info_panel()
     }
 
     /// How far the column in `panel` may still be scrolled, measured with the
@@ -336,12 +372,12 @@ impl App {
     /// image runs on underneath the panels, where it is not drawn and so has
     /// no pixel to report.
     fn pointer_pixel(&self) -> Option<[u32; 2]> {
-        // A panel floating over the picture takes the pointer rather than
+        // Anything drawn over the picture takes the pointer rather than
         // letting it through: the bar would otherwise read out a pixel nobody
-        // can see, and the histogram's own mark would follow the pointer
-        // across its ramp and its buttons to whatever happened to be behind
-        // them.
-        if self.pointer_over_histogram() {
+        // can see, under the panel that is covering it, and the histogram's
+        // own mark would follow the pointer across its ramp and its buttons
+        // to whatever happened to be behind them.
+        if !self.pointer_hit()?.is_image() {
             return None;
         }
         let cursor = self.pointer.cursor?;

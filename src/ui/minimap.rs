@@ -36,7 +36,7 @@ pub fn placement(
     image: [f32; 2],
     upscale: Upscale,
 ) -> Option<Placement> {
-    let rect = minimap_rect(content_area(logical, show_ui), image)?;
+    let rect = thumbnail(content_area(logical, show_ui), image)?;
     Some(Placement {
         x: rect.x * scale,
         y: rect.y * scale,
@@ -53,7 +53,11 @@ pub fn placement(
 ///
 /// `None` when there is no room for one worth reading, which is what keeps it
 /// off screen in a window dragged down small.
-fn minimap_rect(content: Rect, image: [f32; 2]) -> Option<Rect> {
+///
+/// Public because the pointer is tested against it from outside the frame:
+/// the thumbnail is opaque, and what lands on it belongs to it rather than to
+/// the picture it is covering.
+pub fn thumbnail(content: Rect, image: [f32; 2]) -> Option<Rect> {
     if image[0] <= 0.0 || image[1] <= 0.0 {
         return None;
     }
@@ -142,7 +146,7 @@ pub(super) fn draw(
     theme: &Theme,
 ) {
     let image = current.size();
-    let Some(rect) = minimap_rect(content, image) else {
+    let Some(rect) = thumbnail(content, image) else {
         return;
     };
     outline(frame, rect, 1.0, theme.minimap_edge);
@@ -189,17 +193,17 @@ mod tests {
     fn the_minimap_keeps_the_image_shape_and_never_enlarges_it() {
         let content = Chrome::new(WINDOW).content();
 
-        let wide = minimap_rect(content, [4000.0, 1000.0]).expect("room in a 1000x700 window");
+        let wide = thumbnail(content, [4000.0, 1000.0]).expect("room in a 1000x700 window");
         assert!(wide.width <= MINIMAP_SIZE[0] && wide.height <= MINIMAP_SIZE[1]);
         assert!((wide.width / wide.height - 4.0).abs() < 0.1);
 
-        let tall = minimap_rect(content, [1000.0, 4000.0]).expect("room in a 1000x700 window");
+        let tall = thumbnail(content, [1000.0, 4000.0]).expect("room in a 1000x700 window");
         assert!(tall.width <= MINIMAP_SIZE[0] && tall.height <= MINIMAP_SIZE[1]);
         assert!((tall.height / tall.width - 4.0).abs() < 0.1);
 
         // Life size at most: a tiny image gets a tiny map.
         assert_eq!(
-            minimap_rect(content, [24.0, 18.0]),
+            thumbnail(content, [24.0, 18.0]),
             Some(Rect::new(
                 (content.x + PADDING).round(),
                 (content.y + PADDING).round(),
@@ -209,7 +213,7 @@ mod tests {
         );
 
         // Top-left of the content area, and clear of its far edges.
-        let rect = minimap_rect(content, [4000.0, 1000.0]).expect("room");
+        let rect = thumbnail(content, [4000.0, 1000.0]).expect("room");
         assert!(rect.x >= content.x + PADDING - 0.5);
         assert!(rect.y >= content.y + PADDING - 0.5);
         assert!(rect.right() < content.right() && rect.bottom() < content.bottom());
@@ -217,7 +221,7 @@ mod tests {
         // And nothing at all when the window has no room to spare: a map
         // taking a third of a small content area would be in the way.
         assert_eq!(
-            minimap_rect(Chrome::new([200.0, 160.0]).content(), [800.0, 600.0]),
+            thumbnail(Chrome::new([200.0, 160.0]).content(), [800.0, 600.0]),
             None
         );
     }
