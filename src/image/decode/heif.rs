@@ -33,7 +33,7 @@ use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
 ///
 /// `LibHeif::drop` calls `heif_deinit`, which unloads the codec plugins; doing
 /// that per image would rescan the plugin directory every time the user
-/// pressed `n`. The guard is deliberately never dropped.
+/// pressed `]`. The guard is deliberately never dropped.
 fn lib_heif() -> &'static LibHeif {
     static LIB: OnceLock<LibHeif> = OnceLock::new();
     LIB.get_or_init(LibHeif::new)

@@ -84,16 +84,16 @@ second-guessing the grade would be wrong. Measurement data and other
 scene-referred content opens with an automatic 99.8% window, because values
 occupying a fraction of the nominal range otherwise show as a black rectangle.
 HDR content additionally starts on the neutral tone map rather than clipping.
-All of it is adjustable: `a` cycles the automatic window, `t` the tone map,
-`r` resets.
+All of it is adjustable: `e` cycles the automatic window, `t` the tone map,
+`z` resets.
 
 **Rotation is usually ignored.** An image tagged with an orientation is shown
 the way its pixels are stored, except in WebP and HEIF. If a JPEG from a phone
 appears on its side, that is why.
 
 **Failures are reported in the terminal.** Given several files, the first one
-that opens is shown and the ones that did not are named on the way past. `n`
-and `p` step over a file that cannot be decoded, so one bad file in a
+that opens is shown and the ones that did not are named on the way past. `]`
+and `[` step over a file that cannot be decoded, so one bad file in a
 directory cannot trap you.
 
 **Live reload works for every format.** The file on screen is re-read within
@@ -177,7 +177,7 @@ quarter of the memory that expanding them to colour would cost.
 
 **Values are never rescaled.** An elevation model holds metres, and −86 metres
 at the Dead Sea is a real reading, not something to normalise away. The
-display window (`a`, `[`, `]`, `,`, `.`) is what brings a range into view, and
+display window (`e`, `a`, `s`, `A`, `S`) is what brings a range into view, and
 its bounds are reported in the file's own units.
 
 **A no-data value is honoured** where the file records one, and kept out of

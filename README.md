@@ -48,37 +48,41 @@ Both ship as standard on the distributions above.
 
 | Key | Action |
 | --- | --- |
-| `q`, `Esc` | Quit — `Esc` first closes an open popup |
+| `1`, `0` | Actual size (100%) |
+| `2`, `3`, `4`, `5` | 200%, 400%, 800%, 1600% |
+| `Shift`+`2`, `3`, `4` | 50%, 25%, 10% |
 | `+`, `=` / `-`, `_` | Zoom in / out |
 | Wheel | Zoom about the pointer |
-| `0` | Actual size (100%) |
-| Arrows | Pan |
+| Space | Cycle fit → fit width → fit height |
+| `p` | Cycle the filter used above 100%: nearest → bicubic |
+| Arrows | Pan by 64 pixels; `Shift` by one, `Ctrl` to the far side |
 | Drag | Pan, with the image following the pointer |
-| `f` | Cycle fit → fit width → fit height |
-| `u` | Cycle the filter used above 100%: nearest → bicubic |
-| `n`, `p` | Next / previous file |
-| `e`, `E` | Exposure down / up, half a stop |
-| `a` | Cycle the automatic window: unit → min/max → 99.8% |
-| `[`, `]` | Slide the window down / up |
-| `,` `.` | Narrow / widen the window |
-| `t` | Cycle tone mapping: clip → reinhard → neutral |
-| `c` | Cycle false colour (single-channel images) |
-| `r` | Reset display settings |
-| `h` | Toggle the histogram |
-| `l` | Toggle a logarithmic count axis on it |
-| `i` | Toggle the file information panel |
-| `m` | Toggle the minimap |
+| `]`, `[` | Next / previous file |
+| `Shift+C` / `Ctrl+C` | Copy the file's path / the picture itself |
+| `Ctrl+Shift+C` / `Ctrl+I` | Copy the file as a URI / its metadata |
 | `` ` `` | Toggle the interface panels |
+| `~` | The same, closing the map, histogram and information too |
+| `m`, `h`, `i`, `g` | Toggle the minimap, histogram, file information, grid |
+| `l` | Toggle a logarithmic count axis on the histogram |
+| `q`, `Esc` | Quit — `Esc` first closes an open popup |
+| `d`, `f` | Exposure down / up, half a stop |
+| `a`, `s` | Slide the window down / up |
+| `A`, `S` | Narrow / widen the window |
+| `e` | Cycle the automatic window: unit → min/max → 99.8% |
+| `t` | Cycle tone mapping: clip → reinhard → neutral |
+| `r` | Cycle false colour (single-channel images) |
+| `z` | Reset display settings |
 
 The panels are opaque and the image is fitted inside them rather than passing
 behind them, so `` ` `` changes how much room a fitted image has and it re-fits
 on the spot.
 
-Zooming leaves fit mode; panning does not, so `f` then Down scrolls through a
-tall image at fit-width. Keys held with Ctrl, Alt or Super are ignored, so
-window-manager chords such as `Super+0` do not disturb the view.
+Zooming leaves fit mode; panning does not, so Space then Down scrolls through a
+tall image at fit-width. Apart from the copying chords and `Ctrl` with an
+arrow, keys held with Ctrl, Alt or Super are ignored, so window-manager chords
+such as `Super+0` do not disturb the view.
 
-`n` and `p` keep the pan and zoom when the file they land on is the same size
+`]` and `[` keep the pan and zoom when the file they land on is the same size
 as the one on screen — a directory of frames or of exposures is a set to be
 compared, and the comparison only works if the same detail stays under the
 same pixels. A file of another size is a different picture, and is fitted.
@@ -125,7 +129,7 @@ A reload keeps you where you were: the same pan and zoom, the same exposure
 and tone map, with only an automatic window re-derived from the new pixels.
 The point is watching one spot as the numbers under it change. A file that
 comes back a different size is treated as a different picture and gets a fresh
-fit. `n` and `p` move the watch along with the view.
+fit. `]` and `[` move the watch along with the view.
 
 It is a `stat` every 250 ms, not `inotify`. That costs nothing measurable, and
 it is the version that works over NFS and SSHFS and that survives the way most
@@ -258,7 +262,7 @@ sensor counts, and the header does not distinguish them. Window bounds are
 reported in source units for linear integer data, so a 12-bit scan reads
 `0–4096` rather than `0.000–0.063`.
 
-False colour (`c`, or `--colormap`) applies to single-channel images, and
+False colour (`r`, or `--colormap`) applies to single-channel images, and
 suppresses tone mapping while active — a curve on top of a colormap would
 distort the mapping you are reading values off.
 

@@ -1,35 +1,58 @@
 # Keys and mouse
 
-Every control `image-view` has. Letter keys work in either case except `e`
-and `c`, where the two cases do different things.
+Every control `image-view` has. Letter keys work in either case except `a`,
+`s` and `c`, where the two cases do different things.
 
-## The view
+## Zoom and position
 
 | Key | What it does |
 | --- | --- |
-| `q`, `Esc` | Quit. `Esc` closes an open popup first |
+| `1`, `0` | Actual size, one image pixel per screen pixel |
+| `2`, `3`, `4`, `5` | 200%, 400%, 800%, 1600% |
+| `Shift`+`2`, `3`, `4` | 50%, 25%, 10% |
 | `+`, `=` | Zoom in one step, a factor of 1.25 |
 | `-`, `_` | Zoom out one step |
-| `0` | Actual size, one image pixel per screen pixel |
-| `f` | Cycle how the image is fitted: whole → width → height |
-| `u` | Cycle the filter used above 100%: nearest → bicubic |
+| `Space` | Cycle how the image is fitted: whole → width → height |
+| `p` | Cycle the filter used above 100%: nearest → bicubic |
 | Arrows | Pan by 64 pixels |
-| `n`, `Page Down` | Next file |
-| `p`, `Page Up` | Previous file |
-| `Shift+C` | Copy the absolute path of the file on screen |
-| `Ctrl+Shift+C` | Copy the file on screen as a URI |
-| `Ctrl+C` | Copy the picture itself, as you are seeing it |
-| `Ctrl+M` | Copy everything the file information says about the file |
+| `Shift`+Arrows | Pan by one pixel |
+| `Ctrl`+Arrows | Pan to the far side of the image |
 
-Zoom runs from 2% to 6400%. Zooming leaves fit mode; panning does not, so `f`
-and then Down scrolls through a tall image at fit-width.
+Zoom runs from 2% to 6400%. The zooms below 100% are the ones above it with
+`Shift` held, so each zoom is under the number it hangs off. The number row is
+the one part of the keyboard read by where a key is rather than by what it
+types, so `Shift`+`2` is 50% whatever character your layout puts there.
 
-`n` and `p` keep the pan and zoom when the next file is the same size as the
+Zooming leaves fit mode; panning does not, so `Space` and then Down scrolls
+through a tall image at fit-width.
+
+`Shift` with an arrow places the view to the pixel, which is what lining two
+images up on the same detail takes; `Ctrl` with one runs to that side of the
+image in a single press. Neither does anything when the whole image is already
+on screen, since there is then nowhere to pan to.
+
+## Moving through the files
+
+| Key | What it does |
+| --- | --- |
+| `]`, `Page Down` | Next file |
+| `[`, `Page Up` | Previous file |
+
+They keep the pan and zoom when the next file is the same size as the
 one on screen, so a directory of frames or exposures stays comparable under
 the same pixels. A file of a different size is a different picture, and is
 fitted. Files that cannot be decoded are stepped over. The list is whatever
 was named at startup, in that order; naming a directory puts the images in it
 on the list.
+
+## Copying
+
+| Key | What it does |
+| --- | --- |
+| `Shift+C` | Copy the absolute path of the file on screen |
+| `Ctrl+Shift+C` | Copy the file on screen as a URI |
+| `Ctrl+C` | Copy the picture itself, as you are seeing it |
+| `Ctrl+I` | Copy everything the file information says about the file |
 
 `Shift+C` copies the path in full, from the root down, whichever way the file
 was named when the program was started — a relative name is of no use in
@@ -54,7 +77,7 @@ widens it. Transparency comes along only where the file had some; an opaque
 picture arrives opaque rather than carrying an empty channel. Everything
 arrives 8-bit, which is the depth the screen was showing it at.
 
-`Ctrl+M` copies everything the file information panel says, one line per
+`Ctrl+I` copies everything the file information panel says, one line per
 field: the section it stands under, its name, and what it says, separated by
 commas so that it opens as a table in a spreadsheet and reads as plain lines
 anywhere else. It works whether or not the panel is showing — what it says is
@@ -68,7 +91,7 @@ a fraction of a second, and only then is there anything to paste. Copying
 something else in the meantime wins: whichever copy you asked for last is the
 one you get, not whichever happened to finish last.
 
-Any of the three copies outlives the window: closing `image-view` leaves it on
+Any of the copies outlives the window: closing `image-view` leaves it on
 the clipboard, and it stays there until something else copies over it. Quitting
 straight after copying is safe — a picture still being prepared is finished
 before the window goes.
@@ -77,21 +100,24 @@ before the window goes.
 
 | Key | What it does |
 | --- | --- |
-| `e` | Exposure down half a stop |
-| `E` | Exposure up half a stop |
-| `a` | Cycle the automatic window: off (0–1) → min/max → 99.8% |
-| `[` | Slide the window down |
-| `]` | Slide the window up |
-| `,` | Narrow the window, raising contrast |
-| `.` | Widen the window, lowering contrast |
+| `d` | Exposure down half a stop |
+| `f` | Exposure up half a stop |
+| `a` | Slide the window down |
+| `s` | Slide the window up |
+| `A` | Narrow the window, raising contrast |
+| `S` | Widen the window, lowering contrast |
+| `e` | Cycle the automatic window: off (0–1) → min/max → 99.8% |
 | `t` | Cycle tone mapping: clip → Reinhard → neutral |
-| `c` | Cycle false colour: grey → viridis → magma → turbo. Lower case only |
-| `r` | Reset every display setting |
+| `r` | Cycle false colour: grey → viridis → magma → turbo |
+| `z` | Reset every display setting |
+
+The window is the one place the case of a key matters: `a` and `s` move it,
+`A` and `S` change how wide it is.
 
 Sliding or resizing the window by hand takes it out of whichever automatic
-mode it was in; `a` cycles back into them. Exposure stops at ±16 stops.
+mode it was in; `e` cycles back into them. Exposure stops at ±16 stops.
 
-False colour applies to single-channel images only, and `c` does nothing on a
+False colour applies to single-channel images only, and `r` does nothing on a
 colour one. While a colormap is active, tone mapping is suspended — a curve on
 top of a colormap would distort the values you are reading off it.
 
@@ -106,6 +132,7 @@ top of a colormap would distort the values you are reading off it.
 | `g` | Show or hide the grid over the image |
 | `` ` `` | Show or hide the panels around the image |
 | `~` | The same, and closes the histogram, information and minimap |
+| `q`, `Esc` | Quit. `Esc` closes an open popup first |
 
 The panels are opaque and the image is fitted inside them, so hiding them
 gives a fitted image more room and it re-fits immediately.
@@ -148,7 +175,7 @@ field, as the file gives it.
 Clicking copies. A click on a field copies what it says; a click on a heading
 copies that whole section, one line per field as a name and a value; and the
 button at the top of the panel copies the lot, with the section named on each
-line as well — the same thing `Ctrl+M` does. A mark appears over whatever the
+line as well — the same thing `Ctrl+I` does. A mark appears over whatever the
 pointer is on to show what a click would take. It goes away while the column
 is being scrolled, since the pointer is then resting rather than pointing.
 
@@ -191,7 +218,7 @@ button. Pressing it opens a menu hanging under it, under three headings.
 **Zoom** is 10% through 1600%. **Fit** is the three fits — the whole image,
 its width, its height — as arrows pointing the way each one fills the window.
 **Up-scaling** is the filter the image is magnified with, `Nearest` or
-`Bicubic`, the same choice `u` cycles. Whichever of each the view is in is
+`Bicubic`, the same choice `p` cycles. Whichever of each the view is in is
 lit, and choosing acts at once; pressing anywhere outside the menu, or `Esc`,
 closes it without changing anything. A window too small to hold the menu does
 not open one.
@@ -227,7 +254,7 @@ without it.
 
 ## Keys that are deliberately ignored
 
-Apart from the two copying chords above, anything held with `Ctrl`, `Alt` or a
-`Super`/`Command` key does nothing here, and neither does `Ctrl` with the
-wheel. Those combinations belong to the window manager, and a chord such as
-`Super+0` would otherwise move the view behind its back.
+Apart from the copying chords and `Ctrl` with an arrow, anything held with
+`Ctrl`, `Alt` or a `Super`/`Command` key does nothing here, and neither does
+`Ctrl` with the wheel. Those combinations belong to the window manager, and a
+chord such as `Super+0` would otherwise move the view behind its back.

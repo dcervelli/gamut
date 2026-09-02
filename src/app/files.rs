@@ -30,7 +30,7 @@ pub(super) struct Pending {
     /// on can be recognised and dropped.
     pub(super) generation: u64,
     pub(super) index: usize,
-    /// Set when the request came from `n` or `p`, so that a file that will not
+    /// Set when the request came from `]` or `[`, so that a file that will not
     /// decode can be stepped over rather than stopping the walk.
     pub(super) step: Option<Step>,
     pub(super) since: Instant,
@@ -107,7 +107,7 @@ impl Files {
     }
 
     /// The opening request. As a walk, so that a file which passes the header
-    /// check and then fails to decode is stepped over exactly as `n` would
+    /// check and then fails to decode is stepped over exactly as `]` would
     /// step over it. Nothing is on screen yet, so every file in the list is a
     /// candidate.
     pub(super) fn open_first(&mut self) -> Request {
@@ -125,7 +125,7 @@ impl Files {
     /// Moves to the next or previous file. `None` when there is nowhere to go.
     ///
     /// From wherever the last request was aimed rather than from what is on
-    /// screen, so that holding `n` walks the list instead of asking for the
+    /// screen, so that holding `]` walks the list instead of asking for the
     /// same neighbour over and over while a slow file opens. Only the last of
     /// those requests is decoded; the ones passed over are files the user has
     /// already scrolled past.
@@ -250,7 +250,7 @@ mod tests {
         Files::new(paths, 0, decode::Overrides::default())
     }
 
-    /// Holding `n` through a directory asks for each file in turn without
+    /// Holding `]` through a directory asks for each file in turn without
     /// waiting for the last, and only the file the user stopped on is shown.
     #[test]
     fn a_reply_the_user_has_stepped_past_is_not_accepted() {

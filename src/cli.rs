@@ -50,13 +50,21 @@ OPTIONS:
     --                      Treat every later argument as a path
 ";
 
+/// The headings the keys are listed under, in the order they are printed.
+/// Shared by `--help` and the manual page so that neither can grow a section
+/// the other does not have.
+const SECTIONS: [(Section, &str); 5] = [
+    (Section::Zoom, "ZOOM AND POSITION KEYS"),
+    (Section::Files, "FILE KEYS"),
+    (Section::Clipboard, "CLIPBOARD KEYS"),
+    (Section::Interface, "INTERFACE KEYS"),
+    (Section::Display, "DISPLAY KEYS"),
+];
+
 /// The whole of `--help`: the options, then every key under its heading.
 pub fn usage() -> String {
     let mut text = OPTIONS.to_string();
-    for (section, heading) in [
-        (Section::View, "VIEW KEYS"),
-        (Section::Display, "DISPLAY KEYS"),
-    ] {
+    for (section, heading) in SECTIONS {
         let _ = writeln!(text, "\n{heading}:");
         for binding in KEYS.iter().filter(|binding| binding.section == section) {
             let _ = writeln!(text, "    {:<17}{}", binding.shown, binding.help);
@@ -163,10 +171,7 @@ pub fn man() -> String {
         let _ = writeln!(text, ".TP\n.B {}\n{}", roff(&flags), roff(&description));
     }
 
-    for (section, heading) in [
-        (Section::View, "VIEW KEYS"),
-        (Section::Display, "DISPLAY KEYS"),
-    ] {
+    for (section, heading) in SECTIONS {
         let _ = writeln!(text, ".SH {heading}");
         for binding in KEYS.iter().filter(|binding| binding.section == section) {
             let _ = writeln!(
@@ -464,7 +469,12 @@ mod tests {
                 binding.shown
             );
         }
-        assert!(text.contains("VIEW KEYS:\n") && text.contains("DISPLAY KEYS:\n"));
+        for (_, heading) in SECTIONS {
+            assert!(
+                text.contains(&format!("{heading}:\n")),
+                "{heading} should be a heading of its own"
+            );
+        }
     }
 
     fn packaging() -> PathBuf {

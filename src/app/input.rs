@@ -10,7 +10,7 @@ use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use winit::event::{ElementState, MouseButton, MouseScrollDelta};
-use winit::keyboard::{Key, ModifiersState, NamedKey};
+use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey, PhysicalKey};
 use winit::window::{Cursor, CursorIcon};
 
 use super::App;
@@ -23,7 +23,8 @@ use crate::ui::info::Copyable;
 use crate::ui::layers::Hit;
 use crate::ui::{self, Current, Menu, Widget};
 
-/// Window pixels moved per arrow-key press.
+/// Window pixels moved per arrow-key press. Shift moves one pixel instead,
+/// for placing a view exactly, and Ctrl goes as far as the image does.
 const PAN_STEP: f32 = 64.0;
 
 /// How far one notch of the wheel scrolls a panel that has more to show than
@@ -41,8 +42,9 @@ pub enum Action {
     Quit,
     ZoomIn,
     ZoomOut,
-    ActualSize,
-    Pan(Direction),
+    /// Go to this zoom, 1.0 being one image pixel to one screen pixel.
+    ZoomTo(f32),
+    Pan(Direction, PanStep),
     CycleFit,
     CycleUpscale,
     NextFile,
@@ -91,57 +93,101 @@ pub enum Direction {
 }
 
 impl Direction {
-    /// One step in this direction, in window pixels.
-    fn step(self) -> (f32, f32) {
+    /// Which way this is, as a sign on each axis.
+    fn sign(self) -> [f32; 2] {
         match self {
-            Direction::Left => (-PAN_STEP, 0.0),
-            Direction::Right => (PAN_STEP, 0.0),
-            Direction::Up => (0.0, -PAN_STEP),
-            Direction::Down => (0.0, PAN_STEP),
+            Direction::Left => [-1.0, 0.0],
+            Direction::Right => [1.0, 0.0],
+            Direction::Up => [0.0, -1.0],
+            Direction::Down => [0.0, 1.0],
         }
     }
 }
 
-/// A key as `winit` reports it: the character it produced, or the name of
-/// one that produces none.
+/// How far one press of a pan key moves the view.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PanStep {
+    /// One window pixel, for lining a view up exactly.
+    Fine,
+    /// [`PAN_STEP`] window pixels.
+    Coarse,
+    /// As far as the image goes that way.
+    Edge,
+}
+
+impl PanStep {
+    /// Window pixels one press moves, and `None` for the one that moves as
+    /// far as there is to move.
+    fn pixels(self) -> Option<f32> {
+        match self {
+            PanStep::Fine => Some(1.0),
+            PanStep::Coarse => Some(PAN_STEP),
+            PanStep::Edge => None,
+        }
+    }
+}
+
+/// A key as `winit` reports it: the character it produced, the name of one
+/// that produces none, or — where the character would depend on the layout —
+/// the place on the keyboard it was pressed.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum KeyName {
     Char(&'static str),
     Named(NamedKey),
+    /// Matched by position rather than by what it types. For the number row,
+    /// whose shifted characters are whatever the layout puts there: `@` is
+    /// Shift+`2` on one keyboard and `"` on another, and the zoom that hangs
+    /// off `2` should be under `2` on both.
+    Position(KeyCode),
 }
 
-/// What a binding is held with, over and above whatever Shift the character
-/// itself already implies.
+/// What a binding is held with, over and above whatever Shift a character
+/// key already implies.
 ///
 /// Ctrl, Alt and Super must be held exactly as written: a chord this table
 /// does not bind belongs to the window manager, and acting on `Super+0` as
 /// well would move the view behind its back.
 ///
-/// Shift is never among them. A key that reaches us has already had Shift
-/// applied — the table says `e` and `E`, not `e` and Shift+`e` — so asking
-/// for it again would be asking twice, and asking for it where the character
-/// is a capital would refuse the same capital typed under Caps Lock. What the
-/// user presses is spelled out in [`Binding::shown`] instead.
+/// Shift is a modifier for a named key and not for a character one — see
+/// [`satisfies`]. What the user presses is spelled out in [`Binding::shown`]
+/// either way.
 pub type Mods = ModifiersState;
 
-/// Held with nothing but Shift, if anything.
+/// Held with nothing, or with nothing but the Shift a character carries.
 const PLAIN: Mods = Mods::empty();
 const CTRL: Mods = Mods::CONTROL;
+const SHIFT: Mods = Mods::SHIFT;
 
-/// Whether the modifiers `held` are the ones a binding asked for.
-fn satisfies(required: Mods, held: Mods) -> bool {
-    held.difference(Mods::SHIFT) == required
+/// Whether the modifiers `held` are the ones a binding asked for, for a key
+/// of this kind. Shift is the difference between the two kinds.
+///
+/// A character has already had Shift applied — the table says `a` and `A`,
+/// not `a` and Shift+`a` — so asking for it again would be asking twice, and
+/// asking for it where the character is a capital would refuse the same
+/// capital typed under Caps Lock. It is therefore ignored there.
+///
+/// A named key, or one bound by position, is the same key whether or not
+/// Shift is held, so there Shift is a modifier like any other: it is what
+/// tells `Shift+Left` from `Left`, and `Shift+2` from `2`.
+fn satisfies(required: Mods, held: Mods, key: KeyName) -> bool {
+    match key {
+        Char(_) => held.difference(Mods::SHIFT) == required,
+        Named(_) | Position(_) => held == required,
+    }
 }
 
 /// Which heading a binding is listed under in `--help`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Section {
-    View,
+    Zoom,
+    Files,
+    Clipboard,
+    Interface,
     Display,
 }
 
 /// One line of `--help`, and the keys that do it. A line may bind several
-/// keys to several actions (`n, p`), and a line may bind none (`Wheel`).
+/// keys to several actions (`d, f`), and a line may bind none (`Wheel`).
 pub struct Binding {
     pub section: Section,
     /// What is held down with the keys below.
@@ -153,12 +199,226 @@ pub struct Binding {
 }
 
 use Action::*;
-use KeyName::{Char, Named};
+use Direction::{Down, Left, Right, Up};
+use KeyName::{Char, Named, Position};
+use PanStep::{Coarse, Edge, Fine};
 
 /// Every key, in the order `--help` lists them.
+///
+/// Letter keys are bound in both cases wherever the capital is not itself a
+/// binding, so that Caps Lock does not turn the keyboard off. The four that
+/// mean two different things — `a`/`A`, `s`/`S`, `c`/`C` — are the exception,
+/// and are bound one case at a time.
 pub const KEYS: &[Binding] = &[
+    // The number row is bound by position, not by what it types: the zooms
+    // below 100% are the ones above it with Shift held, and which character
+    // that is depends on the layout.
     Binding {
-        section: Section::View,
+        section: Section::Zoom,
+        mods: PLAIN,
+        shown: "1, 0",
+        help: "Actual size (100%)",
+        keys: &[
+            (Position(KeyCode::Digit1), ZoomTo(1.0)),
+            (Position(KeyCode::Digit0), ZoomTo(1.0)),
+        ],
+    },
+    Binding {
+        section: Section::Zoom,
+        mods: PLAIN,
+        shown: "2, 3, 4, 5",
+        help: "200%, 400%, 800%, 1600%",
+        keys: &[
+            (Position(KeyCode::Digit2), ZoomTo(2.0)),
+            (Position(KeyCode::Digit3), ZoomTo(4.0)),
+            (Position(KeyCode::Digit4), ZoomTo(8.0)),
+            (Position(KeyCode::Digit5), ZoomTo(16.0)),
+        ],
+    },
+    Binding {
+        section: Section::Zoom,
+        mods: SHIFT,
+        shown: "Shift+2, 3, 4",
+        help: "50%, 25%, 10%",
+        keys: &[
+            (Position(KeyCode::Digit2), ZoomTo(0.5)),
+            (Position(KeyCode::Digit3), ZoomTo(0.25)),
+            (Position(KeyCode::Digit4), ZoomTo(0.1)),
+        ],
+    },
+    Binding {
+        section: Section::Zoom,
+        mods: PLAIN,
+        shown: "+, =",
+        help: "Zoom in",
+        keys: &[(Char("+"), ZoomIn), (Char("="), ZoomIn)],
+    },
+    Binding {
+        section: Section::Zoom,
+        mods: PLAIN,
+        shown: "-, _",
+        help: "Zoom out",
+        keys: &[(Char("-"), ZoomOut), (Char("_"), ZoomOut)],
+    },
+    Binding {
+        section: Section::Zoom,
+        mods: PLAIN,
+        shown: "Wheel",
+        help: "Zoom about the pointer",
+        keys: &[],
+    },
+    Binding {
+        section: Section::Zoom,
+        mods: PLAIN,
+        shown: "Space",
+        help: "Cycle fit / fit width / fit height",
+        keys: &[(Named(NamedKey::Space), CycleFit)],
+    },
+    Binding {
+        section: Section::Zoom,
+        mods: PLAIN,
+        shown: "p",
+        help: "Cycle the filter used above 100%: nearest, bicubic",
+        keys: &[(Char("p"), CycleUpscale), (Char("P"), CycleUpscale)],
+    },
+    Binding {
+        section: Section::Zoom,
+        mods: PLAIN,
+        shown: "Arrows",
+        help: "Pan by 64 pixels",
+        keys: &[
+            (Named(NamedKey::ArrowLeft), Pan(Left, Coarse)),
+            (Named(NamedKey::ArrowRight), Pan(Right, Coarse)),
+            (Named(NamedKey::ArrowUp), Pan(Up, Coarse)),
+            (Named(NamedKey::ArrowDown), Pan(Down, Coarse)),
+        ],
+    },
+    // Shift belongs to the modifiers here, where it does not for a character:
+    // an arrow is the same key whichever way it is held, so this is the one
+    // place the table has to ask for it.
+    Binding {
+        section: Section::Zoom,
+        mods: SHIFT,
+        shown: "Shift+Arrows",
+        help: "Pan by one pixel",
+        keys: &[
+            (Named(NamedKey::ArrowLeft), Pan(Left, Fine)),
+            (Named(NamedKey::ArrowRight), Pan(Right, Fine)),
+            (Named(NamedKey::ArrowUp), Pan(Up, Fine)),
+            (Named(NamedKey::ArrowDown), Pan(Down, Fine)),
+        ],
+    },
+    Binding {
+        section: Section::Zoom,
+        mods: CTRL,
+        shown: "Ctrl+Arrows",
+        help: "Pan to the far side of the image",
+        keys: &[
+            (Named(NamedKey::ArrowLeft), Pan(Left, Edge)),
+            (Named(NamedKey::ArrowRight), Pan(Right, Edge)),
+            (Named(NamedKey::ArrowUp), Pan(Up, Edge)),
+            (Named(NamedKey::ArrowDown), Pan(Down, Edge)),
+        ],
+    },
+    Binding {
+        section: Section::Files,
+        mods: PLAIN,
+        shown: "], Page Down",
+        help: "Next file",
+        keys: &[(Char("]"), NextFile), (Named(NamedKey::PageDown), NextFile)],
+    },
+    Binding {
+        section: Section::Files,
+        mods: PLAIN,
+        shown: "[, Page Up",
+        help: "Previous file",
+        keys: &[
+            (Char("["), PreviousFile),
+            (Named(NamedKey::PageUp), PreviousFile),
+        ],
+    },
+    // The first two are both the capital, so both are typed with Shift held;
+    // only the Ctrl that parts one from the other is a modifier as far as the
+    // table is concerned. `shown` says what the fingers do.
+    Binding {
+        section: Section::Clipboard,
+        mods: PLAIN,
+        shown: "Shift+C",
+        help: "Copy the absolute path of the file on screen",
+        keys: &[(Char("C"), CopyPath)],
+    },
+    Binding {
+        section: Section::Clipboard,
+        mods: CTRL,
+        shown: "Ctrl+Shift+C",
+        help: "Copy the file on screen as a URI another program can open",
+        keys: &[(Char("C"), CopyUri)],
+    },
+    Binding {
+        section: Section::Clipboard,
+        mods: CTRL,
+        shown: "Ctrl+C",
+        help: "Copy the picture itself, as the display settings show it",
+        keys: &[(Char("c"), CopyImage)],
+    },
+    Binding {
+        section: Section::Clipboard,
+        mods: CTRL,
+        shown: "Ctrl+I",
+        help: "Copy everything the info panel says about the file",
+        keys: &[(Char("i"), CopyMetadata), (Char("I"), CopyMetadata)],
+    },
+    Binding {
+        section: Section::Interface,
+        mods: PLAIN,
+        shown: "`",
+        help: "Toggle the interface panels",
+        keys: &[(Char("`"), ToggleInterface)],
+    },
+    Binding {
+        section: Section::Interface,
+        mods: PLAIN,
+        shown: "~",
+        help: "Toggle the panels, closing the map, histogram and information",
+        keys: &[(Char("~"), ToggleInterfaceAndPanels)],
+    },
+    Binding {
+        section: Section::Interface,
+        mods: PLAIN,
+        shown: "m",
+        help: "Toggle the minimap",
+        keys: &[(Char("m"), ToggleMinimap), (Char("M"), ToggleMinimap)],
+    },
+    Binding {
+        section: Section::Interface,
+        mods: PLAIN,
+        shown: "h",
+        help: "Toggle the histogram",
+        keys: &[(Char("h"), ToggleHistogram), (Char("H"), ToggleHistogram)],
+    },
+    Binding {
+        section: Section::Interface,
+        mods: PLAIN,
+        shown: "i",
+        help: "Toggle the file information panel",
+        keys: &[(Char("i"), ToggleInfo), (Char("I"), ToggleInfo)],
+    },
+    Binding {
+        section: Section::Interface,
+        mods: PLAIN,
+        shown: "g",
+        help: "Toggle the grid over the image",
+        keys: &[(Char("g"), ToggleGrid), (Char("G"), ToggleGrid)],
+    },
+    Binding {
+        section: Section::Interface,
+        mods: PLAIN,
+        shown: "l",
+        help: "Toggle a logarithmic count axis on the histogram",
+        keys: &[(Char("l"), ToggleLogCounts), (Char("L"), ToggleLogCounts)],
+    },
+    Binding {
+        section: Section::Interface,
         mods: PLAIN,
         shown: "q, Esc",
         help: "Quit",
@@ -169,139 +429,41 @@ pub const KEYS: &[Binding] = &[
         ],
     },
     Binding {
-        section: Section::View,
-        mods: PLAIN,
-        shown: "+, =",
-        help: "Zoom in",
-        keys: &[(Char("+"), ZoomIn), (Char("="), ZoomIn)],
-    },
-    Binding {
-        section: Section::View,
-        mods: PLAIN,
-        shown: "-, _",
-        help: "Zoom out",
-        keys: &[(Char("-"), ZoomOut), (Char("_"), ZoomOut)],
-    },
-    Binding {
-        section: Section::View,
-        mods: PLAIN,
-        shown: "Wheel",
-        help: "Zoom about the pointer",
-        keys: &[],
-    },
-    Binding {
-        section: Section::View,
-        mods: PLAIN,
-        shown: "0",
-        help: "Actual size (100%)",
-        keys: &[(Char("0"), ActualSize)],
-    },
-    Binding {
-        section: Section::View,
-        mods: PLAIN,
-        shown: "Arrows",
-        help: "Pan",
-        keys: &[
-            (Named(NamedKey::ArrowLeft), Pan(Direction::Left)),
-            (Named(NamedKey::ArrowRight), Pan(Direction::Right)),
-            (Named(NamedKey::ArrowUp), Pan(Direction::Up)),
-            (Named(NamedKey::ArrowDown), Pan(Direction::Down)),
-        ],
-    },
-    Binding {
-        section: Section::View,
-        mods: PLAIN,
-        shown: "f",
-        help: "Cycle fit / fit width / fit height",
-        keys: &[(Char("f"), CycleFit), (Char("F"), CycleFit)],
-    },
-    Binding {
-        section: Section::View,
-        mods: PLAIN,
-        shown: "u",
-        help: "Cycle the filter used above 100%: nearest, bicubic",
-        keys: &[(Char("u"), CycleUpscale), (Char("U"), CycleUpscale)],
-    },
-    Binding {
-        section: Section::View,
-        mods: PLAIN,
-        shown: "n, p",
-        help: "Next / previous file",
-        keys: &[
-            (Char("n"), NextFile),
-            (Char("N"), NextFile),
-            (Named(NamedKey::PageDown), NextFile),
-            (Char("p"), PreviousFile),
-            (Char("P"), PreviousFile),
-            (Named(NamedKey::PageUp), PreviousFile),
-        ],
-    },
-    // Both are the capital, so both are typed with Shift held; only the Ctrl
-    // that parts one from the other is a modifier as far as the table is
-    // concerned. `shown` says what the fingers do.
-    Binding {
-        section: Section::View,
-        mods: PLAIN,
-        shown: "Shift+C",
-        help: "Copy the absolute path of the file on screen",
-        keys: &[(Char("C"), CopyPath)],
-    },
-    Binding {
-        section: Section::View,
-        mods: CTRL,
-        shown: "Ctrl+Shift+C",
-        help: "Copy the file on screen as a URI another program can open",
-        keys: &[(Char("C"), CopyUri)],
-    },
-    Binding {
-        section: Section::View,
-        mods: CTRL,
-        shown: "Ctrl+C",
-        help: "Copy the picture itself, as the display settings show it",
-        keys: &[(Char("c"), CopyImage)],
-    },
-    Binding {
-        section: Section::View,
-        mods: CTRL,
-        shown: "Ctrl+M",
-        help: "Copy everything the info panel says about the file",
-        keys: &[(Char("m"), CopyMetadata), (Char("M"), CopyMetadata)],
-    },
-    Binding {
         section: Section::Display,
         mods: PLAIN,
-        shown: "e, E",
+        shown: "d, f",
         help: "Exposure down / up, half a stop",
-        keys: &[(Char("e"), Exposure(-0.5)), (Char("E"), Exposure(0.5))],
+        keys: &[
+            (Char("d"), Exposure(-0.5)),
+            (Char("D"), Exposure(-0.5)),
+            (Char("f"), Exposure(0.5)),
+            (Char("F"), Exposure(0.5)),
+        ],
     },
+    // One case each: the capitals are the width of the window, below.
     Binding {
         section: Section::Display,
         mods: PLAIN,
-        shown: "a",
-        help: "Cycle the automatic window: unit, min/max, 99.8%",
-        keys: &[(Char("a"), CycleAutoWindow), (Char("A"), CycleAutoWindow)],
-    },
-    Binding {
-        section: Section::Display,
-        mods: PLAIN,
-        shown: "[, ]",
+        shown: "a, s",
         help: "Slide the window down / up",
         keys: &[
-            (Char("["), ShiftWindow(-0.05)),
-            (Char("]"), ShiftWindow(0.05)),
+            (Char("a"), ShiftWindow(-0.05)),
+            (Char("s"), ShiftWindow(0.05)),
         ],
     },
     Binding {
         section: Section::Display,
         mods: PLAIN,
-        shown: ", .",
+        shown: "A, S",
         help: "Narrow / widen the window",
-        keys: &[
-            (Char(","), Contrast(0.8)),
-            (Char("<"), Contrast(0.8)),
-            (Char("."), Contrast(1.25)),
-            (Char(">"), Contrast(1.25)),
-        ],
+        keys: &[(Char("A"), Contrast(0.8)), (Char("S"), Contrast(1.25))],
+    },
+    Binding {
+        section: Section::Display,
+        mods: PLAIN,
+        shown: "e",
+        help: "Cycle the automatic window: unit, min/max, 99.8%",
+        keys: &[(Char("e"), CycleAutoWindow), (Char("E"), CycleAutoWindow)],
     },
     Binding {
         section: Section::Display,
@@ -313,80 +475,35 @@ pub const KEYS: &[Binding] = &[
     Binding {
         section: Section::Display,
         mods: PLAIN,
-        shown: "c",
-        help: "Cycle false colour for single-channel images",
-        // Lower case only: Shift+C copies the path.
-        keys: &[(Char("c"), CycleColormap)],
-    },
-    Binding {
-        section: Section::Display,
-        mods: PLAIN,
         shown: "r",
+        help: "Cycle false colour for single-channel images",
+        keys: &[(Char("r"), CycleColormap), (Char("R"), CycleColormap)],
+    },
+    Binding {
+        section: Section::Display,
+        mods: PLAIN,
+        shown: "z",
         help: "Reset the window, exposure and tone map",
-        keys: &[(Char("r"), ResetDisplay), (Char("R"), ResetDisplay)],
-    },
-    Binding {
-        section: Section::Display,
-        mods: PLAIN,
-        shown: "h",
-        help: "Toggle the histogram",
-        keys: &[(Char("h"), ToggleHistogram), (Char("H"), ToggleHistogram)],
-    },
-    Binding {
-        section: Section::Display,
-        mods: PLAIN,
-        shown: "l",
-        help: "Toggle a logarithmic count axis on the histogram",
-        keys: &[(Char("l"), ToggleLogCounts), (Char("L"), ToggleLogCounts)],
-    },
-    Binding {
-        section: Section::Display,
-        mods: PLAIN,
-        shown: "i",
-        help: "Toggle the file information panel",
-        keys: &[(Char("i"), ToggleInfo), (Char("I"), ToggleInfo)],
-    },
-    Binding {
-        section: Section::Display,
-        mods: PLAIN,
-        shown: "m",
-        help: "Toggle the minimap",
-        keys: &[(Char("m"), ToggleMinimap), (Char("M"), ToggleMinimap)],
-    },
-    Binding {
-        section: Section::Display,
-        mods: PLAIN,
-        shown: "g",
-        help: "Toggle the grid over the image",
-        keys: &[(Char("g"), ToggleGrid), (Char("G"), ToggleGrid)],
-    },
-    Binding {
-        section: Section::Display,
-        mods: PLAIN,
-        shown: "`",
-        help: "Toggle the interface panels",
-        keys: &[(Char("`"), ToggleInterface)],
-    },
-    Binding {
-        section: Section::Display,
-        mods: PLAIN,
-        shown: "~",
-        help: "Toggle the panels, closing the map, histogram and information",
-        keys: &[(Char("~"), ToggleInterfaceAndPanels)],
+        keys: &[(Char("z"), ResetDisplay), (Char("Z"), ResetDisplay)],
     },
 ];
 
-/// What `key` held with `mods` asks for, if anything.
-pub fn action_for(key: &Key, mods: Mods) -> Option<Action> {
+/// What `key`, pressed at `position` and held with `mods`, asks for. The
+/// place on the keyboard comes along with the character because a handful of
+/// bindings are made against it — see [`KeyName::Position`].
+pub fn action_for(key: &Key, position: PhysicalKey, mods: Mods) -> Option<Action> {
     KEYS.iter()
-        .filter(|binding| satisfies(binding.mods, mods))
-        .flat_map(|binding| binding.keys)
-        .find(|(name, _)| match (name, key) {
-            (Char(text), Key::Character(typed)) => typed.as_str() == *text,
-            (Named(name), Key::Named(pressed)) => name == pressed,
-            _ => false,
+        .flat_map(|binding| binding.keys.iter().map(|entry| (binding.mods, entry)))
+        .find(|(required, (name, _))| {
+            satisfies(*required, mods, *name)
+                && match (name, key) {
+                    (Char(text), Key::Character(typed)) => typed.as_str() == *text,
+                    (Named(name), Key::Named(pressed)) => name == pressed,
+                    (Position(code), _) => position == PhysicalKey::Code(*code),
+                    _ => false,
+                }
         })
-        .map(|(_, action)| *action)
+        .map(|(_, (_, action))| *action)
 }
 
 /// What an event leaves the window owing.
@@ -467,8 +584,8 @@ fn report(error: &anyhow::Error) {
 }
 
 impl App {
-    pub(super) fn handle_key(&mut self, key: &Key) -> Effect {
-        match action_for(key, self.pointer.modifiers) {
+    pub(super) fn handle_key(&mut self, key: &Key, position: PhysicalKey) -> Effect {
+        match action_for(key, position, self.pointer.modifiers) {
             Some(action) => self.perform(action),
             None => Effect::Nothing,
         }
@@ -491,10 +608,15 @@ impl App {
             }
             ZoomIn => self.view.zoom_in(image, viewport),
             ZoomOut => self.view.zoom_out(image, viewport),
-            ActualSize => self.view.actual_size(image, viewport),
-            Pan(direction) => {
-                let (dx, dy) = direction.step();
-                self.view.pan_by(dx, dy, image, viewport);
+            ZoomTo(scale) => self.view.set_zoom(scale, image, viewport),
+            Pan(direction, step) => {
+                let sign = direction.sign();
+                match step.pixels() {
+                    Some(by) => self
+                        .view
+                        .pan_by(sign[0] * by, sign[1] * by, image, viewport),
+                    None => self.view.pan_to_edge(sign, image, viewport),
+                }
             }
             CycleFit => self.view.cycle_fit(),
             CycleUpscale => self.view.cycle_upscale(),
@@ -1079,42 +1201,106 @@ mod tests {
         }
     }
 
-    /// Shift belongs to the character, not to the modifiers: a binding that
-    /// asked for it as well would never match, since `satisfies` takes it out
-    /// of what is held before comparing.
+    /// Shift belongs to the character, not to the modifiers: a binding on a
+    /// character that asked for it as well would never match, since
+    /// `satisfies` takes it out of what is held before comparing. Only a key
+    /// Shift does not change — one bound by name or by position — may ask
+    /// for it.
     #[test]
-    fn no_binding_asks_for_shift() {
+    fn only_layout_free_keys_are_bound_with_shift() {
         for binding in KEYS {
-            assert!(
-                !binding.mods.shift_key(),
-                "`{}` asks for Shift; say it with the character instead",
-                binding.shown
-            );
+            if !binding.mods.shift_key() {
+                continue;
+            }
+            for (name, _) in binding.keys {
+                assert!(
+                    matches!(name, Named(_) | Position(_)),
+                    "`{}` asks for Shift on {name:?}; say it with the character instead",
+                    binding.shown
+                );
+            }
         }
     }
+
+    /// A key whose position the table does not care about. Every binding but
+    /// the number row's is made against the character or the name, so what is
+    /// under the key is beside the point.
+    const ELSEWHERE: PhysicalKey = PhysicalKey::Code(KeyCode::F13);
 
     #[test]
     fn keys_resolve_to_their_actions() {
         use winit::keyboard::SmolStr;
-        let plain = |text: &str| action_for(&Key::Character(SmolStr::new(text)), PLAIN);
+        let plain = |text: &str| action_for(&Key::Character(SmolStr::new(text)), ELSEWHERE, PLAIN);
         assert_eq!(plain("q"), Some(Quit));
-        assert_eq!(action_for(&Key::Named(NamedKey::Escape), PLAIN), Some(Quit));
         assert_eq!(
-            action_for(&Key::Named(NamedKey::PageDown), PLAIN),
+            action_for(&Key::Named(NamedKey::Escape), ELSEWHERE, PLAIN),
+            Some(Quit)
+        );
+        assert_eq!(
+            action_for(&Key::Named(NamedKey::PageDown), ELSEWHERE, PLAIN),
             Some(NextFile)
         );
-        assert_eq!(plain("E"), Some(Exposure(0.5)));
-        assert_eq!(plain("z"), None);
+        assert_eq!(plain("]"), Some(NextFile));
+        assert_eq!(plain("F"), Some(Exposure(0.5)));
+        // The window's position and its width are the same two keys in
+        // different cases.
+        assert_eq!(plain("a"), Some(ShiftWindow(-0.05)));
+        assert_eq!(plain("A"), Some(Contrast(0.8)));
+        assert_eq!(plain("w"), None);
         // The backquote and the tilde are the same key, and Shift is the
         // difference between hiding the bars and clearing the screen.
         assert_eq!(plain("`"), Some(ToggleInterface));
         assert_eq!(
-            action_for(&Key::Character(SmolStr::new("~")), Mods::SHIFT),
+            action_for(&Key::Character(SmolStr::new("~")), ELSEWHERE, Mods::SHIFT),
             Some(ToggleInterfaceAndPanels)
         );
     }
 
-    /// The four things `c` does are told apart by what is held with it,
+    /// The three pan distances are one key held three ways, and a named key
+    /// takes Shift as a modifier: the plain binding must not answer for the
+    /// shifted press as well.
+    #[test]
+    fn the_arrows_pan_by_what_is_held_with_them() {
+        let left = Key::Named(NamedKey::ArrowLeft);
+        let held = |mods| action_for(&left, ELSEWHERE, mods);
+        assert_eq!(held(PLAIN), Some(Pan(Left, Coarse)));
+        assert_eq!(held(SHIFT), Some(Pan(Left, Fine)));
+        assert_eq!(held(CTRL), Some(Pan(Left, Edge)));
+        assert_eq!(held(CTRL | SHIFT), None);
+        // Escape is not bound with Shift, and so does not answer to it.
+        assert_eq!(
+            action_for(&Key::Named(NamedKey::Escape), ELSEWHERE, SHIFT),
+            None
+        );
+    }
+
+    /// The number row answers to where it is rather than to what it types, so
+    /// that Shift+`2` is 50% on a keyboard that puts `@` there and on one that
+    /// puts `"` there. The character reported alongside is ignored: here it is
+    /// the one a French layout sends, which is neither.
+    #[test]
+    fn the_zoom_digits_go_by_position_rather_than_character() {
+        use winit::keyboard::SmolStr;
+        let two = PhysicalKey::Code(KeyCode::Digit2);
+        let typed = Key::Character(SmolStr::new("é"));
+        assert_eq!(action_for(&typed, two, PLAIN), Some(ZoomTo(2.0)));
+        assert_eq!(
+            action_for(&Key::Character(SmolStr::new("2")), two, SHIFT),
+            Some(ZoomTo(0.5))
+        );
+        // `1` is the whole of that key: nothing hangs off it under Shift.
+        assert_eq!(
+            action_for(&typed, PhysicalKey::Code(KeyCode::Digit1), SHIFT),
+            None
+        );
+        // And the character on its own reaches nothing, wherever it came from.
+        assert_eq!(
+            action_for(&Key::Character(SmolStr::new("@")), ELSEWHERE, PLAIN),
+            None
+        );
+    }
+
+    /// The three things `c` does are told apart by what is held with it,
     /// and a chord nothing binds is still left to the window manager.
     #[test]
     fn modifiers_tell_chords_apart() {
@@ -1123,21 +1309,32 @@ mod tests {
         // so it is held for every reading of `C`.
         let lower = Key::Character(SmolStr::new("c"));
         let upper = Key::Character(SmolStr::new("C"));
-        assert_eq!(action_for(&lower, PLAIN), Some(CycleColormap));
-        assert_eq!(action_for(&upper, Mods::SHIFT), Some(CopyPath));
+        // The lower case on its own is not bound at all.
+        assert_eq!(action_for(&lower, ELSEWHERE, PLAIN), None);
+        assert_eq!(action_for(&upper, ELSEWHERE, Mods::SHIFT), Some(CopyPath));
         assert_eq!(
-            action_for(&upper, Mods::CONTROL | Mods::SHIFT),
+            action_for(&upper, ELSEWHERE, Mods::CONTROL | Mods::SHIFT),
             Some(CopyUri)
         );
         // The same capitals under Caps Lock, which reports no Shift at all.
-        assert_eq!(action_for(&upper, PLAIN), Some(CopyPath));
-        assert_eq!(action_for(&upper, CTRL), Some(CopyUri));
-        assert_eq!(action_for(&lower, Mods::CONTROL), Some(CopyImage));
-        // Chords the table does not bind belong to the window manager.
-        assert_eq!(action_for(&lower, Mods::ALT), None);
-        assert_eq!(action_for(&upper, Mods::CONTROL | Mods::ALT), None);
+        assert_eq!(action_for(&upper, ELSEWHERE, PLAIN), Some(CopyPath));
+        assert_eq!(action_for(&upper, ELSEWHERE, CTRL), Some(CopyUri));
         assert_eq!(
-            action_for(&Key::Character(SmolStr::new("0")), Mods::SUPER),
+            action_for(&lower, ELSEWHERE, Mods::CONTROL),
+            Some(CopyImage)
+        );
+        // Chords the table does not bind belong to the window manager.
+        assert_eq!(action_for(&lower, ELSEWHERE, Mods::ALT), None);
+        assert_eq!(
+            action_for(&upper, ELSEWHERE, Mods::CONTROL | Mods::ALT),
+            None
+        );
+        assert_eq!(
+            action_for(
+                &Key::Character(SmolStr::new("0")),
+                PhysicalKey::Code(KeyCode::Digit0),
+                Mods::SUPER
+            ),
             None
         );
     }

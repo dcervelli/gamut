@@ -889,11 +889,12 @@ impl ApplicationHandler<Decoded> for App {
                 event:
                     KeyEvent {
                         logical_key,
+                        physical_key,
                         state: ElementState::Pressed,
                         ..
                     },
                 ..
-            } => self.handle_key(&logical_key),
+            } => self.handle_key(&logical_key, physical_key),
             WindowEvent::RedrawRequested => {
                 self.redraw();
                 Effect::Nothing
@@ -1040,7 +1041,7 @@ mod tests {
     #[test]
     fn stepping_to_an_image_of_the_same_size_keeps_the_view() {
         let (mut app, dir) = app_over("same", &[("a.png", 64, 48), ("b.png", 64, 48)]);
-        app.view.actual_size(app.image_size(), VIEWPORT);
+        app.view.set_zoom(1.0, app.image_size(), VIEWPORT);
         app.view.zoom_in(app.image_size(), VIEWPORT);
         let zoom = app.view.zoom(app.image_size(), VIEWPORT);
 
@@ -1056,7 +1057,7 @@ mod tests {
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }
 
-    /// Holding `n` through a directory asks for each file in turn without
+    /// Holding `]` through a directory asks for each file in turn without
     /// waiting for the last, and only the file the user stopped on is shown.
     /// Anything else would be a picture they have already scrolled past.
     #[test]
@@ -1109,7 +1110,7 @@ mod tests {
     /// A file whose header reads cleanly and whose pixels do not gets past
     /// the check that happens before the window opens. Opening asks for the
     /// first file as a walk for exactly that reason, so start-up steps over it
-    /// as `n` would step over it later.
+    /// as `]` would step over it later.
     #[test]
     fn a_first_file_that_will_not_decode_is_stepped_over() {
         let (mut app, dir) = opening(
@@ -1227,7 +1228,7 @@ mod tests {
     #[test]
     fn stepping_to_an_image_of_another_size_fits_it() {
         let (mut app, dir) = app_over("other", &[("a.png", 64, 48), ("b.png", 32, 32)]);
-        app.view.actual_size(app.image_size(), VIEWPORT);
+        app.view.set_zoom(1.0, app.image_size(), VIEWPORT);
         app.view.zoom_in(app.image_size(), VIEWPORT);
 
         app.step(true);
