@@ -113,7 +113,7 @@ static GPU_ERROR_REPORTED: AtomicBool = AtomicBool::new(false);
 
 fn report_gpu_error(what: &str, detail: impl std::fmt::Display) {
     if !GPU_ERROR_REPORTED.swap(true, Ordering::Relaxed) {
-        eprintln!("image-view: {what}: {detail}");
+        eprintln!("gamut: {what}: {detail}");
     }
 }
 
@@ -164,7 +164,7 @@ impl Renderer {
         let adapter_name = adapter.get_info().name;
 
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("image-view device"),
+            label: Some("gamut device"),
             required_features: capabilities.required_features(),
             required_limits: adapter.limits(),
             ..Default::default()

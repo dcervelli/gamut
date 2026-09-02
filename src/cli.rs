@@ -17,10 +17,10 @@ use crate::image::{Primaries, Transfer};
 use crate::render::{HdrPreference, Upscale};
 
 const OPTIONS: &str = "\
-image-view — preview images
+gamut — preview images
 
 USAGE:
-    image-view [OPTIONS] <PATH>...
+    gamut [OPTIONS] <PATH>...
 
 The first file is shown, stretched to fit the window, and re-read whenever
 something else writes to it. A directory stands for the images directly
@@ -127,7 +127,7 @@ fn option_entries() -> Vec<(String, String)> {
 /// Rendered from `OPTIONS` and [`KEYS`] rather than written out beside them,
 /// for the reason `--help` is: there is one list of options and one list of
 /// keys, and a second copy would be a second thing to keep in step. `--help`
-/// and `image-view(1)` therefore cannot disagree.
+/// and `gamut(1)` therefore cannot disagree.
 pub fn man() -> String {
     let mut text = String::new();
     let version = env!("CARGO_PKG_VERSION");
@@ -211,10 +211,7 @@ pub fn first_readable(files: &[PathBuf]) -> Result<(usize, Option<[f32; 2]>)> {
                 // return is reported by `main`, and saying it here as well
                 // would print it twice.
                 for problem in &skipped {
-                    eprintln!(
-                        "image-view: {}",
-                        crate::escape_controls(&format!("{problem:#}"))
-                    );
+                    eprintln!("gamut: {}", crate::escape_controls(&format!("{problem:#}")));
                 }
                 return Ok((index, size.map(|(w, h)| [w as f32, h as f32])));
             }
@@ -273,7 +270,7 @@ fn expand_directories(named: Vec<PathBuf>) -> Result<Vec<PathBuf>> {
         // Worth mentioning only once we know we are carrying on without them,
         // as with a file whose header will not read.
         for path in empty {
-            eprintln!("image-view: no images in {}", crate::shown_path(&path));
+            eprintln!("gamut: no images in {}", crate::shown_path(&path));
         }
         return Ok(files);
     }

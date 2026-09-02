@@ -848,7 +848,7 @@ mod tests {
     }
 
     fn written(name: &str, bytes: &[u8]) -> std::path::PathBuf {
-        let path = std::env::temp_dir().join(format!("image-view-exif-{name}"));
+        let path = std::env::temp_dir().join(format!("gamut-exif-{name}"));
         std::fs::write(&path, bytes).expect("the temporary directory is writable");
         path
     }

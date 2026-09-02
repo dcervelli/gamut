@@ -547,16 +547,13 @@ impl App {
                 None => match renderer.uploader().run(&image) {
                     Ok(uploaded) => uploaded,
                     Err(error) => {
-                        eprintln!(
-                            "image-view: {}",
-                            crate::escape_controls(&format!("{error:#}"))
-                        );
+                        eprintln!("gamut: {}", crate::escape_controls(&format!("{error:#}")));
                         return false;
                     }
                 },
             };
             if let Some(note) = renderer.install_image(uploaded) {
-                eprintln!("image-view: {note}");
+                eprintln!("gamut: {note}");
             }
             stored = renderer.image_format_label();
         }
@@ -601,10 +598,7 @@ impl App {
         let failed = match decoded.outcome {
             Ok(ready) => !self.apply(decoded.file, ready),
             Err(error) => {
-                eprintln!(
-                    "image-view: {}",
-                    crate::escape_controls(&format!("{error:#}"))
-                );
+                eprintln!("gamut: {}", crate::escape_controls(&format!("{error:#}")));
                 true
             }
         };
@@ -700,10 +694,7 @@ impl App {
             Ok(()) => self.reported_error = false,
             Err(error) => {
                 if !self.reported_error {
-                    eprintln!(
-                        "image-view: {}",
-                        crate::escape_controls(&format!("{error:#}"))
-                    );
+                    eprintln!("gamut: {}", crate::escape_controls(&format!("{error:#}")));
                     self.reported_error = true;
                 }
             }
@@ -788,7 +779,7 @@ impl ApplicationHandler<Decoded> for App {
         let window = match event_loop.create_window(attributes) {
             Ok(window) => Arc::new(window),
             Err(error) => {
-                eprintln!("image-view: could not open a window: {error}");
+                eprintln!("gamut: could not open a window: {error}");
                 event_loop.exit();
                 return;
             }
@@ -798,10 +789,7 @@ impl ApplicationHandler<Decoded> for App {
         let mut renderer = match Renderer::new(window.clone(), self.hdr) {
             Ok(renderer) => renderer,
             Err(error) => {
-                eprintln!(
-                    "image-view: {}",
-                    crate::escape_controls(&format!("{error:#}"))
-                );
+                eprintln!("gamut: {}", crate::escape_controls(&format!("{error:#}")));
                 event_loop.exit();
                 return;
             }
@@ -811,15 +799,12 @@ impl ApplicationHandler<Decoded> for App {
             match renderer.set_image(&current.image) {
                 Ok(note) => {
                     if let Some(note) = note {
-                        eprintln!("image-view: {note}");
+                        eprintln!("gamut: {note}");
                     }
                     current.stored = renderer.image_format_label();
                 }
                 Err(error) => {
-                    eprintln!(
-                        "image-view: {}",
-                        crate::escape_controls(&format!("{error:#}"))
-                    );
+                    eprintln!("gamut: {}", crate::escape_controls(&format!("{error:#}")));
                     event_loop.exit();
                     return;
                 }
@@ -829,7 +814,7 @@ impl ApplicationHandler<Decoded> for App {
         if self.hdr == HdrPreference::On {
             let output = renderer.output();
             eprintln!(
-                "image-view: {} \u{2192} {} output{}",
+                "gamut: {} \u{2192} {} output{}",
                 renderer.adapter_name(),
                 output.label,
                 if output.is_hdr {
@@ -948,7 +933,7 @@ mod tests {
     /// The files are written under a directory of their own so that the tests,
     /// which run alongside each other, cannot tread on each other's files.
     fn opening(name: &str, files: &[(&str, u32, u32)]) -> (App, PathBuf) {
-        let dir = std::env::temp_dir().join(format!("image-view-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("gamut-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("the temporary directory is writable");
         let paths: Vec<PathBuf> = files
             .iter()
@@ -1164,11 +1149,11 @@ mod tests {
         let (mut app, dir) = opening("title", &[("a.png", 64, 48), ("b.png", 32, 32)]);
         corrupt(app.files.path(0));
 
-        assert_eq!(app.title(), "loading a.png — image-view");
+        assert_eq!(app.title(), "loading a.png — gamut");
         answer(&mut app, Reload::Fresh);
-        assert_eq!(app.title(), "loading b.png — image-view");
+        assert_eq!(app.title(), "loading b.png — gamut");
         answer(&mut app, Reload::Fresh);
-        assert_eq!(app.title(), "b.png — image-view");
+        assert_eq!(app.title(), "b.png — gamut");
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }

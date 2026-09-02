@@ -1,5 +1,5 @@
 [package]
-name = "image-view"
+name = "gamut"
 version = "0.1.0"
 edition = "2024"
 # Not the edition's own floor of 1.85 but the oldest toolchain that has every
@@ -8,8 +8,8 @@ edition = "2024"
 # code against it, so it stays honest.
 rust-version = "1.88"
 description = "A GPU image viewer with real colour management, for photographs, measurement data and HDR"
-repository = "https://github.com/closedcontour/image-view"
-homepage = "https://github.com/closedcontour/image-view"
+repository = "https://github.com/closedcontour/gamut"
+homepage = "https://github.com/closedcontour/gamut"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
 keywords = ["image", "viewer", "hdr", "color-management", "wgpu"]

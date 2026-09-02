@@ -49,7 +49,7 @@ fn main() -> ExitCode {
     match run() {
         Ok(code) => code,
         Err(error) => {
-            eprintln!("image-view: {}", escape_controls(&format!("{error:#}")));
+            eprintln!("gamut: {}", escape_controls(&format!("{error:#}")));
             ExitCode::FAILURE
         }
     }

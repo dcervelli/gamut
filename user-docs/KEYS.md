@@ -1,6 +1,6 @@
 # Keys and mouse
 
-Every control `image-view` has. Letter keys work in either case except `a`,
+Every control `gamut` has. Letter keys work in either case except `a`,
 `s` and `c`, where the two cases do different things.
 
 ## Zoom and position
@@ -91,7 +91,7 @@ a fraction of a second, and only then is there anything to paste. Copying
 something else in the meantime wins: whichever copy you asked for last is the
 one you get, not whichever happened to finish last.
 
-Any of the copies outlives the window: closing `image-view` leaves it on
+Any of the copies outlives the window: closing `gamut` leaves it on
 the clipboard, and it stays there until something else copies over it. Quitting
 straight after copying is safe — a picture still being prepared is finished
 before the window goes.

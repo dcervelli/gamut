@@ -148,7 +148,7 @@ mod tests {
 
     #[test]
     fn a_real_file_is_watched() {
-        let path = std::env::temp_dir().join(format!("image-view-watch-{}", std::process::id()));
+        let path = std::env::temp_dir().join(format!("gamut-watch-{}", std::process::id()));
         fs::write(&path, b"first").expect("the temporary directory is writable");
         let mut watch = Watch::new(&path);
         assert!(!watch.poll());

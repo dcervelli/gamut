@@ -107,7 +107,7 @@ impl Loader {
         let cancelled = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&cancelled);
         let thread = thread::Builder::new()
-            .name("image-view loader".into())
+            .name("gamut loader".into())
             .spawn(move || run(incoming, proxy, &flag))
             .expect("the loader thread can be spawned");
         Self {

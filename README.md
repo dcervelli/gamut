@@ -1,4 +1,4 @@
-# image-view
+# gamut
 
 A GPU-accelerated image previewer with real colour management: Rust, `winit`
 for the window, `wgpu` for the drawing, `glyphon` for the text.
@@ -18,7 +18,7 @@ cd packaging && makepkg -si
 ```
 
 That installs the desktop entry and the icon as well as the binary, so a file
-manager offers `image-view` for a picture and `xdg-open` reaches it.
+manager offers `gamut` for a picture and `xdg-open` reaches it.
 
 There are no prebuilt binaries, and none are planned: the package is compiled
 from the source of a tagged release.

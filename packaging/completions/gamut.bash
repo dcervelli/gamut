@@ -1,9 +1,9 @@
-# bash completion for image-view
+# bash completion for gamut
 #
 # The option list here is checked against `--help` by a test in src/cli.rs, so
 # a flag cannot be added to one without the other.
 
-_image_view() {
+_gamut() {
     local cur prev
     cur=${COMP_WORDS[COMP_CWORD]}
     prev=${COMP_WORDS[COMP_CWORD-1]}
@@ -28,4 +28,4 @@ _image_view() {
     _filedir '@(jpg|jpeg|jpe|jfif|png|gif|bmp|tif|tiff|webp|avif|heic|heif|hif|ico|hdr|exr|pnm|pbm|pgm|ppm|pam|JPG|JPEG|PNG|GIF|BMP|TIF|TIFF|WEBP|AVIF|HEIC|HEIF|HIF|ICO|HDR|EXR)'
 }
 
-complete -F _image_view image-view
+complete -F _gamut gamut

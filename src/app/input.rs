@@ -577,10 +577,7 @@ impl Pointer {
 /// pressed and show nothing on screen when they work, so the only thing worth
 /// saying is when one did not.
 fn report(error: &anyhow::Error) {
-    eprintln!(
-        "image-view: {}",
-        crate::escape_controls(&format!("{error:#}"))
-    );
+    eprintln!("gamut: {}", crate::escape_controls(&format!("{error:#}")));
 }
 
 impl App {

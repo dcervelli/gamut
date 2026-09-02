@@ -1,11 +1,11 @@
 # Maintainer: TODO <TODO>
 
-pkgname=image-view
+pkgname=gamut
 pkgver=0.1.0
 pkgrel=1
 pkgdesc="A GPU image viewer with real colour management, for photographs, measurement data and HDR"
 arch=('x86_64' 'aarch64')
-url="https://github.com/closedcontour/image-view"
+url="https://github.com/closedcontour/gamut"
 license=('MIT OR Apache-2.0')
 # libheif reads HEIC and AVIF, and its codec plugins decide which of the two
 # actually work: libde265 or ffmpeg for HEVC, dav1d or aom for AV1. Both are

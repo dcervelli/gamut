@@ -1,4 +1,4 @@
-# image-view
+# gamut
 
 A GPU image viewer: Rust, `winit`, `wgpu`, `glyphon`. The README explains the
 design and the reasoning behind it; this file is the map for making changes.
