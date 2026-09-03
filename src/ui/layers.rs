@@ -261,14 +261,23 @@ mod tests {
         // And the body it leaves between them is the menu's as well.
         let panel = popup.panel();
         assert_eq!(
-            hit([panel.x + 0.5, panel.y + 0.5], &panels, WINDOW, shown(), None),
+            hit(
+                [panel.x + 0.5, panel.y + 0.5],
+                &panels,
+                WINDOW,
+                shown(),
+                None
+            ),
             Hit::Menu
         );
 
         // Off the popup the layers underneath answer as they always did: the
         // grab that makes a press there dismiss the menu is the handlers',
         // not the stack's, so the bar goes on reading out the pixel.
-        assert_eq!(hit(middle(content), &panels, WINDOW, shown(), None), Hit::Image);
+        assert_eq!(
+            hit(middle(content), &panels, WINDOW, shown(), None),
+            Hit::Image
+        );
     }
 
     /// A panel takes what lands anywhere on it, buttons or no buttons. That
@@ -319,7 +328,13 @@ mod tests {
         assert_eq!(hit(bar, &panels, WINDOW, shown(), None), Hit::Image);
         let content = content_area(WINDOW, false);
         assert!(matches!(
-            hit(middle(histogram::panel(content)), &panels, WINDOW, shown(), None),
+            hit(
+                middle(histogram::panel(content)),
+                &panels,
+                WINDOW,
+                shown(),
+                None
+            ),
             Hit::Histogram(_)
         ));
     }

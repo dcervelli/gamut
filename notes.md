@@ -25,33 +25,37 @@
 * Still to do: push a v0.1.0 tag, then open the omarchy-pkgs PR. The name is
   not committed to until then.
 
-## INITIAL RELEASE
+## IN PROCESS
+* Final licencing pass/cleanup (with Lucide)
+* Understanding the --hdr flag
+
+## RELEASE 0.1.0
 * Full UI pass
+  * Animate pans and zoom, with reset, and no curveballs
   * Settings icon LR for cursor interaction
-  * Color spectrum chooser
-  * Icons have px shifts
+  * Color spectrum chooser to lower right
+  * Red / blue color spectrum
   * Scaling chooser
   * Toast for messages ("Copied filename")
 * Histogram
   * Vertical scale
-  * Log/linear
   * EV slider
-* Region selection
-* Copy
-  * Region (raw)
-  * Pixel color
-* Modifications
-  * 90° rotations
-  * Crop to region
-* Paste image
-* Hotkey choices
-  * Keys for magnifications
-* Rewrite history with @closedcontour.com email
+* Move repo to dcervelli/
+* American spellings
+* Wayland app_id
 * Docs
   * Usage
 
 ## FUTURE
-
+* Listen to directories
+* Open in…
+* Copy Pixel color
+* Region selection
+* Modifications
+  * 90° rotations
+  * Crop to region
+* Copy region
+* Paste image
 * Settings
   * Pixel format
   * Geospatial format
