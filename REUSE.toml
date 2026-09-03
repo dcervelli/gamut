@@ -16,6 +16,11 @@ version = 1
 # SPDX identifier. `LICENSE-MIT` and `LICENSE-APACHE` stay at the root: they
 # are gamut's own licence, which is what a reader and GitHub both look there
 # for.
+#
+# `LICENSES/` holds every licence anything in the distribution is under, not
+# only what the source tree carries, because `THIRD-PARTY-LICENSES` is in the
+# tree too and is annotated below for what it actually is. That is the
+# stronger invariant to keep and the one `reuse lint` can check.
 
 [[annotations]]
 path = "**"
@@ -51,3 +56,17 @@ SPDX-FileCopyrightText = [
     "2026 Dan Cervelli",
 ]
 SPDX-License-Identifier = "CC0-1.0 AND Apache-2.0 AND (MIT OR Apache-2.0)"
+
+# The notices of the crates linked into the binary, generated from Cargo.lock
+# by `bin/release` — see `about.toml` for what it is allowed to find. It is
+# not gamut's work and the blanket rule above must not claim it: what it
+# contains is the licence of each crate it lists, reproduced in full, so it is
+# annotated with the set of those licences and their authors are named inside
+# it crate by crate. Adding a dependency under a licence new to this list
+# means a text for it in `LICENSES/` as well; `about.toml`'s `accepted` list
+# is what stops one arriving unnoticed.
+[[annotations]]
+path = "THIRD-PARTY-LICENSES"
+precedence = "override"
+SPDX-FileCopyrightText = "the authors of the crates listed in the file"
+SPDX-License-Identifier = "MIT AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND ISC AND Zlib AND Unicode-3.0"

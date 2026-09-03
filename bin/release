@@ -20,7 +20,7 @@ usage() {
 
 cd "$(dirname "$0")/.."
 
-for tool in cargo git; do
+for tool in cargo git reuse; do
     command -v "$tool" >/dev/null || { echo "$tool is not installed" >&2; exit 1; }
 done
 
@@ -52,7 +52,10 @@ git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && {
 
 # Cargo.toml and the PKGBUILD are put back if anything below fails, so a failed
 # release leaves no half-bumped tree behind.
-restore() { git checkout -- Cargo.toml Cargo.lock packaging/PKGBUILD 2>/dev/null || true; }
+restore() {
+    git checkout -- Cargo.toml Cargo.lock packaging/PKGBUILD \
+        THIRD-PARTY-LICENSES 2>/dev/null || true
+}
 trap restore EXIT
 
 awk -v v="$VERSION" '
@@ -70,9 +73,27 @@ awk -v v="$VERSION" '
 # will. `cargo test` covers the packaging drift tests, so a stale desktop entry
 # or completion stops the release here rather than after the tag.
 cargo build --quiet
+
+# The notices of every crate linked into the binary, rewritten from the lock
+# that build just refreshed. It is generated here rather than in the PKGBUILD
+# because `cargo about` is not a package Arch carries, and because it reaches
+# the network for the few crates that ship no licence text of their own —
+# neither of which belongs in a `--frozen` build. Shipping it in the tarball
+# instead costs a checked-in generated file, and CI checks it has not drifted.
+command -v cargo-about >/dev/null || {
+    echo "cargo-about is not installed:" >&2
+    echo "    cargo install cargo-about --locked --features cli" >&2
+    exit 1
+}
+{
+    printf 'Cargo.lock sha256: %s\n\n' "$(sha256sum Cargo.lock | cut -d' ' -f1)"
+    cargo about generate --frozen packaging/about.hbs
+} >THIRD-PARTY-LICENSES
+
 cargo fmt --check
 cargo clippy --quiet --all-targets -- -D warnings
 cargo test --quiet
+reuse lint --quiet
 
 NAME=$(sed -n 's/^name = "\(.*\)"$/\1/p' Cargo.toml | head -1)
 BUILT=$(./target/debug/"$NAME" --version)
@@ -83,7 +104,7 @@ BUILT=$(./target/debug/"$NAME" --version)
 
 trap - EXIT
 
-git add Cargo.toml Cargo.lock packaging/PKGBUILD
+git add Cargo.toml Cargo.lock packaging/PKGBUILD THIRD-PARTY-LICENSES
 git commit -m "Release $TAG"
 git tag "$TAG"
 

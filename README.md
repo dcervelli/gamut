@@ -1055,3 +1055,17 @@ Which is recorded file by file in [REUSE.toml](REUSE.toml), in the form the
 [REUSE](https://reuse.software) specification defines, with the licence texts
 it names in [LICENSES/](LICENSES). `reuse lint` checks that nothing in the
 tree is unaccounted for, and CI runs it.
+
+The crates linked into the binary are the third part, and they are not in the
+tree at all — `Cargo.lock` only names them. Their notices are collected in
+[THIRD-PARTY-LICENSES](THIRD-PARTY-LICENSES), generated from that lock by
+`cargo about` and rewritten by `bin/release`, because a statically linked
+binary carries its dependencies' code and owes their notices with it. Which
+licences may turn up there is not left open: `about.toml` lists the ones this
+project accepts, in priority order, and a crate arriving under anything else
+fails generation rather than being written out quietly — `cargo audit` for
+licences instead of advisories. The file is stamped with the lock it was
+generated from, and CI fails if that is not the lock in the tree.
+
+Between the three, `LICENSES/` ends up holding every licence anything in the
+distribution is under, and `reuse lint` reports none of them unused.
