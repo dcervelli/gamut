@@ -61,6 +61,11 @@ render/        the GPU
 packaging/     what an Arch package is built from: PKGBUILD, the .desktop entry,
                the icon, and hand-written shell completions
 bin/           release, and pkgbuild-sha which points the PKGBUILD at a published tag
+REUSE.toml     which file in the tree is under what licence; LICENSES/ holds the
+               texts it names, and `reuse lint` checks the two agree
+about.toml     which licences a dependency may arrive under; packaging/about.hbs
+               renders THIRD-PARTY-LICENSES, the notices of every linked crate,
+               which bin/release regenerates and stamps with the lock it read
 ```
 
 `main.rs::APP_ID` is the crate's own name, and everything outside the program
@@ -86,6 +91,8 @@ name.
 | An image format | `image/decode/<fmt>.rs` implementing `Decoder`, one line in `DECODERS`, a fixture in `test_images/` (see its README and `generate.sh`) |
 | What a copy of the image contains | `image/encode.rs`; the chord that asks for it is in `app/input.rs` |
 | A colour-space source (a new tag a format carries) | `image/color/` |
+| Someone else's work brought into the tree | say where it came from beside the code that carries it, then one `[[annotations]]` entry in `REUSE.toml`; if its licence is new to the tree, its text goes in `LICENSES/` named by SPDX identifier, and the PKGBUILD's `license=()` grows an entry |
+| A dependency | `Cargo.toml`, then `bin/release` rewrites `THIRD-PARTY-LICENSES`. A licence `about.toml` does not accept fails generation: add it there, in priority order, and its text to `LICENSES/`, or take the dependency instead |
 | An upscale filter or tone map | the WGSL function, one arm in `render/shader_codes.rs`, one enum variant with its `label`/`parse`/`next` |
 | A new render pass | build it from `render/gpu.rs`; add its target to `Renderer::render` |
 | Something about the display window, exposure or false colour | `image/display.rs` (state) and `shaders/image.wgsl` / `composite.wgsl` (effect) |
@@ -122,6 +129,8 @@ cargo clippy --all-targets    # clean
 cargo doc --no-deps           # no warnings
 cargo run --release -- test_images/png-rgb8.png --histogram
 cargo audit                   # no advisories against the pinned dependency versions
+reuse lint                    # every file accounted for by REUSE.toml
+cargo about generate --frozen packaging/about.hbs   # only after a dependency changes
 ```
 
 Decoders parse untrusted files, so treat a panic on a malformed input as a

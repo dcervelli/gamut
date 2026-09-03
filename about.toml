@@ -1,0 +1,42 @@
+# What `cargo about` may find in the dependency graph, and in what order it
+# should pick when a crate offers a choice.
+#
+# This is an allowlist as much as a configuration: a crate whose licence is
+# not below fails generation rather than being written out quietly, so a
+# dependency arriving under terms nothing here has agreed to stops a release
+# instead of appearing in a notice file nobody read. It is the same bargain as
+# `cargo audit`, over licences instead of advisories.
+#
+# The order is a priority. Every entry is permissive, so what it really
+# decides is which text gets printed for the ninety-odd crates offering `MIT
+# OR Apache-2.0`; MIT first keeps the file to the shorter of the two.
+#
+# `GPL-2.0-only` is deliberately absent. `self_cell` offers `Apache-2.0 OR
+# GPL-2.0-only` and so resolves to Apache-2.0 on its own; leaving GPL out
+# means that if the Apache half ever went away, this would fail rather than
+# silently take the copyleft branch into a package that cannot carry it.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "0BSD",
+    "Unlicense",
+    "CC0-1.0",
+    # `unicode-ident` is `(MIT OR Apache-2.0) AND Unicode-3.0`: the Unicode
+    # half is required rather than offered, so it has to be accepted outright.
+    "Unicode-3.0",
+]
+
+# Only what is linked into the binary owes a notice. A test harness or a build
+# script is not shipped, so its licence is not the package's business.
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+
+# The two targets the PKGBUILD builds for. Without this the graph is resolved
+# for every platform at once and the file would carry notices for crates that
+# never reach an Arch user — Windows and macOS backends, mostly.
+targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]

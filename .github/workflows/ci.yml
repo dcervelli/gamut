@@ -21,7 +21,7 @@ jobs:
       - name: Install the toolchain and the libraries it links
         run: |
           pacman -Syu --noconfirm --needed \
-            git rust cargo-audit libheif vulkan-icd-loader fontconfig pkgconf
+            git rust cargo-audit reuse libheif vulkan-icd-loader fontconfig pkgconf
 
       - uses: actions/checkout@v4
 
@@ -43,6 +43,32 @@ jobs:
 
       - name: Advisories
         run: cargo audit
+
+      - name: Licensing
+        # Every file in the tree is accounted for by REUSE.toml, and every
+        # licence it names has its text in LICENSES/. This is what catches a
+        # file arriving from somewhere else without its licence coming too.
+        run: reuse lint
+
+      - name: The third-party notices are current
+        # THIRD-PARTY-LICENSES is generated from Cargo.lock by bin/release,
+        # which stamps the lock it read on the first line. Comparing that
+        # against the lock in the tree catches a dependency added without the
+        # notices being rewritten, and costs nothing: `cargo about` is not an
+        # Arch package, and building it on every push to regenerate the file
+        # in full would take minutes to prove what a hash proves at once.
+        run: |
+          want=$(sha256sum Cargo.lock | cut -d' ' -f1)
+          have=$(sed -n 's/^Cargo\.lock sha256: //p' THIRD-PARTY-LICENSES | head -1)
+          test -n "$have" \
+            || { echo "THIRD-PARTY-LICENSES carries no lock stamp"; exit 1; }
+          test "$want" = "$have" || {
+            echo "THIRD-PARTY-LICENSES was generated from a different Cargo.lock"
+            echo "  tree:  $want"
+            echo "  stamp: $have"
+            echo "Regenerate: cargo about generate --frozen packaging/about.hbs"
+            exit 1
+          }
 
       - name: The PKGBUILD is at the version Cargo.toml says
         # ttfx keeps a PKGBUILD in its own tree that fell three releases behind
