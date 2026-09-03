@@ -43,7 +43,8 @@ one on screen, so a directory of frames or exposures stays comparable under
 the same pixels. A file of a different size is a different picture, and is
 fitted. Files that cannot be decoded are stepped over. The list is whatever
 was named at startup, in that order; naming a directory puts the images in it
-on the list.
+on the list, and keeps it up to date as images are added to that directory or
+taken out of it.
 
 ## Copying
 

@@ -1,4 +1,5 @@
-//! Noticing that the file on screen has changed underneath us.
+//! Noticing that the file on screen has changed underneath us — or that a
+//! directory named on the command line holds something else now.
 //!
 //! Polling rather than inotify and its per-platform cousins, deliberately: it
 //! is one `stat` every quarter second, it needs no dependency and no
@@ -24,8 +25,8 @@ struct Signature {
     len: u64,
 }
 
-/// One file, and enough of its history to tell a finished write from one
-/// still in progress.
+/// One file — or one directory — and enough of its history to tell a
+/// finished write from one still in progress.
 pub struct Watch {
     path: PathBuf,
     /// The file as it was when we last read it.
@@ -36,6 +37,11 @@ pub struct Watch {
     /// the file was not there, which is a state a poll can pass through
     /// while a file is being replaced.
     settling: Option<Signature>,
+    /// Whether the last settled look found nothing there. Latched behind the
+    /// same settling as a reload is, so that the moment an atomic save passes
+    /// through — the old file unlinked, the new one not yet renamed over it —
+    /// is not reported as a file that has gone.
+    missing: bool,
 }
 
 impl Watch {
@@ -46,7 +52,17 @@ impl Watch {
             path: path.to_path_buf(),
             loaded: signature,
             settling: signature,
+            missing: signature.is_none(),
         }
+    }
+
+    /// Whether there is nothing at the path any more, as of the last poll.
+    ///
+    /// Deleting the file does not take the picture off the screen — its
+    /// pixels are as good as they ever were, and there is nothing to put in
+    /// its place — so the interface says so instead.
+    pub fn missing(&self) -> bool {
+        self.missing
     }
 
     /// Returns `true` when the file has changed and then stopped changing,
@@ -64,6 +80,9 @@ impl Watch {
             self.settling = seen;
             return false;
         }
+        // It has held still for a whole interval, so whatever it is now is
+        // what it is: a file, or nothing.
+        self.missing = seen.is_none();
         // A file that has gone away leaves the last good image on screen:
         // there is nothing to read, and the delete is usually half of a
         // replacement whose other half is along in a moment.
@@ -99,6 +118,7 @@ mod tests {
             path: PathBuf::from("unused"),
             loaded,
             settling: loaded,
+            missing: loaded.is_none(),
         }
     }
 
@@ -136,6 +156,29 @@ mod tests {
         // Replaced rather than deleted: the new file loads.
         assert!(!watch.advance(sig(20)));
         assert!(watch.advance(sig(20)));
+    }
+
+    /// A file that has gone is only called gone once it stays gone: the gap
+    /// an atomic save passes through looks exactly the same at one poll, and
+    /// the bar must not blink a word into the interface and out again.
+    #[test]
+    fn a_file_is_called_missing_only_once_it_stays_missing() {
+        let mut watch = watching(sig(10));
+        assert!(!watch.missing());
+
+        assert!(!watch.advance(None));
+        assert!(
+            !watch.missing(),
+            "one poll into a rename is not a deleted file"
+        );
+        assert!(!watch.advance(None));
+        assert!(watch.missing());
+
+        // And a file put back is a file again, on the poll that reloads it.
+        assert!(!watch.advance(sig(20)));
+        assert!(watch.missing(), "not until the new file settles");
+        assert!(watch.advance(sig(20)));
+        assert!(!watch.missing());
     }
 
     #[test]

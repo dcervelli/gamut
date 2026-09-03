@@ -34,6 +34,18 @@ directories inside it, and here the name is all there is to go on: a file is
 taken for an image if its extension is one of those above, so a JPEG saved as
 `photo.txt` is passed over where naming it yourself would have opened it.
 
+**And it keeps standing for it.** The directory is looked at again about
+twice a second for as long as the window is open. An image saved into it
+joins the list where its name puts it, and one deleted drops out — so a
+render dropping frames into a folder is a list that grows as you watch it,
+and `]` reaches a file that did not exist when you started. The picture on
+screen is the one exception: it stays on the list even after the file behind
+it is gone, since it is still what you are looking at — and the bar writes
+`DELETED` in front of its name so that you know that is what you are looking
+at. The word appears about half a second after the file goes and takes itself
+off again if the file comes back; a file named on the command line and then
+deleted is marked the same way.
+
 **One picture per file.** Nothing here shows more than one:
 
 - an animated GIF or WebP shows its first frame and stops — there is no

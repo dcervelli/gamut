@@ -37,6 +37,13 @@ pub(super) fn top_label(shown: &str, reading: Option<&Reading>) -> String {
     }
 }
 
+/// The word that goes in front of the name when the file behind the picture
+/// is gone. Set apart in the warning colour rather than folded into the name,
+/// which is still the name of the file the pixels came from: it is a fact
+/// about the file's standing in the world, not part of what it is called —
+/// and a file that really is called `DELETED` must not read as this.
+pub(super) const DELETED: &str = "DELETED";
+
 /// Where the file on screen comes in the list it was opened with, for in
 /// front of its name — or `None` for a single file, "[1/1]" being a count of
 /// nothing.
