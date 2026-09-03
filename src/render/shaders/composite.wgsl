@@ -5,7 +5,7 @@
 // neither the image layer nor the UI layer has to.
 
 struct Params {
-    tone_map: u32,     // 0 clip, 1 reinhard, 2 neutral
+    tone_map: u32,     // 0 clip, 1 reinhard, 2 neutral, 3 none
     encoding: u32,     // 0 sRGB surface (hardware encodes), 1 scRGB linear, 2 PQ
     // Global output gain, applied after compositing. 1.0 means "1.0 is SDR
     // reference white", which is what both sRGB and scRGB want.
@@ -74,6 +74,10 @@ fn tone_map(color: vec3<f32>) -> vec3<f32> {
     switch params.tone_map {
         case 1u: { return reinhard(max(color, vec3<f32>(0.0))); }
         case 2u: { return neutral(max(color, vec3<f32>(0.0))); }
+        // Nothing to do: the surface has room above 1.0 and the highlights
+        // are meant to use it. Negatives still go, being light that is not
+        // there rather than headroom.
+        case 3u: { return max(color, vec3<f32>(0.0)); }
         default: { return clamp(color, vec3<f32>(0.0), vec3<f32>(1.0)); }
     }
 }

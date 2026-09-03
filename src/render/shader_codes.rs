@@ -59,6 +59,7 @@ pub fn tone_map(map: ToneMap) -> u32 {
         ToneMap::Clip => 0,
         ToneMap::Reinhard => 1,
         ToneMap::Neutral => 2,
+        ToneMap::Off => 3,
     }
 }
 

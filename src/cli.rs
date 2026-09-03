@@ -39,7 +39,7 @@ OPTIONS:
                             gain map beside it
         --colormap <MAP>    Start with false colour on single-channel images:
                             gray, viridis, magma, or turbo
-        --tone-map <MAP>    Start with clip, reinhard, or neutral
+        --tone-map <MAP>    Start with off, clip, reinhard, or neutral
         --window <MODE>     Start with the window set to unit, minmax, or pct
         --exposure <STOPS>  Start at this exposure, in stops
         --upscale <FILTER>  How to resample above 100%: nearest or bicubic

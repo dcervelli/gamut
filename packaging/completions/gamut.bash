@@ -12,7 +12,7 @@ _gamut() {
         --transfer)   COMPREPLY=($(compgen -W 'linear srgb pq hlg gamma:' -- "$cur")); return ;;
         --primaries)  COMPREPLY=($(compgen -W 'bt709 p3 bt2020 adobe' -- "$cur")); return ;;
         --colormap)   COMPREPLY=($(compgen -W 'gray viridis magma turbo' -- "$cur")); return ;;
-        --tone-map)   COMPREPLY=($(compgen -W 'clip reinhard neutral' -- "$cur")); return ;;
+        --tone-map)   COMPREPLY=($(compgen -W 'off clip reinhard neutral' -- "$cur")); return ;;
         --window)     COMPREPLY=($(compgen -W 'unit minmax pct' -- "$cur")); return ;;
         --upscale)    COMPREPLY=($(compgen -W 'nearest bicubic' -- "$cur")); return ;;
         --exposure)   return ;;

@@ -231,7 +231,7 @@ fn gamut(primaries: Primaries) -> ColorGamut {
 mod tests {
     use super::*;
     use crate::image::Stats;
-    use crate::image::display::{AutoWindow, Display, Startup, ToneMap};
+    use crate::image::display::{AutoWindow, Display, Headroom, Startup, ToneMap};
 
     use ultrahdr_rs::{GainMapMetadata, encode_ultrahdr};
 
@@ -356,7 +356,7 @@ mod tests {
     fn it_opens_windowed_to_the_base_rendition_rather_than_stretched() {
         let image = reconstructed();
         let stats = Stats::scan(&image);
-        let display = Display::for_image_with(&image, &stats, Startup::default());
+        let display = Display::for_image_with(&image, &stats, Startup::default(), Headroom::None);
 
         assert_eq!(display.auto, AutoWindow::Manual);
         assert_eq!(display.low, 0.0);

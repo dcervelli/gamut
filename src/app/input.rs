@@ -469,7 +469,7 @@ pub const KEYS: &[Binding] = &[
         section: Section::Display,
         mods: PLAIN,
         shown: "t",
-        help: "Cycle tone mapping: clip, reinhard, neutral",
+        help: "Cycle tone mapping: off, clip, reinhard, neutral",
         keys: &[(Char("t"), CycleToneMap), (Char("T"), CycleToneMap)],
     },
     Binding {
@@ -715,8 +715,11 @@ impl App {
                 return Effect::Nothing;
             }
             ResetDisplay => {
-                return self.adjust(|current, _| {
-                    current.display.reset(&current.stats, &current.image);
+                let headroom = self.headroom();
+                return self.adjust(move |current, _| {
+                    current
+                        .display
+                        .reset(&current.stats, &current.image, headroom);
                     true
                 });
             }

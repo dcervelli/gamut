@@ -83,9 +83,10 @@ display — sRGB, gamma, PQ, HLG — opens untouched at 0–1, because
 second-guessing the grade would be wrong. Measurement data and other
 scene-referred content opens with an automatic 99.8% window, because values
 occupying a fraction of the nominal range otherwise show as a black rectangle.
-HDR content additionally starts on the neutral tone map rather than clipping.
-All of it is adjustable: `e` cycles the automatic window, `t` the tone map,
-`z` resets.
+HDR content additionally starts on the neutral tone map rather than clipping,
+unless the window is on an HDR display, where the highlights have somewhere to
+go and no curve is applied at all. All of it is adjustable: `e` cycles the
+automatic window, `t` the tone map, `z` resets.
 
 **Rotation is usually ignored.** An image tagged with an orientation is shown
 the way its pixels are stored, except in WebP and HEIF. If a JPEG from a phone

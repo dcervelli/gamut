@@ -16,7 +16,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::{Window, WindowId};
 
 use crate::image::decode;
-use crate::image::display::{Display, Startup};
+use crate::image::display::{Display, Headroom, Startup, ToneMap};
 use crate::loader::{Decoded, Loader, Opened, Ready, Reload, Request};
 use crate::render::{HdrPreference, Placement, Rect, Renderer, Scene, Upscale};
 use crate::theme::{self, Theme};
@@ -167,6 +167,34 @@ impl App {
             .as_ref()
             .map(Current::size)
             .or(self.header_size)
+    }
+
+    /// Whether the surface we actually got has room above SDR white, which is
+    /// half of what a tone map defaults from. Before there is a window the
+    /// answer is the SDR one, and [`App::adopt_headroom`] asks again once the
+    /// surface has been chosen.
+    fn headroom(&self) -> Headroom {
+        match &self.renderer {
+            Some(renderer) if renderer.output().is_hdr => Headroom::Above,
+            _ => Headroom::None,
+        }
+    }
+
+    /// Re-derives the tone map for whatever is on screen, for the moment the
+    /// output is settled and its headroom is known at last.
+    ///
+    /// The file named on the command line is decoded before the window opens,
+    /// so its display state is worked out against an SDR surface whatever the
+    /// surface turns out to be. A curve asked for on the command line is left
+    /// alone: that is a choice rather than a default.
+    fn adopt_headroom(&mut self) {
+        if self.startup.tone_map.is_some() {
+            return;
+        }
+        let headroom = self.headroom();
+        if let Some(current) = &mut self.current {
+            current.display.tone_map = ToneMap::default_for(&current.image, headroom);
+        }
     }
 
     fn image_size(&self) -> [f32; 2] {
@@ -534,7 +562,7 @@ impl App {
                 display.refresh_auto(&stats);
                 display
             }
-            None => Display::for_image_with(&image, &stats, self.startup),
+            None => Display::for_image_with(&image, &stats, self.startup, self.headroom()),
         };
 
         let mut stored = None;
@@ -830,6 +858,9 @@ impl ApplicationHandler<Decoded> for App {
         self.loader.attach(renderer.uploader());
         self.renderer = Some(renderer);
         self.window = Some(window);
+        // The surface exists at last, so whatever was decoded before the
+        // window opened can find out what it is being drawn onto.
+        self.adopt_headroom();
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {

@@ -908,7 +908,7 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
-    use crate::image::display::{Display, Startup};
+    use crate::image::display::{Display, Headroom, Startup};
     use crate::image::exif::{Entry, Exif, Section};
     use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples, Stats};
     use crate::ui::Monospace;
@@ -934,7 +934,7 @@ mod tests {
         );
         let stats = Stats::scan(&image);
         Current {
-            display: Display::for_image_with(&image, &stats, Startup::default()),
+            display: Display::for_image_with(&image, &stats, Startup::default(), Headroom::None),
             image: std::sync::Arc::new(image),
             stats,
             label: "kingfisher.png".into(),

@@ -69,7 +69,7 @@ Both ship as standard on the distributions above.
 | `a`, `s` | Slide the window down / up |
 | `A`, `S` | Narrow / widen the window |
 | `e` | Cycle the automatic window: unit → min/max → 99.8% |
-| `t` | Cycle tone mapping: clip → reinhard → neutral |
+| `t` | Cycle tone mapping: off → clip → reinhard → neutral |
 | `r` | Cycle false colour (single-channel images) |
 | `z` | Reset display settings |
 
@@ -244,6 +244,14 @@ so a 20000×20000 16-bit grey scan costs 800 MB rather than 3.2 GB.
 (`Rgb10a2Unorm` + `Bt2100Pq`) otherwise. It is opt-in because a driver will
 report an HDR colour space whether or not the monitor in front of you is HDR.
 Without it, HDR content is tone mapped into an ordinary sRGB surface.
+
+What the surface can hold is what the tone map defaults from, and the two are
+one decision: a curve exists to fit values above 1.0 into a target that stops
+there, so a target that does not stop there starts without one
+(`ToneMap::Off`). The surface is settled after the first file is decoded — the
+window opens later — so `App::adopt_headroom` asks the question again once
+there is one. `t` still reaches every curve from there, which is how you see
+what an SDR viewer would make of the same file.
 
 ### Grey images
 

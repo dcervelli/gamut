@@ -53,6 +53,11 @@ impl AutoWindow {
 /// What to do with values that are still above 1.0 once windowed.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ToneMap {
+    /// Nothing: the values go out as they are. What an HDR surface wants,
+    /// its whole point being the room above SDR white. On an SDR surface it
+    /// comes to the same thing as `Clip`, since the hardware clamps on the
+    /// way to an 8-bit target either way.
+    Off,
     /// Clip. Correct for measurement work, where you want to see clipping.
     Clip,
     Reinhard,
@@ -64,6 +69,7 @@ pub enum ToneMap {
 impl ToneMap {
     pub fn label(self) -> &'static str {
         match self {
+            ToneMap::Off => "off",
             ToneMap::Clip => "clip",
             ToneMap::Reinhard => "reinhard",
             ToneMap::Neutral => "neutral",
@@ -72,7 +78,8 @@ impl ToneMap {
 
     pub fn parse(value: &str) -> Option<Self> {
         Some(match value.to_ascii_lowercase().as_str() {
-            "clip" | "none" => ToneMap::Clip,
+            "off" | "none" => ToneMap::Off,
+            "clip" => ToneMap::Clip,
             "reinhard" => ToneMap::Reinhard,
             "neutral" => ToneMap::Neutral,
             _ => return None,
@@ -81,9 +88,27 @@ impl ToneMap {
 
     fn next(self) -> Self {
         match self {
+            ToneMap::Off => ToneMap::Clip,
             ToneMap::Clip => ToneMap::Reinhard,
             ToneMap::Reinhard => ToneMap::Neutral,
-            ToneMap::Neutral => ToneMap::Clip,
+            ToneMap::Neutral => ToneMap::Off,
+        }
+    }
+
+    /// The curve an image gets when nothing has asked for one: none at all
+    /// where the surface has room for the highlights, and otherwise a roll-off
+    /// for content that can exceed SDR white and a plain clip for content that
+    /// cannot.
+    ///
+    /// Held apart from [`Display::for_image_with`] because the surface is
+    /// settled after the first file is decoded, so the answer has to be asked
+    /// for again once there is a window — and again if the output ever
+    /// changes underneath one.
+    pub fn default_for(image: &DecodedImage, headroom: Headroom) -> Self {
+        match (headroom, image.is_high_dynamic_range()) {
+            (Headroom::Above, _) => ToneMap::Off,
+            (Headroom::None, true) => ToneMap::Neutral,
+            (Headroom::None, false) => ToneMap::Clip,
         }
     }
 
@@ -95,6 +120,9 @@ impl ToneMap {
     /// readout is that it agrees with the screen.
     pub fn apply(self, color: [f32; 3]) -> [f32; 3] {
         match self {
+            // The negatives go, as they do under every other curve here:
+            // undershoot from a bicubic lobe is not light.
+            ToneMap::Off => color.map(|c| c.max(0.0)),
             ToneMap::Clip => color.map(|c| c.clamp(0.0, 1.0)),
             ToneMap::Reinhard => color.map(|c| {
                 let c = c.max(0.0);
@@ -250,6 +278,23 @@ const TURBO: [[f32; 3]; 6] = [
     [59.28637943, 2.82956604, 27.34824973],
 ];
 
+/// Whether the surface being drawn to has room above SDR white.
+///
+/// It is what decides whether values over 1.0 need a curve at all, so it
+/// belongs to the output rather than to the image or to the user. `render`
+/// resolves it from the surface it managed to get; this layer only has to
+/// know which of the two it is.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Headroom {
+    /// An SDR surface: everything above 1.0 has to be brought down into it.
+    #[default]
+    None,
+    /// An HDR surface: the highlights go out at the brightness they were
+    /// graded to, and tone mapping is something the viewer asks for rather
+    /// than something the output imposes.
+    Above,
+}
+
 /// Display state requested on the command line, applied on top of whatever
 /// each image's own defaults work out to.
 #[derive(Clone, Copy, Default, Debug)]
@@ -299,7 +344,16 @@ impl Display {
     /// highlights were put on purpose — so stretching their observed range
     /// into 0..1 would undo exactly the grading they exist to carry, and
     /// would do it differently for every frame of a sequence.
-    pub fn for_image_with(image: &DecodedImage, stats: &Stats, startup: Startup) -> Self {
+    ///
+    /// `headroom` is the other half of the tone-map decision: a curve exists
+    /// to fit values above 1.0 into a surface that stops there, so a surface
+    /// that does not stop there starts without one.
+    pub fn for_image_with(
+        image: &DecodedImage,
+        stats: &Stats,
+        startup: Startup,
+        headroom: Headroom,
+    ) -> Self {
         let display_referred = matches!(
             image.color.transfer,
             Transfer::Srgb | Transfer::Gamma(_) | Transfer::Pq | Transfer::Hlg
@@ -315,11 +369,7 @@ impl Display {
             high: 1.0,
             auto,
             exposure_stops: 0.0,
-            tone_map: if image.is_high_dynamic_range() {
-                ToneMap::Neutral
-            } else {
-                ToneMap::Clip
-            },
+            tone_map: ToneMap::default_for(image, headroom),
             colormap: Colormap::Gray,
         };
 
@@ -419,9 +469,9 @@ impl Display {
     /// not a rendering decision: it says which of the file's numbers you are
     /// trying to read, and a reset that threw that away would take the answer
     /// with it. There is a key and a row of buttons for changing it.
-    pub fn reset(&mut self, stats: &Stats, image: &DecodedImage) {
+    pub fn reset(&mut self, stats: &Stats, image: &DecodedImage, headroom: Headroom) {
         let colormap = self.colormap;
-        *self = Self::for_image_with(image, stats, Startup::default());
+        *self = Self::for_image_with(image, stats, Startup::default(), headroom);
         self.colormap = colormap;
     }
 
@@ -560,6 +610,23 @@ mod tests {
     use super::*;
     use crate::image::{AlphaMode, Channels, ColorSpace, Primaries, Samples};
 
+    /// Linear float grey, which is what every HDR path here comes out as:
+    /// 1.0 is SDR white and anything above it is the headroom.
+    fn float_gray(data: Vec<f32>) -> DecodedImage {
+        DecodedImage {
+            width: data.len() as u32,
+            height: 1,
+            samples: Samples::F32 {
+                channels: Channels::Gray,
+                data,
+            },
+            color: ColorSpace::LINEAR_BT709,
+            alpha: AlphaMode::Opaque,
+            value_range: None,
+            nodata: None,
+        }
+    }
+
     fn gray(data: Vec<u16>, transfer: Transfer) -> DecodedImage {
         DecodedImage {
             width: data.len() as u32,
@@ -588,13 +655,18 @@ mod tests {
             &photographic,
             &Stats::scan(&photographic),
             Startup::default(),
+            Headroom::None,
         );
         assert_eq!(display.auto, AutoWindow::Off);
         assert_eq!((display.low, display.high), (0.0, 1.0));
 
         let measurement = gray(vec![0, 1000, 4095], Transfer::Linear);
-        let display =
-            Display::for_image_with(&measurement, &Stats::scan(&measurement), Startup::default());
+        let display = Display::for_image_with(
+            &measurement,
+            &Stats::scan(&measurement),
+            Startup::default(),
+            Headroom::None,
+        );
         assert_eq!(display.auto, AutoWindow::Percentile);
         assert!(display.high < 0.1, "12-bit data windowed to its own range");
     }
@@ -610,7 +682,8 @@ mod tests {
             // whose darkest sample is nowhere near zero.
             let frame = gray(vec![30_000, 45_000, 60_000], transfer);
             let stats = Stats::scan(&frame);
-            let display = Display::for_image_with(&frame, &stats, Startup::default());
+            let display =
+                Display::for_image_with(&frame, &stats, Startup::default(), Headroom::None);
 
             assert!(stats.max > 1.0, "{transfer:?} should exceed SDR white");
             assert_eq!(display.auto, AutoWindow::Off, "{transfer:?}");
@@ -684,7 +757,12 @@ mod tests {
     fn a_declared_value_range_beats_scanning() {
         let mut image = gray(vec![0, 1000, 4095], Transfer::Linear);
         image.value_range = Some((0.1, 0.2));
-        let display = Display::for_image_with(&image, &Stats::scan(&image), Startup::default());
+        let display = Display::for_image_with(
+            &image,
+            &Stats::scan(&image),
+            Startup::default(),
+            Headroom::None,
+        );
         assert_eq!(display.auto, AutoWindow::Manual);
         assert_eq!((display.low, display.high), (0.1, 0.2));
     }
@@ -955,7 +1033,8 @@ mod tests {
     fn cycling_out_of_a_hand_set_window_returns_to_automatic() {
         let image = gray(vec![0, 1000, 4095], Transfer::Linear);
         let stats = Stats::scan(&image);
-        let mut display = Display::for_image_with(&image, &stats, Startup::default());
+        let mut display =
+            Display::for_image_with(&image, &stats, Startup::default(), Headroom::None);
 
         display.adjust_contrast(0.5);
         assert_eq!(display.auto, AutoWindow::Manual);
@@ -969,25 +1048,57 @@ mod tests {
     fn hdr_content_gets_a_tone_curve_and_ordinary_content_does_not() {
         let sdr = gray(vec![0, 4095], Transfer::Srgb);
         assert_eq!(
-            Display::for_image_with(&sdr, &Stats::scan(&sdr), Startup::default()).tone_map,
+            Display::for_image_with(&sdr, &Stats::scan(&sdr), Startup::default(), Headroom::None)
+                .tone_map,
             ToneMap::Clip
         );
 
-        let hdr = DecodedImage {
-            width: 2,
-            height: 1,
-            samples: Samples::F32 {
-                channels: Channels::Gray,
-                data: vec![0.5, 8.0],
-            },
-            color: ColorSpace::LINEAR_BT709,
-            alpha: AlphaMode::Opaque,
-            value_range: None,
-            nodata: None,
-        };
+        let hdr = float_gray(vec![0.5, 8.0]);
         assert_eq!(
-            Display::for_image_with(&hdr, &Stats::scan(&hdr), Startup::default()).tone_map,
+            Display::for_image_with(&hdr, &Stats::scan(&hdr), Startup::default(), Headroom::None)
+                .tone_map,
             ToneMap::Neutral
         );
+    }
+
+    /// The whole point of asking for an HDR surface is the room above SDR
+    /// white, so a curve that squeezes the highlights back into 0..1 before
+    /// they get there would undo it. The tone map is what the SDR path needs,
+    /// not what the content is.
+    #[test]
+    fn a_surface_with_headroom_starts_with_no_curve_at_all() {
+        let hdr = float_gray(vec![0.5, 8.0]);
+        let sdr = gray(vec![0, 4095], Transfer::Srgb);
+        for image in [&hdr, &sdr] {
+            assert_eq!(
+                ToneMap::default_for(image, Headroom::Above),
+                ToneMap::Off,
+                "a surface with headroom takes the pixels as they are"
+            );
+        }
+        assert_eq!(ToneMap::default_for(&hdr, Headroom::None), ToneMap::Neutral);
+        assert_eq!(ToneMap::default_for(&sdr, Headroom::None), ToneMap::Clip);
+    }
+
+    /// `Off` passes the highlights through and clips nothing but the light
+    /// that is not there, which is what the shader's arm 3 does.
+    #[test]
+    fn the_off_curve_keeps_what_is_above_white_and_drops_what_is_below_black() {
+        assert_eq!(ToneMap::Off.apply([-0.25, 0.5, 6.31]), [0.0, 0.5, 6.31]);
+    }
+
+    /// Every curve has to be reachable from every other one, or a viewer on
+    /// an HDR surface who presses `t` to see the SDR rendering has no way
+    /// back to the one the surface was asked for.
+    #[test]
+    fn cycling_the_tone_map_returns_to_where_it_started() {
+        let mut map = ToneMap::Off;
+        let mut seen = vec![map];
+        for _ in 0..3 {
+            map = map.next();
+            assert!(!seen.contains(&map), "{map:?} came round twice");
+            seen.push(map);
+        }
+        assert_eq!(map.next(), ToneMap::Off);
     }
 }
