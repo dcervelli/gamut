@@ -211,6 +211,10 @@ pub struct FrameInput {
     /// Which file is on screen, out of how many.
     pub index: usize,
     pub count: usize,
+    /// Whether the file the picture came from is no longer there. The picture
+    /// stays up — its pixels are as good as they ever were, and there is
+    /// nothing to put in its place — so the bar is where this is said.
+    pub deleted: bool,
     /// The output's label when it is an HDR surface, which is worth a word in
     /// the bar; `None` on an ordinary one.
     pub hdr_output: Option<&'static str>,
@@ -366,6 +370,19 @@ pub fn build_frame(
             theme.text_dim,
             (facts_x - BAR_PADDING).max(1.0),
             counter,
+        );
+        name_x += width + COUNTER_GAP;
+    }
+    // In front of the name, on the side of the bar the name is read from, so
+    // that it is seen before the file it is about rather than after it.
+    if input.deleted {
+        let width = text.measure_text(status::DELETED, TEXT_SIZE)[0];
+        frame.text_clipped(
+            [name_x, top_baseline],
+            TEXT_SIZE,
+            theme.warning,
+            (facts_x - PADDING - name_x).max(1.0),
+            status::DELETED.to_string(),
         );
         name_x += width + COUNTER_GAP;
     }

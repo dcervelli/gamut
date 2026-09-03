@@ -50,6 +50,14 @@ pub struct App {
     view: View,
     /// The file on screen, watched for writes by anything else.
     watch: Watch,
+    /// The paths as the command line gave them, and a watch on each directory
+    /// among them. A directory is a place to look rather than a fixed list:
+    /// images appearing in it or disappearing from it while the window is open
+    /// join or leave the walk, noticed on the same cadence as a write to the
+    /// file on screen. Empty — and so costing nothing — when every path named
+    /// was a file.
+    named: Vec<PathBuf>,
+    directories: Vec<Watch>,
     /// The colours everything is drawn in, and the palette file they came
     /// from, watched on the same cadence as the image: Omarchy rewrites it
     /// wholesale when the desktop's theme changes, and the window should
@@ -96,8 +104,13 @@ impl App {
     /// enough to open the window at the right shape before the pixels exist.
     /// The file itself is asked for here, so that it is being read while the
     /// window and the GPU are still being set up.
+    ///
+    /// `named` is the command line's own list, `files` before any directory in
+    /// it was replaced by the images inside. Kept so that those directories
+    /// can be looked at again and the list built from them anew.
     pub fn new(
         files: Vec<PathBuf>,
+        named: Vec<PathBuf>,
         index: usize,
         size: Option<[f32; 2]>,
         options: Options,
@@ -113,6 +126,11 @@ impl App {
             upscale,
         } = options;
         let watch = Watch::new(&files[index]);
+        let directories = named
+            .iter()
+            .filter(|path| path.is_dir())
+            .map(|path| Watch::new(path))
+            .collect();
         let theme_watch = theme::watch();
         let mut view = View::new();
         view.set_upscale(upscale);
@@ -124,6 +142,8 @@ impl App {
             hdr,
             view,
             watch,
+            named,
+            directories,
             theme: Theme::detect(),
             theme_watch,
             next_poll: Instant::now() + watch::INTERVAL,
@@ -451,17 +471,46 @@ impl App {
 
     /// Re-reads the file on screen if something else has written to it, which
     /// is what makes this usable next to whatever produced the image.
-    fn poll_file(&mut self) {
+    ///
+    /// Returns whether the window owes a redraw, which it does when the file
+    /// has gone or come back: the picture is untouched either way, and the bar
+    /// is the only thing that changes.
+    fn poll_file(&mut self) -> bool {
         // Not while a read is already in flight. A file being written
         // continuously would otherwise stack up a decode every interval, and
         // the reply already on its way carries a watch taken later than this
         // one anyway.
-        if self.files.is_idle()
-            && self.watch.poll()
+        if !self.files.is_idle() {
+            return false;
+        }
+        let was_missing = self.watch.missing();
+        if self.watch.poll()
             && let Some(request) = self.files.reload()
         {
             self.send(request);
         }
+        self.watch.missing() != was_missing
+    }
+
+    /// Notices images arriving in or leaving a directory that was named on the
+    /// command line, and builds the list from it again. Returns whether the
+    /// window owes a redraw, which it does only when the list really changed —
+    /// the bar counts the files and says which of them is on screen.
+    fn poll_directories(&mut self) -> bool {
+        // Between reads only: rebuilding moves the file on screen to a new
+        // index, and a reply on its way is aimed at the old one. Nothing is
+        // lost by waiting, since a watch not polled is a watch that has not
+        // seen the change yet and will see it at a later look.
+        if self.directories.is_empty() || !self.files.is_idle() {
+            return false;
+        }
+        // Every one of them is polled, not just as far as the first that
+        // fires: each has its own idea of what has settled to keep up to date.
+        let changed = self.directories.iter_mut().fold(false, |changed, watch| {
+            let fired = watch.poll();
+            fired || changed
+        });
+        changed && self.files.relist(crate::listing::relist(&self.named))
     }
 
     /// Notices that the desktop's theme has changed. Returns whether the
@@ -673,6 +722,7 @@ impl App {
             reading,
             index: self.files.index(),
             count: self.files.len(),
+            deleted: self.watch.missing(),
             hdr_output,
         };
 
@@ -744,8 +794,12 @@ impl ApplicationHandler<Decoded> for App {
         let now = Instant::now();
         if now >= self.next_poll {
             self.next_poll = now + watch::INTERVAL;
-            self.poll_file();
-            if self.poll_theme()
+            // All three, always: each has a watch that only advances when it
+            // is polled.
+            let vanished = self.poll_file();
+            let relisted = self.poll_directories();
+            let retinted = self.poll_theme();
+            if (vanished || relisted || retinted)
                 && let Some(window) = &self.window
             {
                 window.request_redraw();
@@ -948,12 +1002,28 @@ mod tests {
     /// The files are written under a directory of their own so that the tests,
     /// which run alongside each other, cannot tread on each other's files.
     fn opening(name: &str, files: &[(&str, u32, u32)]) -> (App, PathBuf) {
+        let (dir, paths) = written(name, files);
+        (open(paths.clone(), paths), dir)
+    }
+
+    /// The same, opened the way `gamut some-dir/` opens it: the directory is
+    /// what was named, and the files in it are only what it held at the time.
+    fn opening_directory(name: &str, files: &[(&str, u32, u32)]) -> (App, PathBuf) {
+        let (dir, paths) = written(name, files);
+        (open(paths, vec![dir.clone()]), dir)
+    }
+
+    fn written(name: &str, files: &[(&str, u32, u32)]) -> (PathBuf, Vec<PathBuf>) {
         let dir = std::env::temp_dir().join(format!("gamut-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("the temporary directory is writable");
-        let paths: Vec<PathBuf> = files
+        let paths = files
             .iter()
             .map(|&(name, width, height)| write_png(&dir, name, width, height))
             .collect();
+        (dir, paths)
+    }
+
+    fn open(paths: Vec<PathBuf>, named: Vec<PathBuf>) -> App {
         let options = Options {
             overrides: decode::Overrides::default(),
             startup: Startup::default(),
@@ -964,14 +1034,14 @@ mod tests {
             upscale: Upscale::default(),
         };
         let size = decode::probe(&paths[0]).expect("we just wrote it");
-        let app = App::new(
+        App::new(
             paths,
+            named,
             0,
             size.map(|(w, h)| [w as f32, h as f32]),
             options,
             Loader::detached(),
-        );
-        (app, dir)
+        )
     }
 
     /// As [`opening`], with the application's own opening request answered:
@@ -1053,6 +1123,97 @@ mod tests {
         assert_eq!(app.files.index(), 1);
         assert_eq!(app.view.fit(), None);
         assert_eq!(app.view.zoom(app.image_size(), VIEWPORT), zoom);
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// A directory named on the command line is a place to look, not a list
+    /// fixed when the window opened: an image written into it joins the walk,
+    /// and one taken out of it leaves.
+    #[test]
+    fn a_directory_is_read_again_when_what_is_in_it_changes() {
+        let (mut app, dir) = opening_directory("relist", &[("a.png", 8, 8), ("b.png", 8, 8)]);
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.files.len(), 2);
+        assert!(!app.poll_directories(), "nothing has happened to it");
+
+        write_png(&dir, "c.png", 8, 8);
+        assert!(!app.poll_directories(), "the change has not settled yet");
+        assert!(app.poll_directories());
+        assert_eq!(app.files.len(), 3);
+        assert_eq!(app.files.path(2), dir.join("c.png"));
+        assert_eq!(
+            app.files.shown_path(),
+            dir.join("a.png"),
+            "the picture on screen is undisturbed"
+        );
+
+        std::fs::remove_file(dir.join("b.png")).expect("we just wrote it");
+        assert!(!app.poll_directories(), "the change has not settled yet");
+        assert!(app.poll_directories());
+        assert_eq!(app.files.len(), 2);
+        assert_eq!(app.files.path(1), dir.join("c.png"));
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// Deleting the file being looked at does not take the picture off the
+    /// screen — there is nothing to put in its place — so the bar says what
+    /// has happened to it, and the walk goes on around it.
+    #[test]
+    fn a_deleted_file_stays_on_screen_and_is_marked() {
+        let (mut app, dir) = opening_directory("deleted", &[("a.png", 8, 8), ("b.png", 8, 8)]);
+        answer(&mut app, Reload::Fresh);
+        assert!(!app.poll_file(), "nothing has happened to it");
+        assert!(!app.watch.missing());
+
+        std::fs::remove_file(dir.join("a.png")).expect("we just wrote it");
+        assert!(!app.poll_file(), "one poll into a save is not a deletion");
+        assert!(app.poll_file(), "the bar has something new to say");
+        assert!(app.watch.missing());
+        assert!(
+            !app.poll_file(),
+            "and having been said once it is not said again"
+        );
+        assert!(app.current.is_some(), "the picture is untouched");
+
+        // The list still names it, and still steps around it. Rebuilding it
+        // changes nothing: the file on screen goes back in where it was, so
+        // the count in the bar and the walk are the same as they were.
+        assert!(!app.poll_directories());
+        assert!(!app.poll_directories());
+        assert_eq!(app.files.len(), 2);
+        assert_eq!(app.files.shown_path(), dir.join("a.png"));
+        app.step(true);
+        assert_eq!(
+            app.files.pending().map(|pending| pending.index),
+            Some(1),
+            "`]` goes on to the file that is still there"
+        );
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// The list is rebuilt between reads and not during one: a rebuild moves
+    /// the file on screen to a new index, and the reply on its way is aimed at
+    /// the old one. The change is not lost — the watch has not seen it yet.
+    #[test]
+    fn a_directory_is_not_rebuilt_under_a_read_in_flight() {
+        let (mut app, dir) = opening_directory("mid-read", &[("a.png", 8, 8), ("b.png", 8, 8)]);
+        answer(&mut app, Reload::Fresh);
+
+        write_png(&dir, "c.png", 8, 8);
+        app.step(true);
+        assert!(!app.files.is_idle());
+        for _ in 0..4 {
+            assert!(!app.poll_directories(), "not while a read is in flight");
+        }
+        assert_eq!(app.files.len(), 2);
+
+        answer(&mut app, Reload::Fresh);
+        assert!(!app.poll_directories(), "the first look at the change");
+        assert!(app.poll_directories());
+        assert_eq!(app.files.len(), 3);
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }

@@ -31,7 +31,8 @@ cargo run --release -- photo.jpg scan.tiff render.exr
 
 A directory named instead of a file stands for the images directly inside it,
 in name order — one level, and by extension, since the alternative is opening
-every file in the directory to see what it is.
+every file in the directory to see what it is. It is a place to look rather
+than a list fixed at startup: see [live reload](#live-reload).
 
 The first file is shown, stretched to fit the space the interface panels
 leave in the middle; the window opens at the image's own size plus that
@@ -138,6 +139,23 @@ watch on the original inode looking at a file nobody will ever write to again.
 A change is read only once the size and timestamp have held still for a whole
 interval, so a file caught halfway through being written is waited out rather
 than decoded and reported as corrupt.
+
+A directory named on the command line is watched the same way and by the same
+means — its own `stat`, on the same cadence — and when it changes the list is
+read from it again. An image written into the directory joins the walk where
+its name puts it; one deleted leaves it. So a script dropping frames into a
+folder builds the list as it goes, and `]` reaches a file that did not exist
+when the window opened.
+
+Two things hold still through that. The file on screen is never dropped from
+the list, whatever has happened to it on disk: its pixels are up and correct,
+and everything the interface says about them — the title, the bars, the
+information panel — is read off the path they came from. It keeps its
+neighbours too, so `]` from a file deleted under you goes on to whatever has
+taken its place rather than back over one already seen. And the list is only
+rebuilt between reads, since a rebuild moves the file on screen to a new index
+and a reply already on its way is aimed at the old one; a change noticed
+during a read is simply seen again at a later look.
 
 ## Theme
 
@@ -613,7 +631,8 @@ anything having to notice that it should.
 | `src/app/` | Window lifecycle and the event loop's state: `files.rs` is the file list and the read in flight, `input.rs` the keymap and pointer, `window.rs` titles and opening size |
 | `src/ui/` | Building each frame's interface: `chrome.rs` the panels, one file per widget, `pixel.rs` the pointer's readout, `status.rs` the words in the bars |
 | `src/view.rs` | Zoom / pan / fit geometry — pure maths |
-| `src/watch.rs` | Noticing that the file on screen has been rewritten |
+| `src/listing.rs` | What a path on the command line stands for: a directory is the images inside it, read again while the program runs |
+| `src/watch.rs` | Noticing that the file on screen has been rewritten, or that a directory named on the command line holds something else now |
 | `src/clipboard.rs` | The clipboard and `file:` URIs, held by a process of its own so a copy outlives the window |
 | `src/theme/` | `palette.rs` reads the desktop's palette; `mod.rs` derives the colours drawn from it |
 | `src/image/` | The data model: `Samples`, `color/` (transfer functions, primaries, ICC and CICP), stats, display state |

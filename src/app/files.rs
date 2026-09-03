@@ -4,6 +4,7 @@
 //! calls for and never sends one, so it needs no loader, no window and no
 //! disk, and can be driven through a whole walk in a test.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -187,6 +188,60 @@ impl Files {
             .take_if(|pending| pending.generation == generation)
     }
 
+    /// Takes in a list read again from the directories the command line
+    /// named. Returns whether it differs from the one already held, which is
+    /// what the bar's count and the file's place in it depend on.
+    ///
+    /// The file on screen stays on the list wherever it has gone: its pixels
+    /// are up and correct, and dropping the path they came from would leave
+    /// the title, the bars and the information panel describing a file that is
+    /// not the one being shown. It keeps its place among its neighbours too,
+    /// so that `]` lands on whatever has taken its position rather than on a
+    /// file the user has already seen.
+    ///
+    /// Between reads only: this moves the file on screen to a new index, and a
+    /// request in flight is aimed at the old one.
+    pub(super) fn relist(&mut self, mut paths: Vec<PathBuf>) -> bool {
+        debug_assert!(self.is_idle(), "the list is rebuilt between reads");
+        let shown = self.paths[self.index].clone();
+        self.index = match paths.iter().position(|path| *path == shown) {
+            Some(index) => index,
+            None => {
+                let at = self.place_for(&shown, &paths);
+                paths.insert(at, shown);
+                at
+            }
+        };
+        let changed = paths != self.paths;
+        self.paths = paths;
+        changed
+    }
+
+    /// Where a file that is no longer in the directory goes back into the
+    /// list: after everything that came before it, before everything that came
+    /// after, which is what keeps `]` and `[` going the way the user was
+    /// going.
+    ///
+    /// A path that was in the old list settles which side it is on by where it
+    /// was. One that has only just appeared has no place there to go on, and
+    /// settles it by its name — the order the directory itself was read in,
+    /// which is the order the rest of the list is in.
+    fn place_for(&self, shown: &Path, paths: &[PathBuf]) -> usize {
+        let was: HashMap<&Path, usize> = self
+            .paths
+            .iter()
+            .enumerate()
+            .map(|(index, path)| (path.as_path(), index))
+            .collect();
+        paths
+            .iter()
+            .take_while(|path| match was.get(path.as_path()) {
+                Some(&index) => index < self.index,
+                None => path.as_path() < shown,
+            })
+            .count()
+    }
+
     /// A reply has reached the screen.
     pub(super) fn shown(&mut self, index: usize) {
         self.index = index;
@@ -296,6 +351,114 @@ mod tests {
         assert_eq!(files.index(), 0, "nothing new ever reached the screen");
 
         assert!(files.failed(0, None).is_none(), "a reload is not a walk");
+    }
+
+    fn named(names: &[&str]) -> Vec<PathBuf> {
+        names.iter().map(PathBuf::from).collect()
+    }
+
+    /// A directory read again is a list read again: a file written into it
+    /// joins the walk, and the one on screen goes on being the one on screen.
+    #[test]
+    fn a_file_that_has_appeared_joins_the_list() {
+        let mut files = list(2);
+        files.shown(1);
+        assert!(files.relist(named(&["0.png", "1.png", "2.png"])));
+        assert_eq!(files.len(), 3);
+        assert_eq!(files.shown_path(), Path::new("1.png"));
+        assert_eq!(files.index(), 1);
+        assert_eq!(files.step(true).map(|r| r.index), Some(2));
+
+        let mut files = list(2);
+        files.shown(1);
+        assert!(files.relist(named(&["0.png", "0a.png", "1.png"])));
+        assert_eq!(files.index(), 2, "a file arriving before it moves it along");
+        assert!(
+            !files.relist(named(&["0.png", "0a.png", "1.png"])),
+            "a directory that has not changed changes nothing"
+        );
+    }
+
+    /// The file on screen is never dropped from the list, whatever has become
+    /// of it: its pixels are up, and everything the interface says about them
+    /// is read off the path they came from. It keeps its neighbours, so that
+    /// `]` goes on to what has taken its place rather than back over a file
+    /// already seen.
+    #[test]
+    fn the_file_on_screen_survives_being_deleted_under_us() {
+        let mut files = list(4);
+        files.shown(1);
+        assert!(files.relist(named(&["0.png", "2.png"])));
+        assert_eq!(files.shown_path(), Path::new("1.png"));
+        assert_eq!(files.len(), 3, "the file on screen, and what is left");
+        assert_eq!(files.step(true).map(|r| r.index), Some(2));
+        assert_eq!(files.path(2), Path::new("2.png"));
+    }
+
+    /// The file on screen and the neighbours it would have stepped to, all
+    /// gone at once. It keeps its place among whatever is left, so that `]`
+    /// reaches the next survivor and `[` the last one before it — the walk
+    /// carries on from where the user actually is, not from where the list
+    /// happens to have closed up.
+    #[test]
+    fn a_file_deleted_with_its_neighbours_keeps_its_place_among_the_survivors() {
+        let mut files = list(5);
+        files.shown(2);
+        assert!(files.relist(named(&["0.png", "4.png"])));
+        assert_eq!(files.shown_path(), Path::new("2.png"));
+        assert_eq!(files.index(), 1);
+        assert_eq!(files.path(0), Path::new("0.png"));
+        assert_eq!(files.path(2), Path::new("4.png"));
+        assert_eq!(files.step(true).map(|r| r.index), Some(2));
+
+        // And with everything before it gone, it leads what is left.
+        let mut files = list(3);
+        files.shown(1);
+        assert!(files.relist(named(&["2.png"])));
+        assert_eq!(files.index(), 0);
+        assert_eq!(files.path(1), Path::new("2.png"));
+    }
+
+    /// The list is read again every time the directory changes, so a file
+    /// already deleted is passed over the missing path again and again. It
+    /// stays where it was put, and the rebuilds around it go on as normal.
+    #[test]
+    fn a_file_already_gone_keeps_its_place_through_later_rebuilds() {
+        let mut files = list(3);
+        files.shown(1);
+        assert!(
+            !files.relist(named(&["0.png", "2.png"])),
+            "the file on screen going back in leaves the list as it was, and \
+             nothing in the bar reads any differently for it"
+        );
+
+        // A file arrives after it: the one on screen has not moved.
+        assert!(files.relist(named(&["0.png", "2.png", "3.png"])));
+        assert_eq!(files.index(), 1);
+        assert_eq!(files.shown_path(), Path::new("1.png"));
+        assert_eq!(files.len(), 4);
+
+        // One arrives before it, and it moves along with the rest.
+        assert!(files.relist(named(&["0.png", "0a.png", "2.png", "3.png"])));
+        assert_eq!(files.index(), 2);
+        assert_eq!(files.shown_path(), Path::new("1.png"));
+
+        // And the file itself comes back: it is an ordinary member again,
+        // in the place the directory gives it rather than the place we kept.
+        assert!(files.relist(named(&["0.png", "0a.png", "1.png", "2.png"])));
+        assert_eq!(files.index(), 2);
+        assert_eq!(files.len(), 4, "no phantom left behind beside it");
+    }
+
+    /// Emptying the directory altogether leaves the picture that is up, with
+    /// nowhere to step to.
+    #[test]
+    fn an_emptied_directory_leaves_the_one_file_on_screen() {
+        let mut files = list(2);
+        assert!(files.relist(Vec::new()));
+        assert_eq!(files.len(), 1);
+        assert_eq!(files.shown_path(), Path::new("0.png"));
+        assert!(files.step(true).is_none());
     }
 
     #[test]

@@ -81,6 +81,10 @@ pub struct Theme {
     pub text_bright: Color,
     /// What is switched on, and where the display window sits.
     pub accent: Color,
+    /// The word that says the file behind the picture on screen is gone. Its
+    /// own role rather than the accent, which means the opposite: the accent
+    /// is what is switched on, and this is what has been lost.
+    pub warning: Color,
     /// The minimap's border, and the wash over the part of the image that is
     /// off screen. Both go over a thumbnail drawn by the image layer, so both
     /// stay translucent.
@@ -167,6 +171,7 @@ impl Theme {
         // so the name is the primary taken the last step to white.
         text_bright: Color::rgb(255, 255, 255),
         accent: Color::rgb(120, 180, 255),
+        warning: Color::rgb(255, 116, 108),
         minimap_edge: Color::rgba(255, 255, 255, 70),
         minimap_dim: Color::rgba(6, 6, 10, 150),
         histogram_luma: HISTOGRAM_LUMA,
@@ -216,6 +221,16 @@ impl Theme {
             .or_else(|| palette.color("blue"))
             .unwrap_or(bright);
 
+        // A theme's own red, which it chose to be read against this very
+        // background — it is the colour its terminal writes errors in. The
+        // leading ink where the theme names no red that can be seen here, so
+        // that the word still reads even when it cannot be coloured.
+        let warning = ["bright_red", "red"]
+            .into_iter()
+            .filter_map(|key| palette.color(key))
+            .find(|shade| separated(*shade, background))
+            .unwrap_or(text_bright);
+
         // The theme's own next surface up, where it has one that can actually
         // be seen against the panel; otherwise a step from the panel towards
         // the text, which every palette can supply.
@@ -252,6 +267,7 @@ impl Theme {
             text_dim: foreground,
             text_bright,
             accent,
+            warning,
             minimap_edge: foreground.with_alpha(Theme::FALLBACK.minimap_edge.a),
             minimap_dim: deep.with_alpha(Theme::FALLBACK.minimap_dim.a),
             histogram_luma: HISTOGRAM_LUMA,

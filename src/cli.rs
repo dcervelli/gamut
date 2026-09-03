@@ -6,7 +6,7 @@
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 
 use crate::APP_ID;
 use crate::app::Options;
@@ -24,7 +24,8 @@ USAGE:
 
 The first file is shown, stretched to fit the window, and re-read whenever
 something else writes to it. A directory stands for the images directly
-inside it, in name order.
+inside it, in name order, and is read again as it changes: an image added
+to it or taken out of it joins or leaves the list.
 
 OPTIONS:
     -h, --help              Show this help
@@ -224,65 +225,12 @@ pub fn first_readable(files: &[PathBuf]) -> Result<(usize, Option<[f32; 2]>)> {
         .expect("the argument list is never empty"))
 }
 
-/// Replaces every directory named on the command line with the images
-/// directly inside it, in name order. One level deep: a directory names a
-/// place to look, not a tree to walk.
-///
-/// Inside a directory the extension decides, since the alternative is opening
-/// every file there to look at its leading bytes. A file named on the command
-/// line is still read for what it holds rather than what it is called.
-fn expand_directories(named: Vec<PathBuf>) -> Result<Vec<PathBuf>> {
-    let extensions = crate::image::decode::supported_extensions();
-    let mut files = Vec::new();
-    let mut empty = Vec::new();
-    for path in named {
-        if !path.is_dir() {
-            files.push(path);
-            continue;
-        }
-        let mut found = Vec::new();
-        let entries =
-            std::fs::read_dir(&path).with_context(|| format!("reading {}", path.display()))?;
-        for entry in entries {
-            let entry = entry.with_context(|| format!("reading {}", path.display()))?;
-            let candidate = entry.path();
-            let extension = candidate
-                .extension()
-                .and_then(|e| e.to_str())
-                .map(|e| e.to_ascii_lowercase())
-                .unwrap_or_default();
-            // The extension is checked first because it costs nothing; the
-            // directory test that follows it is for the rare directory named
-            // like an image.
-            if extensions.contains(&extension.as_str()) && !candidate.is_dir() {
-                found.push(candidate);
-            }
-        }
-        if found.is_empty() {
-            empty.push(path);
-            continue;
-        }
-        found.sort();
-        files.append(&mut found);
-    }
-
-    if !files.is_empty() {
-        // Worth mentioning only once we know we are carrying on without them,
-        // as with a file whose header will not read.
-        for path in empty {
-            eprintln!("gamut: no images in {}", crate::shown_path(&path));
-        }
-        return Ok(files);
-    }
-    let names: Vec<String> = empty
-        .iter()
-        .map(|path| path.display().to_string())
-        .collect();
-    bail!("no images in {}", names.join(", "))
-}
-
 pub struct Args {
     pub files: Vec<PathBuf>,
+    /// The paths as they were given, before any directory among them was
+    /// replaced by the images inside it. Kept so that the list can be built
+    /// again, in the same order, when one of those directories changes.
+    pub named: Vec<PathBuf>,
     pub options: Options,
 }
 
@@ -423,9 +371,11 @@ pub fn parse_args() -> Result<Option<Args>> {
         eprint!("{}", usage());
         bail!("no image files given");
     }
-    let files = expand_directories(files)?;
+    let named = files;
+    let files = crate::listing::expand(named.clone())?;
     Ok(Some(Args {
         files,
+        named,
         options: Options {
             overrides,
             startup,
@@ -684,63 +634,5 @@ mod tests {
             OPTIONS.contains(APP_ID),
             "the help text still calls the program {APP_ID}"
         );
-    }
-
-    fn fixtures() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_images")
-    }
-
-    /// A directory stands for the images in it, in name order, and for
-    /// nothing else: the colour profile, the shell script and the README
-    /// lying beside them are not files to show.
-    #[test]
-    fn a_directory_becomes_the_images_inside_it() {
-        let files = expand_directories(vec![fixtures()]).expect("test_images/ holds images");
-        let mut sorted = files.clone();
-        sorted.sort();
-        assert_eq!(files, sorted, "the list is in name order");
-        assert!(files.contains(&fixtures().join("png-rgb8.png")));
-
-        let extensions = crate::image::decode::supported_extensions();
-        for file in &files {
-            let extension = file
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or_default()
-                .to_ascii_lowercase();
-            assert!(
-                extensions.contains(&extension.as_str()),
-                "{} is not an image and should not be listed",
-                file.display()
-            );
-        }
-        assert!(
-            !files.contains(&fixtures().join("unsupported.tga")),
-            "a format we cannot read is not worth stepping through"
-        );
-    }
-
-    /// Whatever is not a directory is passed through untouched, extension and
-    /// all, so that the sniffing which opens a JPEG named `.png` still has its
-    /// chance and a missing file still reports itself.
-    #[test]
-    fn files_are_left_as_they_were_named() {
-        let named = vec![
-            fixtures().join("unsupported.tga"),
-            PathBuf::from("no-such-file"),
-        ];
-        assert_eq!(
-            expand_directories(named.clone()).expect("names to pass through"),
-            named
-        );
-    }
-
-    /// A directory with nothing to show in it is an error worth naming,
-    /// rather than an empty list that opens a window onto nothing.
-    #[test]
-    fn a_directory_holding_no_images_is_reported() {
-        let empty = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
-        let error = expand_directories(vec![empty.clone()]).expect_err("src/ holds no images");
-        assert!(error.to_string().contains(&empty.display().to_string()));
     }
 }

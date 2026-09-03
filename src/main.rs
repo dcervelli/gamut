@@ -4,6 +4,7 @@ mod app;
 mod cli;
 mod clipboard;
 mod image;
+mod listing;
 mod loader;
 mod render;
 mod theme;
@@ -85,7 +86,7 @@ fn run() -> Result<ExitCode> {
     let event_loop = EventLoop::<loader::Decoded>::with_user_event().build()?;
     event_loop.set_control_flow(ControlFlow::Wait);
     let loader = Loader::new(event_loop.create_proxy());
-    let mut app = App::new(args.files, index, size, args.options, loader);
+    let mut app = App::new(args.files, args.named, index, size, args.options, loader);
     event_loop.run_app(&mut app)?;
 
     // Every file passed the header check and then failed to decode. Each
