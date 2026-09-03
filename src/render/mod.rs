@@ -21,6 +21,8 @@ pub mod ui_layer;
 
 #[cfg(test)]
 mod filter_tests;
+#[cfg(test)]
+pub(crate) mod ui_tests;
 pub(crate) mod upload;
 
 use std::sync::Arc;
@@ -78,6 +80,11 @@ pub struct Scene<'a> {
 pub trait TextMeasure {
     /// Width and height of `text` at `size`, in logical pixels.
     fn measure_text(&mut self, text: &str, size: f32) -> [f32; 2];
+
+    /// How far below the top of a run at `size` the middle of its capitals
+    /// sits, in logical pixels: what a label is placed by when it has to sit
+    /// level with a mark beside it, rather than merely inside the same box.
+    fn cap_centre(&mut self, size: f32) -> f32;
 
     /// As [`TextMeasure::measure_text`], for a run drawn with
     /// [`UiFrame::text_clipped_mono`].
@@ -415,9 +422,16 @@ impl Renderer {
     }
 }
 
+/// Forwarded whole to the interface layer, which is where the fonts are: a
+/// caller that has a renderer measures through it, and a test that has no
+/// surface measures against a [`UiRenderer`] directly.
 impl TextMeasure for Renderer {
+    fn cap_centre(&mut self, size: f32) -> f32 {
+        self.ui.cap_centre(size)
+    }
+
     fn measure_text(&mut self, text: &str, size: f32) -> [f32; 2] {
-        self.ui.measure(text, size)
+        self.ui.measure_text(text, size)
     }
 
     fn measure_mono(&mut self, text: &str, size: f32) -> [f32; 2] {

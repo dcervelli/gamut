@@ -15,6 +15,7 @@ pub mod minimap;
 mod buttons;
 mod grid;
 pub mod histogram;
+mod icon;
 mod pixel;
 mod status;
 
@@ -33,6 +34,18 @@ pub use info::FileFacts;
 pub use menu::Menu;
 
 const TEXT_SIZE: f32 = 13.0;
+
+/// What stands between a value and what the display makes of it, in every
+/// readout that shows one turning into the other.
+///
+/// Not an arrow, though an arrow is what it means. The interface's face has
+/// no U+2192 of its own, so a run holding one is broken in two and the arrow
+/// comes from whichever fallback the font stack offers — a monospace face
+/// here, whose arrow is drawn small and low in the em and sits visibly under
+/// the line it was set on. A guillemet is Latin-1, so every face the
+/// interface could be set in has one, drawn on the same line as the words
+/// either side of it.
+pub(super) const BECOMES: &str = "\u{00bb}";
 
 /// The gap between the file count and the name it belongs to. Tighter than
 /// the gap between two unrelated things in a bar, the two being one line
@@ -215,6 +228,12 @@ impl TextMeasure for Monospace {
         [text.chars().count() as f32 * size, size]
     }
 
+    /// Every glyph is a `size` square sitting on the top of its line here, so
+    /// its middle is half a square down.
+    fn cap_centre(&mut self, size: f32) -> f32 {
+        size / 2.0
+    }
+
     fn measure_mono(&mut self, text: &str, size: f32) -> [f32; 2] {
         self.measure_text(text, size)
     }
@@ -237,6 +256,17 @@ impl TextMeasure for Monospace {
         }
         [width, lines as f32 * size * 1.3]
     }
+}
+
+/// What the grid toggle reads out while the grid is on: how far apart its
+/// lines are at `zoom`, on a display of `scale` physical pixels to the
+/// logical one. `None` while it is off, there being no spacing in force then.
+///
+/// Worked out here rather than inside the toggle because it is also what says
+/// how wide the toggle is, and the pointer has to be answered against the
+/// width the frame was drawn at — see [`layers::hit`].
+pub fn grid_spacing(show_grid: bool, zoom: f32, scale: f32) -> Option<String> {
+    show_grid.then(|| grid::label(grid::step(zoom, scale)))
 }
 
 /// Builds one frame of interface.
@@ -319,8 +349,9 @@ pub fn build_frame(
     let facts_width = text.measure_text(&facts, TEXT_SIZE)[0];
     // Clear of the two buttons at the end of the bar, the innermost of which
     // is the zoom readout.
-    let grid_button = chrome.grid_button(panels.show_grid);
-    let zoom_button = chrome.zoom_button(panels.show_grid);
+    let spacing = grid_spacing(panels.show_grid, zoom, input.scale);
+    let grid_button = chrome.grid_button(spacing.as_deref());
+    let zoom_button = chrome.zoom_button(spacing.as_deref());
     let facts_x = (zoom_button.x - PADDING - facts_width).max(BAR_PADDING);
 
     // The count is a fact about the list, not part of the name, and is set
@@ -357,7 +388,6 @@ pub fn build_frame(
         theme,
     );
 
-    let spacing = panels.show_grid.then(|| grid::label(grid_step));
     buttons::grid_button(
         &mut frame,
         text,
@@ -414,7 +444,7 @@ pub fn build_frame(
     // panels and what floats over the content area but the words on them: a
     // popup is the thing being looked at while it is open.
     if let Some(open) = panels.menu
-        && let Some(popup) = chrome.popup(open, panels.show_grid)
+        && let Some(popup) = chrome.popup(open, spacing.as_deref())
     {
         frame.over(|frame| menu::draw(frame, text, &popup, view, zoom, panels, theme));
     }
@@ -432,6 +462,12 @@ pub fn backdrop(theme: &Theme) -> Backdrop {
 }
 
 /// Where text has to start to sit centred in a bar of `BAR_HEIGHT`.
+///
+/// The line's own box, descenders and all, rather than the capitals that
+/// [`buttons::centred_text`] levels a label by: what a bar carries is prose —
+/// a file's name, a readout — where descenders are ordinary and the room
+/// under the baseline is room the words actually use. A button's label is
+/// levelled against the mark beside it instead, which is a different job.
 fn text_baseline(bar: Rect) -> f32 {
     bar.y + (bar.height - TEXT_SIZE * 1.3) / 2.0
 }

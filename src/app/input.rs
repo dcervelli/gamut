@@ -1069,7 +1069,9 @@ impl App {
             Widget::Zoom => {
                 let chrome = self.chrome();
                 if self.current.is_some()
-                    && chrome.popup(Menu::Zoom, self.panels.show_grid).is_some()
+                    && chrome
+                        .popup(Menu::Zoom, self.grid_spacing().as_deref())
+                        .is_some()
                 {
                     self.panels.menu = Some(Menu::Zoom);
                 }

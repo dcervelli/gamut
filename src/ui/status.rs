@@ -4,7 +4,7 @@
 use crate::image::display::{AutoWindow, Colormap};
 use crate::render::TextMeasure;
 
-use super::{Current, FrameInput, Reading, TEXT_SIZE};
+use super::{BECOMES, Current, FrameInput, Reading, TEXT_SIZE};
 
 /// Joins as many leading segments as fit in `width`, keeping at least the
 /// first however narrow the window gets.
@@ -55,7 +55,7 @@ pub(super) fn describe_pixels(current: &Current) -> String {
     let stored = current
         .stored
         .as_ref()
-        .map(|stored| format!(" \u{2192} {stored}"))
+        .map(|stored| format!(" {BECOMES} {stored}"))
         .unwrap_or_default();
     format!(
         "{} {channels}{stored}",

@@ -23,8 +23,9 @@ use crate::image::AlphaMode;
 use crate::render::{Color, Rect, TextMeasure, UiFrame};
 use crate::theme::Theme;
 
-use super::buttons::outline;
+use super::buttons::{ICON_SIDE, outline, text_top};
 use super::histogram::HISTOGRAM_SIZE;
+use super::icon;
 use super::menu::CELL_RADIUS;
 use super::{Current, PADDING, PANEL_INSET, PANEL_RADIUS, PANEL_WIDTH, Panels, TEXT_SIZE};
 
@@ -73,10 +74,11 @@ const HEADER_GAP: f32 = 11.0;
 const CHIP_HEIGHT: f32 = 20.0;
 const CHIP_PADDING: f32 = 7.0;
 const CHIP_GAP: f32 = 5.0;
-/// The side of the mark on a copy button, and how far the sheet behind is
-/// offset from the one in front.
-const COPY_ICON: f32 = 11.0;
-const COPY_ICON_OFFSET: f32 = 3.0;
+/// The room set aside for the mark on a copy button, in the button's width
+/// as well as in what [`icon::fit`] sizes a square out of. A side toggle's,
+/// so that the two marks are drawn at one size wherever they are seen
+/// together.
+const COPY_ICON: f32 = ICON_SIDE;
 
 /// The scrollbar down the panel's inner edge, and the room kept clear for it
 /// whether or not there is anything to scroll — text that reflowed the moment
@@ -465,39 +467,28 @@ fn chip(
     let x = rect.x + ((rect.width - held) / 2.0).round();
     if let Some((label, _)) = label {
         frame.text(
-            [x, (rect.y + (rect.height - LABEL_SIZE * 1.3) / 2.0).round()],
+            [x, text_top(frame, text, rect, LABEL_SIZE)],
             LABEL_SIZE,
             ink,
             label,
         );
     }
-    copy_icon(
-        frame,
-        Rect::new(
-            (x + label.map_or(0.0, |(_, width)| width + CHIP_GAP)).round(),
-            (rect.y + (rect.height - COPY_ICON) / 2.0).round(),
-            COPY_ICON,
-            COPY_ICON,
-        ),
-        theme.bar_background,
-        ink,
+    // The chip's own ground, which is opaque, is what the sheet in front is
+    // knocked out of: the mark has to read as one sheet over another rather
+    // than as a lattice, and a wash would show the sheet behind through it.
+    let held = Rect::new(
+        x + label.map_or(0.0, |(_, width)| width + CHIP_GAP),
+        rect.y,
+        COPY_ICON,
+        rect.height,
     );
-}
-
-/// The mark on a copy button: one sheet behind another and offset from it,
-/// which is what a copy is. The sheet in front is filled with the ground
-/// before it is outlined, so the two read as one over the other rather than
-/// as a lattice.
-fn copy_icon(frame: &mut UiFrame, rect: Rect, ground: Color, ink: Color) {
-    let side = [
-        rect.width - COPY_ICON_OFFSET,
-        rect.height - COPY_ICON_OFFSET,
-    ];
-    let behind = Rect::new(rect.x + COPY_ICON_OFFSET, rect.y, side[0], side[1]);
-    let front = Rect::new(rect.x, rect.y + COPY_ICON_OFFSET, side[0], side[1]);
-    outline(frame, behind, RULE_WIDTH, ink);
-    frame.rect(front, ground);
-    outline(frame, front, RULE_WIDTH, ink);
+    icon::draw(
+        frame,
+        icon::COPY,
+        icon::fit(frame, held, COPY_ICON),
+        ink,
+        theme.bar_background,
+    );
 }
 
 /// Draws the panel: the column scrolled by [`Panels::info_scroll`], with a

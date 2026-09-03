@@ -94,7 +94,19 @@ impl Hit {
 ///
 /// Top down, and the first layer to claim the point wins: no layer is asked
 /// what is behind it, and none of them has to.
-pub fn hit(point: [f32; 2], panels: &Panels, logical: [f32; 2], shown: Option<Shown>) -> Hit {
+///
+/// `spacing` is what the grid toggle is reading out, from
+/// [`grid_spacing`](super::grid_spacing): the one thing about the bar that
+/// the window's size does not settle, the toggle being fitted to the number
+/// in it. The caller works it out the way the frame builder does, from the
+/// zoom the frame was drawn at.
+pub fn hit(
+    point: [f32; 2],
+    panels: &Panels,
+    logical: [f32; 2],
+    shown: Option<Shown>,
+    spacing: Option<&str>,
+) -> Hit {
     let chrome = Chrome::new(logical);
 
     // The menu, which is the thing being looked at while it is open and is
@@ -102,7 +114,7 @@ pub fn hit(point: [f32; 2], panels: &Panels, logical: [f32; 2], shown: Option<Sh
     // grid has no popup to hit, and the press that finds none dismisses the
     // menu it should never have been left with.
     if let Some(menu) = panels.menu
-        && let Some(popup) = chrome.popup(menu, panels.show_grid)
+        && let Some(popup) = chrome.popup(menu, spacing)
         && popup.contains(point)
     {
         return match popup.item_at(point) {
@@ -136,7 +148,7 @@ pub fn hit(point: [f32; 2], panels: &Panels, logical: [f32; 2], shown: Option<Sh
     }
 
     if panels.show_ui && chrome.contains(point) {
-        return Hit::Chrome(chrome.widget_at(point, panels.show_grid));
+        return Hit::Chrome(chrome.widget_at(point, spacing));
     }
     Hit::Image
 }
@@ -189,7 +201,7 @@ mod tests {
         let panels = panels();
         let chrome = Chrome::new(WINDOW);
         let content = chrome.content();
-        let at = |point| hit(point, &panels, WINDOW, shown());
+        let at = |point| hit(point, &panels, WINDOW, shown(), None);
 
         assert_eq!(at(middle(content)), Hit::Image);
         assert_eq!(
@@ -224,7 +236,7 @@ mod tests {
         let chrome = Chrome::new(WINDOW);
         let content = chrome.content();
         panels.menu = Some(Menu::Zoom);
-        let popup = chrome.popup(Menu::Zoom, panels.show_grid).expect("room");
+        let popup = chrome.popup(Menu::Zoom, None).expect("room");
 
         // The cells really are over the panels, or this proves nothing.
         let covered = popup
@@ -241,7 +253,7 @@ mod tests {
 
         for (index, cell) in popup.cells() {
             assert_eq!(
-                hit(middle(cell), &panels, WINDOW, shown()),
+                hit(middle(cell), &panels, WINDOW, shown(), None),
                 Hit::Cell(index),
                 "cell {index}"
             );
@@ -249,14 +261,14 @@ mod tests {
         // And the body it leaves between them is the menu's as well.
         let panel = popup.panel();
         assert_eq!(
-            hit([panel.x + 0.5, panel.y + 0.5], &panels, WINDOW, shown()),
+            hit([panel.x + 0.5, panel.y + 0.5], &panels, WINDOW, shown(), None),
             Hit::Menu
         );
 
         // Off the popup the layers underneath answer as they always did: the
         // grab that makes a press there dismiss the menu is the handlers',
         // not the stack's, so the bar goes on reading out the pixel.
-        assert_eq!(hit(middle(content), &panels, WINDOW, shown()), Hit::Image);
+        assert_eq!(hit(middle(content), &panels, WINDOW, shown(), None), Hit::Image);
     }
 
     /// A panel takes what lands anywhere on it, buttons or no buttons. That
@@ -271,11 +283,11 @@ mod tests {
         // The plot itself: on the panel, and on none of its toggles.
         let plot = [panel.right() - 4.0, panel.y + panel.height / 2.0];
         assert_eq!(
-            hit(plot, &panels, WINDOW, shown()),
+            hit(plot, &panels, WINDOW, shown(), None),
             Hit::Histogram(None),
             "the plot is the panel's, and it is not a button"
         );
-        assert_eq!(hit(plot, &panels, WINDOW, shown()).widget(), None);
+        assert_eq!(hit(plot, &panels, WINDOW, shown(), None).widget(), None);
     }
 
     /// Nothing over the picture is drawn before there is a picture, so
@@ -289,7 +301,7 @@ mod tests {
             middle(histogram::panel(content)),
             middle(info::panel(content, true).expect("room")),
         ] {
-            assert_eq!(hit(point, &panels, WINDOW, None), Hit::Image);
+            assert_eq!(hit(point, &panels, WINDOW, None, None), Hit::Image);
         }
     }
 
@@ -301,13 +313,13 @@ mod tests {
     fn hiding_the_chrome_leaves_the_floating_panels_behind() {
         let mut panels = panels();
         let bar = middle(Chrome::new(WINDOW).bottom);
-        assert_eq!(hit(bar, &panels, WINDOW, shown()), Hit::Chrome(None));
+        assert_eq!(hit(bar, &panels, WINDOW, shown(), None), Hit::Chrome(None));
 
         panels.show_ui = false;
-        assert_eq!(hit(bar, &panels, WINDOW, shown()), Hit::Image);
+        assert_eq!(hit(bar, &panels, WINDOW, shown(), None), Hit::Image);
         let content = content_area(WINDOW, false);
         assert!(matches!(
-            hit(middle(histogram::panel(content)), &panels, WINDOW, shown()),
+            hit(middle(histogram::panel(content)), &panels, WINDOW, shown(), None),
             Hit::Histogram(_)
         ));
     }
@@ -322,8 +334,8 @@ mod tests {
         let panel = middle(histogram::panel(content));
         panels.show_histogram = false;
 
-        assert_eq!(hit(panel, &panels, WINDOW, shown()), Hit::Info);
+        assert_eq!(hit(panel, &panels, WINDOW, shown(), None), Hit::Info);
         panels.show_info = false;
-        assert_eq!(hit(panel, &panels, WINDOW, shown()), Hit::Image);
+        assert_eq!(hit(panel, &panels, WINDOW, shown(), None), Hit::Image);
     }
 }

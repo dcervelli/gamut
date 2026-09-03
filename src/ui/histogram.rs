@@ -5,10 +5,12 @@ use crate::image::stats::BINS;
 use crate::render::{Blend, Color, Rect, TextMeasure, UiFrame};
 use crate::theme::Theme;
 
-use super::buttons::{button_ink, outline};
+use super::buttons::{ICON_SIDE, button_ink, outline};
 use super::chrome::BUTTON_SIZE;
+use super::icon;
 use super::{
-    Current, FrameInput, PADDING, PANEL_INSET, PANEL_RADIUS, PANEL_WIDTH, Panels, TEXT_SIZE, Widget,
+    BECOMES, Current, FrameInput, PADDING, PANEL_INSET, PANEL_RADIUS, PANEL_WIDTH, Panels,
+    TEXT_SIZE, Widget,
 };
 
 /// The panel: as wide as anything else floating over the content area, and
@@ -27,9 +29,20 @@ pub(super) const TOOLBAR_WIDTH: f32 = BUTTON_SIZE + PANEL_INSET;
 const TOOLBAR_GAP: f32 = 8.0;
 
 /// The corner a toolbar button is drawn with, and what is left around its
-/// icon. The same as the chrome's toggles, which are the same size.
+/// icon. The same as the chrome's toggles, which are the same size — and the
+/// inset is taken from the side those wear their marks at rather than set
+/// beside it, so that a button in this strip and a button in the corner of
+/// the window cannot end up carrying marks of two different weights.
 const TOGGLE_RADIUS: f32 = 5.0;
-const ICON_INSET: f32 = 6.0;
+
+/// The middle of the grid a mark is described on, and the two measures the
+/// plane toggles are drawn from, in that grid's units: how far each colour
+/// disc is struck from the middle, and how big the discs are. The luminance
+/// disc is one mark where the colours are three, so it is the larger.
+const GRID_MIDDLE: f32 = 12.0;
+const LUMA_DISC: f32 = 8.0;
+const PLANE_ORBIT: f32 = 5.5;
+const PLANE_DISC: f32 = 4.0;
 /// The row of false colours under the ramp: how deep a swatch is, and the
 /// corner it is drawn with. Deep enough to press and to read the map off,
 /// shallow enough that the row reads as a legend under the band rather than
@@ -401,7 +414,7 @@ pub(super) fn draw(
     if let Some(across) = across {
         let value = transfer.to_linear(axis_min + across * span);
         let mapped = current.display.response(value).clamp(0.0, 1.0);
-        let readout = format!("{value:.4}  \u{2192}  {mapped:.4}");
+        let readout = format!("{value:.4}  {BECOMES}  {mapped:.4}");
         let ends_width = [axis_min, axis_max].map(|end| {
             text.measure_text(&format!("{:.4}", transfer.to_linear(end)), label_size)[0]
         });
@@ -652,83 +665,44 @@ fn controls(
         let (background, ink) = button_ink(active, hovered(*widget), theme);
         frame.rounded_rect(button, TOGGLE_RADIUS, background);
 
+        let square = icon::fit(frame, button, ICON_SIDE);
         match widget {
-            // The luminance plane as what it looks like on the plot: one
-            // filled hill, in the ink the button is lit in.
+            // The two plane toggles are drawn here rather than taken from
+            // `ui::icon` because they are pictures of the planes themselves,
+            // each in the colour that plane is plotted in — which is not
+            // something a mark drawn in one ink can be.
+            //
+            // Luminance is one plane, so it is one disc, in the neutral the
+            // plot draws that plane in.
             Widget::Luma => {
-                let icon = button.inset(ICON_INSET, ICON_INSET);
-                let hill: Vec<[f32; 2]> = (0..=4)
-                    .map(|step| {
-                        let across = step as f32 / 4.0;
-                        // Highest a little left of centre, the way a
-                        // photograph's luminance usually is.
-                        let height = 1.0 - (across - 0.4).abs() * 1.6;
-                        [
-                            icon.x + across * icon.width,
-                            icon.bottom() - height * icon.height,
-                        ]
-                    })
-                    .collect();
-                frame.area(&hill, icon.bottom(), ink, Blend::Over);
+                let place = icon::Placer::new(frame, square);
+                frame.circle(
+                    place.free(frame, [GRID_MIDDLE, GRID_MIDDLE]),
+                    place.units(LUMA_DISC),
+                    theme.histogram_luma,
+                );
             }
-            // And the colour planes as the three bars they are drawn in, in
-            // their own colours: nothing else in the window is red, green and
-            // blue side by side.
+            // And the colour planes are three, so they are three smaller
+            // discs, in their own colours: nothing else in the window is red,
+            // green and blue together.
             Widget::Planes => {
-                let icon = button.inset(ICON_INSET - 1.0, ICON_INSET);
-                let step = icon.width / 3.0;
-                for (index, plane) in theme.histogram_planes.iter().enumerate() {
-                    let height = icon.height * [0.55, 1.0, 0.75][index];
-                    frame.rect(
-                        on_device(
-                            Rect::new(
-                                icon.x + index as f32 * step,
-                                icon.bottom() - height,
-                                step - 1.0,
-                                height,
-                            ),
-                            input.scale,
-                        ),
-                        *plane,
-                    );
+                let place = icon::Placer::new(frame, square);
+                for (turn, plane) in theme.histogram_planes.into_iter().enumerate() {
+                    // Struck about the middle at a third of a turn each,
+                    // starting at the top, so the three read as one mark
+                    // rather than as a row.
+                    let angle = (-90.0 + 120.0 * turn as f32).to_radians();
+                    let at = [
+                        GRID_MIDDLE + PLANE_ORBIT * angle.cos(),
+                        GRID_MIDDLE + PLANE_ORBIT * angle.sin(),
+                    ];
+                    frame.circle(place.free(frame, at), place.units(PLANE_DISC), plane);
                 }
             }
-            // The count axis as the shape it takes: a curve that climbs fast
-            // and then flattens, which is the log of a straight line and is
-            // what the switch does to the bars. Stroked rather than filled,
-            // the way the response curve on the plot beside it is — this is a
-            // line about the plot, not a plane drawn on it.
-            Widget::Log => {
-                let icon = button.inset(ICON_INSET, ICON_INSET);
-                let curve: Vec<[f32; 2]> = (0..=8)
-                    .map(|step| {
-                        let across = step as f32 / 8.0;
-                        [
-                            icon.x + across * icon.width,
-                            icon.bottom() - across.powf(0.42) * icon.height,
-                        ]
-                    })
-                    .collect();
-                frame.polyline(&curve, CURVE_WIDTH, ink, Blend::Over);
-            }
-            // Back to the start: the bar and the triangle a transport control
-            // uses, which is what this does to the rendering.
-            _ => {
-                let icon = button.inset(ICON_INSET, ICON_INSET + 1.0);
-                let stem = (icon.width * 0.22).max(1.0);
-                frame.rect(
-                    on_device(Rect::new(icon.x, icon.y, stem, icon.height), input.scale),
-                    ink,
-                );
-                frame.triangle(
-                    [
-                        [icon.right(), icon.y],
-                        [icon.right(), icon.bottom()],
-                        [icon.x + stem + 1.0, icon.y + icon.height / 2.0],
-                    ],
-                    ink,
-                );
-            }
+            // The count axis as a curve, which is what the switch puts it on.
+            Widget::Log => icon::draw(frame, icon::SPLINE, square, ink, background),
+            // Back to the start.
+            _ => icon::draw(frame, icon::ROTATE_CCW, square, ink, background),
         }
     }
 
