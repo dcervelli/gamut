@@ -61,8 +61,11 @@ package() {
     install -Dm644 "$text" "$pkgdir/usr/share/licenses/$pkgname/$text"
   done
   # And the crates statically linked into the binary. Generated at release time
-  # rather than here: `cargo about` is not a package Arch carries, and it wants
-  # the network, neither of which suits a `--frozen` build.
+  # rather than here, and committed: `cargo about` is packaged neither in the
+  # repositories nor in the AUR, so generating it here would mean installing
+  # the tool from crates.io first — unpinned, and over the network. Generation
+  # is otherwise offline and deterministic, so the committed file can be
+  # checked by regenerating it and diffing.
   install -Dm644 THIRD-PARTY-LICENSES \
     "$pkgdir/usr/share/licenses/$pkgname/THIRD-PARTY-LICENSES"
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"

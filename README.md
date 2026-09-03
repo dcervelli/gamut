@@ -1067,5 +1067,21 @@ fails generation rather than being written out quietly — `cargo audit` for
 licences instead of advisories. The file is stamped with the lock it was
 generated from, and CI fails if that is not the lock in the tree.
 
+It is a generated file kept in the tree, which is the one place this project
+does that, so the reason is worth saying. Generation is offline and
+deterministic — `--frozen` implies `--offline`, every crate in the graph
+ships its own licence text, and the same lock gives the same bytes — so the
+PKGBUILD could perfectly well produce it during the build, as it already does
+the manual page. What stops it is that `cargo about` is packaged neither in
+Arch's repositories nor in the AUR: building it there would mean fetching the
+tool from crates.io first, unpinned and over the network, inside a build that
+is otherwise `--frozen`. Committing the file is what keeps the package
+buildable with cargo and nothing else. Being deterministic, it can be
+verified rather than trusted:
+
+```sh
+cargo about generate --frozen packaging/about.hbs | diff - <(tail -n +3 THIRD-PARTY-LICENSES)
+```
+
 Between the three, `LICENSES/` ends up holding every licence anything in the
 distribution is under, and `reuse lint` reports none of them unused.
