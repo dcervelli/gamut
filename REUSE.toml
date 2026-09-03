@@ -18,7 +18,7 @@ version = 1
 # for.
 #
 # `LICENSES/` holds every licence anything in the distribution is under, not
-# only what the source tree carries, because `THIRD-PARTY-LICENSES` is in the
+# only what the source tree carries, because `THIRD-PARTY-NOTICES` is in the
 # tree too and is annotated below for what it actually is. That is the
 # stronger invariant to keep and the one `reuse lint` can check.
 
@@ -66,7 +66,7 @@ SPDX-License-Identifier = "CC0-1.0 AND Apache-2.0 AND (MIT OR Apache-2.0)"
 # means a text for it in `LICENSES/` as well; `about.toml`'s `accepted` list
 # is what stops one arriving unnoticed.
 [[annotations]]
-path = "THIRD-PARTY-LICENSES"
+path = "THIRD-PARTY-NOTICES"
 precedence = "override"
 SPDX-FileCopyrightText = "the authors of the crates listed in the file"
 SPDX-License-Identifier = "MIT AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND ISC AND Zlib AND Unicode-3.0"

@@ -9,7 +9,7 @@ url="https://github.com/closedcontour/gamut"
 # gamut itself, then the licences of the work carried in its own source tree:
 # Lucide's icon geometry, and the two colormap fits. REUSE.toml says which file
 # is which. The crates linked into the binary are not gamut's source and do not
-# belong here; their notices ship as THIRD-PARTY-LICENSES.
+# belong here; their notices ship as THIRD-PARTY-NOTICES.
 license=('MIT OR Apache-2.0' 'ISC' 'CC0-1.0' 'Apache-2.0')
 # libheif reads HEIC and AVIF, and its codec plugins decide which of the two
 # actually work: libde265 or ffmpeg for HEVC, dav1d or aom for AV1. Both are
@@ -66,8 +66,8 @@ package() {
   # the tool from crates.io first — unpinned, and over the network. Generation
   # is otherwise offline and deterministic, so the committed file can be
   # checked by regenerating it and diffing.
-  install -Dm644 THIRD-PARTY-LICENSES \
-    "$pkgdir/usr/share/licenses/$pkgname/THIRD-PARTY-LICENSES"
+  install -Dm644 THIRD-PARTY-NOTICES \
+    "$pkgdir/usr/share/licenses/$pkgname/THIRD-PARTY-NOTICES"
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
   install -Dm644 user-docs/KEYS.md "$pkgdir/usr/share/doc/$pkgname/KEYS.md"
   install -Dm644 user-docs/FORMATS.md "$pkgdir/usr/share/doc/$pkgname/FORMATS.md"

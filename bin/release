@@ -54,7 +54,7 @@ git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && {
 # release leaves no half-bumped tree behind.
 restore() {
     git checkout -- Cargo.toml Cargo.lock packaging/PKGBUILD \
-        THIRD-PARTY-LICENSES 2>/dev/null || true
+        THIRD-PARTY-NOTICES 2>/dev/null || true
 }
 trap restore EXIT
 
@@ -95,7 +95,7 @@ command -v cargo-about >/dev/null || {
 {
     printf 'Cargo.lock sha256: %s\n\n' "$(sha256sum Cargo.lock | cut -d' ' -f1)"
     cargo about generate --frozen packaging/about.hbs
-} >THIRD-PARTY-LICENSES
+} >THIRD-PARTY-NOTICES
 
 cargo fmt --check
 cargo clippy --quiet --all-targets -- -D warnings
@@ -111,7 +111,7 @@ BUILT=$(./target/debug/"$NAME" --version)
 
 trap - EXIT
 
-git add Cargo.toml Cargo.lock packaging/PKGBUILD THIRD-PARTY-LICENSES
+git add Cargo.toml Cargo.lock packaging/PKGBUILD THIRD-PARTY-NOTICES
 git commit -m "Release $TAG"
 git tag "$TAG"
 

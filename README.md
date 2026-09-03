@@ -1058,7 +1058,7 @@ tree is unaccounted for, and CI runs it.
 
 The crates linked into the binary are the third part, and they are not in the
 tree at all — `Cargo.lock` only names them. Their notices are collected in
-[THIRD-PARTY-LICENSES](THIRD-PARTY-LICENSES), generated from that lock by
+[THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES), generated from that lock by
 `cargo about` and rewritten by `bin/release`, because a statically linked
 binary carries its dependencies' code and owes their notices with it. Which
 licences may turn up there is not left open: `about.toml` lists the ones this
@@ -1080,7 +1080,7 @@ buildable with cargo and nothing else. Being deterministic, it can be
 verified rather than trusted:
 
 ```sh
-cargo about generate --frozen packaging/about.hbs | diff - <(tail -n +3 THIRD-PARTY-LICENSES)
+cargo about generate --frozen packaging/about.hbs | diff - <(tail -n +3 THIRD-PARTY-NOTICES)
 ```
 
 Between the three, `LICENSES/` ends up holding every licence anything in the

@@ -1,6 +1,6 @@
 Cargo.lock sha256: 4cc083c971585868df42f3374eb5b5b2dc3ea50b0411667c736b85fbaa1fb37c
 
-                      gamut: third-party licences
+                      gamut: third-party notices
 
 gamut itself is under LICENSE-MIT and LICENSE-APACHE, at your option, and the
 work carried in its own source tree is accounted for in REUSE.toml with the
