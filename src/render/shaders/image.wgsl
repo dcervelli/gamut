@@ -173,6 +173,9 @@ fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
 // within what the eye resolves in a false-colour display. They produce
 // sRGB-encoded values, so the caller linearises.
 //
+// Viridis and magma are Matt Zucker's fits, from
+// https://www.shadertoy.com/view/WlfXRN, under CC0; `REUSE.toml` records it.
+//
 // Mirrored on the CPU by `Colormap::color` in image/display.rs, which the
 // pointer readout uses to say what colour a pixel came out. Change one, change
 // the other: a swatch that disagrees with the screen is worse than no swatch.
@@ -198,6 +201,9 @@ fn magma(t: f32) -> vec3<f32> {
     return c0 + t * (c1 + t * (c2 + t * (c3 + t * (c4 + t * (c5 + t * c6)))));
 }
 
+// Turbo's colormap is Anton Mikhailov's and this fit to it Ruofei Du's, both
+// of Google, published under Apache-2.0; `REUSE.toml` records it.
+// https://gist.github.com/mikhailov-work/0d177465a8151eb6ede1768d51d476c7
 fn turbo(t: f32) -> vec3<f32> {
     let red4 = vec4<f32>(0.13572138, 4.61539260, -42.66032258, 132.13108234);
     let green4 = vec4<f32>(0.09140261, 2.19418839, 4.84296658, -14.18503333);

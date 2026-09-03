@@ -21,7 +21,7 @@ jobs:
       - name: Install the toolchain and the libraries it links
         run: |
           pacman -Syu --noconfirm --needed \
-            git rust cargo-audit libheif vulkan-icd-loader fontconfig pkgconf
+            git rust cargo-audit reuse libheif vulkan-icd-loader fontconfig pkgconf
 
       - uses: actions/checkout@v4
 
@@ -43,6 +43,12 @@ jobs:
 
       - name: Advisories
         run: cargo audit
+
+      - name: Licensing
+        # Every file in the tree is accounted for by REUSE.toml, and every
+        # licence it names has its text in LICENSES/. This is what catches a
+        # file arriving from somewhere else without its licence coming too.
+        run: reuse lint
 
       - name: The PKGBUILD is at the version Cargo.toml says
         # ttfx keeps a PKGBUILD in its own tree that fell three releases behind

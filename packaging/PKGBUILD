@@ -6,7 +6,9 @@ pkgrel=1
 pkgdesc="A GPU image viewer with real colour management, for photographs, measurement data and HDR"
 arch=('x86_64' 'aarch64')
 url="https://github.com/closedcontour/gamut"
-license=('MIT OR Apache-2.0')
+# gamut itself, then the licences of the work it carries: Lucide's icon
+# geometry, and the two colormap fits. REUSE.toml says which file is which.
+license=('MIT OR Apache-2.0' 'ISC' 'CC0-1.0' 'Apache-2.0')
 # libheif reads HEIC and AVIF, and its codec plugins decide which of the two
 # actually work: libde265 or ffmpeg for HEVC, dav1d or aom for AV1. Both are
 # ordinary on Arch, so they are left to libheif's own dependencies.
@@ -47,9 +49,15 @@ package() {
 
   install -Dm755 "target/release/$pkgname" "$pkgdir/usr/bin/$pkgname"
 
+  # gamut's own licence, and then the record of everything else the binary
+  # carries: REUSE.toml names the file each licence applies to, and LICENSES/
+  # holds the texts it names.
   install -Dm644 LICENSE-MIT "$pkgdir/usr/share/licenses/$pkgname/LICENSE-MIT"
   install -Dm644 LICENSE-APACHE "$pkgdir/usr/share/licenses/$pkgname/LICENSE-APACHE"
-  install -Dm644 LICENSE-LUCIDE "$pkgdir/usr/share/licenses/$pkgname/LICENSE-LUCIDE"
+  install -Dm644 REUSE.toml "$pkgdir/usr/share/licenses/$pkgname/REUSE.toml"
+  for text in LICENSES/*.txt; do
+    install -Dm644 "$text" "$pkgdir/usr/share/licenses/$pkgname/$text"
+  done
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
   install -Dm644 user-docs/KEYS.md "$pkgdir/usr/share/doc/$pkgname/KEYS.md"
   install -Dm644 user-docs/FORMATS.md "$pkgdir/usr/share/doc/$pkgname/FORMATS.md"

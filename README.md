@@ -1036,6 +1036,22 @@ at your option. Unless you state otherwise, any contribution you intentionally
 submit for inclusion in this work shall be dual-licensed as above, without any
 additional terms or conditions.
 
-The marks the buttons wear are [Lucide](https://lucide.dev)'s geometry,
-redescribed in `src/ui/icon.rs` as a table of strokes on Lucide's own 24-unit
-grid. Lucide is ISC-licensed ([LICENSE-LUCIDE](LICENSE-LUCIDE)).
+Two things in the tree are someone else's work, and are licensed as they say
+rather than as above:
+
+- The marks the buttons wear are [Lucide](https://lucide.dev)'s geometry,
+  redescribed in `src/ui/icon.rs` as a table of strokes on Lucide's own
+  24-unit grid. Lucide is ISC-licensed.
+- The false-colour ramps are polynomial fits rather than sampled tables, so
+  what is borrowed is the fit. Viridis and magma are
+  [Matt Zucker's](https://www.shadertoy.com/view/WlfXRN) fits to matplotlib's,
+  under CC0; turbo's is
+  [Google's](https://gist.github.com/mikhailov-work/0d177465a8151eb6ede1768d51d476c7)
+  fit to its own, under Apache-2.0. Both appear twice, in
+  `src/image/display.rs` and `src/render/shaders/image.wgsl`, because the
+  readout and the screen have to agree.
+
+Which is recorded file by file in [REUSE.toml](REUSE.toml), in the form the
+[REUSE](https://reuse.software) specification defines, with the licence texts
+it names in [LICENSES/](LICENSES). `reuse lint` checks that nothing in the
+tree is unaccounted for, and CI runs it.

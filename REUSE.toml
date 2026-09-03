@@ -1,0 +1,53 @@
+version = 1
+
+# What in this tree is under what licence, in the form `reuse lint` can check.
+#
+# gamut itself is `MIT OR Apache-2.0`, and the blanket rule below says so once
+# rather than in a header at the top of every file. The rules after it are the
+# exceptions: files that carry someone else's work as well as gamut's own. The
+# last matching rule wins, so the exceptions come after the blanket.
+#
+# `precedence = "override"` makes this file authoritative over anything the
+# tool might otherwise read out of a source file. Without it `reuse` treats a
+# stray use of the word "Copyright" in a comment — a decoder quoting a format
+# specification, say — as a copyright notice of its own.
+#
+# The licence texts these names refer to are in `LICENSES/`, named by their
+# SPDX identifier. `LICENSE-MIT` and `LICENSE-APACHE` stay at the root: they
+# are gamut's own licence, which is what a reader and GitHub both look there
+# for.
+
+[[annotations]]
+path = "**"
+precedence = "override"
+SPDX-FileCopyrightText = "2026 Dan Cervelli"
+SPDX-License-Identifier = "MIT OR Apache-2.0"
+
+# The icons. `src/ui/icon.rs` redescribes Lucide's geometry as a table of
+# marks on Lucide's own 24-unit grid; the module's own docs say why it is a
+# table rather than the path data Lucide ships.
+[[annotations]]
+path = "src/ui/icon.rs"
+precedence = "override"
+SPDX-FileCopyrightText = [
+    "2013-2022 Cole Bemis",
+    "2022 Lucide Contributors",
+    "2026 Dan Cervelli",
+]
+SPDX-License-Identifier = "ISC AND (MIT OR Apache-2.0)"
+
+# The colormaps, which are polynomial fits rather than sampled tables, and so
+# carry the licence of the fit rather than of the colormap it approximates.
+# Viridis and magma are Matt Zucker's fits to matplotlib's (CC0, and the data
+# fitted was CC0 too); turbo is Google's own fit to theirs (Apache-2.0). The
+# same coefficients appear twice because the shader and its CPU twin have to
+# agree — see the note above `viridis()` in the shader.
+[[annotations]]
+path = ["src/image/display.rs", "src/render/shaders/image.wgsl"]
+precedence = "override"
+SPDX-FileCopyrightText = [
+    "2019 Matt Zucker",
+    "2019 Google LLC",
+    "2026 Dan Cervelli",
+]
+SPDX-License-Identifier = "CC0-1.0 AND Apache-2.0 AND (MIT OR Apache-2.0)"

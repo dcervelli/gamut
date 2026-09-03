@@ -214,6 +214,12 @@ fn ramp(coefficients: &[[f32; 3]], t: f32) -> [f32; 3] {
     out
 }
 
+// Viridis and magma are Matt Zucker's polynomial fits to matplotlib's
+// colormaps, from https://www.shadertoy.com/view/WlfXRN, dedicated to the
+// public domain under CC0; the colormap data he fitted was CC0 as well. What
+// is borrowed is the fit, not the colormap, which is why the licence recorded
+// in `REUSE.toml` is the fit's.
+//
 // Written out to the digit as the shader has them, so that the two tables can
 // be checked against each other by eye; f32 keeps rather fewer of them.
 #[allow(clippy::excessive_precision)]
@@ -238,6 +244,11 @@ const MAGMA: [[f32; 3]; 7] = [
     [18.65570507, -11.48977352, -5.60196151],
 ];
 
+/// Turbo's fit is Google's own rather than a third party's: the colormap is
+/// Anton Mikhailov's and the approximation Ruofei Du's, published together at
+/// <https://gist.github.com/mikhailov-work/0d177465a8151eb6ede1768d51d476c7>
+/// under Apache-2.0. `REUSE.toml` records it.
+///
 /// The shader writes this one as two dot products per channel; it is the same
 /// degree-five polynomial, transposed to a triple per power.
 #[allow(clippy::excessive_precision)]

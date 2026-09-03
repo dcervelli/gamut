@@ -3,7 +3,8 @@
 //! An icon here is a short list of [`Mark`]s on a 24-unit square, which is
 //! the grid [Lucide](https://lucide.dev) draws on, scaled into whatever
 //! square the button has room for. The geometry of the icons below is
-//! Lucide's; `LICENSE-LUCIDE` at the root of the tree is its licence.
+//! Lucide's, which is ISC-licensed: `REUSE.toml` records that, and
+//! `LICENSES/ISC.txt` is the text it refers to.
 //!
 //! Why a table of marks rather than the path data Lucide ships: a path can be
 //! drawn but it cannot be *hinted*. At the size a toggle wears one — a dozen
