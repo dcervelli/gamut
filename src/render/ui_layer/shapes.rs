@@ -9,12 +9,17 @@ use crate::render::gpu::{self, GrowableBuffer};
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct QuadInstance {
-    /// x, y, width, height in physical pixels.
-    rect: [f32; 4],
+    /// Centre, then half extent along the quad's own two axes, in physical
+    /// pixels.
+    bounds: [f32; 4],
     /// Linear, straight alpha.
     color: [f32; 4],
+    /// The unit vector the quad's own x axis runs along.
+    axis: [f32; 2],
     corner: f32,
-    _pad: [f32; 3],
+    /// Zero fills the shape; anything more draws a band that wide on its
+    /// outline.
+    stroke: f32,
 }
 
 #[repr(C)]
@@ -82,8 +87,9 @@ impl Shapes {
             gpu::buffer_group(device, "ui viewport", &viewport_layout, &viewport_buffer);
         let pipeline_layout = gpu::pipeline_layout(device, "ui quads", &[&viewport_layout]);
 
-        let quad_attributes =
-            wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32];
+        let quad_attributes = wgpu::vertex_attr_array![
+            0 => Float32x4, 1 => Float32x4, 2 => Float32x2, 3 => Float32, 4 => Float32
+        ];
         let poly_attributes = wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x4];
         let pipeline_for = |label, blend, kind| {
             let (entry, buffer) = match kind {
@@ -206,15 +212,16 @@ impl Shapes {
                 let (kind, blend, added) = match shape {
                     Shape::Quad(quad) => {
                         instances.push(QuadInstance {
-                            rect: [
-                                quad.rect.x * scale,
-                                quad.rect.y * scale,
-                                quad.rect.width * scale,
-                                quad.rect.height * scale,
+                            bounds: [
+                                quad.centre[0] * scale,
+                                quad.centre[1] * scale,
+                                quad.half[0] * scale,
+                                quad.half[1] * scale,
                             ],
                             color: quad.color.to_linear(),
+                            axis: quad.axis,
                             corner: quad.corner * scale,
-                            _pad: [0.0; 3],
+                            stroke: quad.stroke * scale,
                         });
                         (Kind::Quad, quad.blend, 1)
                     }

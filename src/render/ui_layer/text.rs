@@ -100,6 +100,52 @@ impl Text {
         [width, height]
     }
 
+    /// How far below the top of a laid-out run the middle of its capitals
+    /// sits, at `size`.
+    ///
+    /// What a label is placed by when it has to sit level with a mark beside
+    /// it. A run is laid out in a box that reserves room under the baseline
+    /// for descenders, and cosmic-text centres that whole box in the line; so
+    /// centring the line in a button leaves a label with no descenders in it
+    /// — a percentage, a count of pixels — visibly low against the mark
+    /// beside it. The eye levels text on its capitals, so that is what this
+    /// measures.
+    pub(super) fn cap_centre(&mut self, size: f32, face: Face) -> f32 {
+        // Disjoint field borrows: the run below holds the buffer while the
+        // font it was shaped with is looked up.
+        let Self {
+            font_system,
+            measure_buffer,
+            ..
+        } = self;
+        measure_buffer.set_metrics(Metrics::new(size, size * 1.3));
+        measure_buffer.set_size(None, None);
+        measure_buffer.set_wrap(Wrap::None);
+        // Shaped rather than worked out from the size alone, so that the
+        // answer comes from whichever font a label will actually be set in.
+        measure_buffer.set_text(
+            "H",
+            &Attrs::new().family(family(face)),
+            Shaping::Advanced,
+            None,
+        );
+        measure_buffer.shape_until_scroll(font_system, false);
+
+        let Some(run) = measure_buffer.layout_runs().next() else {
+            return size / 2.0;
+        };
+        let cap = run
+            .glyphs
+            .first()
+            .and_then(|glyph| font_system.get_font(glyph.font_id, glyphon::Weight::NORMAL))
+            .map(|font| font.as_swash().metrics(&[]).scale(size).cap_height)
+            // A face that declares no cap height: most set their capitals at
+            // about seven tenths of the em.
+            .filter(|cap| *cap > 0.0)
+            .unwrap_or(size * 0.7);
+        (run.line_y - run.line_top) - cap / 2.0
+    }
+
     /// `texts` is one slice of runs per layer of the frame, in the order they
     /// are drawn.
     pub(super) fn prepare(

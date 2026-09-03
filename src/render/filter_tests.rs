@@ -12,43 +12,18 @@ use half::f16;
 use super::WORKING_FORMAT;
 use super::gpu;
 use super::image_layer::{Draw, ImageLayer};
-use super::upload::Capabilities;
 use super::{Placement, Upscale};
 use crate::image::display::Display;
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
 
-struct Gpu {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    capabilities: Capabilities,
-}
-
-fn gpu() -> Option<Gpu> {
-    let instance =
-        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::HighPerformance,
-        ..Default::default()
-    }))
-    .ok()?;
-    let capabilities = Capabilities::from_adapter(&adapter);
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        label: Some("filter tests"),
-        required_features: capabilities.required_features(),
-        required_limits: adapter.limits(),
-        ..Default::default()
-    }))
-    .ok()?;
-    Some(Gpu {
-        device,
-        queue,
-        capabilities,
-    })
-}
-
 /// Draws `image` into a `target`-sized working-space texture and reads it
 /// back, as RGBA rows of linear values.
-fn draw(gpu: &Gpu, image: &DecodedImage, target: [u32; 2], placement: Placement) -> Vec<[f32; 4]> {
+fn draw(
+    gpu: &gpu::TestContext,
+    image: &DecodedImage,
+    target: [u32; 2],
+    placement: Placement,
+) -> Vec<[f32; 4]> {
     draw_all(
         gpu,
         image,
@@ -61,7 +36,12 @@ fn draw(gpu: &Gpu, image: &DecodedImage, target: [u32; 2], placement: Placement)
 }
 
 /// As [`draw`], for the frames that put down the minimap's thumbnail as well.
-fn draw_all(gpu: &Gpu, image: &DecodedImage, target: [u32; 2], quads: Draw) -> Vec<[f32; 4]> {
+fn draw_all(
+    gpu: &gpu::TestContext,
+    image: &DecodedImage,
+    target: [u32; 2],
+    quads: Draw,
+) -> Vec<[f32; 4]> {
     let mut layer = ImageLayer::new(&gpu.device, WORKING_FORMAT);
     let uploaded = layer
         .uploader(&gpu.device, &gpu.queue, gpu.capabilities)
@@ -202,13 +182,13 @@ fn close(a: f32, b: f32, tolerance: f32) -> bool {
 /// texels it covers, not a bilinear tap at its centre.
 #[test]
 fn minification_averages_every_texel_it_covers() {
-    let Some(gpu) = gpu() else {
+    let Some(gpu) = gpu::test_context() else {
         return;
     };
     let data: Vec<u8> = (0..16).map(|value| value * 16).collect();
     let image = gray_u8(4, 4, data.clone());
 
-    let pixels = draw(&gpu, &image, [1, 1], whole([1, 1], &image));
+    let pixels = draw(gpu, &image, [1, 1], whole([1, 1], &image));
     let expected = data.iter().map(|v| *v as f32 / 255.0).sum::<f32>() / 16.0;
     assert!(
         close(pixels[0][0], expected, 1e-3),
@@ -222,14 +202,14 @@ fn minification_averages_every_texel_it_covers() {
 /// the factor that forces the chain to be used at all.
 #[test]
 fn the_coarse_chain_agrees_with_a_direct_average() {
-    let Some(gpu) = gpu() else {
+    let Some(gpu) = gpu::test_context() else {
         return;
     };
     const SIZE: u32 = 64;
     let data: Vec<u8> = (0..SIZE * SIZE).map(|index| (index % 251) as u8).collect();
     let image = gray_u8(SIZE, SIZE, data.clone());
 
-    let pixels = draw(&gpu, &image, [4, 4], whole([4, 4], &image));
+    let pixels = draw(gpu, &image, [4, 4], whole([4, 4], &image));
     for block_y in 0..4usize {
         for block_x in 0..4usize {
             let mut total = 0.0f32;
@@ -253,14 +233,14 @@ fn the_coarse_chain_agrees_with_a_direct_average() {
 /// zoom every output pixel is a texel, with nothing blended in between.
 #[test]
 fn antialiased_nearest_is_exact_at_whole_zooms() {
-    let Some(gpu) = gpu() else {
+    let Some(gpu) = gpu::test_context() else {
         return;
     };
     let image = gray_u8(2, 2, vec![0u8, 255, 255, 0]);
 
     let mut placement = whole([10, 10], &image);
     placement.upscale = Upscale::Nearest;
-    let pixels = draw(&gpu, &image, [10, 10], placement);
+    let pixels = draw(gpu, &image, [10, 10], placement);
 
     for (index, pixel) in pixels.iter().enumerate() {
         let value = pixel[0];
@@ -282,14 +262,14 @@ fn antialiased_nearest_is_exact_at_whole_zooms() {
 /// and that one pixel resolves it rather than having to pick a side.
 #[test]
 fn antialiased_nearest_resolves_an_edge_that_lands_mid_pixel() {
-    let Some(gpu) = gpu() else {
+    let Some(gpu) = gpu::test_context() else {
         return;
     };
     let image = gray_u8(2, 2, vec![0u8, 255, 255, 0]);
 
     let mut placement = whole([9, 9], &image);
     placement.upscale = Upscale::Nearest;
-    let pixels = draw(&gpu, &image, [9, 9], placement);
+    let pixels = draw(gpu, &image, [9, 9], placement);
 
     // Well inside a texel, still that texel.
     assert!(close(at(&pixels, 9, 1, 1), 0.0, 1e-3));
@@ -308,14 +288,14 @@ fn antialiased_nearest_resolves_an_edge_that_lands_mid_pixel() {
 /// exactly, however its neighbours ring around it.
 #[test]
 fn bicubic_passes_texel_centres_through() {
-    let Some(gpu) = gpu() else {
+    let Some(gpu) = gpu::test_context() else {
         return;
     };
     let image = gray_u8(2, 2, vec![0u8, 255, 255, 0]);
 
     let mut placement = whole([10, 10], &image);
     placement.upscale = Upscale::Bicubic;
-    let pixels = draw(&gpu, &image, [10, 10], placement);
+    let pixels = draw(gpu, &image, [10, 10], placement);
 
     // At five-to-one, the centre of texel 0 falls on the centre of pixel 2 and
     // the centre of texel 1 on that of pixel 7.
@@ -329,7 +309,7 @@ fn bicubic_passes_texel_centres_through() {
 /// transparent half is green, and none of it may reach the result.
 #[test]
 fn a_transparent_texel_does_not_bleed_its_colour() {
-    let Some(gpu) = gpu() else {
+    let Some(gpu) = gpu::test_context() else {
         return;
     };
     let image = DecodedImage {
@@ -353,7 +333,7 @@ fn a_transparent_texel_does_not_bleed_its_colour() {
         zoom: 0.5,
         upscale: Upscale::Nearest,
     };
-    let pixels = draw(&gpu, &image, [1, 1], placement);
+    let pixels = draw(gpu, &image, [1, 1], placement);
 
     // The target holds premultiplied colour, so half coverage of opaque red
     // reads as half red, half alpha, and no green whatsoever.
@@ -368,7 +348,7 @@ fn a_transparent_texel_does_not_bleed_its_colour() {
 /// sixteen to one and cannot be drawn without it.
 #[test]
 fn the_thumbnail_is_drawn_beside_the_view_and_builds_the_chain_it_needs() {
-    let Some(gpu) = gpu() else {
+    let Some(gpu) = gpu::test_context() else {
         return;
     };
     const SIZE: u32 = 64;
@@ -378,7 +358,7 @@ fn the_thumbnail_is_drawn_beside_the_view_and_builds_the_chain_it_needs() {
 
     let target = [SIZE + THUMBNAIL, SIZE + THUMBNAIL];
     let pixels = draw_all(
-        &gpu,
+        gpu,
         &image,
         target,
         Draw {

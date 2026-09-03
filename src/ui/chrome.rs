@@ -34,17 +34,36 @@ pub(super) const BAR_PADDING: f32 = (SIDE_WIDTH - BUTTON_SIZE) / 2.0;
 /// The zoom readout in the top bar, which is also the button that opens the
 /// zoom menu. Wide enough for the longest reading it takes.
 pub(super) const ZOOM_BUTTON: [f32; 2] = [58.0, 22.0];
-/// The grid toggle at the right of the top bar, switched on: its icon and
-/// the widest spacing it reads out, which is "5000 px" at the zoom furthest
-/// out on a display that packs two physical pixels into the logical one.
-pub(super) const GRID_BUTTON_ON: [f32; 2] = [88.0, 22.0];
-/// And switched off, where it is the icon alone: an unlit toggle has no
-/// spacing to report, and a button holding the room for one it is not using
-/// would be a gap in the bar.
+/// The gap between the spacing the grid toggle reads out and the mark it
+/// belongs to. The mark keeps the rest of its square clear around the icon
+/// in it, so what shows on screen is wider again than this.
+pub(super) const READING_GAP: f32 = 4.0;
+/// The room the grid toggle gives one digit of its reading.
+const READING_DIGIT: f32 = 8.0;
+/// And the room it gives the rest of one: the space and the "px" after the
+/// number, and the padding in front of it.
+const READING_REST: f32 = 25.0;
+/// How wide the grid toggle is with `spacing` read out in it, and the mark's
+/// own square with nothing read out — an unlit toggle has no spacing in
+/// force, and a button holding the room for one it is not using would be a
+/// gap in the bar. That square is the side panels' one, so that the only two
+/// icon-and-nothing-else buttons in the window are the same size wherever
+/// they sit.
 ///
-/// The side panels' square, so that the only two icon-and-nothing-else
-/// buttons in the window are the same size wherever they sit.
-pub(super) const GRID_BUTTON_OFF: [f32; 2] = [BUTTON_SIZE, BUTTON_SIZE];
+/// Counted in digits rather than measured in the face the bar is set in,
+/// because the button has to be where the frame drew it when a press lands on
+/// it, and the pointer is answered where there are no fonts to ask. The
+/// allowance is wider than the interface's own face needs; the reading is set
+/// against the mark, so what the allowance leaves over falls in front of the
+/// number, where it is the button's padding. `buttons` checks the allowance
+/// against the fonts the reading is drawn in.
+pub(super) fn grid_width(spacing: Option<&str>) -> f32 {
+    let Some(spacing) = spacing else {
+        return BUTTON_SIZE;
+    };
+    let digits = spacing.chars().filter(char::is_ascii_digit).count() as f32;
+    BUTTON_SIZE + READING_GAP + READING_REST + digits * READING_DIGIT
+}
 
 /// Width of the hairline along a panel's inner edge, in logical pixels. What
 /// it is drawn in is the theme's `border`.
@@ -103,27 +122,33 @@ impl Chrome {
     /// well as whether they are drawn, and the side panels are too narrow for
     /// words.
     ///
-    /// Wider when the grid is `on`, that reading being what the extra room is
-    /// for. Unlike the zoom readout it may move, since the thing it moves for
-    /// is the press that was just made on it.
-    pub fn grid_button(&self, on: bool) -> Rect {
-        let size = if on { GRID_BUTTON_ON } else { GRID_BUTTON_OFF };
+    /// Fitted to the `spacing` it is reading out, and the mark's own square
+    /// while it is reading out nothing. Its right edge is anchored and the
+    /// rest of it grows leftwards, pushing the zoom readout along the bar in
+    /// front of it.
+    pub fn grid_button(&self, spacing: Option<&str>) -> Rect {
+        let size = [grid_width(spacing), BUTTON_SIZE];
         bar_button(self.top, size, self.top.right() - BAR_PADDING)
     }
 
     /// The zoom readout, in the top bar just inside the grid toggle. Fixed
     /// width rather than fitted to what it says, so that it does not move as
-    /// the zoom changes; it does move when the grid toggle beside it does,
-    /// `grid_on` being what says where that toggle currently ends.
+    /// the zoom changes what it reads.
+    ///
+    /// Hung off the toggle beside it at a fixed gap, `spacing` being what says
+    /// where that toggle ends: the two are the pair at the end of the bar and
+    /// they stay a pair, rather than the readout holding a place of its own
+    /// with a gap that opens and closes as the toggle is fitted to its
+    /// reading.
     ///
     /// In the top bar rather than the bottom one because everything the top
     /// bar says is a measurement of the picture — how many pixels it has, and
     /// now how big they are being drawn.
-    pub fn zoom_button(&self, grid_on: bool) -> Rect {
+    pub fn zoom_button(&self, spacing: Option<&str>) -> Rect {
         bar_button(
             self.top,
             ZOOM_BUTTON,
-            self.grid_button(grid_on).x - BUTTON_GAP,
+            self.grid_button(spacing).x - BUTTON_GAP,
         )
     }
 
@@ -174,18 +199,18 @@ impl Chrome {
 
     /// Which of the widgets fixed to the panels a point lands on, if any.
     /// The cells of an open menu float above these and are tested first, by
-    /// the application. `grid_on` is where the grid toggle currently is, its
-    /// width being one of the things its state decides.
-    pub fn widget_at(&self, point: [f32; 2], grid_on: bool) -> Option<Widget> {
+    /// the application. `spacing` is what the grid toggle is reading out,
+    /// which is what says how much of the bar it takes.
+    pub fn widget_at(&self, point: [f32; 2], spacing: Option<&str>) -> Option<Widget> {
         if self.minimap_button.contains(point) {
             Some(Widget::Minimap)
         } else if self.histogram_button.contains(point) {
             Some(Widget::Histogram)
         } else if self.info_button.contains(point) {
             Some(Widget::Info)
-        } else if self.grid_button(grid_on).contains(point) {
+        } else if self.grid_button(spacing).contains(point) {
             Some(Widget::Grid)
-        } else if self.zoom_button(grid_on).contains(point) {
+        } else if self.zoom_button(spacing).contains(point) {
             Some(Widget::Zoom)
         } else {
             None
@@ -194,16 +219,16 @@ impl Chrome {
 
     /// Where `menu` goes when it is open: hanging from the button that opens
     /// it, its right edge in line with the button's, over whatever is under
-    /// it. `grid_on` is what says where that button is — see
+    /// it. `spacing` is what says where that button is — see
     /// [`Chrome::zoom_button`].
     ///
     /// `None` when the window has no room for the whole grid, which is also
     /// what keeps the menu from being opened at all in a window that small.
-    pub fn popup(&self, menu: Menu, grid_on: bool) -> Option<Popup> {
+    pub fn popup(&self, menu: Menu, spacing: Option<&str>) -> Option<Popup> {
         Popup::below(
             menu.sections(),
             menu.grid(),
-            self.zoom_button(grid_on),
+            self.zoom_button(spacing),
             self.window(),
         )
     }
@@ -290,6 +315,10 @@ mod tests {
     use super::*;
     use crate::view::{Fit, View};
 
+    /// A spacing to lay the bar out with, in the middle of the range of
+    /// widths a reading can have.
+    const SPACING: Option<&str> = Some("50 px");
+
     const WINDOW: [f32; 2] = [1000.0, 700.0];
 
     #[test]
@@ -369,13 +398,13 @@ mod tests {
             (Widget::Info, chrome.info_button),
         ] {
             assert_eq!(
-                chrome.widget_at([rect.x + 1.0, rect.y + 1.0], false),
+                chrome.widget_at([rect.x + 1.0, rect.y + 1.0], None),
                 Some(widget),
                 "{widget:?}"
             );
         }
         assert_eq!(
-            chrome.widget_at([WINDOW[0] / 2.0, WINDOW[1] / 2.0], false),
+            chrome.widget_at([WINDOW[0] / 2.0, WINDOW[1] / 2.0], None),
             None
         );
     }
@@ -401,7 +430,7 @@ mod tests {
         assert_eq!(short.histogram_button.width, BUTTON_SIZE);
         assert_eq!(short.info_button.width, 0.0);
         assert_eq!(
-            short.widget_at([short.info_button.x, short.info_button.y], false),
+            short.widget_at([short.info_button.x, short.info_button.y], None),
             None
         );
     }
@@ -432,10 +461,10 @@ mod tests {
                 chrome.minimap_button,
                 chrome.info_button,
                 chrome.histogram_button,
-                chrome.grid_button(true),
-                chrome.grid_button(false),
-                chrome.zoom_button(true),
-                chrome.zoom_button(false),
+                chrome.grid_button(SPACING),
+                chrome.grid_button(None),
+                chrome.zoom_button(SPACING),
+                chrome.zoom_button(None),
             ] {
                 assert!(
                     button.width >= 0.0 && button.height >= 0.0,
@@ -458,12 +487,16 @@ mod tests {
     #[test]
     fn the_grid_toggle_is_a_button_at_the_end_of_the_top_bar() {
         let chrome = Chrome::new(WINDOW);
-        let button = chrome.grid_button(true);
-        let unlit = chrome.grid_button(false);
+        let button = chrome.grid_button(SPACING);
+        let unlit = chrome.grid_button(None);
 
-        assert_eq!(button.width, GRID_BUTTON_ON[0]);
-        assert_eq!(unlit.width, GRID_BUTTON_OFF[0]);
+        assert_eq!(button.width, grid_width(SPACING));
+        assert_eq!(unlit.width, BUTTON_SIZE);
         assert!(unlit.width < button.width);
+        // And it is fitted to the reading rather than held at one width for
+        // every reading there is: another digit is another button's worth of
+        // number, and takes room for one.
+        assert!(chrome.grid_button(Some("500 px")).width > button.width);
         for button in [button, unlit] {
             assert_eq!(button.right(), chrome.top.right() - BAR_PADDING);
             assert_eq!(
@@ -478,16 +511,16 @@ mod tests {
         // button and outside the narrow one is the grid switched on and
         // nothing at all switched off.
         let wide_only = [unlit.x - 2.0, button.y + 1.0];
-        assert_eq!(chrome.widget_at(wide_only, true), Some(Widget::Grid));
-        assert_eq!(chrome.widget_at(wide_only, false), None);
+        assert_eq!(chrome.widget_at(wide_only, SPACING), Some(Widget::Grid));
+        assert_eq!(chrome.widget_at(wide_only, None), None);
         assert_eq!(
-            chrome.widget_at([unlit.x + 1.0, unlit.y + 1.0], false),
+            chrome.widget_at([unlit.x + 1.0, unlit.y + 1.0], None),
             Some(Widget::Grid)
         );
         // The bar it sits in is still the interface, so the facts written
         // beside it are not a press on anything.
         assert_eq!(
-            chrome.widget_at([button.x - 2.0, button.y + 1.0], true),
+            chrome.widget_at([button.x - 2.0, button.y + 1.0], SPACING),
             None
         );
         assert!(chrome.contains([button.x - 2.0, button.y + 1.0]));
@@ -503,11 +536,11 @@ mod tests {
     fn the_bars_end_on_the_same_lines_as_the_side_toggles() {
         for size in [WINDOW, [640.0, 480.0], [2000.0, 1400.0]] {
             let chrome = Chrome::new(size);
-            for grid_on in [false, true] {
+            for spacing in [None, SPACING] {
                 assert_eq!(
-                    chrome.grid_button(grid_on).right(),
+                    chrome.grid_button(spacing).right(),
                     chrome.histogram_button.right(),
-                    "{size:?} grid_on={grid_on}"
+                    "{size:?} spacing={spacing:?}"
                 );
             }
             assert_eq!(chrome.histogram_button.right(), chrome.info_button.right());
@@ -516,21 +549,23 @@ mod tests {
             assert_eq!(BAR_PADDING, chrome.minimap_button.x - chrome.left.x);
             assert_eq!(
                 BAR_PADDING,
-                chrome.top.right() - chrome.grid_button(false).right()
+                chrome.top.right() - chrome.grid_button(None).right()
             );
         }
     }
 
     /// The zoom readout shares the top bar with the grid toggle, just inside
     /// it: the two buttons are the measurements of the picture, and both are
-    /// at the end the facts about it are written towards.
+    /// at the end the facts about it are written towards. The gap between
+    /// them is the same one every pair of buttons in the window is set at,
+    /// whatever the toggle is reading out.
     #[test]
     fn the_zoom_readout_sits_inside_the_grid_toggle_in_the_top_bar() {
         let chrome = Chrome::new(WINDOW);
 
-        for grid_on in [false, true] {
-            let button = chrome.zoom_button(grid_on);
-            let grid = chrome.grid_button(grid_on);
+        for spacing in [None, SPACING, Some("10000 px")] {
+            let button = chrome.zoom_button(spacing);
+            let grid = chrome.grid_button(spacing);
 
             assert_eq!(button.width, ZOOM_BUTTON[0]);
             assert_eq!(button.right(), grid.x - BUTTON_GAP);
@@ -544,17 +579,17 @@ mod tests {
 
             // Each of the two takes only the press that lands on itself.
             assert_eq!(
-                chrome.widget_at([button.x + 1.0, button.y + 1.0], grid_on),
+                chrome.widget_at([button.x + 1.0, button.y + 1.0], spacing),
                 Some(Widget::Zoom)
             );
             assert_eq!(
-                chrome.widget_at([grid.x + 1.0, grid.y + 1.0], grid_on),
+                chrome.widget_at([grid.x + 1.0, grid.y + 1.0], spacing),
                 Some(Widget::Grid)
             );
             // The bar they sit in is still the interface, so a press between
             // them does not reach the image behind.
             assert_eq!(
-                chrome.widget_at([button.x - 2.0, button.y + 1.0], grid_on),
+                chrome.widget_at([button.x - 2.0, button.y + 1.0], spacing),
                 None
             );
             assert!(chrome.contains([button.x - 2.0, button.y + 1.0]));
@@ -562,7 +597,7 @@ mod tests {
 
         // Lighting the grid widens its button, which pushes the readout along
         // with it rather than letting the two overlap.
-        assert!(chrome.zoom_button(true).x < chrome.zoom_button(false).x);
+        assert!(chrome.zoom_button(SPACING).x < chrome.zoom_button(None).x);
     }
 
     /// The panels are opaque, so the image is fitted into what they leave —
@@ -598,5 +633,25 @@ mod tests {
         assert!(placement.x + placement.width <= shown.x + shown.width + 0.5);
         assert!(placement.y >= shown.y - 0.5);
         assert!(placement.y + placement.height <= shown.y + shown.height + 0.5);
+    }
+
+    /// The grid toggle wears its mark in the last button's width of itself,
+    /// so where the mark lands is decided by the toggle's right edge. That
+    /// edge does not move when the toggle lights up and grows leftwards to
+    /// make room for its reading, and it is the same edge the column of
+    /// toggles down the right of the window is aligned to — so all of those
+    /// marks line up, lit or not.
+    #[test]
+    fn the_grid_toggle_keeps_its_mark_over_the_toggles_below() {
+        let chrome = Chrome::new(WINDOW);
+        let (on, off) = (chrome.grid_button(SPACING), chrome.grid_button(None));
+        assert!(
+            on.width > off.width,
+            "the lit toggle makes room for a reading"
+        );
+        assert_eq!(on.right(), off.right(), "and grows leftwards to do it");
+        assert_eq!(on.right(), chrome.histogram_button.right());
+        assert_eq!(on.right(), chrome.info_button.right());
+        assert_eq!(off.width, chrome.histogram_button.width);
     }
 }

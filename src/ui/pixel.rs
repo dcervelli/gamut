@@ -17,7 +17,7 @@ use crate::theme::Theme;
 
 use super::buttons::outline;
 use super::chrome::BAR_PADDING;
-use super::{Current, TEXT_SIZE, text_baseline};
+use super::{BECOMES, Current, TEXT_SIZE, text_baseline};
 
 /// Side of the colour swatch, in logical pixels: the height of a line of
 /// text, so that it reads as part of the sentence beside it.
@@ -154,7 +154,7 @@ fn values(image: &DecodedImage, sample: &Sample, mapped: &Mapped) -> String {
         .iter()
         .map(|value| format!("{value:.3}"))
         .collect();
-    format!("{}   \u{2192}   {}", stored.join(" "), displayed.join(" "))
+    format!("{}   {BECOMES}   {}", stored.join(" "), displayed.join(" "))
 }
 
 /// One stored component, in the units the file keeps it in. Integer samples
@@ -224,7 +224,7 @@ mod tests {
         // everything after it works in — sRGB 231 is 80% of the way up.
         assert_eq!(
             read(&rgb8([231, 128, 64]), &Display::default(), [3, 4]),
-            "231 128 64   \u{2192}   0.799 0.216 0.051"
+            format!("231 128 64   {BECOMES}   0.799 0.216 0.051")
         );
     }
 
@@ -244,14 +244,17 @@ mod tests {
         );
         let display = Display::default();
 
-        assert_eq!(read(&image, &display, [0, 0]), "0.1250   \u{2192}   0.125");
+        assert_eq!(
+            read(&image, &display, [0, 0]),
+            format!("0.1250   {BECOMES}   0.125")
+        );
         assert_eq!(
             read(&image, &display, [1, 0]),
-            "2.500e-6   \u{2192}   0.000"
+            format!("2.500e-6   {BECOMES}   0.000")
         );
         assert_eq!(
             read(&image, &display, [2, 0]),
-            "1.000e7   \u{2192}   10000000.000"
+            format!("1.000e7   {BECOMES}   10000000.000")
         );
     }
 

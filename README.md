@@ -1016,3 +1016,7 @@ Dual-licensed under either of
 at your option. Unless you state otherwise, any contribution you intentionally
 submit for inclusion in this work shall be dual-licensed as above, without any
 additional terms or conditions.
+
+The marks the buttons wear are [Lucide](https://lucide.dev)'s geometry,
+redescribed in `src/ui/icon.rs` as a table of strokes on Lucide's own 24-unit
+grid. Lucide is ISC-licensed ([LICENSE-LUCIDE](LICENSE-LUCIDE)).

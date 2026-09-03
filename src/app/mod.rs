@@ -247,7 +247,22 @@ impl App {
             &self.panels,
             self.logical_size(),
             self.shown(),
+            self.grid_spacing().as_deref(),
         ))
+    }
+
+    /// What the grid toggle is reading out, and so how much of the top bar it
+    /// is taking: how far apart its lines are at the zoom on screen, or
+    /// `None` with the grid off or nothing to lay one over.
+    ///
+    /// Worked out from the same zoom the frame builder works it out from,
+    /// rather than remembered from the frame it drew: it is the width of a
+    /// button the pointer has to be answered against, and a width kept
+    /// between the two of them is a width that can fall out of step.
+    pub(super) fn grid_spacing(&self) -> Option<String> {
+        let current = self.current.as_ref()?;
+        let zoom = self.view.zoom(current.size(), self.viewport());
+        ui::grid_spacing(self.panels.show_grid, zoom, self.scale_factor())
     }
 
     /// Whether the menu that is open has the pointer, rather than the layer

@@ -148,10 +148,35 @@ pub enum Blend {
     Screen,
 }
 
+/// The x axis of everything that lies with the window, which is every shape
+/// in the interface but the strokes an icon is drawn from.
+const ALONG_THE_WINDOW: [f32; 2] = [1.0, 0.0];
+
+/// The square `radius` out from `centre` on all sides: the box a circle of
+/// that radius is drawn in.
+fn square(centre: [f32; 2], radius: f32) -> Rect {
+    Rect::new(
+        centre[0] - radius,
+        centre[1] - radius,
+        2.0 * radius,
+        2.0 * radius,
+    )
+}
+
 pub(crate) struct QuadItem {
-    rect: Rect,
+    /// Centre, and half extent along the shape's own two axes, in logical
+    /// pixels. A stroked shape's extent is its centre line: the band the
+    /// shader lays down straddles it.
+    centre: [f32; 2],
+    half: [f32; 2],
     color: Color,
     corner: f32,
+    /// The unit vector the shape's own x axis runs along. `[1.0, 0.0]` for
+    /// everything that lies with the window, which is everything but the
+    /// strokes an icon is drawn from.
+    axis: [f32; 2],
+    /// Zero for a filled shape; the width of the band, for a stroked one.
+    stroke: f32,
     blend: Blend,
 }
 
@@ -264,6 +289,31 @@ impl UiFrame {
         &mut self.layers[self.current]
     }
 
+    /// The one place a quad is added to the list. Everything else here is a
+    /// choice of the four things one can be: where it is, how round, which
+    /// way it faces, and whether it is filled or drawn as a band on its own
+    /// outline.
+    #[allow(clippy::too_many_arguments)]
+    fn quad(
+        &mut self,
+        rect: Rect,
+        color: Color,
+        corner: f32,
+        axis: [f32; 2],
+        stroke: f32,
+        blend: Blend,
+    ) {
+        self.layer().shapes.push(Shape::Quad(QuadItem {
+            centre: [rect.x + rect.width / 2.0, rect.y + rect.height / 2.0],
+            half: [rect.width / 2.0, rect.height / 2.0],
+            color,
+            corner,
+            axis,
+            stroke,
+            blend,
+        }));
+    }
+
     pub fn rect(&mut self, rect: Rect, color: Color) {
         self.rect_blended(rect, color, Blend::Over);
     }
@@ -271,12 +321,7 @@ impl UiFrame {
     /// As [`UiFrame::rect`], but combined with what is under it by `blend`
     /// rather than simply covering it.
     pub fn rect_blended(&mut self, rect: Rect, color: Color, blend: Blend) {
-        self.layer().shapes.push(Shape::Quad(QuadItem {
-            rect,
-            color,
-            corner: 0.0,
-            blend,
-        }));
+        self.quad(rect, color, 0.0, ALONG_THE_WINDOW, 0.0, blend);
     }
 
     /// What a line `thickness` logical pixels thick is actually drawn: the
@@ -291,6 +336,113 @@ impl UiFrame {
             (thickness * self.scale).round().max(1.0) / self.scale
         } else {
             thickness
+        }
+    }
+
+    /// One coordinate moved onto the device's own pixel grid, in logical
+    /// pixels.
+    ///
+    /// A display need not have a whole number of device pixels to the logical
+    /// one, so a coordinate that is round in the units the interface is
+    /// written in is very often not round in the units it is drawn in — and
+    /// every edge the shader lays down is feathered over a device pixel,
+    /// which is what turns that difference into a blur.
+    pub fn snap(&self, value: f32) -> f32 {
+        if self.scale.is_finite() && self.scale > 0.0 {
+            (value * self.scale).round() / self.scale
+        } else {
+            value
+        }
+    }
+
+    /// `rect` with all four of its edges on the device grid, and never
+    /// narrower or shallower than a single device pixel — something rounded
+    /// away to nothing is not a fainter shape but no shape.
+    pub fn snap_rect(&self, rect: Rect) -> Rect {
+        let (x, y) = (self.snap(rect.x), self.snap(rect.y));
+        let least = self.line_width(0.0);
+        Rect::new(
+            x,
+            y,
+            (self.snap(rect.right()) - x).max(least),
+            (self.snap(rect.bottom()) - y).max(least),
+        )
+    }
+
+    /// The largest whole number of `step`s that fits inside `value`, and
+    /// never fewer than one.
+    ///
+    /// What sizes the square an icon is drawn in. An icon is described on a
+    /// grid of its own and scaled into that square, so whether the grid
+    /// divides into whole device pixels decides whether the cells of a
+    /// lattice come out equal — snapping each line on its own cannot fix an
+    /// interval that is five and a half pixels wide, it can only round the
+    /// lines to either side of it in different directions.
+    ///
+    /// Down rather than to the nearest, so that a caller which set aside
+    /// `value` for the square has set aside enough: rounding up could return
+    /// half a step more than the room it was given.
+    pub fn snap_within(&self, value: f32, step: f32) -> f32 {
+        if !(self.scale.is_finite() && self.scale > 0.0) || step <= 0.0 {
+            return value;
+        }
+        let step = step * self.scale;
+        ((value * self.scale / step).floor().max(1.0) * step) / self.scale
+    }
+
+    /// `pixels` device pixels, in the logical ones the interface is written
+    /// in: for a measure that is fixed in the device's own units, the way the
+    /// quantum an icon's square is sized in is.
+    pub fn device_pixels(&self, pixels: f32) -> f32 {
+        if self.scale.is_finite() && self.scale > 0.0 {
+            pixels / self.scale
+        } else {
+            pixels
+        }
+    }
+
+    /// Where a stroke `thickness` wide, wanted at `at` device pixels, has to
+    /// be centred for both of its edges to land on device pixel boundaries:
+    /// the middle of a pixel when it is an odd number of them across, and the
+    /// seam between two when it is even. The answer is in logical pixels, as
+    /// everything a frame holds is.
+    ///
+    /// The rule every icon is drawn by, and the counterpart of
+    /// [`UiFrame::line`] for anything given as a centre line rather than as
+    /// the box it fills. `thickness` is what [`UiFrame::line_width`] gave, so
+    /// that it is a whole number of device pixels to begin with; a stroke
+    /// centred anywhere else is spread over one pixel more than it needs, and
+    /// the feather then draws it at two weights depending on where it fell.
+    ///
+    /// `at` is in device pixels rather than logical ones because a caller
+    /// that can say exactly where a mark goes in the device's own units would
+    /// lose that exactness by converting first: a whole number of device
+    /// pixels is a repeating fraction of a logical one at any scale that is
+    /// not itself whole, and multiplying it back lands a hair either side of
+    /// the half pixel the stroke was to be centred on. Which side is
+    /// arbitrary, and a row of marks landing on different sides is a row with
+    /// uneven gaps — which is what a lattice must not have.
+    pub fn stroke_centre_in_device(&self, at: f32, thickness: f32) -> f32 {
+        if !(self.scale.is_finite() && self.scale > 0.0) {
+            return at;
+        }
+        let phase = if (thickness * self.scale).round() as i32 % 2 == 0 {
+            0.0
+        } else {
+            0.5
+        };
+        ((at - phase).round() + phase) / self.scale
+    }
+
+    /// `value` in device pixels, rounded to a whole one: the inverse of
+    /// [`UiFrame::device_pixels`], for a measure already known to be on the
+    /// device's grid and wanted back in its own units without the error that
+    /// a round trip through logical pixels leaves behind.
+    pub fn to_device(&self, value: f32) -> f32 {
+        if self.scale.is_finite() && self.scale > 0.0 {
+            (value * self.scale).round()
+        } else {
+            value
         }
     }
 
@@ -337,12 +489,60 @@ impl UiFrame {
     }
 
     pub fn rounded_rect(&mut self, rect: Rect, corner: f32, color: Color) {
-        self.layer().shapes.push(Shape::Quad(QuadItem {
-            rect,
+        self.quad(rect, color, corner, ALONG_THE_WINDOW, 0.0, Blend::Over);
+    }
+
+    /// A stroke `width` wide from `from` to `to`, with a round cap at each
+    /// end.
+    ///
+    /// One instance whichever way it runs: a box with no thickness, drawn as
+    /// a band on its own outline, comes out a stadium about the line between
+    /// the two points. So a stroke at an angle is anti-aliased by the same
+    /// half pixel of feathering as the edge of a panel, rather than by
+    /// nothing at all the way a triangulated one would be.
+    ///
+    /// Nothing here is snapped. Where a stroke has to be sharp — an icon —
+    /// the caller puts its ends on the device grid first, with
+    /// [`UiFrame::stroke_centre_in_device`].
+    pub fn stroke(&mut self, from: [f32; 2], to: [f32; 2], width: f32, color: Color) {
+        let (dx, dy) = (to[0] - from[0], to[1] - from[1]);
+        let length = dx.hypot(dy);
+        // A stroke between one point and itself is a dot, and has no
+        // direction to be turned by.
+        let axis = if length > f32::EPSILON {
+            [dx / length, dy / length]
+        } else {
+            ALONG_THE_WINDOW
+        };
+        let centre = [(from[0] + to[0]) / 2.0, (from[1] + to[1]) / 2.0];
+        self.quad(
+            Rect::new(centre[0] - length / 2.0, centre[1], length, 0.0),
             color,
-            corner,
-            blend: Blend::Over,
-        }));
+            0.0,
+            axis,
+            width,
+            Blend::Over,
+        );
+    }
+
+    /// A band `width` wide laid along the outline of `rect`, rounded by
+    /// `corner`: a rectangle drawn rather than filled.
+    ///
+    /// `rect` is the centre line, the way an SVG rectangle's is, so the band
+    /// reaches half its width either side of it.
+    pub fn stroke_rect(&mut self, rect: Rect, corner: f32, width: f32, color: Color) {
+        self.quad(rect, color, corner, ALONG_THE_WINDOW, width, Blend::Over);
+    }
+
+    /// A filled circle.
+    pub fn circle(&mut self, centre: [f32; 2], radius: f32, color: Color) {
+        self.rounded_rect(square(centre, radius), radius, color);
+    }
+
+    /// A circle drawn rather than filled: [`UiFrame::stroke_rect`] on a
+    /// square rounded as far as it will go.
+    pub fn stroke_circle(&mut self, centre: [f32; 2], radius: f32, width: f32, color: Color) {
+        self.stroke_rect(square(centre, radius), radius, width, color);
     }
 
     /// Fills the region between the polyline `top` — left to right, in
@@ -415,17 +615,6 @@ impl UiFrame {
                 blend,
             }));
         }
-    }
-
-    /// A filled triangle, in logical pixels: what the arrowheads and
-    /// chevrons an icon is drawn from are made of, since a rectangle cannot
-    /// point anywhere.
-    pub fn triangle(&mut self, vertices: [[f32; 2]; 3], color: Color) {
-        self.layer().shapes.push(Shape::Poly(PolyItem {
-            vertices: vertices.to_vec(),
-            color,
-            blend: Blend::Over,
-        }));
     }
 
     /// Draws `text` with its top-left corner at `at`.
@@ -557,6 +746,25 @@ pub struct UiRenderer {
     text: Text,
 }
 
+/// The fonts are here, so this is what answers for them.
+impl crate::render::TextMeasure for UiRenderer {
+    fn measure_text(&mut self, text: &str, size: f32) -> [f32; 2] {
+        self.text.measure(text, size, Face::Sans, None)
+    }
+
+    fn measure_mono(&mut self, text: &str, size: f32) -> [f32; 2] {
+        self.text.measure(text, size, Face::Mono, None)
+    }
+
+    fn measure_wrapped(&mut self, text: &str, size: f32, width: f32) -> [f32; 2] {
+        self.text.measure(text, size, Face::Sans, Some(width))
+    }
+
+    fn cap_centre(&mut self, size: f32) -> f32 {
+        self.text.cap_centre(size, Face::Sans)
+    }
+}
+
 impl UiRenderer {
     pub fn new(
         device: &wgpu::Device,
@@ -567,24 +775,6 @@ impl UiRenderer {
             shapes: Shapes::new(device, target_format),
             text: Text::new(device, queue, target_format),
         }
-    }
-
-    /// Width and height of `text` in logical pixels, for laying out anything
-    /// that has to sit next to it.
-    pub fn measure(&mut self, text: &str, size: f32) -> [f32; 2] {
-        self.text.measure(text, size, Face::Sans, None)
-    }
-
-    /// As [`UiRenderer::measure`], for a run set in the monospace face.
-    pub fn measure_mono(&mut self, text: &str, size: f32) -> [f32; 2] {
-        self.text.measure(text, size, Face::Mono, None)
-    }
-
-    /// As [`UiRenderer::measure`], but for text broken across lines at
-    /// `width`: how tall a paragraph will come out, for anything stacking one
-    /// under another.
-    pub fn measure_wrapped(&mut self, text: &str, size: f32, width: f32) -> [f32; 2] {
-        self.text.measure(text, size, Face::Sans, Some(width))
     }
 
     /// `physical` is the target size in device pixels; `scale` takes the
@@ -615,5 +805,91 @@ impl UiRenderer {
 
     pub fn trim(&mut self) {
         self.text.trim();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The scales a display actually asks for, whole and fractional.
+    const SCALES: [f32; 5] = [1.0, 1.25, 1.5, 1.75, 2.0];
+
+    /// A stroke centred where `stroke_centre_in_device` puts it has both edges
+    /// on a device pixel boundary — which is the whole reason the method
+    /// exists, and is not what rounding to a whole logical pixel gives.
+    #[test]
+    fn a_stroke_centre_puts_both_edges_on_the_grid() {
+        for scale in SCALES {
+            let frame = UiFrame::new(scale);
+            for thickness in [1.0, 1.5, 2.0, 3.0] {
+                let width = frame.line_width(thickness);
+                for step in 0..40 {
+                    let asked = step as f32 * 0.37;
+                    let centre = frame.stroke_centre_in_device(asked * scale, width);
+                    for edge in [centre - width / 2.0, centre + width / 2.0] {
+                        let device = edge * scale;
+                        assert!(
+                            (device - device.round()).abs() < 1e-3,
+                            "scale {scale}, width {width}: an edge at {device}"
+                        );
+                    }
+                    // And it is the nearest such place, not just some place.
+                    assert!(
+                        (centre - asked).abs() <= 0.5 / scale + 1e-3,
+                        "scale {scale}: {asked} moved to {centre}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// A line thinner than a device pixel is not a fainter line but a line
+    /// drawn at random, so a snapped rectangle keeps a pixel either way.
+    #[test]
+    fn a_snapped_rectangle_never_vanishes() {
+        for scale in SCALES {
+            let frame = UiFrame::new(scale);
+            let thin = frame.snap_rect(Rect::new(3.2, 4.9, 0.01, 0.01));
+            assert!(thin.width * scale >= 1.0 - 1e-3, "{thin:?} at {scale}");
+            assert!(thin.height * scale >= 1.0 - 1e-3, "{thin:?} at {scale}");
+        }
+    }
+
+    #[test]
+    fn snapping_within_a_step_lands_on_a_whole_multiple_that_fits() {
+        for scale in SCALES {
+            let frame = UiFrame::new(scale);
+            let step = frame.device_pixels(8.0);
+            for asked in [1.0, 7.0, 13.4, 22.0] {
+                let side = frame.snap_within(asked, step);
+                let steps = side / step;
+                assert!(
+                    (steps - steps.round()).abs() < 1e-3,
+                    "scale {scale}: {asked} snapped to {side}, which is {steps} steps"
+                );
+                // Never more room than it was given, unless one whole step is
+                // already more than that.
+                assert!(
+                    side <= asked + 1e-3 || steps <= 1.0 + 1e-3,
+                    "scale {scale}: {asked} snapped up to {side}"
+                );
+                assert!(side > 0.0);
+            }
+        }
+    }
+
+    /// Nothing here may divide by a scale the window has not reported yet.
+    #[test]
+    fn an_impossible_scale_leaves_every_measure_alone() {
+        for scale in [0.0, f32::NAN, f32::INFINITY] {
+            let frame = UiFrame::new(scale);
+            assert_eq!(frame.snap(3.7), 3.7);
+            assert_eq!(frame.stroke_centre_in_device(3.7, 1.0), 3.7);
+            assert_eq!(frame.snap_within(3.7, 1.0), 3.7);
+            assert_eq!(frame.device_pixels(3.7), 3.7);
+            assert_eq!(frame.to_device(3.7), 3.7);
+            assert_eq!(frame.line_width(2.0), 2.0);
+        }
     }
 }

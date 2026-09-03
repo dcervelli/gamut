@@ -20,6 +20,9 @@ ui/            builds each frame's display list; no wgpu or winit imports
   chrome.rs      the four panels and their buttons; content_area(), image_viewport()
   layers.rs      which layer the pointer is on: Hit, hit() — one answer for hover, press, wheel and readout
   histogram.rs / minimap.rs / grid.rs / buttons.rs   one widget each
+  icon.rs        the marks a button wears: Lucide's geometry on its own
+                 24-unit grid, sized and placed in whole device pixels so
+                 strokes stay sharp and evenly spaced marks stay even
   info.rs        the file's own facts, in a column that scrolls
   pixel.rs       the pointer's readout: coordinate, stored and mapped values, swatch
   menu.rs        Menu (which popup is open), the zoom menu's choices, and how its cells are drawn
@@ -47,7 +50,9 @@ render/        the GPU
   mod.rs         Renderer: surface, device, the three passes; Scene is what a frame draws; TextMeasure trait
   placement.rs   Placement (where the image lands) and Upscale (the magnification filter)
   upload.rs      texture format choice and the transfer-function LUTs; the "sampled texel is linear" invariant
-  image_layer.rs / reduce.rs / composite.rs / ui_layer/   the passes; ui_layer holds Rect, Color, UiFrame, and popup.rs (sections of cells anchored to a corner)
+  image_layer.rs / reduce.rs / composite.rs / ui_layer/   the passes; ui_layer holds Rect, Color, UiFrame — its
+               quads fill or stroke a rounded box at any angle, and snap/stroke_centre_in_device put one on the device grid —
+               and popup.rs (sections of cells anchored to a corner)
   shader_codes.rs  every Rust<->WGSL integer code, one fn per shader switch
   gpu.rs         wgpu boilerplate helpers (layouts, uniform buffers, full-screen pipelines, GrowableBuffer)
   shaders/       WGSL; each Params struct is mirrored by a #[repr(C)] struct in the .rs file that loads it
@@ -69,6 +74,7 @@ name.
 | A key binding | `app/input.rs`: one `KEYS` entry, with the `mods` it is held with, and one `perform` arm. `--help` follows. |
 | A status-bar segment | `ui/status.rs`; the pointer's pixel readout is `ui/pixel.rs` |
 | What a pixel reads as under the pointer | `image/mod.rs::sample` for what the file holds, `image/display.rs::map` for what the screen shows |
+| A button's icon | `ui/icon.rs`: one `&[Mark]` on the 24-unit grid, and one `icon::draw` call where the button is drawn. The caller sets aside a budget; whether the mark comes out sharp is `UiFrame::stroke_centre_in_device`'s business and whether its spacing stays even is `icon::fit`'s |
 | A panel or overlay | a new `ui/<name>.rs` and one call in `ui/mod.rs::build_frame`; if the pointer can be on it, a `Hit` variant and one test in `ui/layers.rs` at the same height in the stack it is drawn at; a new colour role goes in `theme/mod.rs` |
 | What the info panel says about a file | `ui/info.rs` for the layout; the file's own facts are gathered in `app/mod.rs::file_facts`, its metadata in `image/exif.rs`, and its georeference in `image/geo.rs` |
 | A popup menu | a `Menu` variant in `ui/menu.rs` with its choices, `sections`/`grid`/`choose` arms and a `draw` arm; `Chrome::popup` places it, `App::press` opens it, and `ui/layers.rs` puts it over everything |
@@ -88,7 +94,18 @@ name.
 - A sampled texel is always linear in the working space. Transfer functions
   are resolved once at upload (`render/upload.rs`), never in a shader.
 - The interface is laid out in logical pixels; the image is placed in
-  physical ones. `FrameInput.scale` converts.
+  physical ones. `FrameInput.scale` converts. A display need not have a whole
+  number of device pixels to the logical one, so anything thin — a rule, an
+  icon's stroke — is put on the device's own grid before it is drawn
+  (`UiFrame::line`, `snap`, `stroke_centre_in_device`). Rounding to a whole logical
+  pixel is not the same thing and is not enough.
+- A label that sits beside a mark is levelled on its capitals
+  (`TextMeasure::cap_centre`), not on the box its line is laid out in — that
+  box keeps room under the baseline for descenders the label may not have. A
+  line of prose in a bar centres the box instead (`ui/mod.rs::text_baseline`),
+  descenders being ordinary there.
+- The interface's face has no U+2192, and the arrow the fallback supplies sits
+  low, so a readout showing one thing become another uses `ui::BECOMES`.
 - Handlers return an `Effect` (`Redraw` / `Nothing` / `Quit`), never call
   `request_redraw` themselves.
 - Docs: `user-docs/` is for users and has its own CLAUDE.md; implementation

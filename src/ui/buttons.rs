@@ -5,7 +5,8 @@ use crate::render::{Color, Rect, TextMeasure, UiFrame};
 use crate::theme::Theme;
 
 use super::TEXT_SIZE;
-use super::chrome::{BUTTON_SIZE, GRID_BUTTON_OFF, GRID_BUTTON_ON, ZOOM_BUTTON};
+use super::chrome::{BUTTON_SIZE, READING_GAP, ZOOM_BUTTON, grid_width};
+use super::icon;
 use super::menu::CELL_RADIUS;
 
 /// How much of the accent is left behind a switched-on toggle. Enough to read
@@ -15,10 +16,13 @@ const ACTIVE_BUTTON_WASH: u8 = 64;
 
 /// The corner radius of a side-panel toggle.
 const TOGGLE_RADIUS: f32 = 5.0;
-/// What is left around a toggle's icon, across and down. The side panels are
-/// a bar's thickness wide and the buttons fill them, so the icons are small:
-/// what these are set against is legibility at that size, not the button.
-const ICON_INSET: f32 = 6.0;
+/// The room set aside for a toggle's mark: what [`icon::fit`] is given to
+/// size a square out of, not the size it comes back with. The side panels are
+/// a bar's thickness wide and the buttons fill them, so what this is set
+/// against is legibility at that size rather than the button — three logical
+/// pixels of air is enough to keep a mark off the button's rounded corners,
+/// and every pixel beyond that is one the mark does not have.
+pub(super) const ICON_SIDE: f32 = BUTTON_SIZE - 6.0;
 
 /// The histogram toggle: a miniature of what it shows, rather than a letter,
 /// since the side panels are too narrow to label anything in words.
@@ -29,34 +33,12 @@ pub(super) fn histogram_button(
     hover: bool,
     theme: &Theme,
 ) {
-    // A window too small to hold the button gets no button, rather than a
-    // smear of sub-pixel bars.
-    if rect.width < BUTTON_SIZE {
-        return;
-    }
-    let (background, ink) = button_ink(active, hover, theme);
-    frame.rounded_rect(rect, TOGGLE_RADIUS, background);
-
-    const BARS: [f32; 4] = [0.45, 1.0, 0.7, 0.3];
-    let plot = rect.inset(ICON_INSET, ICON_INSET);
-    let step = plot.width / BARS.len() as f32;
-    for (index, fraction) in BARS.iter().enumerate() {
-        let height = plot.height * fraction;
-        frame.rect(
-            Rect::new(
-                (plot.x + index as f32 * step).round(),
-                plot.bottom() - height,
-                (step - 1.0).max(1.0),
-                height,
-            ),
-            ink,
-        );
-    }
+    toggle(frame, rect, icon::CHART_AREA, active, hover, theme);
 }
 
-/// The info toggle: the letter i, which is what the panel it opens is — a
-/// column of words about the file, rather than a picture of anything the way
-/// the other two toggles are.
+/// The info toggle. The panel it opens is a column of words about the file
+/// rather than a picture of anything the way the other two are, so the mark
+/// for it is the one the rest of the world already uses for that.
 pub(super) fn info_button(
     frame: &mut UiFrame,
     rect: Rect,
@@ -64,30 +46,29 @@ pub(super) fn info_button(
     hover: bool,
     theme: &Theme,
 ) {
-    if rect.width < BUTTON_SIZE {
-        return;
-    }
-    let (background, ink) = button_ink(active, hover, theme);
-    frame.rounded_rect(rect, TOGGLE_RADIUS, background);
-
-    const STROKE: f32 = 3.0;
-    const TITTLE_GAP: f32 = 2.5;
-    let icon = rect.inset(0.0, ICON_INSET - 1.0);
-    let x = (rect.x + (rect.width - STROKE) / 2.0).round();
-    frame.rounded_rect(Rect::new(x, icon.y, STROKE, STROKE), STROKE / 2.0, ink);
-    let stem = icon.y + STROKE + TITTLE_GAP;
-    frame.rounded_rect(
-        Rect::new(x, stem, STROKE, (icon.bottom() - stem).max(0.0)),
-        STROKE / 2.0,
-        ink,
-    );
+    toggle(frame, rect, icon::INFO, active, hover, theme);
 }
 
-/// The minimap toggle: the panel itself in miniature, a frame for the image
-/// with the viewport sitting in a corner of it.
+/// The minimap toggle: the panel itself in miniature, a frame for the whole
+/// image with a smaller view of it inside.
 pub(super) fn minimap_button(
     frame: &mut UiFrame,
     rect: Rect,
+    active: bool,
+    hover: bool,
+    theme: &Theme,
+) {
+    toggle(frame, rect, icon::SQUARE_SQUARE, active, hover, theme);
+}
+
+/// One square toggle in a side panel: the button, and the mark it wears.
+///
+/// A window too small to hold the button gets no button, rather than a smear
+/// of a mark drawn into less room than its own strokes need.
+fn toggle(
+    frame: &mut UiFrame,
+    rect: Rect,
+    marks: &[icon::Mark],
     active: bool,
     hover: bool,
     theme: &Theme,
@@ -97,19 +78,14 @@ pub(super) fn minimap_button(
     }
     let (background, ink) = button_ink(active, hover, theme);
     frame.rounded_rect(rect, TOGGLE_RADIUS, background);
-
-    // Wider than it is tall, the way a window is, and so inset further across
-    // than down.
-    let icon = rect.inset(ICON_INSET - 1.0, ICON_INSET);
-    outline(frame, icon, 1.0, ink);
-    frame.rect(
-        Rect::new(
-            icon.x + 2.0,
-            icon.y + 2.0,
-            icon.width * 0.5,
-            icon.height * 0.5,
-        ),
+    // No knockout in any of these three, so the ground goes unused; the
+    // button's own is what one would cover anyway.
+    icon::draw(
+        frame,
+        marks,
+        icon::fit(frame, rect, ICON_SIDE),
         ink,
+        background,
     );
 }
 
@@ -184,19 +160,19 @@ pub(super) fn zoom_button(
     centred_text(frame, text, rect, ink, &percent(zoom));
 }
 
-/// Side of the grid icon, and the room between it and the spacing beside it.
-/// Smaller than the button it sits in by about what a side toggle's icon is
-/// smaller than its own, so that the two read as the same weight where they
-/// meet in the corner of the window — a lattice needs more room than a bar
-/// chart to stay a lattice, which is why it is not simply the same size.
-const GRID_ICON: f32 = 12.0;
-const GRID_ICON_GAP: f32 = 7.0;
+/// Side of the grid mark. A side toggle's, since the grid toggle is the same
+/// size as one and the two meet in the corner of the window, where a mark
+/// drawn at a second size would read as a mistake.
+const GRID_ICON: f32 = ICON_SIDE;
 
 /// The grid toggle: the icon always, and — while the grid is on — how far
 /// apart its lines are, in `spacing`. The reading is worth the room because
 /// the spacing follows the zoom rather than being chosen, so a grid whose
 /// size is not stated is a grid that cannot be measured with; switched off
 /// there is no spacing in force, and the icon says the rest.
+///
+/// `rect` is fitted to the reading by [`grid_width`], which is also what the
+/// pointer is answered against.
 pub(super) fn grid_button(
     frame: &mut UiFrame,
     text: &mut dyn TextMeasure,
@@ -207,81 +183,61 @@ pub(super) fn grid_button(
 ) {
     // As with the toggles: a window too narrow for the whole button gets no
     // button rather than a label spilling out of one.
-    let least = if spacing.is_some() {
-        GRID_BUTTON_ON
-    } else {
-        GRID_BUTTON_OFF
-    };
-    if rect.width < least[0] || rect.height < least[1] {
+    if rect.width < grid_width(spacing) || rect.height < BUTTON_SIZE {
         return;
     }
     let (background, ink) = button_ink(spacing.is_some(), hover, theme);
     frame.rounded_rect(rect, CELL_RADIUS, background);
 
-    // Icon and reading are centred as one, so that the button reads as a
-    // label with a mark after it rather than as two things in a row.
-    //
-    // The mark comes last so that it stays at the end of the bar as the
-    // button grows leftwards to make room for the reading: the icon is what
-    // says which toggle this is, and a toggle that swapped ends with its own
-    // label every time it was pressed would be a toggle you had to find again.
-    let label = spacing.map(|spacing| (spacing, text.measure_text(spacing, TEXT_SIZE)[0]));
-    let width = GRID_ICON + label.map_or(0.0, |(_, width)| GRID_ICON_GAP + width);
-    let x = (rect.x + (rect.width - width) / 2.0).round();
-
-    if let Some((spacing, _)) = label {
+    // The mark sits in the last button's width of the toggle, whether or not
+    // there is a reading in front of it. The button grows leftwards to make
+    // room for one, so anchoring the mark to the right keeps it exactly where
+    // it was — over the column of side-panel toggles it shares a corner of
+    // the window with, and in the same place from one press to the next. A
+    // mark that moved every time the toggle was pressed, or every time the
+    // zoom put another digit in the reading, would be a mark you had to find
+    // again.
+    let mark = Rect::new(rect.right() - BUTTON_SIZE, rect.y, BUTTON_SIZE, rect.height);
+    if let Some(spacing) = spacing {
+        // Set against the mark rather than centred in what is left of the
+        // button: the number and the icon are one reading, and a number half
+        // a button clear of the mark it is qualifying reads as two things
+        // sharing a button rather than as a label with a mark after it. What
+        // the number does not use of the room [`grid_width`] gave it is left
+        // in front of it, where it is the button's own padding.
+        let width = text.measure_text(spacing, TEXT_SIZE)[0];
         frame.text(
-            [x, (rect.y + (rect.height - TEXT_SIZE * 1.3) / 2.0).round()],
+            [
+                frame.snap(mark.x - READING_GAP - width),
+                text_top(frame, text, rect, TEXT_SIZE),
+            ],
             TEXT_SIZE,
             ink,
             spacing,
         );
     }
-    grid_icon(
+    icon::draw(
         frame,
-        Rect::new(
-            x + label.map_or(0.0, |(_, width)| width + GRID_ICON_GAP),
-            (rect.y + (rect.height - GRID_ICON) / 2.0).round(),
-            GRID_ICON,
-            GRID_ICON,
-        ),
+        icon::GRID_3X3,
+        icon::fit(frame, mark, GRID_ICON),
         ink,
+        background,
     );
-}
-
-/// The grid in miniature: a frame with two lines each way through it, which
-/// is the smallest thing that reads as squares rather than as a hash.
-fn grid_icon(frame: &mut UiFrame, rect: Rect, ink: Color) {
-    const LINE: f32 = 1.0;
-    outline(frame, rect, LINE, ink);
-    for fraction in [1.0 / 3.0, 2.0 / 3.0] {
-        frame.rect(
-            Rect::new(
-                (rect.x + rect.width * fraction).round(),
-                rect.y,
-                LINE,
-                rect.height,
-            ),
-            ink,
-        );
-        frame.rect(
-            Rect::new(
-                rect.x,
-                (rect.y + rect.height * fraction).round(),
-                rect.width,
-                LINE,
-            ),
-            ink,
-        );
-    }
 }
 
 pub(super) fn percent(zoom: f32) -> String {
     format!("{:.0}%", zoom * 100.0)
 }
 
-/// Draws `label` centred in `rect`, the way a button wears its label. Whole
-/// logical pixels, since a glyph laid out on a half one is a blurred glyph.
+/// Draws `label` centred in `rect`, the way a button wears its label.
+///
+/// Levelled on its capitals rather than on the box its line is laid out in:
+/// that box keeps room under the baseline for descenders, so centring it puts
+/// a label with none — a percentage, a count of pixels — visibly low against
+/// whatever sits beside it.
+///
+/// On the device's grid, since a glyph laid out on part of a pixel is a
+/// blurred glyph.
 pub(super) fn centred_text(
     frame: &mut UiFrame,
     text: &mut dyn TextMeasure,
@@ -292,11 +248,52 @@ pub(super) fn centred_text(
     let width = text.measure_text(label, TEXT_SIZE)[0];
     frame.text(
         [
-            (rect.x + (rect.width - width) / 2.0).round(),
-            (rect.y + (rect.height - TEXT_SIZE * 1.3) / 2.0).round(),
+            frame.snap(rect.x + (rect.width - width) / 2.0),
+            text_top(frame, text, rect, TEXT_SIZE),
         ],
         TEXT_SIZE,
         color,
         label,
     );
+}
+
+/// Where a run at `size` starts for its capitals to sit level in `rect`.
+pub(super) fn text_top(frame: &UiFrame, text: &mut dyn TextMeasure, rect: Rect, size: f32) -> f32 {
+    frame.snap(rect.y + rect.height / 2.0 - text.cap_centre(size))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::render::ui_tests::test_fonts;
+
+    /// The least and the most the room [`grid_width`] sets aside may exceed
+    /// the reading it is for, in logical pixels: enough that the number is
+    /// not set against the front of the button, and little enough that the
+    /// button is not padded out of proportion to the mark at the other end
+    /// of it.
+    const PADDING: std::ops::RangeInclusive<f32> = 4.0..=16.0;
+
+    /// Every reading the grid toggle can show fits the room the button sets
+    /// aside for it, with the button's padding left over and no more.
+    ///
+    /// The room is counted in digits, the pointer having to be answered where
+    /// there are no fonts to ask. This is what holds that count to the face
+    /// the bar is actually set in: too mean and the number runs off the front
+    /// of the button, too generous and the reading drifts away from the mark
+    /// it belongs to.
+    #[test]
+    fn every_spacing_fits_the_grid_button() {
+        let Some(mut fonts) = test_fonts() else {
+            return;
+        };
+        for spacing in ["1 px", "20 px", "500 px", "5000 px", "10000 px"] {
+            let width = fonts.measure_text(spacing, TEXT_SIZE)[0];
+            let room = grid_width(Some(spacing)) - BUTTON_SIZE - READING_GAP;
+            assert!(
+                PADDING.contains(&(room - width)),
+                "\"{spacing}\" is {width} wide in a button leaving {room} for it"
+            );
+        }
+    }
 }

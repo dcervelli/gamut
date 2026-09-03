@@ -227,3 +227,52 @@ impl GrowableBuffer {
         self.buffer.slice(..)
     }
 }
+
+/// One device for the whole test run, and the capabilities of the adapter it
+/// came from. `None` where the machine has no adapter to draw with, which is
+/// how the tests that use it report success rather than failing for a reason
+/// that has nothing to do with the code.
+///
+/// Shared rather than opened per test, and per *frame* within a test, because
+/// `wgpu::Instance::new` opens a Vulkan instance and the loader's own locking
+/// does not survive a dozen threads doing that at once: the process dies in
+/// `vkCreateInstance` with no error the test harness can report. One instance
+/// is also very much faster.
+#[cfg(test)]
+pub(crate) fn test_context() -> Option<&'static TestContext> {
+    use std::sync::OnceLock;
+
+    static CONTEXT: OnceLock<Option<TestContext>> = OnceLock::new();
+    CONTEXT.get_or_init(open_test_context).as_ref()
+}
+
+#[cfg(test)]
+pub(crate) struct TestContext {
+    pub(crate) device: wgpu::Device,
+    pub(crate) queue: wgpu::Queue,
+    pub(crate) capabilities: crate::render::upload::Capabilities,
+}
+
+#[cfg(test)]
+fn open_test_context() -> Option<TestContext> {
+    let instance =
+        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::HighPerformance,
+        ..Default::default()
+    }))
+    .ok()?;
+    let capabilities = crate::render::upload::Capabilities::from_adapter(&adapter);
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        label: Some("tests"),
+        required_features: capabilities.required_features(),
+        required_limits: adapter.limits(),
+        ..Default::default()
+    }))
+    .ok()?;
+    Some(TestContext {
+        device,
+        queue,
+        capabilities,
+    })
+}

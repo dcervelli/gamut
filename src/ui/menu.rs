@@ -11,7 +11,8 @@ use crate::render::{Color, Popup, PopupGrid, PopupSection, Rect, TextMeasure, Ui
 use crate::theme::Theme;
 use crate::view::{Fit, View, Viewport};
 
-use super::buttons::{button_ink, centred_text, outline, percent};
+use super::buttons::{button_ink, centred_text, percent};
+use super::icon;
 use super::{PADDING, Panels, TEXT_SIZE, Widget};
 
 /// An ordinary cell of a popup menu, and the room around them. Wider than it
@@ -38,7 +39,9 @@ const MENU_RADIUS: f32 = 8.0;
 pub(super) const CELL_RADIUS: f32 = 5.0;
 /// The frame drawn in a fit cell of the zoom menu, which the arrows point out
 /// to the edges of.
-const FIT_ICON: [f32; 2] = [26.0, 17.0];
+/// The room set aside for the mark in a fit cell. Larger than a toggle's,
+/// the cells of a menu being larger than a button in a bar.
+const FIT_ICON: f32 = 24.0;
 
 /// A popup the interface can have open, and so what it is a menu of.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -212,7 +215,7 @@ pub(super) fn draw(
                     ZoomChoice::Scale(scale) => {
                         centred_text(frame, text, cell, ink, &percent(scale))
                     }
-                    ZoomChoice::Fit(fit) => fit_icon(frame, cell, fit, ink),
+                    ZoomChoice::Fit(fit) => fit_icon(frame, cell, fit, background, ink),
                     // In words, where the fits above are in arrows: the two
                     // filters are not a direction or a size, and there is no
                     // picture of "bicubic" a reader would arrive at unaided.
@@ -226,100 +229,17 @@ pub(super) fn draw(
     }
 }
 
-/// A box of `size` centred in `rect`: where an icon goes in a cell it is not
-/// meant to fill.
-fn centred(rect: Rect, size: [f32; 2]) -> Rect {
-    Rect::new(
-        (rect.x + (rect.width - size[0]) / 2.0).round(),
-        (rect.y + (rect.height - size[1]) / 2.0).round(),
-        size[0].min(rect.width),
-        size[1].min(rect.height),
-    )
-}
-
-/// The three fits, as the frame each of them fills and the directions it
-/// fills it in: arrows out to left and right for a fit to the width, up and
-/// down for one to the height, and both for the fit that takes in the whole
-/// image.
-fn fit_icon(frame: &mut UiFrame, cell: Rect, fit: Fit, ink: Color) {
-    let icon = centred(cell, FIT_ICON);
-    outline(frame, icon, 1.5, ink);
-    let inner = icon.inset(3.0, 3.0);
-    if fit != Fit::Height {
-        double_arrow(frame, inner, true, ink);
-    }
-    if fit != Fit::Width {
-        double_arrow(frame, inner, false, ink);
-    }
-}
-
-/// A double-headed arrow spanning `rect` along one axis and centred across
-/// the other: a shaft with a triangle pointing out at each end.
-fn double_arrow(frame: &mut UiFrame, rect: Rect, horizontal: bool, color: Color) {
-    /// How far back from the point an arrowhead reaches, and how wide it is
-    /// there.
-    const HEAD: [f32; 2] = [5.0, 7.0];
-    const SHAFT: f32 = 1.5;
-
-    let (span, across) = if horizontal {
-        (rect.width, rect.height)
-    } else {
-        (rect.height, rect.width)
+/// The three fits, each as the mark for what it fills: chevrons out to left
+/// and right for the fit to the window's width, up and down for the one to
+/// its height, and the four corners of `expand` for the fit that takes in the
+/// whole image.
+fn fit_icon(frame: &mut UiFrame, cell: Rect, fit: Fit, ground: Color, ink: Color) {
+    let marks = match fit {
+        Fit::Whole => icon::EXPAND,
+        Fit::Width => icon::CHEVRONS_LEFT_RIGHT,
+        Fit::Height => icon::CHEVRONS_UP_DOWN,
     };
-    // Two heads and nothing between them is still an arrow; less than that is
-    // a smudge, and the cell is better left with just its frame.
-    let head = HEAD[0].min(span / 2.0);
-    if span <= 0.0 || across < HEAD[1] {
-        return;
-    }
-    let middle = |low: f32, extent: f32, width: f32| low + (extent - width) / 2.0;
-
-    if horizontal {
-        let centre = rect.y + rect.height / 2.0;
-        frame.rect(
-            Rect::new(
-                rect.x + head,
-                middle(rect.y, rect.height, SHAFT),
-                span - 2.0 * head,
-                SHAFT,
-            ),
-            color,
-        );
-        for (point, back) in [(rect.x, rect.x + head), (rect.right(), rect.right() - head)] {
-            frame.triangle(
-                [
-                    [point, centre],
-                    [back, centre - HEAD[1] / 2.0],
-                    [back, centre + HEAD[1] / 2.0],
-                ],
-                color,
-            );
-        }
-    } else {
-        let centre = rect.x + rect.width / 2.0;
-        frame.rect(
-            Rect::new(
-                middle(rect.x, rect.width, SHAFT),
-                rect.y + head,
-                SHAFT,
-                span - 2.0 * head,
-            ),
-            color,
-        );
-        for (point, back) in [
-            (rect.y, rect.y + head),
-            (rect.bottom(), rect.bottom() - head),
-        ] {
-            frame.triangle(
-                [
-                    [centre, point],
-                    [centre - HEAD[1] / 2.0, back],
-                    [centre + HEAD[1] / 2.0, back],
-                ],
-                color,
-            );
-        }
-    }
+    icon::draw(frame, marks, icon::fit(frame, cell, FIT_ICON), ink, ground);
 }
 
 #[cfg(test)]
@@ -335,10 +255,10 @@ mod tests {
     #[test]
     fn the_zoom_menu_hangs_from_the_readout_that_opens_it() {
         let chrome = Chrome::new(WINDOW);
-        for grid_on in [false, true] {
-            let button = chrome.zoom_button(grid_on);
+        for spacing in [None, Some("50 px")] {
+            let button = chrome.zoom_button(spacing);
             let popup = chrome
-                .popup(Menu::Zoom, grid_on)
+                .popup(Menu::Zoom, spacing)
                 .expect("a window with room for it");
 
             assert_eq!(popup.cells().count(), ZOOM_CHOICES.len());
@@ -357,7 +277,7 @@ mod tests {
         // which is also what stops one being opened there.
         assert!(
             Chrome::new([220.0, 200.0])
-                .popup(Menu::Zoom, false)
+                .popup(Menu::Zoom, None)
                 .is_none()
         );
     }
@@ -449,7 +369,7 @@ mod tests {
     #[test]
     fn the_filters_are_named_in_cells_cut_wide_enough_for_the_words() {
         let chrome = Chrome::new(WINDOW);
-        let popup = chrome.popup(Menu::Zoom, false).expect("room for it");
+        let popup = chrome.popup(Menu::Zoom, None).expect("room for it");
         let scale = popup.cell(0);
         let filter = popup.cell(ZOOM_CHOICES.len() - 1);
 
