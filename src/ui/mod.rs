@@ -277,9 +277,23 @@ pub fn build_frame(
     let grid_step = grid::step(zoom, input.scale);
 
     // Under the floating panels, which are read against the image and would
-    // be harder to read over a grid as well.
+    // be harder to read over a grid as well. The minimap's thumbnail is not
+    // one of them — the image layer draws it, below this frame — so the grid
+    // is told to leave its rectangle alone.
     if panels.show_grid {
-        grid::draw(&mut frame, current, view, input, content, grid_step, theme);
+        let thumbnail = input
+            .minimap_on_screen
+            .then(|| minimap::thumbnail(content, current.size()))
+            .flatten();
+        grid::draw(
+            &mut frame,
+            view.placement(current.size(), input.viewport),
+            input.scale,
+            content,
+            thumbnail,
+            grid_step,
+            theme,
+        );
     }
     if panels.show_histogram {
         histogram::draw(&mut frame, text, current, input, panels, content, theme);

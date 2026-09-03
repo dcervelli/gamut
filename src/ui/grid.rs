@@ -7,11 +7,8 @@
 //! any zoom. So one spacing is picked per frame from the round numbers a
 //! ruler is marked in, and the toggle says which one is in force.
 
-use crate::render::{Rect, UiFrame};
+use crate::render::{Color, Placement, Rect, UiFrame};
 use crate::theme::Theme;
-use crate::view::View;
-
-use super::{Current, FrameInput};
 
 /// What the spacing aims at, in logical pixels. Laid out in logical rather
 /// than physical ones so the grid reads the same size on any display, the
@@ -68,17 +65,21 @@ fn next_step(step: f32) -> f32 {
 /// visible: the panels are opaque and are drawn after this, but the image can
 /// also be zoomed until it runs off every edge, and the grid marks up an
 /// image rather than a window.
+///
+/// `minimap` is the thumbnail's rectangle when the minimap is on screen. It
+/// is left clear: the thumbnail is drawn by the image layer, underneath this
+/// whole frame, so unlike the panels it cannot cover a grid line laid across
+/// it — and a grid belongs to the image being looked at, not to the map of
+/// where in it that is.
 pub(super) fn draw(
     frame: &mut UiFrame,
-    current: &Current,
-    view: &View,
-    input: &FrameInput,
+    placement: Placement,
+    scale: f32,
     content: Rect,
+    minimap: Option<Rect>,
     step: f32,
     theme: &Theme,
 ) {
-    let placement = view.placement(current.size(), input.viewport);
-    let scale = input.scale;
     if !placement.zoom.is_finite() || scale <= 0.0 {
         return;
     }
@@ -105,17 +106,56 @@ pub(super) fn draw(
     let snap = |value: f32| (value * scale).round() / scale;
 
     for x in lines(image.x, spacing, image.right(), area.x, area.right()) {
-        frame.rect(
+        fill_around(
+            frame,
             Rect::new(snap(x), area.y, width, area.height),
+            minimap,
             theme.bar_background,
         );
     }
     for y in lines(image.y, spacing, image.bottom(), area.y, area.bottom()) {
-        frame.rect(
+        fill_around(
+            frame,
             Rect::new(area.x, snap(y), area.width, width),
+            minimap,
             theme.bar_background,
         );
     }
+}
+
+/// Fills `rect`, less whatever `hole` covers of it.
+fn fill_around(frame: &mut UiFrame, rect: Rect, hole: Option<Rect>, color: Color) {
+    let Some(hole) = hole.and_then(|hole| intersect(rect, hole)) else {
+        frame.rect(rect, color);
+        return;
+    };
+    for piece in around(rect, hole) {
+        if piece.width > 0.0 && piece.height > 0.0 {
+            frame.rect(piece, color);
+        }
+    }
+}
+
+/// The pieces of `rect` left over once `hole` — which is inside it — is taken
+/// out: the strips above and below it, and the two beside it between them.
+/// Some of the four are empty where the hole meets an edge of `rect`.
+fn around(rect: Rect, hole: Rect) -> [Rect; 4] {
+    [
+        Rect::new(rect.x, rect.y, rect.width, hole.y - rect.y),
+        Rect::new(
+            rect.x,
+            hole.bottom(),
+            rect.width,
+            rect.bottom() - hole.bottom(),
+        ),
+        Rect::new(rect.x, hole.y, hole.x - rect.x, hole.height),
+        Rect::new(
+            hole.right(),
+            hole.y,
+            rect.right() - hole.right(),
+            hole.height,
+        ),
+    ]
 }
 
 /// Where the lines fall along one axis, in logical pixels: multiples of
@@ -257,6 +297,44 @@ mod tests {
         // And the image's far edge stops them, not the window's.
         let short = lines(0.0, 10.0, 45.0, 0.0, 1000.0);
         assert_eq!(short, vec![10.0, 20.0, 30.0, 40.0]);
+    }
+
+    /// The minimap's thumbnail is the image layer's, drawn under the whole
+    /// interface, so the grid has to step around it rather than count on
+    /// being covered the way it is by the panels.
+    #[test]
+    fn a_line_across_the_minimap_is_broken_around_it() {
+        let hole = Rect::new(20.0, 20.0, 100.0, 80.0);
+
+        // A line straight down the middle of it comes back as the part above
+        // and the part below, and nothing in between.
+        let line = Rect::new(60.0, 0.0, 1.0, 400.0);
+        let pieces: Vec<_> = around(line, intersect(line, hole).expect("crossed"))
+            .into_iter()
+            .filter(|p| p.width > 0.0 && p.height > 0.0)
+            .collect();
+        assert_eq!(
+            pieces,
+            vec![
+                Rect::new(60.0, 0.0, 1.0, 20.0),
+                Rect::new(60.0, 100.0, 1.0, 300.0)
+            ]
+        );
+
+        // The pieces of a line across it keep every part of the line the hole
+        // does not cover, and none of what it does.
+        let line = Rect::new(0.0, 40.0, 400.0, 1.0);
+        let pieces: Vec<_> = around(line, intersect(line, hole).expect("crossed"))
+            .into_iter()
+            .filter(|p| p.width > 0.0 && p.height > 0.0)
+            .collect();
+        assert!(pieces.iter().all(|p| intersect(*p, hole).is_none()));
+        let covered: f32 = pieces.iter().map(|p| p.width * p.height).sum();
+        assert_eq!(covered, line.width * line.height - hole.width * line.height);
+
+        // And a line clear of it is left whole.
+        let line = Rect::new(300.0, 0.0, 1.0, 400.0);
+        assert!(intersect(line, hole).is_none());
     }
 
     #[test]
