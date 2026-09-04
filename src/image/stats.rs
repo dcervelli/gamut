@@ -371,7 +371,7 @@ impl<'a> Values<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::image::{AlphaMode, ColorSpace, Primaries, Transfer};
+    use crate::image::{AlphaMode, ColorSpace, Primaries, Referred, Transfer};
 
     fn linear_gray(data: Vec<u16>) -> DecodedImage {
         DecodedImage {
@@ -383,7 +383,7 @@ mod tests {
             },
             color: ColorSpace::LINEAR_BT709,
             alpha: AlphaMode::Opaque,
-            value_range: None,
+            referred: Referred::Scene,
             nodata: None,
         }
     }
@@ -457,7 +457,7 @@ mod tests {
                 primaries: Primaries::DisplayP3,
             },
             alpha: AlphaMode::Premultiplied,
-            value_range: None,
+            referred: Referred::Display,
             nodata: None,
         };
         let plot = Stats::scan(&image).plot;
@@ -498,7 +498,7 @@ mod tests {
             },
             color: ColorSpace::LINEAR_BT709,
             alpha: AlphaMode::Opaque,
-            value_range: None,
+            referred: Referred::Scene,
             nodata: None,
         };
         // BT.709 luminance weights green at 0.7152.
@@ -515,7 +515,7 @@ mod tests {
             },
             color: ColorSpace::LINEAR_BT709,
             alpha: AlphaMode::Opaque,
-            value_range: None,
+            referred: Referred::Scene,
             nodata: None,
         }
     }
@@ -604,7 +604,7 @@ mod tests {
                 ..ColorSpace::LINEAR_BT709
             },
             alpha: AlphaMode::Opaque,
-            value_range: None,
+            referred: Referred::Display,
             nodata: None,
         }
     }
@@ -665,7 +665,7 @@ mod tests {
             },
             color: ColorSpace::LINEAR_BT709,
             alpha: AlphaMode::Opaque,
-            value_range: None,
+            referred: Referred::Scene,
             nodata: None,
         };
         let stats = Stats::scan(&image);

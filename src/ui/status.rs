@@ -1,7 +1,7 @@
 //! The words in the bars: what the image is, and what the view is doing to
 //! it.
 
-use crate::image::display::{AutoWindow, Colormap};
+use crate::image::display::{AutoWindow, Colormap, Headroom, ToneMap};
 use crate::render::TextMeasure;
 
 use super::{BECOMES, Current, FrameInput, Reading, TEXT_SIZE};
@@ -77,12 +77,10 @@ pub(super) fn describe_pixels(current: &Current) -> String {
 /// magnified with: all three are the button in the top bar, which reads the
 /// zoom out and opens a menu of the rest. The bar named the filter once, but
 /// naming a thing it could not be used to change is worth less than a cell
-/// that both says and sets it.
+/// that both says and sets it. Nor which surface the picture is on: that is
+/// the button at the end of this bar, lit when it is the HDR one.
 pub(super) fn describe_state(current: &Current, input: &FrameInput) -> String {
     let mut parts = Vec::new();
-    if let Some(label) = input.hdr_output {
-        parts.push(label.to_string());
-    }
     if current.display.auto != AutoWindow::Off {
         parts.push(format!(
             "{} {}",
@@ -93,13 +91,36 @@ pub(super) fn describe_state(current: &Current, input: &FrameInput) -> String {
     if current.display.exposure_stops != 0.0 {
         parts.push(format!("{:+.1} EV", current.display.exposure_stops));
     }
-    if current.display.colormap != Colormap::Gray {
+    // The false colour is a reading of one channel, and the display leaves
+    // it off a colour image; so does the bar.
+    if current.image.is_gray() && current.display.colormap != Colormap::Gray {
         parts.push(current.display.colormap.label().to_string());
     }
-    if current.image.is_high_dynamic_range() {
-        parts.push(current.display.tone_map.label().to_string());
+    if let Some(highlights) = describe_highlights(current, input.headroom) {
+        parts.push(highlights.to_string());
     }
     parts.join("   \u{00b7}   ")
+}
+
+/// What is becoming of the highlights: the curve that is on them, or —
+/// where there is none and the surface stops at white — that they are being
+/// clipped, said outright rather than left to be inferred from a picture
+/// that has gone flat at the top. Nothing at all where nothing is being
+/// done: no curve and nothing above white to clip, or no curve and a surface
+/// with the room to show what is.
+///
+/// The false colour clips whatever the curve, and says so by being named
+/// itself, in the segment before this one.
+fn describe_highlights(current: &Current, headroom: Headroom) -> Option<&'static str> {
+    let display = &current.display;
+    if current.image.is_gray() && display.colormap != Colormap::Gray {
+        return None;
+    }
+    match (display.tone_map, headroom) {
+        (ToneMap::None, Headroom::Above) => None,
+        (ToneMap::None, Headroom::None) => display.exceeds_white(&current.stats).then_some("clip"),
+        (curve, _) => Some(curve.label()),
+    }
 }
 
 /// Window bounds in the units of the source file where that is meaningful.
@@ -123,6 +144,82 @@ fn format_window(current: &Current) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::image::display::{Display, Startup};
+    use crate::image::exif::Exif;
+    use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples, Stats};
+    use crate::ui::FileFacts;
+
+    /// A grey photograph on screen: two codes, black and white, sRGB.
+    fn photograph() -> Current {
+        let image = DecodedImage::new(
+            2,
+            1,
+            Samples::U8 {
+                channels: Channels::Gray,
+                data: vec![0, 255],
+            },
+            ColorSpace::SRGB,
+            AlphaMode::Opaque,
+        );
+        let stats = Stats::scan(&image);
+        Current {
+            display: Display::for_image_with(&image, &stats, Startup::default(), Headroom::None),
+            image: std::sync::Arc::new(image),
+            stats,
+            label: "a.png".into(),
+            file: FileFacts {
+                path: "a.png".into(),
+                bytes: None,
+                modified: None,
+                reader: None,
+            },
+            exif: Exif::default(),
+            stored: None,
+        }
+    }
+
+    /// The bar says what is becoming of the highlights and nothing more: no
+    /// word for a picture with none above white, `clip` once exposure has
+    /// pushed some there on a surface that stops at white, the curve's own
+    /// name while one is on, and nothing under a false colour, which is named
+    /// itself and clips whatever the curve.
+    #[test]
+    fn the_bar_says_what_becomes_of_the_highlights() {
+        let mut current = photograph();
+        for headroom in [Headroom::None, Headroom::Above] {
+            assert_eq!(
+                describe_highlights(&current, headroom),
+                None,
+                "{headroom:?}"
+            );
+        }
+
+        current.display.adjust_exposure(1.0);
+        assert_eq!(describe_highlights(&current, Headroom::None), Some("clip"));
+        assert_eq!(
+            describe_highlights(&current, Headroom::Above),
+            None,
+            "an HDR surface has room for them, and nothing is being done"
+        );
+
+        current.display.tone_map = ToneMap::Neutral;
+        for headroom in [Headroom::None, Headroom::Above] {
+            assert_eq!(
+                describe_highlights(&current, headroom),
+                Some("neutral"),
+                "{headroom:?}"
+            );
+        }
+
+        current.display.colormap = Colormap::Viridis;
+        for headroom in [Headroom::None, Headroom::Above] {
+            assert_eq!(
+                describe_highlights(&current, headroom),
+                None,
+                "{headroom:?}"
+            );
+        }
+    }
 
     /// The bar names the image on screen first and always. A file on its way
     /// in is mentioned after it, never in place of it: captioning one picture

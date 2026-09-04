@@ -21,7 +21,6 @@ use std::thread::{self, JoinHandle};
 use std::time::Instant;
 
 use anyhow::{Result, anyhow};
-use winit::event_loop::EventLoopProxy;
 
 use crate::clipboard;
 use crate::image::decode::{self, Overrides};
@@ -122,13 +121,16 @@ enum Command {
 }
 
 impl Loader {
-    pub fn new(proxy: EventLoopProxy<Decoded>) -> Self {
+    /// `deliver` is where each finished file goes, called on the loader's
+    /// thread; it answers `false` once nobody is listening, which stops the
+    /// thread.
+    pub fn new(deliver: impl FnMut(Decoded) -> bool + Send + 'static) -> Self {
         let (commands, incoming) = mpsc::channel();
         let cancelled = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&cancelled);
         let thread = thread::Builder::new()
             .name("gamut loader".into())
-            .spawn(move || run(incoming, proxy, &flag))
+            .spawn(move || run(incoming, deliver, &flag))
             .expect("the loader thread can be spawned");
         Self {
             commands: Some(commands),
@@ -191,7 +193,11 @@ impl Drop for Loader {
     }
 }
 
-fn run(incoming: Receiver<Command>, proxy: EventLoopProxy<Decoded>, cancelled: &AtomicBool) {
+fn run(
+    incoming: Receiver<Command>,
+    mut deliver: impl FnMut(Decoded) -> bool,
+    cancelled: &AtomicBool,
+) {
     let mut upload = None;
     let mut queued: Option<Request> = None;
 
@@ -221,7 +227,7 @@ fn run(incoming: Receiver<Command>, proxy: EventLoopProxy<Decoded>, cancelled: &
             };
             // A closed loop means the window has gone; stop rather than
             // decode for nobody.
-            if proxy.send_event(decoded).is_err() {
+            if !deliver(decoded) {
                 return;
             }
         }

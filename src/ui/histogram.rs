@@ -91,6 +91,44 @@ const RAMP_GAP: f32 = 4.0;
 /// set between, before they give way to it.
 const LABEL_GAP: f32 = 8.0;
 
+/// The word set beside the line that marks white, when white is not the top
+/// of the plot.
+const WHITE_LABEL: &str = "white";
+
+/// How far past white a value has to reach before it is marked as beyond it:
+/// a hair, so that the window's own top does not count.
+const ABOVE_WHITE: f32 = 1.0 + 1e-3;
+
+/// How the response curve is scaled up the plot: in the file's own encoding,
+/// as the bins across are, from 0 at the axis to `ceiling` at the top.
+///
+/// The ceiling is white — encoded, so that a display doing nothing draws the
+/// diagonal — except where the curve runs past it, which it does on a surface
+/// with room above white and no curve on: the top of the plot is then
+/// wherever the response gets to, and white is a line drawn across it.
+/// `white` is where that line goes, as a fraction of the plot's height, and
+/// `None` where white is the top and the line would be the plot's own edge.
+struct Scale {
+    ceiling: f32,
+    white: Option<f32>,
+}
+
+impl Scale {
+    fn new(encoded_white: f32, highest: f32) -> Self {
+        let ceiling = highest.max(encoded_white).max(f32::MIN_POSITIVE);
+        let white = encoded_white / ceiling;
+        Self {
+            ceiling,
+            white: (white < 1.0 - 1e-3).then_some(white),
+        }
+    }
+
+    /// An encoded response as a fraction of the plot's height.
+    fn up(&self, encoded: f32) -> f32 {
+        (encoded / self.ceiling).clamp(0.0, 1.0)
+    }
+}
+
 /// Where the pointer's readout goes on the label line — the middle of it —
 /// and whether the two ends of the axis still fit either side of it.
 ///
@@ -408,12 +446,16 @@ pub(super) fn draw(
     // the numbers are the ones every other readout quotes; a curve that is
     // straight and a value that is comparable cannot both be had, and the
     // shape is what the plot is for.
+    // Half of what every value comes out as: on a surface with room above
+    // white and no curve on, the response runs past 1, and so does the
+    // readout, since that is what the screen is showing.
+    let headroom = input.headroom;
     let marked = marked(current, content, input.cursor, input.pointer);
     let across = marked.map(bin_across);
     let mut ends_fit = true;
     if let Some(across) = across {
         let value = transfer.to_linear(axis_min + across * span);
-        let mapped = current.display.response(value).clamp(0.0, 1.0);
+        let mapped = current.display.response(value, headroom).max(0.0);
         let readout = format!("{value:.4}  {BECOMES}  {mapped:.4}");
         let ends_width = [axis_min, axis_max].map(|end| {
             text.measure_text(&format!("{:.4}", transfer.to_linear(end)), label_size)[0]
@@ -571,21 +613,29 @@ pub(super) fn draw(
         let (top, bottom) = (snap(band.y), snap(band.bottom()));
         let edge = |index: usize| snap(band.x + band.width * index as f32 / BINS as f32);
 
+        // A cell above white — which only a surface with room above white
+        // has, and only with no curve on — is drawn white, since the panel
+        // cannot glow, with the accent along its top edge to say that the
+        // screen does: the same ink as the tick that marks white on the
+        // axis, and the run of it is how much of the axis is out past that.
         let channels = current.image.channels();
+        let hair = 1.0 / input.scale;
         for index in 0..BINS {
             let (left, right) = (edge(index), edge(index + 1));
             let across = (index as f32 + 0.5) / BINS as f32;
             let value = transfer.to_linear(axis_min + across * span);
             frame.rect(
                 Rect::new(left, top, right - left, bottom - top),
-                Color::from_linear(current.display.shade(value, channels)),
+                Color::from_linear(current.display.shade(value, channels, headroom)),
             );
+            if current.display.response(value, headroom) > ABOVE_WHITE {
+                frame.rect(Rect::new(left, top, right - left, hair), theme.accent);
+            }
         }
         // Outside the colour rather than over it, so that the band keeps its
         // full depth. A window left of everything makes the whole ramp black,
         // and a black band on a dark panel is a gap in it without this. One
         // physical pixel, snapped like the band it rings.
-        let hair = 1.0 / input.scale;
         let (left, right) = (edge(0), edge(BINS));
         outline(
             frame,
@@ -609,21 +659,50 @@ pub(super) fn draw(
         let (offset, gain) = current.display.transform();
         if offset.is_finite() && gain.is_finite() {
             let columns = bars.width.max(1.0) as usize;
-            let curve: Vec<[f32; 2]> = (0..=columns)
+            // Decoded to run the transform on, then encoded again to be
+            // drawn: both axes are in the file's own units, so a display
+            // doing nothing is the diagonal. Plotting the linear response
+            // against an encoded axis would bend the curve by the transfer
+            // function alone, and draw a shoulder into an image nobody had
+            // touched.
+            let responses: Vec<f32> = (0..=columns)
                 .map(|column| {
                     let across = column as f32 / columns as f32;
-                    // Decoded to run the transform on, then encoded again to
-                    // be drawn: both axes are in the file's own units, so a
-                    // display doing nothing is the diagonal. Plotting the
-                    // linear response against an encoded axis would bend the
-                    // curve by the transfer function alone, and draw a
-                    // shoulder into an image nobody had touched.
                     let value = transfer.to_linear(axis_min + across * span);
-                    let response = current.display.response(value).clamp(0.0, 1.0);
-                    let response = transfer.to_encoded(response).clamp(0.0, 1.0);
+                    let response = current.display.response(value, headroom).max(0.0);
+                    transfer.to_encoded(response).max(0.0)
+                })
+                .collect();
+            // The plot's height is white, unless the response runs past it —
+            // a surface with room above white, and no curve on — in which
+            // case the top is wherever the response gets to and white is a
+            // line across the plot, so that the room above it can be seen as
+            // the room it is rather than as a clip that is not happening.
+            let highest = responses.iter().copied().fold(0.0, f32::max);
+            let scale = Scale::new(transfer.to_encoded(1.0), highest);
+            if let Some(white) = scale.white {
+                let y = device(bars.bottom() - white * bars.height, input.scale);
+                frame.rect(
+                    Rect::new(bars.x, y, bars.width, 1.0 / input.scale),
+                    theme.text_dim,
+                );
+                let size = TEXT_SIZE * 0.75;
+                let width = text.measure_text(WHITE_LABEL, size)[0];
+                frame.text(
+                    [bars.right() - width - 2.0, y - size * 1.3],
+                    size,
+                    theme.text_dim,
+                    WHITE_LABEL,
+                );
+            }
+            let curve: Vec<[f32; 2]> = responses
+                .iter()
+                .enumerate()
+                .map(|(column, &response)| {
+                    let across = column as f32 / columns as f32;
                     [
                         bars.x + across * bars.width,
-                        bars.bottom() - response * bars.height,
+                        bars.bottom() - scale.up(response) * bars.height,
                     ]
                 })
                 .collect();

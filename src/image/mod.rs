@@ -145,6 +145,48 @@ impl AlphaMode {
     }
 }
 
+/// What the numbers stand for once decoded to linear light: light that was
+/// graded for a display, or light as a scene or a sensor had it.
+///
+/// The distinction everything about the opening view rests on. A photograph
+/// — sRGB, a gamma curve, PQ, HLG, or a JPEG with its gain map applied — has
+/// a reference white: 1.0 is white, whoever made it put it there, and
+/// whatever sits above it is the highlights they meant to keep. Sensor counts
+/// and renders have no such point; 1.0 is wherever the file's scale happens
+/// to put it, and a 12-bit scan in a 16-bit container reaches a sixteenth of
+/// the way there. The first is shown as it is and the second is windowed to
+/// what it holds, and the tone curve is a question only the first can raise.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Referred {
+    /// Graded: 1.0 is reference white, and the picture is meant as it is.
+    Display,
+    /// Measured or rendered: no white is stated, and the useful range has to
+    /// be found in the pixels.
+    Scene,
+}
+
+impl Referred {
+    /// What the transfer function alone says. A curve is only ever applied to
+    /// light that has been graded, so a curved file is display-referred and
+    /// a linear one is taken as scene-referred unless its decoder knows
+    /// better — which the gain-map path does, since its base image was a
+    /// graded photograph before the map lifted its highlights.
+    pub fn of(transfer: Transfer) -> Self {
+        match transfer {
+            Transfer::Linear => Referred::Scene,
+            Transfer::Srgb | Transfer::Pq | Transfer::Hlg | Transfer::Gamma(_) => Referred::Display,
+        }
+    }
+
+    /// The word for it, for the information panel.
+    pub fn label(self) -> &'static str {
+        match self {
+            Referred::Display => "display (1.0 is white)",
+            Referred::Scene => "scene (no white stated)",
+        }
+    }
+}
+
 /// One decoded image, described rather than normalised.
 #[derive(Clone, Debug)]
 pub struct DecodedImage {
@@ -153,11 +195,9 @@ pub struct DecodedImage {
     pub samples: Samples,
     pub color: ColorSpace,
     pub alpha: AlphaMode,
-    /// The range the file says its values occupy, in the same linear
-    /// working-space units the shader will sample — decoders converting from
-    /// something like TIFF's `SMinSampleValue` must scale it themselves.
-    /// `None` means the display window is chosen by scanning instead.
-    pub value_range: Option<(f32, f32)>,
+    /// Whether 1.0 means reference white. Follows the transfer function
+    /// unless the decoder says otherwise; see [`Referred`].
+    pub referred: Referred,
     /// The value standing in for "no measurement here". Elevation models use
     /// -9999 and similar sentinels, which would otherwise dominate the
     /// automatic window and squash the real data into a sliver.
@@ -165,8 +205,9 @@ pub struct DecodedImage {
 }
 
 impl DecodedImage {
-    /// An image with nothing stated beyond its pixels: no declared value
-    /// range and no no-data sentinel, which is what most formats can say.
+    /// An image with nothing stated beyond its pixels and its colour space:
+    /// what the numbers mean follows from the transfer function, and there is
+    /// no no-data sentinel, which is what most formats can say.
     pub fn new(
         width: u32,
         height: u32,
@@ -180,7 +221,7 @@ impl DecodedImage {
             samples,
             color,
             alpha,
-            value_range: None,
+            referred: Referred::of(color.transfer),
             nodata: None,
         }
     }
@@ -261,13 +302,6 @@ impl DecodedImage {
             color,
             alpha,
         })
-    }
-
-    /// True when the content can exceed the SDR range and so needs either
-    /// tone mapping or an HDR output.
-    pub fn is_high_dynamic_range(&self) -> bool {
-        matches!(self.samples, Samples::F32 { .. })
-            || matches!(self.color.transfer, Transfer::Pq | Transfer::Hlg)
     }
 
     /// Sanity check used by the loader, so a broken decoder fails loudly
@@ -377,7 +411,7 @@ mod tests {
             },
             color: ColorSpace::LINEAR_BT709,
             alpha: AlphaMode::Opaque,
-            value_range: None,
+            referred: Referred::Scene,
             nodata: None,
         }
     }
@@ -443,7 +477,7 @@ mod tests {
             },
             color: ColorSpace::LINEAR_BT709,
             alpha: AlphaMode::Premultiplied,
-            value_range: None,
+            referred: Referred::Scene,
             nodata: None,
         };
 
@@ -488,19 +522,33 @@ mod tests {
         assert!(gray16(vec![], 0, 2).validate().is_err());
     }
 
+    /// A curve is only ever put on graded light, so the curve says which kind
+    /// of light it is; linear is taken as measured until a decoder says
+    /// otherwise.
     #[test]
-    fn high_dynamic_range_is_recognised_by_type_and_by_curve() {
-        let mut image = gray16(vec![0; 6], 3, 2);
-        assert!(!image.is_high_dynamic_range());
+    fn what_the_light_is_referred_to_follows_from_the_curve() {
+        for transfer in [
+            Transfer::Srgb,
+            Transfer::Pq,
+            Transfer::Hlg,
+            Transfer::Gamma(2.2),
+        ] {
+            assert_eq!(Referred::of(transfer), Referred::Display, "{transfer:?}");
+        }
+        assert_eq!(Referred::of(Transfer::Linear), Referred::Scene);
 
-        image.color.transfer = Transfer::Pq;
-        assert!(image.is_high_dynamic_range());
-
-        image.color.transfer = Transfer::Linear;
-        image.samples = Samples::F32 {
-            channels: Channels::Gray,
-            data: vec![0.0; 6],
-        };
-        assert!(image.is_high_dynamic_range());
+        let image = gray16(vec![0; 6], 3, 2);
+        assert_eq!(image.referred, Referred::Scene);
+        let photograph = DecodedImage::new(
+            1,
+            1,
+            Samples::U8 {
+                channels: Channels::Gray,
+                data: vec![0],
+            },
+            ColorSpace::SRGB,
+            AlphaMode::Opaque,
+        );
+        assert_eq!(photograph.referred, Referred::Display);
     }
 }

@@ -14,7 +14,7 @@ use super::gpu;
 use super::image_layer::{Draw, ImageLayer};
 use super::{Placement, Upscale};
 use crate::image::display::Display;
-use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
+use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Referred, Samples};
 
 /// Draws `image` into a `target`-sized working-space texture and reads it
 /// back, as RGBA rows of linear values.
@@ -152,7 +152,7 @@ fn gray_u8(width: u32, height: u32, data: Vec<u8>) -> DecodedImage {
         },
         color: ColorSpace::LINEAR_BT709,
         alpha: AlphaMode::Opaque,
-        value_range: None,
+        referred: Referred::Scene,
         nodata: None,
     }
 }
@@ -321,7 +321,7 @@ fn a_transparent_texel_does_not_bleed_its_colour() {
         },
         color: ColorSpace::LINEAR_BT709,
         alpha: AlphaMode::Straight,
-        value_range: None,
+        referred: Referred::Scene,
         nodata: None,
     };
 

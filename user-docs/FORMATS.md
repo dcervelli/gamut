@@ -91,13 +91,17 @@ than being expanded to colour — which is a quarter of the memory on a large
 scan. The formats that cannot preserve them say so below.
 
 **How a file opens follows from what it is.** Content already graded for a
-display — sRGB, gamma, PQ, HLG — opens untouched at 0–1, because
-second-guessing the grade would be wrong. Measurement data and other
-scene-referred content opens with an automatic 99.8% window, because values
-occupying a fraction of the nominal range otherwise show as a black rectangle.
-HDR content additionally starts on the neutral tone map rather than clipping.
-All of it is adjustable: `e` cycles the automatic window, `t` the tone map,
-`z` resets.
+display — sRGB, gamma, PQ, HLG, a JPEG with its gain map applied — opens
+untouched at 0–1, because second-guessing the grade would be wrong.
+Measurement data and other scene-referred content opens with an automatic
+99.8% window, because values occupying a fraction of the nominal range
+otherwise show as a black rectangle. Where that leaves highlights above white
+— a PQ frame, a gain-mapped photograph — the neutral tone map is on from the
+start rather than clipping, unless the picture is going out to an HDR surface,
+where the highlights have somewhere to go and no curve is applied at all. All
+of it is adjustable: `e` cycles the automatic window, `t` the tone map, `o`
+the room above white, `z` resets. The information panel's "Referred to" line says
+which kind of light a file was taken for.
 
 **Rotation is usually ignored.** An image tagged with an orientation is shown
 the way its pixels are stored, except in WebP and HEIF. If a JPEG from a phone
@@ -140,10 +144,10 @@ numbers shown as sRGB come out visibly flat.
 ordinary graded photograph every viewer has always shown, and a smaller *gain
 map* recording how much brighter than white each pixel really was. Both are
 read and recombined, so the file arrives as a genuine HDR image — tone mapped
-on an ordinary display, sent out at full brightness on an HDR one with
-`--hdr`. The whole boost is applied rather than a share of it guessed for your
-monitor; exposure (`e`, `E`) and the tone map (`t`) are where you decide what
-to do with it.
+on an ordinary display, sent out at full brightness on a monitor in HDR mode
+(see `o` in KEYS.md). The whole boost is applied rather than a share of it
+guessed for your monitor; exposure (`d`, `f`) and the tone map (`t`) are where
+you decide what to do with it.
 
 - `--no-gain-map` shows the SDR photograph instead, which is the picture every
   other viewer shows and what you want when the two need comparing.

@@ -244,6 +244,20 @@ impl ColorSpace {
 mod tests {
     use super::*;
 
+    /// The other way: linear BT.709 to BT.2020, which is the gamut an HDR10
+    /// surface reads its signal in. Row-major, and the inverse of
+    /// [`Primaries::Bt2020.to_bt709()`](Primaries::to_bt709).
+    ///
+    /// Written out to the digit as `bt709_to_bt2020` in
+    /// `render/shaders/composite.wgsl` has it (there as columns, the way WGSL
+    /// takes a matrix), so that the two can be checked against each other; a
+    /// test below does.
+    const BT709_TO_BT2020: [[f32; 3]; 3] = [
+        [0.6274021, 0.3292916, 0.0433063],
+        [0.0690956, 0.9195437, 0.0113606],
+        [0.0163942, 0.0880285, 0.8955772],
+    ];
+
     fn close(a: f32, b: f32) -> bool {
         (a - b).abs() < 1e-4
     }
@@ -320,6 +334,40 @@ mod tests {
             for (column_index, value) in row.iter().enumerate() {
                 let expected = if row_index == column_index { 1.0 } else { 0.0 };
                 assert!(close(*value, expected));
+            }
+        }
+    }
+
+    /// The matrix the HDR10 path converts through has to be the inverse of
+    /// the one the decoders convert with, or a BT.2020 file would not come
+    /// back out as the numbers it went in as — and it has to be the matrix
+    /// the shader actually holds, which is transcribed and would otherwise
+    /// drift in silence.
+    #[test]
+    fn the_bt2020_matrices_are_each_others_inverse_and_the_shader_has_the_same_one() {
+        let forward = Primaries::Bt2020.to_bt709();
+        for (row, back) in BT709_TO_BT2020.iter().enumerate() {
+            for column in 0..3 {
+                let product: f32 = back
+                    .iter()
+                    .zip(&forward)
+                    .map(|(a, forward_row)| a * forward_row[column])
+                    .sum();
+                let expected = if row == column { 1.0 } else { 0.0 };
+                assert!(
+                    (product - expected).abs() < 1e-4,
+                    "[{row}][{column}] of the product is {product}"
+                );
+            }
+            let sum: f32 = back.iter().sum();
+            assert!((sum - 1.0).abs() < 1e-4, "row {row} sums to {sum}");
+        }
+
+        let shader = include_str!("../../render/shaders/composite.wgsl");
+        for row in BT709_TO_BT2020 {
+            for value in row {
+                let written = format!("{value:.7}");
+                assert!(shader.contains(&written), "{written} is not in the shader");
             }
         }
     }

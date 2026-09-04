@@ -16,8 +16,9 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::{Window, WindowId};
 
 use crate::image::decode;
-use crate::image::display::{Display, Startup};
+use crate::image::display::{Display, Headroom, Startup};
 use crate::loader::{Decoded, Loader, Opened, Ready, Reload, Request};
+use crate::monitor::{Mode, Monitors};
 use crate::render::{HdrPreference, Placement, Rect, Renderer, Scene, Upscale};
 use crate::theme::{self, Theme};
 use crate::timing;
@@ -30,6 +31,15 @@ use crate::watch::{self, Watch};
 use files::{Announce, Files};
 use input::{Effect, Pointer};
 use window::{file_label, initial_window_size, loading_title, window_title};
+
+/// What wakes the event loop from another thread.
+pub enum UserEvent {
+    /// A file the loader has finished with. Boxed: it carries the pixels,
+    /// and the other variant carries nothing.
+    Decoded(Box<Decoded>),
+    /// A monitor's mode was learnt, or changed.
+    Monitor,
+}
 
 /// What the command line asked for, beyond which files to show.
 pub struct Options {
@@ -46,7 +56,15 @@ pub struct App {
     files: Files,
     current: Option<Current>,
     startup: Startup,
+    /// What was asked of the surface: by `--output`, and by every press of
+    /// the switch since. Read against the monitor's mode in
+    /// [`App::surface_hdr`] and [`App::headroom`].
     hdr: HdrPreference,
+    /// The compositor's word on the monitors, where it gives one.
+    monitors: Option<Monitors>,
+    /// The mode of the monitor the window is on, as last read: `None` until
+    /// the window has landed on one, and for good where nothing says.
+    monitor: Option<Mode>,
     view: View,
     /// The file on screen, watched for writes by anything else.
     watch: Watch,
@@ -115,6 +133,7 @@ impl App {
         size: Option<[f32; 2]>,
         options: Options,
         loader: Loader,
+        monitors: Option<Monitors>,
     ) -> Self {
         let Options {
             overrides,
@@ -140,6 +159,8 @@ impl App {
             header_size: size,
             startup,
             hdr,
+            monitors,
+            monitor: None,
             view,
             watch,
             named,
@@ -188,6 +209,164 @@ impl App {
             .as_ref()
             .map(Current::size)
             .or(self.header_size)
+    }
+
+    /// Whether the surface should be the HDR one. The monitor decides where
+    /// the compositor says what it is in: one in HDR mode gets the HDR
+    /// surface, which costs the compositor nothing and gives the picture the
+    /// room, and one in SDR mode gets the SDR surface — unless `--output
+    /// hdr` asked for the other regardless, which is the one route left that
+    /// asks a compositor to switch a monitor over. Where nothing says what
+    /// the monitor is, what was asked for is all there is to go on.
+    fn surface_hdr(&self) -> bool {
+        match self.monitor {
+            Some(Mode::Hdr) => true,
+            Some(Mode::Sdr) | None => self.hdr == HdrPreference::On,
+        }
+    }
+
+    /// Whether the picture is going out with room above SDR white, which is
+    /// half of what a tone map defaults from and half of what every readout
+    /// of a value says. It takes three things: a surface with the room, a
+    /// monitor not known to be in SDR mode — a compositor maps an HDR surface
+    /// down for one that is, and the room is not there however the surface
+    /// was made — and the switch not having turned it off. Before there is a
+    /// window the answer is the SDR one, and [`App::adopt_headroom`] asks
+    /// again whenever any of the three moves.
+    fn headroom(&self) -> Headroom {
+        let surface = self
+            .renderer
+            .as_ref()
+            .is_some_and(|renderer| renderer.output().is_hdr);
+        if surface && self.monitor != Some(Mode::Sdr) && self.hdr != HdrPreference::Off {
+            Headroom::Above
+        } else {
+            Headroom::None
+        }
+    }
+
+    /// Whether the switch has anything to switch: an HDR colour space is
+    /// offered for the window, and the monitor is in HDR mode — or nothing
+    /// can say what it is in. Where the compositor can say and has not yet,
+    /// which is the moment before the window has landed on a monitor, the
+    /// answer is no: most monitors are SDR, and a switch that lit for a
+    /// frame and then died would be the switch having been wrong.
+    fn hdr_available(&self) -> bool {
+        self.renderer.as_ref().is_some_and(Renderer::hdr_available)
+            && (self.monitors.is_none() || self.monitor == Some(Mode::Hdr))
+    }
+
+    /// Puts the surface where [`App::surface_hdr`] says and the curve where
+    /// the headroom that leaves says, and reports whether the picture
+    /// changed. Called whenever an input to either moves: the window landing
+    /// on a monitor, the monitor changing mode, the switch being pressed.
+    /// Which surface it is goes to stderr when it changes, the way the choice
+    /// at start-up does, since the bar has room for one word and the
+    /// surface's name is several.
+    fn sync_output(&mut self) -> bool {
+        let before = self.headroom();
+        let wanted = self.surface_hdr();
+        let mut changed = false;
+        if let Some(renderer) = &mut self.renderer
+            && renderer.output().is_hdr != wanted
+            && renderer.set_hdr(wanted)
+        {
+            eprintln!("gamut: {} output", renderer.output().label);
+            changed = true;
+        }
+        if self.headroom() != before {
+            self.adopt_headroom();
+            changed = true;
+        }
+        changed
+    }
+
+    /// Reads which monitor the window is on and what the compositor says it
+    /// is in, and follows a change. Cheap enough to ask after every batch of
+    /// events, which is how a window carried to another monitor is noticed:
+    /// nothing else says. Returns whether anything on screen changed — the
+    /// picture, or only the switch, which a monitor's mode lights or kills.
+    fn sync_monitor(&mut self) -> bool {
+        let Some(monitors) = &self.monitors else {
+            return false;
+        };
+        let name = self
+            .window
+            .as_ref()
+            .and_then(|window| window.current_monitor())
+            .and_then(|monitor| monitor.name());
+        let mode = name.as_deref().and_then(|name| monitors.mode(name));
+        if mode == self.monitor {
+            return false;
+        }
+        // Worth a line, since it is what lights the switch or kills it.
+        if let (Some(name), Some(mode)) = (&name, mode) {
+            let mode = match mode {
+                Mode::Hdr => "HDR",
+                Mode::Sdr => "SDR",
+            };
+            eprintln!("gamut: monitor {name} is in {mode} mode");
+        }
+        self.monitor = mode;
+        self.sync_output();
+        true
+    }
+
+    /// Re-derives the tone map for whatever is on screen, for the moment the
+    /// output is settled and its headroom is known at last, and for every
+    /// switch of it after.
+    ///
+    /// The file named on the command line is decoded before the window opens,
+    /// so its display state is worked out against an SDR surface whatever the
+    /// surface turns out to be. A curve asked for on the command line is left
+    /// alone: that is a choice rather than a default.
+    fn adopt_headroom(&mut self) {
+        if self.startup.tone_map.is_some() {
+            return;
+        }
+        let headroom = self.headroom();
+        if let Some(current) = &mut self.current {
+            current.display.adopt(headroom, &current.stats);
+        }
+    }
+
+    /// Switches the room above white on or off. Returns whether anything
+    /// changed.
+    ///
+    /// On a monitor in HDR mode the surface stays the HDR one either way and
+    /// the compositor clips at white instead, so that the switch never asks
+    /// the compositor for anything it might answer with a modeset. Where
+    /// nothing says what the monitor is, the switch moves the surface
+    /// itself, as the only lever there is. On a monitor in SDR mode there is
+    /// no room to switch to, and the press is refused with a word on why.
+    ///
+    /// The curve follows the headroom, as it does when the window first
+    /// opens: the switch chooses the curve the room wants for what is on
+    /// screen, and `t` changes it afterwards.
+    pub(super) fn toggle_hdr(&mut self) -> bool {
+        if self.renderer.is_none() {
+            return false;
+        }
+        if self.monitor == Some(Mode::Sdr) {
+            eprintln!(
+                "gamut: this monitor is in SDR mode, so there is no room above white to switch to"
+            );
+            return false;
+        }
+        if self.monitors.is_some() && self.monitor.is_none() {
+            eprintln!("gamut: the compositor has not yet said which monitor this is on");
+            return false;
+        }
+        if !self.hdr_available() {
+            eprintln!("gamut: no HDR colour space is offered for this window");
+            return false;
+        }
+        self.hdr = if self.headroom() == Headroom::Above {
+            HdrPreference::Off
+        } else {
+            HdrPreference::On
+        };
+        self.sync_output()
     }
 
     fn image_size(&self) -> [f32; 2] {
@@ -624,7 +803,7 @@ impl App {
                 display.refresh_auto(&stats);
                 display
             }
-            None => Display::for_image_with(&image, &stats, self.startup),
+            None => Display::for_image_with(&image, &stats, self.startup, self.headroom()),
         };
 
         let mut stored = None;
@@ -734,10 +913,8 @@ impl App {
                     Reading::File(file_label(self.files.path(pending.index)))
                 }
             });
-        let hdr_output = {
-            let output = self.renderer.as_ref().expect("checked above").output();
-            output.is_hdr.then_some(output.label)
-        };
+        let headroom = self.headroom();
+        let hdr_available = self.hdr_available();
         let input = FrameInput {
             logical,
             scale,
@@ -749,7 +926,8 @@ impl App {
             index: self.files.index(),
             count: self.files.len(),
             deleted: self.watch.missing(),
-            hdr_output,
+            headroom,
+            hdr_available,
         };
 
         // Split borrow: the frame builder needs the renderer's font metrics
@@ -780,6 +958,7 @@ impl App {
             frame: &frame,
             scale,
             backdrop,
+            headroom,
         };
         match renderer.render(scene) {
             Ok(()) => self.reported_error = false,
@@ -809,7 +988,7 @@ fn file_facts(path: &std::path::Path) -> FileFacts {
     }
 }
 
-impl ApplicationHandler<Decoded> for App {
+impl ApplicationHandler<UserEvent> for App {
     /// Look at the file, then sleep until it is time to look again rather than
     /// until the next event: nothing tells us about a write, so we go and ask.
     ///
@@ -817,6 +996,12 @@ impl ApplicationHandler<Decoded> for App {
     /// that a stream of events — a drag, a resize — cannot keep pushing the
     /// next look out of reach.
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if self.sync_monitor()
+            && let Some(window) = &self.window
+        {
+            window.request_redraw();
+        }
+
         let now = Instant::now();
         if now >= self.next_poll {
             self.next_poll = now + watch::INTERVAL;
@@ -849,14 +1034,25 @@ impl ApplicationHandler<Decoded> for App {
         event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
     }
 
-    /// A file the loader has finished with.
-    fn user_event(&mut self, event_loop: &ActiveEventLoop, decoded: Decoded) {
-        self.deliver(decoded);
-        // Nothing ever reached the screen and nothing else is coming: every
-        // file named on the command line failed to decode. Stop, rather than
-        // sit in an empty window with nothing on the way.
-        if self.current.is_none() && self.files.is_idle() {
-            event_loop.exit();
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
+        match event {
+            UserEvent::Decoded(decoded) => {
+                self.deliver(*decoded);
+                // Nothing ever reached the screen and nothing else is coming:
+                // every file named on the command line failed to decode.
+                // Stop, rather than sit in an empty window with nothing on
+                // the way.
+                if self.current.is_none() && self.files.is_idle() {
+                    event_loop.exit();
+                }
+            }
+            UserEvent::Monitor => {
+                if self.sync_monitor()
+                    && let Some(window) = &self.window
+                {
+                    window.request_redraw();
+                }
+            }
         }
     }
 
@@ -907,6 +1103,9 @@ impl ApplicationHandler<Decoded> for App {
             }
         }
 
+        // Asked for and not had is worth a line; asked for and had is worth
+        // one too, since the switch's later lines say the same thing. A
+        // surface that follows the monitor says so when it moves.
         if self.hdr == HdrPreference::On {
             let output = renderer.output();
             eprintln!(
@@ -916,7 +1115,7 @@ impl ApplicationHandler<Decoded> for App {
                 if output.is_hdr {
                     ""
                 } else {
-                    " (no HDR colour space offered for this surface)"
+                    " (no HDR colour space offered for this window)"
                 }
             );
         }
@@ -926,6 +1125,11 @@ impl ApplicationHandler<Decoded> for App {
         self.loader.attach(renderer.uploader());
         self.renderer = Some(renderer);
         self.window = Some(window);
+        // The surface exists at last, so whatever was decoded before the
+        // window opened can find out what it is being drawn onto. Which
+        // monitor it is on is not known until it has been shown, and the
+        // surface follows it from `about_to_wait`.
+        self.adopt_headroom();
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -1068,6 +1272,7 @@ mod tests {
             size.map(|(w, h)| [w as f32, h as f32]),
             options,
             Loader::detached(),
+            None,
         )
     }
 

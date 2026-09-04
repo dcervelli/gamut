@@ -71,6 +71,15 @@ tiff = "0.11.3"
 ultrahdr-rs = "0.3.5"
 wgpu = "30.0.1"
 winit = "0.30.13"
+# The compositor's word on which monitors are in HDR mode, read through the
+# colour-management protocol on a connection of our own. A driver offers an
+# HDR colour space for a window on any monitor; only the compositor knows
+# what the monitor is doing, and asking for the space on one in SDR mode can
+# make it switch the monitor over, blanking every display on the way. Both
+# crates are already in the tree under winit; `staging` is where the protocol
+# lives.
+wayland-client = "0.31.15"
+wayland-protocols = { version = "0.32.13", features = ["client", "staging"] }
 # The clipboard, which Wayland leaves to the client: there is no store to put
 # a string in, only a promise to hand the bytes over when someone later asks.
 # This speaks that protocol directly rather than shelling out to `wl-copy`,

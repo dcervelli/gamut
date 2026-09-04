@@ -34,6 +34,7 @@ listing.rs     what a path on the command line stands for: a directory is the
 loader.rs      the decode + upload thread; replies arrive as winit user events; a
                paste is fetched here too, on its way to being read
 watch.rs       polling a file — or a directory — for a settled change
+monitor.rs     what the compositor says each monitor is in, SDR or HDR, over a Wayland connection of its own
 clipboard.rs   putting text or a file: URI on the clipboard, in a process that outlives
                the window; and reading a pasted picture off it
 pasted.rs      where a pasted picture is written and what it is called: the
@@ -42,7 +43,8 @@ clock.rs       a moment as a date and time — UTC, or the zone the system's own
                compiled zone file says it is in
 timing.rs      startup instrumentation
 image/         the data model, nothing GPU
-  mod.rs         Channels, Samples, AlphaMode, DecodedImage, Sample (one pixel read back)
+  mod.rs         Channels, Samples, AlphaMode, Referred (graded or measured light), DecodedImage,
+                 Sample (one pixel read back)
   color/         Transfer, Primaries, ColorSpace; icc.rs and cicp.rs translate what files say into them
   stats.rs       the scan an image gets on load: min/max, histogram, plot
   encode.rs      the displayed image walked back out to an 8-bit sRGB PNG, for the clipboard
@@ -100,7 +102,8 @@ name.
 | A colour-space source (a new tag a format carries) | `image/color/` |
 | Someone else's work brought into the tree | say where it came from beside the code that carries it, then one `[[annotations]]` entry in `REUSE.toml`; if its licence is new to the tree, its text goes in `LICENSES/` named by SPDX identifier, and the PKGBUILD's `license=()` grows an entry |
 | A dependency | `Cargo.toml`, then `bin/release` rewrites `THIRD-PARTY-NOTICES`. A licence `about.toml` does not accept fails generation: add it there, in priority order, and its text to `LICENSES/`, or take the dependency instead |
-| An upscale filter or tone map | the WGSL function, one arm in `render/shader_codes.rs`, one enum variant with its `label`/`parse`/`next` |
+| An upscale filter or tone map | the WGSL function, one arm in `render/shader_codes.rs`, one enum variant with its `label`/`parse`/`next`; a tone map's CPU twin is `ToneMap::apply`, which takes the surface's `Headroom` as the shader arm does |
+| What the surface can be, SDR or HDR | `render/output.rs` chooses it; `monitor.rs` says what the monitor is in; `App::surface_hdr` and `App::headroom` put the two together, `App::sync_output` acts on them, and `App::toggle_hdr` is what the bar's `HDR` button and `o` both call |
 | A new render pass | build it from `render/gpu.rs`; add its target to `Renderer::render` |
 | Something about the display window, exposure or false colour | `image/display.rs` (state) and `shaders/image.wgsl` / `composite.wgsl` (effect) |
 

@@ -5,7 +5,7 @@ use crate::render::{Color, Rect, TextMeasure, UiFrame};
 use crate::theme::Theme;
 
 use super::TEXT_SIZE;
-use super::chrome::{BUTTON_SIZE, READING_GAP, ZOOM_BUTTON, grid_width};
+use super::chrome::{BUTTON_SIZE, OUTPUT_BUTTON, READING_GAP, ZOOM_BUTTON, grid_width};
 use super::icon;
 use super::menu::CELL_RADIUS;
 
@@ -167,6 +167,41 @@ pub(super) fn zoom_button(
     let (background, ink) = button_ink(open, hover, theme);
     frame.rounded_rect(rect, CELL_RADIUS, background);
     centred_text(frame, text, rect, ink, &percent(zoom));
+}
+
+/// How much of the ink is left on the surface switch when there is nothing
+/// to switch to. Enough to read the word, little enough to read as a control
+/// that is not taking presses.
+const DEAD_BUTTON_INK: u8 = 90;
+
+/// The headroom switch: one word, lit while the picture is going out with
+/// room above white. A toggle rather than a readout, since whether the
+/// picture uses the room is the viewer's to choose — where there is any: the
+/// driver offers an HDR colour space and the monitor is not in SDR mode.
+/// Where there is none, the button is drawn dead rather than left out: a
+/// control that is sometimes there is a control that has to be found again.
+pub(super) fn output_button(
+    frame: &mut UiFrame,
+    text: &mut dyn TextMeasure,
+    rect: Rect,
+    hdr: bool,
+    available: bool,
+    hover: bool,
+    theme: &Theme,
+) {
+    if rect.width < OUTPUT_BUTTON[0] || rect.height < OUTPUT_BUTTON[1] {
+        return;
+    }
+    let (background, ink) = if available {
+        button_ink(hdr, hover, theme)
+    } else {
+        (
+            theme.button_idle,
+            theme.text_dim.with_alpha(DEAD_BUTTON_INK),
+        )
+    };
+    frame.rounded_rect(rect, CELL_RADIUS, background);
+    centred_text(frame, text, rect, ink, "HDR");
 }
 
 /// Side of the grid mark. A side toggle's, since the grid toggle is the same
