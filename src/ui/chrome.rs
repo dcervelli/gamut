@@ -727,10 +727,11 @@ mod tests {
         // A window dragged narrow keeps it inside the bar rather than pushing
         // it out of the window.
         let cramped = Chrome::new([40.0, 200.0]);
-        assert!(cramped.bottom.contains([
-            cramped.pixel_button.x + 0.5,
-            cramped.pixel_button.y + 0.5
-        ]));
+        assert!(
+            cramped
+                .bottom
+                .contains([cramped.pixel_button.x + 0.5, cramped.pixel_button.y + 0.5])
+        );
     }
 
     #[test]

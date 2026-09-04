@@ -56,11 +56,7 @@ impl PixelFormat {
     /// Every format, in the order the menu offers them — the same order
     /// [`PixelFormat::next`] steps through, so the key and the cells agree
     /// about what comes after what.
-    pub const ALL: [PixelFormat; 3] = [
-        PixelFormat::Hex,
-        PixelFormat::Decimal,
-        PixelFormat::Mapped,
-    ];
+    pub const ALL: [PixelFormat; 3] = [PixelFormat::Hex, PixelFormat::Decimal, PixelFormat::Mapped];
 
     /// What the interface calls this format, for the cell that chooses it.
     pub fn label(self) -> &'static str {
@@ -312,7 +308,12 @@ mod tests {
 
     fn read(image: &DecodedImage, display: &Display, at: [u32; 2], format: PixelFormat) -> String {
         let sample = image.sample(at[0], at[1]).expect("inside the image");
-        value(image, &sample, &display.map(&sample, Headroom::None), format)
+        value(
+            image,
+            &sample,
+            &display.map(&sample, Headroom::None),
+            format,
+        )
     }
 
     /// The three formats are three answers about one pixel, and the bar shows
@@ -396,7 +397,10 @@ mod tests {
         assert_eq!(read([1, 0], PixelFormat::Mapped), "0.000");
         assert_eq!(read([2, 0], PixelFormat::Mapped), "10000000.000");
 
-        assert_eq!(read([0, 0], PixelFormat::Hex), format!("{:08X}", 0.125f32.to_bits()));
+        assert_eq!(
+            read([0, 0], PixelFormat::Hex),
+            format!("{:08X}", 0.125f32.to_bits())
+        );
     }
 
     /// The key steps through every format and comes back to where it started,
@@ -404,7 +408,11 @@ mod tests {
     #[test]
     fn the_formats_cycle_in_the_order_the_menu_offers_them() {
         let mut format = PixelFormat::ALL[0];
-        for expected in PixelFormat::ALL.iter().skip(1).chain([&PixelFormat::ALL[0]]) {
+        for expected in PixelFormat::ALL
+            .iter()
+            .skip(1)
+            .chain([&PixelFormat::ALL[0]])
+        {
             format = format.next();
             assert_eq!(format, *expected);
         }

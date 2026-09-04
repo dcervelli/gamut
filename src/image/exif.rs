@@ -941,10 +941,7 @@ mod tests {
                 ("Lens", "A Lens 6.765mm f/1.78"),
                 ("Taken", "2026-08-27 20:06:17 +12:00"),
                 // 89/50 is exactly 1.78, and is quoted as such.
-                (
-                    "Exposure",
-                    "1/50 s \u{00b7} f/1.78 \u{00b7} ISO 200"
-                ),
+                ("Exposure", "1/50 s \u{00b7} f/1.78 \u{00b7} ISO 200"),
                 ("Focal length", "6.765 mm (24 mm equivalent)"),
             ])
         );

@@ -13,7 +13,7 @@
 * Licensed MIT OR Apache-2.0. Every Rust dependency is permissive (the one
   copyleft offer, `self_cell`, is Apache-2.0 OR GPL-2.0-only, so Apache-2.0
   is taken). `libheif` is LGPL-3.0-or-later and is linked dynamically, which
-  that license allows without reaching our terms. Arch's libheif in turn pulls
+  that licence allows without reaching our terms. Arch's libheif in turn pulls
   in GPL encoders (x264, x265) as shared libraries of its own; we neither link
   nor ship those, so the obligation stays with that package, as it already
   does for every other program on the system that reads a HEIC.
@@ -25,39 +25,30 @@
 * Still to do: push a v0.1.0 tag, then open the omarchy-pkgs PR. The name is
   not committed to until then.
 
-## IN PROCESS
-* Final licencing pass/cleanup (with Lucide)
-* Understanding the --hdr flag
-
 ## RELEASE 0.1.0
-* Full UI pass
-  * Animate pans and zoom, with reset, and no curveballs
-  * Settings icon LR for cursor interaction
-  * Color spectrum chooser to lower right
-  * Red / blue color spectrum
-  * Scaling chooser
-  * Toast for messages ("Copied filename")
-* Histogram
-  * Vertical scale
-  * EV slider
+* GRAY16 → G16
+* Zoom percentage tooltips to show keyboard shortcut
+* Color spectrum chooser to lower right
+* Toast for messages ("Copied filename")
+* EV UI
+* Window UI
 * Move repo to dcervelli/
-* American spellings
 * Wayland app_id
-* Docs
-  * Usage
+* Usage Docs
+* Human readme
+* Remember settings for a file across swaps
 
 ## FUTURE
-* Listen to directories
+* Replace middot with separator for clean bar sections
+* \[1/8\] → 1/8 and separator to right
+* Red / blue color spectrum
 * Open in…
-* Copy Pixel color
 * Region selection
 * Modifications
   * 90° rotations
   * Crop to region
 * Copy region
-* Paste image
 * Settings
-  * Pixel format
   * Geospatial format
   * Date time format
 * Color scale: alpha mask
@@ -82,8 +73,7 @@
 * For the filename, if all files are in the same directory, just display the file name; if not, display a minimum disambiguated file path.
 * Formats
   * JPEG XL
-  * DNG
-  * Other raw files
+  * DNG/Raw
 * Info cleanup
   * Info / Specific tag renderers?
   * Perf on scroll up/down by drag

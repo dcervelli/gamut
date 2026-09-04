@@ -325,8 +325,7 @@ pub(super) fn draw(
                 let Some(format) = PixelFormat::ALL.get(index) else {
                     continue;
                 };
-                let (background, ink) =
-                    button_ink(*format == panels.pixel_format, hover, theme);
+                let (background, ink) = button_ink(*format == panels.pixel_format, hover, theme);
                 frame.rounded_rect(cell, CELL_RADIUS, background);
                 centered_text(frame, text, cell, ink, format.label());
             }

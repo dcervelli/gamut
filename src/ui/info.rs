@@ -919,10 +919,7 @@ mod tests {
                     name: "Camera",
                     entries: vec![
                         entry("Camera", "Apple iPhone 16 Pro"),
-                        entry(
-                            "Exposure",
-                            "1/50 s \u{00b7} f/1.78 \u{00b7} ISO 200",
-                        ),
+                        entry("Exposure", "1/50 s \u{00b7} f/1.78 \u{00b7} ISO 200"),
                     ],
                 },
                 Section {

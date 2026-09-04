@@ -1680,7 +1680,10 @@ mod tests {
 
         for action in [CopyPixelValue, CopyPixelCoordinate] {
             let hint = hint(action).unwrap_or_else(|| panic!("{action:?} is bound"));
-            assert!(hint.ends_with("(Ctrl+.)") || hint.ends_with("(Ctrl+Shift+.)"), "{hint}");
+            assert!(
+                hint.ends_with("(Ctrl+.)") || hint.ends_with("(Ctrl+Shift+.)"),
+                "{hint}"
+            );
         }
     }
 
@@ -1713,10 +1716,7 @@ mod tests {
             action_for(&greater, ELSEWHERE, SHIFT),
             Some(CyclePixelFormat)
         );
-        assert_eq!(
-            action_for(&stop, ELSEWHERE, CTRL),
-            Some(CopyPixelValue)
-        );
+        assert_eq!(action_for(&stop, ELSEWHERE, CTRL), Some(CopyPixelValue));
         assert_eq!(
             action_for(&greater, ELSEWHERE, CTRL | SHIFT),
             Some(CopyPixelCoordinate)
