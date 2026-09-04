@@ -222,6 +222,10 @@ impl ColorSpace {
         primaries: Primaries::Bt709,
     };
 
+    /// The space in one token — `BT.709/sRGB`, `BT.2020/PQ` — for the top
+    /// bar, which sets it beside the other facts about the file. Unspaced
+    /// around the solidus so that it reads as one thing rather than as two
+    /// segments the bar has parted.
     pub fn label(&self) -> String {
         let transfer = match self.transfer {
             Transfer::Linear => "linear".to_string(),
@@ -236,7 +240,7 @@ impl ColorSpace {
             Primaries::Bt2020 => "BT.2020",
             Primaries::AdobeRgb => "Adobe RGB",
         };
-        format!("{primaries} / {transfer}")
+        format!("{primaries}/{transfer}")
     }
 }
 
@@ -373,7 +377,7 @@ mod tests {
     }
 
     /// A conversion matrix must leave the white point alone, or every image
-    /// through it picks up a colour cast.
+    /// through it picks up a color cast.
     #[test]
     fn primaries_conversions_preserve_white() {
         for primaries in [Primaries::DisplayP3, Primaries::Bt2020, Primaries::AdobeRgb] {

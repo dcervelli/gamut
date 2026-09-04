@@ -27,7 +27,7 @@ ui/            builds each frame's display list; no wgpu or winit imports
   pixel.rs       the pointer's readout: coordinate, stored and mapped values, swatch
   menu.rs        Menu (which popup is open), the zoom menu's choices, and how its cells are drawn
   status.rs      the words in the top and bottom bars
-theme/         palette.rs reads Omarchy's colors.toml and resolves its cascade; mod.rs derives Theme's colour roles
+theme/         palette.rs reads Omarchy's colors.toml and resolves its cascade; mod.rs derives Theme's color roles
 view.rs        zoom / pan / fit geometry, pure maths (View, Viewport, Fit)
 listing.rs     what a path on the command line stands for: a directory is the
                images inside it, read again while the program runs
@@ -90,7 +90,7 @@ name.
 | A status-bar segment | `ui/status.rs`; the pointer's pixel readout is `ui/pixel.rs` |
 | What a pixel reads as under the pointer | `image/mod.rs::sample` for what the file holds, `image/display.rs::map` for what the screen shows |
 | A button's icon | `ui/icon.rs`: one `&[Mark]` on the 24-unit grid, and one `icon::draw` call where the button is drawn. The caller sets aside a budget; whether the mark comes out sharp is `UiFrame::stroke_centre_in_device`'s business and whether its spacing stays even is `icon::fit`'s |
-| A panel or overlay | a new `ui/<name>.rs` and one call in `ui/mod.rs::build_frame`; if the pointer can be on it, a `Hit` variant and one test in `ui/layers.rs` at the same height in the stack it is drawn at; a new colour role goes in `theme/mod.rs` |
+| A panel or overlay | a new `ui/<name>.rs` and one call in `ui/mod.rs::build_frame`; if the pointer can be on it, a `Hit` variant and one test in `ui/layers.rs` at the same height in the stack it is drawn at; a new color role goes in `theme/mod.rs` |
 | What the info panel says about a file | `ui/info.rs` for the layout; the file's own facts are gathered in `app/mod.rs::file_facts`, its metadata in `image/exif.rs`, and its georeference in `image/geo.rs` |
 | A popup menu | a `Menu` variant in `ui/menu.rs` with its choices, `sections`/`grid`/`choose` arms and a `draw` arm; `Chrome::popup` places it, `App::press` opens it, and `ui/layers.rs` puts it over everything |
 | A CLI flag | `cli.rs`, and the `Options` / `Startup` / `Overrides` field it sets |
@@ -99,13 +99,13 @@ name.
 | An image format | `image/decode/<fmt>.rs` implementing `Decoder`, one line in `DECODERS`, a fixture in `test_images/` (see its README and `generate.sh`) |
 | What a copy of the image contains | `image/encode.rs`; the chord that asks for it is in `app/input.rs` |
 | What a paste accepts, or where it is written | `clipboard.rs::IMAGE_TYPES` for the MIME types and the extensions they are saved under, `pasted.rs` for the directory and the name; `App::paste` starts it and `app/files.rs::adopt` puts it in the list. Whether the button for it is on screen is `Panels::paste`, looked at by `App::poll_clipboard` |
-| A colour-space source (a new tag a format carries) | `image/color/` |
+| A color-space source (a new tag a format carries) | `image/color/` |
 | Someone else's work brought into the tree | say where it came from beside the code that carries it, then one `[[annotations]]` entry in `REUSE.toml`; if its licence is new to the tree, its text goes in `LICENSES/` named by SPDX identifier, and the PKGBUILD's `license=()` grows an entry |
 | A dependency | `Cargo.toml`, then `bin/release` rewrites `THIRD-PARTY-NOTICES`. A licence `about.toml` does not accept fails generation: add it there, in priority order, and its text to `LICENSES/`, or take the dependency instead |
 | An upscale filter or tone map | the WGSL function, one arm in `render/shader_codes.rs`, one enum variant with its `label`/`parse`/`next`; a tone map's CPU twin is `ToneMap::apply`, which takes the surface's `Headroom` as the shader arm does |
 | What the surface can be, SDR or HDR | `render/output.rs` chooses it; `monitor.rs` says what the monitor is in; `App::surface_hdr` and `App::headroom` put the two together, `App::sync_output` acts on them, and `App::toggle_hdr` is what the bar's `HDR` button and `o` both call |
 | A new render pass | build it from `render/gpu.rs`; add its target to `Renderer::render` |
-| Something about the display window, exposure or false colour | `image/display.rs` (state) and `shaders/image.wgsl` / `composite.wgsl` (effect) |
+| Something about the display window, exposure or false color | `image/display.rs` (state) and `shaders/image.wgsl` / `composite.wgsl` (effect) |
 
 ## Conventions
 
@@ -130,6 +130,17 @@ name.
   `request_redraw` themselves.
 - Docs: `user-docs/` is for users and has its own CLAUDE.md; implementation
   reasoning belongs in the README or in module docs.
+- American spelling in anything new — code, comments, docs, and every word a
+  user reads: `color`, `gray`, `normalize`, `center`, `behavior`. The data
+  model already spells `ColorSpace` and `Channels::Gray` that way, and prose
+  that disagrees with the identifiers beside it makes both harder to search.
+  The exception is a name someone else chose, quoted as they wrote it: a
+  spec's own wording, an external API, an SPDX license identifier.
+  `colour` has been swept out of the tree; `centre`, `grey`, `normalise`,
+  `recognise` and `quantise` have not, and still stand in older prose and in
+  identifiers such as `cap_centre` and `stroke_centre_in_device`. Leave those
+  where they are until they are renamed as a piece — a half-renamed identifier
+  is worse than a consistently British one.
 
 ## Checks
 

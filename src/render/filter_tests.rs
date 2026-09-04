@@ -305,10 +305,10 @@ fn bicubic_passes_texel_centres_through() {
 }
 
 /// Filtering straight alpha without multiplying it through first is what puts
-/// a halo of a transparent texel's colour along a hard edge. Here the
+/// a halo of a transparent texel's color along a hard edge. Here the
 /// transparent half is green, and none of it may reach the result.
 #[test]
-fn a_transparent_texel_does_not_bleed_its_colour() {
+fn a_transparent_texel_does_not_bleed_its_color() {
     let Some(gpu) = gpu::test_context() else {
         return;
     };
@@ -335,7 +335,7 @@ fn a_transparent_texel_does_not_bleed_its_colour() {
     };
     let pixels = draw(gpu, &image, [1, 1], placement);
 
-    // The target holds premultiplied colour, so half coverage of opaque red
+    // The target holds premultiplied color, so half coverage of opaque red
     // reads as half red, half alpha, and no green whatsoever.
     assert!(close(pixels[0][0], 0.5, 5e-3), "red: {:?}", pixels[0]);
     assert!(close(pixels[0][1], 0.0, 5e-3), "green: {:?}", pixels[0]);

@@ -26,6 +26,10 @@ more than it tells them. Name a thing the user already meets elsewhere — an
 ICC profile, an EXIF orientation, a gain map — and describe everything else in
 plain words.
 
+**American spelling.** `color`, `gray`, `normalize`, `center`, `behavior` —
+the same rule the rest of the project follows, so that a user searching these
+pages and a user reading the interface meet the same words.
+
 **Voice: concise, not terse.** Complete sentences, no padding. State what
 happens, then why it matters if the why is not obvious. Prefer the active
 voice and the present tense. A caveat is worth a sentence of explanation; it

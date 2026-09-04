@@ -4,7 +4,7 @@
 // there is no transfer function here. What remains is: resample to the size
 // the view asks for, expand whatever component layout we uploaded to RGBA, get
 // into the BT.709 working space, apply the display window, and optionally
-// false-colour a single channel.
+// false-color a single channel.
 //
 // Resampling is done here with explicit texel loads rather than by a sampler.
 // A sampler offers one bilinear tap, which neither shows the pixel grid a
@@ -50,9 +50,9 @@ fn vs_main(@builtin(vertex_index) index: u32) -> VertexOut {
     return out;
 }
 
-// Colour premultiplied by alpha, in the component layout the texture stores.
+// Color premultiplied by alpha, in the component layout the texture stores.
 // Every filter below is a weighted sum of texels, and weighting straight alpha
-// would drag the colour of fully transparent texels into their neighbours,
+// would drag the color of fully transparent texels into their neighbours,
 // which is what shows as haloing along a hard edge. Coarse levels are already
 // premultiplied, so this is a no-op for them.
 fn premultiplied(texel: vec4<f32>) -> vec4<f32> {
@@ -170,14 +170,14 @@ fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
 }
 
 // Polynomial fits to the matplotlib colormaps. Approximations, but well
-// within what the eye resolves in a false-colour display. They produce
+// within what the eye resolves in a false-color display. They produce
 // sRGB-encoded values, so the caller linearises.
 //
 // Viridis and magma are Matt Zucker's fits, from
 // https://www.shadertoy.com/view/WlfXRN, under CC0; `REUSE.toml` records it.
 //
 // Mirrored on the CPU by `Colormap::color` in image/display.rs, which the
-// pointer readout uses to say what colour a pixel came out. Change one, change
+// pointer readout uses to say what color a pixel came out. Change one, change
 // the other: a swatch that disagrees with the screen is worse than no swatch.
 fn viridis(t: f32) -> vec3<f32> {
     let c0 = vec3<f32>(0.2777273, 0.00540734, 0.33409980);
@@ -249,9 +249,9 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     }
 
     // Undo the premultiplication `resample` worked in, so that windowing and
-    // the primaries matrix act on the actual colour rather than a faded one.
+    // the primaries matrix act on the actual color rather than a faded one.
     // Bicubic's negative lobes can undershoot, so a texel that has resolved to
-    // near-nothing is taken as nothing rather than divided into a wild colour.
+    // near-nothing is taken as nothing rather than divided into a wild color.
     if params.alpha_mode == 0u {
         alpha = 1.0;
     } else {

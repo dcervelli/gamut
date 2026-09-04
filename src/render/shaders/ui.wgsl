@@ -2,7 +2,7 @@
 //
 // One draw call for the whole interface, however many panels it grows. The UI
 // renders into its own sRGB target and never learns what the output surface
-// is doing, so widget code can go on thinking in plain sRGB colours while the
+// is doing, so widget code can go on thinking in plain sRGB colors while the
 // image beside it is in extended-range linear.
 //
 // An instance is a rounded rectangle about its own centre, turned to face

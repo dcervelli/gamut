@@ -12,8 +12,8 @@ pub const BINS: usize = 256;
 /// stride. Enough for stable percentiles, fast enough to run on every load.
 const MAX_SAMPLED_PIXELS: usize = 1 << 21;
 
-/// Number of colour components a pixel carries, alpha aside.
-pub const COLOUR: usize = 3;
+/// Number of color components a pixel carries, alpha aside.
+pub const COLOR: usize = 3;
 
 /// The histogram the interface draws.
 ///
@@ -47,10 +47,10 @@ pub struct Plot {
     pub max: f32,
     /// Counts over `min..max` for the luminance of each sampled pixel.
     pub luma: [u32; BINS],
-    /// Red, green and blue, for an image that carries colour. Their range is
+    /// Red, green and blue, for an image that carries color. Their range is
     /// what sets the axis; luminance is a weighted average of them and so
     /// always falls inside it.
-    pub colour: Option<[[u32; BINS]; COLOUR]>,
+    pub color: Option<[[u32; BINS]; COLOR]>,
 }
 
 impl Plot {
@@ -61,9 +61,9 @@ impl Plot {
     /// The twin of the luminance pass in [`Stats::scan`], and it has to be
     /// worked out from the file's components rather than from
     /// [`Sample::color`]: the scan bins what the transfer function alone
-    /// makes of them, where that colour has also been carried into the
+    /// makes of them, where that color has also been carried into the
     /// working space and had its premultiplication undone. On a P3 file, or
-    /// one with premultiplied alpha, a bin taken from the colour would name a
+    /// one with premultiplied alpha, a bin taken from the color would name a
     /// bar the pixel is not in.
     ///
     /// `None` where there is no bar to point at: an axis with no span, a
@@ -110,7 +110,7 @@ impl Plot {
             min: 0.0,
             max: 1.0,
             luma: [0; BINS],
-            colour: None,
+            color: None,
         }
     }
 }
@@ -132,9 +132,9 @@ impl Stats {
     /// Scans `image`, converting to the linear working space as it goes so
     /// that the numbers line up with what the shader will sample.
     ///
-    /// Grey images are measured on their single channel; colour images on
+    /// Grey images are measured on their single channel; color images on
     /// relative luminance, which is what an exposure control should track.
-    /// Colour images additionally get per-channel counts, which the UI draws
+    /// Color images additionally get per-channel counts, which the UI draws
     /// as a four-channel histogram.
     pub fn scan(image: &DecodedImage) -> Self {
         let channels = image.samples.channels();
@@ -145,8 +145,8 @@ impl Stats {
         let is_data =
             move |value: f32| value.is_finite() && nodata.is_none_or(|sentinel| value != sentinel);
 
-        let colour = !channels.is_gray();
-        let plotted = if colour { COLOUR } else { 1 };
+        let color = !channels.is_gray();
+        let plotted = if color { COLOR } else { 1 };
         let (mut min, mut max) = (f32::INFINITY, f32::NEG_INFINITY);
         let (mut axis_min, mut axis_max) = if transfer.is_linear() {
             (f32::INFINITY, f32::NEG_INFINITY)
@@ -195,8 +195,8 @@ impl Stats {
             min: axis_min,
             max: axis_max,
             luma: [0; BINS],
-            colour: if colour {
-                Some([[0; BINS]; COLOUR])
+            color: if color {
+                Some([[0; BINS]; COLOR])
             } else {
                 None
             },
@@ -230,9 +230,9 @@ impl Stats {
                         // axis the same way the samples themselves did.
                         bin(&mut plot.luma, encode(transfer, value));
                     }
-                    if let Some(planes) = plot.colour.as_mut() {
+                    if let Some(planes) = plot.color.as_mut() {
                         for (plane, (stored, decoded)) in
-                            encoded[..COLOUR].iter().zip(linear).enumerate()
+                            encoded[..COLOR].iter().zip(linear).enumerate()
                         {
                             if is_data(*decoded) {
                                 bin(&mut planes[plane], *stored);
@@ -276,7 +276,7 @@ impl Stats {
     }
 }
 
-/// Grey uses its one channel; colour collapses to relative luminance,
+/// Grey uses its one channel; color collapses to relative luminance,
 /// weighted for the BT.709 primaries the working space uses.
 fn luminance(pixel: &[f32], channels: Channels) -> f32 {
     if channels.is_gray() {
@@ -434,7 +434,7 @@ mod tests {
     /// Every pixel's marker lands on a bar that actually has the pixel in it.
     ///
     /// The one that would go wrong quietly: this image is P3 with
-    /// premultiplied alpha, so the colour a readout gets back from
+    /// premultiplied alpha, so the color a readout gets back from
     /// [`DecodedImage::sample`] has been through a primaries matrix and a
     /// divide by alpha that the scan never applied. A bin taken from that
     /// would point at an empty bar beside the pixel's own.
@@ -488,7 +488,7 @@ mod tests {
     }
 
     #[test]
-    fn colour_images_are_measured_on_luminance() {
+    fn color_images_are_measured_on_luminance() {
         let green = DecodedImage {
             width: 1,
             height: 1,
@@ -520,21 +520,21 @@ mod tests {
         }
     }
 
-    /// The point of the separate axis: saturated colour runs well past the
+    /// The point of the separate axis: saturated color runs well past the
     /// luminance range, and binning it there would pile it into the last bin.
     #[test]
-    fn colour_channels_are_binned_over_their_own_range() {
+    fn color_channels_are_binned_over_their_own_range() {
         let stats = Stats::scan(&rgb_f32(vec![1.0, 0.0, 0.0]));
         let plot = &stats.plot;
-        let colour = plot.colour.expect("an rgb image has channel counts");
+        let color = plot.color.expect("an rgb image has channel counts");
 
         assert!((stats.max - 0.2126).abs() < 1e-4, "luminance is unchanged");
         assert!(plot.min.abs() < 1e-6);
         assert!((plot.max - 1.0).abs() < 1e-6);
         // Red at the top of the axis, green and blue at the bottom.
-        assert_eq!(colour[0][BINS - 1], 1);
-        assert_eq!(colour[1][0], 1);
-        assert_eq!(colour[2][0], 1);
+        assert_eq!(color[0][BINS - 1], 1);
+        assert_eq!(color[1][0], 1);
+        assert_eq!(color[2][0], 1);
         // Luminance sits between them, on the same axis as the rest.
         assert_eq!(plot.luma.iter().sum::<u32>(), 1);
         assert_eq!(plot.luma[(0.2126 * 255.0) as usize], 1);
@@ -543,8 +543,8 @@ mod tests {
     #[test]
     fn every_plane_counts_every_pixel() {
         let stats = Stats::scan(&rgb_f32(vec![0.25, 0.5, 0.75, 0.0, 0.5, 1.0]));
-        let colour = stats.plot.colour.expect("an rgb image has channel counts");
-        for plane in &colour {
+        let color = stats.plot.color.expect("an rgb image has channel counts");
+        for plane in &color {
             assert_eq!(plane.iter().sum::<u32>(), 2);
         }
         assert_eq!(stats.plot.luma.iter().sum::<u32>(), 2);
@@ -566,7 +566,7 @@ mod tests {
         let opaque = opaque.plot;
 
         assert_eq!(with_alpha.max, opaque.max, "alpha would have widened this");
-        assert_eq!(with_alpha.colour, opaque.colour);
+        assert_eq!(with_alpha.color, opaque.color);
     }
 
     #[test]
@@ -574,7 +574,7 @@ mod tests {
         assert!(
             Stats::scan(&linear_gray(vec![0, 1000, 4095]))
                 .plot
-                .colour
+                .color
                 .is_none()
         );
     }
@@ -586,7 +586,7 @@ mod tests {
         let plot = Stats::scan(&rgb_f32(vec![0.5, 0.5, 0.5])).plot;
         assert_eq!(plot.luma.iter().sum::<u32>(), 0);
         assert!(
-            plot.colour
+            plot.color
                 .is_some_and(|planes| planes.iter().all(|plane| plane.iter().sum::<u32>() == 0))
         );
     }

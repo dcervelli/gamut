@@ -42,7 +42,7 @@ pub(super) fn decode_as(bytes: &[u8], format: ::image::ImageFormat) -> Result<Dy
     Ok(reader.decode()?)
 }
 
-/// Wraps a decoded buffer in what we know about it. `stated` is the colour
+/// Wraps a decoded buffer in what we know about it. `stated` is the color
 /// space the container claimed, used wherever the pixel type does not settle
 /// the question by itself.
 pub(super) fn describe(

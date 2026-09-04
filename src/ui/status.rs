@@ -4,12 +4,15 @@
 use crate::image::display::{AutoWindow, Colormap, Headroom, ToneMap};
 use crate::render::TextMeasure;
 
-use super::{BECOMES, Current, FrameInput, Reading, TEXT_SIZE};
+use super::{Current, FrameInput, Reading, TEXT_SIZE};
+
+/// Between one segment of a bar and the next. A thin gap: the middot already
+/// parts them, and the bars are short of room before they are short of air.
+const SEPARATOR: &str = " \u{00b7} ";
 
 /// Joins as many leading segments as fit in `width`, keeping at least the
 /// first however narrow the window gets.
 pub(super) fn fit_segments(text: &mut dyn TextMeasure, segments: &[String], width: f32) -> String {
-    const SEPARATOR: &str = "   \u{00b7}   ";
     let Some((first, rest)) = segments.split_first() else {
         return String::new();
     };
@@ -38,7 +41,7 @@ pub(super) fn top_label(shown: &str, reading: Option<&Reading>) -> String {
 }
 
 /// The word that goes in front of the name when the file behind the picture
-/// is gone. Set apart in the warning colour rather than folded into the name,
+/// is gone. Set apart in the warning color rather than folded into the name,
 /// which is still the name of the file the pixels came from: it is a fact
 /// about the file's standing in the world, not part of what it is called —
 /// and a file that really is called `DELETED` must not read as this.
@@ -57,17 +60,15 @@ pub(super) fn counter(index: usize, count: usize) -> Option<String> {
     (count > 1).then(|| format!("[{}/{}]", index + 1, count))
 }
 
+/// What each pixel holds, in the bar's shorthand: `RGB8`, `RGBA16`,
+/// `GRAY32F`.
+///
+/// Not the format the GPU stored it in. That is a fact about this machine
+/// rather than about the file — the same image lands on a different one on a
+/// device without 16-bit norm textures — and it is the info panel's `Stored
+/// as`, written out where a reader has gone looking for it.
 pub(super) fn describe_pixels(current: &Current) -> String {
-    let channels = current.image.channels().label();
-    let stored = current
-        .stored
-        .as_ref()
-        .map(|stored| format!(" {BECOMES} {stored}"))
-        .unwrap_or_default();
-    format!(
-        "{} {channels}{stored}",
-        current.image.samples.component_name()
-    )
+    current.image.samples.short_label()
 }
 
 /// What is being done to the image, for the bottom bar: only the things
@@ -91,15 +92,15 @@ pub(super) fn describe_state(current: &Current, input: &FrameInput) -> String {
     if current.display.exposure_stops != 0.0 {
         parts.push(format!("{:+.1} EV", current.display.exposure_stops));
     }
-    // The false colour is a reading of one channel, and the display leaves
-    // it off a colour image; so does the bar.
+    // The false color is a reading of one channel, and the display leaves
+    // it off a color image; so does the bar.
     if current.image.is_gray() && current.display.colormap != Colormap::Gray {
         parts.push(current.display.colormap.label().to_string());
     }
     if let Some(highlights) = describe_highlights(current, input.headroom) {
         parts.push(highlights.to_string());
     }
-    parts.join("   \u{00b7}   ")
+    parts.join(SEPARATOR)
 }
 
 /// What is becoming of the highlights: the curve that is on them, or —
@@ -109,7 +110,7 @@ pub(super) fn describe_state(current: &Current, input: &FrameInput) -> String {
 /// done: no curve and nothing above white to clip, or no curve and a surface
 /// with the room to show what is.
 ///
-/// The false colour clips whatever the curve, and says so by being named
+/// The false color clips whatever the curve, and says so by being named
 /// itself, in the segment before this one.
 fn describe_highlights(current: &Current, headroom: Headroom) -> Option<&'static str> {
     let display = &current.display;
@@ -181,7 +182,7 @@ mod tests {
     /// The bar says what is becoming of the highlights and nothing more: no
     /// word for a picture with none above white, `clip` once exposure has
     /// pushed some there on a surface that stops at white, the curve's own
-    /// name while one is on, and nothing under a false colour, which is named
+    /// name while one is on, and nothing under a false color, which is named
     /// itself and clips whatever the curve.
     #[test]
     fn the_bar_says_what_becomes_of_the_highlights() {

@@ -40,10 +40,10 @@ enum Tone {
     FloatWithNodata,
     /// Signed 16-bit elevations, scaled to span negative and positive.
     Int16,
-    /// As `Color`, but the last quadrant carries no colour at all. A GIF's
+    /// As `Color`, but the last quadrant carries no color at all. A GIF's
     /// transparency is a palette index rather than a channel, so the pixel
-    /// behind it has nothing to hold a colour in and the decoder hands back
-    /// four zeroes where that index sat. A PNG's `tRNS` keeps the colour
+    /// behind it has nothing to hold a color in and the decoder hands back
+    /// four zeroes where that index sat. A PNG's `tRNS` keeps the color
     /// under the hole, which is why `Color` cannot serve both.
     ColorLastCleared,
 }
@@ -126,7 +126,7 @@ const FIXTURES: &[Fixture] = &[
     },
     Fixture {
         file: "png-rgb8.png",
-        covers: "PNG truecolour, 8-bit",
+        covers: "PNG truecolor, 8-bit",
         channels: Channels::Rgb,
         kind: Kind::U8,
         color: SRGB,
@@ -138,7 +138,7 @@ const FIXTURES: &[Fixture] = &[
     },
     Fixture {
         file: "png-rgba8.png",
-        covers: "PNG truecolour plus alpha, 8-bit",
+        covers: "PNG truecolor plus alpha, 8-bit",
         channels: Channels::Rgba,
         kind: Kind::U8,
         color: SRGB,
@@ -174,7 +174,7 @@ const FIXTURES: &[Fixture] = &[
     },
     Fixture {
         file: "png-rgb16.png",
-        covers: "PNG truecolour, 16-bit",
+        covers: "PNG truecolor, 16-bit",
         channels: Channels::Rgb,
         kind: Kind::U16,
         color: SRGB,
@@ -186,7 +186,7 @@ const FIXTURES: &[Fixture] = &[
     },
     Fixture {
         file: "png-rgba16.png",
-        covers: "PNG truecolour plus alpha, 16-bit",
+        covers: "PNG truecolor plus alpha, 16-bit",
         channels: Channels::Rgba,
         kind: Kind::U16,
         color: SRGB,
@@ -222,7 +222,7 @@ const FIXTURES: &[Fixture] = &[
     },
     Fixture {
         file: "png-palette.png",
-        covers: "PNG indexed colour, expanded on decode",
+        covers: "PNG indexed color, expanded on decode",
         channels: Channels::Rgb,
         kind: Kind::U8,
         color: SRGB,
@@ -234,7 +234,7 @@ const FIXTURES: &[Fixture] = &[
     },
     Fixture {
         file: "png-palette-alpha.png",
-        covers: "PNG indexed colour with a tRNS chunk",
+        covers: "PNG indexed color with a tRNS chunk",
         channels: Channels::Rgba,
         kind: Kind::U8,
         color: SRGB,
@@ -404,7 +404,7 @@ const FIXTURES: &[Fixture] = &[
     },
     Fixture {
         file: "tiff-rgb8.tif",
-        covers: "TIFF truecolour, 8-bit",
+        covers: "TIFF truecolor, 8-bit",
         channels: Channels::Rgb,
         kind: Kind::U8,
         color: SRGB,
@@ -416,7 +416,7 @@ const FIXTURES: &[Fixture] = &[
     },
     Fixture {
         file: "tiff-rgba8.tif",
-        covers: "TIFF truecolour plus alpha, 8-bit",
+        covers: "TIFF truecolor plus alpha, 8-bit",
         channels: Channels::Rgba,
         kind: Kind::U8,
         color: SRGB,
@@ -440,7 +440,7 @@ const FIXTURES: &[Fixture] = &[
     },
     Fixture {
         file: "tiff-rgb16.tif",
-        covers: "TIFF truecolour, 16-bit",
+        covers: "TIFF truecolor, 16-bit",
         channels: Channels::Rgb,
         kind: Kind::U16,
         color: LINEAR,
@@ -625,7 +625,7 @@ const FIXTURES: &[Fixture] = &[
     // ------------------------------------------------------------ HEIF
     Fixture {
         file: "heic-rgb8.heic",
-        covers: "HEIC truecolour, 8-bit",
+        covers: "HEIC truecolor, 8-bit",
         channels: Channels::Rgb,
         kind: Kind::U8,
         color: SRGB,
@@ -637,7 +637,7 @@ const FIXTURES: &[Fixture] = &[
     },
     Fixture {
         file: "heic-rgba8.heic",
-        covers: "HEIC truecolour plus alpha, 8-bit",
+        covers: "HEIC truecolor plus alpha, 8-bit",
         channels: Channels::Rgba,
         kind: Kind::U8,
         color: SRGB,
@@ -700,7 +700,7 @@ const FIXTURES: &[Fixture] = &[
         nodata: None,
         tolerance: EXACT,
     },
-    // The same colour space said the other way: an ICC profile with no
+    // The same color space said the other way: an ICC profile with no
     // `nclx` box beside it, which is what some cameras write and what used to
     // read as plain sRGB.
     Fixture {
@@ -781,7 +781,7 @@ const FIXTURES: &[Fixture] = &[
         tolerance: LOSSY,
     },
     // Lossy plus alpha is two bitstreams: an `ALPH` chunk for the coverage
-    // and a `VP8` chunk for the colour, which only the extended container can
+    // and a `VP8` chunk for the color, which only the extended container can
     // hold together.
     Fixture {
         file: "webp-lossy-rgba8.webp",
@@ -795,7 +795,7 @@ const FIXTURES: &[Fixture] = &[
         nodata: None,
         tolerance: LOSSY,
     },
-    // The only thing a WebP has to say about its own colour.
+    // The only thing a WebP has to say about its own color.
     Fixture {
         file: "webp-icc-p3.webp",
         covers: "WebP `ICCP` chunk naming Display P3",
@@ -853,7 +853,7 @@ const FIXTURES: &[Fixture] = &[
         tolerance: EXACT,
     },
     // A 4-bit palette with a fully opaque AND mask beside it: the shallow
-    // bitmap path, and the one an icon written before 32-bit colour takes.
+    // bitmap path, and the one an icon written before 32-bit color takes.
     Fixture {
         file: "ico-bmp-palette.ico",
         covers: "ICO bitmap entry, 4-bit palette plus AND mask",
@@ -1234,8 +1234,8 @@ fn every_fixture_decodes_to_what_it_says_it_does() {
 
             // Grey keeps its value in the red slot; alpha, where present, is
             // always the last component.
-            let colour_slots = if fixture.channels.is_gray() { 1 } else { 3 };
-            for slot in 0..colour_slots {
+            let color_slots = if fixture.channels.is_gray() { 1 } else { 3 };
+            for slot in 0..color_slots {
                 assert!(
                     (found[slot] - want[slot]).abs() <= fixture.tolerance,
                     "{name} quadrant {index} channel {slot}: got {found:?}, want {want:?}"

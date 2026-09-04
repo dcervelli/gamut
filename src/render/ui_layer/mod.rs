@@ -1,7 +1,7 @@
 //! The interface layer: a draw list, and the text machinery behind it.
 //!
 //! The UI is deliberately not part of image rendering. It draws into its own
-//! sRGB target, so widget code works in ordinary sRGB colours and logical
+//! sRGB target, so widget code works in ordinary sRGB colors and logical
 //! pixels and never has to know whether the image beside it is a JPEG or a
 //! scene-linear EXR being tone mapped for an HDR display. The compositor is
 //! the only thing that sees both.
@@ -68,8 +68,8 @@ impl Rect {
     }
 }
 
-/// An sRGB colour with straight alpha, the way UI code likes to think about
-/// colour. Conversion to whatever the pipeline needs happens on the way to
+/// An sRGB color with straight alpha, the way UI code likes to think about
+/// color. Conversion to whatever the pipeline needs happens on the way to
 /// the GPU.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Color {
@@ -92,7 +92,7 @@ impl Color {
         Self { a, ..self }
     }
 
-    /// The interface colour that shows a linear working-space value: the
+    /// The interface color that shows a linear working-space value: the
     /// inverse of [`Color::to_linear`], for the readouts that have to put a
     /// piece of the display's own output on a panel.
     ///
@@ -142,8 +142,8 @@ pub enum Blend {
     /// without ever clipping: red over green reads yellow, all three read
     /// neutral. For overlapping plots that each want to stay visible.
     ///
-    /// Meant for opaque colours. Alpha still controls coverage, so a
-    /// translucent shape screens proportionately less, but a colour dimmed by
+    /// Meant for opaque colors. Alpha still controls coverage, so a
+    /// translucent shape screens proportionately less, but a color dimmed by
     /// its alpha rather than by its components will not read as intended.
     Screen,
 }

@@ -61,7 +61,7 @@ pub(super) fn decode(source: &mut dyn ReadSeek) -> Result<DecodedImage> {
     dynamic::describe(decoded, Some(::image::ImageFormat::Png), color)
 }
 
-/// What a PNG says about its own colour, read from the chunks up to the first
+/// What a PNG says about its own color, read from the chunks up to the first
 /// `IDAT` and no further.
 ///
 /// `cICP` is preferred over `iCCP` where a file carries both, for the same

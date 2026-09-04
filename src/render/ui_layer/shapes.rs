@@ -144,10 +144,10 @@ impl Shapes {
             })
         };
 
-        // Both shaders premultiply, so colour and coverage accumulate into a
+        // Both shaders premultiply, so color and coverage accumulate into a
         // transparent target, which is what the compositor wants. Screen
         // weights the source by what is already there, which only works on
-        // premultiplied colour — hence the convention.
+        // premultiplied color — hence the convention.
         const SCREEN: wgpu::BlendState = wgpu::BlendState {
             color: wgpu::BlendComponent {
                 src_factor: wgpu::BlendFactor::OneMinusDst,

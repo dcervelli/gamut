@@ -215,7 +215,7 @@ impl Reducer {
 /// The format the chain is stored in.
 ///
 /// Float, so that a level holds linear light with no transfer function to
-/// think about, and premultiplied colour without an 8-bit floor under it. Half
+/// think about, and premultiplied color without an 8-bit floor under it. Half
 /// floats everywhere except above a 32-bit float source, where the range and
 /// the low bits are the point of the file.
 pub fn level_format(source: wgpu::TextureFormat) -> wgpu::TextureFormat {

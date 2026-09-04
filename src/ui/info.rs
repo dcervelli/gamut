@@ -441,7 +441,7 @@ fn chip_width(text: &mut dyn TextMeasure, copies: Copyable) -> f32 {
 ///
 /// On opaque ground rather than the panel's own, because the one in the
 /// column is drawn over the words it would copy and they must not show
-/// through it; and outlined, because ground the colour of the panel it sits
+/// through it; and outlined, because ground the color of the panel it sits
 /// on would otherwise leave it no edge.
 fn chip(
     frame: &mut UiFrame,
@@ -661,7 +661,7 @@ fn column(text: &mut dyn TextMeasure, contents: &Contents, width: f32) -> Column
 /// it saying less than nothing; a section left with nothing in it goes too,
 /// an empty heading being a question about where the rest of it went. In
 /// practice the first two always stand, since a file always has a size and a
-/// picture always has a colour space.
+/// picture always has a color space.
 fn contents(current: &Current) -> Contents {
     let mut sections = vec![
         ("File", fields(file_facts(current))),
@@ -786,7 +786,7 @@ fn image_facts(current: &Current) -> Vec<(&'static str, String)> {
         // on a device without the format lands somewhere wider or narrower,
         // and the difference belongs beside what the file holds.
         ("Stored as", current.stored.clone().unwrap_or_default()),
-        ("Colour space", image.color.label()),
+        ("Color space", image.color.label()),
         // Only where there is an alpha channel to have been multiplied
         // through or not: "opaque" under an image the line above already
         // called rgb is a word about nothing.
@@ -921,7 +921,7 @@ mod tests {
                         entry("Camera", "Apple iPhone 16 Pro"),
                         entry(
                             "Exposure",
-                            "1/50 s   \u{00b7}   f/1.78   \u{00b7}   ISO 200",
+                            "1/50 s \u{00b7} f/1.78 \u{00b7} ISO 200",
                         ),
                     ],
                 },
@@ -966,7 +966,7 @@ mod tests {
             "2025-08-31 09:32:02 UTC",
             "4 \u{00d7} 5",
             "8-bit rgb",
-            "BT.709 / sRGB",
+            "BT.709/sRGB",
             "Apple iPhone 16 Pro",
             "value 23",
         ] {

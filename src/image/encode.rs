@@ -1,7 +1,7 @@
 //! The image as it is on screen, written out as a PNG.
 //!
 //! The picture that travels is the one the display settings have made — the
-//! window, the exposure, the tone curve, the false colour — at the image's own
+//! window, the exposure, the tone curve, the false color — at the image's own
 //! size rather than the window's. So this is not a screenshot: it is the
 //! rendering pipeline run again on the CPU, over every pixel instead of the
 //! one under the pointer.
@@ -49,8 +49,8 @@ pub struct Raster {
 /// Runs the display pipeline over every pixel of `image`.
 ///
 /// A single-channel image stays single-channel, because that is what it is and
-/// storing the same number three times says nothing more. False colour is the
-/// exception: it turns one value into a colour on purpose, and a grey PNG
+/// storing the same number three times says nothing more. False color is the
+/// exception: it turns one value into a color on purpose, and a grey PNG
 /// could not hold the result.
 ///
 /// Alpha is carried only where the file had some. An image that was opaque
@@ -162,7 +162,7 @@ pub fn png(raster: &Raster) -> Result<Vec<u8>> {
     // On content it would have chosen differently, the same fixed filter cost
     // half as much again in bytes, and the bytes are what the paste waits on.
     // Said outright rather than left to be assumed. Whatever the file's own
-    // colour space was, the window and the tone curve have taken it to what
+    // color space was, the window and the tone curve have taken it to what
     // the screen was showing, and that was resolved against sRGB.
     encoder.set_source_srgb(SrgbRenderingIntent::Perceptual);
 
@@ -250,7 +250,7 @@ mod tests {
         Display::default()
     }
 
-    /// `(colour type, bit depth, pixel bytes)` as a PNG decoder reads them
+    /// `(color type, bit depth, pixel bytes)` as a PNG decoder reads them
     /// back, which is the only reading of the file that matters.
     fn round_trip(raster: &Raster) -> (ColorType, BitDepth, Vec<u8>) {
         let bytes = super::png(raster).expect("a valid raster encodes");
@@ -272,10 +272,10 @@ mod tests {
         assert_eq!(pixels, vec![0, 128, 255]);
     }
 
-    /// False colour is three components where the value was one, so the grey
+    /// False color is three components where the value was one, so the grey
     /// cannot be kept — this is the one thing that widens a single channel.
     #[test]
-    fn false_colour_makes_a_grey_image_colour() {
+    fn false_color_makes_a_grey_image_color() {
         let mut display = plain();
         display.colormap = Colormap::Viridis;
         let raster = displayed(&image(Channels::Gray, vec![0, 255]), &display);

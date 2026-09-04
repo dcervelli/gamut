@@ -3,7 +3,7 @@
 pkgname=gamut
 pkgver=0.1.0
 pkgrel=1
-pkgdesc="A GPU image viewer with real colour management, for photographs, measurement data and HDR"
+pkgdesc="A GPU image viewer with real color management, for photographs, measurement data and HDR"
 arch=('x86_64' 'aarch64')
 url="https://github.com/closedcontour/gamut"
 # gamut itself, then the licences of the work carried in its own source tree:

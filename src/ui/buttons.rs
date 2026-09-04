@@ -122,7 +122,7 @@ pub(super) fn outline(frame: &mut UiFrame, rect: Rect, thickness: f32, color: Co
     }
     let edge = frame.line_width(thickness);
     // The two down the sides stop where the two across meet them, so that a
-    // colour with anything less than full alpha is not laid twice at the
+    // color with anything less than full alpha is not laid twice at the
     // corners and drawn darker there.
     let middle = (rect.height - 2.0 * edge).max(0.0);
     frame.line(
@@ -177,7 +177,7 @@ const DEAD_BUTTON_INK: u8 = 90;
 /// The headroom switch: one word, lit while the picture is going out with
 /// room above white. A toggle rather than a readout, since whether the
 /// picture uses the room is the viewer's to choose — where there is any: the
-/// driver offers an HDR colour space and the monitor is not in SDR mode.
+/// driver offers an HDR color space and the monitor is not in SDR mode.
 /// Where there is none, the button is drawn dead rather than left out: a
 /// control that is sometimes there is a control that has to be found again.
 pub(super) fn output_button(

@@ -42,7 +42,7 @@ fn reinhard(color: vec3<f32>) -> vec3<f32> {
 }
 
 // Khronos PBR Neutral. Holds hue and saturation far better than a Reinhard
-// curve and avoids the colour cast of the ACES approximations.
+// curve and avoids the color cast of the ACES approximations.
 fn neutral(color_in: vec3<f32>) -> vec3<f32> {
     let start_compression = 0.8 - 0.04;
     let desaturation = 0.15;
@@ -160,7 +160,7 @@ fn backdrop(point: vec2<f32>) -> vec3<f32> {
     return params.base.rgb;
 }
 
-// The curve acts on the colour, not on the colour faded by its coverage, so a
+// The curve acts on the color, not on the color faded by its coverage, so a
 // half-transparent highlight tone maps to the same shade as an opaque one.
 fn tone_map_premultiplied(texel: vec4<f32>) -> vec3<f32> {
     if texel.a <= 0.0 {

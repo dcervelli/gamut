@@ -76,7 +76,7 @@ pub struct App {
     /// was a file.
     named: Vec<PathBuf>,
     directories: Vec<Watch>,
-    /// The colours everything is drawn in, and the palette file they came
+    /// The colors everything is drawn in, and the palette file they came
     /// from, watched on the same cadence as the image: Omarchy rewrites it
     /// wholesale when the desktop's theme changes, and the window should
     /// follow rather than stay in the theme it opened under.
@@ -245,7 +245,7 @@ impl App {
         }
     }
 
-    /// Whether the switch has anything to switch: an HDR colour space is
+    /// Whether the switch has anything to switch: an HDR color space is
     /// offered for the window, and the monitor is in HDR mode — or nothing
     /// can say what it is in. Where the compositor can say and has not yet,
     /// which is the moment before the window has landed on a monitor, the
@@ -358,7 +358,7 @@ impl App {
             return false;
         }
         if !self.hdr_available() {
-            eprintln!("gamut: no HDR colour space is offered for this window");
+            eprintln!("gamut: no HDR color space is offered for this window");
             return false;
         }
         self.hdr = if self.headroom() == Headroom::Above {
@@ -720,7 +720,7 @@ impl App {
 
     /// Notices that the desktop's theme has changed. Returns whether the
     /// window owes a redraw, which it does only when the new palette actually
-    /// resolves to different colours.
+    /// resolves to different colors.
     fn poll_theme(&mut self) -> bool {
         if !self.theme_watch.poll() {
             return false;
@@ -1115,7 +1115,7 @@ impl ApplicationHandler<UserEvent> for App {
                 if output.is_hdr {
                     ""
                 } else {
-                    " (no HDR colour space offered for this window)"
+                    " (no HDR color space offered for this window)"
                 }
             );
         }

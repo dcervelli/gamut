@@ -66,7 +66,7 @@ impl super::Decoder for TiffRs {
             // The decoder expands indexed data to RGB for us.
             tiff::ColorType::RGB(_) | tiff::ColorType::Palette(_) => Channels::Rgb,
             tiff::ColorType::RGBA(_) => Channels::Rgba,
-            other => bail!("unsupported TIFF colour type {other:?}"),
+            other => bail!("unsupported TIFF color type {other:?}"),
         };
 
         super::check_decoded_size(width, height, channels.count(), bit_depth(color))?;

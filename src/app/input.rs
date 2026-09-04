@@ -498,7 +498,7 @@ pub const KEYS: &[Binding] = &[
         section: Section::Display,
         mods: PLAIN,
         shown: "r",
-        help: "Cycle false colour for single-channel images",
+        help: "Cycle false color for single-channel images",
         keys: &[(Char("r"), CycleColormap), (Char("R"), CycleColormap)],
     },
     Binding {

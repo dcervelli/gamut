@@ -102,7 +102,7 @@ pub enum Widget {
     Planes,
     Log,
     Reset,
-    /// One of the false colours offered under that panel's ramp, by its place
+    /// One of the false colors offered under that panel's ramp, by its place
     /// in [`crate::image::display::Colormap::ALL`].
     Ramp(usize),
     /// The switch between the SDR and the HDR surface, at the end of the
@@ -234,7 +234,7 @@ pub struct FrameInput {
     /// which is half of what every readout of a value has to say.
     pub headroom: Headroom,
     /// Whether the switch has anything to switch: the driver offers an HDR
-    /// colour space for this window, and the monitor is not known to be in
+    /// color space for this window, and the monitor is not known to be in
     /// SDR mode. The switch is drawn dead otherwise.
     pub hdr_available: bool,
 }
@@ -522,7 +522,7 @@ pub fn build_frame(
     frame
 }
 
-/// What the compositor paints behind the image: the panel colour, with the
+/// What the compositor paints behind the image: the panel color, with the
 /// theme's hairline as the other square of the checkerboard.
 pub fn backdrop(theme: &Theme) -> Backdrop {
     Backdrop {

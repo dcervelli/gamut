@@ -219,7 +219,7 @@ fn decode(bytes: &[u8]) -> Result<::image::DynamicImage> {
 /// The gain map's vocabulary for primaries, which is narrower than ours.
 ///
 /// It only labels the result — this file's metadata says the map is applied
-/// in the base image's own colour space, and we keep our own answer for what
+/// in the base image's own color space, and we keep our own answer for what
 /// that space is — so the one gamut with no equivalent costs nothing.
 fn gamut(primaries: Primaries) -> ColorGamut {
     match primaries {

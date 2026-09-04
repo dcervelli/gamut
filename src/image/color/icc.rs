@@ -1,6 +1,6 @@
 //! What an embedded ICC profile says about the numbers in a file.
 //!
-//! Only the two things this viewer's colour model can act on are taken from a
+//! Only the two things this viewer's color model can act on are taken from a
 //! profile: which primaries the components are expressed in, and — where the
 //! profile states a plain power law — the transfer function. Everything else
 //! ICC can describe (lookup-table transforms, non-RGB connection spaces,
@@ -141,7 +141,7 @@ mod tests {
         );
     }
 
-    /// Nonsense in must not become a confident colour space out.
+    /// Nonsense in must not become a confident color space out.
     #[test]
     fn an_unreadable_profile_leaves_the_assumption_alone() {
         assert_eq!(

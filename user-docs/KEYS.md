@@ -68,13 +68,13 @@ than typing its name. Pasting into a text field still yields the URI.
 
 `Ctrl+C` copies the picture rather than a name for it, ready to paste into an
 editor, a document or a chat window. What travels is what you are looking at:
-the window, the exposure, the tone curve and any false colour are all applied,
+the window, the exposure, the tone curve and any false color are all applied,
 so a raw scan you have brought up out of the shadows arrives brought up. It is
 the image at its own size, not a photograph of the window — the zoom, the pan
 and the panels are how you are looking at it and none of them are copied.
 
 A single-channel image stays single-channel, so a greyscale scan does not
-arrive as three copies of itself, and false colour is the one thing that
+arrive as three copies of itself, and false color is the one thing that
 widens it. Transparency comes along only where the file had some; an opaque
 picture arrives opaque rather than carrying an empty channel. Everything
 arrives 8-bit, which is the depth the screen was showing it at.
@@ -140,7 +140,7 @@ that is not a paste; open it as an argument instead.
 | `e` | Cycle the automatic window: off (0–1) → min/max → 99.8% |
 | `t` | Cycle tone mapping: none → Reinhard → neutral |
 | `o` | Turn the room above white off and on, where the monitor is in HDR mode |
-| `r` | Cycle false colour: grey → viridis → magma → turbo |
+| `r` | Cycle false color: grey → viridis → magma → turbo |
 | `z` | Reset every display setting |
 
 The window is the one place the case of a key matters: `a` and `s` move it,
@@ -168,15 +168,15 @@ are in HDR mode, and gamut follows: the window gets an HDR surface on a
 monitor in HDR mode and an SDR one otherwise, and never asks the compositor
 to switch a monitor over — a request some compositors answer by blanking
 every display. On a monitor in HDR mode the button turns the room off and on
-without touching the surface. On one in SDR mode, or where no HDR colour
+without touching the surface. On one in SDR mode, or where no HDR color
 space is offered, it is drawn dead and `o` does nothing but say why in the
 terminal. `--output hdr` asks for the HDR surface regardless, for anyone who
 wants the compositor's own switch, and `--output sdr` stays on the SDR one
 whatever the monitor is. Where nothing says what the monitor is, `o` moves
 the surface itself.
 
-False colour applies to single-channel images only, and `r` does nothing on a
-colour one. While a colormap is active, tone mapping is suspended — a curve on
+False color applies to single-channel images only, and `r` does nothing on a
+color one. While a colormap is active, tone mapping is suspended — a curve on
 top of a colormap would distort the values you are reading off it.
 
 ## The interface
@@ -216,7 +216,7 @@ that a long column can be read by looking for a thing rather than from the
 top. It opens with the file itself — what it is called, where it is, what it
 turned out to be, how large it is and when it was last written — and then the
 picture in it: how many pixels across and down, what each pixel holds, the
-colour space those numbers are meant in, and whether it carries transparency.
+color space those numbers are meant in, and whether it carries transparency.
 
 After those comes what the file's own metadata says, for a file that carries
 any: the camera and lens, when the photograph was taken, the exposure it was
@@ -289,7 +289,7 @@ for an 8-bit image, counts for a 16-bit one, the value itself for floating
 point — so they are the numbers whatever wrote the file put there. The mapped
 values are what the window, the exposure and the tone curve have made of them,
 where 0 and 1 are the ends of the window the bar names on the right. The
-swatch at the front is the colour the pixel comes out on screen, false colour
+swatch at the front is the color the pixel comes out on screen, false color
 included. In a window too narrow for all of it, the coordinates stay.
 
 The pointer keeps its grab until the button comes up, so a drag that leaves

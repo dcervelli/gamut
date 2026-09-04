@@ -3,7 +3,7 @@
 //!
 //! There is no usable pure-Rust HEVC decoder, so this one binds to the system
 //! `libheif`. What is left to do here is the part `libheif` deliberately does
-//! not do: say what the numbers mean. A HEIF file states its colour space in
+//! not do: say what the numbers mean. A HEIF file states its color space in
 //! CICP codes (H.273) rather than by convention, so unlike PNG or TIFF this
 //! decoder is *told* the transfer function and the primaries, and passes them
 //! on rather than guessing. That is how a Display P3 phone photograph and a

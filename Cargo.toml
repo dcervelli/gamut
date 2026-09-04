@@ -7,7 +7,7 @@ edition = "2024"
 # Nothing is pinned by this — Arch tracks current Rust — but clippy checks the
 # code against it, so it stays honest.
 rust-version = "1.88"
-description = "A GPU image viewer with real colour management, for photographs, measurement data and HDR"
+description = "A GPU image viewer with real color management, for photographs, measurement data and HDR"
 repository = "https://github.com/closedcontour/gamut"
 homepage = "https://github.com/closedcontour/gamut"
 readme = "README.md"
@@ -72,8 +72,8 @@ ultrahdr-rs = "0.3.5"
 wgpu = "30.0.1"
 winit = "0.30.13"
 # The compositor's word on which monitors are in HDR mode, read through the
-# colour-management protocol on a connection of our own. A driver offers an
-# HDR colour space for a window on any monitor; only the compositor knows
+# color-management protocol on a connection of our own. A driver offers an
+# HDR color space for a window on any monitor; only the compositor knows
 # what the monitor is doing, and asking for the space on one in SDR mode can
 # make it switch the monitor over, blanking every display on the way. Both
 # crates are already in the tree under winit; `staging` is where the protocol

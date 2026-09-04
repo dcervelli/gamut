@@ -29,11 +29,11 @@ struct Params {
     regions: [[f32; 4]; REGIONS],
 }
 
-/// What is behind the image: the interface's own colour everywhere, turning
+/// What is behind the image: the interface's own color everywhere, turning
 /// into a checkerboard of it and `alternate` wherever an image is drawn, so
 /// that transparency reads as transparency rather than as dark pixels.
 ///
-/// The colours come from the interface rather than being chosen here, so that
+/// The colors come from the interface rather than being chosen here, so that
 /// the backdrop and the panels around it cannot drift apart.
 #[derive(Clone, Copy)]
 pub struct Backdrop {
@@ -107,7 +107,7 @@ impl Composite {
     /// `regions` is where the checkerboard shows: the image quads this frame
     /// draws, and nothing at all on a frame with no image on screen. `gray`
     /// is whether the image on screen has one channel, which is what decides
-    /// whether the false colour is on it. Of the scene, this reads the
+    /// whether the false color is on it. Of the scene, this reads the
     /// display state, the backdrop and the headroom; of the output, only how
     /// it is encoded.
     pub fn prepare(
@@ -125,12 +125,12 @@ impl Composite {
             headroom,
             ..
         } = *scene;
-        // False colour is already display-referred: a tone curve on top of a
+        // False color is already display-referred: a tone curve on top of a
         // colormap would distort the mapping the viewer is reading values
-        // off, and headroom above the top of the ramp is a colour the ramp
+        // off, and headroom above the top of the ramp is a color the ramp
         // does not have — so a plain clip, whatever the surface. The same
         // choice `Display::curve` makes for the readouts, and on the same
-        // test: the display ignores a colormap on a colour image, so the
+        // test: the display ignores a colormap on a color image, so the
         // compositor has to as well.
         let tone_map = if gray && display.colormap != Colormap::Gray {
             shader_codes::tone_map(ToneMap::None, Headroom::None)

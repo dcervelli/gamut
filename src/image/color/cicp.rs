@@ -1,12 +1,12 @@
 //! Coding-independent code points: the small integers a file uses to state
-//! its colour space outright instead of leaving it to convention.
+//! its color space outright instead of leaving it to convention.
 //!
 //! The same numbering serves HEIF's `nclx` box and PNG's `cICP` chunk — both
 //! defer to ITU-T H.273 — so one translation covers both, and adding a third
 //! format that carries them is a matter of reading two bytes.
 //!
 //! Translation, not interpretation: what is lost here is only the distinctions
-//! this program's colour model does not draw. Everything it can name comes
+//! this program's color model does not draw. Everything it can name comes
 //! through exactly.
 
 use super::{ColorSpace, Primaries, Transfer};

@@ -86,7 +86,7 @@ pub(super) enum Mark {
     /// before the marks that follow so they read as being in front of what is
     /// behind them rather than woven through it.
     ///
-    /// Only usable where that ground is a colour and not a translucent wash
+    /// Only usable where that ground is a color and not a translucent wash
     /// over something else, since it works by covering rather than by
     /// erasing.
     Knockout {
@@ -417,7 +417,7 @@ impl Placer {
 
 /// Draws `marks` in `within` — a square from [`fit`] — in `ink`.
 ///
-/// `ground` is what a [`Mark::Knockout`] is filled with: the colour the icon
+/// `ground` is what a [`Mark::Knockout`] is filled with: the color the icon
 /// is sitting on. An icon with no knockout in it can be given anything.
 pub(super) fn draw(frame: &mut UiFrame, marks: &[Mark], within: Rect, ink: Color, ground: Color) {
     if within.width <= 0.0 || within.height <= 0.0 {

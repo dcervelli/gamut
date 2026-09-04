@@ -506,8 +506,13 @@ fn push(rows: &mut Vec<Entry>, name: &str, value: Option<String>) {
     }
 }
 
+/// Between one part of a compound value and the next — the same thin gap the
+/// bars part their segments with, this being the same middot doing the same
+/// work a panel further in.
+const SEPARATOR: &str = " \u{00b7} ";
+
 fn join(parts: &[String]) -> Option<String> {
-    (!parts.is_empty()).then(|| parts.join("   \u{00b7}   "))
+    (!parts.is_empty()).then(|| parts.join(SEPARATOR))
 }
 
 /// Names for tags the metadata standard does not describe.
@@ -595,7 +600,7 @@ fn compression(code: u32) -> Option<&'static str> {
     })
 }
 
-/// Whether a value is bulk rather than a fact: a maker note, a colour map, a
+/// Whether a value is bulk rather than a fact: a maker note, a color map, a
 /// table of strip offsets. Written out it would be pages of hexadecimal, and
 /// rendering it costs the memory of the string as well as the room.
 fn is_bulk(value: &Value) -> bool {
@@ -938,7 +943,7 @@ mod tests {
                 // 89/50 is exactly 1.78, and is quoted as such.
                 (
                     "Exposure",
-                    "1/50 s   \u{00b7}   f/1.78   \u{00b7}   ISO 200"
+                    "1/50 s \u{00b7} f/1.78 \u{00b7} ISO 200"
                 ),
                 ("Focal length", "6.765 mm (24 mm equivalent)"),
             ])

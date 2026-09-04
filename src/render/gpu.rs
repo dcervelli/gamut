@@ -159,7 +159,7 @@ pub fn fullscreen_pipeline(device: &wgpu::Device, spec: Fullscreen<'_>) -> wgpu:
     })
 }
 
-/// One colour attachment, stored after the pass.
+/// One color attachment, stored after the pass.
 pub fn attachment(
     view: &wgpu::TextureView,
     load: wgpu::LoadOp<wgpu::Color>,

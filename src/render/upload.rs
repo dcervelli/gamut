@@ -323,7 +323,7 @@ mod tests {
     /// only one where filtering happens on properly linearised texels for
     /// free. Losing this would silently reintroduce gamma-incorrect scaling.
     #[test]
-    fn eight_bit_srgb_colour_keeps_the_hardware_srgb_format() {
+    fn eight_bit_srgb_color_keeps_the_hardware_srgb_format() {
         let decoded = image(
             Samples::U8 {
                 channels: Channels::Rgb,
@@ -413,7 +413,7 @@ mod tests {
         let values: &[f16] = bytemuck::cast_slice(plan.pixels.as_bytes());
         assert!(
             (values[0].to_f32() - 0.2158).abs() < 0.01,
-            "colour is decoded"
+            "color is decoded"
         );
         assert!(
             (values[1].to_f32() - 128.0 / 255.0).abs() < 1e-3,

@@ -13,7 +13,7 @@
 //! Every GIF comes back RGBA, whatever its palette holds, because that is the
 //! one layout the crate's decoder produces.
 //!
-//! BMP takes it too. A `BITMAPV4` or `BITMAPV5` header can name a colour space
+//! BMP takes it too. A `BITMAPV4` or `BITMAPV5` header can name a color space
 //! — sRGB, or a whole ICC profile appended after the pixels — but the crate's
 //! decoder surfaces neither, and a BMP carrying either is rare enough that
 //! reading the header a second time to find one would be work spent on almost
@@ -33,7 +33,7 @@
 //! handing the buffer over, so there is nothing left here to do but say that
 //! it does. `pnm-maxval1023.pgm` is the fixture that keeps it true.
 //!
-//! What netpbm says about colour is nothing this program can act on either.
+//! What netpbm says about color is nothing this program can act on either.
 //! Its specification names the BT.709 transfer function, which is close
 //! enough to sRGB to call it that; a pipeline writing linear measurements
 //! into a PGM is indistinguishable from the inside, and is what

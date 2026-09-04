@@ -17,7 +17,7 @@
     </clipPath>
   </defs>
 
-  <!-- The body: a rounded tile, so the icon reads on a panel of any colour. -->
+  <!-- The body: a rounded tile, so the icon reads on a panel of any color. -->
   <rect x="6" y="6" width="116" height="116" rx="26" fill="#151a24"/>
   <rect x="6.5" y="6.5" width="115" height="115" rx="25.5" fill="none"
         stroke="#ffffff" stroke-opacity="0.10" stroke-width="1"/>
@@ -33,6 +33,6 @@
   <rect x="20" y="24" width="88" height="66" rx="6" fill="none"
         stroke="#ffffff" stroke-opacity="0.55" stroke-width="2.5"/>
 
-  <!-- The strip beneath: the colour the viewer is careful about. -->
+  <!-- The strip beneath: the color the viewer is careful about. -->
   <rect x="20" y="100" width="88" height="8" rx="4" fill="url(#gamut)"/>
 </svg>

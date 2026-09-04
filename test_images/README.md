@@ -24,7 +24,7 @@ Every image is 32×24, four 16×12 quadrants, probed at their centres:
 
 |          | top-left | top-right | bottom-left | bottom-right |
 | -------- | -------- | --------- | ----------- | ------------ |
-| colour   | red      | green     | blue        | white        |
+| color   | red      | green     | blue        | white        |
 | grey     | 0        | 85        | 170         | 255          |
 | alpha    | 255      | 191       | 128         | 64           |
 | float    | 0.0      | 0.5       | 1.0         | 3.984        |
@@ -39,17 +39,17 @@ mapping.
 | Format | Files |
 | ------ | ----- |
 | PNG | grey / grey+alpha / RGB / RGBA at 8 and 16 bits, 1- and 4-bit depths, palette, palette + `tRNS`, Adam7 interlacing |
-| PNG colour tags | `cICP` for BT.2100 PQ on BT.2020 — the whole of how a PNG says it is HDR — and `iCCP` for Display P3 |
+| PNG color tags | `cICP` for BT.2100 PQ on BT.2020 — the whole of how a PNG says it is HDR — and `iCCP` for Display P3 |
 | JPEG | baseline, greyscale, progressive, 4:2:0 subsampling |
 | TIFF | grey / RGB / RGBA at 8 and 16 bits, 32-bit float, LZW / Deflate / PackBits / uncompressed, big-endian, tiled |
 | TIFF as raster data | BigTIFF, Deflate + floating-point predictor + tiling (how DEMs ship), signed Int16, GDAL no-data sentinel |
 | Radiance | RGBE with its shared exponent |
 | OpenEXR | RGB, RGBA with associated alpha, zip compression |
 | HEIF | RGB / RGBA / monochrome / monochrome + a separate alpha plane at 8 bits, 10-bit, an `irot` rotation, and AV1 in the same container |
-| HEIF colour tags | BT.2100 PQ on BT.2020, and Display P3 — the CICP codes a HEIF states outright rather than leaving to convention — plus one tagged by ICC profile with no `nclx` box, which is what some cameras write |
+| HEIF color tags | BT.2100 PQ on BT.2020, and Display P3 — the CICP codes a HEIF states outright rather than leaving to convention — plus one tagged by ICC profile with no `nclx` box, which is what some cameras write |
 | GIF | a palette, an interlaced one, a transparent index, and a two-frame animation whose second frame is upside down |
 | WebP | lossless (VP8L) with and without alpha, lossy (VP8) with and without an `ALPH` chunk beside it |
-| WebP container | `ICCP` for Display P3 — the only thing a WebP has to say about its colour — an `EXIF` orientation applied on decode, and a two-frame animation whose second frame is upside down |
+| WebP container | `ICCP` for Display P3 — the only thing a WebP has to say about its color — an `EXIF` orientation applied on decode, and a two-frame animation whose second frame is upside down |
 | ICO | a 32-bit bitmap entry, a 4-bit palette entry with its AND mask, and a PNG entry — the two formats an entry can hold |
 | ICO directory | a PNG entry that is not RGBA and one carrying an `iCCP` profile, both of which `image`'s own ICO decoder refuses, and a two-size directory whose larger entry is the shallower |
 | BMP | 24-bit, 32-bit with bitfield masks and alpha, a 4-bit palette, an 8-bit palette with `BI_RLE8` runs, and one whose rows are stored top-down |
