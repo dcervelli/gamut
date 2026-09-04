@@ -713,19 +713,29 @@ impl App {
                 }
                 return Effect::Quit;
             }
-            ZoomIn => self.view.zoom_in(image, viewport),
-            ZoomOut => self.view.zoom_out(image, viewport),
-            ZoomTo(scale) => self.view.set_zoom(scale, image, viewport),
+            ZoomIn => self.animate(|view, image, viewport| view.zoom_in(image, viewport)),
+            ZoomOut => self.animate(|view, image, viewport| view.zoom_out(image, viewport)),
+            ZoomTo(scale) => {
+                self.animate(|view, image, viewport| view.set_zoom(scale, image, viewport));
+            }
             Pan(direction, step) => {
                 let sign = direction.sign();
                 match step.pixels() {
-                    Some(by) => self
-                        .view
-                        .pan_by(sign[0] * by, sign[1] * by, image, viewport),
-                    None => self.view.pan_to_edge(sign, image, viewport),
+                    // The single pixel is for lining a view up exactly, and
+                    // a step of one pixel has nothing to animate: it lands.
+                    Some(by) if step == PanStep::Fine => {
+                        self.view
+                            .pan_by(sign[0] * by, sign[1] * by, image, viewport);
+                    }
+                    Some(by) => self.animate(|view, image, viewport| {
+                        view.pan_by(sign[0] * by, sign[1] * by, image, viewport);
+                    }),
+                    None => self.animate(|view, image, viewport| {
+                        view.pan_to_edge(sign, image, viewport);
+                    }),
                 }
             }
-            CycleFit => self.view.cycle_fit(),
+            CycleFit => self.animate(|view, _, _| view.cycle_fit()),
             CycleUpscale => self.view.cycle_upscale(),
             // Nothing to draw yet: the file is only being asked for, and what
             // is on screen stays until it arrives.
@@ -1308,8 +1318,9 @@ impl App {
             }
             Widget::Cell(index) => {
                 if let Some(menu) = self.panels.menu.take() {
-                    let (image, viewport) = (self.image_size(), self.viewport());
-                    menu.choose(index, &mut self.view, image, viewport);
+                    self.animate(|view, image, viewport| {
+                        menu.choose(index, view, image, viewport);
+                    });
                 }
             }
             // As with the reset: the key's action, so that the button and the
@@ -1370,9 +1381,14 @@ impl App {
             Some(Hit::Image) | None => {}
         }
 
-        let steps = match delta {
-            MouseScrollDelta::LineDelta(_, lines) => lines,
-            MouseScrollDelta::PixelDelta(pixels) => pixels.y as f32 / WHEEL_PIXELS_PER_STEP,
+        // A wheel's notch is a step asked for by name, and is animated as a
+        // key's would be; a trackpad's scroll is the hand on the view, as a
+        // drag is, and goes where the fingers put it.
+        let (steps, notched) = match delta {
+            MouseScrollDelta::LineDelta(_, lines) => (lines, true),
+            MouseScrollDelta::PixelDelta(pixels) => {
+                (pixels.y as f32 / WHEEL_PIXELS_PER_STEP, false)
+            }
         };
         // A trackpad emits a long tail of all but motionless events at the end
         // of a gesture, which would leave the view drifting after the finger
@@ -1386,8 +1402,14 @@ impl App {
             viewport.x + viewport.width / 2.0,
             viewport.y + viewport.height / 2.0,
         ]);
-        self.view
-            .zoom_steps_at(steps, anchor, self.image_size(), viewport);
+        if notched {
+            self.animate(|view, image, viewport| {
+                view.zoom_steps_at(steps, anchor, image, viewport);
+            });
+        } else {
+            self.view
+                .zoom_steps_at(steps, anchor, self.image_size(), viewport);
+        }
         true
     }
 }

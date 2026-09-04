@@ -88,7 +88,22 @@ behind them, so `` ` `` changes how much room a fitted image has and it re-fits
 on the spot.
 
 Zooming leaves fit mode; panning does not, so Space then Down scrolls through a
-tall image at fit-width. Apart from the copying chords and `Ctrl` with an
+tall image at fit-width.
+
+A pan or zoom asked for by name — a key, a notch of the wheel, a choice from
+the zoom menu — is a move of 200 ms rather than a cut, and one asked for
+before the last has landed starts from wherever the view has got to, with the
+whole 200 ms again to finish. A drag, `Shift` with an arrow, and a trackpad's
+scroll are not moves: the hand is on the view, and it goes exactly where it is
+put. The path a move takes is a straight line in the space-scale diagram of
+Furnas and Bederson (*Space-Scale Diagrams: Understanding Multiscale
+Interfaces*, CHI '95): the view's center is interpolated in (pan × zoom, zoom)
+rather than in pan and zoom separately. Interpolate those separately and a
+zoom that also pans swings the image out to one side and back, the zoom
+carrying the target away faster than the pan brings it in. Along the
+space-scale line every point of the image crosses the screen in a straight
+line at a steady rate, and whatever a wheel zoom is anchored on stays put from
+the first frame to the last. Apart from the copying chords and `Ctrl` with an
 arrow, keys held with Ctrl, Alt or Super are ignored, so window-manager chords
 such as `Super+0` do not disturb the view.
 
