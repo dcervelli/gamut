@@ -19,6 +19,7 @@
 
 use std::time::SystemTime;
 
+use crate::clock;
 use crate::image::AlphaMode;
 use crate::render::{Color, Rect, TextMeasure, UiFrame};
 use crate::theme::Theme;
@@ -851,47 +852,16 @@ fn grouped(value: u64) -> String {
     out
 }
 
-/// When the file was last written, as UTC.
-///
-/// UTC rather than local time because the standard library knows nothing of
-/// time zones, and a wrong local time is worse than a right one in a zone the
-/// reader has to convert from — the label says which it is.
+/// When the file was last written. UTC, and the label says so, since a time
+/// read off this panel — or copied out of it — is bound for wherever the
+/// reader is; see [`crate::clock`], which also has the local clock a pasted
+/// picture is named from.
 fn format_time(time: SystemTime) -> String {
-    let seconds = match time.duration_since(SystemTime::UNIX_EPOCH) {
-        Ok(since) => since.as_secs() as i64,
-        // Before 1970, which a file can be: the error carries how far before.
-        Err(before) => -(before.duration().as_secs() as i64),
-    };
-    let days = seconds.div_euclid(86_400);
-    let time_of_day = seconds.rem_euclid(86_400);
-    let (year, month, day) = civil_from_days(days);
+    let at = clock::utc(time);
     format!(
-        "{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02} UTC",
-        time_of_day / 3600,
-        (time_of_day / 60) % 60,
-        time_of_day % 60
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02} UTC",
+        at.year, at.month, at.day, at.hour, at.minute, at.second
     )
-}
-
-/// The civil date `days` after 1970-01-01, by Howard Hinnant's algorithm:
-/// the calendar is shifted to start in March so that the leap day falls at
-/// the end of the year and the month lengths make a repeating pattern.
-fn civil_from_days(days: i64) -> (i64, u32, u32) {
-    let shifted = days + 719_468;
-    let era = shifted.div_euclid(146_097);
-    let day_of_era = shifted.rem_euclid(146_097);
-    let year_of_era =
-        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let year = year_of_era + era * 400;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let shifted_month = (5 * day_of_year + 2) / 153;
-    let day = (day_of_year - (153 * shifted_month + 2) / 5 + 1) as u32;
-    let month = if shifted_month < 10 {
-        shifted_month + 3
-    } else {
-        shifted_month - 9
-    } as u32;
-    (if month <= 2 { year + 1 } else { year }, month, day)
 }
 
 #[cfg(test)]

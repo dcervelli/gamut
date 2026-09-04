@@ -163,6 +163,7 @@ impl App {
                 info_scroll: 0.0,
                 show_minimap: minimap,
                 show_grid: false,
+                paste: false,
                 hover: None,
                 info_hover: None,
                 menu: None,
@@ -513,6 +514,31 @@ impl App {
         changed && self.files.relist(crate::listing::relist(&self.named))
     }
 
+    /// Notices a picture arriving on the clipboard or leaving it, which is
+    /// what puts the paste button on screen and takes it off again. Returns
+    /// whether the answer changed, and so whether the window owes a redraw.
+    ///
+    /// Asked rather than waited for, as everything else on this tick is:
+    /// nothing tells a program that the selection has changed, and one look
+    /// costs about as much as the handful of `stat`s beside it. Only while
+    /// the interface is on screen, since the button is the only thing that
+    /// depends on the answer — `` ` `` therefore stops the looking as well as
+    /// hiding the button.
+    fn poll_clipboard(&mut self) -> bool {
+        let offered =
+            self.panels.show_ui && matches!(crate::clipboard::offered_image(), Ok(Some(_)));
+        if offered == self.panels.paste {
+            return false;
+        }
+        self.panels.paste = offered;
+        // A button that has just appeared under a pointer that has not moved
+        // should light up, and one that has just gone should not leave the
+        // highlight behind it. Motion is what usually asks this question, and
+        // this is the one thing that can change the answer without any.
+        self.update_hover();
+        true
+    }
+
     /// Notices that the desktop's theme has changed. Returns whether the
     /// window owes a redraw, which it does only when the new palette actually
     /// resolves to different colours.
@@ -794,12 +820,13 @@ impl ApplicationHandler<Decoded> for App {
         let now = Instant::now();
         if now >= self.next_poll {
             self.next_poll = now + watch::INTERVAL;
-            // All three, always: each has a watch that only advances when it
-            // is polled.
+            // All of them, always: each has a watch that only advances when
+            // it is polled.
             let vanished = self.poll_file();
             let relisted = self.poll_directories();
             let retinted = self.poll_theme();
-            if (vanished || relisted || retinted)
+            let offered = self.poll_clipboard();
+            if (vanished || relisted || retinted || offered)
                 && let Some(window) = &self.window
             {
                 window.request_redraw();

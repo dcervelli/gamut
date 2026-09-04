@@ -85,6 +85,9 @@ const CHECKER_SQUARE: f32 = 8.0;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Widget {
     Minimap,
+    /// The button that pastes the picture on the clipboard. On screen only
+    /// while there is one — see [`Panels::paste`].
+    Paste,
     Histogram,
     Info,
     Grid,
@@ -168,6 +171,15 @@ pub struct Panels {
     /// is not held: it follows the zoom, and is worked out afresh each frame
     /// by [`grid::step`].
     pub show_grid: bool,
+    /// Whether the clipboard is holding a picture this program could show,
+    /// which is whether the paste button is on screen at all: a button that
+    /// did nothing when pressed would be worse than no button.
+    ///
+    /// Looked at on the same cadence as the file and the palette, since
+    /// nothing tells us when a selection changes — see
+    /// `App::poll_clipboard`. It is what was true at the last look, so a
+    /// press asks the clipboard again rather than acting on it.
+    pub paste: bool,
     /// Which widget the pointer is over. Held rather than recomputed while
     /// drawing so that motion knows when the highlight has changed and a
     /// redraw is actually owed.
@@ -434,6 +446,14 @@ pub fn build_frame(
         panels.hover == Some(Widget::Minimap),
         theme,
     );
+    if panels.paste {
+        buttons::paste_button(
+            &mut frame,
+            chrome.paste_button,
+            panels.hover == Some(Widget::Paste),
+            theme,
+        );
+    }
     buttons::histogram_button(
         &mut frame,
         chrome.histogram_button,

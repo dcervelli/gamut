@@ -61,6 +61,15 @@ pub(super) fn minimap_button(
     toggle(frame, rect, icon::SQUARE_SQUARE, active, hover, theme);
 }
 
+/// The paste button, under the minimap toggle. Not a toggle: it does
+/// something rather than switching something on, so it is never drawn lit —
+/// there is no state for it to be showing. It is on screen only while there
+/// is a picture on the clipboard to paste, which is what says a press on it
+/// would do anything at all.
+pub(super) fn paste_button(frame: &mut UiFrame, rect: Rect, hover: bool, theme: &Theme) {
+    toggle(frame, rect, icon::CLIPBOARD, false, hover, theme);
+}
+
 /// One square toggle in a side panel: the button, and the mark it wears.
 ///
 /// A window too small to hold the button gets no button, rather than a smear

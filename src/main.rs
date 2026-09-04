@@ -3,9 +3,11 @@
 mod app;
 mod cli;
 mod clipboard;
+mod clock;
 mod image;
 mod listing;
 mod loader;
+mod pasted;
 mod render;
 mod theme;
 mod timing;

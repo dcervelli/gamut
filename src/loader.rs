@@ -4,13 +4,16 @@
 //! time in proportion to the pixel count happens there — the decode, the
 //! statistics scan, the repack into a texture format and the copy to the GPU —
 //! so that the event loop is free to pan, zoom and draw while a file opens.
+//! A pasted picture is fetched here too: it is one more thing a read may have
+//! to wait on somebody else for, and the waiting belongs off the event loop
+//! with the rest.
 //!
 //! Replies come back as winit user events rather than through a channel the
 //! event loop would have to poll: the loop is asleep almost all of the time,
 //! and a proxy wakes it the moment an image is ready instead of leaving it to
 //! be noticed at the next file-watch tick.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -20,6 +23,7 @@ use std::time::Instant;
 use anyhow::{Result, anyhow};
 use winit::event_loop::EventLoopProxy;
 
+use crate::clipboard;
 use crate::image::decode::{self, Overrides};
 use crate::image::exif::Exif;
 use crate::image::{DecodedImage, Stats};
@@ -38,6 +42,21 @@ pub enum Reload {
     InPlace,
 }
 
+/// Where a read's bytes come from.
+pub enum Source {
+    /// The file itself, which is already on disk.
+    Disk,
+    /// The clipboard, under this MIME type. The selection is written into the
+    /// file first and then read back like any other, so a pasted picture is a
+    /// file the user keeps rather than pixels that exist only while the
+    /// window is open.
+    ///
+    /// Here rather than on the event loop because fetching it means waiting
+    /// on whichever program holds the selection, and how long that takes is
+    /// theirs to decide.
+    Clipboard(String),
+}
+
 /// One file to read.
 pub struct Request {
     /// Which request this is. Replies carry it back so the event loop can tell
@@ -47,6 +66,7 @@ pub struct Request {
     pub path: PathBuf,
     pub overrides: Overrides,
     pub mode: Reload,
+    pub source: Source,
 }
 
 /// A finished read, whether or not it produced an image.
@@ -246,8 +266,16 @@ fn read(request: Request, upload: Option<&Upload>, cancelled: &AtomicBool) -> Op
         path,
         overrides,
         mode,
+        source,
     } = request;
 
+    // A paste has to be fetched before there is a file to read at all. The
+    // watch is taken after it, so that the file the bars describe is the one
+    // that now exists rather than the empty name it was reserved under.
+    let received = match &source {
+        Source::Disk => Ok(()),
+        Source::Clipboard(mime) => fetch(mime, &path),
+    };
     let watch = Watch::new(&path);
     let started = Instant::now();
     // Each stage runs behind a panic guard. Decoders here run C and Rust
@@ -256,7 +284,7 @@ fn read(request: Request, upload: Option<&Upload>, cancelled: &AtomicBool) -> Op
     // then answer nothing ever again, and the window would sit in "loading"
     // for good. Caught, a panic becomes an ordinary decode failure, which the
     // event loop already knows how to step over.
-    let decoded = guard("decoding", || decode::load(&path, overrides));
+    let decoded = received.and_then(|()| guard("decoding", || decode::load(&path, overrides)));
     if cancelled.load(Ordering::Relaxed) {
         return None;
     }
@@ -296,6 +324,21 @@ fn read(request: Request, upload: Option<&Upload>, cancelled: &AtomicBool) -> Op
         },
         outcome,
     })
+}
+
+/// Writes the selection into the file reserved for it, and clears the name
+/// again if it could not be filled.
+///
+/// The empty file was made to settle which paste owns the name (see
+/// [`crate::pasted::reserve`]); nothing having been written into it, leaving
+/// it behind would put a file nobody can open into the directory the user
+/// keeps their pictures in — and into the walk beside it.
+fn fetch(mime_type: &str, path: &Path) -> Result<()> {
+    let received = clipboard::receive(mime_type, path);
+    if received.is_err() {
+        let _ = std::fs::remove_file(path);
+    }
+    received.map(|_| ())
 }
 
 #[cfg(test)]
