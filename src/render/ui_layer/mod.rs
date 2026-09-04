@@ -229,9 +229,17 @@ pub(crate) struct TextItem {
     clip: Option<Rect>,
 }
 
-/// How many layers a frame is drawn in. Two: what the interface is, and
-/// whatever is floating over it at the moment.
-pub(crate) const LAYERS: usize = 2;
+/// How many layers a frame is drawn in. Three: what the interface is,
+/// whatever is floating over it at the moment, and the label that names what
+/// the pointer is resting on — which has to be readable over the floating
+/// thing as well, since it can be resting on that.
+pub(crate) const LAYERS: usize = 3;
+
+/// The layer [`UiFrame::over`] draws on: over the interface, under the label
+/// that names a thing on it.
+const FLOATING: usize = 1;
+/// The layer [`UiFrame::topmost`] draws on, which nothing covers.
+const NAMING: usize = LAYERS - 1;
 
 /// One layer of a frame. Shapes keep the order they were added in, but the
 /// text of a layer is drawn after all of its shapes — the glyph pass is
@@ -264,8 +272,8 @@ impl UiFrame {
         }
     }
 
-    /// Runs `draw` on the layer that floats over everything emitted so far,
-    /// and returns to the layer that was current.
+    /// Runs `draw` on the layer that floats over the interface, and returns
+    /// to the layer that was current.
     ///
     /// What is drawn inside covers the words on the panels underneath as well
     /// as the panels themselves, which is what an open menu has to do — it is
@@ -276,10 +284,25 @@ impl UiFrame {
     /// Scoped rather than a switch, because the interface is not built in the
     /// order it is stacked: the info panel floats over the content area but is
     /// drawn before the bars, so a button of its own that simply moved to the
-    /// top layer would take the bars up there with it.
+    /// floating layer would take the bars up there with it.
     pub fn over<T>(&mut self, draw: impl FnOnce(&mut Self) -> T) -> T {
+        self.on(FLOATING, draw)
+    }
+
+    /// Runs `draw` on the layer nothing else can cover, and returns to the
+    /// layer that was current.
+    ///
+    /// Kept for the one thing that has to be read over everything else,
+    /// whatever else is up: the tooltip naming what the pointer is resting
+    /// on. A menu drawn by [`UiFrame::over`] is the thing being looked at,
+    /// but a label about one of its own cells would be hidden by it.
+    pub fn topmost<T>(&mut self, draw: impl FnOnce(&mut Self) -> T) -> T {
+        self.on(NAMING, draw)
+    }
+
+    fn on<T>(&mut self, layer: usize, draw: impl FnOnce(&mut Self) -> T) -> T {
         let was = self.current;
-        self.current = LAYERS - 1;
+        self.current = layer;
         let drawn = draw(self);
         self.current = was;
         drawn

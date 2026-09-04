@@ -8,6 +8,7 @@ use crate::theme::Theme;
 use super::buttons::{ICON_SIDE, button_ink, outline};
 use super::chrome::BUTTON_SIZE;
 use super::icon;
+use super::tooltip::{Opens, Tip, Tips};
 use super::{
     BECOMES, Current, FrameInput, PADDING, PANEL_INSET, PANEL_RADIUS, PANEL_WIDTH, Panels,
     TEXT_SIZE, Widget,
@@ -260,6 +261,34 @@ pub fn widget_at(content: Rect, point: [f32; 2], gray: bool) -> Option<Widget> {
     (0..Colormap::ALL.len())
         .find(|&index| swatch_button(bars, index).contains(point))
         .map(Widget::Ramp)
+}
+
+/// Offers every button on the panel to the tooltips, each naming itself into
+/// the plot beside it: a label about the plot should be read without looking
+/// away from the plot, and the panel is wide enough to hold one.
+///
+/// The same rectangles [`widget_at`] answers the pointer with, so that what a
+/// tooltip hangs from is what the pointer found.
+pub(super) fn offer_tips(tips: &mut Tips, content: Rect, gray: bool) {
+    let panel = panel(content);
+    for (index, widget) in toolbar(gray).iter().enumerate() {
+        tips.offer_toward(
+            Tip::Widget(*widget),
+            toolbar_button(panel, gray, index),
+            Opens::Right,
+        );
+    }
+    if !gray {
+        return;
+    }
+    let bars = plot_area(panel, gray);
+    for index in 0..Colormap::ALL.len() {
+        tips.offer_toward(
+            Tip::Widget(Widget::Ramp(index)),
+            swatch_button(bars, index),
+            Opens::Right,
+        );
+    }
 }
 
 /// The band of colour under the plot, aligned with the bins so that a cell of

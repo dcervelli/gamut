@@ -23,7 +23,8 @@ use crate::render::Rect;
 use crate::timing;
 use crate::ui::info::Copyable;
 use crate::ui::layers::Hit;
-use crate::ui::{self, Current, Menu, Widget};
+use crate::ui::menu::Cycle;
+use crate::ui::{self, Current, Menu, Panels, Tip, Widget};
 
 /// Window pixels moved per arrow-key press. Shift moves one pixel instead,
 /// for placing a view exactly, and Ctrl goes as far as the image does.
@@ -57,6 +58,10 @@ pub enum Action {
     /// histogram and information panel are closed on the way past.
     ToggleInterfaceAndPanels,
     ToggleHistogram,
+    /// Which of that panel's planes are plotted. Both can be off: the panel
+    /// still has its response curve and its ramp to read.
+    ToggleLuma,
+    TogglePlanes,
     /// Whether that panel's plot counts up its axis or the logarithm of its
     /// counts. About the plot rather than about the image, which is why it
     /// is not one of the things [`Action::ResetDisplay`] puts back.
@@ -181,6 +186,74 @@ fn satisfies(required: Mods, held: Mods, key: KeyName) -> bool {
     match key {
         Char(_) => held.difference(Mods::SHIFT) == required,
         Named(_) | Position(_) => held == required,
+    }
+}
+
+/// The line of the key table that performs `action`: what to press for it,
+/// and what `--help` says it does.
+///
+/// The first such line. An action bound on more than one line — the arrows
+/// and their modified forms — is a different action on each, so the first is
+/// the one that answers.
+fn binding_for(action: Action) -> Option<&'static Binding> {
+    KEYS.iter()
+        .find(|binding| binding.keys.iter().any(|(_, bound)| *bound == action))
+}
+
+/// One line of a tooltip: what a key does, and what to press for it.
+///
+/// The key table's own words, so that a tooltip and `--help` cannot come to
+/// disagree about a binding — there is nowhere for them to disagree.
+fn hint(action: Action) -> Option<String> {
+    let binding = binding_for(action)?;
+    Some(format!("{} ({})", binding.help, binding.shown))
+}
+
+/// The action a thing in the interface stands for, which is what names it.
+///
+/// The buttons are the keys' twins — `App::press` is careful that a button
+/// and a key never drift apart — so a button is named by what its key does.
+/// `None` for the things no key reaches, which name themselves instead: see
+/// [`ui::tooltip::words`].
+fn action_of(tip: Tip, panels: &Panels) -> Option<Action> {
+    Some(match tip {
+        Tip::Widget(Widget::Minimap) => ToggleMinimap,
+        Tip::Widget(Widget::Histogram) => ToggleHistogram,
+        Tip::Widget(Widget::Info) => ToggleInfo,
+        Tip::Widget(Widget::Grid) => ToggleGrid,
+        Tip::Widget(Widget::Output) => ToggleHdr,
+        Tip::Widget(Widget::Paste) => Action::Paste,
+        // The histogram panel's own, and the row of false colours a key
+        // cycles through.
+        Tip::Widget(Widget::Luma) => ToggleLuma,
+        Tip::Widget(Widget::Planes) => TogglePlanes,
+        Tip::Widget(Widget::Log) => ToggleLogCounts,
+        Tip::Widget(Widget::Reset) => ResetDisplay,
+        // Only the swatches that are actually on offer: an index past the
+        // end is not a false colour, and naming it after the key that cycles
+        // them would be naming nothing.
+        Tip::Widget(Widget::Ramp(index)) if index < Colormap::ALL.len() => CycleColormap,
+        // A cell of a menu sets one state directly where the key cycles
+        // through them all: the key is worth naming, the cycle's description
+        // is not — see `Menu::cell_tip`.
+        Tip::Widget(Widget::Cell(index)) => match panels.menu?.cell_tip(index)?.cycle {
+            Cycle::Fit => CycleFit,
+            Cycle::Upscale => CycleUpscale,
+        },
+        Tip::Widget(_) | Tip::Name | Tip::Counter => return None,
+    })
+}
+
+/// What names `tip` on the first line of its tooltip: its own words where the
+/// interface has some for it, and otherwise the description of the key that
+/// does the same job — with that key after it either way.
+fn names(tip: Tip, panels: &Panels) -> Option<String> {
+    let binding = action_of(tip, panels).and_then(binding_for);
+    match (ui::tooltip::words(tip, panels), binding) {
+        (Some(words), Some(binding)) => Some(format!("{words} ({})", binding.shown)),
+        (Some(words), None) => Some(words.to_string()),
+        (None, Some(binding)) => Some(format!("{} ({})", binding.help, binding.shown)),
+        (None, None) => None,
     }
 }
 
@@ -424,6 +497,21 @@ pub const KEYS: &[Binding] = &[
         shown: "g",
         help: "Toggle the grid over the image",
         keys: &[(Char("g"), ToggleGrid), (Char("G"), ToggleGrid)],
+    },
+    // The three that work the histogram's plot, under the key that opens it.
+    Binding {
+        section: Section::Interface,
+        mods: PLAIN,
+        shown: "j",
+        help: "Toggle the luminance plane on the histogram",
+        keys: &[(Char("j"), ToggleLuma), (Char("J"), ToggleLuma)],
+    },
+    Binding {
+        section: Section::Interface,
+        mods: PLAIN,
+        shown: "k",
+        help: "Toggle the colour planes on the histogram",
+        keys: &[(Char("k"), TogglePlanes), (Char("K"), TogglePlanes)],
     },
     Binding {
         section: Section::Interface,
@@ -670,6 +758,8 @@ impl App {
                 return self.perform(ToggleInterface);
             }
             ToggleHistogram => self.press(Widget::Histogram),
+            ToggleLuma => self.press(Widget::Luma),
+            TogglePlanes => self.press(Widget::Planes),
             ToggleLogCounts => self.press(Widget::Log),
             ToggleInfo => self.press(Widget::Info),
             ToggleMinimap => self.press(Widget::Minimap),
@@ -923,6 +1013,10 @@ impl App {
             // Wherever this one is going, it is not the press that went down
             // on the info panel, so there is nothing left to copy.
             self.pointer.copying = None;
+            // What the button does is a better answer than the label saying
+            // what it is, and the label would be standing over whatever the
+            // press opened.
+            self.tooltips.dismiss();
         }
 
         // A press goes to the layer it lands on and no further: the panels
@@ -1114,7 +1208,52 @@ impl App {
         let changed = hover != self.panels.hover || info != self.panels.info_hover;
         self.panels.hover = hover;
         self.panels.info_hover = info;
-        changed
+
+        // The tooltip follows the same answer, and is asked on every call
+        // rather than only when the highlight moves: the pointer being still
+        // is what opens one, so motion within a button matters to it even
+        // though nothing on screen changed.
+        //
+        // The top bar's own words name themselves too, and are asked for
+        // separately — where a run of words ends takes the fonts to say.
+        let tip = match hover {
+            _ if self.menu_has_pointer(hit) => None,
+            Some(widget) => Some(Tip::Widget(widget)),
+            None => self.bar_tip(),
+        };
+        let named = self.tooltips.point(Instant::now(), tip);
+        changed || named
+    }
+
+    /// What to say about the thing the pointer has rested on, if anything.
+    ///
+    /// The first line names the thing, and the lines under it are what to
+    /// press instead. Both come out of the key table wherever a key does the
+    /// same job, so that a tooltip and `--help` cannot disagree about a
+    /// binding — see [`names`] and [`hint`].
+    pub(super) fn tooltip(&self) -> Option<ui::Tooltip> {
+        let at = self.tooltips.showing()?;
+        let (title, hints) = match at {
+            // The name in the bar is cut to the room the bar has, and is only
+            // the last part of the path even when it is not. The tooltip is
+            // the path in full — which is also exactly what the key beside it
+            // copies.
+            Tip::Name => (
+                self.shown_path().display().to_string(),
+                Vec::from_iter(hint(CopyPath)),
+            ),
+            // The count says which of the list is on screen; the keys are how
+            // to reach the rest of it.
+            Tip::Counter => (
+                format!("File {} of {}", self.files.index() + 1, self.files.len()),
+                [NextFile, PreviousFile]
+                    .into_iter()
+                    .filter_map(hint)
+                    .collect(),
+            ),
+            _ => (names(at, &self.panels)?, Vec::new()),
+        };
+        Some(ui::Tooltip { at, title, hints })
     }
 
     /// Acts on a press. The keys that stand in for the toggles come through
@@ -1256,6 +1395,155 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A `Panels` with the menu open, for naming its cells.
+    fn panels(menu: Option<Menu>) -> Panels {
+        Panels {
+            show_ui: true,
+            show_histogram: false,
+            show_info: false,
+            info_scroll: 0.0,
+            show_luma: true,
+            show_planes: true,
+            log_counts: false,
+            show_minimap: true,
+            show_grid: false,
+            paste: true,
+            hover: None,
+            info_hover: None,
+            menu,
+        }
+    }
+
+    /// Every button in the chrome is named by the key that does the same job,
+    /// in that key's own words: there is one table, so a tooltip and `--help`
+    /// have nowhere to disagree about a binding.
+    #[test]
+    fn a_button_is_named_by_the_key_that_does_the_same_job() {
+        let panels = panels(None);
+        let named = |widget| names(Tip::Widget(widget), &panels);
+
+        assert_eq!(
+            named(Widget::Minimap).as_deref(),
+            Some("Toggle the minimap (m)")
+        );
+        assert_eq!(
+            named(Widget::Histogram).as_deref(),
+            Some("Toggle the histogram (h)")
+        );
+        assert_eq!(
+            named(Widget::Grid).as_deref(),
+            Some("Toggle the grid over the image (g)")
+        );
+        assert_eq!(
+            named(Widget::Output).as_deref(),
+            Some("Toggle HDR output, where the monitor is in HDR mode (o)")
+        );
+
+        // The one button no key reaches names itself, and has no key after
+        // it to name.
+        let zoom = named(Widget::Zoom).expect("the readout names itself");
+        assert!(!zoom.contains('('), "{zoom}");
+    }
+
+    /// Nothing in the chrome is left unnamed: a button with no tooltip is one
+    /// the pointer rests on for nothing.
+    #[test]
+    fn every_chrome_button_has_something_to_say() {
+        let panels = panels(None);
+        for widget in [
+            Widget::Minimap,
+            Widget::Paste,
+            Widget::Histogram,
+            Widget::Info,
+            Widget::Grid,
+            Widget::Output,
+            Widget::Zoom,
+        ] {
+            assert!(
+                names(Tip::Widget(widget), &panels).is_some(),
+                "{widget:?} names itself"
+            );
+        }
+    }
+
+    /// A cell of the zoom menu is named in its own words — the key cycles
+    /// through them all and so describes none of them — with the key that
+    /// cycles to it after. Except the numbered cells, which wear their zoom.
+    #[test]
+    fn a_menu_cell_is_named_in_its_own_words_and_by_the_key_that_cycles_to_it() {
+        let panels = panels(Some(Menu::Zoom));
+        let named = |index| names(Tip::Widget(Widget::Cell(index)), &panels);
+
+        let mut named_cells = 0;
+        for index in 0..32 {
+            let Some(words) = named(index) else { continue };
+            named_cells += 1;
+            assert!(
+                words.ends_with("(Space)") || words.ends_with("(p)"),
+                "{words}"
+            );
+        }
+        assert_eq!(named_cells, 5, "three fits and two filters");
+
+        // And a cell that says what it is already is left alone.
+        assert_eq!(named(0), None, "a percentage names itself");
+    }
+
+    /// The histogram panel's buttons are named in the panel's own few words
+    /// — its labels are read across the plot, so they have a panel's width
+    /// and not a window's — and by the key that does the same job.
+    #[test]
+    fn the_histogram_panels_buttons_are_named_briefly_and_by_their_keys() {
+        let panels = panels(None);
+        let named = |widget| names(Tip::Widget(widget), &panels);
+
+        assert_eq!(named(Widget::Luma).as_deref(), Some("Luminance plane (j)"));
+        assert_eq!(named(Widget::Planes).as_deref(), Some("Colour planes (k)"));
+        assert_eq!(
+            named(Widget::Log).as_deref(),
+            Some("Logarithmic counts (l)")
+        );
+        assert_eq!(
+            named(Widget::Reset).as_deref(),
+            Some("Reset the display (z)")
+        );
+
+        // Every false colour on offer, each by the name `--colormap` takes
+        // for it, with the key that cycles to it.
+        for (index, map) in Colormap::ALL.into_iter().enumerate() {
+            let words = named(Widget::Ramp(index)).unwrap_or_else(|| panic!("{map:?} is named"));
+            assert!(words.ends_with("(r)"), "{words}");
+            assert!(
+                map == Colormap::Gray || words.to_lowercase().contains(map.label()),
+                "{words} names {map:?}"
+            );
+        }
+        assert_eq!(named(Widget::Ramp(Colormap::ALL.len())), None);
+
+        // Short enough to be read where they are drawn: beside a toggle, on
+        // a panel one panel wide.
+        for widget in [
+            Widget::Luma,
+            Widget::Planes,
+            Widget::Log,
+            Widget::Reset,
+            Widget::Ramp(1),
+        ] {
+            let words = named(widget).expect("named above");
+            assert!(words.len() <= 24, "{words} is too long for the panel");
+        }
+    }
+
+    /// The keys the top bar's own words stand for are all bound, so neither
+    /// readout is left pointing at a key that does not exist.
+    #[test]
+    fn the_bars_own_readouts_have_keys_to_name() {
+        for action in [CopyPath, NextFile, PreviousFile] {
+            let hint = hint(action).unwrap_or_else(|| panic!("{action:?} is bound"));
+            assert!(hint.ends_with(')'), "{hint}");
+        }
+    }
 
     /// A chord bound twice would do whichever came first in the table,
     /// silently. The same key under different modifiers is a different chord.
