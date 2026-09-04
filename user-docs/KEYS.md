@@ -54,6 +54,8 @@ taken out of it.
 | `Ctrl+Shift+C` | Copy the file on screen as a URI |
 | `Ctrl+C` | Copy the picture itself, as you are seeing it |
 | `Ctrl+I` | Copy everything the file information says about the file |
+| `Ctrl+.` | Copy the value of the pixel under the pointer |
+| `Ctrl+Shift+.` | Copy the coordinate of the pixel under the pointer |
 | `Ctrl+V` | Paste a picture, saved among your pictures and shown |
 
 `Shift+C` copies the path in full, from the root down, whichever way the file
@@ -86,6 +88,15 @@ anywhere else. It works whether or not the panel is showing — what it says is
 a fact about the file, and asking for it should not mean first arranging to
 look at it. Single fields and single sections can be copied from the panel
 itself; see below.
+
+`Ctrl+.` copies the value the bottom left corner is reading out, exactly as it
+is written there — so switching the readout to hex with `>` and pressing
+`Ctrl+.` puts `E78040` on the clipboard, and switching it back puts
+`231 128 64` there instead. `Ctrl+Shift+.` copies the pixel's coordinate
+rather than its value, as `x,y` with nothing around it: `1919,1079`, ready to
+paste into a command line or a spreadsheet. Both work on the pixel the pointer
+is over at the moment you press them, and say so on the terminal when the
+pointer is not over one.
 
 The picture is prepared in the background, so the window keeps answering while
 a large one is being got ready — a photograph of some tens of megapixels takes
@@ -188,6 +199,7 @@ top of a colormap would distort the values you are reading off it.
 | `i` | Show or hide the file information |
 | `m` | Show or hide the minimap |
 | `g` | Show or hide the grid over the image |
+| `>` | Cycle how the pixel under the pointer is read out: hex → decimal → mapped |
 | `` ` `` | Show or hide the panels around the image |
 | `~` | The same, and closes the histogram, information and minimap |
 | `q`, `Esc` | Quit. `Esc` closes an open popup first |
@@ -271,6 +283,7 @@ counted off in the image's own pixels.
 | Wheel over the file information | Scroll it |
 | Drag the file information | Scroll it, as if dragging the scrollbar's handle |
 | Click the zoom percentage | Open the zoom menu: scale, fit and the magnification filter |
+| Click the dot in the bottom left | Choose how a pixel's value is read out |
 
 The percentage in the top bar, just inside the grid button, is itself a
 button. Pressing it opens a menu hanging under it, under three headings.
@@ -283,14 +296,27 @@ closes it without changing anything. A window too small to hold the menu does
 not open one.
 
 Pointing at the image reads that pixel out in the bottom left corner: its
-coordinates, the numbers the file holds there, an arrow, and what the display
-settings map those numbers to. The numbers are in the file's own units — codes
-for an 8-bit image, counts for a 16-bit one, the value itself for floating
-point — so they are the numbers whatever wrote the file put there. The mapped
-values are what the window, the exposure and the tone curve have made of them,
-where 0 and 1 are the ends of the window the bar names on the right. The
-swatch at the front is the colour the pixel comes out on screen, false colour
-included. In a window too narrow for all of it, the coordinates stay.
+coordinates, a swatch of the colour it comes out on screen, and its value. The
+swatch is what the display settings actually make of the pixel, false colour
+included; the coordinates are padded to the size of the image, so nothing
+after them moves as the pointer crosses a power of ten. In a window too narrow
+for all of it, the coordinates stay.
+
+One pixel answers more than one question, so the value is written whichever of
+three ways you ask for. **Decimal** is the numbers the file holds, in its own
+units — codes for an 8-bit image, counts for a 16-bit one, the value itself
+for floating point — the numbers whatever wrote the file put there. **Hex** is
+those same numbers as a colour is usually written down: run together, in upper
+case, with no `#` and no `0x`, two digits to an 8-bit sample and four to a
+16-bit one, so an ordinary photograph reads `E78040` and pastes straight into
+anything that takes a colour. A floating-point file has no such code, and
+what you get there is the bits it actually stores. **Mapped** is what the
+window, the exposure and the tone curve have made of the numbers, where 0 and
+1 are the ends of the window the bar names on the right.
+
+`>` steps through the three, and the dot at the head of the readout opens a
+menu of them; whichever is in force is lit. It applies to whichever image is
+on screen and stays as you set it.
 
 The pointer keeps its grab until the button comes up, so a drag that leaves
 the window goes on working. The cursor becomes a closed hand only when there

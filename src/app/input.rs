@@ -95,6 +95,14 @@ pub enum Action {
     /// Write the picture on the clipboard to a file of its own, put it in the
     /// list beside the one on screen, and show it.
     Paste,
+    /// Step the bottom bar's readout through the ways of writing a pixel's
+    /// value: hexadecimal, decimal, mapped.
+    CyclePixelFormat,
+    /// Put the value of the pixel under the pointer on the clipboard, written
+    /// exactly as the bar is writing it.
+    CopyPixelValue,
+    /// Put that pixel's coordinate on the clipboard, as `x,y`.
+    CopyPixelCoordinate,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -223,6 +231,9 @@ fn action_of(tip: Tip, panels: &Panels) -> Option<Action> {
         Tip::Widget(Widget::Grid) => ToggleGrid,
         Tip::Widget(Widget::Output) => ToggleHdr,
         Tip::Widget(Widget::Paste) => Action::Paste,
+        // The dot at the head of the pixel readout, which the key steps
+        // through exactly as a press on one of its cells chooses.
+        Tip::Widget(Widget::PixelFormat) => CyclePixelFormat,
         // The histogram panel's own, and the row of false colours a key
         // cycles through.
         Tip::Widget(Widget::Luma) => ToggleLuma,
@@ -239,6 +250,7 @@ fn action_of(tip: Tip, panels: &Panels) -> Option<Action> {
         Tip::Widget(Widget::Cell(index)) => match panels.menu?.cell_tip(index)?.cycle {
             Cycle::Fit => CycleFit,
             Cycle::Upscale => CycleUpscale,
+            Cycle::PixelFormat => CyclePixelFormat,
         },
         Tip::Widget(_) | Tip::Name | Tip::Counter => return None,
     })
@@ -449,6 +461,24 @@ pub const KEYS: &[Binding] = &[
         help: "Copy everything the info panel says about the file",
         keys: &[(Char("i"), CopyMetadata), (Char("I"), CopyMetadata)],
     },
+    // The full stop and the greater-than are one key on most keyboards, and
+    // as with the two `C`s above only the Ctrl that is held either way is a
+    // modifier as far as the table is concerned. `shown` says what the
+    // fingers do.
+    Binding {
+        section: Section::Clipboard,
+        mods: CTRL,
+        shown: "Ctrl+.",
+        help: "Copy the value of the pixel under the pointer, as read out",
+        keys: &[(Char("."), CopyPixelValue)],
+    },
+    Binding {
+        section: Section::Clipboard,
+        mods: CTRL,
+        shown: "Ctrl+Shift+.",
+        help: "Copy the coordinate of the pixel under the pointer, as x,y",
+        keys: &[(Char(">"), CopyPixelCoordinate)],
+    },
     Binding {
         section: Section::Clipboard,
         mods: CTRL,
@@ -519,6 +549,15 @@ pub const KEYS: &[Binding] = &[
         shown: "l",
         help: "Toggle a logarithmic count axis on the histogram",
         keys: &[(Char("l"), ToggleLogCounts), (Char("L"), ToggleLogCounts)],
+    },
+    // The same key as the two copies above, with no Ctrl held: what it
+    // switches is what they take away with them.
+    Binding {
+        section: Section::Interface,
+        mods: PLAIN,
+        shown: ">",
+        help: "Cycle the pixel readout: hex, decimal, mapped",
+        keys: &[(Char(">"), CyclePixelFormat)],
     },
     Binding {
         section: Section::Interface,
@@ -830,6 +869,21 @@ impl App {
             // then read, and what is on screen stays until it arrives.
             Paste => {
                 self.paste();
+                return Effect::Nothing;
+            }
+            // The bar alone changes, but that is a frame all the same.
+            CyclePixelFormat => {
+                self.panels.pixel_format = self.panels.pixel_format.next();
+            }
+            // Nothing on screen changes; a copy is reported only when it
+            // could not be made — here including the one case a pixel copy
+            // has and the others do not, the pointer being nowhere near one.
+            CopyPixelValue => {
+                self.copy_pixel(false);
+                return Effect::Nothing;
+            }
+            CopyPixelCoordinate => {
+                self.copy_pixel(true);
                 return Effect::Nothing;
             }
             ResetDisplay => {
@@ -1251,6 +1305,16 @@ impl App {
                     .filter_map(hint)
                     .collect(),
             ),
+            // The dot at the head of the pixel readout: what the key does to
+            // it, and under that the two copies that take what it is showing
+            // away with them — neither of which has a button anywhere.
+            Tip::Widget(Widget::PixelFormat) => (
+                names(at, &self.panels)?,
+                [CopyPixelValue, CopyPixelCoordinate]
+                    .into_iter()
+                    .filter_map(hint)
+                    .collect(),
+            ),
             _ => (names(at, &self.panels)?, Vec::new()),
         };
         Some(ui::Tooltip { at, title, hints })
@@ -1266,18 +1330,8 @@ impl App {
             Widget::Info => self.panels.show_info = !self.panels.show_info,
             // Only ever opens one: the press that closes a menu is answered
             // by the menu itself, before the widgets underneath are asked.
-            // A window with no room for the panel gets no menu rather than a
-            // state nothing on screen accounts for.
-            Widget::Zoom => {
-                let chrome = self.chrome();
-                if self.current.is_some()
-                    && chrome
-                        .popup(Menu::Zoom, self.grid_spacing().as_deref())
-                        .is_some()
-                {
-                    self.panels.menu = Some(Menu::Zoom);
-                }
-            }
+            Widget::Zoom => self.open_menu(Menu::Zoom),
+            Widget::PixelFormat => self.open_menu(Menu::PixelFormat),
             // The action the key runs, as with the reset below: the button
             // is on screen because the clipboard was holding a picture at the
             // last look, and the paste asks it again rather than trusting
@@ -1309,7 +1363,13 @@ impl App {
             Widget::Cell(index) => {
                 if let Some(menu) = self.panels.menu.take() {
                     let (image, viewport) = (self.image_size(), self.viewport());
-                    menu.choose(index, &mut self.view, image, viewport);
+                    menu.choose(
+                        index,
+                        &mut self.view,
+                        &mut self.panels.pixel_format,
+                        image,
+                        viewport,
+                    );
                 }
             }
             // As with the reset: the key's action, so that the button and the
@@ -1318,6 +1378,54 @@ impl App {
                 let _ = self.toggle_hdr();
             }
         }
+    }
+
+    /// Opens `menu`, if there is anything for it to be about and room to draw
+    /// it. A window with no room for the panel gets no menu rather than a
+    /// state nothing on screen accounts for.
+    fn open_menu(&mut self, menu: Menu) {
+        if self.current.is_some()
+            && self
+                .chrome()
+                .popup(menu, self.grid_spacing().as_deref())
+                .is_some()
+        {
+            self.panels.menu = Some(menu);
+        }
+    }
+
+    /// Puts the pixel under the pointer on the clipboard: its `coordinate`,
+    /// or else its value written exactly as the bar is writing it, so that
+    /// what is copied is what was read.
+    ///
+    /// A pixel and not a picture, so this is done in line like the other
+    /// small copies. Nothing to copy is not a failure — a key was pressed
+    /// with the pointer off the image, or over a panel covering it — but it
+    /// is the one thing worth saying, since a copy that worked shows nothing
+    /// either.
+    fn copy_pixel(&mut self, coordinate: bool) {
+        let Some(text) = self.pixel_text(coordinate) else {
+            eprintln!("gamut: no pixel under the pointer to copy");
+            return;
+        };
+        self.copy(text.as_bytes(), clipboard::TEXT);
+    }
+
+    /// What such a copy says, or `None` when the pointer is not on a pixel.
+    fn pixel_text(&self, coordinate: bool) -> Option<String> {
+        let at = self.pointer_pixel()?;
+        if coordinate {
+            return Some(ui::pixel::copied_coordinate(at));
+        }
+        let current = self.current.as_ref()?;
+        let sample = current.image.sample(at[0], at[1])?;
+        let mapped = current.display.map(&sample, self.headroom());
+        Some(ui::pixel::value(
+            &current.image,
+            &sample,
+            &mapped,
+            self.panels.pixel_format,
+        ))
     }
 
     /// Scrolls the info panel with the wheel.
@@ -1409,6 +1517,7 @@ mod tests {
             show_minimap: true,
             show_grid: false,
             paste: true,
+            pixel_format: ui::PixelFormat::default(),
             hover: None,
             info_hover: None,
             menu,
@@ -1459,6 +1568,7 @@ mod tests {
             Widget::Grid,
             Widget::Output,
             Widget::Zoom,
+            Widget::PixelFormat,
         ] {
             assert!(
                 names(Tip::Widget(widget), &panels).is_some(),
@@ -1533,6 +1643,65 @@ mod tests {
             let words = named(widget).expect("named above");
             assert!(words.len() <= 24, "{words} is too long for the panel");
         }
+    }
+
+    /// The dot at the head of the pixel readout is named by the key that
+    /// steps it on, and the two copies that take what it is showing away are
+    /// bound as well: they have no button anywhere, so that label is the only
+    /// place either of them is written down.
+    #[test]
+    fn the_pixel_readout_names_its_key_and_the_copies_that_have_none() {
+        let panels = panels(None);
+        assert_eq!(
+            names(Tip::Widget(Widget::PixelFormat), &panels).as_deref(),
+            Some("Cycle the pixel readout: hex, decimal, mapped (>)")
+        );
+
+        for action in [CopyPixelValue, CopyPixelCoordinate] {
+            let hint = hint(action).unwrap_or_else(|| panic!("{action:?} is bound"));
+            assert!(hint.ends_with("(Ctrl+.)") || hint.ends_with("(Ctrl+Shift+.)"), "{hint}");
+        }
+    }
+
+    /// A cell of the pixel menu is named by what it answers rather than by
+    /// what it is called — the cell is already wearing the name — with the key
+    /// that steps through them after it.
+    #[test]
+    fn a_pixel_format_cell_says_which_question_it_answers() {
+        let panels = panels(Some(Menu::PixelFormat));
+        let named = |index| names(Tip::Widget(Widget::Cell(index)), &panels);
+
+        for index in 0..ui::PixelFormat::ALL.len() {
+            let words = named(index).unwrap_or_else(|| panic!("cell {index} is named"));
+            assert!(words.ends_with("(>)"), "{words}");
+        }
+        assert_eq!(named(ui::PixelFormat::ALL.len()), None);
+    }
+
+    /// The full stop is three bindings, told apart by what is held with it:
+    /// shifted it steps the readout on, and with Ctrl the two of them copy
+    /// what it is showing. Shift is part of the character, so the shifted
+    /// pair arrive as `>` with it held.
+    #[test]
+    fn the_full_stop_reads_out_a_pixel_three_ways() {
+        use winit::keyboard::SmolStr;
+        let stop = Key::Character(SmolStr::new("."));
+        let greater = Key::Character(SmolStr::new(">"));
+
+        assert_eq!(
+            action_for(&greater, ELSEWHERE, SHIFT),
+            Some(CyclePixelFormat)
+        );
+        assert_eq!(
+            action_for(&stop, ELSEWHERE, CTRL),
+            Some(CopyPixelValue)
+        );
+        assert_eq!(
+            action_for(&greater, ELSEWHERE, CTRL | SHIFT),
+            Some(CopyPixelCoordinate)
+        );
+        // Unshifted and unheld it is a full stop and nothing else.
+        assert_eq!(action_for(&stop, ELSEWHERE, PLAIN), None);
     }
 
     /// The keys the top bar's own words stand for are all bound, so neither

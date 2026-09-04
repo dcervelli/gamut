@@ -24,7 +24,8 @@ ui/            builds each frame's display list; no wgpu or winit imports
                  24-unit grid, sized and placed in whole device pixels so
                  strokes stay sharp and evenly spaced marks stay even
   info.rs        the file's own facts, in a column that scrolls
-  pixel.rs       the pointer's readout: coordinate, stored and mapped values, swatch
+  pixel.rs       the pointer's readout: coordinate, swatch, and the pixel's
+                 value in whichever of `PixelFormat`'s three ways is in force
   menu.rs        Menu (which popup is open), the zoom menu's choices, and how its cells are drawn
   tooltip.rs     the label naming what the pointer is resting on: Tip is what can
                  have one, Tooltips is when it opens, Tips is where it goes —
@@ -92,7 +93,7 @@ name.
 | --- | --- |
 | A key binding | `app/input.rs`: one `KEYS` entry, with the `mods` it is held with, and one `perform` arm. `--help` follows. |
 | A status-bar segment | `ui/status.rs`; the pointer's pixel readout is `ui/pixel.rs` |
-| What a pixel reads as under the pointer | `image/mod.rs::sample` for what the file holds, `image/display.rs::map` for what the screen shows |
+| What a pixel reads as under the pointer | `image/mod.rs::sample` for what the file holds, `image/display.rs::map` for what the screen shows, `ui/pixel.rs::PixelFormat` for which of the two the bar writes out and how |
 | What something is called when the pointer rests on it | a `Tip` variant in `ui/tooltip.rs` and one `tips.offer(tip, rect)` beside where it is drawn; `App::tooltip` composes the words, from `KEYS` by way of `action_of` wherever a key does the same job, so a tooltip and `--help` cannot disagree. Words of its own go in `ui/tooltip.rs::words`, and a menu cell's in `Menu::cell_tip`. A thing that wants its label somewhere other than under it offers with `offer_toward`: the histogram panel's toggles open `Opens::Right`, across the plot they act on. When it opens is `Tooltips`, held by `App` and asked in `update_hover` and `about_to_wait` |
 | A button's icon | `ui/icon.rs`: one `&[Mark]` on the 24-unit grid, and one `icon::draw` call where the button is drawn. The caller sets aside a budget; whether the mark comes out sharp is `UiFrame::stroke_centre_in_device`'s business and whether its spacing stays even is `icon::fit`'s |
 | A panel or overlay | a new `ui/<name>.rs` and one call in `ui/mod.rs::build_frame`; if the pointer can be on it, a `Hit` variant and one test in `ui/layers.rs` at the same height in the stack it is drawn at; a new colour role goes in `theme/mod.rs` |

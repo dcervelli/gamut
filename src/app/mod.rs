@@ -191,6 +191,7 @@ impl App {
                 show_minimap: minimap,
                 show_grid: false,
                 paste: false,
+                pixel_format: ui::PixelFormat::default(),
                 hover: None,
                 info_hover: None,
                 menu: None,

@@ -70,6 +70,21 @@ pub(super) fn paste_button(frame: &mut UiFrame, rect: Rect, hover: bool, theme: 
     toggle(frame, rect, icon::CLIPBOARD, false, hover, theme);
 }
 
+/// The button at the head of the pixel readout, in the bottom bar: a ring
+/// with a point at its centre, for the one pixel the readout is about. Lit
+/// while the menu it opens is open, the way the zoom readout is — it chooses
+/// how the value beside it is written rather than switching anything on, so
+/// there is no other state for it to be showing.
+pub(super) fn pixel_button(
+    frame: &mut UiFrame,
+    rect: Rect,
+    open: bool,
+    hover: bool,
+    theme: &Theme,
+) {
+    toggle(frame, rect, icon::CIRCLE_DOT, open, hover, theme);
+}
+
 /// One square toggle in a side panel: the button, and the mark it wears.
 ///
 /// A window too small to hold the button gets no button, rather than a smear

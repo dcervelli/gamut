@@ -13,6 +13,7 @@ use crate::view::{Fit, View, Viewport};
 
 use super::buttons::{button_ink, centred_text, percent};
 use super::icon;
+use super::pixel::PixelFormat;
 use super::{PADDING, Panels, TEXT_SIZE, Widget};
 
 /// An ordinary cell of a popup menu, and the room around them. Wider than it
@@ -47,6 +48,9 @@ const FIT_ICON: f32 = 24.0;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Menu {
     Zoom,
+    /// How the bottom bar writes out the pixel under the pointer, opened from
+    /// the dot at the head of that readout.
+    PixelFormat,
 }
 
 /// What a cell of a menu is, for anything outside the menu that has to say
@@ -68,12 +72,14 @@ pub struct CellTip {
 pub enum Cycle {
     Fit,
     Upscale,
+    PixelFormat,
 }
 
 impl Menu {
     pub fn sections(self) -> &'static [PopupSection] {
         match self {
             Menu::Zoom => &ZOOM_SECTIONS,
+            Menu::PixelFormat => &PIXEL_SECTIONS,
         }
     }
 
@@ -120,17 +126,40 @@ impl Menu {
                     cycle: Cycle::Upscale,
                 }),
             },
+            // What each format answers, rather than what it is called: the
+            // cell is already wearing the name, and the name is the one thing
+            // about a format that does not say which question it is for.
+            Menu::PixelFormat => Some(CellTip {
+                label: match PixelFormat::ALL.get(index)? {
+                    PixelFormat::Hex => "The file's codes, as a colour is written",
+                    PixelFormat::Decimal => "The file's own numbers",
+                    PixelFormat::Mapped => "What the display makes of them",
+                },
+                cycle: Cycle::PixelFormat,
+            }),
         }
     }
 
     /// Acts on cell `index`. Out-of-range indices cannot arrive — the popup
     /// only hands back cells it laid out — but a menu that has nothing to say
     /// about a cell simply says nothing.
-    pub fn choose(self, index: usize, view: &mut View, image: [f32; 2], viewport: Viewport) {
+    pub fn choose(
+        self,
+        index: usize,
+        view: &mut View,
+        format: &mut PixelFormat,
+        image: [f32; 2],
+        viewport: Viewport,
+    ) {
         match self {
             Menu::Zoom => {
                 if let Some(choice) = ZOOM_CHOICES.get(index) {
                     choice.apply(view, image, viewport);
+                }
+            }
+            Menu::PixelFormat => {
+                if let Some(choice) = PixelFormat::ALL.get(index) {
+                    *format = *choice;
                 }
             }
         }
@@ -170,6 +199,17 @@ const ZOOM_SECTIONS: [PopupSection; 3] = [
         cell_width: MENU_WORD_CELL,
     },
 ];
+
+/// The one section of the pixel-format menu: the three formats abreast, in
+/// cells cut for words as the up-scaling filters' are. One section and no
+/// heading would leave the panel saying nothing about what it is a menu of,
+/// and it hangs from a dot rather than from a word.
+const PIXEL_SECTIONS: [PopupSection; 1] = [PopupSection {
+    title: "Pixel value",
+    items: PixelFormat::ALL.len(),
+    columns: PixelFormat::ALL.len(),
+    cell_width: MENU_WORD_CELL,
+}];
 
 /// What the zoom menu offers. The order is the order the cells are laid out
 /// in, section by section and left to right within each.
@@ -278,6 +318,17 @@ pub(super) fn draw(
                         centred_text(frame, text, cell, ink, filter.label())
                     }
                 }
+            }
+            // In words, as the filters are, and for the same reason: there is
+            // no picture of "decimal" a reader would arrive at unaided.
+            Menu::PixelFormat => {
+                let Some(format) = PixelFormat::ALL.get(index) else {
+                    continue;
+                };
+                let (background, ink) =
+                    button_ink(*format == panels.pixel_format, hover, theme);
+                frame.rounded_rect(cell, CELL_RADIUS, background);
+                centred_text(frame, text, cell, ink, format.label());
             }
         }
     }
@@ -435,6 +486,44 @@ mod tests {
             .max()
             .expect("two filters");
         assert!(filter.width > longest as f32 * TEXT_SIZE * 0.7);
+    }
+
+    /// The pixel menu is exactly the formats on offer, in the order the key
+    /// steps through them, and pressing a cell puts the readout in the format
+    /// that cell wears — the same one the cell is lit for.
+    #[test]
+    fn every_pixel_format_has_a_cell_that_chooses_it() {
+        let chrome = Chrome::new(WINDOW);
+        let popup = chrome
+            .popup(Menu::PixelFormat, None)
+            .expect("a window with room for it");
+        assert_eq!(popup.cells().count(), PixelFormat::ALL.len());
+        assert_eq!(PIXEL_SECTIONS[0].items, PixelFormat::ALL.len());
+
+        // It stands over the button that opens it, at the other end of the
+        // window from the zoom menu.
+        assert!(popup.panel().bottom() <= chrome.pixel_button.y);
+
+        let mut view = View::new();
+        for (index, expected) in PixelFormat::ALL.into_iter().enumerate() {
+            let mut format = PixelFormat::default();
+            Menu::PixelFormat.choose(
+                index,
+                &mut view,
+                &mut format,
+                [900.0, 600.0],
+                Viewport::whole(WINDOW),
+            );
+            assert_eq!(format, expected);
+        }
+
+        // Wide enough for the longest of the names it is cut for.
+        let longest = PixelFormat::ALL
+            .iter()
+            .map(|format| format.label().len())
+            .max()
+            .expect("three formats");
+        assert!(popup.cell(0).width > longest as f32 * TEXT_SIZE * 0.7);
     }
 
     /// The button reads out the same zoom the cells are chosen from, so the

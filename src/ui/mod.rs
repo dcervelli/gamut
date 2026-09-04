@@ -17,7 +17,7 @@ mod buttons;
 mod grid;
 pub mod histogram;
 mod icon;
-mod pixel;
+pub mod pixel;
 mod status;
 
 use std::sync::Arc;
@@ -33,6 +33,7 @@ use crate::view::{View, Viewport};
 use chrome::{BAR_PADDING, Chrome};
 pub use info::FileFacts;
 pub use menu::Menu;
+pub use pixel::PixelFormat;
 pub use status::BarText;
 pub use tooltip::{Tip, Tooltip, Tooltips};
 
@@ -84,9 +85,9 @@ const PANEL_RADIUS: f32 = 6.0;
 const CHECKER_SQUARE: f32 = 8.0;
 
 /// Something in the interface the pointer can be over and press: a toggle in
-/// a side panel, one of the two buttons at the end of the top bar, or a cell
-/// of the menu the zoom readout opens. One value rather than a flag each, so that
-/// hit-testing, hover and drawing all go through the same test.
+/// a side panel, a button in one of the bars, or a cell of whichever menu is
+/// open. One value rather than a flag each, so that hit-testing, hover and
+/// drawing all go through the same test.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Widget {
     Minimap,
@@ -113,6 +114,9 @@ pub enum Widget {
     /// The switch between the SDR and the HDR surface, at the end of the
     /// bottom bar: lit while the picture is going out with room above white.
     Output,
+    /// The dot at the head of the pixel readout, at the other end of that
+    /// bar, which opens the menu of ways to write a pixel's value.
+    PixelFormat,
 }
 
 /// The image on screen, with everything derived from it.
@@ -197,6 +201,11 @@ pub struct Panels {
     /// widgets: it moves as the panel scrolls, and it is there whether or not
     /// the bars are.
     pub info_hover: Option<info::Copyable>,
+    /// How the bottom bar writes out the value of the pixel under the
+    /// pointer. Here rather than with the display's own settings because it
+    /// is about the reading and not about the rendering: nothing on screen
+    /// changes with it but the words in the bar.
+    pub pixel_format: PixelFormat,
     /// The menu popped up over the interface, if any. It is drawn over
     /// everything and takes the pointer while it is open: a press on a cell
     /// chooses, one anywhere else dismisses it, and the wheel is spent on it
@@ -547,17 +556,39 @@ pub fn build_frame(
     );
     tips.offer(Tip::Widget(Widget::Output), output_button);
 
+    // The head of the readout, and the only part of it that is always there:
+    // the pointer is over the bar rather than over a pixel while it is on its
+    // way to this button.
+    let pixel_button = chrome.pixel_button;
+    buttons::pixel_button(
+        &mut frame,
+        pixel_button,
+        panels.menu == Some(Menu::PixelFormat),
+        panels.hover == Some(Widget::PixelFormat),
+        theme,
+    );
+    tips.offer(Tip::Widget(Widget::PixelFormat), pixel_button);
+
     let right = status::describe_state(current, input);
     let right_width = text.measure_text(&right, TEXT_SIZE)[0];
     let right_x = (output_button.x - PADDING - right_width).max(BAR_PADDING);
 
+    // The strip of the bar the readout has to itself: past the button at its
+    // head, and stopping short of the words at the other end.
+    let readout_x = pixel_button.right() + pixel::GAP;
+    let readout = Rect::new(
+        readout_x,
+        bar.y,
+        ((right_x - PADDING) - readout_x).max(0.0),
+        bar.height,
+    );
     pixel::draw(
         &mut frame,
         text,
         current,
         input,
-        bar,
-        (right_x - PADDING).max(BAR_PADDING),
+        readout,
+        panels.pixel_format,
         theme,
     );
     frame.text([right_x, baseline], TEXT_SIZE, theme.text_dim, right);
