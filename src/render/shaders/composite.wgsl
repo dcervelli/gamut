@@ -69,7 +69,9 @@ fn neutral(color_in: vec3<f32>) -> vec3<f32> {
 }
 
 // Mirrored on the CPU by `ToneMap::apply` in image/display.rs, for the one
-// pixel the readout in the bottom bar has to describe.
+// pixel the readout in the bottom bar has to describe. Which arm "no curve"
+// takes is the surface's to say — 0 on an SDR surface, 3 on one with room
+// above white — and `shader_codes::tone_map` says it.
 fn tone_map(color: vec3<f32>) -> vec3<f32> {
     switch params.tone_map {
         case 1u: { return reinhard(max(color, vec3<f32>(0.0))); }
@@ -80,6 +82,20 @@ fn tone_map(color: vec3<f32>) -> vec3<f32> {
         case 3u: { return max(color, vec3<f32>(0.0)); }
         default: { return clamp(color, vec3<f32>(0.0), vec3<f32>(1.0)); }
     }
+}
+
+// The working space's BT.709 primaries taken to BT.2020, which is the gamut
+// an HDR10 surface reads its signal in. The inverse of
+// `Primaries::Bt2020.to_bt709()` in image/color/mod.rs, where a test holds
+// these nine numbers against it. BT.2020 contains BT.709 whole, so nothing in
+// range comes out negative; a wide-gamut source can, and is clipped after.
+fn bt709_to_bt2020(color: vec3<f32>) -> vec3<f32> {
+    let matrix = mat3x3<f32>(
+        vec3<f32>(0.6274021, 0.0690956, 0.0163942),
+        vec3<f32>(0.3292916, 0.9195437, 0.0880285),
+        vec3<f32>(0.0433063, 0.0113606, 0.8955772),
+    );
+    return max(matrix * color, vec3<f32>(0.0));
 }
 
 // SMPTE ST 2084, taking a value relative to 203-nit reference white.
@@ -116,7 +132,9 @@ fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
         case 0u: { return vec4<f32>(color, 1.0); }
         // scRGB: linear values, 1.0 is SDR white, above that is brighter.
         case 1u: { return vec4<f32>(color, 1.0); }
-        default: { return vec4<f32>(pq_encode(color), 1.0); }
+        // HDR10: a PQ-encoded signal in the BT.2020 gamut, so the primaries
+        // are converted before the curve goes on.
+        default: { return vec4<f32>(pq_encode(bt709_to_bt2020(color)), 1.0); }
     }
 }
 

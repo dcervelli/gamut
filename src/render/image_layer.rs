@@ -88,6 +88,14 @@ pub struct ImageLayer {
     thumbnail_level: Option<usize>,
 }
 
+impl GpuImage {
+    /// Whether the image has one channel of colour, which is what decides
+    /// whether a false colour is on it.
+    pub fn is_gray(&self) -> bool {
+        self.swizzle < 2
+    }
+}
+
 impl ImageLayer {
     pub fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {

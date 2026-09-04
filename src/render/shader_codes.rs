@@ -4,7 +4,7 @@
 //! `switch` in a WGSL file. Keep the two in step: a value added on one side
 //! and not the other fails silently, as the wrong branch rather than an error.
 
-use crate::image::display::{Colormap, ToneMap};
+use crate::image::display::{Colormap, Headroom, ToneMap};
 use crate::image::{AlphaMode, Channels};
 
 use super::output::Encoding;
@@ -53,13 +53,16 @@ pub fn colormap(map: Colormap) -> u32 {
     }
 }
 
-/// Matches `tone_map` in `shaders/composite.wgsl`.
-pub fn tone_map(map: ToneMap) -> u32 {
-    match map {
-        ToneMap::Clip => 0,
-        ToneMap::Reinhard => 1,
-        ToneMap::Neutral => 2,
-        ToneMap::Off => 3,
+/// Matches `tone_map` in `shaders/composite.wgsl`, and `ToneMap::apply` in
+/// `image/display.rs`, which is the same match on the CPU: no curve is a
+/// clip at white on an SDR surface and a pass-through on one with room above
+/// it, and the two curves are themselves whatever the surface.
+pub fn tone_map(map: ToneMap, headroom: Headroom) -> u32 {
+    match (map, headroom) {
+        (ToneMap::None, Headroom::None) => 0,
+        (ToneMap::Reinhard, _) => 1,
+        (ToneMap::Neutral, _) => 2,
+        (ToneMap::None, Headroom::Above) => 3,
     }
 }
 

@@ -707,6 +707,8 @@ dependencies = [
  "pollster",
  "tiff",
  "ultrahdr-rs",
+ "wayland-client",
+ "wayland-protocols",
  "wgpu",
  "winit",
  "wl-clipboard-rs",

@@ -4,12 +4,13 @@
 
 use bytemuck::{Pod, Zeroable};
 
+use super::Scene;
 use super::gpu::{self, Fullscreen};
 use super::output::Output;
 use super::placement::Placement;
 use super::shader_codes;
 use super::ui_layer::Color;
-use crate::image::display::{Colormap, Display};
+use crate::image::display::{Colormap, Headroom, ToneMap};
 
 /// The most regions the checkerboard can be cut into: the image, and the
 /// minimap's thumbnail.
@@ -104,22 +105,37 @@ impl Composite {
     }
 
     /// `regions` is where the checkerboard shows: the image quads this frame
-    /// draws, and nothing at all on a frame with no image on screen.
+    /// draws, and nothing at all on a frame with no image on screen. `gray`
+    /// is whether the image on screen has one channel, which is what decides
+    /// whether the false colour is on it. Of the scene, this reads the
+    /// display state, the backdrop and the headroom; of the output, only how
+    /// it is encoded.
     pub fn prepare(
         &self,
         queue: &wgpu::Queue,
-        display: &Display,
+        scene: &Scene<'_>,
+        gray: bool,
         output: &Output,
-        backdrop: Backdrop,
-        scale: f32,
         regions: [Option<Placement>; REGIONS],
     ) {
+        let Scene {
+            display,
+            backdrop,
+            scale,
+            headroom,
+            ..
+        } = *scene;
         // False colour is already display-referred: a tone curve on top of a
-        // colormap would distort the mapping the viewer is reading values off.
-        let tone_map = if display.colormap == Colormap::Gray {
-            shader_codes::tone_map(display.tone_map)
+        // colormap would distort the mapping the viewer is reading values
+        // off, and headroom above the top of the ramp is a colour the ramp
+        // does not have — so a plain clip, whatever the surface. The same
+        // choice `Display::curve` makes for the readouts, and on the same
+        // test: the display ignores a colormap on a colour image, so the
+        // compositor has to as well.
+        let tone_map = if gray && display.colormap != Colormap::Gray {
+            shader_codes::tone_map(ToneMap::None, Headroom::None)
         } else {
-            0
+            shader_codes::tone_map(display.tone_map, headroom)
         };
 
         // A region that is not drawn stays the empty rectangle it starts as,

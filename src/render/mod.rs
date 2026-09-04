@@ -29,7 +29,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use anyhow::{Context, Result, anyhow};
 use winit::window::Window;
 
-use crate::image::{DecodedImage, display::Display};
+use crate::image::{
+    DecodedImage,
+    display::{Display, Headroom},
+};
 use crate::timing;
 
 pub use composite::Backdrop;
@@ -62,6 +65,7 @@ struct Targets {
 /// layer rather than the interface's, since it is the image: the same window,
 /// tone map and colormap apply to it without any of that having to be
 /// reimplemented in sRGB.
+#[derive(Clone, Copy)]
 pub struct Scene<'a> {
     pub placement: Placement,
     pub thumbnail: Option<Placement>,
@@ -70,6 +74,11 @@ pub struct Scene<'a> {
     /// Physical pixels to the logical one the interface is laid out in.
     pub scale: f32,
     pub backdrop: Backdrop,
+    /// Whether the picture is going out with room above white, which decides
+    /// what the compositor does with no curve on the highlights: clip, or
+    /// let them through. Not the surface's alone to say: an HDR surface on a
+    /// monitor in SDR mode has none, and the switch can turn it off.
+    pub headroom: Headroom,
 }
 
 /// Text measurement, for interface code that has to lay something out next
@@ -95,6 +104,9 @@ pub struct Renderer {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     output: Output,
+    /// What the surface can be configured as, kept so that the output can be
+    /// chosen again when it is switched.
+    surface_capabilities: wgpu::SurfaceCapabilities,
     capabilities: Capabilities,
     adapter_name: String,
 
@@ -196,6 +208,7 @@ impl Renderer {
             queue,
             config,
             output,
+            surface_capabilities,
             capabilities,
             adapter_name,
             targets,
@@ -212,6 +225,42 @@ impl Renderer {
 
     pub fn output(&self) -> &Output {
         &self.output
+    }
+
+    /// Whether the driver offers an HDR colour space for this window, and so
+    /// whether there is anything for [`Renderer::set_hdr`] to switch to.
+    pub fn hdr_available(&self) -> bool {
+        Output::hdr_available(&self.surface_capabilities)
+    }
+
+    /// Puts the surface onto an HDR colour space, or back onto sRGB. Returns
+    /// whether the output changed.
+    ///
+    /// The surface is configured afresh with the new format and colour
+    /// space, and the compositor — the one pass that writes to the surface,
+    /// and so the one pipeline keyed on its format — is built again for it.
+    /// The offscreen targets are untouched: the image and the interface are
+    /// drawn the same way whatever they are going out to.
+    pub fn set_hdr(&mut self, on: bool) -> bool {
+        let preference = if on {
+            HdrPreference::On
+        } else {
+            HdrPreference::Off
+        };
+        let Some(output) = Output::choose(&self.surface_capabilities, preference) else {
+            return false;
+        };
+        if output.format == self.output.format && output.color_space == self.output.color_space {
+            return false;
+        }
+        self.config.format = output.format;
+        self.config.color_space = output.color_space;
+        self.surface.configure(&self.device, &self.config);
+        self.composite = Composite::new(&self.device, output.format);
+        self.composite
+            .bind_targets(&self.device, &self.targets.image, &self.targets.ui);
+        self.output = output;
+        true
     }
 
     pub fn adapter_name(&self) -> &str {
@@ -274,13 +323,14 @@ impl Renderer {
     pub fn render(&mut self, scene: Scene<'_>) -> Result<()> {
         use wgpu::CurrentSurfaceTexture as Acquired;
 
+        // The backdrop is the compositor's, and it reads the scene itself.
         let Scene {
             placement,
             thumbnail,
             display,
             frame,
             scale,
-            backdrop,
+            ..
         } = scene;
 
         let surface_texture = match self.surface.get_current_texture() {
@@ -350,19 +400,12 @@ impl Renderer {
         // a checkerboard rather than as the plain backdrop. Asked of the image
         // layer rather than assumed from `placement`, since a frame drawn
         // before the first file has decoded has a placement but no image.
-        let checkered = if self.image_layer.current().is_some() {
-            [Some(placement), thumbnail]
-        } else {
-            [None, None]
+        let (checkered, gray) = match self.image_layer.current() {
+            Some(image) => ([Some(placement), thumbnail], image.is_gray()),
+            None => ([None, None], false),
         };
-        self.composite.prepare(
-            &self.queue,
-            display,
-            &self.output,
-            backdrop,
-            scale,
-            checkered,
-        );
+        self.composite
+            .prepare(&self.queue, &scene, gray, &self.output, checkered);
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

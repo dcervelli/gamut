@@ -20,7 +20,7 @@ mod status;
 
 use std::sync::Arc;
 
-use crate::image::display::Display;
+use crate::image::display::{Display, Headroom};
 use crate::image::exif::Exif;
 use crate::image::stats::BINS;
 use crate::image::{DecodedImage, Stats};
@@ -89,6 +89,9 @@ pub enum Widget {
     /// One of the false colours offered under that panel's ramp, by its place
     /// in [`crate::image::display::Colormap::ALL`].
     Ramp(usize),
+    /// The switch between the SDR and the HDR surface, at the end of the
+    /// bottom bar: lit while the picture is going out with room above white.
+    Output,
 }
 
 /// The image on screen, with everything derived from it.
@@ -198,9 +201,13 @@ pub struct FrameInput {
     /// Which file is on screen, out of how many.
     pub index: usize,
     pub count: usize,
-    /// The output's label when it is an HDR surface, which is worth a word in
-    /// the bar; `None` on an ordinary one.
-    pub hdr_output: Option<&'static str>,
+    /// Whether the surface the picture is going out to has room above white,
+    /// which is half of what every readout of a value has to say.
+    pub headroom: Headroom,
+    /// Whether the switch has anything to switch: the driver offers an HDR
+    /// colour space for this window, and the monitor is not known to be in
+    /// SDR mode. The switch is drawn dead otherwise.
+    pub hdr_available: bool,
 }
 
 /// A stand-in for the renderer's fonts, for the tests that lay something out
@@ -407,21 +414,34 @@ pub fn build_frame(
     let bar = chrome.bottom;
     let baseline = text_baseline(bar);
 
+    // The surface switch ends the bar, where the grid toggle ends the top
+    // one: it is the one control of the display that is not a fact about the
+    // picture, and the words about what is being done to the picture run up
+    // to it.
+    let output_button = chrome.output_button();
+    buttons::output_button(
+        &mut frame,
+        text,
+        output_button,
+        input.headroom == Headroom::Above,
+        input.hdr_available,
+        panels.hover == Some(Widget::Output),
+        theme,
+    );
+
     let right = status::describe_state(current, input);
     let right_width = text.measure_text(&right, TEXT_SIZE)[0];
-    let right_x = (bar.right() - BAR_PADDING - right_width).max(BAR_PADDING);
+    let right_x = (output_button.x - PADDING - right_width).max(BAR_PADDING);
 
-    if let Some(at) = input.pointer {
-        pixel::draw(
-            &mut frame,
-            text,
-            current,
-            at,
-            bar,
-            (right_x - PADDING).max(BAR_PADDING),
-            theme,
-        );
-    }
+    pixel::draw(
+        &mut frame,
+        text,
+        current,
+        input,
+        bar,
+        (right_x - PADDING).max(BAR_PADDING),
+        theme,
+    );
     frame.text([right_x, baseline], TEXT_SIZE, theme.text_dim, right);
 
     // On the layer above everything else, so that it covers not only the

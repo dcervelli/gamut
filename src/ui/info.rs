@@ -806,16 +806,12 @@ fn image_facts(current: &Current) -> Vec<(&'static str, String)> {
                 AlphaMode::Premultiplied => "premultiplied".to_string(),
             },
         ),
-        // The range the file declared, as against the one its pixels turned
-        // out to occupy: the histogram shows the second, and only the file
-        // can say the first.
-        (
-            "Declared range",
-            image
-                .value_range
-                .map(|(low, high)| format!("{low} \u{2013} {high}"))
-                .unwrap_or_default(),
-        ),
+        // What the numbers mean once they are light: graded, so that 1.0 is
+        // white and the picture opens as it is, or measured, so that it opens
+        // windowed to what it holds. The one fact the opening view is decided
+        // by, and the one a reader asking why a file opened dark or stretched
+        // is looking for.
+        ("Referred to", image.referred.label().to_string()),
     ]
 }
 

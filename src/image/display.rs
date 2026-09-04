@@ -4,7 +4,7 @@
 //! All of it is uniform state — changing any of it re-renders, it never
 //! re-decodes or re-uploads.
 
-use super::{Channels, DecodedImage, Sample, Stats, Transfer};
+use super::{Channels, DecodedImage, Referred, Sample, Stats, Transfer};
 
 /// How the display window is chosen.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -51,15 +51,20 @@ impl AutoWindow {
 }
 
 /// What to do with values that are still above 1.0 once windowed.
+///
+/// A curve is something added: it exists to fit values above white into a
+/// surface that stops there. So there are the two curves, and `None` — which
+/// is not a third curve but the absence of one, and means whatever the
+/// surface makes of the highlights on its own: an SDR surface clamps them at
+/// white, and an HDR surface shows them at the brightness they were graded
+/// to. Which of the two is [`Headroom`]'s to say, and the surface's; the
+/// choice of curve is the viewer's.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ToneMap {
-    /// Nothing: the values go out as they are. What an HDR surface wants,
-    /// its whole point being the room above SDR white. On an SDR surface it
-    /// comes to the same thing as `Clip`, since the hardware clamps on the
-    /// way to an 8-bit target either way.
-    Off,
-    /// Clip. Correct for measurement work, where you want to see clipping.
-    Clip,
+    /// No curve. Clipping on an SDR surface, which is correct for measurement
+    /// work where clipping is a thing to be seen; the highlights as they are
+    /// on an HDR one, which is the whole point of asking for one.
+    None,
     Reinhard,
     /// Khronos PBR Neutral: keeps hue and saturation far better than a
     /// Reinhard curve, and rolls off highlights without the ACES colour cast.
@@ -69,8 +74,7 @@ pub enum ToneMap {
 impl ToneMap {
     pub fn label(self) -> &'static str {
         match self {
-            ToneMap::Off => "off",
-            ToneMap::Clip => "clip",
+            ToneMap::None => "none",
             ToneMap::Reinhard => "reinhard",
             ToneMap::Neutral => "neutral",
         }
@@ -78,8 +82,7 @@ impl ToneMap {
 
     pub fn parse(value: &str) -> Option<Self> {
         Some(match value.to_ascii_lowercase().as_str() {
-            "off" | "none" => ToneMap::Off,
-            "clip" => ToneMap::Clip,
+            "none" => ToneMap::None,
             "reinhard" => ToneMap::Reinhard,
             "neutral" => ToneMap::Neutral,
             _ => return None,
@@ -88,47 +91,53 @@ impl ToneMap {
 
     fn next(self) -> Self {
         match self {
-            ToneMap::Off => ToneMap::Clip,
-            ToneMap::Clip => ToneMap::Reinhard,
+            ToneMap::None => ToneMap::Reinhard,
             ToneMap::Reinhard => ToneMap::Neutral,
-            ToneMap::Neutral => ToneMap::Off,
+            ToneMap::Neutral => ToneMap::None,
         }
     }
 
-    /// The curve an image gets when nothing has asked for one: none at all
-    /// where the surface has room for the highlights, and otherwise a roll-off
-    /// for content that can exceed SDR white and a plain clip for content that
-    /// cannot.
+    /// The curve a picture gets when nothing has asked for one: none at all
+    /// where the surface has room for the highlights, and otherwise a
+    /// roll-off where there are highlights above white to roll off — and
+    /// none, again, where there are not, since a curve on a picture that
+    /// never reaches white is a bend in it for no reason.
     ///
-    /// Held apart from [`Display::for_image_with`] because the surface is
-    /// settled after the first file is decoded, so the answer has to be asked
-    /// for again once there is a window — and again if the output ever
-    /// changes underneath one.
-    pub fn default_for(image: &DecodedImage, headroom: Headroom) -> Self {
-        match (headroom, image.is_high_dynamic_range()) {
-            (Headroom::Above, _) => ToneMap::Off,
+    /// `above_white` is the picture as the display has it: not what kind of
+    /// file it is, but whether anything in it comes out past white once the
+    /// window is on it. See [`Display::exceeds_white`].
+    ///
+    /// Held apart from [`Display::for_image_with`] because the surface can
+    /// change under a picture — it is settled after the first file is
+    /// decoded, and it is switched — so the answer has to be asked for again
+    /// whenever it does.
+    pub fn default_for(headroom: Headroom, above_white: bool) -> Self {
+        match (headroom, above_white) {
+            (Headroom::Above, _) | (Headroom::None, false) => ToneMap::None,
             (Headroom::None, true) => ToneMap::Neutral,
-            (Headroom::None, false) => ToneMap::Clip,
         }
     }
 
-    /// The curve itself, applied to one linear colour.
+    /// The curve itself, applied to one linear colour, on a surface with
+    /// `headroom`.
     ///
     /// The GPU runs this on every pixel of every frame as `tone_map` in
-    /// `shaders/composite.wgsl`; this is the same arithmetic for the one pixel
-    /// a readout has to describe. Keep the two in step — the point of a
-    /// readout is that it agrees with the screen.
-    pub fn apply(self, color: [f32; 3]) -> [f32; 3] {
-        match self {
+    /// `shaders/composite.wgsl`, with `shader_codes::tone_map` choosing the
+    /// arm the way the match below does; this is the same arithmetic for the
+    /// one pixel a readout has to describe. Keep the two in step — the point
+    /// of a readout is that it agrees with the screen.
+    pub fn apply(self, color: [f32; 3], headroom: Headroom) -> [f32; 3] {
+        match (self, headroom) {
+            // The hardware clamps on the way into an SDR surface.
+            (ToneMap::None, Headroom::None) => color.map(|c| c.clamp(0.0, 1.0)),
             // The negatives go, as they do under every other curve here:
             // undershoot from a bicubic lobe is not light.
-            ToneMap::Off => color.map(|c| c.max(0.0)),
-            ToneMap::Clip => color.map(|c| c.clamp(0.0, 1.0)),
-            ToneMap::Reinhard => color.map(|c| {
+            (ToneMap::None, Headroom::Above) => color.map(|c| c.max(0.0)),
+            (ToneMap::Reinhard, _) => color.map(|c| {
                 let c = c.max(0.0);
                 c / (c + 1.0)
             }),
-            ToneMap::Neutral => neutral(color.map(|c| c.max(0.0))),
+            (ToneMap::Neutral, _) => neutral(color.map(|c| c.max(0.0))),
         }
     }
 }
@@ -280,13 +289,14 @@ const TURBO: [[f32; 3]; 6] = [
 
 /// Whether the surface being drawn to has room above SDR white.
 ///
-/// It is what decides whether values over 1.0 need a curve at all, so it
-/// belongs to the output rather than to the image or to the user. `render`
-/// resolves it from the surface it managed to get; this layer only has to
-/// know which of the two it is.
+/// It is what decides what becomes of values over 1.0 when no curve is on,
+/// so it belongs to the output rather than to the image or to the user, and
+/// is passed to everything here that has to say what the screen shows rather
+/// than kept in [`Display`]. `render` resolves it from the surface it managed
+/// to get; this layer only has to know which of the two it is.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Headroom {
-    /// An SDR surface: everything above 1.0 has to be brought down into it.
+    /// An SDR surface: everything above 1.0 is clamped at white on the way in.
     #[default]
     None,
     /// An HDR surface: the highlights go out at the brightness they were
@@ -324,7 +334,7 @@ impl Default for Display {
             high: 1.0,
             auto: AutoWindow::Off,
             exposure_stops: 0.0,
-            tone_map: ToneMap::Clip,
+            tone_map: ToneMap::None,
             colormap: Colormap::Gray,
         }
     }
@@ -333,35 +343,34 @@ impl Default for Display {
 impl Display {
     /// Sensible starting point for this particular image.
     ///
-    /// The distinction that matters is display-referred versus scene-referred.
-    /// A JPEG or an sRGB PNG has already been graded by whoever produced it,
-    /// so 0..1 is exactly right and touching it would be wrong. Linear sensor
-    /// counts have not, and showing them unwindowed is how you get a black
-    /// rectangle.
+    /// One rule, and it is the image's [`Referred`]. A JPEG, an sRGB PNG, a
+    /// PQ frame or a photograph with its gain map applied has already been
+    /// graded by whoever produced it: 1.0 is white, so 0..1 is exactly right
+    /// and touching it would be wrong — and for the HDR ones, stretching the
+    /// observed range into 0..1 would undo exactly the grading they exist to
+    /// carry, differently for every frame of a sequence. Linear sensor counts
+    /// have no white, and showing them unwindowed is how you get a black
+    /// rectangle, so they are windowed to what they hold.
     ///
-    /// PQ and HLG belong with the graded ones. They are absolute curves —
-    /// 1.0 is reference white and the headroom above it is where the
-    /// highlights were put on purpose — so stretching their observed range
-    /// into 0..1 would undo exactly the grading they exist to carry, and
-    /// would do it differently for every frame of a sequence.
+    /// The tone curve follows from the window rather than from the file: a
+    /// curve exists to fit values above white into a surface that stops
+    /// there, so it is wanted when the window leaves something above white
+    /// and the surface has no room for it — the highlights of a graded HDR
+    /// picture on an SDR surface — and not otherwise. The startup exposure is
+    /// applied after that decision is made: it is a setting like any other,
+    /// and what the file opens with is a fact about the file.
     ///
-    /// `headroom` is the other half of the tone-map decision: a curve exists
-    /// to fit values above 1.0 into a surface that stops there, so a surface
-    /// that does not stop there starts without one.
+    /// `headroom` is the surface's half of that decision. The surface can
+    /// change under a picture, and [`Display::adopt`] asks again when it does.
     pub fn for_image_with(
         image: &DecodedImage,
         stats: &Stats,
         startup: Startup,
         headroom: Headroom,
     ) -> Self {
-        let display_referred = matches!(
-            image.color.transfer,
-            Transfer::Srgb | Transfer::Gamma(_) | Transfer::Pq | Transfer::Hlg
-        );
-        let auto = if display_referred {
-            AutoWindow::Off
-        } else {
-            AutoWindow::Percentile
+        let auto = match image.referred {
+            Referred::Display => AutoWindow::Off,
+            Referred::Scene => AutoWindow::Percentile,
         };
 
         let mut display = Self {
@@ -369,26 +378,20 @@ impl Display {
             high: 1.0,
             auto,
             exposure_stops: 0.0,
-            tone_map: ToneMap::default_for(image, headroom),
+            tone_map: ToneMap::None,
             colormap: Colormap::Gray,
         };
-
-        // A file that states its own range is more trustworthy than a scan of
-        // the pixels, so it wins over the automatic modes.
-        match image.value_range {
-            Some((low, high)) if high > low && !display_referred => {
-                display.low = low;
-                display.high = high;
-                display.auto = AutoWindow::Manual;
-            }
-            _ => display.apply_auto(stats),
-        }
-
+        display.apply_auto(stats);
         if let Some(auto) = startup.auto {
             display.auto = auto;
             display.apply_auto(stats);
         }
-        if let Some(colormap) = startup.colormap {
+        display.adopt(headroom, stats);
+
+        // The false colour is a reading of one channel, and a colour image's
+        // three are colours already: the display ignores it there, and so
+        // must the state, or the bar names a map that does nothing.
+        if let Some(colormap) = startup.colormap.filter(|_| image.is_gray()) {
             display.colormap = colormap;
         }
         if let Some(tone_map) = startup.tone_map {
@@ -398,6 +401,40 @@ impl Display {
             display.exposure_stops = stops;
         }
         display
+    }
+
+    /// Takes the tone curve the surface wants for what is on screen: none
+    /// where it has room for the highlights, a roll-off where it does not and
+    /// there are highlights to roll off. For when the surface has changed
+    /// under the picture — it is settled after the first file is decoded, and
+    /// it is switched.
+    ///
+    /// Not what was asked for with `t`: the switch chooses the curve the
+    /// surface wants, and `t` changes it afterwards. A curve given on the
+    /// command line is a choice rather than a default, and the caller keeps
+    /// that one.
+    pub fn adopt(&mut self, headroom: Headroom, stats: &Stats) {
+        self.tone_map = ToneMap::default_for(headroom, self.exceeds_white(stats));
+    }
+
+    /// Whether the picture, as the window and the exposure have it, reaches
+    /// past white: whether there is anything for a tone curve to act on, or
+    /// for an SDR surface to clip.
+    ///
+    /// Measured at the value the window was set to put at white, where it was
+    /// set from the pixels, and at the brightest pixel otherwise. A
+    /// percentile window puts its percentile at white and leaves the outliers
+    /// above it by design — that is what the percentile is for — so on that
+    /// window the brightest pixel says nothing, and only exposure can carry
+    /// the picture past white.
+    pub fn exceeds_white(&self, stats: &Stats) -> bool {
+        // A hair over one, so that the window's own top does not count.
+        const TOLERANCE: f32 = 1e-3;
+        let top = match self.auto {
+            AutoWindow::Percentile => stats.percentile(0.999),
+            AutoWindow::Off | AutoWindow::MinMax | AutoWindow::Manual => stats.max,
+        };
+        self.windowed(top) > 1.0 + TOLERANCE
     }
 
     fn apply_auto(&mut self, stats: &Stats) {
@@ -475,10 +512,11 @@ impl Display {
         self.colormap = colormap;
     }
 
-    /// What this display state makes of one pixel: the number it becomes and
-    /// the colour it comes out as. The readout in the bottom bar is this run
-    /// for whichever pixel the pointer is over.
-    pub fn map(&self, sample: &Sample) -> Mapped {
+    /// What this display state makes of one pixel on a surface with
+    /// `headroom`: the number it becomes and the colour it comes out as. The
+    /// readout in the bottom bar is this run for whichever pixel the pointer
+    /// is over.
+    pub fn map(&self, sample: &Sample, headroom: Headroom) -> Mapped {
         let (offset, gain) = self.transform();
         let mut values = [0.0; 3];
         for (slot, value) in values.iter_mut().zip(sample.color()) {
@@ -488,29 +526,34 @@ impl Display {
 
         // The order the pipeline uses: window, then false colour for a single
         // channel, then the tone curve over whatever that produced.
-        let false_colored = sample.channels.is_gray() && self.colormap != Colormap::Gray;
         let color = match (sample.channels.is_gray(), self.colormap) {
             (true, Colormap::Gray) => [values[0]; 3],
             (true, colormap) => colormap.color(values[0]),
             (false, _) => values,
         };
 
-        // False colour is already display-referred, so `composite.rs` holds
-        // the curve at `Clip` over it — a tone curve on top of a colormap
-        // would distort the mapping the viewer is reading values off. The
-        // readout has to make the same choice, or it stops describing the
-        // screen it is meant to be describing.
-        let tone_map = if false_colored {
-            ToneMap::Clip
-        } else {
-            self.tone_map
-        };
-
         Mapped {
             values,
             count,
-            color: tone_map.apply(color),
+            color: self.curve(sample.channels, headroom, color),
             alpha: sample.alpha,
+        }
+    }
+
+    /// The tone curve as the compositor runs it over a colour: the chosen one
+    /// — or, over a false colour, a plain clip whatever the surface.
+    ///
+    /// False colour is already display-referred, so `composite.rs` holds the
+    /// curve at a clip over it: a tone curve on top of a colormap would
+    /// distort the mapping the viewer is reading values off, and headroom
+    /// above the top of the ramp is a colour the ramp does not have. Every
+    /// readout has to make the same choice, or it stops describing the screen
+    /// it is meant to be describing.
+    fn curve(&self, channels: Channels, headroom: Headroom, color: [f32; 3]) -> [f32; 3] {
+        if channels.is_gray() && self.colormap != Colormap::Gray {
+            ToneMap::None.apply(color, Headroom::None)
+        } else {
+            self.tone_map.apply(color, headroom)
         }
     }
 
@@ -540,15 +583,17 @@ impl Display {
     }
 
     /// What the screen makes of one value on the image's own linear scale:
-    /// the window, the exposure and the tone curve, as a number from 0 to 1.
+    /// the window, the exposure and the tone curve, as a number from 0 — and
+    /// past 1 on a surface with room above white and no curve on, since that
+    /// is what such a surface shows.
     ///
     /// The neutral axis of the pipeline — a grey fed through it — which is
     /// what the histogram draws as its response curve. [`Display::map`] is
     /// the same arithmetic for a whole pixel, where the false colour and a
     /// tone curve's cross-channel terms also come in; a curve for those would
     /// be three curves, and the panel is asking a one-dimensional question.
-    pub fn response(&self, value: f32) -> f32 {
-        self.tone_map.apply([self.windowed(value); 3])[0]
+    pub fn response(&self, value: f32, headroom: Headroom) -> f32 {
+        self.tone_map.apply([self.windowed(value); 3], headroom)[0]
     }
 
     /// And the colour it comes out as: the window, the false colour and the
@@ -560,16 +605,17 @@ impl Display {
     ///
     /// It needs the channels because the false colour is a reading of one:
     /// it is what a grey image is looked at through, and a colour image's
-    /// three are colours already. Everything outside 0..1 comes back as the
-    /// end it went past — black below, the top of the ramp above — because
-    /// that is what the screen does with it.
-    pub fn shade(&self, value: f32, channels: Channels) -> [f32; 3] {
+    /// three are colours already. Everything below the window comes back
+    /// black, and everything above it as the top of the ramp, or as white —
+    /// or, on a surface with room above white and no curve on, brighter than
+    /// white — because that is what the screen does with it.
+    pub fn shade(&self, value: f32, channels: Channels, headroom: Headroom) -> [f32; 3] {
         let windowed = self.windowed(value);
         let color = match (channels.is_gray(), self.colormap) {
             (true, Colormap::Gray) | (false, _) => [windowed; 3],
             (true, colormap) => colormap.color(windowed),
         };
-        self.tone_map.apply(color)
+        self.curve(channels, headroom, color)
     }
 
     /// `(value - low) * gain`: one value through the window with its
@@ -589,7 +635,9 @@ pub struct Mapped {
     ///
     /// Not simply [`Mapped::values`] repeated: a false colour is three
     /// components where the value is one, and the tone curve has moved both
-    /// by the time they reach the surface.
+    /// by the time they reach the surface. Above 1.0 only on a surface with
+    /// room above white and no curve on, which is the one case where the
+    /// screen is.
     pub color: [f32; 3],
     /// Coverage, carried through from the sample. Nothing above windows it.
     pub alpha: f32,
@@ -608,7 +656,7 @@ impl Mapped {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::image::{AlphaMode, Channels, ColorSpace, Primaries, Samples};
+    use crate::image::{AlphaMode, Channels, ColorSpace, Primaries, Referred, Samples};
 
     /// Linear float grey, which is what every HDR path here comes out as:
     /// 1.0 is SDR white and anything above it is the headroom.
@@ -622,7 +670,7 @@ mod tests {
             },
             color: ColorSpace::LINEAR_BT709,
             alpha: AlphaMode::Opaque,
-            value_range: None,
+            referred: Referred::Scene,
             nodata: None,
         }
     }
@@ -640,7 +688,7 @@ mod tests {
                 primaries: Primaries::Bt709,
             },
             alpha: AlphaMode::Opaque,
-            value_range: None,
+            referred: Referred::of(transfer),
             nodata: None,
         }
     }
@@ -700,7 +748,7 @@ mod tests {
         let mut display = Display::default();
         (display.low, display.high) = (0.25, 0.75);
 
-        let grey = |v: f32| display.shade(v, Channels::Rgb);
+        let grey = |v: f32| display.shade(v, Channels::Rgb, Headroom::None);
         assert_eq!(grey(0.25), [0.0; 3], "the window's floor comes out black");
         assert_eq!(grey(0.5), [0.5; 3]);
         assert_eq!(grey(0.75), [1.0; 3], "and its ceiling comes out white");
@@ -710,23 +758,25 @@ mod tests {
         // A colour image is three colours already, so the false colour is not
         // for it however it is set.
         display.colormap = Colormap::Viridis;
-        assert_eq!(display.shade(0.5, Channels::Rgb), [0.5; 3]);
-        assert_eq!(display.shade(0.5, Channels::Rgba), [0.5; 3]);
+        assert_eq!(display.shade(0.5, Channels::Rgb, Headroom::None), [0.5; 3]);
+        assert_eq!(display.shade(0.5, Channels::Rgba, Headroom::None), [0.5; 3]);
 
         // On a grey one it is, and it clips to the ends of its own ramp
         // rather than to black and white.
-        let mapped = |v: f32| display.shade(v, Channels::Gray);
+        let mapped = |v: f32| display.shade(v, Channels::Gray, Headroom::None);
         assert_eq!(mapped(0.5), Colormap::Viridis.color(0.5));
         assert_eq!(mapped(-1.0), Colormap::Viridis.color(0.0));
         assert_eq!(mapped(9.0), Colormap::Viridis.color(1.0));
         assert_ne!(mapped(0.5), [0.5; 3], "viridis is not grey at mid ramp");
     }
 
-    /// And the false colour goes on before the tone curve, as the pipeline
-    /// runs it: a curve applied to the value first would pick a different
-    /// colour off the ramp, not merely a dimmer one.
+    /// And no curve bends a false colour, on either surface: the ramp is read
+    /// off the windowed value and clipped at its ends, as the compositor
+    /// holds it — a curve over the ramp would pick a different colour off it,
+    /// not merely a dimmer one, and the readouts have to agree with the
+    /// screen about which.
     #[test]
-    fn the_ramp_is_read_before_the_tone_curve_bends_it() {
+    fn a_false_colour_is_read_off_the_ramp_and_no_curve_bends_it() {
         let mut display = Display {
             colormap: Colormap::Magma,
             tone_map: ToneMap::Reinhard,
@@ -734,12 +784,17 @@ mod tests {
         };
         (display.low, display.high) = (0.0, 2.0);
 
-        let shaded = display.shade(1.0, Channels::Gray);
-        let read_first = ToneMap::Reinhard.apply(Colormap::Magma.color(0.5));
-        let curved_first = Colormap::Magma.color(ToneMap::Reinhard.apply([0.5; 3])[0]);
-
-        assert_eq!(shaded, read_first);
-        assert_ne!(read_first, curved_first, "the order is not a free choice");
+        for headroom in [Headroom::None, Headroom::Above] {
+            let shaded = display.shade(1.0, Channels::Gray, headroom);
+            assert_eq!(shaded, Colormap::Magma.color(0.5), "{headroom:?}");
+            let curved = ToneMap::Reinhard.apply(Colormap::Magma.color(0.5), headroom);
+            assert_ne!(shaded, curved, "{headroom:?}: the curve is held off");
+        }
+        // Three colours are colours already, and the curve is on them.
+        assert_eq!(
+            display.shade(1.0, Channels::Rgb, Headroom::None),
+            ToneMap::Reinhard.apply([0.5; 3], Headroom::None)
+        );
     }
 
     /// The key and the row of buttons offer the same maps in the same order.
@@ -753,18 +808,20 @@ mod tests {
         assert_eq!(map.next(), Colormap::ALL[0], "and round again");
     }
 
+    /// A photograph with its gain map applied is linear float — the signature
+    /// of sensor data, which the opening window stretches — but it was graded
+    /// before the map lifted its highlights, and its decoder says so. What it
+    /// says wins over what the samples look like: the window stays at white,
+    /// and the highlights above it get a curve rather than a stretch.
     #[test]
-    fn a_declared_value_range_beats_scanning() {
-        let mut image = gray(vec![0, 1000, 4095], Transfer::Linear);
-        image.value_range = Some((0.1, 0.2));
-        let display = Display::for_image_with(
-            &image,
-            &Stats::scan(&image),
-            Startup::default(),
-            Headroom::None,
-        );
-        assert_eq!(display.auto, AutoWindow::Manual);
-        assert_eq!((display.low, display.high), (0.1, 0.2));
+    fn a_decoder_that_calls_linear_light_graded_is_believed() {
+        let mut image = float_gray(vec![0.0, 0.5, 1.0, 3.9]);
+        image.referred = Referred::Display;
+        let stats = Stats::scan(&image);
+        let display = Display::for_image_with(&image, &stats, Startup::default(), Headroom::None);
+        assert_eq!(display.auto, AutoWindow::Off);
+        assert_eq!((display.low, display.high), (0.0, 1.0));
+        assert_eq!(display.tone_map, ToneMap::Neutral);
     }
 
     /// The number a readout shows is the window's own scale: whatever was set
@@ -779,10 +836,10 @@ mod tests {
             ..Default::default()
         };
 
-        let low = display.map(&image.sample(0, 0).expect("inside"));
+        let low = display.map(&image.sample(0, 0).expect("inside"), Headroom::None);
         assert!(low.values()[0].abs() < 1e-6);
 
-        let middle = display.map(&image.sample(1, 0).expect("inside"));
+        let middle = display.map(&image.sample(1, 0).expect("inside"), Headroom::None);
         assert!(
             (middle.values()[0] - 1.0).abs() < 1e-3,
             "{:?}",
@@ -804,12 +861,12 @@ mod tests {
             },
             color: ColorSpace::LINEAR_BT709,
             alpha: AlphaMode::Opaque,
-            value_range: None,
+            referred: Referred::Scene,
             nodata: None,
         };
         let sample = image.sample(0, 0).expect("inside");
 
-        let clipped = Display::default().map(&sample);
+        let clipped = Display::default().map(&sample, Headroom::None);
         assert_eq!(clipped.values(), [4.0, 4.0, 4.0]);
         assert_eq!(clipped.color, [1.0, 1.0, 1.0]);
 
@@ -819,7 +876,7 @@ mod tests {
             tone_map: ToneMap::Neutral,
             ..Default::default()
         }
-        .map(&sample);
+        .map(&sample, Headroom::None);
         assert_eq!(rolled.values(), [4.0, 4.0, 4.0]);
         assert!(
             rolled.color[0] < 1.0 && rolled.color[0] > 0.8,
@@ -836,10 +893,14 @@ mod tests {
         let mut display = Display::default();
         let dark = image.sample(0, 0).expect("inside");
 
-        assert_eq!(display.map(&dark).color, [0.0; 3], "grey stays grey");
+        assert_eq!(
+            display.map(&dark, Headroom::None).color,
+            [0.0; 3],
+            "grey stays grey"
+        );
 
         display.colormap = Colormap::Viridis;
-        let mapped = display.map(&dark);
+        let mapped = display.map(&dark, Headroom::None);
         assert_eq!(mapped.values(), [0.0], "the measurement is untouched");
         assert!(
             mapped.color[2] > mapped.color[1],
@@ -896,20 +957,23 @@ mod tests {
     /// ordinary values where they are before rolling off the top.
     #[test]
     fn the_tone_curves_match_what_the_compositor_does() {
-        assert_eq!(ToneMap::Clip.apply([-1.0, 0.5, 2.0]), [0.0, 0.5, 1.0]);
+        assert_eq!(
+            ToneMap::None.apply([-1.0, 0.5, 2.0], Headroom::None),
+            [0.0, 0.5, 1.0]
+        );
 
-        let reinhard = ToneMap::Reinhard.apply([-1.0, 1.0, 3.0]);
+        let reinhard = ToneMap::Reinhard.apply([-1.0, 1.0, 3.0], Headroom::None);
         assert_eq!(reinhard[0], 0.0);
         assert!((reinhard[1] - 0.5).abs() < 1e-6);
         assert!((reinhard[2] - 0.75).abs() < 1e-6);
 
-        let neutral = ToneMap::Neutral.apply([0.2, 0.4, 0.6]);
+        let neutral = ToneMap::Neutral.apply([0.2, 0.4, 0.6], Headroom::None);
         for (got, want) in neutral.iter().zip([0.2, 0.4, 0.6]) {
             assert!((got - want).abs() < 0.05, "{neutral:?}");
         }
         // Everything above the shoulder stays inside the display's range.
         for value in [1.0, 4.0, 100.0] {
-            let peak = ToneMap::Neutral.apply([value; 3])[0];
+            let peak = ToneMap::Neutral.apply([value; 3], Headroom::None)[0];
             assert!((0.8..=1.0).contains(&peak), "{value} -> {peak}");
         }
     }
@@ -976,18 +1040,21 @@ mod tests {
             ..Default::default()
         };
         let (black, white) = display.displayed_bounds();
-        assert!(display.response(black).abs() < 1e-6);
-        assert!((display.response(white) - 1.0).abs() < 1e-6);
+        assert!(display.response(black, Headroom::None).abs() < 1e-6);
+        assert!((display.response(white, Headroom::None) - 1.0).abs() < 1e-6);
         // Clipping is flat on both sides of the window, which is the corner
         // the curve is drawn to show.
-        assert_eq!(display.response(0.0), 0.0);
-        assert_eq!(display.response(4.0), 1.0);
+        assert_eq!(display.response(0.0, Headroom::None), 0.0);
+        assert_eq!(display.response(4.0, Headroom::None), 1.0);
 
         display.tone_map = ToneMap::Neutral;
-        assert!(display.response(white) < 1.0, "the shoulder rolls off");
+        assert!(
+            display.response(white, Headroom::None) < 1.0,
+            "the shoulder rolls off"
+        );
         let mut previous = f32::NEG_INFINITY;
         for step in 0..64 {
-            let response = display.response(step as f32 / 16.0);
+            let response = display.response(step as f32 / 16.0, Headroom::None);
             assert!(response >= previous, "step {step}: {response} < {previous}");
             assert!((0.0..=1.0).contains(&response), "step {step}: {response}");
             previous = response;
@@ -1044,21 +1111,29 @@ mod tests {
         assert_eq!(display.auto, AutoWindow::MinMax);
     }
 
-    #[test]
-    fn hdr_content_gets_a_tone_curve_and_ordinary_content_does_not() {
-        let sdr = gray(vec![0, 4095], Transfer::Srgb);
-        assert_eq!(
-            Display::for_image_with(&sdr, &Stats::scan(&sdr), Startup::default(), Headroom::None)
-                .tone_map,
-            ToneMap::Clip
-        );
+    fn opened(image: &DecodedImage, headroom: Headroom) -> Display {
+        Display::for_image_with(image, &Stats::scan(image), Startup::default(), headroom)
+    }
 
-        let hdr = float_gray(vec![0.5, 8.0]);
-        assert_eq!(
-            Display::for_image_with(&hdr, &Stats::scan(&hdr), Startup::default(), Headroom::None)
-                .tone_map,
-            ToneMap::Neutral
-        );
+    /// The curve is for highlights the window leaves above white on a surface
+    /// that stops there. A graded HDR picture has them; an ordinary one does
+    /// not; and a measurement — however wide its numbers — is windowed to
+    /// what it holds first, which leaves nothing above white for a curve to
+    /// act on and would make a curve a bend in the data for no reason.
+    #[test]
+    fn a_curve_is_added_only_where_the_window_leaves_highlights_above_white() {
+        let photograph = gray(vec![0, 4095], Transfer::Srgb);
+        assert_eq!(opened(&photograph, Headroom::None).tone_map, ToneMap::None);
+
+        let pq = gray(vec![30_000, 60_000], Transfer::Pq);
+        assert_eq!(opened(&pq, Headroom::None).tone_map, ToneMap::Neutral);
+
+        // Sensor counts, and a render: linear float that reaches well past
+        // 1.0, and is windowed to its own range rather than curved.
+        let measurement = float_gray(vec![0.0, 100.0, 4000.0, 4095.0]);
+        let display = opened(&measurement, Headroom::None);
+        assert_eq!(display.auto, AutoWindow::Percentile);
+        assert_eq!(display.tone_map, ToneMap::None);
     }
 
     /// The whole point of asking for an HDR surface is the room above SDR
@@ -1067,24 +1142,163 @@ mod tests {
     /// not what the content is.
     #[test]
     fn a_surface_with_headroom_starts_with_no_curve_at_all() {
-        let hdr = float_gray(vec![0.5, 8.0]);
-        let sdr = gray(vec![0, 4095], Transfer::Srgb);
-        for image in [&hdr, &sdr] {
+        for above_white in [true, false] {
             assert_eq!(
-                ToneMap::default_for(image, Headroom::Above),
-                ToneMap::Off,
+                ToneMap::default_for(Headroom::Above, above_white),
+                ToneMap::None,
                 "a surface with headroom takes the pixels as they are"
             );
         }
-        assert_eq!(ToneMap::default_for(&hdr, Headroom::None), ToneMap::Neutral);
-        assert_eq!(ToneMap::default_for(&sdr, Headroom::None), ToneMap::Clip);
+        assert_eq!(ToneMap::default_for(Headroom::None, true), ToneMap::Neutral);
+        assert_eq!(ToneMap::default_for(Headroom::None, false), ToneMap::None);
+
+        let pq = gray(vec![30_000, 60_000], Transfer::Pq);
+        assert_eq!(opened(&pq, Headroom::Above).tone_map, ToneMap::None);
     }
 
-    /// `Off` passes the highlights through and clips nothing but the light
-    /// that is not there, which is what the shader's arm 3 does.
+    /// The switch chooses the curve the surface wants for what is on screen,
+    /// and asks about the picture as it is now rather than as it opened.
     #[test]
-    fn the_off_curve_keeps_what_is_above_white_and_drops_what_is_below_black() {
-        assert_eq!(ToneMap::Off.apply([-0.25, 0.5, 6.31]), [0.0, 0.5, 6.31]);
+    fn adopting_a_surface_re_derives_the_curve_from_what_is_on_screen() {
+        let pq = gray(vec![30_000, 60_000], Transfer::Pq);
+        let stats = Stats::scan(&pq);
+        let mut display = opened(&pq, Headroom::None);
+        assert_eq!(display.tone_map, ToneMap::Neutral);
+
+        display.adopt(Headroom::Above, &stats);
+        assert_eq!(display.tone_map, ToneMap::None);
+        display.adopt(Headroom::None, &stats);
+        assert_eq!(display.tone_map, ToneMap::Neutral);
+
+        // A window that brings the highlights under white leaves nothing for
+        // a curve to do, on either surface.
+        display.auto = AutoWindow::MinMax;
+        display.refresh_auto(&stats);
+        display.adopt(Headroom::None, &stats);
+        assert_eq!(display.tone_map, ToneMap::None);
+    }
+
+    /// Whether anything comes out past white is a question about the window
+    /// and the exposure, not about the file: an ordinary photograph pushed a
+    /// stop up has highlights to clip, and a percentile window's outliers are
+    /// what the percentile left out rather than headroom.
+    #[test]
+    fn exceeding_white_is_measured_where_the_window_put_it() {
+        let photograph = gray(vec![0, 32_768, u16::MAX], Transfer::Srgb);
+        let stats = Stats::scan(&photograph);
+        let mut display = opened(&photograph, Headroom::None);
+        assert!(!display.exceeds_white(&stats));
+        display.adjust_exposure(1.0);
+        assert!(display.exceeds_white(&stats));
+
+        let pq = gray(vec![30_000, 60_000], Transfer::Pq);
+        assert!(opened(&pq, Headroom::None).exceeds_white(&Stats::scan(&pq)));
+
+        // A thousand ordinary samples and one hot pixel: the percentile
+        // window ignores the hot pixel, and so does this.
+        let mut counts: Vec<u16> = (0..1000).map(|count| count * 4).collect();
+        counts.push(u16::MAX);
+        let measurement = gray(counts, Transfer::Linear);
+        let stats = Stats::scan(&measurement);
+        let mut display = opened(&measurement, Headroom::None);
+        assert_eq!(display.auto, AutoWindow::Percentile);
+        assert!(
+            stats.max > display.high,
+            "the hot pixel is above the window"
+        );
+        assert!(!display.exceeds_white(&stats));
+        // Until exposure carries the window's own top past white.
+        display.adjust_exposure(0.5);
+        assert!(display.exceeds_white(&stats));
+    }
+
+    /// The exposure asked for on the command line is a setting, applied
+    /// after the file has decided what it opens with: a photograph opened a
+    /// stop up clips rather than quietly acquiring a curve it was not asked
+    /// for.
+    #[test]
+    fn a_startup_exposure_does_not_earn_a_curve() {
+        let photograph = gray(vec![0, 4095], Transfer::Srgb);
+        let display = Display::for_image_with(
+            &photograph,
+            &Stats::scan(&photograph),
+            Startup {
+                exposure_stops: Some(2.0),
+                ..Startup::default()
+            },
+            Headroom::None,
+        );
+        assert_eq!(display.tone_map, ToneMap::None);
+        assert_eq!(display.exposure_stops, 2.0);
+    }
+
+    /// A false colour is a reading of one channel, and a colour image's three
+    /// are colours already: the flag reaches a grey image and not a colour
+    /// one, so that the state never names a map the screen is not applying.
+    #[test]
+    fn a_startup_colormap_reaches_only_a_grey_image() {
+        let startup = Startup {
+            colormap: Some(Colormap::Viridis),
+            ..Startup::default()
+        };
+        let grey = gray(vec![0, 4095], Transfer::Srgb);
+        let display = Display::for_image_with(&grey, &Stats::scan(&grey), startup, Headroom::None);
+        assert_eq!(display.colormap, Colormap::Viridis);
+
+        let colour = DecodedImage::new(
+            1,
+            1,
+            Samples::F32 {
+                channels: Channels::Rgb,
+                data: vec![0.5, 0.5, 0.5],
+            },
+            ColorSpace::LINEAR_BT709,
+            AlphaMode::Opaque,
+        );
+        let display =
+            Display::for_image_with(&colour, &Stats::scan(&colour), startup, Headroom::None);
+        assert_eq!(display.colormap, Colormap::Gray);
+    }
+
+    /// No curve means whatever the surface does: an SDR surface clamps at
+    /// white, and an HDR one passes the highlights through and clips nothing
+    /// but the light that is not there — the shader's arms 0 and 3.
+    #[test]
+    fn no_curve_is_a_clip_on_sdr_and_a_pass_through_on_hdr() {
+        let color = [-0.25, 0.5, 6.31];
+        assert_eq!(ToneMap::None.apply(color, Headroom::None), [0.0, 0.5, 1.0]);
+        assert_eq!(
+            ToneMap::None.apply(color, Headroom::Above),
+            [0.0, 0.5, 6.31]
+        );
+        // The curves are the curves whatever the surface.
+        for map in [ToneMap::Reinhard, ToneMap::Neutral] {
+            assert_eq!(
+                map.apply(color, Headroom::None),
+                map.apply(color, Headroom::Above)
+            );
+        }
+    }
+
+    /// And so does a readout of a value: on a surface with room above white
+    /// the response runs past 1, which is what the histogram draws, and a
+    /// false colour is clipped there as everywhere, since the ramp has no
+    /// colour for what is past its end.
+    #[test]
+    fn the_response_and_the_shade_run_past_white_only_where_the_surface_does() {
+        let display = Display::default();
+        assert_eq!(display.response(4.0, Headroom::None), 1.0);
+        assert_eq!(display.response(4.0, Headroom::Above), 4.0);
+        assert_eq!(display.shade(4.0, Channels::Rgb, Headroom::Above), [4.0; 3]);
+
+        let false_colour = Display {
+            colormap: Colormap::Viridis,
+            ..Default::default()
+        };
+        assert_eq!(
+            false_colour.shade(4.0, Channels::Gray, Headroom::Above),
+            Colormap::Viridis.color(1.0)
+        );
     }
 
     /// Every curve has to be reachable from every other one, or a viewer on
@@ -1092,13 +1306,13 @@ mod tests {
     /// back to the one the surface was asked for.
     #[test]
     fn cycling_the_tone_map_returns_to_where_it_started() {
-        let mut map = ToneMap::Off;
+        let mut map = ToneMap::None;
         let mut seen = vec![map];
-        for _ in 0..3 {
+        for _ in 0..2 {
             map = map.next();
             assert!(!seen.contains(&map), "{map:?} came round twice");
             seen.push(map);
         }
-        assert_eq!(map.next(), ToneMap::Off);
+        assert_eq!(map.next(), ToneMap::None);
     }
 }

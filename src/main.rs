@@ -5,6 +5,7 @@ mod cli;
 mod clipboard;
 mod image;
 mod loader;
+mod monitor;
 mod render;
 mod theme;
 mod timing;
@@ -79,13 +80,22 @@ fn run() -> Result<ExitCode> {
     // that a large file no longer holds the window shut while it is read.
     let (index, size) = cli::first_readable(&args.files)?;
 
-    // With a user event: it is how the loader hands finished images back, and
-    // how it wakes a loop that is otherwise asleep between one file check and
-    // the next.
-    let event_loop = EventLoop::<loader::Decoded>::with_user_event().build()?;
+    // With a user event: it is how the loader hands finished images back and
+    // how the monitor watch says a monitor has changed, and how either wakes
+    // a loop that is otherwise asleep between one file check and the next.
+    let event_loop = EventLoop::<app::UserEvent>::with_user_event().build()?;
     event_loop.set_control_flow(ControlFlow::Wait);
-    let loader = Loader::new(event_loop.create_proxy());
-    let mut app = App::new(args.files, index, size, args.options, loader);
+    let proxy = event_loop.create_proxy();
+    let loader = Loader::new(move |decoded| {
+        proxy
+            .send_event(app::UserEvent::Decoded(Box::new(decoded)))
+            .is_ok()
+    });
+    let proxy = event_loop.create_proxy();
+    let monitors = monitor::watch(move || {
+        let _ = proxy.send_event(app::UserEvent::Monitor);
+    });
+    let mut app = App::new(args.files, index, size, args.options, loader, monitors);
     event_loop.run_app(&mut app)?;
 
     // Every file passed the header check and then failed to decode. Each

@@ -17,7 +17,7 @@ use crate::theme::Theme;
 
 use super::buttons::outline;
 use super::chrome::BAR_PADDING;
-use super::{Current, TEXT_SIZE, text_baseline};
+use super::{Current, FrameInput, TEXT_SIZE, text_baseline};
 
 /// Side of the colour swatch, in logical pixels: the height of a line of
 /// text, so that it reads as part of the sentence beside it.
@@ -32,7 +32,10 @@ const GAP: f32 = 8.0;
 const SEPARATOR: &str = "\u{00b7}";
 
 /// Draws the readout at the left of the bottom bar, from [`BAR_PADDING`] up to
-/// `limit` — where the state text at the other end of the bar begins.
+/// `limit` — where the state text at the other end of the bar begins — for
+/// the pixel the pointer is over, if it is over one. What comes out is half
+/// the surface's doing, which is why the frame's input comes along rather
+/// than the pixel alone.
 ///
 /// The coordinate leads, then the swatch, then the numbers it stands for. The
 /// swatch belongs to the colour it depicts rather than to the pixel's address,
@@ -42,15 +45,18 @@ pub(super) fn draw(
     frame: &mut UiFrame,
     text: &mut dyn TextMeasure,
     current: &Current,
-    at: [u32; 2],
+    input: &FrameInput,
     bar: Rect,
     limit: f32,
     theme: &Theme,
 ) {
+    let Some(at) = input.pointer else {
+        return;
+    };
     let Some(sample) = current.image.sample(at[0], at[1]) else {
         return;
     };
-    let mapped = current.display.map(&sample);
+    let mapped = current.display.map(&sample, input.headroom);
     let baseline = text_baseline(bar);
 
     // Whatever else has to go, the coordinate stays: it is the one thing the
@@ -176,9 +182,9 @@ fn component(value: f32, float: bool) -> String {
 /// The swatch's colour: what the compositor will put on screen for this
 /// pixel, encoded the way interface colours are written.
 ///
-/// An SDR reading of it. On an HDR output the surface carries more range than
-/// a swatch in a panel can show, and the panel is the thing it has to sit
-/// beside without glowing.
+/// An SDR reading of it: `from_linear` stops at white. On an HDR output the
+/// surface carries more range than a swatch in a panel can show, and the
+/// panel is the thing it has to sit beside without glowing.
 fn swatch_color(mapped: &Mapped) -> Color {
     Color::from_linear(mapped.color)
         .with_alpha((mapped.alpha.clamp(0.0, 1.0) * 255.0).round() as u8)
@@ -187,7 +193,7 @@ fn swatch_color(mapped: &Mapped) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::image::display::{Colormap, Display};
+    use crate::image::display::{Colormap, Display, Headroom};
     use crate::image::{AlphaMode, Channels, ColorSpace};
 
     use crate::ui::Monospace;
@@ -211,7 +217,7 @@ mod tests {
 
     fn read(image: &DecodedImage, display: &Display, at: [u32; 2]) -> String {
         let sample = image.sample(at[0], at[1]).expect("inside the image");
-        values(image, &sample, &display.map(&sample))
+        values(image, &sample, &display.map(&sample, Headroom::None))
     }
 
     /// The file's numbers in the file's units, and beside them what the
@@ -318,13 +324,13 @@ mod tests {
         let sample = image.sample(0, 0).expect("inside the image");
 
         let mut display = Display::default();
-        let grey = swatch_color(&display.map(&sample));
+        let grey = swatch_color(&display.map(&sample, Headroom::None));
         assert_eq!(grey.r, grey.g);
         assert_eq!(grey.g, grey.b);
         assert_eq!(grey.a, 255);
 
         display.colormap = Colormap::Viridis;
-        let false_colour = swatch_color(&display.map(&sample));
+        let false_colour = swatch_color(&display.map(&sample, Headroom::None));
         assert!(
             false_colour.g > false_colour.r && false_colour.b > false_colour.r,
             "the middle of viridis is teal, not grey: {false_colour:?}"

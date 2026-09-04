@@ -25,7 +25,9 @@ use ultrahdr_rs::{
     ColorGamut, ColorTransfer, Decoder, GainMap, PixelFormat, RawImage, Unstoppable,
 };
 
-use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Primaries, Samples, Transfer};
+use crate::image::{
+    AlphaMode, Channels, ColorSpace, DecodedImage, Primaries, Referred, Samples, Transfer,
+};
 
 /// A JPEG, examined for the things the `image` crate throws away: the ICC
 /// profile, and a gain map if there is one.
@@ -166,7 +168,7 @@ impl<'a> Container<'a> {
         // puts the highlights above it. Saying so keeps the startup window
         // off the percentile stretch that linear float otherwise asks for,
         // which would undo the grading the moment it loaded.
-        image.value_range = Some((0.0, 1.0));
+        image.referred = Referred::Display;
         Ok(Some(image))
     }
 }
@@ -344,21 +346,22 @@ mod tests {
         assert_eq!(image.color.primaries, Primaries::DisplayP3);
         assert_eq!(image.channels(), Channels::Rgba);
         assert_eq!(image.alpha, AlphaMode::Opaque);
-        assert!(image.is_high_dynamic_range());
+        assert_eq!(image.referred, Referred::Display);
         image.validate().expect("a well-formed buffer");
     }
 
     /// A photograph has already been graded, and linear float is otherwise
-    /// the signature of sensor data — which the startup window stretches. The
-    /// stated range is what keeps the grading intact, so it is worth pinning
-    /// against the display logic rather than asserting the field alone.
+    /// the signature of sensor data — which the startup window stretches.
+    /// Saying the light is display-referred is what keeps the grading intact,
+    /// so it is worth pinning against the display logic rather than asserting
+    /// the field alone.
     #[test]
     fn it_opens_windowed_to_the_base_rendition_rather_than_stretched() {
         let image = reconstructed();
         let stats = Stats::scan(&image);
         let display = Display::for_image_with(&image, &stats, Startup::default(), Headroom::None);
 
-        assert_eq!(display.auto, AutoWindow::Manual);
+        assert_eq!(display.auto, AutoWindow::Off);
         assert_eq!(display.low, 0.0);
         assert_eq!(display.high, 1.0);
         // And the highlights above that window get rolled off rather than cut.

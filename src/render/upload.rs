@@ -291,7 +291,7 @@ fn map_f32(data: &[f32], channels: Channels, components: usize, transfer: Transf
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::image::{AlphaMode, ColorSpace, DecodedImage, Primaries, Samples};
+    use crate::image::{AlphaMode, ColorSpace, DecodedImage, Primaries, Referred, Samples};
 
     const FULL: Capabilities = Capabilities {
         norm16: true,
@@ -314,7 +314,7 @@ mod tests {
                 primaries: Primaries::Bt709,
             },
             alpha: AlphaMode::Opaque,
-            value_range: None,
+            referred: Referred::of(transfer),
             nodata: None,
         }
     }
@@ -447,7 +447,7 @@ mod tests {
                         primaries: Primaries::Bt709,
                     },
                     alpha: AlphaMode::Opaque,
-                    value_range: None,
+                    referred: Referred::of(transfer),
                     nodata: None,
                 };
                 let plan = plan(&decoded, capabilities);

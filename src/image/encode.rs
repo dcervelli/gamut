@@ -28,7 +28,7 @@ use std::sync::OnceLock;
 use anyhow::{Context, Result};
 use png::{BitDepth, ColorType, Compression, Encoder, SrgbRenderingIntent};
 
-use super::display::{Colormap, Display};
+use super::display::{Colormap, Display, Headroom};
 use super::{Channels, DecodedImage, Transfer};
 
 /// Pixels below which the walk is not worth dividing: the threads cost more to
@@ -119,7 +119,9 @@ fn fill(band: &mut [u8], first: u32, image: &DecodedImage, display: &Display, ch
             let Some(sample) = image.sample(x as u32, y) else {
                 continue;
             };
-            let mapped = display.map(&sample);
+            // An SDR reading: a PNG stops at white, so what is copied is the
+            // picture as an SDR surface shows it, whatever the window is on.
+            let mapped = display.map(&sample, Headroom::None);
             if gray {
                 // Grey reaches the screen as the same number in all three, so
                 // any one of them is the whole of it.
@@ -348,7 +350,7 @@ mod tests {
         );
 
         let mut clipped = plain();
-        clipped.tone_map = ToneMap::Clip;
+        clipped.tone_map = ToneMap::None;
         assert_eq!(round_trip(&displayed(&bright, &clipped)).2[0], 255);
 
         let mut rolled = plain();
@@ -418,7 +420,7 @@ mod tests {
         let mut expected = Vec::with_capacity((width * height * 4) as usize);
         for y in 0..height {
             for x in 0..width {
-                let mapped = display.map(&source.sample(x, y).unwrap());
+                let mapped = display.map(&source.sample(x, y).unwrap(), Headroom::None);
                 for value in mapped.color {
                     expected.push(quantise(value, levels()));
                 }

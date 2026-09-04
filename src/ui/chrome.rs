@@ -45,6 +45,9 @@ pub(super) const GRID_BUTTON_ON: [f32; 2] = [88.0, 22.0];
 /// The side panels' square, so that the only two icon-and-nothing-else
 /// buttons in the window are the same size wherever they sit.
 pub(super) const GRID_BUTTON_OFF: [f32; 2] = [BUTTON_SIZE, BUTTON_SIZE];
+/// The surface switch at the right of the bottom bar: the one word it wears,
+/// with the room a button's label keeps around itself.
+pub(super) const OUTPUT_BUTTON: [f32; 2] = [42.0, 22.0];
 
 /// Width of the hairline along a panel's inner edge, in logical pixels. What
 /// it is drawn in is the theme's `border`.
@@ -127,6 +130,21 @@ impl Chrome {
         )
     }
 
+    /// The switch between the SDR and the HDR surface, at the right of the
+    /// bottom bar — the end the grid toggle holds in the top one, so that
+    /// the two bars end on the same line.
+    ///
+    /// In the bottom bar rather than the top because it is not a fact about
+    /// the picture: it is what is being done with it, which is what the
+    /// bottom bar is for, and the words about the rest of that run up to it.
+    pub fn output_button(&self) -> Rect {
+        bar_button(
+            self.bottom,
+            OUTPUT_BUTTON,
+            self.bottom.right() - BAR_PADDING,
+        )
+    }
+
     /// The whole window, which is what a popup is placed in: a menu hangs off
     /// the button that opened it and is bounded by the window, not by the
     /// frame the picture is in — a menu pushed around by where the image
@@ -187,6 +205,8 @@ impl Chrome {
             Some(Widget::Grid)
         } else if self.zoom_button(grid_on).contains(point) {
             Some(Widget::Zoom)
+        } else if self.output_button().contains(point) {
+            Some(Widget::Output)
         } else {
             None
         }

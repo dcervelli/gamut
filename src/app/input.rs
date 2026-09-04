@@ -72,6 +72,9 @@ pub enum Action {
     CycleToneMap,
     CycleColormap,
     ResetDisplay,
+    /// Between the SDR and the HDR surface, where the driver offers the
+    /// choice.
+    ToggleHdr,
     /// Put the absolute path of the file on screen on the clipboard.
     CopyPath,
     /// Put the file on screen on the clipboard as a `file:` URI, under the
@@ -469,8 +472,15 @@ pub const KEYS: &[Binding] = &[
         section: Section::Display,
         mods: PLAIN,
         shown: "t",
-        help: "Cycle tone mapping: off, clip, reinhard, neutral",
+        help: "Cycle tone mapping: none, reinhard, neutral",
         keys: &[(Char("t"), CycleToneMap), (Char("T"), CycleToneMap)],
+    },
+    Binding {
+        section: Section::Display,
+        mods: PLAIN,
+        shown: "o",
+        help: "Toggle HDR output, where the monitor is in HDR mode",
+        keys: &[(Char("o"), ToggleHdr), (Char("O"), ToggleHdr)],
     },
     Binding {
         section: Section::Display,
@@ -723,6 +733,7 @@ impl App {
                     true
                 });
             }
+            ToggleHdr => return Effect::redraw_if(self.toggle_hdr()),
         }
         Effect::Redraw
     }
@@ -1104,6 +1115,11 @@ impl App {
                     let (image, viewport) = (self.image_size(), self.viewport());
                     menu.choose(index, &mut self.view, image, viewport);
                 }
+            }
+            // As with the reset: the key's action, so that the button and the
+            // key cannot come to mean different things.
+            Widget::Output => {
+                let _ = self.toggle_hdr();
             }
         }
     }

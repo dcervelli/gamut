@@ -107,7 +107,8 @@ before the window goes.
 | `A` | Narrow the window, raising contrast |
 | `S` | Widen the window, lowering contrast |
 | `e` | Cycle the automatic window: off (0–1) → min/max → 99.8% |
-| `t` | Cycle tone mapping: off → clip → Reinhard → neutral |
+| `t` | Cycle tone mapping: none → Reinhard → neutral |
+| `o` | Turn the room above white off and on, where the monitor is in HDR mode |
 | `r` | Cycle false colour: grey → viridis → magma → turbo |
 | `z` | Reset every display setting |
 
@@ -117,12 +118,31 @@ The window is the one place the case of a key matters: `a` and `s` move it,
 Sliding or resizing the window by hand takes it out of whichever automatic
 mode it was in; `e` cycles back into them. Exposure stops at ±16 stops.
 
-Tone mapping is what brings values brighter than white down into a display
-that cannot show them, so on an HDR display there is nothing for it to do and
-it starts off. On an ordinary display it starts on neutral for content that
-has such values and on clip for content that does not. Cycling to a curve on
-an HDR display is still worth doing once: it shows you what everyone on an
-ordinary display will see.
+Tone mapping is a curve added to bring values brighter than white down into a
+surface that cannot show them. `none` is not a third curve but the absence of
+one: on an ordinary (SDR) surface the highlights are clipped at white, and on
+an HDR surface they are shown at the brightness they were graded to. A picture
+starts with no curve on an HDR surface; on an SDR one it starts on neutral
+when there are highlights above white to roll off, and with none otherwise.
+Switching the room with `o`, or the window landing on a different kind of
+monitor, chooses the curve again for what it lands on; `t` changes it after
+that.
+
+The bottom bar names the curve while one is on, and says `clip` when there is
+none, the surface is SDR and highlights are being thrown away — so a
+photograph pushed a stop up says so rather than going flat in silence. The
+`HDR` button at the end of the bar is the switch for that room, lit while the
+picture is going out with it. On Wayland the compositor says which monitors
+are in HDR mode, and gamut follows: the window gets an HDR surface on a
+monitor in HDR mode and an SDR one otherwise, and never asks the compositor
+to switch a monitor over — a request some compositors answer by blanking
+every display. On a monitor in HDR mode the button turns the room off and on
+without touching the surface. On one in SDR mode, or where no HDR colour
+space is offered, it is drawn dead and `o` does nothing but say why in the
+terminal. `--output hdr` asks for the HDR surface regardless, for anyone who
+wants the compositor's own switch, and `--output sdr` stays on the SDR one
+whatever the monitor is. Where nothing says what the monitor is, `o` moves
+the surface itself.
 
 False colour applies to single-channel images only, and `r` does nothing on a
 colour one. While a colormap is active, tone mapping is suspended — a curve on

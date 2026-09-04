@@ -28,10 +28,12 @@ theme/         palette.rs reads Omarchy's colors.toml and resolves its cascade; 
 view.rs        zoom / pan / fit geometry, pure maths (View, Viewport, Fit)
 loader.rs      the decode + upload thread; replies arrive as winit user events
 watch.rs       polling a file for a settled change
+monitor.rs     what the compositor says each monitor is in, SDR or HDR, over a Wayland connection of its own
 clipboard.rs   putting text or a file: URI on the clipboard, in a process that outlives the window
 timing.rs      startup instrumentation
 image/         the data model, nothing GPU
-  mod.rs         Channels, Samples, AlphaMode, DecodedImage, Sample (one pixel read back)
+  mod.rs         Channels, Samples, AlphaMode, Referred (graded or measured light), DecodedImage,
+                 Sample (one pixel read back)
   color/         Transfer, Primaries, ColorSpace; icc.rs and cicp.rs translate what files say into them
   stats.rs       the scan an image gets on load: min/max, histogram, plot
   encode.rs      the displayed image walked back out to an 8-bit sRGB PNG, for the clipboard
@@ -77,7 +79,8 @@ name.
 | An image format | `image/decode/<fmt>.rs` implementing `Decoder`, one line in `DECODERS`, a fixture in `test_images/` (see its README and `generate.sh`) |
 | What a copy of the image contains | `image/encode.rs`; the chord that asks for it is in `app/input.rs` |
 | A colour-space source (a new tag a format carries) | `image/color/` |
-| An upscale filter or tone map | the WGSL function, one arm in `render/shader_codes.rs`, one enum variant with its `label`/`parse`/`next` |
+| An upscale filter or tone map | the WGSL function, one arm in `render/shader_codes.rs`, one enum variant with its `label`/`parse`/`next`; a tone map's CPU twin is `ToneMap::apply`, which takes the surface's `Headroom` as the shader arm does |
+| What the surface can be, SDR or HDR | `render/output.rs` chooses it; `monitor.rs` says what the monitor is in; `App::surface_hdr` and `App::headroom` put the two together, `App::sync_output` acts on them, and `App::toggle_hdr` is what the bar's `HDR` button and `o` both call |
 | A new render pass | build it from `render/gpu.rs`; add its target to `Renderer::render` |
 | Something about the display window, exposure or false colour | `image/display.rs` (state) and `shaders/image.wgsl` / `composite.wgsl` (effect) |
 

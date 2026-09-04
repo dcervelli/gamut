@@ -9,12 +9,12 @@ _gamut() {
   _arguments -s -S \
     '(-h --help)'{-h,--help}'[Show this help]' \
     '(-V --version)'{-V,--version}'[Show the version]' \
-    '--hdr[Use an HDR surface when the display offers one]' \
+    '--output[Start on an sdr or an hdr surface]:surface:(sdr hdr)' \
     '--transfer[Override the transfer function the file is assumed to use]:function:(linear srgb pq hlg gamma:)' \
     '--primaries[Override the colour primaries]:primaries:(bt709 p3 bt2020 adobe)' \
     '--no-gain-map[Show the SDR base image of an Ultra HDR JPEG]' \
     '--colormap[Start with false colour on single-channel images]:map:(gray viridis magma turbo)' \
-    '--tone-map[Start with this tone map]:map:(off clip reinhard neutral)' \
+    '--tone-map[Start with this tone map]:map:(none reinhard neutral)' \
     '--window[Start with the window set this way]:mode:(unit minmax pct)' \
     '--exposure[Start at this exposure, in stops]:stops:' \
     '--upscale[How to resample above 100%]:filter:(nearest bicubic)' \

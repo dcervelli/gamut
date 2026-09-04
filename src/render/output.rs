@@ -4,16 +4,35 @@
 //! Availability is not the same as usefulness: a driver will happily report an
 //! HDR colour space while the monitor in front of you is SDR, and picking one
 //! then changes how everything looks for no benefit. So HDR output is
-//! requested, not assumed.
+//! requested, not assumed — by the monitor, where the compositor says what it
+//! is in (`monitor`), and otherwise by hand.
 
-/// What the user asked for on the command line.
+/// Which surface is wanted: what `--output` asked for at start-up, and what
+/// the switch asks for after. What it comes to is decided in `App`, which
+/// also has the monitor's word; here only [`HdrPreference::On`] asks for the
+/// HDR surface.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum HdrPreference {
-    /// Always use an SDR sRGB surface and tone map HDR content into it.
+    /// Whatever the monitor is in, where the compositor says; SDR where
+    /// nothing does.
     #[default]
+    Follow,
+    /// An SDR sRGB surface, with HDR content tone mapped into it.
     Off,
-    /// Use an HDR surface when the driver offers one.
+    /// An HDR surface, where the driver offers one — even for a monitor in
+    /// SDR mode, which a compositor may answer by switching the monitor over.
     On,
+}
+
+impl HdrPreference {
+    /// `sdr` or `hdr`, as the command line names them.
+    pub fn parse(value: &str) -> Option<Self> {
+        Some(match value.to_ascii_lowercase().as_str() {
+            "sdr" => HdrPreference::Off,
+            "hdr" => HdrPreference::On,
+            _ => return None,
+        })
+    }
 }
 
 /// The transfer encoding the composite shader applies on the way out, to
@@ -53,6 +72,13 @@ impl Output {
             }
         }
         Self::srgb(capabilities)
+    }
+
+    /// Whether an HDR surface is there to be asked for at all: the driver
+    /// offers a colour space with room above white for this window. Not
+    /// whether the monitor is HDR, which nothing on Linux will say.
+    pub fn hdr_available(capabilities: &wgpu::SurfaceCapabilities) -> bool {
+        Self::extended_linear(capabilities).is_some() || Self::pq(capabilities).is_some()
     }
 
     fn supports(

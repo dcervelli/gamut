@@ -15,7 +15,7 @@ use super::image_layer::{Draw, ImageLayer};
 use super::upload::Capabilities;
 use super::{Placement, Upscale};
 use crate::image::display::Display;
-use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
+use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Referred, Samples};
 
 struct Gpu {
     device: wgpu::Device,
@@ -172,7 +172,7 @@ fn gray_u8(width: u32, height: u32, data: Vec<u8>) -> DecodedImage {
         },
         color: ColorSpace::LINEAR_BT709,
         alpha: AlphaMode::Opaque,
-        value_range: None,
+        referred: Referred::Scene,
         nodata: None,
     }
 }
@@ -341,7 +341,7 @@ fn a_transparent_texel_does_not_bleed_its_colour() {
         },
         color: ColorSpace::LINEAR_BT709,
         alpha: AlphaMode::Straight,
-        value_range: None,
+        referred: Referred::Scene,
         nodata: None,
     };
 

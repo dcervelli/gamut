@@ -29,7 +29,10 @@ inside it, in name order.
 OPTIONS:
     -h, --help              Show this help
     -V, --version           Show the version
-        --hdr               Use an HDR surface when the display offers one
+        --output <SURFACE>  Start on an sdr or an hdr surface. Left alone, the
+                            surface follows the monitor: HDR where the
+                            compositor says it is in HDR mode. hdr asks for
+                            one regardless; o switches later
         --transfer <FN>     Override the transfer function the file is assumed
                             to use: linear, srgb, pq, hlg, or gamma:<N>
         --primaries <P>     Override the colour primaries: bt709, p3, bt2020,
@@ -39,7 +42,7 @@ OPTIONS:
                             gain map beside it
         --colormap <MAP>    Start with false colour on single-channel images:
                             gray, viridis, magma, or turbo
-        --tone-map <MAP>    Start with off, clip, reinhard, or neutral
+        --tone-map <MAP>    Start with none, reinhard, or neutral
         --window <MODE>     Start with the window set to unit, minmax, or pct
         --exposure <STOPS>  Start at this exposure, in stops
         --upscale <FILTER>  How to resample above 100%: nearest or bicubic
@@ -291,7 +294,7 @@ pub fn parse_args() -> Result<Option<Args>> {
     let mut files = Vec::new();
     let mut overrides = Overrides::default();
     let mut startup = Startup::default();
-    let mut hdr = HdrPreference::Off;
+    let mut hdr = HdrPreference::Follow;
     let mut histogram = false;
     let mut info = false;
     let mut minimap = true;
@@ -316,8 +319,11 @@ pub fn parse_args() -> Result<Option<Args>> {
                     print!("{}", man());
                     return Ok(None);
                 }
-                Some("--hdr") => {
-                    hdr = HdrPreference::On;
+                Some("--output") => {
+                    let value = next_value(&mut arguments, "--output")?;
+                    hdr = HdrPreference::parse(&value).ok_or_else(|| {
+                        anyhow::anyhow!("unknown output `{value}`: sdr or hdr (try --help)")
+                    })?;
                     continue;
                 }
                 Some("--transfer") => {

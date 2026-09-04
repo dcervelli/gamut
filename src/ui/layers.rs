@@ -198,6 +198,10 @@ mod tests {
         );
         assert_eq!(at([WINDOW[0] / 2.0, 4.0]), Hit::Chrome(None));
         assert_eq!(
+            at(middle(chrome.output_button())),
+            Hit::Chrome(Some(Widget::Output))
+        );
+        assert_eq!(
             at(middle(
                 minimap::thumbnail(content, [4000.0, 3000.0]).expect("room")
             )),
