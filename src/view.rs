@@ -76,6 +76,41 @@ impl Viewport {
     }
 }
 
+/// The view in space-scale coordinates: where its centre is in the diagram
+/// Furnas and Bederson draw in *Space-Scale Diagrams: Understanding
+/// Multiscale Interfaces* (CHI '95), which stacks every magnification of the
+/// image up a scale axis and shows a view as a window of fixed size moved
+/// about in it.
+///
+/// `v` is the zoom, and `u` is the pan scaled by it: the image's centre in
+/// screen pixels from the viewport's, the other way about. The point of the
+/// coordinates is that a straight line through them is the path a pan and a
+/// zoom together should take: a point of the image lands on screen at
+/// `x·v − u`, linear in both, so while `u` and `v` move at a steady rate so
+/// does every point on screen. Interpolate pan and zoom on their own and the
+/// place being zoomed towards swings away first — the zoom carries it off
+/// faster than the pan can bring it back — then returns. That is the joint
+/// pan-zoom problem of the paper's fourth page, and this is its answer.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Position {
+    pub u: [f32; 2],
+    pub v: f32,
+}
+
+impl Position {
+    /// The point `t` of the way along the straight line from `from` to `to`,
+    /// `t` running from zero to one. Not clamped: it is the caller's easing
+    /// that says how fast the line is travelled.
+    pub fn between(from: Position, to: Position, t: f32) -> Position {
+        let lerp = |a: f32, b: f32| a + (b - a) * t;
+        Position {
+            u: [lerp(from.u[0], to.u[0]), lerp(from.u[1], to.u[1])],
+            v: lerp(from.v, to.v),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
 pub struct View {
     /// `None` once the user has zoomed manually.
     fit: Option<Fit>,
@@ -303,6 +338,32 @@ impl View {
             None => Fit::Whole,
             Some(fit) => fit.next(),
         });
+    }
+
+    /// Where the view is in space-scale coordinates. From the pan actually on
+    /// screen rather than the one held, as `zoom_steps_at` reads it: a view
+    /// against an edge is at the edge, wherever it was asked to go.
+    pub fn position(&self, image: [f32; 2], viewport: Viewport) -> Position {
+        let zoom = self.zoom(image, viewport);
+        let pan = Self::clamp_pan(self.pan, image, viewport.size(), zoom);
+        Position {
+            u: [pan[0] * zoom, pan[1] * zoom],
+            v: zoom,
+        }
+    }
+
+    /// The view at `position`: what is on screen part way through a move.
+    /// Not in fit mode, whatever this view is in — a fit is a zoom the
+    /// viewport decides, and a view on its way there is at some other one.
+    /// The upscale filter comes along, being a preference rather than a
+    /// place.
+    pub fn at(&self, position: Position) -> View {
+        View {
+            fit: None,
+            zoom: position.v,
+            pan: [position.u[0] / position.v, position.u[1] / position.v],
+            upscale: self.upscale,
+        }
     }
 }
 
@@ -682,6 +743,127 @@ mod tests {
         view.reset();
         view.cycle_fit();
         assert!(view.can_pan(IMAGE, Viewport::whole([1200.0, 600.0])));
+    }
+
+    /// The straight line in space-scale coordinates is a straight line on
+    /// screen for every point of the image, travelled at a steady rate: the
+    /// point half way along the path is half way between where it began and
+    /// where it ends. Interpolating pan and zoom separately fails this — the
+    /// zoom runs ahead of the pan and the point swings out and back.
+    #[test]
+    fn a_pan_and_zoom_together_carry_every_point_in_a_straight_line() {
+        // Zooms below 1:1, where placement is not rounded to whole pixels
+        // and the check can be exact; an image large enough at both to have
+        // somewhere to pan to.
+        let image = [4000.0, 4000.0];
+        let mut from = View::new();
+        from.set_zoom(0.5, image, WINDOW);
+        from.pan_by(150.0, -100.0, image, WINDOW);
+        let mut to = View::new();
+        to.set_zoom(0.9, image, WINDOW);
+        to.pan_by(800.0, 350.0, image, WINDOW);
+        let (a, b) = (from.position(image, WINDOW), to.position(image, WINDOW));
+        assert!(a.v < b.v && a.u != b.u);
+
+        let on_screen = |t: f32, point: [f32; 2]| {
+            let placement = from.at(Position::between(a, b, t)).placement(image, WINDOW);
+            [
+                placement.x + point[0] * placement.zoom,
+                placement.y + point[1] * placement.zoom,
+            ]
+        };
+        for point in [
+            [0.0, 0.0],
+            [2000.0, 2000.0],
+            [3500.0, 700.0],
+            [4000.0, 4000.0],
+        ] {
+            let start = on_screen(0.0, point);
+            let end = on_screen(1.0, point);
+            for t in [0.25, 0.5, 0.75] {
+                let along = on_screen(t, point);
+                for axis in 0..2 {
+                    let expected = start[axis] + (end[axis] - start[axis]) * t;
+                    assert!(
+                        close(along[axis], expected),
+                        "{point:?} at {t}: {along:?}, expected {expected} on axis {axis}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The ends of a move are where a view can be, so the line between them
+    /// is too: the pan limit is a straight line in these coordinates, and
+    /// the clamp never has to move a point that is on its way.
+    #[test]
+    fn the_line_between_two_views_stays_within_the_image() {
+        let image = [4000.0, 4000.0];
+        let mut from = View::new();
+        from.set_zoom(0.5, image, WINDOW);
+        from.pan_to_edge([1.0, 1.0], image, WINDOW);
+        let mut to = View::new();
+        to.set_zoom(2.0, image, WINDOW);
+        to.pan_to_edge([-1.0, -1.0], image, WINDOW);
+        let (a, b) = (from.position(image, WINDOW), to.position(image, WINDOW));
+        for t in [0.1, 0.3, 0.5, 0.7, 0.9] {
+            let between = Position::between(a, b, t);
+            let along = from.at(between);
+            // What the clamp leaves is what was asked for.
+            let held = along.position(image, WINDOW);
+            assert!(close(held.u[0], between.u[0]) && close(held.u[1], between.u[1]));
+        }
+    }
+
+    /// A wheel zoom keeps the point under the pointer at both ends, and so
+    /// all the way along: the straight line keeps whatever its ends share.
+    #[test]
+    fn a_moving_wheel_zoom_keeps_its_anchor_throughout() {
+        let image = [4000.0, 4000.0];
+        let mut from = View::new();
+        from.set_zoom(2.0, image, WINDOW);
+        from.pan_by(300.0, -200.0, image, WINDOW);
+        let mut to = from;
+        let anchor = [900.0, 250.0];
+        to.zoom_steps_at(4.0, anchor, image, WINDOW);
+        let (a, b) = (from.position(image, WINDOW), to.position(image, WINDOW));
+
+        let under = |t: f32| {
+            from.at(Position::between(a, b, t))
+                .placement(image, WINDOW)
+                .image_point(anchor)
+        };
+        let start = under(0.0);
+        for t in [0.2, 0.5, 0.8, 1.0] {
+            let along = under(t);
+            // Placement lands on whole pixels above 1:1, so the point can
+            // drift by half an output pixel at either zoom and no further.
+            let tolerance = 0.5 / a.v + 0.5 / b.v;
+            assert!(
+                (along[0] - start[0]).abs() <= tolerance,
+                "{start:?} -> {along:?} at {t}"
+            );
+            assert!(
+                (along[1] - start[1]).abs() <= tolerance,
+                "{start:?} -> {along:?} at {t}"
+            );
+        }
+    }
+
+    /// A view on its way to a fit is not yet fitted, and the fit it reaches
+    /// is the same place the fitted view is.
+    #[test]
+    fn a_view_at_the_end_of_its_line_is_where_the_settled_view_is() {
+        let mut from = View::new();
+        from.set_zoom(4.0, IMAGE, WINDOW);
+        from.pan_by(500.0, 500.0, IMAGE, WINDOW);
+        let to = View::new();
+        assert_eq!(to.fit(), Some(Fit::Whole));
+        let end = from.at(to.position(IMAGE, WINDOW));
+        assert_eq!(end.fit(), None);
+        let (arrived, settled) = (end.placement(IMAGE, WINDOW), to.placement(IMAGE, WINDOW));
+        assert!(close(arrived.x, settled.x) && close(arrived.y, settled.y));
+        assert!(close(arrived.zoom, settled.zoom));
     }
 
     #[test]

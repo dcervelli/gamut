@@ -19,6 +19,7 @@ use crate::image::decode;
 use crate::image::display::{Display, Headroom, Startup};
 use crate::loader::{Decoded, Loader, Opened, Ready, Reload, Request};
 use crate::monitor::{Mode, Monitors};
+use crate::motion::Motion;
 use crate::render::{HdrPreference, Placement, Rect, Renderer, Scene, Upscale};
 use crate::theme::{self, Theme};
 use crate::timing;
@@ -65,7 +66,14 @@ pub struct App {
     /// The mode of the monitor the window is on, as last read: `None` until
     /// the window has landed on one, and for good where nothing says.
     monitor: Option<Mode>,
+    /// Where the view is going: the pan and zoom every key and press act
+    /// on. What is on screen is [`App::shown_view`], which is this once it
+    /// has arrived.
     view: View,
+    /// The move the view is in the middle of, from where it was shown when
+    /// the last animated change was asked for to wherever `view` now says.
+    /// `None` once it has landed, and while nothing is moving.
+    motion: Option<Motion>,
     /// The file on screen, watched for writes by anything else.
     watch: Watch,
     /// The paths as the command line gave them, and a watch on each directory
@@ -167,6 +175,7 @@ impl App {
             monitors,
             monitor: None,
             view,
+            motion: None,
             watch,
             named,
             directories,
@@ -523,7 +532,7 @@ impl App {
     /// between the two of them is a width that can fall out of step.
     pub(super) fn grid_spacing(&self) -> Option<String> {
         let current = self.current.as_ref()?;
-        let zoom = self.view.zoom(current.size(), self.viewport());
+        let zoom = self.shown_view().zoom(current.size(), self.viewport());
         ui::grid_spacing(self.panels.show_grid, zoom, self.scale_factor())
     }
 
@@ -633,6 +642,49 @@ impl App {
         image_viewport(self.window_size(), self.scale_factor(), self.panels.show_ui)
     }
 
+    /// The view as it is on screen at `now`: `view` itself once it has
+    /// arrived, and somewhere along the way to it while a move is in flight.
+    /// Everything that reads the picture — the frame, the pixel under the
+    /// pointer, the grid's spacing, the minimap's marker — reads this, so
+    /// that they agree with one another about what is on screen mid-move.
+    fn view_at(&self, now: Instant) -> View {
+        match &self.motion {
+            Some(motion) => {
+                let (image, viewport) = (self.image_size(), self.viewport());
+                let to = self.view.position(image, viewport);
+                self.view.at(motion.position(to, now))
+            }
+            None => self.view,
+        }
+    }
+
+    pub(super) fn shown_view(&self) -> View {
+        self.view_at(Instant::now())
+    }
+
+    /// Makes `change` to the view, and puts it on screen as a move over
+    /// [`crate::motion::DURATION`] rather than in one jump. The move starts
+    /// from where the view is shown at this instant, which part way through
+    /// an earlier move is part way along it: that move is dropped, and this
+    /// one has the whole time to get from there to where `change` leaves the
+    /// view.
+    ///
+    /// For a change asked for by name — a key, a notch of the wheel, a
+    /// choice from the menu. A change the hand is on — a drag, a single
+    /// pixel's step, a trackpad's scroll — goes to `view` directly and lands
+    /// at once, or, if a move is in flight, at the end of it: the move is
+    /// left running, and finds the view moved when it looks.
+    pub(super) fn animate(&mut self, change: impl FnOnce(&mut View, [f32; 2], Viewport)) {
+        let (image, viewport) = (self.image_size(), self.viewport());
+        let now = Instant::now();
+        let from = self.view_at(now).position(image, viewport);
+        change(&mut self.view, image, viewport);
+        let to = self.view.position(image, viewport);
+        // Nowhere to go — a fit already fitted, an edge already reached, a
+        // filter changed — is not a move, and owes no frames.
+        self.motion = (to != from).then(|| Motion::new(from, now));
+    }
+
     /// The pointer in logical pixels, which is what the interface is laid out
     /// in. Events arrive in physical ones.
     fn logical_cursor(&self) -> Option<[f32; 2]> {
@@ -664,7 +716,10 @@ impl App {
             return None;
         }
         let image = self.current.as_ref()?.size();
-        let point = self.view.placement(image, viewport).image_point(cursor);
+        let point = self
+            .shown_view()
+            .placement(image, viewport)
+            .image_point(cursor);
         // Written as a positive range test rather than four negated bounds so
         // that a NaN coordinate is rejected: every `<`/`>=` comparison is
         // false for NaN, so the old form let a NaN through to read as pixel
@@ -687,7 +742,10 @@ impl App {
         // Panning and the minimap answer the same question: whether any of the
         // image is off screen. Pan is clamped to the image, so a view with
         // nowhere to go is one showing all of it.
-        self.panels.show_minimap && self.view.can_pan(self.image_size(), self.viewport())
+        self.panels.show_minimap
+            && self
+                .shown_view()
+                .can_pan(self.image_size(), self.viewport())
     }
 
     /// Where the minimap's thumbnail goes, in physical pixels: the whole
@@ -952,11 +1010,19 @@ impl App {
             return;
         }
 
+        // A move that has landed is over: what is on screen is `view`
+        // itself, and the frames it was asking for can stop.
+        let now = Instant::now();
+        if self.motion.as_ref().is_some_and(|motion| motion.done(now)) {
+            self.motion = None;
+        }
+        let view = self.view_at(now);
+
         let scale = window.scale_factor() as f32;
         let physical = self.window_size();
         let logical = [physical[0] / scale, physical[1] / scale];
         let viewport = self.viewport();
-        let placement = self.view.placement(self.image_size(), viewport);
+        let placement = view.placement(self.image_size(), viewport);
 
         let pointer = self.pointer_pixel();
         let cursor = self.logical_cursor();
@@ -990,7 +1056,7 @@ impl App {
             &input,
             &self.panels,
             self.current.as_ref(),
-            &self.view,
+            &view,
             &self.theme,
         );
 
@@ -1020,6 +1086,14 @@ impl App {
                     self.reported_error = true;
                 }
             }
+        }
+
+        // A move still in flight owes the next frame. Asked for from here
+        // rather than timed from the loop, so that it comes when the
+        // compositor is ready for one and the move plays at the display's
+        // own rate.
+        if self.motion.is_some() {
+            window.request_redraw();
         }
     }
 }
@@ -1400,6 +1474,37 @@ mod tests {
             },
             outcome,
         });
+    }
+
+    /// A key's pan is a move: the view is where it is going at once, and
+    /// what is on screen gets there over [`crate::motion::DURATION`]. A
+    /// single pixel's is not, and lands as it is pressed.
+    #[test]
+    fn a_keyboard_pan_moves_and_a_single_pixel_lands() {
+        use input::{Action, Direction, PanStep};
+
+        let (mut app, dir) = app_over("motion", &[("a.png", 64, 48)]);
+        let (image, viewport) = (app.image_size(), app.viewport());
+        app.view.set_zoom(4.0, image, viewport);
+        let before = app.view.position(image, viewport);
+
+        let _ = app.perform(Action::Pan(Direction::Right, PanStep::Coarse));
+        assert!(app.motion.is_some());
+        let target = app.view.position(image, viewport);
+        assert!(target.u[0] > before.u[0]);
+        // Just begun: on screen it has barely left where it was.
+        let now = Instant::now();
+        let shown = app.view_at(now).position(image, viewport);
+        assert!(shown.u[0] < target.u[0]);
+        // Landed, and where the view says.
+        let landed = app.view_at(now + crate::motion::DURATION);
+        assert_eq!(landed.position(image, viewport), target);
+
+        app.motion = None;
+        let _ = app.perform(Action::Pan(Direction::Left, PanStep::Fine));
+        assert!(app.motion.is_none());
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
     }
 
     /// Stepping between frames of the same size is a comparison — the same

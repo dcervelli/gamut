@@ -8,6 +8,7 @@ mod image;
 mod listing;
 mod loader;
 mod monitor;
+mod motion;
 mod pasted;
 mod render;
 mod theme;
