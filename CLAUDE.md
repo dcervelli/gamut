@@ -26,7 +26,11 @@ ui/            builds each frame's display list; no wgpu or winit imports
   info.rs        the file's own facts, in a column that scrolls
   pixel.rs       the pointer's readout: coordinate, stored and mapped values, swatch
   menu.rs        Menu (which popup is open), the zoom menu's choices, and how its cells are drawn
-  status.rs      the words in the top and bottom bars
+  tooltip.rs     the label naming what the pointer is resting on: Tip is what can
+                 have one, Tooltips is when it opens, Tips is where it goes —
+                 in the content area, on the layer nothing covers
+  status.rs      the words in the top and bottom bars; top_bar() lays the top one
+                 out for the frame builder and for the pointer alike
 theme/         palette.rs reads Omarchy's colors.toml and resolves its cascade; mod.rs derives Theme's colour roles
 view.rs        zoom / pan / fit geometry, pure maths (View, Viewport, Fit)
 listing.rs     what a path on the command line stands for: a directory is the
@@ -87,6 +91,7 @@ name.
 | A key binding | `app/input.rs`: one `KEYS` entry, with the `mods` it is held with, and one `perform` arm. `--help` follows. |
 | A status-bar segment | `ui/status.rs`; the pointer's pixel readout is `ui/pixel.rs` |
 | What a pixel reads as under the pointer | `image/mod.rs::sample` for what the file holds, `image/display.rs::map` for what the screen shows |
+| What something is called when the pointer rests on it | a `Tip` variant in `ui/tooltip.rs` and one `tips.offer(tip, rect)` beside where it is drawn; `App::tooltip` composes the words, from `KEYS` by way of `action_of` wherever a key does the same job, so a tooltip and `--help` cannot disagree. Words of its own go in `ui/tooltip.rs::words`, and a menu cell's in `Menu::cell_tip`. A thing that wants its label somewhere other than under it offers with `offer_toward`: the histogram panel's toggles open `Opens::Right`, across the plot they act on. When it opens is `Tooltips`, held by `App` and asked in `update_hover` and `about_to_wait` |
 | A button's icon | `ui/icon.rs`: one `&[Mark]` on the 24-unit grid, and one `icon::draw` call where the button is drawn. The caller sets aside a budget; whether the mark comes out sharp is `UiFrame::stroke_centre_in_device`'s business and whether its spacing stays even is `icon::fit`'s |
 | A panel or overlay | a new `ui/<name>.rs` and one call in `ui/mod.rs::build_frame`; if the pointer can be on it, a `Hit` variant and one test in `ui/layers.rs` at the same height in the stack it is drawn at; a new colour role goes in `theme/mod.rs` |
 | What the info panel says about a file | `ui/info.rs` for the layout; the file's own facts are gathered in `app/mod.rs::file_facts`, its metadata in `image/exif.rs`, and its georeference in `image/geo.rs` |

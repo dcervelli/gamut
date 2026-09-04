@@ -23,7 +23,7 @@ use crate::theme::{self, Theme};
 use crate::timing;
 use crate::ui::chrome::{Chrome, content_area, image_viewport};
 use crate::ui::layers::{Hit, Shown};
-use crate::ui::{self, Current, FileFacts, FrameInput, Panels, Reading};
+use crate::ui::{self, Current, FileFacts, FrameInput, Panels, Reading, Tooltips};
 use crate::view::{View, Viewport};
 use crate::watch::{self, Watch};
 
@@ -84,6 +84,11 @@ pub struct App {
     renderer: Option<Renderer>,
     pointer: Pointer,
     panels: Panels,
+    /// When the label naming what the pointer is resting on opens and closes.
+    /// Apart from the panels because it is the one thing on screen that
+    /// depends on how long something has been true: `panels.tooltip` is what
+    /// it has settled on, and this is the clock behind it.
+    tooltips: Tooltips,
     /// Copies of the picture still being prepared, joined before the loop
     /// leaves. A copy is often followed straight away by `q`, and a thread
     /// that has not yet handed its bytes over dies with the process — the
@@ -151,6 +156,7 @@ impl App {
             window: None,
             renderer: None,
             pointer: Pointer::default(),
+            tooltips: Tooltips::default(),
             copying: Vec::new(),
             copies: Arc::new(AtomicU64::new(0)),
             panels: Panels {
@@ -242,6 +248,62 @@ impl App {
     /// tests, which have to answer between frames.
     fn content(&self) -> Rect {
         content_area(self.logical_size(), self.panels.show_ui)
+    }
+
+    /// What the top bar says about a read that is taking its time, which is
+    /// part of the name it sets: worked out here rather than in the frame
+    /// builder because the pointer is answered against that name between
+    /// frames and has to see the same words.
+    fn reading(&self) -> Option<Reading> {
+        self.files
+            .pending()
+            // With nothing on screen there is no flicker to guard against and
+            // nothing else to say, so the wait is worth naming immediately.
+            .filter(|pending| pending.announced || self.current.is_none())
+            .map(|pending| {
+                if self.current.is_some() && pending.index == self.files.index() {
+                    Reading::Again
+                } else {
+                    Reading::File(file_label(self.files.path(pending.index)))
+                }
+            })
+    }
+
+    /// Which of the top bar's own runs of words the pointer is on, if any.
+    ///
+    /// Asked with the fonts the bar is drawn in, as the information panel's
+    /// rows are: a run of words ends where the face it is set in says, and
+    /// the pointer has to be answered against what was actually drawn.
+    pub(super) fn bar_tip(&mut self) -> Option<ui::Tip> {
+        if !self.panels.show_ui {
+            return None;
+        }
+        let point = self.logical_cursor()?;
+        let chrome = self.chrome();
+        // Asked on every motion, including the ones over the picture, so the
+        // cheap question comes before the layout it would otherwise pay for.
+        if !chrome.top.contains(point) {
+            return None;
+        }
+        let bar = chrome.top;
+        let limit = chrome.zoom_button(self.grid_spacing().as_deref()).x;
+        let (index, count) = (self.files.index(), self.files.len());
+        let deleted = self.watch.missing();
+        let reading = self.reading();
+        // Split borrow: the measurement needs the renderer while it reads the
+        // file the bar is about.
+        let (Some(renderer), Some(current)) = (self.renderer.as_mut(), self.current.as_ref())
+        else {
+            return None;
+        };
+        let about = ui::BarText {
+            current,
+            reading: reading.as_ref(),
+            index,
+            count,
+            deleted,
+        };
+        ui::bar_tip(renderer, point, bar, limit, &about)
     }
 
     /// The image on screen, as the layers need to know it. `None` before the
@@ -721,19 +783,8 @@ impl App {
         let cursor = self.logical_cursor();
         let thumbnail = self.minimap_placement(logical, scale);
         let minimap = self.minimap_on_screen();
-        let reading = self
-            .files
-            .pending()
-            // With nothing on screen there is no flicker to guard against and
-            // nothing else to say, so the wait is worth naming immediately.
-            .filter(|pending| pending.announced || self.current.is_none())
-            .map(|pending| {
-                if self.current.is_some() && pending.index == self.files.index() {
-                    Reading::Again
-                } else {
-                    Reading::File(file_label(self.files.path(pending.index)))
-                }
-            });
+        let reading = self.reading();
+        let tooltip = self.tooltip();
         let hdr_output = {
             let output = self.renderer.as_ref().expect("checked above").output();
             output.is_hdr.then_some(output.label)
@@ -750,6 +801,7 @@ impl App {
             count: self.files.len(),
             deleted: self.watch.missing(),
             hdr_output,
+            tooltip,
         };
 
         // Split borrow: the frame builder needs the renderer's font metrics
@@ -833,10 +885,23 @@ impl ApplicationHandler<Decoded> for App {
             }
         }
 
-        // Sleep until the next thing with a time on it: the file check, or the
-        // moment a read that is still going becomes worth mentioning. A read
-        // that finishes first wakes us through the proxy instead.
+        // The pointer resting on a button long enough to be told what it is:
+        // the one thing on screen that happens because time passed rather
+        // than because anything arrived.
+        if self.tooltips.tick(now)
+            && let Some(window) = &self.window
+        {
+            window.request_redraw();
+        }
+
+        // Sleep until the next thing with a time on it: the file check, the
+        // moment a read that is still going becomes worth mentioning, or the
+        // moment a tooltip is due. A read that finishes first wakes us
+        // through the proxy instead.
         let mut deadline = self.next_poll;
+        if let Some(due) = self.tooltips.deadline() {
+            deadline = deadline.min(due);
+        }
         match self.files.announce_slow_read(now) {
             Announce::Waiting(due) => deadline = deadline.min(due),
             Announce::Now => {

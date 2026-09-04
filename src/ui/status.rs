@@ -2,9 +2,132 @@
 //! it.
 
 use crate::image::display::{AutoWindow, Colormap};
-use crate::render::TextMeasure;
+use crate::render::{Rect, TextMeasure};
 
-use super::{BECOMES, Current, FrameInput, Reading, TEXT_SIZE};
+use super::chrome::BAR_PADDING;
+use super::{BECOMES, COUNTER_GAP, Current, FrameInput, PADDING, Reading, TEXT_SIZE};
+
+/// One run of words in the top bar: where it starts, how much room it was
+/// given, and what it says.
+pub(super) struct Run {
+    pub x: f32,
+    /// What the run is cut to: the room left between where it starts and
+    /// whatever is set after it.
+    pub room: f32,
+    /// How wide it actually comes out — its own width, or `room` where it was
+    /// too long for the space. What is on screen, and so what the pointer is
+    /// answered against.
+    pub width: f32,
+    pub text: String,
+}
+
+impl Run {
+    /// The strip of `bar` this run occupies, for the pointer and for anything
+    /// that has to be placed against it.
+    ///
+    /// The bar's whole height rather than the line's: a run of words thirteen
+    /// pixels tall is too fine a thing to ask anyone to point at, and the bar
+    /// holds nothing above or below it to be confused with.
+    pub fn strip(&self, bar: Rect) -> Rect {
+        Rect::new(self.x, bar.y, self.width, bar.height)
+    }
+}
+
+/// The top bar's words, laid out: the count of files, the word for a file
+/// that has gone, the name, and the facts about the picture.
+///
+/// Laid out here rather than inside the frame builder because the pointer has
+/// to be answered against the same rectangles between frames, and two
+/// readings of where a run of words went are two readings that can disagree.
+pub(super) struct TopBar {
+    pub counter: Option<Run>,
+    pub deleted: Option<Run>,
+    pub name: Run,
+    pub facts: Run,
+}
+
+/// What the top bar has to say about the file, gathered from wherever the
+/// caller keeps it: the frame builder has it in a [`FrameInput`], and the
+/// pointer has to ask the application for it between frames.
+pub struct BarText<'a> {
+    pub current: &'a Current,
+    pub reading: Option<&'a Reading>,
+    pub index: usize,
+    pub count: usize,
+    pub deleted: bool,
+}
+
+/// Lays the top bar's words out in `bar`, between its near end and `limit` —
+/// where the buttons at the far end start.
+///
+/// Least to most disposable, and the facts are dropped whole rather than
+/// clipped: half of "18333 x 15667" is worse than none of it. Half the bar at
+/// most, so that the name it is sharing the bar with keeps the other half.
+pub(super) fn top_bar(
+    text: &mut dyn TextMeasure,
+    bar: Rect,
+    limit: f32,
+    about: &BarText,
+) -> TopBar {
+    let run = |text: &mut dyn TextMeasure, x: f32, room: f32, words: String| {
+        let width = text.measure_text(&words, TEXT_SIZE)[0].min(room);
+        Run {
+            x,
+            room,
+            width,
+            text: words,
+        }
+    };
+
+    let facts = [
+        format!(
+            "{} \u{00d7} {}",
+            about.current.image.width, about.current.image.height
+        ),
+        describe_pixels(about.current),
+        about.current.image.color.label(),
+    ];
+    let facts = fit_segments(text, &facts, (bar.width / 2.0 - BAR_PADDING * 2.0).max(1.0));
+    let facts_width = text.measure_text(&facts, TEXT_SIZE)[0];
+    // Clear of the buttons at the end of the bar.
+    let facts_x = (limit - PADDING - facts_width).max(BAR_PADDING);
+    let facts = run(text, facts_x, facts_width, facts);
+
+    // The count is a fact about the list, not part of the name, and is set
+    // like the other facts in the bar: the name is the one thing here worth
+    // picking out, and picking out two things picks out neither.
+    let mut name_x = BAR_PADDING;
+    let counter = counter(about.index, about.count).map(|counter| {
+        let counter = run(text, BAR_PADDING, (facts_x - BAR_PADDING).max(1.0), counter);
+        name_x += counter.width + COUNTER_GAP;
+        counter
+    });
+    // In front of the name, on the side of the bar the name is read from, so
+    // that it is seen before the file it is about rather than after it.
+    let deleted = about.deleted.then(|| {
+        let deleted = run(
+            text,
+            name_x,
+            (facts_x - PADDING - name_x).max(1.0),
+            DELETED.to_string(),
+        );
+        name_x += deleted.width + COUNTER_GAP;
+        deleted
+    });
+    let name = run(
+        text,
+        name_x,
+        (facts_x - PADDING - name_x).max(1.0),
+        top_label(&about.current.label, about.reading),
+    );
+
+    TopBar {
+        counter,
+        deleted,
+        name,
+        facts,
+    }
+}
 
 /// Joins as many leading segments as fit in `width`, keeping at least the
 /// first however narrow the window gets.

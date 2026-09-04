@@ -11,6 +11,7 @@ pub mod info;
 pub mod layers;
 pub mod menu;
 pub mod minimap;
+pub mod tooltip;
 
 mod buttons;
 mod grid;
@@ -32,6 +33,10 @@ use crate::view::{View, Viewport};
 use chrome::{BAR_PADDING, Chrome};
 pub use info::FileFacts;
 pub use menu::Menu;
+pub use status::BarText;
+pub use tooltip::{Tip, Tooltip, Tooltips};
+
+use tooltip::Tips;
 
 const TEXT_SIZE: f32 = 13.0;
 
@@ -230,6 +235,11 @@ pub struct FrameInput {
     /// The output's label when it is an HDR surface, which is worth a word in
     /// the bar; `None` on an ordinary one.
     pub hdr_output: Option<&'static str>,
+    /// What the pointer has rested on long enough to be told about, and what
+    /// to say about it. Composed by the application — most of a tooltip is
+    /// the key that does the same job, and the keys are the application's —
+    /// and settled by [`Tooltips`], which is where the timing lives.
+    pub tooltip: Option<Tooltip>,
 }
 
 /// A stand-in for the renderer's fonts, for the tests that lay something out
@@ -285,6 +295,36 @@ pub fn grid_spacing(show_grid: bool, zoom: f32, scale: f32) -> Option<String> {
     show_grid.then(|| grid::label(grid::step(zoom, scale)))
 }
 
+/// Which of the top bar's own runs of words the pointer is on, if any.
+///
+/// Beside [`layers::hit`] rather than in it because answering takes the fonts
+/// the bar is set in: where a run of words ends depends on the face it is
+/// drawn in, so this is asked separately, the way the information panel's
+/// rows are.
+///
+/// `bar` is the top panel and `limit` where the buttons at the far end of it
+/// begin — the same two the frame builder lays the words out between.
+pub fn bar_tip(
+    text: &mut dyn TextMeasure,
+    point: [f32; 2],
+    bar: Rect,
+    limit: f32,
+    about: &BarText,
+) -> Option<Tip> {
+    if !bar.contains(point) {
+        return None;
+    }
+    let words = status::top_bar(text, bar, limit, about);
+    if words
+        .counter
+        .as_ref()
+        .is_some_and(|counter| counter.strip(bar).contains(point))
+    {
+        return Some(Tip::Counter);
+    }
+    words.name.strip(bar).contains(point).then_some(Tip::Name)
+}
+
 /// Builds one frame of interface.
 pub fn build_frame(
     text: &mut dyn TextMeasure,
@@ -319,6 +359,12 @@ pub fn build_frame(
         return frame;
     };
     let content = chrome::content_area(size, panels.show_ui);
+
+    // Each thing says where it went as it is drawn, so that the tooltip
+    // naming one hangs off the rectangle the frame actually used. Anything
+    // else that wants a tooltip does the same: become a `Tip` the pointer can
+    // be answered with, and offer its rectangle here.
+    let mut tips = Tips::new(input.tooltip.as_ref());
     let zoom = view.zoom(current.size(), input.viewport);
     let grid_step = grid::step(zoom, input.scale);
 
@@ -343,6 +389,7 @@ pub fn build_frame(
     }
     if panels.show_histogram {
         histogram::draw(&mut frame, text, current, input, panels, content, theme);
+        histogram::offer_tips(&mut tips, content, current.image.is_gray());
     }
     if input.minimap_on_screen {
         minimap::draw(&mut frame, current, view, input, content, theme);
@@ -367,59 +414,56 @@ pub fn build_frame(
     let top = chrome.top;
     let top_baseline = text_baseline(top);
 
-    // Least to most disposable, and dropped whole rather than clipped: half
-    // of "18333 x 15667" is worse than none of it. Half the bar at most, so
-    // that the name it is sharing the bar with keeps the other half.
-    let facts = [
-        format!("{} \u{00d7} {}", current.image.width, current.image.height),
-        status::describe_pixels(current),
-        current.image.color.label(),
-    ];
-    let facts = status::fit_segments(text, &facts, (top.width / 2.0 - BAR_PADDING * 2.0).max(1.0));
-    let facts_width = text.measure_text(&facts, TEXT_SIZE)[0];
     // Clear of the two buttons at the end of the bar, the innermost of which
     // is the zoom readout.
     let spacing = grid_spacing(panels.show_grid, zoom, input.scale);
     let grid_button = chrome.grid_button(spacing.as_deref());
     let zoom_button = chrome.zoom_button(spacing.as_deref());
-    let facts_x = (zoom_button.x - PADDING - facts_width).max(BAR_PADDING);
 
-    // The count is a fact about the list, not part of the name, and is set
-    // like the other facts in the bar: the name is the one thing here worth
-    // picking out, and picking out two things picks out neither.
-    let mut name_x = BAR_PADDING;
-    if let Some(counter) = status::counter(input.index, input.count) {
-        let width = text.measure_text(&counter, TEXT_SIZE)[0];
+    // Laid out by `status`, which the pointer asks as well: what a tooltip
+    // hangs from has to be where the words actually went.
+    let bar_text = status::BarText {
+        current,
+        reading: input.reading.as_ref(),
+        index: input.index,
+        count: input.count,
+        deleted: input.deleted,
+    };
+    let words = status::top_bar(text, top, zoom_button.x, &bar_text);
+
+    if let Some(counter) = &words.counter {
         frame.text_clipped(
-            [BAR_PADDING, top_baseline],
+            [counter.x, top_baseline],
             TEXT_SIZE,
             theme.text_dim,
-            (facts_x - BAR_PADDING).max(1.0),
-            counter,
+            counter.room,
+            counter.text.clone(),
         );
-        name_x += width + COUNTER_GAP;
+        tips.offer(Tip::Counter, counter.strip(top));
     }
-    // In front of the name, on the side of the bar the name is read from, so
-    // that it is seen before the file it is about rather than after it.
-    if input.deleted {
-        let width = text.measure_text(status::DELETED, TEXT_SIZE)[0];
+    if let Some(deleted) = &words.deleted {
         frame.text_clipped(
-            [name_x, top_baseline],
+            [deleted.x, top_baseline],
             TEXT_SIZE,
             theme.warning,
-            (facts_x - PADDING - name_x).max(1.0),
-            status::DELETED.to_string(),
+            deleted.room,
+            deleted.text.clone(),
         );
-        name_x += width + COUNTER_GAP;
     }
     frame.text_clipped_bold(
-        [name_x, top_baseline],
+        [words.name.x, top_baseline],
         TEXT_SIZE,
         theme.text_bright,
-        (facts_x - PADDING - name_x).max(1.0),
-        status::top_label(&current.label, input.reading.as_ref()),
+        words.name.room,
+        words.name.text.clone(),
     );
-    frame.text([facts_x, top_baseline], TEXT_SIZE, theme.text_dim, facts);
+    tips.offer(Tip::Name, words.name.strip(top));
+    frame.text(
+        [words.facts.x, top_baseline],
+        TEXT_SIZE,
+        theme.text_dim,
+        words.facts.text.clone(),
+    );
 
     buttons::zoom_button(
         &mut frame,
@@ -430,6 +474,7 @@ pub fn build_frame(
         panels.hover == Some(Widget::Zoom),
         theme,
     );
+    tips.offer(Tip::Widget(Widget::Zoom), zoom_button);
 
     buttons::grid_button(
         &mut frame,
@@ -439,6 +484,7 @@ pub fn build_frame(
         panels.hover == Some(Widget::Grid),
         theme,
     );
+    tips.offer(Tip::Widget(Widget::Grid), grid_button);
     buttons::minimap_button(
         &mut frame,
         chrome.minimap_button,
@@ -446,6 +492,7 @@ pub fn build_frame(
         panels.hover == Some(Widget::Minimap),
         theme,
     );
+    tips.offer(Tip::Widget(Widget::Minimap), chrome.minimap_button);
     if panels.paste {
         buttons::paste_button(
             &mut frame,
@@ -453,6 +500,7 @@ pub fn build_frame(
             panels.hover == Some(Widget::Paste),
             theme,
         );
+        tips.offer(Tip::Widget(Widget::Paste), chrome.paste_button);
     }
     buttons::histogram_button(
         &mut frame,
@@ -461,6 +509,7 @@ pub fn build_frame(
         panels.hover == Some(Widget::Histogram),
         theme,
     );
+    tips.offer(Tip::Widget(Widget::Histogram), chrome.histogram_button);
     buttons::info_button(
         &mut frame,
         chrome.info_button,
@@ -468,6 +517,7 @@ pub fn build_frame(
         panels.hover == Some(Widget::Info),
         theme,
     );
+    tips.offer(Tip::Widget(Widget::Info), chrome.info_button);
 
     // Bottom panel: what is happening to the image. The pointer comes and
     // goes on its own, and the rest changes as the view is worked.
@@ -497,8 +547,19 @@ pub fn build_frame(
     if let Some(open) = panels.menu
         && let Some(popup) = chrome.popup(open, spacing.as_deref())
     {
+        // Its cells are named like anything else, and are offered from here
+        // rather than from inside the menu so that every tooltip in the frame
+        // is collected in one place.
+        for (index, cell) in popup.cells() {
+            tips.offer(Tip::Widget(Widget::Cell(index)), cell);
+        }
         frame.over(|frame| menu::draw(frame, text, &popup, view, zoom, panels, theme));
     }
+
+    // On its own layer above even that: what a tooltip names can be on the
+    // menu, and a label hidden by the thing it is about says nothing. It goes
+    // in the content area, off the chrome the thing it names is part of.
+    tips.draw(&mut frame, text, content, theme);
     frame
 }
 

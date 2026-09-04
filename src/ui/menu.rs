@@ -49,6 +49,27 @@ pub enum Menu {
     Zoom,
 }
 
+/// What a cell of a menu is, for anything outside the menu that has to say
+/// something about it: the words that name the choice, and which of the
+/// interface's cycles it belongs to.
+///
+/// The cycle rather than the key: which key runs a cycle is the
+/// application's, and a menu that named one would be a second place for a
+/// binding to be written down.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct CellTip {
+    pub label: &'static str,
+    pub cycle: Cycle,
+}
+
+/// A cycle a key steps through, which is how the keyboard reaches what a cell
+/// of a menu sets directly.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Cycle {
+    Fit,
+    Upscale,
+}
+
 impl Menu {
     pub fn sections(self) -> &'static [PopupSection] {
         match self {
@@ -66,6 +87,39 @@ impl Menu {
             heading: MENU_HEADING,
             heading_gap: MENU_HEADING_GAP,
             section_gap: MENU_SECTION_GAP,
+        }
+    }
+
+    /// What cell `index` is, for the tooltip that names it. `None` for a
+    /// cell that already says what it is: a zoom cell wears its own
+    /// percentage, and there is nothing a tooltip could add to "200%".
+    pub fn cell_tip(self, index: usize) -> Option<CellTip> {
+        match self {
+            Menu::Zoom => match ZOOM_CHOICES.get(index)? {
+                ZoomChoice::Scale(_) => None,
+                ZoomChoice::Fit(Fit::Whole) => Some(CellTip {
+                    label: "Fit the whole image",
+                    cycle: Cycle::Fit,
+                }),
+                ZoomChoice::Fit(Fit::Width) => Some(CellTip {
+                    label: "Fit the image's width",
+                    cycle: Cycle::Fit,
+                }),
+                ZoomChoice::Fit(Fit::Height) => Some(CellTip {
+                    label: "Fit the image's height",
+                    cycle: Cycle::Fit,
+                }),
+                // What the filter does, rather than what it is called: the
+                // cell is already wearing the name.
+                ZoomChoice::Filter(Upscale::Nearest) => Some(CellTip {
+                    label: "Magnify to hard pixel edges",
+                    cycle: Cycle::Upscale,
+                }),
+                ZoomChoice::Filter(Upscale::Bicubic) => Some(CellTip {
+                    label: "Magnify smoothly",
+                    cycle: Cycle::Upscale,
+                }),
+            },
         }
     }
 
