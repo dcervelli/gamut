@@ -11,7 +11,7 @@ use crate::render::{Color, Popup, PopupGrid, PopupSection, Rect, TextMeasure, Ui
 use crate::theme::Theme;
 use crate::view::{Fit, View, Viewport};
 
-use super::buttons::{button_ink, centred_text, percent};
+use super::buttons::{button_ink, centered_text, percent};
 use super::icon;
 use super::{PADDING, Panels, TEXT_SIZE, Widget};
 
@@ -267,7 +267,7 @@ pub(super) fn draw(
                 frame.rounded_rect(cell, CELL_RADIUS, background);
                 match choice {
                     ZoomChoice::Scale(scale) => {
-                        centred_text(frame, text, cell, ink, &percent(scale))
+                        centered_text(frame, text, cell, ink, &percent(scale))
                     }
                     ZoomChoice::Fit(fit) => fit_icon(frame, cell, fit, background, ink),
                     // In words, where the fits above are in arrows: the two
@@ -275,7 +275,7 @@ pub(super) fn draw(
                     // picture of "bicubic" a reader would arrive at unaided.
                     // Their cells are cut wider so there is room to say so.
                     ZoomChoice::Filter(filter) => {
-                        centred_text(frame, text, cell, ink, filter.label())
+                        centered_text(frame, text, cell, ink, filter.label())
                     }
                 }
             }

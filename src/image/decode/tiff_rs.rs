@@ -66,7 +66,7 @@ impl super::Decoder for TiffRs {
             // The decoder expands indexed data to RGB for us.
             tiff::ColorType::RGB(_) | tiff::ColorType::Palette(_) => Channels::Rgb,
             tiff::ColorType::RGBA(_) => Channels::Rgba,
-            other => bail!("unsupported TIFF colour type {other:?}"),
+            other => bail!("unsupported TIFF color type {other:?}"),
         };
 
         super::check_decoded_size(width, height, channels.count(), bit_depth(color))?;
@@ -123,8 +123,8 @@ fn resident_bits(result: &DecodingResult) -> u8 {
 /// the program works in.
 ///
 /// Signed and wide integer rasters become floats rather than being rescaled:
-/// an elevation model holds metres, and -86 at the Dead Sea is a real value,
-/// not something to normalise away. The display window is what turns them into
+/// an elevation model holds meters, and -86 at the Dead Sea is a real value,
+/// not something to normalize away. The display window is what turns them into
 /// something visible.
 fn into_samples(result: DecodingResult, channels: Channels) -> Result<Samples> {
     fn floats<T: Copy, F: Fn(T) -> f32>(data: Vec<T>, convert: F) -> Vec<f32> {

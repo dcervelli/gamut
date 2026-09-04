@@ -5,12 +5,12 @@ pixels, and where each format will surprise you.
 
 | Format | Extensions | Depth kept | What the file can tell us |
 | --- | --- | --- | --- |
-| PNG | `.png` | 8 and 16-bit | Colour space, including HDR; ICC profile |
+| PNG | `.png` | 8 and 16-bit | Color space, including HDR; ICC profile |
 | JPEG | `.jpg` `.jpeg` `.jpe` `.jfif` | 8-bit | ICC profile; HDR gain map |
 | GIF | `.gif` | 8-bit | Nothing — always sRGB |
 | TIFF | `.tif` `.tiff` | 8 to 64-bit, integer or float | Nothing — inferred from depth |
 | WebP | `.webp` | 8-bit | ICC profile; orientation |
-| HEIF | `.heic` `.heif` `.hif` `.avif` | 8, 10 and 12-bit | Colour space, including HDR; ICC profile; orientation |
+| HEIF | `.heic` `.heif` `.hif` `.avif` | 8, 10 and 12-bit | Color space, including HDR; ICC profile; orientation |
 | ICO | `.ico` | Whatever the chosen icon holds | ICC profile, for the larger icons |
 | BMP | `.bmp` | 8-bit | Nothing — always sRGB |
 | Netpbm | `.pnm` `.pbm` `.pgm` `.ppm` `.pam` | 8 and 16-bit | Nothing — always sRGB |
@@ -69,11 +69,11 @@ is then held whole in memory and in graphics memory. Expect a large file to
 cost somewhat more than its decoded size while it loads.
 
 **An untagged file is treated as sRGB**, which is what every format here has
-always meant in the absence of anything better. Where a file states its colour
+always meant in the absence of anything better. Where a file states its color
 space, that is believed instead; where it states it twice and the two
 disagree, the more precise statement wins.
 
-**Only part of an ICC profile is used.** The primaries are recognised if they
+**Only part of an ICC profile is used.** The primaries are recognized if they
 are sRGB, Display P3, BT.2020 or Adobe RGB, and the tone response is taken
 only where the profile states a simple power law. A profile that describes
 some other gamut, or that describes itself with lookup tables, or that is for
@@ -86,8 +86,8 @@ assumed to mean, for every file opened in that run. This matters most for
 TIFF, which says nothing at all.
 
 **Depth and channels survive.** A 16-bit scan stays 16-bit, floating-point
-data stays floating point, and a greyscale image stays single-channel rather
-than being expanded to colour — which is a quarter of the memory on a large
+data stays floating point, and a grayscale image stays single-channel rather
+than being expanded to color — which is a quarter of the memory on a large
 scan. The formats that cannot preserve them say so below.
 
 **How a file opens follows from what it is.** Content already graded for a
@@ -118,12 +118,12 @@ display settings.
 
 ## PNG
 
-Everything the format holds: 8 and 16-bit, greyscale or colour, with or
+Everything the format holds: 8 and 16-bit, grayscale or color, with or
 without alpha, indexed, interlaced, and the sub-byte depths, which arrive
 expanded. Transparency on an indexed image becomes a real alpha channel.
 
 PNG is one of only two formats here that can state outright that it is HDR,
-and when it does — BT.2100 PQ or HLG — that is read and honoured. An ICC
+and when it does — BT.2100 PQ or HLG — that is read and honored. An ICC
 profile is read where there is no such statement, so a Display P3 PNG shows as
 Display P3.
 
@@ -132,7 +132,7 @@ non-animated reader sees.
 
 ## JPEG
 
-Baseline and progressive, 8-bit, greyscale or colour, at any chroma
+Baseline and progressive, 8-bit, grayscale or color, at any chroma
 subsampling. Arithmetic-coded and lossless JPEG do not open, nor do 12-bit
 files; all three are rare and none is produced by a camera.
 
@@ -160,17 +160,17 @@ you decide what to do with it.
   a stereo pair, opens as an ordinary JPEG.
 
 **CMYK JPEGs open**, but the conversion to RGB does not use the file's CMYK
-profile, so the colours are approximate.
+profile, so the colors are approximate.
 
 ## GIF
 
-Opens, and there is little to say: the format carries no colour information,
+Opens, and there is little to say: the format carries no color information,
 no orientation and no depth beyond 8-bit, and its palette is sRGB by
 definition. Interlaced files are fine.
 
 Transparency in a GIF is one palette entry that is a hole — all or nothing,
 with no partial transparency anywhere in the format — and the pixel behind the
-hole has no colour of its own, unlike a transparent pixel in a PNG.
+hole has no color of its own, unlike a transparent pixel in a PNG.
 
 An animated GIF shows its first frame on the full canvas the file declares, so
 a first frame stored as a small patch still arrives at the right size rather
@@ -185,29 +185,29 @@ compressed with LZW, Deflate, PackBits or CCITT Group 4:
 - 8, 16 and 32-bit unsigned integers;
 - signed integers and 64-bit values, widened to float with their signs intact;
 - 16, 32 and 64-bit floating point;
-- greyscale or colour, with or without alpha, and indexed colour.
+- grayscale or color, with or without alpha, and indexed color.
 
 Single-band floating-point rasters — which is what an elevation model or a
 scientific image usually is — stay single-band all the way to the screen, at a
-quarter of the memory that expanding them to colour would cost.
+quarter of the memory that expanding them to color would cost.
 
-**Values are never rescaled.** An elevation model holds metres, and −86 metres
-at the Dead Sea is a real reading, not something to normalise away. The
+**Values are never rescaled.** An elevation model holds meters, and −86 meters
+at the Dead Sea is a real reading, not something to normalize away. The
 display window (`e`, `a`, `s`, `A`, `S`) is what brings a range into view, and
 its bounds are reported in the file's own units.
 
-**A no-data value is honoured** where the file records one, and kept out of
+**A no-data value is honored** where the file records one, and kept out of
 the statistics — so a clipped raster's −9999 fill cannot set the bottom of the
 automatic window and squash the real terrain into a sliver.
 
 Caveats:
 
-- **A TIFF says nothing about colour.** No profile is read, and the tone
+- **A TIFF says nothing about color.** No profile is read, and the tone
   response is inferred from depth: 8-bit is taken as sRGB, anything deeper as
   linear measurement data. That is right nearly always and wrong for a 16-bit
   *scanned photograph*, which looks washed out until you pass `--transfer
   srgb`.
-- CMYK, YCbCr and Lab TIFFs are refused, naming the colour type. This takes
+- CMYK, YCbCr and Lab TIFFs are refused, naming the color type. This takes
   JPEG-compressed TIFFs with it, since they are almost always stored as
   YCbCr; ZSTD- and WebP-compressed TIFFs do not open either.
 - Multi-page files show the first page.
@@ -219,21 +219,21 @@ Both kinds and the container that holds either: lossy, lossless, and
 transparency in either.
 
 - The **ICC profile** is read, and is the only thing a WebP can say about its
-  own colour. Without one it means sRGB.
+  own color. Without one it means sRGB.
 - The **orientation is applied**, one of only two places a rotation tag is
-  honoured.
+  honored.
 - An **animated** WebP shows its first frame on the full canvas, so a first
   frame stored as a partial patch arrives whole.
 
-Nothing in WebP goes above 8 bits or outside three colour channels, so there
-is no depth to preserve and no greyscale encoding: a grey WebP is a grey
-colour WebP.
+Nothing in WebP goes above 8 bits or outside three color channels, so there
+is no depth to preserve and no grayscale encoding: a gray WebP is a gray
+color WebP.
 
 ## HEIF — HEIC and AVIF
 
 The one format that does not have to be guessed at. Where a 16-bit TIFF leaves
 you to work out whether it is a photograph or a frame of sensor readings, a
-HEIF file states its colour space outright, so a Display P3 photograph from a
+HEIF file states its color space outright, so a Display P3 photograph from a
 phone and a BT.2100 PQ frame both land in the right space with no flag from
 you. An ICC profile is read where a file carries one instead.
 
@@ -261,16 +261,16 @@ Caveats:
 An ICO is not one image but a folder of them — the same picture at 16, 32, 48
 and 256 pixels, so Windows can pick the size that fits where it is drawing. A
 viewer has no such slot, so it has to choose, and this one shows the largest
-icon, breaking a tie on colour depth. The others are not reachable.
+icon, breaking a tie on color depth. The others are not reachable.
 
 That is deliberately the opposite of the usual choice, which is to prefer the
 deepest icon: in a file whose 256-pixel icon uses a palette and whose 16-pixel
-icon is full colour, preferring depth shows you a thumbnail.
+icon is full color, preferring depth shows you a thumbnail.
 
 Both kinds of icon are read. The larger ones are stored as PNG and get
 everything the PNG support offers, so an icon can be Display P3 and can be
-greyscale. The smaller ones are bitmaps, and their transparency mask is
-applied, which is how a 16-colour icon has a transparent background; a bitmap
+grayscale. The smaller ones are bitmaps, and their transparency mask is
+applied, which is how a 16-color icon has a transparent background; a bitmap
 icon always arrives with an alpha channel whatever its stored depth.
 
 A cursor (`.cur`) uses the same container with different fields and is not
@@ -282,25 +282,25 @@ Opens, whatever the variant: 1, 4, 8, 16, 24 and 32 bits per pixel, palettes,
 run-length compression, and rows stored either way up. Files with an alpha
 channel keep it.
 
-The format carries no colour information this program reads, so a BMP is
-always taken as sRGB. Some are written with a colour space recorded in the
+The format carries no color information this program reads, so a BMP is
+always taken as sRGB. Some are written with a color space recorded in the
 header, and that is ignored; if you know a particular file means something
 else, `--transfer` and `--primaries` are the way to say so.
 
 ## Netpbm — PBM, PGM, PPM and PAM
 
 Opens in every member of the family, in both the ASCII and the binary
-spellings, at 8 or 16 bits per sample, greyscale or colour. PAM files carrying
+spellings, at 8 or 16 bits per sample, grayscale or color. PAM files carrying
 an alpha channel keep it; the other three have no alpha to carry.
 
-Any brightness scale is honoured. Netpbm lets a file declare what a fully
+Any brightness scale is honored. Netpbm lets a file declare what a fully
 bright sample is, and instrument output often says 1023 or 4095 rather than
 the full width of the sample — a file like that is read at the brightness it
 was meant to have rather than a fraction of it.
 
-The format says nothing about colour, so its files are taken as sRGB. That is
+The format says nothing about color, so its files are taken as sRGB. That is
 what the specification calls for, but a pipeline writing linear measurements
-into a greyscale file is common and looks no different from the inside: if a
+into a grayscale file is common and looks no different from the inside: if a
 `.pgm` opens looking washed out, `--transfer linear` is the correction.
 
 ## Radiance HDR
@@ -320,7 +320,7 @@ premultiplied, which is the format's own convention.
 
 The limits are worth knowing before reaching for EXR as a data container:
 
-- **Colour channels only.** A file whose channels are a single luminance,
+- **Color channels only.** A file whose channels are a single luminance,
   a depth pass, motion vectors or any other arbitrary output will not open.
   For single-channel measurement data, TIFF is the format that works here.
 - Only the first layer is shown, and the others are not reachable.

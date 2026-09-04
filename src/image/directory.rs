@@ -241,7 +241,7 @@ mod tests {
         assert_eq!(
             f64::from_le_bytes(bytes[..8].try_into().unwrap()),
             10.0,
-            "a pixel is ten metres"
+            "a pixel is ten meters"
         );
     }
 

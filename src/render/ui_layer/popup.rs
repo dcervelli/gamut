@@ -41,7 +41,7 @@ pub struct PopupGrid {
     /// not: cells of a height read as one panel, and a row that stood taller
     /// than the row above it would read as a different kind of control.
     pub cell_height: f32,
-    /// Between neighbouring cells.
+    /// Between neighboring cells.
     pub gap: f32,
     /// Between the outermost cells and the panel's edge.
     pub padding: f32,
@@ -91,7 +91,7 @@ impl Popup {
     /// Hung from the button rather than pinned to a corner of the window: a
     /// menu that appears somewhere other than under the thing pressed makes
     /// the reader look for it. `area` is only the bound it may not leave, so
-    /// a menu is free to lie over whatever its button's neighbours are.
+    /// a menu is free to lie over whatever its button's neighbors are.
     ///
     /// The panel is cut for the widest row any section asks for; every
     /// section then lays its own cells out from the same left edge, at its

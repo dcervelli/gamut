@@ -1,6 +1,6 @@
 //! Draws the image into the linear working-space target.
 //!
-//! Everything colour-related that varies per frame lives in one uniform, so
+//! Everything color-related that varies per frame lives in one uniform, so
 //! changing exposure, the window or the colormap costs a buffer write rather
 //! than a re-decode. Resampling is chosen the same way: which filter to run
 //! and which level of the coarse chain to read are two more fields in it.
@@ -89,8 +89,8 @@ pub struct ImageLayer {
 }
 
 impl GpuImage {
-    /// Whether the image has one channel of colour, which is what decides
-    /// whether a false colour is on it.
+    /// Whether the image has one channel of color, which is what decides
+    /// whether a false color is on it.
     pub fn is_gray(&self) -> bool {
         self.swizzle < 2
     }
@@ -120,7 +120,7 @@ impl ImageLayer {
                 layout: &pipeline_layout,
                 topology: wgpu::PrimitiveTopology::TriangleStrip,
                 format: target_format,
-                // The shader emits premultiplied colour.
+                // The shader emits premultiplied color.
                 blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
             },
         );

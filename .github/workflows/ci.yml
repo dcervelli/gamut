@@ -46,8 +46,8 @@ jobs:
 
       - name: Licensing
         # Every file in the tree is accounted for by REUSE.toml, and every
-        # licence it names has its text in LICENSES/. This is what catches a
-        # file arriving from somewhere else without its licence coming too.
+        # license it names has its text in LICENSES/. This is what catches a
+        # file arriving from somewhere else without its license coming too.
         run: reuse lint
 
       - name: The third-party notices are current

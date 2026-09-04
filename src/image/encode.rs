@@ -1,7 +1,7 @@
 //! The image as it is on screen, written out as a PNG.
 //!
 //! The picture that travels is the one the display settings have made — the
-//! window, the exposure, the tone curve, the false colour — at the image's own
+//! window, the exposure, the tone curve, the false color — at the image's own
 //! size rather than the window's. So this is not a screenshot: it is the
 //! rendering pipeline run again on the CPU, over every pixel instead of the
 //! one under the pointer.
@@ -49,8 +49,8 @@ pub struct Raster {
 /// Runs the display pipeline over every pixel of `image`.
 ///
 /// A single-channel image stays single-channel, because that is what it is and
-/// storing the same number three times says nothing more. False colour is the
-/// exception: it turns one value into a colour on purpose, and a grey PNG
+/// storing the same number three times says nothing more. False color is the
+/// exception: it turns one value into a color on purpose, and a gray PNG
 /// could not hold the result.
 ///
 /// Alpha is carried only where the file had some. An image that was opaque
@@ -123,12 +123,12 @@ fn fill(band: &mut [u8], first: u32, image: &DecodedImage, display: &Display, ch
             // picture as an SDR surface shows it, whatever the window is on.
             let mapped = display.map(&sample, Headroom::None);
             if gray {
-                // Grey reaches the screen as the same number in all three, so
+                // Gray reaches the screen as the same number in all three, so
                 // any one of them is the whole of it.
-                pixel[0] = quantise(mapped.color[0], levels);
+                pixel[0] = quantize(mapped.color[0], levels);
             } else {
                 for (slot, value) in pixel.iter_mut().zip(mapped.color) {
-                    *slot = quantise(value, levels);
+                    *slot = quantize(value, levels);
                 }
             }
             if let Some(index) = channels.alpha_index() {
@@ -162,7 +162,7 @@ pub fn png(raster: &Raster) -> Result<Vec<u8>> {
     // On content it would have chosen differently, the same fixed filter cost
     // half as much again in bytes, and the bytes are what the paste waits on.
     // Said outright rather than left to be assumed. Whatever the file's own
-    // colour space was, the window and the tone curve have taken it to what
+    // color space was, the window and the tone curve have taken it to what
     // the screen was showing, and that was resolved against sRGB.
     encoder.set_source_srgb(SrgbRenderingIntent::Perceptual);
 
@@ -199,7 +199,7 @@ fn levels() -> &'static [f32; 255] {
 /// The sRGB curve is applied here and nowhere earlier: everything upstream of
 /// this works in linear light, which is the invariant `render::upload` states
 /// and the shaders rely on.
-fn quantise(linear: f32, levels: &[f32; 255]) -> u8 {
+fn quantize(linear: f32, levels: &[f32; 255]) -> u8 {
     // How many thresholds the value has passed is the code it lands on, which
     // clamps both ends by itself: nothing under the first is 0, everything
     // over the last is 255. A NaN passes none of them and comes out 0, which
@@ -250,7 +250,7 @@ mod tests {
         Display::default()
     }
 
-    /// `(colour type, bit depth, pixel bytes)` as a PNG decoder reads them
+    /// `(color type, bit depth, pixel bytes)` as a PNG decoder reads them
     /// back, which is the only reading of the file that matters.
     fn round_trip(raster: &Raster) -> (ColorType, BitDepth, Vec<u8>) {
         let bytes = super::png(raster).expect("a valid raster encodes");
@@ -262,7 +262,7 @@ mod tests {
     }
 
     #[test]
-    fn a_grey_image_stays_one_channel() {
+    fn a_gray_image_stays_one_channel() {
         let raster = displayed(&image(Channels::Gray, vec![0, 128, 255]), &plain());
         assert_eq!(raster.channels, Channels::Gray);
         let (color, depth, pixels) = round_trip(&raster);
@@ -272,10 +272,10 @@ mod tests {
         assert_eq!(pixels, vec![0, 128, 255]);
     }
 
-    /// False colour is three components where the value was one, so the grey
+    /// False color is three components where the value was one, so the gray
     /// cannot be kept — this is the one thing that widens a single channel.
     #[test]
-    fn false_colour_makes_a_grey_image_colour() {
+    fn false_color_makes_a_gray_image_color() {
         let mut display = plain();
         display.colormap = Colormap::Viridis;
         let raster = displayed(&image(Channels::Gray, vec![0, 255]), &display);
@@ -283,7 +283,7 @@ mod tests {
         let (color, _, pixels) = round_trip(&raster);
         assert_eq!(color, ColorType::Rgb);
         // Viridis runs dark blue-purple to bright yellow; whatever the exact
-        // codes, the two ends are not grey and not each other.
+        // codes, the two ends are not gray and not each other.
         assert_eq!(pixels.len(), 6);
         assert!(pixels[2] > pixels[0], "the low end is blue: {pixels:?}");
         assert!(pixels[3] > pixels[5], "the high end is yellow: {pixels:?}");
@@ -303,9 +303,9 @@ mod tests {
         // Coverage takes no curve on the way through.
         assert_eq!(pixels[3], 128);
 
-        let grey_alpha = displayed(&image(Channels::GrayAlpha, vec![200, 64]), &plain());
-        assert_eq!(grey_alpha.channels, Channels::GrayAlpha);
-        assert_eq!(round_trip(&grey_alpha).0, ColorType::GrayscaleAlpha);
+        let gray_alpha = displayed(&image(Channels::GrayAlpha, vec![200, 64]), &plain());
+        assert_eq!(gray_alpha.channels, Channels::GrayAlpha);
+        assert_eq!(round_trip(&gray_alpha).0, ColorType::GrayscaleAlpha);
     }
 
     /// The whole point: what is copied is what the display settings made, not
@@ -371,7 +371,7 @@ mod tests {
         let levels = levels();
         for step in 0..=200_000u32 {
             let linear = step as f32 / 200_000.0;
-            let code = quantise(linear, levels);
+            let code = quantize(linear, levels);
             let exact = Transfer::Srgb.to_encoded(linear) * 255.0;
             // Half a code is the whole of the allowance, and the slack on top
             // of it is float error at a boundary rather than room to be wrong.
@@ -385,14 +385,14 @@ mod tests {
         // be exact: shown unwindowed, every one of them comes back itself.
         for code in 0..=u8::MAX {
             let linear = Transfer::Srgb.to_linear(f32::from(code) / 255.0);
-            assert_eq!(quantise(linear, levels), code);
+            assert_eq!(quantize(linear, levels), code);
         }
 
         // Both ends clamp by themselves, having either no threshold passed or
         // every one of them.
-        assert_eq!(quantise(-1.0, levels), 0);
-        assert_eq!(quantise(4.0, levels), 255);
-        assert_eq!(quantise(f32::NAN, levels), 0);
+        assert_eq!(quantize(-1.0, levels), 0);
+        assert_eq!(quantize(4.0, levels), 255);
+        assert_eq!(quantize(f32::NAN, levels), 0);
     }
 
     /// Dividing the walk between threads must not move a single pixel of it.
@@ -422,7 +422,7 @@ mod tests {
             for x in 0..width {
                 let mapped = display.map(&source.sample(x, y).unwrap(), Headroom::None);
                 for value in mapped.color {
-                    expected.push(quantise(value, levels()));
+                    expected.push(quantize(value, levels()));
                 }
                 expected.push(byte(mapped.alpha));
             }

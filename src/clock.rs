@@ -106,7 +106,7 @@ fn offset_at(at: i64) -> i64 {
 
 /// Which compiled zone to read.
 ///
-/// `TZ` naming one is honoured, since a program run under it is being asked
+/// `TZ` naming one is honored, since a program run under it is being asked
 /// for that zone's time. Only the form that names a zone — `Pacific/Auckland`,
 /// with or without the leading colon a shell convention allows — is read: a
 /// `TZ` spelling the rule out in full is a grammar of its own, and one this

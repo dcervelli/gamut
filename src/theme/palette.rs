@@ -3,13 +3,13 @@
 //!
 //! The file is not read literally. Omarchy resolves it — short names, ANSI
 //! `color0`..`color15` in both directions, shades mixed out of the base
-//! colours — before any consumer sees it, and a theme is free to define only
+//! colors — before any consumer sees it, and a theme is free to define only
 //! one side of any of those pairs. [`Palette`] reimplements that cascade
 //! rather than shelling out to `omarchy-theme-color`, which costs a process
 //! per read and is not there to be called off Omarchy anyway. The tests check
 //! the result against what that script prints for the same file.
 //!
-//! Nothing here knows what the interface does with a colour; that is
+//! Nothing here knows what the interface does with a color; that is
 //! [`super::Theme`]'s business.
 
 use std::collections::HashMap;
@@ -33,7 +33,7 @@ pub fn watch() -> Watch {
 }
 
 /// Whether the theme is meant to be read as light-on-dark or dark-on-light.
-/// The palette says which; it is not inferred from the colours here, since
+/// The palette says which; it is not inferred from the colors here, since
 /// the file's own answer is the one every other application on the desktop
 /// is using.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -53,7 +53,7 @@ pub struct Palette {
     mode: Mode,
 }
 
-/// Where Omarchy materialises the active theme. A real directory rewritten
+/// Where Omarchy materializes the active theme. A real directory rewritten
 /// wholesale on every theme change, not a symlink into a themes folder, which
 /// is why the file itself is what gets watched.
 fn colors_file() -> Option<PathBuf> {
@@ -104,8 +104,8 @@ impl Palette {
         self.mode
     }
 
-    /// One resolved key as a colour, or `None` when the theme does not define
-    /// it or defines it as something that is not a hex colour — a palette may
+    /// One resolved key as a color, or `None` when the theme does not define
+    /// it or defines it as something that is not a hex color — a palette may
     /// hold gradient angles and `rgba()` lists as well, and those are not for
     /// us.
     pub fn color(&self, key: &str) -> Option<Color> {
@@ -150,7 +150,7 @@ fn mode_name(mode: Mode) -> &'static str {
 ///
 /// A key or value holding anything outside the character set Omarchy accepts
 /// is dropped rather than passed on, so a palette cannot smuggle something
-/// unexpected in through a colour.
+/// unexpected in through a color.
 fn parse(text: &str) -> HashMap<String, String> {
     let mut values = HashMap::new();
     for line in text.lines() {
@@ -230,7 +230,7 @@ const ANSI_NAMES: [(&str, &str); 16] = [
 
 /// Fills in every key the palette does not define itself, following the same
 /// order Omarchy's own resolver does — the order matters, since later steps
-/// mix colours that earlier ones may just have supplied.
+/// mix colors that earlier ones may just have supplied.
 fn cascade(values: &mut HashMap<String, String>) {
     // The complete legacy short-name palette first, before ANSI fallbacks or
     // derived shades. A theme defining both forms keeps the canonical one.
@@ -366,7 +366,7 @@ pub(super) const BLACK: Color = Color::rgb(0, 0, 0);
 pub(super) const WHITE: Color = Color::rgb(255, 255, 255);
 
 /// `amount` of the way from `from` to `to`, per channel, on the encoded
-/// values rather than on light. Not a colour-managed blend on purpose: it has
+/// values rather than on light. Not a color-managed blend on purpose: it has
 /// to land on the same bytes as the mixes baked into every other themed
 /// config on the desktop, and those are done this way.
 pub(super) fn mix(from: Color, to: Color, amount: f32) -> Color {
@@ -388,7 +388,7 @@ fn hex(color: Color) -> String {
 
 /// `#rrggbb` or its three-digit short form, with or without the `#`. Anything
 /// else in a palette — an `rgba()` list, a gradient angle, a bare word — is
-/// not a colour this interface can use and comes back as `None`.
+/// not a color this interface can use and comes back as `None`.
 fn parse_hex(value: &str) -> Option<Color> {
     let digits = value.trim().strip_prefix('#').unwrap_or(value.trim());
     if !digits.chars().all(|c| c.is_ascii_hexdigit()) {
@@ -560,7 +560,7 @@ mod tests {
             ("color5", "#cba6f7"),
             ("magenta", "#cba6f7"),
             ("color7", "#cdd6f4"),
-            // No eighth colour and no dark foreground, so the muted grey the
+            // No eighth color and no dark foreground, so the muted gray the
             // slot holds falls all the way back to the foreground.
             ("color8", "#cdd6f4"),
             ("muted", "#cdd6f4"),
@@ -579,8 +579,8 @@ mod tests {
     #[test]
     fn a_shade_with_nothing_to_mix_from_is_left_unset() {
         // The resolver every other consumer uses mixes from the empty string
-        // here and lands on a grey nobody chose. Saying nothing instead is
-        // what lets the interface fall back to a colour that was chosen.
+        // here and lands on a gray nobody chose. Saying nothing instead is
+        // what lets the interface fall back to a color that was chosen.
         let palette = palette(SPARSE);
         for absent in ["red", "green", "blue", "brown", "bright_red"] {
             assert_eq!(palette.color(absent), None, "{absent}");

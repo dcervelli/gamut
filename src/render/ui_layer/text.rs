@@ -105,12 +105,12 @@ impl Text {
     ///
     /// What a label is placed by when it has to sit level with a mark beside
     /// it. A run is laid out in a box that reserves room under the baseline
-    /// for descenders, and cosmic-text centres that whole box in the line; so
-    /// centring the line in a button leaves a label with no descenders in it
+    /// for descenders, and cosmic-text centers that whole box in the line; so
+    /// centering the line in a button leaves a label with no descenders in it
     /// — a percentage, a count of pixels — visibly low against the mark
     /// beside it. The eye levels text on its capitals, so that is what this
     /// measures.
-    pub(super) fn cap_centre(&mut self, size: f32, face: Face) -> f32 {
+    pub(super) fn cap_center(&mut self, size: f32, face: Face) -> f32 {
         // Disjoint field borrows: the run below holds the buffer while the
         // font it was shaped with is looked up.
         let Self {

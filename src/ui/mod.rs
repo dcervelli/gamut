@@ -57,7 +57,7 @@ pub(super) const BECOMES: &str = "\u{00bb}";
 /// about one file.
 const COUNTER_GAP: f32 = 8.0;
 
-/// The gap between two neighbours: what floats over the content area from the
+/// The gap between two neighbors: what floats over the content area from the
 /// edge of that area, and one thing in a bar from the next.
 ///
 /// Not what a bar is inset by at its ends — that is
@@ -71,7 +71,7 @@ const PANEL_INSET: f32 = 10.0;
 /// How wide the panels that float over the content area are. The histogram
 /// fixes it: wide enough that a bin is exactly one logical pixel, which is
 /// what keeps its bars evenly spaced instead of some of them landing astride
-/// a pixel boundary and coming out fatter than their neighbours. The
+/// a pixel boundary and coming out fatter than their neighbors. The
 /// information panel takes the same width so that the two line up down the
 /// right of the window, whether or not either has anything else on it.
 const PANEL_WIDTH: f32 = histogram::TOOLBAR_WIDTH + BINS as f32 + 2.0 * PANEL_INSET;
@@ -107,7 +107,7 @@ pub enum Widget {
     Planes,
     Log,
     Reset,
-    /// One of the false colours offered under that panel's ramp, by its place
+    /// One of the false colors offered under that panel's ramp, by its place
     /// in [`crate::image::display::Colormap::ALL`].
     Ramp(usize),
     /// The switch between the SDR and the HDR surface, at the end of the
@@ -239,7 +239,7 @@ pub struct FrameInput {
     /// which is half of what every readout of a value has to say.
     pub headroom: Headroom,
     /// Whether the switch has anything to switch: the driver offers an HDR
-    /// colour space for this window, and the monitor is not known to be in
+    /// color space for this window, and the monitor is not known to be in
     /// SDR mode. The switch is drawn dead otherwise.
     pub hdr_available: bool,
     /// What the pointer has rested on long enough to be told about, and what
@@ -263,7 +263,7 @@ impl TextMeasure for Monospace {
 
     /// Every glyph is a `size` square sitting on the top of its line here, so
     /// its middle is half a square down.
-    fn cap_centre(&mut self, size: f32) -> f32 {
+    fn cap_center(&mut self, size: f32) -> f32 {
         size / 2.0
     }
 
@@ -584,7 +584,7 @@ pub fn build_frame(
     frame
 }
 
-/// What the compositor paints behind the image: the panel colour, with the
+/// What the compositor paints behind the image: the panel color, with the
 /// theme's hairline as the other square of the checkerboard.
 pub fn backdrop(theme: &Theme) -> Backdrop {
     Backdrop {
@@ -594,13 +594,13 @@ pub fn backdrop(theme: &Theme) -> Backdrop {
     }
 }
 
-/// Where text has to start to sit centred in a bar of `BAR_HEIGHT`.
+/// Where text has to start to sit centered in a bar of `BAR_HEIGHT`.
 ///
 /// The line's own box, descenders and all, rather than the capitals that
-/// [`buttons::centred_text`] levels a label by: what a bar carries is prose —
+/// [`buttons::centered_text`] levels a label by: what a bar carries is prose —
 /// a file's name, a readout — where descenders are ordinary and the room
 /// under the baseline is room the words actually use. A button's label is
-/// levelled against the mark beside it instead, which is a different job.
+/// leveled against the mark beside it instead, which is a different job.
 fn text_baseline(bar: Rect) -> f32 {
     bar.y + (bar.height - TEXT_SIZE * 1.3) / 2.0
 }

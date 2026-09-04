@@ -1,6 +1,6 @@
 # gamut
 
-A GPU-accelerated image previewer with real colour management: Rust, `winit`
+A GPU-accelerated image previewer with real color management: Rust, `winit`
 for the window, `wgpu` for the drawing, `glyphon` for the text.
 
 Handles ordinary photographs, 16-bit and floating-point measurement data, and
@@ -73,7 +73,7 @@ Both ship as standard on the distributions above.
 | `e` | Cycle the automatic window: unit → min/max → 99.8% |
 | `t` | Cycle tone mapping: none → reinhard → neutral |
 | `o` | Toggle HDR output, where the monitor is in HDR mode |
-| `r` | Cycle false colour (single-channel images) |
+| `r` | Cycle false color (single-channel images) |
 | `z` | Reset display settings |
 
 `Ctrl+V` also has a button, in the left strip under the minimap toggle, and
@@ -123,7 +123,7 @@ the button stays lit, and the minimap returns without being asked for again.
 The thumbnail is not a separate rendering of the image: it is a second quad in
 the image layer's pass, drawn from the same texture through the same shader as
 the view itself, reading whichever coarse level suits the size it is drawn at.
-Exposure, the display window, false colour and tone mapping therefore reach it
+Exposure, the display window, false color and tone mapping therefore reach it
 without any of that being reimplemented for a widget, and it costs one more
 draw call and a second uniform. Only the border and the wash over what is off
 screen belong to the interface, which is why both are drawn hollow or
@@ -160,7 +160,7 @@ Two things hold still through that. The file on screen is never dropped from
 the list, whatever has happened to it on disk: its pixels are up and correct,
 and everything the interface says about them — the title, the bars, the
 information panel — is read off the path they came from. It keeps its
-neighbours too, so `]` from a file deleted under you goes on to whatever has
+neighbors too, so `]` from a file deleted under you goes on to whatever has
 taken its place rather than back over one already seen. And the list is only
 rebuilt between reads, since a rebuild moves the file on screen to a new index
 and a reply already on its way is aimed at the old one; a change noticed
@@ -168,8 +168,8 @@ during a read is simply seen again at a later look.
 
 ## Theme
 
-The interface takes its colours from the desktop rather than carrying its own.
-On [Omarchy](https://omarchy.org) the active theme is materialised as a
+The interface takes its colors from the desktop rather than carrying its own.
+On [Omarchy](https://omarchy.org) the active theme is materialized as a
 palette file, and `src/theme/` reads it, resolves it, and derives the
 handful of roles the chrome actually needs — panel, hairline, primary and dim
 text, accent, the menu panel, the ground the panels that float over the image
@@ -184,7 +184,7 @@ wearable rather than to black on black.
 
 The palette is not read literally. Omarchy resolves it through an alias and
 derivation cascade before any consumer sees it — short names, ANSI `color0`
-through `color15` in both directions, shades mixed out of the base colours —
+through `color15` in both directions, shades mixed out of the base colors —
 and a theme is free to define only one side of any of those pairs.
 `src/theme/palette.rs` reimplements that cascade rather than shelling out to
 `omarchy-theme-color`, which would cost a process per read and is not there to
@@ -206,11 +206,11 @@ gets when `lighter_background` resolves back to the background it sits on.
 Two more resist being themed and are not:
 
 * **The histogram's plot is drawn on a near-black ground, in the primaries
-  themselves.** The plot is drawn by screening the colour planes over one
+  themselves.** The plot is drawn by screening the color planes over one
   another, and screening only reads on a dark ground: what is under the plot
   is added to every plane, so a ground light enough to see lifts each plane's
   darkest channel several times over and three overlapping planes come out as
-  three washes of the same pale colour. Pure red, green and blue on a
+  three washes of the same pale color. Pure red, green and blue on a
   near-black are the one set that behaves: two planes overlapping give the
   secondary between them and all three give white, which is the reading a
   channel histogram is looked at for — and is the same reading in every
@@ -218,7 +218,7 @@ Two more resist being themed and are not:
 
   Themed planes were tried: each pulled towards its own primary and then
   scaled, whole, until the three screened together landed on a neutral mid
-  grey. It works, in the sense that no theme blows the plot out — but the
+  gray. It works, in the sense that no theme blows the plot out — but the
   overlaps come out muddier the further a palette sits from the primaries, so
   how much a histogram can be read depends on the desktop's taste in reds.
   That is the wrong thing to make themeable.
@@ -228,17 +228,17 @@ Two more resist being themed and are not:
   it as the bars carry — the same panel the file's information is read on, and
   the same one a popup's cells sit on, that last held nearer to opaque since
   the picture coming through a menu is what the choices on it compete with.
-* **The luminance plane is a neutral grey.** It stands for a pixel's value
+* **The luminance plane is a neutral gray.** It stands for a pixel's value
   rather than for one of its channels, so a hue on it would read as a fourth
-  colour.
+  color.
 
-## Colour management
+## Color management
 
 The one invariant everything else follows from:
 
 > **A sampled texel is always linear in the working space** — because the data
 > was linear already, because the format's hardware decode produces it, or
-> because we linearised on the way in.
+> because we linearized on the way in.
 
 It matters because a format's own decode — sRGB or otherwise — happens as part
 of reading a texel, before anything is weighted against anything else, while a
@@ -253,8 +253,8 @@ HDR content to survive until tone mapping.
 
 | Source | Stored as |
 | --- | --- |
-| 8-bit sRGB colour | `Rgba8UnormSrgb` — hardware decodes, filtering stays correct |
-| 8-bit sRGB grey | `R16Float` — there is no `R8UnormSrgb`, so a LUT linearises it |
+| 8-bit sRGB color | `Rgba8UnormSrgb` — hardware decodes, filtering stays correct |
+| 8-bit sRGB gray | `R16Float` — there is no `R8UnormSrgb`, so a LUT linearizes it |
 | 16-bit linear | `R16Unorm` / `Rgba16Unorm`, or half float where unsupported |
 | 16-bit encoded | half float via a 65536-entry LUT |
 | 32-bit float | `R32Float` / `Rgba32Float`, or half float if the GPU cannot filter them |
@@ -262,7 +262,7 @@ HDR content to survive until tone mapping.
 Alpha is coverage, never light, so it is never put through a transfer
 function. Three-channel data is expanded to four because no graphics API has a
 three-component sampled texture; one- and two-channel data is *not* expanded,
-so a 20000×20000 16-bit grey scan costs 800 MB rather than 3.2 GB.
+so a 20000×20000 16-bit gray scan costs 800 MB rather than 3.2 GB.
 
 ### Display-referred and scene-referred
 
@@ -300,10 +300,10 @@ once, in the compositor, by two things.
 room above it, and shows the highlights at the brightness they were graded to.
 
 Which surface the window gets follows the monitor. A driver reports an HDR
-colour space whether or not the monitor in front of you is HDR — wgpu's
+color space whether or not the monitor in front of you is HDR — wgpu's
 `display_hdr_info` comes back empty everywhere but Windows and macOS — but on
 Wayland the compositor knows, and says: every output carries an image
-description under the colour-management protocol, and `monitor.rs` reads
+description under the color-management protocol, and `monitor.rs` reads
 them on a connection of its own and listens for changes. A monitor in HDR
 mode gets the HDR surface, one in SDR mode gets the sRGB one, and a window
 carried from one to the other switches on the way. Asking the other way
@@ -318,7 +318,7 @@ the monitor is.
 the room rather than the surface: on a monitor in HDR mode it turns the
 headroom off and on, and the compositor clips at white in between, with the
 surface left where it is so that the compositor is asked for nothing. It is
-drawn dead, and `o` says why, on a monitor in SDR mode or where no HDR colour
+drawn dead, and `o` says why, on a monitor in SDR mode or where no HDR color
 space is offered. Off Wayland, or under a compositor without the protocol,
 nothing says what the monitor is, and the switch moves the surface itself as
 it used to.
@@ -346,13 +346,13 @@ is on, and `clip` when there is none, the surface is SDR and there are
 highlights being thrown away — so an ordinary photograph pushed a stop up says
 so, and the picture never goes flat at the top in silence.
 
-False colour (`r`, or `--colormap`) applies to single-channel images, and
+False color (`r`, or `--colormap`) applies to single-channel images, and
 holds the curve at a clip while active, on either surface — a curve on top of
 a colormap would distort the mapping you are reading values off, and there is
-no colour past the end of the ramp for headroom to show as.
+no color past the end of the ramp for headroom to show as.
 
 Two things the HDR path does not do, deliberately for now: it clips wide-gamut
-colour to BT.709 even on scRGB, which could carry the negatives a P3 or
+color to BT.709 even on scRGB, which could carry the negatives a P3 or
 BT.2020 file produces; and a scene-referred file on an HDR surface is still
 windowed to 0..1, since without a reference white there is nothing to put
 above it — widen the window or raise the exposure to use the room.
@@ -367,11 +367,11 @@ the image is for, so it is a setting:
 
 | Filter | What it is for |
 | --- | --- |
-| `nearest` (default) | Nearest neighbour, ramped across the single output pixel that straddles a texel edge. Shows the pixel grid a measurement image is read on. At a whole-number zoom it is exactly nearest neighbour; at 4.5:1 it resolves the half-covered pixel rather than doubling columns unevenly, which is what plain nearest does. |
-| `bicubic` | Catmull-Rom. Interpolating, so texel centres come through untouched, and noticeably sharper than bilinear. What you want when the subject is a photograph. |
+| `nearest` (default) | Nearest neighbor, ramped across the single output pixel that straddles a texel edge. Shows the pixel grid a measurement image is read on. At a whole-number zoom it is exactly nearest neighbor; at 4.5:1 it resolves the half-covered pixel rather than doubling columns unevenly, which is what plain nearest does. |
+| `bicubic` | Catmull-Rom. Interpolating, so texel centers come through untouched, and noticeably sharper than bilinear. What you want when the subject is a photograph. |
 
 At and above 1:1 the quad is put on whole pixels, so a texel edge falls on a
-pixel edge and `nearest` is exactly nearest. Centring an odd difference
+pixel edge and `nearest` is exactly nearest. Centering an odd difference
 otherwise leaves it half a pixel off the grid, which would put every texel edge
 through the middle of a pixel and cost the 100% view its crispness.
 
@@ -379,7 +379,7 @@ All three filters are weighted sums of texel loads in `shaders/image.wgsl`
 rather than sampler taps — one bilinear tap is neither of the two above, and it
 covers four texels however far out the view is zoomed. Because the shader does
 the weighting, it can also multiply straight alpha through first, so a
-transparent texel no longer bleeds its colour into the edge beside it.
+transparent texel no longer bleeds its color into the edge beside it.
 
 ### What it costs, and the coarse chain
 
@@ -398,7 +398,7 @@ a *fifteenth* of the image's own texture where a mip chain is a third of it.
 It is built the first time a view zooms out past 4:1 — most never do — and it
 is dropped with the image, so only one is ever alive. Levels are float, which
 keeps them linear with no transfer function to think about and no 8-bit floor
-under premultiplied colour: half floats, or 32-bit ones above a 32-bit float
+under premultiplied color: half floats, or 32-bit ones above a 32-bit float
 source, where the range and the low bits are the point of the file.
 
 ## Architecture
@@ -406,7 +406,7 @@ source, where the range and the low bits are the point of the file.
 Rendering is three separable layers:
 
 1. **Image layer** → a linear working-space target. Swizzle, primaries
-   matrix, display window, false colour.
+   matrix, display window, false color.
 2. **UI layer** → its own sRGB target. One instanced draw for every rectangle
    plus one text pass.
 3. **Compositor** → the surface. Tone map, lay the UI over, encode for
@@ -435,7 +435,7 @@ four from the window size alone, which is what lets the frame builder and the
 click handler agree on where a widget is without either of them owning it. The
 top bar carries which file it is — its place in the list, in front of its
 name, so that the count is always in the same place whatever the name is — and
-what the image is: its size, its pixels, its colour space, all fixed for as
+what the image is: its size, its pixels, its color space, all fixed for as
 long as the file is on screen. The name is the only thing in the window set
 bold, and the only thing drawn in the ink the theme keeps for it; the count in
 front of it is set like the facts at the other end of the bar, since it is one
@@ -444,7 +444,7 @@ from that bar at a glance is the name. The bottom bar carries what changes: what
 under the pointer, and what the view is doing to the image, the last of which
 says nothing at all while nothing is being done. The pointer's end of it is a readout of one pixel —
 where it is, the components the file holds there in the file's own units, the
-values the display window maps them to, and a swatch of the colour they come
+values the display window maps them to, and a swatch of the color they come
 out as. The two numbers answer different questions, which is why both are
 there: the stored one is the measurement, the mapped one is why it looks the
 way it does. Saying what the screen is showing means running the display
@@ -459,7 +459,7 @@ information, the order the two panels they open are stacked in over the
 picture. The end of the top bar holds the two readouts that are also buttons:
 the grid toggle, and just inside it the zoom percentage. Both are measurements
 of the picture, which is what the top bar is for. The bars are inset at their
-ends by the same margin that centres a toggle across a side panel — derived
+ends by the same margin that centers a toggle across a side panel — derived
 from it, not merely equal to it — so the grid toggle ends on the same line the
 column of toggles below it ends on, and the file name starts on the line the
 minimap toggle starts on. Two edges a few pixels apart read as a mistake in a
@@ -520,7 +520,7 @@ ink. The
 pointer belongs to it while it is over it: the wheel scrolls the column
 instead of zooming, and a press starts a drag of the scrollbar's thumb
 rather than of the picture, moving the column by what putting the thumb there
-would rather than by what the pointer travelled — one thing or the other for
+would rather than by what the pointer traveled — one thing or the other for
 as long as the button is held, so a drag that runs off the panel goes on
 scrolling rather than beginning to pan half-way through. A column with nothing
 left to scroll to still takes the gesture rather than handing it back, and
@@ -532,7 +532,7 @@ starting at the top. The file's own facts — its name, its path, which decoder
 turned out to own it, when it was written and how large it is — are one `stat`
 and one look at the header, taken as the image goes on screen. The picture's
 own are what the decoder already said: its size, what each pixel holds, the
-colour space those numbers are meant in, and what the GPU stored them as. The
+color space those numbers are meant in, and what the GPU stored them as. The
 bars say some of that as well, but they say it in passing and drop it when the
 window narrows, and a fact worth reading is a fact worth being able to go back
 to.
@@ -576,7 +576,7 @@ lands on the clipboard cannot come to disagree. The button that says what a
 click would take appears over the words rather than beside them, on the layer
 above so that it covers them — the column is as wide as the panel lets it be,
 and there is no margin to stand a button in — and nudged back inside the panel
-where being centred on what it copies would hang it over an edge. A press on
+where being centered on what it copies would hang it over an edge. A press on
 the panel starts a scroll of the column as well, the two gestures being one
 and the same at the moment the button goes down, so the copy is made only if
 the button comes back up without the pointer having gone anywhere. And the
@@ -709,7 +709,7 @@ anything having to notice that it should.
 | `src/clipboard.rs` | The clipboard and `file:` URIs, held by a process of its own so a copy outlives the window; and reading a pasted picture off it |
 | `src/pasted.rs` | Where a pasted picture is written and what it is called, by the desktop's own conventions |
 | `src/clock.rs` | A moment as a date and time, in UTC or in the zone the system is set to |
-| `src/theme/` | `palette.rs` reads the desktop's palette; `mod.rs` derives the colours drawn from it |
+| `src/theme/` | `palette.rs` reads the desktop's palette; `mod.rs` derives the colors drawn from it |
 | `src/image/` | The data model: `Samples`, `color/` (transfer functions, primaries, ICC and CICP), stats, display state |
 | `src/image/decode/` | The decoder trait and its registry, one file per format |
 | `src/image/encode.rs` | The display pipeline run over every pixel, out to an 8-bit sRGB PNG |
@@ -730,14 +730,14 @@ anything having to notice that it should.
 | PNG `cICP` and `iCCP` chunks | [`png`](https://crates.io/crates/png), which `image` already carries |
 
 The decoder is chosen by content, falling back to the file extension for
-formats without a recognisable header. Files are streamed rather than read
+formats without a recognizable header. Files are streamed rather than read
 into memory whole, so opening a 600 MB raster does not begin by copying it —
 JPEG excepted, because its gain map sits past the pixels and the reader that
 finds it needs the file as one slice.
 
 ### Saying what the numbers mean
 
-Four formats state their colour space rather than leaving it to convention,
+Four formats state their color space rather than leaving it to convention,
 and they do it in two vocabularies.
 
 **CICP code points** — the small integers of ITU-T H.273 — are the precise
@@ -750,7 +750,7 @@ dependency for the header pass.
 
 **ICC profiles** are the other form, and the one a phone JPEG uses — and the
 only form WebP has. Only what
-this program's colour model can act on is taken from a profile: the primaries,
+this program's color model can act on is taken from a profile: the primaries,
 matched against the four it can name by comparing colorants rather than by
 reading description text, and a transfer function only where the profile
 states a plain power law. Where a file carries both vocabularies the code
@@ -801,8 +801,8 @@ tag, and keeps a single-band raster single-band all the way to the GPU: a
 of `Rgba32Float`.
 
 Signed and wide integer rasters are widened to float rather than rescaled —
-an elevation model holds metres, and −86 at the Dead Sea is a real value, not
-something to normalise away. A no-data sentinel is read from the file and kept
+an elevation model holds meters, and −86 at the Dead Sea is a real value, not
+something to normalize away. A no-data sentinel is read from the file and kept
 out of the statistics, so a clipped DEM's −9999 fill cannot set the bottom of
 the automatic window and squash the terrain into a sliver.
 
@@ -846,7 +846,7 @@ Both bitstreams, and the container that can hold either. VP8 is lossy, coded
 as YCbCr 4:2:0 and upsampled on the way out; VP8L is lossless and exact. Alpha
 arrives two ways — a bit in the VP8L header, or an `ALPH` chunk beside a lossy
 frame — and is straight in both. Neither bitstream has anything above eight
-bits or outside three colour channels, so a WebP is always `U8` and always
+bits or outside three color channels, so a WebP is always `U8` and always
 RGB or RGBA; there is no depth to preserve and no monochrome encoding to keep
 one channel wide.
 
@@ -855,12 +855,12 @@ same reason `png` is: everything worth having beyond the pixels lives in the
 RIFF container, and `ImageReader` hands back only the pixels. Three chunks are
 read.
 
-`ICCP` is the only thing a WebP has to say about its own colour — the format
+`ICCP` is the only thing a WebP has to say about its own color — the format
 carries no CICP code points — and it goes through the same profile reader
 JPEG, PNG and HEIF use. Without one the file means sRGB.
 
 `EXIF` carries the orientation, and it is applied. This is the one place a
-metadata tag is honoured rather than ignored, and it is a deliberate
+metadata tag is honored rather than ignored, and it is a deliberate
 exception: the tag sits in a chunk this decoder is already opening for the
 profile, and reading it costs a rotation of a buffer that is already in hand.
 JPEG's EXIF orientation still is not applied — same tag, different decoder,
@@ -868,7 +868,7 @@ and that one would have to grow a container pass to reach it.
 
 `ANIM` and `ANMF` make the file an animation, and the first frame is what is
 shown. That frame is not necessarily a picture: the format lets it be a patch
-at an offset, composited onto a canvas the `ANIM` chunk colours, so it is
+at an offset, composited onto a canvas the `ANIM` chunk colors, so it is
 decoded through the animation path rather than read out directly and arrives
 whole either way. The frames after it are not shown. Nothing downstream of the
 decoder has a clock — an image is decoded once, uploaded once, and redrawn
@@ -883,7 +883,7 @@ orientation, and a palette of sRGB bytes by definition. Every GIF comes back
 RGBA whatever its palette holds — the crate's decoder has one output layout,
 and the transparent index has to go somewhere. That index is also all the
 transparency the format has: one palette entry is a hole, the rest are opaque,
-and the pixel behind the hole carries no colour at all rather than a colour
+and the pixel behind the hole carries no color at all rather than a color
 with zero alpha the way a PNG's `tRNS` does.
 
 An animated GIF shows its first frame, the same choice an animated WebP gets.
@@ -912,7 +912,7 @@ same problem a 10-bit HEIF poses — `Samples::full_scale` says a `U16` image's
 white is 65535, so a raster stated against 1023 would show at a sixteenth of
 its brightness — but here the crate already rescales every sample before
 handing the buffer over, so there is nothing to add beyond a fixture that
-keeps it true. A `BITMAPV5HEADER`'s colour space is the one thing genuinely
+keeps it true. A `BITMAPV5HEADER`'s color space is the one thing genuinely
 left on the floor; the crate does not surface it, and BMPs that carry one are
 rare enough that reading the header a second time to find it would be work
 spent on almost nothing.
@@ -936,14 +936,14 @@ take different routes:
 
 **PNG**, which is how every entry above 48 pixels has been written since
 Vista, goes through the same code a `.png` on disk does. So an `iCCP` chunk is
-read — an icon can be Display P3 — and any pixel layout is kept, greyscale
+read — an icon can be Display P3 — and any pixel layout is kept, grayscale
 included. `image` refuses anything but RGBA8 there, on the strength of a
 Microsoft blog post saying embedded PNGs must be 32-bit; browsers display the
 others, and so does this.
 
 **BMP** is a headerless DIB with two Windows-specific quirks: the height in
 its header counts the rows twice, and a 1-bit AND mask may follow the pixels
-carrying transparency the colour data has no room for — which is how a 4-bit
+carrying transparency the color data has no room for — which is how a 4-bit
 palette icon has a transparent background. `image` handles both, but only from
 inside its own ICO decoder, whose hooks are `pub(crate)`, so the chosen entry
 is handed back to it wrapped in a 22-byte container holding nothing else.
@@ -953,7 +953,7 @@ bitmap entry comes back RGBA whatever its stored depth, because the mask has
 nowhere else to go.
 
 Only type 1, the icon, is claimed. A cursor is the same container under the
-`.cur` extension, but its directory overloads the colour-plane and bit-depth
+`.cur` extension, but its directory overloads the color-plane and bit-depth
 fields with the hotspot coordinates, so the numbers the selection sorts on
 would mean something else entirely. One opened as `.ico` anyway is named as a
 cursor rather than mis-sorted.
@@ -976,7 +976,7 @@ the header alone, before anything is decoded, with a message naming the size.
 
 ### Adding a format
 
-Decoders describe what they found rather than normalising it:
+Decoders describe what they found rather than normalizing it:
 
 ```rust
 pub trait Decoder: Sync {
@@ -1014,7 +1014,7 @@ streamed to the GPU in tiles, so an image also has to fit in one texture.
 EXIF orientation is not applied, so a rotated phone JPEG shows unrotated. HEIF
 and WebP are the exceptions: HEIF's rotation lives in the container rather than
 in a metadata tag, and WebP's tag sits in a chunk its decoder already opens for
-the colour profile.
+the color profile.
 
 An ICO shows one entry of the several it holds — the largest — and the rest
 are not reachable. Showing them side by side is what the comparison view is
@@ -1068,9 +1068,9 @@ against arithmetic done on the CPU: that minification is the exact mean of the
 texels a pixel covers, that
 two levels of the coarse chain plus the draw's own filter come to the same
 number as averaging the source directly, that antialiased nearest is exactly
-nearest at a whole-number zoom, that Catmull-Rom passes texel centres through
-untouched, that a transparent texel does not bleed its colour into its
-neighbour, and that the minimap's thumbnail lands beside the view as a second
+nearest at a whole-number zoom, that Catmull-Rom passes texel centers through
+untouched, that a transparent texel does not bleed its color into its
+neighbor, and that the minimap's thumbnail lands beside the view as a second
 draw of the same texture — building the coarse chain the view itself had no
 use for. Where no adapter can be had they report success rather than failing
 for a reason that has nothing to do with the code.
@@ -1080,14 +1080,14 @@ layout the decoder can produce and every per-format encoding with its own code
 path: PNG bit depths, palettes and interlacing; progressive and subsampled
 JPEG; TIFF compressions, byte orders, tiling, BigTIFF, the floating-point
 predictor, signed samples and no-data; Radiance RGBE; EXR associated alpha;
-HEIC monochrome, 10-bit, `irot` and its colour tags, and the same container
+HEIC monochrome, 10-bit, `irot` and its color tags, and the same container
 with AV1 inside; WebP in both bitstreams, with and without alpha, tagged,
 rotated and animated; GIF interlaced, transparent and animated. Four of them
-exist for the colour tags in particular: a
+exist for the color tags in particular: a
 PNG carrying `cICP` for BT.2100 PQ, a PNG carrying `iCCP` for Display P3, a
 HEIF tagged by ICC profile with no `nclx` box beside it, and a WebP carrying
 `ICCP`. Each is checked for
-dimensions, channel layout, sample type, colour space, alpha mode and actual
+dimensions, channel layout, sample type, color space, alpha mode and actual
 pixel values, and then pushed through the upload planner under both GPU
 capability sets. A test asserts the directory and the fixture table stay in
 step, so a file cannot be added without a test.
@@ -1100,12 +1100,12 @@ two fixtures are assembled around the bitstreams it did write.
 `display-p3.icc` sits beside the fixtures as an input rather than an output;
 `examples/make-icc.rs` is what produced it.
 
-## Licence
+## License
 
 Dual-licensed under either of
 
 - Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
-- MIT licence ([LICENSE-MIT](LICENSE-MIT))
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
 
 at your option. Unless you state otherwise, any contribution you intentionally
 submit for inclusion in this work shall be dual-licensed as above, without any
@@ -1117,7 +1117,7 @@ rather than as above:
 - The marks the buttons wear are [Lucide](https://lucide.dev)'s geometry,
   redescribed in `src/ui/icon.rs` as a table of strokes on Lucide's own
   24-unit grid. Lucide is ISC-licensed.
-- The false-colour ramps are polynomial fits rather than sampled tables, so
+- The false-color ramps are polynomial fits rather than sampled tables, so
   what is borrowed is the fit. Viridis and magma are
   [Matt Zucker's](https://www.shadertoy.com/view/WlfXRN) fits to matplotlib's,
   under CC0; turbo's is
@@ -1127,7 +1127,7 @@ rather than as above:
   readout and the screen have to agree.
 
 Which is recorded file by file in [REUSE.toml](REUSE.toml), in the form the
-[REUSE](https://reuse.software) specification defines, with the licence texts
+[REUSE](https://reuse.software) specification defines, with the license texts
 it names in [LICENSES/](LICENSES). `reuse lint` checks that nothing in the
 tree is unaccounted for, and CI runs it.
 
@@ -1136,16 +1136,16 @@ tree at all — `Cargo.lock` only names them. Their notices are collected in
 [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES), generated from that lock by
 `cargo about` and rewritten by `bin/release`, because a statically linked
 binary carries its dependencies' code and owes their notices with it. Which
-licences may turn up there is not left open: `about.toml` lists the ones this
+licenses may turn up there is not left open: `about.toml` lists the ones this
 project accepts, in priority order, and a crate arriving under anything else
 fails generation rather than being written out quietly — `cargo audit` for
-licences instead of advisories. The file is stamped with the lock it was
+licenses instead of advisories. The file is stamped with the lock it was
 generated from, and CI fails if that is not the lock in the tree.
 
 It is a generated file kept in the tree, which is the one place this project
 does that, so the reason is worth saying. Generation is offline and
 deterministic — `--frozen` implies `--offline`, every crate in the graph
-ships its own licence text, and the same lock gives the same bytes — so the
+ships its own license text, and the same lock gives the same bytes — so the
 PKGBUILD could perfectly well produce it during the build, as it already does
 the manual page. What stops it is that `cargo about` is packaged neither in
 Arch's repositories nor in the AUR: building it there would mean fetching the
@@ -1158,5 +1158,5 @@ verified rather than trusted:
 cargo about generate --frozen packaging/about.hbs | diff - <(tail -n +3 THIRD-PARTY-NOTICES)
 ```
 
-Between the three, `LICENSES/` ends up holding every licence anything in the
+Between the three, `LICENSES/` ends up holding every license anything in the
 distribution is under, and `reuse lint` reports none of them unused.

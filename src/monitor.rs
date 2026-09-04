@@ -1,10 +1,10 @@
 //! What the compositor says each monitor is in: SDR, or HDR with room above
 //! white.
 //!
-//! A driver offers an HDR colour space for a window on any monitor, and
+//! A driver offers an HDR color space for a window on any monitor, and
 //! nothing about the surface says what the monitor in front of it is doing.
 //! The compositor knows, and on Wayland says so: every output carries an
-//! image description under the colour-management protocol, and it changes
+//! image description under the color-management protocol, and it changes
 //! when the monitor is switched into or out of HDR mode. This reads them, on
 //! a connection of its own so that winit's is left alone, and says when one
 //! changes.
@@ -60,7 +60,7 @@ impl Monitors {
 }
 
 /// Starts listening. `None` off Wayland, or under a compositor that does not
-/// speak colour management: nothing then says what a monitor is.
+/// speak color management: nothing then says what a monitor is.
 ///
 /// The first answers are in hand before this returns, so that the window can
 /// open on the right surface; `notify` is called from the listening thread
@@ -132,7 +132,7 @@ struct Output {
     /// how every object made from it is told apart.
     global: u32,
     proxy: wl_output::WlOutput,
-    /// Its colour-management side, once the manager is known.
+    /// Its color-management side, once the manager is known.
     managed: Option<WpColorManagementOutputV1>,
     name: Option<String>,
     reading: Reading,

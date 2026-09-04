@@ -1,19 +1,19 @@
 //! Coding-independent code points: the small integers a file uses to state
-//! its colour space outright instead of leaving it to convention.
+//! its color space outright instead of leaving it to convention.
 //!
 //! The same numbering serves HEIF's `nclx` box and PNG's `cICP` chunk — both
 //! defer to ITU-T H.273 — so one translation covers both, and adding a third
 //! format that carries them is a matter of reading two bytes.
 //!
 //! Translation, not interpretation: what is lost here is only the distinctions
-//! this program's colour model does not draw. Everything it can name comes
+//! this program's color model does not draw. Everything it can name comes
 //! through exactly.
 
 use super::{ColorSpace, Primaries, Transfer};
 
 /// H.273 reserves 2 for "unspecified" in both tables, which is what a file
 /// written without a care says, and what we substitute when a decoder hands
-/// back a code it did not recognise.
+/// back a code it did not recognize.
 pub const UNSPECIFIED: u8 = 2;
 
 pub fn color_space(primaries_code: u8, transfer_code: u8) -> ColorSpace {
@@ -89,7 +89,7 @@ mod tests {
     }
 
     #[test]
-    fn wide_gamuts_are_recognised_and_the_rest_round_to_bt709() {
+    fn wide_gamuts_are_recognized_and_the_rest_round_to_bt709() {
         assert_eq!(primaries(9), Primaries::Bt2020);
         assert_eq!(primaries(12), Primaries::DisplayP3);
         assert_eq!(primaries(11), Primaries::DisplayP3);

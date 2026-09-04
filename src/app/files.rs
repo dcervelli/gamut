@@ -28,7 +28,7 @@ pub(super) enum Announce {
 /// A read that has been asked for and not yet answered.
 pub(super) struct Pending {
     /// Which request it is, so that a reply arriving after the user has moved
-    /// on can be recognised and dropped.
+    /// on can be recognized and dropped.
     pub(super) generation: u64,
     pub(super) index: usize,
     /// Set when the request came from `]` or `[`, so that a file that will not
@@ -134,7 +134,7 @@ impl Files {
     ///
     /// From wherever the last request was aimed rather than from what is on
     /// screen, so that holding `]` walks the list instead of asking for the
-    /// same neighbour over and over while a slow file opens. Only the last of
+    /// same neighbor over and over while a slow file opens. Only the last of
     /// those requests is decoded; the ones passed over are files the user has
     /// already scrolled past.
     pub(super) fn step(&mut self, forward: bool) -> Option<Request> {
@@ -145,7 +145,7 @@ impl Files {
             .pending
             .as_ref()
             .map_or(self.index, |pending| pending.index);
-        let next = self.neighbour(from, forward);
+        let next = self.neighbor(from, forward);
         Some(self.request(
             next,
             Reload::Fresh,
@@ -181,7 +181,7 @@ impl Files {
     ///
     /// Not a walk. A file that will not decode is stepped over when the user
     /// was going somewhere, but a paste is one particular picture that was
-    /// asked for, and wandering off to a neighbour instead would answer a
+    /// asked for, and wandering off to a neighbor instead would answer a
     /// question nobody put.
     pub(super) fn adopt(&mut self, path: PathBuf, source: Source) -> Request {
         let at = self.index + 1;
@@ -236,7 +236,7 @@ impl Files {
     /// where pictures are kept — and a rebuild is no reason for a picture the
     /// user made this session to fall out of the walk.
     ///
-    /// Each keeps its place among its neighbours, so that `]` lands on
+    /// Each keeps its place among its neighbors, so that `]` lands on
     /// whatever has taken its position rather than on a file already seen.
     ///
     /// Between reads only: this moves the file on screen to a new index, and a
@@ -308,7 +308,7 @@ impl Files {
         if step.remaining == 0 {
             return None;
         }
-        let next = self.neighbour(from, step.forward);
+        let next = self.neighbor(from, step.forward);
         Some(self.request(
             next,
             Reload::Fresh,
@@ -320,7 +320,7 @@ impl Files {
         ))
     }
 
-    fn neighbour(&self, index: usize, forward: bool) -> usize {
+    fn neighbor(&self, index: usize, forward: bool) -> usize {
         let count = self.paths.len();
         if forward {
             (index + 1) % count
@@ -435,7 +435,7 @@ mod tests {
 
     /// The file on screen is never dropped from the list, whatever has become
     /// of it: its pixels are up, and everything the interface says about them
-    /// is read off the path they came from. It keeps its neighbours, so that
+    /// is read off the path they came from. It keeps its neighbors, so that
     /// `]` goes on to what has taken its place rather than back over a file
     /// already seen.
     #[test]
@@ -449,13 +449,13 @@ mod tests {
         assert_eq!(files.path(2), Path::new("2.png"));
     }
 
-    /// The file on screen and the neighbours it would have stepped to, all
+    /// The file on screen and the neighbors it would have stepped to, all
     /// gone at once. It keeps its place among whatever is left, so that `]`
     /// reaches the next survivor and `[` the last one before it — the walk
     /// carries on from where the user actually is, not from where the list
     /// happens to have closed up.
     #[test]
-    fn a_file_deleted_with_its_neighbours_keeps_its_place_among_the_survivors() {
+    fn a_file_deleted_with_its_neighbors_keeps_its_place_among_the_survivors() {
         let mut files = list(5);
         files.shown(2);
         assert!(files.relist(named(&["0.png", "4.png"])));

@@ -1,4 +1,4 @@
-//! A GPU-accelerated image previewer with colour management.
+//! A GPU-accelerated image previewer with color management.
 
 mod app;
 mod cli;

@@ -13,7 +13,7 @@
 * Licensed MIT OR Apache-2.0. Every Rust dependency is permissive (the one
   copyleft offer, `self_cell`, is Apache-2.0 OR GPL-2.0-only, so Apache-2.0
   is taken). `libheif` is LGPL-3.0-or-later and is linked dynamically, which
-  that licence allows without reaching our terms. Arch's libheif in turn pulls
+  that license allows without reaching our terms. Arch's libheif in turn pulls
   in GPL encoders (x264, x265) as shared libraries of its own; we neither link
   nor ship those, so the obligation stays with that package, as it already
   does for every other program on the system that reads a HEIC.

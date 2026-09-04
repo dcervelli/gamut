@@ -241,7 +241,7 @@ mod tests {
         assert_eq!(marker, rect);
 
         // At 1:1 in a window half the image's size, half of it in each
-        // direction is on screen, and centred that is the middle of the map.
+        // direction is on screen, and centered that is the middle of the map.
         let half = Viewport::whole([400.0, 300.0]);
         let mut view = View::new();
         view.set_zoom(1.0, image, half);

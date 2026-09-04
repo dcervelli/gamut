@@ -107,14 +107,14 @@ pub fn words(tip: Tip, panels: &Panels) -> Option<&'static str> {
         Tip::Widget(Widget::Paste) => "Paste a picture",
         // The histogram panel's, in as few words as will carry them.
         Tip::Widget(Widget::Luma) => "Luminance plane",
-        Tip::Widget(Widget::Planes) => "Colour planes",
+        Tip::Widget(Widget::Planes) => "Color planes",
         Tip::Widget(Widget::Log) => "Logarithmic counts",
         Tip::Widget(Widget::Reset) => "Reset the display",
         // Named rather than merely shown: a swatch of viridis is a green
         // rectangle that could be anything, and the map has a name people
         // ask for it by — the same one `--colormap` takes.
         Tip::Widget(Widget::Ramp(index)) => match Colormap::ALL.get(index)? {
-            Colormap::Gray => "No false colour",
+            Colormap::Gray => "No false color",
             Colormap::Viridis => "Viridis",
             Colormap::Magma => "Magma",
             Colormap::Turbo => "Turbo",
@@ -407,7 +407,7 @@ fn place(size: [f32; 2], anchor: Rect, opens: Opens, area: Rect) -> Rect {
     )
 }
 
-/// `length` centred on a thing of `span` starting at `start`.
+/// `length` centered on a thing of `span` starting at `start`.
 fn middle(start: f32, span: f32, length: f32) -> f32 {
     start + (span - length) / 2.0
 }

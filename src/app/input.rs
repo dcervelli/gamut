@@ -223,14 +223,14 @@ fn action_of(tip: Tip, panels: &Panels) -> Option<Action> {
         Tip::Widget(Widget::Grid) => ToggleGrid,
         Tip::Widget(Widget::Output) => ToggleHdr,
         Tip::Widget(Widget::Paste) => Action::Paste,
-        // The histogram panel's own, and the row of false colours a key
+        // The histogram panel's own, and the row of false colors a key
         // cycles through.
         Tip::Widget(Widget::Luma) => ToggleLuma,
         Tip::Widget(Widget::Planes) => TogglePlanes,
         Tip::Widget(Widget::Log) => ToggleLogCounts,
         Tip::Widget(Widget::Reset) => ResetDisplay,
         // Only the swatches that are actually on offer: an index past the
-        // end is not a false colour, and naming it after the key that cycles
+        // end is not a false color, and naming it after the key that cycles
         // them would be naming nothing.
         Tip::Widget(Widget::Ramp(index)) if index < Colormap::ALL.len() => CycleColormap,
         // A cell of a menu sets one state directly where the key cycles
@@ -510,7 +510,7 @@ pub const KEYS: &[Binding] = &[
         section: Section::Interface,
         mods: PLAIN,
         shown: "k",
-        help: "Toggle the colour planes on the histogram",
+        help: "Toggle the color planes on the histogram",
         keys: &[(Char("k"), TogglePlanes), (Char("K"), TogglePlanes)],
     },
     Binding {
@@ -586,7 +586,7 @@ pub const KEYS: &[Binding] = &[
         section: Section::Display,
         mods: PLAIN,
         shown: "r",
-        help: "Cycle false colour for single-channel images",
+        help: "Cycle false color for single-channel images",
         keys: &[(Char("r"), CycleColormap), (Char("R"), CycleColormap)],
     },
     Binding {
@@ -1000,7 +1000,7 @@ impl App {
         }
 
         // A press that went down on something the info panel copies and has
-        // not travelled since is a click on it, and this is where it is
+        // not traveled since is a click on it, and this is where it is
         // answered: the release ends the drag it also started, and only one
         // of the two gestures can have been meant.
         if state == ElementState::Released
@@ -1499,7 +1499,7 @@ mod tests {
         let named = |widget| names(Tip::Widget(widget), &panels);
 
         assert_eq!(named(Widget::Luma).as_deref(), Some("Luminance plane (j)"));
-        assert_eq!(named(Widget::Planes).as_deref(), Some("Colour planes (k)"));
+        assert_eq!(named(Widget::Planes).as_deref(), Some("Color planes (k)"));
         assert_eq!(
             named(Widget::Log).as_deref(),
             Some("Logarithmic counts (l)")
@@ -1509,7 +1509,7 @@ mod tests {
             Some("Reset the display (z)")
         );
 
-        // Every false colour on offer, each by the name `--colormap` takes
+        // Every false color on offer, each by the name `--colormap` takes
         // for it, with the key that cycles to it.
         for (index, map) in Colormap::ALL.into_iter().enumerate() {
             let words = named(Widget::Ramp(index)).unwrap_or_else(|| panic!("{map:?} is named"));

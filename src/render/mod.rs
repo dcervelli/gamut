@@ -54,7 +54,7 @@ use upload::Capabilities;
 const WORKING_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
 /// The UI's own target. sRGB so that blending happens in linear and so that
-/// glyphon's colour handling is correct without it knowing anything.
+/// glyphon's color handling is correct without it knowing anything.
 const UI_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
 struct Targets {
@@ -93,7 +93,7 @@ pub trait TextMeasure {
     /// How far below the top of a run at `size` the middle of its capitals
     /// sits, in logical pixels: what a label is placed by when it has to sit
     /// level with a mark beside it, rather than merely inside the same box.
-    fn cap_centre(&mut self, size: f32) -> f32;
+    fn cap_center(&mut self, size: f32) -> f32;
 
     /// As [`TextMeasure::measure_text`], for a run drawn with
     /// [`UiFrame::text_clipped_mono`].
@@ -234,16 +234,16 @@ impl Renderer {
         &self.output
     }
 
-    /// Whether the driver offers an HDR colour space for this window, and so
+    /// Whether the driver offers an HDR color space for this window, and so
     /// whether there is anything for [`Renderer::set_hdr`] to switch to.
     pub fn hdr_available(&self) -> bool {
         Output::hdr_available(&self.surface_capabilities)
     }
 
-    /// Puts the surface onto an HDR colour space, or back onto sRGB. Returns
+    /// Puts the surface onto an HDR color space, or back onto sRGB. Returns
     /// whether the output changed.
     ///
-    /// The surface is configured afresh with the new format and colour
+    /// The surface is configured afresh with the new format and color
     /// space, and the compositor — the one pass that writes to the surface,
     /// and so the one pipeline keyed on its format — is built again for it.
     /// The offscreen targets are untouched: the image and the interface are
@@ -417,7 +417,7 @@ impl Renderer {
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("image layer"),
-                // Transparent, not a colour: what is behind the image is the
+                // Transparent, not a color: what is behind the image is the
                 // compositor's business, since it belongs to the interface
                 // and must not go through the tone curve with the image.
                 color_attachments: &[Some(attachment(
@@ -469,8 +469,8 @@ impl Renderer {
 /// caller that has a renderer measures through it, and a test that has no
 /// surface measures against a [`UiRenderer`] directly.
 impl TextMeasure for Renderer {
-    fn cap_centre(&mut self, size: f32) -> f32 {
-        self.ui.cap_centre(size)
+    fn cap_center(&mut self, size: f32) -> f32 {
+        self.ui.cap_center(size)
     }
 
     fn measure_text(&mut self, text: &str, size: f32) -> [f32; 2] {

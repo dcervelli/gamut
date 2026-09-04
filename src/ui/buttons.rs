@@ -122,7 +122,7 @@ pub(super) fn outline(frame: &mut UiFrame, rect: Rect, thickness: f32, color: Co
     }
     let edge = frame.line_width(thickness);
     // The two down the sides stop where the two across meet them, so that a
-    // colour with anything less than full alpha is not laid twice at the
+    // color with anything less than full alpha is not laid twice at the
     // corners and drawn darker there.
     let middle = (rect.height - 2.0 * edge).max(0.0);
     frame.line(
@@ -166,7 +166,7 @@ pub(super) fn zoom_button(
     }
     let (background, ink) = button_ink(open, hover, theme);
     frame.rounded_rect(rect, CELL_RADIUS, background);
-    centred_text(frame, text, rect, ink, &percent(zoom));
+    centered_text(frame, text, rect, ink, &percent(zoom));
 }
 
 /// How much of the ink is left on the surface switch when there is nothing
@@ -177,7 +177,7 @@ const DEAD_BUTTON_INK: u8 = 90;
 /// The headroom switch: one word, lit while the picture is going out with
 /// room above white. A toggle rather than a readout, since whether the
 /// picture uses the room is the viewer's to choose — where there is any: the
-/// driver offers an HDR colour space and the monitor is not in SDR mode.
+/// driver offers an HDR color space and the monitor is not in SDR mode.
 /// Where there is none, the button is drawn dead rather than left out: a
 /// control that is sometimes there is a control that has to be found again.
 pub(super) fn output_button(
@@ -201,7 +201,7 @@ pub(super) fn output_button(
         )
     };
     frame.rounded_rect(rect, CELL_RADIUS, background);
-    centred_text(frame, text, rect, ink, "HDR");
+    centered_text(frame, text, rect, ink, "HDR");
 }
 
 /// Side of the grid mark. A side toggle's, since the grid toggle is the same
@@ -243,7 +243,7 @@ pub(super) fn grid_button(
     // again.
     let mark = Rect::new(rect.right() - BUTTON_SIZE, rect.y, BUTTON_SIZE, rect.height);
     if let Some(spacing) = spacing {
-        // Set against the mark rather than centred in what is left of the
+        // Set against the mark rather than centered in what is left of the
         // button: the number and the icon are one reading, and a number half
         // a button clear of the mark it is qualifying reads as two things
         // sharing a button rather than as a label with a mark after it. What
@@ -273,16 +273,16 @@ pub(super) fn percent(zoom: f32) -> String {
     format!("{:.0}%", zoom * 100.0)
 }
 
-/// Draws `label` centred in `rect`, the way a button wears its label.
+/// Draws `label` centered in `rect`, the way a button wears its label.
 ///
-/// Levelled on its capitals rather than on the box its line is laid out in:
-/// that box keeps room under the baseline for descenders, so centring it puts
+/// Leveled on its capitals rather than on the box its line is laid out in:
+/// that box keeps room under the baseline for descenders, so centering it puts
 /// a label with none — a percentage, a count of pixels — visibly low against
 /// whatever sits beside it.
 ///
 /// On the device's grid, since a glyph laid out on part of a pixel is a
 /// blurred glyph.
-pub(super) fn centred_text(
+pub(super) fn centered_text(
     frame: &mut UiFrame,
     text: &mut dyn TextMeasure,
     rect: Rect,
@@ -303,7 +303,7 @@ pub(super) fn centred_text(
 
 /// Where a run at `size` starts for its capitals to sit level in `rect`.
 pub(super) fn text_top(frame: &UiFrame, text: &mut dyn TextMeasure, rect: Rect, size: f32) -> f32 {
-    frame.snap(rect.y + rect.height / 2.0 - text.cap_centre(size))
+    frame.snap(rect.y + rect.height / 2.0 - text.cap_center(size))
 }
 
 #[cfg(test)]

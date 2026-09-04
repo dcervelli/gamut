@@ -37,7 +37,7 @@ pub enum UserEvent {
     /// A file the loader has finished with. Boxed: it carries the pixels,
     /// and the other variant carries nothing.
     Decoded(Box<Decoded>),
-    /// A monitor's mode was learnt, or changed.
+    /// A monitor's mode was learned, or changed.
     Monitor,
 }
 
@@ -76,7 +76,7 @@ pub struct App {
     /// was a file.
     named: Vec<PathBuf>,
     directories: Vec<Watch>,
-    /// The colours everything is drawn in, and the palette file they came
+    /// The colors everything is drawn in, and the palette file they came
     /// from, watched on the same cadence as the image: Omarchy rewrites it
     /// wholesale when the desktop's theme changes, and the window should
     /// follow rather than stay in the theme it opened under.
@@ -251,7 +251,7 @@ impl App {
         }
     }
 
-    /// Whether the switch has anything to switch: an HDR colour space is
+    /// Whether the switch has anything to switch: an HDR color space is
     /// offered for the window, and the monitor is in HDR mode — or nothing
     /// can say what it is in. Where the compositor can say and has not yet,
     /// which is the moment before the window has landed on a monitor, the
@@ -364,7 +364,7 @@ impl App {
             return false;
         }
         if !self.hdr_available() {
-            eprintln!("gamut: no HDR colour space is offered for this window");
+            eprintln!("gamut: no HDR color space is offered for this window");
             return false;
         }
         self.hdr = if self.headroom() == Headroom::Above {
@@ -782,7 +782,7 @@ impl App {
 
     /// Notices that the desktop's theme has changed. Returns whether the
     /// window owes a redraw, which it does only when the new palette actually
-    /// resolves to different colours.
+    /// resolves to different colors.
     fn poll_theme(&mut self) -> bool {
         if !self.theme_watch.poll() {
             return false;
@@ -1180,7 +1180,7 @@ impl ApplicationHandler<UserEvent> for App {
                 if output.is_hdr {
                     ""
                 } else {
-                    " (no HDR colour space offered for this window)"
+                    " (no HDR color space offered for this window)"
                 }
             );
         }
@@ -1286,7 +1286,7 @@ mod tests {
     /// about stepping between files rather than about where the panels are.
     const VIEWPORT: Viewport = Viewport::whole(WINDOW);
 
-    /// A grey PNG of the given size, written where the test can step onto it.
+    /// A gray PNG of the given size, written where the test can step onto it.
     fn write_png(dir: &Path, name: &str, width: u32, height: u32) -> PathBuf {
         let path = dir.join(name);
         let pixels = vec![128u8; (width * height * 3) as usize];
@@ -1342,7 +1342,7 @@ mod tests {
     }
 
     /// As [`opening`], with the application's own opening request answered:
-    /// the state the tests about later behaviour want to start from.
+    /// the state the tests about later behavior want to start from.
     fn app_over(name: &str, files: &[(&str, u32, u32)]) -> (App, PathBuf) {
         let (mut app, dir) = opening(name, files);
         answer(&mut app, Reload::Fresh);

@@ -24,7 +24,7 @@
 //!
 //! - **BMP**, which is a headerless DIB with two Windows-specific quirks: the
 //!   height in its header counts the rows twice, and a 1-bit AND mask may
-//!   follow the pixels to carry transparency the colour data has no room for.
+//!   follow the pixels to carry transparency the color data has no room for.
 //!   `image` handles both, but only from inside its own ICO decoder — the
 //!   hooks are `pub(crate)` — so the entry is handed back to it wrapped in a
 //!   22-byte container holding nothing else. Rebuilding the DIB reader to
@@ -32,7 +32,7 @@
 //!   variants, already written and already tested.
 //!
 //! Only type 1, the icon, is claimed. A cursor is the same container under the
-//! `.cur` extension, but its directory overloads the colour-plane and bit-depth
+//! `.cur` extension, but its directory overloads the color-plane and bit-depth
 //! fields with the hotspot coordinates, so the numbers this module sorts on
 //! would mean something else entirely.
 
@@ -244,7 +244,7 @@ fn bitmap(payload: &[u8], entry: &Entry) -> Result<DecodedImage> {
     super::check_decoded_size(width, height, 4, 8)?;
 
     let decoded = ::image::DynamicImage::from_decoder(decoder).context("decoding the bitmap")?;
-    // A BMP has nothing to say about colour that this program can act on, so
+    // A BMP has nothing to say about color that this program can act on, so
     // sRGB stands — the same default a PNG entry without a profile gets.
     dynamic::describe(decoded, Some(ImageFormat::Ico), ColorSpace::SRGB)
 }

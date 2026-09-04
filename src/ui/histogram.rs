@@ -37,20 +37,20 @@ const TOOLBAR_GAP: f32 = 8.0;
 const TOGGLE_RADIUS: f32 = 5.0;
 
 /// The middle of the grid a mark is described on, and the two measures the
-/// plane toggles are drawn from, in that grid's units: how far each colour
+/// plane toggles are drawn from, in that grid's units: how far each color
 /// disc is struck from the middle, and how big the discs are. The luminance
-/// disc is one mark where the colours are three, so it is the larger.
+/// disc is one mark where the colors are three, so it is the larger.
 const GRID_MIDDLE: f32 = 12.0;
 const LUMA_DISC: f32 = 8.0;
 const PLANE_ORBIT: f32 = 5.5;
 const PLANE_DISC: f32 = 4.0;
-/// The row of false colours under the ramp: how deep a swatch is, and the
+/// The row of false colors under the ramp: how deep a swatch is, and the
 /// corner it is drawn with. Deep enough to press and to read the map off,
 /// shallow enough that the row reads as a legend under the band rather than
 /// as a second band.
 const SWATCH_HEIGHT: f32 = 16.0;
 const SWATCH_RADIUS: f32 = 3.0;
-/// What is left around a swatch's colour inside its button, so that the
+/// What is left around a swatch's color inside its button, so that the
 /// button's own lit background is what shows a chosen map.
 const SWATCH_INSET: f32 = 3.0;
 
@@ -61,7 +61,7 @@ const PLOT_RADIUS: f32 = 3.0;
 /// rather than as a hole cut in it.
 const PLOT_INSET: f32 = 4.0;
 
-/// What the luminance plane drops to once colour planes are drawn over it.
+/// What the luminance plane drops to once color planes are drawn over it.
 const HISTOGRAM_LUMA_UNDER: u8 = 110;
 
 /// The response curve's stroke, in logical pixels.
@@ -82,8 +82,8 @@ const TICK_RISE: f32 = 1.0;
 const CURSOR_ALPHA: u8 = 190;
 const CURSOR_WIDTH: f32 = 1.0;
 
-/// The ramp under the plot: how deep the band of colour is, and how far it
-/// stands off the plot's ground. Deep enough to read a colour off and no
+/// The ramp under the plot: how deep the band of color is, and how far it
+/// stands off the plot's ground. Deep enough to read a color off and no
 /// deeper — it is a legend along the axis, not a second plot.
 const RAMP_HEIGHT: f32 = 8.0;
 const RAMP_GAP: f32 = 4.0;
@@ -176,7 +176,7 @@ fn bars(panel: Rect) -> Rect {
     )
 }
 
-/// The same, on an image the false colours apply to: the row of them takes
+/// The same, on an image the false colors apply to: the row of them takes
 /// its room off the bottom of the plot.
 ///
 /// The panel is one height either way, so the information panel below it does
@@ -199,13 +199,13 @@ fn plot_area(panel: Rect, gray: bool) -> Rect {
 /// The buttons down the left, in the order they are stacked.
 ///
 /// A control that could not act is left out rather than drawn dead: an image
-/// with one channel has no colour planes to toggle, and the two that remain
+/// with one channel has no color planes to toggle, and the two that remain
 /// close the gap up. Hiding rather than dimming is the panel's rule for both
 /// of these — see [`swatch_button`] for the other one.
 fn toolbar(gray: bool) -> &'static [Widget] {
     const GRAY: [Widget; 3] = [Widget::Luma, Widget::Log, Widget::Reset];
-    const COLOUR: [Widget; 4] = [Widget::Luma, Widget::Planes, Widget::Log, Widget::Reset];
-    if gray { &GRAY } else { &COLOUR }
+    const COLOR: [Widget; 4] = [Widget::Luma, Widget::Planes, Widget::Log, Widget::Reset];
+    if gray { &GRAY } else { &COLOR }
 }
 
 /// One of those buttons by its place in the column. Aligned with the top of
@@ -220,12 +220,12 @@ fn toolbar_button(panel: Rect, gray: bool, index: usize) -> Rect {
     )
 }
 
-/// One of the false-colour swatches under the ramp, by its place in
+/// One of the false-color swatches under the ramp, by its place in
 /// [`Colormap::ALL`]. They divide the plot's width between them, so each sits
-/// under the stretch of band it would colour.
+/// under the stretch of band it would color.
 ///
-/// Only on an image they apply to. The display ignores the false colour on a
-/// three-channel image — its channels are colours already — so on one of
+/// Only on an image they apply to. The display ignores the false color on a
+/// three-channel image — its channels are colors already — so on one of
 /// those the row is not there at all, and the plot has the room instead.
 fn swatch_button(bars: Rect, index: usize) -> Rect {
     let count = Colormap::ALL.len() as f32;
@@ -241,8 +241,8 @@ fn swatch_button(bars: Rect, index: usize) -> Rect {
 /// Which of the panel's own buttons a point lands on.
 ///
 /// Two of them do not apply to every image, and `gray` decides both: a
-/// single-channel image has no colour planes to toggle, and a colour image is
-/// its own colour, so the false colours are what the display leaves out for
+/// single-channel image has no color planes to toggle, and a color image is
+/// its own color, so the false colors are what the display leaves out for
 /// it. Neither is drawn where it does not apply, and neither answers here.
 pub fn widget_at(content: Rect, point: [f32; 2], gray: bool) -> Option<Widget> {
     let panel = panel(content);
@@ -291,7 +291,7 @@ pub(super) fn offer_tips(tips: &mut Tips, content: Rect, gray: bool) {
     }
 }
 
-/// The band of colour under the plot, aligned with the bins so that a cell of
+/// The band of color under the plot, aligned with the bins so that a cell of
 /// it sits under the bar it belongs to. Below the plot's ground, and so below
 /// the ticks that stand in the ground's lower margin.
 fn ramp(bars: Rect) -> Rect {
@@ -305,7 +305,7 @@ fn ramp(bars: Rect) -> Rect {
 
 /// Where a bin's bar is drawn across the plot, from 0 at the left edge to 1
 /// at the right. The two end bins are carried out to the edges so that the
-/// shape fills the plot's width; the rest stand at their centres.
+/// shape fills the plot's width; the rest stand at their centers.
 fn bin_across(index: usize) -> f32 {
     match index {
         0 => 0.0,
@@ -350,7 +350,7 @@ fn bar_fraction(count: u32, peak: u32, log: bool) -> f32 {
 /// edge. On its own that is a soft line; in a row of them it is a ripple at
 /// the beat of the scale factor, which on a 1.6 display is every fifth pixel.
 /// Snapped, the feather resolves to fully in or fully out at each pixel
-/// centre and a mark comes out as the shape it is.
+/// center and a mark comes out as the shape it is.
 fn device(value: f32, scale: f32) -> f32 {
     (value * scale).round() / scale
 }
@@ -359,7 +359,7 @@ fn device(value: f32, scale: f32) -> f32 {
 /// something thinner than one is still drawn rather than rounded away.
 ///
 /// Not what the ramp's cells use: they tile, so what matters there is that
-/// each shares an edge exactly with its neighbour, and a floor under their
+/// each shares an edge exactly with its neighbor, and a floor under their
 /// width would make them overlap and run past the end of the band.
 fn on_device(rect: Rect, scale: f32) -> Rect {
     let (x, y) = (device(rect.x, scale), device(rect.y, scale));
@@ -412,8 +412,8 @@ pub fn marked(
 /// leave free — above the information panel, the order the two toggles that
 /// open them are stacked in.
 ///
-/// Colour images get four planes — red, green, blue and luminance — over the
-/// range their colour channels span; grey images keep the single luminance
+/// Color images get four planes — red, green, blue and luminance — over the
+/// range their color channels span; gray images keep the single luminance
 /// plane over theirs.
 pub(super) fn draw(
     frame: &mut UiFrame,
@@ -427,8 +427,8 @@ pub(super) fn draw(
     let panel = panel(content);
     frame.rounded_rect(panel, PANEL_RADIUS, theme.panel_background);
 
-    // What applies to this image: the false colours are for a single channel
-    // and the colour planes are for three, and the panel leaves out whichever
+    // What applies to this image: the false colors are for a single channel
+    // and the color planes are for three, and the panel leaves out whichever
     // the display would ignore rather than drawing it dead.
     let gray = current.image.is_gray();
     let bars = plot_area(panel, gray);
@@ -438,16 +438,16 @@ pub(super) fn draw(
         theme.plot_background,
     );
 
-    // Luminance always goes down first, underneath the colour planes: it
+    // Luminance always goes down first, underneath the color planes: it
     // runs as tall as the tallest of them about as often as not, and painting
-    // it on top swamps the colour the panel exists to show.
+    // it on top swamps the color the panel exists to show.
     let plotted = &current.stats.plot;
     let luma: &[[u32; BINS]] = if panels.show_luma {
         std::slice::from_ref(&plotted.luma)
     } else {
         &[]
     };
-    let colour: &[[u32; BINS]] = match plotted.colour.as_ref() {
+    let color: &[[u32; BINS]] = match plotted.color.as_ref() {
         Some(planes) if panels.show_planes => planes,
         _ => &[],
     };
@@ -470,7 +470,7 @@ pub(super) fn draw(
     // Both of them decoded, as the ends of the axis are. Neither will measure
     // against the plot underneath with a ruler, because both of the plot's
     // axes are spaced in the file's own encoding — the bins across, so that a
-    // quantised file does not comb, and the response up, so that a display
+    // quantized file does not comb, and the response up, so that a display
     // doing nothing is the diagonal. The positions are the file's units and
     // the numbers are the ones every other readout quotes; a curve that is
     // straight and a value that is comparable cannot both be had, and the
@@ -516,7 +516,7 @@ pub(super) fn draw(
     // One peak across every plane on screen, so their heights stay
     // comparable — and only across those, so that a plane left on its own
     // fills the plot rather than keeping the room a hidden one wanted.
-    let peak = colour
+    let peak = color
         .iter()
         .chain(luma)
         .flatten()
@@ -524,7 +524,7 @@ pub(super) fn draw(
         .max()
         .unwrap_or(1);
     let height_of = |count: u32| bar_fraction(count, peak, panels.log_counts) * bars.height;
-    // One point per bin, at its centre, with the ends carried out to the
+    // One point per bin, at its center, with the ends carried out to the
     // edges of the plot so the shape fills its width.
     let curve = |counts: &[u32; BINS]| -> Vec<[f32; 2]> {
         counts
@@ -537,9 +537,9 @@ pub(super) fn draw(
             .collect()
     };
 
-    // Dimmed only when it is a backdrop; with the colour planes off — or on
-    // a grey image, which has none — it is the plot.
-    let luma_ink = if colour.is_empty() {
+    // Dimmed only when it is a backdrop; with the color planes off — or on
+    // a gray image, which has none — it is the plot.
+    let luma_ink = if color.is_empty() {
         theme.histogram_luma
     } else {
         theme.histogram_luma.with_alpha(HISTOGRAM_LUMA_UNDER)
@@ -547,7 +547,7 @@ pub(super) fn draw(
     for counts in luma {
         frame.area(&curve(counts), bars.bottom(), luma_ink, Blend::Over);
     }
-    for (counts, color) in colour.iter().zip(theme.histogram_planes) {
+    for (counts, color) in color.iter().zip(theme.histogram_planes) {
         frame.area(&curve(counts), bars.bottom(), color, Blend::Screen);
     }
 
@@ -620,12 +620,12 @@ pub(super) fn draw(
         }
 
         // And what the display turns each of those values into, in a band
-        // along the foot of the plot: the bin above a cell, and the colour it
+        // along the foot of the plot: the bin above a cell, and the color it
         // comes out as under it.
         //
         // The curve says how much and this says what of, which are different
-        // questions on a false-coloured image — a curve cannot draw viridis —
-        // and the same question answered twice on a grey one, where the band
+        // questions on a false-colored image — a curve cannot draw viridis —
+        // and the same question answered twice on a gray one, where the band
         // is the tone curve as a wedge and the curve is it as a shape. It is
         // where clipping stops being an inference: everything left of the
         // window comes out black and everything right of it comes out at the
@@ -633,7 +633,7 @@ pub(super) fn draw(
         // display is throwing away, drawn at the width they occupy.
         //
         // One cell per bin, over the bin's own middle, so a cell is the
-        // colour of the bar standing above it.
+        // color of the bar standing above it.
         // On the device's pixels, like every other mark here: a cell is
         // about one logical pixel wide, so unsnapped the band ripples at the
         // beat of the scale factor. See [`device`].
@@ -661,7 +661,7 @@ pub(super) fn draw(
                 frame.rect(Rect::new(left, top, right - left, hair), theme.accent);
             }
         }
-        // Outside the colour rather than over it, so that the band keeps its
+        // Outside the color rather than over it, so that the band keeps its
         // full depth. A window left of everything makes the whole ramp black,
         // and a black band on a dark panel is a gap in it without this. One
         // physical pixel, snapped like the band it rings.
@@ -741,7 +741,7 @@ pub(super) fn draw(
 }
 
 /// The strip of buttons down the left of the panel, and the row of false
-/// colours under its ramp.
+/// colors under its ramp.
 ///
 /// Drawn here rather than with the chrome's toggles because these belong to
 /// the panel: they say what the plot beside them is showing and what the band
@@ -777,7 +777,7 @@ fn controls(
         match widget {
             // The two plane toggles are drawn here rather than taken from
             // `ui::icon` because they are pictures of the planes themselves,
-            // each in the colour that plane is plotted in — which is not
+            // each in the color that plane is plotted in — which is not
             // something a mark drawn in one ink can be.
             //
             // Luminance is one plane, so it is one disc, in the neutral the
@@ -790,8 +790,8 @@ fn controls(
                     theme.histogram_luma,
                 );
             }
-            // And the colour planes are three, so they are three smaller
-            // discs, in their own colours: nothing else in the window is red,
+            // And the color planes are three, so they are three smaller
+            // discs, in their own colors: nothing else in the window is red,
             // green and blue together.
             Widget::Planes => {
                 let place = icon::Placer::new(frame, square);
@@ -814,8 +814,8 @@ fn controls(
         }
     }
 
-    // The false colours, each showing itself, and only where the display
-    // would act on the choice. The whole ramp rather than one colour off it:
+    // The false colors, each showing itself, and only where the display
+    // would act on the choice. The whole ramp rather than one color off it:
     // a map is a sequence, and a single swatch of viridis is a green
     // rectangle that could be anything.
     if !gray {
@@ -916,7 +916,7 @@ mod tests {
             assert!(button.right() <= bars.x, "the strip clears the plot");
             assert!(toolbar_button(panel, gray, 0).y >= panel.y);
             assert!(button.bottom() <= panel.bottom(), "{button:?}");
-            // And it ends above the band of colour, which is what the room
+            // And it ends above the band of color, which is what the room
             // under the plot is for: a button beside the ramp would read as
             // belonging to it rather than to the plot it acts on.
             assert!(
@@ -929,11 +929,11 @@ mod tests {
         }
     }
 
-    /// The false colours take their room off the plot rather than off the
+    /// The false colors take their room off the plot rather than off the
     /// panel, so that the information panel below does not shift about from
     /// one file to the next.
     #[test]
-    fn the_panel_is_one_height_with_the_false_colours_and_without() {
+    fn the_panel_is_one_height_with_the_false_colors_and_without() {
         let panel = panel(Rect::new(0.0, 0.0, 800.0, 600.0));
         let (with, without) = (plot_area(panel, true), plot_area(panel, false));
         assert!(with.height < without.height, "{with:?} {without:?}");
@@ -1004,14 +1004,14 @@ mod tests {
             "and the slot it leaves is filled, not left empty"
         );
 
-        // Nothing answers where the row of false colours would be on an image
+        // Nothing answers where the row of false colors would be on an image
         // that has none: the plot is there instead.
         let swatch = middle(swatch_button(plot_area(panel, true), 2));
         assert_eq!(widget_at(content, swatch, true), Some(Widget::Ramp(2)));
         assert_eq!(
             widget_at(content, swatch, false),
             None,
-            "three channels are their own colour, and the false ones are not applied"
+            "three channels are their own color, and the false ones are not applied"
         );
     }
 
@@ -1063,10 +1063,10 @@ mod tests {
     #[test]
     fn the_axis_ends_give_the_line_up_to_the_readout_and_not_before() {
         let bars = bars(panel(Rect::new(0.0, 0.0, 800.0, 600.0)));
-        let centred = |width: f32| bars.x + (bars.width - width) / 2.0;
+        let centered = |width: f32| bars.x + (bars.width - width) / 2.0;
 
         let (x, fits) = readout_placement(bars, 80.0, [40.0, 40.0]);
-        assert_eq!(x, centred(80.0), "centred on the plot, not on the panel");
+        assert_eq!(x, centered(80.0), "centered on the plot, not on the panel");
         assert!(fits, "80 in the middle and 40 either side of 256 is room");
 
         let room = (bars.width - 80.0) / 2.0 - LABEL_GAP;

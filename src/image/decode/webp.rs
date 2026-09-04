@@ -1,5 +1,5 @@
 //! WebP: the RIFF container, both of its bitstreams, and what it says about
-//! colour.
+//! color.
 //!
 //! `image-webp` is a direct dependency rather than a feature of `image`,
 //! because everything worth having here lives in the container beside the
@@ -11,9 +11,9 @@
 //!
 //! What the format cannot say is anything about depth or range: both
 //! bitstreams are 8-bit, VP8 through YCbCr 4:2:0 and VP8L through an exact
-//! RGBA, so the samples are always `U8` and the colour is always
-//! display-referred. There is no HDR path to preserve and no greyscale
-//! encoding to keep one channel wide — a grey WebP is a grey RGB WebP.
+//! RGBA, so the samples are always `U8` and the color is always
+//! display-referred. There is no HDR path to preserve and no grayscale
+//! encoding to keep one channel wide — a gray WebP is a gray RGB WebP.
 //!
 //! Animation is decoded as far as its first frame. `read_image` composites
 //! that frame onto the canvas the `ANIM` chunk describes, so a file whose
@@ -254,7 +254,7 @@ mod tests {
         assert_eq!(untouched, data);
     }
 
-    /// Alpha has to survive the turn as well as colour.
+    /// Alpha has to survive the turn as well as color.
     #[test]
     fn rotation_carries_the_alpha_channel() {
         let data = vec![1, 2, 3, 64, 5, 6, 7, 128];

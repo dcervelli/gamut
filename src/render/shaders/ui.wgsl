@@ -2,10 +2,10 @@
 //
 // One draw call for the whole interface, however many panels it grows. The UI
 // renders into its own sRGB target and never learns what the output surface
-// is doing, so widget code can go on thinking in plain sRGB colours while the
+// is doing, so widget code can go on thinking in plain sRGB colors while the
 // image beside it is in extended-range linear.
 //
-// An instance is a rounded rectangle about its own centre, turned to face
+// An instance is a rounded rectangle about its own center, turned to face
 // `axis`, and either filled or drawn as a band straddling its own outline.
 // That covers everything the interface is made of: a panel is a filled box, a
 // rule a very thin one, a stroked circle a band on a square rounded as far as
@@ -22,7 +22,7 @@ struct Viewport {
 @group(0) @binding(0) var<uniform> viewport: Viewport;
 
 struct Instance {
-    // Centre, then half extent along the instance's own two axes, in
+    // Center, then half extent along the instance's own two axes, in
     // physical pixels.
     @location(0) bounds: vec4<f32>,
     @location(1) color: vec4<f32>,     // linear, straight alpha
@@ -30,7 +30,7 @@ struct Instance {
     // lies with the window passes (1, 0).
     @location(2) axis: vec2<f32>,
     @location(3) corner: f32,
-    // Zero fills the shape. Anything more draws a band that wide centred on
+    // Zero fills the shape. Anything more draws a band that wide centered on
     // its outline, and leaves the inside alone.
     @location(4) stroke: f32,
 };
@@ -38,7 +38,7 @@ struct Instance {
 struct VertexOut {
     @builtin(position) position: vec4<f32>,
     @location(0) color: vec4<f32>,
-    // Position within the rectangle, in pixels, relative to its centre and
+    // Position within the rectangle, in pixels, relative to its center and
     // along its own axes.
     @location(1) local: vec2<f32>,
     @location(2) half_size: vec2<f32>,
@@ -54,14 +54,14 @@ const PAD: f32 = 1.0;
 
 @vertex
 fn vs_main(@builtin(vertex_index) index: u32, instance: Instance) -> VertexOut {
-    let centre = instance.bounds.xy;
+    let center = instance.bounds.xy;
     let half_size = instance.bounds.zw;
     let reach = half_size + vec2<f32>(instance.stroke * 0.5 + PAD);
 
     let unit = vec2<f32>(f32(index & 1u), f32(index >> 1u));
     let local = (unit - vec2<f32>(0.5)) * 2.0 * reach;
     let across = vec2<f32>(-instance.axis.y, instance.axis.x);
-    let pixel = centre + local.x * instance.axis + local.y * across;
+    let pixel = center + local.x * instance.axis + local.y * across;
 
     var out: VertexOut;
     out.position = vec4<f32>(

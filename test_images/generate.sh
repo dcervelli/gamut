@@ -2,10 +2,10 @@
 # Regenerates the decoder fixtures. Run from this directory.
 #
 # Every image is the same 32x24 pattern of four 16x12 quadrants, so a test can
-# probe the centre of each quadrant and know what it should find:
+# probe the center of each quadrant and know what it should find:
 #
-#   colour:  top-left red     top-right green    bottom-left blue   bottom-right white
-#   grey:    top-left 0       top-right 85       bottom-left 170    bottom-right 255
+#   color:  top-left red     top-right green    bottom-left blue   bottom-right white
+#   gray:    top-left 0       top-right 85       bottom-left 170    bottom-right 255
 #   alpha:   top-left 255     top-right 191      bottom-left 128    bottom-right 64
 #   float:   top-left 0.0     top-right 0.5      bottom-left 1.0    bottom-right 3.984
 #
@@ -16,7 +16,7 @@
 # The point is coverage of decode paths, not pretty pictures: every pixel
 # layout a decoder can hand back, plus the per-format encodings that have
 # their own code path (bit depths, palettes, interlacing, progressive JPEG,
-# TIFF compressions and byte orders, HEIF colour tags and transformations).
+# TIFF compressions and byte orders, HEIF color tags and transformations).
 #
 # `display-p3.icc` is an input rather than an output: it is checked in beside
 # the fixtures and is not regenerated here. See `examples/make-icc.rs`.
@@ -81,7 +81,7 @@ import struct, sys, zlib
 
 mode, src, dst = sys.argv[1:4]
 if mode == "cicp":
-    # Colour primaries, transfer function, matrix coefficients, full range.
+    # Color primaries, transfer function, matrix coefficients, full range.
     kind, body = b"cICP", bytes(int(value) for value in sys.argv[4:8])
 else:
     profile = open(sys.argv[4], "rb").read()
@@ -126,7 +126,7 @@ magick "$work/color.png" -quality 95 -sampling-factor 4:2:0 jpeg-subsampled.jpg
 magick "$work/color.png" gif-palette.gif
 magick "$work/color.png" -interlace GIF gif-interlaced.gif
 # Transparency is a palette index rather than a channel, so it is all or
-# nothing and the pixel behind it carries no colour: white is named as the
+# nothing and the pixel behind it carries no color: white is named as the
 # transparent one, and the quadrant comes back as four zeroes.
 magick "$work/color.png" -transparent white gif-transparent.gif
 # Two frames, the pattern first and the upside-down one second, so a decoder
@@ -154,7 +154,7 @@ magick "$work/float.png" -set colorspace RGB -evaluate multiply 3.984375 hdr-rgb
 # ---------------------------------------------------------------- OpenEXR
 magick "$work/float.png" -set colorspace RGB -evaluate multiply 3.984375 exr-rgb.exr
 # Composite while both are still sRGB-tagged so the coverage values pass
-# through untouched, then reinterpret as linear and scale only the colour.
+# through untouched, then reinterpret as linear and scale only the color.
 magick "$work/float.png" \( "$work/alpha.png" -set colorspace sRGB -channel R -separate \) \
   -alpha off -compose CopyOpacity -composite \
   -set colorspace RGB -channel RGB -evaluate multiply 3.984375 +channel exr-rgba.exr
@@ -166,21 +166,21 @@ magick "$work/float.png" -set colorspace RGB -evaluate multiply 3.984375 \
 # expected values serves these as serves PNG. The nclx tags are what makes
 # this family different from every other format here: a HEIF file *states* its
 # transfer function and primaries in CICP codes rather than leaving them to
-# convention, so the colour-space fixtures below are testing a translation
+# convention, so the color-space fixtures below are testing a translation
 # rather than a guess.
 magick "$work/color.png"       -depth 16 -define png:bit-depth=16 "$work/color16.png"
 
 heif-enc -L --hevc -o heic-rgb8.heic        "$work/color.png"       > /dev/null
 heif-enc -L --hevc -o heic-rgba8.heic       "$work/color-alpha.png" > /dev/null
-# A greyscale input encodes as a monochrome image, and must stay one channel.
+# A grayscale input encodes as a monochrome image, and must stay one channel.
 heif-enc -L --hevc -o heic-gray8.heic       "$work/gray.png"        > /dev/null
 heif-enc -L --hevc -o heic-gray-alpha8.heic "$work/gray-alpha.png"  > /dev/null
 # 10-bit, tagged BT.2100 PQ on BT.2020 primaries: the HDR path, and the one
 # that has to be lifted from 0..1023 to the full 16-bit range on the way in.
-heif-enc -L --hevc -b 10 --colour_primaries 9 --transfer_characteristic 16 \
+heif-enc -L --hevc -b 10 --color_primaries 9 --transfer_characteristic 16 \
   -o heic-pq10.heic "$work/color16.png" > /dev/null
 # Display P3 primaries (EG 432-1) with the sRGB curve: what a phone writes.
-heif-enc -L --hevc --colour_primaries 12 --transfer_characteristic 13 \
+heif-enc -L --hevc --color_primaries 12 --transfer_characteristic 13 \
   -o heif-p3.heif "$work/color.png" > /dev/null
 # An upside-down image that says it is upside down. `--rotate-cw` writes an
 # `irot` property rather than turning the pixels, so this decodes back to the
@@ -189,7 +189,7 @@ heif-enc -L --hevc --rotate-cw 180 -o heic-rotated.heic \
   "$work/color-upside-down.png" > /dev/null
 # The same container with AV1 inside instead of HEVC.
 heif-enc -L -A -o avif-rgb8.avif "$work/color.png" > /dev/null
-# A HEIF that states its colour space with an ICC profile and no `nclx` box,
+# A HEIF that states its color space with an ICC profile and no `nclx` box,
 # which is what some cameras write. `heif-enc` has no way to embed a profile,
 # but ImageMagick carries the source PNG's through untouched — the pixels are
 # not converted, because there is no target profile to convert to. HEVC at
@@ -205,7 +205,7 @@ magick "$work/color.png"       -define webp:lossless=true webp-lossless-rgb8.web
 magick "$work/color-alpha.png" -define webp:lossless=true webp-lossless-rgba8.webp
 magick "$work/color.png"       -quality 95 webp-lossy-rgb8.webp
 # Lossy plus alpha is the one layout that needs the extended container: an
-# `ALPH` chunk carrying the coverage beside a `VP8` chunk carrying the colour.
+# `ALPH` chunk carrying the coverage beside a `VP8` chunk carrying the color.
 magick "$work/color-alpha.png" -quality 95 webp-lossy-rgba8.webp
 # Display P3 by ICC profile, carried through from the tagged PNG the same way
 # `heic-icc-p3.heic` is. Lossless, so this one stays exact.
@@ -213,7 +213,7 @@ magick png-icc-p3.png -define webp:lossless=true webp-icc-p3.webp
 
 # ImageMagick's WebP writer emits neither an `EXIF` chunk nor an animation, so
 # the two container fixtures that need them are assembled here from bitstreams
-# it did write — the same approach the PNG colour tags above take.
+# it did write — the same approach the PNG color tags above take.
 webp_tag() {  # exif src dst orientation  |  anim dst frame...
   python3 - "$@" <<'TAG'
 import struct, sys
@@ -284,7 +284,7 @@ webp_tag anim webp-animated.webp webp-lossless-rgb8.webp "$work/upside-down.webp
 # ----------------------------------------------------------------- ICO
 # A directory of icons rather than one image, in the two formats an entry can
 # hold. `-type TrueColorAlpha` forces the 32-bit bitmap that carries the alpha
-# ramp; left alone, ImageMagick quantises the four-colour pattern to a 4-bit
+# ramp; left alone, ImageMagick quantizes the four-color pattern to a 4-bit
 # palette, which is the other bitmap path and gets a fixture of its own.
 magick "$work/color-alpha.png" -type TrueColorAlpha ico-bmp-rgba8.ico
 magick "$work/color.png"                            ico-bmp-palette.ico
@@ -348,7 +348,7 @@ ico_pack ico-multi.ico ico-bmp-palette.ico "$work/thumbnail.ico"
 # The DIB the ICO fixtures carry, in a file of its own. `BMP3:` pins the
 # ordinary `BITMAPINFOHEADER`; the alpha fixture is left to choose for itself,
 # because carrying alpha is what forces the `BITMAPV5HEADER` and the bitfield
-# masks that come with it. `-type Palette` on a four-colour pattern lands on
+# masks that come with it. `-type Palette` on a four-color pattern lands on
 # 4-bit, and adding RLE to it lands on 8-bit, so the two palette widths and
 # both of the format's run-length codings are covered between them.
 magick "$work/color.png"       -type TrueColor      BMP3:bmp-rgb8.bmp
@@ -359,7 +359,7 @@ magick "$work/color.png" -depth 8 -type Palette -compress RLE BMP3:bmp-rle8.bmp
 # A BMP stores its rows bottom-up unless its height is negative, and screen
 # capture is where the other kind comes from. ImageMagick writes only the
 # usual way round, so the rows are reversed here and the height negated to
-# say so: it decodes to the ordinary pattern only if the sign is honoured.
+# say so: it decodes to the ordinary pattern only if the sign is honored.
 bmp_topdown() {  # src dst
   python3 - "$@" <<'FLIP'
 import struct, sys
@@ -383,7 +383,7 @@ bmp_topdown bmp-rgb8.bmp bmp-topdown.bmp
 
 # -------------------------------------------------------------- netpbm
 # `-depth` is not optional here. Left to itself ImageMagick picks the smallest
-# MAXVAL that represents the colours present, so the four-colour pattern comes
+# MAXVAL that represents the colors present, so the four-color pattern comes
 # out as `MAXVAL 3` — which is a fine netpbm file and a good demonstration of
 # why the decoder reads MAXVAL, but not the fixture wanted at full range.
 magick "$work/color.png" -depth 8  ppm:pnm-rgb8.ppm
@@ -398,9 +398,9 @@ magick "$work/color.png" -depth 8 -compress None ppm:pnm-ascii.pnm
 # the picture shows at a sixteenth of its brightness.
 magick "$work/gray.png" -depth 10 -colorspace gray pgm:pnm-maxval1023.pgm
 # MAXVAL 1, at the other end: one bit per pixel, and `+dither` so the two
-# middle steps of the grey pattern round to the ends rather than stippling.
+# middle steps of the gray pattern round to the ends rather than stippling.
 magick "$work/gray.png" -colorspace gray -threshold 50% +dither pbm:pnm-bilevel.pbm
-# PAM, which generalises the three above and is the only one of them that can
+# PAM, which generalizes the three above and is the only one of them that can
 # carry alpha.
 magick "$work/color-alpha.png" -depth 8 pam:pnm-rgba8.pam
 
@@ -447,7 +447,7 @@ gdal_translate -q -of GTiff -a_nodata -9999 -co COMPRESS=NONE \
 # a backend.
 magick "$work/color.png" unsupported.tga
 # A PNG called a TIFF, to exercise the content-sniffing fallback.
-cp png-rgb8.png mislabelled.tif
+cp png-rgb8.png mislabeled.tif
 
 echo "generated $(ls -1 *.png *.jpg *.jpeg *.tif *.tiff *.hdr *.exr *.gif \
                     *.heic *.heif *.avif *.webp *.ico *.bmp *.tga \

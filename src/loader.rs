@@ -110,7 +110,7 @@ pub struct Loader {
     thread: Option<JoinHandle<()>>,
     /// Asks a read under way to stop between stages rather than see itself
     /// out, so that quitting does not wait on work nobody will look at.
-    cancelled: Arc<AtomicBool>,
+    canceled: Arc<AtomicBool>,
 }
 
 enum Command {
@@ -126,8 +126,8 @@ impl Loader {
     /// thread.
     pub fn new(deliver: impl FnMut(Decoded) -> bool + Send + 'static) -> Self {
         let (commands, incoming) = mpsc::channel();
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let flag = Arc::clone(&cancelled);
+        let canceled = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&canceled);
         let thread = thread::Builder::new()
             .name("gamut loader".into())
             .spawn(move || run(incoming, deliver, &flag))
@@ -135,7 +135,7 @@ impl Loader {
         Self {
             commands: Some(commands),
             thread: Some(thread),
-            cancelled,
+            canceled,
         }
     }
 
@@ -166,7 +166,7 @@ impl Loader {
         Self {
             commands: Some(commands),
             thread: None,
-            cancelled: Arc::new(AtomicBool::new(false)),
+            canceled: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -183,7 +183,7 @@ impl Drop for Loader {
     /// race outright: nothing else runs while we wait, and by the time the
     /// process leaves `main` the thread is gone.
     fn drop(&mut self) {
-        self.cancelled.store(true, Ordering::Relaxed);
+        self.canceled.store(true, Ordering::Relaxed);
         // The channel goes first. The thread returns only when `recv` fails,
         // so joining while we still held the sender would wait for ever.
         self.commands = None;
@@ -196,7 +196,7 @@ impl Drop for Loader {
 fn run(
     incoming: Receiver<Command>,
     mut deliver: impl FnMut(Decoded) -> bool,
-    cancelled: &AtomicBool,
+    canceled: &AtomicBool,
 ) {
     let mut upload = None;
     let mut queued: Option<Request> = None;
@@ -217,12 +217,12 @@ fn run(
         // Between commands rather than only at `recv`: a request sent just
         // before the sender was dropped is still sitting in the channel, and
         // reading it would hold up the quit for a file nobody will see.
-        if cancelled.load(Ordering::Relaxed) {
+        if canceled.load(Ordering::Relaxed) {
             return;
         }
 
         if let Some(request) = queued.take() {
-            let Some(decoded) = read(request, upload.as_ref(), cancelled) else {
+            let Some(decoded) = read(request, upload.as_ref(), canceled) else {
                 return;
             };
             // A closed loop means the window has gone; stop rather than
@@ -265,7 +265,7 @@ fn guard<T>(stage: &str, work: impl FnOnce() -> Result<T>) -> Result<T> {
 /// decoder here can be interrupted part way through, but the two stages after
 /// the decode need never be started — and the upload in particular must not
 /// reach for a device the main thread is on its way to destroying.
-fn read(request: Request, upload: Option<&Upload>, cancelled: &AtomicBool) -> Option<Decoded> {
+fn read(request: Request, upload: Option<&Upload>, canceled: &AtomicBool) -> Option<Decoded> {
     let Request {
         generation,
         index,
@@ -291,7 +291,7 @@ fn read(request: Request, upload: Option<&Upload>, cancelled: &AtomicBool) -> Op
     // for good. Caught, a panic becomes an ordinary decode failure, which the
     // event loop already knows how to step over.
     let decoded = received.and_then(|()| guard("decoding", || decode::load(&path, overrides)));
-    if cancelled.load(Ordering::Relaxed) {
+    if canceled.load(Ordering::Relaxed) {
         return None;
     }
 
@@ -303,7 +303,7 @@ fn read(request: Request, upload: Option<&Upload>, cancelled: &AtomicBool) -> Op
         let exif = guard("reading the metadata", || Ok(Exif::read(&path)))?;
         Ok((image, stats, exif))
     });
-    if cancelled.load(Ordering::Relaxed) {
+    if canceled.load(Ordering::Relaxed) {
         return None;
     }
 

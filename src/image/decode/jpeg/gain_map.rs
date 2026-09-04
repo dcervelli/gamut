@@ -219,7 +219,7 @@ fn decode(bytes: &[u8]) -> Result<::image::DynamicImage> {
 /// The gain map's vocabulary for primaries, which is narrower than ours.
 ///
 /// It only labels the result — this file's metadata says the map is applied
-/// in the base image's own colour space, and we keep our own answer for what
+/// in the base image's own color space, and we keep our own answer for what
 /// that space is — so the one gamut with no equivalent costs nothing.
 fn gamut(primaries: Primaries) -> ColorGamut {
     match primaries {
@@ -251,7 +251,7 @@ mod tests {
 
     /// How bright the flat base image is. High enough that two stops of boost
     /// clears SDR white, which is the thing worth asserting.
-    const GREY: u8 = 230;
+    const GRAY: u8 = 230;
 
     /// An Ultra HDR file built here rather than checked in: 16x16 of one flat
     /// tone, with a half-size gain map that leaves the left half alone and
@@ -261,7 +261,7 @@ mod tests {
         const MAP: u32 = 8;
 
         let base = jpeg(
-            &[GREY; (BASE * BASE * 3) as usize],
+            &[GRAY; (BASE * BASE * 3) as usize],
             BASE,
             BASE,
             ::image::ExtendedColorType::Rgb8,
@@ -317,7 +317,7 @@ mod tests {
         // The base tone through the sRGB curve, which is what the untouched
         // half must still be. JPEG is lossy even at quality 100, hence the
         // slack.
-        let expected = Transfer::Srgb.to_linear(GREY as f32 / 255.0);
+        let expected = Transfer::Srgb.to_linear(GRAY as f32 / 255.0);
         assert!(
             (plain - expected).abs() < 0.02,
             "unmarked half moved: {plain} against {expected}"

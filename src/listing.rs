@@ -103,7 +103,7 @@ mod tests {
     }
 
     /// A directory stands for the images in it, in name order, and for
-    /// nothing else: the colour profile, the shell script and the README
+    /// nothing else: the color profile, the shell script and the README
     /// lying beside them are not files to show.
     #[test]
     fn a_directory_becomes_the_images_inside_it() {

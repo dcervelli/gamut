@@ -2,7 +2,7 @@
 //! to encode its result.
 //!
 //! Availability is not the same as usefulness: a driver will happily report an
-//! HDR colour space while the monitor in front of you is SDR, and picking one
+//! HDR color space while the monitor in front of you is SDR, and picking one
 //! then changes how everything looks for no benefit. So HDR output is
 //! requested, not assumed — by the monitor, where the compositor says what it
 //! is in (`monitor`), and otherwise by hand.
@@ -75,7 +75,7 @@ impl Output {
     }
 
     /// Whether an HDR surface is there to be asked for at all: the driver
-    /// offers a colour space with room above white for this window. Not
+    /// offers a color space with room above white for this window. Not
     /// whether the monitor is HDR, which nothing on Linux will say.
     pub fn hdr_available(capabilities: &wgpu::SurfaceCapabilities) -> bool {
         Self::extended_linear(capabilities).is_some() || Self::pq(capabilities).is_some()

@@ -166,7 +166,7 @@ impl Exif {
         // of the panel. The georeference speaks for its tags only when it
         // came to something — a directory nothing could be read out of is
         // better listed raw than dropped.
-        let mut told: Vec<Tag> = SUMMARISED.to_vec();
+        let mut told: Vec<Tag> = SUMMARIZED.to_vec();
         told.extend(DESCRIBED.map(|(tag, _)| tag));
         if !geo.is_empty() {
             told.extend(GEOREFERENCED.map(|number| Tag(Context::Tiff, number)));
@@ -220,7 +220,7 @@ impl Exif {
 
 /// The tags `Camera` and `Location` speak for, and so the ones the listing
 /// leaves out.
-const SUMMARISED: [Tag; 17] = [
+const SUMMARIZED: [Tag; 17] = [
     Tag::Make,
     Tag::Model,
     Tag::LensModel,
@@ -453,17 +453,17 @@ fn degrees(value: &Value) -> Option<f64> {
     Some(part(0) + part(1) / 60.0 + part(2) / 3600.0)
 }
 
-/// How high the camera was, to the metre. Below sea level is a real answer and
+/// How high the camera was, to the meter. Below sea level is a real answer and
 /// a signed one, which is why the reference tag is asked as well.
 fn altitude(exif: &exif::Exif) -> Option<String> {
-    let metres = match &primary(exif, Tag::GPSAltitude)?.value {
+    let meters = match &primary(exif, Tag::GPSAltitude)?.value {
         Value::Rational(parts) => parts.first()?.to_f64(),
         _ => return None,
     };
     let below = primary(exif, Tag::GPSAltitudeRef)
         .and_then(|field| field.value.get_uint(0))
         .is_some_and(|reference| reference == 1);
-    let signed = if below { -metres } else { metres };
+    let signed = if below { -meters } else { meters };
     Some(format!("{signed:.0} m"))
 }
 
@@ -506,8 +506,13 @@ fn push(rows: &mut Vec<Entry>, name: &str, value: Option<String>) {
     }
 }
 
+/// Between one part of a compound value and the next — the same thin gap the
+/// bars part their segments with, this being the same middot doing the same
+/// work a panel further in.
+const SEPARATOR: &str = " \u{00b7} ";
+
 fn join(parts: &[String]) -> Option<String> {
-    (!parts.is_empty()).then(|| parts.join("   \u{00b7}   "))
+    (!parts.is_empty()).then(|| parts.join(SEPARATOR))
 }
 
 /// Names for tags the metadata standard does not describe.
@@ -595,7 +600,7 @@ fn compression(code: u32) -> Option<&'static str> {
     })
 }
 
-/// Whether a value is bulk rather than a fact: a maker note, a colour map, a
+/// Whether a value is bulk rather than a fact: a maker note, a color map, a
 /// table of strip offsets. Written out it would be pages of hexadecimal, and
 /// rendering it costs the memory of the string as well as the room.
 fn is_bulk(value: &Value) -> bool {
@@ -908,7 +913,7 @@ mod tests {
     /// into the lines they are read as, in units a reader can use, and under
     /// the headings they are looked for beneath.
     #[test]
-    fn a_photograph_is_summarised_as_it_would_be_read() {
+    fn a_photograph_is_summarized_as_it_would_be_read() {
         let path = written("photograph.jpg", &jpeg_with(photograph()));
         let exif = Exif::read(&path);
         let _ = std::fs::remove_file(&path);
@@ -938,7 +943,7 @@ mod tests {
                 // 89/50 is exactly 1.78, and is quoted as such.
                 (
                     "Exposure",
-                    "1/50 s   \u{00b7}   f/1.78   \u{00b7}   ISO 200"
+                    "1/50 s \u{00b7} f/1.78 \u{00b7} ISO 200"
                 ),
                 ("Focal length", "6.765 mm (24 mm equivalent)"),
             ])

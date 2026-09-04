@@ -61,8 +61,8 @@ impl Viewport {
         [self.width, self.height]
     }
 
-    /// The point the image is centred on, and that zoom works about.
-    fn centre(&self) -> [f32; 2] {
+    /// The point the image is centered on, and that zoom works about.
+    fn center(&self) -> [f32; 2] {
         [self.x + self.width / 2.0, self.y + self.height / 2.0]
     }
 
@@ -81,8 +81,8 @@ pub struct View {
     fit: Option<Fit>,
     /// Only consulted when `fit` is `None`.
     zoom: f32,
-    /// The image-space point, relative to the image centre, shown at the
-    /// centre of the window.
+    /// The image-space point, relative to the image center, shown at the
+    /// center of the window.
     pan: [f32; 2],
     upscale: Upscale,
 }
@@ -135,10 +135,10 @@ impl View {
         }
     }
 
-    /// How far the pan may go from the centre on each axis before the image's
+    /// How far the pan may go from the center on each axis before the image's
     /// edge reaches the viewport's, and so where panning that way stops. Zero
     /// on an axis the image does not overflow, which is the axis it stays
-    /// centred on.
+    /// centered on.
     fn pan_limit(image: [f32; 2], viewport: [f32; 2], zoom: f32) -> [f32; 2] {
         let limit = |image_extent: f32, viewport_extent: f32| {
             (image_extent / 2.0 - viewport_extent / (2.0 * zoom)).max(0.0)
@@ -148,7 +148,7 @@ impl View {
 
     /// Keeps the image from being dragged away from the viewport: when it is
     /// larger than the viewport you can pan up to its edges and no further,
-    /// and when it is smaller it stays centred on that axis.
+    /// and when it is smaller it stays centered on that axis.
     fn clamp_pan(pan: [f32; 2], image: [f32; 2], viewport: [f32; 2], zoom: f32) -> [f32; 2] {
         let [lx, ly] = Self::pan_limit(image, viewport, zoom);
         [pan[0].clamp(-lx, lx), pan[1].clamp(-ly, ly)]
@@ -168,12 +168,12 @@ impl View {
         let pan = Self::clamp_pan(self.pan, image, viewport.size(), zoom);
         let width = image[0] * zoom;
         let height = image[1] * zoom;
-        let centre = viewport.centre();
-        let x = centre[0] - pan[0] * zoom - width / 2.0;
-        let y = centre[1] - pan[1] * zoom - height / 2.0;
+        let center = viewport.center();
+        let x = center[0] - pan[0] * zoom - width / 2.0;
+        let y = center[1] - pan[1] * zoom - height / 2.0;
 
         // At and above 1:1 the pixel grid is the whole point, so the image goes
-        // on whole pixels. Centring an odd difference otherwise leaves the
+        // on whole pixels. Centering an odd difference otherwise leaves the
         // quad half a pixel off the grid, which puts every texel edge through
         // the middle of a pixel and costs the 100% view its crispness. Below
         // 1:1 there is no grid to line up with, and rounding would make the
@@ -195,7 +195,7 @@ impl View {
     }
 
     fn zoom_by(&mut self, factor: f32, image: [f32; 2], viewport: Viewport) {
-        // Materialise the current fit zoom before leaving fit mode, so zooming
+        // Materialize the current fit zoom before leaving fit mode, so zooming
         // continues from what is on screen rather than jumping.
         let current = self.zoom(image, viewport);
         self.zoom = (current * factor).clamp(MIN_ZOOM, MAX_ZOOM);
@@ -216,8 +216,8 @@ impl View {
     /// steps are what a trackpad sends, so this takes a float rather than a
     /// count of notches.
     ///
-    /// The anchor cannot always be honoured: an image smaller than the
-    /// viewport stays centred on that axis, and one panned to its edge stops
+    /// The anchor cannot always be honored: an image smaller than the
+    /// viewport stays centered on that axis, and one panned to its edge stops
     /// there. `clamp_pan` decides that, exactly as it does for a drag.
     pub fn zoom_steps_at(
         &mut self,
@@ -236,8 +236,8 @@ impl View {
         // screen rather than the one held: they differ whenever the view is
         // against an edge, and zooming from the held one would jump.
         let pan = Self::clamp_pan(self.pan, image, viewport.size(), before);
-        let centre = viewport.centre();
-        let offset = [anchor[0] - centre[0], anchor[1] - centre[1]];
+        let center = viewport.center();
+        let offset = [anchor[0] - center[0], anchor[1] - center[1]];
         let point = [pan[0] + offset[0] / before, pan[1] + offset[1] / before];
 
         self.zoom = after;
@@ -250,7 +250,7 @@ impl View {
         );
     }
 
-    /// Zooms to `zoom` about the centre of the viewport, leaving fit mode.
+    /// Zooms to `zoom` about the center of the viewport, leaving fit mode.
     /// What was in the middle stays in the middle, which is what a zoom asked
     /// for by name — rather than at a point — means.
     pub fn set_zoom(&mut self, zoom: f32, image: [f32; 2], viewport: Viewport) {
@@ -265,7 +265,7 @@ impl View {
         self.fit
     }
 
-    /// The image goes back to being fitted, centred: a fit with the view left
+    /// The image goes back to being fitted, centered: a fit with the view left
     /// panned off to one side would show a corner of an image it has just
     /// been asked to fit.
     pub fn set_fit(&mut self, fit: Fit) {
@@ -283,7 +283,7 @@ impl View {
 
     /// Pans as far as the view goes, in the direction given as a sign per
     /// axis: to the image's edge on an axis there is more of than fits, and
-    /// nowhere at all on one the image is centred on. An axis whose sign is
+    /// nowhere at all on one the image is centered on. An axis whose sign is
     /// zero keeps the pan it had.
     pub fn pan_to_edge(&mut self, direction: [f32; 2], image: [f32; 2], viewport: Viewport) {
         let zoom = self.zoom(image, viewport);
@@ -318,7 +318,7 @@ mod tests {
     }
 
     #[test]
-    fn opens_fitted_and_centred() {
+    fn opens_fitted_and_centered() {
         let view = View::new();
         assert_eq!(view.fit(), Some(Fit::Whole));
 
@@ -333,7 +333,7 @@ mod tests {
 
     /// The readout in the bar is this mapping run backwards from the pointer,
     /// so it has to invert `placement` exactly — including the half-pixel the
-    /// centring leaves when the image does not fill the window.
+    /// centering leaves when the image does not fill the window.
     #[test]
     fn a_window_point_maps_back_to_the_image_pixel_under_it() {
         let view = View::new();
@@ -348,9 +348,9 @@ mod tests {
         ]);
         assert!(close(bottom_right[0], IMAGE[0]) && close(bottom_right[1], IMAGE[1]));
 
-        // And the middle of the window is the middle of a centred image.
-        let centre = placement.image_point([600.0, 600.0]);
-        assert!(close(centre[0], IMAGE[0] / 2.0) && close(centre[1], IMAGE[1] / 2.0));
+        // And the middle of the window is the middle of a centered image.
+        let center = placement.image_point([600.0, 600.0]);
+        assert!(close(center[0], IMAGE[0] / 2.0) && close(center[1], IMAGE[1] / 2.0));
     }
 
     /// Zoomed in and panned, the point under the pointer is wherever the pan
@@ -365,7 +365,7 @@ mod tests {
 
         let placement = view.placement(IMAGE, viewport);
         let point = placement.image_point([200.0, 150.0]);
-        // 1:1, so the viewport centre sits over the image centre plus the pan.
+        // 1:1, so the viewport center sits over the image center plus the pan.
         assert!(close(point[0], IMAGE[0] / 2.0 + 100.0));
         assert!(close(point[1], IMAGE[1] / 2.0 + 50.0));
 
@@ -444,7 +444,7 @@ mod tests {
     }
 
     #[test]
-    fn an_image_smaller_than_the_window_stays_centred() {
+    fn an_image_smaller_than_the_window_stays_centered() {
         let mut view = View::new();
         view.set_zoom(1.0, IMAGE, WINDOW);
         view.pan_by(500.0, 500.0, IMAGE, WINDOW);
@@ -484,7 +484,7 @@ mod tests {
         view.pan_to_edge([1.0, 0.0], IMAGE, WINDOW);
         let placement = view.placement(IMAGE, WINDOW);
         assert!(close(placement.x + placement.width, WINDOW.width));
-        // Vertically untouched, so still centred.
+        // Vertically untouched, so still centered.
         assert!(close(
             placement.y + placement.height / 2.0,
             WINDOW.height / 2.0
@@ -561,10 +561,10 @@ mod tests {
     #[test]
     fn an_offset_viewport_carries_the_image_and_the_anchor_with_it() {
         // Narrow enough that the fit is below 1:1, where placement is not
-        // rounded to whole pixels and the centring can be checked exactly.
+        // rounded to whole pixels and the centering can be checked exactly.
         let inset = Viewport::new(50.0, 30.0, 450.0, 1140.0);
 
-        // Fitted on width, so it spans the viewport and is centred in it —
+        // Fitted on width, so it spans the viewport and is centered in it —
         // rather than spanning the window it is a hole in.
         let placement = View::new().placement(IMAGE, inset);
         assert!(close(placement.x, inset.x));
@@ -647,7 +647,7 @@ mod tests {
     #[test]
     fn magnified_views_land_on_whole_pixels() {
         let mut view = View::new();
-        // An odd window against an even image is what puts the centre on a
+        // An odd window against an even image is what puts the center on a
         // half pixel.
         let window = Viewport::whole([1201.0, 1201.0]);
         view.set_zoom(1.0, IMAGE, window);

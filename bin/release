@@ -77,7 +77,7 @@ cargo build --quiet
 # The notices of every crate linked into the binary, rewritten from the lock
 # that build just refreshed. Generation itself is offline and deterministic —
 # `--frozen` implies `--offline`, every crate in the graph ships its own
-# licence text, and the same lock gives the same bytes — so this could just as
+# license text, and the same lock gives the same bytes — so this could just as
 # well run in the PKGBUILD, were the tool there to run. It is not: `cargo
 # about` is packaged neither in Arch's repositories nor in the AUR, so a
 # PKGBUILD wanting it would have to `cargo install` it from crates.io mid

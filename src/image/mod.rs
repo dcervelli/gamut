@@ -1,6 +1,6 @@
 //! The image data model.
 //!
-//! Decoders describe what they found rather than normalising it, so that a
+//! Decoders describe what they found rather than normalizing it, so that a
 //! 16-bit measurement scan and an HDR photograph both survive the trip to the
 //! GPU intact. Turning that description into a texture is the renderer's job
 //! (see `render::upload`).
@@ -41,6 +41,19 @@ impl Channels {
         }
     }
 
+    /// The same layout in the shorthand the top bar is set in, where the
+    /// space goes to the file's name and every fact about it is read at a
+    /// glance rather than out loud. Joined to the depth by
+    /// [`Samples::short_label`]; the words are [`Channels::label`].
+    pub fn code(self) -> &'static str {
+        match self {
+            Channels::Gray => "GRAY",
+            Channels::GrayAlpha => "GRAYA",
+            Channels::Rgb => "RGB",
+            Channels::Rgba => "RGBA",
+        }
+    }
+
     pub fn count(self) -> usize {
         match self {
             Channels::Gray => 1,
@@ -63,8 +76,8 @@ impl Channels {
         matches!(self, Channels::Gray | Channels::GrayAlpha)
     }
 
-    /// How many components carry colour, alpha aside: one for grey, three
-    /// otherwise. Grey is replicated across the three on the way to the
+    /// How many components carry color, alpha aside: one for gray, three
+    /// otherwise. Gray is replicated across the three on the way to the
     /// screen, so one value is the whole of what the file said.
     pub fn color_count(self) -> usize {
         if self.is_gray() { 1 } else { 3 }
@@ -120,9 +133,21 @@ impl Samples {
             Samples::F32 { .. } => "32-bit float",
         }
     }
+
+    /// Layout and depth as one token — `RGB8`, `RGBA16`, `GRAY32F` — for the
+    /// top bar, which has a name to fit beside it. The info panel writes the
+    /// same two facts out in words instead, having the room.
+    pub fn short_label(&self) -> String {
+        let depth = match self {
+            Samples::U8 { .. } => "8",
+            Samples::U16 { .. } => "16",
+            Samples::F32 { .. } => "32F",
+        };
+        format!("{}{depth}", self.channels().code())
+    }
 }
 
-/// Whether colour components have already been multiplied by alpha. PNG says
+/// Whether color components have already been multiplied by alpha. PNG says
 /// straight, EXR usually says premultiplied, and blending them the wrong way
 /// shows as haloing.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -187,7 +212,7 @@ impl Referred {
     }
 }
 
-/// One decoded image, described rather than normalised.
+/// One decoded image, described rather than normalized.
 #[derive(Clone, Debug)]
 pub struct DecodedImage {
     pub width: u32,
@@ -205,7 +230,7 @@ pub struct DecodedImage {
 }
 
 impl DecodedImage {
-    /// An image with nothing stated beyond its pixels and its colour space:
+    /// An image with nothing stated beyond its pixels and its color space:
     /// what the numbers mean follows from the transfer function, and there is
     /// no no-data sentinel, which is what most formats can say.
     pub fn new(
@@ -282,7 +307,7 @@ impl DecodedImage {
         };
         if self.alpha == AlphaMode::Premultiplied {
             // The shader's threshold as well as its division: a texel that has
-            // resolved to nearly nothing is nothing, rather than a wild colour
+            // resolved to nearly nothing is nothing, rather than a wild color
             // divided out of it.
             if alpha > 1e-4 {
                 for value in &mut color {
@@ -362,15 +387,15 @@ impl Sample {
         &self.stored[..self.channels.count()]
     }
 
-    /// The colour, in the linear BT.709 working space with premultiplication
-    /// undone: one component for grey, three for colour. This is what
+    /// The color, in the linear BT.709 working space with premultiplication
+    /// undone: one component for gray, three for color. This is what
     /// `shaders/image.wgsl` has in hand at the moment it applies the window.
     pub fn color(&self) -> &[f32] {
         &self.color[..self.channels.color_count()]
     }
 }
 
-/// Row-major 3x3 times a colour, the CPU-side twin of the `primaries` matrix
+/// Row-major 3x3 times a color, the CPU-side twin of the `primaries` matrix
 /// multiply in `shaders/image.wgsl`.
 fn to_working_space(matrix: [[f32; 3]; 3], color: [f32; 3]) -> [f32; 3] {
     let mut out = [0.0; 3];
@@ -383,6 +408,45 @@ fn to_working_space(matrix: [[f32; 3]; 3], color: [f32; 3]) -> [f32; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The bar's shorthand: layout then depth, one token, no two of the
+    /// twelve alike — a reader who has learned `RGB8` has learned the rest.
+    #[test]
+    fn every_layout_and_depth_has_its_own_shorthand() {
+        let layouts = [
+            Channels::Gray,
+            Channels::GrayAlpha,
+            Channels::Rgb,
+            Channels::Rgba,
+        ];
+        let mut seen = Vec::new();
+        for channels in layouts {
+            for samples in [
+                Samples::U8 {
+                    channels,
+                    data: Vec::new(),
+                },
+                Samples::U16 {
+                    channels,
+                    data: Vec::new(),
+                },
+                Samples::F32 {
+                    channels,
+                    data: Vec::new(),
+                },
+            ] {
+                seen.push(samples.short_label());
+            }
+        }
+        assert_eq!(seen[0], "GRAY8");
+        assert_eq!(seen[5], "GRAYA32F");
+        assert_eq!(seen[6], "RGB8");
+        assert_eq!(seen[10], "RGBA16");
+        let mut unique = seen.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), seen.len(), "{seen:?}");
+    }
 
     #[test]
     fn channel_layout_is_self_consistent() {
@@ -464,7 +528,7 @@ mod tests {
     }
 
     /// What the shader has in hand when it applies the window is the straight
-    /// colour, so that is what a sample reports — while `stored` keeps the
+    /// color, so that is what a sample reports — while `stored` keeps the
     /// faded numbers the file actually contains.
     #[test]
     fn a_premultiplied_sample_is_divided_back_out_the_way_the_shader_does_it() {
@@ -486,14 +550,14 @@ mod tests {
         assert_eq!(sample.color(), [0.5, 1.0, 1.5]);
 
         // A texel that has resolved to nothing is nothing, rather than a wild
-        // colour divided out of an alpha of zero.
+        // color divided out of an alpha of zero.
         let empty = image.sample(1, 0).expect("inside the image");
         assert_eq!(empty.color(), [0.0, 0.0, 0.0]);
         assert_eq!(empty.alpha, 0.0);
     }
 
-    /// Colour comes back in the working space, since that is where the window
-    /// and everything after it happens. Grey has no primaries to convert.
+    /// Color comes back in the working space, since that is where the window
+    /// and everything after it happens. Gray has no primaries to convert.
     #[test]
     fn a_sample_is_taken_to_the_working_space() {
         let mut image = DecodedImage::new(

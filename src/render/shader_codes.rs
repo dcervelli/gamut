@@ -34,7 +34,7 @@ pub fn alpha(alpha: AlphaMode) -> u32 {
 
 /// What a coarse level holds. Straight alpha has been multiplied through on
 /// the way in; an image whose alpha channel is meaningless keeps it that way,
-/// since dividing the colour back out by it would be nonsense. Same switch as
+/// since dividing the color back out by it would be nonsense. Same switch as
 /// [`alpha`].
 pub fn level_alpha(alpha: AlphaMode) -> u32 {
     match alpha {

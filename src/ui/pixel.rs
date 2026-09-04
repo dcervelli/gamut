@@ -1,14 +1,14 @@
 //! The readout that follows the pointer: which pixel it is over, what the
 //! file holds there, what the display makes of that, and a swatch of the
-//! colour it comes out as.
+//! color it comes out as.
 //!
 //! Two numbers for one pixel, because they answer different questions. The
-//! stored one is the measurement — the count a sensor recorded, the metre a
+//! stored one is the measurement — the count a sensor recorded, the meter a
 //! terrain model states — and is the reason anyone points at a pixel. The
-//! mapped one is what the window, the exposure and the false colour have made
+//! mapped one is what the window, the exposure and the false color have made
 //! of it, and is the reason the pixel looks the way it does. The swatch
 //! settles the second question without asking anyone to read three decimals
-//! and imagine a colour.
+//! and imagine a color.
 
 use crate::image::display::Mapped;
 use crate::image::{DecodedImage, Sample, Samples};
@@ -19,14 +19,14 @@ use super::buttons::outline;
 use super::chrome::BAR_PADDING;
 use super::{BECOMES, Current, FrameInput, TEXT_SIZE, text_baseline};
 
-/// Side of the colour swatch, in logical pixels: the height of a line of
+/// Side of the color swatch, in logical pixels: the height of a line of
 /// text, so that it reads as part of the sentence beside it.
 const SWATCH: f32 = 13.0;
 
 /// Between the swatch and the words on either side of it.
 const GAP: f32 = 8.0;
 
-/// What parts the coordinate from the colour: the same middot the bars use
+/// What parts the coordinate from the color: the same middot the bars use
 /// between one segment and the next, so that the readout reads as two things
 /// the way the rest of the bar does.
 const SEPARATOR: &str = "\u{00b7}";
@@ -38,7 +38,7 @@ const SEPARATOR: &str = "\u{00b7}";
 /// than the pixel alone.
 ///
 /// The coordinate leads, then the swatch, then the numbers it stands for. The
-/// swatch belongs to the colour it depicts rather than to the pixel's address,
+/// swatch belongs to the color it depicts rather than to the pixel's address,
 /// so it sits in front of the values and moves with them — and the coordinate
 /// is set to a fixed width so that they stay put while the pointer moves.
 pub(super) fn draw(
@@ -179,8 +179,8 @@ fn component(value: f32, float: bool) -> String {
     }
 }
 
-/// The swatch's colour: what the compositor will put on screen for this
-/// pixel, encoded the way interface colours are written.
+/// The swatch's color: what the compositor will put on screen for this
+/// pixel, encoded the way interface colors are written.
 ///
 /// An SDR reading of it: `from_linear` stops at white. On an HDR output the
 /// surface carries more range than a swatch in a panel can show, and the
@@ -310,10 +310,10 @@ mod tests {
     }
 
     /// The swatch is there to answer the question the numbers cannot: a
-    /// windowed value of 0.5 is a shade of grey until a colormap is on, and
-    /// then it is a colour no column of digits describes.
+    /// windowed value of 0.5 is a shade of gray until a colormap is on, and
+    /// then it is a color no column of digits describes.
     #[test]
-    fn the_swatch_shows_the_colour_the_pixel_comes_out_rather_than_its_value() {
+    fn the_swatch_shows_the_color_the_pixel_comes_out_rather_than_its_value() {
         let image = DecodedImage::new(
             1,
             1,
@@ -327,16 +327,16 @@ mod tests {
         let sample = image.sample(0, 0).expect("inside the image");
 
         let mut display = Display::default();
-        let grey = swatch_color(&display.map(&sample, Headroom::None));
-        assert_eq!(grey.r, grey.g);
-        assert_eq!(grey.g, grey.b);
-        assert_eq!(grey.a, 255);
+        let gray = swatch_color(&display.map(&sample, Headroom::None));
+        assert_eq!(gray.r, gray.g);
+        assert_eq!(gray.g, gray.b);
+        assert_eq!(gray.a, 255);
 
         display.colormap = Colormap::Viridis;
-        let false_colour = swatch_color(&display.map(&sample, Headroom::None));
+        let false_color = swatch_color(&display.map(&sample, Headroom::None));
         assert!(
-            false_colour.g > false_colour.r && false_colour.b > false_colour.r,
-            "the middle of viridis is teal, not grey: {false_colour:?}"
+            false_color.g > false_color.r && false_color.b > false_color.r,
+            "the middle of viridis is teal, not gray: {false_color:?}"
         );
     }
 }

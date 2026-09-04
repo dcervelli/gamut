@@ -36,12 +36,12 @@ OPTIONS:
                             one regardless; o switches later
         --transfer <FN>     Override the transfer function the file is assumed
                             to use: linear, srgb, pq, hlg, or gamma:<N>
-        --primaries <P>     Override the colour primaries: bt709, p3, bt2020,
+        --primaries <P>     Override the color primaries: bt709, p3, bt2020,
                             or adobe
         --no-gain-map       Show the SDR base image of an Ultra HDR JPEG,
                             rather than reconstructing the HDR one from the
                             gain map beside it
-        --colormap <MAP>    Start with false colour on single-channel images:
+        --colormap <MAP>    Start with false color on single-channel images:
                             gray, viridis, magma, or turbo
         --tone-map <MAP>    Start with none, reinhard, or neutral
         --window <MODE>     Start with the window set to unit, minmax, or pct
@@ -519,11 +519,11 @@ mod tests {
                 .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
             for option in long_options() {
                 // fish spells a long option without its dashes.
-                let spelt = match file.ends_with(".fish") {
+                let spelled = match file.ends_with(".fish") {
                     true => format!("-l {}", option.trim_start_matches('-')),
                     false => option.clone(),
                 };
-                assert!(text.contains(&spelt), "{file} should offer {option}");
+                assert!(text.contains(&spelled), "{file} should offer {option}");
             }
         }
     }

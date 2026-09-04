@@ -7,12 +7,12 @@
 /// How the image is resampled when it is shown larger than life.
 ///
 /// Minification has one right answer — average what the pixel covers — but
-/// magnification is a judgement about what the image is for, so it is the
+/// magnification is a judgment about what the image is for, so it is the
 /// user's to make. Neither is a smoothing filter in the ordinary sense: both
-/// leave a texel centre exactly as it was found.
+/// leave a texel center exactly as it was found.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Upscale {
-    /// Nearest neighbour, ramped across the single output pixel that straddles
+    /// Nearest neighbor, ramped across the single output pixel that straddles
     /// a texel edge. Shows the pixel grid a measurement image is read on, and
     /// unlike plain nearest it does not double columns unevenly at a zoom that
     /// is not a whole number.

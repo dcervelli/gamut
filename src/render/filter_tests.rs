@@ -179,7 +179,7 @@ fn close(a: f32, b: f32, tolerance: f32) -> bool {
 }
 
 /// The claim minification rests on: an output pixel is the mean of exactly the
-/// texels it covers, not a bilinear tap at its centre.
+/// texels it covers, not a bilinear tap at its center.
 #[test]
 fn minification_averages_every_texel_it_covers() {
     let Some(gpu) = gpu::test_context() else {
@@ -284,10 +284,10 @@ fn antialiased_nearest_resolves_an_edge_that_lands_mid_pixel() {
     );
 }
 
-/// Catmull-Rom is interpolating: a magnified texel centre reproduces the texel
-/// exactly, however its neighbours ring around it.
+/// Catmull-Rom is interpolating: a magnified texel center reproduces the texel
+/// exactly, however its neighbors ring around it.
 #[test]
-fn bicubic_passes_texel_centres_through() {
+fn bicubic_passes_texel_centers_through() {
     let Some(gpu) = gpu::test_context() else {
         return;
     };
@@ -297,18 +297,18 @@ fn bicubic_passes_texel_centres_through() {
     placement.upscale = Upscale::Bicubic;
     let pixels = draw(gpu, &image, [10, 10], placement);
 
-    // At five-to-one, the centre of texel 0 falls on the centre of pixel 2 and
-    // the centre of texel 1 on that of pixel 7.
+    // At five-to-one, the center of texel 0 falls on the center of pixel 2 and
+    // the center of texel 1 on that of pixel 7.
     assert!(close(at(&pixels, 10, 2, 2), 0.0, 2e-3));
     assert!(close(at(&pixels, 10, 7, 2), 1.0, 2e-3));
     assert!(close(at(&pixels, 10, 2, 7), 1.0, 2e-3));
 }
 
 /// Filtering straight alpha without multiplying it through first is what puts
-/// a halo of a transparent texel's colour along a hard edge. Here the
+/// a halo of a transparent texel's color along a hard edge. Here the
 /// transparent half is green, and none of it may reach the result.
 #[test]
-fn a_transparent_texel_does_not_bleed_its_colour() {
+fn a_transparent_texel_does_not_bleed_its_color() {
     let Some(gpu) = gpu::test_context() else {
         return;
     };
@@ -335,7 +335,7 @@ fn a_transparent_texel_does_not_bleed_its_colour() {
     };
     let pixels = draw(gpu, &image, [1, 1], placement);
 
-    // The target holds premultiplied colour, so half coverage of opaque red
+    // The target holds premultiplied color, so half coverage of opaque red
     // reads as half red, half alpha, and no green whatsoever.
     assert!(close(pixels[0][0], 0.5, 5e-3), "red: {:?}", pixels[0]);
     assert!(close(pixels[0][1], 0.0, 5e-3), "green: {:?}", pixels[0]);

@@ -1,13 +1,13 @@
 //! What an embedded ICC profile says about the numbers in a file.
 //!
-//! Only the two things this viewer's colour model can act on are taken from a
+//! Only the two things this viewer's color model can act on are taken from a
 //! profile: which primaries the components are expressed in, and — where the
 //! profile states a plain power law — the transfer function. Everything else
 //! ICC can describe (lookup-table transforms, non-RGB connection spaces,
 //! rendering intents) is outside what the shader does, and is left alone
 //! rather than half-applied.
 //!
-//! Primaries are recognised by matching the profile's colorants against those
+//! Primaries are recognized by matching the profile's colorants against those
 //! of the four spaces [`Primaries`] can name, rather than by reading the
 //! description text: a profile written by a phone says "Display P3" but one
 //! written by a scanner says whatever its vendor felt like, and the numbers
@@ -103,13 +103,13 @@ mod tests {
     /// Round-trips each reference profile through its own encoder, so the
     /// match is tested against real profile bytes rather than against the
     /// in-memory structure it was built from.
-    fn recognise(profile: &ColorProfile) -> ColorSpace {
+    fn recognize(profile: &ColorProfile) -> ColorSpace {
         let encoded = profile.encode().expect("reference profiles encode");
         color_space(&encoded, ColorSpace::SRGB)
     }
 
     #[test]
-    fn each_reference_profile_is_recognised_as_itself() {
+    fn each_reference_profile_is_recognized_as_itself() {
         let cases = [
             (ColorProfile::new_srgb(), Primaries::Bt709),
             (ColorProfile::new_display_p3(), Primaries::DisplayP3),
@@ -117,12 +117,12 @@ mod tests {
             (ColorProfile::new_adobe_rgb(), Primaries::AdobeRgb),
         ];
         for (profile, expected) in cases {
-            assert_eq!(recognise(&profile).primaries, expected);
+            assert_eq!(recognize(&profile).primaries, expected);
         }
     }
 
     /// The distinction this whole module exists for. Display P3 is the
-    /// closest neighbour sRGB has among the four, and confusing the two is
+    /// closest neighbor sRGB has among the four, and confusing the two is
     /// what makes a phone photograph look washed out.
     #[test]
     fn display_p3_is_not_mistaken_for_srgb() {
@@ -141,7 +141,7 @@ mod tests {
         );
     }
 
-    /// Nonsense in must not become a confident colour space out.
+    /// Nonsense in must not become a confident color space out.
     #[test]
     fn an_unreadable_profile_leaves_the_assumption_alone() {
         assert_eq!(

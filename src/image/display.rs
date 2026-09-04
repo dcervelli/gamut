@@ -1,5 +1,5 @@
 //! How the numbers in an image become something you can look at: the window
-//! applied before display, exposure, tone mapping and false colour.
+//! applied before display, exposure, tone mapping and false color.
 //!
 //! All of it is uniform state — changing any of it re-renders, it never
 //! re-decodes or re-uploads.
@@ -67,7 +67,7 @@ pub enum ToneMap {
     None,
     Reinhard,
     /// Khronos PBR Neutral: keeps hue and saturation far better than a
-    /// Reinhard curve, and rolls off highlights without the ACES colour cast.
+    /// Reinhard curve, and rolls off highlights without the ACES color cast.
     Neutral,
 }
 
@@ -118,7 +118,7 @@ impl ToneMap {
         }
     }
 
-    /// The curve itself, applied to one linear colour, on a surface with
+    /// The curve itself, applied to one linear color, on a surface with
     /// `headroom`.
     ///
     /// The GPU runs this on every pixel of every frame as `tone_map` in
@@ -170,7 +170,7 @@ fn neutral(color: [f32; 3]) -> [f32; 3] {
     color.map(|c| c + (new_peak - c) * g)
 }
 
-/// False colour for single-channel images. Ignored for colour images.
+/// False color for single-channel images. Ignored for color images.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Colormap {
     Gray,
@@ -218,14 +218,14 @@ impl Colormap {
         }
     }
 
-    /// The colour this map gives to a windowed value, in the linear working
+    /// The color this map gives to a windowed value, in the linear working
     /// space. Out-of-window values take the end of the ramp, as they do on
     /// screen.
     ///
     /// The same fits `false_color` runs in `shaders/image.wgsl`, and the same
-    /// linearisation after them — the polynomials produce sRGB-encoded
+    /// linearization after them — the polynomials produce sRGB-encoded
     /// values. Two copies of a table is a thing to keep an eye on; the
-    /// alternative is a readout that names a colour the screen is not
+    /// alternative is a readout that names a color the screen is not
     /// showing.
     pub fn color(self, value: f32) -> [f32; 3] {
         let t = value.clamp(0.0, 1.0);
@@ -254,7 +254,7 @@ fn ramp(coefficients: &[[f32; 3]], t: f32) -> [f32; 3] {
 // Viridis and magma are Matt Zucker's polynomial fits to matplotlib's
 // colormaps, from https://www.shadertoy.com/view/WlfXRN, dedicated to the
 // public domain under CC0; the colormap data he fitted was CC0 as well. What
-// is borrowed is the fit, not the colormap, which is why the licence recorded
+// is borrowed is the fit, not the colormap, which is why the license recorded
 // in `REUSE.toml` is the fit's.
 //
 // Written out to the digit as the shader has them, so that the two tables can
@@ -399,8 +399,8 @@ impl Display {
         }
         display.adopt(headroom, stats);
 
-        // The false colour is a reading of one channel, and a colour image's
-        // three are colours already: the display ignores it there, and so
+        // The false color is a reading of one channel, and a color image's
+        // three are colors already: the display ignores it there, and so
         // must the state, or the bar names a map that does nothing.
         if let Some(colormap) = startup.colormap.filter(|_| image.is_gray()) {
             display.colormap = colormap;
@@ -484,14 +484,14 @@ impl Display {
         self.exposure_stops = (self.exposure_stops + stops).clamp(-16.0, 16.0);
     }
 
-    /// Widens or narrows the window about its own centre, the "level" half of
+    /// Widens or narrows the window about its own center, the "level" half of
     /// a window/level control.
     pub fn adjust_contrast(&mut self, factor: f32) {
-        let centre = (self.low + self.high) / 2.0;
+        let center = (self.low + self.high) / 2.0;
         let half = (self.high - self.low) / 2.0 * factor;
         if half.is_finite() && half > 0.0 {
-            self.low = centre - half;
-            self.high = centre + half;
+            self.low = center - half;
+            self.high = center + half;
             self.auto = AutoWindow::Manual;
         }
     }
@@ -513,7 +513,7 @@ impl Display {
     /// would do nothing at all for whoever had passed one — which is the one
     /// person who has most reason to press it.
     ///
-    /// The false colour is left where it is, being the one thing here that is
+    /// The false color is left where it is, being the one thing here that is
     /// not a rendering decision: it says which of the file's numbers you are
     /// trying to read, and a reset that threw that away would take the answer
     /// with it. There is a key and a row of buttons for changing it.
@@ -524,7 +524,7 @@ impl Display {
     }
 
     /// What this display state makes of one pixel on a surface with
-    /// `headroom`: the number it becomes and the colour it comes out as. The
+    /// `headroom`: the number it becomes and the color it comes out as. The
     /// readout in the bottom bar is this run for whichever pixel the pointer
     /// is over.
     pub fn map(&self, sample: &Sample, headroom: Headroom) -> Mapped {
@@ -535,7 +535,7 @@ impl Display {
         }
         let count = sample.channels.color_count();
 
-        // The order the pipeline uses: window, then false colour for a single
+        // The order the pipeline uses: window, then false color for a single
         // channel, then the tone curve over whatever that produced.
         let color = match (sample.channels.is_gray(), self.colormap) {
             (true, Colormap::Gray) => [values[0]; 3],
@@ -551,13 +551,13 @@ impl Display {
         }
     }
 
-    /// The tone curve as the compositor runs it over a colour: the chosen one
-    /// — or, over a false colour, a plain clip whatever the surface.
+    /// The tone curve as the compositor runs it over a color: the chosen one
+    /// — or, over a false color, a plain clip whatever the surface.
     ///
-    /// False colour is already display-referred, so `composite.rs` holds the
+    /// False color is already display-referred, so `composite.rs` holds the
     /// curve at a clip over it: a tone curve on top of a colormap would
     /// distort the mapping the viewer is reading values off, and headroom
-    /// above the top of the ramp is a colour the ramp does not have. Every
+    /// above the top of the ramp is a color the ramp does not have. Every
     /// readout has to make the same choice, or it stops describing the screen
     /// it is meant to be describing.
     fn curve(&self, channels: Channels, headroom: Headroom, color: [f32; 3]) -> [f32; 3] {
@@ -598,25 +598,25 @@ impl Display {
     /// past 1 on a surface with room above white and no curve on, since that
     /// is what such a surface shows.
     ///
-    /// The neutral axis of the pipeline — a grey fed through it — which is
+    /// The neutral axis of the pipeline — a gray fed through it — which is
     /// what the histogram draws as its response curve. [`Display::map`] is
-    /// the same arithmetic for a whole pixel, where the false colour and a
+    /// the same arithmetic for a whole pixel, where the false color and a
     /// tone curve's cross-channel terms also come in; a curve for those would
     /// be three curves, and the panel is asking a one-dimensional question.
     pub fn response(&self, value: f32, headroom: Headroom) -> f32 {
         self.tone_map.apply([self.windowed(value); 3], headroom)[0]
     }
 
-    /// And the colour it comes out as: the window, the false colour and the
+    /// And the color it comes out as: the window, the false color and the
     /// tone curve, in the order [`Display::map`] runs them.
     ///
     /// The same arithmetic as `map`, asked about a value rather than about a
     /// pixel, which is what lets the histogram paint the display's own output
     /// under the values it is plotting instead of a second drawing of it.
     ///
-    /// It needs the channels because the false colour is a reading of one:
-    /// it is what a grey image is looked at through, and a colour image's
-    /// three are colours already. Everything below the window comes back
+    /// It needs the channels because the false color is a reading of one:
+    /// it is what a gray image is looked at through, and a color image's
+    /// three are colors already. Everything below the window comes back
     /// black, and everything above it as the top of the ramp, or as white —
     /// or, on a surface with room above white and no curve on, brighter than
     /// white — because that is what the screen does with it.
@@ -642,9 +642,9 @@ impl Display {
 pub struct Mapped {
     values: [f32; 3],
     count: usize,
-    /// The colour on screen, in the linear BT.709 the compositor works in.
+    /// The color on screen, in the linear BT.709 the compositor works in.
     ///
-    /// Not simply [`Mapped::values`] repeated: a false colour is three
+    /// Not simply [`Mapped::values`] repeated: a false color is three
     /// components where the value is one, and the tone curve has moved both
     /// by the time they reach the surface. Above 1.0 only on a surface with
     /// room above white and no curve on, which is the one case where the
@@ -655,7 +655,7 @@ pub struct Mapped {
 }
 
 impl Mapped {
-    /// `(value - low) * gain` per colour channel, before the tone curve: a
+    /// `(value - low) * gain` per color channel, before the tone curve: a
     /// highlight over the window reads as the number it is rather than as the
     /// 1.0 it is about to be clipped to, which is the whole use of a readout
     /// on measurement work.
@@ -669,7 +669,7 @@ mod tests {
     use super::*;
     use crate::image::{AlphaMode, Channels, ColorSpace, Primaries, Referred, Samples};
 
-    /// Linear float grey, which is what every HDR path here comes out as:
+    /// Linear float gray, which is what every HDR path here comes out as:
     /// 1.0 is SDR white and anything above it is the headroom.
     fn float_gray(data: Vec<f32>) -> DecodedImage {
         DecodedImage {
@@ -753,41 +753,41 @@ mod tests {
 
     /// What the histogram's ramp is painted with. The ends are the reason it
     /// is worth drawing: past either edge of the window the screen has one
-    /// colour and no more, and the band shows how much of the axis that is.
+    /// color and no more, and the band shows how much of the axis that is.
     #[test]
     fn a_value_is_shaded_the_way_the_screen_shows_it() {
         let mut display = Display::default();
         (display.low, display.high) = (0.25, 0.75);
 
-        let grey = |v: f32| display.shade(v, Channels::Rgb, Headroom::None);
-        assert_eq!(grey(0.25), [0.0; 3], "the window's floor comes out black");
-        assert_eq!(grey(0.5), [0.5; 3]);
-        assert_eq!(grey(0.75), [1.0; 3], "and its ceiling comes out white");
-        assert_eq!(grey(0.0), [0.0; 3], "everything below it, clipped to one");
-        assert_eq!(grey(1.0), [1.0; 3], "and everything above it, to the other");
+        let gray = |v: f32| display.shade(v, Channels::Rgb, Headroom::None);
+        assert_eq!(gray(0.25), [0.0; 3], "the window's floor comes out black");
+        assert_eq!(gray(0.5), [0.5; 3]);
+        assert_eq!(gray(0.75), [1.0; 3], "and its ceiling comes out white");
+        assert_eq!(gray(0.0), [0.0; 3], "everything below it, clipped to one");
+        assert_eq!(gray(1.0), [1.0; 3], "and everything above it, to the other");
 
-        // A colour image is three colours already, so the false colour is not
+        // A color image is three colors already, so the false color is not
         // for it however it is set.
         display.colormap = Colormap::Viridis;
         assert_eq!(display.shade(0.5, Channels::Rgb, Headroom::None), [0.5; 3]);
         assert_eq!(display.shade(0.5, Channels::Rgba, Headroom::None), [0.5; 3]);
 
-        // On a grey one it is, and it clips to the ends of its own ramp
+        // On a gray one it is, and it clips to the ends of its own ramp
         // rather than to black and white.
         let mapped = |v: f32| display.shade(v, Channels::Gray, Headroom::None);
         assert_eq!(mapped(0.5), Colormap::Viridis.color(0.5));
         assert_eq!(mapped(-1.0), Colormap::Viridis.color(0.0));
         assert_eq!(mapped(9.0), Colormap::Viridis.color(1.0));
-        assert_ne!(mapped(0.5), [0.5; 3], "viridis is not grey at mid ramp");
+        assert_ne!(mapped(0.5), [0.5; 3], "viridis is not gray at mid ramp");
     }
 
-    /// And no curve bends a false colour, on either surface: the ramp is read
+    /// And no curve bends a false color, on either surface: the ramp is read
     /// off the windowed value and clipped at its ends, as the compositor
-    /// holds it — a curve over the ramp would pick a different colour off it,
+    /// holds it — a curve over the ramp would pick a different color off it,
     /// not merely a dimmer one, and the readouts have to agree with the
     /// screen about which.
     #[test]
-    fn a_false_colour_is_read_off_the_ramp_and_no_curve_bends_it() {
+    fn a_false_color_is_read_off_the_ramp_and_no_curve_bends_it() {
         let mut display = Display {
             colormap: Colormap::Magma,
             tone_map: ToneMap::Reinhard,
@@ -801,7 +801,7 @@ mod tests {
             let curved = ToneMap::Reinhard.apply(Colormap::Magma.color(0.5), headroom);
             assert_ne!(shaded, curved, "{headroom:?}: the curve is held off");
         }
-        // Three colours are colours already, and the curve is on them.
+        // Three colors are colors already, and the curve is on them.
         assert_eq!(
             display.shade(1.0, Channels::Rgb, Headroom::None),
             ToneMap::Reinhard.apply([0.5; 3], Headroom::None)
@@ -810,7 +810,7 @@ mod tests {
 
     /// The key and the row of buttons offer the same maps in the same order.
     #[test]
-    fn cycling_the_false_colour_walks_the_row_of_them() {
+    fn cycling_the_false_color_walks_the_row_of_them() {
         let mut map = Colormap::ALL[0];
         for expected in Colormap::ALL.into_iter().skip(1) {
             map = map.next();
@@ -860,7 +860,7 @@ mod tests {
 
     /// The two halves of a readout answer different questions, so they are
     /// allowed to disagree: the value says how far above the window the pixel
-    /// is, and the colour says what the screen did about it.
+    /// is, and the color says what the screen did about it.
     #[test]
     fn a_clipped_highlight_reads_as_the_number_it_is_and_shows_as_white() {
         let image = DecodedImage {
@@ -896,10 +896,10 @@ mod tests {
         );
     }
 
-    /// A false-coloured pixel has one value and three components of colour,
+    /// A false-colored pixel has one value and three components of color,
     /// and only the swatch can say what the second is.
     #[test]
-    fn false_colour_leaves_the_value_alone_and_changes_the_colour() {
+    fn false_color_leaves_the_value_alone_and_changes_the_color() {
         let image = gray(vec![0, u16::MAX], Transfer::Linear);
         let mut display = Display::default();
         let dark = image.sample(0, 0).expect("inside");
@@ -907,7 +907,7 @@ mod tests {
         assert_eq!(
             display.map(&dark, Headroom::None).color,
             [0.0; 3],
-            "grey stays grey"
+            "gray stays gray"
         );
 
         display.colormap = Colormap::Viridis;
@@ -920,11 +920,11 @@ mod tests {
     }
 
     /// The fits are transcribed from `shaders/image.wgsl`, where a mistyped
-    /// coefficient would be invisible; against matplotlib's own colours they
+    /// coefficient would be invisible; against matplotlib's own colors they
     /// are not. Loose, because a seven-term fit is an approximation of a
     /// 256-entry table, but nowhere near loose enough to hide a typo.
     #[test]
-    fn the_colormaps_land_on_the_colours_they_are_named_after() {
+    fn the_colormaps_land_on_the_colors_they_are_named_after() {
         let encoded = |map: Colormap, t: f32| {
             map.color(t)
                 .map(|channel| Transfer::Srgb.to_encoded(channel))
@@ -1084,7 +1084,7 @@ mod tests {
     }
 
     #[test]
-    fn contrast_keeps_the_centre_and_marks_the_window_manual() {
+    fn contrast_keeps_the_center_and_marks_the_window_manual() {
         let mut display = Display {
             low: 0.0,
             high: 1.0,
@@ -1243,20 +1243,20 @@ mod tests {
         assert_eq!(display.exposure_stops, 2.0);
     }
 
-    /// A false colour is a reading of one channel, and a colour image's three
-    /// are colours already: the flag reaches a grey image and not a colour
+    /// A false color is a reading of one channel, and a color image's three
+    /// are colors already: the flag reaches a gray image and not a color
     /// one, so that the state never names a map the screen is not applying.
     #[test]
-    fn a_startup_colormap_reaches_only_a_grey_image() {
+    fn a_startup_colormap_reaches_only_a_gray_image() {
         let startup = Startup {
             colormap: Some(Colormap::Viridis),
             ..Startup::default()
         };
-        let grey = gray(vec![0, 4095], Transfer::Srgb);
-        let display = Display::for_image_with(&grey, &Stats::scan(&grey), startup, Headroom::None);
+        let gray = gray(vec![0, 4095], Transfer::Srgb);
+        let display = Display::for_image_with(&gray, &Stats::scan(&gray), startup, Headroom::None);
         assert_eq!(display.colormap, Colormap::Viridis);
 
-        let colour = DecodedImage::new(
+        let color = DecodedImage::new(
             1,
             1,
             Samples::F32 {
@@ -1267,7 +1267,7 @@ mod tests {
             AlphaMode::Opaque,
         );
         let display =
-            Display::for_image_with(&colour, &Stats::scan(&colour), startup, Headroom::None);
+            Display::for_image_with(&color, &Stats::scan(&color), startup, Headroom::None);
         assert_eq!(display.colormap, Colormap::Gray);
     }
 
@@ -1293,8 +1293,8 @@ mod tests {
 
     /// And so does a readout of a value: on a surface with room above white
     /// the response runs past 1, which is what the histogram draws, and a
-    /// false colour is clipped there as everywhere, since the ramp has no
-    /// colour for what is past its end.
+    /// false color is clipped there as everywhere, since the ramp has no
+    /// color for what is past its end.
     #[test]
     fn the_response_and_the_shade_run_past_white_only_where_the_surface_does() {
         let display = Display::default();
@@ -1302,12 +1302,12 @@ mod tests {
         assert_eq!(display.response(4.0, Headroom::Above), 4.0);
         assert_eq!(display.shade(4.0, Channels::Rgb, Headroom::Above), [4.0; 3]);
 
-        let false_colour = Display {
+        let false_color = Display {
             colormap: Colormap::Viridis,
             ..Default::default()
         };
         assert_eq!(
-            false_colour.shade(4.0, Channels::Gray, Headroom::Above),
+            false_color.shade(4.0, Channels::Gray, Headroom::Above),
             Colormap::Viridis.color(1.0)
         );
     }
