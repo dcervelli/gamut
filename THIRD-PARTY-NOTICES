@@ -1,4 +1,4 @@
-Cargo.lock sha256: 4cc083c971585868df42f3374eb5b5b2dc3ea50b0411667c736b85fbaa1fb37c
+Cargo.lock sha256: 20c3ea892cf77486126bb9f4c07486715c6115b55f8114c2622f7f70e0bf1ebf
 
                       gamut: third-party notices
 
@@ -1328,7 +1328,7 @@ BSD 3-Clause "New" or "Revised" License
 Used by:
   exr 1.74.2
 
-Copyright (c) <year> <owner>. 
+Copyright (c) <year> <owner>.
 
 Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
 
@@ -4901,5 +4901,3 @@ the following restrictions:
     misrepresented as being the original software.
 
 3. This notice may not be removed or altered from any source distribution.
-
-
