@@ -166,7 +166,7 @@ impl Exif {
         // of the panel. The georeference speaks for its tags only when it
         // came to something — a directory nothing could be read out of is
         // better listed raw than dropped.
-        let mut told: Vec<Tag> = SUMMARISED.to_vec();
+        let mut told: Vec<Tag> = SUMMARIZED.to_vec();
         told.extend(DESCRIBED.map(|(tag, _)| tag));
         if !geo.is_empty() {
             told.extend(GEOREFERENCED.map(|number| Tag(Context::Tiff, number)));
@@ -220,7 +220,7 @@ impl Exif {
 
 /// The tags `Camera` and `Location` speak for, and so the ones the listing
 /// leaves out.
-const SUMMARISED: [Tag; 17] = [
+const SUMMARIZED: [Tag; 17] = [
     Tag::Make,
     Tag::Model,
     Tag::LensModel,
@@ -453,17 +453,17 @@ fn degrees(value: &Value) -> Option<f64> {
     Some(part(0) + part(1) / 60.0 + part(2) / 3600.0)
 }
 
-/// How high the camera was, to the metre. Below sea level is a real answer and
+/// How high the camera was, to the meter. Below sea level is a real answer and
 /// a signed one, which is why the reference tag is asked as well.
 fn altitude(exif: &exif::Exif) -> Option<String> {
-    let metres = match &primary(exif, Tag::GPSAltitude)?.value {
+    let meters = match &primary(exif, Tag::GPSAltitude)?.value {
         Value::Rational(parts) => parts.first()?.to_f64(),
         _ => return None,
     };
     let below = primary(exif, Tag::GPSAltitudeRef)
         .and_then(|field| field.value.get_uint(0))
         .is_some_and(|reference| reference == 1);
-    let signed = if below { -metres } else { metres };
+    let signed = if below { -meters } else { meters };
     Some(format!("{signed:.0} m"))
 }
 
@@ -913,7 +913,7 @@ mod tests {
     /// into the lines they are read as, in units a reader can use, and under
     /// the headings they are looked for beneath.
     #[test]
-    fn a_photograph_is_summarised_as_it_would_be_read() {
+    fn a_photograph_is_summarized_as_it_would_be_read() {
         let path = written("photograph.jpg", &jpeg_with(photograph()));
         let exif = Exif::read(&path);
         let _ = std::fs::remove_file(&path);

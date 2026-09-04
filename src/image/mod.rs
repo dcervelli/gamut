@@ -1,6 +1,6 @@
 //! The image data model.
 //!
-//! Decoders describe what they found rather than normalising it, so that a
+//! Decoders describe what they found rather than normalizing it, so that a
 //! 16-bit measurement scan and an HDR photograph both survive the trip to the
 //! GPU intact. Turning that description into a texture is the renderer's job
 //! (see `render::upload`).
@@ -76,8 +76,8 @@ impl Channels {
         matches!(self, Channels::Gray | Channels::GrayAlpha)
     }
 
-    /// How many components carry color, alpha aside: one for grey, three
-    /// otherwise. Grey is replicated across the three on the way to the
+    /// How many components carry color, alpha aside: one for gray, three
+    /// otherwise. Gray is replicated across the three on the way to the
     /// screen, so one value is the whole of what the file said.
     pub fn color_count(self) -> usize {
         if self.is_gray() { 1 } else { 3 }
@@ -212,7 +212,7 @@ impl Referred {
     }
 }
 
-/// One decoded image, described rather than normalised.
+/// One decoded image, described rather than normalized.
 #[derive(Clone, Debug)]
 pub struct DecodedImage {
     pub width: u32,
@@ -388,7 +388,7 @@ impl Sample {
     }
 
     /// The color, in the linear BT.709 working space with premultiplication
-    /// undone: one component for grey, three for color. This is what
+    /// undone: one component for gray, three for color. This is what
     /// `shaders/image.wgsl` has in hand at the moment it applies the window.
     pub fn color(&self) -> &[f32] {
         &self.color[..self.channels.color_count()]
@@ -410,7 +410,7 @@ mod tests {
     use super::*;
 
     /// The bar's shorthand: layout then depth, one token, no two of the
-    /// twelve alike — a reader who has learnt `RGB8` has learnt the rest.
+    /// twelve alike — a reader who has learned `RGB8` has learned the rest.
     #[test]
     fn every_layout_and_depth_has_its_own_shorthand() {
         let layouts = [
@@ -557,7 +557,7 @@ mod tests {
     }
 
     /// Color comes back in the working space, since that is where the window
-    /// and everything after it happens. Grey has no primaries to convert.
+    /// and everything after it happens. Gray has no primaries to convert.
     #[test]
     fn a_sample_is_taken_to_the_working_space() {
         let mut image = DecodedImage::new(

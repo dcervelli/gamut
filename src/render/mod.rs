@@ -93,7 +93,7 @@ pub trait TextMeasure {
     /// How far below the top of a run at `size` the middle of its capitals
     /// sits, in logical pixels: what a label is placed by when it has to sit
     /// level with a mark beside it, rather than merely inside the same box.
-    fn cap_centre(&mut self, size: f32) -> f32;
+    fn cap_center(&mut self, size: f32) -> f32;
 
     /// As [`TextMeasure::measure_text`], for a run drawn with
     /// [`UiFrame::text_clipped_mono`].
@@ -469,8 +469,8 @@ impl Renderer {
 /// caller that has a renderer measures through it, and a test that has no
 /// surface measures against a [`UiRenderer`] directly.
 impl TextMeasure for Renderer {
-    fn cap_centre(&mut self, size: f32) -> f32 {
-        self.ui.cap_centre(size)
+    fn cap_center(&mut self, size: f32) -> f32 {
+        self.ui.cap_center(size)
     }
 
     fn measure_text(&mut self, text: &str, size: f32) -> [f32; 2] {

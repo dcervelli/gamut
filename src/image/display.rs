@@ -223,7 +223,7 @@ impl Colormap {
     /// screen.
     ///
     /// The same fits `false_color` runs in `shaders/image.wgsl`, and the same
-    /// linearisation after them — the polynomials produce sRGB-encoded
+    /// linearization after them — the polynomials produce sRGB-encoded
     /// values. Two copies of a table is a thing to keep an eye on; the
     /// alternative is a readout that names a color the screen is not
     /// showing.
@@ -254,7 +254,7 @@ fn ramp(coefficients: &[[f32; 3]], t: f32) -> [f32; 3] {
 // Viridis and magma are Matt Zucker's polynomial fits to matplotlib's
 // colormaps, from https://www.shadertoy.com/view/WlfXRN, dedicated to the
 // public domain under CC0; the colormap data he fitted was CC0 as well. What
-// is borrowed is the fit, not the colormap, which is why the licence recorded
+// is borrowed is the fit, not the colormap, which is why the license recorded
 // in `REUSE.toml` is the fit's.
 //
 // Written out to the digit as the shader has them, so that the two tables can
@@ -484,14 +484,14 @@ impl Display {
         self.exposure_stops = (self.exposure_stops + stops).clamp(-16.0, 16.0);
     }
 
-    /// Widens or narrows the window about its own centre, the "level" half of
+    /// Widens or narrows the window about its own center, the "level" half of
     /// a window/level control.
     pub fn adjust_contrast(&mut self, factor: f32) {
-        let centre = (self.low + self.high) / 2.0;
+        let center = (self.low + self.high) / 2.0;
         let half = (self.high - self.low) / 2.0 * factor;
         if half.is_finite() && half > 0.0 {
-            self.low = centre - half;
-            self.high = centre + half;
+            self.low = center - half;
+            self.high = center + half;
             self.auto = AutoWindow::Manual;
         }
     }
@@ -598,7 +598,7 @@ impl Display {
     /// past 1 on a surface with room above white and no curve on, since that
     /// is what such a surface shows.
     ///
-    /// The neutral axis of the pipeline — a grey fed through it — which is
+    /// The neutral axis of the pipeline — a gray fed through it — which is
     /// what the histogram draws as its response curve. [`Display::map`] is
     /// the same arithmetic for a whole pixel, where the false color and a
     /// tone curve's cross-channel terms also come in; a curve for those would
@@ -615,7 +615,7 @@ impl Display {
     /// under the values it is plotting instead of a second drawing of it.
     ///
     /// It needs the channels because the false color is a reading of one:
-    /// it is what a grey image is looked at through, and a color image's
+    /// it is what a gray image is looked at through, and a color image's
     /// three are colors already. Everything below the window comes back
     /// black, and everything above it as the top of the ramp, or as white —
     /// or, on a surface with room above white and no curve on, brighter than
@@ -669,7 +669,7 @@ mod tests {
     use super::*;
     use crate::image::{AlphaMode, Channels, ColorSpace, Primaries, Referred, Samples};
 
-    /// Linear float grey, which is what every HDR path here comes out as:
+    /// Linear float gray, which is what every HDR path here comes out as:
     /// 1.0 is SDR white and anything above it is the headroom.
     fn float_gray(data: Vec<f32>) -> DecodedImage {
         DecodedImage {
@@ -759,12 +759,12 @@ mod tests {
         let mut display = Display::default();
         (display.low, display.high) = (0.25, 0.75);
 
-        let grey = |v: f32| display.shade(v, Channels::Rgb, Headroom::None);
-        assert_eq!(grey(0.25), [0.0; 3], "the window's floor comes out black");
-        assert_eq!(grey(0.5), [0.5; 3]);
-        assert_eq!(grey(0.75), [1.0; 3], "and its ceiling comes out white");
-        assert_eq!(grey(0.0), [0.0; 3], "everything below it, clipped to one");
-        assert_eq!(grey(1.0), [1.0; 3], "and everything above it, to the other");
+        let gray = |v: f32| display.shade(v, Channels::Rgb, Headroom::None);
+        assert_eq!(gray(0.25), [0.0; 3], "the window's floor comes out black");
+        assert_eq!(gray(0.5), [0.5; 3]);
+        assert_eq!(gray(0.75), [1.0; 3], "and its ceiling comes out white");
+        assert_eq!(gray(0.0), [0.0; 3], "everything below it, clipped to one");
+        assert_eq!(gray(1.0), [1.0; 3], "and everything above it, to the other");
 
         // A color image is three colors already, so the false color is not
         // for it however it is set.
@@ -772,13 +772,13 @@ mod tests {
         assert_eq!(display.shade(0.5, Channels::Rgb, Headroom::None), [0.5; 3]);
         assert_eq!(display.shade(0.5, Channels::Rgba, Headroom::None), [0.5; 3]);
 
-        // On a grey one it is, and it clips to the ends of its own ramp
+        // On a gray one it is, and it clips to the ends of its own ramp
         // rather than to black and white.
         let mapped = |v: f32| display.shade(v, Channels::Gray, Headroom::None);
         assert_eq!(mapped(0.5), Colormap::Viridis.color(0.5));
         assert_eq!(mapped(-1.0), Colormap::Viridis.color(0.0));
         assert_eq!(mapped(9.0), Colormap::Viridis.color(1.0));
-        assert_ne!(mapped(0.5), [0.5; 3], "viridis is not grey at mid ramp");
+        assert_ne!(mapped(0.5), [0.5; 3], "viridis is not gray at mid ramp");
     }
 
     /// And no curve bends a false color, on either surface: the ramp is read
@@ -907,7 +907,7 @@ mod tests {
         assert_eq!(
             display.map(&dark, Headroom::None).color,
             [0.0; 3],
-            "grey stays grey"
+            "gray stays gray"
         );
 
         display.colormap = Colormap::Viridis;
@@ -1084,7 +1084,7 @@ mod tests {
     }
 
     #[test]
-    fn contrast_keeps_the_centre_and_marks_the_window_manual() {
+    fn contrast_keeps_the_center_and_marks_the_window_manual() {
         let mut display = Display {
             low: 0.0,
             high: 1.0,
@@ -1244,16 +1244,16 @@ mod tests {
     }
 
     /// A false color is a reading of one channel, and a color image's three
-    /// are colors already: the flag reaches a grey image and not a color
+    /// are colors already: the flag reaches a gray image and not a color
     /// one, so that the state never names a map the screen is not applying.
     #[test]
-    fn a_startup_colormap_reaches_only_a_grey_image() {
+    fn a_startup_colormap_reaches_only_a_gray_image() {
         let startup = Startup {
             colormap: Some(Colormap::Viridis),
             ..Startup::default()
         };
-        let grey = gray(vec![0, 4095], Transfer::Srgb);
-        let display = Display::for_image_with(&grey, &Stats::scan(&grey), startup, Headroom::None);
+        let gray = gray(vec![0, 4095], Transfer::Srgb);
+        let display = Display::for_image_with(&gray, &Stats::scan(&gray), startup, Headroom::None);
         assert_eq!(display.colormap, Colormap::Viridis);
 
         let color = DecodedImage::new(

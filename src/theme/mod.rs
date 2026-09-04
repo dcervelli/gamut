@@ -2,7 +2,7 @@
 //!
 //! The window is a viewer, not a desktop: its chrome should disappear into
 //! whatever the rest of the desktop looks like rather than announce itself in
-//! one fixed grey. On Omarchy the active theme is materialised as a palette
+//! one fixed gray. On Omarchy the active theme is materialized as a palette
 //! file, so that is read once at startup and again whenever it changes, and
 //! the interface's handful of roles — panel, hairline, text, accent — are
 //! derived from it.
@@ -90,7 +90,7 @@ pub struct Theme {
     /// stay translucent.
     pub minimap_edge: Color,
     pub minimap_dim: Color,
-    /// The luminance plane, under the color ones: a neutral grey, since it
+    /// The luminance plane, under the color ones: a neutral gray, since it
     /// is the value of a pixel and not one of its channels.
     pub histogram_luma: Color,
     /// Red, green and blue channel ink, in that order. The primaries

@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use super::{Overrides, load, probe, supported_extensions};
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
 
-/// Centre of each quadrant, in the order the expectation tables use.
+/// Center of each quadrant, in the order the expectation tables use.
 const PROBES: [(u32, u32); 4] = [(8, 6), (24, 6), (8, 18), (24, 18)];
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -31,7 +31,7 @@ enum Tone {
     Color,
     /// 0, 1/3, 2/3, 1.
     Gray,
-    /// What a one-bit image can represent of the grey pattern: the two middle
+    /// What a one-bit image can represent of the gray pattern: the two middle
     /// steps round to the ends.
     GrayBilevel,
     /// 0, 0.5, 1.0, 255/64 — the last one deliberately above SDR range.
@@ -54,7 +54,7 @@ enum Coverage {
     Opaque,
     /// 1, 0.749, 0.502, 0.251.
     Ramp,
-    /// A palette's `tRNS` is quantised to all-or-nothing by the encoder.
+    /// A palette's `tRNS` is quantized to all-or-nothing by the encoder.
     BinaryLastTransparent,
 }
 
@@ -102,7 +102,7 @@ const FIXTURES: &[Fixture] = &[
     // ------------------------------------------------------------- PNG
     Fixture {
         file: "png-gray8.png",
-        covers: "PNG greyscale, 8-bit",
+        covers: "PNG grayscale, 8-bit",
         channels: Channels::Gray,
         kind: Kind::U8,
         color: SRGB,
@@ -114,7 +114,7 @@ const FIXTURES: &[Fixture] = &[
     },
     Fixture {
         file: "png-gray-alpha8.png",
-        covers: "PNG greyscale plus alpha, 8-bit",
+        covers: "PNG grayscale plus alpha, 8-bit",
         channels: Channels::GrayAlpha,
         kind: Kind::U8,
         color: SRGB,
@@ -150,7 +150,7 @@ const FIXTURES: &[Fixture] = &[
     },
     Fixture {
         file: "png-gray16.png",
-        covers: "PNG greyscale, 16-bit",
+        covers: "PNG grayscale, 16-bit",
         channels: Channels::Gray,
         kind: Kind::U16,
         color: SRGB,
@@ -162,7 +162,7 @@ const FIXTURES: &[Fixture] = &[
     },
     Fixture {
         file: "png-gray-alpha16.png",
-        covers: "PNG greyscale plus alpha, 16-bit",
+        covers: "PNG grayscale plus alpha, 16-bit",
         channels: Channels::GrayAlpha,
         kind: Kind::U16,
         color: SRGB,
@@ -297,7 +297,7 @@ const FIXTURES: &[Fixture] = &[
     },
     Fixture {
         file: "jpeg-gray.jpg",
-        covers: "JPEG single-component greyscale",
+        covers: "JPEG single-component grayscale",
         channels: Channels::Gray,
         kind: Kind::U8,
         color: SRGB,
@@ -392,7 +392,7 @@ const FIXTURES: &[Fixture] = &[
     // ------------------------------------------------------------ TIFF
     Fixture {
         file: "tiff-gray8.tif",
-        covers: "TIFF greyscale, 8-bit — guessed display-referred",
+        covers: "TIFF grayscale, 8-bit — guessed display-referred",
         channels: Channels::Gray,
         kind: Kind::U8,
         color: SRGB,
@@ -428,7 +428,7 @@ const FIXTURES: &[Fixture] = &[
     },
     Fixture {
         file: "tiff-gray16.tif",
-        covers: "TIFF greyscale, 16-bit — guessed scene-referred",
+        covers: "TIFF grayscale, 16-bit — guessed scene-referred",
         channels: Channels::Gray,
         kind: Kind::U16,
         color: LINEAR,
@@ -661,7 +661,7 @@ const FIXTURES: &[Fixture] = &[
         nodata: None,
         tolerance: EXACT,
     },
-    // Grey and alpha arrive as two separate planes here, not interleaved.
+    // Gray and alpha arrive as two separate planes here, not interleaved.
     Fixture {
         file: "heic-gray-alpha8.heic",
         covers: "HEIC monochrome plus a separate alpha plane, 8-bit",
@@ -979,7 +979,7 @@ const FIXTURES: &[Fixture] = &[
     },
     // The same picture with its rows reversed and a negative height saying
     // so, which is how screen capture writes one. Passing this table means
-    // the sign was honoured; ignoring it would turn the picture upside down.
+    // the sign was honored; ignoring it would turn the picture upside down.
     Fixture {
         file: "bmp-topdown.bmp",
         covers: "BMP top-down row order",
@@ -1046,7 +1046,7 @@ const FIXTURES: &[Fixture] = &[
     },
     // `MAXVAL 1023` in a 16-bit word, which has to be lifted to 65535 or the
     // picture shows at a sixteenth of its brightness. Passing the ordinary
-    // grey table is what says it was.
+    // gray table is what says it was.
     Fixture {
         file: "pnm-maxval1023.pgm",
         covers: "netpbm PGM whose MAXVAL is not the sample width",
@@ -1073,7 +1073,7 @@ const FIXTURES: &[Fixture] = &[
         nodata: None,
         tolerance: EXACT,
     },
-    // PAM generalises the three above, states its fields as keyword lines
+    // PAM generalizes the three above, states its fields as keyword lines
     // rather than bare numbers, and is the only one that carries alpha.
     Fixture {
         file: "pnm-rgba8.pam",
@@ -1089,7 +1089,7 @@ const FIXTURES: &[Fixture] = &[
     },
     // A PNG under a TIFF name, decoded by sniffing rather than extension.
     Fixture {
-        file: "mislabelled.tif",
+        file: "mislabeled.tif",
         covers: "content sniffing when the extension lies",
         channels: Channels::Rgb,
         kind: Kind::U8,
@@ -1124,7 +1124,7 @@ fn kind_of(samples: &Samples) -> Kind {
     }
 }
 
-/// One pixel's components, integers normalised to 0..1 so that 8- and 16-bit
+/// One pixel's components, integers normalized to 0..1 so that 8- and 16-bit
 /// fixtures can share a table of expected values.
 fn pixel(image: &DecodedImage, x: u32, y: u32) -> Vec<f32> {
     let count = image.samples.channels().count();
@@ -1143,7 +1143,7 @@ fn pixel(image: &DecodedImage, x: u32, y: u32) -> Vec<f32> {
     }
 }
 
-/// Expected RGBA for each quadrant. Grey fixtures put their value in the red
+/// Expected RGBA for each quadrant. Gray fixtures put their value in the red
 /// slot, which is where the comparison looks for them.
 fn expected(tone: Tone, coverage: Coverage) -> [[f32; 4]; 4] {
     let third = 1.0 / 3.0;
@@ -1232,7 +1232,7 @@ fn every_fixture_decodes_to_what_it_says_it_does() {
             let found = pixel(&image, x, y);
             let want = table[index];
 
-            // Grey keeps its value in the red slot; alpha, where present, is
+            // Gray keeps its value in the red slot; alpha, where present, is
             // always the last component.
             let color_slots = if fixture.channels.is_gray() { 1 } else { 3 };
             for slot in 0..color_slots {

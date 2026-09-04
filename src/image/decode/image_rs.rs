@@ -129,7 +129,7 @@ mod tests {
     }
 
     #[test]
-    fn every_dib_header_a_bmp_can_carry_is_recognised() {
+    fn every_dib_header_a_bmp_can_carry_is_recognized() {
         // Core, Info, V2, V3, V4, V5.
         for size in [12, 40, 52, 56, 108, 124] {
             assert!(is_bmp(&bmp_header(size)), "{size}");
@@ -138,7 +138,7 @@ mod tests {
 
     /// PBM, PGM, PPM and PAM, in both their ASCII and binary spellings.
     #[test]
-    fn every_netpbm_magic_number_is_recognised() {
+    fn every_netpbm_magic_number_is_recognized() {
         for magic in ["P1", "P2", "P3", "P4", "P5", "P6", "P7"] {
             assert!(is_netpbm(format!("{magic}\n32 24\n").as_bytes()), "{magic}");
         }

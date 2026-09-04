@@ -52,7 +52,7 @@ fn vs_main(@builtin(vertex_index) index: u32) -> VertexOut {
 
 // Color premultiplied by alpha, in the component layout the texture stores.
 // Every filter below is a weighted sum of texels, and weighting straight alpha
-// would drag the color of fully transparent texels into their neighbours,
+// would drag the color of fully transparent texels into their neighbors,
 // which is what shows as haloing along a hard edge. Coarse levels are already
 // premultiplied, so this is a no-op for them.
 fn premultiplied(texel: vec4<f32>) -> vec4<f32> {
@@ -77,9 +77,9 @@ fn load(coord: vec2<i32>) -> vec4<f32> {
 // the view zooms out; the clamp is a backstop, not a working limit.
 fn area(uv: vec2<f32>) -> vec4<f32> {
     let half = min(params.texels_per_pixel, vec2<f32>(64.0)) * 0.5;
-    let centre = uv * params.extent;
-    let low = centre - half;
-    let high = centre + half;
+    let center = uv * params.extent;
+    let low = center - half;
+    let high = center + half;
 
     let first = vec2<i32>(floor(low));
     let last = vec2<i32>(ceil(high)) - vec2<i32>(1);
@@ -104,7 +104,7 @@ fn area(uv: vec2<f32>) -> vec4<f32> {
     return sum / max(total, 1e-8);
 }
 
-// Nearest neighbour, except across the one output pixel that straddles a texel
+// Nearest neighbor, except across the one output pixel that straddles a texel
 // boundary, where it ramps instead of stepping. Keeps the pixel grid a
 // measurement image is read on, without the uneven column doubling plain
 // nearest gives at a zoom that is not a whole number.
@@ -122,7 +122,7 @@ fn antialiased_nearest(uv: vec2<f32>) -> vec4<f32> {
 }
 
 // Catmull-Rom, the B = 0, C = 1/2 member of the cubic family: interpolating,
-// so texel centres come through untouched, and sharper than bilinear at the
+// so texel centers come through untouched, and sharper than bilinear at the
 // cost of a little ringing either side of a hard edge.
 fn catmull_rom(offset: f32) -> array<f32, 4> {
     let f2 = offset * offset;
@@ -171,7 +171,7 @@ fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
 
 // Polynomial fits to the matplotlib colormaps. Approximations, but well
 // within what the eye resolves in a false-color display. They produce
-// sRGB-encoded values, so the caller linearises.
+// sRGB-encoded values, so the caller linearizes.
 //
 // Viridis and magma are Matt Zucker's fits, from
 // https://www.shadertoy.com/view/WlfXRN, under CC0; `REUSE.toml` records it.
@@ -237,7 +237,7 @@ fn false_color(which: u32, t: f32) -> vec3<f32> {
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let texel = resample(in.uv);
 
-    // Expand whatever we uploaded to RGBA. Grey replicates; alpha defaults
+    // Expand whatever we uploaded to RGBA. Gray replicates; alpha defaults
     // to opaque when the source had none.
     var color: vec3<f32>;
     var alpha: f32;

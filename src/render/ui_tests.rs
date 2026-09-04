@@ -1,7 +1,7 @@
 //! What the interface layer actually puts on the device's pixels.
 //!
 //! The claim these check is the one the whole of `ui/icon.rs` is built on: a
-//! stroke a whole number of device pixels wide, centred where those pixels
+//! stroke a whole number of device pixels wide, centered where those pixels
 //! meet, comes out of the shader fully covered on the pixels it lands on and
 //! not at all on the ones beside them. It cannot be checked on the CPU —
 //! coverage is the fragment shader's arithmetic — so this runs a real
@@ -156,7 +156,7 @@ mod tests {
         alpha.chunks(width).map(|row| row[x]).collect()
     }
 
-    /// A stroke put where [`UiFrame::stroke_centre_in_device`] says has both long
+    /// A stroke put where [`UiFrame::stroke_center_in_device`] says has both long
     /// edges on a device pixel boundary: a slice across it is that many whole
     /// pixels of ink and nothing else. That is the entire claim `ui/icon.rs`
     /// rests on, and it holds at every scale.
@@ -169,10 +169,10 @@ mod tests {
         for scale in SCALES {
             let mut frame = UiFrame::new(scale);
             let width = frame.line_width(1.0);
-            let y = frame.stroke_centre_in_device(5.3 * scale, width);
+            let y = frame.stroke_center_in_device(5.3 * scale, width);
             let (from, to) = (
-                [frame.stroke_centre_in_device(2.7 * scale, width), y],
-                [frame.stroke_centre_in_device(17.2 * scale, width), y],
+                [frame.stroke_center_in_device(2.7 * scale, width), y],
+                [frame.stroke_center_in_device(17.2 * scale, width), y],
             );
             frame.stroke(from, to, width, INK);
             let Some(alpha) = alpha_of(&frame, AREA, scale) else {
@@ -211,10 +211,10 @@ mod tests {
         );
     }
 
-    /// A label placed by [`UiRenderer::cap_centre`] sits level in its box.
+    /// A label placed by [`UiRenderer::cap_center`] sits level in its box.
     ///
     /// The reported fault: a run is laid out in a box that keeps room under
-    /// the baseline for descenders, so centring *that* leaves a label with
+    /// the baseline for descenders, so centering *that* leaves a label with
     /// none — "17%", "500 px" — hanging below the mark beside it.
     ///
     /// Measured on the top and bottom of the ink, which for a label of digits
@@ -233,7 +233,7 @@ mod tests {
             let mut fonts = UiRenderer::new(&context.device, &context.queue, UI_FORMAT);
             let mut frame = UiFrame::new(scale);
             let button = Rect::new(0.0, 0.0, 40.0, 22.0);
-            let top = frame.snap(button.y + button.height / 2.0 - fonts.cap_centre(13.0));
+            let top = frame.snap(button.y + button.height / 2.0 - fonts.cap_center(13.0));
             frame.text([4.0, top], 13.0, INK, "17%");
 
             let Some(alpha) = alpha_of(&frame, [button.width, button.height], scale) else {
@@ -253,7 +253,7 @@ mod tests {
             let middle = (button.height * scale).round() / 2.0;
             assert!(
                 (caps - middle).abs() <= 1.0,
-                "scale {scale}: the capitals centre on {caps}, the box on {middle}"
+                "scale {scale}: the capitals center on {caps}, the box on {middle}"
             );
         }
     }

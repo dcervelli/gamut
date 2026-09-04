@@ -12,8 +12,8 @@
 //! What the format cannot say is anything about depth or range: both
 //! bitstreams are 8-bit, VP8 through YCbCr 4:2:0 and VP8L through an exact
 //! RGBA, so the samples are always `U8` and the color is always
-//! display-referred. There is no HDR path to preserve and no greyscale
-//! encoding to keep one channel wide — a grey WebP is a grey RGB WebP.
+//! display-referred. There is no HDR path to preserve and no grayscale
+//! encoding to keep one channel wide — a gray WebP is a gray RGB WebP.
 //!
 //! Animation is decoded as far as its first frame. `read_image` composites
 //! that frame onto the canvas the `ANIM` chunk describes, so a file whose

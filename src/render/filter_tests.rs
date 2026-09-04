@@ -179,7 +179,7 @@ fn close(a: f32, b: f32, tolerance: f32) -> bool {
 }
 
 /// The claim minification rests on: an output pixel is the mean of exactly the
-/// texels it covers, not a bilinear tap at its centre.
+/// texels it covers, not a bilinear tap at its center.
 #[test]
 fn minification_averages_every_texel_it_covers() {
     let Some(gpu) = gpu::test_context() else {
@@ -284,10 +284,10 @@ fn antialiased_nearest_resolves_an_edge_that_lands_mid_pixel() {
     );
 }
 
-/// Catmull-Rom is interpolating: a magnified texel centre reproduces the texel
-/// exactly, however its neighbours ring around it.
+/// Catmull-Rom is interpolating: a magnified texel center reproduces the texel
+/// exactly, however its neighbors ring around it.
 #[test]
-fn bicubic_passes_texel_centres_through() {
+fn bicubic_passes_texel_centers_through() {
     let Some(gpu) = gpu::test_context() else {
         return;
     };
@@ -297,8 +297,8 @@ fn bicubic_passes_texel_centres_through() {
     placement.upscale = Upscale::Bicubic;
     let pixels = draw(gpu, &image, [10, 10], placement);
 
-    // At five-to-one, the centre of texel 0 falls on the centre of pixel 2 and
-    // the centre of texel 1 on that of pixel 7.
+    // At five-to-one, the center of texel 0 falls on the center of pixel 2 and
+    // the center of texel 1 on that of pixel 7.
     assert!(close(at(&pixels, 10, 2, 2), 0.0, 2e-3));
     assert!(close(at(&pixels, 10, 7, 2), 1.0, 2e-3));
     assert!(close(at(&pixels, 10, 2, 7), 1.0, 2e-3));

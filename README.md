@@ -160,7 +160,7 @@ Two things hold still through that. The file on screen is never dropped from
 the list, whatever has happened to it on disk: its pixels are up and correct,
 and everything the interface says about them — the title, the bars, the
 information panel — is read off the path they came from. It keeps its
-neighbours too, so `]` from a file deleted under you goes on to whatever has
+neighbors too, so `]` from a file deleted under you goes on to whatever has
 taken its place rather than back over one already seen. And the list is only
 rebuilt between reads, since a rebuild moves the file on screen to a new index
 and a reply already on its way is aimed at the old one; a change noticed
@@ -169,7 +169,7 @@ during a read is simply seen again at a later look.
 ## Theme
 
 The interface takes its colors from the desktop rather than carrying its own.
-On [Omarchy](https://omarchy.org) the active theme is materialised as a
+On [Omarchy](https://omarchy.org) the active theme is materialized as a
 palette file, and `src/theme/` reads it, resolves it, and derives the
 handful of roles the chrome actually needs — panel, hairline, primary and dim
 text, accent, the menu panel, the ground the panels that float over the image
@@ -218,7 +218,7 @@ Two more resist being themed and are not:
 
   Themed planes were tried: each pulled towards its own primary and then
   scaled, whole, until the three screened together landed on a neutral mid
-  grey. It works, in the sense that no theme blows the plot out — but the
+  gray. It works, in the sense that no theme blows the plot out — but the
   overlaps come out muddier the further a palette sits from the primaries, so
   how much a histogram can be read depends on the desktop's taste in reds.
   That is the wrong thing to make themeable.
@@ -228,7 +228,7 @@ Two more resist being themed and are not:
   it as the bars carry — the same panel the file's information is read on, and
   the same one a popup's cells sit on, that last held nearer to opaque since
   the picture coming through a menu is what the choices on it compete with.
-* **The luminance plane is a neutral grey.** It stands for a pixel's value
+* **The luminance plane is a neutral gray.** It stands for a pixel's value
   rather than for one of its channels, so a hue on it would read as a fourth
   color.
 
@@ -238,7 +238,7 @@ The one invariant everything else follows from:
 
 > **A sampled texel is always linear in the working space** — because the data
 > was linear already, because the format's hardware decode produces it, or
-> because we linearised on the way in.
+> because we linearized on the way in.
 
 It matters because a format's own decode — sRGB or otherwise — happens as part
 of reading a texel, before anything is weighted against anything else, while a
@@ -254,7 +254,7 @@ HDR content to survive until tone mapping.
 | Source | Stored as |
 | --- | --- |
 | 8-bit sRGB color | `Rgba8UnormSrgb` — hardware decodes, filtering stays correct |
-| 8-bit sRGB grey | `R16Float` — there is no `R8UnormSrgb`, so a LUT linearises it |
+| 8-bit sRGB gray | `R16Float` — there is no `R8UnormSrgb`, so a LUT linearizes it |
 | 16-bit linear | `R16Unorm` / `Rgba16Unorm`, or half float where unsupported |
 | 16-bit encoded | half float via a 65536-entry LUT |
 | 32-bit float | `R32Float` / `Rgba32Float`, or half float if the GPU cannot filter them |
@@ -262,7 +262,7 @@ HDR content to survive until tone mapping.
 Alpha is coverage, never light, so it is never put through a transfer
 function. Three-channel data is expanded to four because no graphics API has a
 three-component sampled texture; one- and two-channel data is *not* expanded,
-so a 20000×20000 16-bit grey scan costs 800 MB rather than 3.2 GB.
+so a 20000×20000 16-bit gray scan costs 800 MB rather than 3.2 GB.
 
 ### Display-referred and scene-referred
 
@@ -367,11 +367,11 @@ the image is for, so it is a setting:
 
 | Filter | What it is for |
 | --- | --- |
-| `nearest` (default) | Nearest neighbour, ramped across the single output pixel that straddles a texel edge. Shows the pixel grid a measurement image is read on. At a whole-number zoom it is exactly nearest neighbour; at 4.5:1 it resolves the half-covered pixel rather than doubling columns unevenly, which is what plain nearest does. |
-| `bicubic` | Catmull-Rom. Interpolating, so texel centres come through untouched, and noticeably sharper than bilinear. What you want when the subject is a photograph. |
+| `nearest` (default) | Nearest neighbor, ramped across the single output pixel that straddles a texel edge. Shows the pixel grid a measurement image is read on. At a whole-number zoom it is exactly nearest neighbor; at 4.5:1 it resolves the half-covered pixel rather than doubling columns unevenly, which is what plain nearest does. |
+| `bicubic` | Catmull-Rom. Interpolating, so texel centers come through untouched, and noticeably sharper than bilinear. What you want when the subject is a photograph. |
 
 At and above 1:1 the quad is put on whole pixels, so a texel edge falls on a
-pixel edge and `nearest` is exactly nearest. Centring an odd difference
+pixel edge and `nearest` is exactly nearest. Centering an odd difference
 otherwise leaves it half a pixel off the grid, which would put every texel edge
 through the middle of a pixel and cost the 100% view its crispness.
 
@@ -459,7 +459,7 @@ information, the order the two panels they open are stacked in over the
 picture. The end of the top bar holds the two readouts that are also buttons:
 the grid toggle, and just inside it the zoom percentage. Both are measurements
 of the picture, which is what the top bar is for. The bars are inset at their
-ends by the same margin that centres a toggle across a side panel — derived
+ends by the same margin that centers a toggle across a side panel — derived
 from it, not merely equal to it — so the grid toggle ends on the same line the
 column of toggles below it ends on, and the file name starts on the line the
 minimap toggle starts on. Two edges a few pixels apart read as a mistake in a
@@ -520,7 +520,7 @@ ink. The
 pointer belongs to it while it is over it: the wheel scrolls the column
 instead of zooming, and a press starts a drag of the scrollbar's thumb
 rather than of the picture, moving the column by what putting the thumb there
-would rather than by what the pointer travelled — one thing or the other for
+would rather than by what the pointer traveled — one thing or the other for
 as long as the button is held, so a drag that runs off the panel goes on
 scrolling rather than beginning to pan half-way through. A column with nothing
 left to scroll to still takes the gesture rather than handing it back, and
@@ -576,7 +576,7 @@ lands on the clipboard cannot come to disagree. The button that says what a
 click would take appears over the words rather than beside them, on the layer
 above so that it covers them — the column is as wide as the panel lets it be,
 and there is no margin to stand a button in — and nudged back inside the panel
-where being centred on what it copies would hang it over an edge. A press on
+where being centered on what it copies would hang it over an edge. A press on
 the panel starts a scroll of the column as well, the two gestures being one
 and the same at the moment the button goes down, so the copy is made only if
 the button comes back up without the pointer having gone anywhere. And the
@@ -730,7 +730,7 @@ anything having to notice that it should.
 | PNG `cICP` and `iCCP` chunks | [`png`](https://crates.io/crates/png), which `image` already carries |
 
 The decoder is chosen by content, falling back to the file extension for
-formats without a recognisable header. Files are streamed rather than read
+formats without a recognizable header. Files are streamed rather than read
 into memory whole, so opening a 600 MB raster does not begin by copying it —
 JPEG excepted, because its gain map sits past the pixels and the reader that
 finds it needs the file as one slice.
@@ -801,8 +801,8 @@ tag, and keeps a single-band raster single-band all the way to the GPU: a
 of `Rgba32Float`.
 
 Signed and wide integer rasters are widened to float rather than rescaled —
-an elevation model holds metres, and −86 at the Dead Sea is a real value, not
-something to normalise away. A no-data sentinel is read from the file and kept
+an elevation model holds meters, and −86 at the Dead Sea is a real value, not
+something to normalize away. A no-data sentinel is read from the file and kept
 out of the statistics, so a clipped DEM's −9999 fill cannot set the bottom of
 the automatic window and squash the terrain into a sliver.
 
@@ -860,7 +860,7 @@ carries no CICP code points — and it goes through the same profile reader
 JPEG, PNG and HEIF use. Without one the file means sRGB.
 
 `EXIF` carries the orientation, and it is applied. This is the one place a
-metadata tag is honoured rather than ignored, and it is a deliberate
+metadata tag is honored rather than ignored, and it is a deliberate
 exception: the tag sits in a chunk this decoder is already opening for the
 profile, and reading it costs a rotation of a buffer that is already in hand.
 JPEG's EXIF orientation still is not applied — same tag, different decoder,
@@ -936,7 +936,7 @@ take different routes:
 
 **PNG**, which is how every entry above 48 pixels has been written since
 Vista, goes through the same code a `.png` on disk does. So an `iCCP` chunk is
-read — an icon can be Display P3 — and any pixel layout is kept, greyscale
+read — an icon can be Display P3 — and any pixel layout is kept, grayscale
 included. `image` refuses anything but RGBA8 there, on the strength of a
 Microsoft blog post saying embedded PNGs must be 32-bit; browsers display the
 others, and so does this.
@@ -976,7 +976,7 @@ the header alone, before anything is decoded, with a message naming the size.
 
 ### Adding a format
 
-Decoders describe what they found rather than normalising it:
+Decoders describe what they found rather than normalizing it:
 
 ```rust
 pub trait Decoder: Sync {
@@ -1068,9 +1068,9 @@ against arithmetic done on the CPU: that minification is the exact mean of the
 texels a pixel covers, that
 two levels of the coarse chain plus the draw's own filter come to the same
 number as averaging the source directly, that antialiased nearest is exactly
-nearest at a whole-number zoom, that Catmull-Rom passes texel centres through
+nearest at a whole-number zoom, that Catmull-Rom passes texel centers through
 untouched, that a transparent texel does not bleed its color into its
-neighbour, and that the minimap's thumbnail lands beside the view as a second
+neighbor, and that the minimap's thumbnail lands beside the view as a second
 draw of the same texture — building the coarse chain the view itself had no
 use for. Where no adapter can be had they report success rather than failing
 for a reason that has nothing to do with the code.
@@ -1100,12 +1100,12 @@ two fixtures are assembled around the bitstreams it did write.
 `display-p3.icc` sits beside the fixtures as an input rather than an output;
 `examples/make-icc.rs` is what produced it.
 
-## Licence
+## License
 
 Dual-licensed under either of
 
 - Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
-- MIT licence ([LICENSE-MIT](LICENSE-MIT))
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
 
 at your option. Unless you state otherwise, any contribution you intentionally
 submit for inclusion in this work shall be dual-licensed as above, without any
@@ -1127,7 +1127,7 @@ rather than as above:
   readout and the screen have to agree.
 
 Which is recorded file by file in [REUSE.toml](REUSE.toml), in the form the
-[REUSE](https://reuse.software) specification defines, with the licence texts
+[REUSE](https://reuse.software) specification defines, with the license texts
 it names in [LICENSES/](LICENSES). `reuse lint` checks that nothing in the
 tree is unaccounted for, and CI runs it.
 
@@ -1136,16 +1136,16 @@ tree at all — `Cargo.lock` only names them. Their notices are collected in
 [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES), generated from that lock by
 `cargo about` and rewritten by `bin/release`, because a statically linked
 binary carries its dependencies' code and owes their notices with it. Which
-licences may turn up there is not left open: `about.toml` lists the ones this
+licenses may turn up there is not left open: `about.toml` lists the ones this
 project accepts, in priority order, and a crate arriving under anything else
 fails generation rather than being written out quietly — `cargo audit` for
-licences instead of advisories. The file is stamped with the lock it was
+licenses instead of advisories. The file is stamped with the lock it was
 generated from, and CI fails if that is not the lock in the tree.
 
 It is a generated file kept in the tree, which is the one place this project
 does that, so the reason is worth saying. Generation is offline and
 deterministic — `--frozen` implies `--offline`, every crate in the graph
-ships its own licence text, and the same lock gives the same bytes — so the
+ships its own license text, and the same lock gives the same bytes — so the
 PKGBUILD could perfectly well produce it during the build, as it already does
 the manual page. What stops it is that `cargo about` is packaged neither in
 Arch's repositories nor in the AUR: building it there would mean fetching the
@@ -1158,5 +1158,5 @@ verified rather than trusted:
 cargo about generate --frozen packaging/about.hbs | diff - <(tail -n +3 THIRD-PARTY-NOTICES)
 ```
 
-Between the three, `LICENSES/` ends up holding every licence anything in the
+Between the three, `LICENSES/` ends up holding every license anything in the
 distribution is under, and `reuse lint` reports none of them unused.

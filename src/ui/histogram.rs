@@ -276,7 +276,7 @@ fn ramp(bars: Rect) -> Rect {
 
 /// Where a bin's bar is drawn across the plot, from 0 at the left edge to 1
 /// at the right. The two end bins are carried out to the edges so that the
-/// shape fills the plot's width; the rest stand at their centres.
+/// shape fills the plot's width; the rest stand at their centers.
 fn bin_across(index: usize) -> f32 {
     match index {
         0 => 0.0,
@@ -321,7 +321,7 @@ fn bar_fraction(count: u32, peak: u32, log: bool) -> f32 {
 /// edge. On its own that is a soft line; in a row of them it is a ripple at
 /// the beat of the scale factor, which on a 1.6 display is every fifth pixel.
 /// Snapped, the feather resolves to fully in or fully out at each pixel
-/// centre and a mark comes out as the shape it is.
+/// center and a mark comes out as the shape it is.
 fn device(value: f32, scale: f32) -> f32 {
     (value * scale).round() / scale
 }
@@ -330,7 +330,7 @@ fn device(value: f32, scale: f32) -> f32 {
 /// something thinner than one is still drawn rather than rounded away.
 ///
 /// Not what the ramp's cells use: they tile, so what matters there is that
-/// each shares an edge exactly with its neighbour, and a floor under their
+/// each shares an edge exactly with its neighbor, and a floor under their
 /// width would make them overlap and run past the end of the band.
 fn on_device(rect: Rect, scale: f32) -> Rect {
     let (x, y) = (device(rect.x, scale), device(rect.y, scale));
@@ -384,7 +384,7 @@ pub fn marked(
 /// open them are stacked in.
 ///
 /// Color images get four planes — red, green, blue and luminance — over the
-/// range their color channels span; grey images keep the single luminance
+/// range their color channels span; gray images keep the single luminance
 /// plane over theirs.
 pub(super) fn draw(
     frame: &mut UiFrame,
@@ -441,7 +441,7 @@ pub(super) fn draw(
     // Both of them decoded, as the ends of the axis are. Neither will measure
     // against the plot underneath with a ruler, because both of the plot's
     // axes are spaced in the file's own encoding — the bins across, so that a
-    // quantised file does not comb, and the response up, so that a display
+    // quantized file does not comb, and the response up, so that a display
     // doing nothing is the diagonal. The positions are the file's units and
     // the numbers are the ones every other readout quotes; a curve that is
     // straight and a value that is comparable cannot both be had, and the
@@ -495,7 +495,7 @@ pub(super) fn draw(
         .max()
         .unwrap_or(1);
     let height_of = |count: u32| bar_fraction(count, peak, panels.log_counts) * bars.height;
-    // One point per bin, at its centre, with the ends carried out to the
+    // One point per bin, at its center, with the ends carried out to the
     // edges of the plot so the shape fills its width.
     let curve = |counts: &[u32; BINS]| -> Vec<[f32; 2]> {
         counts
@@ -509,7 +509,7 @@ pub(super) fn draw(
     };
 
     // Dimmed only when it is a backdrop; with the color planes off — or on
-    // a grey image, which has none — it is the plot.
+    // a gray image, which has none — it is the plot.
     let luma_ink = if color.is_empty() {
         theme.histogram_luma
     } else {
@@ -596,7 +596,7 @@ pub(super) fn draw(
         //
         // The curve says how much and this says what of, which are different
         // questions on a false-colored image — a curve cannot draw viridis —
-        // and the same question answered twice on a grey one, where the band
+        // and the same question answered twice on a gray one, where the band
         // is the tone curve as a wedge and the curve is it as a shape. It is
         // where clipping stops being an inference: everything left of the
         // window comes out black and everything right of it comes out at the
@@ -1034,10 +1034,10 @@ mod tests {
     #[test]
     fn the_axis_ends_give_the_line_up_to_the_readout_and_not_before() {
         let bars = bars(panel(Rect::new(0.0, 0.0, 800.0, 600.0)));
-        let centred = |width: f32| bars.x + (bars.width - width) / 2.0;
+        let centered = |width: f32| bars.x + (bars.width - width) / 2.0;
 
         let (x, fits) = readout_placement(bars, 80.0, [40.0, 40.0]);
-        assert_eq!(x, centred(80.0), "centred on the plot, not on the panel");
+        assert_eq!(x, centered(80.0), "centered on the plot, not on the panel");
         assert!(fits, "80 in the middle and 40 either side of 256 is room");
 
         let room = (bars.width - 80.0) / 2.0 - LABEL_GAP;

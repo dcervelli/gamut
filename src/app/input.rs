@@ -910,7 +910,7 @@ impl App {
         }
 
         // A press that went down on something the info panel copies and has
-        // not travelled since is a click on it, and this is where it is
+        // not traveled since is a click on it, and this is where it is
         // answered: the release ends the drag it also started, and only one
         // of the two gestures can have been meant.
         if state == ElementState::Released

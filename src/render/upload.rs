@@ -4,7 +4,7 @@
 //!
 //! > **A sampled texel is always linear in the working space** — either
 //! > because the data was linear already, or because the format's hardware
-//! > decode produces it, or because we linearised on the way in.
+//! > decode produces it, or because we linearized on the way in.
 //!
 //! It matters because a format's own decode happens as part of reading a
 //! texel, before anything is weighted against anything else, while a shader
@@ -71,7 +71,7 @@ pub struct Capabilities {
     /// become float.
     pub norm16: bool,
     /// Whether a linear sampler may be used with 32-bit float textures.
-    /// Without it, float images would be stuck on nearest-neighbour.
+    /// Without it, float images would be stuck on nearest-neighbor.
     pub float32_filterable: bool,
 }
 
@@ -128,7 +128,7 @@ pub fn plan(image: &DecodedImage, capabilities: Capabilities) -> Plan<'_> {
             precision_note: None,
         },
 
-        // Grey with a curve on it. There is no `R8UnormSrgb`, so the choice is
+        // Gray with a curve on it. There is no `R8UnormSrgb`, so the choice is
         // a 4x expansion to `Rgba8UnormSrgb` or a 2x one to half floats;
         // half floats also keep the single-channel path uniform.
         Samples::U8 { data, .. } => {
@@ -243,7 +243,7 @@ fn expand_u16(data: &[u16], channels: Channels, components: usize, opaque: u16) 
     }
 }
 
-/// Linearises integer samples through `lut`, widening to `components`.
+/// Linearizes integer samples through `lut`, widening to `components`.
 /// Alpha is a coverage fraction, never a light measurement, so it is scaled
 /// by `full_scale` and never put through the curve.
 fn map_to_f16<T: Copy + Into<u32>>(
@@ -320,7 +320,7 @@ mod tests {
     }
 
     /// The one case where the hardware can do the transfer decode, and so the
-    /// only one where filtering happens on properly linearised texels for
+    /// only one where filtering happens on properly linearized texels for
     /// free. Losing this would silently reintroduce gamma-incorrect scaling.
     #[test]
     fn eight_bit_srgb_color_keeps_the_hardware_srgb_format() {
@@ -339,10 +339,10 @@ mod tests {
         assert_eq!(plan.pixels.as_bytes()[4..7], [40, 50, 60]);
     }
 
-    /// There is no `R8UnormSrgb`, so grey with a curve on it has to be
-    /// linearised on the way in rather than left for the shader.
+    /// There is no `R8UnormSrgb`, so gray with a curve on it has to be
+    /// linearized on the way in rather than left for the shader.
     #[test]
-    fn eight_bit_srgb_gray_is_linearised_to_half_float() {
+    fn eight_bit_srgb_gray_is_linearized_to_half_float() {
         let decoded = image(
             Samples::U8 {
                 channels: Channels::Gray,
@@ -356,7 +356,7 @@ mod tests {
         let values: &[f16] = bytemuck::cast_slice(plan.pixels.as_bytes());
         assert_eq!(values[0].to_f32(), 0.0);
         assert!((values[2].to_f32() - 1.0).abs() < 1e-3);
-        // Mid sRGB grey is about 21% of the light, not 50%.
+        // Mid sRGB gray is about 21% of the light, not 50%.
         assert!((values[1].to_f32() - 0.2158).abs() < 0.01, "{values:?}");
     }
 
@@ -399,7 +399,7 @@ mod tests {
     /// Alpha is coverage, not light: running it through a transfer function
     /// would make edges wrong.
     #[test]
-    fn alpha_is_never_linearised() {
+    fn alpha_is_never_linearized() {
         let decoded = image(
             Samples::U8 {
                 channels: Channels::GrayAlpha,

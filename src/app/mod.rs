@@ -37,7 +37,7 @@ pub enum UserEvent {
     /// A file the loader has finished with. Boxed: it carries the pixels,
     /// and the other variant carries nothing.
     Decoded(Box<Decoded>),
-    /// A monitor's mode was learnt, or changed.
+    /// A monitor's mode was learned, or changed.
     Monitor,
 }
 
@@ -1221,7 +1221,7 @@ mod tests {
     /// about stepping between files rather than about where the panels are.
     const VIEWPORT: Viewport = Viewport::whole(WINDOW);
 
-    /// A grey PNG of the given size, written where the test can step onto it.
+    /// A gray PNG of the given size, written where the test can step onto it.
     fn write_png(dir: &Path, name: &str, width: u32, height: u32) -> PathBuf {
         let path = dir.join(name);
         let pixels = vec![128u8; (width * height * 3) as usize];
@@ -1277,7 +1277,7 @@ mod tests {
     }
 
     /// As [`opening`], with the application's own opening request answered:
-    /// the state the tests about later behaviour want to start from.
+    /// the state the tests about later behavior want to start from.
     fn app_over(name: &str, files: &[(&str, u32, u32)]) -> (App, PathBuf) {
         let (mut app, dir) = opening(name, files);
         answer(&mut app, Reload::Fresh);

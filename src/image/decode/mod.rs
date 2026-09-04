@@ -34,7 +34,7 @@ mod fixture_tests;
 pub trait ReadSeek: Read + Seek {}
 impl<T: Read + Seek> ReadSeek for T {}
 
-/// Enough of the file for any decoder to recognise its own header.
+/// Enough of the file for any decoder to recognize its own header.
 const HEADER: usize = 64;
 
 pub trait Decoder: Sync {
@@ -50,7 +50,7 @@ pub trait Decoder: Sync {
 
     /// `overrides` is passed in as well as applied afterwards, because one
     /// of its settings — whether to reconstruct from a gain map — changes
-    /// what a decoder produces rather than how it is labelled.
+    /// what a decoder produces rather than how it is labeled.
     fn decode(&self, source: &mut dyn ReadSeek, overrides: Overrides) -> Result<DecodedImage>;
 
     /// The image's size, taken from the header rather than by decoding it.

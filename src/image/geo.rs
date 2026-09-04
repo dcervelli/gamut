@@ -87,8 +87,8 @@ pub fn describe(tags: &Tags) -> Vec<Entry> {
         rows.push(Entry::new("Vertical system", vertical));
     }
     // What a coordinate is a coordinate *of*: the corner of a cell, or the
-    // point at its centre. Half a pixel, which is half a metre here and
-    // fifteen metres in a satellite scene.
+    // point at its center. Half a pixel, which is half a meter here and
+    // fifteen meters in a satellite scene.
     if let Some(Value::Code(code)) = keys
         .iter()
         .find(|(id, _)| *id == RASTER_TYPE)
@@ -98,7 +98,7 @@ pub fn describe(tags: &Tags) -> Vec<Entry> {
             "Pixel is",
             match code {
                 1 => "area (coordinates are corners)".to_string(),
-                2 => "point (coordinates are centres)".to_string(),
+                2 => "point (coordinates are centers)".to_string(),
                 other => format!("raster type {other}"),
             },
         ));
@@ -340,7 +340,7 @@ fn extent(place: &Placement, size: Option<[u32; 2]>) -> Option<[String; 2]> {
 
 /// A coordinate as a reader wants it. Rust writes a float as the shortest
 /// text that reads back as the same number, which is exactly right for a
-/// round number of metres and far too much for a degree that came out of an
+/// round number of meters and far too much for a degree that came out of an
 /// arithmetic; the panel's own rounding settles the second case.
 fn number(value: f64) -> String {
     super::exif::tidy(&format!("{value}"))
@@ -518,7 +518,7 @@ mod tests {
             rows(&claimed),
             [(
                 "Pixel is".to_string(),
-                "point (coordinates are centres)".to_string()
+                "point (coordinates are centers)".to_string()
             )]
         );
     }

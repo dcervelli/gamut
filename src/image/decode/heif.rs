@@ -29,7 +29,7 @@ use libheif_rs::{
 
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
 
-/// `libheif`'s global initialisation, done once.
+/// `libheif`'s global initialization, done once.
 ///
 /// `LibHeif::drop` calls `heif_deinit`, which unloads the codec plugins; doing
 /// that per image would rescan the plugin directory every time the user
@@ -99,7 +99,7 @@ impl super::Decoder for Heif {
             bail!("HEIF image is {width}x{height}");
         }
 
-        // Bit depth of the luma (or the sole grey) channel: 8 for an ordinary
+        // Bit depth of the luma (or the sole gray) channel: 8 for an ordinary
         // photograph, 10 or 12 for HDR. `libheif` reports -1 for a handle it
         // cannot make sense of, which arrives here as 255.
         let depth = handle.luma_bits_per_pixel();
@@ -135,17 +135,17 @@ impl super::Decoder for Heif {
 
         let planes = image.planes();
         let samples = if monochrome {
-            let grey = planes
+            let gray = planes
                 .y
-                .ok_or_else(|| anyhow!("monochrome HEIF image decoded without a grey plane"))?;
+                .ok_or_else(|| anyhow!("monochrome HEIF image decoded without a gray plane"))?;
             match channels {
                 Channels::GrayAlpha => {
                     let alpha = planes.a.ok_or_else(|| {
                         anyhow!("HEIF image claims an alpha channel but decoded without one")
                     })?;
-                    interleave_planes(&[grey, alpha], width, height)?
+                    interleave_planes(&[gray, alpha], width, height)?
                 }
-                _ => interleave_planes(&[grey], width, height)?,
+                _ => interleave_planes(&[gray], width, height)?,
             }
         } else {
             let interleaved = planes
@@ -172,7 +172,7 @@ const MAX_PIXELS: u64 = 32768 * 32768;
 /// Is this the start of an ISO base media file whose brand says still image?
 ///
 /// The brand list lives in `libheif` rather than here, so a format its plugins
-/// learn to open is recognised without this file changing. `MayBe` means the
+/// learn to open is recognized without this file changing. `MayBe` means the
 /// header did not reach the end of the brand list, which for a real HEIF is
 /// worth handing on: `decode` gives a better message than the registry's
 /// "unsupported image format" would.
@@ -188,7 +188,7 @@ fn is_heif(header: &[u8]) -> bool {
 
 /// What to ask `libheif` to hand back.
 ///
-/// Grey stays grey — expanding a one-channel image to RGB would triple what
+/// Gray stays gray — expanding a one-channel image to RGB would triple what
 /// the GPU has to hold for nothing. Anything above 8 bits comes back as
 /// little-endian 16-bit words; the `LE` in the name is the buffer's byte
 /// order, not the host's, so reading it explicitly keeps this correct on a
@@ -205,7 +205,7 @@ fn requested_color_space(channels: Channels, wide: bool) -> HeifColorSpace {
 
 /// Copies one row-strided plane per component into a tightly packed buffer.
 ///
-/// Used for monochrome, where grey and alpha arrive as separate planes and
+/// Used for monochrome, where gray and alpha arrive as separate planes and
 /// have to be woven together; the interleaved case has its own path because
 /// its components are already adjacent.
 fn interleave_planes(planes: &[Plane<&[u8]>], width: u32, height: u32) -> Result<Samples> {
@@ -339,7 +339,7 @@ impl Layout {
     /// Reads component `index` of a row as a full-range 16-bit value.
     ///
     /// A narrow plane widens on the way through, which is what a monochrome
-    /// image with 10-bit grey and an 8-bit alpha plane needs: the two arrive
+    /// image with 10-bit gray and an 8-bit alpha plane needs: the two arrive
     /// at different widths and have to leave at the same one.
     ///
     /// The `LE` in `libheif`'s chroma names is the buffer's byte order, not
@@ -426,7 +426,7 @@ mod tests {
         let scale = Scale::new(10);
         assert_eq!(scale.to_full(0), 0);
         assert_eq!(scale.to_full(1023), u16::MAX);
-        // And mid grey stays mid grey rather than drifting a code value.
+        // And mid gray stays mid gray rather than drifting a code value.
         assert_eq!(scale.to_full(512), 32800);
     }
 
@@ -473,7 +473,7 @@ mod tests {
         );
     }
 
-    /// Grey must not be widened to RGB, and a deep file must not be asked for
+    /// Gray must not be widened to RGB, and a deep file must not be asked for
     /// as bytes — either would be a silent loss on the way to the GPU.
     #[test]
     fn the_requested_layout_preserves_channels_and_depth() {
@@ -498,7 +498,7 @@ mod tests {
     /// The `ftyp` brand, not the extension, is what makes a file ours — and a
     /// file that merely starts with a box header is not.
     #[test]
-    fn brands_are_recognised_and_other_containers_are_not() {
+    fn brands_are_recognized_and_other_containers_are_not() {
         let heic = b"\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic";
         assert!(is_heif(heic));
         let avif = b"\x00\x00\x00\x1cftypavif\x00\x00\x00\x00avifmif1miaf";

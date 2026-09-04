@@ -74,7 +74,7 @@ mod tests {
     }
 
     /// Multiple channels count toward the ceiling, or an RGBA image four
-    /// times the size of an allowed grey one would slip through.
+    /// times the size of an allowed gray one would slip through.
     #[test]
     fn channel_count_and_bit_depth_both_count() {
         assert!(check_decoded_size(32768, 32768, 4, 32).is_err());

@@ -21,7 +21,7 @@ pub const COLOR: usize = 3;
 /// linear values the rest of [`Stats`] is measured in. Two reasons, and the
 /// first is a correctness one:
 ///
-/// Uniform bins over decoded values cannot be filled evenly by a quantised
+/// Uniform bins over decoded values cannot be filled evenly by a quantized
 /// file. A code step near white is several times wider in linear terms than
 /// one near black — for 8-bit sRGB, 0.0089 against a bin width of 0.0039 — so
 /// the highlights come out as a comb of spikes with empty bins between them
@@ -30,7 +30,7 @@ pub const COLOR: usize = 3;
 ///
 /// The second is that the eye's response is close to the curve a
 /// display-referred file is encoded with, so plotting against it gives equal
-/// width to equal perceived steps: mid grey sits in the middle rather than a
+/// width to equal perceived steps: mid gray sits in the middle rather than a
 /// fifth of the way along. Scene-referred files store linear samples, so
 /// their plot stays linear, which is what measurement work wants.
 ///
@@ -132,7 +132,7 @@ impl Stats {
     /// Scans `image`, converting to the linear working space as it goes so
     /// that the numbers line up with what the shader will sample.
     ///
-    /// Grey images are measured on their single channel; color images on
+    /// Gray images are measured on their single channel; color images on
     /// relative luminance, which is what an exposure control should track.
     /// Color images additionally get per-channel counts, which the UI draws
     /// as a four-channel histogram.
@@ -276,7 +276,7 @@ impl Stats {
     }
 }
 
-/// Grey uses its one channel; color collapses to relative luminance,
+/// Gray uses its one channel; color collapses to relative luminance,
 /// weighted for the BT.709 primaries the working space uses.
 fn luminance(pixel: &[f32], channels: Channels) -> f32 {
     if channels.is_gray() {
@@ -316,7 +316,7 @@ impl<'a> Values<'a> {
     }
 
     /// Calls `visit` with one pixel's components twice over: first as the
-    /// file holds them, normalised to 0..1 for integer samples, then decoded
+    /// file holds them, normalized to 0..1 for integer samples, then decoded
     /// to the linear working space. Alpha is included where the image has
     /// one, since callers slice down to what they want.
     fn for_each(self, mut visit: impl FnMut(&[f32], &[f32])) {
@@ -570,7 +570,7 @@ mod tests {
     }
 
     #[test]
-    fn grey_images_have_no_channel_histogram() {
+    fn gray_images_have_no_channel_histogram() {
         assert!(
             Stats::scan(&linear_gray(vec![0, 1000, 4095]))
                 .plot

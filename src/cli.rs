@@ -519,11 +519,11 @@ mod tests {
                 .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
             for option in long_options() {
                 // fish spells a long option without its dashes.
-                let spelt = match file.ends_with(".fish") {
+                let spelled = match file.ends_with(".fish") {
                     true => format!("-l {}", option.trim_start_matches('-')),
                     false => option.clone(),
                 };
-                assert!(text.contains(&spelt), "{file} should offer {option}");
+                assert!(text.contains(&spelled), "{file} should offer {option}");
             }
         }
     }

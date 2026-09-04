@@ -251,7 +251,7 @@ mod tests {
 
     /// How bright the flat base image is. High enough that two stops of boost
     /// clears SDR white, which is the thing worth asserting.
-    const GREY: u8 = 230;
+    const GRAY: u8 = 230;
 
     /// An Ultra HDR file built here rather than checked in: 16x16 of one flat
     /// tone, with a half-size gain map that leaves the left half alone and
@@ -261,7 +261,7 @@ mod tests {
         const MAP: u32 = 8;
 
         let base = jpeg(
-            &[GREY; (BASE * BASE * 3) as usize],
+            &[GRAY; (BASE * BASE * 3) as usize],
             BASE,
             BASE,
             ::image::ExtendedColorType::Rgb8,
@@ -317,7 +317,7 @@ mod tests {
         // The base tone through the sRGB curve, which is what the untouched
         // half must still be. JPEG is lossy even at quality 100, hence the
         // slack.
-        let expected = Transfer::Srgb.to_linear(GREY as f32 / 255.0);
+        let expected = Transfer::Srgb.to_linear(GRAY as f32 / 255.0);
         assert!(
             (plain - expected).abs() < 0.02,
             "unmarked half moved: {plain} against {expected}"

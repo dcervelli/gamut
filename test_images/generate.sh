@@ -2,10 +2,10 @@
 # Regenerates the decoder fixtures. Run from this directory.
 #
 # Every image is the same 32x24 pattern of four 16x12 quadrants, so a test can
-# probe the centre of each quadrant and know what it should find:
+# probe the center of each quadrant and know what it should find:
 #
 #   color:  top-left red     top-right green    bottom-left blue   bottom-right white
-#   grey:    top-left 0       top-right 85       bottom-left 170    bottom-right 255
+#   gray:    top-left 0       top-right 85       bottom-left 170    bottom-right 255
 #   alpha:   top-left 255     top-right 191      bottom-left 128    bottom-right 64
 #   float:   top-left 0.0     top-right 0.5      bottom-left 1.0    bottom-right 3.984
 #
@@ -172,7 +172,7 @@ magick "$work/color.png"       -depth 16 -define png:bit-depth=16 "$work/color16
 
 heif-enc -L --hevc -o heic-rgb8.heic        "$work/color.png"       > /dev/null
 heif-enc -L --hevc -o heic-rgba8.heic       "$work/color-alpha.png" > /dev/null
-# A greyscale input encodes as a monochrome image, and must stay one channel.
+# A grayscale input encodes as a monochrome image, and must stay one channel.
 heif-enc -L --hevc -o heic-gray8.heic       "$work/gray.png"        > /dev/null
 heif-enc -L --hevc -o heic-gray-alpha8.heic "$work/gray-alpha.png"  > /dev/null
 # 10-bit, tagged BT.2100 PQ on BT.2020 primaries: the HDR path, and the one
@@ -284,7 +284,7 @@ webp_tag anim webp-animated.webp webp-lossless-rgb8.webp "$work/upside-down.webp
 # ----------------------------------------------------------------- ICO
 # A directory of icons rather than one image, in the two formats an entry can
 # hold. `-type TrueColorAlpha` forces the 32-bit bitmap that carries the alpha
-# ramp; left alone, ImageMagick quantises the four-color pattern to a 4-bit
+# ramp; left alone, ImageMagick quantizes the four-color pattern to a 4-bit
 # palette, which is the other bitmap path and gets a fixture of its own.
 magick "$work/color-alpha.png" -type TrueColorAlpha ico-bmp-rgba8.ico
 magick "$work/color.png"                            ico-bmp-palette.ico
@@ -359,7 +359,7 @@ magick "$work/color.png" -depth 8 -type Palette -compress RLE BMP3:bmp-rle8.bmp
 # A BMP stores its rows bottom-up unless its height is negative, and screen
 # capture is where the other kind comes from. ImageMagick writes only the
 # usual way round, so the rows are reversed here and the height negated to
-# say so: it decodes to the ordinary pattern only if the sign is honoured.
+# say so: it decodes to the ordinary pattern only if the sign is honored.
 bmp_topdown() {  # src dst
   python3 - "$@" <<'FLIP'
 import struct, sys
@@ -398,9 +398,9 @@ magick "$work/color.png" -depth 8 -compress None ppm:pnm-ascii.pnm
 # the picture shows at a sixteenth of its brightness.
 magick "$work/gray.png" -depth 10 -colorspace gray pgm:pnm-maxval1023.pgm
 # MAXVAL 1, at the other end: one bit per pixel, and `+dither` so the two
-# middle steps of the grey pattern round to the ends rather than stippling.
+# middle steps of the gray pattern round to the ends rather than stippling.
 magick "$work/gray.png" -colorspace gray -threshold 50% +dither pbm:pnm-bilevel.pbm
-# PAM, which generalises the three above and is the only one of them that can
+# PAM, which generalizes the three above and is the only one of them that can
 # carry alpha.
 magick "$work/color-alpha.png" -depth 8 pam:pnm-rgba8.pam
 
@@ -447,7 +447,7 @@ gdal_translate -q -of GTiff -a_nodata -9999 -co COMPRESS=NONE \
 # a backend.
 magick "$work/color.png" unsupported.tga
 # A PNG called a TIFF, to exercise the content-sniffing fallback.
-cp png-rgb8.png mislabelled.tif
+cp png-rgb8.png mislabeled.tif
 
 echo "generated $(ls -1 *.png *.jpg *.jpeg *.tif *.tiff *.hdr *.exr *.gif \
                     *.heic *.heif *.avif *.webp *.ico *.bmp *.tga \

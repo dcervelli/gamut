@@ -10,14 +10,14 @@ If a sentence would not change what a reader does or expects, cut it.
 
 **Never name a library, crate or dependency.** A user does not care which
 decoder reads a JPEG, and naming one tells them nothing they can use. Describe
-the behaviour instead: "12-bit files do not open", not "the decoder is 8-bit
+the behavior instead: "12-bit files do not open", not "the decoder is 8-bit
 only". The one exception is software the user must install themselves — that
 is a prerequisite, not an implementation detail, and it belongs here with the
 package names they will need.
 
 **Never point at files in this repository.** No test fixtures, no sample
 images, no source paths, no benchmark files. An example must be one the reader
-could recognise from their own work — "a 16-bit scanned photograph", "an
+could recognize from their own work — "a 16-bit scanned photograph", "an
 elevation model" — not one that exists only in the tree.
 
 **Keep internals out of the vocabulary.** Chunk names, box names, container

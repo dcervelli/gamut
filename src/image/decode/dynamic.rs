@@ -15,7 +15,7 @@ use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
 
 use super::ReadSeek;
 
-/// The size stated in the header of whatever format the crate recognises.
+/// The size stated in the header of whatever format the crate recognizes.
 pub(super) fn dimensions(source: &mut dyn ReadSeek) -> Result<Option<(u32, u32)>> {
     let reader = ::image::ImageReader::new(BufReader::new(source)).with_guessed_format()?;
     Ok(Some(reader.into_dimensions()?))
@@ -27,7 +27,7 @@ pub(super) fn dimensions(source: &mut dyn ReadSeek) -> Result<Option<(u32, u32)>
 pub(super) fn limit<R: std::io::BufRead + Seek>(reader: &mut ::image::ImageReader<R>) {
     let mut limits = ::image::Limits::default();
     limits.max_alloc = Some(super::MAX_DECODED_BYTES);
-    // `max_alloc` is documented as advisory — some decoders honour it, some do
+    // `max_alloc` is documented as advisory — some decoders honor it, some do
     // not — while the dimension limits are strict for every one. Set them to
     // the same ceiling the GPU imposes, so a format `image` decodes without
     // consulting `max_alloc` (EXR, HDR) still cannot claim an unbounded size.

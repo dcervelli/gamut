@@ -28,7 +28,7 @@ fn vs_main(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
 
 // Color premultiplied by alpha, in the component layout the texture stores.
 // Averaging straight alpha would drag the color of fully transparent texels
-// into its neighbours, which is what shows as haloing along a hard edge.
+// into its neighbors, which is what shows as haloing along a hard edge.
 fn premultiplied(texel: vec4<f32>) -> vec4<f32> {
     if params.alpha_mode != 1u {
         return texel;

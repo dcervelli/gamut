@@ -73,7 +73,7 @@ so a raw scan you have brought up out of the shadows arrives brought up. It is
 the image at its own size, not a photograph of the window — the zoom, the pan
 and the panels are how you are looking at it and none of them are copied.
 
-A single-channel image stays single-channel, so a greyscale scan does not
+A single-channel image stays single-channel, so a grayscale scan does not
 arrive as three copies of itself, and false color is the one thing that
 widens it. Transparency comes along only where the file had some; an opaque
 picture arrives opaque rather than carrying an empty channel. Everything
@@ -140,7 +140,7 @@ that is not a paste; open it as an argument instead.
 | `e` | Cycle the automatic window: off (0–1) → min/max → 99.8% |
 | `t` | Cycle tone mapping: none → Reinhard → neutral |
 | `o` | Turn the room above white off and on, where the monitor is in HDR mode |
-| `r` | Cycle false color: grey → viridis → magma → turbo |
+| `r` | Cycle false color: gray → viridis → magma → turbo |
 | `z` | Reset every display setting |
 
 The window is the one place the case of a key matters: `a` and `s` move it,

@@ -53,7 +53,7 @@ pub struct Palette {
     mode: Mode,
 }
 
-/// Where Omarchy materialises the active theme. A real directory rewritten
+/// Where Omarchy materializes the active theme. A real directory rewritten
 /// wholesale on every theme change, not a symlink into a themes folder, which
 /// is why the file itself is what gets watched.
 fn colors_file() -> Option<PathBuf> {
@@ -560,7 +560,7 @@ mod tests {
             ("color5", "#cba6f7"),
             ("magenta", "#cba6f7"),
             ("color7", "#cdd6f4"),
-            // No eighth color and no dark foreground, so the muted grey the
+            // No eighth color and no dark foreground, so the muted gray the
             // slot holds falls all the way back to the foreground.
             ("color8", "#cdd6f4"),
             ("muted", "#cdd6f4"),
@@ -579,7 +579,7 @@ mod tests {
     #[test]
     fn a_shade_with_nothing_to_mix_from_is_left_unset() {
         // The resolver every other consumer uses mixes from the empty string
-        // here and lands on a grey nobody chose. Saying nothing instead is
+        // here and lands on a gray nobody chose. Saying nothing instead is
         // what lets the interface fall back to a color that was chosen.
         let palette = palette(SPARSE);
         for absent in ["red", "green", "blue", "brown", "bright_red"] {

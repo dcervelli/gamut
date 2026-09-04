@@ -73,7 +73,7 @@ always meant in the absence of anything better. Where a file states its color
 space, that is believed instead; where it states it twice and the two
 disagree, the more precise statement wins.
 
-**Only part of an ICC profile is used.** The primaries are recognised if they
+**Only part of an ICC profile is used.** The primaries are recognized if they
 are sRGB, Display P3, BT.2020 or Adobe RGB, and the tone response is taken
 only where the profile states a simple power law. A profile that describes
 some other gamut, or that describes itself with lookup tables, or that is for
@@ -86,7 +86,7 @@ assumed to mean, for every file opened in that run. This matters most for
 TIFF, which says nothing at all.
 
 **Depth and channels survive.** A 16-bit scan stays 16-bit, floating-point
-data stays floating point, and a greyscale image stays single-channel rather
+data stays floating point, and a grayscale image stays single-channel rather
 than being expanded to color — which is a quarter of the memory on a large
 scan. The formats that cannot preserve them say so below.
 
@@ -118,12 +118,12 @@ display settings.
 
 ## PNG
 
-Everything the format holds: 8 and 16-bit, greyscale or color, with or
+Everything the format holds: 8 and 16-bit, grayscale or color, with or
 without alpha, indexed, interlaced, and the sub-byte depths, which arrive
 expanded. Transparency on an indexed image becomes a real alpha channel.
 
 PNG is one of only two formats here that can state outright that it is HDR,
-and when it does — BT.2100 PQ or HLG — that is read and honoured. An ICC
+and when it does — BT.2100 PQ or HLG — that is read and honored. An ICC
 profile is read where there is no such statement, so a Display P3 PNG shows as
 Display P3.
 
@@ -132,7 +132,7 @@ non-animated reader sees.
 
 ## JPEG
 
-Baseline and progressive, 8-bit, greyscale or color, at any chroma
+Baseline and progressive, 8-bit, grayscale or color, at any chroma
 subsampling. Arithmetic-coded and lossless JPEG do not open, nor do 12-bit
 files; all three are rare and none is produced by a camera.
 
@@ -185,18 +185,18 @@ compressed with LZW, Deflate, PackBits or CCITT Group 4:
 - 8, 16 and 32-bit unsigned integers;
 - signed integers and 64-bit values, widened to float with their signs intact;
 - 16, 32 and 64-bit floating point;
-- greyscale or color, with or without alpha, and indexed color.
+- grayscale or color, with or without alpha, and indexed color.
 
 Single-band floating-point rasters — which is what an elevation model or a
 scientific image usually is — stay single-band all the way to the screen, at a
 quarter of the memory that expanding them to color would cost.
 
-**Values are never rescaled.** An elevation model holds metres, and −86 metres
-at the Dead Sea is a real reading, not something to normalise away. The
+**Values are never rescaled.** An elevation model holds meters, and −86 meters
+at the Dead Sea is a real reading, not something to normalize away. The
 display window (`e`, `a`, `s`, `A`, `S`) is what brings a range into view, and
 its bounds are reported in the file's own units.
 
-**A no-data value is honoured** where the file records one, and kept out of
+**A no-data value is honored** where the file records one, and kept out of
 the statistics — so a clipped raster's −9999 fill cannot set the bottom of the
 automatic window and squash the real terrain into a sliver.
 
@@ -221,12 +221,12 @@ transparency in either.
 - The **ICC profile** is read, and is the only thing a WebP can say about its
   own color. Without one it means sRGB.
 - The **orientation is applied**, one of only two places a rotation tag is
-  honoured.
+  honored.
 - An **animated** WebP shows its first frame on the full canvas, so a first
   frame stored as a partial patch arrives whole.
 
 Nothing in WebP goes above 8 bits or outside three color channels, so there
-is no depth to preserve and no greyscale encoding: a grey WebP is a grey
+is no depth to preserve and no grayscale encoding: a gray WebP is a gray
 color WebP.
 
 ## HEIF — HEIC and AVIF
@@ -269,7 +269,7 @@ icon is full color, preferring depth shows you a thumbnail.
 
 Both kinds of icon are read. The larger ones are stored as PNG and get
 everything the PNG support offers, so an icon can be Display P3 and can be
-greyscale. The smaller ones are bitmaps, and their transparency mask is
+grayscale. The smaller ones are bitmaps, and their transparency mask is
 applied, which is how a 16-color icon has a transparent background; a bitmap
 icon always arrives with an alpha channel whatever its stored depth.
 
@@ -290,17 +290,17 @@ else, `--transfer` and `--primaries` are the way to say so.
 ## Netpbm — PBM, PGM, PPM and PAM
 
 Opens in every member of the family, in both the ASCII and the binary
-spellings, at 8 or 16 bits per sample, greyscale or color. PAM files carrying
+spellings, at 8 or 16 bits per sample, grayscale or color. PAM files carrying
 an alpha channel keep it; the other three have no alpha to carry.
 
-Any brightness scale is honoured. Netpbm lets a file declare what a fully
+Any brightness scale is honored. Netpbm lets a file declare what a fully
 bright sample is, and instrument output often says 1023 or 4095 rather than
 the full width of the sample — a file like that is read at the brightness it
 was meant to have rather than a fraction of it.
 
 The format says nothing about color, so its files are taken as sRGB. That is
 what the specification calls for, but a pipeline writing linear measurements
-into a greyscale file is common and looks no different from the inside: if a
+into a grayscale file is common and looks no different from the inside: if a
 `.pgm` opens looking washed out, `--transfer linear` is the correction.
 
 ## Radiance HDR

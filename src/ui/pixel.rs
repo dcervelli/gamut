@@ -3,7 +3,7 @@
 //! color it comes out as.
 //!
 //! Two numbers for one pixel, because they answer different questions. The
-//! stored one is the measurement — the count a sensor recorded, the metre a
+//! stored one is the measurement — the count a sensor recorded, the meter a
 //! terrain model states — and is the reason anyone points at a pixel. The
 //! mapped one is what the window, the exposure and the false color have made
 //! of it, and is the reason the pixel looks the way it does. The swatch
@@ -310,7 +310,7 @@ mod tests {
     }
 
     /// The swatch is there to answer the question the numbers cannot: a
-    /// windowed value of 0.5 is a shade of grey until a colormap is on, and
+    /// windowed value of 0.5 is a shade of gray until a colormap is on, and
     /// then it is a color no column of digits describes.
     #[test]
     fn the_swatch_shows_the_color_the_pixel_comes_out_rather_than_its_value() {
@@ -327,16 +327,16 @@ mod tests {
         let sample = image.sample(0, 0).expect("inside the image");
 
         let mut display = Display::default();
-        let grey = swatch_color(&display.map(&sample, Headroom::None));
-        assert_eq!(grey.r, grey.g);
-        assert_eq!(grey.g, grey.b);
-        assert_eq!(grey.a, 255);
+        let gray = swatch_color(&display.map(&sample, Headroom::None));
+        assert_eq!(gray.r, gray.g);
+        assert_eq!(gray.g, gray.b);
+        assert_eq!(gray.a, 255);
 
         display.colormap = Colormap::Viridis;
         let false_color = swatch_color(&display.map(&sample, Headroom::None));
         assert!(
             false_color.g > false_color.r && false_color.b > false_color.r,
-            "the middle of viridis is teal, not grey: {false_color:?}"
+            "the middle of viridis is teal, not gray: {false_color:?}"
         );
     }
 }

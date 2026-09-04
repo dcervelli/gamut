@@ -55,7 +55,7 @@ impl Transfer {
                 let encoded = value.max(0.0).powf(1.0 / M2);
                 let numerator = (encoded - C1).max(0.0);
                 let denominator = C2 - C3 * encoded;
-                // 10000 nits full scale, normalised to 203 nits reference white.
+                // 10000 nits full scale, normalized to 203 nits reference white.
                 (numerator / denominator).powf(1.0 / M1) * (10000.0 / 203.0)
             }
             Transfer::Hlg => {
@@ -68,7 +68,7 @@ impl Transfer {
                 } else {
                     (((value - C) / A).exp() + B) / 12.0
                 };
-                // Nominal 1000 nit system gamma, normalised to reference white.
+                // Nominal 1000 nit system gamma, normalized to reference white.
                 scene * (1000.0 / 203.0)
             }
             Transfer::Gamma(gamma) => {
@@ -83,7 +83,7 @@ impl Transfer {
     /// Encodes a linear component back the way the file stored it, the exact
     /// inverse of [`Transfer::to_linear`].
     ///
-    /// Used to plot histograms on the curve the samples were quantised
+    /// Used to plot histograms on the curve the samples were quantized
     /// against: binning decoded values uniformly leaves gaps between the
     /// codes of an 8-bit file, because a code step at the top of the range is
     /// several times wider in linear terms than one at the bottom.
@@ -92,7 +92,7 @@ impl Transfer {
             Transfer::Linear => value,
             // Negative light has no encoding; the curves below are defined on
             // 0.. only, and `powf` of a negative is NaN. Mirroring keeps such
-            // a value ordered relative to its neighbours instead.
+            // a value ordered relative to its neighbors instead.
             _ if value < 0.0 => -self.to_encoded(-value),
             Transfer::Srgb => {
                 if value <= 0.0031308 {
@@ -107,8 +107,8 @@ impl Transfer {
                 const C1: f32 = 3424.0 / 4096.0;
                 const C2: f32 = 32.0 * 2413.0 / 4096.0;
                 const C3: f32 = 32.0 * 2392.0 / 4096.0;
-                let normalised = (value * (203.0 / 10000.0)).powf(M1);
-                ((C1 + C2 * normalised) / (1.0 + C3 * normalised)).powf(M2)
+                let normalized = (value * (203.0 / 10000.0)).powf(M1);
+                ((C1 + C2 * normalized) / (1.0 + C3 * normalized)).powf(M2)
             }
             Transfer::Hlg => {
                 const A: f32 = 0.17883277;
@@ -270,7 +270,7 @@ mod tests {
     fn srgb_decodes_at_the_documented_anchors() {
         assert!(close(Transfer::Srgb.to_linear(0.0), 0.0));
         assert!(close(Transfer::Srgb.to_linear(1.0), 1.0));
-        // Mid grey: sRGB 0.5 is a little over 21% of the light.
+        // Mid gray: sRGB 0.5 is a little over 21% of the light.
         assert!(close(Transfer::Srgb.to_linear(0.5), 0.214_041));
         // The curve is continuous across the join between its two pieces.
         let below = Transfer::Srgb.to_linear(0.040_44);
@@ -290,7 +290,7 @@ mod tests {
     #[test]
     fn pq_puts_reference_white_at_one() {
         // ST 2084 encodes 203 nits — the reference white the pipeline
-        // normalises to — at roughly 0.58 of its code range.
+        // normalizes to — at roughly 0.58 of its code range.
         let white = Transfer::Pq.to_linear(0.580_69);
         assert!((white - 1.0).abs() < 0.02, "got {white}");
         // And it reaches far above SDR range at full scale.
@@ -298,7 +298,7 @@ mod tests {
     }
 
     /// Every curve has to round-trip, since the histogram plots samples on
-    /// the curve they were quantised against and reads the window back off it.
+    /// the curve they were quantized against and reads the window back off it.
     #[test]
     fn every_transfer_encodes_back_to_where_it_started() {
         let transfers = [

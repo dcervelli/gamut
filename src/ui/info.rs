@@ -316,11 +316,11 @@ fn header(text: &mut dyn TextMeasure, view: Rect) -> Header {
     let hint_width = (left - view.x - CHIP_GAP).max(1.0);
     let hint_height = text.measure_wrapped(HINT, LABEL_SIZE, hint_width)[1];
     let height = hint_height.max(CHIP_HEIGHT);
-    let centred = |own: f32| (view.y + (height - own) / 2.0).round();
+    let centered = |own: f32| (view.y + (height - own) / 2.0).round();
     Header {
         strip: Rect::new(view.x, view.y, view.width, height),
-        hint: Rect::new(view.x, centred(hint_height), hint_width, hint_height),
-        button: Rect::new(left, centred(CHIP_HEIGHT), width, CHIP_HEIGHT),
+        hint: Rect::new(view.x, centered(hint_height), hint_width, hint_height),
+        button: Rect::new(left, centered(CHIP_HEIGHT), width, CHIP_HEIGHT),
     }
 }
 
@@ -459,7 +459,7 @@ fn chip(
     frame.rounded_rect(rect, CELL_RADIUS, theme.bar_background);
     outline(frame, rect, RULE_WIDTH, edge);
 
-    // Centred as one, so that a button wearing only the mark has it in the
+    // Centered as one, so that a button wearing only the mark has it in the
     // middle rather than pushed to the end a label would have started at.
     let label = copies
         .label()
@@ -608,7 +608,7 @@ pub(super) fn draw(
     {
         let width = chip_width(text, copies);
         let middle = view.y + (top + bottom) / 2.0 - scroll;
-        // Centred on what it would copy, but nudged back inside the panel
+        // Centered on what it would copy, but nudged back inside the panel
         // where that would hang it over an edge — which the first heading,
         // being a single line at the very top of the column, otherwise does.
         // A button belongs to the thing it is beside, and half a button at

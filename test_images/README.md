@@ -20,12 +20,12 @@ here. `examples/make-icc.rs` is what produced it.
 
 ## The pattern
 
-Every image is 32×24, four 16×12 quadrants, probed at their centres:
+Every image is 32×24, four 16×12 quadrants, probed at their centers:
 
 |          | top-left | top-right | bottom-left | bottom-right |
 | -------- | -------- | --------- | ----------- | ------------ |
 | color   | red      | green     | blue        | white        |
-| grey     | 0        | 85        | 170         | 255          |
+| gray     | 0        | 85        | 170         | 255          |
 | alpha    | 255      | 191       | 128         | 64           |
 | float    | 0.0      | 0.5       | 1.0         | 3.984        |
 
@@ -38,10 +38,10 @@ mapping.
 
 | Format | Files |
 | ------ | ----- |
-| PNG | grey / grey+alpha / RGB / RGBA at 8 and 16 bits, 1- and 4-bit depths, palette, palette + `tRNS`, Adam7 interlacing |
+| PNG | gray / gray+alpha / RGB / RGBA at 8 and 16 bits, 1- and 4-bit depths, palette, palette + `tRNS`, Adam7 interlacing |
 | PNG color tags | `cICP` for BT.2100 PQ on BT.2020 — the whole of how a PNG says it is HDR — and `iCCP` for Display P3 |
-| JPEG | baseline, greyscale, progressive, 4:2:0 subsampling |
-| TIFF | grey / RGB / RGBA at 8 and 16 bits, 32-bit float, LZW / Deflate / PackBits / uncompressed, big-endian, tiled |
+| JPEG | baseline, grayscale, progressive, 4:2:0 subsampling |
+| TIFF | gray / RGB / RGBA at 8 and 16 bits, 32-bit float, LZW / Deflate / PackBits / uncompressed, big-endian, tiled |
 | TIFF as raster data | BigTIFF, Deflate + floating-point predictor + tiling (how DEMs ship), signed Int16, GDAL no-data sentinel |
 | Radiance | RGBE with its shared exponent |
 | OpenEXR | RGB, RGBA with associated alpha, zip compression |
@@ -54,7 +54,7 @@ mapping.
 | ICO directory | a PNG entry that is not RGBA and one carrying an `iCCP` profile, both of which `image`'s own ICO decoder refuses, and a two-size directory whose larger entry is the shallower |
 | BMP | 24-bit, 32-bit with bitfield masks and alpha, a 4-bit palette, an 8-bit palette with `BI_RLE8` runs, and one whose rows are stored top-down |
 | netpbm | binary PPM and PGM at 8 bits, binary PPM at 16, an ASCII PPM, a bitmap at one bit per pixel, a PAM with alpha, and a PGM whose `MAXVAL` is 1023 rather than the width of its samples |
-| Routing | `mislabelled.tif` (a PNG, found by sniffing), `.jpeg`, `.tiff`, `.heif` and `.pnm` spellings |
+| Routing | `mislabeled.tif` (a PNG, found by sniffing), `.jpeg`, `.tiff`, `.heif` and `.pnm` spellings |
 | Failure | `unsupported.tga`, `bad-truncated.png` |
 
 `src/image/decode/fixture_tests.rs` asserts that this directory and its

@@ -11,7 +11,7 @@ pub(crate) const BAR_HEIGHT: f32 = 30.0;
 
 /// Width of the left and right panels. The bars' own height: they hold a
 /// column of toggles and nothing else, so their width is a button's, and
-/// making the four panels the same thickness leaves the picture centred in a
+/// making the four panels the same thickness leaves the picture centered in a
 /// frame of even weight.
 pub(crate) const SIDE_WIDTH: f32 = BAR_HEIGHT;
 
@@ -24,7 +24,7 @@ const BUTTON_GAP: f32 = 8.0;
 /// The margin at the ends of the bars: how far the first thing in one is
 /// from the edge of the window.
 ///
-/// The inset that centres a toggle across a side panel, and derived from it
+/// The inset that centers a toggle across a side panel, and derived from it
 /// rather than merely equal to it, so the two cannot drift apart as either is
 /// retuned. That makes the button at the end of a bar and the column of
 /// toggles below it share one line down the edge of the window — the whole
@@ -276,7 +276,7 @@ impl Chrome {
 }
 
 /// The `index`-th square button down a side panel, counting from the top.
-/// The inset that centres it across the strip is also the gap above the first
+/// The inset that centers it across the strip is also the gap above the first
 /// one, so a column of buttons reads as set into the panel rather than as
 /// merely fitted to it.
 ///
@@ -293,7 +293,7 @@ fn side_button(panel: Rect, index: usize) -> Rect {
     Rect::new(panel.x + inset, panel.y + top, size, size)
 }
 
-/// A button ending at `right` in a bar, centred across it. Clamped to the
+/// A button ending at `right` in a bar, centered across it. Clamped to the
 /// bar, so a window dragged narrow shrinks the button rather than pushing it
 /// out of the window.
 fn bar_button(bar: Rect, size: [f32; 2], right: f32) -> Rect {
@@ -400,7 +400,7 @@ mod tests {
         assert!(button.y >= chrome.right.y);
         assert!(button.bottom() <= chrome.right.bottom());
 
-        // Centred in the strip rather than merely fitted into it.
+        // Centered in the strip rather than merely fitted into it.
         assert_eq!(
             button.x - chrome.right.x,
             chrome.right.right() - button.right()
@@ -477,7 +477,7 @@ mod tests {
     /// The right panel holds a column of toggles, in the order the panels
     /// they open are stacked in: the histogram at the top and the information
     /// column under it. A window too short for one of them drops it rather
-    /// than stacking it over its neighbour.
+    /// than stacking it over its neighbor.
     #[test]
     fn the_side_toggles_stack_down_the_panel_and_stop_when_it_runs_out() {
         let chrome = Chrome::new(WINDOW);
@@ -486,7 +486,7 @@ mod tests {
         assert_eq!(histogram.x, info.x);
         assert!(histogram.bottom() <= info.y, "{histogram:?} over {info:?}");
         assert!(info.bottom() <= chrome.right.bottom());
-        // Set into the panel by the same inset that centres them across it.
+        // Set into the panel by the same inset that centers them across it.
         assert_eq!(histogram.y - chrome.right.y, histogram.x - chrome.right.x);
 
         // A window with room for the first and not the second keeps the
@@ -598,7 +598,7 @@ mod tests {
     /// window: the button at the end of a bar ends where the column of
     /// toggles below it ends, and the words at the other end start where the
     /// toggle on that side starts. Both fall out of the bars' margin being
-    /// the inset that centres a toggle across a panel, so neither can drift
+    /// the inset that centers a toggle across a panel, so neither can drift
     /// as the button size or the panel width is retuned.
     #[test]
     fn the_bars_end_on_the_same_lines_as_the_side_toggles() {
@@ -637,7 +637,7 @@ mod tests {
 
             assert_eq!(button.width, ZOOM_BUTTON[0]);
             assert_eq!(button.right(), grid.x - BUTTON_GAP);
-            // Centred across the bar, and inside it.
+            // Centered across the bar, and inside it.
             assert_eq!(
                 button.y - chrome.top.y,
                 chrome.top.bottom() - button.bottom()
@@ -695,7 +695,7 @@ mod tests {
         assert!(view.zoom(image, hidden) > view.zoom(image, shown));
 
         // Fitted between the panels means fitted *inside* them: the image is
-        // centred on the content area, not on the window.
+        // centered on the content area, not on the window.
         let placement = view.placement(image, shown);
         assert!(placement.x >= shown.x - 0.5);
         assert!(placement.x + placement.width <= shown.x + shown.width + 0.5);

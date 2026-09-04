@@ -152,22 +152,22 @@ pub enum Blend {
 /// in the interface but the strokes an icon is drawn from.
 const ALONG_THE_WINDOW: [f32; 2] = [1.0, 0.0];
 
-/// The square `radius` out from `centre` on all sides: the box a circle of
+/// The square `radius` out from `center` on all sides: the box a circle of
 /// that radius is drawn in.
-fn square(centre: [f32; 2], radius: f32) -> Rect {
+fn square(center: [f32; 2], radius: f32) -> Rect {
     Rect::new(
-        centre[0] - radius,
-        centre[1] - radius,
+        center[0] - radius,
+        center[1] - radius,
         2.0 * radius,
         2.0 * radius,
     )
 }
 
 pub(crate) struct QuadItem {
-    /// Centre, and half extent along the shape's own two axes, in logical
-    /// pixels. A stroked shape's extent is its centre line: the band the
+    /// Center, and half extent along the shape's own two axes, in logical
+    /// pixels. A stroked shape's extent is its center line: the band the
     /// shader lays down straddles it.
-    centre: [f32; 2],
+    center: [f32; 2],
     half: [f32; 2],
     color: Color,
     corner: f32,
@@ -304,7 +304,7 @@ impl UiFrame {
         blend: Blend,
     ) {
         self.layer().shapes.push(Shape::Quad(QuadItem {
-            centre: [rect.x + rect.width / 2.0, rect.y + rect.height / 2.0],
+            center: [rect.x + rect.width / 2.0, rect.y + rect.height / 2.0],
             half: [rect.width / 2.0, rect.height / 2.0],
             color,
             corner,
@@ -402,16 +402,16 @@ impl UiFrame {
     }
 
     /// Where a stroke `thickness` wide, wanted at `at` device pixels, has to
-    /// be centred for both of its edges to land on device pixel boundaries:
+    /// be centered for both of its edges to land on device pixel boundaries:
     /// the middle of a pixel when it is an odd number of them across, and the
     /// seam between two when it is even. The answer is in logical pixels, as
     /// everything a frame holds is.
     ///
     /// The rule every icon is drawn by, and the counterpart of
-    /// [`UiFrame::line`] for anything given as a centre line rather than as
+    /// [`UiFrame::line`] for anything given as a center line rather than as
     /// the box it fills. `thickness` is what [`UiFrame::line_width`] gave, so
     /// that it is a whole number of device pixels to begin with; a stroke
-    /// centred anywhere else is spread over one pixel more than it needs, and
+    /// centered anywhere else is spread over one pixel more than it needs, and
     /// the feather then draws it at two weights depending on where it fell.
     ///
     /// `at` is in device pixels rather than logical ones because a caller
@@ -419,10 +419,10 @@ impl UiFrame {
     /// lose that exactness by converting first: a whole number of device
     /// pixels is a repeating fraction of a logical one at any scale that is
     /// not itself whole, and multiplying it back lands a hair either side of
-    /// the half pixel the stroke was to be centred on. Which side is
+    /// the half pixel the stroke was to be centered on. Which side is
     /// arbitrary, and a row of marks landing on different sides is a row with
     /// uneven gaps — which is what a lattice must not have.
-    pub fn stroke_centre_in_device(&self, at: f32, thickness: f32) -> f32 {
+    pub fn stroke_center_in_device(&self, at: f32, thickness: f32) -> f32 {
         if !(self.scale.is_finite() && self.scale > 0.0) {
             return at;
         }
@@ -503,7 +503,7 @@ impl UiFrame {
     ///
     /// Nothing here is snapped. Where a stroke has to be sharp — an icon —
     /// the caller puts its ends on the device grid first, with
-    /// [`UiFrame::stroke_centre_in_device`].
+    /// [`UiFrame::stroke_center_in_device`].
     pub fn stroke(&mut self, from: [f32; 2], to: [f32; 2], width: f32, color: Color) {
         let (dx, dy) = (to[0] - from[0], to[1] - from[1]);
         let length = dx.hypot(dy);
@@ -514,9 +514,9 @@ impl UiFrame {
         } else {
             ALONG_THE_WINDOW
         };
-        let centre = [(from[0] + to[0]) / 2.0, (from[1] + to[1]) / 2.0];
+        let center = [(from[0] + to[0]) / 2.0, (from[1] + to[1]) / 2.0];
         self.quad(
-            Rect::new(centre[0] - length / 2.0, centre[1], length, 0.0),
+            Rect::new(center[0] - length / 2.0, center[1], length, 0.0),
             color,
             0.0,
             axis,
@@ -528,21 +528,21 @@ impl UiFrame {
     /// A band `width` wide laid along the outline of `rect`, rounded by
     /// `corner`: a rectangle drawn rather than filled.
     ///
-    /// `rect` is the centre line, the way an SVG rectangle's is, so the band
+    /// `rect` is the center line, the way an SVG rectangle's is, so the band
     /// reaches half its width either side of it.
     pub fn stroke_rect(&mut self, rect: Rect, corner: f32, width: f32, color: Color) {
         self.quad(rect, color, corner, ALONG_THE_WINDOW, width, Blend::Over);
     }
 
     /// A filled circle.
-    pub fn circle(&mut self, centre: [f32; 2], radius: f32, color: Color) {
-        self.rounded_rect(square(centre, radius), radius, color);
+    pub fn circle(&mut self, center: [f32; 2], radius: f32, color: Color) {
+        self.rounded_rect(square(center, radius), radius, color);
     }
 
     /// A circle drawn rather than filled: [`UiFrame::stroke_rect`] on a
     /// square rounded as far as it will go.
-    pub fn stroke_circle(&mut self, centre: [f32; 2], radius: f32, width: f32, color: Color) {
-        self.stroke_rect(square(centre, radius), radius, width, color);
+    pub fn stroke_circle(&mut self, center: [f32; 2], radius: f32, width: f32, color: Color) {
+        self.stroke_rect(square(center, radius), radius, width, color);
     }
 
     /// Fills the region between the polyline `top` — left to right, in
@@ -573,7 +573,7 @@ impl UiFrame {
 
     /// Strokes the polyline `points` — in logical pixels — `width` wide.
     ///
-    /// Each segment is a quad about its own centre line, with a square patch
+    /// Each segment is a quad about its own center line, with a square patch
     /// at every interior joint. Mitring would be the tidier construction, but
     /// a patch the width of the stroke fills the notch on the outside of a
     /// bend at any angle, and the one curve drawn with this turns over
@@ -760,8 +760,8 @@ impl crate::render::TextMeasure for UiRenderer {
         self.text.measure(text, size, Face::Sans, Some(width))
     }
 
-    fn cap_centre(&mut self, size: f32) -> f32 {
-        self.text.cap_centre(size, Face::Sans)
+    fn cap_center(&mut self, size: f32) -> f32 {
+        self.text.cap_center(size, Face::Sans)
     }
 }
 
@@ -815,19 +815,19 @@ mod tests {
     /// The scales a display actually asks for, whole and fractional.
     const SCALES: [f32; 5] = [1.0, 1.25, 1.5, 1.75, 2.0];
 
-    /// A stroke centred where `stroke_centre_in_device` puts it has both edges
+    /// A stroke centered where `stroke_center_in_device` puts it has both edges
     /// on a device pixel boundary — which is the whole reason the method
     /// exists, and is not what rounding to a whole logical pixel gives.
     #[test]
-    fn a_stroke_centre_puts_both_edges_on_the_grid() {
+    fn a_stroke_center_puts_both_edges_on_the_grid() {
         for scale in SCALES {
             let frame = UiFrame::new(scale);
             for thickness in [1.0, 1.5, 2.0, 3.0] {
                 let width = frame.line_width(thickness);
                 for step in 0..40 {
                     let asked = step as f32 * 0.37;
-                    let centre = frame.stroke_centre_in_device(asked * scale, width);
-                    for edge in [centre - width / 2.0, centre + width / 2.0] {
+                    let center = frame.stroke_center_in_device(asked * scale, width);
+                    for edge in [center - width / 2.0, center + width / 2.0] {
                         let device = edge * scale;
                         assert!(
                             (device - device.round()).abs() < 1e-3,
@@ -836,8 +836,8 @@ mod tests {
                     }
                     // And it is the nearest such place, not just some place.
                     assert!(
-                        (centre - asked).abs() <= 0.5 / scale + 1e-3,
-                        "scale {scale}: {asked} moved to {centre}"
+                        (center - asked).abs() <= 0.5 / scale + 1e-3,
+                        "scale {scale}: {asked} moved to {center}"
                     );
                 }
             }
@@ -885,7 +885,7 @@ mod tests {
         for scale in [0.0, f32::NAN, f32::INFINITY] {
             let frame = UiFrame::new(scale);
             assert_eq!(frame.snap(3.7), 3.7);
-            assert_eq!(frame.stroke_centre_in_device(3.7, 1.0), 3.7);
+            assert_eq!(frame.stroke_center_in_device(3.7, 1.0), 3.7);
             assert_eq!(frame.snap_within(3.7, 1.0), 3.7);
             assert_eq!(frame.device_pixels(3.7), 3.7);
             assert_eq!(frame.to_device(3.7), 3.7);

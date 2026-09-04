@@ -6,7 +6,7 @@ pkgrel=1
 pkgdesc="A GPU image viewer with real color management, for photographs, measurement data and HDR"
 arch=('x86_64' 'aarch64')
 url="https://github.com/closedcontour/gamut"
-# gamut itself, then the licences of the work carried in its own source tree:
+# gamut itself, then the licenses of the work carried in its own source tree:
 # Lucide's icon geometry, and the two colormap fits. REUSE.toml says which file
 # is which. The crates linked into the binary are not gamut's source and do not
 # belong here; their notices ship as THIRD-PARTY-NOTICES.
@@ -51,8 +51,8 @@ package() {
 
   install -Dm755 "target/release/$pkgname" "$pkgdir/usr/bin/$pkgname"
 
-  # gamut's own licence, and then the record of everything else the binary
-  # carries: REUSE.toml names the file each licence applies to, and LICENSES/
+  # gamut's own license, and then the record of everything else the binary
+  # carries: REUSE.toml names the file each license applies to, and LICENSES/
   # holds the texts it names.
   install -Dm644 LICENSE-MIT "$pkgdir/usr/share/licenses/$pkgname/LICENSE-MIT"
   install -Dm644 LICENSE-APACHE "$pkgdir/usr/share/licenses/$pkgname/LICENSE-APACHE"

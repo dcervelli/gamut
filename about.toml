@@ -1,11 +1,11 @@
 # What `cargo about` may find in the dependency graph, and in what order it
 # should pick when a crate offers a choice.
 #
-# This is an allowlist as much as a configuration: a crate whose licence is
+# This is an allowlist as much as a configuration: a crate whose license is
 # not below fails generation rather than being written out quietly, so a
 # dependency arriving under terms nothing here has agreed to stops a release
 # instead of appearing in a notice file nobody read. It is the same bargain as
-# `cargo audit`, over licences instead of advisories.
+# `cargo audit`, over licenses instead of advisories.
 #
 # The order is a priority. Every entry is permissive, so what it really
 # decides is which text gets printed for the ninety-odd crates offering `MIT
@@ -32,7 +32,7 @@ accepted = [
 ]
 
 # Only what is linked into the binary owes a notice. A test harness or a build
-# script is not shipped, so its licence is not the package's business.
+# script is not shipped, so its license is not the package's business.
 ignore-build-dependencies = true
 ignore-dev-dependencies = true
 

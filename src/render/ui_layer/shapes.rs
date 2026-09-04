@@ -9,7 +9,7 @@ use crate::render::gpu::{self, GrowableBuffer};
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct QuadInstance {
-    /// Centre, then half extent along the quad's own two axes, in physical
+    /// Center, then half extent along the quad's own two axes, in physical
     /// pixels.
     bounds: [f32; 4],
     /// Linear, straight alpha.
@@ -213,8 +213,8 @@ impl Shapes {
                     Shape::Quad(quad) => {
                         instances.push(QuadInstance {
                             bounds: [
-                                quad.centre[0] * scale,
-                                quad.centre[1] * scale,
+                                quad.center[0] * scale,
+                                quad.center[1] * scale,
                                 quad.half[0] * scale,
                                 quad.half[1] * scale,
                             ],

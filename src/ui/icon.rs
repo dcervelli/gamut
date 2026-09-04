@@ -9,7 +9,7 @@
 //! Why a table of marks rather than the path data Lucide ships: a path can be
 //! drawn but it cannot be *hinted*. At the size a toggle wears one — a dozen
 //! pixels or so — an icon is sharp when each of its strokes is a whole number
-//! of device pixels wide and centred where those pixels meet, and blurred
+//! of device pixels wide and centered where those pixels meet, and blurred
 //! when it is not; nothing else about it matters nearly as much. Marks are
 //! placed one at a time so that each can be put there. Rounding to whole
 //! *logical* pixels, which is what the interface did before, is not the same
@@ -23,7 +23,7 @@
 //! units come to five and a half device pixels there is no placing of four
 //! lines that leaves three equal gaps between them: they round outward,
 //! inward, outward, inward, and the middle cell comes out a third wider than
-//! its neighbours. So the square is sized in whole [`QUANTUM`]s of the grid
+//! its neighbors. So the square is sized in whole [`QUANTUM`]s of the grid
 //! first, which makes every mark on a multiple of three land on a whole
 //! device pixel, and the spacing survives the snapping.
 
@@ -46,7 +46,7 @@ const QUANTUM: f32 = 8.0;
 
 /// One stroke or fill of an icon, in grid units.
 ///
-/// Positions are the *centre line* of what is drawn, the way an SVG path's
+/// Positions are the *center line* of what is drawn, the way an SVG path's
 /// are: a stroked rectangle's band reaches half a stroke either side of the
 /// rectangle given here, which is why Lucide's icons are inset from the edge
 /// of their grid by about a stroke.
@@ -227,7 +227,7 @@ pub(super) const CHEVRONS_LEFT_RIGHT: &[Mark] = &[
 
 /// Lucide's `rotate-ccw`: a turn back to where the rendering started.
 ///
-/// The arc runs anticlockwise from the left of the circle almost the whole
+/// The arc runs counterclockwise from the left of the circle almost the whole
 /// way round, and the two short strokes are the head of the arrow it arrives
 /// as. Lucide draws that last stretch on a slightly wider radius than the
 /// rest; one radius throughout is a difference no button is large enough to
@@ -302,7 +302,7 @@ pub(super) const COPY: &[Mark] = &[
 ];
 
 /// The square an icon is drawn in: the largest whole number of [`QUANTUM`]s
-/// that fits in `budget` logical pixels, centred in `within`.
+/// that fits in `budget` logical pixels, centered in `within`.
 ///
 /// `budget` is room set aside rather than a size asked for, and the square
 /// comes back no larger — so a caller that reserved `budget` in its layout
@@ -349,7 +349,7 @@ pub(super) struct Placer {
     /// The square's corner and side, in device pixels.
     origin: [f32; 2],
     side: f32,
-    /// Logical pixels to the grid unit, for the measures that are not centre
+    /// Logical pixels to the grid unit, for the measures that are not center
     /// lines: a corner radius, a circle's own radius.
     unit: f32,
     stroke: f32,
@@ -366,16 +366,16 @@ impl Placer {
         }
     }
 
-    /// One point of a stroke's centre line, placed so that the stroke's two
+    /// One point of a stroke's center line, placed so that the stroke's two
     /// edges land on device pixel boundaries.
     fn at(&self, frame: &UiFrame, point: [f32; 2]) -> [f32; 2] {
         [
-            frame.stroke_centre_in_device(self.device(self.origin[0], point[0]), self.stroke),
-            frame.stroke_centre_in_device(self.device(self.origin[1], point[1]), self.stroke),
+            frame.stroke_center_in_device(self.device(self.origin[0], point[0]), self.stroke),
+            frame.stroke_center_in_device(self.device(self.origin[1], point[1]), self.stroke),
         ]
     }
 
-    /// A rectangle's centre line, both corners placed by [`Placer::at`].
+    /// A rectangle's center line, both corners placed by [`Placer::at`].
     fn boxed(&self, frame: &UiFrame, at: [f32; 2], size: [f32; 2]) -> Rect {
         let start = self.at(frame, at);
         let end = self.at(frame, [at[0] + size[0], at[1] + size[1]]);
@@ -383,7 +383,7 @@ impl Placer {
     }
 
     /// A point placed on the grid but not snapped to the device's: for the
-    /// vertices of a filled shape and the centre of a round one, where moving
+    /// vertices of a filled shape and the center of a round one, where moving
     /// a point onto the pixel grid bends the outline rather than sharpening
     /// it.
     pub(super) fn free(&self, frame: &UiFrame, point: [f32; 2]) -> [f32; 2] {
@@ -402,7 +402,7 @@ impl Placer {
         origin + at * self.side / GRID
     }
 
-    /// A filled rectangle, whose *edges* rather than whose centre line are
+    /// A filled rectangle, whose *edges* rather than whose center line are
     /// what has to be on the device grid.
     fn filled(&self, frame: &UiFrame, at: [f32; 2], size: [f32; 2]) -> Rect {
         let corner = self.free(frame, at);
@@ -437,7 +437,7 @@ pub(super) fn draw(frame: &mut UiFrame, marks: &[Mark], within: Rect, ink: Color
             }
             Mark::Circle { at, radius } => {
                 // Snapped, so that the two sides of the circle land on the
-                // grid the same way its centre does.
+                // grid the same way its center does.
                 let across = frame.snap(radius * place.unit).max(stroke);
                 frame.stroke_circle(place.at(frame, *at), across, stroke, ink);
             }
@@ -477,14 +477,14 @@ fn arc(
     sweep: f32,
     ink: Color,
 ) {
-    let centre = place.free(frame, at);
+    let center = place.free(frame, at);
     let radius = place.units(radius);
     let steps = ((sweep.abs() / ARC_STEP).ceil() as usize).max(2);
     let point = |step: usize| {
         let angle = (start + sweep * step as f32 / steps as f32).to_radians();
         [
-            centre[0] + radius * angle.cos(),
-            centre[1] + radius * angle.sin(),
+            center[0] + radius * angle.cos(),
+            center[1] + radius * angle.sin(),
         ]
     };
     for step in 0..steps {
@@ -592,7 +592,7 @@ mod tests {
         let room = STROKE / 2.0..=GRID - STROKE / 2.0;
         for icon in ICONS {
             for mark in icon {
-                for point in centre_lines(mark) {
+                for point in center_lines(mark) {
                     assert!(
                         room.contains(&point[0]) && room.contains(&point[1]),
                         "{point:?} is off the grid"
@@ -603,7 +603,7 @@ mod tests {
     }
 
     /// End to end, on a real adapter: an icon drawn through the whole path —
-    /// placed by [`Placer`], turned into instances, and rasterised by the
+    /// placed by [`Placer`], turned into instances, and rasterized by the
     /// shader — has no soft pixels across its straight strokes.
     ///
     /// The row through the middle of `grid-3x3` crosses four of them: the two
@@ -728,8 +728,8 @@ mod tests {
         }
     }
 
-    /// Where a stroked mark's centre line falls in logical pixels, as `draw`
-    /// places it. A filled mark has no centre line: its edges are snapped as
+    /// Where a stroked mark's center line falls in logical pixels, as `draw`
+    /// places it. A filled mark has no center line: its edges are snapped as
     /// edges, and it contributes nothing here.
     fn stroke_edges(frame: &UiFrame, place: &Placer, mark: &Mark) -> Vec<f32> {
         let both = |point: [f32; 2]| {
@@ -742,13 +742,13 @@ mod tests {
                 [both(*at), both([at[0] + size[0], at[1] + size[1]])].concat()
             }
             Mark::Circle { at, radius } => {
-                let centre = place.at(frame, *at);
+                let center = place.at(frame, *at);
                 let across = frame.snap(radius * place.unit).max(place.stroke);
                 vec![
-                    centre[0] - across,
-                    centre[0] + across,
-                    centre[1] - across,
-                    centre[1] + across,
+                    center[0] - across,
+                    center[0] + across,
+                    center[1] - across,
+                    center[1] + across,
                 ]
             }
             // A curve, a fill and a cap meet the grid at every angle;
@@ -760,7 +760,7 @@ mod tests {
     }
 
     /// Every point a mark is described by, in grid units.
-    fn centre_lines(mark: &Mark) -> Vec<[f32; 2]> {
+    fn center_lines(mark: &Mark) -> Vec<[f32; 2]> {
         match mark {
             Mark::Line(from, to) => vec![*from, *to],
             Mark::Rect { at, size, .. } | Mark::Knockout { at, size, .. } => {

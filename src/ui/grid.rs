@@ -38,7 +38,7 @@ pub(super) fn step(zoom: f32, scale: f32) -> f32 {
     let target = TARGET_SPACING * scale.max(f32::MIN_POSITIVE) / zoom;
     let decade = 10f32.powf(target.log10().floor());
     let mantissa = target / decade;
-    // The boundaries are the geometric means of the neighbouring steps, so
+    // The boundaries are the geometric means of the neighboring steps, so
     // that "nearest" is nearest by ratio: a spacing 40% out either way is the
     // worst any zoom can be given.
     let chosen = STEPS

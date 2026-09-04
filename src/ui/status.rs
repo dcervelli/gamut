@@ -126,7 +126,7 @@ fn describe_highlights(current: &Current, headroom: Headroom) -> Option<&'static
 
 /// Window bounds in the units of the source file where that is meaningful.
 /// Linear integer data reads back as counts, which is what measurement work
-/// wants; anything with a curve on it stays in normalised units.
+/// wants; anything with a curve on it stays in normalized units.
 fn format_window(current: &Current) -> String {
     let scale = if current.image.color.transfer.is_linear() {
         current.image.samples.full_scale()
@@ -150,7 +150,7 @@ mod tests {
     use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples, Stats};
     use crate::ui::FileFacts;
 
-    /// A grey photograph on screen: two codes, black and white, sRGB.
+    /// A gray photograph on screen: two codes, black and white, sRGB.
     fn photograph() -> Current {
         let image = DecodedImage::new(
             2,
