@@ -276,6 +276,20 @@ pub(super) const GRID_3X3: &[Mark] = &[
     Mark::Line([15.0, 3.0], [15.0, 21.0]),
 ];
 
+/// Lucide's `circle-dot`: a ring with a point at its center, which is one
+/// pixel picked out of everything around it — the button that says how the
+/// pixel under the pointer is read out.
+pub(super) const CIRCLE_DOT: &[Mark] = &[
+    Mark::Circle {
+        at: [12.0, 12.0],
+        radius: 10.0,
+    },
+    Mark::Circle {
+        at: [12.0, 12.0],
+        radius: 1.0,
+    },
+];
+
 /// Lucide's `copy`: one sheet behind another and offset from it, which is
 /// what a copy is.
 ///

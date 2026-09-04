@@ -74,6 +74,15 @@ struct Placed {
     heading: Rect,
 }
 
+/// Which way a popup hangs from the button that opens it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Hang {
+    /// Under it, right edges in line: a button at the right of the top bar.
+    Below,
+    /// Over it, left edges in line: a button at the left of the bottom bar.
+    Above,
+}
+
 /// A popup placed in a window: where its panel is, where each section's name
 /// goes, and where each of its cells landed.
 pub struct Popup {
@@ -86,10 +95,40 @@ pub struct Popup {
 impl Popup {
     /// Places a popup of `sections` under `anchor` — the button that opens
     /// it — with its right edge in line with the anchor's, kept within
-    /// `area`.
+    /// `area`. For a button at the right of a bar across the top of the
+    /// window, which is where the two edges the panel is hung from are.
+    pub fn below(
+        sections: &[PopupSection],
+        grid: PopupGrid,
+        anchor: Rect,
+        area: Rect,
+    ) -> Option<Self> {
+        Self::hung(sections, grid, anchor, area, Hang::Below)
+    }
+
+    /// As [`Popup::below`], for a button in a bar across the bottom: the
+    /// panel stands above the anchor instead, and its *left* edge is the one
+    /// in line with the anchor's.
+    ///
+    /// Both halves of that are the same rule — the panel opens into the
+    /// window and is justified with the edge of the button that faces into
+    /// it. A menu hung the other way from a button in the corner it belongs
+    /// to would be a menu with nowhere to go, slid back inside the window and
+    /// no longer under the thing that opened it.
+    pub fn above(
+        sections: &[PopupSection],
+        grid: PopupGrid,
+        anchor: Rect,
+        area: Rect,
+    ) -> Option<Self> {
+        Self::hung(sections, grid, anchor, area, Hang::Above)
+    }
+
+    /// The shared placement: the panel is measured the same way whichever
+    /// way it hangs, and only the corner it is pinned by differs.
     ///
     /// Hung from the button rather than pinned to a corner of the window: a
-    /// menu that appears somewhere other than under the thing pressed makes
+    /// menu that appears somewhere other than beside the thing pressed makes
     /// the reader look for it. `area` is only the bound it may not leave, so
     /// a menu is free to lie over whatever its button's neighbors are.
     ///
@@ -101,11 +140,12 @@ impl Popup {
     /// `None` when `area` has no room for the whole of it, which is what
     /// keeps a popup off a window dragged down small: half a menu answers
     /// nothing, and shrinking the cells would only make them unreadable.
-    pub fn below(
+    fn hung(
         sections: &[PopupSection],
         grid: PopupGrid,
         anchor: Rect,
         area: Rect,
+        hang: Hang,
     ) -> Option<Self> {
         let wanted: Vec<&PopupSection> = sections
             .iter()
@@ -147,8 +187,12 @@ impl Popup {
         // Justified with the anchor, then slid back inside the bound; a menu
         // hanging off a button near the edge stays whole rather than running
         // off the window.
-        let x = (anchor.right() - width).clamp(bounds.x, bounds.right() - width);
-        let y = (anchor.bottom() + grid.margin).clamp(bounds.y, bounds.bottom() - height);
+        let (x, y) = match hang {
+            Hang::Below => (anchor.right() - width, anchor.bottom() + grid.margin),
+            Hang::Above => (anchor.x, anchor.y - grid.margin - height),
+        };
+        let x = x.clamp(bounds.x, bounds.right() - width);
+        let y = y.clamp(bounds.y, bounds.bottom() - height);
         // Whole logical pixels: everything inside is placed from this corner,
         // and a panel on a half pixel puts every label on one.
         let panel = Rect::new(x.round(), y.round(), width, height);
@@ -395,6 +439,31 @@ mod tests {
             assert!(popup.contains(middle));
             assert_eq!(popup.item_at(middle), None);
         }
+    }
+
+    /// A menu hung the other way stands over its button, and is justified
+    /// with the button's left edge rather than its right: the button it
+    /// belongs to is at the other end of the window, and so is the room the
+    /// panel needs.
+    #[test]
+    fn a_popup_above_its_button_stands_over_it_and_starts_where_it_does() {
+        let low = Rect::new(40.0, AREA.bottom() - 26.0, 22.0, 22.0);
+        let popup = Popup::above(&SECTIONS, grid(), low, AREA).expect("room enough");
+        let panel = popup.panel();
+
+        assert_eq!(panel.x, low.x);
+        assert_eq!(panel.bottom(), low.y - 12.0);
+        // Same panel as ever, only put somewhere else.
+        assert_eq!(panel.width, interior() + 2.0 * 10.0);
+        assert_eq!(popup.cells().count(), 13);
+
+        // And one hung from a button in the corner of the window is slid back
+        // inside the margin rather than run off it, either way: up from the
+        // top, and in from the left.
+        let corner = Rect::new(4.0, 4.0, 22.0, 22.0);
+        let popup = Popup::above(&SECTIONS, grid(), corner, AREA).expect("room enough");
+        assert_eq!(popup.panel().y, AREA.y + 12.0);
+        assert_eq!(popup.panel().x, AREA.x + 12.0);
     }
 
     /// A button hard against an edge would justify the panel off the window,

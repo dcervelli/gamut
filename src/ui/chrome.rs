@@ -95,6 +95,15 @@ pub struct Chrome {
     /// toggle under it — the order the two panels they open are stacked in.
     pub histogram_button: Rect,
     pub info_button: Rect,
+    /// The button at the head of the pixel readout, at the left of the bottom
+    /// bar: it says how a pixel's value is written, and the readout follows
+    /// it along the bar.
+    ///
+    /// Always there, where the readout beside it comes and goes with the
+    /// pointer: the pointer is never over a pixel while it is over the bar,
+    /// so a button that only appeared with the readout could never be
+    /// pressed.
+    pub pixel_button: Rect,
 }
 
 impl Chrome {
@@ -113,6 +122,14 @@ impl Chrome {
         let bottom = Rect::new(0.0, size[1] - bar, size[0], bar);
 
         Self {
+            // Ending a button's width past the padding is beginning at the
+            // padding: the left of the bottom bar, under the column of
+            // toggles down the left panel and on the same line as them.
+            pixel_button: bar_button(
+                bottom,
+                [BUTTON_SIZE, BUTTON_SIZE],
+                bottom.x + BAR_PADDING + BUTTON_SIZE,
+            ),
             minimap_button: side_button(left, 0),
             paste_button: side_button(left, 1),
             histogram_button: side_button(right, 0),
@@ -244,25 +261,37 @@ impl Chrome {
             Some(Widget::Zoom)
         } else if self.output_button().contains(point) {
             Some(Widget::Output)
+        } else if self.pixel_button.contains(point) {
+            Some(Widget::PixelFormat)
         } else {
             None
         }
     }
 
     /// Where `menu` goes when it is open: hanging from the button that opens
-    /// it, its right edge in line with the button's, over whatever is under
-    /// it. `spacing` is what says where that button is — see
-    /// [`Chrome::zoom_button`].
+    /// it, over whatever is beside it — down from the zoom readout in the top
+    /// bar, up from the pixel button in the bottom one. `spacing` is what says
+    /// where the first of those is — see [`Chrome::zoom_button`].
     ///
     /// `None` when the window has no room for the whole grid, which is also
     /// what keeps the menu from being opened at all in a window that small.
     pub fn popup(&self, menu: Menu, spacing: Option<&str>) -> Option<Popup> {
-        Popup::below(
-            menu.sections(),
-            menu.grid(),
-            self.zoom_button(spacing),
-            self.window(),
-        )
+        match menu {
+            Menu::Zoom => Popup::below(
+                menu.sections(),
+                menu.grid(),
+                self.zoom_button(spacing),
+                self.window(),
+            ),
+            // From the bottom bar, so it stands over its button rather than
+            // hanging off the foot of the window — see [`Popup::above`].
+            Menu::PixelFormat => Popup::above(
+                menu.sections(),
+                menu.grid(),
+                self.pixel_button,
+                self.window(),
+            ),
+        }
     }
 
     /// Whether a click at `point` belongs to the interface rather than to the
@@ -671,6 +700,39 @@ mod tests {
     /// The panels are opaque, so the image is fitted into what they leave —
     /// and gets the whole window back the moment they are hidden, without
     /// anything having to re-fit it by hand.
+    /// The pixel button leads the bottom bar, on the line the column of side
+    /// toggles keeps down the left of the window — the two ends of the bars
+    /// and the panels between them share one margin — and it answers the
+    /// pointer where it is drawn.
+    #[test]
+    fn the_pixel_button_leads_the_bottom_bar_on_the_side_panels_line() {
+        let chrome = Chrome::new(WINDOW);
+        let button = chrome.pixel_button;
+
+        assert_eq!(button.x, chrome.minimap_button.x);
+        assert_eq!(button.width, BUTTON_SIZE);
+        let middle = [
+            button.x + button.width / 2.0,
+            button.y + button.height / 2.0,
+        ];
+        assert!(chrome.bottom.contains(middle));
+        assert_eq!(
+            chrome.widget_at(middle, None, false),
+            Some(Widget::PixelFormat)
+        );
+        // And nothing else in that bar is where it is: the surface switch is
+        // at the far end of it.
+        assert!(button.right() < chrome.output_button().x);
+
+        // A window dragged narrow keeps it inside the bar rather than pushing
+        // it out of the window.
+        let cramped = Chrome::new([40.0, 200.0]);
+        assert!(cramped.bottom.contains([
+            cramped.pixel_button.x + 0.5,
+            cramped.pixel_button.y + 0.5
+        ]));
+    }
+
     #[test]
     fn the_image_is_fitted_between_the_panels_and_re_fitted_without_them() {
         // A 2x window, to catch a conversion that only holds at scale 1.

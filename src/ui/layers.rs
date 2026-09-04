@@ -181,6 +181,7 @@ mod tests {
             show_minimap: true,
             show_grid: false,
             paste: false,
+            pixel_format: crate::ui::PixelFormat::default(),
             hover: None,
             info_hover: None,
             menu: None,
