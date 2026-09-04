@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::image::decode;
-use crate::loader::{Reload, Request};
+use crate::loader::{Reload, Request, Source};
 
 /// How long a file may take to open before the bar says so. Long enough that
 /// the ordinary case — a file that opens between two frames — never flickers a
@@ -54,6 +54,11 @@ pub(super) struct Step {
 
 pub(super) struct Files {
     paths: Vec<PathBuf>,
+    /// Files written while the program was running — a picture pasted from
+    /// the clipboard — which live where pictures are kept rather than
+    /// wherever we were told to look. No directory named on the command line
+    /// accounts for one, so [`Files::relist`] has to put them back itself.
+    adopted: Vec<PathBuf>,
     /// The file on screen.
     index: usize,
     overrides: decode::Overrides,
@@ -68,6 +73,7 @@ impl Files {
     pub(super) fn new(paths: Vec<PathBuf>, index: usize, overrides: decode::Overrides) -> Self {
         Self {
             paths,
+            adopted: Vec::new(),
             index,
             overrides,
             generation: 0,
@@ -120,6 +126,7 @@ impl Files {
                 forward: true,
                 remaining,
             }),
+            Source::Disk,
         )
     }
 
@@ -148,6 +155,7 @@ impl Files {
                 // on screen.
                 remaining: self.paths.len() - 2,
             }),
+            Source::Disk,
         ))
     }
 
@@ -159,10 +167,36 @@ impl Files {
         if self.pending.is_some() {
             return None;
         }
-        Some(self.request(self.index, Reload::InPlace, None))
+        Some(self.request(self.index, Reload::InPlace, None, Source::Disk))
     }
 
-    fn request(&mut self, index: usize, mode: Reload, step: Option<Step>) -> Request {
+    /// Takes in a file that did not exist when the list was made — a picture
+    /// pasted from the clipboard, whose bytes the loader fetches on its way
+    /// to reading it — and asks for it.
+    ///
+    /// It goes in beside the file on screen rather than at the end of the
+    /// list: the list is what `]` and `[` walk, and what was just pasted
+    /// belongs next to where the user is rather than past every file they
+    /// have not looked at yet.
+    ///
+    /// Not a walk. A file that will not decode is stepped over when the user
+    /// was going somewhere, but a paste is one particular picture that was
+    /// asked for, and wandering off to a neighbour instead would answer a
+    /// question nobody put.
+    pub(super) fn adopt(&mut self, path: PathBuf, source: Source) -> Request {
+        let at = self.index + 1;
+        self.paths.insert(at, path.clone());
+        self.adopted.push(path);
+        self.request(at, Reload::Fresh, None, source)
+    }
+
+    fn request(
+        &mut self,
+        index: usize,
+        mode: Reload,
+        step: Option<Step>,
+        source: Source,
+    ) -> Request {
         self.generation += 1;
         self.pending = Some(Pending {
             generation: self.generation,
@@ -177,6 +211,7 @@ impl Files {
             path: self.paths[index].clone(),
             overrides: self.overrides,
             mode,
+            source,
         }
     }
 
@@ -192,42 +227,60 @@ impl Files {
     /// named. Returns whether it differs from the one already held, which is
     /// what the bar's count and the file's place in it depend on.
     ///
-    /// The file on screen stays on the list wherever it has gone: its pixels
-    /// are up and correct, and dropping the path they came from would leave
-    /// the title, the bars and the information panel describing a file that is
-    /// not the one being shown. It keeps its place among its neighbours too,
-    /// so that `]` lands on whatever has taken its position rather than on a
-    /// file the user has already seen.
+    /// Two kinds of file survive a rebuild that does not mention them. The
+    /// file on screen stays wherever it has gone: its pixels are up and
+    /// correct, and dropping the path they came from would leave the title,
+    /// the bars and the information panel describing a file that is not the
+    /// one being shown. A file that was pasted stays because no directory
+    /// named on the command line was ever going to list it — it was written
+    /// where pictures are kept — and a rebuild is no reason for a picture the
+    /// user made this session to fall out of the walk.
+    ///
+    /// Each keeps its place among its neighbours, so that `]` lands on
+    /// whatever has taken its position rather than on a file already seen.
     ///
     /// Between reads only: this moves the file on screen to a new index, and a
     /// request in flight is aimed at the old one.
     pub(super) fn relist(&mut self, mut paths: Vec<PathBuf>) -> bool {
         debug_assert!(self.is_idle(), "the list is rebuilt between reads");
-        let shown = self.paths[self.index].clone();
-        self.index = match paths.iter().position(|path| *path == shown) {
-            Some(index) => index,
-            None => {
-                let at = self.place_for(&shown, &paths);
-                paths.insert(at, shown);
-                at
+        // In the order they stand in now, so that each is placed against a
+        // list the ones before it are already back in.
+        let keep: Vec<(usize, PathBuf)> = self
+            .paths
+            .iter()
+            .enumerate()
+            .filter(|(index, path)| *index == self.index || self.adopted.contains(path))
+            .map(|(index, path)| (index, path.clone()))
+            .collect();
+        for (was, path) in keep {
+            if paths.contains(&path) {
+                continue;
             }
-        };
+            let at = self.place_for(&path, was, &paths);
+            paths.insert(at, path);
+        }
+
+        let shown = &self.paths[self.index];
+        self.index = paths
+            .iter()
+            .position(|path| path == shown)
+            .expect("the file on screen was put back if the rebuild had dropped it");
         let changed = paths != self.paths;
         self.paths = paths;
         changed
     }
 
-    /// Where a file that is no longer in the directory goes back into the
-    /// list: after everything that came before it, before everything that came
-    /// after, which is what keeps `]` and `[` going the way the user was
-    /// going.
+    /// Where a file the rebuild did not list goes back into it: after
+    /// everything that came before it, before everything that came after,
+    /// which is what keeps `]` and `[` going the way the user was going.
+    /// `was` is where it stood in the list as it is now.
     ///
     /// A path that was in the old list settles which side it is on by where it
     /// was. One that has only just appeared has no place there to go on, and
     /// settles it by its name — the order the directory itself was read in,
     /// which is the order the rest of the list is in.
-    fn place_for(&self, shown: &Path, paths: &[PathBuf]) -> usize {
-        let was: HashMap<&Path, usize> = self
+    fn place_for(&self, missing: &Path, was: usize, paths: &[PathBuf]) -> usize {
+        let previously: HashMap<&Path, usize> = self
             .paths
             .iter()
             .enumerate()
@@ -235,9 +288,9 @@ impl Files {
             .collect();
         paths
             .iter()
-            .take_while(|path| match was.get(path.as_path()) {
-                Some(&index) => index < self.index,
-                None => path.as_path() < shown,
+            .take_while(|path| match previously.get(path.as_path()) {
+                Some(&index) => index < was,
+                None => path.as_path() < missing,
             })
             .count()
     }
@@ -263,6 +316,7 @@ impl Files {
                 forward: step.forward,
                 remaining: step.remaining - 1,
             }),
+            Source::Disk,
         ))
     }
 
@@ -448,6 +502,61 @@ mod tests {
         assert!(files.relist(named(&["0.png", "0a.png", "1.png", "2.png"])));
         assert_eq!(files.index(), 2);
         assert_eq!(files.len(), 4, "no phantom left behind beside it");
+    }
+
+    /// A pasted picture goes in beside the file on screen and is asked for
+    /// straight away, so that `[` goes back to where the user was and `]`
+    /// carries on where they were going.
+    #[test]
+    fn a_pasted_file_joins_the_list_beside_the_one_on_screen() {
+        let mut files = list(3);
+        files.shown(1);
+        let request = files.adopt(
+            PathBuf::from("/pictures/pasted.png"),
+            Source::Clipboard("image/png".into()),
+        );
+        assert_eq!(request.index, 2);
+        assert!(matches!(request.source, Source::Clipboard(_)));
+        assert_eq!(files.len(), 4);
+        assert_eq!(files.path(2), Path::new("/pictures/pasted.png"));
+        assert_eq!(files.index(), 1, "nothing is on screen until it is read");
+
+        let pending = files
+            .accept(request.generation)
+            .expect("the reply we waited for");
+        assert!(
+            files.failed(2, pending.step).is_none(),
+            "a paste asks for one picture rather than walking off to another"
+        );
+    }
+
+    /// No directory named on the command line lists a pasted file — it was
+    /// written where pictures are kept — so a rebuild would drop every one of
+    /// them the moment the user stepped off it.
+    #[test]
+    fn a_pasted_file_survives_the_list_being_read_again() {
+        let mut files = list(3);
+        files.shown(1);
+        let request = files.adopt(
+            PathBuf::from("pasted.png"),
+            Source::Clipboard("image/png".into()),
+        );
+        files.accept(request.generation);
+        files.shown(request.index);
+        assert_eq!(files.shown_path(), Path::new("pasted.png"));
+
+        // Stepped off it, and the directory changes underneath.
+        let request = files.step(true).expect("somewhere to step");
+        files.accept(request.generation);
+        files.shown(request.index);
+        assert!(files.relist(named(&["0.png", "1.png", "2.png", "3.png"])));
+        assert_eq!(files.len(), 5);
+        assert_eq!(
+            files.path(2),
+            Path::new("pasted.png"),
+            "still between the file it was pasted beside and the next one"
+        );
+        assert_eq!(files.shown_path(), Path::new("2.png"));
     }
 
     /// Emptying the directory altogether leaves the picture that is up, with

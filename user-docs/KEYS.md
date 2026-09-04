@@ -46,7 +46,7 @@ was named at startup, in that order; naming a directory puts the images in it
 on the list, and keeps it up to date as images are added to that directory or
 taken out of it.
 
-## Copying
+## Copying and pasting
 
 | Key | What it does |
 | --- | --- |
@@ -54,6 +54,7 @@ taken out of it.
 | `Ctrl+Shift+C` | Copy the file on screen as a URI |
 | `Ctrl+C` | Copy the picture itself, as you are seeing it |
 | `Ctrl+I` | Copy everything the file information says about the file |
+| `Ctrl+V` | Paste a picture, saved among your pictures and shown |
 
 `Shift+C` copies the path in full, from the root down, whichever way the file
 was named when the program was started — a relative name is of no use in
@@ -96,6 +97,35 @@ Any of the copies outlives the window: closing `gamut` leaves it on
 the clipboard, and it stays there until something else copies over it. Quitting
 straight after copying is safe — a picture still being prepared is finished
 before the window goes.
+
+`Ctrl+V` goes the other way: it takes the picture on the clipboard, writes it
+into your pictures directory, and shows it. The file is a real one and it
+stays — a screenshot, or a picture copied out of a browser or an editor, has
+no file behind it, and one that vanished when you closed the window would be
+no use to come back to. It is named for the moment you pasted it, in the same
+form a screenshot is named in: `pasted_2026-09-04_11-40-32.png`. Where it
+goes is wherever your desktop keeps pictures — `~/Pictures` unless you have
+told it otherwise — and the directory is made if it is not there yet.
+
+There is a button for it too, in the left strip under the minimap toggle. It
+is there only while the clipboard is holding a picture `gamut` can show, so
+what it says is not only that pasting is possible but that there is something
+to paste — it appears when you copy a picture in another window and goes when
+something else is copied over it. `gamut` looks at the clipboard four times a
+second to keep it up to date, and stops looking while the interface is hidden
+with `` ` ``.
+
+The pasted file joins the list beside the one you were looking at, so `[`
+goes back to where you were and `]` carries on. It stays on the list for as
+long as the window is open, even when what you opened was a directory that
+knows nothing about it.
+
+What is pasted is whatever the picture was copied as, saved as it stands:
+nothing is re-encoded, so a JPEG arrives a JPEG. `Ctrl+V` does nothing if the
+clipboard holds words rather than a picture, or holds it in a format `gamut`
+cannot read — it says so on the terminal and leaves the window as it was.
+Copying a *file* in a file manager copies its name and not its contents, and
+that is not a paste; open it as an argument instead.
 
 ## The display
 
@@ -210,6 +240,7 @@ counted off in the image's own pixels.
 | Trackpad scroll | The same, by fractions of a notch |
 | Click a panel button | Show or hide the histogram, the file information, or the minimap |
 | Click the grid button | Show or hide the grid |
+| Click the paste button | Paste the picture on the clipboard, as `Ctrl+V` does |
 | Wheel over the file information | Scroll it |
 | Drag the file information | Scroll it, as if dragging the scrollbar's handle |
 | Click the zoom percentage | Open the zoom menu: scale, fit and the magnification filter |

@@ -61,6 +61,7 @@ Both ship as standard on the distributions above.
 | `]`, `[` | Next / previous file |
 | `Shift+C` / `Ctrl+C` | Copy the file's path / the picture itself |
 | `Ctrl+Shift+C` / `Ctrl+I` | Copy the file as a URI / its metadata |
+| `Ctrl+V` | Paste a picture, saved among your pictures and shown |
 | `` ` `` | Toggle the interface panels |
 | `~` | The same, closing the map, histogram and information too |
 | `m`, `h`, `i`, `g` | Toggle the minimap, histogram, file information, grid |
@@ -73,6 +74,13 @@ Both ship as standard on the distributions above.
 | `t` | Cycle tone mapping: clip → reinhard → neutral |
 | `r` | Cycle false colour (single-channel images) |
 | `z` | Reset display settings |
+
+`Ctrl+V` also has a button, in the left strip under the minimap toggle, and
+that button is on screen only while the clipboard is holding a picture that
+can be shown — the clipboard is looked at on the same quarter-second cadence
+as the file and the palette, and not at all while the interface is hidden.
+A button that did nothing when pressed would be worse than no button, and one
+that comes and goes says what the clipboard holds without being asked.
 
 The panels are opaque and the image is fitted inside them rather than passing
 behind them, so `` ` `` changes how much room a fitted image has and it re-fits
@@ -633,7 +641,9 @@ anything having to notice that it should.
 | `src/view.rs` | Zoom / pan / fit geometry — pure maths |
 | `src/listing.rs` | What a path on the command line stands for: a directory is the images inside it, read again while the program runs |
 | `src/watch.rs` | Noticing that the file on screen has been rewritten, or that a directory named on the command line holds something else now |
-| `src/clipboard.rs` | The clipboard and `file:` URIs, held by a process of its own so a copy outlives the window |
+| `src/clipboard.rs` | The clipboard and `file:` URIs, held by a process of its own so a copy outlives the window; and reading a pasted picture off it |
+| `src/pasted.rs` | Where a pasted picture is written and what it is called, by the desktop's own conventions |
+| `src/clock.rs` | A moment as a date and time, in UTC or in the zone the system is set to |
 | `src/theme/` | `palette.rs` reads the desktop's palette; `mod.rs` derives the colours drawn from it |
 | `src/image/` | The data model: `Samples`, `color/` (transfer functions, primaries, ICC and CICP), stats, display state |
 | `src/image/decode/` | The decoder trait and its registry, one file per format |

@@ -145,6 +145,53 @@ pub(super) const SQUARE_SQUARE: &[Mark] = &[
     },
 ];
 
+/// Lucide's `clipboard`: the board a pasted picture arrives on.
+///
+/// Lucide draws the board as one path that starts beside the clip, runs all
+/// the way round and stops on the clip's other side, leaving the top edge
+/// open where the clip stands; a whole rounded rectangle with the clip laid
+/// over it would put a stroke straight through the middle of the clip. So
+/// the board is written out here as Lucide draws it — the four straight
+/// sides, the four corners as quarter turns, and the top edge in two pieces.
+pub(super) const CLIPBOARD: &[Mark] = &[
+    Mark::Line([6.0, 4.0], [8.0, 4.0]),
+    Mark::Line([16.0, 4.0], [18.0, 4.0]),
+    Mark::Arc {
+        at: [18.0, 6.0],
+        radius: 2.0,
+        start: -90.0,
+        sweep: 90.0,
+    },
+    Mark::Line([20.0, 6.0], [20.0, 20.0]),
+    Mark::Arc {
+        at: [18.0, 20.0],
+        radius: 2.0,
+        start: 0.0,
+        sweep: 90.0,
+    },
+    Mark::Line([18.0, 22.0], [6.0, 22.0]),
+    Mark::Arc {
+        at: [6.0, 20.0],
+        radius: 2.0,
+        start: 90.0,
+        sweep: 90.0,
+    },
+    Mark::Line([4.0, 20.0], [4.0, 6.0]),
+    Mark::Arc {
+        at: [6.0, 6.0],
+        radius: 2.0,
+        start: 180.0,
+        sweep: 90.0,
+    },
+    // The clip, last so that it is drawn over the ends of the top edge
+    // rather than under them.
+    Mark::Rect {
+        at: [8.0, 2.0],
+        size: [8.0, 4.0],
+        radius: 1.0,
+    },
+];
+
 /// Lucide's `expand`: four corners with an arrow reaching out to each. The
 /// fit that takes in the whole image, where the two below take in one axis.
 pub(super) const EXPAND: &[Mark] = &[
@@ -593,6 +640,47 @@ mod tests {
                 .count();
             assert_eq!(
                 strokes, 4,
+                "scale {scale}: {strokes} strokes across, {row:?}"
+            );
+        }
+    }
+
+    /// The clipboard's board is a path rather than a rectangle, and its two
+    /// sides still have to come out as two hard strokes at every scale — the
+    /// corners it is joined to them by are drawn as chains of short strokes,
+    /// which is exactly where a soft edge would creep in.
+    #[test]
+    fn the_clipboard_comes_out_as_hard_as_the_rest() {
+        const AREA: [f32; 2] = [24.0, 24.0];
+        for scale in SCALES {
+            let mut frame = UiFrame::new(scale);
+            let square = fit(&frame, Rect::new(0.0, 0.0, AREA[0], AREA[1]), 14.0);
+            draw(
+                &mut frame,
+                CLIPBOARD,
+                square,
+                Color::rgb(255, 255, 255),
+                Color::rgb(0, 0, 0),
+            );
+            let Some(alpha) = crate::render::ui_tests::alpha_of(&frame, AREA, scale) else {
+                return;
+            };
+            let width = device(AREA[0], scale).round() as usize;
+            // Across the middle of the board, below the clip and above the
+            // bottom edge, which is the two sides and nothing else.
+            let middle = device(square.y + square.height / 2.0, scale) as usize;
+            let row = &alpha[middle * width..(middle + 1) * width];
+            assert_eq!(
+                crate::render::ui_tests::feathered(row),
+                0,
+                "scale {scale}: a feathered row across the icon, {row:?}"
+            );
+            let strokes = row
+                .windows(2)
+                .filter(|pair| pair[0] == 0 && pair[1] == 255)
+                .count();
+            assert_eq!(
+                strokes, 2,
                 "scale {scale}: {strokes} strokes across, {row:?}"
             );
         }

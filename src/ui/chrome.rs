@@ -83,8 +83,11 @@ pub struct Chrome {
     pub bottom: Rect,
     pub left: Rect,
     pub right: Rect,
-    /// The minimap toggle, at the top of the left panel.
+    /// The minimap toggle, at the top of the left panel, and the paste
+    /// button under it. The paste button is drawn and pressable only while
+    /// the clipboard is holding a picture — see [`Chrome::widget_at`].
     pub minimap_button: Rect,
+    pub paste_button: Rect,
     /// The histogram toggle, at the top of the right panel, and the info
     /// toggle under it — the order the two panels they open are stacked in.
     pub histogram_button: Rect,
@@ -108,6 +111,7 @@ impl Chrome {
 
         Self {
             minimap_button: side_button(left, 0),
+            paste_button: side_button(left, 1),
             histogram_button: side_button(right, 0),
             info_button: side_button(right, 1),
             top,
@@ -201,9 +205,17 @@ impl Chrome {
     /// The cells of an open menu float above these and are tested first, by
     /// the application. `spacing` is what the grid toggle is reading out,
     /// which is what says how much of the bar it takes.
-    pub fn widget_at(&self, point: [f32; 2], spacing: Option<&str>) -> Option<Widget> {
+    ///
+    /// `paste` is whether the clipboard is holding a picture, which is the
+    /// other thing about the interface the window's size does not settle: the
+    /// button for it is there only while there is something to paste, so a
+    /// point where it would be reaches the panel and no widget when there is
+    /// not.
+    pub fn widget_at(&self, point: [f32; 2], spacing: Option<&str>, paste: bool) -> Option<Widget> {
         if self.minimap_button.contains(point) {
             Some(Widget::Minimap)
+        } else if paste && self.paste_button.contains(point) {
+            Some(Widget::Paste)
         } else if self.histogram_button.contains(point) {
             Some(Widget::Histogram)
         } else if self.info_button.contains(point) {
@@ -378,6 +390,39 @@ mod tests {
         assert!(!chrome.contains([chrome.right.x - 1.0, button.y + 1.0]));
     }
 
+    /// The paste button is under the minimap toggle, in the same strip, and
+    /// it is there for the pointer only while there is something to paste:
+    /// the rectangle is always laid out — the layout is the window's size and
+    /// nothing else — and what comes and goes is whether anything answers on
+    /// it.
+    #[test]
+    fn the_paste_button_answers_only_while_there_is_a_paste() {
+        let chrome = Chrome::new(WINDOW);
+        let button = chrome.paste_button;
+        let at = [button.x + 1.0, button.y + 1.0];
+
+        assert!(button.y >= chrome.minimap_button.bottom());
+        assert!(button.bottom() <= chrome.left.bottom());
+        assert_eq!(button.x, chrome.minimap_button.x);
+        assert_eq!(button.width, chrome.minimap_button.width);
+
+        assert_eq!(chrome.widget_at(at, None, true), Some(Widget::Paste));
+        assert_eq!(
+            chrome.widget_at(at, None, false),
+            None,
+            "with nothing to paste the press reaches the panel and no widget"
+        );
+        // And it never stands in front of the toggle above it.
+        assert_eq!(
+            chrome.widget_at(
+                [chrome.minimap_button.x + 1.0, chrome.minimap_button.y + 1.0],
+                None,
+                true
+            ),
+            Some(Widget::Minimap)
+        );
+    }
+
     #[test]
     fn the_minimap_toggle_sits_inside_the_left_panel() {
         let chrome = Chrome::new(WINDOW);
@@ -398,13 +443,13 @@ mod tests {
             (Widget::Info, chrome.info_button),
         ] {
             assert_eq!(
-                chrome.widget_at([rect.x + 1.0, rect.y + 1.0], None),
+                chrome.widget_at([rect.x + 1.0, rect.y + 1.0], None, false),
                 Some(widget),
                 "{widget:?}"
             );
         }
         assert_eq!(
-            chrome.widget_at([WINDOW[0] / 2.0, WINDOW[1] / 2.0], None),
+            chrome.widget_at([WINDOW[0] / 2.0, WINDOW[1] / 2.0], None, false),
             None
         );
     }
@@ -430,7 +475,7 @@ mod tests {
         assert_eq!(short.histogram_button.width, BUTTON_SIZE);
         assert_eq!(short.info_button.width, 0.0);
         assert_eq!(
-            short.widget_at([short.info_button.x, short.info_button.y], None),
+            short.widget_at([short.info_button.x, short.info_button.y], None, false),
             None
         );
     }
@@ -511,16 +556,19 @@ mod tests {
         // button and outside the narrow one is the grid switched on and
         // nothing at all switched off.
         let wide_only = [unlit.x - 2.0, button.y + 1.0];
-        assert_eq!(chrome.widget_at(wide_only, SPACING), Some(Widget::Grid));
-        assert_eq!(chrome.widget_at(wide_only, None), None);
         assert_eq!(
-            chrome.widget_at([unlit.x + 1.0, unlit.y + 1.0], None),
+            chrome.widget_at(wide_only, SPACING, false),
+            Some(Widget::Grid)
+        );
+        assert_eq!(chrome.widget_at(wide_only, None, false), None);
+        assert_eq!(
+            chrome.widget_at([unlit.x + 1.0, unlit.y + 1.0], None, false),
             Some(Widget::Grid)
         );
         // The bar it sits in is still the interface, so the facts written
         // beside it are not a press on anything.
         assert_eq!(
-            chrome.widget_at([button.x - 2.0, button.y + 1.0], SPACING),
+            chrome.widget_at([button.x - 2.0, button.y + 1.0], SPACING, false),
             None
         );
         assert!(chrome.contains([button.x - 2.0, button.y + 1.0]));
@@ -579,17 +627,17 @@ mod tests {
 
             // Each of the two takes only the press that lands on itself.
             assert_eq!(
-                chrome.widget_at([button.x + 1.0, button.y + 1.0], spacing),
+                chrome.widget_at([button.x + 1.0, button.y + 1.0], spacing, false),
                 Some(Widget::Zoom)
             );
             assert_eq!(
-                chrome.widget_at([grid.x + 1.0, grid.y + 1.0], spacing),
+                chrome.widget_at([grid.x + 1.0, grid.y + 1.0], spacing, false),
                 Some(Widget::Grid)
             );
             // The bar they sit in is still the interface, so a press between
             // them does not reach the image behind.
             assert_eq!(
-                chrome.widget_at([button.x - 2.0, button.y + 1.0], spacing),
+                chrome.widget_at([button.x - 2.0, button.y + 1.0], spacing, false),
                 None
             );
             assert!(chrome.contains([button.x - 2.0, button.y + 1.0]));

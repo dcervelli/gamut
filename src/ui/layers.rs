@@ -148,7 +148,7 @@ pub fn hit(
     }
 
     if panels.show_ui && chrome.contains(point) {
-        return Hit::Chrome(chrome.widget_at(point, spacing));
+        return Hit::Chrome(chrome.widget_at(point, spacing, panels.paste));
     }
     Hit::Image
 }
@@ -180,6 +180,7 @@ mod tests {
             log_counts: false,
             show_minimap: true,
             show_grid: false,
+            paste: false,
             hover: None,
             info_hover: None,
             menu: None,
@@ -193,6 +194,25 @@ mod tests {
 
     fn middle(rect: Rect) -> [f32; 2] {
         [rect.x + rect.width / 2.0, rect.y + rect.height / 2.0]
+    }
+
+    /// The paste button is a layer's widget like any other, and the clipboard
+    /// having nothing on it leaves the strip under the pointer instead of the
+    /// button — the same answer the strip gives anywhere else on it.
+    #[test]
+    fn the_paste_button_is_on_the_chrome_only_while_there_is_a_paste() {
+        let chrome = Chrome::new(WINDOW);
+        let at = middle(chrome.paste_button);
+
+        let mut panels = panels();
+        panels.paste = true;
+        assert_eq!(
+            hit(at, &panels, WINDOW, shown(), None),
+            Hit::Chrome(Some(Widget::Paste))
+        );
+
+        panels.paste = false;
+        assert_eq!(hit(at, &panels, WINDOW, shown(), None), Hit::Chrome(None));
     }
 
     /// The stack, from the top down, each layer claiming its own point.

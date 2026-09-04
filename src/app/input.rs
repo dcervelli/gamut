@@ -17,6 +17,8 @@ use super::App;
 use crate::clipboard;
 use crate::image::display::{Colormap, Startup};
 use crate::image::encode;
+use crate::loader::Source;
+use crate::pasted;
 use crate::render::Rect;
 use crate::timing;
 use crate::ui::info::Copyable;
@@ -82,6 +84,9 @@ pub enum Action {
     /// Put everything the info panel says about the file on the clipboard,
     /// as the rows a click on its topmost button would copy.
     CopyMetadata,
+    /// Write the picture on the clipboard to a file of its own, put it in the
+    /// list beside the one on screen, and show it.
+    Paste,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -367,6 +372,13 @@ pub const KEYS: &[Binding] = &[
         shown: "Ctrl+I",
         help: "Copy everything the info panel says about the file",
         keys: &[(Char("i"), CopyMetadata), (Char("I"), CopyMetadata)],
+    },
+    Binding {
+        section: Section::Clipboard,
+        mods: CTRL,
+        shown: "Ctrl+V",
+        help: "Paste a picture, saved among your pictures and shown",
+        keys: &[(Char("v"), Paste), (Char("V"), Paste)],
     },
     Binding {
         section: Section::Interface,
@@ -714,6 +726,12 @@ impl App {
                 self.copy_facts(Copyable::All);
                 return Effect::Nothing;
             }
+            // Nothing to draw yet either: the picture is being written and
+            // then read, and what is on screen stays until it arrives.
+            Paste => {
+                self.paste();
+                return Effect::Nothing;
+            }
             ResetDisplay => {
                 return self.adjust(|current, _| {
                     current.display.reset(&current.stats, &current.image);
@@ -792,6 +810,37 @@ impl App {
                 report(&error);
             }
         }));
+    }
+
+    /// Writes the picture on the clipboard to a file of its own and shows it.
+    ///
+    /// A file and not just pixels: a paste comes from somewhere with no file
+    /// behind it — a screenshot, a browser, an editor — and showing it without
+    /// writing it would leave the user nothing to come back to and nothing to
+    /// step back to. So it is written where the desktop keeps pictures, and
+    /// joins the list beside the one on screen.
+    ///
+    /// Asking what the clipboard is offering is a word with the compositor and
+    /// nothing more, so it is done here. Fetching the bytes means waiting on
+    /// whichever program holds the selection, and that goes to the loader with
+    /// the reading — which also means a paste that will not arrive, or will not
+    /// decode, is reported exactly as an unreadable file is.
+    fn paste(&mut self) {
+        let offer = match clipboard::offered_image() {
+            Ok(Some(offer)) => offer,
+            // Not a failure: a key was pressed and there was nothing there.
+            Ok(None) => {
+                eprintln!("gamut: nothing on the clipboard that could be shown");
+                return;
+            }
+            Err(error) => return report(&error),
+        };
+        let path = match pasted::reserve(offer.extension) {
+            Ok(path) => path,
+            Err(error) => return report(&error),
+        };
+        let request = self.files.adopt(path, Source::Clipboard(offer.mime));
+        self.send(request);
     }
 
     /// Puts what the info panel says on the clipboard: as much of a table as
@@ -1076,6 +1125,12 @@ impl App {
                     self.panels.menu = Some(Menu::Zoom);
                 }
             }
+            // The action the key runs, as with the reset below: the button
+            // is on screen because the clipboard was holding a picture at the
+            // last look, and the paste asks it again rather than trusting
+            // that. A selection that has gone in between is answered the way
+            // an empty clipboard is.
+            Widget::Paste => self.paste(),
             Widget::Luma => self.panels.show_luma = !self.panels.show_luma,
             Widget::Planes => self.panels.show_planes = !self.panels.show_planes,
             // The plot's own axis rather than anything about the rendering,
