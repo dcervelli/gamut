@@ -7,6 +7,12 @@
 //! the file arriving takes back whatever it left — including the file the
 //! walk has stepped past and come round to again.
 //!
+//! One thing outranks what a file left: a file arriving beside a picture of
+//! its own size takes that picture's pan and zoom rather than its own. Images
+//! of a size are a set being compared, and the comparison is made wherever
+//! the eye already is. Everything else it left — its window and exposure, its
+//! tone curve and false color — still comes back with it.
+//!
 //! By path rather than by index: the list is rebuilt while the window is open
 //! — a directory named on the command line is a place to look rather than a
 //! fixed list — and a file that has moved in it is still the same file.

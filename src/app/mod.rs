@@ -1085,22 +1085,25 @@ impl App {
         self.files.shown(file.index);
         self.watch = file.watch;
         match &kept {
-            // Back to a file that has been here before: exactly where it was
-            // left. The magnification filter is not part of a view — it is a
-            // standing preference — so it stays as it is.
+            // A picture of the same size as the one it is arriving beside is
+            // almost always part of a set to be compared — frames of a
+            // sequence, or one exposure against another — and there the point
+            // is that the same detail stays under the same pixels. So the pan
+            // and zoom carry over from the picture leaving the screen, ahead
+            // of anything this file was left in itself: what the comparison
+            // is being made at is where the eye already is, not where this
+            // file happened to be the last time it was looked at.
+            _ if same_size => {}
+            // Back to a file of another size that has been here before:
+            // exactly where it was left. The magnification filter is not part
+            // of a view — it is a standing preference — so it stays as it is.
             Some(settings) => {
                 let upscale = self.view.upscale();
                 self.view = settings.view;
                 self.view.set_upscale(upscale);
             }
-            // A file seen for the first time. Images of the same size are
-            // almost always a set to be compared — frames of a sequence, or
-            // one exposure against another — and there the point is that the
-            // same detail stays under the same pixels, so the pan and zoom
-            // carry over from the picture it is arriving beside. A file of
-            // another size is a new picture, so it is fitted afresh.
-            None if !same_size => self.view.reset(),
-            None => {}
+            // A new shape, seen for the first time, so it is fitted afresh.
+            None => self.view.reset(),
         }
         if !in_place {
             // A move under way was about the picture that has just left, and
@@ -1756,6 +1759,35 @@ mod tests {
 
         answer(&mut app, Reload::Fresh);
         assert_eq!(app.files.index(), 1);
+        assert_eq!(app.view.fit(), None);
+        assert_eq!(app.view.zoom(app.image_size(), VIEWPORT), zoom);
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// A file coming back at the size of the one it is arriving beside is a
+    /// comparison, and it is made where the eye is: the pan and zoom carry
+    /// over from the picture leaving the screen, whatever this file was left
+    /// in the last time it was looked at.
+    #[test]
+    fn a_same_size_neighbor_takes_the_view_it_arrives_beside() {
+        let (mut app, dir) = app_over("compared", &[("a.png", 64, 48), ("b.png", 64, 48)]);
+
+        // b.png is left at 4x, so it has a view of its own to be put back.
+        app.step(true);
+        answer(&mut app, Reload::Fresh);
+        app.view.set_zoom(4.0, app.image_size(), VIEWPORT);
+
+        // Back to a.png, and on to somewhere else in it.
+        app.step(false);
+        answer(&mut app, Reload::Fresh);
+        app.view.set_zoom(2.0, app.image_size(), VIEWPORT);
+        let zoom = app.view.zoom(app.image_size(), VIEWPORT);
+
+        // And on to b.png again: at a.png's zoom, not the 4x it was left in.
+        app.step(true);
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.files.shown_path(), dir.join("b.png"));
         assert_eq!(app.view.fit(), None);
         assert_eq!(app.view.zoom(app.image_size(), VIEWPORT), zoom);
 
