@@ -6,6 +6,16 @@ Notable changes to `gamut`. The format follows
 
 ## Unreleased
 
+### Fixed
+
+- A window no longer opens larger than the screen on a scaled display. The
+  opening size is worked out in logical pixels rather than physical ones —
+  winit takes the size a window is created with as logical, so a 4K monitor at
+  2x was given a window twice the size meant — and every monitor is consulted
+  rather than the first one enumerated, the window opening at the largest size
+  that fits on all of them. It now takes up to two thirds of a monitor rather
+  than 85%.
+
 ### Changed
 
 - The grid toggle has moved from the end of the top bar to the head of the
@@ -16,6 +26,14 @@ Notable changes to `gamut`. The format follows
 - The pixel readout cycles on `.` rather than `>`; the Shift is gone. The two
   copies that take what it reads out are unchanged, still `Ctrl+.` for the
   value and `Ctrl+Shift+.` for the coordinate.
+- A window opens no smaller than one both floating panels fit in, where the
+  monitor has the room for it. A small picture used to open a window its own
+  size, which left the histogram and the information toggles dead in it before
+  anything had been pressed.
+- The histogram panel stays off in a window with no room for it, as the
+  information panel already did. Where there is no room for what one of them
+  opens, its toggle is drawn dead, refuses the press, and says why it is dead
+  when the pointer rests on it.
 - The Wayland `app_id` and X11 `WM_CLASS` are now `com.dcervelli.gamut`, the
   reverse-DNS form a desktop expects, and the desktop entry and the icon are
   filed under that name to match. A window rule matching the old `gamut` class

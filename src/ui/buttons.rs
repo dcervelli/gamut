@@ -63,6 +63,7 @@ pub(super) fn histogram_button(
     rect: Rect,
     active: bool,
     hover: bool,
+    enabled: bool,
     theme: &Theme,
 ) {
     toggle(
@@ -72,6 +73,7 @@ pub(super) fn histogram_button(
         Corners::All,
         active,
         hover,
+        enabled,
         theme,
     );
 }
@@ -84,9 +86,19 @@ pub(super) fn info_button(
     rect: Rect,
     active: bool,
     hover: bool,
+    enabled: bool,
     theme: &Theme,
 ) {
-    toggle(frame, rect, icon::INFO, Corners::All, active, hover, theme);
+    toggle(
+        frame,
+        rect,
+        icon::INFO,
+        Corners::All,
+        active,
+        hover,
+        enabled,
+        theme,
+    );
 }
 
 /// The minimap toggle: the panel itself in miniature, a frame for the whole
@@ -105,6 +117,7 @@ pub(super) fn minimap_button(
         Corners::All,
         active,
         hover,
+        true,
         theme,
     );
 }
@@ -114,7 +127,16 @@ pub(super) fn minimap_button(
 /// rather than switching anything on, so there is no other state for it to be
 /// showing.
 pub(super) fn copy_button(frame: &mut UiFrame, rect: Rect, open: bool, hover: bool, theme: &Theme) {
-    toggle(frame, rect, icon::COPY, Corners::All, open, hover, theme);
+    toggle(
+        frame,
+        rect,
+        icon::COPY,
+        Corners::All,
+        open,
+        hover,
+        true,
+        theme,
+    );
 }
 
 /// The paste button, under the copy button. Not a toggle: it does
@@ -130,6 +152,7 @@ pub(super) fn paste_button(frame: &mut UiFrame, rect: Rect, hover: bool, theme: 
         Corners::All,
         false,
         hover,
+        true,
         theme,
     );
 }
@@ -155,7 +178,7 @@ pub(super) fn step_button(
     } else {
         (icon::CHEVRON_LEFT, Corners::Leading)
     };
-    toggle(frame, rect, marks, corners, false, hover, theme);
+    toggle(frame, rect, marks, corners, false, hover, true, theme);
 }
 
 /// The button at the head of the pixel readout, in the bottom bar: a ring
@@ -177,6 +200,7 @@ pub(super) fn pixel_button(
         Corners::All,
         open,
         hover,
+        true,
         theme,
     );
 }
@@ -193,6 +217,7 @@ pub(super) fn maximize_button(frame: &mut UiFrame, rect: Rect, hover: bool, them
         Corners::All,
         false,
         hover,
+        true,
         theme,
     );
 }
@@ -202,6 +227,12 @@ pub(super) fn maximize_button(frame: &mut UiFrame, rect: Rect, hover: bool, them
 ///
 /// A window too small to hold the button gets no button, rather than a smear
 /// of a mark drawn into less room than its own strokes need.
+///
+/// `enabled` is whether the press would do anything. A toggle that would not
+/// is drawn dead rather than left out, for the reason the surface switch is:
+/// a control that is sometimes there is a control that has to be found again,
+/// and the tooltip on a dead one says why it is dead.
+#[expect(clippy::too_many_arguments, reason = "a button's state, one flag each")]
 fn toggle(
     frame: &mut UiFrame,
     rect: Rect,
@@ -209,12 +240,17 @@ fn toggle(
     corners: Corners,
     active: bool,
     hover: bool,
+    enabled: bool,
     theme: &Theme,
 ) {
     if rect.width < BUTTON_SIZE {
         return;
     }
-    let (background, ink) = button_ink(active, hover, theme);
+    let (background, ink) = if enabled {
+        button_ink(active, hover, theme)
+    } else {
+        dead_ink(theme)
+    };
     frame.rounded_rect_corners(rect, corners.radii(TOGGLE_RADIUS), background);
     // No knockout in any of these three, so the ground goes unused; the
     // button's own is what one would cover anyway.
@@ -225,6 +261,16 @@ fn toggle(
         ink,
         background,
     );
+}
+
+/// What a control that is not taking presses is drawn in: the idle ground,
+/// and enough of the ink left to read the mark on it but not enough to read
+/// as a button that would answer.
+pub(super) fn dead_ink(theme: &Theme) -> (Color, Color) {
+    (
+        theme.button_idle,
+        theme.text_dim.with_alpha(DEAD_BUTTON_INK),
+    )
 }
 
 /// A toggle's background and ink. Active outranks hover: what is on says more
@@ -324,10 +370,7 @@ pub(super) fn output_button(
     let (background, ink) = if available {
         button_ink(hdr, hover, theme)
     } else {
-        (
-            theme.button_idle,
-            theme.text_dim.with_alpha(DEAD_BUTTON_INK),
-        )
+        dead_ink(theme)
     };
     frame.rounded_rect(rect, CELL_RADIUS, background);
     centered_text(frame, text, rect, ink, "HDR", TEXT_SIZE);

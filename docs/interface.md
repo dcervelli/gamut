@@ -4,16 +4,58 @@
 
 The first file is shown stretched to fit the space the interface panels leave
 in the middle, and the window opens at the image's own size plus that chrome,
-shrunk to fit the monitor (`src/app/window.rs`). `` ` `` hides the panels and
+shrunk to fit the monitors (`src/app/window.rs`). `` ` `` hides the panels and
 gives the image the whole window, re-fitting it as it goes.
 
-`--size <W> <H>` replaces that calculation with the two numbers it is given.
-They are the whole window, chrome included, and they are logical pixels — the
-units a compositor lays windows out in — where the image path works in
-physical ones, since what it is matching is the image's own pixels. Neither
-the image nor the monitor gets a say afterwards: a window larger than the
-screen is something a compositor is asked for on purpose, and only a floor of
-`MIN_WINDOW` applies, below which the chrome would have all of the window.
+Every monitor is asked, not one. `primary_monitor` is `None` on Wayland by
+definition — there is no such thing there — and nothing before the surface is
+mapped says which monitor the compositor will choose. So `window_size` asks
+each monitor what window it would want, being the image held inside
+`MAX_WINDOW_FRACTION` of that monitor's room, and takes the largest of those
+answers that fits on *every* monitor. A window sized that way cannot overrun
+whichever screen it lands on. Where none of them fits everywhere — a monitor
+smaller than `MIN_WINDOW`, say — the smallest answer is taken as the least bad
+of them.
+
+The whole calculation is in logical pixels, which is the correction that
+matters. The image's own pixels are physical, so a monitor's scale converts
+them; the panel constants are logical already. Asking in physical pixels does
+not work, because winit's Wayland backend converts the size a window is
+created with at a scale of `1.0` — the surface has none until the compositor
+configures it — so physical pixels are taken as logical ones and the window
+opens `scale` times too large, well past the screen on a 4K monitor at 2×.
+The scale used is the output's integer one, 2 where the compositor is really
+running 1.6; the true fractional scale only arrives with
+`wp_fractional_scale_v1` after the surface is mapped. That error goes the safe
+way, opening a little under 100% rather than overrunning.
+
+A window also opens no smaller than one the interface itself fits in.
+`ui::PANELS_ROOM` is the content area the histogram and the information column
+need together — the strip's width, the plot's fixed height, the gap, and the
+least column the panel will show — and `PANELS_WINDOW` is that plus the chrome
+and a logical pixel of slack. A window opening below it would have both those
+toggles dead in it from the first frame, which is not something the viewer
+asked for; where the picture is smaller than the interface, the window is
+better a little larger than the picture. The floor is measured against the
+monitor's whole room rather than against `MAX_WINDOW_FRACTION` of it — the
+fraction is about leaving the desktop its share of a large window, and this is
+about a small one being usable at all — and a monitor that cannot take it is
+given `MIN_WINDOW` instead, since a floor that did not fit the screen would be
+the very thing the rest of this prevents.
+
+The slack is a rounding allowance, not a margin. A window is laid out in
+logical pixels and sized in device ones, so the size that comes back is the
+size asked for rounded to the device grid: 392 logical pixels on a monitor at
+1.6 is 627 device pixels and 391.875 logical ones, a hair under the 392 the
+panels needed. Asking for exactly the room leaves them out about as often as
+not; asking for a pixel more never does, half a device pixel being the worst
+the rounding can do.
+
+`--size <W> <H>` replaces the calculation with the two numbers it is given.
+They are the whole window, chrome included, in the same logical pixels.
+Neither the image nor the monitors gets a say afterwards: a window larger than
+the screen is something a compositor is asked for on purpose, and only a floor
+of `MIN_WINDOW` applies, below which the chrome would have all of the window.
 Whether the request is honored is the compositor's business — a tiling one
 uses it as the floating size, if it uses it at all.
 
@@ -212,6 +254,36 @@ fitted to the reading in it, so it widens when the grid comes on and pushes
 the pixel button and the readout after it along the bottom bar. What moves
 there moves on the press that was just made, and the mark the press was aimed
 at is the one thing that stays where it was.
+
+
+## Panels a window has no room for
+
+The two panels down the right of the window — the histogram and the
+information column — are both `PANEL_WIDTH` wide, and the histogram is one
+fixed height besides: its plot gives a bin to the logical pixel, and the rows
+under it are set to what they say, so there is nothing in either to give. A
+content area smaller than one of them gets no panel rather than one drawn over
+the picture it is about and off the edge of the window. `ui::room` asks the
+question for both at once, because they are stacked: the histogram takes the
+top of the strip, and what it takes is height the column below it does not
+have, so a window can have room for the column alone and none for it under an
+open plot. What it takes is settled inside `info::panel`, which asks whether
+the plot is on screen rather than whether its toggle is on — a window too
+short for the plot is not one the column has to start below, and putting that
+question in one place is what keeps the frame builder and the pointer from
+disagreeing about where the column begins.
+
+One answer serves three readers — the frame builder, `layers::hit` and the
+application — since a panel the pointer could reach but the frame did not draw
+would take presses meant for the picture under it. It also decides the two
+toggles in the right-hand strip: where there is no room for what one opens it
+is drawn dead, in the ink the surface switch uses when there is no headroom to
+switch to, and the press is refused rather than quietly setting something no
+one can see. Its tooltip says why instead of naming the panel and the key
+beside it — `tooltip::NO_ROOM`, a sentence rather than a label, because what a
+dead control owes the reader is the reason and not the binding. The toggle
+stays in the strip either way: a control that is sometimes there is a control
+that has to be found again.
 
 
 ## Layers and the pointer

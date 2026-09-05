@@ -474,6 +474,14 @@ impl App {
         ui::info::panel(self.content(), self.panels.show_histogram)
     }
 
+    /// Whether the content area has room for each of the two panels that
+    /// float over it. The frame builder works this out for itself; it is
+    /// worked out here as well for the presses and the tooltips, which have
+    /// to answer between frames.
+    pub(super) fn room(&self) -> ui::Room {
+        ui::room(self.content(), &self.panels)
+    }
+
     /// What the panels leave free for the image and for whatever floats over
     /// it, in the logical pixels those are laid out in. The frame builder
     /// works this out for itself; it is worked out here as well for the hit
