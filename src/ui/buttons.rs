@@ -61,7 +61,15 @@ pub(super) fn minimap_button(
     toggle(frame, rect, icon::SQUARE_SQUARE, active, hover, theme);
 }
 
-/// The paste button, under the minimap toggle. Not a toggle: it does
+/// The button that opens the menu of copies, under the minimap toggle. Lit
+/// while that menu is open, the way the zoom readout is: it opens a panel
+/// rather than switching anything on, so there is no other state for it to be
+/// showing.
+pub(super) fn copy_button(frame: &mut UiFrame, rect: Rect, open: bool, hover: bool, theme: &Theme) {
+    toggle(frame, rect, icon::COPY, open, hover, theme);
+}
+
+/// The paste button, under the copy button. Not a toggle: it does
 /// something rather than switching something on, so it is never drawn lit —
 /// there is no state for it to be showing. It is on screen only while there
 /// is a picture on the clipboard to paste, which is what says a press on it

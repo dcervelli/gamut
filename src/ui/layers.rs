@@ -236,7 +236,56 @@ mod tests {
         );
 
         panels.paste = false;
-        assert_eq!(hit(at, &panels, WINDOW, shown(), None, None), Hit::Chrome(None));
+        assert_eq!(
+            hit(at, &panels, WINDOW, shown(), None, None),
+            Hit::Chrome(None)
+        );
+    }
+
+    /// The menu of copies hangs off the strip down the left of the window
+    /// and lies over the picture, so it takes the pointer from it — and its
+    /// button is on the chrome like any other.
+    #[test]
+    fn the_copy_menu_takes_the_pointer_from_the_picture_under_it() {
+        let mut panels = panels();
+        let chrome = Chrome::new(WINDOW);
+        assert_eq!(
+            hit(
+                middle(chrome.copy_button),
+                &panels,
+                WINDOW,
+                shown(),
+                None,
+                None
+            ),
+            Hit::Chrome(Some(Widget::Copy))
+        );
+
+        panels.menu = Some(Menu::Copy);
+        let popup = chrome.popup(Menu::Copy, None).expect("room");
+        for (index, cell) in popup.cells() {
+            assert_eq!(
+                hit(middle(cell), &panels, WINDOW, shown(), None, None),
+                Hit::Cell(index),
+                "cell {index}"
+            );
+        }
+        let panel = popup.panel();
+        assert!(
+            chrome.content().contains(middle(panel)),
+            "the menu should lie over the picture"
+        );
+        assert_eq!(
+            hit(
+                [panel.x + 0.5, panel.y + 0.5],
+                &panels,
+                WINDOW,
+                shown(),
+                None,
+                None
+            ),
+            Hit::Menu
+        );
     }
 
     /// The stack, from the top down, each layer claiming its own point.
@@ -377,7 +426,10 @@ mod tests {
             Hit::Histogram(None),
             "the plot is the panel's, and it is not a button"
         );
-        assert_eq!(hit(plot, &panels, WINDOW, shown(), None, None).widget(), None);
+        assert_eq!(
+            hit(plot, &panels, WINDOW, shown(), None, None).widget(),
+            None
+        );
     }
 
     /// Nothing over the picture is drawn before there is a picture, so
@@ -403,7 +455,10 @@ mod tests {
     fn hiding_the_chrome_leaves_the_floating_panels_behind() {
         let mut panels = panels();
         let bar = middle(Chrome::new(WINDOW).bottom);
-        assert_eq!(hit(bar, &panels, WINDOW, shown(), None, None), Hit::Chrome(None));
+        assert_eq!(
+            hit(bar, &panels, WINDOW, shown(), None, None),
+            Hit::Chrome(None)
+        );
 
         panels.show_ui = false;
         assert_eq!(hit(bar, &panels, WINDOW, shown(), None, None), Hit::Image);

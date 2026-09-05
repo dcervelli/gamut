@@ -59,7 +59,8 @@ Both ship as standard on the distributions above.
 | Arrows | Pan by 64 pixels; `Shift` by one, `Ctrl` to the far side |
 | Drag | Pan, with the image following the pointer |
 | `]`, `[` | Next / previous file |
-| `Shift+C` / `Ctrl+C` | Copy the file's path / the picture itself |
+| `c` / `Shift+C` | Copy the file's name / its path |
+| `Ctrl+C` | Copy the picture itself |
 | `Ctrl+Shift+C` / `Ctrl+I` | Copy the file as a URI / its metadata |
 | `Ctrl+V` | Paste a picture, saved among your pictures and shown |
 | `` ` `` | Toggle the interface panels |
@@ -76,12 +77,20 @@ Both ship as standard on the distributions above.
 | `r` | Cycle false color (single-channel images) |
 | `z` | Reset display settings |
 
-`Ctrl+V` also has a button, in the left strip under the minimap toggle, and
-that button is on screen only while the clipboard is holding a picture that
-can be shown — the clipboard is looked at on the same quarter-second cadence
-as the file and the palette, and not at all while the interface is hidden.
-A button that did nothing when pressed would be worse than no button, and one
-that comes and goes says what the clipboard holds without being asked.
+The copies have a button too, under the minimap toggle: it opens a menu of
+what can be taken — the file's name, its path, its URI, everything the
+information panel says about it, and the picture itself — each cell doing
+exactly what its key does, and named in the tooltip by the key table's own
+words for it. The two copies of the pixel under the pointer are not on it:
+while the menu is open the pointer is over the menu, and there would never be
+a pixel under it to take.
+
+`Ctrl+V` has a button as well, under that one, and it is on screen only while
+the clipboard is holding a picture that can be shown — the clipboard is looked
+at on the same quarter-second cadence as the file and the palette, and not at
+all while the interface is hidden. A button that did nothing when pressed would
+be worse than no button, and one that comes and goes says what the clipboard
+holds without being asked.
 
 The panels are opaque and the image is fitted inside them rather than passing
 behind them, so `` ` `` changes how much room a fitted image has and it re-fits
@@ -90,10 +99,10 @@ on the spot.
 A copy takes the selection and leaves the picture exactly as it was, which
 makes it the one action in the program with no sign that it happened — a copy
 that worked and a key that was never read look identical. So each one raises a
-message at the foot of the content area saying what was taken: the path, the
-URI, the picture, a field of the information panel, the pixel under the
-pointer. It goes on its own after 2.6 seconds, and can be taken off sooner by
-the cross it carries or by `Esc`, which puts away whatever is up — a menu
+message at the foot of the content area saying what was taken: the name, the
+path, the URI, the picture, a field of the information panel, the pixel under
+the pointer. It goes on its own after 2.6 seconds, and can be taken off sooner
+by the cross it carries or by `Esc`, which puts away whatever is up — a menu
 first, then a message — and only quits when there is nothing left to put away.
 `q` quits regardless, since a copy is often followed straight away by it.
 The message has three levels, and the theme's own inks carry them: the
@@ -493,18 +502,24 @@ transform on the CPU, so `ToneMap::apply` and `Colormap::color` in
 that disagreed with the image beside it would be worse than none.
 
 The strips are a bar's thickness wide — they hold a column of square toggles
-and nothing else, so a frame of even weight is the right one — and the left
-one holds the minimap toggle, the right one the histogram above the file
-information, the order the two panels they open are stacked in over the
-picture. The end of the top bar holds the two readouts that are also buttons:
-the grid toggle, and just inside it the zoom percentage. Both are measurements
-of the picture, which is what the top bar is for. The bars are inset at their
-ends by the same margin that centers a toggle across a side panel — derived
-from it, not merely equal to it — so the grid toggle ends on the same line the
-column of toggles below it ends on, and the file name starts on the line the
-minimap toggle starts on. Two edges a few pixels apart read as a mistake in a
-way that one shared edge does not, and deriving the margin is what keeps them
-from drifting apart when a button size is retuned. Pressing the percentage
+and nothing else, so a frame of even weight is the right one — and the left one
+holds the minimap toggle above the copy button and the paste button, the right
+one the histogram above the file information, the order the two panels they
+open are stacked in over the picture. The button that comes and goes with the
+clipboard is the last of the left-hand three, so that nothing above it moves
+under the pointer as it appears. The end of the top bar holds the two readouts
+that are also buttons: the grid toggle, and just inside it the zoom percentage.
+Both are measurements of the picture, which is what the top bar is for. The
+bars are inset at their ends by the same margin that centers a toggle across a
+side panel — derived from it, not merely equal to it — so the grid toggle ends
+on the same line the column of toggles below it ends on, and the file name
+starts on the line the minimap toggle starts on. Two edges a few pixels apart
+read as a mistake in a way that one shared edge does not, and deriving the
+margin is what keeps them from drifting apart when a button size is retuned. A
+menu hangs from the button that opens it, off whichever of its edges faces into
+the window: down from a button in the top bar, up from one in the bottom bar,
+and out to the right from one in the left strip, where a button has its
+neighbors above and below it and its room to the side. Pressing the percentage
 opens a menu of zooms — the ladder from 10% to 1600% and the three fits as
 icons — hung from the button, its right edge in line with the button's, placed
 against the window rather than against the frame the picture is in: a menu

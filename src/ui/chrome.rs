@@ -86,10 +86,13 @@ pub struct Chrome {
     pub bottom: Rect,
     pub left: Rect,
     pub right: Rect,
-    /// The minimap toggle, at the top of the left panel, and the paste
-    /// button under it. The paste button is drawn and pressable only while
-    /// the clipboard is holding a picture — see [`Chrome::widget_at`].
+    /// The minimap toggle, at the top of the left panel, the button that
+    /// opens the menu of copies under it, and the paste button under that.
+    /// The paste button is drawn and pressable only while the clipboard is
+    /// holding a picture — see [`Chrome::widget_at`]; it is the last of the
+    /// three so that the two above it do not move as it comes and goes.
     pub minimap_button: Rect,
+    pub copy_button: Rect,
     pub paste_button: Rect,
     /// The histogram toggle, at the top of the right panel, and the info
     /// toggle under it — the order the two panels they open are stacked in.
@@ -131,7 +134,8 @@ impl Chrome {
                 bottom.x + BAR_PADDING + BUTTON_SIZE,
             ),
             minimap_button: side_button(left, 0),
-            paste_button: side_button(left, 1),
+            copy_button: side_button(left, 1),
+            paste_button: side_button(left, 2),
             histogram_button: side_button(right, 0),
             info_button: side_button(right, 1),
             top,
@@ -249,6 +253,8 @@ impl Chrome {
     pub fn widget_at(&self, point: [f32; 2], spacing: Option<&str>, paste: bool) -> Option<Widget> {
         if self.minimap_button.contains(point) {
             Some(Widget::Minimap)
+        } else if self.copy_button.contains(point) {
+            Some(Widget::Copy)
         } else if paste && self.paste_button.contains(point) {
             Some(Widget::Paste)
         } else if self.histogram_button.contains(point) {
@@ -270,8 +276,9 @@ impl Chrome {
 
     /// Where `menu` goes when it is open: hanging from the button that opens
     /// it, over whatever is beside it — down from the zoom readout in the top
-    /// bar, up from the pixel button in the bottom one. `spacing` is what says
-    /// where the first of those is — see [`Chrome::zoom_button`].
+    /// bar, up from the pixel button in the bottom one, out from the copy
+    /// button in the left panel. `spacing` is what says where the first of
+    /// those is — see [`Chrome::zoom_button`].
     ///
     /// `None` when the window has no room for the whole grid, which is also
     /// what keeps the menu from being opened at all in a window that small.
@@ -289,6 +296,15 @@ impl Chrome {
                 menu.sections(),
                 menu.grid(),
                 self.pixel_button,
+                self.window(),
+            ),
+            // From a button in the column down the left panel, which has its
+            // neighbors above and below it and its room to the side — see
+            // [`Popup::beside`].
+            Menu::Copy => Popup::beside(
+                menu.sections(),
+                menu.grid(),
+                self.copy_button,
                 self.window(),
             ),
         }
@@ -439,7 +455,31 @@ mod tests {
         assert!(!chrome.contains([chrome.right.x - 1.0, button.y + 1.0]));
     }
 
-    /// The paste button is under the minimap toggle, in the same strip, and
+    /// The column down the left panel: the minimap toggle, the button that
+    /// opens the menu of copies, and the paste button under those. The copy
+    /// button is above the one that comes and goes, so nothing moves under
+    /// the pointer as the clipboard changes.
+    #[test]
+    fn the_copy_button_sits_between_the_minimap_toggle_and_the_paste_button() {
+        let chrome = Chrome::new(WINDOW);
+        let button = chrome.copy_button;
+
+        assert_eq!(button.x, chrome.minimap_button.x);
+        assert_eq!(button.width, chrome.minimap_button.width);
+        assert!(button.y >= chrome.minimap_button.bottom());
+        assert!(chrome.paste_button.y >= button.bottom());
+
+        // There whether or not there is anything to paste, unlike the button
+        // under it.
+        for paste in [false, true] {
+            assert_eq!(
+                chrome.widget_at([button.x + 1.0, button.y + 1.0], None, paste),
+                Some(Widget::Copy)
+            );
+        }
+    }
+
+    /// The paste button is under the copy button, in the same strip, and
     /// it is there for the pointer only while there is something to paste:
     /// the rectangle is always laid out — the layout is the window's size and
     /// nothing else — and what comes and goes is whether anything answers on
@@ -450,7 +490,7 @@ mod tests {
         let button = chrome.paste_button;
         let at = [button.x + 1.0, button.y + 1.0];
 
-        assert!(button.y >= chrome.minimap_button.bottom());
+        assert!(button.y >= chrome.copy_button.bottom());
         assert!(button.bottom() <= chrome.left.bottom());
         assert_eq!(button.x, chrome.minimap_button.x);
         assert_eq!(button.width, chrome.minimap_button.width);

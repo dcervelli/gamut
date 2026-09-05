@@ -81,6 +81,10 @@ enum Hang {
     Below,
     /// Over it, left edges in line: a button at the left of the bottom bar.
     Above,
+    /// Beside it, to the right, top edges in line: a button in the strip down
+    /// the left of the window, where there is no room above or below it for a
+    /// panel to hang without covering the buttons it is stacked with.
+    Beside,
 }
 
 /// A popup placed in a window: where its panel is, where each section's name
@@ -122,6 +126,22 @@ impl Popup {
         area: Rect,
     ) -> Option<Self> {
         Self::hung(sections, grid, anchor, area, Hang::Above)
+    }
+
+    /// As [`Popup::below`], for a button in the strip down the left of the
+    /// window: the panel stands to the right of the anchor, with their top
+    /// edges in line.
+    ///
+    /// The same rule again — the panel opens into the window, off the edge of
+    /// the button that faces into it. A button in a column has its neighbors
+    /// directly above and below it, so the room it has is sideways.
+    pub fn beside(
+        sections: &[PopupSection],
+        grid: PopupGrid,
+        anchor: Rect,
+        area: Rect,
+    ) -> Option<Self> {
+        Self::hung(sections, grid, anchor, area, Hang::Beside)
     }
 
     /// The shared placement: the panel is measured the same way whichever
@@ -190,6 +210,7 @@ impl Popup {
         let (x, y) = match hang {
             Hang::Below => (anchor.right() - width, anchor.bottom() + grid.margin),
             Hang::Above => (anchor.x, anchor.y - grid.margin - height),
+            Hang::Beside => (anchor.right() + grid.margin, anchor.y),
         };
         let x = x.clamp(bounds.x, bounds.right() - width);
         let y = y.clamp(bounds.y, bounds.bottom() - height);
@@ -464,6 +485,27 @@ mod tests {
         let popup = Popup::above(&SECTIONS, grid(), corner, AREA).expect("room enough");
         assert_eq!(popup.panel().y, AREA.y + 12.0);
         assert_eq!(popup.panel().x, AREA.x + 12.0);
+    }
+
+    /// A menu hung off a button in a column stands to its right, their top
+    /// edges in line: there is nothing above or below such a button but the
+    /// buttons it is stacked with, and the room it has is sideways.
+    #[test]
+    fn a_popup_beside_its_button_stands_to_the_right_of_it() {
+        let side = Rect::new(4.0, 40.0, 22.0, 22.0);
+        let popup = Popup::beside(&SECTIONS, grid(), side, AREA).expect("room enough");
+        let panel = popup.panel();
+
+        assert_eq!(panel.x, side.right() + 12.0);
+        assert_eq!(panel.y, side.y);
+        assert_eq!(panel.width, interior() + 2.0 * 10.0);
+        assert_eq!(popup.cells().count(), 13);
+
+        // And one hung from a button low down the strip is lifted back inside
+        // the margin rather than run off the foot of the window.
+        let low = Rect::new(4.0, AREA.bottom() - 30.0, 22.0, 22.0);
+        let popup = Popup::beside(&SECTIONS, grid(), low, AREA).expect("room enough");
+        assert_eq!(popup.panel().bottom(), AREA.bottom() - 12.0);
     }
 
     /// A button hard against an edge would justify the panel off the window,

@@ -23,7 +23,7 @@ use crate::render::Rect;
 use crate::timing;
 use crate::ui::info::Copyable;
 use crate::ui::layers::Hit;
-use crate::ui::menu::Reach;
+use crate::ui::menu::{Copies, Reach};
 use crate::ui::toast::Level;
 use crate::ui::{self, Current, Menu, Panels, Tip, Widget};
 
@@ -88,6 +88,9 @@ pub enum Action {
     /// Between the SDR and the HDR surface, where the driver offers the
     /// choice.
     ToggleHdr,
+    /// Put the name of the file on screen on the clipboard, with nothing of
+    /// the directory it sits in.
+    CopyName,
     /// Put the absolute path of the file on screen on the clipboard.
     CopyPath,
     /// Put the file on screen on the clipboard as a `file:` URI, under the
@@ -326,9 +329,28 @@ fn action_of(tip: Tip, panels: &Panels) -> Option<Action> {
             Reach::Upscale => CycleUpscale,
             Reach::PixelFormat => CyclePixelFormat,
             Reach::Zoom(scale) => ZoomTo(scale),
+            // The one menu whose cells are things done rather than states to
+            // be in: the key does exactly what the cell does, and its line of
+            // the table is what names both.
+            Reach::Copy(what) => copy_action(what),
         },
         Tip::Widget(_) | Tip::Name | Tip::Counter => return None,
     })
+}
+
+/// The action a cell of the menu of copies asks for.
+///
+/// Which copy each cell is is the menu's; what that copy does, what it is
+/// called and which key runs it are all the key table's, and this is the one
+/// place the two are put together.
+fn copy_action(what: Copies) -> Action {
+    match what {
+        Copies::Name => CopyName,
+        Copies::Path => CopyPath,
+        Copies::Uri => CopyUri,
+        Copies::Image => CopyImage,
+        Copies::Facts => CopyMetadata,
+    }
 }
 
 /// What names `tip` on the first line of its tooltip: its own words where the
@@ -508,7 +530,14 @@ pub const KEYS: &[Binding] = &[
             (Named(NamedKey::PageUp), PreviousFile),
         ],
     },
-    // The first two are both the capital, so both are typed with Shift held;
+    Binding {
+        section: Section::Clipboard,
+        mods: PLAIN,
+        shown: "c",
+        help: "Copy the name of the file on screen, without its path",
+        keys: &[(Char("c"), CopyName)],
+    },
+    // The next two are both the capital, so both are typed with Shift held;
     // only the Ctrl that parts one from the other is a modifier as far as the
     // table is concerned. `shown` says what the fingers do.
     Binding {
@@ -529,7 +558,7 @@ pub const KEYS: &[Binding] = &[
         section: Section::Clipboard,
         mods: CTRL,
         shown: "Ctrl+C",
-        help: "Copy the picture itself, as the display settings show it",
+        help: "Copy the image itself, as the display settings show it",
         keys: &[(Char("c"), CopyImage)],
     },
     Binding {
@@ -561,7 +590,7 @@ pub const KEYS: &[Binding] = &[
         section: Section::Clipboard,
         mods: CTRL,
         shown: "Ctrl+V",
-        help: "Paste a picture, saved among your pictures and shown",
+        help: "Paste an image, saved among your pictures and shown",
         keys: &[(Char("v"), Paste), (Char("V"), Paste)],
     },
     Binding {
@@ -953,6 +982,10 @@ impl App {
             // was, so the message at the foot of the window is the only sign
             // it happened at all — and the only way to tell a copy that
             // worked from a key that was never read.
+            CopyName => {
+                let name = self.shown_name();
+                self.copy(name.as_bytes(), clipboard::TEXT, "Copied file name.");
+            }
             CopyPath => {
                 let path = self.shown_path();
                 self.copy(
@@ -1024,6 +1057,21 @@ impl App {
     fn shown_path(&self) -> PathBuf {
         let path = self.files.shown_path();
         std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf())
+    }
+
+    /// The name of the file on screen, with nothing of the directory it sits
+    /// in — what the top bar shows, at whatever length it actually is.
+    ///
+    /// Taken from the path as it was given rather than from the absolute one:
+    /// the two end in the same name, and there is nothing here that needs the
+    /// working directory. The whole path stands in for one that ends in no
+    /// name at all, which a file on the list never does.
+    fn shown_name(&self) -> String {
+        let path = self.files.shown_path();
+        match path.file_name() {
+            Some(name) => name.to_string_lossy().into_owned(),
+            None => path.to_string_lossy().into_owned(),
+        }
     }
 
     /// Puts the picture on screen on the clipboard as a PNG.
@@ -1469,6 +1517,7 @@ impl App {
             // by the menu itself, before the widgets underneath are asked.
             Widget::Zoom => self.open_menu(Menu::Zoom),
             Widget::PixelFormat => self.open_menu(Menu::PixelFormat),
+            Widget::Copy => self.open_menu(Menu::Copy),
             // The action the key runs, as with the reset below: the button
             // is on screen because the clipboard was holding a picture at the
             // last look, and the paste asks it again rather than trusting
@@ -1499,6 +1548,14 @@ impl App {
             }
             Widget::Cell(index) => {
                 if let Some(menu) = self.panels.menu.take() {
+                    // A cell of the menu of copies runs the key's action, as
+                    // the reset and the paste buttons do: what it asks for is
+                    // done rather than set, and there is nothing about the
+                    // view for `choose` to settle.
+                    if let Some(what) = menu.copy_at(index) {
+                        let _ = self.perform(copy_action(what));
+                        return;
+                    }
                     // The format is lifted out and put back so that the
                     // closure borrows nothing of `self`: a zoom chosen here
                     // is a move, and a format is settled on the spot.
@@ -1728,6 +1785,7 @@ mod tests {
         let panels = panels(None);
         for widget in [
             Widget::Minimap,
+            Widget::Copy,
             Widget::Paste,
             Widget::Histogram,
             Widget::Info,
@@ -1832,6 +1890,53 @@ mod tests {
                 hint.ends_with("(Ctrl+.)") || hint.ends_with("(Ctrl+Shift+.)"),
                 "{hint}"
             );
+        }
+    }
+
+    /// A cell of the menu of copies has no words of its own: the key table
+    /// already describes each copy in a sentence, and the cell is named by
+    /// that sentence and by the key that runs it.
+    ///
+    /// The button that opens the menu names itself, no one key opening it.
+    #[test]
+    fn a_copy_cell_is_named_by_the_key_table_and_nothing_else() {
+        let panels = panels(Some(Menu::Copy));
+        let named = |index| names(Tip::Widget(Widget::Cell(index)), &panels);
+
+        assert_eq!(
+            named(0).as_deref(),
+            Some("Copy the name of the file on screen, without its path (c)")
+        );
+        assert_eq!(
+            named(1).as_deref(),
+            Some("Copy the absolute path of the file on screen (Shift+C)")
+        );
+
+        // Every cell of it, and nothing past the end of the menu.
+        for index in 0..Copies::ALL.len() {
+            let words = named(index).unwrap_or_else(|| panic!("cell {index} is named"));
+            assert!(words.starts_with("Copy "), "{words}");
+            assert!(words.ends_with(')'), "{words} says what to press");
+        }
+        assert_eq!(named(Copies::ALL.len()), None);
+
+        // And the button it hangs from says what the menu is of, no one key
+        // doing that job.
+        let button = names(Tip::Widget(Widget::Copy), &panels).expect("the button names itself");
+        assert!(!button.contains('('), "{button}");
+    }
+
+    /// Every copy the menu offers is a key as well, which is what lets a cell
+    /// be named by the key table — and what keeps the two ways of asking for
+    /// the same copy from drifting apart.
+    #[test]
+    fn every_copy_on_the_menu_is_bound_to_a_key() {
+        let mut actions = Vec::new();
+        for what in Copies::ALL {
+            let action = copy_action(what);
+            assert!(binding_for(action).is_some(), "{what:?} is bound");
+            assert!(!actions.contains(&action), "{what:?} twice");
+            actions.push(action);
         }
     }
 
@@ -2001,7 +2106,7 @@ mod tests {
         );
     }
 
-    /// The three things `c` does are told apart by what is held with it,
+    /// The four things `c` does are told apart by what is held with it,
     /// and a chord nothing binds is still left to the window manager.
     #[test]
     fn modifiers_tell_chords_apart() {
@@ -2010,8 +2115,8 @@ mod tests {
         // so it is held for every reading of `C`.
         let lower = Key::Character(SmolStr::new("c"));
         let upper = Key::Character(SmolStr::new("C"));
-        // The lower case on its own is not bound at all.
-        assert_eq!(action_for(&lower, ELSEWHERE, PLAIN), None);
+        // The lower case on its own is the shortest of the copies.
+        assert_eq!(action_for(&lower, ELSEWHERE, PLAIN), Some(CopyName));
         assert_eq!(action_for(&upper, ELSEWHERE, Mods::SHIFT), Some(CopyPath));
         assert_eq!(
             action_for(&upper, ELSEWHERE, Mods::CONTROL | Mods::SHIFT),

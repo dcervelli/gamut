@@ -93,6 +93,8 @@ const CHECKER_SQUARE: f32 = 8.0;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Widget {
     Minimap,
+    /// The button that opens the menu of copies, under the minimap toggle.
+    Copy,
     /// The button that pastes the picture on the clipboard. On screen only
     /// while there is one — see [`Panels::paste`].
     Paste,
@@ -537,6 +539,14 @@ pub fn build_frame(
         theme,
     );
     tips.offer(Tip::Widget(Widget::Minimap), chrome.minimap_button);
+    buttons::copy_button(
+        &mut frame,
+        chrome.copy_button,
+        panels.menu == Some(Menu::Copy),
+        panels.hover == Some(Widget::Copy),
+        theme,
+    );
+    tips.offer(Tip::Widget(Widget::Copy), chrome.copy_button);
     if panels.paste {
         buttons::paste_button(
             &mut frame,

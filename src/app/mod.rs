@@ -669,7 +669,7 @@ impl App {
         let said = !outcomes.is_empty();
         for outcome in outcomes {
             match outcome {
-                Ok(()) => self.toast("Copied picture.", Level::Message),
+                Ok(()) => self.toast("Copied image.", Level::Message),
                 Err(error) => self.toast(error, Level::Error),
             }
         }

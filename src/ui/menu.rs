@@ -51,6 +51,51 @@ pub enum Menu {
     /// How the bottom bar writes out the pixel under the pointer, opened from
     /// the dot at the head of that readout.
     PixelFormat,
+    /// What a copy takes with it, opened from the button under the minimap
+    /// toggle. The one menu of things to do rather than states to be in.
+    Copy,
+}
+
+/// A copy the interface can be asked for, and so a cell of [`Menu::Copy`].
+///
+/// The copies of something the window is already showing, which is what a
+/// menu can ask for at all: the two that take the pixel under the pointer are
+/// not here, since the pointer is over the menu while the menu is open and
+/// there would never be a pixel under it to take.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Copies {
+    /// The file's own name, with nothing of the path it sits in.
+    Name,
+    Path,
+    Uri,
+    /// The picture itself, as the display settings show it.
+    Image,
+    /// Everything the information panel says about the file.
+    Facts,
+}
+
+impl Copies {
+    /// In the order the cells are laid out, two to a row.
+    pub const ALL: [Copies; 5] = [
+        Copies::Name,
+        Copies::Path,
+        Copies::Uri,
+        Copies::Facts,
+        Copies::Image,
+    ];
+
+    /// The word the cell wears. What the copy actually takes is the key
+    /// table's to say — see `App::tooltip` — so these name the thing rather
+    /// than describe the copy, and are short enough to sit in a cell.
+    pub fn label(self) -> &'static str {
+        match self {
+            Copies::Name => "Name",
+            Copies::Path => "Path",
+            Copies::Uri => "URI",
+            Copies::Image => "Image",
+            Copies::Facts => "Info",
+        }
+    }
 }
 
 /// What a cell of a menu is, for anything outside the menu that has to say
@@ -62,7 +107,12 @@ pub enum Menu {
 /// binding to be written down.
 #[derive(Clone, PartialEq, Debug)]
 pub struct CellTip {
-    pub label: String,
+    /// What the cell is, where the menu has words of its own for it. `None`
+    /// where the key that does the same job already describes it at a length
+    /// a label can carry, which leaves the key table to name it — a copy is
+    /// described in a phrase, and writing that phrase here as well would be
+    /// somewhere for the two to disagree.
+    pub label: Option<String>,
     pub reach: Reach,
 }
 
@@ -75,6 +125,9 @@ pub enum Reach {
     Upscale,
     PixelFormat,
     Zoom(f32),
+    /// A copy, which no cycle reaches: the key for it does exactly what the
+    /// cell does, and is what names the cell.
+    Copy(Copies),
 }
 
 impl Menu {
@@ -82,6 +135,7 @@ impl Menu {
         match self {
             Menu::Zoom => &ZOOM_SECTIONS,
             Menu::PixelFormat => &PIXEL_SECTIONS,
+            Menu::Copy => &COPY_SECTIONS,
         }
     }
 
@@ -108,29 +162,29 @@ impl Menu {
         match self {
             Menu::Zoom => match *ZOOM_CHOICES.get(index)? {
                 ZoomChoice::Scale(scale) => Some(CellTip {
-                    label: format!("Zoom to {}", percent(scale)),
+                    label: Some(format!("Zoom to {}", percent(scale))),
                     reach: Reach::Zoom(scale),
                 }),
                 ZoomChoice::Fit(Fit::Whole) => Some(CellTip {
-                    label: "Fit the whole image".to_string(),
+                    label: Some("Fit the whole image".to_string()),
                     reach: Reach::Fit,
                 }),
                 ZoomChoice::Fit(Fit::Width) => Some(CellTip {
-                    label: "Fit the image's width".to_string(),
+                    label: Some("Fit the image's width".to_string()),
                     reach: Reach::Fit,
                 }),
                 ZoomChoice::Fit(Fit::Height) => Some(CellTip {
-                    label: "Fit the image's height".to_string(),
+                    label: Some("Fit the image's height".to_string()),
                     reach: Reach::Fit,
                 }),
                 // What the filter does, rather than what it is called: the
                 // cell is already wearing the name.
                 ZoomChoice::Filter(Upscale::Nearest) => Some(CellTip {
-                    label: "Magnify to hard pixel edges".to_string(),
+                    label: Some("Magnify to hard pixel edges".to_string()),
                     reach: Reach::Upscale,
                 }),
                 ZoomChoice::Filter(Upscale::Bicubic) => Some(CellTip {
-                    label: "Magnify smoothly".to_string(),
+                    label: Some("Magnify smoothly".to_string()),
                     reach: Reach::Upscale,
                 }),
             },
@@ -138,14 +192,35 @@ impl Menu {
             // cell is already wearing the name, and the name is the one thing
             // about a format that does not say which question it is for.
             Menu::PixelFormat => Some(CellTip {
-                label: match PixelFormat::ALL.get(index)? {
-                    PixelFormat::Hex => "The file's codes, as a color is written",
-                    PixelFormat::Decimal => "The file's own numbers",
-                    PixelFormat::Mapped => "What the display makes of them",
-                }
-                .to_string(),
+                label: Some(
+                    match PixelFormat::ALL.get(index)? {
+                        PixelFormat::Hex => "The file's codes, as a color is written",
+                        PixelFormat::Decimal => "The file's own numbers",
+                        PixelFormat::Mapped => "What the display makes of them",
+                    }
+                    .to_string(),
+                ),
                 reach: Reach::PixelFormat,
             }),
+            // No words of its own: the key table already says what each of
+            // these copies takes, in a sentence, and saying it twice is
+            // saying it in two places that can drift apart.
+            Menu::Copy => Some(CellTip {
+                label: None,
+                reach: Reach::Copy(self.copy_at(index)?),
+            }),
+        }
+    }
+
+    /// Which copy cell `index` asks for, when this is the menu of copies.
+    ///
+    /// `None` for every other menu: those set a state and are answered by
+    /// [`Menu::choose`], where a copy is something done and is the
+    /// application's — nothing here has a file or a clipboard to hand.
+    pub fn copy_at(self, index: usize) -> Option<Copies> {
+        match self {
+            Menu::Copy => Copies::ALL.get(index).copied(),
+            Menu::Zoom | Menu::PixelFormat => None,
         }
     }
 
@@ -171,6 +246,9 @@ impl Menu {
                     *format = *choice;
                 }
             }
+            // Nothing about the view or the readout: what its cells ask for
+            // is done rather than set, and is [`Menu::copy_at`]'s.
+            Menu::Copy => {}
         }
     }
 }
@@ -218,6 +296,27 @@ const PIXEL_SECTIONS: [PopupSection; 1] = [PopupSection {
     items: PixelFormat::ALL.len(),
     columns: PixelFormat::ALL.len(),
     cell_width: MENU_WORD_CELL,
+}];
+
+/// The one section of the menu of copies: everything that can be taken, each
+/// cell wearing the name of the thing it takes.
+///
+/// One group rather than the file's own facts parted from the image itself.
+/// The heading is what says the menu is of copies — the panel would otherwise
+/// say nothing about what it is a menu of, as the pixel menu's does — and a
+/// second heading naming the image would stand over a single cell wearing
+/// that same word.
+///
+/// Two to a row rather than four abreast, and in the ordinary cell rather than
+/// the wider one the words elsewhere ask for: the words here are one short
+/// noun each, and the menu hangs off a button in the strip down the left of
+/// the window, where a panel as wide as the zoom menu's would lie across the
+/// picture it is a menu about.
+const COPY_SECTIONS: [PopupSection; 1] = [PopupSection {
+    title: "Copy",
+    items: Copies::ALL.len(),
+    columns: 2,
+    cell_width: MENU_CELL[0],
 }];
 
 /// What the zoom menu offers. The order is the order the cells are laid out
@@ -327,6 +426,17 @@ pub(super) fn draw(
                         centered_text(frame, text, cell, ink, filter.label())
                     }
                 }
+            }
+            // Never lit: a copy is something done, and there is no state for
+            // a cell of this menu to be showing — only the pointer's own
+            // highlight tells one cell from the next.
+            Menu::Copy => {
+                let Some(copy) = Copies::ALL.get(index) else {
+                    continue;
+                };
+                let (background, ink) = button_ink(false, hover, theme);
+                frame.rounded_rect(cell, CELL_RADIUS, background);
+                centered_text(frame, text, cell, ink, copy.label());
             }
             // In words, as the filters are, and for the same reason: there is
             // no picture of "decimal" a reader would arrive at unaided.
@@ -532,6 +642,67 @@ mod tests {
             .max()
             .expect("three formats");
         assert!(popup.cell(0).width > longest as f32 * TEXT_SIZE * 0.7);
+    }
+
+    /// The menu of copies stands beside the button that opens it — that
+    /// button is in a column, with its neighbors above and below — and offers
+    /// exactly the copies on offer, in order.
+    #[test]
+    fn the_copy_menu_stands_beside_the_button_that_opens_it() {
+        let chrome = Chrome::new(WINDOW);
+        let popup = chrome
+            .popup(Menu::Copy, None)
+            .expect("a window with room for it");
+        let (panel, button) = (popup.panel(), chrome.copy_button);
+
+        assert_eq!(popup.cells().count(), Copies::ALL.len());
+        assert!(panel.x >= button.right(), "{panel:?} beside {button:?}");
+        assert_eq!(panel.y, button.y);
+        assert!(panel.bottom() <= WINDOW[1] - PADDING);
+
+        // Every cell is one of the copies, in the order they are listed, and
+        // there is nothing past the last of them.
+        for (index, expected) in Copies::ALL.into_iter().enumerate() {
+            assert_eq!(Menu::Copy.copy_at(index), Some(expected));
+        }
+        assert_eq!(Menu::Copy.copy_at(Copies::ALL.len()), None);
+        assert_eq!(
+            COPY_SECTIONS
+                .iter()
+                .map(|section| section.items)
+                .sum::<usize>(),
+            Copies::ALL.len()
+        );
+
+        // Wide enough for the words the cells wear, which is what keeps them
+        // in the ordinary cell rather than the wider one.
+        let longest = Copies::ALL
+            .iter()
+            .map(|copy| copy.label().len())
+            .max()
+            .expect("five copies");
+        assert!(popup.cell(0).width > longest as f32 * TEXT_SIZE * 0.7);
+    }
+
+    /// A copy cell leaves the naming to the key that does the same job: it
+    /// has a key of its own doing exactly what it does, where every other
+    /// cell is reached by a cycle that describes none of them.
+    #[test]
+    fn only_a_copy_cell_has_no_words_of_its_own() {
+        for index in 0..Copies::ALL.len() {
+            let tip = Menu::Copy.cell_tip(index).expect("a cell");
+            assert_eq!(tip.label, None);
+            assert!(matches!(tip.reach, Reach::Copy(_)));
+        }
+        for (menu, count) in [
+            (Menu::Zoom, ZOOM_CHOICES.len()),
+            (Menu::PixelFormat, PixelFormat::ALL.len()),
+        ] {
+            for index in 0..count {
+                let tip = menu.cell_tip(index).expect("a cell");
+                assert!(tip.label.is_some(), "{menu:?} cell {index}");
+            }
+        }
     }
 
     /// The button reads out the same zoom the cells are chosen from, so the

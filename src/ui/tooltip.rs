@@ -104,12 +104,15 @@ pub fn words(tip: Tip, panels: &Panels) -> Option<String> {
     // A menu cell's are its own, and one of them is a number the cell was
     // laid out from rather than a phrase written down here.
     if let Tip::Widget(Widget::Cell(index)) = tip {
-        return Some(panels.menu?.cell_tip(index)?.label);
+        return panels.menu?.cell_tip(index)?.label;
     }
     Some(
         match tip {
             Tip::Widget(Widget::Zoom) => "Zoom, fit and filter",
-            Tip::Widget(Widget::Paste) => "Paste a picture",
+            // No one key opens it — every cell of it has a key of its own —
+            // so the button says what the menu is of.
+            Tip::Widget(Widget::Copy) => "Copy the file or the image",
+            Tip::Widget(Widget::Paste) => "Paste an image",
             // No one key does this and only this — Escape dismisses whatever
             // is up, a menu first — so the cross names itself.
             Tip::Widget(Widget::Dismiss) => "Dismiss this message",

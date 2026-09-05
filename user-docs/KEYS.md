@@ -46,7 +46,7 @@ rather than resetting them.
 A file being opened for the first time keeps the pan and zoom when it is the
 same size as the one on screen, so a directory of frames or exposures stays
 comparable under the same pixels. One of a different size is a different
-picture, and is fitted. Files that cannot be decoded are stepped over. The list is whatever
+image, and is fitted. Files that cannot be decoded are stepped over. The list is whatever
 was named at startup, in that order; naming a directory puts the images in it
 on the list, and keeps it up to date as images are added to that directory or
 taken out of it.
@@ -55,17 +55,18 @@ taken out of it.
 
 | Key | What it does |
 | --- | --- |
+| `c` | Copy the name of the file on screen, without its path |
 | `Shift+C` | Copy the absolute path of the file on screen |
 | `Ctrl+Shift+C` | Copy the file on screen as a URI |
-| `Ctrl+C` | Copy the picture itself, as you are seeing it |
+| `Ctrl+C` | Copy the image itself, as you are seeing it |
 | `Ctrl+I` | Copy everything the file information says about the file |
 | `Ctrl+.` | Copy the value of the pixel under the pointer |
 | `Ctrl+Shift+.` | Copy the coordinate of the pixel under the pointer |
-| `Ctrl+V` | Paste a picture, saved among your pictures and shown |
+| `Ctrl+V` | Paste an image, saved among your pictures and shown |
 
 Every copy says so: a short message appears at the foot of the window naming
 what was taken, and goes on its own after a couple of seconds. Copying changes
-nothing you can see in the picture, so without it there is no way to tell a
+nothing you can see in the image, so without it there is no way to tell a
 copy that worked from a key that was not read. Click the cross on the message
 to take it off sooner, or press `Esc` — which closes whatever is up, a popup
 first and then a message, and quits only when there is nothing left to close.
@@ -74,6 +75,10 @@ means what you asked for could not be done and nothing is wrong — the pointer
 was not over a pixel, say; one in its red means the copy failed, and the
 terminal has the reason in full.
 
+`c` copies the file's own name and nothing else — `sunset.tif`, not the
+directory it sits in — which is what you want when you are naming the file to
+someone rather than pointing a program at it.
+
 `Shift+C` copies the path in full, from the root down, whichever way the file
 was named when the program was started — a relative name is of no use in
 another window, which is where a copied path is going.
@@ -81,10 +86,10 @@ another window, which is where a copied path is going.
 `Ctrl+Shift+C` copies the same file as a URI instead: `file://` and the path,
 with spaces and punctuation escaped. This is what a file manager, a browser or
 another program's open dialog asks for when it wants the file itself rather
-than words about it, so pasting into one of those opens the picture rather
+than words about it, so pasting into one of those opens the image rather
 than typing its name. Pasting into a text field still yields the URI.
 
-`Ctrl+C` copies the picture rather than a name for it, ready to paste into an
+`Ctrl+C` copies the image rather than a name for it, ready to paste into an
 editor, a document or a chat window. What travels is what you are looking at:
 the window, the exposure, the tone curve and any false color are all applied,
 so a raw scan you have brought up out of the shadows arrives brought up. It is
@@ -94,7 +99,7 @@ and the panels are how you are looking at it and none of them are copied.
 A single-channel image stays single-channel, so a grayscale scan does not
 arrive as three copies of itself, and false color is the one thing that
 widens it. Transparency comes along only where the file had some; an opaque
-picture arrives opaque rather than carrying an empty channel. Everything
+image arrives opaque rather than carrying an empty channel. Everything
 arrives 8-bit, which is the depth the screen was showing it at.
 
 `Ctrl+I` copies everything the file information panel says, one line per
@@ -114,7 +119,7 @@ paste into a command line or a spreadsheet. Both work on the pixel the pointer
 is over at the moment you press them, and say so on the terminal when the
 pointer is not over one.
 
-The picture is prepared in the background, so the window keeps answering while
+The image is prepared in the background, so the window keeps answering while
 a large one is being got ready — a photograph of some tens of megapixels takes
 a fraction of a second, and only then is there anything to paste. Copying
 something else in the meantime wins: whichever copy you asked for last is the
@@ -122,22 +127,22 @@ one you get, not whichever happened to finish last.
 
 Any of the copies outlives the window: closing `gamut` leaves it on
 the clipboard, and it stays there until something else copies over it. Quitting
-straight after copying is safe — a picture still being prepared is finished
+straight after copying is safe — an image still being prepared is finished
 before the window goes.
 
-`Ctrl+V` goes the other way: it takes the picture on the clipboard, writes it
+`Ctrl+V` goes the other way: it takes the image on the clipboard, writes it
 into your pictures directory, and shows it. The file is a real one and it
-stays — a screenshot, or a picture copied out of a browser or an editor, has
+stays — a screenshot, or an image copied out of a browser or an editor, has
 no file behind it, and one that vanished when you closed the window would be
 no use to come back to. It is named for the moment you pasted it, in the same
 form a screenshot is named in: `pasted_2026-09-04_11-40-32.png`. Where it
 goes is wherever your desktop keeps pictures — `~/Pictures` unless you have
 told it otherwise — and the directory is made if it is not there yet.
 
-There is a button for it too, in the left strip under the minimap toggle. It
-is there only while the clipboard is holding a picture `gamut` can show, so
+There is a button for it too, in the left strip under the copy button. It
+is there only while the clipboard is holding an image `gamut` can show, so
 what it says is not only that pasting is possible but that there is something
-to paste — it appears when you copy a picture in another window and goes when
+to paste — it appears when you copy an image in another window and goes when
 something else is copied over it. `gamut` looks at the clipboard four times a
 second to keep it up to date, and stops looking while the interface is hidden
 with `` ` ``.
@@ -147,9 +152,9 @@ goes back to where you were and `]` carries on. It stays on the list for as
 long as the window is open, even when what you opened was a directory that
 knows nothing about it.
 
-What is pasted is whatever the picture was copied as, saved as it stands:
+What is pasted is whatever the image was copied as, saved as it stands:
 nothing is re-encoded, so a JPEG arrives a JPEG. `Ctrl+V` does nothing if the
-clipboard holds words rather than a picture, or holds it in a format `gamut`
+clipboard holds words rather than an image, or holds it in a format `gamut`
 cannot read — it says so on the terminal and leaves the window as it was.
 Copying a *file* in a file manager copies its name and not its contents, and
 that is not a paste; open it as an argument instead.
@@ -179,7 +184,7 @@ mode it was in; `e` cycles back into them. Exposure stops at ±16 stops.
 Tone mapping is a curve added to bring values brighter than white down into a
 surface that cannot show them. `none` is not a third curve but the absence of
 one: on an ordinary (SDR) surface the highlights are clipped at white, and on
-an HDR surface they are shown at the brightness they were graded to. A picture
+an HDR surface they are shown at the brightness they were graded to. An image
 starts with no curve on an HDR surface; on an SDR one it starts on neutral
 when there are highlights above white to roll off, and with none otherwise.
 Switching the room with `o`, or the window landing on a different kind of
@@ -190,7 +195,7 @@ The bottom bar names the curve while one is on, and says `clip` when there is
 none, the surface is SDR and highlights are being thrown away — so a
 photograph pushed a stop up says so rather than going flat in silence. The
 `HDR` button at the end of the bar is the switch for that room, lit while the
-picture is going out with it. On Wayland the compositor says which monitors
+image is going out with it. On Wayland the compositor says which monitors
 are in HDR mode, and gamut follows: the window gets an HDR surface on a
 monitor in HDR mode and an SDR one otherwise, and never asks the compositor
 to switch a monitor over — a request some compositors answer by blanking
@@ -236,14 +241,14 @@ histogram is closed leaves it that way for when you open it.
 
 The histogram, the file information and the minimap float over the image
 rather than sitting in the bars, so `` ` `` leaves them where they are.
-`Shift` with it closes all three as well, for the picture on its own; they
+`Shift` with it closes all three as well, for the image on its own; they
 stay closed when the bars come back.
 
 The file information sits down the right of the image, under headings, so
 that a long column can be read by looking for a thing rather than from the
 top. It opens with the file itself — what it is called, where it is, what it
 turned out to be, how large it is and when it was last written — and then the
-picture in it: how many pixels across and down, what each pixel holds, the
+image in it: how many pixels across and down, what each pixel holds, the
 color space those numbers are meant in, and whether it carries transparency.
 
 After those comes what the file's own metadata says, for a file that carries
@@ -278,7 +283,7 @@ the wheel moves the words instead of the zoom. Dragging the panel scrolls it
 as well, the drag holding the scrollbar's handle rather than the words: drag
 down to move down the column, and a short drag carries a long column a long
 way — as far as putting the handle there would. The pointer belongs to the
-panel while it is over it, so neither gesture reaches the picture behind.
+panel while it is over it, so neither gesture reaches the image behind.
 
 The grid divides the image into squares of a round number of image pixels —
 1, 2, 5, 10, 20, 50 and so on — chosen so that the lines land about fifty
@@ -295,11 +300,21 @@ counted off in the image's own pixels.
 | Trackpad scroll | The same, by fractions of a notch |
 | Click a panel button | Show or hide the histogram, the file information, or the minimap |
 | Click the grid button | Show or hide the grid |
-| Click the paste button | Paste the picture on the clipboard, as `Ctrl+V` does |
+| Click the copy button | Open the menu of copies: the file, or the image |
+| Click the paste button | Paste the image on the clipboard, as `Ctrl+V` does |
 | Wheel over the file information | Scroll it |
 | Drag the file information | Scroll it, as if dragging the scrollbar's handle |
 | Click the zoom percentage | Open the zoom menu: scale, fit and the magnification filter |
 | Click the dot in the bottom left | Choose how a pixel's value is read out |
+
+The button under the minimap toggle, in the left strip, opens a menu of the
+copies beside it: the file's **Name**, its **Path**, its **URI**, the
+**Info** the file information panel holds about it, and the **Image** itself.
+Each cell does exactly what its key does, and resting on one names the key as
+well, so the menu is also where those keys are learned. The two copies
+of the pixel under the pointer are not on it: the pointer is over the menu
+while the menu is open, so there would be no pixel under it to copy. Pressing
+anywhere outside the menu, or `Esc`, closes it without copying anything.
 
 The percentage in the top bar, just inside the grid button, is itself a
 button. Pressing it opens a menu hanging under it, under three headings.
@@ -338,10 +353,10 @@ The pointer keeps its grab until the button comes up, so a drag that leaves
 the window goes on working. The cursor becomes a closed hand only when there
 is somewhere to drag to.
 
-The panels come between the pointer and the picture. Anything on screen over
+The panels come between the pointer and the image. Anything on screen over
 the image — the histogram, the file information, the minimap, an open menu —
 takes what the pointer does while it is over it, so a click there never starts
-a drag of the picture behind, the wheel there never zooms, and the readout in
+a drag of the image behind, the wheel there never zooms, and the readout in
 the bottom bar goes quiet rather than naming a pixel the panel is covering.
 Hide a panel to get that ground back, or point at the image somewhere else.
 

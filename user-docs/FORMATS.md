@@ -38,7 +38,7 @@ taken for an image if its extension is one of those above, so a JPEG saved as
 twice a second for as long as the window is open. An image saved into it
 joins the list where its name puts it, and one deleted drops out — so a
 render dropping frames into a folder is a list that grows as you watch it,
-and `]` reaches a file that did not exist when you started. The picture on
+and `]` reaches a file that did not exist when you started. The image on
 screen is the one exception: it stays on the list even after the file behind
 it is gone, since it is still what you are looking at — and the bar writes
 `DELETED` in front of its name so that you know that is what you are looking
@@ -46,7 +46,7 @@ at. The word appears about half a second after the file goes and takes itself
 off again if the file comes back; a file named on the command line and then
 deleted is marked the same way.
 
-**One picture per file.** Nothing here shows more than one:
+**One image per file.** Nothing here shows more than one:
 
 - an animated GIF or WebP shows its first frame and stops — there is no
   playback and no way to step through the frames;
@@ -57,7 +57,7 @@ deleted is marked the same way.
 - an EXR shows its first layer.
 
 **Size limits.** An image may be at most 4 GB once decoded, and neither side
-may be longer than 32768 pixels. That is the largest picture current graphics
+may be longer than 32768 pixels. That is the largest image current graphics
 hardware can hold at all. Too large is refused straight away, naming the size
 it would have needed; a long, thin image can pass the first limit and fail the
 second. Everything under them is allowed, including survey-scale rasters that
@@ -97,7 +97,7 @@ Measurement data and other scene-referred content opens with an automatic
 99.8% window, because values occupying a fraction of the nominal range
 otherwise show as a black rectangle. Where that leaves highlights above white
 — a PQ frame, a gain-mapped photograph — the neutral tone map is on from the
-start rather than clipping, unless the picture is going out to an HDR surface,
+start rather than clipping, unless the image is going out to an HDR surface,
 where the highlights have somewhere to go and no curve is applied at all. All
 of it is adjustable: `e` cycles the automatic window, `t` the tone map, `o`
 the room above white, `z` resets. The information panel's "Referred to" line says
@@ -127,7 +127,7 @@ and when it does — BT.2100 PQ or HLG — that is read and honored. An ICC
 profile is read where there is no such statement, so a Display P3 PNG shows as
 Display P3.
 
-An animated PNG shows its default image, the still picture that any
+An animated PNG shows its default image, the still one that any
 non-animated reader sees.
 
 ## JPEG
@@ -140,7 +140,7 @@ files; all three are rare and none is produced by a camera.
 photograph from a phone is Display P3 far more often than it is sRGB, and P3
 numbers shown as sRGB come out visibly flat.
 
-**Gain maps are applied.** A JPEG from a recent phone is two pictures: the
+**Gain maps are applied.** A JPEG from a recent phone is two images: the
 ordinary graded photograph every viewer has always shown, and a smaller *gain
 map* recording how much brighter than white each pixel really was. Both are
 read and recombined, so the file arrives as a genuine HDR image — tone mapped
@@ -149,14 +149,14 @@ on an ordinary display, sent out at full brightness on a monitor in HDR mode
 guessed for your monitor; exposure (`d`, `f`) and the tone map (`t`) are where
 you decide what to do with it.
 
-- `--no-gain-map` shows the SDR photograph instead, which is the picture every
+- `--no-gain-map` shows the SDR photograph instead, which is the image every
   other viewer shows and what you want when the two need comparing.
 - Reconstruction is expensive in memory: a 12-megapixel photograph becomes
   roughly 200 MB where the photograph alone was 12 MB.
-- A gain map that runs the other way — where the stored picture is the HDR one
+- A gain map that runs the other way — where the stored image is the HDR one
   and the map describes the way down — is refused rather than applied
   backwards. The message suggests `--no-gain-map`.
-- A JPEG carrying a second picture that is not a gain map, such as one half of
+- A JPEG carrying a second image that is not a gain map, such as one half of
   a stereo pair, opens as an ordinary JPEG.
 
 **CMYK JPEGs open**, but the conversion to RGB does not use the file's CMYK
@@ -251,14 +251,14 @@ Caveats:
   aom. Both are standard on the systems above; on a stripped-down one, a file
   can fail with a codec error where another HEIF opens fine.
 - **HDR photographs from an iPhone show their SDR version.** HEIF can carry a
-  gain map alongside the picture, which is how those files store the bright
+  gain map alongside the image, which is how those files store the bright
   half, and it is not read. The photograph is correct, just not the bright
   one. A gain map in a JPEG *is* applied.
-- A file holding several pictures shows the primary one.
+- A file holding several images shows the primary one.
 
 ## ICO
 
-An ICO is not one image but a folder of them — the same picture at 16, 32, 48
+An ICO is not one image but a folder of them — the same one at 16, 32, 48
 and 256 pixels, so Windows can pick the size that fits where it is drawing. A
 viewer has no such slot, so it has to choose, and this one shows the largest
 icon, breaking a tie on color depth. The others are not reachable.

@@ -39,7 +39,7 @@ pub fn directory() -> Result<PathBuf> {
         return Ok(dir);
     }
     let home =
-        env_path("HOME").context("HOME is unset, so there is nowhere to keep a pasted picture")?;
+        env_path("HOME").context("HOME is unset, so there is nowhere to keep a pasted image")?;
     Ok(configured(&home).unwrap_or_else(|| home.join("Pictures")))
 }
 
@@ -68,7 +68,7 @@ fn reserve_in(dir: &Path, extension: &str, now: SystemTime) -> Result<PathBuf> {
         }
     }
     bail!(
-        "{} already holds {NAMES_PER_SECOND} pictures pasted this second",
+        "{} already holds {NAMES_PER_SECOND} images pasted this second",
         crate::shown_path(dir)
     )
 }
