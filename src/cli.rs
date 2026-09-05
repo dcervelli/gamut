@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use anyhow::{Result, bail};
 
-use crate::APP_ID;
+use crate::PROGRAM;
 use crate::app::Options;
 use crate::app::input::{KEYS, Section};
 use crate::image::decode::Overrides;
@@ -137,7 +137,7 @@ fn option_entries() -> Vec<(String, String)> {
 pub fn man() -> String {
     let mut text = String::new();
     let version = env!("CARGO_PKG_VERSION");
-    let upper = APP_ID.to_uppercase();
+    let upper = PROGRAM.to_uppercase();
     let tagline = OPTIONS
         .lines()
         .next()
@@ -149,12 +149,12 @@ pub fn man() -> String {
         text,
         r#".TH {} 1 "" "{} {}" "User Commands""#,
         roff(&upper),
-        roff(APP_ID),
+        roff(PROGRAM),
         roff(version)
     );
-    let _ = writeln!(text, ".SH NAME\n{} \\- {}", roff(APP_ID), roff(tagline));
+    let _ = writeln!(text, ".SH NAME\n{} \\- {}", roff(PROGRAM), roff(tagline));
 
-    let _ = writeln!(text, ".SH SYNOPSIS\n.B {}", roff(APP_ID));
+    let _ = writeln!(text, ".SH SYNOPSIS\n.B {}", roff(PROGRAM));
     let _ = writeln!(text, r"[\fIOPTIONS\fR] \fIPATH\fR\&...");
 
     // The prose between the usage line and the options list, as its own
@@ -261,7 +261,7 @@ pub fn parse_args() -> Result<Option<Args>> {
                     return Ok(None);
                 }
                 Some("-V") | Some("--version") => {
-                    println!("{APP_ID} {}", env!("CARGO_PKG_VERSION"));
+                    println!("{PROGRAM} {}", env!("CARGO_PKG_VERSION"));
                     return Ok(None);
                 }
                 // Undocumented, like `--serve-clipboard`: this is how the
@@ -430,6 +430,7 @@ fn next_value(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::APP_ID;
 
     /// Every key is in the help text, and nothing in the help text is a key
     /// that does not exist: the two come from one table.
@@ -533,9 +534,9 @@ mod tests {
     #[test]
     fn the_completions_offer_every_long_option() {
         for file in [
-            format!("{APP_ID}.bash"),
-            format!("_{APP_ID}"),
-            format!("{APP_ID}.fish"),
+            format!("{PROGRAM}.bash"),
+            format!("_{PROGRAM}"),
+            format!("{PROGRAM}.fish"),
         ] {
             let path = packaging().join("completions").join(&file);
             let text = std::fs::read_to_string(&path)
@@ -605,16 +606,18 @@ mod tests {
         }
     }
 
-    /// One name, in one place.
+    /// Two names, each in one place.
     ///
-    /// The Wayland `app_id`, the desktop entry, the icon and the Arch package
-    /// all have to be the same word for a taskbar to pair a window with its
-    /// icon and for a file manager to launch the right thing. That word is the
-    /// crate's own name, so renaming the program is editing `Cargo.toml` and
-    /// moving the files this test names — and forgetting one is a failure here
-    /// rather than a wrong icon on somebody's desktop.
+    /// The desktop entry and the icon are named for the Wayland `app_id`, and
+    /// the entry says that name again in `Icon=` and `StartupWMClass=`: that
+    /// is what a taskbar pairs a window with its icon by. The binary a user
+    /// types, the Arch package and the completions are named for the program
+    /// itself, which is what the entry launches in `Exec=`. Renaming either is
+    /// editing the constant in `main.rs` and moving the files this test names —
+    /// and forgetting one is a failure here rather than a wrong icon on
+    /// somebody's desktop.
     #[test]
-    fn everything_is_named_after_the_crate() {
+    fn everything_is_named_after_the_program_or_the_app_id() {
         let entry = packaging().join(format!("{APP_ID}.desktop"));
         let icon = packaging().join(format!("{APP_ID}.svg"));
         let pkgbuild = packaging().join("PKGBUILD");
@@ -624,44 +627,53 @@ mod tests {
         assert!(
             packaging()
                 .join("completions")
-                .join(format!("{APP_ID}.bash"))
+                .join(format!("{PROGRAM}.bash"))
                 .exists()
                 && packaging()
                     .join("completions")
-                    .join(format!("_{APP_ID}"))
+                    .join(format!("_{PROGRAM}"))
                     .exists()
                 && packaging()
                     .join("completions")
-                    .join(format!("{APP_ID}.fish"))
+                    .join(format!("{PROGRAM}.fish"))
                     .exists(),
-            "the completions are named after the crate too"
+            "the completions are named after the program too"
         );
 
         let text = std::fs::read_to_string(&entry).expect("the desktop entry reads");
-        for field in ["Exec", "TryExec", "Icon", "StartupWMClass"] {
+        for (field, name) in [
+            ("Exec", PROGRAM),
+            ("TryExec", PROGRAM),
+            ("Icon", APP_ID),
+            ("StartupWMClass", APP_ID),
+        ] {
             let value = text
                 .lines()
                 .find_map(|line| line.strip_prefix(&format!("{field}=")))
                 .unwrap_or_else(|| panic!("the desktop entry has no {field}"));
             assert!(
-                value.split(' ').next() == Some(APP_ID),
-                "{field}={value} should name {APP_ID}"
+                value.split(' ').next() == Some(name),
+                "{field}={value} should name {name}"
             );
         }
 
         let text = std::fs::read_to_string(&pkgbuild).expect("the PKGBUILD reads");
         assert!(
-            text.contains(&format!("pkgname={APP_ID}")),
-            "the PKGBUILD packages {APP_ID}"
+            text.contains(&format!("pkgname={PROGRAM}")),
+            "the PKGBUILD packages {PROGRAM}"
         );
         assert!(
             text.contains(&format!("pkgver={}", env!("CARGO_PKG_VERSION"))),
             "the PKGBUILD is at the version Cargo.toml says"
         );
+        assert!(
+            text.contains(APP_ID),
+            "the PKGBUILD installs the entry and the icon under {APP_ID}"
+        );
 
         assert!(
-            OPTIONS.contains(APP_ID),
-            "the help text still calls the program {APP_ID}"
+            OPTIONS.contains(PROGRAM),
+            "the help text still calls the program {PROGRAM}"
         );
     }
 }

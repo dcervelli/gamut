@@ -1,6 +1,11 @@
 # Maintainer: TODO <TODO>
 
 pkgname=gamut
+# The name the desktop knows the program by: the Wayland app_id, and so the
+# basename the entry and the icon have to be filed under for a taskbar to pair
+# a window with its icon. `main.rs::APP_ID` is where it is set, and `cli`'s
+# tests check that this file still agrees with it.
+_appid=com.dcervelli.gamut
 pkgver=0.1.0
 pkgrel=1
 pkgdesc="A GPU image viewer with real color management, for photographs, measurement data and HDR"
@@ -72,10 +77,10 @@ package() {
   install -Dm644 user-docs/KEYS.md "$pkgdir/usr/share/doc/$pkgname/KEYS.md"
   install -Dm644 user-docs/FORMATS.md "$pkgdir/usr/share/doc/$pkgname/FORMATS.md"
 
-  install -Dm644 "packaging/$pkgname.desktop" \
-    "$pkgdir/usr/share/applications/$pkgname.desktop"
-  install -Dm644 "packaging/$pkgname.svg" \
-    "$pkgdir/usr/share/icons/hicolor/scalable/apps/$pkgname.svg"
+  install -Dm644 "packaging/$_appid.desktop" \
+    "$pkgdir/usr/share/applications/$_appid.desktop"
+  install -Dm644 "packaging/$_appid.svg" \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/$_appid.svg"
 
   # The manual page and the completions come out of the binary just built, so
   # they cannot describe a different version of the program than the one being

@@ -26,12 +26,19 @@ use winit::event_loop::{ControlFlow, EventLoop};
 use app::App;
 use loader::Loader;
 
-/// The name this program is known by outside itself: the Wayland `app_id` and
-/// the class half of the X11 `WM_CLASS`, the basename of the desktop entry and
-/// of the icon, and the Arch package. It is the crate's own name so that
-/// `Cargo.toml` is the single place to change it; `cli`'s tests check that
-/// everything in `packaging/` still agrees.
-pub(crate) const APP_ID: &str = env!("CARGO_PKG_NAME");
+/// The word this program is called by: the binary a user types, the name in a
+/// window title, the Arch package, the man page and the completions. It is the
+/// crate's own name so that `Cargo.toml` is the single place to change it;
+/// `cli`'s tests check that everything in `packaging/` still agrees.
+pub(crate) const PROGRAM: &str = env!("CARGO_PKG_NAME");
+
+/// The name this program is known by to a desktop: the Wayland `app_id` and
+/// the class half of the X11 `WM_CLASS`, and the basename of the desktop entry
+/// and of the icon, which have to match it for a taskbar to pair a window with
+/// its icon. It is in the reverse-DNS form a desktop expects of an application
+/// id, so it is written out here rather than taken from [`PROGRAM`] — a crate
+/// name cannot hold the dots.
+pub(crate) const APP_ID: &str = "com.dcervelli.gamut";
 
 /// Replaces control characters with the replacement character before a string
 /// reaches a terminal. A filename is attacker-chosen data, and a terminal

@@ -6,7 +6,7 @@ use winit::dpi::{LogicalSize, PhysicalSize, Size};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::WindowAttributes;
 
-use crate::APP_ID;
+use crate::{APP_ID, PROGRAM};
 use crate::ui::chrome::{BAR_HEIGHT, SIDE_WIDTH};
 
 /// Fraction of the monitor a freshly opened window may occupy.
@@ -41,14 +41,14 @@ pub(super) fn file_label(path: &Path) -> String {
 }
 
 pub(super) fn window_title(path: &Path) -> String {
-    format!("{} — {APP_ID}", file_label(path))
+    format!("{} — {PROGRAM}", file_label(path))
 }
 
 /// Before there is anything to look at, the title carries the file being read.
 /// Titling an empty window with a file it is not yet showing would be saying
 /// something untrue, and the title is the only place the name can go.
 pub(super) fn loading_title(path: &Path) -> String {
-    format!("loading {} — {APP_ID}", file_label(path))
+    format!("loading {} — {PROGRAM}", file_label(path))
 }
 
 /// Give the window an identity before it opens.
@@ -59,7 +59,8 @@ pub(super) fn loading_title(path: &Path) -> String {
 /// can match — needs the application's name as well. Wayland calls it the
 /// `app_id` and X11 the class half of `WM_CLASS`; winit spells both `with_name`
 /// on a per-backend extension trait, so both are set and whichever backend is
-/// in use reads its own.
+/// in use reads its own. The name is [`APP_ID`], the reverse-DNS one the
+/// desktop entry is filed under, not the word the binary is called by.
 ///
 /// The instance name is left empty: it exists to tell several windows of one
 /// application apart, and there is only ever the one here.

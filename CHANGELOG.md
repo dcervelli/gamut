@@ -6,6 +6,14 @@ Notable changes to `gamut`. The format follows
 
 ## Unreleased
 
+### Changed
+
+- The Wayland `app_id` and X11 `WM_CLASS` are now `com.dcervelli.gamut`, the
+  reverse-DNS form a desktop expects, and the desktop entry and the icon are
+  filed under that name to match. A window rule matching the old `gamut` class
+  needs the new name; the command, the package and the window title are
+  unchanged.
+
 ### Added
 
 - `--size <W> <H>` opens the window at the given size rather than at the

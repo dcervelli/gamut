@@ -90,11 +90,14 @@ about.toml     which licenses a dependency may arrive under; packaging/about.hbs
                which bin/release regenerates and stamps with the lock it read
 ```
 
-`main.rs::APP_ID` is the crate's own name, and everything outside the program
-that has to agree on one — the Wayland app_id, the desktop entry, the icon,
-the package — is named from it. `cli.rs`'s tests check that they still do, so
-renaming the program is editing `Cargo.toml` and moving the files those tests
-name.
+The program answers to two names, both in `main.rs`. `PROGRAM` is the crate's
+own name, and what a user types: the binary, the window title, the Arch
+package, the man page and the completions. `APP_ID` is `com.dcervelli.gamut`,
+what the desktop knows it by: the Wayland `app_id` and the X11 `WM_CLASS`, and
+so the basename of the desktop entry and of the icon, which the entry repeats
+in `Icon=` and `StartupWMClass=`. `cli.rs`'s tests check that `packaging/`
+still agrees with both, so renaming either is editing the constant —
+`Cargo.toml` for `PROGRAM` — and moving the files those tests name.
 
 ## Where to make a change
 
