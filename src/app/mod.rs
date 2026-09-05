@@ -8,6 +8,7 @@ mod window;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
+use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time::Instant;
 
@@ -26,6 +27,7 @@ use crate::theme::{self, Theme};
 use crate::timing;
 use crate::ui::chrome::{Chrome, content_area, image_viewport};
 use crate::ui::layers::{Hit, Shown};
+use crate::ui::toast::{self, Level, Toasts};
 use crate::ui::{self, Current, FileFacts, FrameInput, Panels, Reading, Tooltips};
 use crate::view::{View, Viewport};
 use crate::watch::{self, Watch};
@@ -54,6 +56,10 @@ pub struct Options {
     pub minimap: bool,
     pub upscale: Upscale,
 }
+
+/// What a copy prepared on a thread of its own did: took the selection, or
+/// failed with this much to say about it.
+type CopyOutcome = Result<(), String>;
 
 pub struct App {
     files: Files,
@@ -121,6 +127,17 @@ pub struct App {
     /// depends on how long something has been true: `panels.tooltip` is what
     /// it has settled on, and this is the clock behind it.
     tooltips: Tooltips,
+    /// The message about what was just done, and when it takes itself off.
+    /// The other thing on screen that time alone changes.
+    toasts: Toasts,
+    /// How the copies being prepared on threads of their own turned out. A
+    /// copy of the picture has to walk every pixel before it can say whether
+    /// it worked, and the thread doing that has no business touching the
+    /// interface — so it sends the outcome here, and the loop picks it up on
+    /// the same cadence it looks at the file, the palette and the clipboard
+    /// on. `Err` carries the one line the window shows; the whole chain has
+    /// already gone to the terminal.
+    copied: (mpsc::Sender<CopyOutcome>, mpsc::Receiver<CopyOutcome>),
     /// Copies of the picture still being prepared, joined before the loop
     /// leaves. A copy is often followed straight away by `q`, and a thread
     /// that has not yet handed its bytes over dies with the process — the
@@ -194,6 +211,8 @@ impl App {
             renderer: None,
             pointer: Pointer::default(),
             tooltips: Tooltips::default(),
+            toasts: Toasts::default(),
+            copied: mpsc::channel(),
             copying: Vec::new(),
             copies: Arc::new(AtomicU64::new(0)),
             panels: Panels {
@@ -527,6 +546,7 @@ impl App {
             self.logical_size(),
             self.shown(),
             self.grid_spacing().as_deref(),
+            self.toasts.showing(),
         ))
     }
 
@@ -614,6 +634,46 @@ impl App {
             return None;
         };
         ui::info::copyable_at(renderer, current, panel, scroll, point)
+    }
+
+    /// Raises the message at the foot of the window, in place of whatever was
+    /// up. Handlers say it and return `Effect::Redraw`; nothing here asks the
+    /// window for a frame.
+    ///
+    /// Measured against the fonts the frame will set it in, once and here,
+    /// which is why it needs the renderer at all: nothing about the message
+    /// changes while it is up, so the frame builder and the pointer both
+    /// place it from that one number. No renderer means no window to show it
+    /// on, and nothing has been asked for yet.
+    pub(super) fn toast(&mut self, message: impl Into<String>, level: Level) {
+        if let Some(renderer) = self.renderer.as_mut() {
+            self.toasts.show(
+                renderer,
+                Instant::now(),
+                message.into(),
+                level,
+                toast::LINGER,
+            );
+        }
+    }
+
+    /// Says what the copies prepared on their own threads did. Returns
+    /// whether anything was said, and so whether a redraw is owed.
+    ///
+    /// Taken up on the file check's cadence rather than the moment the thread
+    /// finishes: a copy of a large picture takes far longer than the wait
+    /// itself, and a quarter of a second either way on a message about it is
+    /// not a difference anyone can see.
+    fn poll_copies(&mut self) -> bool {
+        let outcomes: Vec<CopyOutcome> = self.copied.1.try_iter().collect();
+        let said = !outcomes.is_empty();
+        for outcome in outcomes {
+            match outcome {
+                Ok(()) => self.toast("Copied picture.", Level::Message),
+                Err(error) => self.toast(error, Level::Error),
+            }
+        }
+        said
     }
 
     /// How far the column in `panel` moves for each logical pixel a drag of
@@ -1094,6 +1154,7 @@ impl App {
             headroom,
             hdr_available,
             tooltip,
+            toast: self.toasts.showing().cloned(),
         };
 
         // Split borrow: the frame builder needs the renderer's font metrics
@@ -1185,28 +1246,38 @@ impl ApplicationHandler<UserEvent> for App {
             let relisted = self.poll_directories();
             let retinted = self.poll_theme();
             let offered = self.poll_clipboard();
-            if (vanished || relisted || retinted || offered)
+            let copied = self.poll_copies();
+            if (vanished || relisted || retinted || offered || copied)
                 && let Some(window) = &self.window
             {
                 window.request_redraw();
             }
         }
 
-        // The pointer resting on a button long enough to be told what it is:
-        // the one thing on screen that happens because time passed rather
-        // than because anything arrived.
-        if self.tooltips.tick(now)
-            && let Some(window) = &self.window
-        {
+        // The two things on screen that happen because time passed rather
+        // than because anything arrived: the pointer resting on a button long
+        // enough to be told what it is, and the message about what was just
+        // done having been up long enough. The message taking itself off
+        // takes a button off the screen with it, so the pointer is asked
+        // again where it now is.
+        let mut timed = self.tooltips.tick(now);
+        if self.toasts.tick(now) {
+            self.update_hover();
+            timed = true;
+        }
+        if timed && let Some(window) = &self.window {
             window.request_redraw();
         }
 
         // Sleep until the next thing with a time on it: the file check, the
         // moment a read that is still going becomes worth mentioning, or the
-        // moment a tooltip is due. A read that finishes first wakes us
+        // moment a tooltip is due or a message has had its time. A read that finishes first wakes us
         // through the proxy instead.
         let mut deadline = self.next_poll;
-        if let Some(due) = self.tooltips.deadline() {
+        for due in [self.tooltips.deadline(), self.toasts.deadline()]
+            .into_iter()
+            .flatten()
+        {
             deadline = deadline.min(due);
         }
         match self.files.announce_slow_read(now) {
@@ -1551,6 +1622,42 @@ mod tests {
         app.motion = None;
         let _ = app.perform(Action::Pan(Direction::Left, PanStep::Fine));
         assert!(app.motion.is_none());
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// Escape puts away whatever is up, topmost first, and leaves only when
+    /// there is nothing left to put away. `q` is not held up by a message:
+    /// a copy is often followed straight away by it.
+    #[test]
+    fn escape_puts_things_away_before_it_quits() {
+        use input::{Action, Effect};
+
+        let (mut app, dir) = app_over("dismiss", &[("a.png", 64, 48)]);
+        let raise = |app: &mut App| {
+            app.toasts.show(
+                &mut crate::ui::Monospace,
+                Instant::now(),
+                "Copied file path.".to_string(),
+                Level::Message,
+                toast::LINGER,
+            );
+        };
+
+        // The menu outranks the message, and each press takes off one thing.
+        app.panels.menu = Some(ui::Menu::Zoom);
+        raise(&mut app);
+        assert_eq!(app.perform(Action::Dismiss), Effect::Redraw);
+        assert_eq!(app.panels.menu, None);
+        assert!(app.toasts.showing().is_some());
+
+        assert_eq!(app.perform(Action::Dismiss), Effect::Redraw);
+        assert!(app.toasts.showing().is_none());
+        assert_eq!(app.perform(Action::Dismiss), Effect::Quit);
+
+        // `q` leaves whether or not there is a message to read.
+        raise(&mut app);
+        assert_eq!(app.perform(Action::Quit), Effect::Quit);
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }

@@ -63,6 +63,17 @@ taken out of it.
 | `Ctrl+Shift+.` | Copy the coordinate of the pixel under the pointer |
 | `Ctrl+V` | Paste a picture, saved among your pictures and shown |
 
+Every copy says so: a short message appears at the foot of the window naming
+what was taken, and goes on its own after a couple of seconds. Copying changes
+nothing you can see in the picture, so without it there is no way to tell a
+copy that worked from a key that was not read. Click the cross on the message
+to take it off sooner, or press `Esc` — which closes whatever is up, a popup
+first and then a message, and quits only when there is nothing left to close.
+`q` quits whether or not a message is showing. A message in the theme's yellow
+means what you asked for could not be done and nothing is wrong — the pointer
+was not over a pixel, say; one in its red means the copy failed, and the
+terminal has the reason in full.
+
 `Shift+C` copies the path in full, from the root down, whichever way the file
 was named when the program was started — a relative name is of no use in
 another window, which is where a copied path is going.
@@ -207,7 +218,7 @@ top of a colormap would distort the values you are reading off it.
 | `>` | Cycle how the pixel under the pointer is read out: hex → decimal → mapped |
 | `` ` `` | Show or hide the panels around the image |
 | `~` | The same, and closes the histogram, information and minimap |
-| `q`, `Esc` | Quit. `Esc` closes an open popup first |
+| `q`, `Esc` | Quit. `Esc` closes an open popup or message first |
 
 The panels are opaque and the image is fitted inside them, so hiding them
 gives a fitted image more room and it re-fits immediately.

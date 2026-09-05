@@ -26,19 +26,19 @@
   not committed to until then.
 
 ## RELEASE 0.1.0
-* GRAY16 → G16
-* Zoom percentage tooltips to show keyboard shortcut
-* Color spectrum chooser to lower right
+* c to copy just filename
 * Toast for messages ("Copied filename")
-* EV UI
-* Window UI
+* Lower right
+  * Color spectrum UI
+  * EV UI
+  * Window UI
 * Move repo to dcervelli/
 * Wayland app_id
 * Usage Docs
 * Human readme
-* Remember settings for a file across swaps
 
 ## FUTURE
+* Output histogram
 * Replace middot with separator for clean bar sections
 * \[1/8\] → 1/8 and separator to right
 * Red / blue color spectrum

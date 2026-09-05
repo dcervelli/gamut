@@ -24,6 +24,7 @@ use crate::timing;
 use crate::ui::info::Copyable;
 use crate::ui::layers::Hit;
 use crate::ui::menu::Reach;
+use crate::ui::toast::Level;
 use crate::ui::{self, Current, Menu, Panels, Tip, Widget};
 
 /// Window pixels moved per arrow-key press. Shift moves one pixel instead,
@@ -43,6 +44,11 @@ const WHEEL_PIXELS_PER_STEP: f32 = 50.0;
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Action {
     Quit,
+    /// Take off whatever is up — the menu that is open, or the message at the
+    /// foot of the window — and quit when nothing is. Escape's, so that the
+    /// key that puts things away is not also the key that leaves; `q` quits
+    /// whether or not a message is showing.
+    Dismiss,
     ZoomIn,
     ZoomOut,
     /// Go to this zoom, 1.0 being one image pixel to one screen pixel.
@@ -635,11 +641,11 @@ pub const KEYS: &[Binding] = &[
         section: Section::Interface,
         mods: PLAIN,
         shown: "q, Esc",
-        help: "Quit",
+        help: "Quit; Esc closes a popup or a message first",
         keys: &[
             (Char("q"), Quit),
             (Char("Q"), Quit),
-            (Named(NamedKey::Escape), Quit),
+            (Named(NamedKey::Escape), Dismiss),
         ],
     },
     Binding {
@@ -794,11 +800,18 @@ impl Pointer {
     }
 }
 
-/// Says that a copy could not be made. Copies happen because a key was
-/// pressed and show nothing on screen when they work, so the only thing worth
-/// saying is when one did not.
+/// Says on the terminal that something could not be done, with the whole
+/// chain of why. What the window says about the same failure is one line —
+/// see [`App::toast`] — since a message at the foot of a picture is read at a
+/// glance and a cause worth following is worth following at leisure.
 fn report(error: &anyhow::Error) {
     eprintln!("gamut: {}", crate::escape_controls(&format!("{error:#}")));
+}
+
+/// The one line about it that goes in the window: the failure itself, without
+/// the chain under it.
+fn briefly(error: &anyhow::Error) -> String {
+    crate::escape_controls(&error.to_string())
 }
 
 impl App {
@@ -819,6 +832,18 @@ impl App {
             // asked for.
             Quit => {
                 if self.panels.menu.take().is_some() {
+                    self.update_hover();
+                    return Effect::Redraw;
+                }
+                return Effect::Quit;
+            }
+            // Escape's own: it takes things off, topmost first, and only
+            // leaves when there is nothing left to take off. A message about
+            // a copy does not stand between `q` and quitting — a copy is
+            // often followed straight away by `q` — but Escape is the key
+            // that puts things away, so it clears the message first.
+            Dismiss => {
+                if self.panels.menu.take().is_some() || self.toasts.dismiss() {
                     self.update_hover();
                     return Effect::Redraw;
                 }
@@ -924,18 +949,25 @@ impl App {
                     true
                 });
             }
-            // Nothing on screen changes; a copy is reported only when it
-            // could not be made.
+            // A copy takes the selection and leaves the picture exactly as it
+            // was, so the message at the foot of the window is the only sign
+            // it happened at all — and the only way to tell a copy that
+            // worked from a key that was never read.
             CopyPath => {
                 let path = self.shown_path();
-                self.copy(path.to_string_lossy().as_bytes(), clipboard::TEXT);
-                return Effect::Nothing;
+                self.copy(
+                    path.to_string_lossy().as_bytes(),
+                    clipboard::TEXT,
+                    "Copied file path.",
+                );
             }
             CopyUri => {
                 let list = clipboard::uri_list(&self.shown_path());
-                self.copy(list.as_bytes(), clipboard::URI_LIST);
-                return Effect::Nothing;
+                self.copy(list.as_bytes(), clipboard::URI_LIST, "Copied file URI.");
             }
+            // The one copy with nothing to say yet: the picture is walked and
+            // encoded on a thread of its own, and what it did is said when it
+            // comes back — see `App::poll_copies`.
             CopyImage => {
                 self.copy_image();
                 return Effect::Nothing;
@@ -943,10 +975,7 @@ impl App {
             // Whether or not the panel is open: what it says is a fact about
             // the file, and asking for it should not mean first arranging to
             // look at it.
-            CopyMetadata => {
-                self.copy_facts(Copyable::All);
-                return Effect::Nothing;
-            }
+            CopyMetadata => self.copy_facts(Copyable::All),
             // Nothing to draw yet either: the picture is being written and
             // then read, and what is on screen stays until it arrives.
             Paste => {
@@ -957,17 +986,11 @@ impl App {
             CyclePixelFormat => {
                 self.panels.pixel_format = self.panels.pixel_format.next();
             }
-            // Nothing on screen changes; a copy is reported only when it
-            // could not be made — here including the one case a pixel copy
-            // has and the others do not, the pointer being nowhere near one.
-            CopyPixelValue => {
-                self.copy_pixel(false);
-                return Effect::Nothing;
-            }
-            CopyPixelCoordinate => {
-                self.copy_pixel(true);
-                return Effect::Nothing;
-            }
+            // As the copies above, with the one case a pixel copy has and the
+            // others do not: the pointer nowhere near a pixel, which is worth
+            // saying because the key looks as though it did nothing.
+            CopyPixelValue => self.copy_pixel(false),
+            CopyPixelCoordinate => self.copy_pixel(true),
             ResetDisplay => {
                 let headroom = self.headroom();
                 return self.adjust(move |current, _| {
@@ -1021,6 +1044,11 @@ impl App {
         let image = Arc::clone(&current.image);
         let display = current.display.clone();
         let (asked, copies) = (self.claim_copy(), Arc::clone(&self.copies));
+        // How it turned out, for the message the window shows about it. Sent
+        // rather than said here: this thread has no business touching the
+        // interface, and the loop picks the outcome up on the same cadence it
+        // looks at the file and the clipboard on.
+        let outcome = self.copied.0.clone();
 
         // Threads that have already handed their bytes over are dropped as
         // each new copy is asked for, so the list is what is still in flight
@@ -1036,7 +1064,11 @@ impl App {
             let encoded = Instant::now();
             let png = match encode::png(&raster) {
                 Ok(png) => png,
-                Err(error) => return report(&error),
+                Err(error) => {
+                    report(&error);
+                    let _ = outcome.send(Err(briefly(&error)));
+                    return;
+                }
             };
             timing::encoded_png(width, height, png.len(), encoded.elapsed());
 
@@ -1046,8 +1078,14 @@ impl App {
             if copies.load(Ordering::Relaxed) != asked {
                 return;
             }
-            if let Err(error) = clipboard::copy(&png, clipboard::PNG) {
-                report(&error);
+            match clipboard::copy(&png, clipboard::PNG) {
+                Ok(()) => {
+                    let _ = outcome.send(Ok(()));
+                }
+                Err(error) => {
+                    report(&error);
+                    let _ = outcome.send(Err(briefly(&error)));
+                }
             }
         }));
     }
@@ -1098,7 +1136,15 @@ impl App {
         if rows.is_empty() {
             return;
         }
-        self.copy(rows.as_bytes(), clipboard::TEXT);
+        // Named by how much of the table was asked for, since a click on a
+        // field and a click on the whole panel are the same gesture on
+        // different buttons and the message is what parts them.
+        let said = match copies {
+            Copyable::All => "Copied file information.",
+            Copyable::Section(_) => "Copied section.",
+            Copyable::Fact(_) => "Copied field.",
+        };
+        self.copy(rows.as_bytes(), clipboard::TEXT, said);
     }
 
     /// Puts `content` on the clipboard under `mime_type`.
@@ -1106,10 +1152,14 @@ impl App {
     /// Done in line, unlike the picture: there is nothing here to prepare, and
     /// a copy the user follows straight away with `q` should be on the
     /// clipboard before the window goes.
-    fn copy(&mut self, content: &[u8], mime_type: &str) {
+    fn copy(&mut self, content: &[u8], mime_type: &str, said: &str) {
         self.claim_copy();
-        if let Err(error) = clipboard::copy(content, mime_type) {
-            report(&error);
+        match clipboard::copy(content, mime_type) {
+            Ok(()) => self.toast(said, Level::Message),
+            Err(error) => {
+                report(&error);
+                self.toast(briefly(&error), Level::Error);
+            }
         }
     }
 
@@ -1139,10 +1189,15 @@ impl App {
         // not traveled since is a click on it, and this is where it is
         // answered: the release ends the drag it also started, and only one
         // of the two gestures can have been meant.
+        // The message the copy raises is a change on screen, and this is the
+        // one path into `copy_facts` that is not a key: the release goes on
+        // to end a drag, which usually owes nothing.
+        let mut changed = false;
         if state == ElementState::Released
             && let Some((copies, _)) = self.pointer.copying.take()
         {
             self.copy_facts(copies);
+            changed = true;
         }
 
         if state == ElementState::Pressed {
@@ -1220,7 +1275,7 @@ impl App {
                 };
             window.set_cursor(Cursor::Icon(icon));
         }
-        false
+        changed
     }
 
     /// Takes a press on the info panel: it starts a drag of the column, and
@@ -1459,6 +1514,12 @@ impl App {
             Widget::Output => {
                 let _ = self.toggle_hdr();
             }
+            // The cross on the message at the foot of the window. The caller
+            // redraws and re-tests the pointer, which is what takes the
+            // highlight off a button that is no longer there.
+            Widget::Dismiss => {
+                self.toasts.dismiss();
+            }
         }
     }
 
@@ -1488,9 +1549,14 @@ impl App {
     fn copy_pixel(&mut self, coordinate: bool) {
         let Some(text) = self.pixel_text(coordinate) else {
             eprintln!("gamut: no pixel under the pointer to copy");
+            self.toast("No pixel under the pointer.", Level::Warning);
             return;
         };
-        self.copy(text.as_bytes(), clipboard::TEXT);
+        let said = match coordinate {
+            true => "Copied pixel coordinate.",
+            false => "Copied pixel value.",
+        };
+        self.copy(text.as_bytes(), clipboard::TEXT, said);
     }
 
     /// What such a copy says, or `None` when the pointer is not on a pixel.
@@ -1553,7 +1619,14 @@ impl App {
             // Every other panel is opaque to the wheel as it is to a press,
             // and has nothing to do with one: the spin is spent there rather
             // than zooming the picture it is floating over.
-            Some(Hit::Cell(_) | Hit::Menu | Hit::Minimap | Hit::Histogram(_) | Hit::Chrome(_)) => {
+            Some(
+                Hit::Cell(_)
+                | Hit::Menu
+                | Hit::Toast(_)
+                | Hit::Minimap
+                | Hit::Histogram(_)
+                | Hit::Chrome(_),
+            ) => {
                 return false;
             }
             // The picture, or a pointer that has not yet said where it is.
@@ -1858,9 +1931,11 @@ mod tests {
         use winit::keyboard::SmolStr;
         let plain = |text: &str| action_for(&Key::Character(SmolStr::new(text)), ELSEWHERE, PLAIN);
         assert_eq!(plain("q"), Some(Quit));
+        // The same line of `--help`, and not the same action: Escape takes
+        // off what is up before it means anything else, and `q` leaves.
         assert_eq!(
             action_for(&Key::Named(NamedKey::Escape), ELSEWHERE, PLAIN),
-            Some(Quit)
+            Some(Dismiss)
         );
         assert_eq!(
             action_for(&Key::Named(NamedKey::PageDown), ELSEWHERE, PLAIN),

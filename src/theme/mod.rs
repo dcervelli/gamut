@@ -81,10 +81,20 @@ pub struct Theme {
     pub text_bright: Color,
     /// What is switched on, and where the display window sits.
     pub accent: Color,
-    /// The word that says the file behind the picture on screen is gone. Its
-    /// own role rather than the accent, which means the opposite: the accent
-    /// is what is switched on, and this is what has been lost.
+    /// The word that says the file behind the picture on screen is gone, and
+    /// the message that says something could not be done. Its own role rather
+    /// than the accent, which means the opposite: the accent is what is
+    /// switched on, and this is what has been lost.
     pub warning: Color,
+    /// The message that says something was not quite what was asked for —
+    /// short of [`Theme::warning`], which is for what failed outright.
+    ///
+    /// The theme's own yellow, which is the color its terminal writes a
+    /// caution in, and so a color chosen to be read against this very
+    /// background. Falls back to the red beside it where the theme names no
+    /// yellow that can be seen here: two levels drawn alike say less than
+    /// they should, and a level drawn invisibly says nothing at all.
+    pub caution: Color,
     /// The minimap's border, and the wash over the part of the image that is
     /// off screen. Both go over a thumbnail drawn by the image layer, so both
     /// stay translucent.
@@ -172,6 +182,7 @@ impl Theme {
         text_bright: Color::rgb(255, 255, 255),
         accent: Color::rgb(120, 180, 255),
         warning: Color::rgb(255, 116, 108),
+        caution: Color::rgb(240, 190, 110),
         minimap_edge: Color::rgba(255, 255, 255, 70),
         minimap_dim: Color::rgba(6, 6, 10, 150),
         histogram_luma: HISTOGRAM_LUMA,
@@ -231,6 +242,16 @@ impl Theme {
             .find(|shade| separated(*shade, background))
             .unwrap_or(text_bright);
 
+        // And its own yellow, read the same way: the color its terminal
+        // writes a caution in. The red beside it where no yellow the theme
+        // names can be seen against this background, since a caution drawn in
+        // the ground it sits on is a caution nobody reads.
+        let caution = ["bright_yellow", "yellow"]
+            .into_iter()
+            .filter_map(|key| palette.color(key))
+            .find(|shade| separated(*shade, background))
+            .unwrap_or(warning);
+
         // The theme's own next surface up, where it has one that can actually
         // be seen against the panel; otherwise a step from the panel towards
         // the text, which every palette can supply.
@@ -268,6 +289,7 @@ impl Theme {
             text_bright,
             accent,
             warning,
+            caution,
             minimap_edge: foreground.with_alpha(Theme::FALLBACK.minimap_edge.a),
             minimap_dim: deep.with_alpha(Theme::FALLBACK.minimap_dim.a),
             histogram_luma: HISTOGRAM_LUMA,
