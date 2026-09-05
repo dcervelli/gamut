@@ -254,6 +254,16 @@ impl Chrome {
         )
     }
 
+    /// Where the bottom bar's own words end: short of that switch by the gap
+    /// the bars keep between one thing and the next.
+    ///
+    /// Asked for by name because the frame builder and the pointer both lay
+    /// those words out, and they have to lay them out against the same edge —
+    /// see [`status::state`](super::status::state).
+    pub fn state_limit(&self) -> f32 {
+        self.output_button().x - super::PADDING
+    }
+
     /// The whole window, which is what a popup is placed in: a menu hangs off
     /// the button that opened it and is bounded by the window, not by the
     /// frame the picture is in — a menu pushed around by where the image

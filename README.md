@@ -405,9 +405,11 @@ file is decoded — the window opens later — so `App::adopt_headroom` asks onc
 more at that point too.
 
 The bottom bar names what is being done and nothing else: the curve when one
-is on, and `clip` when there is none, the surface is SDR and there are
+is on, and `clipped` when there is none, the surface is SDR and there are
 highlights being thrown away — so an ordinary photograph pushed a stop up says
-so, and the picture never goes flat at the top in silence.
+so, and the picture never goes flat at the top in silence. That word is the
+one thing on the line nobody asked for, every other segment being the name of
+a setting, so it is the one thing on it set bold.
 
 False color (`r`, or `--colormap`) applies to single-channel images, and
 holds the curve at a clip while active, on either surface — a curve on top of
@@ -499,13 +501,23 @@ click handler agree on where a widget is without either of them owning it. The
 top bar carries which file it is — its place in the list, in front of its
 name, so that the count is always in the same place whatever the name is — and
 what the image is: its size, its pixels, its color space, all fixed for as
-long as the file is on screen. The name is the only thing in the window set
-bold, and the only thing drawn in the ink the theme keeps for it; the count in
+long as the file is on screen. The name is the only thing drawn in the ink the
+theme keeps for it, and the only thing set bold up there; the count in
 front of it is set like the facts at the other end of the bar, since it is one
 of them. Picking out two things picks out neither, and what a reader wants
 from that bar at a glance is the name. The bottom bar carries what changes: what is
 under the pointer, and what the view is doing to the image, the last of which
-says nothing at all while nothing is being done. The pointer's end of it is a readout of one pixel —
+says nothing at all while nothing is being done. What it does say is the name
+of each thing in force and not a measurement of it — `min/max`, `+¼ EV` — cut
+to the room in front of the surface switch by whole segments, since half of
+`min/max` says less than none of it. The tooltip on those words is the whole
+of it in sentences, a line to each and including the window's own bounds, and
+a press on them opens the histogram panel, which is where every one of those
+settings is set.
+Where those words begin depends on the face they are set in, so the pointer is
+answered against them by measuring them again rather than by any rectangle the
+frame left behind — `ui::state_hover`, beside `layers::hit` for the same
+reason `ui::bar_tip` is. The pointer's end of it is a readout of one pixel —
 where it is, the components the file holds there in the file's own units, the
 values the display window maps them to, and a swatch of the color they come
 out as. The two numbers answer different questions, which is why both are

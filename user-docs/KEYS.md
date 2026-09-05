@@ -192,8 +192,8 @@ Switching the room with `o`, or the window landing on a different kind of
 monitor, chooses the curve again for what it lands on; `t` changes it after
 that.
 
-The bottom bar names the curve while one is on, and says `clip` when there is
-none, the surface is SDR and highlights are being thrown away — so a
+The bottom bar names the curve while one is on, and says **clipped** when
+there is none, the surface is SDR and highlights are being thrown away — so a
 photograph pushed a stop up says so rather than going flat in silence. The
 `HDR` button at the end of the bar is the switch for that room, lit while the
 image is going out with it. On Wayland the compositor says which monitors
@@ -211,6 +211,16 @@ the surface itself.
 False color applies to single-channel images only, and `r` does nothing on a
 color one. While a colormap is active, tone mapping is suspended — a curve on
 top of a colormap would distort the values you are reading off it.
+
+Everything on this page shows up in one line at the right of the bottom bar,
+in front of the `HDR` button: the window by name, the exposure in the quarter
+stops it is stepped in (`+¼ EV`), the false color, and what is becoming of
+the highlights. Only what is in force is named, so an image you have not
+touched leaves that end of the bar empty, and anything the window is too
+narrow for is dropped from the end rather than cut off. Resting the pointer on
+those words says the same thing in sentences, a line to each, with the
+window's own bounds written out; clicking them opens the histogram, which is
+where all of it is set.
 
 ## The interface
 
@@ -250,7 +260,8 @@ histogram is closed leaves it that way for when you open it.
 Under the plot are the settings the plot is drawing, in three rows. **EV**
 steps the exposure a quarter of a stop a press, the same step `d` and `f`
 take, with the exposure in force in front of them. **Window** reads out the
-window's own bounds, in the units the bottom bar quotes them in, and after
+window's own bounds — in the source file's own units where it is counting
+things, and normalized otherwise — and after
 them four buttons that move the window you have: the outer
 two slide it down and up, as `a` and `s` do, and the inner two narrow and
 widen it about its middle, as `A` and `S` do. The four buttons under the

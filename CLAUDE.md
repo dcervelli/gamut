@@ -34,8 +34,10 @@ ui/            builds each frame's display list; no wgpu or winit imports
   toast.rs       the message about what was just done, at the foot of the content
                  area: Toast is what it says and how long it has, Toasts is the
                  clock, and place() puts it and the cross that dismisses it
-  status.rs      the words in the top and bottom bars; top_bar() lays the top one
-                 out for the frame builder and for the pointer alike
+  status.rs      the words in the top and bottom bars; top_bar() and state() lay
+                 each of them out for the frame builder and for the pointer alike —
+                 state() names what is being done to the picture, and explain_state()
+                 says the same in sentences for the tooltip on it
 theme/         palette.rs reads Omarchy's colors.toml and resolves its cascade; mod.rs derives Theme's color roles
 view.rs        zoom / pan / fit geometry, pure maths (View, Viewport, Fit); Position is
                the view in space-scale coordinates, where the line a move follows is straight

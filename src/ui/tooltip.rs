@@ -23,7 +23,7 @@ use crate::render::{Rect, TextMeasure, UiFrame};
 use crate::theme::Theme;
 
 use super::buttons::text_top;
-use super::histogram::{EV_STEP, WINDOWS};
+use super::histogram::{EV_STEP, WINDOWS, stops_label};
 use super::menu::CELL_RADIUS;
 use super::{Panels, TEXT_SIZE, Widget};
 
@@ -73,10 +73,15 @@ pub enum Tip {
     Name,
     /// The count of files beside it.
     Counter,
+    /// The words at the end of the bottom bar that say what is being done to
+    /// the picture. What they say in the room a bar has is the names of the
+    /// things in force; the tooltip is the whole of it in sentences, which is
+    /// where the window's own bounds went — see `App::tooltip`.
+    State,
 }
 
-/// What a tooltip says: the thing itself on the first line, and under it the
-/// keys that do the same job.
+/// What a tooltip says: the thing itself first, and under it the keys that do
+/// the same job.
 ///
 /// Composed by the application rather than here, because almost every line of
 /// one comes out of the key table — a tooltip and `--help` should never be
@@ -84,9 +89,12 @@ pub enum Tip {
 pub struct Tooltip {
     /// What it is about, which is whose rectangle it hangs from.
     pub at: Tip,
-    /// The line that names the thing.
-    pub title: String,
-    /// The lines under it, set dimmer: what to press instead.
+    /// What names the thing. One line for almost everything; the words at the
+    /// end of the bottom bar are about several things at once, and each of
+    /// them is a line, since a paragraph of them would be read as prose
+    /// rather than as a list of what is in force.
+    pub title: Vec<String>,
+    /// The lines under those, set dimmer: what to press instead.
     pub hints: Vec<String>,
 }
 
@@ -116,7 +124,7 @@ pub fn words(tip: Tip, panels: &Panels) -> Option<String> {
         } else {
             -EV_STEP
         };
-        return Some(format!("Exposure {stops:+.2} EV"));
+        return Some(format!("Exposure {} EV", stops_label(stops)));
     }
     Some(
         match tip {
@@ -170,7 +178,7 @@ pub fn words(tip: Tip, panels: &Panels) -> Option<String> {
                 ToneMap::Reinhard => "Reinhard curve",
                 ToneMap::Neutral => "Khronos PBR Neutral curve",
             },
-            Tip::Widget(_) | Tip::Name | Tip::Counter => return None,
+            Tip::Widget(_) | Tip::Name | Tip::Counter | Tip::State => return None,
         }
         .to_string(),
     )
@@ -363,8 +371,11 @@ impl<'a> Tips<'a> {
         if anchor.width <= 0.0 || anchor.height <= 0.0 {
             return;
         }
-        let lines: Vec<&str> = std::iter::once(tooltip.title.as_str())
-            .chain(tooltip.hints.iter().map(String::as_str))
+        let lines: Vec<&str> = tooltip
+            .title
+            .iter()
+            .chain(tooltip.hints.iter())
+            .map(String::as_str)
             .collect();
         let widest = lines
             .iter()
@@ -400,7 +411,7 @@ impl<'a> Tips<'a> {
             for (line, (words, top)) in lines.iter().zip(tops).enumerate() {
                 // The thing leads; what to press instead is set back, the way
                 // the bars set a fact behind the name it is about.
-                let ink = if line == 0 {
+                let ink = if line < tooltip.title.len() {
                     theme.text_primary
                 } else {
                     theme.text_dim
@@ -640,7 +651,7 @@ mod tests {
     fn tooltip(at: Tip) -> Tooltip {
         Tooltip {
             at,
-            title: "Toggle the histogram (h)".into(),
+            title: vec!["Toggle the histogram (h)".into()],
             hints: Vec::new(),
         }
     }
