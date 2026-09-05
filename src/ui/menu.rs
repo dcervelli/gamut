@@ -9,7 +9,7 @@
 
 use crate::render::{Color, Popup, PopupGrid, PopupSection, Rect, TextMeasure, UiFrame, Upscale};
 use crate::theme::Theme;
-use crate::view::{Fit, View, Viewport};
+use crate::view::{Axis, Fit, View, Viewport};
 
 use super::buttons::{button_ink, centered_text, percent};
 use super::icon;
@@ -169,12 +169,8 @@ impl Menu {
                     label: Some("Fit the whole image".to_string()),
                     reach: Reach::Fit,
                 }),
-                ZoomChoice::Fit(Fit::Width) => Some(CellTip {
-                    label: Some("Fit the image's width".to_string()),
-                    reach: Reach::Fit,
-                }),
-                ZoomChoice::Fit(Fit::Height) => Some(CellTip {
-                    label: Some("Fit the image's height".to_string()),
+                ZoomChoice::Fit(Fit::Fill) => Some(CellTip {
+                    label: Some("Fill the window with the image".to_string()),
                     reach: Reach::Fit,
                 }),
                 // What the filter does, rather than what it is called: the
@@ -256,15 +252,15 @@ impl Menu {
 /// How the zoom menu is divided. Three things are chosen from it and they
 /// are not the same kind of thing: a zoom to go to, a rule for the view to
 /// keep, and how the magnified image is resampled. Undivided, the last of
-/// them read as a fourth fit.
+/// them read as a third fit.
 ///
 /// The counts are [`ZOOM_CHOICES`] split up, in that order, and the columns
-/// are what each group wants: eight numbers in fours, three fits abreast, and
-/// two filters named in words rather than drawn as icons.
+/// are what each group wants: eight numbers in fours, the two fits abreast,
+/// and two filters named in words rather than drawn as icons.
 ///
 /// Only the last takes a cell of its own width, and only because a word needs
 /// more room than a number. The rest keep the ordinary cell and stop where
-/// their own cells stop, so the fits sit under the first three percentages
+/// their own cells stop, so the fits sit under the first two percentages
 /// rather than being spread across the panel to fill it.
 const ZOOM_SECTIONS: [PopupSection; 3] = [
     PopupSection {
@@ -275,8 +271,8 @@ const ZOOM_SECTIONS: [PopupSection; 3] = [
     },
     PopupSection {
         title: "Fit",
-        items: 3,
-        columns: 3,
+        items: 2,
+        columns: 2,
         cell_width: MENU_CELL[0],
     },
     PopupSection {
@@ -321,7 +317,7 @@ const COPY_SECTIONS: [PopupSection; 1] = [PopupSection {
 
 /// What the zoom menu offers. The order is the order the cells are laid out
 /// in, section by section and left to right within each.
-const ZOOM_CHOICES: [ZoomChoice; 13] = [
+const ZOOM_CHOICES: [ZoomChoice; 12] = [
     ZoomChoice::Scale(0.10),
     ZoomChoice::Scale(0.25),
     ZoomChoice::Scale(0.50),
@@ -331,8 +327,7 @@ const ZOOM_CHOICES: [ZoomChoice; 13] = [
     ZoomChoice::Scale(8.0),
     ZoomChoice::Scale(16.0),
     ZoomChoice::Fit(Fit::Whole),
-    ZoomChoice::Fit(Fit::Width),
-    ZoomChoice::Fit(Fit::Height),
+    ZoomChoice::Fit(Fit::Fill),
     ZoomChoice::Filter(Upscale::Nearest),
     ZoomChoice::Filter(Upscale::Bicubic),
 ];
@@ -370,11 +365,21 @@ impl ZoomChoice {
     }
 }
 
+/// What the view comes to on screen, which the caller has worked out and
+/// [`draw`] would otherwise measure a second time: the zoom the cells are lit
+/// against, and the axis a fill would fill.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(super) struct Shown {
+    pub zoom: f32,
+    pub fills: Axis,
+}
+
 /// Draws the open menu — [`Panels::menu`], which `popup` was placed for — as
 /// its panel, the name of each section, and a cell for each choice in it.
 /// The view is what every cell is measured against, so that the one it
-/// matches can be lit; `zoom` comes with it because working it out needs the
-/// image and the viewport, which the caller has already had to hand.
+/// matches can be lit; [`Shown`] comes with it because working out either of
+/// the things in it needs the image and the viewport, which the caller has
+/// already had to hand.
 ///
 /// The cells are drawn like the toggles in the side panels, and for the same
 /// reason: each is a press, and a state it is either in or not.
@@ -383,13 +388,14 @@ pub(super) fn draw(
     text: &mut dyn TextMeasure,
     popup: &Popup,
     view: &View,
-    zoom: f32,
+    shown: Shown,
     panels: &Panels,
     theme: &Theme,
 ) {
     let Some(menu) = panels.menu else {
         return;
     };
+    let Shown { zoom, fills } = shown;
     let (fit, upscale) = (view.fit(), view.upscale());
     popup.draw(frame, theme.menu_background);
 
@@ -417,8 +423,8 @@ pub(super) fn draw(
                     ZoomChoice::Scale(scale) => {
                         centered_text(frame, text, cell, ink, &percent(scale), TEXT_SIZE)
                     }
-                    ZoomChoice::Fit(fit) => fit_icon(frame, cell, fit, background, ink),
-                    // In words, where the fits above are in arrows: the two
+                    ZoomChoice::Fit(fit) => fit_icon(frame, cell, fit, fills, background, ink),
+                    // In words, where the fits above are in marks: the two
                     // filters are not a direction or a size, and there is no
                     // picture of "bicubic" a reader would arrive at unaided.
                     // Their cells are cut wider so there is room to say so.
@@ -452,15 +458,17 @@ pub(super) fn draw(
     }
 }
 
-/// The three fits, each as the mark for what it fills: chevrons out to left
-/// and right for the fit to the window's width, up and down for the one to
-/// its height, and the four corners of `expand` for the fit that takes in the
-/// whole image.
-fn fit_icon(frame: &mut UiFrame, cell: Rect, fit: Fit, ground: Color, ink: Color) {
-    let marks = match fit {
-        Fit::Whole => icon::EXPAND,
-        Fit::Width => icon::CHEVRONS_LEFT_RIGHT,
-        Fit::Height => icon::CHEVRONS_UP_DOWN,
+/// The two fits, each as the mark for what it fills: the four corners of
+/// `expand` for the fit that takes the whole image in, and a pair of
+/// chevrons pushed apart for the fit that fills the window — pointing the
+/// way that one actually fills, which is `fills`, since the axis it lands on
+/// is the image's shape against the window's rather than anything the cell
+/// could be drawn with once and for all.
+fn fit_icon(frame: &mut UiFrame, cell: Rect, fit: Fit, fills: Axis, ground: Color, ink: Color) {
+    let marks = match (fit, fills) {
+        (Fit::Whole, _) => icon::EXPAND,
+        (Fit::Fill, Axis::Across) => icon::CHEVRONS_LEFT_RIGHT,
+        (Fit::Fill, Axis::Down) => icon::CHEVRONS_UP_DOWN,
     };
     icon::draw(frame, marks, icon::fit(frame, cell, FIT_ICON), ink, ground);
 }

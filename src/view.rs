@@ -6,24 +6,55 @@ const ZOOM_STEP: f32 = 1.25;
 const MIN_ZOOM: f32 = 0.02;
 const MAX_ZOOM: f32 = 64.0;
 
+/// What the image is measured against when it is fitted: the viewport takes
+/// the image in, or the image covers the viewport.
+///
+/// The two ways round rather than one per axis. Fitting the width and fitting
+/// the height are the same pair seen from the other side: whichever of them
+/// is the smaller scale shows the whole image, which is [`Fit::Whole`]
+/// already, and only the larger one — the image's short side against the
+/// viewport, the long side running off the ends — says anything the other
+/// two do not.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Fit {
-    /// Whole image visible.
+    /// Whole image visible; the viewport may have room to spare on one axis.
     Whole,
-    /// Image width fills the viewport; height may overflow.
-    Width,
-    /// Image height fills the viewport; width may overflow.
-    Height,
+    /// Viewport filled; the image overflows it on one axis.
+    Fill,
 }
 
 impl Fit {
-    fn next(self) -> Fit {
+    fn other(self) -> Fit {
         match self {
-            Fit::Whole => Fit::Width,
-            Fit::Width => Fit::Height,
-            Fit::Height => Fit::Whole,
+            Fit::Whole => Fit::Fill,
+            Fit::Fill => Fit::Whole,
         }
     }
+
+    /// Which axis this fit is measured on: the pair of the viewport's edges
+    /// the image lands exactly against, the other pair being the one it
+    /// falls short of or runs past.
+    ///
+    /// The two fits always take an axis each — the whole image is held by
+    /// the axis with the least room, a filled viewport by the one with the
+    /// most — so this is what says which way round the image is, and it is
+    /// the image's shape against the viewport's that decides.
+    pub fn axis(self, image: [f32; 2], viewport: Viewport) -> Axis {
+        let [width, height] = viewport.size();
+        let (sx, sy) = (width / image[0], height / image[1]);
+        let across = match self {
+            Fit::Whole => sx <= sy,
+            Fit::Fill => sx >= sy,
+        };
+        if across { Axis::Across } else { Axis::Down }
+    }
+}
+
+/// The way an image is held against the viewport: across it or down it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Axis {
+    Across,
+    Down,
 }
 
 /// The part of the window the image is drawn in, in physical pixels, origin
@@ -158,8 +189,7 @@ impl View {
         let sy = viewport[1] / image[1];
         match fit {
             Fit::Whole => sx.min(sy),
-            Fit::Width => sx,
-            Fit::Height => sy,
+            Fit::Fill => sx.max(sy),
         }
     }
 
@@ -333,10 +363,10 @@ impl View {
         self.pan = Self::clamp_pan(self.pan, image, viewport.size(), zoom);
     }
 
-    pub fn cycle_fit(&mut self) {
+    pub fn toggle_fit(&mut self) {
         self.set_fit(match self.fit {
             None => Fit::Whole,
-            Some(fit) => fit.next(),
+            Some(fit) => fit.other(),
         });
     }
 
@@ -448,24 +478,45 @@ mod tests {
     }
 
     #[test]
-    fn fit_cycles_whole_width_height() {
+    fn fit_toggles_between_the_whole_image_and_a_filled_viewport() {
         let mut view = View::new();
         assert_eq!(view.fit(), Some(Fit::Whole));
-        view.cycle_fit();
-        assert_eq!(view.fit(), Some(Fit::Width));
-        view.cycle_fit();
-        assert_eq!(view.fit(), Some(Fit::Height));
-        view.cycle_fit();
+        view.toggle_fit();
+        assert_eq!(view.fit(), Some(Fit::Fill));
+        view.toggle_fit();
         assert_eq!(view.fit(), Some(Fit::Whole));
     }
 
+    /// The two fits are the two axes of the image, each taken once: 900x600
+    /// in a square window is held by its width to be seen whole, and by its
+    /// height to fill the window.
     #[test]
-    fn fit_width_and_height_use_one_axis_each() {
+    fn the_two_fits_take_an_axis_each() {
         let mut view = View::new();
-        view.cycle_fit();
         assert!(close(view.zoom(IMAGE, WINDOW), 1200.0 / 900.0));
-        view.cycle_fit();
+        view.toggle_fit();
         assert!(close(view.zoom(IMAGE, WINDOW), 1200.0 / 600.0));
+    }
+
+    /// Which axis each fit lands on, which is what the menu draws the fill
+    /// with: never the same one, and both of them turning over together when
+    /// the window becomes the other way round to the image.
+    #[test]
+    fn the_axis_a_fit_lands_on_follows_the_shape_of_the_window() {
+        let wide = Viewport::whole([2400.0, 600.0]);
+        for window in [WINDOW, wide] {
+            assert_ne!(
+                Fit::Whole.axis(IMAGE, window),
+                Fit::Fill.axis(IMAGE, window)
+            );
+        }
+        // 900x600 in a square window is wider than the room it has, so it is
+        // held across the window to be seen whole and down it to fill it; in
+        // a window wider still than the image, the other way about.
+        assert_eq!(Fit::Whole.axis(IMAGE, WINDOW), Axis::Across);
+        assert_eq!(Fit::Fill.axis(IMAGE, WINDOW), Axis::Down);
+        assert_eq!(Fit::Whole.axis(IMAGE, wide), Axis::Down);
+        assert_eq!(Fit::Fill.axis(IMAGE, wide), Axis::Across);
     }
 
     #[test]
@@ -575,15 +626,15 @@ mod tests {
     }
 
     #[test]
-    fn fit_width_still_pans_vertically() {
+    fn a_filled_viewport_still_pans_vertically() {
         let mut view = View::new();
-        view.cycle_fit();
-        assert_eq!(view.fit(), Some(Fit::Width));
-        // 900x600 at fit-width in a 1200x600 window is 1200x800: taller than the
+        view.toggle_fit();
+        assert_eq!(view.fit(), Some(Fit::Fill));
+        // 900x600 filling a 1200x600 window is 1200x800: taller than the
         // window, so there is room to scroll down but not sideways.
         let window = Viewport::whole([1200.0, 600.0]);
         view.pan_by(400.0, 400.0, IMAGE, window);
-        assert_eq!(view.fit(), Some(Fit::Width));
+        assert_eq!(view.fit(), Some(Fit::Fill));
         let placement = view.placement(IMAGE, window);
         assert!(close(placement.x, 0.0));
         assert!(close(placement.y + placement.height, window.height));
@@ -717,16 +768,14 @@ mod tests {
         assert_eq!(placement.y, placement.y.round());
 
         // Below 1:1 it is left alone.
-        view.cycle_fit();
-        view.cycle_fit();
-        view.cycle_fit();
+        view.toggle_fit();
         let placement = view.placement([4000.0, 4000.0], window);
         assert!(placement.zoom < 1.0);
         assert!(close(placement.x, 0.0));
     }
 
     /// What a grab cursor is offered on: a fitted image has nowhere to go, and
-    /// fit-width leaves only the axis that overflows.
+    /// a filled viewport leaves only the axis that overflows.
     #[test]
     fn there_is_nothing_to_pan_while_the_whole_image_is_visible() {
         let mut view = View::new();
@@ -738,10 +787,10 @@ mod tests {
         view.zoom_in(IMAGE, WINDOW);
         assert!(view.can_pan(IMAGE, WINDOW));
 
-        // 900x600 at fit-width in a 1200x600 window is 1200x800: taller than
-        // the window, so the vertical axis has somewhere to go.
+        // 900x600 filling a 1200x600 window is 1200x800: taller than the
+        // window, so the vertical axis has somewhere to go.
         view.reset();
-        view.cycle_fit();
+        view.toggle_fit();
         assert!(view.can_pan(IMAGE, Viewport::whole([1200.0, 600.0])));
     }
 

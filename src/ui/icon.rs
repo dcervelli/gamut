@@ -225,14 +225,6 @@ pub(super) const CHEVRON_RIGHT: &[Mark] = &[
     Mark::Line([15.0, 12.0], [9.0, 6.0]),
 ];
 
-/// Lucide's `chevrons-up-down`: the fit that fills the window's height.
-pub(super) const CHEVRONS_UP_DOWN: &[Mark] = &[
-    Mark::Line([7.0, 9.0], [12.0, 4.0]),
-    Mark::Line([12.0, 4.0], [17.0, 9.0]),
-    Mark::Line([7.0, 15.0], [12.0, 20.0]),
-    Mark::Line([12.0, 20.0], [17.0, 15.0]),
-];
-
 /// Lucide's `chevrons-left` and `chevrons-right`: a pair of chevrons pointing
 /// the one way, for the two nudges that slide the display window along the
 /// axis without changing how wide it is.
@@ -261,12 +253,24 @@ pub(super) const CHEVRONS_RIGHT_LEFT: &[Mark] = &[
     Mark::Line([15.0, 12.0], [20.0, 17.0]),
 ];
 
-/// Lucide's `chevrons-left-right`: the fit that fills the window's width.
+/// The nudge that widens the display window and, the marks being a pair of
+/// edges pushed apart, the fit that fills the window across.
 pub(super) const CHEVRONS_LEFT_RIGHT: &[Mark] = &[
     Mark::Line([9.0, 7.0], [4.0, 12.0]),
     Mark::Line([4.0, 12.0], [9.0, 17.0]),
     Mark::Line([15.0, 7.0], [20.0, 12.0]),
     Mark::Line([20.0, 12.0], [15.0, 17.0]),
+];
+
+/// Lucide's `chevrons-up-down`: the same pair stood on end, and the mark for
+/// filling the window down it as [`CHEVRONS_LEFT_RIGHT`] is for filling it
+/// across. Which of the two the fill wears is the shape of the image against
+/// the shape of the window — see `ui::menu::fit_icon`.
+pub(super) const CHEVRONS_UP_DOWN: &[Mark] = &[
+    Mark::Line([7.0, 9.0], [12.0, 4.0]),
+    Mark::Line([12.0, 4.0], [17.0, 9.0]),
+    Mark::Line([7.0, 15.0], [12.0, 20.0]),
+    Mark::Line([12.0, 20.0], [17.0, 15.0]),
 ];
 
 /// Lucide's `rotate-ccw`: a turn back to where the rendering started.
@@ -592,8 +596,8 @@ mod tests {
         COPY,
         EXPAND,
         MAXIMIZE_2,
-        CHEVRONS_UP_DOWN,
         CHEVRONS_LEFT_RIGHT,
+        CHEVRONS_UP_DOWN,
         ROTATE_CCW,
         SPLINE,
     ];

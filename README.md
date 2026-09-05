@@ -54,7 +54,7 @@ Both ship as standard on the distributions above.
 | `Shift`+`2`, `3`, `4` | 50%, 25%, 10% |
 | `+`, `=` / `-`, `_` | Zoom in / out |
 | Wheel | Zoom about the pointer |
-| Space | Cycle fit → fit width → fit height |
+| Space | Toggle fit: the whole image ↔ filling the window |
 | `p` | Cycle the filter used above 100%: nearest → bicubic |
 | Arrows | Pan by 64 pixels; `Shift` by one, `Ctrl` to the far side |
 | Drag | Pan, with the image following the pointer |
@@ -126,7 +126,15 @@ thread sends its outcome back and the message appears when the clipboard
 actually holds it.
 
 Zooming leaves fit mode; panning does not, so Space then Down scrolls through a
-tall image at fit-width.
+tall image filling the window.
+
+The two fits are the whole image and the filled window, and there is no third.
+Fitting the width and fitting the height look like two more, but whichever of
+them is the smaller scale is the whole image already; only the larger — the
+image's short side against the window, its long side running off the ends —
+says anything else, and it says it whichever axis it turns out to be. So the
+choice is what the image is doing rather than which edge it is measured
+against, and Space has two states to move between rather than three.
 
 A pan or zoom asked for by name — a key, a notch of the wheel, a choice from
 the zoom menu — is a move of 200 ms rather than a cut, and one asked for
@@ -543,7 +551,7 @@ menu hangs from the button that opens it, off whichever of its edges faces into
 the window: down from a button in the top bar, up from one in the bottom bar,
 and out to the right from one in the left strip, where a button has its
 neighbors above and below it and its room to the side. Pressing the percentage
-opens a menu of zooms — the ladder from 10% to 1600% and the three fits as
+opens a menu of zooms — the ladder from 10% to 1600% and the two fits as
 icons — hung from the button, its right edge in line with the button's, placed
 against the window rather than against the frame the picture is in: a menu
 pushed around by where the image happens to be would not stay under the thing
@@ -762,12 +770,22 @@ one thing held uniform, since cells of a height read as one panel.
 
 That is what lets one menu hold things that are not the same kind of thing.
 The zoom menu holds three: **Zoom**, eight percentages four to a row; **Fit**,
-the three fits as arrows; and **Up-scaling**, the magnification filter as the
-two words `Nearest` and `Bicubic`. Undivided, those last two read as a fourth
+the two fits as marks; and **Up-scaling**, the magnification filter as the
+two words `Nearest` and `Bicubic`. Undivided, those last two read as a third
 fit — and there is no picture of "bicubic" a reader arrives at unaided, so
 theirs are the one pair of cells cut wider than the rest, by exactly what the
-words need. `ZOOM_SECTIONS` is `ZOOM_CHOICES` cut into three and a test holds
-the two in step, since a choice in no section could never be pressed.
+words need.
+
+The fits are `expand`'s four corners for the whole image and a pair of
+chevrons pushed apart for the filled window, up and down or left and right as
+the image's shape against the window's decides which way that fill runs. It
+is the one mark in the interface chosen by what is on screen rather than by
+what the button is for, and it has to be: which axis a fill lands on is not
+the user's choice but a consequence of the two shapes, so a cell drawn one
+way once would be wrong for half the images opened.
+
+`ZOOM_SECTIONS` is `ZOOM_CHOICES` cut into three and a test holds the two in
+step, since a choice in no section could never be pressed.
 
 They are opaque, and the image is drawn in the `Viewport` they leave rather
 than behind them: zoom, fit, pan limits and the wheel's anchor are all measured
