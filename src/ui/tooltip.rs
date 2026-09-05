@@ -100,27 +100,34 @@ pub struct Tooltip {
 /// for, which is everything on the histogram panel: its labels are read
 /// across the plot they sit on, so they have a panel's width and not a
 /// window's.
-pub fn words(tip: Tip, panels: &Panels) -> Option<&'static str> {
-    Some(match tip {
-        Tip::Widget(Widget::Zoom) => "Zoom, fit and filter",
-        Tip::Widget(Widget::Cell(index)) => panels.menu?.cell_tip(index)?.label,
-        Tip::Widget(Widget::Paste) => "Paste a picture",
-        // The histogram panel's, in as few words as will carry them.
-        Tip::Widget(Widget::Luma) => "Luminance plane",
-        Tip::Widget(Widget::Planes) => "Color planes",
-        Tip::Widget(Widget::Log) => "Logarithmic counts",
-        Tip::Widget(Widget::Reset) => "Reset the display",
-        // Named rather than merely shown: a swatch of viridis is a green
-        // rectangle that could be anything, and the map has a name people
-        // ask for it by — the same one `--colormap` takes.
-        Tip::Widget(Widget::Ramp(index)) => match Colormap::ALL.get(index)? {
-            Colormap::Gray => "No false color",
-            Colormap::Viridis => "Viridis",
-            Colormap::Magma => "Magma",
-            Colormap::Turbo => "Turbo",
-        },
-        Tip::Widget(_) | Tip::Name | Tip::Counter => return None,
-    })
+pub fn words(tip: Tip, panels: &Panels) -> Option<String> {
+    // A menu cell's are its own, and one of them is a number the cell was
+    // laid out from rather than a phrase written down here.
+    if let Tip::Widget(Widget::Cell(index)) = tip {
+        return Some(panels.menu?.cell_tip(index)?.label);
+    }
+    Some(
+        match tip {
+            Tip::Widget(Widget::Zoom) => "Zoom, fit and filter",
+            Tip::Widget(Widget::Paste) => "Paste a picture",
+            // The histogram panel's, in as few words as will carry them.
+            Tip::Widget(Widget::Luma) => "Luminance plane",
+            Tip::Widget(Widget::Planes) => "Color planes",
+            Tip::Widget(Widget::Log) => "Logarithmic counts",
+            Tip::Widget(Widget::Reset) => "Reset the display",
+            // Named rather than merely shown: a swatch of viridis is a green
+            // rectangle that could be anything, and the map has a name people
+            // ask for it by — the same one `--colormap` takes.
+            Tip::Widget(Widget::Ramp(index)) => match Colormap::ALL.get(index)? {
+                Colormap::Gray => "No false color",
+                Colormap::Viridis => "Viridis",
+                Colormap::Magma => "Magma",
+                Colormap::Turbo => "Turbo",
+            },
+            Tip::Widget(_) | Tip::Name | Tip::Counter => return None,
+        }
+        .to_string(),
+    )
 }
 
 /// When the tooltip opens and when it closes, in the terms the pointer

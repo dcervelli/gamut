@@ -43,12 +43,15 @@ impl Channels {
 
     /// The same layout in the shorthand the top bar is set in, where the
     /// space goes to the file's name and every fact about it is read at a
-    /// glance rather than out loud. Joined to the depth by
+    /// glance rather than out loud. A single letter for gray, where the
+    /// three-letter `RGB` is the name of the layout itself: `GRAY16` is the
+    /// longest of the twelve and says the least, the depth being the half of
+    /// it a reader is there for. Joined to the depth by
     /// [`Samples::short_label`]; the words are [`Channels::label`].
     pub fn code(self) -> &'static str {
         match self {
-            Channels::Gray => "GRAY",
-            Channels::GrayAlpha => "GRAYA",
+            Channels::Gray => "G",
+            Channels::GrayAlpha => "GA",
             Channels::Rgb => "RGB",
             Channels::Rgba => "RGBA",
         }
@@ -134,7 +137,7 @@ impl Samples {
         }
     }
 
-    /// Layout and depth as one token — `RGB8`, `RGBA16`, `GRAY32F` — for the
+    /// Layout and depth as one token — `RGB8`, `RGBA16`, `G32F` — for the
     /// top bar, which has a name to fit beside it. The info panel writes the
     /// same two facts out in words instead, having the room.
     pub fn short_label(&self) -> String {
@@ -438,8 +441,8 @@ mod tests {
                 seen.push(samples.short_label());
             }
         }
-        assert_eq!(seen[0], "GRAY8");
-        assert_eq!(seen[5], "GRAYA32F");
+        assert_eq!(seen[0], "G8");
+        assert_eq!(seen[5], "GA32F");
         assert_eq!(seen[6], "RGB8");
         assert_eq!(seen[10], "RGBA16");
         let mut unique = seen.clone();

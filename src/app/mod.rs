@@ -2,6 +2,7 @@
 
 mod files;
 pub mod input;
+mod kept;
 mod window;
 
 use std::path::PathBuf;
@@ -31,6 +32,7 @@ use crate::watch::{self, Watch};
 
 use files::{Announce, Files};
 use input::{Effect, Pointer};
+use kept::{Kept, Settings};
 use window::{file_label, initial_window_size, loading_title, window_title};
 
 /// What wakes the event loop from another thread.
@@ -74,6 +76,10 @@ pub struct App {
     /// the last animated change was asked for to wherever `view` now says.
     /// `None` once it has landed, and while nothing is moving.
     motion: Option<Motion>,
+    /// What each file that has been on screen was left in, so that stepping
+    /// back to one puts it back rather than opening it afresh: the view, and
+    /// everything the display is doing to it.
+    kept: Kept,
     /// The file on screen, watched for writes by anything else.
     watch: Watch,
     /// The paths as the command line gave them, and a watch on each directory
@@ -176,6 +182,7 @@ impl App {
             monitor: None,
             view,
             motion: None,
+            kept: Kept::default(),
             watch,
             named,
             directories,
@@ -903,28 +910,50 @@ impl App {
             gpu,
         } = ready;
         let size = [image.width as f32, image.height as f32];
-        // Images of the same size are almost always a set to be compared —
-        // frames of a sequence, or one exposure against another — and there
-        // the point is that the same detail stays under the same pixels, so
-        // the pan and zoom carry over. A file of another size is a new
-        // picture, so it is fitted afresh.
         let same_size = self
             .current
             .as_ref()
             .is_some_and(|current| current.size() == size);
         // Re-reading the same file keeps the user where they were, since they
         // are watching one spot for the change: same exposure and tone map,
-        // with only an automatic window re-derived from the new pixels.
-        // Stepping to a different file is a different picture, and gets the
-        // exposure its own pixels ask for.
+        // with only an automatic window re-derived from the new pixels. One
+        // that has come back a different size is a new shape to fit, and is
+        // treated as a new picture below.
         let in_place = file.mode == Reload::InPlace && same_size;
-        let display = match self.current.as_ref().filter(|_| in_place) {
-            Some(current) => {
+        // Whether this is a move between files at all. The file already on
+        // screen being read again is not one, whatever it has become: it is
+        // neither a departure to be put away nor a return to be restored.
+        let stepping = self.current.is_some() && self.files.shown_path() != file.path;
+        // The picture being stepped away from, kept as it stands so that
+        // stepping back to it finds it as it was left.
+        if let Some(current) = self.current.as_ref().filter(|_| stepping) {
+            self.kept.keep(
+                self.files.shown_path(),
+                Settings {
+                    view: self.view,
+                    display: current.display.clone(),
+                },
+            );
+        }
+        // And what the file arriving left the last time it was on screen, if
+        // it has been here. Its window is re-derived where it was automatic,
+        // the file being free to have changed on disk since; one set by hand
+        // is left exactly where it was put.
+        let kept = stepping
+            .then(|| self.kept.left(&file.path).cloned())
+            .flatten();
+        let display = match (self.current.as_ref().filter(|_| in_place), &kept) {
+            (Some(current), _) => {
                 let mut display = current.display.clone();
                 display.refresh_auto(&stats);
                 display
             }
-            None => Display::for_image_with(&image, &stats, self.startup, self.headroom()),
+            (None, Some(settings)) => {
+                let mut display = settings.display.clone();
+                display.refresh_auto(&stats);
+                display
+            }
+            (None, None) => Display::for_image_with(&image, &stats, self.startup, self.headroom()),
         };
 
         let mut stored = None;
@@ -950,12 +979,30 @@ impl App {
 
         self.files.shown(file.index);
         self.watch = file.watch;
-        if !same_size {
-            self.view.reset();
+        match &kept {
+            // Back to a file that has been here before: exactly where it was
+            // left. The magnification filter is not part of a view — it is a
+            // standing preference — so it stays as it is.
+            Some(settings) => {
+                let upscale = self.view.upscale();
+                self.view = settings.view;
+                self.view.set_upscale(upscale);
+            }
+            // A file seen for the first time. Images of the same size are
+            // almost always a set to be compared — frames of a sequence, or
+            // one exposure against another — and there the point is that the
+            // same detail stays under the same pixels, so the pan and zoom
+            // carry over from the picture it is arriving beside. A file of
+            // another size is a new picture, so it is fitted afresh.
+            None if !same_size => self.view.reset(),
+            None => {}
         }
-        // A different picture is a different column of words about it, and it
-        // is read from the top.
         if !in_place {
+            // A move under way was about the picture that has just left, and
+            // there is nothing for it to carry the eye across any more.
+            self.motion = None;
+            // A different picture is a different column of words about it,
+            // and it is read from the top.
             self.panels.info_scroll = 0.0;
         }
         self.current = Some(Current {
@@ -1526,6 +1573,64 @@ mod tests {
         assert_eq!(app.files.index(), 1);
         assert_eq!(app.view.fit(), None);
         assert_eq!(app.view.zoom(app.image_size(), VIEWPORT), zoom);
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// Flipping between two pictures is how they are compared, so each of
+    /// them has to come back as it was left: its own pan and zoom, its own
+    /// window and exposure, its own false color.
+    #[test]
+    fn a_file_comes_back_as_it_was_left() {
+        use crate::image::display::Colormap;
+
+        let (mut app, dir) = app_over("kept", &[("a.png", 64, 48), ("b.png", 32, 16)]);
+        app.view.set_zoom(4.0, app.image_size(), VIEWPORT);
+        let zoom = app.view.zoom(app.image_size(), VIEWPORT);
+        let display = app.current.as_mut().expect("a.png is on screen");
+        display.display.adjust_exposure(2.0);
+        display.display.cycle_colormap();
+        let colormap = display.display.colormap;
+
+        // Another size, so nothing carries over: b.png opens fitted and with
+        // the display its own pixels ask for.
+        app.step(true);
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.view.fit(), Some(Fit::Whole));
+        let display = &app.current.as_ref().expect("b.png is on screen").display;
+        assert_eq!(display.exposure_stops, 0.0);
+        assert_eq!(display.colormap, Colormap::Gray);
+
+        // And back, to everything a.png was left in.
+        app.step(false);
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.files.shown_path(), dir.join("a.png"));
+        assert_eq!(app.view.fit(), None);
+        assert_eq!(app.view.zoom(app.image_size(), VIEWPORT), zoom);
+        let display = &app.current.as_ref().expect("a.png is on screen").display;
+        assert_eq!(display.exposure_stops, 2.0);
+        assert_eq!(display.colormap, colormap);
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// A file rewritten under the window is the same file being read again,
+    /// not a return to it: one that comes back a different size is a new
+    /// shape and is fitted afresh, rather than being put back into the view
+    /// it was being looked at in.
+    #[test]
+    fn a_reload_is_not_a_return() {
+        let (mut app, dir) = app_over("reloaded", &[("a.png", 64, 48)]);
+        app.view.set_zoom(4.0, app.image_size(), VIEWPORT);
+        assert_eq!(app.view.fit(), None);
+
+        write_png(&dir, "a.png", 32, 16);
+        let request = app.files.reload().expect("nothing else is being read");
+        app.send(request);
+        answer(&mut app, Reload::InPlace);
+
+        assert_eq!(app.image_size(), [32.0, 16.0]);
+        assert_eq!(app.view.fit(), Some(Fit::Whole), "a new shape to fit");
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }

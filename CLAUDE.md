@@ -13,6 +13,7 @@ cli.rs         argument parsing; usage() renders the key sections from app::inpu
 app/           the event loop's state and winit handlers
   mod.rs         App: window, renderer, loader, apply/deliver/redraw, ApplicationHandler impl
   files.rs       Files: the file list, the read in flight, walks past broken files (pure, tested)
+  kept.rs        what each file was left in — its view and its display — so stepping back to it puts it back
   input.rs       Action, KEYS table, Effect; perform() is where every key's action happens; pointer handling
   window.rs      opening size, titles
 ui/            builds each frame's display list; no wgpu or winit imports
@@ -96,6 +97,7 @@ name.
 | --- | --- |
 | A key binding | `app/input.rs`: one `KEYS` entry, with the `mods` it is held with, and one `perform` arm. `--help` follows. |
 | A status-bar segment | `ui/status.rs`; the pointer's pixel readout is `ui/pixel.rs` |
+| What a file is left in when you step off it, and what comes back when you step on to it | `app/kept.rs`, and the arrival in `App::apply`, which trades the outgoing file's settings for the incoming one's |
 | Whether a change to the view is a move or a cut | `App::animate` around the change, in `app/input.rs`, makes it a move; a change the hand is on — a drag, a single pixel's step, a trackpad's scroll — goes to `App::view` directly. Whatever reads what is on screen reads `App::shown_view`, not `view`; how long a move takes is `motion::DURATION` |
 | What a pixel reads as under the pointer | `image/mod.rs::sample` for what the file holds, `image/display.rs::map` for what the screen shows, `ui/pixel.rs::PixelFormat` for which of the two the bar writes out and how |
 | What something is called when the pointer rests on it | a `Tip` variant in `ui/tooltip.rs` and one `tips.offer(tip, rect)` beside where it is drawn; `App::tooltip` composes the words, from `KEYS` by way of `action_of` wherever a key does the same job, so a tooltip and `--help` cannot disagree. Words of its own go in `ui/tooltip.rs::words`, and a menu cell's in `Menu::cell_tip`. A thing that wants its label somewhere other than under it offers with `offer_toward`: the histogram panel's toggles open `Opens::Right`, across the plot they act on. When it opens is `Tooltips`, held by `App` and asked in `update_hover` and `about_to_wait` |

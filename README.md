@@ -107,10 +107,18 @@ the first frame to the last. Apart from the copying chords and `Ctrl` with an
 arrow, keys held with Ctrl, Alt or Super are ignored, so window-manager chords
 such as `Super+0` do not disturb the view.
 
-`]` and `[` keep the pan and zoom when the file they land on is the same size
-as the one on screen — a directory of frames or of exposures is a set to be
-compared, and the comparison only works if the same detail stays under the
-same pixels. A file of another size is a different picture, and is fitted.
+Every file that has been on screen is remembered as it was left — its pan and
+zoom, and everything the display was doing to it — and stepping back to it puts
+all of that back. Flipping between two pictures is how they are compared, and a
+comparison that reset one of them each time it came round would compare
+nothing. The memory is kept by path, so it survives the list being rebuilt
+under a directory that is being written to.
+
+`]` and `[` keep the pan and zoom of the picture on screen when the file they
+land on is one they have not opened before and is the same size — a directory
+of frames or of exposures is a set to be compared, and the comparison only
+works if the same detail stays under the same pixels. A file of another size
+that has not been seen is a different picture, and is fitted.
 
 Every display control is also a start-up flag — `--colormap viridis`,
 `--tone-map neutral`, `--window minmax`, `--exposure -1.5`, `--output hdr`,
