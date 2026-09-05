@@ -102,6 +102,11 @@ pub enum Widget {
     Info,
     Grid,
     Zoom,
+    /// The button at the end of the top bar that gives the picture the whole
+    /// window. Not a toggle: what it hides includes the button itself, so
+    /// there is no state for it to be showing and no press of it that puts
+    /// the interface back — see [`crate::app::input::Action::Dismiss`].
+    Maximize,
     /// A cell of whichever menu is open. Which menu that is is
     /// [`Panels::menu`], so a cell needs only its place in the grid.
     Cell(usize),
@@ -550,6 +555,13 @@ pub fn build_frame(
         theme,
     );
     tips.offer(Tip::Widget(Widget::Grid), grid_button);
+    buttons::maximize_button(
+        &mut frame,
+        chrome.maximize_button,
+        panels.hover == Some(Widget::Maximize),
+        theme,
+    );
+    tips.offer(Tip::Widget(Widget::Maximize), chrome.maximize_button);
     buttons::minimap_button(
         &mut frame,
         chrome.minimap_button,

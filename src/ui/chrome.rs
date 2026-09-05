@@ -46,9 +46,8 @@ const READING_REST: f32 = 25.0;
 /// How wide the grid toggle is with `spacing` read out in it, and the mark's
 /// own square with nothing read out — an unlit toggle has no spacing in
 /// force, and a button holding the room for one it is not using would be a
-/// gap in the bar. That square is the side panels' one, so that the only two
-/// icon-and-nothing-else buttons in the window are the same size wherever
-/// they sit.
+/// gap in the bar. That square is the side panels' one, so that every button
+/// wearing a mark and nothing else is the same size wherever it sits.
 ///
 /// Counted in digits rather than measured in the face the bar is set in,
 /// because the button has to be where the frame drew it when a press lands on
@@ -98,6 +97,14 @@ pub struct Chrome {
     /// toggle under it — the order the two panels they open are stacked in.
     pub histogram_button: Rect,
     pub info_button: Rect,
+    /// The button that hides the interface, at the very end of the top bar.
+    ///
+    /// Last in the bar, so that it is the thing in the corner of the window:
+    /// it is the only widget up there that is not a measurement of the
+    /// picture, and putting it outside the pair that are keeps the two kinds
+    /// apart. Being last is also what puts its mark on the line the column of
+    /// toggles below it keeps — see [`Chrome::grid_button`].
+    pub maximize_button: Rect,
     /// The button at the head of the pixel readout, at the left of the bottom
     /// bar: it says how a pixel's value is written, and the readout follows
     /// it along the bar.
@@ -133,6 +140,7 @@ impl Chrome {
                 [BUTTON_SIZE, BUTTON_SIZE],
                 bottom.x + BAR_PADDING + BUTTON_SIZE,
             ),
+            maximize_button: bar_button(top, [BUTTON_SIZE, BUTTON_SIZE], top.right() - BAR_PADDING),
             minimap_button: side_button(left, 0),
             copy_button: side_button(left, 1),
             paste_button: side_button(left, 2),
@@ -145,10 +153,10 @@ impl Chrome {
         }
     }
 
-    /// The grid toggle, at the right of the top bar. In the bar rather than
-    /// in a side panel because it reads out how far apart the lines are as
-    /// well as whether they are drawn, and the side panels are too narrow for
-    /// words.
+    /// The grid toggle, in the top bar just inside the button that hides the
+    /// interface. In the bar rather than in a side panel because it reads out
+    /// how far apart the lines are as well as whether they are drawn, and the
+    /// side panels are too narrow for words.
     ///
     /// Fitted to the `spacing` it is reading out, and the mark's own square
     /// while it is reading out nothing. Its right edge is anchored and the
@@ -156,7 +164,7 @@ impl Chrome {
     /// front of it.
     pub fn grid_button(&self, spacing: Option<&str>) -> Rect {
         let size = [grid_width(spacing), BUTTON_SIZE];
-        bar_button(self.top, size, self.top.right() - BAR_PADDING)
+        bar_button(self.top, size, self.maximize_button.x - BUTTON_GAP)
     }
 
     /// The zoom readout, in the top bar just inside the grid toggle. Fixed
@@ -251,7 +259,9 @@ impl Chrome {
     /// point where it would be reaches the panel and no widget when there is
     /// not.
     pub fn widget_at(&self, point: [f32; 2], spacing: Option<&str>, paste: bool) -> Option<Widget> {
-        if self.minimap_button.contains(point) {
+        if self.maximize_button.contains(point) {
+            Some(Widget::Maximize)
+        } else if self.minimap_button.contains(point) {
             Some(Widget::Minimap)
         } else if self.copy_button.contains(point) {
             Some(Widget::Copy)
@@ -595,6 +605,7 @@ mod tests {
                 chrome.minimap_button,
                 chrome.info_button,
                 chrome.histogram_button,
+                chrome.maximize_button,
                 chrome.grid_button(SPACING),
                 chrome.grid_button(None),
                 chrome.zoom_button(SPACING),
@@ -614,12 +625,11 @@ mod tests {
         }
     }
 
-    /// The top bar's own button, laid out like the bottom bar's: at the end
-    /// of the bar, so that the two ends of the window read the same way. It
-    /// grows leftwards when the grid comes on, the end it is anchored to
-    /// staying put.
+    /// The top bar's own readout-and-toggle, just inside the button that
+    /// hides the interface. It grows leftwards when the grid comes on, the
+    /// end it is anchored to staying put.
     #[test]
-    fn the_grid_toggle_is_a_button_at_the_end_of_the_top_bar() {
+    fn the_grid_toggle_is_a_button_inside_the_end_of_the_top_bar() {
         let chrome = Chrome::new(WINDOW);
         let button = chrome.grid_button(SPACING);
         let unlit = chrome.grid_button(None);
@@ -632,7 +642,7 @@ mod tests {
         // number, and takes room for one.
         assert!(chrome.grid_button(Some("500 px")).width > button.width);
         for button in [button, unlit] {
-            assert_eq!(button.right(), chrome.top.right() - BAR_PADDING);
+            assert_eq!(button.right(), chrome.maximize_button.x - BUTTON_GAP);
             assert_eq!(
                 button.y - chrome.top.y,
                 chrome.top.bottom() - button.bottom()
@@ -673,20 +683,18 @@ mod tests {
     fn the_bars_end_on_the_same_lines_as_the_side_toggles() {
         for size in [WINDOW, [640.0, 480.0], [2000.0, 1400.0]] {
             let chrome = Chrome::new(size);
-            for spacing in [None, SPACING] {
-                assert_eq!(
-                    chrome.grid_button(spacing).right(),
-                    chrome.histogram_button.right(),
-                    "{size:?} spacing={spacing:?}"
-                );
-            }
+            assert_eq!(
+                chrome.maximize_button.right(),
+                chrome.histogram_button.right(),
+                "{size:?}"
+            );
             assert_eq!(chrome.histogram_button.right(), chrome.info_button.right());
             // The left is the same line the other way round: the file name
             // starts where the minimap toggle does.
             assert_eq!(BAR_PADDING, chrome.minimap_button.x - chrome.left.x);
             assert_eq!(
                 BAR_PADDING,
-                chrome.top.right() - chrome.grid_button(None).right()
+                chrome.top.right() - chrome.maximize_button.right()
             );
         }
     }
@@ -809,11 +817,10 @@ mod tests {
     /// The grid toggle wears its mark in the last button's width of itself,
     /// so where the mark lands is decided by the toggle's right edge. That
     /// edge does not move when the toggle lights up and grows leftwards to
-    /// make room for its reading, and it is the same edge the column of
-    /// toggles down the right of the window is aligned to — so all of those
-    /// marks line up, lit or not.
+    /// make room for its reading — so the mark is in the same place from one
+    /// press to the next.
     #[test]
-    fn the_grid_toggle_keeps_its_mark_over_the_toggles_below() {
+    fn the_grid_toggle_keeps_its_mark_where_it_was_when_it_lights_up() {
         let chrome = Chrome::new(WINDOW);
         let (on, off) = (chrome.grid_button(SPACING), chrome.grid_button(None));
         assert!(
@@ -821,8 +828,43 @@ mod tests {
             "the lit toggle makes room for a reading"
         );
         assert_eq!(on.right(), off.right(), "and grows leftwards to do it");
-        assert_eq!(on.right(), chrome.histogram_button.right());
-        assert_eq!(on.right(), chrome.info_button.right());
         assert_eq!(off.width, chrome.histogram_button.width);
+    }
+
+    /// The button that hides the interface ends the top bar, and its mark is
+    /// the one over the column of toggles down the right of the window: the
+    /// last thing in a bar is what shares that line, and it is a side
+    /// toggle's own square so the marks are drawn at one size all the way
+    /// down. Nothing about the grid moves it — the toggle beside it grows
+    /// leftwards, into the bar.
+    #[test]
+    fn the_button_that_hides_the_interface_ends_the_top_bar() {
+        let chrome = Chrome::new(WINDOW);
+        let button = chrome.maximize_button;
+
+        assert_eq!(button.width, BUTTON_SIZE);
+        assert_eq!(button.height, BUTTON_SIZE);
+        assert_eq!(button.right(), chrome.top.right() - BAR_PADDING);
+        assert_eq!(button.right(), chrome.histogram_button.right());
+        // Centered across the bar, as everything else in one is.
+        assert_eq!(
+            button.y - chrome.top.y,
+            chrome.top.bottom() - button.bottom()
+        );
+
+        for spacing in [None, SPACING, Some("10000 px")] {
+            assert_eq!(chrome.maximize_button, button, "{spacing:?}");
+            assert!(chrome.grid_button(spacing).right() < button.x);
+            assert_eq!(
+                chrome.widget_at([button.x + 1.0, button.y + 1.0], spacing, false),
+                Some(Widget::Maximize)
+            );
+        }
+        // And it never stands in front of the toggle beside it.
+        let grid = chrome.grid_button(SPACING);
+        assert_eq!(
+            chrome.widget_at([grid.right() - 1.0, grid.y + 1.0], SPACING, false),
+            Some(Widget::Grid)
+        );
     }
 }

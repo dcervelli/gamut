@@ -149,6 +149,13 @@ pub struct App {
     /// and the clipboard should end up holding the one asked for last rather
     /// than whichever finished last. Shared with the threads doing the work.
     copies: Arc<AtomicU64>,
+    /// Whether the window has already said how to bring the interface back.
+    /// The message goes up the first time the bars are hidden and not again:
+    /// with them gone there is nothing on screen that could say it, and a
+    /// message every time would be in the way of the picture that was just
+    /// asked for. Here rather than in [`Panels`] because it is what has
+    /// happened, not what is on screen.
+    said_how_to_restore: bool,
     /// Set if the last render failed, so we report it once rather than every frame.
     reported_error: bool,
 }
@@ -231,6 +238,7 @@ impl App {
                 info_hover: None,
                 menu: None,
             },
+            said_how_to_restore: false,
             reported_error: false,
         };
         let request = app.files.open_first();
@@ -1657,6 +1665,39 @@ mod tests {
 
         // `q` leaves whether or not there is a message to read.
         raise(&mut app);
+        assert_eq!(app.perform(Action::Quit), Effect::Quit);
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// Escape is what brings the interface back, and it does that before it
+    /// takes off the message that said so: a window that dismissed its own
+    /// instructions and left the bars hidden would be disagreeing with what
+    /// it had just told the reader. `q` still leaves from under it.
+    #[test]
+    fn escape_brings_the_interface_back_before_it_quits() {
+        use input::{Action, Effect};
+
+        let (mut app, dir) = app_over("restore", &[("a.png", 64, 48)]);
+        assert!(app.panels.show_ui);
+
+        // Hidden, and the window has said once how to get it back.
+        let _ = app.perform(Action::ToggleInterface);
+        assert!(!app.panels.show_ui);
+        assert!(app.said_how_to_restore);
+
+        // Escape brings it back rather than quitting out from under it.
+        assert_eq!(app.perform(Action::Dismiss), Effect::Redraw);
+        assert!(app.panels.show_ui);
+        // And with it back, Escape is the quit it always was.
+        assert_eq!(app.perform(Action::Dismiss), Effect::Quit);
+
+        // The key that closes the floating panels on its way says it too:
+        // what it hides is the same thing, by the same route.
+        app.said_how_to_restore = false;
+        let _ = app.perform(Action::ToggleInterfaceAndPanels);
+        assert!(app.said_how_to_restore);
+        // And `q` leaves from under a hidden interface, as it always did.
         assert_eq!(app.perform(Action::Quit), Effect::Quit);
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");

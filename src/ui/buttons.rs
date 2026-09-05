@@ -93,6 +93,14 @@ pub(super) fn pixel_button(
     toggle(frame, rect, icon::CIRCLE_DOT, open, hover, theme);
 }
 
+/// The button at the end of the top bar that hides the interface. Not a
+/// toggle, and never drawn lit: what it hides is the bar it sits in, so the
+/// state it would be showing is the state in which it is not on screen at
+/// all. The keys are what bring the interface back.
+pub(super) fn maximize_button(frame: &mut UiFrame, rect: Rect, hover: bool, theme: &Theme) {
+    toggle(frame, rect, icon::MAXIMIZE_2, false, hover, theme);
+}
+
 /// One square toggle in a side panel: the button, and the mark it wears.
 ///
 /// A window too small to hold the button gets no button, rather than a smear

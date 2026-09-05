@@ -304,6 +304,21 @@ pub(super) const GRID_3X3: &[Mark] = &[
     Mark::Line([15.0, 3.0], [15.0, 21.0]),
 ];
 
+/// Lucide's `maximize-2`: two arrows reaching into opposite corners, for the
+/// press that gives the picture the whole window.
+///
+/// Not [`EXPAND`], which reaches into all four: that one is the fit that
+/// takes the whole image in, and two marks a window apart meaning two
+/// different things would be two marks to tell apart.
+pub(super) const MAXIMIZE_2: &[Mark] = &[
+    Mark::Line([15.0, 3.0], [21.0, 3.0]),
+    Mark::Line([21.0, 3.0], [21.0, 9.0]),
+    Mark::Line([21.0, 3.0], [14.0, 10.0]),
+    Mark::Line([3.0, 15.0], [3.0, 21.0]),
+    Mark::Line([3.0, 21.0], [9.0, 21.0]),
+    Mark::Line([3.0, 21.0], [10.0, 14.0]),
+];
+
 /// Lucide's `circle-dot`: a ring with a point at its center, which is one
 /// pixel picked out of everything around it — the button that says how the
 /// pixel under the pointer is read out.
@@ -553,13 +568,14 @@ mod tests {
 
     /// Every icon in the table, so that a new one is held to the same
     /// promises as the rest.
-    const ICONS: [&[Mark]; 10] = [
+    const ICONS: [&[Mark]; 11] = [
         CHART_AREA,
         INFO,
         SQUARE_SQUARE,
         GRID_3X3,
         COPY,
         EXPAND,
+        MAXIMIZE_2,
         CHEVRONS_UP_DOWN,
         CHEVRONS_LEFT_RIGHT,
         ROTATE_CCW,

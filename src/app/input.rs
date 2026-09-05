@@ -41,6 +41,11 @@ const WHEEL_SCROLL_STEP: f32 = 48.0;
 /// done, and this is what turns that into the same zoom increment.
 const WHEEL_PIXELS_PER_STEP: f32 = 50.0;
 
+/// What the window says the first time the interface is hidden. Both keys,
+/// since the one that put it away is not the one a reader who pressed the
+/// button knows about.
+const RESTORE: &str = "Press ` or Esc to restore UI";
+
 /// Something a key asks for.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Action {
@@ -316,6 +321,9 @@ fn action_of(tip: Tip, panels: &Panels) -> Option<Action> {
         Tip::Widget(Widget::Histogram) => ToggleHistogram,
         Tip::Widget(Widget::Info) => ToggleInfo,
         Tip::Widget(Widget::Grid) => ToggleGrid,
+        // The plain press: Shift on the same button asks for the other key,
+        // which the tooltip lists under this one — see `App::tooltip`.
+        Tip::Widget(Widget::Maximize) => ToggleInterface,
         Tip::Widget(Widget::Output) => ToggleHdr,
         Tip::Widget(Widget::Paste) => Action::Paste,
         // The dot at the head of the pixel readout, which the key steps
@@ -692,7 +700,7 @@ pub const KEYS: &[Binding] = &[
         section: Section::Interface,
         mods: PLAIN,
         shown: "q, Esc",
-        help: "Quit; Esc closes a popup or a message first",
+        help: "Quit; Esc closes a popup or message, or shows the interface",
         keys: &[
             (Char("q"), Quit),
             (Char("Q"), Quit),
@@ -897,7 +905,22 @@ impl App {
             // often followed straight away by `q` — but Escape is the key
             // that puts things away, so it clears the message first.
             Dismiss => {
-                if self.panels.menu.take().is_some() || self.toasts.dismiss() {
+                if self.panels.menu.take().is_some() {
+                    self.update_hover();
+                    return Effect::Redraw;
+                }
+                // The interface is the largest thing that can be put away,
+                // and the message raised when it went says this is the key
+                // that brings it back — so it comes back before the message
+                // is taken off, and the message goes with it. Anything else
+                // would make the window disagree with what it had just said.
+                if !self.panels.show_ui {
+                    self.toasts.dismiss();
+                    let effect = self.perform(ToggleInterface);
+                    self.update_hover();
+                    return effect;
+                }
+                if self.toasts.dismiss() {
                     self.update_hover();
                     return Effect::Redraw;
                 }
@@ -945,6 +968,16 @@ impl App {
                 // The menu is part of the interface, and goes with it.
                 self.panels.menu = None;
                 self.panels.hover = None;
+                // The first time it goes, say how to get it back. With the
+                // bars gone there is nothing left on screen that could say
+                // it, and a window that has stopped answering the pointer
+                // anywhere looks broken rather than tidy. Once only: after
+                // that the reader knows, and a message every time would be
+                // in the way of the thing they asked to see.
+                if !self.panels.show_ui && !self.said_how_to_restore {
+                    self.said_how_to_restore = true;
+                    self.toast(RESTORE, Level::Message);
+                }
             }
             // The three panels float over the image rather than inside the
             // bars, so hiding the interface leaves them behind. This asks for
@@ -1525,6 +1558,14 @@ impl App {
                     .filter_map(hint)
                     .collect(),
             ),
+            // The button that hides the interface: what a plain press does,
+            // and under it the key for the press that closes the floating
+            // panels with it — the one thing on the button the pointer
+            // cannot discover by resting on it.
+            Tip::Widget(Widget::Maximize) => (
+                names(at, &self.panels)?,
+                Vec::from_iter(hint(ToggleInterfaceAndPanels)),
+            ),
             // The exposure's two steps: which way this one goes and what it
             // is worth, and under it the keys that take the same step.
             Tip::Widget(Widget::ExposureDown | Widget::ExposureUp) => (
@@ -1546,6 +1587,17 @@ impl App {
             Widget::Minimap => self.panels.show_minimap = !self.panels.show_minimap,
             Widget::Histogram => self.panels.show_histogram = !self.panels.show_histogram,
             Widget::Grid => self.panels.show_grid = !self.panels.show_grid,
+            // The keys' own actions, and which of the two by the modifier
+            // the keys are told apart by: a plain press hides the bars, and
+            // Shift closes the panels floating over the picture on the way,
+            // exactly as `` ` `` and `~` do.
+            Widget::Maximize => {
+                let action = match self.pointer.modifiers.shift_key() {
+                    true => ToggleInterfaceAndPanels,
+                    false => ToggleInterface,
+                };
+                let _ = self.perform(action);
+            }
             Widget::Info => self.panels.show_info = !self.panels.show_info,
             // Only ever opens one: the press that closes a menu is answered
             // by the menu itself, before the widgets underneath are asked.
@@ -1840,6 +1892,12 @@ mod tests {
             named(Widget::Output).as_deref(),
             Some("Toggle HDR output, where the monitor is in HDR mode (o)")
         );
+        // The button in the corner is named by the plain press it makes; the
+        // press with Shift is the line under it — see `App::tooltip`.
+        assert_eq!(
+            named(Widget::Maximize).as_deref(),
+            Some("Toggle the interface panels (`)")
+        );
 
         // The one button no key reaches names itself, and has no key after
         // it to name.
@@ -1859,6 +1917,7 @@ mod tests {
             Widget::Histogram,
             Widget::Info,
             Widget::Grid,
+            Widget::Maximize,
             Widget::Output,
             Widget::Zoom,
             Widget::PixelFormat,
@@ -1868,6 +1927,21 @@ mod tests {
                 "{widget:?} names itself"
             );
         }
+    }
+
+    /// The message raised when the interface goes names keys that really do
+    /// bring it back: the table's own word for the one that hid it, and the
+    /// Escape that takes things off. A message naming a key that did nothing
+    /// would leave the reader with a window they could not get out of.
+    #[test]
+    fn the_message_about_a_hidden_interface_names_keys_that_restore_it() {
+        let binding = binding_for(ToggleInterface).expect("`` ` `` is bound");
+        assert!(RESTORE.contains(binding.shown), "{RESTORE}");
+        assert_eq!(
+            action_for(&Key::Named(NamedKey::Escape), ELSEWHERE, PLAIN),
+            Some(Dismiss)
+        );
+        assert!(RESTORE.contains("Esc"), "{RESTORE}");
     }
 
     /// A cell of the zoom menu is named in its own words — the key cycles
