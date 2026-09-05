@@ -1,6 +1,6 @@
 # gamut
 
-A GPU image viewer: Rust, `winit`, `wgpu`, `glyphon`. The README explains the
+A GPU image viewer: Rust, `winit`, `wgpu`, `glyphon`. `docs/` explains the
 design and the reasoning behind it; this file is the map for making changes.
 
 ## Layout
@@ -144,8 +144,7 @@ name.
   low, so a readout showing one thing become another uses `ui::BECOMES`.
 - Handlers return an `Effect` (`Redraw` / `Nothing` / `Quit`), never call
   `request_redraw` themselves.
-- Docs: `user-docs/` is for users and has its own CLAUDE.md; implementation
-  reasoning belongs in the README or in module docs.
+- Docs: three directories, three audiences — see **Docs ownership** below.
 - American spelling throughout — code, comments, docs, and every word a user
   reads: `color`, `gray`, `center`, `normalize`, `license`, `behavior`,
   `canceled`. The tree holds no British spelling of any of them, so a search
@@ -156,6 +155,29 @@ name.
   in either finds the program. The other exception is a name someone else
   chose, quoted as they wrote it: a spec's own wording, an external API, an
   SPDX license identifier.
+
+## Docs ownership
+
+Four places, and a fact belongs in exactly one of them. Getting this wrong is
+how the README turned into a 1200-line specification once already.
+
+- **`README.md` is human-authored. Do not edit it.** It is the front door: what
+  the program is, who would want it, how to install and start it, and what it
+  cannot do yet. If a change makes the README wrong or incomplete, say so in
+  the summary of the change and leave it alone — do not fix it, do not extend
+  it, and never add a section describing something newly built.
+- **`user-docs/`** is for people who only run the program. It has its own
+  CLAUDE.md with the rules for writing it.
+- **`docs/`** is for people reading or changing the code: the design, the
+  reasoning, the alternatives that were tried and dropped. It has its own
+  CLAUDE.md too. This is where implementation writing goes — new pages here,
+  not new README sections.
+- **`CHANGELOG.md`** takes anything of the form "what is new" or "what changed".
+  Nothing of that shape goes in the README or in `docs/`.
+
+`CLAUDE.md` files, this one included, are conventions rather than explanation:
+what a change must do, not why the code is shaped as it is. `notes.md` is the
+author's own roadmap — read it, do not write to it.
 
 ## Checks
 

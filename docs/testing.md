@@ -1,0 +1,56 @@
+# Tests
+
+```sh
+cargo test
+```
+
+196 tests over the transfer functions and primaries matrices, texture format
+selection (including the device-capability fallbacks), the statistics and
+window logic, the pixel readout's two halves and the colormaps behind its
+swatch, the decoder registry, the CICP translation, ICC profile recognition,
+gain map reconstruction, the view geometry, and the reload watch's idea of
+when a write has finished.
+
+The gain map tests build an Ultra HDR file rather than checking one in: a flat
+base image and a half-size map that leaves one half alone and asks the other
+for two stops, assembled with the same crate that reads it back, so the round
+trip is exercised without a binary fixture.
+
+Seven of them run the real image pipeline on a real adapter — a headless
+device, no window — and check what the shader and the passes actually produce
+against arithmetic done on the CPU: that minification is the exact mean of the
+texels a pixel covers, that
+two levels of the coarse chain plus the draw's own filter come to the same
+number as averaging the source directly, that antialiased nearest is exactly
+nearest at a whole-number zoom, that Catmull-Rom passes texel centers through
+untouched, that a transparent texel does not bleed its color into its
+neighbor, and that the minimap's thumbnail lands beside the view as a second
+draw of the same texture — building the coarse chain the view itself had no
+use for. Where no adapter can be had they report success rather than failing
+for a reason that has nothing to do with the code.
+
+`test_images/` holds 67 real fixtures — see its README — covering every pixel
+layout the decoder can produce and every per-format encoding with its own code
+path: PNG bit depths, palettes and interlacing; progressive and subsampled
+JPEG; TIFF compressions, byte orders, tiling, BigTIFF, the floating-point
+predictor, signed samples and no-data; Radiance RGBE; EXR associated alpha;
+HEIC monochrome, 10-bit, `irot` and its color tags, and the same container
+with AV1 inside; WebP in both bitstreams, with and without alpha, tagged,
+rotated and animated; GIF interlaced, transparent and animated. Four of them
+exist for the color tags in particular: a
+PNG carrying `cICP` for BT.2100 PQ, a PNG carrying `iCCP` for Display P3, a
+HEIF tagged by ICC profile with no `nclx` box beside it, and a WebP carrying
+`ICCP`. Each is checked for
+dimensions, channel layout, sample type, color space, alpha mode and actual
+pixel values, and then pushed through the upload planner under both GPU
+capability sets. A test asserts the directory and the fixture table stay in
+step, so a file cannot be added without a test.
+
+Regenerate them with `test_images/generate.sh`, which needs ImageMagick,
+`heif-enc`, GDAL and Python. Neither `cICP` nor `iCCP` is a chunk ImageMagick
+will write, so those two are spliced in afterwards with their CRCs computed,
+and its WebP writer emits neither an `EXIF` chunk nor an animation, so those
+two fixtures are assembled around the bitstreams it did write.
+`display-p3.icc` sits beside the fixtures as an input rather than an output;
+`examples/make-icc.rs` is what produced it.
+

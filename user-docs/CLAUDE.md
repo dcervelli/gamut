@@ -1,7 +1,7 @@
 # Writing `user-docs/`
 
 Everything in this directory is written for people who *use* `gamut`, not
-for people who work on it. The README is where the implementation is
+for people who work on it. [`docs/`](../docs/) is where the implementation is
 explained; nothing here should duplicate that.
 
 **Write only what a user can act on.** Which files open, what the program does
