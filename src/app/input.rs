@@ -694,14 +694,14 @@ pub const KEYS: &[Binding] = &[
         help: "Toggle a logarithmic count axis on the histogram",
         keys: &[(Char("l"), ToggleLogCounts), (Char("L"), ToggleLogCounts)],
     },
-    // The same key as the two copies above, with no Ctrl held: what it
+    // The same key as the two copies above, with nothing held: what it
     // switches is what they take away with them.
     Binding {
         section: Section::Interface,
         mods: PLAIN,
-        shown: ">",
+        shown: ".",
         help: "Cycle the pixel readout: hex, decimal, mapped",
-        keys: &[(Char(">"), CyclePixelFormat)],
+        keys: &[(Char("."), CyclePixelFormat)],
     },
     Binding {
         section: Section::Interface,
@@ -2147,7 +2147,7 @@ mod tests {
         let panels = panels(None);
         assert_eq!(
             names(Tip::Widget(Widget::PixelFormat), &panels).as_deref(),
-            Some("Cycle the pixel readout: hex, decimal, mapped (>)")
+            Some("Cycle the pixel readout: hex, decimal, mapped (.)")
         );
 
         for action in [CopyPixelValue, CopyPixelCoordinate] {
@@ -2216,32 +2216,29 @@ mod tests {
 
         for index in 0..ui::PixelFormat::ALL.len() {
             let words = named(index).unwrap_or_else(|| panic!("cell {index} is named"));
-            assert!(words.ends_with("(>)"), "{words}");
+            assert!(words.ends_with("(.)"), "{words}");
         }
         assert_eq!(named(ui::PixelFormat::ALL.len()), None);
     }
 
     /// The full stop is three bindings, told apart by what is held with it:
-    /// shifted it steps the readout on, and with Ctrl the two of them copy
-    /// what it is showing. Shift is part of the character, so the shifted
-    /// pair arrive as `>` with it held.
+    /// alone it steps the readout on, and with Ctrl the two of them copy what
+    /// it is showing. Shift is part of the character, so the shifted copy
+    /// arrives as `>` with it held.
     #[test]
     fn the_full_stop_reads_out_a_pixel_three_ways() {
         use winit::keyboard::SmolStr;
         let stop = Key::Character(SmolStr::new("."));
         let greater = Key::Character(SmolStr::new(">"));
 
-        assert_eq!(
-            action_for(&greater, ELSEWHERE, SHIFT),
-            Some(CyclePixelFormat)
-        );
+        assert_eq!(action_for(&stop, ELSEWHERE, PLAIN), Some(CyclePixelFormat));
         assert_eq!(action_for(&stop, ELSEWHERE, CTRL), Some(CopyPixelValue));
         assert_eq!(
             action_for(&greater, ELSEWHERE, CTRL | SHIFT),
             Some(CopyPixelCoordinate)
         );
-        // Unshifted and unheld it is a full stop and nothing else.
-        assert_eq!(action_for(&stop, ELSEWHERE, PLAIN), None);
+        // Shifted and unheld it is a greater-than and nothing else.
+        assert_eq!(action_for(&greater, ELSEWHERE, SHIFT), None);
     }
 
     /// The keys the top bar's own words stand for are all bound, so neither

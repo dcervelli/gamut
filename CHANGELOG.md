@@ -8,6 +8,9 @@ Notable changes to `gamut`. The format follows
 
 ### Changed
 
+- The pixel readout cycles on `.` rather than `>`; the Shift is gone. The two
+  copies that take what it reads out are unchanged, still `Ctrl+.` for the
+  value and `Ctrl+Shift+.` for the coordinate.
 - The Wayland `app_id` and X11 `WM_CLASS` are now `com.dcervelli.gamut`, the
   reverse-DNS form a desktop expects, and the desktop entry and the icon are
   filed under that name to match. A window rule matching the old `gamut` class

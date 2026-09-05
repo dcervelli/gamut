@@ -116,7 +116,7 @@ look at it. Single fields and single sections can be copied from the panel
 itself; see below.
 
 `Ctrl+.` copies the value the bottom left corner is reading out, exactly as it
-is written there — so switching the readout to hex with `>` and pressing
+is written there — so switching the readout to hex with `.` and pressing
 `Ctrl+.` puts `E78040` on the clipboard, and switching it back puts
 `231 128 64` there instead. `Ctrl+Shift+.` copies the pixel's coordinate
 rather than its value, as `x,y` with nothing around it: `1919,1079`, ready to
@@ -235,7 +235,7 @@ where all of it is set.
 | `i` | Show or hide the file information |
 | `m` | Show or hide the minimap |
 | `g` | Show or hide the grid over the image |
-| `>` | Cycle how the pixel under the pointer is read out: hex → decimal → mapped |
+| `.` | Cycle how the pixel under the pointer is read out: hex → decimal → mapped |
 | `` ` `` | Show or hide the panels around the image |
 | `~` | The same, and closes the histogram, information and minimap |
 | `q`, `Esc` | Quit. `Esc` closes a popup or message, or brings the panels back |
@@ -383,7 +383,7 @@ what you get there is the bits it actually stores. **Mapped** is what the
 window, the exposure and the tone curve have made of the numbers, where 0 and
 1 are the ends of the window the bar names on the right.
 
-`>` steps through the three, and the dot at the head of the readout opens a
+`.` steps through the three, and the dot at the head of the readout opens a
 menu of them; whichever is in force is lit. It applies to whichever image is
 on screen and stays as you set it.
 
