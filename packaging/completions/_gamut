@@ -18,6 +18,7 @@ _gamut() {
     '--window[Start with the window set this way]:mode:(unit minmax pct)' \
     '--exposure[Start at this exposure, in stops]:stops:' \
     '--upscale[How to resample above 100%]:filter:(nearest bicubic)' \
+    '--size[Open the window at this size in logical pixels]:width: :height: ' \
     '--histogram[Start with the histogram showing]' \
     '--info[Start with the file information panel showing]' \
     '--no-minimap[Start with the minimap off]' \

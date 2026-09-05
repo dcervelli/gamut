@@ -55,6 +55,8 @@ pub struct Options {
     pub info: bool,
     pub minimap: bool,
     pub upscale: Upscale,
+    /// What `--size` asked the window to open at, in logical pixels.
+    pub size: Option<[u32; 2]>,
 }
 
 /// What a copy prepared on a thread of its own did: took the selection, or
@@ -109,6 +111,10 @@ pub struct App {
     /// while `current` is empty, and `None` for a format whose header would
     /// not say.
     header_size: Option<[f32; 2]>,
+    /// The size `--size` asked the window to open at, in logical pixels, if it
+    /// asked for one. Read once, when the window is made; every size after
+    /// that is the compositor's to give.
+    asked_size: Option<[u32; 2]>,
     /// The thread that reads files.
     ///
     /// Declared before the renderer on purpose: fields are dropped in the
@@ -186,6 +192,7 @@ impl App {
             info,
             minimap,
             upscale,
+            size: asked_size,
         } = options;
         let watch = Watch::new(&files[index]);
         let directories = named
@@ -200,6 +207,7 @@ impl App {
             files: Files::new(files, index, overrides),
             current: None,
             header_size: size,
+            asked_size,
             startup,
             hdr,
             monitors,
@@ -1367,7 +1375,7 @@ impl ApplicationHandler<UserEvent> for App {
             return;
         }
 
-        let size = initial_window_size(event_loop, self.opening_size());
+        let size = initial_window_size(event_loop, self.opening_size(), self.asked_size);
         let attributes = window::with_app_id(
             Window::default_attributes()
                 .with_title(self.title())
@@ -1569,6 +1577,7 @@ mod tests {
             info: false,
             minimap: false,
             upscale: Upscale::default(),
+            size: None,
         };
         let size = decode::probe(&paths[0]).expect("we just wrote it");
         App::new(

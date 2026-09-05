@@ -6,7 +6,11 @@ Notable changes to `gamut`. The format follows
 
 ## Unreleased
 
-Nothing yet.
+### Added
+
+- `--size <W> <H>` opens the window at the given size rather than at the
+  image's own. The pair is the whole window, in logical pixels; a tiling
+  compositor takes it as the floating size.
 
 ## 0.1.0
 

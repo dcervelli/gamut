@@ -7,6 +7,16 @@ in the middle, and the window opens at the image's own size plus that chrome,
 shrunk to fit the monitor (`src/app/window.rs`). `` ` `` hides the panels and
 gives the image the whole window, re-fitting it as it goes.
 
+`--size <W> <H>` replaces that calculation with the two numbers it is given.
+They are the whole window, chrome included, and they are logical pixels — the
+units a compositor lays windows out in — where the image path works in
+physical ones, since what it is matching is the image's own pixels. Neither
+the image nor the monitor gets a say afterwards: a window larger than the
+screen is something a compositor is asked for on purpose, and only a floor of
+`MIN_WINDOW` applies, below which the chrome would have all of the window.
+Whether the request is honored is the compositor's business — a tiling one
+uses it as the floating size, if it uses it at all.
+
 ## Keys and buttons
 
 The key table itself is in [KEYS.md](../user-docs/KEYS.md); what follows is why

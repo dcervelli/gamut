@@ -406,6 +406,11 @@ what scripting wants and what comparing two files on equal terms needs:
 `--histogram` and `--info`. The minimap starts on; `--no-minimap` starts
 without it.
 
+The window itself opens at the image's size, shrunk to fit the screen.
+`--size <W> <H>` opens it at a size you choose instead, in the pixels your
+desktop measures windows in. A tiling window manager takes it as the size to
+use when the window floats, and may lay the window out its own way regardless.
+
 ## Keys that are deliberately ignored
 
 Apart from the copying chords and `Ctrl` with an arrow, anything held with

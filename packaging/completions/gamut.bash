@@ -17,12 +17,13 @@ _gamut() {
         --window)     COMPREPLY=($(compgen -W 'unit minmax pct' -- "$cur")); return ;;
         --upscale)    COMPREPLY=($(compgen -W 'nearest bicubic' -- "$cur")); return ;;
         --exposure)   return ;;
+        --size)       return ;;
     esac
 
     if [[ $cur == -* ]]; then
         COMPREPLY=($(compgen -W '-h --help -V --version --output --transfer --primaries
             --no-gain-map --colormap --tone-map --window --exposure --upscale
-            --histogram --info --no-minimap --timing --' -- "$cur"))
+            --size --histogram --info --no-minimap --timing --' -- "$cur"))
         return
     fi
 
