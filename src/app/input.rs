@@ -15,12 +15,13 @@ use winit::window::{Cursor, CursorIcon};
 
 use super::App;
 use crate::clipboard;
-use crate::image::display::{Colormap, Startup};
+use crate::image::display::{AutoWindow, Colormap, Startup, ToneMap};
 use crate::image::encode;
 use crate::loader::Source;
 use crate::pasted;
 use crate::render::Rect;
 use crate::timing;
+use crate::ui::histogram;
 use crate::ui::info::Copyable;
 use crate::ui::layers::Hit;
 use crate::ui::menu::Reach;
@@ -275,6 +276,16 @@ fn held(mods: Mods) -> String {
     prefix
 }
 
+/// How far one nudge of the display window moves it, as a fraction of its
+/// own width, and what one narrowing or widening scales that width by.
+///
+/// Named because the histogram panel's four nudges are the same four steps
+/// as the keys below: a button that moved the window by some other amount
+/// would be a second answer to a question that already has one.
+const WINDOW_STEP: f32 = 0.05;
+const NARROWER: f32 = 0.8;
+const WIDER: f32 = 1.25;
+
 /// One line of a tooltip: what a key does, and what to press for it.
 ///
 /// The key table's own words, so that a tooltip and `--help` cannot come to
@@ -311,6 +322,17 @@ fn action_of(tip: Tip, panels: &Panels) -> Option<Action> {
         // end is not a false color, and naming it after the key that cycles
         // them would be naming nothing.
         Tip::Widget(Widget::Ramp(index)) if index < Colormap::ALL.len() => CycleColormap,
+        // The same for the two rows under them: the key steps through the
+        // windows and the curves in turn where a button names one outright.
+        Tip::Widget(Widget::Window(index)) if index < histogram::WINDOWS.len() => CycleAutoWindow,
+        Tip::Widget(Widget::Curve(index)) if index < ToneMap::ALL.len() => CycleToneMap,
+        // The four nudges beside the window's reading are the keys with a
+        // picture on them: the same four amounts, so a press and a keystroke
+        // move the window by the same step and are named by the same words.
+        Tip::Widget(Widget::WindowDown) => ShiftWindow(-WINDOW_STEP),
+        Tip::Widget(Widget::WindowUp) => ShiftWindow(WINDOW_STEP),
+        Tip::Widget(Widget::WindowNarrow) => Contrast(NARROWER),
+        Tip::Widget(Widget::WindowWiden) => Contrast(WIDER),
         // A cell of a menu sets one state directly where the key cycles
         // through them all: the key is worth naming, the cycle's description
         // is not — see `Menu::cell_tip`. A numbered cell of the zoom menu is
@@ -646,12 +668,12 @@ pub const KEYS: &[Binding] = &[
         section: Section::Display,
         mods: PLAIN,
         shown: "d, f",
-        help: "Exposure down / up, half a stop",
+        help: "Exposure down / up, a quarter stop",
         keys: &[
-            (Char("d"), Exposure(-0.5)),
-            (Char("D"), Exposure(-0.5)),
-            (Char("f"), Exposure(0.5)),
-            (Char("F"), Exposure(0.5)),
+            (Char("d"), Exposure(-histogram::EV_STEP)),
+            (Char("D"), Exposure(-histogram::EV_STEP)),
+            (Char("f"), Exposure(histogram::EV_STEP)),
+            (Char("F"), Exposure(histogram::EV_STEP)),
         ],
     },
     // One case each: the capitals are the width of the window, below.
@@ -661,8 +683,8 @@ pub const KEYS: &[Binding] = &[
         shown: "a, s",
         help: "Slide the window down / up",
         keys: &[
-            (Char("a"), ShiftWindow(-0.05)),
-            (Char("s"), ShiftWindow(0.05)),
+            (Char("a"), ShiftWindow(-WINDOW_STEP)),
+            (Char("s"), ShiftWindow(WINDOW_STEP)),
         ],
     },
     Binding {
@@ -670,7 +692,10 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "A, S",
         help: "Narrow / widen the window",
-        keys: &[(Char("A"), Contrast(0.8)), (Char("S"), Contrast(1.25))],
+        keys: &[
+            (Char("A"), Contrast(NARROWER)),
+            (Char("S"), Contrast(WIDER)),
+        ],
     },
     Binding {
         section: Section::Display,
@@ -1397,6 +1422,15 @@ impl App {
                     .filter_map(hint)
                     .collect(),
             ),
+            // The exposure's two steps: which way this one goes and what it
+            // is worth, and under it the keys that take the same step.
+            Tip::Widget(Widget::ExposureDown | Widget::ExposureUp) => (
+                names(at, &self.panels)?,
+                [Exposure(-histogram::EV_STEP)]
+                    .into_iter()
+                    .filter_map(hint)
+                    .collect(),
+            ),
             _ => (names(at, &self.panels)?, Vec::new()),
         };
         Some(ui::Tooltip { at, title, hints })
@@ -1440,6 +1474,41 @@ impl App {
                     && let Some(map) = Colormap::ALL.get(index)
                 {
                     current.display.colormap = *map;
+                }
+            }
+            // The keys' own action, as with the reset: a step of the panel's
+            // is a quarter of a stop where a key's is half, and that is the
+            // whole of the difference between them.
+            Widget::ExposureDown => {
+                let _ = self.perform(Exposure(-histogram::EV_STEP));
+            }
+            Widget::ExposureUp => {
+                let _ = self.perform(Exposure(histogram::EV_STEP));
+            }
+            // A window named outright rather than the next one along: the
+            // image's own where the row offers that, which is the one of the
+            // four that only the image can answer.
+            Widget::Window(index) => {
+                if let Some(current) = self.current.as_mut()
+                    && let Some((_, window)) = histogram::WINDOWS.get(index)
+                {
+                    let window = window.unwrap_or_else(|| AutoWindow::default_for(&current.image));
+                    current.display.set_auto(window, &current.stats);
+                }
+            }
+            Widget::Curve(index) => {
+                if let Some(current) = self.current.as_mut()
+                    && let Some(curve) = ToneMap::ALL.get(index)
+                {
+                    current.display.tone_map = *curve;
+                }
+            }
+            // Whatever the tooltip said the button does, done: these four
+            // stand for a key exactly, and asking the same table that names
+            // them is what keeps the two from ever meaning different things.
+            Widget::WindowDown | Widget::WindowUp | Widget::WindowNarrow | Widget::WindowWiden => {
+                if let Some(action) = action_of(Tip::Widget(widget), &self.panels) {
+                    let _ = self.perform(action);
                 }
             }
             Widget::Cell(index) => {
@@ -1727,6 +1796,49 @@ mod tests {
         }
         assert_eq!(named(Widget::Ramp(Colormap::ALL.len())), None);
 
+        // The exposure's two steps say what one press of them is worth, in
+        // the units the bottom bar reads an exposure out in, and say it in
+        // their own quarter stop rather than in the keys' half.
+        assert_eq!(
+            named(Widget::ExposureDown).as_deref(),
+            Some("Exposure -0.25 EV")
+        );
+        assert_eq!(
+            named(Widget::ExposureUp).as_deref(),
+            Some("Exposure +0.25 EV")
+        );
+
+        // The four nudges are the keys with a picture on them, and are named
+        // by those keys' own words: one case each, since the capitals are the
+        // width of the window and the small letters are where it sits.
+        // Each of them says which way it goes, where the key table's own
+        // words name the pair the key is bound with.
+        for (widget, expected) in [
+            (Widget::WindowDown, "Slide the window down (a)"),
+            (Widget::WindowUp, "Slide the window up (s)"),
+            (Widget::WindowNarrow, "Narrow the window (A)"),
+            (Widget::WindowWiden, "Widen the window (S)"),
+        ] {
+            assert_eq!(named(widget).as_deref(), Some(expected));
+        }
+
+        // And the rows that set a state name the state, with the key that
+        // steps through the row after it.
+        for (index, window) in histogram::WINDOWS.iter().enumerate() {
+            let words = named(Widget::Window(index)).unwrap_or_else(|| panic!("{window:?}"));
+            assert!(words.ends_with("(e)"), "{words}");
+        }
+        assert_eq!(named(Widget::Window(histogram::WINDOWS.len())), None);
+        for (index, curve) in ToneMap::ALL.into_iter().enumerate() {
+            let words = named(Widget::Curve(index)).unwrap_or_else(|| panic!("{curve:?}"));
+            assert!(words.ends_with("(t)"), "{words}");
+            assert!(
+                curve == ToneMap::None || words.to_lowercase().contains(curve.label()),
+                "{words} names {curve:?}"
+            );
+        }
+        assert_eq!(named(Widget::Curve(ToneMap::ALL.len())), None);
+
         // Short enough to be read where they are drawn: beside a toggle, on
         // a panel one panel wide.
         for widget in [
@@ -1735,9 +1847,14 @@ mod tests {
             Widget::Log,
             Widget::Reset,
             Widget::Ramp(1),
+            Widget::ExposureDown,
+            Widget::WindowNarrow,
+            Widget::Window(0),
+            Widget::Window(3),
+            Widget::Curve(2),
         ] {
             let words = named(widget).expect("named above");
-            assert!(words.len() <= 24, "{words} is too long for the panel");
+            assert!(words.len() <= 32, "{words} is too long for the panel");
         }
     }
 
@@ -1867,7 +1984,7 @@ mod tests {
             Some(NextFile)
         );
         assert_eq!(plain("]"), Some(NextFile));
-        assert_eq!(plain("F"), Some(Exposure(0.5)));
+        assert_eq!(plain("F"), Some(Exposure(histogram::EV_STEP)));
         // The window's position and its width are the same two keys in
         // different cases.
         assert_eq!(plain("a"), Some(ShiftWindow(-0.05)));

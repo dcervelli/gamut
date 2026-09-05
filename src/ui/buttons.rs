@@ -181,7 +181,7 @@ pub(super) fn zoom_button(
     }
     let (background, ink) = button_ink(open, hover, theme);
     frame.rounded_rect(rect, CELL_RADIUS, background);
-    centered_text(frame, text, rect, ink, &percent(zoom));
+    centered_text(frame, text, rect, ink, &percent(zoom), TEXT_SIZE);
 }
 
 /// How much of the ink is left on the surface switch when there is nothing
@@ -216,7 +216,7 @@ pub(super) fn output_button(
         )
     };
     frame.rounded_rect(rect, CELL_RADIUS, background);
-    centered_text(frame, text, rect, ink, "HDR");
+    centered_text(frame, text, rect, ink, "HDR", TEXT_SIZE);
 }
 
 /// Side of the grid mark. A side toggle's, since the grid toggle is the same
@@ -288,7 +288,8 @@ pub(super) fn percent(zoom: f32) -> String {
     format!("{:.0}%", zoom * 100.0)
 }
 
-/// Draws `label` centered in `rect`, the way a button wears its label.
+/// Draws `label` centered in `rect` at `size`, the way a button wears its
+/// label.
 ///
 /// Leveled on its capitals rather than on the box its line is laid out in:
 /// that box keeps room under the baseline for descenders, so centering it puts
@@ -303,14 +304,15 @@ pub(super) fn centered_text(
     rect: Rect,
     color: Color,
     label: &str,
+    size: f32,
 ) {
-    let width = text.measure_text(label, TEXT_SIZE)[0];
+    let width = text.measure_text(label, size)[0];
     frame.text(
         [
             frame.snap(rect.x + (rect.width - width) / 2.0),
-            text_top(frame, text, rect, TEXT_SIZE),
+            text_top(frame, text, rect, size),
         ],
-        TEXT_SIZE,
+        size,
         color,
         label,
     );

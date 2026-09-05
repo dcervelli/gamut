@@ -67,7 +67,7 @@ Both ship as standard on the distributions above.
 | `m`, `h`, `i`, `g` | Toggle the minimap, histogram, file information, grid |
 | `l` | Toggle a logarithmic count axis on the histogram |
 | `q`, `Esc` | Quit — `Esc` first closes an open popup |
-| `d`, `f` | Exposure down / up, half a stop |
+| `d`, `f` | Exposure down / up, a quarter stop |
 | `a`, `s` | Slide the window down / up |
 | `A`, `S` | Narrow / widen the window |
 | `e` | Cycle the automatic window: unit → min/max → 99.8% |

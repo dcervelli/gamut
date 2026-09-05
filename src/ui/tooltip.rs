@@ -18,11 +18,12 @@
 
 use std::time::{Duration, Instant};
 
-use crate::image::display::Colormap;
+use crate::image::display::{AutoWindow, Colormap, ToneMap};
 use crate::render::{Rect, TextMeasure, UiFrame};
 use crate::theme::Theme;
 
 use super::buttons::text_top;
+use super::histogram::{EV_STEP, WINDOWS};
 use super::menu::CELL_RADIUS;
 use super::{Panels, TEXT_SIZE, Widget};
 
@@ -106,6 +107,17 @@ pub fn words(tip: Tip, panels: &Panels) -> Option<String> {
     if let Tip::Widget(Widget::Cell(index)) = tip {
         return Some(panels.menu?.cell_tip(index)?.label);
     }
+    // The exposure's two steps say what they are worth, the buttons carrying
+    // the number and these the units: one press of one of them, in the words
+    // the bottom bar reads an exposure out in.
+    if let Tip::Widget(step @ (Widget::ExposureDown | Widget::ExposureUp)) = tip {
+        let stops = if step == Widget::ExposureUp {
+            EV_STEP
+        } else {
+            -EV_STEP
+        };
+        return Some(format!("Exposure {stops:+.2} EV"));
+    }
     Some(
         match tip {
             Tip::Widget(Widget::Zoom) => "Zoom, fit and filter",
@@ -123,6 +135,34 @@ pub fn words(tip: Tip, panels: &Panels) -> Option<String> {
                 Colormap::Viridis => "Viridis",
                 Colormap::Magma => "Magma",
                 Colormap::Turbo => "Turbo",
+            },
+            // What a window button sets, rather than the two or three
+            // characters it wears: a row of numbers needs saying in words
+            // once, and the button has no room to say it.
+            Tip::Widget(Widget::Window(index)) => match WINDOWS.get(index)?.1 {
+                None => "The image's own window",
+                Some(AutoWindow::Off) => "Window on 0 to 1",
+                Some(AutoWindow::MinMax) => "Window on the whole range",
+                Some(AutoWindow::Percentile) => "Window on the central 99.8%",
+                // Not one of the four: a hand-set window is where the window
+                // ends up, never something a button puts it on.
+                Some(AutoWindow::Manual) => return None,
+            },
+            // The four nudges beside that reading, one at a time. The key
+            // that does the same job is bound on a line with its opposite —
+            // `a` and `s`, `A` and `S` — and the table's own words name the
+            // pair, which is right for `--help` and one word too many for a
+            // button that only goes one way.
+            Tip::Widget(Widget::WindowDown) => "Slide the window down",
+            Tip::Widget(Widget::WindowUp) => "Slide the window up",
+            Tip::Widget(Widget::WindowNarrow) => "Narrow the window",
+            Tip::Widget(Widget::WindowWiden) => "Widen the window",
+            // And what a curve is, the labels being the names of the things
+            // rather than descriptions of them.
+            Tip::Widget(Widget::Curve(index)) => match ToneMap::ALL.get(index)? {
+                ToneMap::None => "No tone curve",
+                ToneMap::Reinhard => "Reinhard curve",
+                ToneMap::Neutral => "Khronos PBR Neutral curve",
             },
             Tip::Widget(_) | Tip::Name | Tip::Counter => return None,
         }

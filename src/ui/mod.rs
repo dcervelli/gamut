@@ -111,6 +111,25 @@ pub enum Widget {
     /// One of the false colors offered under that panel's ramp, by its place
     /// in [`crate::image::display::Colormap::ALL`].
     Ramp(usize),
+    /// The two steps of the exposure row under that ramp, a quarter of a stop
+    /// each — see [`histogram::EV_STEP`].
+    ExposureDown,
+    ExposureUp,
+    /// One of the windows the row below those offers, by its place in
+    /// [`histogram::WINDOWS`]. They set a window rather than showing which
+    /// one is in force: the line above them is what says that.
+    Window(usize),
+    /// The four nudges at the end of that line, which move the window the
+    /// user has rather than putting them on a new one: along the axis either
+    /// way, and narrower or wider about its own middle.
+    WindowDown,
+    WindowNarrow,
+    WindowWiden,
+    WindowUp,
+    /// And one of the tone curves in the row below that, by its place in
+    /// [`crate::image::display::ToneMap::ALL`]. These do show which is on,
+    /// there being one curve at a time and a button for each of them.
+    Curve(usize),
     /// The switch between the SDR and the HDR surface, at the end of the
     /// bottom bar: lit while the picture is going out with room above white.
     Output,

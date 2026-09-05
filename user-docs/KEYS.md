@@ -147,8 +147,8 @@ that is not a paste; open it as an argument instead.
 
 | Key | What it does |
 | --- | --- |
-| `d` | Exposure down half a stop |
-| `f` | Exposure up half a stop |
+| `d` | Exposure down a quarter stop |
+| `f` | Exposure up a quarter stop |
 | `a` | Slide the window down |
 | `s` | Slide the window up |
 | `A` | Narrow the window, raising contrast |
@@ -216,12 +216,25 @@ The histogram plots each bar as its share of the fullest one, which is the
 plot a photograph wants. It is the wrong plot for measurement data, where one
 value often covers most of the image — a masked sea, the black surround of a
 scan — and that one bar flattens everything the rest of the range is doing
-into the axis. `l`, or the curve button beside the plot, counts the
+into the axis. `l`, or the button for it down the left of the plot, counts the
 logarithm instead: the tall bar stays at the top and the short ones rise to
 where they can be read beside it. Heights can no longer be compared with each
 other once it is on, which is the point of it being a switch. It applies to
 whichever image is on screen and stays as you set it, and setting it while the
 histogram is closed leaves it that way for when you open it.
+
+Under the plot are the settings the plot is drawing, in three rows. **EV**
+steps the exposure a quarter of a stop a press, the same step `d` and `f`
+take, with the exposure in force in front of them. **Window** reads out the
+window's own bounds, in the units the bottom bar quotes them in, and after
+them four buttons that move the window you have: the outer
+two slide it down and up, as `a` and `s` do, and the inner two narrow and
+widen it about its middle, as `A` and `S` do. The four buttons under the
+reading set a window instead: `Auto` is the window this image opens with, and
+`0–1`, `Min/Max` and `99.8%` are those windows outright. Those four set rather
+than switch, so pressing one again after moving the window by hand puts it
+back where it says. **Curve** is the tone curve, a button each for `None`,
+`Reinhard` and `Neutral`, the one in force lit.
 
 The histogram, the file information and the minimap float over the image
 rather than sitting in the bars, so `` ` `` leaves them where they are.
@@ -285,6 +298,7 @@ counted off in the image's own pixels.
 | Click a panel button | Show or hide the histogram, the file information, or the minimap |
 | Click the grid button | Show or hide the grid |
 | Click the paste button | Paste the picture on the clipboard, as `Ctrl+V` does |
+| Click a histogram control | Step the exposure, move or set the window, or choose the tone curve |
 | Wheel over the file information | Scroll it |
 | Drag the file information | Scroll it, as if dragging the scrollbar's handle |
 | Click the zoom percentage | Open the zoom menu: scale, fit and the magnification filter |
