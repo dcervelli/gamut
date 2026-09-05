@@ -283,7 +283,10 @@ stay closed when the bars come back.
 The histogram and the file information are each a fixed width, and the
 histogram a fixed height as well, so a small enough window has nowhere to put
 them. Their buttons go dim when it has not, and pressing one does nothing;
-resting on it says why. Making the window larger brings them back.
+resting on it says why. Making the window larger brings them back. A window
+opened for a file is never smaller than the two of them need, so this is
+something you meet after resizing rather than on opening — unless the screen
+itself has no room, in which case `--size` is the way past it.
 
 The file information sits down the right of the image, under headings, so
 that a long column can be read by looking for a thing rather than from the

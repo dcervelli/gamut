@@ -33,7 +33,7 @@ use super::{Current, PADDING, PANEL_INSET, PANEL_RADIUS, PANEL_WIDTH, Panels, TE
 /// Below this the panel would show its header, two facts and a scrollbar, so
 /// it stays off instead. There is no matching minimum for the width: the
 /// panel is [`PANEL_WIDTH`] wide or it is not on screen.
-const INFO_MIN_HEIGHT: f32 = 160.0;
+pub(super) const INFO_MIN_HEIGHT: f32 = 160.0;
 
 /// The size a field's name is written at, against [`TEXT_SIZE`] for its
 /// value: the values are what is being read, and the names only say which is

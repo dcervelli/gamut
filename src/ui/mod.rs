@@ -359,6 +359,24 @@ pub fn grid_spacing(show_grid: bool, zoom: f32, scale: f32) -> Option<String> {
     show_grid.then(|| grid::label(grid::step(zoom, scale)))
 }
 
+/// The content area both floating panels need at once: the strip they share
+/// is [`PANEL_WIDTH`] wide, and down it go the histogram at its own fixed
+/// height, the gap between the two, and the least column the information
+/// panel will show — each inside the padding everything floating over the
+/// image keeps.
+///
+/// What a window opens at least this large for, where the monitor has the
+/// room to spare — see `app::window`. A window that opens smaller than its
+/// own interface will fit in has two toggles dead in it from the start, for
+/// no reason the viewer chose.
+///
+/// Derived rather than written down, and `the_panels_room_is_room_for_both`
+/// holds it to what [`room`] actually answers.
+pub const PANELS_ROOM: [f32; 2] = [
+    PANEL_WIDTH + 2.0 * PADDING,
+    histogram::HISTOGRAM_SIZE[1] + info::INFO_MIN_HEIGHT + 3.0 * PADDING,
+];
+
 /// Whether the content area has room for each of the two panels that float
 /// over the top right of it.
 ///
@@ -890,4 +908,45 @@ pub(super) fn capitalized(label: &str) -> String {
 /// leveled against the mark beside it instead, which is a different job.
 fn text_baseline(bar: Rect) -> f32 {
     bar.y + (bar.height - TEXT_SIZE * 1.3) / 2.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// [`PANELS_ROOM`] is a sum of the constants the two panels are laid out
+    /// from, and this is what holds it to what they do with them: a content
+    /// area that size has room for both at once, and one a pixel smaller in
+    /// either direction does not.
+    #[test]
+    fn the_panels_room_is_room_for_both() {
+        let panels = Panels {
+            show_ui: true,
+            show_histogram: true,
+            show_info: true,
+            info_scroll: 0.0,
+            show_luma: true,
+            show_planes: true,
+            log_counts: false,
+            show_minimap: true,
+            show_grid: false,
+            paste: false,
+            pixel_format: PixelFormat::default(),
+            hover: None,
+            info_hover: None,
+            state_hover: false,
+            menu: None,
+        };
+        let area = |width, height| room(Rect::new(0.0, 0.0, width, height), &panels);
+
+        assert_eq!(
+            area(PANELS_ROOM[0], PANELS_ROOM[1]),
+            Room {
+                histogram: true,
+                info: true
+            }
+        );
+        assert!(!area(PANELS_ROOM[0] - 1.0, PANELS_ROOM[1]).histogram);
+        assert!(!area(PANELS_ROOM[0], PANELS_ROOM[1] - 1.0).info);
+    }
 }

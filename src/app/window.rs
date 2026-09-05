@@ -6,6 +6,7 @@ use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::WindowAttributes;
 
+use crate::ui;
 use crate::ui::chrome::{BAR_HEIGHT, SIDE_WIDTH};
 use crate::{APP_ID, PROGRAM};
 
@@ -20,6 +21,32 @@ const CHROME: [f64; 2] = [2.0 * SIDE_WIDTH as f64, 2.0 * BAR_HEIGHT as f64];
 /// there is nowhere left for a picture, so a size asked for beneath it is
 /// taken as far as it goes and no further.
 const MIN_WINDOW: [u32; 2] = [320, 240];
+
+/// A logical pixel of slack on [`PANELS_WINDOW`].
+///
+/// A window is laid out in logical pixels and sized in device ones, so the
+/// size that comes back is the size asked for rounded to the device grid — a
+/// 392-pixel window on a monitor at 1.6 is 627 device pixels and 391.875
+/// logical ones. Asking for exactly the room the panels need therefore leaves
+/// them out about as often as not; asking for a pixel more never does, the
+/// rounding being half a device pixel at worst.
+const FLOOR_SLACK: f64 = 1.0;
+
+/// The window that has room for both floating panels at once: the content
+/// area [`ui::PANELS_ROOM`] asks for, the chrome around it, and
+/// [`FLOOR_SLACK`].
+///
+/// The floor a window opens at instead of [`MIN_WINDOW`], where the monitor
+/// has the room to spare. A window that opens too small for its own interface
+/// has the histogram and the information toggles dead in it from the first
+/// frame, and nothing the viewer did asked for that — where the picture is
+/// small, the window is better a little larger than the picture. It is only a
+/// floor: `--size` is not held to it, and neither is a monitor that cannot
+/// take it.
+const PANELS_WINDOW: [f64; 2] = [
+    ui::PANELS_ROOM[0] as f64 + CHROME[0] + FLOOR_SLACK,
+    ui::PANELS_ROOM[1] as f64 + CHROME[1] + FLOOR_SLACK,
+];
 
 /// What a window opens at when the first file's header will not say how large
 /// its image is. Every format read here does say, so this is a fallback for a
@@ -139,6 +166,13 @@ fn monitor_room(size: PhysicalSize<u32>, scale: f64) -> Option<[f64; 2]> {
 /// the true fractional scale does not arrive until the surface is mapped. The
 /// error is in the safe direction: a window that opens a little smaller than
 /// 100% rather than one that overruns the screen.
+///
+/// A picture smaller than the floor is given the floor: [`PANELS_WINDOW`]
+/// where this monitor can take it, and [`MIN_WINDOW`] where it cannot. The
+/// floor is measured against the monitor's whole room rather than against
+/// [`MAX_WINDOW_FRACTION`] of it — the fraction is about leaving the desktop
+/// its share of a large window, and this is about a small one being usable at
+/// all, so it may exceed the fraction on a monitor with little to spare.
 fn wanted_window(room: [f64; 2], scale: f64, image: [f32; 2]) -> [f64; 2] {
     let mut width = f64::from(image[0]) / scale;
     let mut height = f64::from(image[1]) / scale;
@@ -151,10 +185,27 @@ fn wanted_window(room: [f64; 2], scale: f64, image: [f32; 2]) -> [f64; 2] {
         height *= shrink;
     }
 
+    let floor = floor_for(room);
     [
-        (width + CHROME[0]).max(f64::from(MIN_WINDOW[0])),
-        (height + CHROME[1]).max(f64::from(MIN_WINDOW[1])),
+        (width + CHROME[0]).max(floor[0]),
+        (height + CHROME[1]).max(floor[1]),
     ]
+}
+
+/// The smallest window this monitor should be given: one with room for both
+/// panels where the monitor can hold it, and [`MIN_WINDOW`] where it cannot —
+/// a floor that did not fit the screen would be a window off the edge of it,
+/// which is the thing the rest of this is for.
+fn floor_for(room: [f64; 2]) -> [f64; 2] {
+    let least = [f64::from(MIN_WINDOW[0]), f64::from(MIN_WINDOW[1])];
+    if PANELS_WINDOW[0] <= room[0] && PANELS_WINDOW[1] <= room[1] {
+        [
+            least[0].max(PANELS_WINDOW[0]),
+            least[1].max(PANELS_WINDOW[1]),
+        ]
+    } else {
+        least
+    }
 }
 
 /// The size to open at, given what the monitors are.
@@ -230,6 +281,7 @@ fn logical(size: [f64; 2]) -> LogicalSize<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::chrome::content_area;
 
     /// One ordinary monitor, unscaled.
     const MONITOR: [(PhysicalSize<u32>, f64); 1] = [(PhysicalSize::new(2560, 1440), 1.0)];
@@ -263,6 +315,39 @@ mod tests {
 
         let large = window_size(&MONITOR, Some([8000.0, 6000.0]), None);
         assert!(large.width <= 2560 && large.height <= 1440);
+    }
+
+    /// A picture smaller than the interface still opens a window the
+    /// interface fits in: both panels can be opened in the window a tiny
+    /// image gets, so neither toggle is dead in it from the first frame.
+    ///
+    /// Measured against `ui::PANELS_ROOM`, which
+    /// `ui::tests::the_panels_room_is_room_for_both` holds to what the panels
+    /// actually do with it.
+    #[test]
+    fn a_small_picture_still_opens_a_window_the_panels_fit_in() {
+        let size = window_size(&MONITOR, Some([32.0, 24.0]), None);
+        let content = content_area([size.width as f32, size.height as f32], true);
+        assert!(content.width >= ui::PANELS_ROOM[0], "{content:?}");
+        assert!(content.height >= ui::PANELS_ROOM[1], "{content:?}");
+
+        // And with a device pixel's rounding taken off it, which is what a
+        // compositor hands back: the window is laid out in logical pixels
+        // and sized in device ones. Half a device pixel is the worst of it,
+        // and the coarsest grid is a monitor at 1:1.
+        let rounded = content_area([size.width as f32 - 0.5, size.height as f32 - 0.5], true);
+        assert!(rounded.width >= ui::PANELS_ROOM[0], "{rounded:?}");
+        assert!(rounded.height >= ui::PANELS_ROOM[1], "{rounded:?}");
+    }
+
+    /// And a monitor with no room for such a window is not made to hold one.
+    /// The floor is a floor, not a size asked for: a window that would not
+    /// fit the screen is the thing the rest of this is here to prevent.
+    #[test]
+    fn a_monitor_too_small_for_the_panels_keeps_the_smallest_window() {
+        let cramped = [(PhysicalSize::new(500, 400), 1.0)];
+        let size = window_size(&cramped, Some([32.0, 24.0]), None);
+        assert_eq!(size, LogicalSize::new(MIN_WINDOW[0], MIN_WINDOW[1]));
     }
 
     /// The window is asked for in logical pixels, so a scaled monitor's room

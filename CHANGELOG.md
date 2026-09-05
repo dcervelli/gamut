@@ -18,6 +18,10 @@ Notable changes to `gamut`. The format follows
 
 ### Changed
 
+- A window opens no smaller than one both floating panels fit in, where the
+  monitor has the room for it. A small picture used to open a window its own
+  size, which left the histogram and the information toggles dead in it before
+  anything had been pressed.
 - The histogram panel stays off in a window with no room for it, as the
   information panel already did. Where there is no room for what one of them
   opens, its toggle is drawn dead, refuses the press, and says why it is dead

@@ -29,6 +29,28 @@ running 1.6; the true fractional scale only arrives with
 `wp_fractional_scale_v1` after the surface is mapped. That error goes the safe
 way, opening a little under 100% rather than overrunning.
 
+A window also opens no smaller than one the interface itself fits in.
+`ui::PANELS_ROOM` is the content area the histogram and the information column
+need together — the strip's width, the plot's fixed height, the gap, and the
+least column the panel will show — and `PANELS_WINDOW` is that plus the chrome
+and a logical pixel of slack. A window opening below it would have both those
+toggles dead in it from the first frame, which is not something the viewer
+asked for; where the picture is smaller than the interface, the window is
+better a little larger than the picture. The floor is measured against the
+monitor's whole room rather than against `MAX_WINDOW_FRACTION` of it — the
+fraction is about leaving the desktop its share of a large window, and this is
+about a small one being usable at all — and a monitor that cannot take it is
+given `MIN_WINDOW` instead, since a floor that did not fit the screen would be
+the very thing the rest of this prevents.
+
+The slack is a rounding allowance, not a margin. A window is laid out in
+logical pixels and sized in device ones, so the size that comes back is the
+size asked for rounded to the device grid: 392 logical pixels on a monitor at
+1.6 is 627 device pixels and 391.875 logical ones, a hair under the 392 the
+panels needed. Asking for exactly the room leaves them out about as often as
+not; asking for a pixel more never does, half a device pixel being the worst
+the rounding can do.
+
 `--size <W> <H>` replaces the calculation with the two numbers it is given.
 They are the whole window, chrome included, in the same logical pixels.
 Neither the image nor the monitors gets a say afterwards: a window larger than
