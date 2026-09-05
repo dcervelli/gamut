@@ -487,7 +487,7 @@ mod tests {
     fn the_zoom_menu_hangs_from_the_readout_that_opens_it() {
         let chrome = Chrome::new(WINDOW);
         for spacing in [None, Some("50 px")] {
-            let button = chrome.zoom_button(spacing);
+            let button = chrome.zoom_button();
             let popup = chrome
                 .popup(Menu::Zoom, spacing)
                 .expect("a window with room for it");
@@ -628,7 +628,7 @@ mod tests {
 
         // It stands over the button that opens it, at the other end of the
         // window from the zoom menu.
-        assert!(popup.panel().bottom() <= chrome.pixel_button.y);
+        assert!(popup.panel().bottom() <= chrome.pixel_button(None).y);
 
         let mut view = View::new();
         for (index, expected) in PixelFormat::ALL.into_iter().enumerate() {

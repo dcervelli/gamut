@@ -339,7 +339,7 @@ pub(super) fn output_button(
 const GRID_ICON: f32 = ICON_SIDE;
 
 /// The grid toggle: the icon always, and — while the grid is on — how far
-/// apart its lines are, in `spacing`. The reading is worth the room because
+/// apart its lines are, in `spacing`, written after the mark it qualifies. The reading is worth the room because
 /// the spacing follows the zoom rather than being chosen, so a grid whose
 /// size is not stated is a grid that cannot be measured with; switched off
 /// there is no spacing in force, and the icon says the rest.
@@ -362,26 +362,25 @@ pub(super) fn grid_button(
     let (background, ink) = button_ink(spacing.is_some(), hover, theme);
     frame.rounded_rect(rect, CELL_RADIUS, background);
 
-    // The mark sits in the last button's width of the toggle, whether or not
-    // there is a reading in front of it. The button grows leftwards to make
-    // room for one, so anchoring the mark to the right keeps it exactly where
+    // The mark sits in the first button's width of the toggle, whether or
+    // not there is a reading after it. The button grows rightwards to make
+    // room for one, so anchoring the mark to the left keeps it exactly where
     // it was — over the column of side-panel toggles it shares a corner of
     // the window with, and in the same place from one press to the next. A
     // mark that moved every time the toggle was pressed, or every time the
     // zoom put another digit in the reading, would be a mark you had to find
     // again.
-    let mark = Rect::new(rect.right() - BUTTON_SIZE, rect.y, BUTTON_SIZE, rect.height);
+    let mark = Rect::new(rect.x, rect.y, BUTTON_SIZE, rect.height);
     if let Some(spacing) = spacing {
         // Set against the mark rather than centered in what is left of the
         // button: the number and the icon are one reading, and a number half
         // a button clear of the mark it is qualifying reads as two things
-        // sharing a button rather than as a label with a mark after it. What
+        // sharing a button rather than as a mark with a label after it. What
         // the number does not use of the room [`grid_width`] gave it is left
-        // in front of it, where it is the button's own padding.
-        let width = text.measure_text(spacing, TEXT_SIZE)[0];
+        // behind it, where it is the button's own padding.
         frame.text(
             [
-                frame.snap(mark.x - READING_GAP - width),
+                frame.snap(mark.right() + READING_GAP),
                 text_top(frame, text, rect, TEXT_SIZE),
             ],
             TEXT_SIZE,

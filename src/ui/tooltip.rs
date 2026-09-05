@@ -701,7 +701,7 @@ mod tests {
             "{inside:?}"
         );
 
-        let button = chrome.zoom_button(None);
+        let button = chrome.zoom_button();
         let under = place(size, button, Opens::Below, area);
         assert!(under.y >= button.bottom() + OFFSET, "{under:?}");
 
@@ -723,7 +723,7 @@ mod tests {
             chrome.histogram_button,
             chrome.info_button,
             chrome.grid_button(Some("50 px")),
-            chrome.zoom_button(None),
+            chrome.zoom_button(),
             Rect::new(0.0, 0.0, 60.0, BAR_HEIGHT),
         ] {
             for size in [[120.0, 24.0], [420.0, 56.0]] {

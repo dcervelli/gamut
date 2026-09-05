@@ -518,7 +518,7 @@ impl App {
             return None;
         }
         let bar = chrome.top;
-        let limit = chrome.zoom_button(self.grid_spacing().as_deref()).x;
+        let limit = chrome.zoom_button().x;
         let (index, count) = (self.files.index(), self.files.len());
         // Past the pair of step buttons, which are there on exactly the terms
         // the count beside them is — see `Chrome::step_buttons`.

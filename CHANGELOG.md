@@ -8,6 +8,11 @@ Notable changes to `gamut`. The format follows
 
 ### Changed
 
+- The grid toggle has moved from the end of the top bar to the head of the
+  bottom one, in front of the button that says how a pixel is read out, and
+  its spacing is now written after the mark rather than in front of it. The
+  pixel button and the readout after it move along the bar as the toggle
+  widens to read a spacing out.
 - The pixel readout cycles on `.` rather than `>`; the Shift is gone. The two
   copies that take what it reads out are unchanged, still `Ctrl+.` for the
   value and `Ctrl+Shift+.` for the coordinate.

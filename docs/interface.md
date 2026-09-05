@@ -178,11 +178,19 @@ would take is kept clear whether or not the paste button is on screen, so the
 toggle stays where it is as the clipboard changes, and a window too short for
 both ends of the strip drops it rather than standing it on the column coming
 down. The end of the top bar holds the button that hides the interface, and
-inside it the two readouts that are also buttons: the grid toggle, and inside
-that the zoom percentage. The pair are measurements of the picture, which is
-what the top bar is for, and the button that is not one sits outside them in
-the corner of the window, where the world already looks for a control of that
-kind. The bars are inset at their ends by the same margin that centers a toggle
+inside it the zoom percentage, a readout that is also a button. The percentage
+is a measurement of the picture, which is what the top bar is for, and the
+button that is not one sits outside it in the corner of the window, where the
+world already looks for a control of that kind. The head of the bottom bar
+holds the other readout that is also a button — the grid toggle, which says
+whether the grid is drawn and how far apart its lines are — and after it the
+button at the head of the pixel readout. A grid laid over the picture is
+something being done to it rather than a fact about the file, so it belongs in
+the bar that carries what is being done; it is in a bar at all rather than in a
+side strip because it has a spacing to read out, and the strips are a button
+wide, which is too narrow for words. Its mark leads the bar and its reading
+follows the mark, the two being one reading rather than a label and a button
+sharing a square. The bars are inset at their ends by the same margin that centers a toggle
 across a side panel — derived from it, not merely equal to it — so the last
 button in a bar ends on the same line the column of toggles below it ends on,
 and the file name starts on the line the left-hand column starts on. Two edges
@@ -199,8 +207,11 @@ against the window rather than against the frame the picture is in: a menu
 pushed around by where the image happens to be would not stay under the thing
 that opened it. The readout is a fixed width so that the click handler knows
 where it is without measuring what it says, and so that it does not shuffle
-along the bar as the zoom changes; it does move when the grid toggle beside it
-widens to read out its spacing, which is the press that was just made on it.
+along the bar as the zoom changes. The grid toggle is the opposite: it is
+fitted to the reading in it, so it widens when the grid comes on and pushes
+the pixel button and the readout after it along the bottom bar. What moves
+there moves on the press that was just made, and the mark the press was aimed
+at is the one thing that stays where it was.
 
 
 ## Layers and the pointer

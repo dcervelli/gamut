@@ -323,9 +323,9 @@ panel while it is over it, so neither gesture reaches the image behind.
 
 The grid divides the image into squares of a round number of image pixels —
 1, 2, 5, 10, 20, 50 and so on — chosen so that the lines land about fifty
-screen pixels apart at whatever zoom the view is at. The button at the end of
-the top bar says which spacing is in force, so a distance on screen can be
-counted off in the image's own pixels.
+screen pixels apart at whatever zoom the view is at. The button at the head of
+the bottom bar says which spacing is in force, in the reading beside its mark,
+so a distance on screen can be counted off in the image's own pixels.
 
 ## The mouse
 
@@ -335,14 +335,14 @@ counted off in the image's own pixels.
 | Wheel | Zoom about the pointer |
 | Trackpad scroll | The same, by fractions of a notch |
 | Click a panel button | Show or hide the histogram, the file information, or the minimap |
-| Click the grid button | Show or hide the grid |
+| Click the grid button in the bottom left | Show or hide the grid |
 | Click the copy button | Open the menu of copies: the file, or the image |
 | Click the paste button | Paste the image on the clipboard, as `Ctrl+V` does |
 | Click a histogram control | Step the exposure, move or set the window, or choose the tone curve |
 | Wheel over the file information | Scroll it |
 | Drag the file information | Scroll it, as if dragging the scrollbar's handle |
 | Click the zoom percentage | Open the zoom menu: scale, fit and the magnification filter |
-| Click the dot in the bottom left | Choose how a pixel's value is read out |
+| Click the dot beside the grid button | Choose how a pixel's value is read out |
 
 The button at the top of the left strip opens a menu of the
 copies beside it: the file's **Name**, its **Path**, its **URI**, the
@@ -353,8 +353,8 @@ of the pixel under the pointer are not on it: the pointer is over the menu
 while the menu is open, so there would be no pixel under it to copy. Pressing
 anywhere outside the menu, or `Esc`, closes it without copying anything.
 
-The percentage in the top bar, just inside the grid button, is itself a
-button. Pressing it opens a menu hanging under it, under three headings.
+The percentage in the top bar, just inside the button that hides the
+interface, is itself a button. Pressing it opens a menu hanging under it, under three headings.
 **Zoom** is 10% through 1600%. **Fit** is the two fits — the whole image, or
 the window filled by it. The chevrons on the second point the way it fills,
 across the window or down it, which follows the shape of the image.

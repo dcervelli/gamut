@@ -522,11 +522,12 @@ pub fn build_frame(
     let top = chrome.top;
     let top_baseline = text_baseline(top);
 
+    // How far apart the grid's lines are: what the toggle at the head of the
+    // bottom bar reads out, and so what says how much of that bar it takes.
+    let spacing = grid_spacing(panels.show_grid, zoom, input.scale);
     // Clear of the two buttons at the end of the bar, the innermost of which
     // is the zoom readout.
-    let spacing = grid_spacing(panels.show_grid, zoom, input.scale);
-    let grid_button = chrome.grid_button(spacing.as_deref());
-    let zoom_button = chrome.zoom_button(spacing.as_deref());
+    let zoom_button = chrome.zoom_button();
 
     // Laid out by `status`, which the pointer asks as well: what a tooltip
     // hangs from has to be where the words actually went.
@@ -611,15 +612,6 @@ pub fn build_frame(
     );
     tips.offer(Tip::Widget(Widget::Zoom), zoom_button);
 
-    buttons::grid_button(
-        &mut frame,
-        text,
-        grid_button,
-        spacing.as_deref(),
-        panels.hover == Some(Widget::Grid),
-        theme,
-    );
-    tips.offer(Tip::Widget(Widget::Grid), grid_button);
     buttons::maximize_button(
         &mut frame,
         chrome.maximize_button,
@@ -673,10 +665,10 @@ pub fn build_frame(
     // goes on its own, and the rest changes as the view is worked.
     let bar = chrome.bottom;
 
-    // The surface switch ends the bar, where the grid toggle ends the top
-    // one: it is the one control of the display that is not a fact about the
-    // picture, and the words about what is being done to the picture run up
-    // to it.
+    // The surface switch ends the bar, where the button that hides the
+    // interface ends the top one: it is the one control of the display that
+    // is not a fact about the picture, and the words about what is being done
+    // to the picture run up to it.
     let output_button = chrome.output_button();
     buttons::output_button(
         &mut frame,
@@ -689,10 +681,24 @@ pub fn build_frame(
     );
     tips.offer(Tip::Widget(Widget::Output), output_button);
 
+    // The grid toggle leads the bar, on the line the column of side toggles
+    // keeps down the left of the window, and what it reads out is what says
+    // where the button after it begins.
+    let grid_button = chrome.grid_button(spacing.as_deref());
+    buttons::grid_button(
+        &mut frame,
+        text,
+        grid_button,
+        spacing.as_deref(),
+        panels.hover == Some(Widget::Grid),
+        theme,
+    );
+    tips.offer(Tip::Widget(Widget::Grid), grid_button);
+
     // The head of the readout, and the only part of it that is always there:
     // the pointer is over the bar rather than over a pixel while it is on its
     // way to this button.
-    let pixel_button = chrome.pixel_button;
+    let pixel_button = chrome.pixel_button(spacing.as_deref());
     buttons::pixel_button(
         &mut frame,
         pixel_button,
