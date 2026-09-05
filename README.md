@@ -67,7 +67,7 @@ Both ship as standard on the distributions above.
 | `~` | The same, closing the map, histogram and information too |
 | `m`, `h`, `i`, `g` | Toggle the minimap, histogram, file information, grid |
 | `l` | Toggle a logarithmic count axis on the histogram |
-| `q`, `Esc` | Quit — `Esc` first closes an open popup or message |
+| `q`, `Esc` | Quit — `Esc` first closes a popup or message, or shows the interface |
 | `d`, `f` | Exposure down / up, a quarter stop |
 | `a`, `s` | Slide the window down / up |
 | `A`, `S` | Narrow / widen the window |
@@ -96,6 +96,14 @@ The panels are opaque and the image is fitted inside them rather than passing
 behind them, so `` ` `` changes how much room a fitted image has and it re-fits
 on the spot.
 
+`` ` `` has a button as well, in the corner of the top bar, and Shift held on
+it is `~`. It is the one control that hides itself, so the first time the bars
+go a message says which keys bring them back — once and not again, since a
+message every time would be in the way of the picture that was just asked for.
+`Esc` is one of the two because it is the key that puts things away everywhere
+else in the window; without it, someone who pressed the button and never read
+`--help` would have nothing to press.
+
 A copy takes the selection and leaves the picture exactly as it was, which
 makes it the one action in the program with no sign that it happened — a copy
 that worked and a key that was never read look identical. So each one raises a
@@ -103,8 +111,12 @@ message at the foot of the content area saying what was taken: the name, the
 path, the URI, the picture, a field of the information panel, the pixel under
 the pointer. It goes on its own after 2.6 seconds, and can be taken off sooner
 by the cross it carries or by `Esc`, which puts away whatever is up — a menu
-first, then a message — and only quits when there is nothing left to put away.
-`q` quits regardless, since a copy is often followed straight away by it.
+first, then the interface if it is hidden, then a message — and only quits when
+there is nothing left to put away. The interface comes before the message
+because the message raised when it went is the one that says `Esc` brings it
+back, and a key that dismissed its own instructions would leave the reader with
+a window they could not get out of. `q` quits regardless, since a copy is often
+followed straight away by it.
 The message has three levels, and the theme's own inks carry them: the
 ordinary text for something done, the theme's yellow for something that could
 not be done and broke nothing (no pixel under the pointer), its red for a
@@ -507,13 +519,16 @@ holds the minimap toggle above the copy button and the paste button, the right
 one the histogram above the file information, the order the two panels they
 open are stacked in over the picture. The button that comes and goes with the
 clipboard is the last of the left-hand three, so that nothing above it moves
-under the pointer as it appears. The end of the top bar holds the two readouts
-that are also buttons: the grid toggle, and just inside it the zoom percentage.
-Both are measurements of the picture, which is what the top bar is for. The
-bars are inset at their ends by the same margin that centers a toggle across a
-side panel — derived from it, not merely equal to it — so the grid toggle ends
-on the same line the column of toggles below it ends on, and the file name
-starts on the line the minimap toggle starts on. Two edges a few pixels apart
+under the pointer as it appears. The end of the top bar holds the button that
+hides the interface, and inside it the two readouts that are also buttons: the
+grid toggle, and inside that the zoom percentage. The pair are measurements of
+the picture, which is what the top bar is for, and the button that is not one
+sits outside them in the corner of the window, where the world already looks
+for a control of that kind. The bars are inset at their ends by the same margin
+that centers a toggle across a side panel — derived from it, not merely equal
+to it — so the last button in a bar ends on the same line the column of toggles
+below it ends on, and the file name starts on the line the minimap toggle
+starts on. Two edges a few pixels apart
 read as a mistake in a way that one shared edge does not, and deriving the
 margin is what keeps them from drifting apart when a button size is retuned. A
 menu hangs from the button that opens it, off whichever of its edges faces into
