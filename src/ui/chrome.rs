@@ -20,6 +20,15 @@ pub(super) const BUTTON_SIZE: f32 = 22.0;
 /// The gap between two buttons, whether stacked down a panel or side by side
 /// in a bar.
 const BUTTON_GAP: f32 = 8.0;
+/// And the gap between two set against each other instead: a hairline of the
+/// bar showing between them, and nothing more.
+///
+/// The pair that steps through the list is parted by this rather than by
+/// [`BUTTON_GAP`], and squared off where they meet — see
+/// [`Corners`](super::buttons::Corners). Two buttons that go the two ways of
+/// one thing are one control, and a control is not read as one thing with a
+/// button's own width of bar down the middle of it.
+pub(super) const STEP_SEAM: f32 = 1.0;
 
 /// The margin at the ends of the bars: how far the first thing in one is
 /// from the edge of the window.
@@ -145,6 +154,41 @@ impl Chrome {
         }
     }
 
+    /// The two buttons at the head of the top bar: back a file, and on a
+    /// file. In front of the count they move through, at the end of the bar
+    /// the file is named from, so that the three read as one line about which
+    /// of the list is on screen.
+    ///
+    /// Set against each other across a [`STEP_SEAM`] and turned only at the
+    /// ends of the pair: the two go the two ways of one thing, and are drawn
+    /// as one thing.
+    ///
+    /// On screen only while there is more than one file — see
+    /// [`Chrome::widget_at`]. Stepping a list of one does nothing, and a
+    /// button that did nothing when pressed would be worse than no button;
+    /// the count beside them is left out for the same reason.
+    pub fn step_buttons(&self) -> [Rect; 2] {
+        let size = [BUTTON_SIZE, BUTTON_SIZE];
+        let previous = bar_button(self.top, size, self.top.x + BAR_PADDING + BUTTON_SIZE);
+        let next = bar_button(self.top, size, previous.right() + STEP_SEAM + BUTTON_SIZE);
+        [previous, next]
+    }
+
+    /// Where the top bar's words begin: past the pair of step buttons while
+    /// they are on screen, and at the bar's own margin while they are not.
+    ///
+    /// `steps` is whether there is more than one file, which is what puts
+    /// those buttons there. Asked here rather than worked out twice, the
+    /// pointer having to be answered against the same line the words were
+    /// laid out from.
+    pub fn bar_text_x(&self, steps: bool) -> f32 {
+        if steps {
+            self.step_buttons()[1].right() + super::PADDING
+        } else {
+            self.top.x + BAR_PADDING
+        }
+    }
+
     /// The grid toggle, at the right of the top bar. In the bar rather than
     /// in a side panel because it reads out how far apart the lines are as
     /// well as whether they are drawn, and the side panels are too narrow for
@@ -245,13 +289,24 @@ impl Chrome {
     /// the application. `spacing` is what the grid toggle is reading out,
     /// which is what says how much of the bar it takes.
     ///
-    /// `paste` is whether the clipboard is holding a picture, which is the
-    /// other thing about the interface the window's size does not settle: the
-    /// button for it is there only while there is something to paste, so a
-    /// point where it would be reaches the panel and no widget when there is
-    /// not.
-    pub fn widget_at(&self, point: [f32; 2], spacing: Option<&str>, paste: bool) -> Option<Widget> {
-        if self.minimap_button.contains(point) {
+    /// `paste` is whether the clipboard is holding a picture and `steps`
+    /// whether the list holds more than one file: the two other things about
+    /// the interface the window's size does not settle. Each puts a button on
+    /// screen only while it is true, so a point where one would be reaches
+    /// the panel and no widget when it is not.
+    pub fn widget_at(
+        &self,
+        point: [f32; 2],
+        spacing: Option<&str>,
+        paste: bool,
+        steps: bool,
+    ) -> Option<Widget> {
+        let [previous, next] = self.step_buttons();
+        if steps && previous.contains(point) {
+            Some(Widget::Previous)
+        } else if steps && next.contains(point) {
+            Some(Widget::Next)
+        } else if self.minimap_button.contains(point) {
             Some(Widget::Minimap)
         } else if self.copy_button.contains(point) {
             Some(Widget::Copy)
@@ -473,7 +528,7 @@ mod tests {
         // under it.
         for paste in [false, true] {
             assert_eq!(
-                chrome.widget_at([button.x + 1.0, button.y + 1.0], None, paste),
+                chrome.widget_at([button.x + 1.0, button.y + 1.0], None, paste, false),
                 Some(Widget::Copy)
             );
         }
@@ -495,9 +550,9 @@ mod tests {
         assert_eq!(button.x, chrome.minimap_button.x);
         assert_eq!(button.width, chrome.minimap_button.width);
 
-        assert_eq!(chrome.widget_at(at, None, true), Some(Widget::Paste));
+        assert_eq!(chrome.widget_at(at, None, true, false), Some(Widget::Paste));
         assert_eq!(
-            chrome.widget_at(at, None, false),
+            chrome.widget_at(at, None, false, false),
             None,
             "with nothing to paste the press reaches the panel and no widget"
         );
@@ -506,7 +561,8 @@ mod tests {
             chrome.widget_at(
                 [chrome.minimap_button.x + 1.0, chrome.minimap_button.y + 1.0],
                 None,
-                true
+                true,
+                false
             ),
             Some(Widget::Minimap)
         );
@@ -532,13 +588,13 @@ mod tests {
             (Widget::Info, chrome.info_button),
         ] {
             assert_eq!(
-                chrome.widget_at([rect.x + 1.0, rect.y + 1.0], None, false),
+                chrome.widget_at([rect.x + 1.0, rect.y + 1.0], None, false, false),
                 Some(widget),
                 "{widget:?}"
             );
         }
         assert_eq!(
-            chrome.widget_at([WINDOW[0] / 2.0, WINDOW[1] / 2.0], None, false),
+            chrome.widget_at([WINDOW[0] / 2.0, WINDOW[1] / 2.0], None, false, false),
             None
         );
     }
@@ -564,7 +620,12 @@ mod tests {
         assert_eq!(short.histogram_button.width, BUTTON_SIZE);
         assert_eq!(short.info_button.width, 0.0);
         assert_eq!(
-            short.widget_at([short.info_button.x, short.info_button.y], None, false),
+            short.widget_at(
+                [short.info_button.x, short.info_button.y],
+                None,
+                false,
+                false
+            ),
             None
         );
     }
@@ -646,21 +707,66 @@ mod tests {
         // nothing at all switched off.
         let wide_only = [unlit.x - 2.0, button.y + 1.0];
         assert_eq!(
-            chrome.widget_at(wide_only, SPACING, false),
+            chrome.widget_at(wide_only, SPACING, false, false),
             Some(Widget::Grid)
         );
-        assert_eq!(chrome.widget_at(wide_only, None, false), None);
+        assert_eq!(chrome.widget_at(wide_only, None, false, false), None);
         assert_eq!(
-            chrome.widget_at([unlit.x + 1.0, unlit.y + 1.0], None, false),
+            chrome.widget_at([unlit.x + 1.0, unlit.y + 1.0], None, false, false),
             Some(Widget::Grid)
         );
         // The bar it sits in is still the interface, so the facts written
         // beside it are not a press on anything.
         assert_eq!(
-            chrome.widget_at([button.x - 2.0, button.y + 1.0], SPACING, false),
+            chrome.widget_at([button.x - 2.0, button.y + 1.0], SPACING, false, false),
             None
         );
         assert!(chrome.contains([button.x - 2.0, button.y + 1.0]));
+    }
+
+    /// The pair that steps through the list leads the top bar, on the same
+    /// line down the window as the toggles under it, and the bar's words
+    /// begin past them.
+    ///
+    /// They answer only while there is a list to step through: a press where
+    /// one would be reaches the bar and no widget with a single file, exactly
+    /// as the paste button behaves with an empty clipboard.
+    #[test]
+    fn the_step_buttons_lead_the_top_bar_while_there_is_a_list_to_step() {
+        let chrome = Chrome::new(WINDOW);
+        let [previous, next] = chrome.step_buttons();
+
+        assert_eq!(previous.x, chrome.top.x + BAR_PADDING);
+        // The line the column of toggles down the left panel starts on, and
+        // the button at the head of the bottom bar with it.
+        assert_eq!(previous.x, chrome.minimap_button.x);
+        assert_eq!(previous.x, chrome.pixel_button.x);
+        // Set against each other rather than spaced like unrelated buttons:
+        // the pair is one control with two ends.
+        assert_eq!(next.x - previous.right(), STEP_SEAM);
+        for button in [previous, next] {
+            assert_eq!(button.width, BUTTON_SIZE);
+            // Centered across the bar, as every other button in one is.
+            assert_eq!(
+                button.y - chrome.top.y,
+                chrome.top.bottom() - button.bottom()
+            );
+        }
+
+        // The words start clear of them while they are there, and at the
+        // bar's own margin while they are not.
+        assert!(chrome.bar_text_x(true) > next.right());
+        assert_eq!(chrome.bar_text_x(false), chrome.top.x + BAR_PADDING);
+
+        for (button, widget) in [(previous, Widget::Previous), (next, Widget::Next)] {
+            let at = [button.x + 1.0, button.y + 1.0];
+            assert_eq!(chrome.widget_at(at, None, false, true), Some(widget));
+            assert_eq!(
+                chrome.widget_at(at, None, false, false),
+                None,
+                "with one file the press reaches the bar and no widget"
+            );
+        }
     }
 
     /// The bars and the side panels share one line down each edge of the
@@ -716,17 +822,17 @@ mod tests {
 
             // Each of the two takes only the press that lands on itself.
             assert_eq!(
-                chrome.widget_at([button.x + 1.0, button.y + 1.0], spacing, false),
+                chrome.widget_at([button.x + 1.0, button.y + 1.0], spacing, false, false),
                 Some(Widget::Zoom)
             );
             assert_eq!(
-                chrome.widget_at([grid.x + 1.0, grid.y + 1.0], spacing, false),
+                chrome.widget_at([grid.x + 1.0, grid.y + 1.0], spacing, false, false),
                 Some(Widget::Grid)
             );
             // The bar they sit in is still the interface, so a press between
             // them does not reach the image behind.
             assert_eq!(
-                chrome.widget_at([button.x - 2.0, button.y + 1.0], spacing, false),
+                chrome.widget_at([button.x - 2.0, button.y + 1.0], spacing, false, false),
                 None
             );
             assert!(chrome.contains([button.x - 2.0, button.y + 1.0]));
@@ -757,7 +863,7 @@ mod tests {
         ];
         assert!(chrome.bottom.contains(middle));
         assert_eq!(
-            chrome.widget_at(middle, None, false),
+            chrome.widget_at(middle, None, false, false),
             Some(Widget::PixelFormat)
         );
         // And nothing else in that bar is where it is: the surface switch is

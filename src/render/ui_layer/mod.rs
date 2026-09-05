@@ -170,7 +170,9 @@ pub(crate) struct QuadItem {
     center: [f32; 2],
     half: [f32; 2],
     color: Color,
-    corner: f32,
+    /// How round each corner is, from the top left round the way CSS writes
+    /// them — see [`UiFrame::rounded_rect_corners`].
+    corner: [f32; 4],
     /// The unit vector the shape's own x axis runs along. `[1.0, 0.0]` for
     /// everything that lies with the window, which is everything but the
     /// strokes an icon is drawn from.
@@ -321,7 +323,7 @@ impl UiFrame {
         &mut self,
         rect: Rect,
         color: Color,
-        corner: f32,
+        corner: [f32; 4],
         axis: [f32; 2],
         stroke: f32,
         blend: Blend,
@@ -344,7 +346,7 @@ impl UiFrame {
     /// As [`UiFrame::rect`], but combined with what is under it by `blend`
     /// rather than simply covering it.
     pub fn rect_blended(&mut self, rect: Rect, color: Color, blend: Blend) {
-        self.quad(rect, color, 0.0, ALONG_THE_WINDOW, 0.0, blend);
+        self.quad(rect, color, [0.0; 4], ALONG_THE_WINDOW, 0.0, blend);
     }
 
     /// What a line `thickness` logical pixels thick is actually drawn: the
@@ -512,7 +514,19 @@ impl UiFrame {
     }
 
     pub fn rounded_rect(&mut self, rect: Rect, corner: f32, color: Color) {
-        self.quad(rect, color, corner, ALONG_THE_WINDOW, 0.0, Blend::Over);
+        self.rounded_rect_corners(rect, [corner; 4], color);
+    }
+
+    /// A rectangle with each corner turned by its own radius, going round
+    /// from the top left the way CSS writes them: top-left, top-right,
+    /// bottom-right, bottom-left. A zero leaves that corner square.
+    ///
+    /// What two controls set against each other are drawn with: the pair is
+    /// turned at its ends and square where they meet, so that it reads as one
+    /// thing with two halves rather than as two things that happen to be
+    /// touching.
+    pub fn rounded_rect_corners(&mut self, rect: Rect, corners: [f32; 4], color: Color) {
+        self.quad(rect, color, corners, ALONG_THE_WINDOW, 0.0, Blend::Over);
     }
 
     /// A stroke `width` wide from `from` to `to`, with a round cap at each
@@ -541,7 +555,7 @@ impl UiFrame {
         self.quad(
             Rect::new(center[0] - length / 2.0, center[1], length, 0.0),
             color,
-            0.0,
+            [0.0; 4],
             axis,
             width,
             Blend::Over,
@@ -554,7 +568,14 @@ impl UiFrame {
     /// `rect` is the center line, the way an SVG rectangle's is, so the band
     /// reaches half its width either side of it.
     pub fn stroke_rect(&mut self, rect: Rect, corner: f32, width: f32, color: Color) {
-        self.quad(rect, color, corner, ALONG_THE_WINDOW, width, Blend::Over);
+        self.quad(
+            rect,
+            color,
+            [corner; 4],
+            ALONG_THE_WINDOW,
+            width,
+            Blend::Over,
+        );
     }
 
     /// A filled circle.
