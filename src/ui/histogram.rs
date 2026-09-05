@@ -291,19 +291,29 @@ fn readout_placement(bars: Rect, width: f32, ends: [f32; 2]) -> (f32, bool) {
 /// The panel's own rectangle inside `content`: the top right corner, inside
 /// the padding everything floating over the image keeps.
 ///
+/// `None` where the content area is too small to take it, as the information
+/// panel's [`info::panel`](super::info::panel) is `None` in a window too
+/// short for it. The panel is one fixed size — the plot's bins are a logical
+/// pixel each and the rows under it are set to what they say, so there is
+/// nothing here to give — and a panel drawn larger than the area it floats
+/// over would cover the picture it is about and run off the window besides.
+///
 /// Public because the pointer is tested against the whole panel from outside
 /// the frame: what lands on it belongs to it, and must not reach the picture
 /// it is floating over.
-pub fn panel(content: Rect) -> Rect {
+pub fn panel(content: Rect) -> Option<Rect> {
+    if HISTOGRAM_SIZE[0] + 2.0 * PADDING > content.width
+        || HISTOGRAM_SIZE[1] + 2.0 * PADDING > content.height
+    {
+        return None;
+    }
     // Rounded, so that the whole-pixel bin spacing starts on a pixel edge.
-    Rect::new(
-        (content.right() - HISTOGRAM_SIZE[0] - PADDING)
-            .max(content.x + PADDING)
-            .round(),
+    Some(Rect::new(
+        (content.right() - HISTOGRAM_SIZE[0] - PADDING).round(),
         (content.y + PADDING).round(),
         HISTOGRAM_SIZE[0],
         HISTOGRAM_SIZE[1],
-    )
+    ))
 }
 
 /// The ground the bins stand on inside that panel, with the axis label's line
@@ -553,7 +563,7 @@ fn row_buttons(panel: Rect) -> impl Iterator<Item = (Widget, Rect)> {
 /// its own color, so the false colors are what the display leaves out for
 /// it. Neither is drawn where it does not apply, and neither answers here.
 pub fn widget_at(content: Rect, point: [f32; 2], gray: bool) -> Option<Widget> {
-    let panel = panel(content);
+    let panel = panel(content)?;
     if !panel.contains(point) {
         return None;
     }
@@ -581,7 +591,9 @@ pub fn widget_at(content: Rect, point: [f32; 2], gray: bool) -> Option<Widget> {
 /// The same rectangles [`widget_at`] answers the pointer with, so that what a
 /// tooltip hangs from is what the pointer found.
 pub(super) fn offer_tips(tips: &mut Tips, content: Rect, gray: bool) {
-    let panel = panel(content);
+    let Some(panel) = panel(content) else {
+        return;
+    };
     for (index, widget) in toolbar(gray).iter().enumerate() {
         tips.offer_toward(
             Tip::Widget(*widget),
@@ -716,7 +728,7 @@ pub fn marked(
     cursor: Option<[f32; 2]>,
     pointer: Option<[u32; 2]>,
 ) -> Option<usize> {
-    let plot = plot_area(panel(content), current.image.is_gray());
+    let plot = plot_area(panel(content)?, current.image.is_gray());
     if let Some(bin) = hovered_bin(plot, cursor) {
         return Some(bin);
     }
@@ -741,7 +753,9 @@ pub(super) fn draw(
     content: Rect,
     theme: &Theme,
 ) {
-    let panel = panel(content);
+    let Some(panel) = panel(content) else {
+        return;
+    };
     frame.rounded_rect(panel, PANEL_RADIUS, theme.panel_background);
 
     // What applies to this image: the false colors are for a single channel
@@ -1288,7 +1302,7 @@ mod tests {
     /// panel around it, and not the line the axis labels are set on.
     #[test]
     fn only_the_plot_itself_answers_the_pointer() {
-        let bars = bars(panel(Rect::new(0.0, 0.0, 800.0, 600.0)));
+        let bars = bars(panel(Rect::new(0.0, 0.0, 800.0, 600.0)).expect("room"));
 
         assert_eq!(hovered_bin(bars, None), None, "no pointer, no mark");
         assert_eq!(hovered_bin(bars, Some([bars.x - 1.0, bars.y + 1.0])), None);
@@ -1309,7 +1323,7 @@ mod tests {
     /// and the bar it stands on cannot part company.
     #[test]
     fn the_pointer_marks_the_bar_it_is_over() {
-        let bars = bars(panel(Rect::new(0.0, 0.0, 800.0, 600.0)));
+        let bars = bars(panel(Rect::new(0.0, 0.0, 800.0, 600.0)).expect("room"));
         let at = |x: f32| hovered_bin(bars, Some([bars.x + x, bars.y + 1.0]));
 
         assert_eq!(at(0.0), Some(0), "the first pixel of the plot is bin zero");
@@ -1335,12 +1349,36 @@ mod tests {
         [rect.x + rect.width / 2.0, rect.y + rect.height / 2.0]
     }
 
+    /// The panel is one fixed size, so a content area smaller than it in
+    /// either direction gets no panel at all rather than one hanging off the
+    /// window over the picture it is about.
+    #[test]
+    fn a_content_area_too_small_gets_no_panel() {
+        let room = [
+            HISTOGRAM_SIZE[0] + 2.0 * PADDING,
+            HISTOGRAM_SIZE[1] + 2.0 * PADDING,
+        ];
+        assert!(panel(Rect::new(0.0, 0.0, room[0], room[1])).is_some());
+        assert!(panel(Rect::new(0.0, 0.0, room[0] - 1.0, room[1])).is_none());
+        assert!(panel(Rect::new(0.0, 0.0, room[0], room[1] - 1.0)).is_none());
+    }
+
+    /// Where it does fit it sits in the top right of the content area, its
+    /// own padding in from both edges.
+    #[test]
+    fn the_panel_sits_in_the_corner_with_its_padding_around_it() {
+        let content = Rect::new(10.0, 20.0, 800.0, 600.0);
+        let panel = panel(content).expect("room");
+        assert_eq!(panel.right(), content.right() - PADDING);
+        assert_eq!(panel.y, content.y + PADDING);
+    }
+
     /// The panel grew a strip of buttons and a row of ramps around the plot,
     /// and the plot itself did not move across: a bin is one logical pixel,
     /// which is what keeps the bars from landing astride a pixel boundary.
     #[test]
     fn the_plot_keeps_one_pixel_to_the_bin_whatever_grows_around_it() {
-        let panel = panel(Rect::new(0.0, 0.0, 800.0, 600.0));
+        let panel = panel(Rect::new(0.0, 0.0, 800.0, 600.0)).expect("room");
         for gray in [true, false] {
             let bars = plot_area(panel, gray);
             assert_eq!(bars.width, BINS as f32, "gray {gray}");
@@ -1369,7 +1407,7 @@ mod tests {
     /// one file to the next.
     #[test]
     fn the_panel_is_one_height_with_the_false_colors_and_without() {
-        let panel = panel(Rect::new(0.0, 0.0, 800.0, 600.0));
+        let panel = panel(Rect::new(0.0, 0.0, 800.0, 600.0)).expect("room");
         let (with, without) = (plot_area(panel, true), plot_area(panel, false));
         assert!(with.height < without.height, "{with:?} {without:?}");
         assert_eq!(with.y, without.y, "both start under the same label");
@@ -1392,7 +1430,7 @@ mod tests {
     #[test]
     fn the_panels_buttons_answer_within_their_own_bounds() {
         let content = Rect::new(0.0, 0.0, 800.0, 600.0);
-        let panel = panel(content);
+        let panel = panel(content).expect("room");
 
         for gray in [true, false] {
             for (index, widget) in toolbar(gray).iter().enumerate() {
@@ -1424,7 +1462,7 @@ mod tests {
     #[test]
     fn a_control_that_could_do_nothing_is_not_there() {
         let content = Rect::new(0.0, 0.0, 800.0, 600.0);
-        let panel = panel(content);
+        let panel = panel(content).expect("room");
 
         assert_eq!(toolbar(true), [Widget::Luma, Widget::Log, Widget::Reset]);
         assert_eq!(
@@ -1456,7 +1494,7 @@ mod tests {
     /// below them do not shift about from one file to the next.
     #[test]
     fn the_rows_sit_under_the_band_whatever_it_ends_in() {
-        let panel = panel(Rect::new(0.0, 0.0, 800.0, 600.0));
+        let panel = panel(Rect::new(0.0, 0.0, 800.0, 600.0)).expect("room");
         let rows = Rows::new(panel);
         let inside = panel.inset(PANEL_INSET, PANEL_INSET);
 
@@ -1484,7 +1522,7 @@ mod tests {
     #[test]
     fn the_rows_answer_the_pointer_where_they_were_drawn() {
         let content = Rect::new(0.0, 0.0, 800.0, 600.0);
-        let panel = panel(content);
+        let panel = panel(content).expect("room");
         let rows = Rows::new(panel);
 
         // Every image has them, gray or not: what they set is what the
@@ -1520,7 +1558,7 @@ mod tests {
     /// the windows and the curves cover everything there is to choose.
     #[test]
     fn the_rows_offer_every_choice_there_is() {
-        let panel = panel(Rect::new(0.0, 0.0, 800.0, 600.0));
+        let panel = panel(Rect::new(0.0, 0.0, 800.0, 600.0)).expect("room");
         let widgets: Vec<Widget> = row_buttons(panel).map(|(widget, _)| widget).collect();
         assert_eq!(widgets[0], Widget::ExposureDown);
         assert_eq!(widgets[1], Widget::ExposureUp);
@@ -1617,7 +1655,7 @@ mod tests {
         let Some(mut fonts) = test_fonts() else {
             return;
         };
-        let panel = panel(Rect::new(0.0, 0.0, 800.0, 600.0));
+        let panel = panel(Rect::new(0.0, 0.0, 800.0, 600.0)).expect("room");
         let mut width = |label: &str| fonts.measure_text(label, ROW_TEXT)[0];
 
         for word in ["EV", "Window", "Curve"] {
@@ -1665,7 +1703,7 @@ mod tests {
     /// both go, rather than one.
     #[test]
     fn the_axis_ends_give_the_line_up_to_the_readout_and_not_before() {
-        let bars = bars(panel(Rect::new(0.0, 0.0, 800.0, 600.0)));
+        let bars = bars(panel(Rect::new(0.0, 0.0, 800.0, 600.0)).expect("room"));
         let centered = |width: f32| bars.x + (bars.width - width) / 2.0;
 
         let (x, fits) = readout_placement(bars, 80.0, [40.0, 40.0]);

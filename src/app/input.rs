@@ -1560,6 +1560,16 @@ impl App {
     /// and [`hint`].
     pub(super) fn tooltip(&self) -> Option<ui::Tooltip> {
         let at = self.tooltips.showing()?;
+        // A toggle the window has no room for is drawn dead and refuses the
+        // press, so the label says why rather than naming the panel and the
+        // key beside it — neither of which is going to happen.
+        if let Some(said) = ui::tooltip::disabled(at, self.room()) {
+            return Some(ui::Tooltip {
+                at,
+                title: vec![said.to_string()],
+                hints: Vec::new(),
+            });
+        }
         let (title, hints) = match at {
             // The name in the bar is cut to the room the bar has, and is only
             // the last part of the path even when it is not. The tooltip is
@@ -1649,7 +1659,16 @@ impl App {
             Widget::Previous => self.step(false),
             Widget::Next => self.step(true),
             Widget::Minimap => self.panels.show_minimap = !self.panels.show_minimap,
-            Widget::Histogram => self.panels.show_histogram = !self.panels.show_histogram,
+            // Refused where the window has no room for the panel, the way the
+            // surface switch refuses where there is no headroom to switch to:
+            // the toggle is drawn dead, and a press on a dead control that
+            // quietly set something no one could see would be worse than one
+            // that does nothing.
+            Widget::Histogram => {
+                if self.room().histogram {
+                    self.panels.show_histogram = !self.panels.show_histogram;
+                }
+            }
             Widget::Grid => self.panels.show_grid = !self.panels.show_grid,
             // The keys' own actions, and which of the two by the modifier
             // the keys are told apart by: a plain press hides the bars, and
@@ -1662,7 +1681,11 @@ impl App {
                 };
                 let _ = self.perform(action);
             }
-            Widget::Info => self.panels.show_info = !self.panels.show_info,
+            Widget::Info => {
+                if self.room().info {
+                    self.panels.show_info = !self.panels.show_info;
+                }
+            }
             // Only ever opens one: the press that closes a menu is answered
             // by the menu itself, before the widgets underneath are asked.
             Widget::Zoom => self.open_menu(Menu::Zoom),

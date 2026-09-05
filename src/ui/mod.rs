@@ -359,6 +359,36 @@ pub fn grid_spacing(show_grid: bool, zoom: f32, scale: f32) -> Option<String> {
     show_grid.then(|| grid::label(grid::step(zoom, scale)))
 }
 
+/// Whether the content area has room for each of the two panels that float
+/// over the top right of it.
+///
+/// Both are fixed at [`PANEL_WIDTH`], and the histogram is fixed in height as
+/// well, so in a small enough window there is nothing to give and the panel
+/// stays off rather than covering the picture it is about. Held together in
+/// one answer because the two are stacked: the histogram takes the top of the
+/// strip, and what it takes is height the information panel does not have.
+///
+/// Asked by the frame builder, by [`layers::hit`] and by the application, all
+/// three of which have to agree about what is on screen — a panel the pointer
+/// could reach but the frame did not draw would take presses aimed at the
+/// picture under it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Room {
+    pub histogram: bool,
+    pub info: bool,
+}
+
+/// What `content` has room for, with `panels` saying which of the two is
+/// asked for — the histogram's take counting against the information panel
+/// only where the histogram is on screen, which [`info::panel`] settles for
+/// itself.
+pub fn room(content: Rect, panels: &Panels) -> Room {
+    Room {
+        histogram: histogram::panel(content).is_some(),
+        info: info::panel(content, panels.show_histogram).is_some(),
+    }
+}
+
 /// Which of the top bar's own runs of words the pointer is on, if any.
 ///
 /// Beside [`layers::hit`] rather than in it because answering takes the fonts
@@ -477,14 +507,15 @@ pub fn build_frame(
             theme,
         );
     }
-    if panels.show_histogram {
+    let room = room(content, panels);
+    if panels.show_histogram && room.histogram {
         histogram::draw(&mut frame, text, current, input, panels, content, theme);
         histogram::offer_tips(&mut tips, content, current.image.is_gray());
     }
     if input.minimap_on_screen {
         minimap::draw(&mut frame, current, view, input, content, theme);
     }
-    if panels.show_info {
+    if panels.show_info && room.info {
         info::draw(&mut frame, text, current, panels, content, theme);
     }
 
@@ -657,6 +688,7 @@ pub fn build_frame(
         chrome.histogram_button,
         panels.show_histogram,
         panels.hover == Some(Widget::Histogram),
+        room.histogram,
         theme,
     );
     tips.offer(Tip::Widget(Widget::Histogram), chrome.histogram_button);
@@ -665,6 +697,7 @@ pub fn build_frame(
         chrome.info_button,
         panels.show_info,
         panels.hover == Some(Widget::Info),
+        room.info,
         theme,
     );
     tips.offer(Tip::Widget(Widget::Info), chrome.info_button);

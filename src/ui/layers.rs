@@ -156,7 +156,12 @@ pub fn hit(
     // over the content area, which is the whole window when the bars are
     // hidden, and they stay on screen and pressable without them.
     if let Some(shown) = shown {
+        // Whether either is on screen at all: a window too small for one is a
+        // window the frame builder left it out of, and what it is not drawn
+        // over must reach the picture instead — see [`super::room`].
+        let room = super::room(content, panels);
         if panels.show_info
+            && room.info
             && let Some(panel) = info::panel(content, panels.show_histogram)
             && panel.contains(point)
         {
@@ -168,7 +173,10 @@ pub fn hit(
         {
             return Hit::Minimap;
         }
-        if panels.show_histogram && histogram::panel(content).contains(point) {
+        if panels.show_histogram
+            && let Some(panel) = histogram::panel(content)
+            && panel.contains(point)
+        {
             return Hit::Histogram(histogram::widget_at(content, point, shown.gray));
         }
     }
@@ -183,7 +191,9 @@ pub fn hit(
 mod tests {
     use super::*;
     use crate::render::Rect;
-    use crate::ui::Menu;
+    use crate::ui::chrome::{BAR_HEIGHT, SIDE_WIDTH};
+    use crate::ui::histogram::HISTOGRAM_SIZE;
+    use crate::ui::{Menu, PADDING, PANEL_WIDTH, Room};
 
     const WINDOW: [f32; 2] = [1000.0, 700.0];
 
@@ -344,9 +354,54 @@ mod tests {
             Hit::Info
         );
         assert!(matches!(
-            at(middle(histogram::panel(content))),
+            at(middle(histogram::panel(content).expect("room"))),
             Hit::Histogram(_)
         ));
+    }
+
+    /// A window with no room for the panels does not answer the pointer with
+    /// them. Both toggles are still on, so what keeps the picture reachable
+    /// is the room and not the switch: a panel the frame builder left out
+    /// must not go on taking presses aimed at the image under it.
+    #[test]
+    fn a_window_too_small_for_a_panel_leaves_the_picture_under_the_pointer() {
+        let panels = panels();
+        let small = [
+            2.0 * SIDE_WIDTH + PANEL_WIDTH + 2.0 * PADDING - 1.0,
+            2.0 * BAR_HEIGHT + 200.0,
+        ];
+        let content = content_area(small, true);
+        assert_eq!(
+            super::super::room(content, &panels),
+            Room {
+                histogram: false,
+                info: false
+            }
+        );
+
+        let at = |point| hit(point, &panels, small, shown(), None, false, None);
+        assert_eq!(at(middle(content)), Hit::Image);
+        assert_eq!(at([content.right() - 1.0, content.y + 1.0]), Hit::Image);
+    }
+
+    /// The two are stacked, so the histogram's take is height the information
+    /// panel does not have: a window tall enough for the column on its own
+    /// has no room for it under an open histogram.
+    #[test]
+    fn the_histogram_takes_the_room_it_needs_from_the_column_below_it() {
+        let mut panels = panels();
+        let height = 2.0 * BAR_HEIGHT + 2.0 * PADDING + HISTOGRAM_SIZE[1] + 100.0;
+        let content = content_area([WINDOW[0], height], true);
+
+        panels.show_histogram = false;
+        let alone = super::super::room(content, &panels);
+        assert!(alone.histogram, "there is room for the histogram");
+        assert!(alone.info, "and for the column on its own");
+
+        panels.show_histogram = true;
+        let under = super::super::room(content, &panels);
+        assert!(under.histogram);
+        assert!(!under.info, "but not for the column under the histogram");
     }
 
     /// The bug this stack was built to answer: the menu hangs off the zoom
@@ -366,7 +421,9 @@ mod tests {
         let covered = popup
             .cells()
             .filter(|(_, cell)| {
-                histogram::panel(content).contains(middle(*cell))
+                histogram::panel(content)
+                    .expect("room")
+                    .contains(middle(*cell))
                     || in_rect(info::panel(content, true), middle(*cell))
             })
             .count();
@@ -453,7 +510,7 @@ mod tests {
     fn a_panel_takes_the_pointer_between_its_buttons_too() {
         let panels = panels();
         let content = Chrome::new(WINDOW).content();
-        let panel = histogram::panel(content);
+        let panel = histogram::panel(content).expect("room");
 
         // The plot itself: on the panel, and on none of its toggles.
         let plot = [panel.right() - 4.0, panel.y + panel.height / 2.0];
@@ -476,7 +533,7 @@ mod tests {
         let content = Chrome::new(WINDOW).content();
 
         for point in [
-            middle(histogram::panel(content)),
+            middle(histogram::panel(content).expect("room")),
             middle(info::panel(content, true).expect("room")),
         ] {
             assert_eq!(
@@ -507,7 +564,7 @@ mod tests {
         let content = content_area(WINDOW, false);
         assert!(matches!(
             hit(
-                middle(histogram::panel(content)),
+                middle(histogram::panel(content).expect("room")),
                 &panels,
                 WINDOW,
                 shown(),
@@ -526,7 +583,7 @@ mod tests {
     fn a_panel_switched_off_hands_the_pointer_through() {
         let mut panels = panels();
         let content = Chrome::new(WINDOW).content();
-        let panel = middle(histogram::panel(content));
+        let panel = middle(histogram::panel(content).expect("room"));
         panels.show_histogram = false;
 
         assert_eq!(

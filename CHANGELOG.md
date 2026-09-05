@@ -18,6 +18,10 @@ Notable changes to `gamut`. The format follows
 
 ### Changed
 
+- The histogram panel stays off in a window with no room for it, as the
+  information panel already did. Where there is no room for what one of them
+  opens, its toggle is drawn dead, refuses the press, and says why it is dead
+  when the pointer rests on it.
 - The Wayland `app_id` and X11 `WM_CLASS` are now `com.dcervelli.gamut`, the
   reverse-DNS form a desktop expects, and the desktop entry and the icon are
   filed under that name to match. A window rule matching the old `gamut` class

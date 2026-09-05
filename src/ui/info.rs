@@ -25,7 +25,7 @@ use crate::render::{Color, Rect, TextMeasure, UiFrame};
 use crate::theme::Theme;
 
 use super::buttons::{ICON_SIDE, outline, text_top};
-use super::histogram::HISTOGRAM_SIZE;
+use super::histogram::{self, HISTOGRAM_SIZE};
 use super::icon;
 use super::menu::CELL_RADIUS;
 use super::{Current, PADDING, PANEL_INSET, PANEL_RADIUS, PANEL_WIDTH, Panels, TEXT_SIZE};
@@ -278,8 +278,10 @@ pub fn panel(content: Rect, show_histogram: bool) -> Option<Rect> {
         return None;
     }
     // The histogram takes the top of the column's strip; the panel starts
-    // below it rather than being drawn over it.
-    let taken = if show_histogram {
+    // below it rather than being drawn over it. Only where the histogram is
+    // on screen, which asks the window as well as the toggle: a window with
+    // no room for the plot is not one the column has to start below.
+    let taken = if show_histogram && histogram::panel(content).is_some() {
         HISTOGRAM_SIZE[1] + PADDING
     } else {
         0.0
@@ -1241,10 +1243,21 @@ mod tests {
             None
         );
         assert_eq!(panel(Rect::new(0.0, 0.0, 900.0, 140.0), false), None);
-        // Room for the panel, but not once the histogram has had its corner.
-        let squeezed = Rect::new(0.0, 0.0, 900.0, 200.0);
+
+        // Room for the column, but not once the histogram has had the top of
+        // the strip: tall enough for the plot and a hundred pixels more.
+        let squeezed = Rect::new(0.0, 0.0, 900.0, HISTOGRAM_SIZE[1] + 2.0 * PADDING + 100.0);
+        assert!(histogram::panel(squeezed).is_some(), "the plot fits");
         assert!(panel(squeezed, false).is_some());
         assert_eq!(panel(squeezed, true), None);
+
+        // And a window too short for the plot takes nothing off the column
+        // for it. The toggle is on, but there is no plot on screen for the
+        // column to start below — and its own toggle is dead as well.
+        let short = Rect::new(0.0, 0.0, 900.0, 200.0);
+        assert!(histogram::panel(short).is_none(), "the plot does not fit");
+        assert_eq!(panel(short, true), panel(short, false));
+        assert!(panel(short, true).is_some());
     }
 
     #[test]

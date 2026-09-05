@@ -223,6 +223,36 @@ along the bar as the zoom changes; it does move when the grid toggle beside it
 widens to read out its spacing, which is the press that was just made on it.
 
 
+## Panels a window has no room for
+
+The two panels down the right of the window — the histogram and the
+information column — are both `PANEL_WIDTH` wide, and the histogram is one
+fixed height besides: its plot gives a bin to the logical pixel, and the rows
+under it are set to what they say, so there is nothing in either to give. A
+content area smaller than one of them gets no panel rather than one drawn over
+the picture it is about and off the edge of the window. `ui::room` asks the
+question for both at once, because they are stacked: the histogram takes the
+top of the strip, and what it takes is height the column below it does not
+have, so a window can have room for the column alone and none for it under an
+open plot. What it takes is settled inside `info::panel`, which asks whether
+the plot is on screen rather than whether its toggle is on — a window too
+short for the plot is not one the column has to start below, and putting that
+question in one place is what keeps the frame builder and the pointer from
+disagreeing about where the column begins.
+
+One answer serves three readers — the frame builder, `layers::hit` and the
+application — since a panel the pointer could reach but the frame did not draw
+would take presses meant for the picture under it. It also decides the two
+toggles in the right-hand strip: where there is no room for what one opens it
+is drawn dead, in the ink the surface switch uses when there is no headroom to
+switch to, and the press is refused rather than quietly setting something no
+one can see. Its tooltip says why instead of naming the panel and the key
+beside it — `tooltip::NO_ROOM`, a sentence rather than a label, because what a
+dead control owes the reader is the reason and not the binding. The toggle
+stays in the strip either way: a control that is sometimes there is a control
+that has to be found again.
+
+
 ## Layers and the pointer
 
 A frame is drawn in two layers, and the menu is the only thing on the second.

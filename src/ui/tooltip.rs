@@ -25,7 +25,7 @@ use crate::theme::Theme;
 use super::buttons::text_top;
 use super::histogram::{EV_STEP, WINDOWS, stops_label};
 use super::menu::CELL_RADIUS;
-use super::{Panels, TEXT_SIZE, Widget};
+use super::{Panels, Room, TEXT_SIZE, Widget};
 
 /// How long the pointer has to rest before a tooltip opens.
 ///
@@ -96,6 +96,30 @@ pub struct Tooltip {
     pub title: Vec<String>,
     /// The lines under those, set dimmer: what to press instead.
     pub hints: Vec<String>,
+}
+
+/// What a toggle says when the content area has no room for the panel it
+/// opens, in place of the name of the panel.
+///
+/// The button is drawn dead — see [`buttons::dead_ink`](super::buttons::dead_ink)
+/// — and the press is refused, so naming the panel and the key beside it
+/// would be describing something that is not going to happen. Said as a
+/// sentence rather than as a label because it is a reason and not a name.
+pub const NO_ROOM: &str = "Disabled because display is too small.";
+
+/// [`NO_ROOM`] where `tip` is a toggle whose panel `room` has nowhere to put
+/// it, and `None` for everything else — including those two toggles in a
+/// window with room for what they open.
+///
+/// Asked before a tooltip is composed out of the key table, since what a dead
+/// toggle owes the reader is the reason and not the binding.
+pub fn disabled(tip: Tip, room: Room) -> Option<&'static str> {
+    let refused = match tip {
+        Tip::Widget(Widget::Histogram) => !room.histogram,
+        Tip::Widget(Widget::Info) => !room.info,
+        _ => false,
+    };
+    refused.then_some(NO_ROOM)
 }
 
 /// What the interface calls a thing, where the key that does the same job
@@ -648,6 +672,47 @@ mod tests {
         assert!(tips.tick(clock.at(2200) + DELAY));
     }
 
+    /// A toggle whose panel the window cannot take says why it is dead, and
+    /// says nothing of the sort while there is room for what it opens. The
+    /// reason stands in for the name: the label a key would give it names a
+    /// press that is going to be refused.
+    #[test]
+    fn a_toggle_with_nowhere_to_put_its_panel_says_so() {
+        let all = Room {
+            histogram: true,
+            info: true,
+        };
+        let none = Room {
+            histogram: false,
+            info: false,
+        };
+
+        assert_eq!(
+            disabled(Tip::Widget(Widget::Histogram), none),
+            Some(NO_ROOM)
+        );
+        assert_eq!(disabled(Tip::Widget(Widget::Info), none), Some(NO_ROOM));
+        assert_eq!(disabled(Tip::Widget(Widget::Histogram), all), None);
+        assert_eq!(disabled(Tip::Widget(Widget::Info), all), None);
+
+        // Only those two: nothing else on the interface has a panel to make
+        // room for, so nothing else goes dead when the window is small.
+        assert_eq!(disabled(Tip::Widget(Widget::Minimap), none), None);
+        assert_eq!(disabled(Tip::Name, none), None);
+
+        // And one at a time, the way the room itself comes out: a window with
+        // height for the column but not for the plot above it.
+        let column = Room {
+            histogram: false,
+            info: true,
+        };
+        assert_eq!(
+            disabled(Tip::Widget(Widget::Histogram), column),
+            Some(NO_ROOM)
+        );
+        assert_eq!(disabled(Tip::Widget(Widget::Info), column), None);
+    }
+
     fn tooltip(at: Tip) -> Tooltip {
         Tooltip {
             at,
@@ -745,7 +810,7 @@ mod tests {
     #[test]
     fn a_toggle_on_the_histogram_panel_is_named_across_the_plot() {
         let area = content_area(WINDOW, true);
-        let panel = crate::ui::histogram::panel(area);
+        let panel = crate::ui::histogram::panel(area).expect("room");
         let toggle = Rect::new(panel.x + 10.0, panel.y + 30.0, 22.0, 22.0);
         let tip = place([150.0, 24.0], toggle, Opens::Right, area);
 
@@ -761,7 +826,7 @@ mod tests {
     #[test]
     fn a_swatch_with_no_room_beside_it_is_named_the_other_way() {
         let area = content_area(WINDOW, true);
-        let panel = crate::ui::histogram::panel(area);
+        let panel = crate::ui::histogram::panel(area).expect("room");
         let swatch = Rect::new(panel.right() - 70.0, panel.bottom() - 20.0, 60.0, 10.0);
         let tip = place([150.0, 24.0], swatch, Opens::Right, area);
 

@@ -280,6 +280,11 @@ rather than sitting in the bars, so `` ` `` leaves them where they are.
 `Shift` with it closes all three as well, for the image on its own; they
 stay closed when the bars come back.
 
+The histogram and the file information are each a fixed width, and the
+histogram a fixed height as well, so a small enough window has nowhere to put
+them. Their buttons go dim when it has not, and pressing one does nothing;
+resting on it says why. Making the window larger brings them back.
+
 The file information sits down the right of the image, under headings, so
 that a long column can be read by looking for a thing rather than from the
 top. It opens with the file itself — what it is called, where it is, what it
