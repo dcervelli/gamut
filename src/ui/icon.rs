@@ -315,6 +315,14 @@ pub(super) const COPY: &[Mark] = &[
     },
 ];
 
+/// Lucide's `x`: the cross that takes a thing off the screen. Its two strokes
+/// cross at the middle of the grid and reach the same distance into each
+/// corner, so it stays square however the square it is fitted into rounds.
+pub(super) const X: &[Mark] = &[
+    Mark::Line([18.0, 6.0], [6.0, 18.0]),
+    Mark::Line([6.0, 6.0], [18.0, 18.0]),
+];
+
 /// The square an icon is drawn in: the largest whole number of [`QUANTUM`]s
 /// that fits in `budget` logical pixels, centered in `within`.
 ///

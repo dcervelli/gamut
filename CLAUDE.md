@@ -30,6 +30,9 @@ ui/            builds each frame's display list; no wgpu or winit imports
   tooltip.rs     the label naming what the pointer is resting on: Tip is what can
                  have one, Tooltips is when it opens, Tips is where it goes —
                  in the content area, on the layer nothing covers
+  toast.rs       the message about what was just done, at the foot of the content
+                 area: Toast is what it says and how long it has, Toasts is the
+                 clock, and place() puts it and the cross that dismisses it
   status.rs      the words in the top and bottom bars; top_bar() lays the top one
                  out for the frame builder and for the pointer alike
 theme/         palette.rs reads Omarchy's colors.toml and resolves its cascade; mod.rs derives Theme's color roles
@@ -98,6 +101,7 @@ name.
 | A status-bar segment | `ui/status.rs`; the pointer's pixel readout is `ui/pixel.rs` |
 | Whether a change to the view is a move or a cut | `App::animate` around the change, in `app/input.rs`, makes it a move; a change the hand is on — a drag, a single pixel's step, a trackpad's scroll — goes to `App::view` directly. Whatever reads what is on screen reads `App::shown_view`, not `view`; how long a move takes is `motion::DURATION` |
 | What a pixel reads as under the pointer | `image/mod.rs::sample` for what the file holds, `image/display.rs::map` for what the screen shows, `ui/pixel.rs::PixelFormat` for which of the two the bar writes out and how |
+| What the window says about something that just happened | `ui/toast.rs` for how long it stays and how it is drawn, `App::toast` to raise one, and `App::poll_copies` for the copies that only know how they went once their thread is done |
 | What something is called when the pointer rests on it | a `Tip` variant in `ui/tooltip.rs` and one `tips.offer(tip, rect)` beside where it is drawn; `App::tooltip` composes the words, from `KEYS` by way of `action_of` wherever a key does the same job, so a tooltip and `--help` cannot disagree. Words of its own go in `ui/tooltip.rs::words`, and a menu cell's in `Menu::cell_tip`. A thing that wants its label somewhere other than under it offers with `offer_toward`: the histogram panel's toggles open `Opens::Right`, across the plot they act on. When it opens is `Tooltips`, held by `App` and asked in `update_hover` and `about_to_wait` |
 | A button's icon | `ui/icon.rs`: one `&[Mark]` on the 24-unit grid, and one `icon::draw` call where the button is drawn. The caller sets aside a budget; whether the mark comes out sharp is `UiFrame::stroke_center_in_device`'s business and whether its spacing stays even is `icon::fit`'s |
 | A panel or overlay | a new `ui/<name>.rs` and one call in `ui/mod.rs::build_frame`; if the pointer can be on it, a `Hit` variant and one test in `ui/layers.rs` at the same height in the stack it is drawn at; a new color role goes in `theme/mod.rs` |

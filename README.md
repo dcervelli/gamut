@@ -66,7 +66,7 @@ Both ship as standard on the distributions above.
 | `~` | The same, closing the map, histogram and information too |
 | `m`, `h`, `i`, `g` | Toggle the minimap, histogram, file information, grid |
 | `l` | Toggle a logarithmic count axis on the histogram |
-| `q`, `Esc` | Quit — `Esc` first closes an open popup |
+| `q`, `Esc` | Quit — `Esc` first closes an open popup or message |
 | `d`, `f` | Exposure down / up, half a stop |
 | `a`, `s` | Slide the window down / up |
 | `A`, `S` | Narrow / widen the window |
@@ -86,6 +86,23 @@ that comes and goes says what the clipboard holds without being asked.
 The panels are opaque and the image is fitted inside them rather than passing
 behind them, so `` ` `` changes how much room a fitted image has and it re-fits
 on the spot.
+
+A copy takes the selection and leaves the picture exactly as it was, which
+makes it the one action in the program with no sign that it happened — a copy
+that worked and a key that was never read look identical. So each one raises a
+message at the foot of the content area saying what was taken: the path, the
+URI, the picture, a field of the information panel, the pixel under the
+pointer. It goes on its own after 2.6 seconds, and can be taken off sooner by
+the cross it carries or by `Esc`, which puts away whatever is up — a menu
+first, then a message — and only quits when there is nothing left to put away.
+`q` quits regardless, since a copy is often followed straight away by it.
+The message has three levels, and the theme's own inks carry them: the
+ordinary text for something done, the theme's yellow for something that could
+not be done and broke nothing (no pixel under the pointer), its red for a
+failure. Copying the picture is the one copy that cannot say anything at once
+— it walks every pixel and encodes a PNG on a thread of its own — so that
+thread sends its outcome back and the message appears when the clipboard
+actually holds it.
 
 Zooming leaves fit mode; panning does not, so Space then Down scrolls through a
 tall image at fit-width.

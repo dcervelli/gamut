@@ -105,6 +105,9 @@ pub fn words(tip: Tip, panels: &Panels) -> Option<&'static str> {
         Tip::Widget(Widget::Zoom) => "Zoom, fit and filter",
         Tip::Widget(Widget::Cell(index)) => panels.menu?.cell_tip(index)?.label,
         Tip::Widget(Widget::Paste) => "Paste a picture",
+        // No one key does this and only this — Escape dismisses whatever is
+        // up, a menu first — so the cross names itself.
+        Tip::Widget(Widget::Dismiss) => "Dismiss this message",
         // The histogram panel's, in as few words as will carry them.
         Tip::Widget(Widget::Luma) => "Luminance plane",
         Tip::Widget(Widget::Planes) => "Color planes",

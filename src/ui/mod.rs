@@ -11,6 +11,7 @@ pub mod info;
 pub mod layers;
 pub mod menu;
 pub mod minimap;
+pub mod toast;
 pub mod tooltip;
 
 mod buttons;
@@ -35,6 +36,7 @@ pub use info::FileFacts;
 pub use menu::Menu;
 pub use pixel::PixelFormat;
 pub use status::BarText;
+pub use toast::Toast;
 pub use tooltip::{Tip, Tooltip, Tooltips};
 
 use tooltip::Tips;
@@ -117,6 +119,10 @@ pub enum Widget {
     /// The dot at the head of the pixel readout, at the other end of that
     /// bar, which opens the menu of ways to write a pixel's value.
     PixelFormat,
+    /// The cross on the message at the foot of the content area, which takes
+    /// it off. On screen only while there is a message — see
+    /// [`FrameInput::toast`].
+    Dismiss,
 }
 
 /// The image on screen, with everything derived from it.
@@ -256,6 +262,10 @@ pub struct FrameInput {
     /// the key that does the same job, and the keys are the application's —
     /// and settled by [`Tooltips`], which is where the timing lives.
     pub tooltip: Option<Tooltip>,
+    /// The message about what was just done, while one is up. Copied out of
+    /// the application's [`toast::Toasts`] the way the tooltip is composed
+    /// there: what a frame draws is what had settled when it was asked for.
+    pub toast: Option<Toast>,
 }
 
 /// A stand-in for the renderer's fonts, for the tests that lay something out
@@ -413,6 +423,24 @@ pub fn build_frame(
     if panels.show_info {
         info::draw(&mut frame, text, current, panels, content, theme);
     }
+
+    // Over those panels rather than among them, and drawn before the bars so
+    // that hiding the chrome leaves it behind: what it says is about what was
+    // just done, which does not stop being true because the bars are away.
+    if let Some(message) = &input.toast
+        && let Some(placed) = toast::place(message, content)
+    {
+        toast::draw(
+            &mut frame,
+            text,
+            message,
+            placed,
+            panels.hover == Some(Widget::Dismiss),
+            theme,
+        );
+        tips.offer(Tip::Widget(Widget::Dismiss), placed.close);
+    }
+
     if !panels.show_ui {
         return frame;
     }

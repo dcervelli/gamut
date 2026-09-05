@@ -11,9 +11,13 @@
 //!
 //! Laid out from the window size and what is on screen, exactly as
 //! [`build_frame`](super::build_frame) lays the frame out, so what the
-//! pointer reaches is what was drawn under it. Nothing is cached: both work
-//! from the same few numbers, and a layout stored between them is a layout
-//! that can fall out of step with the window.
+//! pointer reaches is what was drawn under it. No layout is remembered from
+//! the frame that drew it: both work from the same few numbers, and a
+//! rectangle stored between them is a rectangle that can fall out of step
+//! with the window. Where one of those numbers takes the fonts to arrive at —
+//! the width of the words on a toast — it is measured once when the thing is
+//! made and carried on the thing itself, which is not the same as caching
+//! where it landed.
 //!
 //! Being over a layer and being taken by it are not quite the same thing. An
 //! open menu takes the pointer wherever it is — a press anywhere off it
@@ -23,7 +27,8 @@
 //! menu is open, which is why the bar goes on reading out the pixel under it.
 
 use super::chrome::{Chrome, content_area};
-use super::{Panels, Widget, histogram, info, minimap};
+use super::toast::Toast;
+use super::{Panels, Widget, histogram, info, minimap, toast};
 
 /// The image on screen, as the layers need to know it. `None` before the
 /// first decode, when the panels that describe an image are not drawn.
@@ -50,6 +55,10 @@ pub enum Hit {
     Cell(usize),
     /// That menu between its cells: a press is spent on it and it stays open.
     Menu,
+    /// The message at the foot of the content area, and the cross that takes
+    /// it off when the pointer is on that. A press anywhere else on it is
+    /// spent there, as it is on any other panel.
+    Toast(Option<Widget>),
     /// The information panel. Which of its rows the pointer is on takes the
     /// fonts to answer, so that is asked separately — see
     /// [`info::copyable_at`].
@@ -72,7 +81,7 @@ impl Hit {
     pub fn widget(self) -> Option<Widget> {
         match self {
             Hit::Cell(index) => Some(Widget::Cell(index)),
-            Hit::Histogram(widget) | Hit::Chrome(widget) => widget,
+            Hit::Toast(widget) | Hit::Histogram(widget) | Hit::Chrome(widget) => widget,
             Hit::Menu | Hit::Info | Hit::Minimap | Hit::Image => None,
         }
     }
@@ -99,13 +108,17 @@ impl Hit {
 /// [`grid_spacing`](super::grid_spacing): the one thing about the bar that
 /// the window's size does not settle, the toggle being fitted to the number
 /// in it. The caller works it out the way the frame builder does, from the
-/// zoom the frame was drawn at.
+/// zoom the frame was drawn at. `message` is the toast that is up, if any,
+/// which is laid out here exactly as the frame builder lays it out — it
+/// carries the width its words were measured at, so neither of them needs the
+/// fonts to place it.
 pub fn hit(
     point: [f32; 2],
     panels: &Panels,
     logical: [f32; 2],
     shown: Option<Shown>,
     spacing: Option<&str>,
+    message: Option<&Toast>,
 ) -> Hit {
     let chrome = Chrome::new(logical);
 
@@ -123,13 +136,23 @@ pub fn hit(
         };
     }
 
+    // The message about what was just done, over everything but the menu:
+    // it is drawn there, and a press aimed at the cross that takes it off
+    // must not become a press on whatever the cross happens to be covering.
+    let content = content_area(logical, panels.show_ui);
+    if let Some(message) = message
+        && let Some(placed) = toast::place(message, content)
+        && placed.panel.contains(point)
+    {
+        return Hit::Toast(placed.close.contains(point).then_some(Widget::Dismiss));
+    }
+
     // What floats over the picture, in the reverse of the order it is drawn
     // in, so that where two of them want the same strip of a narrow window
     // the pointer reaches the one on top. Not gated on the bars: these are
     // over the content area, which is the whole window when the bars are
     // hidden, and they stay on screen and pressable without them.
     if let Some(shown) = shown {
-        let content = content_area(logical, panels.show_ui);
         if panels.show_info
             && let Some(panel) = info::panel(content, panels.show_histogram)
             && panel.contains(point)
@@ -208,12 +231,12 @@ mod tests {
         let mut panels = panels();
         panels.paste = true;
         assert_eq!(
-            hit(at, &panels, WINDOW, shown(), None),
+            hit(at, &panels, WINDOW, shown(), None, None),
             Hit::Chrome(Some(Widget::Paste))
         );
 
         panels.paste = false;
-        assert_eq!(hit(at, &panels, WINDOW, shown(), None), Hit::Chrome(None));
+        assert_eq!(hit(at, &panels, WINDOW, shown(), None, None), Hit::Chrome(None));
     }
 
     /// The stack, from the top down, each layer claiming its own point.
@@ -222,7 +245,7 @@ mod tests {
         let panels = panels();
         let chrome = Chrome::new(WINDOW);
         let content = chrome.content();
-        let at = |point| hit(point, &panels, WINDOW, shown(), None);
+        let at = |point| hit(point, &panels, WINDOW, shown(), None, None);
 
         assert_eq!(at(middle(content)), Hit::Image);
         assert_eq!(
@@ -278,7 +301,7 @@ mod tests {
 
         for (index, cell) in popup.cells() {
             assert_eq!(
-                hit(middle(cell), &panels, WINDOW, shown(), None),
+                hit(middle(cell), &panels, WINDOW, shown(), None, None),
                 Hit::Cell(index),
                 "cell {index}"
             );
@@ -291,6 +314,7 @@ mod tests {
                 &panels,
                 WINDOW,
                 shown(),
+                None,
                 None
             ),
             Hit::Menu
@@ -300,7 +324,39 @@ mod tests {
         // grab that makes a press there dismiss the menu is the handlers',
         // not the stack's, so the bar goes on reading out the pixel.
         assert_eq!(
-            hit(middle(content), &panels, WINDOW, shown(), None),
+            hit(middle(content), &panels, WINDOW, shown(), None, None),
+            Hit::Image
+        );
+    }
+
+    /// The message about what was just done is over the panels it may land
+    /// on, and its cross is a widget like any other — a press aimed at it
+    /// must not become a press on whatever it happens to be covering.
+    #[test]
+    fn the_message_takes_the_pointer_from_the_panels_under_it() {
+        let panels = panels();
+        let content = Chrome::new(WINDOW).content();
+        let mut toasts = toast::Toasts::default();
+        toasts.show(
+            &mut crate::ui::Monospace,
+            std::time::Instant::now(),
+            "Copied file path.".to_string(),
+            toast::Level::Message,
+            toast::LINGER,
+        );
+        let message = toasts.showing();
+        let placed = toast::place(message.expect("one is up"), content).expect("room");
+        let at = |point| hit(point, &panels, WINDOW, shown(), None, message);
+
+        assert_eq!(at(middle(placed.close)), Hit::Toast(Some(Widget::Dismiss)));
+        assert_eq!(
+            at([placed.panel.x + 2.0, middle(placed.panel)[1]]),
+            Hit::Toast(None),
+            "the words are the message's, and they are not a button"
+        );
+        // And with nothing up, the picture answers for the same point again.
+        assert_eq!(
+            hit(middle(placed.close), &panels, WINDOW, shown(), None, None),
             Hit::Image
         );
     }
@@ -317,11 +373,11 @@ mod tests {
         // The plot itself: on the panel, and on none of its toggles.
         let plot = [panel.right() - 4.0, panel.y + panel.height / 2.0];
         assert_eq!(
-            hit(plot, &panels, WINDOW, shown(), None),
+            hit(plot, &panels, WINDOW, shown(), None, None),
             Hit::Histogram(None),
             "the plot is the panel's, and it is not a button"
         );
-        assert_eq!(hit(plot, &panels, WINDOW, shown(), None).widget(), None);
+        assert_eq!(hit(plot, &panels, WINDOW, shown(), None, None).widget(), None);
     }
 
     /// Nothing over the picture is drawn before there is a picture, so
@@ -335,7 +391,7 @@ mod tests {
             middle(histogram::panel(content)),
             middle(info::panel(content, true).expect("room")),
         ] {
-            assert_eq!(hit(point, &panels, WINDOW, None, None), Hit::Image);
+            assert_eq!(hit(point, &panels, WINDOW, None, None, None), Hit::Image);
         }
     }
 
@@ -347,10 +403,10 @@ mod tests {
     fn hiding_the_chrome_leaves_the_floating_panels_behind() {
         let mut panels = panels();
         let bar = middle(Chrome::new(WINDOW).bottom);
-        assert_eq!(hit(bar, &panels, WINDOW, shown(), None), Hit::Chrome(None));
+        assert_eq!(hit(bar, &panels, WINDOW, shown(), None, None), Hit::Chrome(None));
 
         panels.show_ui = false;
-        assert_eq!(hit(bar, &panels, WINDOW, shown(), None), Hit::Image);
+        assert_eq!(hit(bar, &panels, WINDOW, shown(), None, None), Hit::Image);
         let content = content_area(WINDOW, false);
         assert!(matches!(
             hit(
@@ -358,6 +414,7 @@ mod tests {
                 &panels,
                 WINDOW,
                 shown(),
+                None,
                 None
             ),
             Hit::Histogram(_)
@@ -374,8 +431,8 @@ mod tests {
         let panel = middle(histogram::panel(content));
         panels.show_histogram = false;
 
-        assert_eq!(hit(panel, &panels, WINDOW, shown(), None), Hit::Info);
+        assert_eq!(hit(panel, &panels, WINDOW, shown(), None, None), Hit::Info);
         panels.show_info = false;
-        assert_eq!(hit(panel, &panels, WINDOW, shown(), None), Hit::Image);
+        assert_eq!(hit(panel, &panels, WINDOW, shown(), None, None), Hit::Image);
     }
 }
