@@ -12,7 +12,7 @@ Every control `gamut` has. Letter keys work in either case except `a`,
 | `Shift`+`2`, `3`, `4` | 50%, 25%, 10% |
 | `+`, `=` | Zoom in one step, a factor of 1.25 |
 | `-`, `_` | Zoom out one step |
-| `Space` | Cycle how the image is fitted: whole → width → height |
+| `Space` | Toggle how the image is fitted: the whole image, or filling the window |
 | `p` | Cycle the filter used above 100%: nearest → bicubic |
 | Arrows | Pan by 64 pixels |
 | `Shift`+Arrows | Pan by one pixel |
@@ -23,8 +23,12 @@ Zoom runs from 2% to 6400%. The zooms below 100% are the ones above it with
 the one part of the keyboard read by where a key is rather than by what it
 types, so `Shift`+`2` is 50% whatever character your layout puts there.
 
+The two fits are the whole image, which leaves a margin on one side, and the
+window filled, which runs the image off the ends of the other. Which axis
+either one works out to is the image's shape against the window's.
+
 Zooming leaves fit mode; panning does not, so `Space` and then Down scrolls
-through a tall image at fit-width.
+through a tall image filling the window.
 
 `Shift` with an arrow places the view to the pixel, which is what lining two
 images up on the same detail takes; `Ctrl` with one runs to that side of the
@@ -351,8 +355,9 @@ anywhere outside the menu, or `Esc`, closes it without copying anything.
 
 The percentage in the top bar, just inside the grid button, is itself a
 button. Pressing it opens a menu hanging under it, under three headings.
-**Zoom** is 10% through 1600%. **Fit** is the three fits — the whole image,
-its width, its height — as arrows pointing the way each one fills the window.
+**Zoom** is 10% through 1600%. **Fit** is the two fits — the whole image, or
+the window filled by it. The chevrons on the second point the way it fills,
+across the window or down it, which follows the shape of the image.
 **Up-scaling** is the filter the image is magnified with, `Nearest` or
 `Bicubic`, the same choice `p` cycles. Whichever of each the view is in is
 lit, and choosing acts at once; pressing anywhere outside the menu, or `Esc`,

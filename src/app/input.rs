@@ -60,7 +60,7 @@ pub enum Action {
     /// Go to this zoom, 1.0 being one image pixel to one screen pixel.
     ZoomTo(f32),
     Pan(Direction, PanStep),
-    CycleFit,
+    ToggleFit,
     CycleUpscale,
     NextFile,
     PreviousFile,
@@ -354,12 +354,12 @@ fn action_of(tip: Tip, panels: &Panels) -> Option<Action> {
         Tip::Widget(Widget::WindowUp) => ShiftWindow(WINDOW_STEP),
         Tip::Widget(Widget::WindowNarrow) => Contrast(NARROWER),
         Tip::Widget(Widget::WindowWiden) => Contrast(WIDER),
-        // A cell of a menu sets one state directly where the key cycles
-        // through them all: the key is worth naming, the cycle's description
-        // is not — see `Menu::cell_tip`. A numbered cell of the zoom menu is
+        // A cell of a menu sets one state directly where the key steps
+        // through them all: the key is worth naming, the description of the
+        // step is not — see `Menu::cell_tip`. A numbered cell of the zoom menu is
         // the exception, its key going straight to the same zoom.
         Tip::Widget(Widget::Cell(index)) => match panels.menu?.cell_tip(index)?.reach {
-            Reach::Fit => CycleFit,
+            Reach::Fit => ToggleFit,
             Reach::Upscale => CycleUpscale,
             Reach::PixelFormat => CyclePixelFormat,
             Reach::Zoom(scale) => ZoomTo(scale),
@@ -501,8 +501,8 @@ pub const KEYS: &[Binding] = &[
         section: Section::Zoom,
         mods: PLAIN,
         shown: "Space",
-        help: "Cycle fit / fit width / fit height",
-        keys: &[(Named(NamedKey::Space), CycleFit)],
+        help: "Toggle fit between the whole image and filling the window",
+        keys: &[(Named(NamedKey::Space), ToggleFit)],
     },
     Binding {
         section: Section::Zoom,
@@ -955,7 +955,7 @@ impl App {
                     }),
                 }
             }
-            CycleFit => self.animate(|view, _, _| view.cycle_fit()),
+            ToggleFit => self.animate(|view, _, _| view.toggle_fit()),
             CycleUpscale => self.view.cycle_upscale(),
             // Nothing to draw yet: the file is only being asked for, and what
             // is on screen stays until it arrives.
@@ -2019,9 +2019,9 @@ mod tests {
         assert!(RESTORE.contains("Esc"), "{RESTORE}");
     }
 
-    /// A cell of the zoom menu is named in its own words — the key cycles
+    /// A cell of the zoom menu is named in its own words — the key steps
     /// through them all and so describes none of them — with the key that
-    /// cycles to it after.
+    /// reaches it after.
     ///
     /// The numbered cells are named by the one key that goes to the same
     /// zoom, not by the whole of the line that binds it: `2` is the answer to
@@ -2042,7 +2042,7 @@ mod tests {
             named_cells += 1;
             assert!(words.ends_with(')'), "{words} says what to press");
         }
-        assert_eq!(named_cells, 13, "eight zooms, three fits and two filters");
+        assert_eq!(named_cells, 12, "eight zooms, two fits and two filters");
     }
 
     /// The histogram panel's buttons are named in the panel's own few words

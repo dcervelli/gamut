@@ -70,6 +70,18 @@ Enough keys to get going:
 
 | Key | |
 | --- | --- |
+<<<<<<< HEAD
+=======
+| `1`, `0` | Actual size (100%) |
+| `2`, `3`, `4`, `5` | 200%, 400%, 800%, 1600% |
+| `Shift`+`2`, `3`, `4` | 50%, 25%, 10% |
+| `+`, `=` / `-`, `_` | Zoom in / out |
+| Wheel | Zoom about the pointer |
+| Space | Toggle fit: the whole image ↔ filling the window |
+| `p` | Cycle the filter used above 100%: nearest → bicubic |
+| Arrows | Pan by 64 pixels; `Shift` by one, `Ctrl` to the far side |
+| Drag | Pan, with the image following the pointer |
+>>>>>>> bravo
 | `]`, `[` | Next / previous file |
 | Space | Cycle fit → fit width → fit height |
 | `1` | Actual size; wheel to zoom, drag to pan |

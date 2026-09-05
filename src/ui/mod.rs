@@ -29,7 +29,7 @@ use crate::image::stats::BINS;
 use crate::image::{DecodedImage, Stats};
 use crate::render::{Backdrop, Rect, TextMeasure, UiFrame};
 use crate::theme::Theme;
-use crate::view::{View, Viewport};
+use crate::view::{Fit, View, Viewport};
 
 use chrome::{BAR_PADDING, Chrome};
 pub use info::FileFacts;
@@ -745,7 +745,11 @@ pub fn build_frame(
         for (index, cell) in popup.cells() {
             tips.offer(Tip::Widget(Widget::Cell(index)), cell);
         }
-        frame.over(|frame| menu::draw(frame, text, &popup, view, zoom, panels, theme));
+        let shown = menu::Shown {
+            zoom,
+            fills: Fit::Fill.axis(current.size(), input.viewport),
+        };
+        frame.over(|frame| menu::draw(frame, text, &popup, view, shown, panels, theme));
     }
 
     // On its own layer above even that: what a tooltip names can be on the
