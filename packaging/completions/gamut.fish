@@ -14,6 +14,7 @@ complete -c gamut      -l tone-map    -d 'Start with this tone map'       -x -a 
 complete -c gamut      -l window      -d 'Start with the window set this way' -x -a 'unit minmax pct'
 complete -c gamut      -l exposure    -d 'Start at this exposure, in stops' -x
 complete -c gamut      -l upscale     -d 'How to resample above 100%'     -x -a 'nearest bicubic'
+complete -c gamut      -l size        -d 'Open the window at this size in logical pixels' -x
 complete -c gamut      -l histogram   -d 'Start with the histogram showing'
 complete -c gamut      -l info        -d 'Start with the file information panel showing'
 complete -c gamut      -l no-minimap  -d 'Start with the minimap off'

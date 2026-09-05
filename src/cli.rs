@@ -47,6 +47,8 @@ OPTIONS:
         --window <MODE>     Start with the window set to unit, minmax, or pct
         --exposure <STOPS>  Start at this exposure, in stops
         --upscale <FILTER>  How to resample above 100%: nearest or bicubic
+        --size <W> <H>      Open the window at this size in logical pixels,
+                            rather than at the image's own
         --histogram         Start with the histogram showing
         --info              Start with the file information panel showing
         --no-minimap        Start with the minimap off; it is on by default
@@ -247,6 +249,7 @@ pub fn parse_args() -> Result<Option<Args>> {
     let mut info = false;
     let mut minimap = true;
     let mut upscale = Upscale::default();
+    let mut size = None;
     let mut only_files = false;
 
     let mut arguments = std::env::args_os().skip(1);
@@ -338,6 +341,12 @@ pub fn parse_args() -> Result<Option<Args>> {
                     startup.exposure_stops = Some(stops.clamp(-16.0, 16.0));
                     continue;
                 }
+                Some("--size") => {
+                    let width = next_value(&mut arguments, "--size")?;
+                    let height = next_value(&mut arguments, "--size")?;
+                    size = Some([side(&width)?, side(&height)?]);
+                    continue;
+                }
                 Some("--upscale") => {
                     let value = next_value(&mut arguments, "--upscale")?;
                     upscale = Upscale::parse(&value)
@@ -390,8 +399,22 @@ pub fn parse_args() -> Result<Option<Args>> {
             info,
             minimap,
             upscale,
+            size,
         },
     }))
+}
+
+/// One side of `--size`, in logical pixels.
+///
+/// Zero is refused rather than clamped: a window of no width is not a smaller
+/// window but a mistyped one, and saying so is more use than opening something
+/// the caller did not ask for. A size that is merely small is clamped instead,
+/// where the window is opened.
+fn side(value: &str) -> Result<u32> {
+    match value.parse::<u32>() {
+        Ok(pixels) if pixels > 0 => Ok(pixels),
+        _ => bail!("`--size` needs two whole numbers of pixels, got `{value}`"),
+    }
 }
 
 fn next_value(
