@@ -236,6 +236,7 @@ impl App {
                 pixel_format: ui::PixelFormat::default(),
                 hover: None,
                 info_hover: None,
+                state_hover: false,
                 menu: None,
             },
             said_how_to_restore: false,
@@ -530,6 +531,38 @@ impl App {
             deleted,
         };
         ui::bar_tip(renderer, point, bar, start, limit, &about)
+    }
+
+    /// Whether the pointer is on the bottom bar's words about what is being
+    /// done to the picture — which name themselves, and open the histogram
+    /// panel when pressed.
+    ///
+    /// Asked afresh rather than read off [`Panels::state_hover`] wherever it
+    /// decides anything: a press can arrive before the pointer has moved
+    /// since the words last changed, and what is stored there is only what
+    /// was true at the last motion.
+    pub(super) fn state_hover(&mut self) -> bool {
+        if !self.panels.show_ui {
+            return false;
+        }
+        let Some(point) = self.logical_cursor() else {
+            return false;
+        };
+        let chrome = self.chrome();
+        // The cheap question first: this is asked on every motion, including
+        // the ones over the picture.
+        if !chrome.bottom.contains(point) {
+            return false;
+        }
+        let bar = chrome.bottom;
+        let limit = chrome.state_limit();
+        let headroom = self.headroom();
+        // Split borrow, as in `bar_tip`.
+        let (Some(renderer), Some(current)) = (self.renderer.as_mut(), self.current.as_ref())
+        else {
+            return false;
+        };
+        ui::state_hover(renderer, point, bar, limit, current, headroom)
     }
 
     /// The image on screen, as the layers need to know it. `None` before the

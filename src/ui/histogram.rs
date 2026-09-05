@@ -12,7 +12,7 @@ use super::status::format_window;
 use super::tooltip::{Opens, Tip, Tips};
 use super::{
     BECOMES, Current, FrameInput, PADDING, PANEL_INSET, PANEL_RADIUS, PANEL_WIDTH, Panels,
-    TEXT_SIZE, Widget,
+    TEXT_SIZE, Widget, capitalized,
 };
 
 /// The panel: as wide as anything else floating over the content area, and
@@ -98,6 +98,43 @@ const RAMP_GAP: f32 = 4.0;
 /// move the exposure by the same amount and the label on the button cannot
 /// come to disagree with what pressing it does.
 pub const EV_STEP: f32 = 0.25;
+
+/// An exposure in stops, written the way the interface counts them.
+///
+/// The step is a quarter, so the numbers the interface actually reaches are
+/// quarters, and a decimal cannot write one: a tenth of a stop rounds ¼ to
+/// `0.2` and ¾ to `0.8`, which are two different-looking readings of one
+/// even pair of steps. The fractions say it exactly and in fewer characters,
+/// and they are the units a photographer already counts exposure in.
+///
+/// Signed unless it is nothing, since what a reader wants from it is which
+/// way the picture has been pushed. Anything that is not a whole quarter can
+/// only have come from `--exposure`, and falls back to the decimal it was
+/// asked for in.
+pub fn stops_label(stops: f32) -> String {
+    if stops == 0.0 {
+        return "0".to_string();
+    }
+    let quarters = (stops.abs() / EV_STEP).round();
+    if (quarters * EV_STEP - stops.abs()).abs() > 1e-4 {
+        return format!("{stops:+.2}");
+    }
+    let sign = if stops < 0.0 { '-' } else { '+' };
+    let whole = (quarters as u32) / 4;
+    let fraction = match (quarters as u32) % 4 {
+        1 => "\u{00bc}",
+        2 => "\u{00bd}",
+        3 => "\u{00be}",
+        _ => "",
+    };
+    // The whole number is left out where there is none, so a quarter of a
+    // stop reads `+¼` rather than `+0¼`.
+    let whole = match whole {
+        0 if !fraction.is_empty() => String::new(),
+        whole => whole.to_string(),
+    };
+    format!("{sign}{whole}{fraction}")
+}
 
 /// The windows the panel offers outright, in the order they are set out: what
 /// the image itself would open with, and then the three rules named.
@@ -465,8 +502,8 @@ fn row_label(widget: Widget, display: &Display) -> Option<(String, bool)> {
     Some(match widget {
         // The step's own worth, written as it acts: one source for the number
         // on the button and the number the press is worth.
-        Widget::ExposureDown => (format!("{:+.2}", -EV_STEP), false),
-        Widget::ExposureUp => (format!("{:+.2}", EV_STEP), false),
+        Widget::ExposureDown => (stops_label(-EV_STEP), false),
+        Widget::ExposureUp => (stops_label(EV_STEP), false),
         Widget::Window(index) => (WINDOWS.get(index)?.0.to_string(), false),
         // Capitalized, where the bar sets the same word in the middle of a
         // line: a button wears a name, and a name starts with a capital.
@@ -476,15 +513,6 @@ fn row_label(widget: Widget, display: &Display) -> Option<(String, bool)> {
         }
         _ => return None,
     })
-}
-
-/// `label` with its first letter capitalized.
-fn capitalized(label: &str) -> String {
-    let mut letters = label.chars();
-    match letters.next() {
-        Some(first) => first.to_uppercase().chain(letters).collect(),
-        None => String::new(),
-    }
 }
 
 /// Every button in that block, with where it goes. The one list the drawing,
@@ -1176,19 +1204,20 @@ fn rows(
     }
 
     // The exposure between its two steps, and the window along its own line.
-    // Both in the units the rest of the interface quotes them in: stops for
-    // the one, and for the other the bounds the bottom bar writes out, in the
-    // file's own counts where the file is counting things.
+    // Both in the units the rest of the interface quotes them in: stops
+    // counted in quarters, as the bar and the keys count them, and the window
+    // in the file's own counts where the file is counting things.
     //
     // The bounds alone, and not the name of the rule they came from: what a
     // window is for is the two numbers, the rule is a fact about how they
-    // were arrived at, and the bar at the foot of the window already says it.
+    // were arrived at, and the bar at the foot of the window says that and
+    // only that. Between the two readings the whole of it is on screen.
     let stops = rows.stops();
     frame.text(
         [frame.snap(stops.x), text_top(frame, text, stops, ROW_TEXT)],
         ROW_TEXT,
         theme.text_primary,
-        format!("{:.2}", display.exposure_stops),
+        stops_label(display.exposure_stops),
     );
     let window = rows.window_reading();
     frame.text_clipped(
@@ -1232,6 +1261,28 @@ fn rows(
 mod tests {
     use super::*;
     use crate::render::ui_tests::test_fonts;
+
+    /// The exposure is stepped in quarter stops, so it is written in
+    /// quarters: a tenth of a stop cannot say what one press is worth, and
+    /// would read one step as `0.2` and the next but one as `0.8`. Only a
+    /// value from `--exposure` can be anything else, and it is written back
+    /// as it was asked for.
+    #[test]
+    fn an_exposure_is_written_in_the_quarters_it_is_stepped_in() {
+        assert_eq!(stops_label(0.0), "0");
+        assert_eq!(stops_label(EV_STEP), "+\u{00bc}");
+        assert_eq!(stops_label(-EV_STEP), "-\u{00bc}");
+        assert_eq!(stops_label(0.5), "+\u{00bd}");
+        assert_eq!(stops_label(-0.75), "-\u{00be}");
+        assert_eq!(stops_label(1.0), "+1");
+        assert_eq!(stops_label(-1.25), "-1\u{00bc}");
+        assert_eq!(
+            stops_label(-16.0),
+            "-16",
+            "the far end of what a key reaches"
+        );
+        assert_eq!(stops_label(0.1), "+0.10");
+    }
 
     /// The pointer reads a bin of the plot and nothing outside it — not the
     /// panel around it, and not the line the axis labels are set on.
@@ -1588,7 +1639,7 @@ mod tests {
                 "\"{reading}\" needs more than {room}"
             );
         }
-        for stops in ["0.00", "-16.00"] {
+        for stops in ["0", "-16\u{00be}", "-16.00"] {
             let room = rows.stops().width;
             assert!(width(stops) <= room, "\"{stops}\" needs more than {room}");
         }

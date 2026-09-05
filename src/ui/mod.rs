@@ -35,7 +35,7 @@ use chrome::{BAR_PADDING, Chrome};
 pub use info::FileFacts;
 pub use menu::Menu;
 pub use pixel::PixelFormat;
-pub use status::BarText;
+pub use status::{BarText, explain_state};
 pub use toast::Toast;
 pub use tooltip::{Tip, Tooltip, Tooltips};
 
@@ -239,6 +239,12 @@ pub struct Panels {
     /// widgets: it moves as the panel scrolls, and it is there whether or not
     /// the bars are.
     pub info_hover: Option<info::Copyable>,
+    /// Whether the pointer is on the words at the end of the bottom bar that
+    /// say what is being done to the picture. Held apart from `hover` for the
+    /// reason the column is: where those words end takes the fonts to say, so
+    /// they are not a widget [`layers::hit`] can answer for — see
+    /// [`status::state`].
+    pub state_hover: bool,
     /// How the bottom bar writes out the value of the pixel under the
     /// pointer. Here rather than with the display's own settings because it
     /// is about the reading and not about the rendering: nothing on screen
@@ -383,6 +389,30 @@ pub fn bar_tip(
         return Some(Tip::Counter);
     }
     words.name.strip(bar).contains(point).then_some(Tip::Name)
+}
+
+/// Whether the pointer is on the bottom bar's own words: the ones at the far
+/// end saying what is being done to the picture.
+///
+/// Beside [`layers::hit`] for the reason [`bar_tip`] is — where a run of
+/// words begins depends on the face it is set in — and asked as its own
+/// question rather than answered with a [`Tip`] because these words are
+/// pressed as well as pointed at: a press on them opens the panel that sets
+/// what they are reading out.
+///
+/// `bar` is the bottom panel and `limit` where the surface switch at its far
+/// end begins, the same two the frame builder lays the words out between.
+pub fn state_hover(
+    text: &mut dyn TextMeasure,
+    point: [f32; 2],
+    bar: Rect,
+    limit: f32,
+    current: &Current,
+    headroom: Headroom,
+) -> bool {
+    bar.contains(point)
+        && status::state(text, bar, limit, current, headroom)
+            .is_some_and(|state| state.strip(bar).contains(point))
 }
 
 /// Builds one frame of interface.
@@ -642,7 +672,6 @@ pub fn build_frame(
     // Bottom panel: what is happening to the image. The pointer comes and
     // goes on its own, and the rest changes as the view is worked.
     let bar = chrome.bottom;
-    let baseline = text_baseline(bar);
 
     // The surface switch ends the bar, where the grid toggle ends the top
     // one: it is the one control of the display that is not a fact about the
@@ -673,9 +702,13 @@ pub fn build_frame(
     );
     tips.offer(Tip::Widget(Widget::PixelFormat), pixel_button);
 
-    let right = status::describe_state(current, input);
-    let right_width = text.measure_text(&right, TEXT_SIZE)[0];
-    let right_x = (output_button.x - PADDING - right_width).max(BAR_PADDING);
+    // What is being done to the picture, up against that switch — and
+    // nothing at all where nothing is being done, which is where a
+    // photograph left alone leaves it.
+    let state = status::state(text, bar, chrome.state_limit(), current, input.headroom);
+    let state_left = state
+        .as_ref()
+        .map_or(output_button.x, |state| state.strip(bar).x);
 
     // The strip of the bar the readout has to itself: past the button at its
     // head, and stopping short of the words at the other end.
@@ -683,7 +716,7 @@ pub fn build_frame(
     let readout = Rect::new(
         readout_x,
         bar.y,
-        ((right_x - PADDING) - readout_x).max(0.0),
+        ((state_left - PADDING) - readout_x).max(0.0),
         bar.height,
     );
     pixel::draw(
@@ -695,7 +728,10 @@ pub fn build_frame(
         panels.pixel_format,
         theme,
     );
-    frame.text([right_x, baseline], TEXT_SIZE, theme.text_dim, right);
+    if let Some(state) = &state {
+        state_words(&mut frame, text, state, bar, output_button.x, panels, theme);
+        tips.offer(Tip::State, state.strip(bar));
+    }
 
     // On the layer above everything else, so that it covers not only the
     // panels and what floats over the content area but the words on them: a
@@ -726,6 +762,85 @@ pub fn backdrop(theme: &Theme) -> Backdrop {
         base: theme.bar_background,
         alternate: theme.border,
         square: CHECKER_SQUARE,
+    }
+}
+
+/// The words about what is being done to the picture, at the far end of the
+/// bottom bar: the line itself, the wash that comes up under it while the
+/// pointer is on it, and the one word on it set apart.
+///
+/// `limit` is where the surface switch begins, which is what the runs are cut
+/// to: the line is set against it, and a window narrow enough to leave it no
+/// room must lose the words rather than lay them over the switch.
+fn state_words(
+    frame: &mut UiFrame,
+    text: &mut dyn TextMeasure,
+    state: &status::State,
+    bar: Rect,
+    limit: f32,
+    panels: &Panels,
+    theme: &Theme,
+) {
+    let (wash, ink) = buttons::button_ink(false, panels.state_hover, theme);
+    if panels.state_hover {
+        // A button's own wash, at a button's height down the middle of the
+        // bar, so that what comes up under the words is the shape everything
+        // else in the chrome wears when the pointer is on it. Nothing at
+        // rest: the line is a reading first, and a pill standing around it
+        // whether or not anyone is pointing would read as a control before it
+        // read as words.
+        let strip = state.strip(bar);
+        let height = chrome::BUTTON_SIZE.min(bar.height);
+        frame.rounded_rect(
+            Rect::new(
+                strip.x,
+                bar.y + (bar.height - height) / 2.0,
+                strip.width,
+                height,
+            ),
+            menu::CELL_RADIUS,
+            wash,
+        );
+    }
+
+    let baseline = text_baseline(bar);
+    let (head, tail) = match state.clipped {
+        Some(at) => (&state.text[..at], &state.text[at..]),
+        None => (state.text.as_str(), ""),
+    };
+    if !head.is_empty() {
+        frame.text_clipped(
+            [state.x, baseline],
+            TEXT_SIZE,
+            ink,
+            (limit - state.x).max(0.0),
+            head,
+        );
+    }
+    // The word for a picture losing its highlights, which is the one thing on
+    // this line that nobody asked for — set bold, and in the ink the line
+    // takes when the pointer is on it, so that it reads as the thing being
+    // said whether or not anyone is pointing.
+    if !tail.is_empty() {
+        let at = state.x + text.measure_text(head, TEXT_SIZE)[0];
+        frame.text_clipped_bold(
+            [at, baseline],
+            TEXT_SIZE,
+            theme.text_primary,
+            (limit - at).max(0.0),
+            tail,
+        );
+    }
+}
+
+/// `label` with its first letter capitalized: the labels are written as they
+/// are read in the middle of a line, and a button wears a name, a sentence
+/// starts with one.
+pub(super) fn capitalized(label: &str) -> String {
+    let mut letters = label.chars();
+    match letters.next() {
+        Some(first) => first.to_uppercase().chain(letters).collect(),
+        None => String::new(),
     }
 }
 

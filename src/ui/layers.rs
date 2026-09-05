@@ -210,6 +210,7 @@ mod tests {
             pixel_format: crate::ui::PixelFormat::default(),
             hover: None,
             info_hover: None,
+            state_hover: false,
             menu: None,
         }
     }

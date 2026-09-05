@@ -368,7 +368,10 @@ fn action_of(tip: Tip, panels: &Panels) -> Option<Action> {
             // the table is what names both.
             Reach::Copy(what) => copy_action(what),
         },
-        Tip::Widget(_) | Tip::Name | Tip::Counter => return None,
+        // The words at the end of the bottom bar are about four settings at
+        // once, so no one key does what they do; what a press on them opens
+        // is the panel that sets all four, which the tooltip says outright.
+        Tip::Widget(_) | Tip::Name | Tip::Counter | Tip::State => return None,
     })
 }
 
@@ -1360,6 +1363,16 @@ impl App {
                         self.update_hover();
                         return true;
                     }
+                    // The words at the end of the bottom bar are not a
+                    // widget — where they begin takes the fonts to say — so
+                    // they are asked for here, after every widget has had
+                    // its chance and before the press is spent on the panel
+                    // they are set on.
+                    None if self.state_hover() => {
+                        self.press(Widget::Histogram);
+                        self.update_hover();
+                        return true;
+                    }
                     // A panel, between its buttons or with none at all.
                     None => return false,
                 },
@@ -1501,14 +1514,23 @@ impl App {
         // chrome widgets: which one the pointer is on takes the fonts to
         // answer. Not gated on the bars either — the panel can be on screen
         // with the chrome hidden, and its buttons go with it.
-        let (hover, info) = if self.menu_has_pointer(hit) {
-            (None, None)
+        let (hover, info, state) = if self.menu_has_pointer(hit) {
+            (None, None, false)
         } else {
-            (hit.and_then(Hit::widget), self.info_copyable())
+            let hover = hit.and_then(Hit::widget);
+            // The bottom bar's words only when nothing else has claimed the
+            // pointer, which is the order a press is answered in: a window
+            // too narrow to keep them off the button at the head of the
+            // readout must not light both.
+            let state = hover.is_none() && self.state_hover();
+            (hover, self.info_copyable(), state)
         };
-        let changed = hover != self.panels.hover || info != self.panels.info_hover;
+        let changed = hover != self.panels.hover
+            || info != self.panels.info_hover
+            || state != self.panels.state_hover;
         self.panels.hover = hover;
         self.panels.info_hover = info;
+        self.panels.state_hover = state;
 
         // The tooltip follows the same answer, and is asked on every call
         // rather than only when the highlight moves: the pointer being still
@@ -1520,6 +1542,9 @@ impl App {
         let tip = match hover {
             _ if self.menu_has_pointer(hit) => None,
             Some(widget) => Some(Tip::Widget(widget)),
+            // The bottom bar's own words, which have just been measured for
+            // the wash that comes up under them, and then the top bar's.
+            None if state => Some(Tip::State),
             None => self.bar_tip(),
         };
         let named = self.tooltips.point(Instant::now(), tip);
@@ -1528,10 +1553,11 @@ impl App {
 
     /// What to say about the thing the pointer has rested on, if anything.
     ///
-    /// The first line names the thing, and the lines under it are what to
-    /// press instead. Both come out of the key table wherever a key does the
-    /// same job, so that a tooltip and `--help` cannot disagree about a
-    /// binding — see [`names`] and [`hint`].
+    /// The first line names the thing — several lines where it is several
+    /// things — and the lines under them are what to press instead. Both come
+    /// out of the key table wherever a key does the same job, so that a
+    /// tooltip and `--help` cannot disagree about a binding — see [`names`]
+    /// and [`hint`].
     pub(super) fn tooltip(&self) -> Option<ui::Tooltip> {
         let at = self.tooltips.showing()?;
         let (title, hints) = match at {
@@ -1540,13 +1566,17 @@ impl App {
             // the path in full — which is also exactly what the key beside it
             // copies.
             Tip::Name => (
-                self.shown_path().display().to_string(),
+                vec![self.shown_path().display().to_string()],
                 Vec::from_iter(hint(CopyPath)),
             ),
             // The count says which of the list is on screen; the keys are how
             // to reach the rest of it.
             Tip::Counter => (
-                format!("File {} of {}", self.files.index() + 1, self.files.len()),
+                vec![format!(
+                    "File {} of {}",
+                    self.files.index() + 1,
+                    self.files.len()
+                )],
                 [NextFile, PreviousFile]
                     .into_iter()
                     .filter_map(hint)
@@ -1556,7 +1586,7 @@ impl App {
             // it, and under that the two copies that take what it is showing
             // away with them — neither of which has a button anywhere.
             Tip::Widget(Widget::PixelFormat) => (
-                names(at, &self.panels)?,
+                vec![names(at, &self.panels)?],
                 [CopyPixelValue, CopyPixelCoordinate]
                     .into_iter()
                     .filter_map(hint)
@@ -1567,19 +1597,43 @@ impl App {
             // panels with it — the one thing on the button the pointer
             // cannot discover by resting on it.
             Tip::Widget(Widget::Maximize) => (
-                names(at, &self.panels)?,
+                vec![names(at, &self.panels)?],
                 Vec::from_iter(hint(ToggleInterfaceAndPanels)),
             ),
             // The exposure's two steps: which way this one goes and what it
             // is worth, and under it the keys that take the same step.
             Tip::Widget(Widget::ExposureDown | Widget::ExposureUp) => (
-                names(at, &self.panels)?,
+                vec![names(at, &self.panels)?],
                 [Exposure(-histogram::EV_STEP)]
                     .into_iter()
                     .filter_map(hint)
                     .collect(),
             ),
-            _ => (names(at, &self.panels)?, Vec::new()),
+            // The words at the end of the bottom bar: what the bar says in
+            // the room it has, said out in full — a line for each of the
+            // things in force — and under them that the panel which sets all
+            // of it is a press away. The key comes from the table as every
+            // other tooltip's does; the words are about the press, which no
+            // key can describe.
+            Tip::State => {
+                let said = ui::explain_state(self.current.as_ref()?, self.headroom());
+                if said.is_empty() {
+                    return None;
+                }
+                let binding = binding_for(ToggleHistogram)?;
+                // What the press is for while the panel is closed; what it
+                // actually does while the panel is open, the press being the
+                // toggle the key is.
+                let does = match self.panels.show_histogram {
+                    true => "close",
+                    false => "open",
+                };
+                (
+                    said,
+                    vec![format!("Click to {does} the histogram ({})", binding.shown)],
+                )
+            }
+            _ => (vec![names(at, &self.panels)?], Vec::new()),
         };
         Some(ui::Tooltip { at, title, hints })
     }
@@ -1874,6 +1928,7 @@ mod tests {
             pixel_format: ui::PixelFormat::default(),
             hover: None,
             info_hover: None,
+            state_hover: false,
             menu,
         }
     }
@@ -2026,11 +2081,11 @@ mod tests {
         // stop `d` and `f` take as well.
         assert_eq!(
             named(Widget::ExposureDown).as_deref(),
-            Some("Exposure -0.25 EV")
+            Some("Exposure -\u{00bc} EV")
         );
         assert_eq!(
             named(Widget::ExposureUp).as_deref(),
-            Some("Exposure +0.25 EV")
+            Some("Exposure +\u{00bc} EV")
         );
 
         // The four nudges are the keys with a picture on them, and are named
