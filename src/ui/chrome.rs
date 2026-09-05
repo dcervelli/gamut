@@ -95,12 +95,14 @@ pub struct Chrome {
     pub bottom: Rect,
     pub left: Rect,
     pub right: Rect,
-    /// The minimap toggle, at the top of the left panel, the button that
-    /// opens the menu of copies under it, and the paste button under that.
-    /// The paste button is drawn and pressable only while the clipboard is
-    /// holding a picture — see [`Chrome::widget_at`]; it is the last of the
-    /// three so that the two above it do not move as it comes and goes.
+    /// The minimap toggle, at the foot of the left panel, over the corner of
+    /// the content area the minimap itself goes in.
     pub minimap_button: Rect,
+    /// The button that opens the menu of copies, at the top of the left
+    /// panel, and the paste button under it. The paste button is drawn and
+    /// pressable only while the clipboard is holding a picture — see
+    /// [`Chrome::widget_at`]; it is the second of the two so that the one
+    /// above it does not move as it comes and goes.
     pub copy_button: Rect,
     pub paste_button: Rect,
     /// The histogram toggle, at the top of the right panel, and the info
@@ -142,9 +144,14 @@ impl Chrome {
                 [BUTTON_SIZE, BUTTON_SIZE],
                 bottom.x + BAR_PADDING + BUTTON_SIZE,
             ),
-            minimap_button: side_button(left, 0),
-            copy_button: side_button(left, 1),
-            paste_button: side_button(left, 2),
+            // The minimap toggle from the foot of the left panel, in the
+            // corner the minimap itself goes in, and the room kept clear for
+            // the whole column above it whether or not the paste button is on
+            // screen — the toggle no more moves with the clipboard than the
+            // copy button above it does.
+            minimap_button: side_button_up(left, 0, 2),
+            copy_button: side_button(left, 0),
+            paste_button: side_button(left, 1),
             histogram_button: side_button(right, 0),
             info_button: side_button(right, 1),
             top,
@@ -393,6 +400,31 @@ fn side_button(panel: Rect, index: usize) -> Rect {
     Rect::new(panel.x + inset, panel.y + top, size, size)
 }
 
+/// The same, counting from the foot of the panel instead: the `index`-th
+/// square button up from the bottom, with the same inset below the last one
+/// as [`side_button`] leaves above the first.
+///
+/// What a button is put here for is the corner it is in — the minimap toggle
+/// sits over the corner of the content area the minimap itself goes in — so
+/// it keeps that corner while the column from the top grows down towards it.
+///
+/// `above` is how many buttons that column holds, and the two never meet: a
+/// panel too short for both leaves this one empty — neither drawn nor
+/// pressable, as in [`side_button`] — rather than standing it on top of what
+/// is coming down. The room kept clear is the slot the next button down would
+/// have taken, so the gap where the two columns face each other is a
+/// [`BUTTON_GAP`] like any other.
+fn side_button_up(panel: Rect, index: usize, above: usize) -> Rect {
+    let size = BUTTON_SIZE.min(panel.width);
+    let inset = (panel.width - size) / 2.0;
+    let bottom = inset + index as f32 * (size + BUTTON_GAP);
+    let taken = inset + above as f32 * (size + BUTTON_GAP);
+    if bottom + size + taken > panel.height {
+        return Rect::new(panel.x, panel.y, 0.0, 0.0);
+    }
+    Rect::new(panel.x + inset, panel.bottom() - bottom - size, size, size)
+}
+
 /// A button ending at `right` in a bar, centered across it. Clamped to the
 /// bar, so a window dragged narrow shrinks the button rather than pushing it
 /// out of the window.
@@ -510,19 +542,20 @@ mod tests {
         assert!(!chrome.contains([chrome.right.x - 1.0, button.y + 1.0]));
     }
 
-    /// The column down the left panel: the minimap toggle, the button that
-    /// opens the menu of copies, and the paste button under those. The copy
-    /// button is above the one that comes and goes, so nothing moves under
-    /// the pointer as the clipboard changes.
+    /// The column down the left panel: the button that opens the menu of
+    /// copies, and the paste button under it. The copy button is above the
+    /// one that comes and goes, so nothing moves under the pointer as the
+    /// clipboard changes. The minimap toggle is in the same strip but comes
+    /// up from the foot of it, clear of both.
     #[test]
-    fn the_copy_button_sits_between_the_minimap_toggle_and_the_paste_button() {
+    fn the_copy_button_sits_above_the_paste_button_and_clear_of_the_minimap() {
         let chrome = Chrome::new(WINDOW);
         let button = chrome.copy_button;
 
         assert_eq!(button.x, chrome.minimap_button.x);
         assert_eq!(button.width, chrome.minimap_button.width);
-        assert!(button.y >= chrome.minimap_button.bottom());
         assert!(chrome.paste_button.y >= button.bottom());
+        assert!(chrome.minimap_button.y >= chrome.paste_button.bottom());
 
         // There whether or not there is anything to paste, unlike the button
         // under it.
@@ -546,7 +579,7 @@ mod tests {
         let at = [button.x + 1.0, button.y + 1.0];
 
         assert!(button.y >= chrome.copy_button.bottom());
-        assert!(button.bottom() <= chrome.left.bottom());
+        assert!(button.bottom() <= chrome.minimap_button.y);
         assert_eq!(button.x, chrome.minimap_button.x);
         assert_eq!(button.width, chrome.minimap_button.width);
 
@@ -568,8 +601,11 @@ mod tests {
         );
     }
 
+    /// The minimap toggle is at the foot of the left panel, in the corner of
+    /// the content area the minimap itself goes in, and set in from the foot
+    /// by the same inset that centers it across the strip.
     #[test]
-    fn the_minimap_toggle_sits_inside_the_left_panel() {
+    fn the_minimap_toggle_sits_at_the_foot_of_the_left_panel() {
         let chrome = Chrome::new(WINDOW);
         let button = chrome.minimap_button;
 
@@ -578,10 +614,14 @@ mod tests {
         assert!(button.y >= chrome.left.y);
         assert!(button.bottom() <= chrome.left.bottom());
 
-        // The minimap toggle and the first of the right-hand pair are the
-        // same button on opposite strips, and each click lands on its own.
+        // The same button as the first of the right-hand pair, on the
+        // opposite strip and at the other end of it, and each click lands on
+        // its own.
         assert_eq!(button.width, chrome.histogram_button.width);
-        assert_eq!(button.y, chrome.histogram_button.y);
+        assert_eq!(
+            chrome.left.bottom() - button.bottom(),
+            chrome.histogram_button.y - chrome.right.y
+        );
         for (widget, rect) in [
             (Widget::Minimap, button),
             (Widget::Histogram, chrome.histogram_button),
@@ -628,6 +668,53 @@ mod tests {
             ),
             None
         );
+    }
+
+    /// The left panel is filled from both ends, and a window short enough
+    /// for the two to meet drops the one coming up rather than standing it
+    /// on the column coming down: the toggle at the foot is what a shrinking
+    /// window loses, and what is left is still a column read from the top.
+    #[test]
+    fn the_minimap_toggle_gives_way_to_the_column_above_it() {
+        // Tall enough for the whole left panel, and every gap between the
+        // three buttons is the one every pair of buttons is set at.
+        let chrome = Chrome::new(WINDOW);
+        assert_eq!(
+            chrome.paste_button.y - chrome.copy_button.bottom(),
+            BUTTON_GAP
+        );
+        assert!(chrome.minimap_button.y - chrome.paste_button.bottom() >= BUTTON_GAP);
+
+        // Room for the column from the top and not for the toggle under it:
+        // neither drawn nor pressable, and nothing above it has moved.
+        let short = Chrome::new([WINDOW[0], 2.0 * BAR_HEIGHT + 3.0 * BUTTON_SIZE]);
+        assert_eq!(short.copy_button.width, BUTTON_SIZE);
+        assert_eq!(short.paste_button.width, BUTTON_SIZE);
+        assert_eq!(short.minimap_button.width, 0.0);
+        assert_eq!(
+            short.widget_at(
+                [short.minimap_button.x, short.minimap_button.y],
+                None,
+                false,
+                false
+            ),
+            None
+        );
+
+        // And wherever it is there at all, it is clear of the column above
+        // it, whatever the window is doing.
+        for height in [200.0, 260.0, 320.0, 700.0, 1400.0] {
+            let chrome = Chrome::new([WINDOW[0], height]);
+            let minimap = chrome.minimap_button;
+            if minimap.width > 0.0 {
+                assert!(
+                    minimap.y >= chrome.paste_button.bottom() + BUTTON_GAP,
+                    "at {height}: {minimap:?} over {:?}",
+                    chrome.paste_button
+                );
+                assert!(minimap.bottom() <= chrome.left.bottom());
+            }
+        }
     }
 
     #[test]
@@ -788,8 +875,8 @@ mod tests {
             }
             assert_eq!(chrome.histogram_button.right(), chrome.info_button.right());
             // The left is the same line the other way round: the file name
-            // starts where the minimap toggle does.
-            assert_eq!(BAR_PADDING, chrome.minimap_button.x - chrome.left.x);
+            // starts where the column down the left panel does.
+            assert_eq!(BAR_PADDING, chrome.copy_button.x - chrome.left.x);
             assert_eq!(
                 BAR_PADDING,
                 chrome.top.right() - chrome.grid_button(None).right()

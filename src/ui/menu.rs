@@ -51,8 +51,8 @@ pub enum Menu {
     /// How the bottom bar writes out the pixel under the pointer, opened from
     /// the dot at the head of that readout.
     PixelFormat,
-    /// What a copy takes with it, opened from the button under the minimap
-    /// toggle. The one menu of things to do rather than states to be in.
+    /// What a copy takes with it, opened from the button at the top of the
+    /// left strip. The one menu of things to do rather than states to be in.
     Copy,
 }
 

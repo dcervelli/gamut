@@ -109,7 +109,7 @@ pub(super) fn minimap_button(
     );
 }
 
-/// The button that opens the menu of copies, under the minimap toggle. Lit
+/// The button that opens the menu of copies, at the top of the left strip. Lit
 /// while that menu is open, the way the zoom readout is: it opens a panel
 /// rather than switching anything on, so there is no other state for it to be
 /// showing.

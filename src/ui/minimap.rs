@@ -1,5 +1,5 @@
-//! The minimap: a thumbnail of the whole image in the top-left corner, with
-//! the part of it on screen picked out and the rest washed over.
+//! The minimap: a thumbnail of the whole image in the bottom-left corner,
+//! with the part of it on screen picked out and the rest washed over.
 //!
 //! The thumbnail itself is the image layer's — a second draw of the same
 //! texture, placed by [`placement`] — so everything that applies to the image
@@ -48,8 +48,13 @@ pub fn placement(
 }
 
 /// Where the minimap's thumbnail goes: the image's own shape, fitted into the
-/// top-left of `content` and never enlarged past life size, since a map of a
-/// thirty-pixel image blown up to fill the box would be a map of nothing.
+/// bottom-left of `content` and never enlarged past life size, since a map of
+/// a thirty-pixel image blown up to fill the box would be a map of nothing.
+///
+/// The corner its own toggle sits in, at the foot of the left panel, and the
+/// corner the two panels that describe the file leave alone — they come down
+/// the right — so the map and the picture's own facts are never fitted into
+/// the same strip.
 ///
 /// `None` when there is no room for one worth reading, which is what keeps it
 /// off screen in a window dragged down small.
@@ -80,7 +85,7 @@ pub fn thumbnail(content: Rect, image: [f32; 2]) -> Option<Rect> {
     ];
     Some(Rect::new(
         (content.x + PADDING).round(),
-        (content.y + PADDING).round(),
+        (content.bottom() - PADDING - size[1]).round(),
         size[0],
         size[1],
     ))
@@ -127,7 +132,7 @@ fn snap_to_pixels(rect: Rect, scale: f32) -> Rect {
 }
 
 /// Draws the minimap over the thumbnail the image layer has already put in
-/// the top-left of `content`: a border around the whole image, and the part
+/// the bottom-left of `content`: a border around the whole image, and the part
 /// of it the viewport is showing left bright while the rest is washed over.
 ///
 /// Nothing here is filled where the thumbnail shows through, and the frame
@@ -206,17 +211,23 @@ mod tests {
             thumbnail(content, [24.0, 18.0]),
             Some(Rect::new(
                 (content.x + PADDING).round(),
-                (content.y + PADDING).round(),
+                (content.bottom() - PADDING - 18.0).round(),
                 24.0,
                 18.0
             ))
         );
 
-        // Top-left of the content area, and clear of its far edges.
+        // Bottom-left of the content area, and clear of its far edges.
         let rect = thumbnail(content, [4000.0, 1000.0]).expect("room");
         assert!(rect.x >= content.x + PADDING - 0.5);
-        assert!(rect.y >= content.y + PADDING - 0.5);
-        assert!(rect.right() < content.right() && rect.bottom() < content.bottom());
+        assert!(rect.bottom() <= content.bottom() - PADDING + 0.5);
+        assert!(rect.right() < content.right() && rect.y > content.y);
+
+        // Whatever its shape, it stands on the same line above the foot of
+        // the content area: the map moves with the image's height, not the
+        // corner it is in.
+        let tall = thumbnail(content, [1000.0, 4000.0]).expect("room");
+        assert!((tall.bottom() - rect.bottom()).abs() < 0.5);
 
         // And nothing at all when the window has no room to spare: a map
         // taking a third of a small content area would be in the way.

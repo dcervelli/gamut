@@ -321,7 +321,7 @@ counted off in the image's own pixels.
 | Click the zoom percentage | Open the zoom menu: scale, fit and the magnification filter |
 | Click the dot in the bottom left | Choose how a pixel's value is read out |
 
-The button under the minimap toggle, in the left strip, opens a menu of the
+The button at the top of the left strip opens a menu of the
 copies beside it: the file's **Name**, its **Path**, its **URI**, the
 **Info** the file information panel holds about it, and the **Image** itself.
 Each cell does exactly what its key does, and resting on one names the key as

@@ -98,7 +98,8 @@ pub enum Widget {
     Previous,
     Next,
     Minimap,
-    /// The button that opens the menu of copies, under the minimap toggle.
+    /// The button that opens the menu of copies, at the top of the left
+    /// strip.
     Copy,
     /// The button that pastes the picture on the clipboard. On screen only
     /// while there is one — see [`Panels::paste`].

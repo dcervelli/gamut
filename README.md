@@ -77,7 +77,7 @@ Both ship as standard on the distributions above.
 | `r` | Cycle false color (single-channel images) |
 | `z` | Reset display settings |
 
-The copies have a button too, under the minimap toggle: it opens a menu of
+The copies have a button too, at the top of the left strip: it opens a menu of
 what can be taken — the file's name, its path, its URI, everything the
 information panel says about it, and the picture itself — each cell doing
 exactly what its key does, and named in the tooltip by the key table's own
@@ -154,10 +154,12 @@ comparing two files side by side.
 ## Minimap
 
 The minimap is on unless `--no-minimap` turns it off. `m`, or the button at
-the top of the left strip, puts a thumbnail of the whole image in the top-left
-corner, with the part of it on screen picked out and the rest washed over. It
-is the map to read while zoomed in far enough that the image on screen no
-longer says where in the picture you are.
+the foot of the left strip, puts a thumbnail of the whole image in the
+bottom-left corner — the corner that button is in, and the one the two panels
+describing the file leave alone, they being down the right — with the part of
+it on screen picked out and the rest washed over. It is the map to read while
+zoomed in far enough that the image on screen no longer says where in the
+picture you are.
 
 On by default because it costs nothing until it is wanted: it stays off screen
 for as long as the whole image is in view, so the first zoom that cuts
@@ -503,17 +505,23 @@ that disagreed with the image beside it would be worse than none.
 
 The strips are a bar's thickness wide — they hold a column of square toggles
 and nothing else, so a frame of even weight is the right one — and the left one
-holds the minimap toggle above the copy button and the paste button, the right
-one the histogram above the file information, the order the two panels they
-open are stacked in over the picture. The button that comes and goes with the
-clipboard is the last of the left-hand three, so that nothing above it moves
-under the pointer as it appears. The end of the top bar holds the two readouts
+holds the copy button above the paste button, the right one the histogram above
+the file information, the order the two panels they open are stacked in over
+the picture. The button that comes and goes with the clipboard is the last of
+the left-hand column, so that nothing above it moves under the pointer as it
+appears. The minimap toggle is in the left strip too, but it comes up from the
+foot of it rather than down from the top: it is the one toggle whose panel has
+a corner of its own, and it sits in that corner. The room the column above it
+would take is kept clear whether or not the paste button is on screen, so the
+toggle stays where it is as the clipboard changes, and a window too short for
+both ends of the strip drops it rather than standing it on the column coming
+down. The end of the top bar holds the two readouts
 that are also buttons: the grid toggle, and just inside it the zoom percentage.
 Both are measurements of the picture, which is what the top bar is for. The
 bars are inset at their ends by the same margin that centers a toggle across a
 side panel — derived from it, not merely equal to it — so the grid toggle ends
 on the same line the column of toggles below it ends on, and the file name
-starts on the line the minimap toggle starts on. Two edges a few pixels apart
+starts on the line the left-hand column starts on. Two edges a few pixels apart
 read as a mistake in a way that one shared edge does not, and deriving the
 margin is what keeps them from drifting apart when a button size is retuned. A
 menu hangs from the button that opens it, off whichever of its edges faces into
