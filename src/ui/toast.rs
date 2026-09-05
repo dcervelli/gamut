@@ -128,7 +128,11 @@ impl Toasts {
     /// Takes off a message that has had its time. Returns whether anything
     /// went, and so whether a redraw is owed.
     pub fn tick(&mut self, now: Instant) -> bool {
-        if self.showing.as_ref().is_some_and(|toast| now >= toast.until) {
+        if self
+            .showing
+            .as_ref()
+            .is_some_and(|toast| now >= toast.until)
+        {
             self.showing = None;
             return true;
         }
