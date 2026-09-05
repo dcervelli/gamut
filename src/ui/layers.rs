@@ -111,13 +111,16 @@ impl Hit {
 /// zoom the frame was drawn at. `message` is the toast that is up, if any,
 /// which is laid out here exactly as the frame builder lays it out — it
 /// carries the width its words were measured at, so neither of them needs the
-/// fonts to place it.
+/// fonts to place it. `steps` is whether the list holds more than one file,
+/// which is whether the two buttons at the head of the top bar are there at
+/// all; the frame builder asks the same question of the count it is given.
 pub fn hit(
     point: [f32; 2],
     panels: &Panels,
     logical: [f32; 2],
     shown: Option<Shown>,
     spacing: Option<&str>,
+    steps: bool,
     message: Option<&Toast>,
 ) -> Hit {
     let chrome = Chrome::new(logical);
@@ -171,7 +174,7 @@ pub fn hit(
     }
 
     if panels.show_ui && chrome.contains(point) {
-        return Hit::Chrome(chrome.widget_at(point, spacing, panels.paste));
+        return Hit::Chrome(chrome.widget_at(point, spacing, panels.paste, steps));
     }
     Hit::Image
 }
@@ -231,15 +234,36 @@ mod tests {
         let mut panels = panels();
         panels.paste = true;
         assert_eq!(
-            hit(at, &panels, WINDOW, shown(), None, None),
+            hit(at, &panels, WINDOW, shown(), None, false, None),
             Hit::Chrome(Some(Widget::Paste))
         );
 
         panels.paste = false;
         assert_eq!(
-            hit(at, &panels, WINDOW, shown(), None, None),
+            hit(at, &panels, WINDOW, shown(), None, false, None),
             Hit::Chrome(None)
         );
+    }
+
+    /// The pair at the head of the top bar are a layer's widgets like any
+    /// other, and a list of one file leaves the bar under the pointer instead
+    /// of a button — the same answer the bar gives anywhere else on it.
+    #[test]
+    fn the_step_buttons_are_on_the_chrome_only_while_there_is_a_list() {
+        let panels = panels();
+        let [previous, next] = Chrome::new(WINDOW).step_buttons();
+
+        for (button, widget) in [(previous, Widget::Previous), (next, Widget::Next)] {
+            let at = middle(button);
+            assert_eq!(
+                hit(at, &panels, WINDOW, shown(), None, true, None),
+                Hit::Chrome(Some(widget))
+            );
+            assert_eq!(
+                hit(at, &panels, WINDOW, shown(), None, false, None),
+                Hit::Chrome(None)
+            );
+        }
     }
 
     /// The menu of copies hangs off the strip down the left of the window
@@ -256,6 +280,7 @@ mod tests {
                 WINDOW,
                 shown(),
                 None,
+                false,
                 None
             ),
             Hit::Chrome(Some(Widget::Copy))
@@ -265,7 +290,7 @@ mod tests {
         let popup = chrome.popup(Menu::Copy, None).expect("room");
         for (index, cell) in popup.cells() {
             assert_eq!(
-                hit(middle(cell), &panels, WINDOW, shown(), None, None),
+                hit(middle(cell), &panels, WINDOW, shown(), None, false, None),
                 Hit::Cell(index),
                 "cell {index}"
             );
@@ -282,6 +307,7 @@ mod tests {
                 WINDOW,
                 shown(),
                 None,
+                false,
                 None
             ),
             Hit::Menu
@@ -294,7 +320,7 @@ mod tests {
         let panels = panels();
         let chrome = Chrome::new(WINDOW);
         let content = chrome.content();
-        let at = |point| hit(point, &panels, WINDOW, shown(), None, None);
+        let at = |point| hit(point, &panels, WINDOW, shown(), None, false, None);
 
         assert_eq!(at(middle(content)), Hit::Image);
         assert_eq!(
@@ -350,7 +376,7 @@ mod tests {
 
         for (index, cell) in popup.cells() {
             assert_eq!(
-                hit(middle(cell), &panels, WINDOW, shown(), None, None),
+                hit(middle(cell), &panels, WINDOW, shown(), None, false, None),
                 Hit::Cell(index),
                 "cell {index}"
             );
@@ -364,6 +390,7 @@ mod tests {
                 WINDOW,
                 shown(),
                 None,
+                false,
                 None
             ),
             Hit::Menu
@@ -373,7 +400,7 @@ mod tests {
         // grab that makes a press there dismiss the menu is the handlers',
         // not the stack's, so the bar goes on reading out the pixel.
         assert_eq!(
-            hit(middle(content), &panels, WINDOW, shown(), None, None),
+            hit(middle(content), &panels, WINDOW, shown(), None, false, None),
             Hit::Image
         );
     }
@@ -395,7 +422,7 @@ mod tests {
         );
         let message = toasts.showing();
         let placed = toast::place(message.expect("one is up"), content).expect("room");
-        let at = |point| hit(point, &panels, WINDOW, shown(), None, message);
+        let at = |point| hit(point, &panels, WINDOW, shown(), None, false, message);
 
         assert_eq!(at(middle(placed.close)), Hit::Toast(Some(Widget::Dismiss)));
         assert_eq!(
@@ -405,7 +432,15 @@ mod tests {
         );
         // And with nothing up, the picture answers for the same point again.
         assert_eq!(
-            hit(middle(placed.close), &panels, WINDOW, shown(), None, None),
+            hit(
+                middle(placed.close),
+                &panels,
+                WINDOW,
+                shown(),
+                None,
+                false,
+                None
+            ),
             Hit::Image
         );
     }
@@ -422,12 +457,12 @@ mod tests {
         // The plot itself: on the panel, and on none of its toggles.
         let plot = [panel.right() - 4.0, panel.y + panel.height / 2.0];
         assert_eq!(
-            hit(plot, &panels, WINDOW, shown(), None, None),
+            hit(plot, &panels, WINDOW, shown(), None, false, None),
             Hit::Histogram(None),
             "the plot is the panel's, and it is not a button"
         );
         assert_eq!(
-            hit(plot, &panels, WINDOW, shown(), None, None).widget(),
+            hit(plot, &panels, WINDOW, shown(), None, false, None).widget(),
             None
         );
     }
@@ -443,7 +478,10 @@ mod tests {
             middle(histogram::panel(content)),
             middle(info::panel(content, true).expect("room")),
         ] {
-            assert_eq!(hit(point, &panels, WINDOW, None, None, None), Hit::Image);
+            assert_eq!(
+                hit(point, &panels, WINDOW, None, None, false, None),
+                Hit::Image
+            );
         }
     }
 
@@ -456,12 +494,15 @@ mod tests {
         let mut panels = panels();
         let bar = middle(Chrome::new(WINDOW).bottom);
         assert_eq!(
-            hit(bar, &panels, WINDOW, shown(), None, None),
+            hit(bar, &panels, WINDOW, shown(), None, false, None),
             Hit::Chrome(None)
         );
 
         panels.show_ui = false;
-        assert_eq!(hit(bar, &panels, WINDOW, shown(), None, None), Hit::Image);
+        assert_eq!(
+            hit(bar, &panels, WINDOW, shown(), None, false, None),
+            Hit::Image
+        );
         let content = content_area(WINDOW, false);
         assert!(matches!(
             hit(
@@ -470,6 +511,7 @@ mod tests {
                 WINDOW,
                 shown(),
                 None,
+                false,
                 None
             ),
             Hit::Histogram(_)
@@ -486,8 +528,14 @@ mod tests {
         let panel = middle(histogram::panel(content));
         panels.show_histogram = false;
 
-        assert_eq!(hit(panel, &panels, WINDOW, shown(), None, None), Hit::Info);
+        assert_eq!(
+            hit(panel, &panels, WINDOW, shown(), None, false, None),
+            Hit::Info
+        );
         panels.show_info = false;
-        assert_eq!(hit(panel, &panels, WINDOW, shown(), None, None), Hit::Image);
+        assert_eq!(
+            hit(panel, &panels, WINDOW, shown(), None, false, None),
+            Hit::Image
+        );
     }
 }

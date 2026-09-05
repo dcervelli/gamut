@@ -92,6 +92,11 @@ const CHECKER_SQUARE: f32 = 8.0;
 /// drawing all go through the same test.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Widget {
+    /// The two buttons at the head of the top bar, which step back and on
+    /// through the file list. On screen only while there is more than one
+    /// file — see [`chrome::Chrome::step_buttons`].
+    Previous,
+    Next,
     Minimap,
     /// The button that opens the menu of copies, under the minimap toggle.
     Copy,
@@ -349,19 +354,21 @@ pub fn grid_spacing(show_grid: bool, zoom: f32, scale: f32) -> Option<String> {
 /// drawn in, so this is asked separately, the way the information panel's
 /// rows are.
 ///
-/// `bar` is the top panel and `limit` where the buttons at the far end of it
-/// begin — the same two the frame builder lays the words out between.
+/// `bar` is the top panel, `start` where the step buttons at its near end
+/// leave off and `limit` where the buttons at the far end begin — the same
+/// three the frame builder lays the words out between.
 pub fn bar_tip(
     text: &mut dyn TextMeasure,
     point: [f32; 2],
     bar: Rect,
+    start: f32,
     limit: f32,
     about: &BarText,
 ) -> Option<Tip> {
     if !bar.contains(point) {
         return None;
     }
-    let words = status::top_bar(text, bar, limit, about);
+    let words = status::top_bar(text, bar, start, limit, about);
     if words
         .counter
         .as_ref()
@@ -494,7 +501,34 @@ pub fn build_frame(
         count: input.count,
         deleted: input.deleted,
     };
-    let words = status::top_bar(text, top, zoom_button.x, &bar_text);
+    // The pair that steps through the list, at the head of the bar in front
+    // of the count they move through. Only with a list to step through: see
+    // [`Chrome::step_buttons`].
+    let steps = input.count > 1;
+    if steps {
+        let [previous, next] = chrome.step_buttons();
+        for (rect, widget, forward) in [
+            (previous, Widget::Previous, false),
+            (next, Widget::Next, true),
+        ] {
+            buttons::step_button(
+                &mut frame,
+                rect,
+                forward,
+                panels.hover == Some(widget),
+                theme,
+            );
+            tips.offer(Tip::Widget(widget), rect);
+        }
+    }
+
+    let words = status::top_bar(
+        text,
+        top,
+        chrome.bar_text_x(steps),
+        zoom_button.x,
+        &bar_text,
+    );
 
     if let Some(counter) = &words.counter {
         frame.text_clipped(

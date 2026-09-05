@@ -61,8 +61,9 @@ pub struct BarText<'a> {
     pub deleted: bool,
 }
 
-/// Lays the top bar's words out in `bar`, between its near end and `limit` —
-/// where the buttons at the far end start.
+/// Lays the top bar's words out in `bar`, between `start` — where the two
+/// step buttons at its near end leave off — and `limit`, where the buttons at
+/// the far end begin.
 ///
 /// Least to most disposable, and the facts are dropped whole rather than
 /// clipped: half of "18333 x 15667" is worse than none of it. Half the bar at
@@ -70,6 +71,7 @@ pub struct BarText<'a> {
 pub(super) fn top_bar(
     text: &mut dyn TextMeasure,
     bar: Rect,
+    start: f32,
     limit: f32,
     about: &BarText,
 ) -> TopBar {
@@ -94,15 +96,15 @@ pub(super) fn top_bar(
     let facts = fit_segments(text, &facts, (bar.width / 2.0 - BAR_PADDING * 2.0).max(1.0));
     let facts_width = text.measure_text(&facts, TEXT_SIZE)[0];
     // Clear of the buttons at the end of the bar.
-    let facts_x = (limit - PADDING - facts_width).max(BAR_PADDING);
+    let facts_x = (limit - PADDING - facts_width).max(start);
     let facts = run(text, facts_x, facts_width, facts);
 
     // The count is a fact about the list, not part of the name, and is set
     // like the other facts in the bar: the name is the one thing here worth
     // picking out, and picking out two things picks out neither.
-    let mut name_x = BAR_PADDING;
+    let mut name_x = start;
     let counter = counter(about.index, about.count).map(|counter| {
-        let counter = run(text, BAR_PADDING, (facts_x - BAR_PADDING).max(1.0), counter);
+        let counter = run(text, start, (facts_x - start).max(1.0), counter);
         name_x += counter.width + COUNTER_GAP;
         counter
     });
@@ -171,7 +173,7 @@ pub(super) fn top_label(shown: &str, reading: Option<&Reading>) -> String {
 pub(super) const DELETED: &str = "DELETED";
 
 /// Where the file on screen comes in the list it was opened with, for in
-/// front of its name — or `None` for a single file, "[1/1]" being a count of
+/// front of its name — or `None` for a single file, "1 / 1" being a count of
 /// nothing.
 ///
 /// It leads the bar because it is the one part of the line whose width does
@@ -180,7 +182,7 @@ pub(super) const DELETED: &str = "DELETED";
 /// the name is what is being looked at and the count is a fact about the
 /// list, and the two are set apart to say so.
 pub(super) fn counter(index: usize, count: usize) -> Option<String> {
-    (count > 1).then(|| format!("[{}/{}]", index + 1, count))
+    (count > 1).then(|| format!("{} / {}", index + 1, count))
 }
 
 /// What each pixel holds, in the bar's shorthand: `RGB8`, `RGBA16`,
@@ -366,8 +368,8 @@ mod tests {
     /// list is one file long.
     #[test]
     fn a_file_out_of_several_is_counted_and_a_file_on_its_own_is_not() {
-        assert_eq!(counter(0, 6).as_deref(), Some("[1/6]"));
-        assert_eq!(counter(5, 6).as_deref(), Some("[6/6]"));
+        assert_eq!(counter(0, 6).as_deref(), Some("1 / 6"));
+        assert_eq!(counter(5, 6).as_deref(), Some("6 / 6"));
         assert_eq!(counter(0, 1), None);
         assert_eq!(counter(0, 0), None);
     }

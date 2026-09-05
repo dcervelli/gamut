@@ -16,7 +16,9 @@ struct QuadInstance {
     color: [f32; 4],
     /// The unit vector the quad's own x axis runs along.
     axis: [f32; 2],
-    corner: f32,
+    /// How round each corner is, from the top left round the way CSS writes
+    /// them: top-left, top-right, bottom-right, bottom-left.
+    corner: [f32; 4],
     /// Zero fills the shape; anything more draws a band that wide on its
     /// outline.
     stroke: f32,
@@ -88,7 +90,7 @@ impl Shapes {
         let pipeline_layout = gpu::pipeline_layout(device, "ui quads", &[&viewport_layout]);
 
         let quad_attributes = wgpu::vertex_attr_array![
-            0 => Float32x4, 1 => Float32x4, 2 => Float32x2, 3 => Float32, 4 => Float32
+            0 => Float32x4, 1 => Float32x4, 2 => Float32x2, 3 => Float32x4, 4 => Float32
         ];
         let poly_attributes = wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x4];
         let pipeline_for = |label, blend, kind| {
@@ -220,7 +222,7 @@ impl Shapes {
                             ],
                             color: quad.color.to_linear(),
                             axis: quad.axis,
-                            corner: quad.corner * scale,
+                            corner: quad.corner.map(|corner| corner * scale),
                             stroke: quad.stroke * scale,
                         });
                         (Kind::Quad, quad.blend, 1)

@@ -29,7 +29,12 @@ struct Instance {
     // The unit vector the instance's own x axis runs along. Everything that
     // lies with the window passes (1, 0).
     @location(2) axis: vec2<f32>,
-    @location(3) corner: f32,
+    // How round each corner is, going round from the top left the way CSS
+    // writes them: top-left, top-right, bottom-right, bottom-left. Four
+    // rather than one so that a button can be turned at one end and square at
+    // the other, which is what lets two of them be set against each other
+    // with nothing but a seam between.
+    @location(3) corner: vec4<f32>,
     // Zero fills the shape. Anything more draws a band that wide centered on
     // its outline, and leaves the inside alone.
     @location(4) stroke: f32,
@@ -42,7 +47,7 @@ struct VertexOut {
     // along its own axes.
     @location(1) local: vec2<f32>,
     @location(2) half_size: vec2<f32>,
-    @location(3) corner: f32,
+    @location(3) corner: vec4<f32>,
     @location(4) stroke: f32,
 };
 
@@ -73,13 +78,29 @@ fn vs_main(@builtin(vertex_index) index: u32, instance: Instance) -> VertexOut {
     out.color = instance.color;
     out.local = local;
     out.half_size = half_size;
-    out.corner = min(instance.corner, min(half_size.x, half_size.y));
+    out.corner = min(instance.corner, vec4<f32>(min(half_size.x, half_size.y)));
     out.stroke = instance.stroke;
     return out;
 }
 
-/// Signed distance to a rounded box, negative inside.
-fn rounded_box(point: vec2<f32>, half_size: vec2<f32>, radius: f32) -> f32 {
+/// Which of the four radii the corner `point` lies towards is drawn with:
+/// the top pair or the bottom pair, and then the left of that pair or the
+/// right. A point on an axis belongs to whichever side the comparison falls
+/// on, which is only ever the middle of an edge, where the two agree anyway.
+fn corner_of(point: vec2<f32>, radii: vec4<f32>) -> f32 {
+    // (left, right) of the half the point is in.
+    let pair = select(radii.wz, radii.xy, point.y < 0.0);
+    return select(pair.y, pair.x, point.x < 0.0);
+}
+
+/// Signed distance to a box rounded by `radii`, negative inside.
+///
+/// One radius at a time: the distance at a point is settled entirely by the
+/// corner it is nearest, so picking that corner's radius first is the same
+/// shape a four-radius formula would give, and is the whole of the difference
+/// from the single-radius box this grew out of.
+fn rounded_box(point: vec2<f32>, half_size: vec2<f32>, radii: vec4<f32>) -> f32 {
+    let radius = corner_of(point, radii);
     let q = abs(point) - half_size + vec2<f32>(radius);
     return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - radius;
 }

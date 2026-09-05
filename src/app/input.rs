@@ -312,6 +312,10 @@ fn hint(action: Action) -> Option<String> {
 /// [`ui::tooltip::words`].
 fn action_of(tip: Tip, panels: &Panels) -> Option<Action> {
     Some(match tip {
+        // The pair at the head of the top bar, which go where the keys beside
+        // the count go.
+        Tip::Widget(Widget::Previous) => PreviousFile,
+        Tip::Widget(Widget::Next) => NextFile,
         Tip::Widget(Widget::Minimap) => ToggleMinimap,
         Tip::Widget(Widget::Histogram) => ToggleHistogram,
         Tip::Widget(Widget::Info) => ToggleInfo,
@@ -1543,6 +1547,12 @@ impl App {
     /// here too, so that a key and a click cannot drift apart.
     fn press(&mut self, widget: Widget) {
         match widget {
+            // The key's own action, so that a press and a keystroke cannot
+            // come to mean different things. Nothing is drawn differently
+            // yet: the file is only being asked for, and what is on screen
+            // stays until it arrives.
+            Widget::Previous => self.step(false),
+            Widget::Next => self.step(true),
             Widget::Minimap => self.panels.show_minimap = !self.panels.show_minimap,
             Widget::Histogram => self.panels.show_histogram = !self.panels.show_histogram,
             Widget::Grid => self.panels.show_grid = !self.panels.show_grid,
@@ -1825,6 +1835,14 @@ mod tests {
         let named = |widget| names(Tip::Widget(widget), &panels);
 
         assert_eq!(
+            named(Widget::Previous).as_deref(),
+            Some("Previous file ([, Page Up)")
+        );
+        assert_eq!(
+            named(Widget::Next).as_deref(),
+            Some("Next file (], Page Down)")
+        );
+        assert_eq!(
             named(Widget::Minimap).as_deref(),
             Some("Toggle the minimap (m)")
         );
@@ -1853,6 +1871,8 @@ mod tests {
     fn every_chrome_button_has_something_to_say() {
         let panels = panels(None);
         for widget in [
+            Widget::Previous,
+            Widget::Next,
             Widget::Minimap,
             Widget::Copy,
             Widget::Paste,

@@ -209,6 +209,22 @@ pub(super) const EXPAND: &[Mark] = &[
     Mark::Line([15.0, 15.0], [21.0, 21.0]),
 ];
 
+/// Lucide's `chevron-left` and `chevron-right`: one chevron pointing the way
+/// it goes, for the two buttons at the head of the top bar that step back and
+/// on through the file list. A single chevron rather than the doubled one the
+/// window's nudges wear: those move by a step of a size the button chose,
+/// where these go to the next thing along, which is what one chevron says
+/// everywhere else.
+pub(super) const CHEVRON_LEFT: &[Mark] = &[
+    Mark::Line([15.0, 18.0], [9.0, 12.0]),
+    Mark::Line([9.0, 12.0], [15.0, 6.0]),
+];
+
+pub(super) const CHEVRON_RIGHT: &[Mark] = &[
+    Mark::Line([9.0, 18.0], [15.0, 12.0]),
+    Mark::Line([15.0, 12.0], [9.0, 6.0]),
+];
+
 /// Lucide's `chevrons-up-down`: the fit that fills the window's height.
 pub(super) const CHEVRONS_UP_DOWN: &[Mark] = &[
     Mark::Line([7.0, 9.0], [12.0, 4.0]),

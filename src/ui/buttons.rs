@@ -16,6 +16,38 @@ const ACTIVE_BUTTON_WASH: u8 = 64;
 
 /// The corner radius of a side-panel toggle.
 const TOGGLE_RADIUS: f32 = 5.0;
+
+/// Which of a button's corners are turned.
+///
+/// A button standing on its own is turned all round. Two set against each
+/// other are turned at the ends of the pair and left square where they meet,
+/// so that the two read as one control with two halves rather than as two
+/// controls that happen to be touching — see
+/// [`chrome::STEP_SEAM`](super::chrome::STEP_SEAM) for the hairline between
+/// them.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Corners {
+    /// All four, which is every button that has neighbors only at a distance.
+    All,
+    /// Turned down the near side and square down the far one: the first of a
+    /// pair set together.
+    Leading,
+    /// Square down the near side and turned down the far one: the last of
+    /// one.
+    Trailing,
+}
+
+impl Corners {
+    /// The four radii, from the top left round the way
+    /// [`UiFrame::rounded_rect_corners`] takes them.
+    fn radii(self, radius: f32) -> [f32; 4] {
+        match self {
+            Corners::All => [radius; 4],
+            Corners::Leading => [radius, 0.0, 0.0, radius],
+            Corners::Trailing => [0.0, radius, radius, 0.0],
+        }
+    }
+}
 /// The room set aside for a toggle's mark: what [`icon::fit`] is given to
 /// size a square out of, not the size it comes back with. The side panels are
 /// a bar's thickness wide and the buttons fill them, so what this is set
@@ -33,7 +65,15 @@ pub(super) fn histogram_button(
     hover: bool,
     theme: &Theme,
 ) {
-    toggle(frame, rect, icon::CHART_AREA, active, hover, theme);
+    toggle(
+        frame,
+        rect,
+        icon::CHART_AREA,
+        Corners::All,
+        active,
+        hover,
+        theme,
+    );
 }
 
 /// The info toggle. The panel it opens is a column of words about the file
@@ -46,7 +86,7 @@ pub(super) fn info_button(
     hover: bool,
     theme: &Theme,
 ) {
-    toggle(frame, rect, icon::INFO, active, hover, theme);
+    toggle(frame, rect, icon::INFO, Corners::All, active, hover, theme);
 }
 
 /// The minimap toggle: the panel itself in miniature, a frame for the whole
@@ -58,7 +98,15 @@ pub(super) fn minimap_button(
     hover: bool,
     theme: &Theme,
 ) {
-    toggle(frame, rect, icon::SQUARE_SQUARE, active, hover, theme);
+    toggle(
+        frame,
+        rect,
+        icon::SQUARE_SQUARE,
+        Corners::All,
+        active,
+        hover,
+        theme,
+    );
 }
 
 /// The button that opens the menu of copies, under the minimap toggle. Lit
@@ -66,7 +114,7 @@ pub(super) fn minimap_button(
 /// rather than switching anything on, so there is no other state for it to be
 /// showing.
 pub(super) fn copy_button(frame: &mut UiFrame, rect: Rect, open: bool, hover: bool, theme: &Theme) {
-    toggle(frame, rect, icon::COPY, open, hover, theme);
+    toggle(frame, rect, icon::COPY, Corners::All, open, hover, theme);
 }
 
 /// The paste button, under the copy button. Not a toggle: it does
@@ -75,7 +123,39 @@ pub(super) fn copy_button(frame: &mut UiFrame, rect: Rect, open: bool, hover: bo
 /// is a picture on the clipboard to paste, which is what says a press on it
 /// would do anything at all.
 pub(super) fn paste_button(frame: &mut UiFrame, rect: Rect, hover: bool, theme: &Theme) {
-    toggle(frame, rect, icon::CLIPBOARD, false, hover, theme);
+    toggle(
+        frame,
+        rect,
+        icon::CLIPBOARD,
+        Corners::All,
+        false,
+        hover,
+        theme,
+    );
+}
+
+/// One of the two buttons at the head of the top bar: back a file, or on a
+/// file. Not a toggle — it steps through the list rather than switching
+/// anything on, so it is never drawn lit, there being no state for it to be
+/// showing. It is on screen only while there is more than one file, which is
+/// what says a press on it would do anything at all.
+///
+/// A single chevron pointing the way it goes, and no words: the count between
+/// the pair of them is what says how far there is to go, and the bar has the
+/// file's own name to set.
+pub(super) fn step_button(
+    frame: &mut UiFrame,
+    rect: Rect,
+    forward: bool,
+    hover: bool,
+    theme: &Theme,
+) {
+    let (marks, corners) = if forward {
+        (icon::CHEVRON_RIGHT, Corners::Trailing)
+    } else {
+        (icon::CHEVRON_LEFT, Corners::Leading)
+    };
+    toggle(frame, rect, marks, corners, false, hover, theme);
 }
 
 /// The button at the head of the pixel readout, in the bottom bar: a ring
@@ -90,10 +170,19 @@ pub(super) fn pixel_button(
     hover: bool,
     theme: &Theme,
 ) {
-    toggle(frame, rect, icon::CIRCLE_DOT, open, hover, theme);
+    toggle(
+        frame,
+        rect,
+        icon::CIRCLE_DOT,
+        Corners::All,
+        open,
+        hover,
+        theme,
+    );
 }
 
-/// One square toggle in a side panel: the button, and the mark it wears.
+/// One square toggle in a side panel: the button, the corners it is turned
+/// at, and the mark it wears.
 ///
 /// A window too small to hold the button gets no button, rather than a smear
 /// of a mark drawn into less room than its own strokes need.
@@ -101,6 +190,7 @@ fn toggle(
     frame: &mut UiFrame,
     rect: Rect,
     marks: &[icon::Mark],
+    corners: Corners,
     active: bool,
     hover: bool,
     theme: &Theme,
@@ -109,7 +199,7 @@ fn toggle(
         return;
     }
     let (background, ink) = button_ink(active, hover, theme);
-    frame.rounded_rect(rect, TOGGLE_RADIUS, background);
+    frame.rounded_rect_corners(rect, corners.radii(TOGGLE_RADIUS), background);
     // No knockout in any of these three, so the ground goes unused; the
     // button's own is what one would cover anyway.
     icon::draw(

@@ -503,6 +503,9 @@ impl App {
         let bar = chrome.top;
         let limit = chrome.zoom_button(self.grid_spacing().as_deref()).x;
         let (index, count) = (self.files.index(), self.files.len());
+        // Past the pair of step buttons, which are there on exactly the terms
+        // the count beside them is — see `Chrome::step_buttons`.
+        let start = chrome.bar_text_x(count > 1);
         let deleted = self.watch.missing();
         let reading = self.reading();
         // Split borrow: the measurement needs the renderer while it reads the
@@ -518,7 +521,7 @@ impl App {
             count,
             deleted,
         };
-        ui::bar_tip(renderer, point, bar, limit, &about)
+        ui::bar_tip(renderer, point, bar, start, limit, &about)
     }
 
     /// The image on screen, as the layers need to know it. `None` before the
@@ -546,6 +549,7 @@ impl App {
             self.logical_size(),
             self.shown(),
             self.grid_spacing().as_deref(),
+            self.files.len() > 1,
             self.toasts.showing(),
         ))
     }
