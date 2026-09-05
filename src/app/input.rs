@@ -23,7 +23,7 @@ use crate::render::Rect;
 use crate::timing;
 use crate::ui::info::Copyable;
 use crate::ui::layers::Hit;
-use crate::ui::menu::Cycle;
+use crate::ui::menu::Reach;
 use crate::ui::{self, Current, Menu, Panels, Tip, Widget};
 
 /// Window pixels moved per arrow-key press. Shift moves one pixel instead,
@@ -162,6 +162,35 @@ pub enum KeyName {
     Position(KeyCode),
 }
 
+impl KeyName {
+    /// How this key is written for people, where one key of a line has to be
+    /// named on its own — the four zooms of the number row are one line of
+    /// `--help` and four cells of the zoom menu.
+    ///
+    /// `None` for a key nothing has yet had to name singly, which leaves
+    /// [`Binding::shown`] to answer for the whole line. Only the number row
+    /// is bound by position, and the character keys say what they are.
+    fn spelled(self) -> Option<&'static str> {
+        match self {
+            Char(character) => Some(character),
+            Named(_) => None,
+            Position(code) => Some(match code {
+                KeyCode::Digit0 => "0",
+                KeyCode::Digit1 => "1",
+                KeyCode::Digit2 => "2",
+                KeyCode::Digit3 => "3",
+                KeyCode::Digit4 => "4",
+                KeyCode::Digit5 => "5",
+                KeyCode::Digit6 => "6",
+                KeyCode::Digit7 => "7",
+                KeyCode::Digit8 => "8",
+                KeyCode::Digit9 => "9",
+                _ => return None,
+            }),
+        }
+    }
+}
+
 /// What a binding is held with, over and above whatever Shift a character
 /// key already implies.
 ///
@@ -208,6 +237,44 @@ fn binding_for(action: Action) -> Option<&'static Binding> {
         .find(|binding| binding.keys.iter().any(|(_, bound)| *bound == action))
 }
 
+/// What to press for `action`, as the key table writes it.
+///
+/// The whole key column of the line that binds it — a line that binds two
+/// keys to one action offers both — except where the line binds several keys
+/// to several different things and only one of them does this. The number
+/// row is one such line, `2, 3, 4, 5` for four zooms, and the cell of the
+/// zoom menu that goes to one of them is named by the key that reaches it
+/// rather than by all four. Where that key cannot be spelled on its own the
+/// column answers, as it does everywhere else.
+fn shown_for(binding: &Binding, action: Action) -> String {
+    let mut doing = binding.keys.iter().filter(|(_, bound)| *bound == action);
+    match (doing.next(), doing.next()) {
+        (Some((key, _)), None) if binding.keys.len() > 1 => match key.spelled() {
+            Some(key) => format!("{}{key}", held(binding.mods)),
+            None => binding.shown.to_string(),
+        },
+        _ => binding.shown.to_string(),
+    }
+}
+
+/// What is held down with a key, written as [`Binding::shown`] writes it:
+/// `Ctrl+Shift+`, and nothing at all for a key held with nothing.
+fn held(mods: Mods) -> String {
+    let mut prefix = String::new();
+    for (modifier, name) in [
+        (Mods::CONTROL, "Ctrl"),
+        (Mods::ALT, "Alt"),
+        (Mods::SUPER, "Super"),
+        (Mods::SHIFT, "Shift"),
+    ] {
+        if mods.contains(modifier) {
+            prefix.push_str(name);
+            prefix.push('+');
+        }
+    }
+    prefix
+}
+
 /// One line of a tooltip: what a key does, and what to press for it.
 ///
 /// The key table's own words, so that a tooltip and `--help` cannot come to
@@ -246,11 +313,13 @@ fn action_of(tip: Tip, panels: &Panels) -> Option<Action> {
         Tip::Widget(Widget::Ramp(index)) if index < Colormap::ALL.len() => CycleColormap,
         // A cell of a menu sets one state directly where the key cycles
         // through them all: the key is worth naming, the cycle's description
-        // is not — see `Menu::cell_tip`.
-        Tip::Widget(Widget::Cell(index)) => match panels.menu?.cell_tip(index)?.cycle {
-            Cycle::Fit => CycleFit,
-            Cycle::Upscale => CycleUpscale,
-            Cycle::PixelFormat => CyclePixelFormat,
+        // is not — see `Menu::cell_tip`. A numbered cell of the zoom menu is
+        // the exception, its key going straight to the same zoom.
+        Tip::Widget(Widget::Cell(index)) => match panels.menu?.cell_tip(index)?.reach {
+            Reach::Fit => CycleFit,
+            Reach::Upscale => CycleUpscale,
+            Reach::PixelFormat => CyclePixelFormat,
+            Reach::Zoom(scale) => ZoomTo(scale),
         },
         Tip::Widget(_) | Tip::Name | Tip::Counter => return None,
     })
@@ -260,11 +329,14 @@ fn action_of(tip: Tip, panels: &Panels) -> Option<Action> {
 /// interface has some for it, and otherwise the description of the key that
 /// does the same job — with that key after it either way.
 fn names(tip: Tip, panels: &Panels) -> Option<String> {
-    let binding = action_of(tip, panels).and_then(binding_for);
-    match (ui::tooltip::words(tip, panels), binding) {
-        (Some(words), Some(binding)) => Some(format!("{words} ({})", binding.shown)),
-        (Some(words), None) => Some(words.to_string()),
-        (None, Some(binding)) => Some(format!("{} ({})", binding.help, binding.shown)),
+    let pressed = action_of(tip, panels).and_then(|action| {
+        let binding = binding_for(action)?;
+        Some((binding.help, shown_for(binding, action)))
+    });
+    match (ui::tooltip::words(tip, panels), pressed) {
+        (Some(words), Some((_, key))) => Some(format!("{words} ({key})")),
+        (Some(words), None) => Some(words),
+        (None, Some((help, key))) => Some(format!("{help} ({key})")),
         (None, None) => None,
     }
 }
@@ -1600,25 +1672,28 @@ mod tests {
 
     /// A cell of the zoom menu is named in its own words — the key cycles
     /// through them all and so describes none of them — with the key that
-    /// cycles to it after. Except the numbered cells, which wear their zoom.
+    /// cycles to it after.
+    ///
+    /// The numbered cells are named by the one key that goes to the same
+    /// zoom, not by the whole of the line that binds it: `2` is the answer to
+    /// what to press for 200%, and `2, 3, 4, 5` is not.
     #[test]
-    fn a_menu_cell_is_named_in_its_own_words_and_by_the_key_that_cycles_to_it() {
+    fn a_menu_cell_is_named_in_its_own_words_and_by_the_key_that_reaches_it() {
         let panels = panels(Some(Menu::Zoom));
         let named = |index| names(Tip::Widget(Widget::Cell(index)), &panels);
+
+        assert_eq!(named(0).as_deref(), Some("Zoom to 10% (Shift+4)"));
+        assert_eq!(named(3).as_deref(), Some("Zoom to 100% (1, 0)"));
+        assert_eq!(named(4).as_deref(), Some("Zoom to 200% (2)"));
+        assert_eq!(named(7).as_deref(), Some("Zoom to 1600% (5)"));
 
         let mut named_cells = 0;
         for index in 0..32 {
             let Some(words) = named(index) else { continue };
             named_cells += 1;
-            assert!(
-                words.ends_with("(Space)") || words.ends_with("(p)"),
-                "{words}"
-            );
+            assert!(words.ends_with(')'), "{words} says what to press");
         }
-        assert_eq!(named_cells, 5, "three fits and two filters");
-
-        // And a cell that says what it is already is left alone.
-        assert_eq!(named(0), None, "a percentage names itself");
+        assert_eq!(named_cells, 13, "eight zooms, three fits and two filters");
     }
 
     /// The histogram panel's buttons are named in the panel's own few words

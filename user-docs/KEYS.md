@@ -38,10 +38,15 @@ on screen, since there is then nowhere to pan to.
 | `]`, `Page Down` | Next file |
 | `[`, `Page Up` | Previous file |
 
-They keep the pan and zoom when the next file is the same size as the
-one on screen, so a directory of frames or exposures stays comparable under
-the same pixels. A file of a different size is a different picture, and is
-fitted. Files that cannot be decoded are stepped over. The list is whatever
+A file you have already looked at comes back exactly as you left it: the same
+pan and zoom, the same window and exposure, the same tone curve and false
+color. Flipping between two images with `[` and `]` therefore compares them
+rather than resetting them.
+
+A file being opened for the first time keeps the pan and zoom when it is the
+same size as the one on screen, so a directory of frames or exposures stays
+comparable under the same pixels. One of a different size is a different
+picture, and is fitted. Files that cannot be decoded are stepped over. The list is whatever
 was named at startup, in that order; naming a directory puts the images in it
 on the list, and keeps it up to date as images are added to that directory or
 taken out of it.

@@ -184,7 +184,7 @@ pub(super) fn counter(index: usize, count: usize) -> Option<String> {
 }
 
 /// What each pixel holds, in the bar's shorthand: `RGB8`, `RGBA16`,
-/// `GRAY32F`.
+/// `G32F`.
 ///
 /// Not the format the GPU stored it in. That is a fact about this machine
 /// rather than about the file — the same image lands on a different one on a
