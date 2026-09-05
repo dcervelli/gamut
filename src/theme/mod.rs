@@ -139,12 +139,12 @@ const DEEP_VALUE_CEIL: f32 = 0.14;
 /// the panel over it; not enough to compete with what is written on it — and
 /// the information panel is a long column of small words, which is the most
 /// that is ever asked of this ground.
-const PANEL_ALPHA: u8 = 240;
+const PANEL_ALPHA: u8 = 245;
 
 /// How opaque a popup's panel is. Higher than the panels that float over the
 /// image permanently: the picture coming through a menu competes with the
 /// choices on it.
-const MENU_ALPHA: u8 = 246;
+const MENU_ALPHA: u8 = 251;
 
 /// The ground the plot is drawn on. Not quite black, so that the panel's own
 /// edge is still an edge rather than a hole in it.
