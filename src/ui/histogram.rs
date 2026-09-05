@@ -1,13 +1,14 @@
 //! The floating histogram panel.
 
-use crate::image::display::Colormap;
+use crate::image::display::{AutoWindow, Colormap, Display, ToneMap};
 use crate::image::stats::BINS;
 use crate::render::{Blend, Color, Rect, TextMeasure, UiFrame};
 use crate::theme::Theme;
 
-use super::buttons::{ICON_SIDE, button_ink, outline};
+use super::buttons::{ICON_SIDE, button_ink, centered_text, outline, text_top};
 use super::chrome::BUTTON_SIZE;
-use super::icon;
+use super::icon::{self, Mark};
+use super::status::format_window;
 use super::tooltip::{Opens, Tip, Tips};
 use super::{
     BECOMES, Current, FrameInput, PADDING, PANEL_INSET, PANEL_RADIUS, PANEL_WIDTH, Panels,
@@ -15,11 +16,12 @@ use super::{
 };
 
 /// The panel: as wide as anything else floating over the content area, and
-/// tall enough for a plot with its axis label above it and the ramp of what
-/// the display makes of that axis below.
+/// tall enough for a plot with its axis label above it, the ramp of what the
+/// display makes of that axis below, and under that the settings the plot is
+/// drawing — the exposure, the window and the curve, in [`Rows`].
 pub(super) const HISTOGRAM_SIZE: [f32; 2] = [
     PANEL_WIDTH,
-    130.0 + RAMP_GAP + RAMP_HEIGHT + RAMP_GAP + SWATCH_HEIGHT,
+    130.0 + RAMP_GAP + RAMP_HEIGHT + RAMP_GAP + SWATCH_HEIGHT + ROWS_HEIGHT,
 ];
 
 /// The room the strip of buttons down the left takes: a button's width and
@@ -87,6 +89,111 @@ const CURSOR_WIDTH: f32 = 1.0;
 /// deeper — it is a legend along the axis, not a second plot.
 const RAMP_HEIGHT: f32 = 8.0;
 const RAMP_GAP: f32 = 4.0;
+
+/// A quarter of a stop: what one press of the exposure row is worth, and what
+/// the keys that do the same job step by.
+///
+/// Held here, where the buttons that carry the number are drawn, and read by
+/// the key table from here: the two are one step, so a press and a keystroke
+/// move the exposure by the same amount and the label on the button cannot
+/// come to disagree with what pressing it does.
+pub const EV_STEP: f32 = 0.25;
+
+/// The windows the panel offers outright, in the order they are set out: what
+/// the image itself would open with, and then the three rules named.
+///
+/// `None` is the image's own, which only the image can answer — see
+/// [`AutoWindow::default_for`]. None of them says which window is in force:
+/// the reading on the line above them does that, and a press here sets a
+/// window rather than switching one on.
+pub const WINDOWS: [(&str, Option<AutoWindow>); 4] = [
+    ("Auto", None),
+    ("0\u{2013}1", Some(AutoWindow::Off)),
+    ("Min/Max", Some(AutoWindow::MinMax)),
+    ("99.8%", Some(AutoWindow::Percentile)),
+];
+
+/// The four nudges at the end of the window's reading, in the order they are
+/// set out: along the axis one way, in about its own middle, out again, and
+/// along it the other way. Each wears the two chevrons that say what its two
+/// ends do.
+///
+/// They move the window that is there rather than putting it on one of the
+/// rules below them, which is why they are on the line the window is read
+/// out on and not in that row.
+const NUDGES: [(Widget, &[Mark]); 4] = [
+    (Widget::WindowDown, icon::CHEVRONS_LEFT),
+    (Widget::WindowNarrow, icon::CHEVRONS_RIGHT_LEFT),
+    (Widget::WindowWiden, icon::CHEVRONS_LEFT_RIGHT),
+    (Widget::WindowUp, icon::CHEVRONS_RIGHT),
+];
+
+/// The rows of controls under the band: how tall a row is, and the two gaps —
+/// one between the three rows, and the tighter one between the window's own
+/// reading and the buttons that set it, the two being one row in two parts.
+const ROW_HEIGHT: f32 = 20.0;
+const ROW_GAP: f32 = 8.0;
+const SUB_GAP: f32 = 4.0;
+
+/// The column of words down the left of those rows, and the gap between one
+/// of them and what it names.
+///
+/// Wide enough for the longest of the three at [`ROW_TEXT`] and no wider:
+/// what it does not take is what the buttons beside it have, and the row of
+/// four windows is the narrowest cell on the panel.
+/// `every_word_on_the_rows_fits_the_room_it_is_given` holds both ends of that
+/// to the face the panel is actually set in.
+const ROW_LABEL: f32 = 44.0;
+const ROW_LABEL_GAP: f32 = 6.0;
+
+/// How wide one of the exposure row's two steps is, and how much is set aside
+/// in front of them for the exposure itself.
+///
+/// The reading leads and the buttons follow it, close enough to touch: what a
+/// step does is change the number in front of it, and a number a button's
+/// width away from the button that moves it is a number that has to be looked
+/// for. The room the group does not take is left at the end of the line,
+/// where it is margin. Both rows are set out this way — see
+/// [`WINDOW_READING`] — so the two readings start on one line down the panel
+/// and the controls that move them start on another.
+const STEP_WIDTH: f32 = 54.0;
+const STOPS_WIDTH: f32 = 36.0;
+
+/// And how much is set aside for the window's own reading, in front of the
+/// four nudges that move it. Enough for a float raster's bounds written out
+/// in full — an elevation model in meters, say — which is the widest reading
+/// this line can be asked to carry; the test below holds it to that.
+const WINDOW_READING: f32 = 104.0;
+
+/// What is left around one of the nudges' chevrons inside its button. The
+/// same air a side-panel toggle leaves around its own mark, less the two
+/// logical pixels this button is shorter.
+const NUDGE_ICON: f32 = ROW_HEIGHT - 6.0;
+
+/// Between one cell of a row and the next: the false colors under the band,
+/// and the buttons of the rows below them.
+const CELL_GAP: f32 = 4.0;
+
+/// What the words on those rows are set at. The axis labels' size, this being
+/// the same panel's second thoughts about the same measurement — and small
+/// enough that the longest button label has room in the narrowest cell.
+const ROW_TEXT: f32 = TEXT_SIZE * 0.85;
+
+/// What the block of them takes off the panel's height: the rows, the gaps
+/// between them, the gap that parts the block from the band above it, and the
+/// plot's own inset — which the band hangs below rather than inside, so it is
+/// what is left over between the two and it belongs to whatever comes next.
+/// With it counted here the last row ends the panel's own inset above its
+/// edge, the way everything else on the panel starts one below its top.
+const ROWS_HEIGHT: f32 = PLOT_INSET
+    + ROW_GAP
+    + ROW_HEIGHT
+    + ROW_GAP
+    + ROW_HEIGHT
+    + SUB_GAP
+    + ROW_HEIGHT
+    + ROW_GAP
+    + ROW_HEIGHT;
 
 /// The least room left between the pointer's readout and the axis ends it is
 /// set between, before they give way to it.
@@ -172,7 +279,7 @@ fn bars(panel: Rect) -> Rect {
         plot.x + TOOLBAR_WIDTH,
         plot.y + label_height + PLOT_INSET,
         plot.width - TOOLBAR_WIDTH,
-        plot.height - label_height - PLOT_INSET - RAMP_GAP - RAMP_HEIGHT,
+        plot.height - label_height - PLOT_INSET - RAMP_GAP - RAMP_HEIGHT - ROWS_HEIGHT,
     )
 }
 
@@ -228,14 +335,187 @@ fn toolbar_button(panel: Rect, gray: bool, index: usize) -> Rect {
 /// three-channel image — its channels are colors already — so on one of
 /// those the row is not there at all, and the plot has the room instead.
 fn swatch_button(bars: Rect, index: usize) -> Rect {
-    let count = Colormap::ALL.len() as f32;
-    let width = (bars.width - (count - 1.0) * RAMP_GAP) / count;
-    Rect::new(
-        bars.x + index as f32 * (width + RAMP_GAP),
+    let row = Rect::new(
+        bars.x,
         ramp(bars).bottom() + RAMP_GAP,
-        width,
+        bars.width,
         SWATCH_HEIGHT,
+    );
+    share(row, Colormap::ALL.len(), index)
+}
+
+/// One of `count` cells dividing `row` between them, with [`CELL_GAP`]
+/// between neighbors. What every row of buttons on this panel is set out
+/// with, so that the false colors under the band and the windows under those
+/// line up down the panel rather than each being spaced its own way.
+fn share(row: Rect, count: usize, index: usize) -> Rect {
+    let count = count as f32;
+    let width = (row.width - (count - 1.0) * CELL_GAP) / count;
+    Rect::new(
+        row.x + index as f32 * (width + CELL_GAP),
+        row.y,
+        width,
+        row.height,
     )
+}
+
+/// The block of controls under the band: the lines it is set on, and the
+/// column of words down its left.
+///
+/// One rectangle for each, worked out once and read by everything — what is
+/// drawn, what the pointer finds, and what names itself — so that a button
+/// cannot be pressed anywhere but where it was drawn.
+///
+/// It starts below whichever of the two things the band ends in: the ramp
+/// alone on a color image, and the ramp with the row of false colors under it
+/// on a gray one. Those end on the same line — the room the swatches take is
+/// taken off the plot rather than off the panel, see [`plot_area`] — so this
+/// is one block either way, and the rows do not shift about from one file to
+/// the next.
+#[derive(Clone, Copy)]
+struct Rows {
+    /// Where each row's own word goes, in the order they are stacked.
+    labels: [Rect; 3],
+    /// The exposure's line: its two steps at the ends and its reading
+    /// between them.
+    exposure: Rect,
+    /// What the window is now, written along the line its label is on.
+    reading: Rect,
+    /// The four windows on offer, and the three curves below them.
+    window: Rect,
+    curve: Rect,
+}
+
+impl Rows {
+    fn new(panel: Rect) -> Self {
+        let inside = panel.inset(PANEL_INSET, PANEL_INSET);
+        let left = inside.x + ROW_LABEL + ROW_LABEL_GAP;
+        let line = |y: f32, height: f32| Rect::new(left, y, inside.right() - left, height);
+        let label = |y: f32, height: f32| Rect::new(inside.x, y, ROW_LABEL, height);
+
+        let mut y = ramp(bars(panel)).bottom() + ROW_GAP;
+        let (exposure, ev) = (line(y, ROW_HEIGHT), label(y, ROW_HEIGHT));
+        y += ROW_HEIGHT + ROW_GAP;
+        let (reading, window_label) = (line(y, ROW_HEIGHT), label(y, ROW_HEIGHT));
+        y += ROW_HEIGHT + SUB_GAP;
+        let window = line(y, ROW_HEIGHT);
+        y += ROW_HEIGHT + ROW_GAP;
+        let (curve, curve_label) = (line(y, ROW_HEIGHT), label(y, ROW_HEIGHT));
+
+        Self {
+            labels: [ev, window_label, curve_label],
+            exposure,
+            reading,
+            window,
+            curve,
+        }
+    }
+
+    /// The exposure itself, at the head of its row: the number the two steps
+    /// beside it act on.
+    fn stops(&self) -> Rect {
+        Rect::new(
+            self.exposure.x,
+            self.exposure.y,
+            STOPS_WIDTH,
+            self.exposure.height,
+        )
+    }
+
+    /// One of those two steps, following it: down first, then up.
+    fn step(&self, up: bool) -> Rect {
+        let x = self.stops().right() + CELL_GAP + if up { STEP_WIDTH + CELL_GAP } else { 0.0 };
+        Rect::new(x, self.exposure.y, STEP_WIDTH, self.exposure.height)
+    }
+
+    /// The same on the window's line: the room its bounds are written in, and
+    /// after it the four nudges that move them.
+    ///
+    /// The nudges are square, and as deep as the line, so that a chevron is
+    /// drawn on the grid it was described on rather than in a box of some
+    /// other shape.
+    fn window_reading(&self) -> Rect {
+        Rect::new(
+            self.reading.x,
+            self.reading.y,
+            WINDOW_READING,
+            self.reading.height,
+        )
+    }
+
+    fn nudges(&self) -> Rect {
+        let side = self.reading.height;
+        let count = NUDGES.len() as f32;
+        Rect::new(
+            self.window_reading().right() + CELL_GAP,
+            self.reading.y,
+            count * side + (count - 1.0) * CELL_GAP,
+            self.reading.height,
+        )
+    }
+}
+
+/// What one of the rows' buttons wears, and whether it is lit. `None` for a
+/// nudge, which wears a mark rather than a word.
+///
+/// Beside the geometry rather than inside the drawing so that the test can
+/// ask for the same words the frame is set with: a label the layout was not
+/// measured against is a label that can outgrow its button.
+fn row_label(widget: Widget, display: &Display) -> Option<(String, bool)> {
+    Some(match widget {
+        // The step's own worth, written as it acts: one source for the number
+        // on the button and the number the press is worth.
+        Widget::ExposureDown => (format!("{:+.2}", -EV_STEP), false),
+        Widget::ExposureUp => (format!("{:+.2}", EV_STEP), false),
+        Widget::Window(index) => (WINDOWS.get(index)?.0.to_string(), false),
+        // Capitalized, where the bar sets the same word in the middle of a
+        // line: a button wears a name, and a name starts with a capital.
+        Widget::Curve(index) => {
+            let curve = *ToneMap::ALL.get(index)?;
+            (capitalized(curve.label()), display.tone_map == curve)
+        }
+        _ => return None,
+    })
+}
+
+/// `label` with its first letter capitalized.
+fn capitalized(label: &str) -> String {
+    let mut letters = label.chars();
+    match letters.next() {
+        Some(first) => first.to_uppercase().chain(letters).collect(),
+        None => String::new(),
+    }
+}
+
+/// Every button in that block, with where it goes. The one list the drawing,
+/// the pointer and the tooltips all work from.
+///
+/// Every image has all of them: an exposure, a window and a curve are what
+/// the display does to any file whatever, where the two controls the panel
+/// leaves out are about what the file itself holds.
+fn row_buttons(panel: Rect) -> impl Iterator<Item = (Widget, Rect)> {
+    let rows = Rows::new(panel);
+    let steps = [
+        (Widget::ExposureDown, rows.step(false)),
+        (Widget::ExposureUp, rows.step(true)),
+    ];
+    let windows = (0..WINDOWS.len()).map(move |index| {
+        (
+            Widget::Window(index),
+            share(rows.window, WINDOWS.len(), index),
+        )
+    });
+    let curves = (0..ToneMap::ALL.len()).map(move |index| {
+        (
+            Widget::Curve(index),
+            share(rows.curve, ToneMap::ALL.len(), index),
+        )
+    });
+    let nudges = NUDGES
+        .iter()
+        .enumerate()
+        .map(move |(index, (widget, _))| (*widget, share(rows.nudges(), NUDGES.len(), index)));
+    steps.into_iter().chain(nudges).chain(windows).chain(curves)
 }
 
 /// Which of the panel's own buttons a point lands on.
@@ -253,6 +533,9 @@ pub fn widget_at(content: Rect, point: [f32; 2], gray: bool) -> Option<Widget> {
         if toolbar_button(panel, gray, index).contains(point) {
             return Some(*widget);
         }
+    }
+    if let Some((widget, _)) = row_buttons(panel).find(|(_, rect)| rect.contains(point)) {
+        return Some(widget);
     }
     if !gray {
         return None;
@@ -277,6 +560,12 @@ pub(super) fn offer_tips(tips: &mut Tips, content: Rect, gray: bool) {
             toolbar_button(panel, gray, index),
             Opens::Right,
         );
+    }
+    // Beside themselves rather than under themselves, like the toggles: these
+    // are stacked in rows, and a label opening downwards would cover the row
+    // the pointer is on its way to.
+    for (widget, rect) in row_buttons(panel) {
+        tips.offer_toward(Tip::Widget(widget), rect, Opens::Right);
     }
     if !gray {
         return;
@@ -574,7 +863,7 @@ pub(super) fn draw(
         );
     }
 
-    controls(frame, current, input, panels, panel, bars, theme);
+    controls(frame, text, current, input, panels, panel, bars, theme);
 
     // What the display is doing to the values underneath, drawn over them.
     //
@@ -747,8 +1036,10 @@ pub(super) fn draw(
 /// the panel: they say what the plot beside them is showing and what the band
 /// beneath them is painted with, and two of them are pictures of the very
 /// thing they switch.
+#[allow(clippy::too_many_arguments)]
 fn controls(
     frame: &mut UiFrame,
+    text: &mut dyn TextMeasure,
     current: &Current,
     input: &FrameInput,
     panels: &Panels,
@@ -814,6 +1105,8 @@ fn controls(
         }
     }
 
+    rows(frame, text, current, panels, panel, theme);
+
     // The false colors, each showing itself, and only where the display
     // would act on the choice. The whole ramp rather than one color off it:
     // a map is a sequence, and a single swatch of viridis is a green
@@ -845,9 +1138,100 @@ fn controls(
     }
 }
 
+/// The three rows under the band: the exposure, the window, and the curve.
+///
+/// What the plot draws, said in words and set: the ticks along the axis are
+/// the window, the curve over the bins is the curve, and the gain that moves
+/// them both is the exposure. A reading and the buttons that change it,
+/// together, so that a number on this panel is never one you have to go
+/// somewhere else to act on.
+///
+/// The two rows that set a state light the one that is in force; the windows
+/// do not. A window is set from the pixels and then moved by hand — a drag on
+/// the picture, a key, the exposure under it — and a button lit for "min/max"
+/// on a window that has since been shifted would be claiming something that
+/// stopped being true. The line above them is what says where the window is,
+/// and it says it in numbers.
+fn rows(
+    frame: &mut UiFrame,
+    text: &mut dyn TextMeasure,
+    current: &Current,
+    panels: &Panels,
+    panel: Rect,
+    theme: &Theme,
+) {
+    let rows = Rows::new(panel);
+    let display = &current.display;
+
+    // The words down the left, set back the way a fact in a bar is set behind
+    // the name it is about: the rows are read for their values, and these say
+    // which value is which.
+    for (label, at) in ["EV", "Window", "Curve"].into_iter().zip(rows.labels) {
+        frame.text(
+            [frame.snap(at.x), text_top(frame, text, at, ROW_TEXT)],
+            ROW_TEXT,
+            theme.text_dim,
+            label,
+        );
+    }
+
+    // The exposure between its two steps, and the window along its own line.
+    // Both in the units the rest of the interface quotes them in: stops for
+    // the one, and for the other the bounds the bottom bar writes out, in the
+    // file's own counts where the file is counting things.
+    //
+    // The bounds alone, and not the name of the rule they came from: what a
+    // window is for is the two numbers, the rule is a fact about how they
+    // were arrived at, and the bar at the foot of the window already says it.
+    let stops = rows.stops();
+    frame.text(
+        [frame.snap(stops.x), text_top(frame, text, stops, ROW_TEXT)],
+        ROW_TEXT,
+        theme.text_primary,
+        format!("{:.2}", display.exposure_stops),
+    );
+    let window = rows.window_reading();
+    frame.text_clipped(
+        [
+            frame.snap(window.x),
+            text_top(frame, text, window, ROW_TEXT),
+        ],
+        ROW_TEXT,
+        theme.text_primary,
+        window.width,
+        format_window(current),
+    );
+
+    for (widget, rect) in row_buttons(panel) {
+        let worn = row_label(widget, display);
+        let active = worn.as_ref().is_some_and(|(_, active)| *active);
+        let (background, ink) = button_ink(active, panels.hover == Some(widget), theme);
+        frame.rounded_rect(rect, TOGGLE_RADIUS, background);
+        match &worn {
+            Some((label, _)) => centered_text(frame, text, rect, ink, label, ROW_TEXT),
+            // The nudges wear marks where the rest of the block wears words:
+            // what they do to the two ends of the window is a shape, and four
+            // of them spelled out would be a paragraph on a line that is
+            // already a number.
+            None => {
+                if let Some((_, marks)) = NUDGES.iter().find(|(nudge, _)| *nudge == widget) {
+                    icon::draw(
+                        frame,
+                        marks,
+                        icon::fit(frame, rect, NUDGE_ICON),
+                        ink,
+                        background,
+                    );
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::render::ui_tests::test_fonts;
 
     /// The pointer reads a bin of the plot and nothing outside it — not the
     /// panel around it, and not the line the axis labels are set on.
@@ -1015,6 +1399,113 @@ mod tests {
         );
     }
 
+    /// The three rows sit under the band, inside the panel, and land in the
+    /// same place whether or not the image has a row of false colors — the
+    /// band and the swatches under it end on the same line, so the controls
+    /// below them do not shift about from one file to the next.
+    #[test]
+    fn the_rows_sit_under_the_band_whatever_it_ends_in() {
+        let panel = panel(Rect::new(0.0, 0.0, 800.0, 600.0));
+        let rows = Rows::new(panel);
+        let inside = panel.inset(PANEL_INSET, PANEL_INSET);
+
+        let lowest = swatch_button(plot_area(panel, true), 0).bottom();
+        assert_eq!(
+            lowest,
+            ramp(bars(panel)).bottom(),
+            "the false colors end where the band alone would have"
+        );
+        for (widget, rect) in row_buttons(panel) {
+            assert!(rect.y >= lowest, "{widget:?} clears the band: {rect:?}");
+            assert!(rect.bottom() <= inside.bottom(), "{widget:?} {rect:?}");
+            assert!(rect.x >= inside.x + ROW_LABEL, "{widget:?} clears its word");
+            assert!(rect.right() <= inside.right() + 0.01, "{widget:?} {rect:?}");
+        }
+        // The last row is the last thing on the panel, and what it leaves
+        // under it is the panel's own inset and nothing more.
+        assert_eq!(rows.curve.bottom(), inside.bottom());
+        assert_eq!(rows.labels[2].bottom(), inside.bottom());
+    }
+
+    /// Every one of them answers the pointer inside its own bounds and
+    /// nowhere else — not in the column of words beside them, and not in the
+    /// gaps between one and the next.
+    #[test]
+    fn the_rows_answer_the_pointer_where_they_were_drawn() {
+        let content = Rect::new(0.0, 0.0, 800.0, 600.0);
+        let panel = panel(content);
+        let rows = Rows::new(panel);
+
+        // Every image has them, gray or not: what they set is what the
+        // display does to any file whatever.
+        for gray in [true, false] {
+            for (widget, rect) in row_buttons(panel) {
+                assert_eq!(widget_at(content, middle(rect), gray), Some(widget));
+            }
+            assert_eq!(
+                widget_at(content, middle(rows.labels[0]), gray),
+                None,
+                "the word naming a row is not a button"
+            );
+            assert_eq!(
+                widget_at(content, middle(rows.stops()), gray),
+                None,
+                "nor is the exposure the two steps after it act on"
+            );
+            assert_eq!(
+                widget_at(content, middle(rows.window_reading()), gray),
+                None,
+                "nor the window the four nudges after it act on"
+            );
+            let gap = [
+                share(rows.window, WINDOWS.len(), 0).right() + CELL_GAP / 2.0,
+                middle(rows.window)[1],
+            ];
+            assert_eq!(widget_at(content, gap, gray), None, "between two windows");
+        }
+    }
+
+    /// The exposure's two steps are worth what they say they are worth, and
+    /// the windows and the curves cover everything there is to choose.
+    #[test]
+    fn the_rows_offer_every_choice_there_is() {
+        let panel = panel(Rect::new(0.0, 0.0, 800.0, 600.0));
+        let widgets: Vec<Widget> = row_buttons(panel).map(|(widget, _)| widget).collect();
+        assert_eq!(widgets[0], Widget::ExposureDown);
+        assert_eq!(widgets[1], Widget::ExposureUp);
+        assert_eq!(
+            widgets.len(),
+            2 + NUDGES.len() + WINDOWS.len() + ToneMap::ALL.len()
+        );
+
+        // The four things a hand can do to a window, and no two of them the
+        // same thing: along the axis either way, and about its own middle
+        // either way.
+        assert_eq!(
+            NUDGES.map(|(widget, _)| widget),
+            [
+                Widget::WindowDown,
+                Widget::WindowNarrow,
+                Widget::WindowWiden,
+                Widget::WindowUp
+            ]
+        );
+
+        // The three the row names outright, and the fourth that only the
+        // image can answer.
+        let named: Vec<Option<AutoWindow>> = WINDOWS.iter().map(|(_, window)| *window).collect();
+        assert_eq!(
+            named,
+            [
+                None,
+                Some(AutoWindow::Off),
+                Some(AutoWindow::MinMax),
+                Some(AutoWindow::Percentile)
+            ]
+        );
+        assert_eq!(ToneMap::ALL.len(), 3, "one button to a curve");
+    }
+
     /// Either way of scaling the plot draws an empty bin flat on the axis and
     /// the fullest one at the top of it: what changes is only what the bins
     /// between them do with the room.
@@ -1054,6 +1545,67 @@ mod tests {
                 heights.windows(2).all(|pair| pair[0] < pair[1]),
                 "log {log}: {heights:?}"
             );
+        }
+    }
+
+    /// The least room a word may leave inside the cell it is set in, in
+    /// logical pixels: enough that it is not set against the button's rounded
+    /// corners, whichever of the labels it is.
+    const ROOM: f32 = 5.0;
+
+    /// Every word on the three rows fits the room laid out for it — the three
+    /// naming the rows, and the label each button wears.
+    ///
+    /// The layout is in constants, the pointer having to be answered where
+    /// there are no fonts to ask. This is what holds those constants to the
+    /// face the panel is actually set in: too mean and a label is clipped or
+    /// spills over its neighbor, and no measurement anywhere else would catch
+    /// it.
+    #[test]
+    fn every_word_on_the_rows_fits_the_room_it_is_given() {
+        let Some(mut fonts) = test_fonts() else {
+            return;
+        };
+        let panel = panel(Rect::new(0.0, 0.0, 800.0, 600.0));
+        let mut width = |label: &str| fonts.measure_text(label, ROW_TEXT)[0];
+
+        for word in ["EV", "Window", "Curve"] {
+            let room = ROW_LABEL - width(word);
+            assert!(room >= 0.0, "\"{word}\" overruns its column by {room}");
+        }
+        // The two readings lead their rows and the buttons follow them, so
+        // what is set aside for each has to hold what it can be asked to
+        // say — for the window, a float raster's bounds written out in full.
+        let rows = Rows::new(panel);
+        for reading in [
+            "0.000\u{2013}1.000",
+            "-32768\u{2013}65535",
+            "-431.000\u{2013}8848.000",
+        ] {
+            let room = rows.window_reading().width;
+            assert!(
+                width(reading) <= room,
+                "\"{reading}\" needs more than {room}"
+            );
+        }
+        for stops in ["0.00", "-16.00"] {
+            let room = rows.stops().width;
+            assert!(width(stops) <= room, "\"{stops}\" needs more than {room}");
+        }
+
+        let display = Display::default();
+        for (widget, rect) in row_buttons(panel) {
+            // A nudge wears a mark rather than a word, and a mark is fitted
+            // to its button by `icon::fit` rather than measured.
+            let Some((label, _)) = row_label(widget, &display) else {
+                assert!(
+                    NUDGES.iter().any(|(nudge, _)| *nudge == widget),
+                    "{widget:?} wears neither a word nor a mark"
+                );
+                continue;
+            };
+            let room = rect.width - width(&label);
+            assert!(room >= 2.0 * ROOM, "\"{label}\" leaves {room} in {rect:?}");
         }
     }
 

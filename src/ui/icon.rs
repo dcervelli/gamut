@@ -217,6 +217,34 @@ pub(super) const CHEVRONS_UP_DOWN: &[Mark] = &[
     Mark::Line([12.0, 20.0], [17.0, 15.0]),
 ];
 
+/// Lucide's `chevrons-left` and `chevrons-right`: a pair of chevrons pointing
+/// the one way, for the two nudges that slide the display window along the
+/// axis without changing how wide it is.
+pub(super) const CHEVRONS_LEFT: &[Mark] = &[
+    Mark::Line([11.0, 17.0], [6.0, 12.0]),
+    Mark::Line([6.0, 12.0], [11.0, 7.0]),
+    Mark::Line([18.0, 17.0], [13.0, 12.0]),
+    Mark::Line([13.0, 12.0], [18.0, 7.0]),
+];
+
+pub(super) const CHEVRONS_RIGHT: &[Mark] = &[
+    Mark::Line([6.0, 17.0], [11.0, 12.0]),
+    Mark::Line([11.0, 12.0], [6.0, 7.0]),
+    Mark::Line([13.0, 17.0], [18.0, 12.0]),
+    Mark::Line([18.0, 12.0], [13.0, 7.0]),
+];
+
+/// Lucide's `chevrons-right-left`: the two of them facing each other, for the
+/// nudge that narrows the window. [`CHEVRONS_LEFT_RIGHT`] below is the same
+/// pair back to back, and widens it — the marks are what the window's two
+/// ends do.
+pub(super) const CHEVRONS_RIGHT_LEFT: &[Mark] = &[
+    Mark::Line([4.0, 7.0], [9.0, 12.0]),
+    Mark::Line([9.0, 12.0], [4.0, 17.0]),
+    Mark::Line([20.0, 7.0], [15.0, 12.0]),
+    Mark::Line([15.0, 12.0], [20.0, 17.0]),
+];
+
 /// Lucide's `chevrons-left-right`: the fit that fills the window's width.
 pub(super) const CHEVRONS_LEFT_RIGHT: &[Mark] = &[
     Mark::Line([9.0, 7.0], [4.0, 12.0]),

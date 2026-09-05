@@ -40,6 +40,21 @@ impl AutoWindow {
         }
     }
 
+    /// The window an image opens with, which is one rule: the image's own
+    /// [`Referred`]. Something already graded has a white of its own and 0..1
+    /// is exactly right; linear sensor counts have no white, and showing them
+    /// unwindowed is how you get a black rectangle.
+    ///
+    /// Held apart from [`Display::for_image_with`] because it is also what
+    /// the panel's `Auto` button puts back — that button is this rule, where
+    /// the three beside it are the windows named outright.
+    pub fn default_for(image: &DecodedImage) -> Self {
+        match image.referred {
+            Referred::Display => AutoWindow::Off,
+            Referred::Scene => AutoWindow::Percentile,
+        }
+    }
+
     fn next(self) -> Self {
         match self {
             AutoWindow::Off => AutoWindow::MinMax,
@@ -72,6 +87,10 @@ pub enum ToneMap {
 }
 
 impl ToneMap {
+    /// Every curve there is, in the order the key cycles them and the order
+    /// the histogram panel's own row of them is drawn in.
+    pub const ALL: [ToneMap; 3] = [ToneMap::None, ToneMap::Reinhard, ToneMap::Neutral];
+
     pub fn label(self) -> &'static str {
         match self {
             ToneMap::None => "none",
@@ -379,10 +398,7 @@ impl Display {
         startup: Startup,
         headroom: Headroom,
     ) -> Self {
-        let auto = match image.referred {
-            Referred::Display => AutoWindow::Off,
-            Referred::Scene => AutoWindow::Percentile,
-        };
+        let auto = AutoWindow::default_for(image);
 
         let mut display = Self {
             low: 0.0,
@@ -468,7 +484,14 @@ impl Display {
     }
 
     pub fn cycle_auto(&mut self, stats: &Stats) {
-        self.auto = self.auto.next();
+        self.set_auto(self.auto.next(), stats);
+    }
+
+    /// Puts the window on one of the automatic rules and works it out from
+    /// the pixels, which is what the panel's row of them does: they name a
+    /// window outright where the key steps through them in turn.
+    pub fn set_auto(&mut self, auto: AutoWindow, stats: &Stats) {
+        self.auto = auto;
         self.apply_auto(stats);
     }
 

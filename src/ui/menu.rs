@@ -415,7 +415,7 @@ pub(super) fn draw(
                 frame.rounded_rect(cell, CELL_RADIUS, background);
                 match choice {
                     ZoomChoice::Scale(scale) => {
-                        centered_text(frame, text, cell, ink, &percent(scale))
+                        centered_text(frame, text, cell, ink, &percent(scale), TEXT_SIZE)
                     }
                     ZoomChoice::Fit(fit) => fit_icon(frame, cell, fit, background, ink),
                     // In words, where the fits above are in arrows: the two
@@ -423,7 +423,7 @@ pub(super) fn draw(
                     // picture of "bicubic" a reader would arrive at unaided.
                     // Their cells are cut wider so there is room to say so.
                     ZoomChoice::Filter(filter) => {
-                        centered_text(frame, text, cell, ink, filter.label())
+                        centered_text(frame, text, cell, ink, filter.label(), TEXT_SIZE)
                     }
                 }
             }
@@ -436,7 +436,7 @@ pub(super) fn draw(
                 };
                 let (background, ink) = button_ink(false, hover, theme);
                 frame.rounded_rect(cell, CELL_RADIUS, background);
-                centered_text(frame, text, cell, ink, copy.label());
+                centered_text(frame, text, cell, ink, copy.label(), TEXT_SIZE);
             }
             // In words, as the filters are, and for the same reason: there is
             // no picture of "decimal" a reader would arrive at unaided.
@@ -446,7 +446,7 @@ pub(super) fn draw(
                 };
                 let (background, ink) = button_ink(*format == panels.pixel_format, hover, theme);
                 frame.rounded_rect(cell, CELL_RADIUS, background);
-                centered_text(frame, text, cell, ink, format.label());
+                centered_text(frame, text, cell, ink, format.label(), TEXT_SIZE);
             }
         }
     }
