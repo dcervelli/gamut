@@ -833,7 +833,12 @@ mod tests {
         // The bar it sits in is still the interface, so the gap between it
         // and the button after it is not a press on anything.
         assert_eq!(
-            chrome.widget_at([button.right() + 2.0, button.y + 1.0], SPACING, false, false),
+            chrome.widget_at(
+                [button.right() + 2.0, button.y + 1.0],
+                SPACING,
+                false,
+                false
+            ),
             None
         );
         assert!(chrome.contains([button.right() + 2.0, button.y + 1.0]));
