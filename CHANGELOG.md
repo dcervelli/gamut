@@ -6,6 +6,16 @@ Notable changes to `gamut`. The format follows
 
 ## Unreleased
 
+### Fixed
+
+- A window no longer opens larger than the screen on a scaled display. The
+  opening size is worked out in logical pixels rather than physical ones —
+  winit takes the size a window is created with as logical, so a 4K monitor at
+  2x was given a window twice the size meant — and every monitor is consulted
+  rather than the first one enumerated, the window opening at the largest size
+  that fits on all of them. It now takes up to two thirds of a monitor rather
+  than 85%.
+
 ### Changed
 
 - The Wayland `app_id` and X11 `WM_CLASS` are now `com.dcervelli.gamut`, the

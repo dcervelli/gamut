@@ -4,16 +4,36 @@
 
 The first file is shown stretched to fit the space the interface panels leave
 in the middle, and the window opens at the image's own size plus that chrome,
-shrunk to fit the monitor (`src/app/window.rs`). `` ` `` hides the panels and
+shrunk to fit the monitors (`src/app/window.rs`). `` ` `` hides the panels and
 gives the image the whole window, re-fitting it as it goes.
 
-`--size <W> <H>` replaces that calculation with the two numbers it is given.
-They are the whole window, chrome included, and they are logical pixels — the
-units a compositor lays windows out in — where the image path works in
-physical ones, since what it is matching is the image's own pixels. Neither
-the image nor the monitor gets a say afterwards: a window larger than the
-screen is something a compositor is asked for on purpose, and only a floor of
-`MIN_WINDOW` applies, below which the chrome would have all of the window.
+Every monitor is asked, not one. `primary_monitor` is `None` on Wayland by
+definition — there is no such thing there — and nothing before the surface is
+mapped says which monitor the compositor will choose. So `window_size` asks
+each monitor what window it would want, being the image held inside
+`MAX_WINDOW_FRACTION` of that monitor's room, and takes the largest of those
+answers that fits on *every* monitor. A window sized that way cannot overrun
+whichever screen it lands on. Where none of them fits everywhere — a monitor
+smaller than `MIN_WINDOW`, say — the smallest answer is taken as the least bad
+of them.
+
+The whole calculation is in logical pixels, which is the correction that
+matters. The image's own pixels are physical, so a monitor's scale converts
+them; the panel constants are logical already. Asking in physical pixels does
+not work, because winit's Wayland backend converts the size a window is
+created with at a scale of `1.0` — the surface has none until the compositor
+configures it — so physical pixels are taken as logical ones and the window
+opens `scale` times too large, well past the screen on a 4K monitor at 2×.
+The scale used is the output's integer one, 2 where the compositor is really
+running 1.6; the true fractional scale only arrives with
+`wp_fractional_scale_v1` after the surface is mapped. That error goes the safe
+way, opening a little under 100% rather than overrunning.
+
+`--size <W> <H>` replaces the calculation with the two numbers it is given.
+They are the whole window, chrome included, in the same logical pixels.
+Neither the image nor the monitors gets a say afterwards: a window larger than
+the screen is something a compositor is asked for on purpose, and only a floor
+of `MIN_WINDOW` applies, below which the chrome would have all of the window.
 Whether the request is honored is the compositor's business — a tiling one
 uses it as the floating size, if it uses it at all.
 
