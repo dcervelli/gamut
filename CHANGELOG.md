@@ -8,4 +8,4 @@ Notable changes to `gamut`. The format follows
 
 ## 0.1.0
 
-Not released.
+First release.
