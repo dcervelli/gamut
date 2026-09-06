@@ -1328,7 +1328,7 @@ BSD 3-Clause "New" or "Revised" License
 Used by:
   exr 1.74.2
 
-Copyright (c) <year> <owner>.
+Copyright (c) <year> <owner>. 
 
 Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
 
@@ -4901,3 +4901,5 @@ the following restrictions:
     misrepresented as being the original software.
 
 3. This notice may not be removed or altered from any source distribution.
+
+
