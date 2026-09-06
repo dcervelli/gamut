@@ -8,7 +8,7 @@ pkgname=gamut
 _appid=com.dcervelli.gamut
 pkgver=0.1.0
 pkgrel=1
-pkgdesc="A GPU image viewer with real color management, for photographs, measurement data and HDR"
+pkgdesc="A modern image viewer optimized for getting work done, fast."
 arch=('x86_64' 'aarch64')
 url="https://github.com/closedcontour/gamut"
 # gamut itself, then the licenses of the work carried in its own source tree:

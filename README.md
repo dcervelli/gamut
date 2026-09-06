@@ -1,9 +1,65 @@
 # gamut
 
+A modern image viewer optimized for getting work done, fast.
+
+![Main screenshot](user-docs/screenshots/main_screenshot.jpg)
+
+## Features
+
+### All features are keyboard accessible, discoverable in the UI, and settable via the CLI
+### Desktop integration
+### OS themed
+### Copy image
+### Paste image
+### Pixel info
+### Pixel grid
+### Histogram and basic level manipulation
+### Single channel false color
+### HDR
+### Color management
+### File comparison
+### File/directory watch
+### Metadata/EXIF extraction
+### Many formats
+### Fast GPU display
+
+## Install
+
+```sh
+cd packaging && makepkg -si
+```
+
+That installs the desktop entry, icon, and the binary.
+
+## Getting Started
+
+## Docs
+
+## Roadmap
+
+## Contributing
+
+Issues and pull requests are welcome.
+
+## License
+
+Dual-licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
+
+at your option. 
+
+[Lucide](https://lucide.dev) icon
+geometries licensed under ISC.
+
+Polynomial false-color ramps are CC0 or Apache-2.0.
+Further information in [`docs/licensing.md`](docs/licensing.md).
+
+# OLD
+
 A GPU image viewer with real color management — for photographs, measurement
 data and HDR frames.
-
-<!-- TODO: screenshot here. A viewer is worth showing before it is described. -->
 
 Most viewers flatten what they open to 8-bit sRGB on the way in. `gamut` does
 not. A 16-bit scan, a floating-point elevation model and an HDR frame all go
@@ -70,18 +126,6 @@ Enough keys to get going:
 
 | Key | |
 | --- | --- |
-<<<<<<< HEAD
-=======
-| `1`, `0` | Actual size (100%) |
-| `2`, `3`, `4`, `5` | 200%, 400%, 800%, 1600% |
-| `Shift`+`2`, `3`, `4` | 50%, 25%, 10% |
-| `+`, `=` / `-`, `_` | Zoom in / out |
-| Wheel | Zoom about the pointer |
-| Space | Toggle fit: the whole image ↔ filling the window |
-| `p` | Cycle the filter used above 100%: nearest → bicubic |
-| Arrows | Pan by 64 pixels; `Shift` by one, `Ctrl` to the far side |
-| Drag | Pan, with the image following the pointer |
->>>>>>> bravo
 | `]`, `[` | Next / previous file |
 | Space | Cycle fit → fit width → fit height |
 | `1` | Actual size; wheel to zoom, drag to pan |
@@ -123,22 +167,5 @@ The full list, with the reasons, is in [`docs/limits.md`](docs/limits.md).
 ## Contributing
 
 Issues and pull requests are welcome. `cargo test`, `cargo clippy
---all-targets` and `reuse lint` all need to be clean; `CLAUDE.md` describes
+--all-targets` and `reuse lint` all need to be clean; `AGENTS.md` describes
 the layout and the conventions a change is expected to follow.
-
-## License
-
-Dual-licensed under either of
-
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
-- MIT license ([LICENSE-MIT](LICENSE-MIT))
-
-at your option. Unless you state otherwise, any contribution you intentionally
-submit for inclusion in this work shall be dual-licensed as above, without any
-additional terms or conditions.
-
-Two things in the tree are someone else's work and are licensed as they say
-rather than as above — the button marks, which are [Lucide](https://lucide.dev)
-geometry under ISC, and the false-color ramps, which are polynomial fits under
-CC0 and Apache-2.0. That, and how the third-party notices are generated, is set
-out in [`docs/licensing.md`](docs/licensing.md).
