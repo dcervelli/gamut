@@ -10,11 +10,6 @@
 
 ## IN PROGRESS
 
-## RELEASE 0.1.0
-* Move repo to dcervelli/
-* Human README.md
-* Changelog
-
 ## FUTURE
 * App icon
 * Comparison mode toggle
