@@ -6,6 +6,6 @@ Notable changes to `gamut`. The format follows
 
 ## Unreleased
 
-## 0.1.0
+## 0.1.0 - 2026-09-06
 
 First release.
