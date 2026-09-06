@@ -8,8 +8,8 @@ edition = "2024"
 # code against it, so it stays honest.
 rust-version = "1.88"
 description = "A GPU image viewer with real color management, for photographs, measurement data and HDR"
-repository = "https://github.com/closedcontour/gamut"
-homepage = "https://github.com/closedcontour/gamut"
+repository = "https://github.com/dcervelli/gamut"
+homepage = "https://github.com/dcervelli/gamut"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
 keywords = ["image", "viewer", "hdr", "color-management", "wgpu"]

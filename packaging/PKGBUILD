@@ -10,7 +10,7 @@ pkgver=0.1.0
 pkgrel=1
 pkgdesc="A modern image viewer optimized for getting work done, fast."
 arch=('x86_64' 'aarch64')
-url="https://github.com/closedcontour/gamut"
+url="https://github.com/dcervelli/gamut"
 # gamut itself, then the licenses of the work carried in its own source tree:
 # Lucide's icon geometry, and the two colormap fits. REUSE.toml says which file
 # is which. The crates linked into the binary are not gamut's source and do not
