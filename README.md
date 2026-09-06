@@ -6,22 +6,33 @@ A modern image viewer optimized for getting work done, fast.
 
 ## Features
 
-### All features are keyboard accessible, discoverable in the UI, and settable via the CLI
-### Desktop integration
 ### OS themed
+Omarchy's Lupine and Tokyo Night themes:
+![Themes side by side](user-docs/screenshots/themes.gif)
+
+
 ### Copy image
 ### Paste image
 ### Pixel info
 ### Pixel grid
+Scale dynamic pixel grid.
+![Pixel grid animation](user-docs/screenshots/pixel_grid.gif)
+
 ### Histogram and basic level manipulation
 ### Single channel false color
 ### HDR
 ### Color management
 ### File comparison
 ### File/directory watch
+
 ### Metadata/EXIF extraction
+Get file, image, EXIF, georeference, and more metadata. Easily copy all, by section, or by item.
+![Image info/metadata/EXIF](user-docs/screenshots/info.jpg)
+
 ### Many formats
 ### Fast GPU display
+### All features are keyboard accessible, discoverable in the UI, and settable via the CLI
+### Desktop integration
 
 ## Install
 
