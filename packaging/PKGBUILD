@@ -1,4 +1,4 @@
-# Maintainer: TODO <TODO>
+# Maintainer: Dan Cervelli <daniel@cervelli.net>
 
 pkgname=gamut
 # The name the desktop knows the program by: the Wayland app_id, and so the
