@@ -18,6 +18,12 @@ Notable changes to `gamut`. The format follows
 
 ### Changed
 
+- The `HDR` switch says why it is dead when the pointer rests on it, rather
+  than refusing the press with a line in the terminal no one running the
+  program from a desktop would see. On a monitor in SDR mode it names
+  `--output hdr` as the start-up request that would ask the compositor to
+  switch the monitor over; where no HDR color space is offered for the window
+  at all, it says that instead, since restarting would not help.
 - The grid toggle has moved from the end of the top bar to the head of the
   bottom one, in front of the button that says how a pixel is read out, and
   its spacing is now written after the mark rather than in front of it. The

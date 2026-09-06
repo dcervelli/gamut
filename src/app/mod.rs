@@ -28,6 +28,7 @@ use crate::timing;
 use crate::ui::chrome::{Chrome, content_area, image_viewport};
 use crate::ui::layers::{Hit, Shown};
 use crate::ui::toast::{self, Level, Toasts};
+use crate::ui::tooltip::Hdr;
 use crate::ui::{self, Current, FileFacts, FrameInput, Panels, Reading, Tooltips};
 use crate::view::{View, Viewport};
 use crate::watch::{self, Watch};
@@ -304,15 +305,32 @@ impl App {
         }
     }
 
-    /// Whether the switch has anything to switch: an HDR color space is
-    /// offered for the window, and the monitor is in HDR mode — or nothing
-    /// can say what it is in. Where the compositor can say and has not yet,
-    /// which is the moment before the window has landed on a monitor, the
-    /// answer is no: most monitors are SDR, and a switch that lit for a
-    /// frame and then died would be the switch having been wrong.
+    /// Whether the switch has anything to switch, and where it has not, which
+    /// of the two reasons: an HDR color space has to be offered for the
+    /// window, and the monitor has to be in HDR mode — or nothing able to say
+    /// what it is in. Where the compositor can say and has not yet, which is
+    /// the moment before the window has landed on a monitor, the answer is
+    /// [`Hdr::NotInHdrMode`]: most monitors are SDR, and a switch that lit for
+    /// a frame and then died would be the switch having been wrong.
+    ///
+    /// One answer for three readers — whether the button is drawn dead
+    /// ([`App::hdr_available`]), whether it takes a press
+    /// ([`App::toggle_hdr`]), and what its tooltip says instead of its name
+    /// ([`ui::tooltip::disabled`]) — so a dead switch cannot come to give a
+    /// reason it is not dead for.
+    fn hdr_state(&self) -> Hdr {
+        if !self.renderer.as_ref().is_some_and(Renderer::hdr_available) {
+            return Hdr::Unsupported;
+        }
+        if self.monitors.is_some() && self.monitor != Some(Mode::Hdr) {
+            return Hdr::NotInHdrMode;
+        }
+        Hdr::Available
+    }
+
+    /// [`App::hdr_state`] read as the yes or no the button is drawn from.
     fn hdr_available(&self) -> bool {
-        self.renderer.as_ref().is_some_and(Renderer::hdr_available)
-            && (self.monitors.is_none() || self.monitor == Some(Mode::Hdr))
+        self.hdr_state() == Hdr::Available
     }
 
     /// Puts the surface where [`App::surface_hdr`] says and the curve where
@@ -396,28 +414,19 @@ impl App {
     /// the compositor clips at white instead, so that the switch never asks
     /// the compositor for anything it might answer with a modeset. Where
     /// nothing says what the monitor is, the switch moves the surface
-    /// itself, as the only lever there is. On a monitor in SDR mode there is
-    /// no room to switch to, and the press is refused with a word on why.
+    /// itself, as the only lever there is. Where there is no room to switch
+    /// to — a monitor in SDR mode, or no HDR color space for the window — the
+    /// press does nothing at all: the button is drawn dead and its tooltip
+    /// says which of the two it is, so a refusal said again in the terminal
+    /// would only be said where it cannot be read. Switching the monitor over
+    /// is `--output hdr`, at start-up, since that is the request a compositor
+    /// answers with a modeset.
     ///
     /// The curve follows the headroom, as it does when the window first
     /// opens: the switch chooses the curve the room wants for what is on
     /// screen, and `t` changes it afterwards.
     pub(super) fn toggle_hdr(&mut self) -> bool {
-        if self.renderer.is_none() {
-            return false;
-        }
-        if self.monitor == Some(Mode::Sdr) {
-            eprintln!(
-                "gamut: this monitor is in SDR mode, so there is no room above white to switch to"
-            );
-            return false;
-        }
-        if self.monitors.is_some() && self.monitor.is_none() {
-            eprintln!("gamut: the compositor has not yet said which monitor this is on");
-            return false;
-        }
         if !self.hdr_available() {
-            eprintln!("gamut: no HDR color space is offered for this window");
             return false;
         }
         self.hdr = if self.headroom() == Headroom::Above {

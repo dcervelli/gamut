@@ -84,8 +84,13 @@ the monitor is.
 the room rather than the surface: on a monitor in HDR mode it turns the
 headroom off and on, and the compositor clips at white in between, with the
 surface left where it is so that the compositor is asked for nothing. It is
-drawn dead, and `o` says why, on a monitor in SDR mode or where no HDR color
-space is offered. Off Wayland, or under a compositor without the protocol,
+drawn dead, and takes neither a press nor `o`, on a monitor in SDR mode or
+where no HDR color space is offered for the window; resting on it says which
+of the two it is, and the first of them names `--output hdr` as what would
+change the answer — see `ui::tooltip::disabled`, which reads `App::hdr_state`
+for the same answer the button is drawn from. Nothing is written to the
+terminal, since a switch that explains itself where the pointer is has no
+reason to explain itself where the window is not. Off Wayland, or under a compositor without the protocol,
 nothing says what the monitor is, and the switch moves the surface itself as
 it used to.
 

@@ -1560,14 +1560,15 @@ impl App {
     /// and [`hint`].
     pub(super) fn tooltip(&self) -> Option<ui::Tooltip> {
         let at = self.tooltips.showing()?;
-        // A toggle the window has no room for is drawn dead and refuses the
-        // press, so the label says why rather than naming the panel and the
-        // key beside it — neither of which is going to happen.
-        if let Some(said) = ui::tooltip::disabled(at, self.room()) {
+        // A control that is drawn dead — a toggle the window has no room for,
+        // the surface switch on a monitor with no room above white — refuses
+        // the press, so the label says why rather than naming the thing and
+        // the key beside it, neither of which is going to happen.
+        if let Some(refused) = ui::tooltip::disabled(at, self.room(), self.hdr_state()) {
             return Some(ui::Tooltip {
                 at,
-                title: vec![said.to_string()],
-                hints: Vec::new(),
+                title: vec![refused.said.to_string()],
+                hints: refused.hint.map(str::to_string).into_iter().collect(),
             });
         }
         let (title, hints) = match at {

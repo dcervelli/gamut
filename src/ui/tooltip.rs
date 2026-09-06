@@ -107,19 +107,77 @@ pub struct Tooltip {
 /// sentence rather than as a label because it is a reason and not a name.
 pub const NO_ROOM: &str = "Disabled because display is too small.";
 
-/// [`NO_ROOM`] where `tip` is a toggle whose panel `room` has nowhere to put
-/// it, and `None` for everything else — including those two toggles in a
-/// window with room for what they open.
+/// What the surface switch says on a monitor that is not in HDR mode, and
+/// under it the one thing that would change the answer.
+///
+/// The request is a start-up decision because it is the one that a
+/// compositor may answer with a modeset — see `App::toggle_hdr` and
+/// [`crate::render::HdrPreference`] — so it is named as something to restart
+/// with rather than offered as a press.
+pub const NOT_HDR_MODE: &str = "HDR disabled because monitor is not in HDR mode.";
+/// The line under [`NOT_HDR_MODE`].
+pub const REQUEST_HDR_MODE: &str = "Restart with --output hdr to request mode set.";
+
+/// What the switch says where the driver offers no HDR color space for this
+/// window at all. Nothing to advise under it: `--output hdr` would come back
+/// to the sRGB surface exactly as it has.
+pub const NO_HDR_OUTPUT: &str = "HDR disabled because no HDR output is available.";
+
+/// Whether the surface switch has anything to switch, and where it has not,
+/// which of the two reasons — worked out by `App::hdr_state`, since both
+/// halves of the answer are the application's: what the driver offers for
+/// the window, and what the compositor says the monitor is in.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Hdr {
+    /// A press does something.
+    Available,
+    /// An HDR color space is offered, but the monitor is not in HDR mode —
+    /// or the compositor has not yet said which monitor the window is on,
+    /// which is the same answer until it does.
+    NotInHdrMode,
+    /// No HDR color space is offered for this window.
+    Unsupported,
+}
+
+/// Why a dead control is dead.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Refused {
+    /// The sentence that stands in for the name.
+    pub said: &'static str,
+    /// What could be done about it, where anything can, set under it the way
+    /// a key would be.
+    pub hint: Option<&'static str>,
+}
+
+/// Why `tip` is drawn dead, and `None` for anything taking presses — the two
+/// toggles in a window with room for what they open, and the surface switch
+/// on a monitor with room above white.
 ///
 /// Asked before a tooltip is composed out of the key table, since what a dead
-/// toggle owes the reader is the reason and not the binding.
-pub fn disabled(tip: Tip, room: Room) -> Option<&'static str> {
-    let refused = match tip {
+/// control owes the reader is the reason and not the binding.
+pub fn disabled(tip: Tip, room: Room, hdr: Hdr) -> Option<Refused> {
+    let no_room = match tip {
         Tip::Widget(Widget::Histogram) => !room.histogram,
         Tip::Widget(Widget::Info) => !room.info,
         _ => false,
     };
-    refused.then_some(NO_ROOM)
+    if no_room {
+        return Some(Refused {
+            said: NO_ROOM,
+            hint: None,
+        });
+    }
+    match (tip, hdr) {
+        (Tip::Widget(Widget::Output), Hdr::NotInHdrMode) => Some(Refused {
+            said: NOT_HDR_MODE,
+            hint: Some(REQUEST_HDR_MODE),
+        }),
+        (Tip::Widget(Widget::Output), Hdr::Unsupported) => Some(Refused {
+            said: NO_HDR_OUTPUT,
+            hint: None,
+        }),
+        _ => None,
+    }
 }
 
 /// What the interface calls a thing, where the key that does the same job
@@ -686,19 +744,35 @@ mod tests {
             histogram: false,
             info: false,
         };
+        let no_room = Some(Refused {
+            said: NO_ROOM,
+            hint: None,
+        });
 
         assert_eq!(
-            disabled(Tip::Widget(Widget::Histogram), none),
-            Some(NO_ROOM)
+            disabled(Tip::Widget(Widget::Histogram), none, Hdr::Available),
+            no_room
         );
-        assert_eq!(disabled(Tip::Widget(Widget::Info), none), Some(NO_ROOM));
-        assert_eq!(disabled(Tip::Widget(Widget::Histogram), all), None);
-        assert_eq!(disabled(Tip::Widget(Widget::Info), all), None);
+        assert_eq!(
+            disabled(Tip::Widget(Widget::Info), none, Hdr::Available),
+            no_room
+        );
+        assert_eq!(
+            disabled(Tip::Widget(Widget::Histogram), all, Hdr::Available),
+            None
+        );
+        assert_eq!(
+            disabled(Tip::Widget(Widget::Info), all, Hdr::Available),
+            None
+        );
 
         // Only those two: nothing else on the interface has a panel to make
         // room for, so nothing else goes dead when the window is small.
-        assert_eq!(disabled(Tip::Widget(Widget::Minimap), none), None);
-        assert_eq!(disabled(Tip::Name, none), None);
+        assert_eq!(
+            disabled(Tip::Widget(Widget::Minimap), none, Hdr::Available),
+            None
+        );
+        assert_eq!(disabled(Tip::Name, none, Hdr::Available), None);
 
         // And one at a time, the way the room itself comes out: a window with
         // height for the column but not for the plot above it.
@@ -707,10 +781,50 @@ mod tests {
             info: true,
         };
         assert_eq!(
-            disabled(Tip::Widget(Widget::Histogram), column),
-            Some(NO_ROOM)
+            disabled(Tip::Widget(Widget::Histogram), column, Hdr::Available),
+            no_room
         );
-        assert_eq!(disabled(Tip::Widget(Widget::Info), column), None);
+        assert_eq!(
+            disabled(Tip::Widget(Widget::Info), column, Hdr::Available),
+            None
+        );
+    }
+
+    /// The surface switch says which of the two reasons it is dead for, and
+    /// only the one it is dead for: a monitor that could be switched over is
+    /// told what would do it, and a window that will never have an HDR color
+    /// space is not sent to restart for nothing.
+    #[test]
+    fn the_surface_switch_says_why_it_is_dead() {
+        let all = Room {
+            histogram: true,
+            info: true,
+        };
+        let switch = Tip::Widget(Widget::Output);
+
+        assert_eq!(disabled(switch, all, Hdr::Available), None);
+        assert_eq!(
+            disabled(switch, all, Hdr::NotInHdrMode),
+            Some(Refused {
+                said: NOT_HDR_MODE,
+                hint: Some(REQUEST_HDR_MODE),
+            })
+        );
+        assert_eq!(
+            disabled(switch, all, Hdr::Unsupported),
+            Some(Refused {
+                said: NO_HDR_OUTPUT,
+                hint: None,
+            })
+        );
+
+        // The switch is in the bottom bar, which every window has: a small
+        // window kills the panel toggles and leaves this one alone.
+        let none = Room {
+            histogram: false,
+            info: false,
+        };
+        assert_eq!(disabled(switch, none, Hdr::Available), None);
     }
 
     fn tooltip(at: Tip) -> Tooltip {

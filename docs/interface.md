@@ -281,7 +281,11 @@ is drawn dead, in the ink the surface switch uses when there is no headroom to
 switch to, and the press is refused rather than quietly setting something no
 one can see. Its tooltip says why instead of naming the panel and the key
 beside it — `tooltip::NO_ROOM`, a sentence rather than a label, because what a
-dead control owes the reader is the reason and not the binding. The toggle
+dead control owes the reader is the reason and not the binding. The surface
+switch is answered by the same `tooltip::disabled`, out of `App::hdr_state`
+rather than out of the room: it has two reasons to be dead and they want
+different sentences, one of them naming the `--output hdr` that would change
+the answer — see [color](color.md). The toggle
 stays in the strip either way: a control that is sometimes there is a control
 that has to be found again.
 

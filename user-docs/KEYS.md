@@ -206,8 +206,8 @@ monitor in HDR mode and an SDR one otherwise, and never asks the compositor
 to switch a monitor over — a request some compositors answer by blanking
 every display. On a monitor in HDR mode the button turns the room off and on
 without touching the surface. On one in SDR mode, or where no HDR color
-space is offered, it is drawn dead and `o` does nothing but say why in the
-terminal. `--output hdr` asks for the HDR surface regardless, for anyone who
+space is offered, it is drawn dead: neither the button nor `o` does anything,
+and resting the pointer on it says which of the two it is. `--output hdr` asks for the HDR surface regardless, for anyone who
 wants the compositor's own switch, and `--output sdr` stays on the SDR one
 whatever the monitor is. Where nothing says what the monitor is, `o` moves
 the surface itself.
