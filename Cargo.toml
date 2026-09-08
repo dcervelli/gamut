@@ -40,6 +40,21 @@ image = { version = "0.25.10", default-features = false, features = ["bmp", "exr
 # the EXIF orientation and the animation canvas all live in the RIFF container
 # beside the pixels, and `ImageReader` hands back only the pixels.
 image-webp = "0.2.4"
+# JPEG XL, pure Rust: no shared library for the package to depend on and no C
+# toolchain for the build, which is what sets this apart from the HEIF path.
+# It renders into the color encoding the file itself declares and hands the
+# numbers over untouched, which is the bargain every decoder here is written
+# to, so what it says about a file can be passed straight on.
+#
+# `rayon` is its only default feature and is kept, at the cost of five crates:
+# JPEG XL is expensive to decode, and a 12-megapixel photograph costs about
+# 450 ms on one thread against about 220 ms on many — the difference between
+# stepping through a directory and waiting on it. The optional integrations
+# are all left off. `lcms2` in particular would link a second color library
+# beside `moxcms`, and neither is wanted: color transformation is this
+# program's own job, and asking the decoder to convert would be exactly the
+# normalizing the model is built to avoid.
+jxl-oxide = { version = "0.12.6", default-features = false, features = ["rayon"] }
 # The EXIF block, for the info panel: the metadata a photograph carries about
 # how it was taken, which no decoder here surfaces and which lives in a
 # different place in every container. This reads it out of JPEG, TIFF, PNG,

@@ -24,7 +24,7 @@ _gamut() {
     '--no-minimap[Start with the minimap off]' \
     '--timing[Print decode and startup timings to stdout]' \
     '--[Treat every later argument as a path]' \
-    '*:image:_files -g "*.(#i)(jpg|jpeg|jpe|jfif|png|gif|bmp|tif|tiff|webp|avif|heic|heif|hif|ico|hdr|exr|pnm|pbm|pgm|ppm|pam)"'
+    '*:image:_files -g "*.(#i)(jpg|jpeg|jpe|jfif|png|gif|bmp|tif|tiff|webp|jxl|avif|heic|heif|hif|ico|hdr|exr|pnm|pbm|pgm|ppm|pam)"'
 }
 
 _gamut "$@"

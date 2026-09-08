@@ -30,7 +30,7 @@ trap 'rm -rf "$work"' EXIT
 
 # Start clean, so a renamed fixture does not leave its predecessor behind.
 rm -f ./*.png ./*.jpg ./*.jpeg ./*.tif ./*.tiff ./*.hdr ./*.exr ./*.gif \
-      ./*.heic ./*.heif ./*.avif ./*.webp ./*.ico ./*.bmp ./*.tga \
+      ./*.heic ./*.heif ./*.avif ./*.webp ./*.jxl ./*.ico ./*.bmp ./*.tga \
       ./*.pnm ./*.pbm ./*.pgm ./*.ppm ./*.pam
 
 quad '#FF0000' '#00FF00' '#0000FF' '#FFFFFF' "$work/color.png"
@@ -196,6 +196,77 @@ heif-enc -L -A -o avif-rgb8.avif "$work/color.png" > /dev/null
 # quality 100 is near-lossless rather than lossless, hence the tolerance on
 # this one fixture.
 magick png-icc-p3.png -quality 100 heic-icc-p3.heic
+
+# ------------------------------------------------------------- JPEG XL
+# `-d 0` is lossless, so the quadrants come back exactly and the same table of
+# expected values serves these as serves PNG. Like the HEIF family, a JPEG XL
+# *states* what its numbers mean rather than leaving them to convention — as
+# enum codes that translate to CICP, or as an ICC profile — so those two
+# fixtures test a translation rather than a guess.
+#
+# The `-x color_space` hint only takes on a raw format such as PPM: a PNG
+# carries color information of its own, and the hint is passed over for it.
+
+cjxl -d 0 "$work/gray.png"        jxl-gray8.jxl        > /dev/null 2>&1
+cjxl -d 0 "$work/gray-alpha.png"  jxl-gray-alpha8.jxl  > /dev/null 2>&1
+cjxl -d 0 "$work/color.png"       jxl-rgb8.jxl         > /dev/null 2>&1
+cjxl -d 0 "$work/color-alpha.png" jxl-rgba8.jxl        > /dev/null 2>&1
+cjxl -d 0 "$work/color16.png"     jxl-rgb16.jxl        > /dev/null 2>&1
+# The alpha the file declares, rather than the alpha it holds: `--premultiply`
+# sets the flag and leaves the samples alone, so the quadrants are the
+# ordinary ones and only the label differs. That is what is being tested, and
+# it is how `exr-rgba.exr` stands in the same table.
+cjxl -d 0 --premultiply=1 "$work/color-alpha.png" jxl-premultiplied.jxl > /dev/null 2>&1
+# VarDCT rather than Modular, which is the other half of the format and a
+# different decode path entirely. Lossy, hence the tolerance on it.
+cjxl -d 1 "$work/color.png" jxl-lossy.jxl > /dev/null 2>&1
+# The ISOBMFF spelling. A bare codestream starts `ff 0a` and this starts with
+# a `JXL ` box, so the two are recognized by different signatures.
+cjxl -d 0 --container=1 "$work/color.png" jxl-container.jxl > /dev/null 2>&1
+# BT.2100 PQ on BT.2020 primaries, stated as enum codes. As with `heic-pq10`
+# the samples are not converted, only labeled, so the quadrants still hold the
+# ordinary pattern.
+magick "$work/color16.png" -depth 16 "$work/color16.ppm"
+cjxl -d 0 -x color_space=Rec2100PQ "$work/color16.ppm" jxl-cicp-pq.jxl > /dev/null 2>&1
+# Display P3 by ICC profile and no enum codes, which is the other way a file
+# can say it: carried through from the tagged PNG, lossless, so it stays exact.
+cjxl -d 0 png-icc-p3.png jxl-icc-p3.jxl > /dev/null 2>&1
+
+# Orientation is a field in the codestream rather than a tag beside it, and
+# `cjxl` fills it in from the input's EXIF. These two store the pattern the
+# wrong way round and say so, so they come back the right way up only if the
+# field is applied — and the quarter turn additionally swaps the size the
+# header reports, which is what the window opens at.
+png_exif() {  # src dst orientation
+  python3 - "$@" <<'EXIF'
+import struct, sys, zlib
+
+src, dst, orientation = sys.argv[1], sys.argv[2], int(sys.argv[3])
+# A bare TIFF header with one IFD entry: tag 0x0112, SHORT, the orientation.
+tiff = (b"II\x2a\x00" + struct.pack("<I", 8) + struct.pack("<H", 1)
+        + struct.pack("<HHIHH", 0x0112, 3, 1, orientation, 0) + struct.pack("<I", 0))
+payload = struct.pack(">I", len(tiff)) + b"eXIf" + tiff
+payload += struct.pack(">I", zlib.crc32(b"eXIf" + tiff) & 0xFFFFFFFF)
+data = open(src, "rb").read()
+# After the signature and `IHDR`, which is always the first chunk and always
+# thirteen bytes of payload.
+at = 8 + 25
+open(dst, "wb").write(data[:at] + payload + data[at:])
+EXIF
+}
+
+png_exif "$work/color-upside-down.png" "$work/upside-down-exif.png" 3
+cjxl -d 0 "$work/upside-down-exif.png" jxl-rotated.jxl > /dev/null 2>&1
+# Stored a quarter turn anticlockwise, tagged to be turned back: 24x32 on
+# disk, 32x24 once the header is honored.
+magick "$work/color.png" -rotate -90 "$work/color-quarter-turn.png"
+png_exif "$work/color-quarter-turn.png" "$work/quarter-turn-exif.png" 6
+cjxl -d 0 "$work/quarter-turn-exif.png" jxl-quarter-turn.jxl > /dev/null 2>&1
+
+# Two frames, the pattern first and the upside-down one second, so a decoder
+# that ran the animation to its end would fail the table the rest pass.
+magick -delay 10 "$work/color.png" "$work/color-upside-down.png" "$work/animated.gif"
+cjxl -d 0 "$work/animated.gif" jxl-animated.jxl > /dev/null 2>&1
 
 # ---------------------------------------------------------------- WebP
 # Both bitstreams, with and without alpha. VP8L is exact, so it shares the
@@ -450,5 +521,5 @@ magick "$work/color.png" unsupported.tga
 cp png-rgb8.png mislabeled.tif
 
 echo "generated $(ls -1 *.png *.jpg *.jpeg *.tif *.tiff *.hdr *.exr *.gif \
-                    *.heic *.heif *.avif *.webp *.ico *.bmp *.tga \
+                    *.heic *.heif *.avif *.webp *.jxl *.ico *.bmp *.tga \
                     *.pnm *.pbm *.pgm *.ppm *.pam | wc -l) fixtures"

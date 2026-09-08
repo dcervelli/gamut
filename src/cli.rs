@@ -571,6 +571,7 @@ mod tests {
             ("tif", "image/tiff"),
             ("tiff", "image/tiff"),
             ("webp", "image/webp"),
+            ("jxl", "image/jxl"),
             ("avif", "image/avif"),
             ("heic", "image/heif"),
             ("heif", "image/heif"),

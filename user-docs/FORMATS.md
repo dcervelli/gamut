@@ -10,6 +10,7 @@ pixels, and where each format will surprise you.
 | GIF | `.gif` | 8-bit | Nothing — always sRGB |
 | TIFF | `.tif` `.tiff` | 8 to 64-bit, integer or float | Nothing — inferred from depth |
 | WebP | `.webp` | 8-bit | ICC profile; orientation |
+| JPEG XL | `.jxl` | 8 and 16-bit, or float | Color space, including HDR; ICC profile; orientation |
 | HEIF | `.heic` `.heif` `.hif` `.avif` | 8, 10 and 12-bit | Color space, including HDR; ICC profile; orientation |
 | ICO | `.ico` | Whatever the chosen icon holds | ICC profile, for the larger icons |
 | BMP | `.bmp` | 8-bit | Nothing — always sRGB |
@@ -18,8 +19,7 @@ pixels, and where each format will surprise you.
 | OpenEXR | `.exr` | 32-bit float | Nothing — linear by definition |
 
 Anything else is refused, with a message listing the extensions above. There
-is no support for camera raw or DNG, SVG, PSD, JPEG 2000, JPEG XL, TGA, DDS
-or ICNS.
+is no support for camera raw or DNG, SVG, PSD, JPEG 2000, TGA, DDS or ICNS.
 
 ## True of every format
 
@@ -48,8 +48,8 @@ deleted is marked the same way.
 
 **One image per file.** Nothing here shows more than one:
 
-- an animated GIF or WebP shows its first frame and stops — there is no
-  playback and no way to step through the frames;
+- an animated GIF, WebP or JPEG XL shows its first frame and stops — there is
+  no playback and no way to step through the frames;
 - a multi-page TIFF shows its first page;
 - a HEIF holding several images, such as a burst or a Live Photo, shows the
   one it marks as primary;
@@ -104,8 +104,8 @@ the room above white, `z` resets. The information panel's "Referred to" line say
 which kind of light a file was taken for.
 
 **Rotation is usually ignored.** An image tagged with an orientation is shown
-the way its pixels are stored, except in WebP and HEIF. If a JPEG from a phone
-appears on its side, that is why.
+the way its pixels are stored, except in WebP, HEIF and JPEG XL. If a JPEG
+from a phone appears on its side, that is why.
 
 **Failures are reported in the terminal.** Given several files, the first one
 that opens is shown and the ones that did not are named on the way past. `]`
@@ -220,7 +220,7 @@ transparency in either.
 
 - The **ICC profile** is read, and is the only thing a WebP can say about its
   own color. Without one it means sRGB.
-- The **orientation is applied**, one of only two places a rotation tag is
+- The **orientation is applied**, one of only three places a rotation tag is
   honored.
 - An **animated** WebP shows its first frame on the full canvas, so a first
   frame stored as a partial patch arrives whole.
@@ -228,6 +228,36 @@ transparency in either.
 Nothing in WebP goes above 8 bits or outside three color channels, so there
 is no depth to preserve and no grayscale encoding: a gray WebP is a gray
 color WebP.
+
+## JPEG XL
+
+The newest format here and the widest of the modern ones. Both halves of it
+open: the lossy coding a photograph is usually saved with, and the lossless
+one, in either the bare form or the container.
+
+Like HEIF, a JPEG XL states what its numbers mean rather than leaving you to
+guess, so a Display P3 photograph and a BT.2100 PQ frame each land in the
+right space with no flag from you. An ICC profile is read where a file states
+it that way instead.
+
+**Depth is kept as it was authored.** An 8-bit photograph stays 8-bit, a 10-
+or 16-bit file stays 16-bit, and a file written in floating point stays
+floating point with its highlights above white intact. Grayscale stays
+single-channel.
+
+**The orientation is applied**, so a photograph taken sideways arrives
+upright — and the window opens in the shape it will arrive in rather than the
+shape it is stored in.
+
+Caveats:
+
+- **CMYK files do not open.** Separating them needs the output profile this
+  program does not have, and the message says so rather than showing you
+  approximate colors.
+- An **animated** JPEG XL shows its first frame.
+- A JPEG XL made by recompressing a JPEG opens as the picture it holds. The
+  original JPEG can be reconstructed byte for byte by other tools, but that is
+  not something a viewer does.
 
 ## HEIF — HEIC and AVIF
 
