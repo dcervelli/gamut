@@ -20,6 +20,7 @@ mod heif;
 mod ico;
 mod image_rs;
 mod jpeg;
+mod jxl;
 mod limits;
 mod png;
 mod tiff_rs;
@@ -71,6 +72,11 @@ pub trait Decoder: Sync {
 /// case the first wins.
 static DECODERS: &[&dyn Decoder] = &[
     &tiff_rs::TiffRs,
+    // Before the HEIF family, whose `ftyp` box it shares a container
+    // structure with. `libheif`'s brand check should decline a `JXL ` box and
+    // `decode::jxl`'s tests hold it to that, but the cheaper guarantee is to
+    // ask the decoder that can be certain first.
+    &jxl::Jxl,
     &heif::Heif,
     &webp::Webp,
     &ico::Ico,

@@ -6,6 +6,7 @@
 | TIFF | [`tiff`](https://crates.io/crates/tiff) directly |
 | HEIF — HEIC, AVIF | [`libheif-rs`](https://crates.io/crates/libheif-rs), onto the system `libheif` |
 | WebP — lossy, lossless, animated | [`image-webp`](https://crates.io/crates/image-webp) directly |
+| JPEG XL — codestream and container | [`jxl-oxide`](https://crates.io/crates/jxl-oxide) |
 | ICO | own directory reader, onto the PNG path and [`image`](https://crates.io/crates/image)'s bitmap one |
 | Ultra HDR containers, ICC profiles | [`ultrahdr-rs`](https://crates.io/crates/ultrahdr-rs), [`moxcms`](https://crates.io/crates/moxcms) |
 | PNG `cICP` and `iCCP` chunks | [`png`](https://crates.io/crates/png), which `image` already carries |
@@ -18,14 +19,14 @@ finds it needs the file as one slice.
 
 ## Saying what the numbers mean
 
-Four formats state their color space rather than leaving it to convention,
+Five formats state their color space rather than leaving it to convention,
 and they do it in two vocabularies.
 
 **CICP code points** — the small integers of ITU-T H.273 — are the precise
 form, because they name a transfer function this program models exactly. HEIF
-carries them in an `nclx` box, PNG in a `cICP` chunk; one translation in
-`decode::cicp` serves both, so a third format that carries them is a matter of
-reading two bytes. A `cICP` chunk is the whole of how a PNG says it is BT.2100
+carries them in an `nclx` box, PNG in a `cICP` chunk, and JPEG XL derives them
+from its enum color encoding; one translation in `decode::cicp` serves all
+three, which is what made the third of them a matter of reading two bytes. A `cICP` chunk is the whole of how a PNG says it is BT.2100
 PQ or HLG, and `image` surfaces nothing of it, which is why `png` is a direct
 dependency for the header pass.
 
@@ -126,6 +127,52 @@ GPU rather than being tripled into RGB.
 `clap` — while decoding, so a rotated phone photograph arrives upright. That
 is a property of the format, not of this program: JPEG's EXIF orientation is a
 separate tag in a separate decoder, and is still ignored.
+
+## JPEG XL
+
+Pure Rust, which is what separates it from the other modern container here: no
+shared library for the package to depend on and no C toolchain for the build.
+`jxl-oxide` renders into whatever color encoding the file declares and hands
+the samples over without converting them, which is the same division of labor
+`decode` is built around — so `decode::jxl` spends its length describing what
+came back rather than fixing it.
+
+**Depth follows what the file was authored at, not how it is coded.** JPEG XL
+is float from end to end internally, so taking the internal form at face value
+would quadruple what an ordinary photograph costs on the way to the GPU.
+`ImageHeader::metadata::bit_depth` says what was meant, and `depth_of` turns it
+into one of the three sample types: 8 bits or fewer to `U8`, 9 to 16 to `U16`,
+and a float file — or an integer one wider than a `u16` holds — to `F32`, where
+the highlights above 1.0 that are the point of it survive.
+`ImageStream::write_to_buffer` scales into the full range of whichever type it
+is handed, which is exactly what `Samples::full_scale` downstream assumes.
+
+**Color arrives in both vocabularies**, and both already had a translation
+here. `rendered_cicp` gives the code points for a file with an enum encoding,
+and `original_icc` the profile for one without; the CICP form wins where there
+is one, as it does for HEIF. Both are asked of the *rendered* encoding rather
+than the stored one, so what is described is what the buffer actually holds.
+
+**Reading is split in two.** `Reading::header` feeds the source only as far as
+the image header and stops; the size ceiling is applied against what that
+header claims; and only then does `Reading::finish` hand over the rest of the
+file. `jxl-oxide`'s own `JxlImage::builder().read()` does both at once, which
+would mean deciding an image was too large after having taken it in. The same
+split is what lets `dimensions` answer from the header without decoding, and
+because `JxlImage::width` reports the size with the orientation already
+applied, the size the window opens at and the size the pixels arrive at cannot
+disagree — `jxl-quarter-turn.jxl` is 24×32 on disk and 32×24 in both answers.
+
+**Two things the format can hold are deliberately not taken.** A CMYK file is
+refused by name: separating it needs an output profile this program does not
+have, and `Channels` has nowhere to put four color components, so a guess would
+read as a decode. An animation renders its first keyframe, as GIF and WebP do,
+nothing downstream of here having a clock.
+
+The two signatures are unrelated: a bare codestream opens `ff 0a`, and the
+container opens with a `JXL ` box. That box is not `ftyp`, so the HEIF family
+cannot claim a JPEG XL and vice versa — which is worth a test, the two
+decoders being neighbors in `DECODERS`.
 
 ## WebP
 
@@ -253,8 +300,9 @@ directory that lists it, is not an ICO however its first four bytes read.
 ## Size ceiling
 
 Every backend ships conservative allocation limits — 256 MiB in `tiff`,
-512 MiB in `image`, and `libheif`'s own security limits — which a survey-grade
-elevation model passes on the way out of the door. All are raised to 4 GiB,
+512 MiB in `image`, `libheif`'s own security limits, and `jxl-oxide`'s
+`AllocTracker` — which a survey-grade elevation model passes on the way out of
+the door. All are raised to 4 GiB,
 which is not an arbitrary number:
 `max_texture_dimension_2d` is 32768 on current hardware, and 32768 × 32768 × 4
 bytes is exactly 4 GiB, so the ceiling is the largest single-channel 32-bit

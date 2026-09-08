@@ -1,18 +1,20 @@
 # Decoder fixtures
 
-Real files, written by ImageMagick and `heif-enc`, for testing the decode
+Real files, written by ImageMagick, `heif-enc` and `cjxl`, for testing the decode
 paths in `src/image/decode/`. Round-tripping through a crate's own encoder
 only proves it agrees with itself; these exercise encodings it has to read
 from the outside world.
 
 Regenerate with `./generate.sh` — it is the authoritative description of how
 each file was made. Most fixtures need only ImageMagick; the HEIF ones need
-`heif-enc` from libheif, and the measurement rasters at the end need GDAL.
-Nine fixtures need Python as well, because ImageMagick will not write what
-they exist for: neither `cICP` nor `iCCP` for PNG, neither an `EXIF` chunk nor
-an animation for WebP, for ICO neither a PNG-compressed entry nor a directory
-that mixes depths, and for BMP no top-down row order. Each is assembled
-afterwards around output ImageMagick did write.
+`heif-enc` from libheif, the JPEG XL ones `cjxl` from libjxl, and the
+measurement rasters at the end need GDAL. Eleven fixtures need Python as well,
+because ImageMagick will not write what they exist for: neither `cICP` nor
+`iCCP` for PNG, neither an `EXIF` chunk nor an animation for WebP, an `eXIf`
+chunk on the PNG that `cjxl` reads a JPEG XL's orientation from, for ICO
+neither a PNG-compressed entry nor a directory that mixes depths, and for BMP
+no top-down row order. Each is assembled afterwards around output ImageMagick
+did write.
 
 `display-p3.icc` is an input rather than a fixture: it is the profile the three
 ICC-tagged files are tagged with, checked in beside them and not regenerated
@@ -50,6 +52,9 @@ mapping.
 | GIF | a palette, an interlaced one, a transparent index, and a two-frame animation whose second frame is upside down |
 | WebP | lossless (VP8L) with and without alpha, lossy (VP8) with and without an `ALPH` chunk beside it |
 | WebP container | `ICCP` for Display P3 — the only thing a WebP has to say about its color — an `EXIF` orientation applied on decode, and a two-frame animation whose second frame is upside down |
+| JPEG XL | gray / gray+alpha / RGB / RGBA at 8 bits, RGB at 16, Modular (lossless) and VarDCT (lossy), the ISOBMFF container beside the bare codestream, declared premultiplied alpha, and a two-frame animation whose second frame is upside down |
+| JPEG XL color tags | BT.2100 PQ on BT.2020 by enum encoding — which is where its CICP codes come from — and Display P3 by ICC profile, the other way it can say it |
+| JPEG XL orientation | a half turn, and a quarter turn stored 24x32 and displayed 32x24, so that `probe` and `decode` have to agree about a size neither reads off the frame |
 | ICO | a 32-bit bitmap entry, a 4-bit palette entry with its AND mask, and a PNG entry — the two formats an entry can hold |
 | ICO directory | a PNG entry that is not RGBA and one carrying an `iCCP` profile, both of which `image`'s own ICO decoder refuses, and a two-size directory whose larger entry is the shallower |
 | BMP | 24-bit, 32-bit with bitfield masks and alpha, a 4-bit palette, an 8-bit palette with `BI_RLE8` runs, and one whose rows are stored top-down |
