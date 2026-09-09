@@ -14,6 +14,17 @@ the interface was designed in is used instead. The same set fills in for a
 palette too sparse to build on, so a half-written theme degrades to something
 wearable rather than to black on black.
 
+`Theme` stays the source of truth, and what egui draws is derived from it in
+`src/ui/style.rs`: the bars' color is its panel fill, the menu's its window
+fill, the hairline its window stroke, the accent its selection and what a
+lit button is washed with, the two text inks the strokes of its interactive
+and quiet widgets, the theme's yellow and red its warning and error inks. Its
+shadows are off, its corners are the panel's and a toggle's, and its text
+styles are the interface's one size. Everything drawn by hand — a toggle, a
+plot, a swatch — reads its inks from `Theme` directly rather than back out of
+egui's style, so the two cannot come to disagree about a color. A change of
+palette is put on egui's context the same tick it is read.
+
 The palette is not read literally. Omarchy resolves it through an alias and
 derivation cascade before any consumer sees it — short names, ANSI `color0`
 through `color15` in both directions, shades mixed out of the base colors —
@@ -54,6 +65,13 @@ Two more resist being themed and are not:
   overlaps come out muddier the further a palette sits from the primaries, so
   how much a histogram can be read depends on the desktop's taste in reds.
   That is the wrong thing to make themeable.
+
+  The screening itself is done on the CPU, one column of the plot at a time.
+  egui has one blend, so the planes cannot be laid over one another and left
+  to the GPU; instead each column — one to a bin, a logical pixel wide — is
+  cut into stretches at the heights of the planes standing in it, and each
+  stretch is filled with what the planes over it come to, screened in code.
+  On pure primaries over near-black that is exactly the picture the GPU drew.
 
   The panel *around* the plot is not one of these. Nothing is screened onto
   it, so it is the bars' own surface, mildly transparent, with the same ink on

@@ -27,6 +27,10 @@ impl Upscale {
     /// Every filter, in the order the interface offers them — the same order
     /// [`Upscale::next`] cycles through, so the key and the cells of the zoom
     /// menu agree about what comes after what.
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "the menu's tests hold its cells to it")
+    )]
     pub const ALL: [Upscale; 2] = [Upscale::Nearest, Upscale::Bicubic];
 
     /// What the interface calls this filter, for the cell that chooses it.

@@ -7,7 +7,9 @@
 //! any zoom. So one spacing is picked per frame from the round numbers a
 //! ruler is marked in, and the toggle says which one is in force.
 
-use crate::render::{Color, Placement, Rect, UiFrame};
+use crate::render::Placement;
+
+use super::Rect;
 use crate::theme::Theme;
 
 /// What the spacing aims at, in logical pixels. Laid out in logical rather
@@ -67,12 +69,12 @@ fn next_step(step: f32) -> f32 {
 /// image rather than a window.
 ///
 /// `minimap` is the thumbnail's rectangle when the minimap is on screen. It
-/// is left clear: the thumbnail is drawn by the image layer, underneath this
-/// whole frame, so unlike the panels it cannot cover a grid line laid across
-/// it — and a grid belongs to the image being looked at, not to the map of
-/// where in it that is.
-pub(super) fn draw(
-    frame: &mut UiFrame,
+/// is left clear: the thumbnail is drawn by the image layer, underneath the
+/// whole interface, so unlike the panels it cannot cover a grid line laid
+/// across it — and a grid belongs to the image being looked at, not to the
+/// map of where in it that is.
+pub(super) fn paint(
+    painter: &egui::Painter,
     placement: Placement,
     scale: f32,
     content: Rect,
@@ -104,34 +106,45 @@ pub(super) fn draw(
     // reads as a haze rather than as lines.
     let width = 1.0 / scale;
     let snap = |value: f32| (value * scale).round() / scale;
+    let ink: egui::Color32 = theme.bar_background.into();
 
     for x in lines(image.x, spacing, image.right(), area.x, area.right()) {
         fill_around(
-            frame,
+            painter,
             Rect::new(snap(x), area.y, width, area.height),
             minimap,
-            theme.bar_background,
+            ink,
         );
     }
     for y in lines(image.y, spacing, image.bottom(), area.y, area.bottom()) {
         fill_around(
-            frame,
+            painter,
             Rect::new(area.x, snap(y), area.width, width),
             minimap,
-            theme.bar_background,
+            ink,
         );
     }
 }
 
 /// Fills `rect`, less whatever `hole` covers of it.
-fn fill_around(frame: &mut UiFrame, rect: Rect, hole: Option<Rect>, color: Color) {
+fn fill_around(painter: &egui::Painter, rect: Rect, hole: Option<Rect>, color: egui::Color32) {
+    let fill = |piece: Rect| {
+        painter.rect_filled(
+            egui::Rect::from_min_size(
+                egui::pos2(piece.x, piece.y),
+                egui::vec2(piece.width, piece.height),
+            ),
+            0.0,
+            color,
+        );
+    };
     let Some(hole) = hole.and_then(|hole| intersect(rect, hole)) else {
-        frame.rect(rect, color);
+        fill(rect);
         return;
     };
     for piece in around(rect, hole) {
         if piece.width > 0.0 && piece.height > 0.0 {
-            frame.rect(piece, color);
+            fill(piece);
         }
     }
 }

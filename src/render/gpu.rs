@@ -4,8 +4,6 @@
 //! modules used to spell out by hand, with the two or three fields that ever
 //! varied left as parameters.
 
-use bytemuck::Pod;
-
 /// A bind group layout holding one uniform buffer at binding 0.
 pub fn uniform_layout(
     device: &wgpu::Device,
@@ -172,59 +170,6 @@ pub fn attachment(
             load,
             store: wgpu::StoreOp::Store,
         },
-    }
-}
-
-/// A vertex buffer that grows to fit whatever a frame writes into it, and
-/// never shrinks: a frame that once needed the room will need it again.
-pub struct GrowableBuffer {
-    buffer: wgpu::Buffer,
-    capacity: usize,
-    stride: usize,
-    label: &'static str,
-}
-
-impl GrowableBuffer {
-    /// Room for `capacity` values of `T` to begin with.
-    pub fn new<T>(device: &wgpu::Device, label: &'static str, capacity: usize) -> Self {
-        let stride = size_of::<T>();
-        Self {
-            buffer: Self::allocate(device, label, capacity * stride),
-            capacity,
-            stride,
-            label,
-        }
-    }
-
-    fn allocate(device: &wgpu::Device, label: &str, bytes: usize) -> wgpu::Buffer {
-        device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(label),
-            size: bytes as u64,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        })
-    }
-
-    /// Replaces the contents with `data`, reallocating first if it does not
-    /// fit. Writes nothing for an empty slice.
-    pub fn write<T: Pod>(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, data: &[T]) {
-        debug_assert_eq!(
-            size_of::<T>(),
-            self.stride,
-            "{}: wrong element type",
-            self.label
-        );
-        if data.len() > self.capacity {
-            self.capacity = data.len().next_power_of_two();
-            self.buffer = Self::allocate(device, self.label, self.capacity * self.stride);
-        }
-        if !data.is_empty() {
-            queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(data));
-        }
-    }
-
-    pub fn slice(&self) -> wgpu::BufferSlice<'_> {
-        self.buffer.slice(..)
     }
 }
 

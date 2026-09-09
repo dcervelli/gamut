@@ -1,156 +1,115 @@
 //! The words in the bars: what the image is, and what the view is doing to
 //! it.
 
-use crate::image::display::{AutoWindow, Colormap, Headroom, ToneMap};
-use crate::render::{Rect, TextMeasure};
+use egui::{Align2, Label, RichText, Sense, TextFormat, pos2, text::LayoutJob, vec2};
 
-use super::chrome::BAR_PADDING;
-use super::{COUNTER_GAP, Current, PADDING, Reading, TEXT_SIZE, capitalized, histogram};
+use crate::image::display::{AutoWindow, Colormap, Headroom, ToneMap};
+
+use super::chrome::{BAR_PADDING, Corners, Pass, STEP_SEAM, measure};
+use super::control::Control;
+use super::style::TOGGLE_RADIUS;
+use super::tooltip::Tip;
+use super::{
+    COUNTER_GAP, Current, PADDING, Reading, TEXT_SIZE, capitalized, fonts, histogram, icon,
+};
 
 /// Between one segment of a bar and the next. A thin gap: the middot already
 /// parts them, and the bars are short of room before they are short of air.
 const SEPARATOR: &str = " \u{00b7} ";
 
-/// One run of words in the top bar: where it starts, how much room it was
-/// given, and what it says.
-pub(super) struct Run {
-    pub x: f32,
-    /// What the run is cut to: the room left between where it starts and
-    /// whatever is set after it.
-    pub room: f32,
-    /// How wide it actually comes out — its own width, or `room` where it was
-    /// too long for the space. What is on screen, and so what the pointer is
-    /// answered against.
-    pub width: f32,
-    pub text: String,
-}
-
-impl Run {
-    /// The strip of `bar` this run occupies, for the pointer and for anything
-    /// that has to be placed against it.
-    ///
-    /// The bar's whole height rather than the line's: a run of words thirteen
-    /// pixels tall is too fine a thing to ask anyone to point at, and the bar
-    /// holds nothing above or below it to be confused with.
-    pub fn strip(&self, bar: Rect) -> Rect {
-        Rect::new(self.x, bar.y, self.width, bar.height)
-    }
-}
-
-/// The top bar's words, laid out: the count of files, the word for a file
-/// that has gone, the name, and the facts about the picture.
-///
-/// Laid out here rather than inside the frame builder because the pointer has
-/// to be answered against the same rectangles between frames, and two
-/// readings of where a run of words went are two readings that can disagree.
-pub(super) struct TopBar {
-    pub counter: Option<Run>,
-    pub deleted: Option<Run>,
-    pub name: Run,
-    pub facts: Run,
-}
-
-/// What the top bar has to say about the file, gathered from wherever the
-/// caller keeps it: the frame builder has it in a
-/// [`FrameInput`](super::FrameInput), and the pointer has to ask the
-/// application for it between frames.
-pub struct BarText<'a> {
-    pub current: &'a Current,
-    pub reading: Option<&'a Reading>,
-    pub index: usize,
-    pub count: usize,
-    pub deleted: bool,
-}
-
-/// Lays the top bar's words out in `bar`, between `start` — where the two
-/// step buttons at its near end leave off — and `limit`, where the buttons at
-/// the far end begin.
-///
-/// Least to most disposable, and the facts are dropped whole rather than
-/// clipped: half of "18333 x 15667" is worse than none of it. Half the bar at
-/// most, so that the name it is sharing the bar with keeps the other half.
-pub(super) fn top_bar(
-    text: &mut dyn TextMeasure,
-    bar: Rect,
-    start: f32,
-    limit: f32,
-    about: &BarText,
-) -> TopBar {
-    let run = |text: &mut dyn TextMeasure, x: f32, room: f32, words: String| {
-        let width = text.measure_text(&words, TEXT_SIZE)[0].min(room);
-        Run {
-            x,
-            room,
-            width,
-            text: words,
-        }
-    };
-
-    let facts = [
-        format!(
-            "{} \u{00d7} {}",
-            about.current.image.width, about.current.image.height
-        ),
-        describe_pixels(about.current),
-        about.current.image.color.label(),
-    ];
-    let facts = fit_segments(text, &facts, (bar.width / 2.0 - BAR_PADDING * 2.0).max(1.0));
-    let facts_width = text.measure_text(&facts, TEXT_SIZE)[0];
-    // Clear of the buttons at the end of the bar.
-    let facts_x = (limit - PADDING - facts_width).max(start);
-    let facts = run(text, facts_x, facts_width, facts);
-
-    // The count is a fact about the list, not part of the name, and is set
-    // like the other facts in the bar: the name is the one thing here worth
-    // picking out, and picking out two things picks out neither.
-    let mut name_x = start;
-    let counter = counter(about.index, about.count).map(|counter| {
-        let counter = run(text, start, (facts_x - start).max(1.0), counter);
-        name_x += counter.width + COUNTER_GAP;
-        counter
-    });
-    // In front of the name, on the side of the bar the name is read from, so
-    // that it is seen before the file it is about rather than after it.
-    let deleted = about.deleted.then(|| {
-        let deleted = run(
-            text,
-            name_x,
-            (facts_x - PADDING - name_x).max(1.0),
-            DELETED.to_string(),
-        );
-        name_x += deleted.width + COUNTER_GAP;
-        deleted
-    });
-    let name = run(
-        text,
-        name_x,
-        (facts_x - PADDING - name_x).max(1.0),
-        top_label(&about.current.label, about.reading),
-    );
-
-    TopBar {
-        counter,
-        deleted,
-        name,
-        facts,
-    }
+/// The facts about the picture the top bar sets at its far end: its size,
+/// what each pixel holds, and the color space those numbers are meant in.
+/// Least to most disposable, for [`fit_segments`] to cut.
+pub(super) fn facts(current: &Current, _measure: impl FnMut(&str) -> f32) -> [String; 3] {
+    [
+        format!("{} \u{00d7} {}", current.image.width, current.image.height),
+        describe_pixels(current),
+        current.image.color.label(),
+    ]
 }
 
 /// Joins as many leading segments as fit in `width`, keeping at least the
-/// first however narrow the window gets.
-pub(super) fn fit_segments(text: &mut dyn TextMeasure, segments: &[String], width: f32) -> String {
+/// first however narrow the window gets. The facts are dropped whole rather
+/// than clipped: half of "18333 x 15667" is worse than none of it.
+pub(super) fn fit_segments(
+    mut measure: impl FnMut(&str) -> f32,
+    segments: &[String],
+    width: f32,
+) -> String {
     let Some((first, rest)) = segments.split_first() else {
         return String::new();
     };
     let mut joined = first.clone();
     for segment in rest {
         let candidate = format!("{joined}{SEPARATOR}{segment}");
-        if text.measure_text(&candidate, TEXT_SIZE)[0] > width {
+        if measure(&candidate) > width {
             break;
         }
         joined = candidate;
     }
     joined
+}
+
+/// The top bar's own words, from the near end: the pair that steps through
+/// the list while there is one, the count, the word for a file that has
+/// gone, and the name — the one thing in the window set bold, and the only
+/// thing drawn in the ink the theme keeps for it.
+pub(super) fn top_words(pass: &mut Pass, ui: &mut egui::Ui, current: &Current) {
+    let dim: egui::Color32 = pass.theme.text_dim.into();
+    // The pair that steps through the list, at the head of the bar in front
+    // of the count they move through. Only with a list to step through:
+    // stepping a list of one does nothing, and a button that did nothing
+    // when pressed would be worse than no button.
+    if pass.input.count > 1 {
+        let previous = pass.icon_button(
+            ui,
+            icon::CHEVRON_LEFT,
+            Control::Previous,
+            false,
+            true,
+            Corners::Leading,
+        );
+        if previous.clicked() {
+            pass.press(Control::Previous);
+        }
+        ui.add_space(STEP_SEAM);
+        let next = pass.icon_button(
+            ui,
+            icon::CHEVRON_RIGHT,
+            Control::Next,
+            false,
+            true,
+            Corners::Trailing,
+        );
+        if next.clicked() {
+            pass.press(Control::Next);
+        }
+        ui.add_space(PADDING);
+    }
+    // The count is a fact about the list, not part of the name, and is set
+    // like the other facts in the bar: the name is the one thing here worth
+    // picking out, and picking out two things picks out neither.
+    if let Some(counter) = counter(pass.input.index, pass.input.count) {
+        let response = ui.add(Label::new(RichText::new(counter).color(dim)));
+        pass.tooltip(response, Tip::Counter, true);
+        ui.add_space(COUNTER_GAP);
+    }
+    // In front of the name, on the side of the bar the name is read from, so
+    // that it is seen before the file it is about rather than after it.
+    if pass.input.deleted {
+        ui.add(Label::new(RichText::new(DELETED).color(pass.theme.warning)));
+        ui.add_space(COUNTER_GAP);
+    }
+    let name = top_label(&current.label, pass.input.reading.as_ref());
+    let response = ui.add(
+        Label::new(
+            RichText::new(name)
+                .color(pass.theme.text_bright)
+                .family(egui::FontFamily::Name(fonts::BOLD.into())),
+        )
+        .truncate(),
+    );
+    pass.tooltip(response, Tip::Name, true);
 }
 
 /// The name of the image on screen, and after it whatever the loader is busy
@@ -176,12 +135,6 @@ pub(super) const DELETED: &str = "DELETED";
 /// Where the file on screen comes in the list it was opened with, for in
 /// front of its name — or `None` for a single file, "1 / 1" being a count of
 /// nothing.
-///
-/// It leads the bar because it is the one part of the line whose width does
-/// not depend on the file, so a reader looking for it always finds it in the
-/// same place. It is drawn as its own run rather than as part of the name:
-/// the name is what is being looked at and the count is a fact about the
-/// list, and the two are set apart to say so.
 pub(super) fn counter(index: usize, count: usize) -> Option<String> {
     (count > 1).then(|| format!("{} / {}", index + 1, count))
 }
@@ -197,82 +150,73 @@ pub(super) fn describe_pixels(current: &Current) -> String {
     current.image.samples.short_label()
 }
 
-/// The room a press keeps around those words: the wash that comes up under
-/// them is a button's wash, and ink laid tight against the letters would not
-/// read as one. It is also what the pointer finds them by, a little before it
-/// is on them.
-pub(super) const STATE_PAD: f32 = 6.0;
+/// The room a press keeps around the words at the end of the bottom bar: the
+/// wash that comes up under them is a button's wash, and ink laid tight
+/// against the letters would not read as one.
+const STATE_PAD: f32 = 6.0;
 
-/// The words at the far end of the bottom bar, laid out: what is being done
-/// to the image, set against whatever ends the bar.
+/// The words at the far end of the bottom bar: what is being done to the
+/// image, set against the switch that ends the bar, and nothing at all where
+/// nothing is being done. Cut by whole segments to half the bar, as the top
+/// bar's facts are.
 ///
-/// Laid out here rather than inside the frame builder for the same reason the
-/// top bar is — the pointer has to be answered against the same rectangle
-/// between frames, and it can be pressed as well as named.
-pub(super) struct State {
-    /// Where the words start, and how wide they come out.
-    pub x: f32,
-    pub width: f32,
-    /// The line as it is set: as many of the segments as the room took.
-    pub text: String,
-    /// Where the last segment begins in `text`, when that segment is the
-    /// word for highlights being thrown away. It is set bold, so it is drawn
-    /// as a run of its own — see [`CLIPPED`].
-    pub clipped: Option<usize>,
-}
-
-impl State {
-    /// The strip of `bar` the words answer the pointer over: their own width
-    /// and the room around them, at the bar's whole height.
-    ///
-    /// As deep as the bar for the reason [`Run::strip`] is: a line of
-    /// thirteen-pixel words is too fine a thing to ask anyone to point at,
-    /// and there is nothing above or below it here to be confused with.
-    pub fn strip(&self, bar: Rect) -> Rect {
-        Rect::new(
-            self.x - STATE_PAD,
-            bar.y,
-            self.width + 2.0 * STATE_PAD,
-            bar.height,
-        )
-    }
-}
-
-/// Lays those words out in `bar`, ending at `limit` — where the surface
-/// switch at the far end leaves off.
-///
-/// `None` when nothing is being done to the image, which is the ordinary case
-/// for a photograph: there is then no line, and nothing there to point at.
-///
-/// Half the bar at most, and cut by whole segments as the top bar's facts
-/// are: the readout of the pixel under the pointer is sharing this bar, and
-/// half of `min/max` says less than none of it.
-pub(super) fn state(
-    text: &mut dyn TextMeasure,
-    bar: Rect,
-    limit: f32,
-    current: &Current,
-    headroom: Headroom,
-) -> Option<State> {
-    let segments = describe_state(current, headroom);
+/// Pressed as well as pointed at: a press on them opens the panel that sets
+/// what they are reading out, and a button's wash comes up under them while
+/// the pointer is on them. Nothing at rest — the line is a reading first.
+pub(super) fn state_words(pass: &mut Pass, ui: &mut egui::Ui, current: &Current) {
+    let segments = describe_state(current, pass.input.headroom);
     if segments.is_empty() {
-        return None;
+        return;
     }
-    let room = (bar.width / 2.0 - BAR_PADDING * 2.0).max(1.0);
-    let line = fit_segments(text, &segments, room);
-    let width = text.measure_text(&line, TEXT_SIZE)[0];
-    // The bold word is measured in the face the rest of the line is set in,
-    // which comes out a hair narrow; what that costs is a hair of the padding
-    // in front of the switch, and the run is drawn with the room to the
-    // switch rather than with its own width, so nothing is cut off.
+    let room = (ui.max_rect().width() / 2.0 - BAR_PADDING * 2.0).max(1.0);
+    let line = fit_segments(|text| measure(ui, text), &segments, room);
+    // The word for a picture losing its highlights, which is the one thing
+    // on this line that nobody asked for — set bold, and in the ink the line
+    // takes when the pointer is on it, so that it reads as the thing being
+    // said whether or not anyone is pointing.
     let clipped = (segments.last().is_some_and(|last| last == CLIPPED) && line.ends_with(CLIPPED))
         .then(|| line.len() - CLIPPED.len());
-    Some(State {
-        x: (limit - width).max(bar.x + BAR_PADDING),
-        width,
-        text: line,
-        clipped,
-    })
+    let (head, tail) = match clipped {
+        Some(at) => (&line[..at], &line[at..]),
+        None => (line.as_str(), ""),
+    };
+
+    let body = egui::TextStyle::Body.resolve(ui.style());
+    let bold = egui::FontId::new(TEXT_SIZE, egui::FontFamily::Name(fonts::BOLD.into()));
+    let job = |ink: egui::Color32, bold_ink: egui::Color32| {
+        let mut job = LayoutJob::default();
+        job.append(head, 0.0, TextFormat::simple(body.clone(), ink));
+        job.append(tail, 0.0, TextFormat::simple(bold.clone(), bold_ink));
+        job
+    };
+    let primary: egui::Color32 = pass.theme.text_primary.into();
+    let size = ui
+        .ctx()
+        .fonts_mut(|fonts| fonts.layout_job(job(primary, primary)).size());
+    let (rect, response) = ui.allocate_exact_size(
+        vec2(size.x + 2.0 * STATE_PAD, ui.available_height()),
+        Sense::CLICK,
+    );
+    let (wash, ink) = pass.button_ink(false, &response, true);
+    if response.hovered() {
+        // A button's own wash, at a button's height down the middle of the
+        // bar, so that what comes up under the words is the shape everything
+        // else in the chrome wears when the pointer is on it.
+        let pill = egui::Rect::from_center_size(
+            rect.center(),
+            vec2(rect.width(), super::chrome::BUTTON_SIZE.min(rect.height())),
+        );
+        ui.painter().rect_filled(pill, TOGGLE_RADIUS, wash);
+    }
+    let galley = ui
+        .ctx()
+        .fonts_mut(|fonts| fonts.layout_job(job(ink, primary)));
+    let at = Align2::CENTER_CENTER.anchor_size(rect.center(), galley.size());
+    ui.painter().galley(pos2(at.min.x, at.min.y), galley, ink);
+    let response = pass.tooltip(response, Tip::State, true);
+    if response.clicked() {
+        pass.press(Control::Histogram);
+    }
 }
 
 /// What is being done to the image, segment by segment: only the things
@@ -280,10 +224,8 @@ pub(super) fn state(
 ///
 /// Neither the zoom nor the fit it came from, nor the filter the image is
 /// magnified with: all three are the button in the top bar, which reads the
-/// zoom out and opens a menu of the rest. The bar named the filter once, but
-/// naming a thing it could not be used to change is worth less than a cell
-/// that both says and sets it. Nor which surface the picture is on: that is
-/// the button at the end of this bar, lit when it is the HDR one.
+/// zoom out and opens a menu of the rest. Nor which surface the picture is
+/// on: that is the button at the end of this bar, lit when it is the HDR one.
 ///
 /// The window is named and not measured. Its two bounds are a reading rather
 /// than a setting — they want the plot they came off, where the panel writes
@@ -410,7 +352,6 @@ pub fn explain_state(current: &Current, headroom: Headroom) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::chrome::Chrome;
     use super::*;
     use crate::image::display::{Display, Startup};
     use crate::image::exif::Exif;
@@ -446,6 +387,12 @@ mod tests {
         }
     }
 
+    /// Every glyph one `TEXT_SIZE` square, so that a test can say how much
+    /// room a string has in whole characters.
+    fn monospace(text: &str) -> f32 {
+        text.chars().count() as f32 * TEXT_SIZE
+    }
+
     /// The line at the end of the bottom bar names what is in force and
     /// measures nothing: a window by the rule it came from and not by its
     /// bounds, an exposure in the quarters it is stepped in, and — where the
@@ -477,121 +424,34 @@ mod tests {
         );
     }
 
-    /// The words are set against the switch that ends the bar and cut to the
-    /// room in front of it by whole segments, so that they never lie over the
-    /// switch and never say half of anything.
+    /// The words are cut to the room by whole segments, so that they never
+    /// say half of anything, and the first of them survives however narrow
+    /// the window gets.
     #[test]
-    fn the_line_is_set_against_the_switch_and_cut_by_whole_segments() {
-        let Some(mut fonts) = crate::render::ui_tests::test_fonts() else {
-            return;
-        };
+    fn the_line_is_cut_by_whole_segments() {
         let mut current = photograph();
         current.display.auto = AutoWindow::MinMax;
         current.display.adjust_exposure(0.5);
+        let segments = describe_state(&current, Headroom::None);
 
-        let chrome = Chrome::new([900.0, 600.0]);
-        let bar = chrome.bottom;
-        let whole = state(
-            &mut fonts,
-            bar,
-            chrome.state_limit(),
-            &current,
-            Headroom::None,
-        )
-        .expect("something is being done to the picture");
+        let whole = fit_segments(monospace, &segments, 1000.0);
         assert_eq!(
-            whole.text,
+            whole,
             format!("min/max{SEPARATOR}+\u{00bd} EV{SEPARATOR}{CLIPPED}"),
             "a wide window has room for all of it"
         );
+
+        let cut = fit_segments(monospace, &segments, monospace(&whole) * 0.6);
+        assert!(
+            cut.len() < whole.len() && whole.starts_with(&cut),
+            "\"{cut}\" is not \"{whole}\" with segments taken off the end"
+        );
+        assert!(!cut.ends_with(CLIPPED));
+
         assert_eq!(
-            whole.clipped.map(|at| &whole.text[at..]),
-            Some(CLIPPED),
-            "and the word for what is becoming of the highlights is the run \
-             that is set bold"
-        );
-        assert!(whole.x + whole.width <= chrome.state_limit());
-        assert!(
-            whole.strip(bar).right() <= chrome.output_button().x,
-            "the room a press keeps around the words stops short of the switch"
-        );
-
-        // A window with room for about half the line, whatever face it is set
-        // in: the fit is asked to drop something without the test having to
-        // know how wide the words come out.
-        let room = fonts.measure_text(&whole.text, TEXT_SIZE)[0];
-        let chrome = Chrome::new([2.0 * (room * 0.6 + 2.0 * BAR_PADDING), 600.0]);
-        let cut = state(
-            &mut fonts,
-            chrome.bottom,
-            chrome.state_limit(),
-            &current,
-            Headroom::None,
-        )
-        .expect("the line is still there, shorter");
-        assert!(
-            cut.text.len() < whole.text.len() && whole.text.starts_with(&cut.text),
-            "\"{}\" is not \"{}\" with segments taken off the end",
-            cut.text,
-            whole.text
-        );
-        assert_eq!(
-            cut.clipped, None,
-            "and the word that went is not still being pointed at"
-        );
-    }
-
-    /// The pointer is answered over those words and nowhere else along the
-    /// bar: they name themselves and open the histogram when pressed, and a
-    /// picture with nothing being done to it has no words there to reach.
-    #[test]
-    fn the_pointer_is_answered_over_the_words_and_not_over_the_bar() {
-        let Some(mut fonts) = crate::render::ui_tests::test_fonts() else {
-            return;
-        };
-        let chrome = Chrome::new([900.0, 600.0]);
-        let bar = chrome.bottom;
-        let limit = chrome.state_limit();
-        let mut current = photograph();
-        fn on(
-            fonts: &mut dyn TextMeasure,
-            current: &Current,
-            bar: Rect,
-            limit: f32,
-            point: [f32; 2],
-        ) -> bool {
-            crate::ui::state_hover(fonts, point, bar, limit, current, Headroom::None)
-        }
-
-        let middle = [bar.x + bar.width / 2.0, bar.y + bar.height / 2.0];
-        assert!(
-            !on(&mut fonts, &current, bar, limit, middle),
-            "a picture nobody has touched has no words there to point at"
-        );
-
-        current.display.auto = AutoWindow::MinMax;
-        let words = state(&mut fonts, bar, limit, &current, Headroom::None).expect("a line");
-        let strip = words.strip(bar);
-        assert!(on(
-            &mut fonts,
-            &current,
-            bar,
-            limit,
-            [strip.x + strip.width / 2.0, middle[1]]
-        ));
-        assert!(
-            !on(&mut fonts, &current, bar, limit, middle),
-            "and the rest of the bar is still the panel it always was"
-        );
-        assert!(
-            !on(
-                &mut fonts,
-                &current,
-                bar,
-                limit,
-                [strip.right() + 1.0, middle[1]]
-            ),
-            "the switch at the end of the bar answers for itself"
+            fit_segments(monospace, &segments, 1.0),
+            "min/max",
+            "the first segment stays however narrow the window gets"
         );
     }
 
