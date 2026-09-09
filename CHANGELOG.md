@@ -14,8 +14,13 @@ Notable changes to `gamut`. The format follows
   button opens a menu that prints each item's key beside it, the zoom readout
   and the pixel-format dot open popups, and the information column scrolls
   as any scroll area does. A menu that does not fit where it was hung is
-  moved into the window rather than withheld. The interface is set in the
-  desktop's own sans and monospace faces, as before.
+  moved into the window rather than withheld.
+- The interface is set in the faces the desktop itself is set in: the sans
+  and monospace that fontconfig resolves, which is what `fc-match` prints
+  and what the desktop's own rules name. Before, the faces were guessed from
+  fontconfig's aliases alone, and could land on one the desktop never chose.
+  Whatever the face, its capitals now sit at the middle of the bars and the
+  buttons rather than wherever its own metrics happened to put them.
 - The oldest Rust that builds it is 1.95.
 
 ### Added

@@ -42,10 +42,19 @@ egui-wgpu = { version = "0.36.2", default-features = false }
 # would bring a second clipboard library beside `wl-clipboard-rs`, and
 # `links` a browser launcher: both off, the two backends on.
 egui-winit = { version = "0.36.2", default-features = false, features = ["wayland", "x11"] }
-# Finds the desktop's sans and monospace faces through fontconfig, which is
-# what the interface is set in. Already in the tree, and here so that the
-# fonts egui is handed are the ones the rest of the desktop is wearing.
+# Asks fontconfig which faces the desktop is set in, so that the interface
+# is set in the same ones — see `ui/fonts.rs`. The library is opened at run
+# time rather than linked, so the build needs no headers and a desktop
+# without it still gets a window; `fontdb` below is what answers then.
+fontconfig = { version = "0.11", features = ["dlopen"] }
+# The fallback: reads the font directories itself and resolves the generic
+# families from fontconfig's aliases alone, which is a rougher answer than
+# the library's but needs nothing installed.
 fontdb = "0.23"
+# Reads a face's vertical metrics, so that its capitals can be centered in
+# the rows egui lays out. It is the reader egui's own text layout uses, so
+# the numbers are the ones the rows are built from.
+skrifa = "0.44"
 half = { version = "2.7.1", features = ["bytemuck"] }
 # `ico` is enabled for the DIB half of an ICO only: the hooks that decode a
 # headerless bitmap and apply its AND mask are `pub(crate)` behind that

@@ -1,4 +1,4 @@
-Cargo.lock sha256: 6b045406b85de302e0d67f08c329e421e600210df7c5e1b502b1e78c25a5dd30
+Cargo.lock sha256: 0ca8a8e7beca12468c265fe19055368a21b907d4a11acbd4a0ab68eb6b9f9d03
 
                       gamut: third-party notices
 
@@ -17,7 +17,7 @@ or regenerating with
 
     cargo about generate --frozen packaging/about.hbs
 
-  MIT License — 210 crates
+  MIT License — 212 crates
   Apache License 2.0 — 15 crates
   BSD 2-Clause "Simplified" License — 6 crates
   BSD 3-Clause "New" or "Revised" License — 6 crates
@@ -4966,6 +4966,41 @@ Used by:
 The MIT License (MIT)
 
 Copyright (c) HeroicKatora 2020
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+
+--------------------------------------------------------------------------
+MIT License
+--------------------------------------------------------------------------
+
+Used by:
+  fontconfig 0.11.0
+  yeslogic-fontconfig-sys 6.0.1
+
+The MIT License (MIT)
+
+Copyright 2019 YesLogic Pty. Ltd.
+Copyright 2016 Manuel Reinhardt
+Copyright 2014 Austin Bonander
+Copyright 2013 The Servo Project Developers.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
