@@ -66,11 +66,11 @@ the controls are shaped the way they are.
 
 The copies have a button too, at the top of the left strip: it opens a menu of
 what can be taken — the file's name, its path, its URI, everything the
-information panel says about it, and the picture itself — each cell doing
-exactly what its key does, and named in the tooltip by the key table's own
-words for it. The two copies of the pixel under the pointer are not on it:
-while the menu is open the pointer is over the menu, and there would never be
-a pixel under it to take.
+information panel says about it, and the picture itself — each item doing
+exactly what its key does, printing that key beside it, and named in the
+tooltip by the key table's own words for it. The two copies of the pixel
+under the pointer are not on it: while the menu is open the pointer is over
+the menu, and there would never be a pixel under it to take.
 
 `Ctrl+V` has a button as well, under that one, and it is on screen only while
 the clipboard is holding a picture that can be shown — the clipboard is looked
@@ -186,8 +186,9 @@ translucent — the thumbnail underneath them is in the layer below.
 The chrome is four panels: top and bottom bars spanning the full width, with
 skinny left and right strips nested between them, so the corners belong to the
 bars and the strips never reason about where one ends. `Chrome` derives all
-four from the window size alone, which is what lets the frame builder and the
-click handler agree on where a widget is without either of them owning it. The
+four from the window size alone, before egui lays anything out, which is what
+lets the picture be fitted into what they leave without waiting a frame on
+the toolkit. The
 top bar carries which file it is — its place in the list, in front of its
 name, so that the count is always in the same place whatever the name is — and
 what the image is: its size, its pixels, its color space, all fixed for as
@@ -243,12 +244,11 @@ menu hangs from the button that opens it, off whichever of its edges faces into
 the window: down from a button in the top bar, up from one in the bottom bar,
 and out to the right from one in the left strip, where a button has its
 neighbors above and below it and its room to the side. Pressing the percentage
-opens a menu of zooms — the ladder from 10% to 1600% and the three fits as
+opens a menu of zooms — the ladder from 10% to 1600% and the two fits as
 icons — hung from the button, its right edge in line with the button's, placed
 against the window rather than against the frame the picture is in: a menu
 pushed around by where the image happens to be would not stay under the thing
-that opened it. The readout is a fixed width so that the click handler knows
-where it is without measuring what it says, and so that it does not shuffle
+that opened it. The readout is a fixed width so that it does not shuffle
 along the bar as the zoom changes. The grid toggle is the opposite: it is
 fitted to the reading in it, so it widens when the grid comes on and pushes
 the pixel button and the readout after it along the bottom bar. What moves
@@ -270,12 +270,12 @@ have, so a window can have room for the column alone and none for it under an
 open plot. What it takes is settled inside `info::panel`, which asks whether
 the plot is on screen rather than whether its toggle is on — a window too
 short for the plot is not one the column has to start below, and putting that
-question in one place is what keeps the frame builder and the pointer from
-disagreeing about where the column begins.
+question in one place is what keeps the two panels from disagreeing about
+where the column begins.
 
-One answer serves three readers — the frame builder, `layers::hit` and the
-application — since a panel the pointer could reach but the frame did not draw
-would take presses meant for the picture under it. It also decides the two
+One answer serves both readers — the interface and the application — since a
+toggle that quietly set something no one could see would be worse than one
+that does nothing. It also decides the two
 toggles in the right-hand strip: where there is no room for what one opens it
 is drawn dead, in the ink the surface switch uses when there is no headroom to
 switch to, and the press is refused rather than quietly setting something no
@@ -292,39 +292,41 @@ that has to be found again.
 
 ## Layers and the pointer
 
-A frame is drawn in two layers, and the menu is the only thing on the second.
-Shapes keep the order they were emitted in, but a layer's glyphs go down after
-all of its shapes — the text pass is prepared whole, and one per layer is what
-it costs — so without a layer above them the words on a panel would show
-through anything laid over that panel, which is what an open menu does to the
-histogram's axis label. Two layers is as far as this goes on purpose: it is
-the smallest thing that gives the interface a front, and each one costs a
-glyph pass whether or not it has any words on it.
+The window is a stack, and egui keeps it: the picture at the bottom, laid out
+as the one response the central panel holds; the areas floating over it — the
+minimap, the histogram, the information column — at `Order::Middle`; the
+message about what was just done in the foreground; and whatever menu or
+tooltip is open above the lot. egui routes the pointer by that stack, so the
+highlight, the press, the wheel and the picture's own drag cannot disagree
+about what is under it. Every floating area is `interactable` and takes the
+press whether or not it landed on one of that panel's buttons, so nothing
+reaches what is drawn behind, one gesture never acts on two things, and a
+widget that lights up under the pointer is a widget the next click will
+actually press.
 
-The pointer reads that stack back. `src/ui/layers.rs` puts the window in
-order — the picture at the bottom, the panels that float over it, the chrome
-around it, and whatever menu is open on top — and `hit` walks it from the top
-down and names the first layer to claim the point. One answer serves the
-highlight, the press, the wheel and the bar's pixel readout, so the four
-cannot disagree about what is under the pointer; before there was one, they
-were four orderings written out separately, and they did disagree — the zoom
-menu is drawn over the two panels down the right of the window, and a click on
-a cell that happened to be over one of them went to the panel instead. Every
-layer is opaque: a press that lands on a panel is spent there whether or not
-it hit one of that panel's buttons, so nothing reaches what is drawn behind,
-one gesture never acts on two things, and a widget that lights up under the
-pointer is a widget the next click will actually press. The stack is derived
-from the window size and what is on screen, the same few numbers the frame
-builder lays out from, so what the pointer reaches is what was drawn under it
-without either side owning a cached layout.
+The one reading of the stack that is ours is the bar's pixel readout: it
+asks whether the pointer was over the picture with nothing between, which
+the picture's response answers each pass and hands back as
+`Command::OverImage`. It is a pass late only when a panel has appeared or gone
+under a still pointer, and that pass is being painted anyway.
 
-Being over a layer and being taken by one are still two things. A menu takes
-the pointer for as long as it is open, as menus do everywhere: a press
-anywhere off it dismisses it rather than reaching what it landed on, the wheel
-is spent on it, and nothing behind it lights up. That grab is applied by the
-handlers over the top of the stack's answer rather than folded into it, which
-is why the bar goes on reading out the pixel under the pointer while a menu is
-open — what the pointer is over has not changed, only what may be pressed.
+A menu takes the pointer for as long as it is open, as menus do everywhere: a
+press anywhere off it dismisses it rather than reaching what it landed on,
+and the wheel is spent on it. That is egui's popup doing what it does; what
+the application adds is that `Esc` and `q` ask it first — `App::close_menus`
+— so that the key that puts things away takes a menu off before it means
+anything else, and `q` never quits out from under one.
+
+The chrome around the picture is egui's panels, given exactly the sizes
+`Chrome` works out from the window: the viewport the picture is fitted into
+is derived before the interface is laid out, so a fit never waits on a pass
+of the toolkit. Every event goes to egui first, and one it takes for itself —
+a press on a button, a wheel over a panel — goes no further. Keys do not: the
+key table binds some of them by where they sit on the keyboard, which egui's
+keys cannot say, so they stay on winit and go to egui only while one of its
+text fields has the focus. For that to hold, no control may take the focus a
+click would give it: a focused button swallows every key after it, so every
+control here senses a click and nothing more.
 
 
 ## The information panel
@@ -390,20 +392,17 @@ grouped, a coordinate, half of what a raster says about its ground — is
 quoted, or the row would not survive being read back; a field copied on its
 own is not, there being nothing for it to run into.
 
-Which means three lists rather than one, each derived from the last: the
-words, then where they go, then what can be pointed at. One index runs
-through all three, so what is under the pointer, what is drawn lit and what
-lands on the clipboard cannot come to disagree. The button that says what a
-click would take appears over the words rather than beside them, on the layer
-above so that it covers them — the column is as wide as the panel lets it be,
-and there is no margin to stand a button in — and nudged back inside the panel
-where being centered on what it copies would hang it over an edge. A press on
-the panel starts a scroll of the column as well, the two gestures being one
-and the same at the moment the button goes down, so the copy is made only if
-the button comes back up without the pointer having gone anywhere. And the
-button goes away while the column is scrolling: the pointer is not moving,
-the words under it are, and a button that followed whichever of them happened
-to be passing would blink from field to field all the way down.
+Which means one list, `Contents`, and one index run through it for the
+drawing and the copying alike, so what is drawn lit and what lands on the
+clipboard cannot come to disagree. Each heading and each field is a block
+that senses a click, and the button that says what a click would take appears
+over the words rather than beside them — the column is as wide as the panel
+lets it be, and there is no margin to stand a button in — nudged back inside
+the panel where being centered on what it copies would hang it over an edge.
+A press on the panel is the start of a drag of the column as well, the two
+gestures being one and the same at the moment the button goes down; egui's
+scroll area is what parts them, reporting a click only for a press that came
+back up without having traveled.
 
 A raster is read through a different handful of fields, and they are not EXIF
 at all. GeoTIFF shares the TIFF directory rather than taking a container of
@@ -476,48 +475,48 @@ come back with less than a second read gets, and its values would arrive as
 numbers needing a second renderer to say what they mean.
 
 It is the one part of the interface with more to say than fits, and so the
-only part that scrolls. Its column is laid out in full every frame and the
-scroll is subtracted from each row's place down it, which leaves rows lying
-above and below the panel. Nothing here clips them: the text
-layer takes a rectangle to cut the glyphs to, which glyphon trims the quad and
-its texture coordinates against together, so a line sliding under the panel's
-edge is drawn as much of a line as is still inside. Measuring a paragraph
-before drawing it is the same call that draws it, one width and one wrap, so
-what the scroll is clamped against is the height the text actually comes out
-at rather than an estimate of it.
+only part that scrolls, which is egui's scroll area's to do: the bar down the
+panel's inner edge in a gutter kept clear for it whether or not there is
+anything to scroll, since text that reflowed the moment the bar appeared
+would be text that reflowed as it was being read. The scroll area is the
+file's own — its identity is salted with the path — so stepping to another
+file starts at the top of its column rather than however far down the last
+one had been read.
 
 
 ## Popups and menus
 
-Popups are `render::ui_layer::Popup`: a panel of cells under named headings,
-anchored to a corner of an area, which answers where the panel goes, where
-each section's name is set, where each cell landed, and which cell a point is
-over. What a cell has in it and what pressing one does stay with the caller
-(`src/ui/menu.rs`), so a second menu is a `Menu` variant, its sections, and
-the code that draws its cells. Only one can be open, which is what makes
-dismissing one unambiguous: an open menu takes every press before the chrome
-and the image do, a press on a cell chooses and closes, and a press anywhere
-off the panel is spent closing it. `Esc` closes it too, in front of the quit
-it would otherwise be.
+Popups are egui's, hung off the button that opens them in `src/ui/chrome.rs`
+and aligned to it — below the zoom readout, above the pixel dot, beside the
+copy button — with what each holds laid out in `src/ui/menu.rs`. Only one is
+open at a time, a press on a cell chooses and closes, and a press anywhere off
+the panel is spent closing it. `Esc` closes it too, in front of the quit it
+would otherwise be. A menu that does not fit where it was hung is moved into
+the window by egui rather than withheld, which is the one thing here the
+display list did differently: it refused to open a menu the window had no
+room for.
 
-A cell's width belongs to its section rather than to the panel: the panel is
-cut for the widest row any section asks for, and every other section lays its
-own cells from the same left edge and stops where they stop. A short row is a
-short row, not three cells stretched to the width of four. The height is the
-one thing held uniform, since cells of a height read as one panel.
+Each cell is a typed `Control` — a `ZoomChoice`, a `PixelFormat`, one of the
+`Copies` — so that a press comes back as exactly what was chosen, and the
+tooltip on it is named from the key table by the same `action_of` that names
+a button: a numbered cell by the key that goes to that zoom, a fit by the key
+that toggles the fit, a copy by the very line that describes the copy.
 
-That is what lets one menu hold things that are not the same kind of thing.
-The zoom menu holds three: **Zoom**, eight percentages four to a row; **Fit**,
-the three fits as arrows; and **Up-scaling**, the magnification filter as the
-two words `Nearest` and `Bicubic`. Undivided, those last two read as a fourth
-fit — and there is no picture of "bicubic" a reader arrives at unaided, so
-theirs are the one pair of cells cut wider than the rest, by exactly what the
-words need. `ZOOM_SECTIONS` is `ZOOM_CHOICES` cut into three and a test holds
-the two in step, since a choice in no section could never be pressed.
+The zoom menu holds three kinds of thing, and says so: **Zoom**, eight
+percentages four to a row; **Fit**, the two fits as arrows; and
+**Up-scaling**, the magnification filter as the two words `Nearest` and
+`Bicubic`. Undivided, those last two read as a third fit — and there is no
+picture of "bicubic" a reader arrives at unaided, so theirs are the one pair
+of cells cut wider than the rest, by exactly what the words need.
+`ZOOM_SECTIONS` is `ZOOM_CHOICES` cut into three and a test holds the two in
+step, since a choice in no section could never be pressed. The menu of copies
+is a list rather than a grid, each item with its key printed beside it: the
+items are things done rather than states to be in, and what a reader wants
+from one is the key that would have done it without the menu.
 
-They are opaque, and the image is drawn in the `Viewport` they leave rather
-than behind them: zoom, fit, pan limits and the wheel's anchor are all measured
-against that rectangle. It is derived per frame from the window and whether the
-panels are showing, never stored, so `` ` `` re-fits a fitted image without
-anything having to notice that it should.
+The panels are opaque, and the image is drawn in the `Viewport` they leave
+rather than behind them: zoom, fit, pan limits and the wheel's anchor are all
+measured against that rectangle. It is derived per frame from the window and
+whether the panels are showing, never stored, so `` ` `` re-fits a fitted
+image without anything having to notice that it should.
 

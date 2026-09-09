@@ -1,9 +1,9 @@
 //! The message the window shows about something that has just happened, at
 //! the foot of the content area.
 //!
-//! Two parts, as the tooltip has: [`Toasts`] is the timing, held by the
-//! application and asked on every tick of the loop, and [`place`] and
-//! [`draw`] are the drawing, done afresh with each frame.
+//! Two parts: [`Toasts`] is the timing, held by the application and asked on
+//! every tick of the loop, and [`show`] is the drawing, done afresh with each
+//! frame.
 //!
 //! What a toast is for is the thing that leaves no other mark. A copy takes
 //! the selection and changes nothing on screen; without a word about it there
@@ -13,24 +13,20 @@
 //!
 //! It can also be taken off: by the cross it carries, or by Escape, which
 //! dismisses whatever is up before it means anything else. The cross is a
-//! [`Widget`](super::Widget) like any other, so the pointer reaches it
-//! through [`layers::hit`](super::layers::hit) the way it reaches a button in
-//! a bar.
-//!
-//! The words are measured once, when the toast is raised, rather than on
-//! every frame and again for every question the pointer asks. Nothing about a
-//! toast changes while it is up — not its text, not the face it is set in —
-//! so the frame builder and the hit test can lay it out from the same few
-//! numbers without either of them having the fonts to hand.
+//! [`Control`] like any other.
 
 use std::time::{Duration, Instant};
 
-use crate::render::{Rect, TextMeasure, UiFrame};
+use egui::{Align, Label, Layout, RichText, Sense, WidgetInfo, WidgetType, vec2};
+
 use crate::theme::Theme;
 
-use super::buttons::{button_ink, text_top};
-use super::menu::CELL_RADIUS;
-use super::{PADDING, PANEL_RADIUS, TEXT_SIZE, icon};
+use super::Rect;
+use super::chrome::Pass;
+use super::control::Control;
+use super::style::TOGGLE_RADIUS;
+use super::tooltip::Tip;
+use super::{PADDING, PANEL_RADIUS, icon};
 
 /// How long a message stays up unless something takes it off sooner.
 ///
@@ -86,9 +82,6 @@ pub struct Toast {
     /// What it says.
     pub message: String,
     pub level: Level,
-    /// How wide `message` comes out at [`TEXT_SIZE`], measured once when the
-    /// toast was raised — see this module's own note on why.
-    width: f32,
     /// When it takes itself off.
     until: Instant,
 }
@@ -105,22 +98,10 @@ pub struct Toasts {
 
 impl Toasts {
     /// Raises `message`, in place of whatever was up.
-    ///
-    /// `text` is the fonts the interface is set in, which the words are
-    /// measured against here and not again.
-    pub fn show(
-        &mut self,
-        text: &mut dyn TextMeasure,
-        now: Instant,
-        message: String,
-        level: Level,
-        linger: Duration,
-    ) {
-        let width = text.measure_text(&message, TEXT_SIZE)[0];
+    pub fn show(&mut self, now: Instant, message: String, level: Level, linger: Duration) {
         self.showing = Some(Toast {
             message,
             level,
-            width,
             until: now + linger,
         });
     }
@@ -157,127 +138,86 @@ impl Toasts {
     }
 }
 
-/// Where a toast and the cross that dismisses it went.
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub struct Placed {
-    /// The panel the words are on, which is what takes the pointer.
-    pub panel: Rect,
-    /// The cross at its far end.
-    pub close: Rect,
-}
-
-/// Where `toast` goes in `area`, or `None` when there is no room for it.
+/// Draws `toast` at the foot of `content`, with the cross that takes it off.
 ///
 /// Centered along the foot of the area the panels leave: the middle of the
 /// window is where the eye already is, and the foot is the one edge of that
 /// area with nothing floating against it. Not in a bar, because a bar
-/// describes what is on screen and this describes what was just done.
+/// describes what is on screen and this describes what was just done. Over
+/// the panels that float over the picture, so that a message raised while
+/// the histogram is open is still read: it is about what just happened, and
+/// nothing on screen outranks that for as long as it is up. A menu is drawn
+/// over it still, a menu being the thing that is being looked at while it is
+/// open.
 ///
-/// Pure geometry, from the width the words were measured at when the toast
-/// was raised — so the frame builder and the hit test lay it out alike.
-pub fn place(toast: &Toast, area: Rect) -> Option<Placed> {
-    let height = CLOSE.max(TEXT_SIZE * 1.3) + 2.0 * INSET[1];
-    if height + 2.0 * LIFT > area.height {
-        return None;
-    }
-    // Held to what the area can carry: a long message is cut rather than
-    // hung off the side of the window, and one cut to nothing is not drawn.
+/// Held to what the area can carry: a long message is cut rather than hung
+/// off the side of the window, so the cross is always reachable.
+pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, toast: &Toast, content: Rect) {
+    let theme = pass.theme;
     let held = 2.0 * INSET[0] + GAP + CLOSE;
-    let width = (held + toast.width).min(area.width - 2.0 * LIFT);
-    if width <= held {
-        return None;
+    let room = content.width - 2.0 * LIFT - held;
+    if room <= 0.0 || content.height < CLOSE + 2.0 * INSET[1] + 2.0 * LIFT {
+        return;
     }
-
-    let panel = Rect::new(
-        area.x + (area.width - width) / 2.0,
-        area.bottom() - LIFT - height,
-        width,
-        height,
+    let area = egui::Rect::from_min_size(
+        egui::pos2(content.x, content.y),
+        vec2(content.width, content.height),
     );
-    let close = Rect::new(
-        panel.right() - INSET[0] - CLOSE,
-        panel.y + (height - CLOSE) / 2.0,
-        CLOSE,
-        CLOSE,
-    );
-    Some(Placed { panel, close })
+    egui::Area::new(egui::Id::new("toast"))
+        .order(egui::Order::Foreground)
+        .pivot(egui::Align2::CENTER_BOTTOM)
+        .fixed_pos(egui::pos2(area.center().x, area.max.y - LIFT))
+        .constrain_to(area)
+        .interactable(true)
+        .show(ui.ctx(), |ui| {
+            egui::Frame::NONE
+                .fill(theme.menu_background.into())
+                .stroke(egui::Stroke::new(1.0, theme.border))
+                .corner_radius(PANEL_RADIUS)
+                .inner_margin(egui::Margin::symmetric(INSET[0] as i8, INSET[1] as i8))
+                .show(ui, |ui| {
+                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing = vec2(GAP, 0.0);
+                        ui.set_max_width(room + GAP + CLOSE);
+                        ui.add(
+                            Label::new(RichText::new(&toast.message).color(toast.level.ink(theme)))
+                                .truncate(),
+                        );
+                        cross(pass, ui);
+                    });
+                });
+        });
 }
 
-/// Draws the message and the cross that takes it off.
-///
-/// Over the panels that float over the picture, so that a message raised
-/// while the histogram is open is still read: it is about what just happened,
-/// and nothing on screen outranks that for as long as it is up. The menu is
-/// drawn after this and so still covers it, a menu being the thing that is
-/// being looked at while it is open.
-pub fn draw(
-    frame: &mut UiFrame,
-    text: &mut dyn TextMeasure,
-    toast: &Toast,
-    placed: Placed,
-    hover: bool,
-    theme: &Theme,
-) {
-    let Placed { panel, close } = placed;
-    let edge = frame.line_width(1.0);
-    let room = (close.x - GAP - (panel.x + INSET[0])).max(0.0);
-
-    frame.over(|frame| {
-        frame.rounded_rect(panel, PANEL_RADIUS, theme.menu_background);
-        // On the panel's own outline rather than around it, as a tooltip's
-        // is, so the edge is the width of the panel and not a hair wider.
-        frame.stroke_rect(
-            panel.inset(edge / 2.0, edge / 2.0),
-            PANEL_RADIUS,
-            edge,
-            theme.border,
-        );
-        frame.text_clipped(
-            [
-                frame.snap(panel.x + INSET[0]),
-                text_top(frame, text, panel, TEXT_SIZE),
-            ],
-            TEXT_SIZE,
-            toast.level.ink(theme),
-            room,
-            toast.message.clone(),
-        );
-
-        // Never lit: it takes the message off rather than switching anything
-        // on, so there is no state for it to be showing.
-        let (background, ink) = button_ink(false, hover, theme);
-        frame.rounded_rect(close, CELL_RADIUS, background);
-        icon::draw(
-            frame,
-            icon::X,
-            icon::fit(frame, close, CLOSE - 4.0),
-            ink,
-            background,
-        );
-    });
+/// The cross that takes the message off. Never lit: it takes the message off
+/// rather than switching anything on, so there is no state for it to be
+/// showing.
+fn cross(pass: &mut Pass, ui: &mut egui::Ui) {
+    let (rect, response) = ui.allocate_exact_size(vec2(CLOSE, CLOSE), Sense::CLICK);
+    let (background, ink) = pass.button_ink(false, &response, true);
+    ui.painter().rect_filled(rect, TOGGLE_RADIUS, background);
+    icon::paint(
+        ui.painter(),
+        icon::X,
+        icon::square(icon::Grid::new(ui.pixels_per_point()), rect, CLOSE - 4.0),
+        ink,
+        background,
+    );
+    response
+        .widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, Control::Dismiss.label()));
+    let response = pass.tooltip(response, Tip::Control(Control::Dismiss), true);
+    if response.clicked() {
+        pass.press(Control::Dismiss);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::Monospace;
-
-    const AREA: Rect = Rect {
-        x: 0.0,
-        y: 30.0,
-        width: 800.0,
-        height: 500.0,
-    };
 
     fn raised(message: &str) -> Toasts {
         let mut toasts = Toasts::default();
-        toasts.show(
-            &mut Monospace,
-            Instant::now(),
-            message.to_string(),
-            Level::Message,
-            LINGER,
-        );
+        toasts.show(Instant::now(), message.to_string(), Level::Message, LINGER);
         toasts
     }
 
@@ -287,13 +227,7 @@ mod tests {
     fn a_message_takes_itself_off_when_its_time_is_up() {
         let now = Instant::now();
         let mut toasts = Toasts::default();
-        toasts.show(
-            &mut Monospace,
-            now,
-            "Copied file path.".to_string(),
-            Level::Message,
-            LINGER,
-        );
+        toasts.show(now, "Copied file path.".to_string(), Level::Message, LINGER);
 
         assert_eq!(toasts.deadline(), Some(now + LINGER));
         assert!(!toasts.tick(now + LINGER - Duration::from_millis(1)));
@@ -323,7 +257,6 @@ mod tests {
     fn the_newest_message_is_the_one_showing() {
         let mut toasts = raised("Copied file path.");
         toasts.show(
-            &mut Monospace,
             Instant::now(),
             "Copied pixel value.".to_string(),
             Level::Warning,
@@ -332,43 +265,5 @@ mod tests {
         let toast = toasts.showing().expect("one is up");
         assert_eq!(toast.message, "Copied pixel value.");
         assert_eq!(toast.level, Level::Warning);
-    }
-
-    /// Centered along the foot of the area, with the cross inside it and the
-    /// words clear of the cross.
-    #[test]
-    fn a_message_sits_at_the_foot_of_the_area() {
-        let toasts = raised("Copied file path.");
-        let placed = place(toasts.showing().expect("one is up"), AREA).expect("room");
-
-        let middle = placed.panel.x + placed.panel.width / 2.0;
-        assert!((middle - (AREA.x + AREA.width / 2.0)).abs() < 0.5);
-        assert!((placed.panel.bottom() - (AREA.bottom() - LIFT)).abs() < 0.5);
-        assert!(AREA.contains([middle, placed.panel.y + 1.0]));
-
-        assert!(placed.close.right() <= placed.panel.right());
-        assert!(placed.close.x > placed.panel.x + INSET[0]);
-    }
-
-    /// A message longer than the window is cut to it rather than hung off
-    /// either side, so the cross that takes it off is always reachable.
-    #[test]
-    fn a_long_message_is_held_inside_the_area() {
-        let toasts = raised(&"a very long message ".repeat(20));
-        let placed = place(toasts.showing().expect("one is up"), AREA).expect("room");
-
-        assert!(placed.panel.x >= AREA.x + LIFT - 0.01);
-        assert!(placed.panel.right() <= AREA.right() - LIFT + 0.01);
-        assert!(AREA.contains([placed.close.x + 1.0, placed.close.y + 1.0]));
-    }
-
-    /// A window with no room for the panel gets no panel, rather than one
-    /// drawn over the bars or squeezed to nothing.
-    #[test]
-    fn a_window_with_no_room_shows_nothing() {
-        let toasts = raised("Copied file path.");
-        let toast = toasts.showing().expect("one is up");
-        assert!(place(toast, Rect::new(0.0, 0.0, 800.0, 20.0)).is_none());
-        assert!(place(toast, Rect::new(0.0, 0.0, 60.0, 500.0)).is_none());
     }
 }

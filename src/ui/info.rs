@@ -2,33 +2,37 @@
 //! the content area.
 //!
 //! The only part of the interface with more to say than fits, so it is the
-//! only part that scrolls. The column is laid out in full every frame, from
-//! the top of the content down, and what falls outside the panel is cut off
-//! by the text layer rather than by anything here — which is what lets a line
-//! be drawn half, sliding under the panel's edge as the wheel turns. Above it
-//! is a header that does not scroll, holding the one instruction the panel
-//! needs and the button that copies the whole of it.
+//! only part that scrolls: the column lives in a scroll area, under a header
+//! that does not scroll, holding the one instruction the panel needs and the
+//! button that copies the whole of it.
 //!
 //! It is also the only part of the interface that is read out rather than
 //! merely read: a click on a field or on a heading puts it on the clipboard.
-//! So there are three lists here rather than one, each derived from the last
-//! — [`Contents`], which is the words; [`Column`], which is where they go;
-//! and [`blocks`], which is what can be pointed at — and one index runs
-//! through all three, so what is under the pointer, what is drawn lit, and
-//! what is copied cannot come to disagree.
+//! [`Contents`] is the words, and one index runs through it for the drawing
+//! and the copying alike, so what is drawn lit and what lands on the
+//! clipboard cannot come to disagree.
 
 use std::time::SystemTime;
 
+use egui::{
+    Align, Label, Layout, RichText, Sense, StrokeKind, UiBuilder, Vec2, WidgetInfo, WidgetType,
+    pos2, vec2,
+};
+
 use crate::clock;
 use crate::image::AlphaMode;
-use crate::render::{Color, Rect, TextMeasure, UiFrame};
+use crate::render::Color;
+
+use super::Rect;
 use crate::theme::Theme;
 
-use super::buttons::{ICON_SIDE, outline, text_top};
+use super::chrome::{ICON_SIDE, Pass, measure};
+use super::control::Control;
 use super::histogram::{self, HISTOGRAM_SIZE};
 use super::icon;
-use super::menu::CELL_RADIUS;
-use super::{Current, PADDING, PANEL_INSET, PANEL_RADIUS, PANEL_WIDTH, Panels, TEXT_SIZE};
+use super::style::TOGGLE_RADIUS;
+use super::tooltip::Tip;
+use super::{Current, PADDING, PANEL_INSET, PANEL_RADIUS, PANEL_WIDTH, TEXT_SIZE};
 
 /// Below this the panel would show its header, two facts and a scrollbar, so
 /// it stays off instead. There is no matching minimum for the width: the
@@ -76,9 +80,9 @@ const CHIP_HEIGHT: f32 = 20.0;
 const CHIP_PADDING: f32 = 7.0;
 const CHIP_GAP: f32 = 5.0;
 /// The room set aside for the mark on a copy button, in the button's width
-/// as well as in what [`icon::fit`] sizes a square out of. A side toggle's,
-/// so that the two marks are drawn at one size wherever they are seen
-/// together.
+/// as well as in what [`icon::square`] sizes a square out of. A side
+/// toggle's, so that the two marks are drawn at one size wherever they are
+/// seen together.
 const COPY_ICON: f32 = ICON_SIDE;
 
 /// The scrollbar down the panel's inner edge, and the room kept clear for it
@@ -86,9 +90,6 @@ const COPY_ICON: f32 = ICON_SIDE;
 /// the bar appeared would be text that reflowed as it was being read.
 const SCROLLBAR_WIDTH: f32 = 3.0;
 const SCROLLBAR_GUTTER: f32 = SCROLLBAR_WIDTH + 7.0;
-/// The least of the track the thumb may take, so that a very long column
-/// still has something to grab hold of with the eye.
-const THUMB_MIN: f32 = 24.0;
 
 /// What the file itself says about the image, as opposed to what its pixels
 /// do: read once when the image opens, since none of it changes while the
@@ -118,13 +119,11 @@ enum Kind {
 }
 
 impl Kind {
-    /// The size it is written at, and the space above it. A section is set
-    /// off from the one before it, a name sits close to the value under it.
-    fn style(self) -> (f32, f32) {
+    /// The size it is written at.
+    fn size(self) -> f32 {
         match self {
-            Kind::Heading => (TEXT_SIZE, SECTION_GAP),
-            Kind::Label => (LABEL_SIZE, FIELD_GAP),
-            Kind::Value => (TEXT_SIZE, LABEL_GAP),
+            Kind::Heading | Kind::Value => TEXT_SIZE,
+            Kind::Label => LABEL_SIZE,
         }
     }
 
@@ -201,65 +200,6 @@ impl Contents {
     }
 }
 
-/// One run of text in the column, at its place down it, and what clicking it
-/// copies. `y` is measured from the top of the column, not of the window: the
-/// panel subtracts the scroll from it, and the same list serves the drawing,
-/// the hit testing, and the question of how far it may be scrolled.
-struct Row {
-    text: String,
-    kind: Kind,
-    y: f32,
-    height: f32,
-    copies: Copyable,
-}
-
-/// The column as it is built: rows so far, how tall they come to, and the
-/// width they are broken at.
-struct Column {
-    rows: Vec<Row>,
-    height: f32,
-    width: f32,
-}
-
-impl Column {
-    fn add(&mut self, text: &mut dyn TextMeasure, kind: Kind, body: String, copies: Copyable) {
-        let (size, gap) = kind.style();
-        let height = text.measure_wrapped(&body, size, self.width)[1];
-        let y = if self.rows.is_empty() {
-            0.0
-        } else {
-            self.height + gap
-        };
-        self.height = y + height;
-        self.rows.push(Row {
-            text: body,
-            kind,
-            y,
-            height,
-            copies,
-        });
-    }
-}
-
-/// The stretches of the column that can be pointed at, in the order they run
-/// down it: what each copies, and where it starts and ends measured from the
-/// top of the column.
-///
-/// A field's name and the value under it are one stretch, being one thing to
-/// point at and one row to copy; a heading is one on its own, and does not
-/// take in the fields standing under it — a click on a field would otherwise
-/// have two answers.
-fn blocks(column: &Column) -> Vec<(Copyable, f32, f32)> {
-    let mut blocks: Vec<(Copyable, f32, f32)> = Vec::new();
-    for row in &column.rows {
-        match blocks.last_mut() {
-            Some((copies, _, bottom)) if *copies == row.copies => *bottom = row.y + row.height,
-            _ => blocks.push((row.copies, row.y, row.y + row.height)),
-        }
-    }
-    blocks
-}
-
 /// Where the panel goes: down the right of `content`, starting under the
 /// histogram when that is showing as well and at the top of the content when
 /// it is not — the order the two toggles are stacked in.
@@ -298,360 +238,246 @@ pub fn panel(content: Rect, show_histogram: bool) -> Option<Rect> {
     ))
 }
 
-/// The panel's header: the hint, and the button that copies the whole column
-/// right-justified beside it.
-///
-/// The button is placed first and the hint takes what is left, wrapping into
-/// it. The button has a size it must be to be pressed and the hint is words,
-/// which set on two lines as readily as on one — so where the two will not
-/// share a line it is the words that give.
-struct Header {
-    /// The strip both of them take at the top of the panel.
-    strip: Rect,
-    hint: Rect,
-    button: Rect,
-}
-
-fn header(text: &mut dyn TextMeasure, view: Rect) -> Header {
-    let width = chip_width(text, Copyable::All).min(view.width);
-    let left = view.right() - width;
-    let hint_width = (left - view.x - CHIP_GAP).max(1.0);
-    let hint_height = text.measure_wrapped(HINT, LABEL_SIZE, hint_width)[1];
-    let height = hint_height.max(CHIP_HEIGHT);
-    let centered = |own: f32| (view.y + (height - own) / 2.0).round();
-    Header {
-        strip: Rect::new(view.x, view.y, view.width, height),
-        hint: Rect::new(view.x, centered(hint_height), hint_width, hint_height),
-        button: Rect::new(left, centered(CHIP_HEIGHT), width, CHIP_HEIGHT),
-    }
-}
-
-/// The panel's two parts: the header, which stays where it is, and the strip
-/// the column scrolls in under it.
-///
-/// The header does not scroll — it is the panel's own furniture, and a button
-/// that wandered off the top of the panel could not be pressed twice running
-/// — so everything about the column is measured, clipped and hit-tested
-/// against the second of these rather than against the whole panel.
-fn parts(text: &mut dyn TextMeasure, panel: Rect) -> (Header, Rect) {
-    let view = panel.inset(PANEL_INSET, PANEL_INSET);
-    let header = header(text, view);
-    let top = header.strip.bottom() + HEADER_GAP;
-    let column = Rect::new(view.x, top, view.width, (view.bottom() - top).max(0.0));
-    (header, column)
-}
-
-/// How far the column may be scrolled before its last line is at the bottom
-/// of the panel: zero when it all fits, or when there is no panel.
-///
-/// The application clamps the scroll against this as the wheel turns, so that
-/// a spin past the end does not leave the panel having to be wound back
-/// through nothing.
-pub fn max_scroll(text: &mut dyn TextMeasure, current: &Current, panel: Rect) -> f32 {
-    let (_, view) = parts(text, panel);
-    (column(text, &contents(current), view.width).height - view.height).max(0.0)
-}
-
-/// What clicking at `point` would copy, `point` being in the logical pixels
-/// the interface is laid out in and the panel being scrolled by `scroll`.
-///
-/// `None` where the pointer is on the panel but on none of it that copies:
-/// the hint, the scrollbar's gutter, or the space under the last line.
-pub fn copyable_at(
-    text: &mut dyn TextMeasure,
-    current: &Current,
-    panel: Rect,
-    scroll: f32,
-    point: [f32; 2],
-) -> Option<Copyable> {
-    let (header, view) = parts(text, panel);
-    if header.button.contains(point) {
-        return Some(Copyable::All);
-    }
-    // The gutter is the scrollbar's, and a press there is a press on the
-    // scrollbar however far down the column it happens to fall.
-    let clip = Rect::new(view.x, view.y, view.width - SCROLLBAR_GUTTER, view.height);
-    if !clip.contains(point) {
-        return None;
-    }
-    let column = column(text, &contents(current), view.width);
-    let scroll = scroll.clamp(0.0, (column.height - view.height).max(0.0));
-    let at = point[1] - view.y + scroll;
-    blocks(&column)
-        .into_iter()
-        .find(|(_, top, bottom)| at >= *top && at < *bottom)
-        .map(|(copies, ..)| copies)
-}
-
-/// How far the column moves for each logical pixel a drag travels, the drag
-/// being of the scrollbar's thumb rather than of the words: a thumb that
-/// crosses its track in a short distance carries a long column past in that
-/// same distance, so the words run faster than the pointer.
-///
-/// One where there is nothing to scroll and so no thumb to measure: the
-/// scroll is clamped against the overflow in any case, so a column that all
-/// fits stays where it is whatever the drag is multiplied by.
-pub fn scroll_per_drag(text: &mut dyn TextMeasure, current: &Current, panel: Rect) -> f32 {
-    let (_, view) = parts(text, panel);
-    let column = column(text, &contents(current), view.width);
-    let overflow = (column.height - view.height).max(0.0);
-    let travel = thumb(view.height, column.height).1;
-    if overflow <= 0.0 || travel <= 0.0 {
-        return 1.0;
-    }
-    overflow / travel
-}
-
-/// The hairline parting a section from the one before it, given where that
-/// section's heading landed: across the column, in the middle of the space
-/// above the heading, so that the gap reads as belonging to neither section
-/// more than the other.
-///
-/// `None` for a line that would fall outside the panel. A rule is one pixel
-/// and cannot be drawn half, so unlike the words — which slide under the
-/// panel's edge — it is either on screen or it is not.
-fn rule(y: f32, clip: Rect) -> Option<Rect> {
-    let rule = Rect::new(
-        clip.x,
-        (y - SECTION_GAP / 2.0).round(),
-        clip.width,
-        RULE_WIDTH,
-    );
-    (rule.y >= clip.y && rule.bottom() <= clip.bottom()).then_some(rule)
-}
-
-/// The scrollbar's thumb: how tall it is, and how far down the track it
-/// travels between the top of the column and the end of it. Long columns
-/// stop shortening it at [`THUMB_MIN`], which is why the two are not simply
-/// proportional to what the panel shows.
-fn thumb(view_height: f32, column_height: f32) -> (f32, f32) {
-    let height = (view_height * (view_height / column_height)).max(THUMB_MIN);
-    (height, (view_height - height).max(0.0))
-}
-
-/// How wide the button for `copies` comes out: its mark, whatever label goes
+/// The width of the button for `copies`: its mark, whatever label goes
 /// before it, and what is kept clear around them.
-fn chip_width(text: &mut dyn TextMeasure, copies: Copyable) -> f32 {
+fn chip_width(ui: &egui::Ui, copies: Copyable) -> f32 {
     let label = copies.label().map_or(0.0, |label| {
-        text.measure_text(label, LABEL_SIZE)[0] + CHIP_GAP
+        measure(ui, label) * LABEL_SIZE / TEXT_SIZE + CHIP_GAP
     });
     (2.0 * CHIP_PADDING + label + COPY_ICON).round()
 }
 
-/// A copy button: its label, and after it the mark for the two sheets a copy
-/// makes of one.
+/// Paints a copy button in `rect`: its label, and after it the mark for the
+/// two sheets a copy makes of one.
 ///
 /// On opaque ground rather than the panel's own, because the one in the
 /// column is drawn over the words it would copy and they must not show
 /// through it; and outlined, because ground the color of the panel it sits
 /// on would otherwise leave it no edge.
-fn chip(
-    frame: &mut UiFrame,
-    text: &mut dyn TextMeasure,
-    rect: Rect,
-    copies: Copyable,
-    hover: bool,
-    theme: &Theme,
-) {
-    let (edge, ink) = if hover {
-        (theme.accent, theme.text_primary)
+fn chip(pass: &Pass, ui: &egui::Ui, rect: egui::Rect, copies: Copyable, hover: bool) {
+    let theme = pass.theme;
+    let (edge, ink): (egui::Color32, egui::Color32) = if hover {
+        (theme.accent.into(), theme.text_primary.into())
     } else {
-        (theme.border, theme.text_dim)
+        (theme.border.into(), theme.text_dim.into())
     };
-    frame.rounded_rect(rect, CELL_RADIUS, theme.bar_background);
-    outline(frame, rect, RULE_WIDTH, edge);
+    let ground: egui::Color32 = theme.bar_background.into();
+    let painter = ui.painter();
+    painter.rect_filled(rect, TOGGLE_RADIUS, ground);
+    painter.rect_stroke(
+        rect,
+        TOGGLE_RADIUS,
+        egui::Stroke::new(RULE_WIDTH, edge),
+        StrokeKind::Inside,
+    );
 
     // Centered as one, so that a button wearing only the mark has it in the
     // middle rather than pushed to the end a label would have started at.
-    let label = copies
-        .label()
-        .map(|label| (label, text.measure_text(label, LABEL_SIZE)[0]));
-    let held = label.map_or(0.0, |(_, width)| width + CHIP_GAP) + COPY_ICON;
-    let x = rect.x + ((rect.width - held) / 2.0).round();
-    if let Some((label, _)) = label {
-        frame.text(
-            [x, text_top(frame, text, rect, LABEL_SIZE)],
-            LABEL_SIZE,
-            ink,
-            label,
-        );
+    let font = egui::FontId::proportional(LABEL_SIZE);
+    let label = copies.label().map(|label| {
+        let galley = ui
+            .ctx()
+            .fonts_mut(|fonts| fonts.layout_no_wrap(label.to_string(), font.clone(), ink));
+        (galley.size().x, galley)
+    });
+    let held = label.as_ref().map_or(0.0, |(width, _)| width + CHIP_GAP) + COPY_ICON;
+    let x = rect.min.x + ((rect.width() - held) / 2.0).round();
+    if let Some((_, galley)) = &label {
+        let at = pos2(x, rect.center().y - galley.size().y / 2.0);
+        painter.galley(at, galley.clone(), ink);
     }
     // The chip's own ground, which is opaque, is what the sheet in front is
     // knocked out of: the mark has to read as one sheet over another rather
     // than as a lattice, and a wash would show the sheet behind through it.
-    let held = Rect::new(
-        x + label.map_or(0.0, |(_, width)| width + CHIP_GAP),
-        rect.y,
-        COPY_ICON,
-        rect.height,
+    let mark = egui::Rect::from_min_size(
+        pos2(
+            x + label.as_ref().map_or(0.0, |(width, _)| width + CHIP_GAP),
+            rect.min.y,
+        ),
+        vec2(COPY_ICON, rect.height()),
     );
-    icon::draw(
-        frame,
+    icon::paint(
+        painter,
         icon::COPY,
-        icon::fit(frame, held, COPY_ICON),
+        icon::square(icon::Grid::new(ui.pixels_per_point()), mark, COPY_ICON),
         ink,
-        theme.bar_background,
+        ground,
     );
 }
 
-/// Draws the panel: the column scrolled by [`Panels::info_scroll`], with a
-/// copy button on whatever [`Panels::info_hover`] says the pointer is over.
-pub(super) fn draw(
-    frame: &mut UiFrame,
-    text: &mut dyn TextMeasure,
-    current: &Current,
-    panels: &Panels,
-    content: Rect,
-    theme: &Theme,
-) {
-    let (scroll, hover) = (panels.info_scroll, panels.info_hover);
-    let Some(panel) = panel(content, panels.show_histogram) else {
+/// The one copy button that is always on screen, at the head of the panel:
+/// it says what it would take, since the header has not yet said that a
+/// click copies.
+fn copy_all(pass: &mut Pass, ui: &mut egui::Ui) {
+    let width = chip_width(ui, Copyable::All);
+    let (rect, response) = ui.allocate_exact_size(vec2(width, CHIP_HEIGHT), Sense::CLICK);
+    chip(pass, ui, rect, Copyable::All, response.hovered());
+    let control = Control::Facts(Copyable::All);
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, control.label()));
+    let response = pass.tooltip(response, Tip::Control(control), true);
+    if response.clicked() {
+        pass.press(control);
+    }
+}
+
+/// A hairline across the column, on the device's grid.
+fn rule(pass: &Pass, ui: &mut egui::Ui, width: f32) {
+    let grid = icon::Grid::new(ui.pixels_per_point());
+    let edge = grid.line_width(RULE_WIDTH);
+    let (rect, _) = ui.allocate_exact_size(vec2(width, edge), Sense::HOVER);
+    ui.painter().rect_filled(
+        egui::Rect::from_min_size(rect.min, vec2(width, edge)),
+        0.0,
+        pass.theme.border,
+    );
+}
+
+/// Draws the panel: the header, and under it the column of everything the
+/// file has to say, scrolled by egui and read out by a click.
+pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, content: Rect) {
+    let Some(panel) = panel(content, pass.panels.show_histogram) else {
         return;
     };
-    frame.rounded_rect(panel, PANEL_RADIUS, theme.panel_background);
+    let theme = pass.theme;
+    let area = egui::Rect::from_min_size(pos2(panel.x, panel.y), vec2(panel.width, panel.height));
+    egui::Area::new(egui::Id::new("info"))
+        .order(egui::Order::Middle)
+        .fixed_pos(area.min)
+        .interactable(true)
+        .show(ui.ctx(), |ui| {
+            egui::Frame::NONE
+                .fill(theme.panel_background.into())
+                .corner_radius(PANEL_RADIUS)
+                .inner_margin(egui::Margin::same(PANEL_INSET as i8))
+                .show(ui, |ui| {
+                    let inside = area.size() - Vec2::splat(2.0 * PANEL_INSET);
+                    ui.set_min_size(inside);
+                    ui.set_max_size(inside);
+                    ui.spacing_mut().item_spacing = Vec2::ZERO;
 
-    let (header, view) = parts(text, panel);
-    frame.text_wrapped(
-        [header.hint.x, header.hint.y],
-        LABEL_SIZE,
-        theme.text_dim,
-        header.hint.width,
-        header.hint,
-        HINT.to_string(),
-    );
-    chip(
-        frame,
-        text,
-        header.button,
-        Copyable::All,
-        hover == Some(Copyable::All),
-        theme,
-    );
-    // A hairline between the header and the column, which says that the
-    // column runs on under the header rather than stopping short of it.
-    frame.hairline(
-        Rect::new(
-            view.x,
-            (view.y - HEADER_GAP / 2.0).round(),
-            view.width - SCROLLBAR_GUTTER,
-            RULE_WIDTH,
-        ),
-        theme.border,
-    );
+                    // The header: the button first, and the hint takes what
+                    // is left, wrapping into it. The button has a size it
+                    // must be to be pressed and the hint is words, which set
+                    // on two lines as readily as on one.
+                    ui.horizontal(|ui| {
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            copy_all(pass, ui);
+                            ui.add_space(CHIP_GAP);
+                            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                                ui.add(
+                                    Label::new(
+                                        RichText::new(HINT).size(LABEL_SIZE).color(theme.text_dim),
+                                    )
+                                    .wrap(),
+                                );
+                            });
+                        });
+                    });
+                    // A hairline between the header and the column, which
+                    // says that the column runs on under the header rather
+                    // than stopping short of it.
+                    ui.add_space((HEADER_GAP - RULE_WIDTH) / 2.0);
+                    rule(pass, ui, inside.x - SCROLLBAR_GUTTER);
+                    ui.add_space((HEADER_GAP - RULE_WIDTH) / 2.0);
 
-    let column = column(text, &contents(current), view.width);
-    // Clamped here as well as where the wheel sets it: the window can be
-    // resized under a scrolled panel, and the frame drawn from a scroll that
-    // is now past the end should still show the end.
-    let overflow = (column.height - view.height).max(0.0);
-    let scroll = scroll.clamp(0.0, overflow);
-
-    // Everything is clipped to the column rather than to the panel, so a line
-    // slides under the inset edge instead of touching the rounded corner.
-    let clip = Rect::new(view.x, view.y, view.width - SCROLLBAR_GUTTER, view.height);
-    for (index, row) in column.rows.iter().enumerate() {
-        let y = view.y + row.y - scroll;
-        // The first heading opens the column and has nothing above it to be
-        // parted from; every one after it is a section starting, which is
-        // what a reader scrolling this column is looking for.
-        if row.kind == Kind::Heading
-            && index > 0
-            && let Some(rule) = rule(y, clip)
-        {
-            frame.hairline(rule, theme.border);
-        }
-        // Cheap enough to hand every row to the text layer, which clips them,
-        // but a long column would then be reshaped in full every frame.
-        if y + row.height < view.y || y > view.bottom() {
-            continue;
-        }
-        frame.text_wrapped(
-            [view.x, y],
-            row.kind.style().0,
-            row.kind.ink(theme),
-            clip.width,
-            clip,
-            row.text.clone(),
-        );
-    }
-
-    if overflow > 0.0 {
-        let track = Rect::new(
-            view.right() - SCROLLBAR_WIDTH,
-            view.y,
-            SCROLLBAR_WIDTH,
-            view.height,
-        );
-        frame.rounded_rect(track, SCROLLBAR_WIDTH / 2.0, theme.border);
-        let (height, travel) = thumb(view.height, column.height);
-        frame.rounded_rect(
-            Rect::new(
-                track.x,
-                view.y + travel * (scroll / overflow),
-                SCROLLBAR_WIDTH,
-                height,
-            ),
-            SCROLLBAR_WIDTH / 2.0,
-            theme.accent,
-        );
-    }
-
-    // The button saying what the stretch under the pointer would copy, over
-    // the words rather than beside them: the column is as wide as the panel
-    // lets it be and there is no margin to stand one in. It costs nothing to
-    // read past, being on screen only while it is being pointed at.
-    //
-    // On the layer above, so that it covers those words instead of being
-    // covered by them, and dropped rather than drawn half where the stretch
-    // it belongs to is at the edge of the panel.
-    if view.height >= CHIP_HEIGHT
-        && let Some(copies) = hover.filter(|copies| *copies != Copyable::All)
-        && let Some((_, top, bottom)) = blocks(&column).into_iter().find(|(c, ..)| *c == copies)
-    {
-        let width = chip_width(text, copies);
-        let middle = view.y + (top + bottom) / 2.0 - scroll;
-        // Centered on what it would copy, but nudged back inside the panel
-        // where that would hang it over an edge — which the first heading,
-        // being a single line at the very top of the column, otherwise does.
-        // A button belongs to the thing it is beside, and half a button at
-        // the edge of a panel belongs to nothing.
-        let y = (middle - CHIP_HEIGHT / 2.0)
-            .round()
-            .clamp(view.y, view.bottom() - CHIP_HEIGHT);
-        let rect = Rect::new(clip.right() - width, y, width, CHIP_HEIGHT);
-        frame.over(|frame| chip(frame, text, rect, copies, true, theme));
-    }
+                    column(pass, ui, current);
+                });
+        });
 }
 
-/// The whole column, laid out into a panel `width` wide.
+/// The column, in a scroll area with the bar down the panel's inner edge and
+/// a gutter kept clear for it whether or not there is anything to scroll.
 ///
-/// Nothing is decided here beyond where the words go: which sections there
-/// are and what stands under them is [`contents`]'s, and the two agree about
-/// what a [`Copyable::Fact`] index counts because the counting happens once,
-/// here, over the list that one built.
-fn column(text: &mut dyn TextMeasure, contents: &Contents, width: f32) -> Column {
-    let mut column = Column {
-        rows: Vec::new(),
-        height: 0.0,
-        width: (width - SCROLLBAR_GUTTER).max(1.0),
-    };
+/// A different picture is a different column of words about it, and it is
+/// read from the top: the scroll area is the file's own, so stepping to
+/// another file starts at the top of its column rather than however far
+/// down the last one had been read.
+fn column(pass: &mut Pass, ui: &mut egui::Ui, current: &Current) {
+    let contents = contents(current);
+    ui.spacing_mut().scroll.bar_inner_margin = SCROLLBAR_GUTTER - SCROLLBAR_WIDTH;
+    egui::ScrollArea::vertical()
+        .id_salt(("info column", current.file.path.as_str()))
+        .auto_shrink(false)
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing = Vec2::ZERO;
+            let width = ui.available_width();
+            let mut index = 0;
+            for (section, (name, facts)) in contents.sections.iter().enumerate() {
+                // The first heading opens the column and has nothing above
+                // it to be parted from; every one after it is a section
+                // starting, parted from the last by a hairline through the
+                // middle of the space above it, so the gap reads as
+                // belonging to neither section more than the other.
+                if section > 0 {
+                    ui.add_space((SECTION_GAP - RULE_WIDTH) / 2.0);
+                    rule(pass, ui, width);
+                    ui.add_space((SECTION_GAP - RULE_WIDTH) / 2.0);
+                }
+                block(pass, ui, Copyable::Section(section), width, |ui| {
+                    words(ui, Kind::Heading, name, pass.theme);
+                });
+                for fact in facts {
+                    ui.add_space(FIELD_GAP);
+                    // A field's name and the value under it are one block,
+                    // being one thing to point at and one row to copy.
+                    block(pass, ui, Copyable::Fact(index), width, |ui| {
+                        words(ui, Kind::Label, &fact.name, pass.theme);
+                        ui.add_space(LABEL_GAP);
+                        words(ui, Kind::Value, &fact.value, pass.theme);
+                    });
+                    index += 1;
+                }
+            }
+        });
+}
 
-    let mut index = 0;
-    for (section, (name, facts)) in contents.sections.iter().enumerate() {
-        column.add(
-            text,
-            Kind::Heading,
-            name.to_string(),
-            Copyable::Section(section),
+/// One run of words in the column, broken to its width.
+fn words(ui: &mut egui::Ui, kind: Kind, text: &str, theme: &Theme) {
+    ui.add(Label::new(RichText::new(text).size(kind.size()).color(kind.ink(theme))).wrap());
+}
+
+/// A stretch of the column that can be pointed at: what a click on it
+/// copies. While the pointer is on it, the button saying so appears over the
+/// words rather than beside them — the column is as wide as the panel lets
+/// it be and there is no margin to stand one in — nudged back inside the
+/// panel where centering it on the stretch would hang it over an edge.
+fn block(
+    pass: &mut Pass,
+    ui: &mut egui::Ui,
+    copies: Copyable,
+    width: f32,
+    add: impl FnOnce(&mut egui::Ui),
+) {
+    let control = Control::Facts(copies);
+    let response = ui
+        .scope_builder(UiBuilder::new().sense(Sense::CLICK), |ui| {
+            ui.set_width(width);
+            add(ui);
+        })
+        .response;
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, control.label()));
+    let rect = response.rect;
+    if ui.rect_contains_pointer(rect) && ui.clip_rect().height() >= CHIP_HEIGHT {
+        let chip_width = chip_width(ui, copies);
+        let clip = ui.clip_rect();
+        let y = (rect.center().y - CHIP_HEIGHT / 2.0)
+            .round()
+            .clamp(clip.min.y, clip.max.y - CHIP_HEIGHT);
+        chip(
+            pass,
+            ui,
+            egui::Rect::from_min_size(
+                pos2(rect.max.x - chip_width, y),
+                vec2(chip_width, CHIP_HEIGHT),
+            ),
+            copies,
+            true,
         );
-        for fact in facts {
-            let copies = Copyable::Fact(index);
-            column.add(text, Kind::Label, fact.name.clone(), copies);
-            column.add(text, Kind::Value, fact.value.clone(), copies);
-            index += 1;
-        }
     }
-    column
+    if response.clicked() {
+        pass.press(control);
+    }
 }
 
 /// Everything the panel has to say, in the order it says it: the file on
@@ -870,7 +696,6 @@ mod tests {
     use crate::image::display::{Display, Headroom, Startup};
     use crate::image::exif::{Entry, Exif, Section};
     use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples, Stats};
-    use crate::ui::Monospace;
 
     /// A window's worth of content area, for the panel to be placed in.
     const CONTENT: Rect = Rect {
@@ -934,20 +759,19 @@ mod tests {
         }
     }
 
-    /// A panel with room for a column `height` tall and the header over it,
-    /// so that there is nothing left to scroll.
-    fn roomy(height: f32) -> Rect {
-        let inset = 2.0 * PANEL_INSET;
-        let panel = Rect::new(0.0, 0.0, PANEL_WIDTH, height + inset);
-        let taken = parts(&mut Monospace, panel).1.y - panel.y;
-        Rect::new(0.0, 0.0, PANEL_WIDTH, height + taken + PANEL_INSET)
-    }
-
-    fn written(current: &Current, width: f32) -> Vec<String> {
-        column(&mut Monospace, &contents(current), width)
-            .rows
-            .into_iter()
-            .map(|row| row.text)
+    /// Every row of the column, in reading order: a section's name, then
+    /// each of its fields as its name and its value.
+    fn written(current: &Current) -> Vec<String> {
+        contents(current)
+            .sections
+            .iter()
+            .flat_map(|(name, facts)| {
+                std::iter::once(name.to_string()).chain(
+                    facts
+                        .iter()
+                        .flat_map(|fact| [fact.name.clone(), fact.value.clone()]),
+                )
+            })
             .collect()
     }
 
@@ -956,7 +780,7 @@ mod tests {
     /// metadata's own groups after both.
     #[test]
     fn the_column_says_what_the_file_is() {
-        let written = written(&current(), 300.0);
+        let written = written(&current());
         for expected in [
             "kingfisher.png",
             "/home/reader/pictures/kingfisher.png",
@@ -994,7 +818,7 @@ mod tests {
     fn a_file_with_no_metadata_is_all_file_and_no_headings_for_the_rest() {
         let mut current = current();
         current.exif = Exif::default();
-        let written = written(&current, 300.0);
+        let written = written(&current);
         assert!(written.contains(&"File".to_string()), "{written:?}");
         assert!(written.contains(&"Image".to_string()), "{written:?}");
         assert!(!written.contains(&"Camera".to_string()), "{written:?}");
@@ -1012,7 +836,7 @@ mod tests {
         current.file.bytes = None;
         current.file.modified = None;
         current.file.reader = None;
-        let written = written(&current, 300.0);
+        let written = written(&current);
         for absent in [
             "Size",
             "Modified",
@@ -1086,129 +910,6 @@ mod tests {
         );
         assert_eq!(quoted("a \"quoted\" word"), "\"a \"\"quoted\"\" word\"");
         assert_eq!(quoted("two\nlines"), "\"two\nlines\"");
-    }
-
-    /// What the pointer is over is what a click there would copy: the button
-    /// at the top the whole panel, a heading its section, and a name or the
-    /// value under it the one field the two of them are.
-    #[test]
-    fn what_the_pointer_is_over_is_what_a_click_would_copy() {
-        let current = current();
-        let panel = panel(CONTENT, false).expect("room in a 900x640 content area");
-        let (header, view) = parts(&mut Monospace, panel);
-        let at = |x: f32, y: f32| copyable_at(&mut Monospace, &current, panel, 0.0, [x, y]);
-
-        assert_eq!(
-            at(header.button.x + 1.0, header.button.y + 1.0),
-            Some(Copyable::All)
-        );
-        // The hint beside it is an instruction rather than a fact, and copies
-        // nothing.
-        assert_eq!(at(header.hint.x + 1.0, header.hint.y + 1.0), None);
-
-        let column = column(&mut Monospace, &contents(&current), view.width);
-        let blocks = blocks(&column);
-        assert_eq!(blocks[0].0, Copyable::Section(0), "the first heading");
-        assert_eq!(blocks[1].0, Copyable::Fact(0), "the field under it");
-
-        for (copies, top, bottom) in blocks {
-            let middle = view.y + (top + bottom) / 2.0;
-            if middle > view.bottom() {
-                break;
-            }
-            assert_eq!(at(view.x + 1.0, middle), Some(copies));
-            // The gutter is the scrollbar's, however far down the column it
-            // falls: a press there takes hold of the thumb.
-            assert_eq!(at(view.right() - 1.0, middle), None);
-        }
-
-        // Above the column is the header, and below the last line is nothing.
-        assert_eq!(at(view.x + 1.0, view.y - 1.0), None);
-        assert_eq!(at(view.x + 1.0, view.bottom() + 1.0), None);
-    }
-
-    /// The hairline that parts two sections sits in the space above the
-    /// heading, belonging to neither section, and is dropped rather than
-    /// drawn half when that space falls off the end of the panel.
-    #[test]
-    fn a_section_is_parted_from_the_one_before_it_by_a_line() {
-        let clip = Rect::new(10.0, 100.0, 200.0, 300.0);
-        let heading = 240.0;
-        let line = rule(heading, clip).expect("a heading in the middle of the panel");
-        assert!(line.bottom() <= heading && line.y >= heading - SECTION_GAP);
-        assert_eq!(line.x, clip.x, "across the whole column");
-        assert_eq!(line.width, clip.width);
-        assert_eq!(line.height, RULE_WIDTH, "a hairline, not a band");
-
-        // A heading scrolled to the very top of the panel has taken its gap
-        // off the top with it, and there is nothing left to draw a line in.
-        // The same at the bottom — though a heading only just past the end
-        // still has its gap on screen, and is announced by the line before
-        // the words themselves come up.
-        assert_eq!(rule(clip.y, clip), None);
-        assert!(rule(clip.bottom() + 1.0, clip).is_some());
-        assert_eq!(rule(clip.bottom() + SECTION_GAP, clip), None);
-    }
-
-    /// What the wheel is clamped against: enough to bring the last line up to
-    /// the bottom of the panel, and not a pixel more.
-    #[test]
-    fn the_column_scrolls_exactly_as_far_as_it_overflows() {
-        let current = current();
-        let panel = panel(CONTENT, false).expect("room in a 900x640 content area");
-        let (_, view) = parts(&mut Monospace, panel);
-        let height = column(&mut Monospace, &contents(&current), view.width).height;
-
-        assert!(height > view.height, "a photograph's metadata overflows");
-        assert_eq!(
-            max_scroll(&mut Monospace, &current, panel),
-            height - view.height
-        );
-
-        // Rows are stacked in the order they were added, each below the last
-        // by exactly the gap its kind asks for — a value included, which is
-        // pulled a pixel up into its label's line box rather than set below
-        // it, that pixel being leading and not ink.
-        let rows = column(&mut Monospace, &contents(&current), view.width).rows;
-        for pair in rows.windows(2) {
-            let gap = pair[1].kind.style().1;
-            assert_eq!(pair[1].y, pair[0].y + pair[0].height + gap);
-            assert!(pair[0].y < pair[1].y, "rows go down the column");
-        }
-        assert_eq!(rows[0].y, 0.0, "the column starts at the top of the panel");
-
-        // Nowhere to scroll to when the panel is taller than its column.
-        assert_eq!(max_scroll(&mut Monospace, &current, roomy(height)), 0.0);
-    }
-
-    /// What a drag of the scrollbar is multiplied by: dragging the thumb the
-    /// length of its track scrolls the column from its first line to its
-    /// last, however much longer than the track the column is.
-    #[test]
-    fn dragging_the_thumb_across_its_track_scrolls_the_whole_column() {
-        let current = current();
-        let panel = panel(CONTENT, false).expect("room in a 900x640 content area");
-        let (_, view) = parts(&mut Monospace, panel);
-        let height = column(&mut Monospace, &contents(&current), view.width).height;
-
-        let per_pixel = scroll_per_drag(&mut Monospace, &current, panel);
-        let travel = thumb(view.height, height).1;
-        assert!(travel > 0.0, "a thumb with somewhere to go");
-        assert!(
-            (per_pixel * travel - max_scroll(&mut Monospace, &current, panel)).abs() < 0.01,
-            "{per_pixel} per pixel over {travel} does not cross the column"
-        );
-        assert!(
-            per_pixel > 1.0,
-            "a column longer than its panel outruns the pointer"
-        );
-
-        // Nothing to scroll: the drag is left as it comes, and the clamp on
-        // the scroll is what keeps the column still.
-        assert_eq!(
-            scroll_per_drag(&mut Monospace, &current, roomy(height)),
-            1.0
-        );
     }
 
     /// The panel keeps out of the way of the two widgets it shares the
