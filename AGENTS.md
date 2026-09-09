@@ -28,7 +28,8 @@ ui/            lays each frame's interface out with egui; no wgpu or winit impor
                  interface, with icon_button(), button_ink() and tooltip(); content_area(),
                  image_viewport() — pure geometry, worked out before egui lays anything out
   style.rs       Theme's roles as egui's Style and Visuals; Color into Color32
-  fonts.rs       the desktop's sans, bold and monospace faces, found through fontdb
+  fonts.rs       the desktop's sans, bold and monospace faces, as fontconfig resolves
+                 them, each with its capitals centered in egui's rows
   rect.rs        Rect, the logical-pixel rectangle the panels are placed by
   histogram.rs / minimap.rs / grid.rs   one widget each, drawn with egui's painter
   icon.rs        the marks a button wears: Lucide's geometry on its own
