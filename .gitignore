@@ -1,1 +1,7 @@
 /target
+
+# makepkg's leavings from building the package in packaging/
+/packaging/pkg/
+/packaging/src/
+/packaging/*.pkg.tar.zst
+/packaging/*.tar.gz
