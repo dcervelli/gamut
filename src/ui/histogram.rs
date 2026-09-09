@@ -1,18 +1,22 @@
 //! The floating histogram panel.
 
+use egui::{Align2, Color32, FontId, Sense, Stroke, WidgetInfo, WidgetType, pos2, vec2};
+
 use crate::image::display::{AutoWindow, Colormap, Display, ToneMap};
 use crate::image::stats::BINS;
-use crate::render::{Blend, Color, Rect, TextMeasure, UiFrame};
+use crate::render::Color;
+
+use super::Rect;
 use crate::theme::Theme;
 
-use super::buttons::{ICON_SIDE, button_ink, centered_text, outline, text_top};
-use super::chrome::BUTTON_SIZE;
+use super::chrome::{BUTTON_SIZE, ICON_SIDE, Pass};
 use super::icon::{self, Mark};
+use super::minimap::outline;
 use super::status::format_window;
-use super::tooltip::{Opens, Tip, Tips};
+use super::tooltip::Tip;
 use super::{
-    BECOMES, Current, FrameInput, PADDING, PANEL_INSET, PANEL_RADIUS, PANEL_WIDTH, Panels,
-    TEXT_SIZE, Widget, capitalized,
+    BECOMES, Control, Current, PADDING, PANEL_INSET, PANEL_RADIUS, PANEL_WIDTH, TEXT_SIZE,
+    capitalized,
 };
 
 /// The panel: as wide as anything else floating over the content area, and
@@ -158,11 +162,11 @@ pub const WINDOWS: [(&str, Option<AutoWindow>); 4] = [
 /// They move the window that is there rather than putting it on one of the
 /// rules below them, which is why they are on the line the window is read
 /// out on and not in that row.
-const NUDGES: [(Widget, &[Mark]); 4] = [
-    (Widget::WindowDown, icon::CHEVRONS_LEFT),
-    (Widget::WindowNarrow, icon::CHEVRONS_RIGHT_LEFT),
-    (Widget::WindowWiden, icon::CHEVRONS_LEFT_RIGHT),
-    (Widget::WindowUp, icon::CHEVRONS_RIGHT),
+const NUDGES: [(Control, &[Mark]); 4] = [
+    (Control::WindowDown, icon::CHEVRONS_LEFT),
+    (Control::WindowNarrow, icon::CHEVRONS_RIGHT_LEFT),
+    (Control::WindowWiden, icon::CHEVRONS_LEFT_RIGHT),
+    (Control::WindowUp, icon::CHEVRONS_RIGHT),
 ];
 
 /// The rows of controls under the band: how tall a row is, and the two gaps —
@@ -356,9 +360,9 @@ fn plot_area(panel: Rect, gray: bool) -> Rect {
 /// with one channel has no color planes to toggle, and the two that remain
 /// close the gap up. Hiding rather than dimming is the panel's rule for both
 /// of these — see [`swatch_button`] for the other one.
-fn toolbar(gray: bool) -> &'static [Widget] {
-    const GRAY: [Widget; 3] = [Widget::Luma, Widget::Log, Widget::Reset];
-    const COLOR: [Widget; 4] = [Widget::Luma, Widget::Planes, Widget::Log, Widget::Reset];
+fn toolbar(gray: bool) -> &'static [Control] {
+    const GRAY: [Control; 3] = [Control::Luma, Control::Log, Control::Reset];
+    const COLOR: [Control; 4] = [Control::Luma, Control::Planes, Control::Log, Control::Reset];
     if gray { &GRAY } else { &COLOR }
 }
 
@@ -508,16 +512,16 @@ impl Rows {
 /// Beside the geometry rather than inside the drawing so that the test can
 /// ask for the same words the frame is set with: a label the layout was not
 /// measured against is a label that can outgrow its button.
-fn row_label(widget: Widget, display: &Display) -> Option<(String, bool)> {
+fn row_label(widget: Control, display: &Display) -> Option<(String, bool)> {
     Some(match widget {
         // The step's own worth, written as it acts: one source for the number
         // on the button and the number the press is worth.
-        Widget::ExposureDown => (stops_label(-EV_STEP), false),
-        Widget::ExposureUp => (stops_label(EV_STEP), false),
-        Widget::Window(index) => (WINDOWS.get(index)?.0.to_string(), false),
+        Control::ExposureDown => (stops_label(-EV_STEP), false),
+        Control::ExposureUp => (stops_label(EV_STEP), false),
+        Control::Window(index) => (WINDOWS.get(index)?.0.to_string(), false),
         // Capitalized, where the bar sets the same word in the middle of a
         // line: a button wears a name, and a name starts with a capital.
-        Widget::Curve(index) => {
+        Control::Curve(index) => {
             let curve = *ToneMap::ALL.get(index)?;
             (capitalized(curve.label()), display.tone_map == curve)
         }
@@ -531,21 +535,21 @@ fn row_label(widget: Widget, display: &Display) -> Option<(String, bool)> {
 /// Every image has all of them: an exposure, a window and a curve are what
 /// the display does to any file whatever, where the two controls the panel
 /// leaves out are about what the file itself holds.
-fn row_buttons(panel: Rect) -> impl Iterator<Item = (Widget, Rect)> {
+fn row_buttons(panel: Rect) -> impl Iterator<Item = (Control, Rect)> {
     let rows = Rows::new(panel);
     let steps = [
-        (Widget::ExposureDown, rows.step(false)),
-        (Widget::ExposureUp, rows.step(true)),
+        (Control::ExposureDown, rows.step(false)),
+        (Control::ExposureUp, rows.step(true)),
     ];
     let windows = (0..WINDOWS.len()).map(move |index| {
         (
-            Widget::Window(index),
+            Control::Window(index),
             share(rows.window, WINDOWS.len(), index),
         )
     });
     let curves = (0..ToneMap::ALL.len()).map(move |index| {
         (
-            Widget::Curve(index),
+            Control::Curve(index),
             share(rows.curve, ToneMap::ALL.len(), index),
         )
     });
@@ -554,70 +558,6 @@ fn row_buttons(panel: Rect) -> impl Iterator<Item = (Widget, Rect)> {
         .enumerate()
         .map(move |(index, (widget, _))| (*widget, share(rows.nudges(), NUDGES.len(), index)));
     steps.into_iter().chain(nudges).chain(windows).chain(curves)
-}
-
-/// Which of the panel's own buttons a point lands on.
-///
-/// Two of them do not apply to every image, and `gray` decides both: a
-/// single-channel image has no color planes to toggle, and a color image is
-/// its own color, so the false colors are what the display leaves out for
-/// it. Neither is drawn where it does not apply, and neither answers here.
-pub fn widget_at(content: Rect, point: [f32; 2], gray: bool) -> Option<Widget> {
-    let panel = panel(content)?;
-    if !panel.contains(point) {
-        return None;
-    }
-    for (index, widget) in toolbar(gray).iter().enumerate() {
-        if toolbar_button(panel, gray, index).contains(point) {
-            return Some(*widget);
-        }
-    }
-    if let Some((widget, _)) = row_buttons(panel).find(|(_, rect)| rect.contains(point)) {
-        return Some(widget);
-    }
-    if !gray {
-        return None;
-    }
-    let bars = plot_area(panel, gray);
-    (0..Colormap::ALL.len())
-        .find(|&index| swatch_button(bars, index).contains(point))
-        .map(Widget::Ramp)
-}
-
-/// Offers every button on the panel to the tooltips, each naming itself into
-/// the plot beside it: a label about the plot should be read without looking
-/// away from the plot, and the panel is wide enough to hold one.
-///
-/// The same rectangles [`widget_at`] answers the pointer with, so that what a
-/// tooltip hangs from is what the pointer found.
-pub(super) fn offer_tips(tips: &mut Tips, content: Rect, gray: bool) {
-    let Some(panel) = panel(content) else {
-        return;
-    };
-    for (index, widget) in toolbar(gray).iter().enumerate() {
-        tips.offer_toward(
-            Tip::Widget(*widget),
-            toolbar_button(panel, gray, index),
-            Opens::Right,
-        );
-    }
-    // Beside themselves rather than under themselves, like the toggles: these
-    // are stacked in rows, and a label opening downwards would cover the row
-    // the pointer is on its way to.
-    for (widget, rect) in row_buttons(panel) {
-        tips.offer_toward(Tip::Widget(widget), rect, Opens::Right);
-    }
-    if !gray {
-        return;
-    }
-    let bars = plot_area(panel, gray);
-    for index in 0..Colormap::ALL.len() {
-        tips.offer_toward(
-            Tip::Widget(Widget::Ramp(index)),
-            swatch_button(bars, index),
-            Opens::Right,
-        );
-    }
 }
 
 /// The band of color under the plot, aligned with the bins so that a cell of
@@ -737,6 +677,63 @@ pub fn marked(
     current.stats.plot.bin_of(&current.image, &sample)
 }
 
+/// An egui rectangle for one of ours.
+fn area(rect: Rect) -> egui::Rect {
+    egui::Rect::from_min_size(pos2(rect.x, rect.y), vec2(rect.width, rect.height))
+}
+
+/// How wide `text` comes out at `size`.
+fn width_of(ui: &egui::Ui, text: &str, size: f32) -> f32 {
+    ui.ctx().fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap(text.to_string(), FontId::proportional(size), Color32::WHITE)
+            .size()
+            .x
+    })
+}
+
+/// The planes a column of the plot is drawn from: which of them stand this
+/// high, as a set. What the color of a stretch of the column is a function of.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Cover {
+    luma: bool,
+    planes: [bool; 3],
+}
+
+/// What a stretch of a column comes out as, with `cover` standing over it:
+/// the plot's ground, the luminance plane laid over that, and the color
+/// planes screened over the lot.
+///
+/// The display list drew the planes as translucent shapes screened over one
+/// another on the GPU; egui has one blend, so the screening is done here, per
+/// stretch of column, which comes to the same picture — the planes are the
+/// primaries on a near-black ground, so two of them give the secondary
+/// between and all three give white, which is the reading a channel
+/// histogram is looked at for.
+fn screened(theme: &Theme, luma_ink: Color, cover: Cover) -> Color32 {
+    let over = |ground: [f32; 3], ink: Color| -> [f32; 3] {
+        let alpha = ink.a as f32 / 255.0;
+        let ink = [ink.r, ink.g, ink.b].map(|channel| channel as f32 / 255.0);
+        [0, 1, 2].map(|c| ground[c] * (1.0 - alpha) + ink[c] * alpha)
+    };
+    let screen = |ground: [f32; 3], ink: Color| -> [f32; 3] {
+        let ink = [ink.r, ink.g, ink.b].map(|channel| channel as f32 / 255.0);
+        [0, 1, 2].map(|c| 1.0 - (1.0 - ground[c]) * (1.0 - ink[c]))
+    };
+    let ground = theme.plot_background;
+    let mut color = [ground.r, ground.g, ground.b].map(|channel| channel as f32 / 255.0);
+    if cover.luma {
+        color = over(color, luma_ink);
+    }
+    for (plane, ink) in cover.planes.into_iter().zip(theme.histogram_planes) {
+        if plane {
+            color = screen(color, ink);
+        }
+    }
+    let [r, g, b] = color.map(|channel| (channel.clamp(0.0, 1.0) * 255.0).round() as u8);
+    Color32::from_rgb(r, g, b)
+}
+
 /// Draws the histogram in the top-right of `content`, the area the panels
 /// leave free — above the information panel, the order the two toggles that
 /// open them are stacked in.
@@ -744,27 +741,44 @@ pub fn marked(
 /// Color images get four planes — red, green, blue and luminance — over the
 /// range their color channels span; gray images keep the single luminance
 /// plane over theirs.
-pub(super) fn draw(
-    frame: &mut UiFrame,
-    text: &mut dyn TextMeasure,
-    current: &Current,
-    input: &FrameInput,
-    panels: &Panels,
-    content: Rect,
-    theme: &Theme,
-) {
+///
+/// The panel is opaque to the pointer: what lands on it belongs to it rather
+/// than to the picture it is floating over.
+pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, content: Rect) {
     let Some(panel) = panel(content) else {
         return;
     };
-    frame.rounded_rect(panel, PANEL_RADIUS, theme.panel_background);
+    let theme = pass.theme;
+    egui::Area::new(egui::Id::new("histogram"))
+        .order(egui::Order::Middle)
+        .fixed_pos(area(panel).min)
+        .interactable(true)
+        .show(ui.ctx(), |ui| {
+            let (_, body) = ui.allocate_exact_size(area(panel).size(), Sense::CLICK | Sense::DRAG);
+            body.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "Histogram panel"));
+            ui.painter()
+                .rect_filled(area(panel), PANEL_RADIUS, theme.panel_background);
+            plot(pass, ui, current, panel, content);
+            controls(pass, ui, current, panel);
+        });
+}
+
+/// The plot itself: the bins, the pointer's rule, the window's ticks, the
+/// band along the foot and the response curve over the lot.
+fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect, content: Rect) {
+    let theme = pass.theme;
+    let panels = pass.panels;
+    let input = pass.input;
+    let painter = ui.painter();
+    let scale = input.scale;
 
     // What applies to this image: the false colors are for a single channel
     // and the color planes are for three, and the panel leaves out whichever
     // the display would ignore rather than drawing it dead.
     let gray = current.image.is_gray();
     let bars = plot_area(panel, gray);
-    frame.rounded_rect(
-        bars.inset(-PLOT_INSET, -PLOT_INSET),
+    painter.rect_filled(
+        area(bars.inset(-PLOT_INSET, -PLOT_INSET)),
         PLOT_RADIUS,
         theme.plot_background,
     );
@@ -773,11 +787,7 @@ pub(super) fn draw(
     // runs as tall as the tallest of them about as often as not, and painting
     // it on top swamps the color the panel exists to show.
     let plotted = &current.stats.plot;
-    let luma: &[[u32; BINS]] = if panels.show_luma {
-        std::slice::from_ref(&plotted.luma)
-    } else {
-        &[]
-    };
+    let luma: Option<&[u32; BINS]> = panels.show_luma.then_some(&plotted.luma);
     let color: &[[u32; BINS]] = match plotted.color.as_ref() {
         Some(planes) if panels.show_planes => planes,
         _ => &[],
@@ -790,6 +800,7 @@ pub(super) fn draw(
     let transfer = current.image.color.transfer;
     let label_size = TEXT_SIZE * 0.85;
     let label_y = panel.y + PANEL_INSET;
+    let font = FontId::proportional(label_size);
 
     // The pointer's readout, in the middle of the line the two ends of the
     // axis are pinned to. Two numbers, because the panel draws two things and
@@ -806,9 +817,6 @@ pub(super) fn draw(
     // the numbers are the ones every other readout quotes; a curve that is
     // straight and a value that is comparable cannot both be had, and the
     // shape is what the plot is for.
-    // Half of what every value comes out as: on a surface with room above
-    // white and no curve on, the response runs past 1, and so does the
-    // readout, since that is what the screen is showing.
     let headroom = input.headroom;
     let marked = marked(current, content, input.cursor, input.pointer);
     let across = marked.map(bin_across);
@@ -817,30 +825,35 @@ pub(super) fn draw(
         let value = transfer.to_linear(axis_min + across * span);
         let mapped = current.display.response(value, headroom).max(0.0);
         let readout = format!("{value:.4}  {BECOMES}  {mapped:.4}");
-        let ends_width = [axis_min, axis_max].map(|end| {
-            text.measure_text(&format!("{:.4}", transfer.to_linear(end)), label_size)[0]
-        });
-        let width = text.measure_text(&readout, label_size)[0];
+        let ends_width = [axis_min, axis_max]
+            .map(|end| width_of(ui, &format!("{:.4}", transfer.to_linear(end)), label_size));
+        let width = width_of(ui, &readout, label_size);
         let (x, fits) = readout_placement(bars, width, ends_width);
         ends_fit = fits;
-        frame.text([x, label_y], label_size, theme.text_primary, readout);
+        painter.text(
+            pos2(x, label_y),
+            Align2::LEFT_TOP,
+            readout,
+            font.clone(),
+            theme.text_primary.into(),
+        );
     }
     if ends_fit {
         // Pinned to the ends of the axis they name rather than set together
         // in the corner: each is the value of the plot directly below it.
-        let high = format!("{:.4}", transfer.to_linear(axis_max));
-        let high_width = text.measure_text(&high, label_size)[0];
-        frame.text(
-            [bars.x, label_y],
-            label_size,
-            theme.text_dim,
+        painter.text(
+            pos2(bars.x, label_y),
+            Align2::LEFT_TOP,
             format!("{:.4}", transfer.to_linear(axis_min)),
+            font.clone(),
+            theme.text_dim.into(),
         );
-        frame.text(
-            [bars.right() - high_width, label_y],
-            label_size,
-            theme.text_dim,
-            high,
+        painter.text(
+            pos2(bars.right(), label_y),
+            Align2::RIGHT_TOP,
+            format!("{:.4}", transfer.to_linear(axis_max)),
+            font.clone(),
+            theme.text_dim.into(),
         );
     }
 
@@ -855,18 +868,6 @@ pub(super) fn draw(
         .max()
         .unwrap_or(1);
     let height_of = |count: u32| bar_fraction(count, peak, panels.log_counts) * bars.height;
-    // One point per bin, at its center, with the ends carried out to the
-    // edges of the plot so the shape fills its width.
-    let curve = |counts: &[u32; BINS]| -> Vec<[f32; 2]> {
-        counts
-            .iter()
-            .enumerate()
-            .map(|(index, &count)| {
-                let x = bars.x + bin_across(index) * bars.width;
-                [x, bars.bottom() - height_of(count)]
-            })
-            .collect()
-    };
 
     // Dimmed only when it is a backdrop; with the color planes off — or on
     // a gray image, which has none — it is the plot.
@@ -875,11 +876,43 @@ pub(super) fn draw(
     } else {
         theme.histogram_luma.with_alpha(HISTOGRAM_LUMA_UNDER)
     };
-    for counts in luma {
-        frame.area(&curve(counts), bars.bottom(), luma_ink, Blend::Over);
-    }
-    for (counts, color) in color.iter().zip(theme.histogram_planes) {
-        frame.area(&curve(counts), bars.bottom(), color, Blend::Screen);
+
+    // One column to a bin — the bins are a logical pixel each, which is what
+    // the panel's width was fixed for — cut into stretches by the heights of
+    // the planes standing in it, each stretch filled with what the planes
+    // over it come to. On the device's grid, like every other mark here.
+    let snap = |value: f32| device(value, scale);
+    let edge = |index: usize| snap(bars.x + bars.width * index as f32 / BINS as f32);
+    for bin in 0..BINS {
+        let (left, right) = (edge(bin), edge(bin + 1));
+        let mut heights: Vec<(f32, usize)> = Vec::with_capacity(4);
+        if let Some(counts) = luma {
+            heights.push((height_of(counts[bin]), 3));
+        }
+        for (plane, counts) in color.iter().enumerate() {
+            heights.push((height_of(counts[bin]), plane));
+        }
+        heights.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut cover = Cover {
+            luma: luma.is_some(),
+            planes: [!color.is_empty(); 3],
+        };
+        let mut from = 0.0;
+        for (height, plane) in heights {
+            let (bottom, top) = (snap(bars.bottom() - from), snap(bars.bottom() - height));
+            if top < bottom {
+                painter.rect_filled(
+                    egui::Rect::from_min_max(pos2(left, top), pos2(right, bottom)),
+                    0.0,
+                    screened(theme, luma_ink, cover),
+                );
+            }
+            from = height;
+            match plane {
+                3 => cover.luma = false,
+                plane => cover.planes[plane] = false,
+            }
+        }
     }
 
     // The pointer's rule: over the bins it is picking one of, and under the
@@ -891,21 +924,20 @@ pub(super) fn draw(
     // permanent annotation does not: this one is only there while it is being
     // aimed, and it has to be followed up from the axis to the curve.
     if let Some(across) = across {
-        frame.rect(
-            on_device(
+        painter.rect_filled(
+            area(on_device(
                 Rect::new(
                     bars.x + across * bars.width - CURSOR_WIDTH / 2.0,
                     bars.y,
                     CURSOR_WIDTH,
                     bars.height,
                 ),
-                input.scale,
-            ),
+                scale,
+            )),
+            0.0,
             theme.accent.with_alpha(CURSOR_ALPHA),
         );
     }
-
-    controls(frame, text, current, input, panels, panel, bars, theme);
 
     // What the display is doing to the values underneath, drawn over them.
     //
@@ -922,8 +954,6 @@ pub(super) fn draw(
     // exactly, since a curve meeting a floor tangentially cannot be read
     // along the axis by eye, and where the window's top is under a tone map,
     // which nothing on the curve marks because the curve never reaches it.
-    // That is a job for a tick against the axis, not for a rule standing
-    // through the plot in the ink the curve is drawn in.
     if span > 0.0 {
         let (black, white) = current.display.displayed_bounds();
         for value in [black, white] {
@@ -936,16 +966,17 @@ pub(super) fn draw(
             if !(0.0..=1.0).contains(&position) {
                 continue;
             }
-            frame.rect(
-                on_device(
+            painter.rect_filled(
+                area(on_device(
                     Rect::new(
                         bars.x + position * bars.width - TICK_WIDTH / 2.0,
                         bars.bottom() - TICK_RISE,
                         TICK_WIDTH,
                         TICK_HEIGHT,
                     ),
-                    input.scale,
-                ),
+                    scale,
+                )),
+                0.0,
                 theme.accent,
             );
         }
@@ -962,34 +993,30 @@ pub(super) fn draw(
         // window comes out black and everything right of it comes out at the
         // top of the ramp, so the two flat runs at the ends are the range the
         // display is throwing away, drawn at the width they occupy.
-        //
-        // One cell per bin, over the bin's own middle, so a cell is the
-        // color of the bar standing above it.
-        // On the device's pixels, like every other mark here: a cell is
-        // about one logical pixel wide, so unsnapped the band ripples at the
-        // beat of the scale factor. See [`device`].
         let band = ramp(bars);
-        let snap = |value: f32| device(value, input.scale);
         let (top, bottom) = (snap(band.y), snap(band.bottom()));
-        let edge = |index: usize| snap(band.x + band.width * index as f32 / BINS as f32);
-
         // A cell above white — which only a surface with room above white
         // has, and only with no curve on — is drawn white, since the panel
         // cannot glow, with the accent along its top edge to say that the
         // screen does: the same ink as the tick that marks white on the
         // axis, and the run of it is how much of the axis is out past that.
         let channels = current.image.channels();
-        let hair = 1.0 / input.scale;
+        let hair = 1.0 / scale;
         for index in 0..BINS {
             let (left, right) = (edge(index), edge(index + 1));
             let across = (index as f32 + 0.5) / BINS as f32;
             let value = transfer.to_linear(axis_min + across * span);
-            frame.rect(
-                Rect::new(left, top, right - left, bottom - top),
+            painter.rect_filled(
+                egui::Rect::from_min_max(pos2(left, top), pos2(right, bottom)),
+                0.0,
                 Color::from_linear(current.display.shade(value, channels, headroom)),
             );
             if current.display.response(value, headroom) > ABOVE_WHITE {
-                frame.rect(Rect::new(left, top, right - left, hair), theme.accent);
+                painter.rect_filled(
+                    egui::Rect::from_min_max(pos2(left, top), pos2(right, top + hair)),
+                    0.0,
+                    theme.accent,
+                );
             }
         }
         // Outside the color rather than over it, so that the band keeps its
@@ -998,7 +1025,8 @@ pub(super) fn draw(
         // physical pixel, snapped like the band it rings.
         let (left, right) = (edge(0), edge(BINS));
         outline(
-            frame,
+            painter,
+            icon::Grid::new(scale),
             Rect::new(
                 left - hair,
                 top - hair,
@@ -1006,7 +1034,7 @@ pub(super) fn draw(
                 bottom - top + 2.0 * hair,
             ),
             hair,
-            theme.border,
+            theme.border.into(),
         );
 
         // Sampled per column rather than per bin: the response is a
@@ -1021,10 +1049,7 @@ pub(super) fn draw(
             let columns = bars.width.max(1.0) as usize;
             // Decoded to run the transform on, then encoded again to be
             // drawn: both axes are in the file's own units, so a display
-            // doing nothing is the diagonal. Plotting the linear response
-            // against an encoded axis would bend the curve by the transfer
-            // function alone, and draw a shoulder into an image nobody had
-            // touched.
+            // doing nothing is the diagonal.
             let responses: Vec<f32> = (0..=columns)
                 .map(|column| {
                     let across = column as f32 / columns as f32;
@@ -1039,74 +1064,94 @@ pub(super) fn draw(
             // line across the plot, so that the room above it can be seen as
             // the room it is rather than as a clip that is not happening.
             let highest = responses.iter().copied().fold(0.0, f32::max);
-            let scale = Scale::new(transfer.to_encoded(1.0), highest);
-            if let Some(white) = scale.white {
-                let y = device(bars.bottom() - white * bars.height, input.scale);
-                frame.rect(
-                    Rect::new(bars.x, y, bars.width, 1.0 / input.scale),
+            let plot_scale = Scale::new(transfer.to_encoded(1.0), highest);
+            if let Some(white) = plot_scale.white {
+                let y = device(bars.bottom() - white * bars.height, scale);
+                painter.rect_filled(
+                    egui::Rect::from_min_size(pos2(bars.x, y), vec2(bars.width, 1.0 / scale)),
+                    0.0,
                     theme.text_dim,
                 );
                 let size = TEXT_SIZE * 0.75;
-                let width = text.measure_text(WHITE_LABEL, size)[0];
-                frame.text(
-                    [bars.right() - width - 2.0, y - size * 1.3],
-                    size,
-                    theme.text_dim,
+                painter.text(
+                    pos2(bars.right() - 2.0, y - size * 0.3),
+                    Align2::RIGHT_BOTTOM,
                     WHITE_LABEL,
+                    FontId::proportional(size),
+                    theme.text_dim.into(),
                 );
             }
-            let curve: Vec<[f32; 2]> = responses
+            let curve: Vec<egui::Pos2> = responses
                 .iter()
                 .enumerate()
                 .map(|(column, &response)| {
                     let across = column as f32 / columns as f32;
-                    [
+                    pos2(
                         bars.x + across * bars.width,
-                        bars.bottom() - scale.up(response) * bars.height,
-                    ]
+                        bars.bottom() - plot_scale.up(response) * bars.height,
+                    )
                 })
                 .collect();
-            frame.polyline(&curve, CURVE_WIDTH, theme.accent, Blend::Over);
+            painter.add(egui::Shape::line(
+                curve,
+                Stroke::new(CURVE_WIDTH, theme.accent),
+            ));
         }
     }
 }
 
-/// The strip of buttons down the left of the panel, and the row of false
-/// colors under its ramp.
+/// A button on the panel at `rect`: its ground and ink by whether it is
+/// `active` and whether the pointer is on it, its tooltip, and what it
+/// asked for. The caller paints the mark or the word on it.
+fn button(
+    pass: &mut Pass,
+    ui: &mut egui::Ui,
+    rect: Rect,
+    control: Control,
+    active: bool,
+    radius: f32,
+) -> (egui::Response, Color32, Color32) {
+    let response = ui.allocate_rect(area(rect), Sense::CLICK);
+    let (background, ink) = pass.button_ink(active, &response, true);
+    ui.painter().rect_filled(area(rect), radius, background);
+    response
+        .widget_info(|| WidgetInfo::selected(WidgetType::Button, true, active, control.label()));
+    let response = pass.tooltip(response, Tip::Control(control), true);
+    if response.clicked() {
+        pass.press(control);
+    }
+    (response, background, ink)
+}
+
+/// The strip of buttons down the left of the panel, the rows under the band,
+/// and the row of false colors under its ramp.
 ///
 /// Drawn here rather than with the chrome's toggles because these belong to
 /// the panel: they say what the plot beside them is showing and what the band
 /// beneath them is painted with, and two of them are pictures of the very
 /// thing they switch.
-#[allow(clippy::too_many_arguments)]
-fn controls(
-    frame: &mut UiFrame,
-    text: &mut dyn TextMeasure,
-    current: &Current,
-    input: &FrameInput,
-    panels: &Panels,
-    panel: Rect,
-    bars: Rect,
-    theme: &Theme,
-) {
+fn controls(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, panel: Rect) {
+    let theme = pass.theme;
+    let panels = pass.panels;
+    let scale = pass.input.scale;
     let gray = current.image.is_gray();
-    let hovered = |widget: Widget| panels.hover == Some(widget);
+    let bars = plot_area(panel, gray);
 
     for (slot, widget) in toolbar(gray).iter().enumerate() {
-        let button = toolbar_button(panel, gray, slot);
+        let rect = toolbar_button(panel, gray, slot);
         let active = match widget {
-            Widget::Luma => panels.show_luma,
-            Widget::Planes => panels.show_planes,
-            Widget::Log => panels.log_counts,
+            Control::Luma => panels.show_luma,
+            Control::Planes => panels.show_planes,
+            Control::Log => panels.log_counts,
             // The reset is never lit, where the two above it are: it does
             // something rather than being something, and a momentary button
             // holding a state is a button that has to explain itself.
             _ => false,
         };
-        let (background, ink) = button_ink(active, hovered(*widget), theme);
-        frame.rounded_rect(button, TOGGLE_RADIUS, background);
-
-        let square = icon::fit(frame, button, ICON_SIDE);
+        let (_, background, ink) = button(pass, ui, rect, *widget, active, TOGGLE_RADIUS);
+        let grid = icon::Grid::new(ui.pixels_per_point());
+        let square = icon::square(grid, area(rect), ICON_SIDE);
+        let painter = ui.painter();
         match widget {
             // The two plane toggles are drawn here rather than taken from
             // `ui::icon` because they are pictures of the planes themselves,
@@ -1115,10 +1160,14 @@ fn controls(
             //
             // Luminance is one plane, so it is one disc, in the neutral the
             // plot draws that plane in.
-            Widget::Luma => {
-                let place = icon::Placer::new(frame, square);
-                frame.circle(
-                    place.free(frame, [GRID_MIDDLE, GRID_MIDDLE]),
+            Control::Luma => {
+                let place = icon::Placer::new(
+                    grid,
+                    Rect::new(square.min.x, square.min.y, square.width(), square.height()),
+                );
+                let at = place.free([GRID_MIDDLE, GRID_MIDDLE]);
+                painter.circle_filled(
+                    pos2(at[0], at[1]),
                     place.units(LUMA_DISC),
                     theme.histogram_luma,
                 );
@@ -1126,28 +1175,31 @@ fn controls(
             // And the color planes are three, so they are three smaller
             // discs, in their own colors: nothing else in the window is red,
             // green and blue together.
-            Widget::Planes => {
-                let place = icon::Placer::new(frame, square);
+            Control::Planes => {
+                let place = icon::Placer::new(
+                    grid,
+                    Rect::new(square.min.x, square.min.y, square.width(), square.height()),
+                );
                 for (turn, plane) in theme.histogram_planes.into_iter().enumerate() {
                     // Struck about the middle at a third of a turn each,
                     // starting at the top, so the three read as one mark
                     // rather than as a row.
                     let angle = (-90.0 + 120.0 * turn as f32).to_radians();
-                    let at = [
+                    let at = place.free([
                         GRID_MIDDLE + PLANE_ORBIT * angle.cos(),
                         GRID_MIDDLE + PLANE_ORBIT * angle.sin(),
-                    ];
-                    frame.circle(place.free(frame, at), place.units(PLANE_DISC), plane);
+                    ]);
+                    painter.circle_filled(pos2(at[0], at[1]), place.units(PLANE_DISC), plane);
                 }
             }
             // The count axis as a curve, which is what the switch puts it on.
-            Widget::Log => icon::draw(frame, icon::SPLINE, square, ink, background),
+            Control::Log => icon::paint(painter, icon::SPLINE, square, ink, background),
             // Back to the start.
-            _ => icon::draw(frame, icon::ROTATE_CCW, square, ink, background),
+            _ => icon::paint(painter, icon::ROTATE_CCW, square, ink, background),
         }
     }
 
-    rows(frame, text, current, panels, panel, theme);
+    rows(pass, ui, current, panel);
 
     // The false colors, each showing itself, and only where the display
     // would act on the choice. The whole ramp rather than one color off it:
@@ -1157,23 +1209,23 @@ fn controls(
         return;
     }
     for (index, map) in Colormap::ALL.into_iter().enumerate() {
-        let button = swatch_button(bars, index);
+        let rect = swatch_button(bars, index);
         let chosen = current.display.colormap == map;
-        let (background, _) = button_ink(chosen, hovered(Widget::Ramp(index)), theme);
-        frame.rounded_rect(button, SWATCH_RADIUS, background);
+        button(pass, ui, rect, Control::Ramp(index), chosen, SWATCH_RADIUS);
 
         // The gradient on the device's pixels, as the band above it is: a
         // swatch is the same row of one-pixel cells, over less room.
-        let face = button.inset(SWATCH_INSET, SWATCH_INSET);
-        let snap = |value: f32| device(value, input.scale);
+        let face = rect.inset(SWATCH_INSET, SWATCH_INSET);
+        let snap = |value: f32| device(value, scale);
         let (top, bottom) = (snap(face.y), snap(face.bottom()));
-        let steps = (face.width * input.scale).max(1.0) as usize;
+        let steps = (face.width * scale).max(1.0) as usize;
         for step in 0..steps {
             let edge = |step: usize| snap(face.x + face.width * step as f32 / steps as f32);
             let (left, right) = (edge(step), edge(step + 1));
             let t = (step as f32 + 0.5) / steps as f32;
-            frame.rect(
-                Rect::new(left, top, right - left, bottom - top),
+            ui.painter().rect_filled(
+                egui::Rect::from_min_max(pos2(left, top), pos2(right, bottom)),
+                0.0,
                 Color::from_linear(map.color(t)),
             );
         }
@@ -1194,26 +1246,23 @@ fn controls(
 /// on a window that has since been shifted would be claiming something that
 /// stopped being true. The line above them is what says where the window is,
 /// and it says it in numbers.
-fn rows(
-    frame: &mut UiFrame,
-    text: &mut dyn TextMeasure,
-    current: &Current,
-    panels: &Panels,
-    panel: Rect,
-    theme: &Theme,
-) {
+fn rows(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, panel: Rect) {
+    let theme = pass.theme;
     let rows = Rows::new(panel);
     let display = &current.display;
+    let font = FontId::proportional(ROW_TEXT);
+    let grid = icon::Grid::new(ui.pixels_per_point());
 
     // The words down the left, set back the way a fact in a bar is set behind
     // the name it is about: the rows are read for their values, and these say
     // which value is which.
     for (label, at) in ["EV", "Window", "Curve"].into_iter().zip(rows.labels) {
-        frame.text(
-            [frame.snap(at.x), text_top(frame, text, at, ROW_TEXT)],
-            ROW_TEXT,
-            theme.text_dim,
+        ui.painter().text(
+            pos2(grid.snap(at.x), at.y + at.height / 2.0),
+            Align2::LEFT_CENTER,
             label,
+            font.clone(),
+            theme.text_dim.into(),
         );
     }
 
@@ -1221,47 +1270,47 @@ fn rows(
     // Both in the units the rest of the interface quotes them in: stops
     // counted in quarters, as the bar and the keys count them, and the window
     // in the file's own counts where the file is counting things.
-    //
-    // The bounds alone, and not the name of the rule they came from: what a
-    // window is for is the two numbers, the rule is a fact about how they
-    // were arrived at, and the bar at the foot of the window says that and
-    // only that. Between the two readings the whole of it is on screen.
     let stops = rows.stops();
-    frame.text(
-        [frame.snap(stops.x), text_top(frame, text, stops, ROW_TEXT)],
-        ROW_TEXT,
-        theme.text_primary,
+    ui.painter().text(
+        pos2(grid.snap(stops.x), stops.y + stops.height / 2.0),
+        Align2::LEFT_CENTER,
         stops_label(display.exposure_stops),
+        font.clone(),
+        theme.text_primary.into(),
     );
     let window = rows.window_reading();
-    frame.text_clipped(
-        [
-            frame.snap(window.x),
-            text_top(frame, text, window, ROW_TEXT),
-        ],
-        ROW_TEXT,
-        theme.text_primary,
-        window.width,
+    ui.painter().with_clip_rect(area(window)).text(
+        pos2(grid.snap(window.x), window.y + window.height / 2.0),
+        Align2::LEFT_CENTER,
         format_window(current),
+        font.clone(),
+        theme.text_primary.into(),
     );
 
     for (widget, rect) in row_buttons(panel) {
         let worn = row_label(widget, display);
         let active = worn.as_ref().is_some_and(|(_, active)| *active);
-        let (background, ink) = button_ink(active, panels.hover == Some(widget), theme);
-        frame.rounded_rect(rect, TOGGLE_RADIUS, background);
+        let (_, background, ink) = button(pass, ui, rect, widget, active, TOGGLE_RADIUS);
         match &worn {
-            Some((label, _)) => centered_text(frame, text, rect, ink, label, ROW_TEXT),
+            Some((label, _)) => {
+                ui.painter().text(
+                    area(rect).center(),
+                    Align2::CENTER_CENTER,
+                    label,
+                    font.clone(),
+                    ink,
+                );
+            }
             // The nudges wear marks where the rest of the block wears words:
             // what they do to the two ends of the window is a shape, and four
             // of them spelled out would be a paragraph on a line that is
             // already a number.
             None => {
                 if let Some((_, marks)) = NUDGES.iter().find(|(nudge, _)| *nudge == widget) {
-                    icon::draw(
-                        frame,
+                    icon::paint(
+                        ui.painter(),
                         marks,
-                        icon::fit(frame, rect, NUDGE_ICON),
+                        icon::square(grid, area(rect), NUDGE_ICON),
                         ink,
                         background,
                     );
@@ -1274,7 +1323,6 @@ fn rows(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::render::ui_tests::test_fonts;
 
     /// The exposure is stepped in quarter stops, so it is written in
     /// quarters: a tenth of a stop cannot say what one press is worth, and
@@ -1343,10 +1391,6 @@ mod tests {
         }
         assert_eq!(bin_across(0), 0.0);
         assert_eq!(bin_across(BINS - 1), 1.0);
-    }
-
-    fn middle(rect: Rect) -> [f32; 2] {
-        [rect.x + rect.width / 2.0, rect.y + rect.height / 2.0]
     }
 
     /// The panel is one fixed size, so a content area smaller than it in
@@ -1425,49 +1469,17 @@ mod tests {
         );
     }
 
-    /// Each of the panel's buttons answers inside its own bounds and nowhere
-    /// else — not in the gaps between them, and not on the plot.
-    #[test]
-    fn the_panels_buttons_answer_within_their_own_bounds() {
-        let content = Rect::new(0.0, 0.0, 800.0, 600.0);
-        let panel = panel(content).expect("room");
-
-        for gray in [true, false] {
-            for (index, widget) in toolbar(gray).iter().enumerate() {
-                let at = middle(toolbar_button(panel, gray, index));
-                assert_eq!(widget_at(content, at, gray), Some(*widget));
-            }
-            let plot = plot_area(panel, gray);
-            assert_eq!(widget_at(content, middle(plot), gray), None, "the plot");
-        }
-
-        let bars = plot_area(panel, true);
-        for index in 0..Colormap::ALL.len() {
-            let at = middle(swatch_button(bars, index));
-            assert_eq!(widget_at(content, at, true), Some(Widget::Ramp(index)));
-        }
-        assert_eq!(
-            widget_at(content, [panel.x - 1.0, panel.y + 20.0], true),
-            None,
-            "off the panel altogether"
-        );
-        let gap = swatch_button(bars, 0).right() + RAMP_GAP / 2.0;
-        let row = middle(swatch_button(bars, 0))[1];
-        assert_eq!(widget_at(content, [gap, row], true), None, "between two");
-    }
-
     /// A control the display would ignore is not on the panel at all, and the
     /// ones that remain close the gap up rather than leaving a hole where it
     /// would have been.
     #[test]
     fn a_control_that_could_do_nothing_is_not_there() {
-        let content = Rect::new(0.0, 0.0, 800.0, 600.0);
-        let panel = panel(content).expect("room");
+        let panel = panel(Rect::new(0.0, 0.0, 800.0, 600.0)).expect("room");
 
-        assert_eq!(toolbar(true), [Widget::Luma, Widget::Log, Widget::Reset]);
+        assert_eq!(toolbar(true), [Control::Luma, Control::Log, Control::Reset]);
         assert_eq!(
             toolbar(false),
-            [Widget::Luma, Widget::Planes, Widget::Log, Widget::Reset],
+            [Control::Luma, Control::Planes, Control::Log, Control::Reset],
             "three channels have planes to toggle"
         );
         // The reset moves up into the room the planes toggle is not taking.
@@ -1477,15 +1489,11 @@ mod tests {
             "and the slot it leaves is filled, not left empty"
         );
 
-        // Nothing answers where the row of false colors would be on an image
-        // that has none: the plot is there instead.
-        let swatch = middle(swatch_button(plot_area(panel, true), 2));
-        assert_eq!(widget_at(content, swatch, true), Some(Widget::Ramp(2)));
-        assert_eq!(
-            widget_at(content, swatch, false),
-            None,
-            "three channels are their own color, and the false ones are not applied"
-        );
+        // The row of false colors takes its room off the plot on an image
+        // that has them, under the band, and the plot is taller without.
+        let swatch = swatch_button(plot_area(panel, true), 2);
+        assert!(swatch.y >= ramp(plot_area(panel, true)).bottom());
+        assert!(plot_area(panel, false).height > plot_area(panel, true).height);
     }
 
     /// The three rows sit under the band, inside the panel, and land in the
@@ -1516,52 +1524,14 @@ mod tests {
         assert_eq!(rows.labels[2].bottom(), inside.bottom());
     }
 
-    /// Every one of them answers the pointer inside its own bounds and
-    /// nowhere else — not in the column of words beside them, and not in the
-    /// gaps between one and the next.
-    #[test]
-    fn the_rows_answer_the_pointer_where_they_were_drawn() {
-        let content = Rect::new(0.0, 0.0, 800.0, 600.0);
-        let panel = panel(content).expect("room");
-        let rows = Rows::new(panel);
-
-        // Every image has them, gray or not: what they set is what the
-        // display does to any file whatever.
-        for gray in [true, false] {
-            for (widget, rect) in row_buttons(panel) {
-                assert_eq!(widget_at(content, middle(rect), gray), Some(widget));
-            }
-            assert_eq!(
-                widget_at(content, middle(rows.labels[0]), gray),
-                None,
-                "the word naming a row is not a button"
-            );
-            assert_eq!(
-                widget_at(content, middle(rows.stops()), gray),
-                None,
-                "nor is the exposure the two steps after it act on"
-            );
-            assert_eq!(
-                widget_at(content, middle(rows.window_reading()), gray),
-                None,
-                "nor the window the four nudges after it act on"
-            );
-            let gap = [
-                share(rows.window, WINDOWS.len(), 0).right() + CELL_GAP / 2.0,
-                middle(rows.window)[1],
-            ];
-            assert_eq!(widget_at(content, gap, gray), None, "between two windows");
-        }
-    }
-
     /// The exposure's two steps are worth what they say they are worth, and
     /// the windows and the curves cover everything there is to choose.
     #[test]
     fn the_rows_offer_every_choice_there_is() {
         let panel = panel(Rect::new(0.0, 0.0, 800.0, 600.0)).expect("room");
-        let widgets: Vec<Widget> = row_buttons(panel).map(|(widget, _)| widget).collect();
-        assert_eq!(widgets[0], Widget::ExposureDown);
-        assert_eq!(widgets[1], Widget::ExposureUp);
+        let widgets: Vec<Control> = row_buttons(panel).map(|(widget, _)| widget).collect();
+        assert_eq!(widgets[0], Control::ExposureDown);
+        assert_eq!(widgets[1], Control::ExposureUp);
         assert_eq!(
             widgets.len(),
             2 + NUDGES.len() + WINDOWS.len() + ToneMap::ALL.len()
@@ -1573,10 +1543,10 @@ mod tests {
         assert_eq!(
             NUDGES.map(|(widget, _)| widget),
             [
-                Widget::WindowDown,
-                Widget::WindowNarrow,
-                Widget::WindowWiden,
-                Widget::WindowUp
+                Control::WindowDown,
+                Control::WindowNarrow,
+                Control::WindowWiden,
+                Control::WindowUp
             ]
         );
 
@@ -1634,67 +1604,6 @@ mod tests {
                 heights.windows(2).all(|pair| pair[0] < pair[1]),
                 "log {log}: {heights:?}"
             );
-        }
-    }
-
-    /// The least room a word may leave inside the cell it is set in, in
-    /// logical pixels: enough that it is not set against the button's rounded
-    /// corners, whichever of the labels it is.
-    const ROOM: f32 = 5.0;
-
-    /// Every word on the three rows fits the room laid out for it — the three
-    /// naming the rows, and the label each button wears.
-    ///
-    /// The layout is in constants, the pointer having to be answered where
-    /// there are no fonts to ask. This is what holds those constants to the
-    /// face the panel is actually set in: too mean and a label is clipped or
-    /// spills over its neighbor, and no measurement anywhere else would catch
-    /// it.
-    #[test]
-    fn every_word_on_the_rows_fits_the_room_it_is_given() {
-        let Some(mut fonts) = test_fonts() else {
-            return;
-        };
-        let panel = panel(Rect::new(0.0, 0.0, 800.0, 600.0)).expect("room");
-        let mut width = |label: &str| fonts.measure_text(label, ROW_TEXT)[0];
-
-        for word in ["EV", "Window", "Curve"] {
-            let room = ROW_LABEL - width(word);
-            assert!(room >= 0.0, "\"{word}\" overruns its column by {room}");
-        }
-        // The two readings lead their rows and the buttons follow them, so
-        // what is set aside for each has to hold what it can be asked to
-        // say — for the window, a float raster's bounds written out in full.
-        let rows = Rows::new(panel);
-        for reading in [
-            "0.000\u{2013}1.000",
-            "-32768\u{2013}65535",
-            "-431.000\u{2013}8848.000",
-        ] {
-            let room = rows.window_reading().width;
-            assert!(
-                width(reading) <= room,
-                "\"{reading}\" needs more than {room}"
-            );
-        }
-        for stops in ["0", "-16\u{00be}", "-16.00"] {
-            let room = rows.stops().width;
-            assert!(width(stops) <= room, "\"{stops}\" needs more than {room}");
-        }
-
-        let display = Display::default();
-        for (widget, rect) in row_buttons(panel) {
-            // A nudge wears a mark rather than a word, and a mark is fitted
-            // to its button by `icon::fit` rather than measured.
-            let Some((label, _)) = row_label(widget, &display) else {
-                assert!(
-                    NUDGES.iter().any(|(nudge, _)| *nudge == widget),
-                    "{widget:?} wears neither a word nor a mark"
-                );
-                continue;
-            };
-            let room = rect.width - width(&label);
-            assert!(room >= 2.0 * ROOM, "\"{label}\" leaves {room} in {rect:?}");
         }
     }
 

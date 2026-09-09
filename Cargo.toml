@@ -2,11 +2,11 @@
 name = "gamut"
 version = "0.1.0"
 edition = "2024"
-# Not the edition's own floor of 1.85 but the oldest toolchain that has every
-# library item used here: `as_chunks` (`exif.rs`, `geo.rs`) landed in 1.88.
-# Nothing is pinned by this — Arch tracks current Rust — but clippy checks the
-# code against it, so it stays honest.
-rust-version = "1.88"
+# The floor egui sets: every crate of its family declares 1.95, and nothing
+# here is older than what they ask for. Nothing is pinned by this — Arch
+# tracks current Rust — but clippy checks the code against it, so it stays
+# honest.
+rust-version = "1.95"
 description = "A GPU image viewer with real color management, for photographs, measurement data and HDR"
 repository = "https://github.com/dcervelli/gamut"
 homepage = "https://github.com/dcervelli/gamut"
@@ -27,7 +27,34 @@ strip = true
 [dependencies]
 anyhow = "1.0.104"
 bytemuck = { version = "1.25.2", features = ["derive"] }
-glyphon = "0.12.0"
+# The interface: an immediate-mode toolkit whose widgets are drawn into the
+# same sRGB target the compositor lays over the picture, so it never has to
+# know what an HDR surface is. Its one default feature is a bundle of fonts
+# under licenses `about.toml` does not accept, and the interface is set in the
+# desktop's own faces anyway — see `ui/fonts.rs` — so it is left off.
+egui = { version = "0.36.2", default-features = false }
+# The half that draws with wgpu. Its defaults are for wgpu's own feature set
+# and a macOS fix, neither of which this tree needs beyond what `wgpu` below
+# already turns on; its `winit` feature would take over the surface, whose
+# format `render/output.rs` chooses on purpose.
+egui-wgpu = { version = "0.36.2", default-features = false }
+# And the half that turns winit's events into egui's. Its clipboard feature
+# would bring a second clipboard library beside `wl-clipboard-rs`, and
+# `links` a browser launcher: both off, the two backends on.
+egui-winit = { version = "0.36.2", default-features = false, features = ["wayland", "x11"] }
+# Asks fontconfig which faces the desktop is set in, so that the interface
+# is set in the same ones — see `ui/fonts.rs`. The library is opened at run
+# time rather than linked, so the build needs no headers and a desktop
+# without it still gets a window; `fontdb` below is what answers then.
+fontconfig = { version = "0.11", features = ["dlopen"] }
+# The fallback: reads the font directories itself and resolves the generic
+# families from fontconfig's aliases alone, which is a rougher answer than
+# the library's but needs nothing installed.
+fontdb = "0.23"
+# Reads a face's vertical metrics, so that its capitals can be centered in
+# the rows egui lays out. It is the reader egui's own text layout uses, so
+# the numbers are the ones the rows are built from.
+skrifa = "0.44"
 half = { version = "2.7.1", features = ["bytemuck"] }
 # `ico` is enabled for the DIB half of an ICO only: the hooks that decode a
 # headerless bitmap and apply its AND mask are `pub(crate)` behind that
@@ -100,3 +127,13 @@ wayland-protocols = { version = "0.32.13", features = ["client", "staging"] }
 # This speaks that protocol directly rather than shelling out to `wl-copy`,
 # which would be a runtime dependency on a package the user may not have.
 wl-clipboard-rs = "0.9.3"
+
+[dev-dependencies]
+# Drives the interface without a window, through the accessibility tree egui
+# builds of it: a test clicks a button by its name and asks what came of it.
+egui_kittest = "0.36.2"
+# The tests set the interface in egui's own fonts rather than the desktop's,
+# so that they run the same on a machine with no fontconfig to ask. A
+# feature of a dev-dependency reaches only the test builds, and `about.toml`
+# leaves those out, so the bundle's licenses are never shipped.
+egui = { version = "0.36.2", default-features = false, features = ["default_fonts"] }

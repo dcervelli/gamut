@@ -4,12 +4,24 @@
 cargo test
 ```
 
-196 tests over the transfer functions and primaries matrices, texture format
+374 tests over the transfer functions and primaries matrices, texture format
 selection (including the device-capability fallbacks), the statistics and
 window logic, the pixel readout's two halves and the colormaps behind its
 swatch, the decoder registry, the CICP translation, ICC profile recognition,
-gain map reconstruction, the view geometry, and the reload watch's idea of
-when a write has finished.
+gain map reconstruction, the view geometry, the key table, the words the
+interface says, and the reload watch's idea of when a write has finished.
+
+The interface is tested by driving it. `src/ui/driven.rs` lays the whole of
+it out headless with `egui_kittest`, presses a control by the name it gives
+the accessibility tree, and reads off the commands the pass handed back: that
+a toggle comes back as its press and keeps no keyboard focus, that a toggle
+whose panel the window cannot take is dead and refuses the press, that the
+paste button and the step buttons are there only when they would do
+something, that each menu opens and each of its cells chooses what it says.
+Nothing about pixels: what the frame looks like is looked at, and what it
+does is tested. The geometry the panels are placed by — the four bars, the
+content area, where the histogram and the information column go and when
+there is no room for them — is pure and tested on its own.
 
 The gain map tests build an Ultra HDR file rather than checking one in: a flat
 base image and a half-size map that leaves one half alone and asks the other

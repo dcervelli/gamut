@@ -38,7 +38,11 @@ licenses may turn up there is not left open: `about.toml` lists the ones this
 project accepts, in priority order, and a crate arriving under anything else
 fails generation rather than being written out quietly — `cargo audit` for
 licenses instead of advisories. The file is stamped with the lock it was
-generated from, and CI fails if that is not the lock in the tree.
+generated from, and CI fails if that is not the lock in the tree. It is what
+keeps egui's bundled fonts out of the binary: they arrive under font licenses
+the list does not carry, so the feature that would compile them in is left
+off and the interface is set in the desktop's own faces instead, which it
+would have been anyway.
 
 It is a generated file kept in the tree, which is the one place this project
 does that, so the reason is worth saying. Generation is offline and

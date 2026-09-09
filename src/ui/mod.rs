@@ -1,25 +1,30 @@
-//! Building each frame's interface: a display list of panels, widgets and
-//! text, laid out in logical pixels and handed to the renderer's UI layer.
+//! Building each frame's interface with egui: the chrome and everything on
+//! it, laid out in logical pixels from what is on screen.
 //!
 //! Nothing here touches the GPU or the window. The state it needs is passed
 //! in — what is on screen, which panels are showing, what this frame's
-//! geometry is — so that a frame can be built against anything that can
-//! measure text.
+//! geometry is — and what was pressed comes back as commands, so that a
+//! frame can be built and driven with no application behind it.
 
 pub mod chrome;
+pub mod control;
+pub mod fonts;
 pub mod info;
-pub mod layers;
 pub mod menu;
 pub mod minimap;
 pub mod toast;
 pub mod tooltip;
 
-mod buttons;
 mod grid;
 pub mod histogram;
 mod icon;
 pub mod pixel;
+mod rect;
 mod status;
+pub mod style;
+
+#[cfg(test)]
+mod driven;
 
 use std::sync::Arc;
 
@@ -27,21 +32,28 @@ use crate::image::display::{Display, Headroom};
 use crate::image::exif::Exif;
 use crate::image::stats::BINS;
 use crate::image::{DecodedImage, Stats};
-use crate::render::{Backdrop, Rect, TextMeasure, UiFrame};
+use egui::Sense;
+
+use crate::render::Backdrop;
 use crate::theme::Theme;
-use crate::view::{Fit, View, Viewport};
+use crate::view::{View, Viewport};
 
-use chrome::{BAR_PADDING, Chrome};
+pub use control::{Command, Control, Naming};
 pub use info::FileFacts;
-pub use menu::Menu;
 pub use pixel::PixelFormat;
-pub use status::{BarText, explain_state};
+pub use rect::Rect;
+pub use status::explain_state;
 pub use toast::Toast;
-pub use tooltip::{Tip, Tooltip, Tooltips};
+pub use tooltip::{Tip, Tooltip};
 
-use tooltip::Tips;
+use chrome::Pass;
 
 const TEXT_SIZE: f32 = 13.0;
+
+/// Trackpad pixels that add up to one notch of the wheel. Wheels report whole
+/// lines and need no conversion; a trackpad reports the scroll it would have
+/// done, and this is what turns that into the same zoom increment.
+const WHEEL_PIXELS_PER_STEP: f32 = 50.0;
 
 /// What stands between a value and what the display makes of it, in every
 /// readout that shows one turning into the other.
@@ -86,77 +98,6 @@ const PANEL_RADIUS: f32 = 6.0;
 /// as a texture behind the image rather than as a pattern competing with it.
 const CHECKER_SQUARE: f32 = 8.0;
 
-/// Something in the interface the pointer can be over and press: a toggle in
-/// a side panel, a button in one of the bars, or a cell of whichever menu is
-/// open. One value rather than a flag each, so that hit-testing, hover and
-/// drawing all go through the same test.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Widget {
-    /// The two buttons at the head of the top bar, which step back and on
-    /// through the file list. On screen only while there is more than one
-    /// file — see [`chrome::Chrome::step_buttons`].
-    Previous,
-    Next,
-    Minimap,
-    /// The button that opens the menu of copies, at the top of the left
-    /// strip.
-    Copy,
-    /// The button that pastes the picture on the clipboard. On screen only
-    /// while there is one — see [`Panels::paste`].
-    Paste,
-    Histogram,
-    Info,
-    Grid,
-    Zoom,
-    /// The button at the end of the top bar that gives the picture the whole
-    /// window. Not a toggle: what it hides includes the button itself, so
-    /// there is no state for it to be showing and no press of it that puts
-    /// the interface back — see [`crate::app::input::Action::Dismiss`].
-    Maximize,
-    /// A cell of whichever menu is open. Which menu that is is
-    /// [`Panels::menu`], so a cell needs only its place in the grid.
-    Cell(usize),
-    /// The two plane toggles, the switch between a linear and a logarithmic
-    /// count axis, and the button that puts the rendering back, down the left
-    /// of the histogram panel.
-    Luma,
-    Planes,
-    Log,
-    Reset,
-    /// One of the false colors offered under that panel's ramp, by its place
-    /// in [`crate::image::display::Colormap::ALL`].
-    Ramp(usize),
-    /// The two steps of the exposure row under that ramp, a quarter of a stop
-    /// each — see [`histogram::EV_STEP`].
-    ExposureDown,
-    ExposureUp,
-    /// One of the windows the row below those offers, by its place in
-    /// [`histogram::WINDOWS`]. They set a window rather than showing which
-    /// one is in force: the line above them is what says that.
-    Window(usize),
-    /// The four nudges at the end of that line, which move the window the
-    /// user has rather than putting them on a new one: along the axis either
-    /// way, and narrower or wider about its own middle.
-    WindowDown,
-    WindowNarrow,
-    WindowWiden,
-    WindowUp,
-    /// And one of the tone curves in the row below that, by its place in
-    /// [`crate::image::display::ToneMap::ALL`]. These do show which is on,
-    /// there being one curve at a time and a button for each of them.
-    Curve(usize),
-    /// The switch between the SDR and the HDR surface, at the end of the
-    /// bottom bar: lit while the picture is going out with room above white.
-    Output,
-    /// The dot at the head of the pixel readout, at the other end of that
-    /// bar, which opens the menu of ways to write a pixel's value.
-    PixelFormat,
-    /// The cross on the message at the foot of the content area, which takes
-    /// it off. On screen only while there is a message — see
-    /// [`FrameInput::toast`].
-    Dismiss,
-}
-
 /// The image on screen, with everything derived from it.
 pub struct Current {
     /// Shared rather than owned: copying the picture to the clipboard walks
@@ -198,11 +139,6 @@ pub struct Panels {
     pub show_ui: bool,
     pub show_histogram: bool,
     pub show_info: bool,
-    /// How far the info panel's column has been scrolled, in logical pixels.
-    /// Kept here rather than in the panel because the panel is rebuilt every
-    /// frame, and clamped where it is used: what it may run to depends on how
-    /// tall the text comes out in the window as it is now.
-    pub info_scroll: f32,
     /// Which of the histogram's planes are drawn. Both can be off: the panel
     /// still has its response curve and its ramp to read, and a toggle that
     /// refuses to switch off is a toggle that owes an explanation.
@@ -230,31 +166,11 @@ pub struct Panels {
     /// `App::poll_clipboard`. It is what was true at the last look, so a
     /// press asks the clipboard again rather than acting on it.
     pub paste: bool,
-    /// Which widget the pointer is over. Held rather than recomputed while
-    /// drawing so that motion knows when the highlight has changed and a
-    /// redraw is actually owed.
-    pub hover: Option<Widget>,
-    /// And which part of the info panel's column, for the same reason. Held
-    /// apart from `hover` because the column is not one of the chrome's
-    /// widgets: it moves as the panel scrolls, and it is there whether or not
-    /// the bars are.
-    pub info_hover: Option<info::Copyable>,
-    /// Whether the pointer is on the words at the end of the bottom bar that
-    /// say what is being done to the picture. Held apart from `hover` for the
-    /// reason the column is: where those words end takes the fonts to say, so
-    /// they are not a widget [`layers::hit`] can answer for — see
-    /// [`status::state`].
-    pub state_hover: bool,
     /// How the bottom bar writes out the value of the pixel under the
     /// pointer. Here rather than with the display's own settings because it
     /// is about the reading and not about the rendering: nothing on screen
     /// changes with it but the words in the bar.
     pub pixel_format: PixelFormat,
-    /// The menu popped up over the interface, if any. It is drawn over
-    /// everything and takes the pointer while it is open: a press on a cell
-    /// chooses, one anywhere else dismisses it, and the wheel is spent on it
-    /// — see [`layers`].
-    pub menu: Option<Menu>,
 }
 
 /// What this frame looks like, beyond the image and the panels: the values
@@ -295,56 +211,147 @@ pub struct FrameInput {
     /// color space for this window, and the monitor is not known to be in
     /// SDR mode. The switch is drawn dead otherwise.
     pub hdr_available: bool,
-    /// What the pointer has rested on long enough to be told about, and what
-    /// to say about it. Composed by the application — most of a tooltip is
-    /// the key that does the same job, and the keys are the application's —
-    /// and settled by [`Tooltips`], which is where the timing lives.
-    pub tooltip: Option<Tooltip>,
+    /// Whether a drag would move the picture: a fitted image has nowhere to
+    /// go, and the closed hand is a promise that dragging will move
+    /// something.
+    pub can_pan: bool,
     /// The message about what was just done, while one is up. Copied out of
-    /// the application's [`toast::Toasts`] the way the tooltip is composed
-    /// there: what a frame draws is what had settled when it was asked for.
+    /// the application's [`toast::Toasts`]: what a frame draws is what had
+    /// settled when it was asked for.
     pub toast: Option<Toast>,
 }
 
-/// A stand-in for the renderer's fonts, for the tests that lay something out
-/// without a GPU: every glyph one `size` square, so that a test can say how
-/// much room a string has in whole characters.
-#[cfg(test)]
-pub(super) struct Monospace;
-
-#[cfg(test)]
-impl TextMeasure for Monospace {
-    fn measure_text(&mut self, text: &str, size: f32) -> [f32; 2] {
-        [text.chars().count() as f32 * size, size]
+/// One pass of the interface: the chrome and everything on it, laid out in
+/// `ui` — the whole window — from what is on screen. What was pressed comes
+/// back as commands for the application to act on; nothing here acts on it.
+pub fn show(
+    ui: &mut egui::Ui,
+    input: &FrameInput,
+    panels: &Panels,
+    current: Option<&Current>,
+    view: &View,
+    theme: &Theme,
+    namer: &dyn Naming,
+) -> Vec<Command> {
+    let mut pass = Pass {
+        input,
+        panels,
+        current,
+        view,
+        theme,
+        namer,
+        commands: Vec::new(),
+    };
+    if panels.show_ui {
+        pass.bars(ui);
     }
-
-    /// Every glyph is a `size` square sitting on the top of its line here, so
-    /// its middle is half a square down.
-    fn cap_center(&mut self, size: f32) -> f32 {
-        size / 2.0
+    pass.picture(ui);
+    if let Some(current) = current {
+        let content = chrome::content_area(input.logical, panels.show_ui);
+        pass.overlays(ui, current, content);
     }
+    pass.commands
+}
 
-    fn measure_mono(&mut self, text: &str, size: f32) -> [f32; 2] {
-        self.measure_text(text, size)
-    }
-
-    fn measure_wrapped(&mut self, text: &str, size: f32, width: f32) -> [f32; 2] {
-        // Broken between words, as glyphon breaks it, and at the same line
-        // height the text layer sets its metrics to.
-        let columns = (width / size).floor().max(1.0) as usize;
-        let (mut lines, mut used) = (1usize, 0usize);
-        for word in text.split_whitespace() {
-            let length = word.chars().count();
-            if used == 0 {
-                used = length;
-            } else if used + 1 + length <= columns {
-                used += 1 + length;
-            } else {
-                lines += 1;
-                used = length;
+impl Pass<'_> {
+    /// The picture: what the panels leave in the middle, which is where a
+    /// drag pans and the wheel zooms. Laid out as the one thing under
+    /// everything that floats, so that a panel over it takes the pointer
+    /// from it — egui's layers are what the pointer is routed by.
+    ///
+    /// The hand is on the view: a drag goes exactly where it is put, and is
+    /// handed back as far as it went. A wheel's notch is a step asked for by
+    /// name, and a trackpad's scroll is the hand again; which of the two it
+    /// was goes with the steps, and the application decides what to animate.
+    fn picture(&mut self, ui: &mut egui::Ui) {
+        let response = egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ui, |ui| {
+                ui.allocate_rect(ui.max_rect(), Sense::CLICK | Sense::DRAG)
+            })
+            .inner;
+        let scale = self.input.scale;
+        if response.dragged_by(egui::PointerButton::Primary) {
+            let delta = response.drag_delta();
+            if delta != egui::Vec2::ZERO {
+                self.commands
+                    .push(Command::Drag([delta.x * scale, delta.y * scale]));
+            }
+            // The closed hand is a promise that dragging will move
+            // something, so a fitted image — which has nowhere to go — does
+            // not make it.
+            if self.input.can_pan {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
             }
         }
-        [width, lines as f32 * size * 1.3]
+        self.commands
+            .push(Command::OverImage(response.contains_pointer()));
+        if response.contains_pointer() {
+            let wheel: Vec<Command> = ui.input(|input| {
+                input
+                    .events
+                    .iter()
+                    .filter_map(|event| match event {
+                        egui::Event::MouseWheel { unit, delta, .. } => Some(match unit {
+                            egui::MouseWheelUnit::Point => Command::Wheel {
+                                steps: delta.y / WHEEL_PIXELS_PER_STEP,
+                                notched: false,
+                            },
+                            egui::MouseWheelUnit::Line | egui::MouseWheelUnit::Page => {
+                                Command::Wheel {
+                                    steps: delta.y,
+                                    notched: true,
+                                }
+                            }
+                        }),
+                        _ => None,
+                    })
+                    .collect()
+            });
+            self.commands.extend(wheel);
+        }
+    }
+
+    /// What floats over the picture, in the order it is stacked: the grid
+    /// under everything, then the minimap, then the message about what was
+    /// just done — over the panels rather than among them, and there whether
+    /// or not the bars are, since what it says does not stop being true
+    /// because they are away.
+    fn overlays(&mut self, ui: &mut egui::Ui, current: &Current, content: Rect) {
+        let zoom = self.view.zoom(current.size(), self.input.viewport);
+        // Under the floating panels, which are read against the image and
+        // would be harder to read over a grid as well. The minimap's
+        // thumbnail is not one of them — the image layer draws it, below the
+        // whole interface — so the grid is told to leave its rectangle alone.
+        if self.panels.show_grid {
+            let thumbnail = self
+                .input
+                .minimap_on_screen
+                .then(|| minimap::thumbnail(content, current.size()))
+                .flatten();
+            grid::paint(
+                ui.painter(),
+                self.view.placement(current.size(), self.input.viewport),
+                self.input.scale,
+                content,
+                thumbnail,
+                grid::step(zoom, self.input.scale),
+                self.theme,
+            );
+        }
+        if self.input.minimap_on_screen {
+            minimap::show(self, ui, current, content);
+        }
+        let room = room(content, self.panels);
+        if self.panels.show_histogram && room.histogram {
+            histogram::show(self, ui, current, content);
+        }
+        if self.panels.show_info && room.info {
+            info::show(self, ui, current, content);
+        }
+        if let Some(message) = &self.input.toast {
+            toast::show(self, ui, message, content);
+        }
     }
 }
 
@@ -352,9 +359,6 @@ impl TextMeasure for Monospace {
 /// lines are at `zoom`, on a display of `scale` physical pixels to the
 /// logical one. `None` while it is off, there being no spacing in force then.
 ///
-/// Worked out here rather than inside the toggle because it is also what says
-/// how wide the toggle is, and the pointer has to be answered against the
-/// width the frame was drawn at — see [`layers::hit`].
 pub fn grid_spacing(show_grid: bool, zoom: f32, scale: f32) -> Option<String> {
     show_grid.then(|| grid::label(grid::step(zoom, scale)))
 }
@@ -386,10 +390,9 @@ pub const PANELS_ROOM: [f32; 2] = [
 /// one answer because the two are stacked: the histogram takes the top of the
 /// strip, and what it takes is height the information panel does not have.
 ///
-/// Asked by the frame builder, by [`layers::hit`] and by the application, all
-/// three of which have to agree about what is on screen — a panel the pointer
-/// could reach but the frame did not draw would take presses aimed at the
-/// picture under it.
+/// Asked by the frame builder and by the application, which have to agree
+/// about what is on screen: a toggle that quietly set something no one could
+/// see would be worse than one that does nothing.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Room {
     pub histogram: bool,
@@ -407,415 +410,6 @@ pub fn room(content: Rect, panels: &Panels) -> Room {
     }
 }
 
-/// Which of the top bar's own runs of words the pointer is on, if any.
-///
-/// Beside [`layers::hit`] rather than in it because answering takes the fonts
-/// the bar is set in: where a run of words ends depends on the face it is
-/// drawn in, so this is asked separately, the way the information panel's
-/// rows are.
-///
-/// `bar` is the top panel, `start` where the step buttons at its near end
-/// leave off and `limit` where the buttons at the far end begin — the same
-/// three the frame builder lays the words out between.
-pub fn bar_tip(
-    text: &mut dyn TextMeasure,
-    point: [f32; 2],
-    bar: Rect,
-    start: f32,
-    limit: f32,
-    about: &BarText,
-) -> Option<Tip> {
-    if !bar.contains(point) {
-        return None;
-    }
-    let words = status::top_bar(text, bar, start, limit, about);
-    if words
-        .counter
-        .as_ref()
-        .is_some_and(|counter| counter.strip(bar).contains(point))
-    {
-        return Some(Tip::Counter);
-    }
-    words.name.strip(bar).contains(point).then_some(Tip::Name)
-}
-
-/// Whether the pointer is on the bottom bar's own words: the ones at the far
-/// end saying what is being done to the picture.
-///
-/// Beside [`layers::hit`] for the reason [`bar_tip`] is — where a run of
-/// words begins depends on the face it is set in — and asked as its own
-/// question rather than answered with a [`Tip`] because these words are
-/// pressed as well as pointed at: a press on them opens the panel that sets
-/// what they are reading out.
-///
-/// `bar` is the bottom panel and `limit` where the surface switch at its far
-/// end begins, the same two the frame builder lays the words out between.
-pub fn state_hover(
-    text: &mut dyn TextMeasure,
-    point: [f32; 2],
-    bar: Rect,
-    limit: f32,
-    current: &Current,
-    headroom: Headroom,
-) -> bool {
-    bar.contains(point)
-        && status::state(text, bar, limit, current, headroom)
-            .is_some_and(|state| state.strip(bar).contains(point))
-}
-
-/// Builds one frame of interface.
-pub fn build_frame(
-    text: &mut dyn TextMeasure,
-    input: &FrameInput,
-    panels: &Panels,
-    current: Option<&Current>,
-    view: &View,
-    theme: &Theme,
-) -> UiFrame {
-    let size = input.logical;
-    let mut frame = UiFrame::new(input.scale);
-    let chrome = Chrome::new(size);
-
-    let Some(current) = current else {
-        // Nothing has been decoded yet. The panels still go down, so that the
-        // window reads as the application waiting rather than as a hole, with
-        // the file being read where the image's own name will go.
-        if panels.show_ui {
-            for panel in chrome.panels() {
-                frame.rect(panel, theme.bar_background);
-            }
-            if let Some(Reading::File(name)) = &input.reading {
-                frame.text_clipped(
-                    [BAR_PADDING, text_baseline(chrome.top)],
-                    TEXT_SIZE,
-                    theme.text_dim,
-                    (chrome.top.width - BAR_PADDING * 2.0).max(1.0),
-                    format!("loading {name}"),
-                );
-            }
-        }
-        return frame;
-    };
-    let content = chrome::content_area(size, panels.show_ui);
-
-    // Each thing says where it went as it is drawn, so that the tooltip
-    // naming one hangs off the rectangle the frame actually used. Anything
-    // else that wants a tooltip does the same: become a `Tip` the pointer can
-    // be answered with, and offer its rectangle here.
-    let mut tips = Tips::new(input.tooltip.as_ref());
-    let zoom = view.zoom(current.size(), input.viewport);
-    let grid_step = grid::step(zoom, input.scale);
-
-    // Under the floating panels, which are read against the image and would
-    // be harder to read over a grid as well. The minimap's thumbnail is not
-    // one of them — the image layer draws it, below this frame — so the grid
-    // is told to leave its rectangle alone.
-    if panels.show_grid {
-        let thumbnail = input
-            .minimap_on_screen
-            .then(|| minimap::thumbnail(content, current.size()))
-            .flatten();
-        grid::draw(
-            &mut frame,
-            view.placement(current.size(), input.viewport),
-            input.scale,
-            content,
-            thumbnail,
-            grid_step,
-            theme,
-        );
-    }
-    let room = room(content, panels);
-    if panels.show_histogram && room.histogram {
-        histogram::draw(&mut frame, text, current, input, panels, content, theme);
-        histogram::offer_tips(&mut tips, content, current.image.is_gray());
-    }
-    if input.minimap_on_screen {
-        minimap::draw(&mut frame, current, view, input, content, theme);
-    }
-    if panels.show_info && room.info {
-        info::draw(&mut frame, text, current, panels, content, theme);
-    }
-
-    // Over those panels rather than among them, and drawn before the bars so
-    // that hiding the chrome leaves it behind: what it says is about what was
-    // just done, which does not stop being true because the bars are away.
-    if let Some(message) = &input.toast
-        && let Some(placed) = toast::place(message, content)
-    {
-        toast::draw(
-            &mut frame,
-            text,
-            message,
-            placed,
-            panels.hover == Some(Widget::Dismiss),
-            theme,
-        );
-        tips.offer(Tip::Widget(Widget::Dismiss), placed.close);
-    }
-
-    if !panels.show_ui {
-        return frame;
-    }
-
-    for panel in chrome.panels() {
-        frame.rect(panel, theme.bar_background);
-    }
-    for border in chrome.borders() {
-        frame.hairline(border, theme.border);
-    }
-
-    // Top panel: what the image is. Everything here is a property of the
-    // file, so it is written once when the image opens and does not move
-    // again while it is on screen.
-    let top = chrome.top;
-    let top_baseline = text_baseline(top);
-
-    // How far apart the grid's lines are: what the toggle at the head of the
-    // bottom bar reads out, and so what says how much of that bar it takes.
-    let spacing = grid_spacing(panels.show_grid, zoom, input.scale);
-    // Clear of the two buttons at the end of the bar, the innermost of which
-    // is the zoom readout.
-    let zoom_button = chrome.zoom_button();
-
-    // Laid out by `status`, which the pointer asks as well: what a tooltip
-    // hangs from has to be where the words actually went.
-    let bar_text = status::BarText {
-        current,
-        reading: input.reading.as_ref(),
-        index: input.index,
-        count: input.count,
-        deleted: input.deleted,
-    };
-    // The pair that steps through the list, at the head of the bar in front
-    // of the count they move through. Only with a list to step through: see
-    // [`Chrome::step_buttons`].
-    let steps = input.count > 1;
-    if steps {
-        let [previous, next] = chrome.step_buttons();
-        for (rect, widget, forward) in [
-            (previous, Widget::Previous, false),
-            (next, Widget::Next, true),
-        ] {
-            buttons::step_button(
-                &mut frame,
-                rect,
-                forward,
-                panels.hover == Some(widget),
-                theme,
-            );
-            tips.offer(Tip::Widget(widget), rect);
-        }
-    }
-
-    let words = status::top_bar(
-        text,
-        top,
-        chrome.bar_text_x(steps),
-        zoom_button.x,
-        &bar_text,
-    );
-
-    if let Some(counter) = &words.counter {
-        frame.text_clipped(
-            [counter.x, top_baseline],
-            TEXT_SIZE,
-            theme.text_dim,
-            counter.room,
-            counter.text.clone(),
-        );
-        tips.offer(Tip::Counter, counter.strip(top));
-    }
-    if let Some(deleted) = &words.deleted {
-        frame.text_clipped(
-            [deleted.x, top_baseline],
-            TEXT_SIZE,
-            theme.warning,
-            deleted.room,
-            deleted.text.clone(),
-        );
-    }
-    frame.text_clipped_bold(
-        [words.name.x, top_baseline],
-        TEXT_SIZE,
-        theme.text_bright,
-        words.name.room,
-        words.name.text.clone(),
-    );
-    tips.offer(Tip::Name, words.name.strip(top));
-    frame.text(
-        [words.facts.x, top_baseline],
-        TEXT_SIZE,
-        theme.text_dim,
-        words.facts.text.clone(),
-    );
-
-    buttons::zoom_button(
-        &mut frame,
-        text,
-        zoom_button,
-        zoom,
-        panels.menu == Some(Menu::Zoom),
-        panels.hover == Some(Widget::Zoom),
-        theme,
-    );
-    tips.offer(Tip::Widget(Widget::Zoom), zoom_button);
-
-    buttons::maximize_button(
-        &mut frame,
-        chrome.maximize_button,
-        panels.hover == Some(Widget::Maximize),
-        theme,
-    );
-    tips.offer(Tip::Widget(Widget::Maximize), chrome.maximize_button);
-    buttons::minimap_button(
-        &mut frame,
-        chrome.minimap_button,
-        panels.show_minimap,
-        panels.hover == Some(Widget::Minimap),
-        theme,
-    );
-    tips.offer(Tip::Widget(Widget::Minimap), chrome.minimap_button);
-    buttons::copy_button(
-        &mut frame,
-        chrome.copy_button,
-        panels.menu == Some(Menu::Copy),
-        panels.hover == Some(Widget::Copy),
-        theme,
-    );
-    tips.offer(Tip::Widget(Widget::Copy), chrome.copy_button);
-    if panels.paste {
-        buttons::paste_button(
-            &mut frame,
-            chrome.paste_button,
-            panels.hover == Some(Widget::Paste),
-            theme,
-        );
-        tips.offer(Tip::Widget(Widget::Paste), chrome.paste_button);
-    }
-    buttons::histogram_button(
-        &mut frame,
-        chrome.histogram_button,
-        panels.show_histogram,
-        panels.hover == Some(Widget::Histogram),
-        room.histogram,
-        theme,
-    );
-    tips.offer(Tip::Widget(Widget::Histogram), chrome.histogram_button);
-    buttons::info_button(
-        &mut frame,
-        chrome.info_button,
-        panels.show_info,
-        panels.hover == Some(Widget::Info),
-        room.info,
-        theme,
-    );
-    tips.offer(Tip::Widget(Widget::Info), chrome.info_button);
-
-    // Bottom panel: what is happening to the image. The pointer comes and
-    // goes on its own, and the rest changes as the view is worked.
-    let bar = chrome.bottom;
-
-    // The surface switch ends the bar, where the button that hides the
-    // interface ends the top one: it is the one control of the display that
-    // is not a fact about the picture, and the words about what is being done
-    // to the picture run up to it.
-    let output_button = chrome.output_button();
-    buttons::output_button(
-        &mut frame,
-        text,
-        output_button,
-        input.headroom == Headroom::Above,
-        input.hdr_available,
-        panels.hover == Some(Widget::Output),
-        theme,
-    );
-    tips.offer(Tip::Widget(Widget::Output), output_button);
-
-    // The grid toggle leads the bar, on the line the column of side toggles
-    // keeps down the left of the window, and what it reads out is what says
-    // where the button after it begins.
-    let grid_button = chrome.grid_button(spacing.as_deref());
-    buttons::grid_button(
-        &mut frame,
-        text,
-        grid_button,
-        spacing.as_deref(),
-        panels.hover == Some(Widget::Grid),
-        theme,
-    );
-    tips.offer(Tip::Widget(Widget::Grid), grid_button);
-
-    // The head of the readout, and the only part of it that is always there:
-    // the pointer is over the bar rather than over a pixel while it is on its
-    // way to this button.
-    let pixel_button = chrome.pixel_button(spacing.as_deref());
-    buttons::pixel_button(
-        &mut frame,
-        pixel_button,
-        panels.menu == Some(Menu::PixelFormat),
-        panels.hover == Some(Widget::PixelFormat),
-        theme,
-    );
-    tips.offer(Tip::Widget(Widget::PixelFormat), pixel_button);
-
-    // What is being done to the picture, up against that switch — and
-    // nothing at all where nothing is being done, which is where a
-    // photograph left alone leaves it.
-    let state = status::state(text, bar, chrome.state_limit(), current, input.headroom);
-    let state_left = state
-        .as_ref()
-        .map_or(output_button.x, |state| state.strip(bar).x);
-
-    // The strip of the bar the readout has to itself: past the button at its
-    // head, and stopping short of the words at the other end.
-    let readout_x = pixel_button.right() + pixel::GAP;
-    let readout = Rect::new(
-        readout_x,
-        bar.y,
-        ((state_left - PADDING) - readout_x).max(0.0),
-        bar.height,
-    );
-    pixel::draw(
-        &mut frame,
-        text,
-        current,
-        input,
-        readout,
-        panels.pixel_format,
-        theme,
-    );
-    if let Some(state) = &state {
-        state_words(&mut frame, text, state, bar, output_button.x, panels, theme);
-        tips.offer(Tip::State, state.strip(bar));
-    }
-
-    // On the layer above everything else, so that it covers not only the
-    // panels and what floats over the content area but the words on them: a
-    // popup is the thing being looked at while it is open.
-    if let Some(open) = panels.menu
-        && let Some(popup) = chrome.popup(open, spacing.as_deref())
-    {
-        // Its cells are named like anything else, and are offered from here
-        // rather than from inside the menu so that every tooltip in the frame
-        // is collected in one place.
-        for (index, cell) in popup.cells() {
-            tips.offer(Tip::Widget(Widget::Cell(index)), cell);
-        }
-        let shown = menu::Shown {
-            zoom,
-            fills: Fit::Fill.axis(current.size(), input.viewport),
-        };
-        frame.over(|frame| menu::draw(frame, text, &popup, view, shown, panels, theme));
-    }
-
-    // On its own layer above even that: what a tooltip names can be on the
-    // menu, and a label hidden by the thing it is about says nothing. It goes
-    // in the content area, off the chrome the thing it names is part of.
-    tips.draw(&mut frame, text, content, theme);
-    frame
-}
-
 /// What the compositor paints behind the image: the panel color, with the
 /// theme's hairline as the other square of the checkerboard.
 pub fn backdrop(theme: &Theme) -> Backdrop {
@@ -823,74 +417,6 @@ pub fn backdrop(theme: &Theme) -> Backdrop {
         base: theme.bar_background,
         alternate: theme.border,
         square: CHECKER_SQUARE,
-    }
-}
-
-/// The words about what is being done to the picture, at the far end of the
-/// bottom bar: the line itself, the wash that comes up under it while the
-/// pointer is on it, and the one word on it set apart.
-///
-/// `limit` is where the surface switch begins, which is what the runs are cut
-/// to: the line is set against it, and a window narrow enough to leave it no
-/// room must lose the words rather than lay them over the switch.
-fn state_words(
-    frame: &mut UiFrame,
-    text: &mut dyn TextMeasure,
-    state: &status::State,
-    bar: Rect,
-    limit: f32,
-    panels: &Panels,
-    theme: &Theme,
-) {
-    let (wash, ink) = buttons::button_ink(false, panels.state_hover, theme);
-    if panels.state_hover {
-        // A button's own wash, at a button's height down the middle of the
-        // bar, so that what comes up under the words is the shape everything
-        // else in the chrome wears when the pointer is on it. Nothing at
-        // rest: the line is a reading first, and a pill standing around it
-        // whether or not anyone is pointing would read as a control before it
-        // read as words.
-        let strip = state.strip(bar);
-        let height = chrome::BUTTON_SIZE.min(bar.height);
-        frame.rounded_rect(
-            Rect::new(
-                strip.x,
-                bar.y + (bar.height - height) / 2.0,
-                strip.width,
-                height,
-            ),
-            menu::CELL_RADIUS,
-            wash,
-        );
-    }
-
-    let baseline = text_baseline(bar);
-    let (head, tail) = match state.clipped {
-        Some(at) => (&state.text[..at], &state.text[at..]),
-        None => (state.text.as_str(), ""),
-    };
-    if !head.is_empty() {
-        frame.text_clipped(
-            [state.x, baseline],
-            TEXT_SIZE,
-            ink,
-            (limit - state.x).max(0.0),
-            head,
-        );
-    }
-    // The word for a picture losing its highlights, which is the one thing on
-    // this line that nobody asked for — set bold, and in the ink the line
-    // takes when the pointer is on it, so that it reads as the thing being
-    // said whether or not anyone is pointing.
-    if !tail.is_empty() {
-        let at = state.x + text.measure_text(head, TEXT_SIZE)[0];
-        frame.text_clipped_bold(
-            [at, baseline],
-            TEXT_SIZE,
-            theme.text_primary,
-            (limit - at).max(0.0),
-            tail,
-        );
     }
 }
 
@@ -903,17 +429,6 @@ pub(super) fn capitalized(label: &str) -> String {
         Some(first) => first.to_uppercase().chain(letters).collect(),
         None => String::new(),
     }
-}
-
-/// Where text has to start to sit centered in a bar of `BAR_HEIGHT`.
-///
-/// The line's own box, descenders and all, rather than the capitals that
-/// [`buttons::centered_text`] levels a label by: what a bar carries is prose —
-/// a file's name, a readout — where descenders are ordinary and the room
-/// under the baseline is room the words actually use. A button's label is
-/// leveled against the mark beside it instead, which is a different job.
-fn text_baseline(bar: Rect) -> f32 {
-    bar.y + (bar.height - TEXT_SIZE * 1.3) / 2.0
 }
 
 #[cfg(test)]
@@ -930,7 +445,6 @@ mod tests {
             show_ui: true,
             show_histogram: true,
             show_info: true,
-            info_scroll: 0.0,
             show_luma: true,
             show_planes: true,
             log_counts: false,
@@ -938,10 +452,6 @@ mod tests {
             show_grid: false,
             paste: false,
             pixel_format: PixelFormat::default(),
-            hover: None,
-            info_hover: None,
-            state_hover: false,
-            menu: None,
         };
         let area = |width, height| room(Rect::new(0.0, 0.0, width, height), &panels);
 

@@ -14,6 +14,46 @@ the interface was designed in is used instead. The same set fills in for a
 palette too sparse to build on, so a half-written theme degrades to something
 wearable rather than to black on black.
 
+`Theme` stays the source of truth, and what egui draws is derived from it in
+`src/ui/style.rs`: the bars' color is its panel fill, the menu's its window
+fill, the hairline its window stroke, the accent its selection and what a
+lit button is washed with, the two text inks the strokes of its interactive
+and quiet widgets, the theme's yellow and red its warning and error inks. Its
+shadows are off, its corners are the panel's and a toggle's, and its text
+styles are the interface's one size. Everything drawn by hand — a toggle, a
+plot, a swatch — reads its inks from `Theme` directly rather than back out of
+egui's style, so the two cannot come to disagree about a color. A change of
+palette is put on egui's context the same tick it is read.
+
+The faces follow the same rule, in `src/ui/fonts.rs`: the interface is set in
+whatever the desktop calls `sans-serif` and `monospace`, with the bold sans
+for the one bold thing in the window, and ships no font of its own. Which
+face that is, is asked of fontconfig's own library — the answer `fc-match`
+prints — rather than worked out from its configuration files. `fontdb` can
+read those files itself, and did at first, but it honors only the
+`<alias>` elements, ignores the `<match>` rules Omarchy uses to name its
+faces, and lets the last alias in file order win; on an Arch desktop that
+lands on Nimbus Sans Narrow, a condensed face nothing else on the desktop
+is set in. The library is opened at run time, so a machine without it still
+gets a window, set from `fontdb`'s rougher reading. A face fontconfig
+answers with is checked against the question, since it always answers with
+its nearest: a bold that came back regular, or a monospace that came back
+proportional, is treated as no answer, and that family falls back to the
+sans.
+
+Each face is handed to egui with one number worked out from its own
+metrics. egui makes a row as tall as ascent, descent and line gap together,
+puts the baseline the ascent down from the top, and centers that box in a
+bar or a button; where the letters sit inside the box is the face's
+business, and faces differ. Nimbus Sans Narrow declares its ascent no
+higher than its capitals and a fifth of an em of line gap, all of it under
+the baseline, so its text rode a quarter of an em high in every button;
+Liberation Sans and Adwaita Sans are centered to within a pixel. The
+number is the distance from the box's middle to the capitals' middle, set
+as the face's `y_offset_factor`, so the capitals sit at the middle of the
+row whatever face the desktop supplies. It is read with `skrifa`, the
+reader egui's own layout uses, so the two see the same ascent and descent.
+
 The palette is not read literally. Omarchy resolves it through an alias and
 derivation cascade before any consumer sees it — short names, ANSI `color0`
 through `color15` in both directions, shades mixed out of the base colors —
@@ -54,6 +94,13 @@ Two more resist being themed and are not:
   overlaps come out muddier the further a palette sits from the primaries, so
   how much a histogram can be read depends on the desktop's taste in reds.
   That is the wrong thing to make themeable.
+
+  The screening itself is done on the CPU, one column of the plot at a time.
+  egui has one blend, so the planes cannot be laid over one another and left
+  to the GPU; instead each column — one to a bin, a logical pixel wide — is
+  cut into stretches at the heights of the planes standing in it, and each
+  stretch is filled with what the planes over it come to, screened in code.
+  On pure primaries over near-black that is exactly the picture the GPU drew.
 
   The panel *around* the plot is not one of these. Nothing is screened onto
   it, so it is the bars' own surface, mildly transparent, with the same ink on

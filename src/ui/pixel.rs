@@ -13,13 +13,14 @@
 //! whichever is showing and settles the question none of the three answers
 //! without asking anyone to read three decimals and imagine a color.
 
+use egui::{Label, RichText, Sense, StrokeKind, vec2};
+
 use crate::image::display::Mapped;
 use crate::image::{DecodedImage, Sample, Samples};
-use crate::render::{Color, Rect, TextMeasure, UiFrame};
-use crate::theme::Theme;
+use crate::render::Color;
 
-use super::buttons::outline;
-use super::{Current, FrameInput, TEXT_SIZE, text_baseline};
+use super::Current;
+use super::chrome::{Pass, measure};
 
 /// Side of the color swatch, in logical pixels: the height of a line of
 /// text, so that it reads as part of the sentence beside it.
@@ -77,102 +78,58 @@ impl PixelFormat {
 }
 
 /// Draws the readout for the pixel the pointer is over, if it is over one, in
-/// `room`: the strip of the bottom bar between the button that chooses the
-/// format and the state text at the other end. What comes out is half the
-/// surface's doing, which is why the frame's input comes along rather than the
-/// pixel alone.
+/// what is left of the bottom bar between the dot that chooses the format and
+/// the state text at the other end.
 ///
 /// The coordinate leads, then the swatch, then the value it stands for. The
 /// swatch belongs to the color it depicts rather than to the pixel's address,
 /// so it sits in front of the value and moves with it — and the coordinate
 /// is set to a fixed width so that they stay put while the pointer moves.
-pub(super) fn draw(
-    frame: &mut UiFrame,
-    text: &mut dyn TextMeasure,
-    current: &Current,
-    input: &FrameInput,
-    room: Rect,
-    format: PixelFormat,
-    theme: &Theme,
-) {
-    let (start, limit) = (room.x, room.right());
-    let Some(at) = input.pointer else {
+/// Whatever else has to go in a narrow bar, the coordinate stays: it is the
+/// one thing the readout says that nothing else in the window says.
+pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, current: &Current) {
+    let Some(at) = pass.input.pointer else {
         return;
     };
     let Some(sample) = current.image.sample(at[0], at[1]) else {
         return;
     };
-    let mapped = current.display.map(&sample, input.headroom);
-    let baseline = text_baseline(room);
+    let mapped = current.display.map(&sample, pass.input.headroom);
+    let ink: egui::Color32 = pass.theme.text_primary.into();
 
-    // Whatever else has to go, the coordinate stays: it is the one thing the
-    // readout says that nothing else in the window says.
     let coordinate = coordinate(at, [current.image.width, current.image.height]);
-    let end = start + text.measure_mono(&coordinate, TEXT_SIZE)[0];
-    frame.text_clipped_mono(
-        [start, baseline],
-        TEXT_SIZE,
-        theme.text_primary,
-        (limit - start).max(1.0),
-        coordinate,
-    );
+    ui.add(Label::new(RichText::new(coordinate).monospace().color(ink)).truncate());
 
-    let values = value(&current.image, &sample, &mapped, format);
-    let values_width = text.measure_text(&values, TEXT_SIZE)[0];
-    let separator_width = text.measure_text(SEPARATOR, TEXT_SIZE)[0];
     // A bar too short for the swatch gets the words alone, the way a panel
-    // too narrow for a button gets no button.
-    let Some((separator_x, swatch_x, values_x)) = place(
-        end,
-        separator_width,
-        values_width,
-        limit,
-        room.height >= SWATCH,
-    ) else {
-        return;
-    };
-    frame.text(
-        [separator_x, baseline],
-        TEXT_SIZE,
-        theme.text_primary,
-        SEPARATOR,
-    );
-    if let Some(x) = swatch_x {
-        let swatch = Rect::new(
-            x,
-            (room.y + (room.height - SWATCH) / 2.0).round(),
-            SWATCH,
-            SWATCH,
-        );
-        frame.rect(swatch, swatch_color(&mapped));
-        // An outline, so that a transparent or near-black pixel still reads as
-        // a swatch showing something rather than as a gap in the bar.
-        outline(frame, swatch, 1.0, theme.border);
+    // too narrow for a button gets no button; one too narrow for the values
+    // loses the separator and the swatch with them, rather than leaving the
+    // separator parting the coordinate from nothing.
+    let values = value(&current.image, &sample, &mapped, pass.panels.pixel_format);
+    let swatch = ui.available_height() >= SWATCH;
+    let mut needed = GAP + measure(ui, SEPARATOR) + GAP + measure(ui, &values);
+    if swatch {
+        needed += SWATCH + GAP;
     }
-    frame.text_clipped(
-        [values_x, baseline],
-        TEXT_SIZE,
-        theme.text_primary,
-        (limit - values_x).max(1.0),
-        values,
-    );
-}
-
-/// Where the separator, the swatch and the values go once the coordinate has
-/// ended at `end` — or `None` when what is left of the bar before `limit` has
-/// no room for the values, in which case the separator and the swatch go with
-/// them rather than standing after the coordinate parting it from nothing.
-fn place(
-    end: f32,
-    separator_width: f32,
-    values_width: f32,
-    limit: f32,
-    swatch: bool,
-) -> Option<(f32, Option<f32>, f32)> {
-    let separator_x = end + GAP;
-    let after = separator_x + separator_width + GAP;
-    let values_x = if swatch { after + SWATCH + GAP } else { after };
-    (values_x + values_width <= limit).then(|| (separator_x, swatch.then_some(after), values_x))
+    if ui.available_width() < needed {
+        return;
+    }
+    ui.add_space(GAP);
+    ui.add(Label::new(RichText::new(SEPARATOR).color(ink)));
+    ui.add_space(GAP);
+    if swatch {
+        let (rect, _) = ui.allocate_exact_size(vec2(SWATCH, SWATCH), Sense::HOVER);
+        ui.painter().rect_filled(rect, 0.0, swatch_color(&mapped));
+        // An outline, so that a transparent or near-black pixel still reads
+        // as a swatch showing something rather than as a gap in the bar.
+        ui.painter().rect_stroke(
+            rect,
+            0.0,
+            egui::Stroke::new(1.0, pass.theme.border),
+            StrokeKind::Inside,
+        );
+        ui.add_space(GAP);
+    }
+    ui.add(Label::new(RichText::new(values).color(ink)).truncate());
 }
 
 /// Where the pointer is, padded out to the widest coordinate `size` can
@@ -285,9 +242,6 @@ mod tests {
     use super::*;
     use crate::image::display::{Colormap, Display, Headroom};
     use crate::image::{AlphaMode, Channels, ColorSpace};
-
-    use crate::ui::Monospace;
-    use crate::ui::chrome::BAR_PADDING;
 
     /// A 4x5 sRGB image, black but for `pixel` in its bottom right corner at
     /// (3, 4) — which is the pixel every test below points at.
@@ -439,44 +393,6 @@ mod tests {
         assert_eq!(coordinate([1919, 1079], [1920, 1080]), "(1919, 1079)");
         assert_eq!(coordinate([999, 0], [1000, 1000]), "(999, 000)");
         assert_eq!(coordinate([0, 0], [1, 1]), "(0, 0)", "a one-pixel image");
-    }
-
-    /// Whatever else has to go, the coordinate stays: it is the one thing the
-    /// readout says that nothing else in the window says. The separator and
-    /// the swatch go with the values, having nothing to say once they are
-    /// gone.
-    #[test]
-    fn a_narrow_bar_keeps_the_coordinate_and_drops_the_swatch_with_the_values() {
-        let values = read(
-            &rgb8([231, 128, 64]),
-            &Display::default(),
-            [3, 4],
-            PixelFormat::Decimal,
-        );
-        let width = Monospace.measure_text(&values, TEXT_SIZE)[0];
-        let dot = Monospace.measure_text(SEPARATOR, TEXT_SIZE)[0];
-        let end = BAR_PADDING + Monospace.measure_mono(&coordinate([3, 4], [4, 5]), TEXT_SIZE)[0];
-
-        let roomy = place(end, dot, width, end + 1000.0, true).expect("room for all of it");
-        let after_dot = end + GAP + dot + GAP;
-        assert_eq!(
-            roomy,
-            (end + GAP, Some(after_dot), after_dot + SWATCH + GAP)
-        );
-
-        assert_eq!(place(end, dot, width, end + width, true), None);
-    }
-
-    /// A bar too short to draw a swatch in still reads out the numbers, and
-    /// closes the space the swatch would have taken. The separator stays: it
-    /// parts the coordinate from the values, not from the swatch.
-    #[test]
-    fn a_short_bar_gives_the_values_the_swatch_s_place() {
-        let (separator_x, swatch, values_x) =
-            place(100.0, 4.0, 50.0, 1000.0, false).expect("room for the values");
-        assert_eq!(separator_x, 100.0 + GAP);
-        assert_eq!(swatch, None);
-        assert_eq!(values_x, 100.0 + GAP + 4.0 + GAP);
     }
 
     /// The swatch is there to answer the question the numbers cannot: a

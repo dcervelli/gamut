@@ -1,6 +1,7 @@
 //! Window lifecycle, key handling, and building each frame's interface.
 
 mod files;
+mod gui;
 pub mod input;
 mod kept;
 mod window;
@@ -13,7 +14,7 @@ use std::thread::JoinHandle;
 use std::time::Instant;
 
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, KeyEvent, MouseButton, WindowEvent};
+use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::{Window, WindowId};
 
@@ -22,18 +23,18 @@ use crate::image::display::{Display, Headroom, Startup};
 use crate::loader::{Decoded, Loader, Opened, Ready, Reload, Request};
 use crate::monitor::{Mode, Monitors};
 use crate::motion::Motion;
-use crate::render::{HdrPreference, Placement, Rect, Renderer, Scene, Upscale};
+use crate::render::{HdrPreference, Placement, Renderer, Scene, Upscale};
 use crate::theme::{self, Theme};
 use crate::timing;
-use crate::ui::chrome::{Chrome, content_area, image_viewport};
-use crate::ui::layers::{Hit, Shown};
+use crate::ui::chrome::{content_area, image_viewport};
 use crate::ui::toast::{self, Level, Toasts};
 use crate::ui::tooltip::Hdr;
-use crate::ui::{self, Current, FileFacts, FrameInput, Panels, Reading, Tooltips};
+use crate::ui::{self, Current, FileFacts, FrameInput, Panels, Reading, Rect};
 use crate::view::{View, Viewport};
 use crate::watch::{self, Watch};
 
 use files::{Announce, Files};
+use gui::Gui;
 use input::{Effect, Pointer};
 use kept::{Kept, Settings};
 use window::{file_label, initial_window_size, loading_title, window_title};
@@ -127,15 +128,12 @@ pub struct App {
     loader: Loader,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
+    /// The toolkit's context and its adapter to the window, made with them.
+    gui: Option<Gui>,
     pointer: Pointer,
     panels: Panels,
-    /// When the label naming what the pointer is resting on opens and closes.
-    /// Apart from the panels because it is the one thing on screen that
-    /// depends on how long something has been true: `panels.tooltip` is what
-    /// it has settled on, and this is the clock behind it.
-    tooltips: Tooltips,
     /// The message about what was just done, and when it takes itself off.
-    /// The other thing on screen that time alone changes.
+    /// The one thing on screen that time alone changes.
     toasts: Toasts,
     /// How the copies being prepared on threads of their own turned out. A
     /// copy of the picture has to walk every pixel before it can say whether
@@ -225,8 +223,8 @@ impl App {
             loader,
             window: None,
             renderer: None,
+            gui: None,
             pointer: Pointer::default(),
-            tooltips: Tooltips::default(),
             toasts: Toasts::default(),
             copied: mpsc::channel(),
             copying: Vec::new(),
@@ -238,15 +236,10 @@ impl App {
                 show_planes: true,
                 log_counts: false,
                 show_info: info,
-                info_scroll: 0.0,
                 show_minimap: minimap,
                 show_grid: false,
                 paste: false,
                 pixel_format: ui::PixelFormat::default(),
-                hover: None,
-                info_hover: None,
-                state_hover: false,
-                menu: None,
             },
             said_how_to_restore: false,
             reported_error: false,
@@ -466,23 +459,6 @@ impl App {
         [physical[0] / scale, physical[1] / scale]
     }
 
-    /// Where the panels are this frame. Cheap enough to derive on demand, and
-    /// deriving it means there is no cached layout to fall out of step with
-    /// the window.
-    fn chrome(&self) -> Chrome {
-        Chrome::new(self.logical_size())
-    }
-
-    /// Where the info panel is, when it is on screen. The one thing floating
-    /// over the image that takes the pointer for itself, so the pointer has
-    /// to be able to ask where it is.
-    fn info_panel(&self) -> Option<Rect> {
-        if !self.panels.show_info || self.current.is_none() {
-            return None;
-        }
-        ui::info::panel(self.content(), self.panels.show_histogram)
-    }
-
     /// Whether the content area has room for each of the two panels that
     /// float over it. The frame builder works this out for itself; it is
     /// worked out here as well for the presses and the tooltips, which have
@@ -518,213 +494,12 @@ impl App {
             })
     }
 
-    /// Which of the top bar's own runs of words the pointer is on, if any.
-    ///
-    /// Asked with the fonts the bar is drawn in, as the information panel's
-    /// rows are: a run of words ends where the face it is set in says, and
-    /// the pointer has to be answered against what was actually drawn.
-    pub(super) fn bar_tip(&mut self) -> Option<ui::Tip> {
-        if !self.panels.show_ui {
-            return None;
-        }
-        let point = self.logical_cursor()?;
-        let chrome = self.chrome();
-        // Asked on every motion, including the ones over the picture, so the
-        // cheap question comes before the layout it would otherwise pay for.
-        if !chrome.top.contains(point) {
-            return None;
-        }
-        let bar = chrome.top;
-        let limit = chrome.zoom_button().x;
-        let (index, count) = (self.files.index(), self.files.len());
-        // Past the pair of step buttons, which are there on exactly the terms
-        // the count beside them is — see `Chrome::step_buttons`.
-        let start = chrome.bar_text_x(count > 1);
-        let deleted = self.watch.missing();
-        let reading = self.reading();
-        // Split borrow: the measurement needs the renderer while it reads the
-        // file the bar is about.
-        let (Some(renderer), Some(current)) = (self.renderer.as_mut(), self.current.as_ref())
-        else {
-            return None;
-        };
-        let about = ui::BarText {
-            current,
-            reading: reading.as_ref(),
-            index,
-            count,
-            deleted,
-        };
-        ui::bar_tip(renderer, point, bar, start, limit, &about)
-    }
-
-    /// Whether the pointer is on the bottom bar's words about what is being
-    /// done to the picture — which name themselves, and open the histogram
-    /// panel when pressed.
-    ///
-    /// Asked afresh rather than read off [`Panels::state_hover`] wherever it
-    /// decides anything: a press can arrive before the pointer has moved
-    /// since the words last changed, and what is stored there is only what
-    /// was true at the last motion.
-    pub(super) fn state_hover(&mut self) -> bool {
-        if !self.panels.show_ui {
-            return false;
-        }
-        let Some(point) = self.logical_cursor() else {
-            return false;
-        };
-        let chrome = self.chrome();
-        // The cheap question first: this is asked on every motion, including
-        // the ones over the picture.
-        if !chrome.bottom.contains(point) {
-            return false;
-        }
-        let bar = chrome.bottom;
-        let limit = chrome.state_limit();
-        let headroom = self.headroom();
-        // Split borrow, as in `bar_tip`.
-        let (Some(renderer), Some(current)) = (self.renderer.as_mut(), self.current.as_ref())
-        else {
-            return false;
-        };
-        ui::state_hover(renderer, point, bar, limit, current, headroom)
-    }
-
-    /// The image on screen, as the layers need to know it. `None` before the
-    /// first decode, when the panels that describe an image are not drawn.
-    fn shown(&self) -> Option<Shown> {
-        let current = self.current.as_ref()?;
-        Some(Shown {
-            size: current.size(),
-            gray: current.image.channels().is_gray(),
-            minimap: self.minimap_on_screen(),
-        })
-    }
-
-    /// Which layer of the interface the pointer is on: the one question every
-    /// pointer handler asks, so that the highlight, the press, the wheel and
-    /// the bar's readout cannot disagree about what is under it.
-    ///
-    /// `None` before the pointer has said where it is — a press can genuinely
-    /// arrive first — and once it has left the window.
-    pub(super) fn pointer_hit(&self) -> Option<Hit> {
-        let point = self.logical_cursor()?;
-        Some(ui::layers::hit(
-            point,
-            &self.panels,
-            self.logical_size(),
-            self.shown(),
-            self.grid_spacing().as_deref(),
-            self.files.len() > 1,
-            self.toasts.showing(),
-        ))
-    }
-
-    /// What the grid toggle is reading out, and so how much of the top bar it
-    /// is taking: how far apart its lines are at the zoom on screen, or
-    /// `None` with the grid off or nothing to lay one over.
-    ///
-    /// Worked out from the same zoom the frame builder works it out from,
-    /// rather than remembered from the frame it drew: it is the width of a
-    /// button the pointer has to be answered against, and a width kept
-    /// between the two of them is a width that can fall out of step.
-    pub(super) fn grid_spacing(&self) -> Option<String> {
-        let current = self.current.as_ref()?;
-        let zoom = self.shown_view().zoom(current.size(), self.viewport());
-        ui::grid_spacing(self.panels.show_grid, zoom, self.scale_factor())
-    }
-
-    /// Whether the menu that is open has the pointer, rather than the layer
-    /// the pointer happens to be over.
-    ///
-    /// A menu takes the pointer for as long as it is open, as menus do
-    /// everywhere: a press anywhere off it dismisses it instead of reaching
-    /// what it landed on, the wheel is spent on it, and nothing behind it
-    /// lights up under the pointer. What the pointer is *over* is unaffected,
-    /// which is why the bar goes on reading out the pixel under it.
-    pub(super) fn menu_has_pointer(&self, hit: Option<Hit>) -> bool {
-        self.panels.menu.is_some() && !hit.is_some_and(Hit::is_menu)
-    }
-
-    /// Which bin of the histogram the panel is marking, or `None` when it is
-    /// marking none.
-    ///
-    /// What the panel draws its rule and its readout from, and so what a
-    /// motion compares before and after to decide whether the frame on screen
-    /// has gone out of date. It answers for the pointer over the plot and for
-    /// the pixel under it alike, so either one moving on is caught here.
-    pub(super) fn histogram_mark(&self) -> Option<usize> {
-        if !self.panels.show_histogram {
-            return None;
-        }
-        let current = self.current.as_ref()?;
-        ui::histogram::marked(
-            current,
-            self.content(),
-            self.logical_cursor(),
-            self.pointer_pixel(),
-        )
-    }
-
-    /// Where the info panel is when the pointer is on it, and so when what it
-    /// does next belongs to the panel rather than to the image behind it.
-    ///
-    /// Asked of the layers rather than of the panel's own rectangle, so that
-    /// a menu drawn over the panel keeps the pointer it is covering.
-    pub(super) fn pointer_over_info(&self) -> Option<Rect> {
-        if self.pointer_hit()? != Hit::Info {
-            return None;
-        }
-        self.info_panel()
-    }
-
-    /// How far the column in `panel` may still be scrolled, measured with the
-    /// fonts the frame will draw it with. Zero when it all fits, and when
-    /// there is nothing on screen to describe.
-    pub(super) fn info_overflow(&mut self, panel: Rect) -> f32 {
-        // Split borrow: the measurement needs the renderer while it reads the
-        // image the column is about.
-        let (Some(renderer), Some(current)) = (self.renderer.as_mut(), self.current.as_ref())
-        else {
-            return 0.0;
-        };
-        ui::info::max_scroll(renderer, current, panel)
-    }
-
-    /// What clicking where the pointer is would copy out of the info panel,
-    /// and so which of its copy buttons is showing. `None` when the pointer
-    /// is somewhere else, or on a part of the panel that copies nothing.
-    pub(super) fn info_copyable(&mut self) -> Option<ui::info::Copyable> {
-        let panel = self.pointer_over_info()?;
-        let point = self.logical_cursor()?;
-        let scroll = self.panels.info_scroll;
-        // Split borrow, as in `info_overflow`.
-        let (Some(renderer), Some(current)) = (self.renderer.as_mut(), self.current.as_ref())
-        else {
-            return None;
-        };
-        ui::info::copyable_at(renderer, current, panel, scroll, point)
-    }
-
     /// Raises the message at the foot of the window, in place of whatever was
     /// up. Handlers say it and return `Effect::Redraw`; nothing here asks the
     /// window for a frame.
-    ///
-    /// Measured against the fonts the frame will set it in, once and here,
-    /// which is why it needs the renderer at all: nothing about the message
-    /// changes while it is up, so the frame builder and the pointer both
-    /// place it from that one number. No renderer means no window to show it
-    /// on, and nothing has been asked for yet.
     pub(super) fn toast(&mut self, message: impl Into<String>, level: Level) {
-        if let Some(renderer) = self.renderer.as_mut() {
-            self.toasts.show(
-                renderer,
-                Instant::now(),
-                message.into(),
-                level,
-                toast::LINGER,
-            );
-        }
+        self.toasts
+            .show(Instant::now(), message.into(), level, toast::LINGER);
     }
 
     /// Says what the copies prepared on their own threads did. Returns
@@ -744,32 +519,6 @@ impl App {
             }
         }
         said
-    }
-
-    /// How far the column in `panel` moves for each logical pixel a drag of
-    /// its scrollbar travels, measured with the fonts the frame will draw it
-    /// with. One where there is nothing on screen to describe.
-    pub(super) fn info_scroll_per_drag(&mut self, panel: Rect) -> f32 {
-        // Split borrow, as in `info_overflow`.
-        let (Some(renderer), Some(current)) = (self.renderer.as_mut(), self.current.as_ref())
-        else {
-            return 1.0;
-        };
-        ui::info::scroll_per_drag(renderer, current, panel)
-    }
-
-    /// Moves the info panel's column by `by` logical pixels, clamped to what
-    /// there is left to scroll. Returns whether it moved, and so whether the
-    /// frame is now out of date.
-    pub(super) fn scroll_info_by(&mut self, panel: Rect, by: f32) -> bool {
-        if !by.is_finite() || by == 0.0 {
-            return false;
-        }
-        let limit = self.info_overflow(panel);
-        let scrolled = (self.panels.info_scroll + by).clamp(0.0, limit);
-        let moved = scrolled != self.panels.info_scroll;
-        self.panels.info_scroll = scrolled;
-        moved
     }
 
     /// Where the image is drawn, in physical pixels: what the panels leave in
@@ -844,8 +593,9 @@ impl App {
         // letting it through: the bar would otherwise read out a pixel nobody
         // can see, under the panel that is covering it, and the histogram's
         // own mark would follow the pointer across its ramp and its buttons
-        // to whatever happened to be behind them.
-        if !self.pointer_hit()?.is_image() {
+        // to whatever happened to be behind them. egui says which, from the
+        // last pass — see `Pointer::over_image`.
+        if !self.pointer.over_image {
             return None;
         }
         let cursor = self.pointer.cursor?;
@@ -968,11 +718,6 @@ impl App {
             return false;
         }
         self.panels.paste = offered;
-        // A button that has just appeared under a pointer that has not moved
-        // should light up, and one that has just gone should not leave the
-        // highlight behind it. Motion is what usually asks this question, and
-        // this is the one thing that can change the answer without any.
-        self.update_hover();
         true
     }
 
@@ -986,6 +731,9 @@ impl App {
         let theme = Theme::detect();
         let changed = theme != self.theme;
         self.theme = theme;
+        if changed && let Some(gui) = &self.gui {
+            gui.retint(&self.theme);
+        }
         changed
     }
 
@@ -1134,9 +882,6 @@ impl App {
             // A move under way was about the picture that has just left, and
             // there is nothing for it to carry the eye across any more.
             self.motion = None;
-            // A different picture is a different column of words about it,
-            // and it is read from the top.
-            self.panels.info_scroll = 0.0;
         }
         self.current = Some(Current {
             image: Arc::new(image),
@@ -1210,7 +955,6 @@ impl App {
         let thumbnail = self.minimap_placement(logical, scale);
         let minimap = self.minimap_on_screen();
         let reading = self.reading();
-        let tooltip = self.tooltip();
         let headroom = self.headroom();
         let hdr_available = self.hdr_available();
         let input = FrameInput {
@@ -1226,21 +970,26 @@ impl App {
             deleted: self.watch.missing(),
             headroom,
             hdr_available,
-            tooltip,
+            can_pan: self.view.can_pan(self.image_size(), viewport),
             toast: self.toasts.showing().cloned(),
         };
 
-        // Split borrow: the frame builder needs the renderer's font metrics
-        // while reading the rest of the application state.
-        let renderer = self.renderer.as_mut().expect("checked above");
-        let frame = ui::build_frame(
-            renderer,
-            &input,
-            &self.panels,
-            self.current.as_ref(),
-            &view,
-            &self.theme,
-        );
+        let namer = self.namer();
+        let Some(gui) = self.gui.as_mut() else {
+            return;
+        };
+        let mut commands = Vec::new();
+        let (painted, textures) = gui.run(&window, |ui| {
+            commands = ui::show(
+                ui,
+                &input,
+                &self.panels,
+                self.current.as_ref(),
+                &view,
+                &self.theme,
+                &namer,
+            );
+        });
 
         let fallback = Display::default();
         let display = self
@@ -1251,16 +1000,17 @@ impl App {
 
         let backdrop = ui::backdrop(&self.theme);
 
+        let renderer = self.renderer.as_mut().expect("checked above");
         let scene = Scene {
             placement,
             thumbnail,
             display,
-            frame: &frame,
+            ui: &painted,
             scale,
             backdrop,
             headroom,
         };
-        match renderer.render(scene) {
+        match renderer.render(scene, textures) {
             Ok(()) => self.reported_error = false,
             Err(error) => {
                 if !self.reported_error {
@@ -1270,11 +1020,19 @@ impl App {
             }
         }
 
+        // What the interface asked for is done once the frame is off: it
+        // was drawn from the state as it was, and the next frame shows what
+        // the press did.
+        let pressed = !commands.is_empty();
+        for command in commands {
+            self.act(command);
+        }
+
         // A move still in flight owes the next frame. Asked for from here
         // rather than timed from the loop, so that it comes when the
         // compositor is ready for one and the move plays at the display's
         // own rate.
-        if self.motion.is_some() {
+        if self.motion.is_some() || pressed {
             window.request_redraw();
         }
     }
@@ -1327,15 +1085,12 @@ impl ApplicationHandler<UserEvent> for App {
             }
         }
 
-        // The two things on screen that happen because time passed rather
-        // than because anything arrived: the pointer resting on a button long
-        // enough to be told what it is, and the message about what was just
-        // done having been up long enough. The message taking itself off
-        // takes a button off the screen with it, so the pointer is asked
-        // again where it now is.
-        let mut timed = self.tooltips.tick(now);
-        if self.toasts.tick(now) {
-            self.update_hover();
+        // The things on screen that happen because time passed rather than
+        // because anything arrived: the message about what was just done
+        // having been up long enough, and whatever egui is waiting on — a
+        // tooltip's delay, a hover fading.
+        let mut timed = self.toasts.tick(now);
+        if self.gui.as_mut().is_some_and(|gui| gui.due(now)) {
             timed = true;
         }
         if timed && let Some(window) = &self.window {
@@ -1343,13 +1098,16 @@ impl ApplicationHandler<UserEvent> for App {
         }
 
         // Sleep until the next thing with a time on it: the file check, the
-        // moment a read that is still going becomes worth mentioning, or the
-        // moment a tooltip is due or a message has had its time. A read that finishes first wakes us
-        // through the proxy instead.
+        // moment a read that is still going becomes worth mentioning, the
+        // moment a message has had its time, or the moment egui asked for. A
+        // read that finishes first wakes us through the proxy instead.
         let mut deadline = self.next_poll;
-        for due in [self.tooltips.deadline(), self.toasts.deadline()]
-            .into_iter()
-            .flatten()
+        for due in [
+            self.toasts.deadline(),
+            self.gui.as_ref().and_then(Gui::deadline),
+        ]
+        .into_iter()
+        .flatten()
         {
             deadline = deadline.min(due);
         }
@@ -1451,10 +1209,20 @@ impl ApplicationHandler<UserEvent> for App {
             );
         }
 
+        let gui = match Gui::new(&window, &self.theme, renderer.max_texture_side()) {
+            Ok(gui) => gui,
+            Err(error) => {
+                eprintln!("gamut: {}", crate::escape_controls(&format!("{error:#}")));
+                event_loop.exit();
+                return;
+            }
+        };
+
         // From here on the loader uploads as well as decodes, so that
         // stepping to the next file costs the event loop nothing but the swap.
         self.loader.attach(renderer.uploader());
         self.renderer = Some(renderer);
+        self.gui = Some(gui);
         self.window = Some(window);
         // The surface exists at last, so whatever was decoded before the
         // window opened can find out what it is being drawn onto. Which
@@ -1464,7 +1232,26 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        // egui sees every event first. What it takes for itself — a press on
+        // one of its widgets — goes no further; what it merely wants painted
+        // for, a pointer crossing one of them, is a redraw and nothing else.
+        let response = match (&self.gui, &self.window) {
+            (Some(_), Some(window)) => {
+                let window = window.clone();
+                let gui = self.gui.as_mut().expect("matched above");
+                Some(gui.on_event(&window, &event))
+            }
+            _ => None,
+        };
+        if let Some(response) = &response
+            && response.repaint
+            && let Some(window) = &self.window
+        {
+            window.request_redraw();
+        }
+        let consumed = response.is_some_and(|response| response.consumed);
         let effect = match event {
+            _ if consumed && !matches!(event, WindowEvent::RedrawRequested) => Effect::Nothing,
             WindowEvent::CloseRequested => Effect::Quit,
             WindowEvent::Resized(size) => {
                 if let Some(renderer) = &mut self.renderer {
@@ -1476,30 +1263,19 @@ impl ApplicationHandler<UserEvent> for App {
                 self.pointer.modifiers = modifiers.state();
                 Effect::Nothing
             }
+            // Where the pointer is, for the readouts and for the wheel's
+            // anchor: the press, the drag and the wheel themselves are egui's,
+            // and come back from the frame as commands.
             WindowEvent::CursorMoved { position, .. } => {
-                Effect::redraw_if(self.handle_motion([position.x as f32, position.y as f32]))
+                let was_over = self.pointer_pixel();
+                self.pointer.cursor = Some([position.x as f32, position.y as f32]);
+                Effect::redraw_if(self.pointer_pixel() != was_over)
             }
             WindowEvent::CursorLeft { .. } => {
-                let was_over = self.pointer_pixel().is_some() || self.histogram_mark().is_some();
+                let was_over = self.pointer_pixel().is_some();
                 self.pointer.cursor = None;
-                Effect::redraw_if(self.update_hover() || was_over)
+                Effect::redraw_if(was_over)
             }
-            WindowEvent::MouseInput { state, button, .. } => {
-                Effect::redraw_if(self.handle_button(state, button))
-            }
-            // A drag the window did not see end — the button came up over
-            // another window, say — would otherwise resume on the next motion.
-            //
-            // Whatever the press had hold of on the info panel is dropped
-            // rather than copied: losing the window is not a click, and a
-            // copy is bound for somewhere else, where an unasked-for one
-            // would be pasted in place of whatever the user had meant to keep.
-            WindowEvent::Focused(false) => {
-                self.pointer.copying = None;
-                let _ = self.handle_button(ElementState::Released, MouseButton::Left);
-                Effect::Nothing
-            }
-            WindowEvent::MouseWheel { delta, .. } => Effect::redraw_if(self.handle_wheel(delta)),
             WindowEvent::ScaleFactorChanged { .. } => Effect::Redraw,
             WindowEvent::KeyboardInput {
                 event:
@@ -1710,7 +1486,6 @@ mod tests {
         let (mut app, dir) = app_over("dismiss", &[("a.png", 64, 48)]);
         let raise = |app: &mut App| {
             app.toasts.show(
-                &mut crate::ui::Monospace,
                 Instant::now(),
                 "Copied file path.".to_string(),
                 Level::Message,
@@ -1718,11 +1493,11 @@ mod tests {
             );
         };
 
-        // The menu outranks the message, and each press takes off one thing.
-        app.panels.menu = Some(ui::Menu::Zoom);
+        // Each press takes off one thing. A menu would outrank the message,
+        // but the menus are egui's and there is no window here to open one
+        // in; `close_menus` answers for it.
         raise(&mut app);
-        assert_eq!(app.perform(Action::Dismiss), Effect::Redraw);
-        assert_eq!(app.panels.menu, None);
+        assert!(!app.close_menus());
         assert!(app.toasts.showing().is_some());
 
         assert_eq!(app.perform(Action::Dismiss), Effect::Redraw);

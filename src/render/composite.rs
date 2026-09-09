@@ -5,11 +5,11 @@
 use bytemuck::{Pod, Zeroable};
 
 use super::Scene;
+use super::color::Color;
 use super::gpu::{self, Fullscreen};
 use super::output::Output;
 use super::placement::Placement;
 use super::shader_codes;
-use super::ui_layer::Color;
 use crate::image::display::{Colormap, Headroom, ToneMap};
 
 /// The most regions the checkerboard can be cut into: the image, and the
