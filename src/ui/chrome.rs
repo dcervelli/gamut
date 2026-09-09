@@ -1,10 +1,29 @@
-//! The window chrome: four panels, the toggles sitting in them, and what
+//! The window chrome: four panels, the controls sitting in them, and what
 //! they leave in the middle for the image.
+//!
+//! The geometry is derived from the window size alone and nothing else, so
+//! that the image can be fitted into what the panels leave *before* the
+//! interface is laid out: a fit that waited on the toolkit would be a frame
+//! behind the window. egui's panels are then given exactly those sizes, and
+//! what they hold is laid out inside them.
 
-use crate::render::{Popup, Rect};
-use crate::view::Viewport;
+use egui::{
+    Align, Button, CornerRadius, Layout, Rect as Area, Response, RichText, Sense, Ui, Vec2,
+    WidgetInfo, WidgetType, pos2, vec2,
+};
 
-use super::{Menu, Widget};
+use crate::view::{Fit, Viewport};
+
+use super::Rect;
+
+use super::control::{Command, Control, Naming};
+use super::icon::{self, Mark};
+use super::style::TOGGLE_RADIUS;
+use super::tooltip::Tip;
+use super::{Current, FrameInput, PADDING, Panels, Reading, menu, pixel, status};
+use crate::image::display::Headroom;
+use crate::theme::Theme;
+use crate::view::View;
 
 /// Height of the top and bottom panels.
 pub(crate) const BAR_HEIGHT: f32 = 30.0;
@@ -19,15 +38,14 @@ pub(crate) const SIDE_WIDTH: f32 = BAR_HEIGHT;
 pub(super) const BUTTON_SIZE: f32 = 22.0;
 /// The gap between two buttons, whether stacked down a panel or side by side
 /// in a bar.
-const BUTTON_GAP: f32 = 8.0;
+pub(super) const BUTTON_GAP: f32 = 8.0;
 /// And the gap between two set against each other instead: a hairline of the
 /// bar showing between them, and nothing more.
 ///
 /// The pair that steps through the list is parted by this rather than by
-/// [`BUTTON_GAP`], and squared off where they meet — see
-/// [`Corners`](super::buttons::Corners). Two buttons that go the two ways of
-/// one thing are one control, and a control is not read as one thing with a
-/// button's own width of bar down the middle of it.
+/// [`BUTTON_GAP`], and squared off where they meet. Two buttons that go the
+/// two ways of one thing are one control, and a control is not read as one
+/// thing with a button's own width of bar down the middle of it.
 pub(super) const STEP_SEAM: f32 = 1.0;
 
 /// The margin at the ends of the bars: how far the first thing in one is
@@ -37,85 +55,45 @@ pub(super) const STEP_SEAM: f32 = 1.0;
 /// rather than merely equal to it, so the two cannot drift apart as either is
 /// retuned. That makes the button at the end of a bar and the column of
 /// toggles below it share one line down the edge of the window — the whole
-/// reason the bars are not inset by [`PADDING`](super::PADDING) like the
-/// panels that float over the picture.
+/// reason the bars are not inset by [`PADDING`] like the panels that float
+/// over the picture.
 pub(super) const BAR_PADDING: f32 = (SIDE_WIDTH - BUTTON_SIZE) / 2.0;
 /// The zoom readout in the top bar, which is also the button that opens the
-/// zoom menu. Wide enough for the longest reading it takes.
-pub(super) const ZOOM_BUTTON: [f32; 2] = [58.0, 22.0];
+/// zoom menu. Wide enough for the longest reading it takes, and fixed so
+/// that it does not move as the zoom changes what it reads.
+const ZOOM_BUTTON: [f32; 2] = [58.0, 22.0];
 /// The gap between the spacing the grid toggle reads out and the mark it
-/// belongs to. The mark keeps the rest of its square clear around the icon
-/// in it, so what shows on screen is wider again than this.
-pub(super) const READING_GAP: f32 = 4.0;
-/// The room the grid toggle gives one digit of its reading.
-const READING_DIGIT: f32 = 8.0;
-/// And the room it gives the rest of one: the space and the "px" after the
-/// number, and the padding in front of it.
-const READING_REST: f32 = 25.0;
-/// How wide the grid toggle is with `spacing` read out in it, and the mark's
-/// own square with nothing read out — an unlit toggle has no spacing in
-/// force, and a button holding the room for one it is not using would be a
-/// gap in the bar. That square is the side panels' one, so that every button
-/// wearing a mark and nothing else is the same size wherever it sits.
-///
-/// Counted in digits rather than measured in the face the bar is set in,
-/// because the button has to be where the frame drew it when a press lands on
-/// it, and the pointer is answered where there are no fonts to ask. The
-/// allowance is wider than the interface's own face needs; the reading is set
-/// against the mark, so what the allowance leaves over falls after the
-/// number, where it is the button's padding. `buttons` checks the allowance
-/// against the fonts the reading is drawn in.
-pub(super) fn grid_width(spacing: Option<&str>) -> f32 {
-    let Some(spacing) = spacing else {
-        return BUTTON_SIZE;
-    };
-    let digits = spacing.chars().filter(char::is_ascii_digit).count() as f32;
-    BUTTON_SIZE + READING_GAP + READING_REST + digits * READING_DIGIT
-}
+/// belongs to.
+const READING_GAP: f32 = 4.0;
+/// The room the grid toggle keeps after its reading.
+const READING_PAD: f32 = 6.0;
 /// The surface switch at the right of the bottom bar: the one word it wears,
 /// with the room a button's label keeps around itself.
-pub(super) const OUTPUT_BUTTON: [f32; 2] = [42.0, 22.0];
+const OUTPUT_BUTTON: [f32; 2] = [42.0, 22.0];
 
 /// Width of the hairline along a panel's inner edge, in logical pixels. What
 /// it is drawn in is the theme's `border`.
 const BORDER_WIDTH: f32 = 1.0;
 
-/// The window chrome: four panels, and the widgets sitting in them.
+/// The room set aside for a toggle's mark: what [`icon::square`] is given to
+/// size a square out of, not the size it comes back with. The side panels
+/// are a bar's thickness wide and the buttons fill them, so what this is set
+/// against is legibility at that size rather than the button — three logical
+/// pixels of air is enough to keep a mark off the button's rounded corners,
+/// and every pixel beyond that is one the mark does not have.
+pub(super) const ICON_SIDE: f32 = BUTTON_SIZE - 6.0;
+
+/// The window chrome: the four panels.
 ///
 /// Top and bottom span the full width; left and right are nested between
 /// them, so the corners belong to the horizontal bars and the vertical ones
 /// never have to reason about where a bar ends.
-///
-/// Laid out from the window size alone, so the frame builder and the click
-/// handler agree on where everything is without either owning it.
 #[derive(Clone, Copy)]
 pub struct Chrome {
     pub top: Rect,
     pub bottom: Rect,
     pub left: Rect,
     pub right: Rect,
-    /// The minimap toggle, at the foot of the left panel, over the corner of
-    /// the content area the minimap itself goes in.
-    pub minimap_button: Rect,
-    /// The button that opens the menu of copies, at the top of the left
-    /// panel, and the paste button under it. The paste button is drawn and
-    /// pressable only while the clipboard is holding a picture — see
-    /// [`Chrome::widget_at`]; it is the second of the two so that the one
-    /// above it does not move as it comes and goes.
-    pub copy_button: Rect,
-    pub paste_button: Rect,
-    /// The histogram toggle, at the top of the right panel, and the info
-    /// toggle under it — the order the two panels they open are stacked in.
-    pub histogram_button: Rect,
-    pub info_button: Rect,
-    /// The button that hides the interface, at the very end of the top bar.
-    ///
-    /// Last in the bar, so that it is the thing in the corner of the window:
-    /// it is the only widget up there that is not a measurement of the
-    /// picture, and putting it outside the readout that is keeps the two
-    /// kinds apart. Being last is also what puts its mark on the line the
-    /// column of toggles below it keeps — see [`Chrome::zoom_button`].
-    pub maximize_button: Rect,
 }
 
 impl Chrome {
@@ -128,151 +106,16 @@ impl Chrome {
         let side = SIDE_WIDTH.min(size[0] / 2.0);
         let middle = (size[1] - 2.0 * bar).max(0.0);
 
-        let top = Rect::new(0.0, 0.0, size[0], bar);
-        let left = Rect::new(0.0, bar, side, middle);
-        let right = Rect::new(size[0] - side, bar, side, middle);
-        let bottom = Rect::new(0.0, size[1] - bar, size[0], bar);
-
         Self {
-            maximize_button: bar_button(top, [BUTTON_SIZE, BUTTON_SIZE], top.right() - BAR_PADDING),
-            // The minimap toggle from the foot of the left panel, in the
-            // corner the minimap itself goes in, and the room kept clear for
-            // the whole column above it whether or not the paste button is on
-            // screen — the toggle no more moves with the clipboard than the
-            // copy button above it does.
-            minimap_button: side_button_up(left, 0, 2),
-            copy_button: side_button(left, 0),
-            paste_button: side_button(left, 1),
-            histogram_button: side_button(right, 0),
-            info_button: side_button(right, 1),
-            top,
-            bottom,
-            left,
-            right,
+            top: Rect::new(0.0, 0.0, size[0], bar),
+            left: Rect::new(0.0, bar, side, middle),
+            right: Rect::new(size[0] - side, bar, side, middle),
+            bottom: Rect::new(0.0, size[1] - bar, size[0], bar),
         }
-    }
-
-    /// The two buttons at the head of the top bar: back a file, and on a
-    /// file. In front of the count they move through, at the end of the bar
-    /// the file is named from, so that the three read as one line about which
-    /// of the list is on screen.
-    ///
-    /// Set against each other across a [`STEP_SEAM`] and turned only at the
-    /// ends of the pair: the two go the two ways of one thing, and are drawn
-    /// as one thing.
-    ///
-    /// On screen only while there is more than one file — see
-    /// [`Chrome::widget_at`]. Stepping a list of one does nothing, and a
-    /// button that did nothing when pressed would be worse than no button;
-    /// the count beside them is left out for the same reason.
-    pub fn step_buttons(&self) -> [Rect; 2] {
-        let size = [BUTTON_SIZE, BUTTON_SIZE];
-        let previous = bar_button(self.top, size, self.top.x + BAR_PADDING + BUTTON_SIZE);
-        let next = bar_button(self.top, size, previous.right() + STEP_SEAM + BUTTON_SIZE);
-        [previous, next]
-    }
-
-    /// Where the top bar's words begin: past the pair of step buttons while
-    /// they are on screen, and at the bar's own margin while they are not.
-    ///
-    /// `steps` is whether there is more than one file, which is what puts
-    /// those buttons there. Asked here rather than worked out twice, the
-    /// pointer having to be answered against the same line the words were
-    /// laid out from.
-    pub fn bar_text_x(&self, steps: bool) -> f32 {
-        if steps {
-            self.step_buttons()[1].right() + super::PADDING
-        } else {
-            self.top.x + BAR_PADDING
-        }
-    }
-
-    /// The grid toggle, at the head of the bottom bar, on the line the column
-    /// of toggles down the left panel keeps. In a bar rather than in a side
-    /// panel because it reads out how far apart the lines are as well as
-    /// whether they are drawn, and the side panels are too narrow for words;
-    /// in the bottom bar because a grid laid over the picture is something
-    /// being done to it rather than a fact about the file, which is what the
-    /// top bar is for.
-    ///
-    /// Fitted to the `spacing` it is reading out, and the mark's own square
-    /// while it is reading out nothing. Its left edge is anchored and the
-    /// rest of it grows rightwards, pushing the pixel button along the bar
-    /// behind it.
-    pub fn grid_button(&self, spacing: Option<&str>) -> Rect {
-        let size = [grid_width(spacing), BUTTON_SIZE];
-        bar_button_from(self.bottom, size, self.bottom.x + BAR_PADDING)
-    }
-
-    /// The button at the head of the pixel readout, in the bottom bar just
-    /// past the grid toggle: it says how a pixel's value is written, and the
-    /// readout follows it along the bar.
-    ///
-    /// Always there, where the readout beside it comes and goes with the
-    /// pointer: the pointer is never over a pixel while it is over the bar,
-    /// so a button that only appeared with the readout could never be
-    /// pressed.
-    ///
-    /// Hung off the toggle in front of it at a fixed gap, `spacing` being what
-    /// says where that toggle ends: the two are the pair at the head of the
-    /// bar and they stay a pair, rather than this one holding a place of its
-    /// own with a gap that opens and closes as the toggle is fitted to its
-    /// reading.
-    pub fn pixel_button(&self, spacing: Option<&str>) -> Rect {
-        bar_button_from(
-            self.bottom,
-            [BUTTON_SIZE, BUTTON_SIZE],
-            self.grid_button(spacing).right() + BUTTON_GAP,
-        )
-    }
-
-    /// The zoom readout, in the top bar just inside the button that hides the
-    /// interface. Fixed width rather than fitted to what it says, so that it
-    /// does not move as the zoom changes what it reads.
-    ///
-    /// In the top bar rather than the bottom one because everything the top
-    /// bar says is a measurement of the picture — how many pixels it has, and
-    /// now how big they are being drawn.
-    pub fn zoom_button(&self) -> Rect {
-        bar_button(self.top, ZOOM_BUTTON, self.maximize_button.x - BUTTON_GAP)
-    }
-
-    /// The switch between the SDR and the HDR surface, at the right of the
-    /// bottom bar — the end the button that hides the interface holds in the
-    /// top one, so that the two bars end on the same line.
-    ///
-    /// In the bottom bar rather than the top because it is not a fact about
-    /// the picture: it is what is being done with it, which is what the
-    /// bottom bar is for, and the words about the rest of that run up to it.
-    pub fn output_button(&self) -> Rect {
-        bar_button(
-            self.bottom,
-            OUTPUT_BUTTON,
-            self.bottom.right() - BAR_PADDING,
-        )
-    }
-
-    /// Where the bottom bar's own words end: short of that switch by the gap
-    /// the bars keep between one thing and the next.
-    ///
-    /// Asked for by name because the frame builder and the pointer both lay
-    /// those words out, and they have to lay them out against the same edge —
-    /// see [`status::state`](super::status::state).
-    pub fn state_limit(&self) -> f32 {
-        self.output_button().x - super::PADDING
-    }
-
-    /// The whole window, which is what a popup is placed in: a menu hangs off
-    /// the button that opened it and is bounded by the window, not by the
-    /// frame the picture is in — a menu pushed around by where the image
-    /// happens to be would not stay under its own button.
-    fn window(&self) -> Rect {
-        Rect::new(0.0, 0.0, self.top.width, self.bottom.bottom())
     }
 
     /// What the four panels leave in the middle: the image is drawn in it,
-    /// and anything that floats over the image — the histogram, for now — has
-    /// to fit in it.
+    /// and anything that floats over the image has to fit in it.
     pub fn content(&self) -> Rect {
         Rect::new(
             self.left.right(),
@@ -281,187 +124,6 @@ impl Chrome {
             (self.bottom.y - self.top.bottom()).max(0.0),
         )
     }
-
-    /// The four panels, for anything that treats them alike.
-    pub fn panels(&self) -> [Rect; 4] {
-        [self.top, self.bottom, self.left, self.right]
-    }
-
-    /// The hairline along each panel's inner edge: the bottom of the top
-    /// panel, the right of the left one, and so on.
-    ///
-    /// Inside the panel rather than beside it, so that adding the line does
-    /// not move the edge the image is fitted against.
-    pub fn borders(&self) -> [Rect; 4] {
-        let width = BORDER_WIDTH.min(self.top.height).min(self.left.width);
-        [
-            Rect::new(self.top.x, self.top.bottom() - width, self.top.width, width),
-            Rect::new(self.bottom.x, self.bottom.y, self.bottom.width, width),
-            Rect::new(
-                self.left.right() - width,
-                self.left.y,
-                width,
-                self.left.height,
-            ),
-            Rect::new(self.right.x, self.right.y, width, self.right.height),
-        ]
-    }
-
-    /// Which of the widgets fixed to the panels a point lands on, if any.
-    /// The cells of an open menu float above these and are tested first, by
-    /// the application. `spacing` is what the grid toggle is reading out,
-    /// which is what says how much of the bottom bar it takes and so where
-    /// the button after it begins.
-    ///
-    /// `paste` is whether the clipboard is holding a picture and `steps`
-    /// whether the list holds more than one file: the two other things about
-    /// the interface the window's size does not settle. Each puts a button on
-    /// screen only while it is true, so a point where one would be reaches
-    /// the panel and no widget when it is not.
-    pub fn widget_at(
-        &self,
-        point: [f32; 2],
-        spacing: Option<&str>,
-        paste: bool,
-        steps: bool,
-    ) -> Option<Widget> {
-        let [previous, next] = self.step_buttons();
-        if steps && previous.contains(point) {
-            Some(Widget::Previous)
-        } else if steps && next.contains(point) {
-            Some(Widget::Next)
-        } else if self.maximize_button.contains(point) {
-            Some(Widget::Maximize)
-        } else if self.minimap_button.contains(point) {
-            Some(Widget::Minimap)
-        } else if self.copy_button.contains(point) {
-            Some(Widget::Copy)
-        } else if paste && self.paste_button.contains(point) {
-            Some(Widget::Paste)
-        } else if self.histogram_button.contains(point) {
-            Some(Widget::Histogram)
-        } else if self.info_button.contains(point) {
-            Some(Widget::Info)
-        } else if self.zoom_button().contains(point) {
-            Some(Widget::Zoom)
-        } else if self.grid_button(spacing).contains(point) {
-            Some(Widget::Grid)
-        } else if self.pixel_button(spacing).contains(point) {
-            Some(Widget::PixelFormat)
-        } else if self.output_button().contains(point) {
-            Some(Widget::Output)
-        } else {
-            None
-        }
-    }
-
-    /// Where `menu` goes when it is open: hanging from the button that opens
-    /// it, over whatever is beside it — down from the zoom readout in the top
-    /// bar, up from the pixel button in the bottom one, out from the copy
-    /// button in the left panel. `spacing` is what says where the second of
-    /// those is — see [`Chrome::pixel_button`].
-    ///
-    /// `None` when the window has no room for the whole grid, which is also
-    /// what keeps the menu from being opened at all in a window that small.
-    pub fn popup(&self, menu: Menu, spacing: Option<&str>) -> Option<Popup> {
-        match menu {
-            Menu::Zoom => Popup::below(
-                menu.sections(),
-                menu.grid(),
-                self.zoom_button(),
-                self.window(),
-            ),
-            // From the bottom bar, so it stands over its button rather than
-            // hanging off the foot of the window — see [`Popup::above`].
-            Menu::PixelFormat => Popup::above(
-                menu.sections(),
-                menu.grid(),
-                self.pixel_button(spacing),
-                self.window(),
-            ),
-            // From a button in the column down the left panel, which has its
-            // neighbors above and below it and its room to the side — see
-            // [`Popup::beside`].
-            Menu::Copy => Popup::beside(
-                menu.sections(),
-                menu.grid(),
-                self.copy_button,
-                self.window(),
-            ),
-        }
-    }
-
-    /// Whether a click at `point` belongs to the interface rather than to the
-    /// image behind it.
-    pub fn contains(&self, point: [f32; 2]) -> bool {
-        self.top.contains(point)
-            || self.bottom.contains(point)
-            || self.left.contains(point)
-            || self.right.contains(point)
-    }
-}
-
-/// The `index`-th square button down a side panel, counting from the top.
-/// The inset that centers it across the strip is also the gap above the first
-/// one, so a column of buttons reads as set into the panel rather than as
-/// merely fitted to it.
-///
-/// Empty when the panel is too short for that many buttons — a window dragged
-/// down small loses them from the bottom up. Neither drawn nor pressable
-/// then: both go through the rectangle, and an empty one contains nothing.
-fn side_button(panel: Rect, index: usize) -> Rect {
-    let size = BUTTON_SIZE.min(panel.width);
-    let inset = (panel.width - size) / 2.0;
-    let top = inset + index as f32 * (size + BUTTON_GAP);
-    if top + size > panel.height {
-        return Rect::new(panel.x, panel.y, 0.0, 0.0);
-    }
-    Rect::new(panel.x + inset, panel.y + top, size, size)
-}
-
-/// The same, counting from the foot of the panel instead: the `index`-th
-/// square button up from the bottom, with the same inset below the last one
-/// as [`side_button`] leaves above the first.
-///
-/// What a button is put here for is the corner it is in — the minimap toggle
-/// sits over the corner of the content area the minimap itself goes in — so
-/// it keeps that corner while the column from the top grows down towards it.
-///
-/// `above` is how many buttons that column holds, and the two never meet: a
-/// panel too short for both leaves this one empty — neither drawn nor
-/// pressable, as in [`side_button`] — rather than standing it on top of what
-/// is coming down. The room kept clear is the slot the next button down would
-/// have taken, so the gap where the two columns face each other is a
-/// [`BUTTON_GAP`] like any other.
-fn side_button_up(panel: Rect, index: usize, above: usize) -> Rect {
-    let size = BUTTON_SIZE.min(panel.width);
-    let inset = (panel.width - size) / 2.0;
-    let bottom = inset + index as f32 * (size + BUTTON_GAP);
-    let taken = inset + above as f32 * (size + BUTTON_GAP);
-    if bottom + size + taken > panel.height {
-        return Rect::new(panel.x, panel.y, 0.0, 0.0);
-    }
-    Rect::new(panel.x + inset, panel.bottom() - bottom - size, size, size)
-}
-
-/// A button ending at `right` in a bar, centered across it. Clamped to the
-/// bar, so a window dragged narrow shrinks the button rather than pushing it
-/// out of the window.
-fn bar_button(bar: Rect, size: [f32; 2], right: f32) -> Rect {
-    bar_button_from(bar, size, right - size[0].min(bar.width))
-}
-
-/// The same the other way round: a button beginning at `left`, for the things
-/// at the near end of a bar, which are anchored there and grow along it.
-fn bar_button_from(bar: Rect, size: [f32; 2], left: f32) -> Rect {
-    let width = size[0].min(bar.width);
-    let height = size[1].min(bar.height);
-    Rect::new(
-        left.clamp(bar.x, (bar.right() - width).max(bar.x)),
-        bar.y + (bar.height - height) / 2.0,
-        width,
-        height,
-    )
 }
 
 /// What the interface leaves for the image, in logical pixels: the middle
@@ -469,8 +131,6 @@ fn bar_button_from(bar: Rect, size: [f32; 2], left: f32) -> Rect {
 ///
 /// With the panels hidden a floating panel still sits in the corner of the
 /// window rather than where the panels that are not there would have put it.
-/// The frame builder and the minimap's placement both lay out against this,
-/// which is what keeps the thumbnail under the border drawn around it.
 pub fn content_area(logical: [f32; 2], show_ui: bool) -> Rect {
     if show_ui {
         Chrome::new(logical).content()
@@ -499,14 +159,514 @@ pub fn image_viewport(size: [f32; 2], scale: f32, show_ui: bool) -> Viewport {
     )
 }
 
+/// One pass of the interface: what it is drawn from, and what it asks for.
+pub(super) struct Pass<'a> {
+    pub input: &'a FrameInput,
+    pub panels: &'a Panels,
+    pub current: Option<&'a Current>,
+    pub view: &'a View,
+    pub theme: &'a Theme,
+    pub namer: &'a dyn Naming,
+    pub commands: Vec<Command>,
+}
+
+/// Which of a button's corners are turned: all four for one standing on its
+/// own, and only the outer ones for each of a pair set together.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Corners {
+    All,
+    Leading,
+    Trailing,
+}
+
+impl Corners {
+    fn radius(self) -> CornerRadius {
+        let r = TOGGLE_RADIUS as u8;
+        match self {
+            Corners::All => CornerRadius::same(r),
+            Corners::Leading => CornerRadius {
+                nw: r,
+                sw: r,
+                ne: 0,
+                se: 0,
+            },
+            Corners::Trailing => CornerRadius {
+                nw: 0,
+                sw: 0,
+                ne: r,
+                se: r,
+            },
+        }
+    }
+}
+
+impl Pass<'_> {
+    pub fn press(&mut self, control: Control) {
+        self.commands.push(Command::Press(control));
+    }
+
+    /// The four panels, and everything on them.
+    pub fn bars(&mut self, ui: &mut Ui) {
+        let fill: egui::Color32 = self.theme.bar_background.into();
+        let frame = egui::Frame::NONE.fill(fill);
+
+        let top = egui::Panel::top("top")
+            .exact_size(BAR_HEIGHT)
+            .resizable(false)
+            .show_separator_line(false)
+            .frame(frame)
+            .show(ui, |ui| self.top_bar(ui));
+        self.hairline(ui, top.response.rect, Edge::Bottom);
+        let bottom = egui::Panel::bottom("bottom")
+            .exact_size(BAR_HEIGHT)
+            .resizable(false)
+            .show_separator_line(false)
+            .frame(frame)
+            .show(ui, |ui| self.bottom_bar(ui));
+        self.hairline(ui, bottom.response.rect, Edge::Top);
+        let left = egui::Panel::left("left")
+            .exact_size(SIDE_WIDTH)
+            .resizable(false)
+            .show_separator_line(false)
+            .frame(frame)
+            .show(ui, |ui| self.left_strip(ui));
+        self.hairline(ui, left.response.rect, Edge::Right);
+        let right = egui::Panel::right("right")
+            .exact_size(SIDE_WIDTH)
+            .resizable(false)
+            .show_separator_line(false)
+            .frame(frame)
+            .show(ui, |ui| self.right_strip(ui));
+        self.hairline(ui, right.response.rect, Edge::Left);
+    }
+
+    /// The hairline along a panel's inner edge, on the device's own grid so
+    /// that it is one pixel wide wherever it lands.
+    fn hairline(&self, ui: &Ui, panel: Area, edge: Edge) {
+        let ppp = ui.pixels_per_point();
+        let width = icon::Grid::new(ppp).line_width(BORDER_WIDTH);
+        let snap = |v: f32| icon::Grid::new(ppp).snap(v);
+        let line = match edge {
+            Edge::Bottom => Area::from_min_size(
+                pos2(panel.min.x, snap(panel.max.y - width)),
+                vec2(panel.width(), width),
+            ),
+            Edge::Top => Area::from_min_size(
+                pos2(panel.min.x, snap(panel.min.y)),
+                vec2(panel.width(), width),
+            ),
+            Edge::Right => Area::from_min_size(
+                pos2(snap(panel.max.x - width), panel.min.y),
+                vec2(width, panel.height()),
+            ),
+            Edge::Left => Area::from_min_size(
+                pos2(snap(panel.min.x), panel.min.y),
+                vec2(width, panel.height()),
+            ),
+        };
+        ui.painter().rect_filled(line, 0.0, self.theme.border);
+    }
+
+    /// The top bar: what the image is. Everything here is a property of the
+    /// file, so it is written once when the image opens and does not move
+    /// again while it is on screen.
+    fn top_bar(&mut self, ui: &mut Ui) {
+        ui.spacing_mut().item_spacing = Vec2::ZERO;
+        let dim: egui::Color32 = self.theme.text_dim.into();
+        let Some(current) = self.current else {
+            // Nothing has been decoded yet. The bars still go down, so that
+            // the window reads as the application waiting rather than as a
+            // hole, with the file being read where the image's own name will
+            // go.
+            ui.horizontal_centered(|ui| {
+                ui.add_space(BAR_PADDING);
+                if let Some(Reading::File(name)) = &self.input.reading {
+                    ui.add(
+                        egui::Label::new(RichText::new(format!("loading {name}")).color(dim))
+                            .truncate(),
+                    );
+                }
+            });
+            return;
+        };
+        let zoom = self.view.zoom(current.size(), self.input.viewport);
+        let fills = Fit::Fill.axis(current.size(), self.input.viewport);
+
+        ui.horizontal_centered(|ui| {
+            // The end of the bar first, so that the words get what is left.
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.add_space(BAR_PADDING);
+                let maximize = self.icon_button(
+                    ui,
+                    icon::MAXIMIZE_2,
+                    Control::Maximize,
+                    false,
+                    true,
+                    Corners::All,
+                );
+                if maximize.clicked() {
+                    self.press(Control::Maximize);
+                }
+                ui.add_space(BUTTON_GAP);
+                self.zoom_readout(ui, zoom, fills);
+                ui.add_space(PADDING);
+
+                let facts = status::facts(current, |text| measure(ui, text));
+                let room = (ui.max_rect().width() / 2.0 - BAR_PADDING * 2.0).max(1.0);
+                let facts = status::fit_segments(|text| measure(ui, text), &facts, room);
+                ui.add(egui::Label::new(RichText::new(facts).color(dim)).truncate());
+                ui.add_space(PADDING);
+
+                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                    ui.add_space(BAR_PADDING);
+                    status::top_words(self, ui, current);
+                });
+            });
+        });
+    }
+
+    /// The zoom readout: what the view is doing now, and one press from a
+    /// menu of what it could be doing instead. Lit while that menu is open,
+    /// the way a toggle is lit while it is on.
+    fn zoom_readout(&mut self, ui: &mut Ui, zoom: f32, fills: crate::view::Axis) {
+        let id = egui::Id::new("zoom menu");
+        let open = egui::Popup::is_id_open(ui.ctx(), id);
+        let response = ui.add_sized(ZOOM_BUTTON, Button::new(menu::percent(zoom)).selected(open));
+        response.widget_info(|| {
+            WidgetInfo::selected(WidgetType::Button, true, open, Control::Zoom.label())
+        });
+        let response = self.tooltip(response, Tip::Control(Control::Zoom), true);
+        egui::Popup::from_toggle_button_response(&response)
+            .id(id)
+            .align(egui::RectAlign::BOTTOM_END)
+            .gap(PADDING)
+            .show(|ui| menu::zoom_cells(self, ui, zoom, fills));
+    }
+
+    /// The bottom bar: what is happening to the image. The pointer comes and
+    /// goes on its own, and the rest changes as the view is worked.
+    fn bottom_bar(&mut self, ui: &mut Ui) {
+        ui.spacing_mut().item_spacing = Vec2::ZERO;
+        let Some(current) = self.current else {
+            return;
+        };
+        let zoom = self.view.zoom(current.size(), self.input.viewport);
+        let spacing = super::grid_spacing(self.panels.show_grid, zoom, self.input.scale);
+
+        ui.horizontal_centered(|ui| {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                // The surface switch ends the bar, where the button that hides
+                // the interface ends the top one.
+                ui.add_space(BAR_PADDING);
+                self.output_switch(ui);
+                ui.add_space(PADDING);
+                // What is being done to the picture, up against that switch —
+                // and nothing at all where nothing is being done.
+                status::state_words(self, ui, current);
+
+                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                    ui.add_space(BAR_PADDING);
+                    self.grid_toggle(ui, spacing.as_deref());
+                    ui.add_space(BUTTON_GAP);
+                    self.pixel_dot(ui);
+                    ui.add_space(pixel::GAP);
+                    pixel::show(self, ui, current);
+                });
+            });
+        });
+    }
+
+    /// The headroom switch: one word, lit while the picture is going out
+    /// with room above white. Drawn dead rather than left out where there is
+    /// nothing to switch to: a control that is sometimes there is a control
+    /// that has to be found again.
+    fn output_switch(&mut self, ui: &mut Ui) {
+        let on = self.input.headroom == Headroom::Above;
+        let available = self.input.hdr_available;
+        let response = ui.add_enabled_ui(available, |ui| {
+            ui.add_sized(OUTPUT_BUTTON, Button::new("HDR").selected(on))
+        });
+        let response = response.inner;
+        let response = self.tooltip(response, Tip::Control(Control::Output), available);
+        if response.clicked() {
+            self.press(Control::Output);
+        }
+    }
+
+    /// The grid toggle: the icon always, and — while the grid is on — how far
+    /// apart its lines are, written after the mark it qualifies. The mark
+    /// stays in the first button's width of the toggle, whether or not there
+    /// is a reading after it, so it is in the same place from one press to
+    /// the next; the button grows rightwards to make room for the reading.
+    fn grid_toggle(&mut self, ui: &mut Ui, spacing: Option<&str>) {
+        let font = egui::TextStyle::Button.resolve(ui.style());
+        let reading = spacing.map(|spacing| {
+            ui.ctx().fonts_mut(|fonts| {
+                fonts.layout_no_wrap(spacing.to_string(), font.clone(), egui::Color32::WHITE)
+            })
+        });
+        let width = match &reading {
+            Some(galley) => BUTTON_SIZE + READING_GAP + galley.size().x + READING_PAD,
+            None => BUTTON_SIZE,
+        };
+        let (rect, response) = ui.allocate_exact_size(vec2(width, BUTTON_SIZE), Sense::CLICK);
+        let (background, ink) = self.button_ink(spacing.is_some(), &response, true);
+        ui.painter().rect_filled(rect, TOGGLE_RADIUS, background);
+        let mark = Area::from_min_size(rect.min, Vec2::splat(BUTTON_SIZE));
+        icon::paint(
+            ui.painter(),
+            icon::GRID_3X3,
+            icon::square(icon::Grid::new(ui.pixels_per_point()), mark, ICON_SIDE),
+            ink,
+            background,
+        );
+        if let Some(galley) = reading {
+            let at = pos2(
+                mark.max.x + READING_GAP,
+                rect.center().y - galley.size().y / 2.0,
+            );
+            ui.painter().galley(at, galley, ink);
+        }
+        response.widget_info(|| {
+            WidgetInfo::selected(
+                WidgetType::Button,
+                true,
+                spacing.is_some(),
+                Control::Grid.label(),
+            )
+        });
+        let response = self.tooltip(response, Tip::Control(Control::Grid), true);
+        if response.clicked() {
+            self.press(Control::Grid);
+        }
+    }
+
+    /// The dot at the head of the pixel readout, which opens the menu of ways
+    /// to write a pixel's value. Lit while that menu is open.
+    fn pixel_dot(&mut self, ui: &mut Ui) {
+        let id = egui::Id::new("pixel menu");
+        let open = egui::Popup::is_id_open(ui.ctx(), id);
+        let response = self.icon_button(
+            ui,
+            icon::CIRCLE_DOT,
+            Control::PixelFormat,
+            open,
+            true,
+            Corners::All,
+        );
+        // From the bottom bar, so it stands over its button rather than
+        // hanging off the foot of the window.
+        egui::Popup::from_toggle_button_response(&response)
+            .id(id)
+            .align(egui::RectAlign::TOP_START)
+            .gap(PADDING)
+            .show(|ui| menu::pixel_cells(self, ui));
+    }
+
+    /// The left strip: the copy button, the paste button under it while the
+    /// clipboard holds a picture, and the minimap toggle up from the foot —
+    /// in the corner the minimap itself goes in, and clear of the column
+    /// coming down. A window too short for both ends drops the toggle at the
+    /// foot rather than standing it on the column.
+    fn left_strip(&mut self, ui: &mut Ui) {
+        ui.spacing_mut().item_spacing = Vec2::ZERO;
+        let height = ui.available_height();
+        ui.vertical_centered(|ui| {
+            ui.add_space(BAR_PADDING);
+            let id = egui::Id::new("copy menu");
+            let open = egui::Popup::is_id_open(ui.ctx(), id);
+            let copy = self.icon_button(ui, icon::COPY, Control::Copy, open, true, Corners::All);
+            // From a button in a column, which has its neighbors above and
+            // below it and its room to the side.
+            egui::Popup::menu(&copy)
+                .id(id)
+                .align(egui::RectAlign::RIGHT_START)
+                .gap(PADDING)
+                .show(|ui| menu::copy_items(self, ui));
+            if self.panels.paste {
+                ui.add_space(BUTTON_GAP);
+                let paste = self.icon_button(
+                    ui,
+                    icon::CLIPBOARD,
+                    Control::Paste,
+                    false,
+                    true,
+                    Corners::All,
+                );
+                if paste.clicked() {
+                    self.press(Control::Paste);
+                }
+            }
+        });
+        // The room the column above keeps, whether or not the paste button
+        // is on screen, so the toggle at the foot stays put as the clipboard
+        // changes.
+        let taken = BAR_PADDING + 2.0 * (BUTTON_SIZE + BUTTON_GAP);
+        if taken + BUTTON_SIZE + BAR_PADDING > height {
+            return;
+        }
+        ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
+            ui.add_space(BAR_PADDING);
+            let minimap = self.icon_button(
+                ui,
+                icon::SQUARE_SQUARE,
+                Control::Minimap,
+                self.panels.show_minimap,
+                true,
+                Corners::All,
+            );
+            if minimap.clicked() {
+                self.press(Control::Minimap);
+            }
+        });
+    }
+
+    /// The right strip: the histogram toggle above the information toggle,
+    /// the order the two panels they open are stacked in. Each is dead where
+    /// the window has no room for what it opens.
+    fn right_strip(&mut self, ui: &mut Ui) {
+        ui.spacing_mut().item_spacing = Vec2::ZERO;
+        let room = super::room(
+            content_area(self.input.logical, self.panels.show_ui),
+            self.panels,
+        );
+        ui.vertical_centered(|ui| {
+            ui.add_space(BAR_PADDING);
+            let histogram = self.icon_button(
+                ui,
+                icon::CHART_AREA,
+                Control::Histogram,
+                self.panels.show_histogram,
+                room.histogram,
+                Corners::All,
+            );
+            if histogram.clicked() {
+                self.press(Control::Histogram);
+            }
+            ui.add_space(BUTTON_GAP);
+            let info = self.icon_button(
+                ui,
+                icon::INFO,
+                Control::Info,
+                self.panels.show_info,
+                room.info,
+                Corners::All,
+            );
+            if info.clicked() {
+                self.press(Control::Info);
+            }
+        });
+    }
+
+    /// A button's background and ink. Active outranks hover: what is on says
+    /// more than what the pointer happens to be over. A dead control keeps
+    /// the idle ground and enough of the ink to read the mark on it, but not
+    /// enough to read as a button that would answer.
+    pub fn button_ink(
+        &self,
+        active: bool,
+        response: &Response,
+        enabled: bool,
+    ) -> (egui::Color32, egui::Color32) {
+        let theme = self.theme;
+        if !enabled {
+            return (
+                theme.button_idle.into(),
+                theme
+                    .text_dim
+                    .with_alpha(super::style::DEAD_BUTTON_INK)
+                    .into(),
+            );
+        }
+        match (active, response.hovered()) {
+            (true, _) => (
+                theme
+                    .accent
+                    .with_alpha(super::style::ACTIVE_BUTTON_WASH)
+                    .into(),
+                theme.accent.into(),
+            ),
+            (false, true) => (theme.button_hover.into(), theme.text_primary.into()),
+            (false, false) => (theme.button_idle.into(), theme.text_dim.into()),
+        }
+    }
+
+    /// One square toggle wearing a mark: the button, the corners it is
+    /// turned at, and the icon on it. `on` lights it; `enabled` is whether a
+    /// press would do anything, and a toggle that would not is drawn dead
+    /// and names its reason rather than itself.
+    ///
+    /// The press is not taken here: the caller reads it off the response,
+    /// so that one button can open a menu where another sends a command.
+    pub fn icon_button(
+        &mut self,
+        ui: &mut Ui,
+        marks: &[Mark],
+        control: Control,
+        on: bool,
+        enabled: bool,
+        corners: Corners,
+    ) -> Response {
+        // A dead toggle senses nothing but the pointer resting on it: the
+        // press is refused, and the label says why.
+        let sense = if enabled { Sense::CLICK } else { Sense::HOVER };
+        let (rect, response) = ui.allocate_exact_size(Vec2::splat(BUTTON_SIZE), sense);
+        let (background, ink) = self.button_ink(on, &response, enabled);
+        ui.painter().rect_filled(rect, corners.radius(), background);
+        icon::paint(
+            ui.painter(),
+            marks,
+            icon::square(icon::Grid::new(ui.pixels_per_point()), rect, ICON_SIDE),
+            ink,
+            background,
+        );
+        response
+            .widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, on, control.label()));
+        self.tooltip(response, Tip::Control(control), enabled)
+    }
+
+    /// Hangs the tooltip for `tip` off `response`: what the thing is called,
+    /// and under it the keys that do the same job — or, for a dead control,
+    /// why it is dead.
+    pub fn tooltip(&self, response: Response, tip: Tip, enabled: bool) -> Response {
+        let Some(tooltip) = self.namer.tooltip(tip) else {
+            return response;
+        };
+        let theme = self.theme;
+        let show = move |ui: &mut Ui| super::tooltip::show(ui, &tooltip, theme);
+        if enabled {
+            response.on_hover_ui(show)
+        } else {
+            response.on_disabled_hover_ui(show)
+        }
+    }
+}
+
+/// Which edge of a panel faces the picture.
+#[derive(Clone, Copy)]
+enum Edge {
+    Top,
+    Bottom,
+    Left,
+    Right,
+}
+
+/// How wide `text` comes out in the bar's face, for laying words out
+/// against what is left of a bar.
+pub(super) fn measure(ui: &Ui, text: &str) -> f32 {
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    ui.ctx().fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap(text.to_string(), font, egui::Color32::WHITE)
+            .size()
+            .x
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::view::{Fit, View};
-
-    /// A spacing to lay the bar out with, in the middle of the range of
-    /// widths a reading can have.
-    const SPACING: Option<&str> = Some("50 px");
 
     const WINDOW: [f32; 2] = [1000.0, 700.0];
 
@@ -548,201 +708,6 @@ mod tests {
     }
 
     #[test]
-    fn the_histogram_toggle_sits_inside_the_right_panel() {
-        let chrome = Chrome::new(WINDOW);
-        let button = chrome.histogram_button;
-
-        assert!(button.x >= chrome.right.x);
-        assert!(button.right() <= chrome.right.right());
-        assert!(button.y >= chrome.right.y);
-        assert!(button.bottom() <= chrome.right.bottom());
-
-        // Centered in the strip rather than merely fitted into it.
-        assert_eq!(
-            button.x - chrome.right.x,
-            chrome.right.right() - button.right()
-        );
-
-        assert!(chrome.contains([button.x + 1.0, button.y + 1.0]));
-        assert!(!chrome.contains([chrome.right.x - 1.0, button.y + 1.0]));
-    }
-
-    /// The column down the left panel: the button that opens the menu of
-    /// copies, and the paste button under it. The copy button is above the
-    /// one that comes and goes, so nothing moves under the pointer as the
-    /// clipboard changes. The minimap toggle is in the same strip but comes
-    /// up from the foot of it, clear of both.
-    #[test]
-    fn the_copy_button_sits_above_the_paste_button_and_clear_of_the_minimap() {
-        let chrome = Chrome::new(WINDOW);
-        let button = chrome.copy_button;
-
-        assert_eq!(button.x, chrome.minimap_button.x);
-        assert_eq!(button.width, chrome.minimap_button.width);
-        assert!(chrome.paste_button.y >= button.bottom());
-        assert!(chrome.minimap_button.y >= chrome.paste_button.bottom());
-
-        // There whether or not there is anything to paste, unlike the button
-        // under it.
-        for paste in [false, true] {
-            assert_eq!(
-                chrome.widget_at([button.x + 1.0, button.y + 1.0], None, paste, false),
-                Some(Widget::Copy)
-            );
-        }
-    }
-
-    /// The paste button is under the copy button, in the same strip, and
-    /// it is there for the pointer only while there is something to paste:
-    /// the rectangle is always laid out — the layout is the window's size and
-    /// nothing else — and what comes and goes is whether anything answers on
-    /// it.
-    #[test]
-    fn the_paste_button_answers_only_while_there_is_a_paste() {
-        let chrome = Chrome::new(WINDOW);
-        let button = chrome.paste_button;
-        let at = [button.x + 1.0, button.y + 1.0];
-
-        assert!(button.y >= chrome.copy_button.bottom());
-        assert!(button.bottom() <= chrome.minimap_button.y);
-        assert_eq!(button.x, chrome.minimap_button.x);
-        assert_eq!(button.width, chrome.minimap_button.width);
-
-        assert_eq!(chrome.widget_at(at, None, true, false), Some(Widget::Paste));
-        assert_eq!(
-            chrome.widget_at(at, None, false, false),
-            None,
-            "with nothing to paste the press reaches the panel and no widget"
-        );
-        // And it never stands in front of the toggle above it.
-        assert_eq!(
-            chrome.widget_at(
-                [chrome.minimap_button.x + 1.0, chrome.minimap_button.y + 1.0],
-                None,
-                true,
-                false
-            ),
-            Some(Widget::Minimap)
-        );
-    }
-
-    /// The minimap toggle is at the foot of the left panel, in the corner of
-    /// the content area the minimap itself goes in, and set in from the foot
-    /// by the same inset that centers it across the strip.
-    #[test]
-    fn the_minimap_toggle_sits_at_the_foot_of_the_left_panel() {
-        let chrome = Chrome::new(WINDOW);
-        let button = chrome.minimap_button;
-
-        assert!(button.x >= chrome.left.x);
-        assert!(button.right() <= chrome.left.right());
-        assert!(button.y >= chrome.left.y);
-        assert!(button.bottom() <= chrome.left.bottom());
-
-        // The same button as the first of the right-hand pair, on the
-        // opposite strip and at the other end of it, and each click lands on
-        // its own.
-        assert_eq!(button.width, chrome.histogram_button.width);
-        assert_eq!(
-            chrome.left.bottom() - button.bottom(),
-            chrome.histogram_button.y - chrome.right.y
-        );
-        for (widget, rect) in [
-            (Widget::Minimap, button),
-            (Widget::Histogram, chrome.histogram_button),
-            (Widget::Info, chrome.info_button),
-        ] {
-            assert_eq!(
-                chrome.widget_at([rect.x + 1.0, rect.y + 1.0], None, false, false),
-                Some(widget),
-                "{widget:?}"
-            );
-        }
-        assert_eq!(
-            chrome.widget_at([WINDOW[0] / 2.0, WINDOW[1] / 2.0], None, false, false),
-            None
-        );
-    }
-
-    /// The right panel holds a column of toggles, in the order the panels
-    /// they open are stacked in: the histogram at the top and the information
-    /// column under it. A window too short for one of them drops it rather
-    /// than stacking it over its neighbor.
-    #[test]
-    fn the_side_toggles_stack_down_the_panel_and_stop_when_it_runs_out() {
-        let chrome = Chrome::new(WINDOW);
-        let (histogram, info) = (chrome.histogram_button, chrome.info_button);
-
-        assert_eq!(histogram.x, info.x);
-        assert!(histogram.bottom() <= info.y, "{histogram:?} over {info:?}");
-        assert!(info.bottom() <= chrome.right.bottom());
-        // Set into the panel by the same inset that centers them across it.
-        assert_eq!(histogram.y - chrome.right.y, histogram.x - chrome.right.x);
-
-        // A window with room for the first and not the second keeps the
-        // first, and the second is neither drawn nor pressable.
-        let short = Chrome::new([WINDOW[0], 2.0 * BAR_HEIGHT + BUTTON_SIZE + 16.0]);
-        assert_eq!(short.histogram_button.width, BUTTON_SIZE);
-        assert_eq!(short.info_button.width, 0.0);
-        assert_eq!(
-            short.widget_at(
-                [short.info_button.x, short.info_button.y],
-                None,
-                false,
-                false
-            ),
-            None
-        );
-    }
-
-    /// The left panel is filled from both ends, and a window short enough
-    /// for the two to meet drops the one coming up rather than standing it
-    /// on the column coming down: the toggle at the foot is what a shrinking
-    /// window loses, and what is left is still a column read from the top.
-    #[test]
-    fn the_minimap_toggle_gives_way_to_the_column_above_it() {
-        // Tall enough for the whole left panel, and every gap between the
-        // three buttons is the one every pair of buttons is set at.
-        let chrome = Chrome::new(WINDOW);
-        assert_eq!(
-            chrome.paste_button.y - chrome.copy_button.bottom(),
-            BUTTON_GAP
-        );
-        assert!(chrome.minimap_button.y - chrome.paste_button.bottom() >= BUTTON_GAP);
-
-        // Room for the column from the top and not for the toggle under it:
-        // neither drawn nor pressable, and nothing above it has moved.
-        let short = Chrome::new([WINDOW[0], 2.0 * BAR_HEIGHT + 3.0 * BUTTON_SIZE]);
-        assert_eq!(short.copy_button.width, BUTTON_SIZE);
-        assert_eq!(short.paste_button.width, BUTTON_SIZE);
-        assert_eq!(short.minimap_button.width, 0.0);
-        assert_eq!(
-            short.widget_at(
-                [short.minimap_button.x, short.minimap_button.y],
-                None,
-                false,
-                false
-            ),
-            None
-        );
-
-        // And wherever it is there at all, it is clear of the column above
-        // it, whatever the window is doing.
-        for height in [200.0, 260.0, 320.0, 700.0, 1400.0] {
-            let chrome = Chrome::new([WINDOW[0], height]);
-            let minimap = chrome.minimap_button;
-            if minimap.width > 0.0 {
-                assert!(
-                    minimap.y >= chrome.paste_button.bottom() + BUTTON_GAP,
-                    "at {height}: {minimap:?} over {:?}",
-                    chrome.paste_button
-                );
-                assert!(minimap.bottom() <= chrome.left.bottom());
-            }
-        }
-    }
-
-    #[test]
     fn a_window_smaller_than_its_own_chrome_stays_within_itself() {
         // Panels are laid out from the window size, so a window dragged down
         // to nothing must not produce rectangles that escape it or run
@@ -764,239 +729,10 @@ mod tests {
                     "{panel:?} at {size:?}"
                 );
             }
-            for button in [
-                chrome.minimap_button,
-                chrome.info_button,
-                chrome.histogram_button,
-                chrome.maximize_button,
-                chrome.grid_button(SPACING),
-                chrome.grid_button(None),
-                chrome.pixel_button(SPACING),
-                chrome.pixel_button(None),
-                chrome.zoom_button(),
-            ] {
-                assert!(
-                    button.width >= 0.0 && button.height >= 0.0,
-                    "{button:?} at {size:?}"
-                );
-                assert!(button.x >= 0.0 && button.y >= 0.0, "{button:?} at {size:?}");
-            }
             let content = chrome.content();
             assert!(
                 content.width >= 0.0 && content.height >= 0.0,
                 "{content:?} at {size:?}"
-            );
-        }
-    }
-
-    /// The bottom bar's own readout-and-toggle, at the head of it and on the
-    /// line the column of toggles down the left panel keeps. It grows
-    /// rightwards when the grid comes on, the end it is anchored to staying
-    /// put.
-    #[test]
-    fn the_grid_toggle_leads_the_bottom_bar_on_the_side_panels_line() {
-        let chrome = Chrome::new(WINDOW);
-        let button = chrome.grid_button(SPACING);
-        let unlit = chrome.grid_button(None);
-
-        assert_eq!(button.width, grid_width(SPACING));
-        assert_eq!(unlit.width, BUTTON_SIZE);
-        assert!(unlit.width < button.width);
-        // And it is fitted to the reading rather than held at one width for
-        // every reading there is: another digit is another button's worth of
-        // number, and takes room for one.
-        assert!(chrome.grid_button(Some("500 px")).width > button.width);
-        for button in [button, unlit] {
-            assert_eq!(button.x, chrome.bottom.x + BAR_PADDING);
-            assert_eq!(button.x, chrome.minimap_button.x);
-            assert_eq!(
-                button.y - chrome.bottom.y,
-                chrome.bottom.bottom() - button.bottom()
-            );
-            assert!(button.y >= chrome.bottom.y && button.bottom() <= chrome.bottom.bottom());
-        }
-
-        // Whichever it is, it takes the press that lands on it, and only the
-        // width that matches the state it is in: a point inside the wide
-        // button and outside the narrow one is the grid switched on and
-        // nothing at all switched off.
-        let wide_only = [unlit.right() + 2.0, button.y + 1.0];
-        assert_eq!(
-            chrome.widget_at(wide_only, SPACING, false, false),
-            Some(Widget::Grid)
-        );
-        assert_eq!(chrome.widget_at(wide_only, None, false, false), None);
-        assert_eq!(
-            chrome.widget_at([unlit.x + 1.0, unlit.y + 1.0], None, false, false),
-            Some(Widget::Grid)
-        );
-        // The bar it sits in is still the interface, so the gap between it
-        // and the button after it is not a press on anything.
-        assert_eq!(
-            chrome.widget_at(
-                [button.right() + 2.0, button.y + 1.0],
-                SPACING,
-                false,
-                false
-            ),
-            None
-        );
-        assert!(chrome.contains([button.right() + 2.0, button.y + 1.0]));
-    }
-
-    /// The pair that steps through the list leads the top bar, on the same
-    /// line down the window as the toggles under it, and the bar's words
-    /// begin past them.
-    ///
-    /// They answer only while there is a list to step through: a press where
-    /// one would be reaches the bar and no widget with a single file, exactly
-    /// as the paste button behaves with an empty clipboard.
-    #[test]
-    fn the_step_buttons_lead_the_top_bar_while_there_is_a_list_to_step() {
-        let chrome = Chrome::new(WINDOW);
-        let [previous, next] = chrome.step_buttons();
-
-        assert_eq!(previous.x, chrome.top.x + BAR_PADDING);
-        // The line the column of toggles down the left panel starts on, and
-        // the toggle at the head of the bottom bar with it.
-        assert_eq!(previous.x, chrome.minimap_button.x);
-        assert_eq!(previous.x, chrome.grid_button(None).x);
-        // Set against each other rather than spaced like unrelated buttons:
-        // the pair is one control with two ends.
-        assert_eq!(next.x - previous.right(), STEP_SEAM);
-        for button in [previous, next] {
-            assert_eq!(button.width, BUTTON_SIZE);
-            // Centered across the bar, as every other button in one is.
-            assert_eq!(
-                button.y - chrome.top.y,
-                chrome.top.bottom() - button.bottom()
-            );
-        }
-
-        // The words start clear of them while they are there, and at the
-        // bar's own margin while they are not.
-        assert!(chrome.bar_text_x(true) > next.right());
-        assert_eq!(chrome.bar_text_x(false), chrome.top.x + BAR_PADDING);
-
-        for (button, widget) in [(previous, Widget::Previous), (next, Widget::Next)] {
-            let at = [button.x + 1.0, button.y + 1.0];
-            assert_eq!(chrome.widget_at(at, None, false, true), Some(widget));
-            assert_eq!(
-                chrome.widget_at(at, None, false, false),
-                None,
-                "with one file the press reaches the bar and no widget"
-            );
-        }
-    }
-
-    /// The bars and the side panels share one line down each edge of the
-    /// window: the button at the end of a bar ends where the column of
-    /// toggles below it ends, and the words at the other end start where the
-    /// toggle on that side starts. Both fall out of the bars' margin being
-    /// the inset that centers a toggle across a panel, so neither can drift
-    /// as the button size or the panel width is retuned.
-    #[test]
-    fn the_bars_end_on_the_same_lines_as_the_side_toggles() {
-        for size in [WINDOW, [640.0, 480.0], [2000.0, 1400.0]] {
-            let chrome = Chrome::new(size);
-            assert_eq!(
-                chrome.maximize_button.right(),
-                chrome.histogram_button.right(),
-                "{size:?}"
-            );
-            assert_eq!(chrome.histogram_button.right(), chrome.info_button.right());
-            // The left is the same line the other way round: the file name
-            // starts where the column down the left panel does.
-            assert_eq!(BAR_PADDING, chrome.copy_button.x - chrome.left.x);
-            assert_eq!(
-                BAR_PADDING,
-                chrome.top.right() - chrome.maximize_button.right()
-            );
-        }
-    }
-
-    /// The zoom readout ends the top bar's own row of things, just inside the
-    /// button that hides the interface: it is the measurement of the picture
-    /// the top bar is for, and it sits at the end the facts about the picture
-    /// are written towards. The gap between the two is the one every pair of
-    /// buttons in the window is set at, and nothing the grid does moves
-    /// either — the toggle that reads the grid out is in the other bar.
-    #[test]
-    fn the_zoom_readout_sits_inside_the_button_that_hides_the_interface() {
-        let chrome = Chrome::new(WINDOW);
-        let button = chrome.zoom_button();
-
-        assert_eq!(button.width, ZOOM_BUTTON[0]);
-        assert_eq!(button.right(), chrome.maximize_button.x - BUTTON_GAP);
-        // Centered across the bar, and inside it.
-        assert_eq!(
-            button.y - chrome.top.y,
-            chrome.top.bottom() - button.bottom()
-        );
-        assert!(button.y >= chrome.top.y && button.bottom() <= chrome.top.bottom());
-        assert_eq!(button.y, chrome.maximize_button.y);
-
-        for spacing in [None, SPACING, Some("10000 px")] {
-            assert_eq!(chrome.zoom_button(), button, "{spacing:?}");
-            assert_eq!(
-                chrome.widget_at([button.x + 1.0, button.y + 1.0], spacing, false, false),
-                Some(Widget::Zoom)
-            );
-            // The bar it sits in is still the interface, so the facts written
-            // in front of it are not a press on anything.
-            assert_eq!(
-                chrome.widget_at([button.x - 2.0, button.y + 1.0], spacing, false, false),
-                None
-            );
-            assert!(chrome.contains([button.x - 2.0, button.y + 1.0]));
-        }
-    }
-
-    /// The panels are opaque, so the image is fitted into what they leave —
-    /// and gets the whole window back the moment they are hidden, without
-    /// anything having to re-fit it by hand.
-    /// The pixel button follows the grid toggle at the head of the bottom
-    /// bar, at the gap every pair of buttons is set at, and it answers the
-    /// pointer where it is drawn. The toggle in front of it is fitted to its
-    /// reading, so this button moves along the bar as the grid comes on and
-    /// goes off — and the readout after it moves with it.
-    #[test]
-    fn the_pixel_button_follows_the_grid_toggle_in_the_bottom_bar() {
-        let chrome = Chrome::new(WINDOW);
-
-        for spacing in [None, SPACING, Some("10000 px")] {
-            let button = chrome.pixel_button(spacing);
-            let grid = chrome.grid_button(spacing);
-
-            assert_eq!(button.width, BUTTON_SIZE);
-            assert_eq!(button.x, grid.right() + BUTTON_GAP);
-            assert_eq!(button.y, grid.y);
-            let middle = [
-                button.x + button.width / 2.0,
-                button.y + button.height / 2.0,
-            ];
-            assert!(chrome.bottom.contains(middle));
-            assert_eq!(
-                chrome.widget_at(middle, spacing, false, false),
-                Some(Widget::PixelFormat)
-            );
-            // And nothing else in that bar is where it is: the surface switch
-            // is at the far end of it.
-            assert!(button.right() < chrome.output_button().x);
-        }
-
-        // Lighting the grid widens the toggle, which pushes this button along
-        // with it rather than letting the two overlap.
-        assert!(chrome.pixel_button(None).x < chrome.pixel_button(SPACING).x);
-
-        // A window dragged narrow keeps it inside the bar rather than pushing
-        // it out of the window.
-        let cramped = Chrome::new([40.0, 200.0]);
-        for spacing in [None, SPACING] {
-            let button = cramped.pixel_button(spacing);
-            assert!(
-                cramped.bottom.contains([button.x + 0.5, button.y + 0.5]),
-                "{button:?} at {spacing:?}"
             );
         }
     }
@@ -1031,59 +767,5 @@ mod tests {
         assert!(placement.x + placement.width <= shown.x + shown.width + 0.5);
         assert!(placement.y >= shown.y - 0.5);
         assert!(placement.y + placement.height <= shown.y + shown.height + 0.5);
-    }
-
-    /// The grid toggle wears its mark in the first button's width of itself,
-    /// so where the mark lands is decided by the toggle's left edge. That
-    /// edge does not move when the toggle lights up and grows rightwards to
-    /// make room for its reading — so the mark is in the same place from one
-    /// press to the next.
-    #[test]
-    fn the_grid_toggle_keeps_its_mark_where_it_was_when_it_lights_up() {
-        let chrome = Chrome::new(WINDOW);
-        let (on, off) = (chrome.grid_button(SPACING), chrome.grid_button(None));
-        assert!(
-            on.width > off.width,
-            "the lit toggle makes room for a reading"
-        );
-        assert_eq!(on.x, off.x, "and grows rightwards to do it");
-        assert_eq!(off.width, chrome.histogram_button.width);
-    }
-
-    /// The button that hides the interface ends the top bar, and its mark is
-    /// the one over the column of toggles down the right of the window: the
-    /// last thing in a bar is what shares that line, and it is a side
-    /// toggle's own square so the marks are drawn at one size all the way
-    /// down. Nothing about the grid moves it — the toggle that reads the grid
-    /// out is at the head of the other bar.
-    #[test]
-    fn the_button_that_hides_the_interface_ends_the_top_bar() {
-        let chrome = Chrome::new(WINDOW);
-        let button = chrome.maximize_button;
-
-        assert_eq!(button.width, BUTTON_SIZE);
-        assert_eq!(button.height, BUTTON_SIZE);
-        assert_eq!(button.right(), chrome.top.right() - BAR_PADDING);
-        assert_eq!(button.right(), chrome.histogram_button.right());
-        // Centered across the bar, as everything else in one is.
-        assert_eq!(
-            button.y - chrome.top.y,
-            chrome.top.bottom() - button.bottom()
-        );
-
-        for spacing in [None, SPACING, Some("10000 px")] {
-            assert_eq!(chrome.maximize_button, button, "{spacing:?}");
-            assert!(chrome.zoom_button().right() < button.x);
-            assert_eq!(
-                chrome.widget_at([button.x + 1.0, button.y + 1.0], spacing, false, false),
-                Some(Widget::Maximize)
-            );
-        }
-        // And it never stands in front of the readout beside it.
-        let zoom = chrome.zoom_button();
-        assert_eq!(
-            chrome.widget_at([zoom.right() - 1.0, zoom.y + 1.0], SPACING, false, false),
-            Some(Widget::Zoom)
-        );
     }
 }

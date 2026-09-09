@@ -1,15 +1,16 @@
 //! Rendering, in three separable layers.
 //!
 //! 1. [`image_layer`] draws the image into a linear working-space target.
-//! 2. [`ui_layer`] draws the interface into its own sRGB target.
+//! 2. egui's own renderer draws the interface into its own sRGB target.
 //! 3. [`composite`] tone maps the first, lays the second over it, and encodes
 //!    the result for whatever the surface turned out to be.
 //!
 //! Keeping the interface off the image's target is what lets UI code stay in
 //! plain sRGB and logical pixels while the image is in extended-range linear —
-//! and it is what makes a third-party text renderer usable at all, since
-//! glyphon has no idea what an HDR surface is.
+//! and it is what makes a third-party toolkit usable at all, since egui has
+//! no idea what an HDR surface is.
 
+mod color;
 mod composite;
 mod gpu;
 mod image_layer;
@@ -17,12 +18,9 @@ mod output;
 mod placement;
 mod reduce;
 mod shader_codes;
-pub mod ui_layer;
 
 #[cfg(test)]
 mod filter_tests;
-#[cfg(test)]
-pub(crate) mod ui_tests;
 pub(crate) mod upload;
 
 use std::sync::Arc;
@@ -37,24 +35,24 @@ use crate::image::{
 };
 use crate::timing;
 
+pub use color::Color;
 pub use composite::Backdrop;
 pub use output::{HdrPreference, Output};
 pub use placement::{Placement, Upscale};
-pub use ui_layer::{Blend, Color, Popup, PopupGrid, PopupSection, Rect, UiFrame};
 
 use composite::Composite;
 use gpu::attachment;
 use image_layer::{Draw, ImageLayer};
 pub use image_layer::{GpuImage, Upload};
-use ui_layer::UiRenderer;
 use upload::Capabilities;
 
 /// The working space every layer meets in: linear, BT.709 primaries, with
 /// enough range above 1.0 for HDR content to survive until tone mapping.
 const WORKING_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
-/// The UI's own target. sRGB so that blending happens in linear and so that
-/// glyphon's color handling is correct without it knowing anything.
+/// The UI's own target. sRGB so that blending happens in linear: egui's
+/// renderer, given the format, converts its colors to linear in its shader
+/// and lets the attachment encode on write.
 const UI_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
 struct Targets {
@@ -72,7 +70,8 @@ pub struct Scene<'a> {
     pub placement: Placement,
     pub thumbnail: Option<Placement>,
     pub display: &'a Display,
-    pub frame: &'a UiFrame,
+    /// What the interface drew this pass.
+    pub ui: &'a UiPaint,
     /// Physical pixels to the logical one the interface is laid out in.
     pub scale: f32,
     pub backdrop: Backdrop,
@@ -83,26 +82,14 @@ pub struct Scene<'a> {
     pub headroom: Headroom,
 }
 
-/// Text measurement, for interface code that has to lay something out next
-/// to a label. A trait rather than a method on [`Renderer`] so that the
-/// interface can be built against something that is not a GPU.
-pub trait TextMeasure {
-    /// Width and height of `text` at `size`, in logical pixels.
-    fn measure_text(&mut self, text: &str, size: f32) -> [f32; 2];
-
-    /// How far below the top of a run at `size` the middle of its capitals
-    /// sits, in logical pixels: what a label is placed by when it has to sit
-    /// level with a mark beside it, rather than merely inside the same box.
-    fn cap_center(&mut self, size: f32) -> f32;
-
-    /// As [`TextMeasure::measure_text`], for a run drawn with
-    /// [`UiFrame::text_clipped_mono`].
-    fn measure_mono(&mut self, text: &str, size: f32) -> [f32; 2];
-
-    /// Width and height of `text` at `size` once it is broken across lines at
-    /// `width`, in logical pixels: how much room a paragraph will take, for
-    /// anything stacking one under another.
-    fn measure_wrapped(&mut self, text: &str, size: f32, width: f32) -> [f32; 2];
+/// One pass of egui's interface, tessellated and ready to draw: the
+/// triangles and the scale they were laid out at. The changes to egui's
+/// textures since the last pass travel separately — see
+/// [`Renderer::render`] — since they have to be applied whether or not the
+/// frame is drawn.
+pub struct UiPaint {
+    pub primitives: Vec<egui::ClippedPrimitive>,
+    pub pixels_per_point: f32,
 }
 
 pub struct Renderer {
@@ -119,7 +106,11 @@ pub struct Renderer {
 
     targets: Targets,
     image_layer: ImageLayer,
-    ui: UiRenderer,
+    /// Draws what egui laid out. Given the target's sRGB format, it converts
+    /// its colors to linear in the shader and lets the attachment encode on
+    /// write; its blend state is premultiplied source-over, which is what
+    /// the compositor reads the target as.
+    egui: egui_wgpu::Renderer,
     composite: Composite,
 }
 
@@ -205,7 +196,16 @@ impl Renderer {
 
         let targets = Targets::new(&device, width, height);
         let image_layer = ImageLayer::new(&device, WORKING_FORMAT);
-        let ui = UiRenderer::new(&device, &queue, UI_FORMAT);
+        let egui = egui_wgpu::Renderer::new(
+            &device,
+            UI_FORMAT,
+            egui_wgpu::RendererOptions {
+                msaa_samples: 1,
+                depth_stencil_format: None,
+                dithering: true,
+                predictable_texture_filtering: false,
+            },
+        );
         let mut composite = Composite::new(&device, output.format);
         composite.bind_targets(&device, &targets.image, &targets.ui);
 
@@ -220,9 +220,15 @@ impl Renderer {
             adapter_name,
             targets,
             image_layer,
-            ui,
+            egui,
             composite,
         })
+    }
+
+    /// The widest texture the device will make, which bounds egui's font
+    /// atlas.
+    pub fn max_texture_side(&self) -> u32 {
+        self.device.limits().max_texture_dimension_2d
     }
 
     /// Physical pixels.
@@ -327,7 +333,15 @@ impl Renderer {
             .map(|image| format!("{:?}", image.format))
     }
 
-    pub fn render(&mut self, scene: Scene<'_>) -> Result<()> {
+    /// Draws `scene`, and takes in `textures`: what egui changed about its
+    /// textures this pass — a glyph added to its font atlas, an image freed.
+    ///
+    /// The changes are applied whether or not a frame comes of it. egui
+    /// counts a texture as uploaded once it has said so, and a delta lost
+    /// with a frame the surface would not give would leave it drawing from a
+    /// texture that was never made — which is also why they are taken by
+    /// value: epaint refuses to let a delta be dropped unapplied.
+    pub fn render(&mut self, scene: Scene<'_>, mut textures: egui::TexturesDelta) -> Result<()> {
         use wgpu::CurrentSurfaceTexture as Acquired;
 
         // The backdrop is the compositor's, and it reads the scene itself.
@@ -335,10 +349,26 @@ impl Renderer {
             placement,
             thumbnail,
             display,
-            frame,
-            scale,
+            ui,
             ..
         } = scene;
+
+        // Before the surface is asked for, so that a frame it does not give
+        // still leaves egui's textures as egui believes them to be.
+        for (id, deltas) in &textures.set {
+            for delta in deltas {
+                self.egui
+                    .update_texture(&self.device, &self.queue, *id, delta);
+            }
+        }
+        let freed = std::mem::take(&mut textures.free);
+        textures.clear();
+        // A texture egui has let go of is one this frame will not draw from,
+        // so freeing it before or after the frame comes to the same thing;
+        // before is what covers the frame that is not drawn.
+        for id in &freed {
+            self.egui.free_texture(id);
+        }
 
         let surface_texture = match self.surface.get_current_texture() {
             Acquired::Success(texture) => texture,
@@ -374,22 +404,6 @@ impl Renderer {
                 label: Some("frame"),
             });
 
-        // The interface is staged first, before the image layer records
-        // anything into the encoder. `ui.prepare` is the one step here that
-        // can fail — a full glyph atlas — and the image layer's `prepare`
-        // marks its coarse chain built as a side effect of recording it. Were
-        // that to run first, a text-atlas failure would drop the encoder
-        // unsubmitted while the chain still counted as built, and the image
-        // would go blank when zoomed out until the file was reloaded. Ordered
-        // this way, a failure here returns before the image layer touches its
-        // state. The two are otherwise independent.
-        self.ui.prepare(
-            &self.device,
-            &self.queue,
-            frame,
-            [self.config.width, self.config.height],
-            scale,
-        )?;
         // A view that has just zoomed out past what the coarse chain covers
         // builds the rest of it here.
         self.image_layer.prepare(
@@ -414,6 +428,19 @@ impl Renderer {
         self.composite
             .prepare(&self.queue, &scene, gray, &self.output, checkered);
 
+        // egui's vertices, staged before the passes are recorded.
+        let screen = egui_wgpu::ScreenDescriptor {
+            size_in_pixels: [self.config.width, self.config.height],
+            pixels_per_point: ui.pixels_per_point,
+        };
+        let staged = self.egui.update_buffers(
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            &ui.primitives,
+            &screen,
+        );
+
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("image layer"),
@@ -429,7 +456,7 @@ impl Renderer {
             self.image_layer.render(&mut pass);
         }
         {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("ui layer"),
                 color_attachments: &[Some(attachment(
                     &self.targets.ui,
@@ -437,7 +464,8 @@ impl Renderer {
                 ))],
                 ..Default::default()
             });
-            self.ui.render(&mut pass)?;
+            let mut pass = pass.forget_lifetime();
+            self.egui.render(&mut pass, &ui.primitives, &screen);
         }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -451,9 +479,9 @@ impl Renderer {
             self.composite.render(&mut pass);
         }
 
-        self.queue.submit(Some(encoder.finish()));
+        self.queue
+            .submit(staged.into_iter().chain(Some(encoder.finish())));
         self.queue.present(surface_texture);
-        self.ui.trim();
         // Here rather than at the call site because the paths above that give
         // up on acquiring a surface texture also return `Ok`, and a frame that
         // was never drawn is not the frame anyone is timing. Handing it to the
@@ -462,27 +490,6 @@ impl Renderer {
             timing::first_image_frame();
         }
         Ok(())
-    }
-}
-
-/// Forwarded whole to the interface layer, which is where the fonts are: a
-/// caller that has a renderer measures through it, and a test that has no
-/// surface measures against a [`UiRenderer`] directly.
-impl TextMeasure for Renderer {
-    fn cap_center(&mut self, size: f32) -> f32 {
-        self.ui.cap_center(size)
-    }
-
-    fn measure_text(&mut self, text: &str, size: f32) -> [f32; 2] {
-        self.ui.measure_text(text, size)
-    }
-
-    fn measure_mono(&mut self, text: &str, size: f32) -> [f32; 2] {
-        self.ui.measure_mono(text, size)
-    }
-
-    fn measure_wrapped(&mut self, text: &str, size: f32, width: f32) -> [f32; 2] {
-        self.ui.measure_wrapped(text, size, width)
     }
 }
 

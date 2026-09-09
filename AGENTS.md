@@ -1,6 +1,6 @@
 # gamut
 
-A GPU image viewer: Rust, `winit`, `wgpu`, `glyphon`. `docs/` explains the
+A GPU image viewer: Rust, `winit`, `wgpu`, `egui`. `docs/` explains the
 design and the reasoning behind it; this file is the map for making changes.
 
 ## Layout
@@ -12,32 +12,44 @@ main.rs        mod decls, event-loop bootstrap
 cli.rs         argument parsing; usage() renders the key sections from app::input::KEYS
 app/           the event loop's state and winit handlers
   mod.rs         App: window, renderer, loader, apply/deliver/redraw, ApplicationHandler impl
+  gui.rs         Gui: egui's context and its winit adapter; runs a pass, merges
+                 when egui wants painting again into the loop's deadline
   files.rs       Files: the file list, the read in flight, walks past broken files (pure, tested)
   kept.rs        what each file was left in — its view and its display — so stepping back to it puts it back
-  input.rs       Action, KEYS table, Effect; perform() is where every key's action happens; pointer handling
+  input.rs       Action, KEYS table, Effect; perform() is where every key's action happens;
+                 act() is where every Command from the interface happens; Namer composes tooltips from KEYS
   window.rs      opening size, titles
-ui/            builds each frame's display list; no wgpu or winit imports
-  mod.rs         Current, Panels, FrameInput, build_frame(), backdrop()
-  chrome.rs      the four panels and their buttons; content_area(), image_viewport()
-  layers.rs      which layer the pointer is on: Hit, hit() — one answer for hover, press, wheel and readout
-  histogram.rs / minimap.rs / grid.rs / buttons.rs   one widget each
+ui/            lays each frame's interface out with egui; no wgpu or winit imports
+  mod.rs         Current, Panels, FrameInput, show() — the whole interface, handing back Commands —
+                 the picture's own drag and wheel, room(), backdrop()
+  control.rs     Control (everything that can be pressed), Command (what a pass asked for),
+                 Naming (the words the application has for the interface)
+  chrome.rs      the four panels as egui Panels and everything on them; Pass is one pass of the
+                 interface, with icon_button(), button_ink() and tooltip(); content_area(),
+                 image_viewport() — pure geometry, worked out before egui lays anything out
+  style.rs       Theme's roles as egui's Style and Visuals; Color into Color32
+  fonts.rs       the desktop's sans, bold and monospace faces, found through fontdb
+  rect.rs        Rect, the logical-pixel rectangle the panels are placed by
+  histogram.rs / minimap.rs / grid.rs   one widget each, drawn with egui's painter
   icon.rs        the marks a button wears: Lucide's geometry on its own
                  24-unit grid, sized and placed in whole device pixels so
-                 strokes stay sharp and evenly spaced marks stay even
-  info.rs        the file's own facts, in a column that scrolls
+                 strokes stay sharp and evenly spaced marks stay even; Grid is
+                 the device's grid, paint() draws through egui's painter
+  info.rs        the file's own facts, in a scroll area, each block a press that copies it
   pixel.rs       the pointer's readout: coordinate, swatch, and the pixel's
                  value in whichever of `PixelFormat`'s three ways is in force
-  menu.rs        Menu (which popup is open), the zoom menu's choices, and how its cells are drawn
+  menu.rs        the three popups' contents: the zoom menu's choices and cells, the
+                 pixel-format cells, and the menu of copies with each item's key beside it
   tooltip.rs     the label naming what the pointer is resting on: Tip is what can
-                 have one, Tooltips is when it opens, Tips is where it goes —
-                 in the content area, on the layer nothing covers
+                 have one, Tooltip is what is said, disabled() why a dead control is dead;
+                 when it opens and where it goes are egui's
   toast.rs       the message about what was just done, at the foot of the content
                  area: Toast is what it says and how long it has, Toasts is the
-                 clock, and place() puts it and the cross that dismisses it
-  status.rs      the words in the top and bottom bars; top_bar() and state() lay
-                 each of them out for the frame builder and for the pointer alike —
-                 state() names what is being done to the picture, and explain_state()
-                 says the same in sentences for the tooltip on it
+                 clock, and show() draws it with the cross that dismisses it
+  status.rs      the words in the top and bottom bars: top_words() and state_words()
+                 lay them out, state_words() naming what is being done to the
+                 picture, and explain_state() says the same in sentences for the tooltip on it
+  driven.rs      (tests) the interface driven headless through egui_kittest
 theme/         palette.rs reads Omarchy's colors.toml and resolves its cascade; mod.rs derives Theme's color roles
 view.rs        zoom / pan / fit geometry, pure maths (View, Viewport, Fit); Position is
                the view in space-scale coordinates, where the line a move follows is straight
@@ -71,14 +83,14 @@ image/         the data model, nothing GPU
   decode/        Decoder trait + DECODERS registry in mod.rs; one file per format; limits.rs the size ceiling;
                  dynamic.rs the shared DynamicImage bridge; fixture_tests.rs runs every file in test_images/
 render/        the GPU
-  mod.rs         Renderer: surface, device, the three passes; Scene is what a frame draws; TextMeasure trait
+  mod.rs         Renderer: surface, device, the three passes; Scene is what a frame draws;
+                 UiPaint is what egui drew, and the ui-layer pass hands it to egui-wgpu
+  color.rs       Color, the sRGB color the interface and the theme speak in
   placement.rs   Placement (where the image lands) and Upscale (the magnification filter)
   upload.rs      texture format choice and the transfer-function LUTs; the "sampled texel is linear" invariant
-  image_layer.rs / reduce.rs / composite.rs / ui_layer/   the passes; ui_layer holds Rect, Color, UiFrame — its
-               quads fill or stroke a rounded box at any angle, and snap/stroke_center_in_device put one on the device grid —
-               and popup.rs (sections of cells anchored to a corner)
+  image_layer.rs / reduce.rs / composite.rs   the passes
   shader_codes.rs  every Rust<->WGSL integer code, one fn per shader switch
-  gpu.rs         wgpu boilerplate helpers (layouts, uniform buffers, full-screen pipelines, GrowableBuffer)
+  gpu.rs         wgpu boilerplate helpers (layouts, uniform buffers, full-screen pipelines)
   shaders/       WGSL; each Params struct is mirrored by a #[repr(C)] struct in the .rs file that loads it
 packaging/     what an Arch package is built from: PKGBUILD, the .desktop entry,
                the icon, and hand-written shell completions
@@ -104,16 +116,17 @@ still agrees with both, so renaming either is editing the constant —
 | Change | Edit |
 | --- | --- |
 | A key binding | `app/input.rs`: one `KEYS` entry, with the `mods` it is held with, and one `perform` arm. `--help` follows. |
+| A button | a `Control` variant in `ui/control.rs` with its `label`, the widget where it is drawn — `Pass::icon_button` for a square toggle — pushing `Command::Press` on a click, and an arm of `App::press`. Keys that do the same job go through `press` too, so the two cannot drift apart |
 | A status-bar segment | `ui/status.rs`; the pointer's pixel readout is `ui/pixel.rs` |
 | What a file is left in when you step off it, and what comes back when you step on to it | `app/kept.rs`, and the arrival in `App::apply`, which trades the outgoing file's settings for the incoming one's |
-| Whether a change to the view is a move or a cut | `App::animate` around the change, in `app/input.rs`, makes it a move; a change the hand is on — a drag, a single pixel's step, a trackpad's scroll — goes to `App::view` directly. Whatever reads what is on screen reads `App::shown_view`, not `view`; how long a move takes is `motion::DURATION` |
+| Whether a change to the view is a move or a cut | `App::animate` around the change, in `app/input.rs`, makes it a move; a change the hand is on — a drag, a single pixel's step, a trackpad's scroll — goes to `App::view` directly. Whatever reads what is on screen reads `App::shown_view`, not `view`; how long a move takes is `motion::DURATION`. The drag and the wheel themselves arrive from `ui::show` as `Command::Drag` and `Command::Wheel`, off the picture's own response in `Pass::picture` |
 | What a pixel reads as under the pointer | `image/mod.rs::sample` for what the file holds, `image/display.rs::map` for what the screen shows, `ui/pixel.rs::PixelFormat` for which of the two the bar writes out and how |
 | What the window says about something that just happened | `ui/toast.rs` for how long it stays and how it is drawn, `App::toast` to raise one, and `App::poll_copies` for the copies that only know how they went once their thread is done |
-| What something is called when the pointer rests on it | a `Tip` variant in `ui/tooltip.rs` and one `tips.offer(tip, rect)` beside where it is drawn; `App::tooltip` composes the words, from `KEYS` by way of `action_of` wherever a key does the same job, so a tooltip and `--help` cannot disagree. Words of its own go in `ui/tooltip.rs::words`, and a menu cell's in `Menu::cell_tip`. A thing that wants its label somewhere other than under it offers with `offer_toward`: the histogram panel's toggles open `Opens::Right`, across the plot they act on. When it opens is `Tooltips`, held by `App` and asked in `update_hover` and `about_to_wait` |
-| A button's icon | `ui/icon.rs`: one `&[Mark]` on the 24-unit grid, and one `icon::draw` call where the button is drawn. The caller sets aside a budget; whether the mark comes out sharp is `UiFrame::stroke_center_in_device`'s business and whether its spacing stays even is `icon::fit`'s |
-| A panel or overlay | a new `ui/<name>.rs` and one call in `ui/mod.rs::build_frame`; if the pointer can be on it, a `Hit` variant and one test in `ui/layers.rs` at the same height in the stack it is drawn at; a new color role goes in `theme/mod.rs` |
+| What something is called when the pointer rests on it | a `Tip` variant in `ui/tooltip.rs` and one `pass.tooltip(response, tip, enabled)` on the widget's response; `Namer::tooltip` in `app/input.rs` composes the words, from `KEYS` by way of `action_of` wherever a key does the same job, so a tooltip and `--help` cannot disagree. Words of its own go in `ui/tooltip.rs::words`, a zoom cell's in `ZoomChoice::describe`. When it opens and where it goes are egui's, tuned in `ui/style.rs` |
+| A button's icon | `ui/icon.rs`: one `&[Mark]` on the 24-unit grid, and one `icon::paint` call where the button is drawn, in a square from `icon::square`. The caller sets aside a budget; whether the mark comes out sharp is `icon::Grid`'s business and whether its spacing stays even is `icon::fit`'s |
+| A panel or overlay | a new `ui/<name>.rs` with a `show(pass, ui, ..)` that opens an `egui::Area` at the rectangle its own `panel()` works out, and one call in `Pass::overlays`. An area that is `interactable` takes the pointer from the picture under it; `Order` is the height in the stack. A new color role goes in `theme/mod.rs` and, if a stock widget wears it, `ui/style.rs` |
 | What the info panel says about a file | `ui/info.rs` for the layout; the file's own facts are gathered in `app/mod.rs::file_facts`, its metadata in `image/exif.rs`, and its georeference in `image/geo.rs` |
-| A popup menu | a `Menu` variant in `ui/menu.rs` with its choices, `sections`/`grid`/`choose` arms and a `draw` arm; `Chrome::popup` places it — below, above or beside the button, per `render/ui_layer/popup.rs` — `App::press` opens it, and `ui/layers.rs` puts it over everything. A cell that does something rather than setting something leaves `choose` empty and is performed in `App::press`, as the menu of copies is |
+| A popup menu | a function in `ui/menu.rs` that lays its cells out, each pushing `Command::Press` of a typed `Control` — `ZoomTo`, `Format`, `Copies` — and an `egui::Popup` hung off its button in `ui/chrome.rs`, aligned below, above or beside it with `RectAlign`. The popup opens, closes and takes the pointer by itself; `App::close_menus` is how a key closes one. An item that does something rather than setting something is performed in `App::press`, as the menu of copies is, and prints its key beside it from `Naming::shortcut` |
 | A CLI flag | `cli.rs`, and the `Options` / `Startup` / `Overrides` field it sets |
 | What a path on the command line stands for | `listing.rs`; `App::poll_directories` notices a named directory changing and `app/files.rs::relist` takes the new list in |
 | Anything a user installs — the desktop entry, the icon, a completion, the man page | `packaging/`; the man page is generated by `cli.rs::man()` from the same `OPTIONS` and `KEYS` as `--help`, so it is never edited directly |
@@ -138,13 +151,22 @@ still agrees with both, so renaming either is editing the constant —
   physical ones. `FrameInput.scale` converts. A display need not have a whole
   number of device pixels to the logical one, so anything thin — a rule, an
   icon's stroke — is put on the device's own grid before it is drawn
-  (`UiFrame::line`, `snap`, `stroke_center_in_device`). Rounding to a whole logical
-  pixel is not the same thing and is not enough.
-- A label that sits beside a mark is leveled on its capitals
-  (`TextMeasure::cap_center`), not on the box its line is laid out in — that
-  box keeps room under the baseline for descenders the label may not have. A
-  line of prose in a bar centers the box instead (`ui/mod.rs::text_baseline`),
-  descenders being ordinary there.
+  (`icon::Grid`'s `snap`, `line_width` and `stroke_center_in_device`).
+  Rounding to a whole logical pixel is not the same thing and is not enough.
+- The geometry the picture is fitted into is worked out before egui lays
+  anything out (`chrome::content_area`, from the window size alone), and
+  egui's panels are given exactly those sizes: a fit that waited on the
+  toolkit would be a frame behind the window.
+- The interface never acts on the application. `ui::show` hands back
+  `Command`s, and `App::act` does them after the frame is off, through the
+  same `press` a key goes through. A widget that needs words asks the
+  `Naming` it was given.
+- Every control senses `Sense::CLICK`, never `Sense::click()`: the latter
+  takes keyboard focus on a press, and a focused button would swallow every
+  key after it. Keys stay on winit's table, and go to egui only while
+  `text_edit_focused()`.
+- Stock egui widgets wear the theme through `ui/style.rs`; anything drawn by
+  hand reads its inks from `Theme` directly, through `Pass::button_ink`.
 - The interface's face has no U+2192, and the arrow the fallback supplies sits
   low, so a readout showing one thing become another uses `ui::BECOMES`.
 - Handlers return an `Effect` (`Redraw` / `Nothing` / `Quit`), never call

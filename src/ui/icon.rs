@@ -12,10 +12,10 @@
 //! of device pixels wide and centered where those pixels meet, and blurred
 //! when it is not; nothing else about it matters nearly as much. Marks are
 //! placed one at a time so that each can be put there. Rounding to whole
-//! *logical* pixels, which is what the interface did before, is not the same
-//! thing and is not enough: a display with 1.5 device pixels to the logical
-//! one puts half of those marks astride a pixel boundary, and the shader's
-//! feathering then draws them at two different weights.
+//! *logical* pixels is not the same thing and is not enough: a display with
+//! 1.5 device pixels to the logical one puts half of those marks astride a
+//! pixel boundary, and egui's feathering then draws them at two different
+//! weights.
 //!
 //! Placing each mark on its own is not enough on its own, either. Lucide's
 //! marks are spaced six grid units apart — the lines of a lattice, the bars
@@ -27,7 +27,7 @@
 //! first, which makes every mark on a multiple of three land on a whole
 //! device pixel, and the spacing survives the snapping.
 
-use crate::render::{Blend, Color, Rect, UiFrame};
+use super::Rect;
 
 /// The side of the square an icon is described on: Lucide's grid.
 const GRID: f32 = 24.0;
@@ -386,6 +386,90 @@ pub(super) const X: &[Mark] = &[
     Mark::Line([6.0, 6.0], [18.0, 18.0]),
 ];
 
+/// The device's grid, in the terms a mark is placed on it: physical pixels
+/// to the logical one, and the arithmetic that puts a coordinate on a whole
+/// one. The same arithmetic the display list does for itself, held here so
+/// that an icon painted by egui lands where one drawn by the list did.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(super) struct Grid {
+    scale: f32,
+}
+
+impl Grid {
+    pub(super) fn new(pixels_per_point: f32) -> Self {
+        Self {
+            scale: pixels_per_point,
+        }
+    }
+
+    fn usable(self) -> bool {
+        self.scale.is_finite() && self.scale > 0.0
+    }
+
+    /// A stroke `thickness` logical pixels thick, as the nearest whole
+    /// number of device pixels and never fewer than one.
+    pub(super) fn line_width(self, thickness: f32) -> f32 {
+        if self.usable() {
+            (thickness * self.scale).round().max(1.0) / self.scale
+        } else {
+            thickness
+        }
+    }
+
+    /// One coordinate moved onto the device's own pixel grid.
+    pub(super) fn snap(self, value: f32) -> f32 {
+        if self.usable() {
+            (value * self.scale).round() / self.scale
+        } else {
+            value
+        }
+    }
+
+    /// The largest whole number of `step`s that fits inside `value`, and
+    /// never fewer than one — see [`fit`] for what it is for.
+    fn snap_within(self, value: f32, step: f32) -> f32 {
+        if !self.usable() || step <= 0.0 {
+            return value;
+        }
+        let step = step * self.scale;
+        ((value * self.scale / step).floor().max(1.0) * step) / self.scale
+    }
+
+    /// `pixels` device pixels, in logical ones.
+    pub(super) fn device_pixels(self, pixels: f32) -> f32 {
+        if self.usable() {
+            pixels / self.scale
+        } else {
+            pixels
+        }
+    }
+
+    /// Where a stroke `thickness` wide, wanted at `at` device pixels, has to
+    /// be centered for both of its edges to land on device pixel boundaries:
+    /// the middle of a pixel when it is an odd number of them across, and
+    /// the seam between two when it is even. In logical pixels.
+    fn stroke_center_in_device(self, at: f32, thickness: f32) -> f32 {
+        if !self.usable() {
+            return at;
+        }
+        let phase = if (thickness * self.scale).round() as i32 % 2 == 0 {
+            0.0
+        } else {
+            0.5
+        };
+        ((at - phase).round() + phase) / self.scale
+    }
+
+    /// `value` in device pixels, rounded to a whole one.
+    fn to_device(self, value: f32) -> f32 {
+        if self.usable() {
+            (value * self.scale).round()
+        } else {
+            value
+        }
+    }
+}
+
 /// The square an icon is drawn in: the largest whole number of [`QUANTUM`]s
 /// that fits in `budget` logical pixels, centered in `within`.
 ///
@@ -395,29 +479,42 @@ pub(super) const X: &[Mark] = &[
 /// crops its mark rather than growing one that spills out of it. What it
 /// costs is that the mark is drawn at whole steps: a little under the budget
 /// at one scale, right at it on another.
-pub(super) fn fit(frame: &UiFrame, within: Rect, budget: f32) -> Rect {
+pub(super) fn fit(grid: Grid, within: Rect, budget: f32) -> Rect {
     let budget = budget.min(within.width).min(within.height).max(0.0);
-    let step = frame.device_pixels(QUANTUM);
+    let step = grid.device_pixels(QUANTUM);
     // A budget too small to hold one step gets what there is: an icon under a
     // third of the grid across has no even spacing left to protect anyway.
     let side = if budget < step {
-        frame.snap(budget)
+        grid.snap(budget)
     } else {
-        frame.snap_within(budget, step)
+        grid.snap_within(budget, step)
     };
     Rect::new(
-        frame.snap(within.x + (within.width - side) / 2.0),
-        frame.snap(within.y + (within.height - side) / 2.0),
+        grid.snap(within.x + (within.width - side) / 2.0),
+        grid.snap(within.y + (within.height - side) / 2.0),
         side,
         side,
+    )
+}
+
+/// The same, for a square egui is asked to draw in.
+pub(super) fn square(grid: Grid, within: egui::Rect, budget: f32) -> egui::Rect {
+    let fitted = fit(
+        grid,
+        Rect::new(within.min.x, within.min.y, within.width(), within.height()),
+        budget,
+    );
+    egui::Rect::from_min_size(
+        egui::pos2(fitted.x, fitted.y),
+        egui::vec2(fitted.width, fitted.height),
     )
 }
 
 /// The stroke an icon `side` logical pixels across is drawn with: Lucide's
 /// two units of twenty-four, taken to the nearest whole device pixel and
 /// never less than one.
-fn stroke_for(frame: &UiFrame, side: f32) -> f32 {
-    frame.line_width(side * STROKE / GRID)
+fn stroke_for(grid: Grid, side: f32) -> f32 {
+    grid.line_width(side * STROKE / GRID)
 }
 
 /// Grid units to logical pixels, on the device's own grid.
@@ -431,6 +528,7 @@ fn stroke_for(frame: &UiFrame, side: f32) -> f32 {
 /// becomes a repeating fraction, and the marks of one lattice then round to
 /// either side of where they belong.
 pub(super) struct Placer {
+    grid: Grid,
     /// The square's corner and side, in device pixels.
     origin: [f32; 2],
     side: f32,
@@ -441,29 +539,32 @@ pub(super) struct Placer {
 }
 
 impl Placer {
-    pub(super) fn new(frame: &UiFrame, within: Rect) -> Self {
+    pub(super) fn new(grid: Grid, within: Rect) -> Self {
         let side = within.width.min(within.height);
         Self {
-            origin: [frame.to_device(within.x), frame.to_device(within.y)],
-            side: frame.to_device(side),
+            grid,
+            origin: [grid.to_device(within.x), grid.to_device(within.y)],
+            side: grid.to_device(side),
             unit: side / GRID,
-            stroke: stroke_for(frame, side),
+            stroke: stroke_for(grid, side),
         }
     }
 
     /// One point of a stroke's center line, placed so that the stroke's two
     /// edges land on device pixel boundaries.
-    fn at(&self, frame: &UiFrame, point: [f32; 2]) -> [f32; 2] {
+    fn at(&self, point: [f32; 2]) -> [f32; 2] {
         [
-            frame.stroke_center_in_device(self.device(self.origin[0], point[0]), self.stroke),
-            frame.stroke_center_in_device(self.device(self.origin[1], point[1]), self.stroke),
+            self.grid
+                .stroke_center_in_device(self.device(self.origin[0], point[0]), self.stroke),
+            self.grid
+                .stroke_center_in_device(self.device(self.origin[1], point[1]), self.stroke),
         ]
     }
 
     /// A rectangle's center line, both corners placed by [`Placer::at`].
-    fn boxed(&self, frame: &UiFrame, at: [f32; 2], size: [f32; 2]) -> Rect {
-        let start = self.at(frame, at);
-        let end = self.at(frame, [at[0] + size[0], at[1] + size[1]]);
+    fn boxed(&self, at: [f32; 2], size: [f32; 2]) -> Rect {
+        let start = self.at(at);
+        let end = self.at([at[0] + size[0], at[1] + size[1]]);
         Rect::new(start[0], start[1], end[0] - start[0], end[1] - start[1])
     }
 
@@ -471,10 +572,12 @@ impl Placer {
     /// vertices of a filled shape and the center of a round one, where moving
     /// a point onto the pixel grid bends the outline rather than sharpening
     /// it.
-    pub(super) fn free(&self, frame: &UiFrame, point: [f32; 2]) -> [f32; 2] {
+    pub(super) fn free(&self, point: [f32; 2]) -> [f32; 2] {
         [
-            frame.device_pixels(self.device(self.origin[0], point[0])),
-            frame.device_pixels(self.device(self.origin[1], point[1])),
+            self.grid
+                .device_pixels(self.device(self.origin[0], point[0])),
+            self.grid
+                .device_pixels(self.device(self.origin[1], point[1])),
         ]
     }
 
@@ -489,99 +592,126 @@ impl Placer {
 
     /// A filled rectangle, whose *edges* rather than whose center line are
     /// what has to be on the device grid.
-    fn filled(&self, frame: &UiFrame, at: [f32; 2], size: [f32; 2]) -> Rect {
-        let corner = self.free(frame, at);
-        frame.snap_rect(Rect::new(
-            corner[0],
-            corner[1],
-            size[0] * self.unit,
-            size[1] * self.unit,
-        ))
+    fn filled(&self, at: [f32; 2], size: [f32; 2]) -> Rect {
+        let corner = self.free(at);
+        let (x, y) = (self.grid.snap(corner[0]), self.grid.snap(corner[1]));
+        let least = self.grid.line_width(0.0);
+        Rect::new(
+            x,
+            y,
+            (self.grid.snap(corner[0] + size[0] * self.unit) - x).max(least),
+            (self.grid.snap(corner[1] + size[1] * self.unit) - y).max(least),
+        )
+    }
+
+    /// The points of the chain of straight strokes that stands in for an
+    /// arc. Nothing here is snapped: a curve meets the pixel grid at every
+    /// angle, so there is no placing of it that the feather does not have to
+    /// finish; what the grid is for is the straight strokes beside it.
+    fn arc(&self, at: [f32; 2], radius: f32, start: f32, sweep: f32) -> Vec<[f32; 2]> {
+        let center = self.free(at);
+        let radius = self.units(radius);
+        let steps = ((sweep.abs() / ARC_STEP).ceil() as usize).max(2);
+        (0..=steps)
+            .map(|step| {
+                let angle = (start + sweep * step as f32 / steps as f32).to_radians();
+                [
+                    center[0] + radius * angle.cos(),
+                    center[1] + radius * angle.sin(),
+                ]
+            })
+            .collect()
     }
 }
 
-/// Draws `marks` in `within` — a square from [`fit`] — in `ink`.
-///
-/// `ground` is what a [`Mark::Knockout`] is filled with: the color the icon
-/// is sitting on. An icon with no knockout in it can be given anything.
-pub(super) fn draw(frame: &mut UiFrame, marks: &[Mark], within: Rect, ink: Color, ground: Color) {
-    if within.width <= 0.0 || within.height <= 0.0 {
+/// Draws `marks` in `within` — a square from [`square`] — in `ink`, with
+/// egui's painter. Each stroke is given round caps, as Lucide draws them.
+pub(super) fn paint(
+    painter: &egui::Painter,
+    marks: &[Mark],
+    within: egui::Rect,
+    ink: egui::Color32,
+    ground: egui::Color32,
+) {
+    use egui::{Pos2, Stroke, StrokeKind, pos2};
+
+    if within.width() <= 0.0 || within.height() <= 0.0 {
         return;
     }
-    let place = Placer::new(frame, within);
+    let grid = Grid::new(painter.pixels_per_point());
+    let place = Placer::new(
+        grid,
+        Rect::new(within.min.x, within.min.y, within.width(), within.height()),
+    );
     let stroke = place.stroke;
+    let pen = Stroke::new(stroke, ink);
+    let point = |at: [f32; 2]| pos2(at[0], at[1]);
+    // A stroke with round caps: the segment, and a dot at each end.
+    let capped = |from: Pos2, to: Pos2| {
+        painter.line_segment([from, to], pen);
+        painter.circle_filled(from, stroke / 2.0, ink);
+        painter.circle_filled(to, stroke / 2.0, ink);
+    };
+    let boxed = |rect: Rect| {
+        egui::Rect::from_min_size(pos2(rect.x, rect.y), egui::vec2(rect.width, rect.height))
+    };
     for mark in marks {
         match mark {
-            Mark::Line(from, to) => {
-                let (from, to) = (place.at(frame, *from), place.at(frame, *to));
-                frame.stroke(from, to, stroke, ink);
-            }
+            Mark::Line(from, to) => capped(point(place.at(*from)), point(place.at(*to))),
             Mark::Rect { at, size, radius } => {
-                let rect = place.boxed(frame, *at, *size);
-                frame.stroke_rect(rect, radius * place.unit, stroke, ink);
+                painter.rect_stroke(
+                    boxed(place.boxed(*at, *size)),
+                    radius * place.unit,
+                    pen,
+                    StrokeKind::Middle,
+                );
             }
             Mark::Circle { at, radius } => {
-                // Snapped, so that the two sides of the circle land on the
-                // grid the same way its center does.
-                let across = frame.snap(radius * place.unit).max(stroke);
-                frame.stroke_circle(place.at(frame, *at), across, stroke, ink);
+                let across = grid.snap(radius * place.unit).max(stroke);
+                painter.circle_stroke(point(place.at(*at)), across, pen);
             }
             Mark::Arc {
                 at,
                 radius,
                 start,
                 sweep,
-            } => arc(frame, &place, *at, *radius, *start, *sweep, ink),
-            Mark::Dot(at) => frame.circle(place.at(frame, *at), stroke / 2.0, ink),
+            } => {
+                let points = place.arc(*at, *radius, *start, *sweep);
+                for pair in points.windows(2) {
+                    capped(point(pair[0]), point(pair[1]));
+                }
+            }
+            Mark::Dot(at) => {
+                painter.circle_filled(point(place.at(*at)), stroke / 2.0, ink);
+            }
             Mark::Area { top, baseline } => {
-                let points: Vec<[f32; 2]> = top.iter().map(|at| place.free(frame, *at)).collect();
-                // The one edge of a plot that is straight is the one it
-                // stands on, so that is the one worth putting on the grid.
-                let foot = frame.snap(place.free(frame, [0.0, *baseline])[1]);
-                frame.area(&points, foot, ink, Blend::Over);
+                let foot = grid.snap(place.free([0.0, *baseline])[1]);
+                // One trapezoid under each segment of the top, each of them
+                // convex, which is what egui can fill.
+                for pair in top.windows(2) {
+                    let (a, b) = (place.free(pair[0]), place.free(pair[1]));
+                    painter.add(egui::Shape::convex_polygon(
+                        vec![
+                            pos2(a[0], a[1]),
+                            pos2(b[0], b[1]),
+                            pos2(b[0], foot),
+                            pos2(a[0], foot),
+                        ],
+                        ink,
+                        Stroke::NONE,
+                    ));
+                }
             }
             Mark::Knockout { at, size, radius } => {
-                frame.rounded_rect(place.filled(frame, *at, *size), radius * place.unit, ground);
+                painter.rect_filled(boxed(place.filled(*at, *size)), radius * place.unit, ground);
             }
         }
-    }
-}
-
-/// One arc, as the chain of straight strokes that stands in for it.
-///
-/// Nothing here is snapped. A curve meets the pixel grid at every angle, so
-/// there is no placing of it that the feather does not have to finish; what
-/// the grid is for is the straight strokes beside it.
-#[allow(clippy::too_many_arguments)]
-fn arc(
-    frame: &mut UiFrame,
-    place: &Placer,
-    at: [f32; 2],
-    radius: f32,
-    start: f32,
-    sweep: f32,
-    ink: Color,
-) {
-    let center = place.free(frame, at);
-    let radius = place.units(radius);
-    let steps = ((sweep.abs() / ARC_STEP).ceil() as usize).max(2);
-    let point = |step: usize| {
-        let angle = (start + sweep * step as f32 / steps as f32).to_radians();
-        [
-            center[0] + radius * angle.cos(),
-            center[1] + radius * angle.sin(),
-        ]
-    };
-    for step in 0..steps {
-        frame.stroke(point(step), point(step + 1), place.stroke, ink);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use crate::render::Color;
 
     /// The scales a display actually asks for, whole and fractional.
     const SCALES: [f32; 5] = [1.0, 1.25, 1.5, 1.75, 2.0];
@@ -609,8 +739,7 @@ mod tests {
     #[test]
     fn the_square_is_a_whole_number_of_device_pixels() {
         for scale in SCALES {
-            let frame = UiFrame::new(scale);
-            let square = fit(&frame, Rect::new(0.0, 0.0, 22.0, 22.0), 14.0);
+            let square = fit(Grid::new(scale), Rect::new(0.0, 0.0, 22.0, 22.0), 14.0);
             let side = device(square.width, scale);
             assert!(
                 (side - side.round()).abs() < 1e-3,
@@ -622,9 +751,8 @@ mod tests {
 
     #[test]
     fn the_square_never_outgrows_what_holds_it() {
-        let frame = UiFrame::new(1.0);
         let button = Rect::new(0.0, 0.0, 9.0, 9.0);
-        let square = fit(&frame, button, 14.0);
+        let square = fit(Grid::new(1.0), button, 14.0);
         assert!(square.width <= button.width, "{square:?}");
     }
 
@@ -633,14 +761,14 @@ mod tests {
     #[test]
     fn every_stroke_lands_on_the_device_grid() {
         for scale in SCALES {
-            let frame = UiFrame::new(scale);
-            let square = fit(&frame, Rect::new(0.0, 0.0, 22.0, 22.0), 14.0);
-            let place = Placer::new(&frame, square);
+            let grid = Grid::new(scale);
+            let square = fit(grid, Rect::new(0.0, 0.0, 22.0, 22.0), 14.0);
+            let place = Placer::new(grid, square);
             let half = device(place.stroke, scale) / 2.0;
             let mut checked = 0;
             for icon in ICONS {
                 for mark in icon {
-                    for edge in stroke_edges(&frame, &place, mark) {
+                    for edge in stroke_edges(&place, mark) {
                         for side in [device(edge, scale) - half, device(edge, scale) + half] {
                             assert!(
                                 (side - side.round()).abs() < 1e-3,
@@ -660,8 +788,7 @@ mod tests {
     #[test]
     fn the_stroke_is_a_whole_number_of_device_pixels() {
         for scale in SCALES {
-            let frame = UiFrame::new(scale);
-            let stroke = device(stroke_for(&frame, 14.0), scale);
+            let stroke = device(stroke_for(Grid::new(scale), 14.0), scale);
             assert!(stroke >= 1.0, "scale {scale}: stroke {stroke}");
             assert!(
                 (stroke - stroke.round()).abs() < 1e-3,
@@ -688,138 +815,12 @@ mod tests {
         }
     }
 
-    /// End to end, on a real adapter: an icon drawn through the whole path —
-    /// placed by [`Placer`], turned into instances, and rasterized by the
-    /// shader — has no soft pixels across its straight strokes.
-    ///
-    /// The row through the middle of `grid-3x3` crosses four of them: the two
-    /// sides of the frame and the two lines down it. It is clear of the round
-    /// caps at their ends and of the frame's rounded corners, which are
-    /// curves and are meant to be feathered.
-    #[test]
-    fn a_drawn_icon_has_no_soft_edges_across_its_strokes() {
-        const AREA: [f32; 2] = [24.0, 24.0];
-        for scale in SCALES {
-            let mut frame = UiFrame::new(scale);
-            let square = fit(&frame, Rect::new(0.0, 0.0, AREA[0], AREA[1]), 14.0);
-            draw(
-                &mut frame,
-                GRID_3X3,
-                square,
-                Color::rgb(255, 255, 255),
-                Color::rgb(0, 0, 0),
-            );
-            let Some(alpha) = crate::render::ui_tests::alpha_of(&frame, AREA, scale) else {
-                return;
-            };
-            let width = device(AREA[0], scale).round() as usize;
-            let middle = device(square.y + square.height / 2.0, scale) as usize;
-            let row = &alpha[middle * width..(middle + 1) * width];
-            assert_eq!(
-                crate::render::ui_tests::feathered(row),
-                0,
-                "scale {scale}: a feathered row across the icon, {row:?}"
-            );
-            let strokes = row
-                .windows(2)
-                .filter(|pair| pair[0] == 0 && pair[1] == 255)
-                .count();
-            assert_eq!(
-                strokes, 4,
-                "scale {scale}: {strokes} strokes across, {row:?}"
-            );
-        }
-    }
-
-    /// The clipboard's board is a path rather than a rectangle, and its two
-    /// sides still have to come out as two hard strokes at every scale — the
-    /// corners it is joined to them by are drawn as chains of short strokes,
-    /// which is exactly where a soft edge would creep in.
-    #[test]
-    fn the_clipboard_comes_out_as_hard_as_the_rest() {
-        const AREA: [f32; 2] = [24.0, 24.0];
-        for scale in SCALES {
-            let mut frame = UiFrame::new(scale);
-            let square = fit(&frame, Rect::new(0.0, 0.0, AREA[0], AREA[1]), 14.0);
-            draw(
-                &mut frame,
-                CLIPBOARD,
-                square,
-                Color::rgb(255, 255, 255),
-                Color::rgb(0, 0, 0),
-            );
-            let Some(alpha) = crate::render::ui_tests::alpha_of(&frame, AREA, scale) else {
-                return;
-            };
-            let width = device(AREA[0], scale).round() as usize;
-            // Across the middle of the board, below the clip and above the
-            // bottom edge, which is the two sides and nothing else.
-            let middle = device(square.y + square.height / 2.0, scale) as usize;
-            let row = &alpha[middle * width..(middle + 1) * width];
-            assert_eq!(
-                crate::render::ui_tests::feathered(row),
-                0,
-                "scale {scale}: a feathered row across the icon, {row:?}"
-            );
-            let strokes = row
-                .windows(2)
-                .filter(|pair| pair[0] == 0 && pair[1] == 255)
-                .count();
-            assert_eq!(
-                strokes, 2,
-                "scale {scale}: {strokes} strokes across, {row:?}"
-            );
-        }
-    }
-
-    /// The lattice's three cells are the same width, at every scale.
-    ///
-    /// Snapping each line on its own is not enough for this: six grid units
-    /// can come to five and a half device pixels, and four lines rounded
-    /// individually then land 5, 6 and 5 apart, leaving a middle cell a third
-    /// wider than the two beside it. It is [`fit`] sizing the square in whole
-    /// [`QUANTUM`]s that makes the interval whole in the first place.
-    #[test]
-    fn the_cells_of_a_lattice_come_out_equal() {
-        for (scale, budget) in SCALES
-            .into_iter()
-            .flat_map(|scale| [12.0, 14.0, 16.0, 18.0, 20.0, 22.0].map(|budget| (scale, budget)))
-        {
-            let mut frame = UiFrame::new(scale);
-            let square = fit(&frame, Rect::new(0.0, 0.0, 24.0, 24.0), budget);
-            draw(
-                &mut frame,
-                GRID_3X3,
-                square,
-                Color::rgb(255, 255, 255),
-                Color::rgb(0, 0, 0),
-            );
-            let Some(alpha) = crate::render::ui_tests::alpha_of(&frame, [24.0, 24.0], scale) else {
-                return;
-            };
-            let width = device(24.0, scale).round() as usize;
-            let middle = device(square.y + square.height / 2.0, scale) as usize;
-            let row = &alpha[middle * width..(middle + 1) * width];
-
-            // Where each of the four strokes across the row begins.
-            let starts: Vec<usize> = (1..row.len())
-                .filter(|at| row[at - 1] == 0 && row[*at] == 255)
-                .collect();
-            assert_eq!(starts.len(), 4, "scale {scale}, budget {budget}: {row:?}");
-            let cells: Vec<usize> = starts.windows(2).map(|pair| pair[1] - pair[0]).collect();
-            assert!(
-                cells.iter().all(|cell| *cell == cells[0]),
-                "scale {scale}, budget {budget}: cells {cells:?} device pixels apart"
-            );
-        }
-    }
-
-    /// Where a stroked mark's center line falls in logical pixels, as `draw`
+    /// Where a stroked mark's center line falls in logical pixels, as `paint`
     /// places it. A filled mark has no center line: its edges are snapped as
     /// edges, and it contributes nothing here.
-    fn stroke_edges(frame: &UiFrame, place: &Placer, mark: &Mark) -> Vec<f32> {
+    fn stroke_edges(place: &Placer, mark: &Mark) -> Vec<f32> {
         let both = |point: [f32; 2]| {
-            let at = place.at(frame, point);
+            let at = place.at(point);
             vec![at[0], at[1]]
         };
         match mark {
@@ -828,8 +829,8 @@ mod tests {
                 [both(*at), both([at[0] + size[0], at[1] + size[1]])].concat()
             }
             Mark::Circle { at, radius } => {
-                let center = place.at(frame, *at);
-                let across = frame.snap(radius * place.unit).max(place.stroke);
+                let center = place.at(*at);
+                let across = place.grid.snap(radius * place.unit).max(place.stroke);
                 vec![
                     center[0] - across,
                     center[0] + across,

@@ -5,13 +5,15 @@
 //! texture, placed by [`placement`] — so everything that applies to the image
 //! applies to it for nothing. Only the border and the wash are drawn here.
 
-use crate::render::{Placement, Rect, UiFrame, Upscale};
-use crate::theme::Theme;
-use crate::view::{View, Viewport};
+use egui::Sense;
 
-use super::buttons::outline;
-use super::chrome::content_area;
-use super::{Current, FrameInput, PADDING};
+use crate::render::{Placement, Upscale};
+
+use super::Rect;
+use crate::view::Viewport;
+
+use super::chrome::{Pass, content_area};
+use super::{Current, PADDING, icon};
 
 /// The largest the minimap's thumbnail may be. It keeps the image's own
 /// shape inside this, so a panorama gets a wide short one and a portrait a
@@ -135,60 +137,121 @@ fn snap_to_pixels(rect: Rect, scale: f32) -> Rect {
 /// the bottom-left of `content`: a border around the whole image, and the part
 /// of it the viewport is showing left bright while the rest is washed over.
 ///
-/// Nothing here is filled where the thumbnail shows through, and the frame
-/// this draws into is composited over the image layer, so the two halves of
-/// the widget meet on screen without either knowing about the other.
+/// Nothing here is filled where the thumbnail shows through, and the
+/// interface is composited over the image layer, so the two halves of the
+/// widget meet on screen without either knowing about the other.
 ///
 /// Only called with part of the image off screen — see `minimap_on_screen` —
 /// so the marked-out part is always smaller than the thumbnail on at least
 /// one axis, and there is always something to wash over.
-pub(super) fn draw(
-    frame: &mut UiFrame,
-    current: &Current,
-    view: &View,
-    input: &FrameInput,
-    content: Rect,
-    theme: &Theme,
-) {
+///
+/// The thumbnail is opaque to the pointer: what lands on it belongs to it
+/// rather than to the picture it is covering, so it is laid out as an area
+/// of its own that takes the press and does nothing with it.
+pub(super) fn show(pass: &Pass, ui: &mut egui::Ui, current: &Current, content: Rect) {
     let image = current.size();
     let Some(rect) = thumbnail(content, image) else {
         return;
     };
-    outline(frame, rect, 1.0, theme.minimap_edge);
-
-    let placement = view.placement(image, input.viewport);
-    let shown = snap_to_pixels(
-        minimap_marker(rect, image, placement, input.viewport),
-        input.scale,
+    let theme = pass.theme;
+    let scale = pass.input.scale;
+    let area = egui::Rect::from_min_size(
+        egui::pos2(rect.x, rect.y),
+        egui::vec2(rect.width, rect.height),
     );
+    egui::Area::new(egui::Id::new("minimap"))
+        .order(egui::Order::Middle)
+        .fixed_pos(area.min)
+        .interactable(true)
+        .show(ui.ctx(), |ui| {
+            let (_, response) = ui.allocate_exact_size(area.size(), Sense::CLICK | Sense::DRAG);
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Minimap thumbnail")
+            });
+            let painter = ui.painter();
+            let grid = icon::Grid::new(scale);
+            outline(painter, grid, rect, 1.0, theme.minimap_edge.into());
 
-    for aside in [
-        Rect::new(rect.x, rect.y, rect.width, shown.y - rect.y),
-        Rect::new(
-            rect.x,
-            shown.bottom(),
-            rect.width,
-            rect.bottom() - shown.bottom(),
-        ),
-        Rect::new(rect.x, shown.y, shown.x - rect.x, shown.height),
-        Rect::new(
-            shown.right(),
-            shown.y,
-            rect.right() - shown.right(),
-            shown.height,
-        ),
-    ] {
-        if aside.width > 0.0 && aside.height > 0.0 {
-            frame.rect(aside, theme.minimap_dim);
-        }
+            let placement = pass.view.placement(image, pass.input.viewport);
+            let shown = snap_to_pixels(
+                minimap_marker(rect, image, placement, pass.input.viewport),
+                scale,
+            );
+            let wash: egui::Color32 = theme.minimap_dim.into();
+            for aside in [
+                Rect::new(rect.x, rect.y, rect.width, shown.y - rect.y),
+                Rect::new(
+                    rect.x,
+                    shown.bottom(),
+                    rect.width,
+                    rect.bottom() - shown.bottom(),
+                ),
+                Rect::new(rect.x, shown.y, shown.x - rect.x, shown.height),
+                Rect::new(
+                    shown.right(),
+                    shown.y,
+                    rect.right() - shown.right(),
+                    shown.height,
+                ),
+            ] {
+                if aside.width > 0.0 && aside.height > 0.0 {
+                    painter.rect_filled(
+                        egui::Rect::from_min_size(
+                            egui::pos2(aside.x, aside.y),
+                            egui::vec2(aside.width, aside.height),
+                        ),
+                        0.0,
+                        wash,
+                    );
+                }
+            }
+            outline(painter, grid, shown, 1.5, theme.accent.into());
+        });
+}
+
+/// A rectangle drawn as four edges, so that what is behind it — the
+/// thumbnail under the minimap's border — stays visible. Four snapped lines,
+/// so that an outline is the same weight as itself wherever on the device's
+/// grid it lands, and the two down the sides stop where the two across meet
+/// them, so a translucent color is not laid twice at the corners.
+pub(super) fn outline(
+    painter: &egui::Painter,
+    grid: icon::Grid,
+    rect: Rect,
+    thickness: f32,
+    color: egui::Color32,
+) {
+    if rect.width <= 0.0 || rect.height <= 0.0 {
+        return;
     }
-    outline(frame, shown, 1.5, theme.accent);
+    let edge = grid.line_width(thickness);
+    let middle = (rect.height - 2.0 * edge).max(0.0);
+    let fill = |piece: Rect| {
+        let x = grid.snap(piece.x);
+        let y = grid.snap(piece.y);
+        painter.rect_filled(
+            egui::Rect::from_min_size(
+                egui::pos2(x, y),
+                egui::vec2(
+                    (grid.snap(piece.right()) - x).max(edge),
+                    (grid.snap(piece.bottom()) - y).max(edge),
+                ),
+            ),
+            0.0,
+            color,
+        );
+    };
+    fill(Rect::new(rect.x, rect.y, rect.width, edge));
+    fill(Rect::new(rect.x, rect.bottom() - edge, rect.width, edge));
+    fill(Rect::new(rect.x, rect.y + edge, edge, middle));
+    fill(Rect::new(rect.right() - edge, rect.y + edge, edge, middle));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ui::chrome::Chrome;
+    use crate::view::View;
 
     const WINDOW: [f32; 2] = [1000.0, 700.0];
 
