@@ -1303,21 +1303,26 @@ impl App {
         })
     }
 
-    /// Puts `region` on screen, and — where its size is not what it was —
-    /// writes the size at its middle for a moment.
+    /// Puts `region` on screen.
     fn select(&mut self, region: Region) {
-        let before = self.selection.region().map(|region| region.size());
         self.selection = Selection::Shown(region);
-        if before != Some(region.size()) {
-            self.dimensions_until = Some(Instant::now() + ui::region::LINGER);
-        }
+    }
+
+    /// Whether the pointer is on the region, which is what its size and its
+    /// coordinates are written for. The hand counts as being on it for as
+    /// long as it has hold of it: a corner dragged to the edge of the image
+    /// leaves the pointer off the region it is still resizing, and the size
+    /// is exactly what is being watched then.
+    pub(super) fn over_region(&self) -> bool {
+        self.selection.region().is_some()
+            && (self.pointer.grip.is_some() || self.grabbing.is_some())
     }
 
     /// Takes the region off, and the mode with it.
     pub(super) fn clear_region(&mut self) {
         self.selection = Selection::Off;
         self.grabbing = None;
-        self.dimensions_until = None;
+        self.pointer.grip = None;
     }
 
     /// A drag on the picture has taken hold of the region — or of nothing

@@ -34,8 +34,11 @@ ui/            lays each frame's interface out with egui; no wgpu or winit impor
   histogram.rs / minimap.rs / grid.rs   one widget each, drawn with egui's painter
   region.rs      the region marked out on the picture: where its outline and
                  eight handles go, which handle the pointer is on, and the
-                 size written at its middle for a moment; the gestures on it
-                 are read in Pass::picture against the same geometry
+                 words it wears while the pointer is on it — its size at its
+                 middle, each edge's coordinate inside that edge's mark, and
+                 labels() deciding which of them there is room for; the
+                 gestures on it are read in Pass::picture against the same
+                 geometry
   icon.rs        the marks a button wears: Lucide's geometry on its own
                  24-unit grid, sized and placed in whole device pixels so
                  strokes stay sharp and evenly spaced marks stay even; Grid is

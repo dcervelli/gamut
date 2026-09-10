@@ -356,8 +356,15 @@ pixel rather than panning the view, and with the pointer resting on a handle
 they move that handle instead: rest on the right edge's handle and press
 Right to make the region one pixel wider, or Left to make it one narrower.
 `Ctrl` with an arrow grows the region on that side, wherever the pointer is.
-Every change to its size writes the size at its middle, `640 × 480`, for a
-second.
+
+Point at the region and it says what it is: its size at its middle,
+`640 × 480`, and the coordinate of each edge written just inside the mark in
+the middle of that edge. The left and right numbers are where those edges
+sit across the image and the top and bottom where they sit down it, so the
+right minus the left is the width beside them. They stay for as long as the
+pointer is on the region — including while you are dragging it — and go when
+you point somewhere else, leaving the outline. A region too small to hold
+all of it writes what fits, dropping the edges before the size.
 
 `Space` fits the region rather than the image: the whole of it in the
 window, then filling the window, in turn. It is a zoom like the ones on the

@@ -343,13 +343,30 @@ handle — moves the region rather than doing nothing, so no key is dead while
 a region is up. `Ctrl` with an arrow grows that side. None of it is animated:
 a region moves a pixel at a time, and a pixel has nothing to animate.
 
-The size is written at the region's middle for a second after it changes —
-`dimensions_until` on `App`, on the same deadline clock as the message about
-a copy — and at the middle of the part of the region that is on screen,
-since a region larger than the window has its middle wherever it has it and
-words written off screen are words nobody reads. It says the size and not the
-position because the size is the thing a drag is judged by; the position is
-where the outline is.
+The region wears its measurements while the pointer is on it: its size at
+its middle, and each edge's coordinate inside the mark in the middle of that
+edge. They come and go with the hand rather than with a clock, since the
+hand is what says which region is being worked on, and a region left on the
+picture keeps only its outline, which is the thing it is for. `App::over_region`
+is the reading, and it is `Pointer::grip` — the hit test the interface
+already reports, so a panel covering the region does not count — or a drag
+in flight, since a corner dragged to the edge of the image leaves the
+pointer off the region it is still resizing and the size is exactly what is
+being watched then.
+
+`ui::region::labels` lays the five of them out and is where the fitting is
+decided. Each is a pill, and one that will not fit inside the visible part
+of the region, or that would land on a pill already placed, is left out
+rather than written over the outline or over its neighbor. They are given
+room in one order — the size, then left, right, top, bottom — so the size is
+the last to go and a region drawn small says the one thing worth saying. The
+size is centered on the part of the region that is on screen rather than on
+the region, since a region larger than the window has its middle wherever it
+has it; the coordinates are placed against the true edges, so an edge off
+screen simply has no room and loses its own. The coordinates are the
+boundaries rather than the pixels beside them — the right minus the left is
+the width written at the middle — because two readings that did not add up
+would be worse than either alone.
 
 `Space` fits the region through `View::fit_region`, which sets the zoom the
 region's own size asks for and centers it, and leaves the view out of fit

@@ -135,10 +135,6 @@ impl Region {
         self.y + self.height
     }
 
-    pub fn size(&self) -> [u32; 2] {
-        [self.width, self.height]
-    }
-
     /// The region as the four numbers geometry works in.
     pub fn as_f32(&self) -> [f32; 4] {
         [
