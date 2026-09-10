@@ -11,7 +11,7 @@ use crate::theme::Theme;
 
 use super::chrome::{BUTTON_SIZE, ICON_SIDE, Pass};
 use super::icon::{self, Mark};
-use super::minimap::outline;
+use super::outline;
 use super::status::format_window;
 use super::tooltip::Tip;
 use super::{

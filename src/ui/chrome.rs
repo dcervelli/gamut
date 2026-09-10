@@ -400,9 +400,16 @@ impl Pass<'_> {
     /// the next; the button grows rightwards to make room for the reading.
     fn grid_toggle(&mut self, ui: &mut Ui, spacing: Option<&str>) {
         let font = egui::TextStyle::Button.resolve(ui.style());
+        // No ink of its own: the reading is drawn in the button's, which is
+        // handed to the painter below. A color set here would be baked into
+        // the galley and would win over that one.
         let reading = spacing.map(|spacing| {
             ui.ctx().fonts_mut(|fonts| {
-                fonts.layout_no_wrap(spacing.to_string(), font.clone(), egui::Color32::WHITE)
+                fonts.layout_no_wrap(
+                    spacing.to_string(),
+                    font.clone(),
+                    egui::Color32::PLACEHOLDER,
+                )
             })
         });
         let width = match &reading {
@@ -492,14 +499,17 @@ impl Pass<'_> {
             .show(|ui| menu::open_items(self, ui));
     }
 
-    /// The left strip: the copy button, the open button under it, the paste
-    /// button under that while the clipboard holds a picture, and the minimap
-    /// toggle up from the foot — in the corner the minimap itself goes in,
-    /// and clear of the column coming down. A window too short for both ends
-    /// drops the toggle at the foot rather than standing it on the column.
+    /// The left strip: the copy button, the open button under it, the region
+    /// button under that, the paste button under that while the clipboard
+    /// holds a picture, and the minimap toggle up from the foot — in the
+    /// corner the minimap itself goes in, and clear of the column coming
+    /// down. A window too short for both ends drops the toggle at the foot
+    /// rather than standing it on the column.
     ///
     /// The two menu buttons are together at the head of the column because
-    /// they are the same gesture: this file, handed to something else.
+    /// they are the same gesture: this file, handed to something else. The
+    /// region button sits above the paste button rather than after it so
+    /// that it stays put as the paste button comes and goes.
     fn left_strip(&mut self, ui: &mut Ui) {
         ui.spacing_mut().item_spacing = Vec2::ZERO;
         let height = ui.available_height();
@@ -517,6 +527,18 @@ impl Pass<'_> {
                 .show(|ui| menu::copy_items(self, ui));
             ui.add_space(BUTTON_GAP);
             self.open_button(ui);
+            ui.add_space(BUTTON_GAP);
+            let region = self.icon_button(
+                ui,
+                icon::CROP,
+                Control::Region,
+                self.input.selection.is_on(),
+                true,
+                Corners::All,
+            );
+            if region.clicked() {
+                self.press(Control::Region);
+            }
             if self.panels.paste {
                 ui.add_space(BUTTON_GAP);
                 let paste = self.icon_button(
@@ -535,7 +557,7 @@ impl Pass<'_> {
         // The room the column above keeps, whether or not the paste button
         // is on screen, so the toggle at the foot stays put as the clipboard
         // changes.
-        let taken = BAR_PADDING + 3.0 * (BUTTON_SIZE + BUTTON_GAP);
+        let taken = BAR_PADDING + 4.0 * (BUTTON_SIZE + BUTTON_GAP);
         if taken + BUTTON_SIZE + BAR_PADDING > height {
             return;
         }

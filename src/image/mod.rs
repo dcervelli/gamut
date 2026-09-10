@@ -15,9 +15,11 @@ pub mod display;
 pub mod encode;
 pub mod exif;
 pub mod geo;
+pub mod region;
 pub mod stats;
 
 pub use color::{ColorSpace, Primaries, Transfer};
+pub use region::Region;
 pub use stats::Stats;
 
 /// How many components each pixel carries, and what they mean.
