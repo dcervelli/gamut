@@ -179,6 +179,13 @@ still agrees with both, so renaming either is editing the constant —
   `text_edit_focused()`.
 - Stock egui widgets wear the theme through `ui/style.rs`; anything drawn by
   hand reads its inks from `Theme` directly, through `Pass::button_ink`.
+- Text laid out to be drawn is laid out in `Color32::PLACEHOLDER`, and its
+  ink goes to `Painter::galley`. A color given to `layout_no_wrap` is baked
+  into the galley and the painter's is then ignored, so a galley laid out in
+  white stays white however the theme changes — which looks right on a dark
+  theme and is unreadable on a light one. Laying it out in the ink itself is
+  the other correct form, as `ui/info.rs` and `ui/status.rs` do; what must
+  not happen is one color in the layout and another at the painter.
 - The interface's face has no U+2192, and the arrow the fallback supplies sits
   low, so a readout showing one thing become another uses `ui::BECOMES`.
 - Handlers return an `Effect` (`Redraw` / `Nothing` / `Quit`), never call
