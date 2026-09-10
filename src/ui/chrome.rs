@@ -400,9 +400,16 @@ impl Pass<'_> {
     /// the next; the button grows rightwards to make room for the reading.
     fn grid_toggle(&mut self, ui: &mut Ui, spacing: Option<&str>) {
         let font = egui::TextStyle::Button.resolve(ui.style());
+        // No ink of its own: the reading is drawn in the button's, which is
+        // handed to the painter below. A color set here would be baked into
+        // the galley and would win over that one.
         let reading = spacing.map(|spacing| {
             ui.ctx().fonts_mut(|fonts| {
-                fonts.layout_no_wrap(spacing.to_string(), font.clone(), egui::Color32::WHITE)
+                fonts.layout_no_wrap(
+                    spacing.to_string(),
+                    font.clone(),
+                    egui::Color32::PLACEHOLDER,
+                )
             })
         });
         let width = match &reading {

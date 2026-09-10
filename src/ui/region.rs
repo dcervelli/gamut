@@ -260,9 +260,13 @@ pub(super) fn show(pass: &Pass, ui: &mut egui::Ui, current: &Current, content: R
         return;
     };
     let font = egui::TextStyle::Body.resolve(ui.style());
+    // Laid out with no ink of its own, so that the one handed to the
+    // painter below is the one it is drawn in: a color set here is baked
+    // into the galley and wins over the painter's, which would leave the
+    // words in whatever was written here whatever the theme said.
     let laid = |text: &str| {
         ui.ctx().fonts_mut(|fonts| {
-            fonts.layout_no_wrap(text.to_string(), font.clone(), egui::Color32::WHITE)
+            fonts.layout_no_wrap(text.to_string(), font.clone(), egui::Color32::PLACEHOLDER)
         })
     };
     for label in labels(region, rect, visible, grid, |text| {
