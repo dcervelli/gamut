@@ -14,12 +14,13 @@ use std::thread::JoinHandle;
 use std::time::Instant;
 
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, KeyEvent, WindowEvent};
+use winit::event::{KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::{Window, WindowId};
 
 use crate::image::decode;
 use crate::image::display::{Display, Headroom, Startup};
+use crate::image::region::Region;
 use crate::loader::{Decoded, Loader, Opened, Ready, Reload, Request};
 use crate::monitor::{Mode, Monitors};
 use crate::motion::Motion;
@@ -31,12 +32,12 @@ use crate::ui::chrome::{content_area, image_viewport};
 use crate::ui::toast::{self, Level, Toasts};
 use crate::ui::tooltip::Hdr;
 use crate::ui::{self, Current, FileFacts, FrameInput, Panels, Reading, Rect, Selection};
-use crate::view::{Fit, View, Viewport};
+use crate::view::{View, Viewport};
 use crate::watch::{self, Watch};
 
 use files::{Announce, Files};
 use gui::Gui;
-use input::{Effect, Grabbing, Pointer};
+use input::{Effect, Framing, Grabbing, Pointer};
 use kept::{Kept, Settings};
 use window::{file_label, initial_window_size, loading_title, window_title};
 
@@ -151,10 +152,14 @@ pub struct App {
     /// The hold a drag on the picture has on it, from the press to the
     /// release, while the drag is the region's rather than the view's.
     grabbing: Option<Grabbing>,
-    /// What `Space` does to the region next: the two fits in turn, as it
-    /// does for the picture. Its own rather than the view's, since a fit
-    /// of the region is not a fit the view keeps.
-    region_fit: Fit,
+    /// What `Space` frames next while a region is up: the region at either
+    /// fit, then the picture at either. Its own rather than the view's,
+    /// since a fit of the region is not a fit the view keeps.
+    framing: Framing,
+    /// The box being dragged out to zoom to, with `Space` held, while the
+    /// drag is under way: painted over the picture, and what the view goes
+    /// to when the drag lets go.
+    zoom_box: Option<Region>,
     /// The message about what was just done, and when it takes itself off.
     /// The one thing on screen that time alone changes.
     toasts: Toasts,
@@ -251,7 +256,8 @@ impl App {
             pointer: Pointer::default(),
             selection: Selection::Off,
             grabbing: None,
-            region_fit: Fit::Whole,
+            framing: Framing::FIRST,
+            zoom_box: None,
             toasts: Toasts::default(),
             copied: mpsc::channel(),
             copying: Vec::new(),
@@ -1016,6 +1022,8 @@ impl App {
             selection: self.selection,
             grabbing: self.grabbing.as_ref().map(Grabbing::grab),
             over_region: self.over_region(),
+            box_zoom: self.pointer.space != input::Space::Up,
+            zoom_box: self.zoom_box,
         };
 
         let namer = self.namer();
@@ -1326,11 +1334,16 @@ impl ApplicationHandler<UserEvent> for App {
                     KeyEvent {
                         logical_key,
                         physical_key,
-                        state: ElementState::Pressed,
+                        state,
                         ..
                     },
                 ..
-            } => self.handle_key(&logical_key, physical_key),
+            } => self.handle_key(&logical_key, physical_key, state),
+            // A key held as the focus goes is released somewhere else.
+            WindowEvent::Focused(false) => {
+                self.keys_lost();
+                Effect::Nothing
+            }
             WindowEvent::RedrawRequested => {
                 self.redraw();
                 Effect::Nothing
@@ -1594,7 +1607,7 @@ mod tests {
     /// and before quitting. Stepping to another file takes it off as well.
     #[test]
     fn a_region_takes_the_keys_that_move_the_picture() {
-        use crate::image::region::{Grip, Region, Side};
+        use crate::image::region::{Grip, Side};
         use input::{Action, Direction, Effect, PanStep};
         use ui::{Command, Grab};
 
@@ -1673,14 +1686,27 @@ mod tests {
             })
         );
 
-        // Space fits it: a zoom of its own rather than a fit the view keeps,
-        // and the two fits in turn.
+        // Space frames the region first and the picture after: the region
+        // fitted and filled — a zoom of its own rather than a fit the view
+        // keeps — then the picture's two fits, and round again.
         assert_eq!(app.view.fit(), Some(Fit::Whole));
+        assert_eq!(app.framing, Framing::Region(Fit::Whole));
         let _ = app.perform(Action::ToggleFit);
         assert_eq!(app.view.fit(), None);
-        assert_eq!(app.region_fit, Fit::Fill);
+        assert_eq!(app.framing, Framing::Region(Fit::Fill));
         let _ = app.perform(Action::ToggleFit);
-        assert_eq!(app.region_fit, Fit::Whole);
+        assert_eq!(app.view.fit(), None);
+        assert_eq!(app.framing, Framing::Picture(Fit::Whole));
+        let _ = app.perform(Action::ToggleFit);
+        assert_eq!(app.view.fit(), Some(Fit::Whole));
+        let _ = app.perform(Action::ToggleFit);
+        assert_eq!(app.view.fit(), Some(Fit::Fill));
+        assert_eq!(app.framing, Framing::Region(Fit::Whole));
+        // A change to the region starts the cycle over at the region.
+        let _ = app.perform(Action::ToggleFit);
+        assert_eq!(app.framing, Framing::Region(Fit::Fill));
+        let _ = app.perform(Action::Pan(Direction::Left, PanStep::Coarse));
+        assert_eq!(app.framing, Framing::Region(Fit::Whole));
 
         // Escape takes it off after the message, and before quitting.
         app.toast("Copied region.", Level::Message);
@@ -1711,6 +1737,107 @@ mod tests {
         answer(&mut app, Reload::Fresh);
         assert_eq!(app.files.index(), 1);
         assert_eq!(app.selection, Selection::Off);
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// `Space` is answered on its way up, so that a drag while it is held
+    /// can draw a box to zoom to without the view moving first: a tap fits,
+    /// a hold with a box drawn under it does not, and the key's repeats are
+    /// nothing at all.
+    #[test]
+    fn space_fits_on_its_way_up_unless_a_box_was_drawn_under_it() {
+        use input::{Action, Effect, Space};
+        use ui::{Command, Grab};
+        use winit::event::ElementState::{Pressed, Released};
+        use winit::keyboard::{Key, KeyCode, NamedKey, PhysicalKey};
+
+        let (mut app, dir) = app_over("space", &[("a.png", 64, 48)]);
+        let space = Key::Named(NamedKey::Space);
+        let at = PhysicalKey::Code(KeyCode::Space);
+        assert_eq!(app.view.fit(), Some(Fit::Whole));
+
+        // A tap: nothing moves on the way down — a frame for the pointer,
+        // no more — and the fit comes on the way up. Held, the key repeats,
+        // and a repeat is the same press still going.
+        assert_eq!(app.handle_key(&space, at, Pressed), Effect::Redraw);
+        assert_eq!(app.view.fit(), Some(Fit::Whole));
+        assert!(app.motion.is_none());
+        assert_eq!(app.pointer.space, Space::Held { drawn: false });
+        assert_eq!(app.handle_key(&space, at, Pressed), Effect::Nothing);
+        assert_eq!(app.pointer.space, Space::Held { drawn: false });
+        assert_eq!(app.handle_key(&space, at, Released), Effect::Redraw);
+        assert_eq!(app.view.fit(), Some(Fit::Fill));
+        assert_eq!(app.pointer.space, Space::Up);
+
+        // Held with a box dragged out under it: the box is not a region,
+        // the view goes to it as a move when the drag lets go, and letting
+        // go of the key afterwards fits nothing.
+        app.motion = None;
+        let _ = app.handle_key(&space, at, Pressed);
+        app.act(Command::Grab {
+            grab: Grab::Zoom,
+            at: [10.2, 5.5],
+        });
+        assert_eq!(app.pointer.space, Space::Held { drawn: true });
+        app.act(Command::Pull([20.9, 15.1]));
+        assert_eq!(
+            app.zoom_box,
+            Some(Region {
+                x: 10,
+                y: 5,
+                width: 11,
+                height: 11
+            })
+        );
+        assert_eq!(app.selection, Selection::Off);
+        app.act(Command::Release);
+        assert_eq!(app.zoom_box, None);
+        assert!(app.grabbing.is_none());
+        assert!(app.motion.is_some(), "the zoom to the box is a move");
+        assert_eq!(app.view.fit(), None);
+        // Centered on the box — through whatever viewport the application
+        // has without a window, which is what the move was made against.
+        let (image, viewport) = (app.image_size(), app.viewport());
+        let center = app.view.placement(image, viewport).image_point([
+            viewport.x + viewport.width / 2.0,
+            viewport.y + viewport.height / 2.0,
+        ]);
+        assert!(
+            (center[0] - 15.5).abs() < 0.01 && (center[1] - 10.5).abs() < 0.01,
+            "the box is centered: {center:?}"
+        );
+        assert_eq!(app.handle_key(&space, at, Released), Effect::Redraw);
+        assert_eq!(app.view.fit(), None);
+        assert_eq!(app.pointer.space, Space::Up);
+
+        // Escape drops a box part way through: the toolkit takes the drag
+        // off the hand on the same key, and the release that follows finds
+        // nothing to zoom to.
+        let _ = app.handle_key(&space, at, Pressed);
+        app.act(Command::Grab {
+            grab: Grab::Zoom,
+            at: [1.0, 1.0],
+        });
+        app.act(Command::Pull([30.0, 30.0]));
+        assert!(app.zoom_box.is_some());
+        app.motion = None;
+        let before = app.view.position(image, viewport);
+        assert_eq!(app.perform(Action::Dismiss), Effect::Redraw);
+        assert_eq!(app.zoom_box, None);
+        assert!(app.grabbing.is_none());
+        app.act(Command::Release);
+        assert!(app.motion.is_none());
+        assert_eq!(app.view.position(image, viewport), before);
+        assert_eq!(app.handle_key(&space, at, Released), Effect::Redraw);
+        assert_eq!(app.view.position(image, viewport), before);
+
+        // The window losing the keyboard lets go of the key: its release
+        // is going somewhere else.
+        let _ = app.handle_key(&space, at, Pressed);
+        assert_ne!(app.pointer.space, Space::Up);
+        app.keys_lost();
+        assert_eq!(app.pointer.space, Space::Up);
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }

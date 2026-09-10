@@ -40,10 +40,15 @@ Notable changes to `gamut`. The format follows
   `Ctrl` with an arrow grows it that way. While the pointer is on it, it
   writes its size at its middle and each edge's coordinate inside that
   edge's mark, dropping whichever of them a region drawn small has no room
-  for. `Space` fits the region to the window
-  instead of the picture, and `Ctrl+C` and the copy menu copy the region
-  instead of the whole. `x` again, or `Esc`, takes it off, and so does
-  stepping to another file.
+  for. `Space` fits the region to the window before the picture — the
+  region fitted, then filling the window, then the picture's two fits, in
+  turn — and `Ctrl+C` and the copy menu copy the region instead of the
+  whole. `x` again, or `Esc`, takes it off, and so does stepping to another
+  file.
+- Holding `Space` while dragging a box on the picture zooms to the box when
+  the drag lets go. `Space` now answers when it comes up rather than when it
+  goes down, so that the picture does not move under the hand about to draw;
+  a tap toggles the fit as before, and holding the key repeats nothing.
 - JPEG XL (`.jxl`) opens: both the lossy and the lossless halves of the
   format, in either the bare codestream or the container. The color space is
   read from the file's own statement of it, HDR included, or from an ICC

@@ -108,6 +108,8 @@ fn input(logical: [f32; 2], count: usize) -> FrameInput {
         selection: Selection::Off,
         grabbing: None,
         over_region: false,
+        box_zoom: false,
+        zoom_box: None,
     }
 }
 
@@ -487,6 +489,59 @@ fn a_region_on_screen_is_taken_hold_of_from_inside_it() {
         commands
             .iter()
             .all(|command| matches!(command, Command::Drag(_))),
+        "{commands:?}"
+    );
+}
+
+/// With `Space` held, a drag on the picture draws a box to zoom to,
+/// wherever it begins — a region under the press does not take it — and
+/// the view does not pan.
+#[test]
+fn a_drag_with_space_held_draws_a_box_to_zoom_to() {
+    let mut harness = open(WINDOW, 1, panels());
+    let region = Region {
+        x: 1,
+        y: 1,
+        width: 1,
+        height: 1,
+    };
+    harness.state_mut().input.selection = Selection::Shown(region);
+    harness.state_mut().input.box_zoom = true;
+    harness.run();
+    let inside = screen_point(&harness, [1.5, 1.5]);
+    let to = screen_point(&harness, [3.5, 2.5]);
+    let commands = drag(&mut harness, inside, to);
+    let pressed = image_point(&harness, inside);
+    assert!(
+        matches!(commands.first(), Some(Command::Grab { grab: Grab::Zoom, at }) if *at == pressed),
+        "{commands:?}"
+    );
+    assert!(
+        commands
+            .iter()
+            .any(|command| matches!(command, Command::Pull(_))),
+        "{commands:?}"
+    );
+    assert_eq!(commands.last(), Some(&Command::Release));
+    assert!(
+        !commands
+            .iter()
+            .any(|command| matches!(command, Command::Drag(_))),
+        "the view did not pan: {commands:?}"
+    );
+
+    // The key up again, the same drag takes hold of the region as before.
+    harness.state_mut().input.box_zoom = false;
+    harness.run();
+    let commands = drag(&mut harness, inside, to);
+    assert!(
+        matches!(
+            commands.first(),
+            Some(Command::Grab {
+                grab: Grab::Handle(Grip::Inside),
+                ..
+            })
+        ),
         "{commands:?}"
     );
 }

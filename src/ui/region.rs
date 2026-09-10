@@ -30,6 +30,11 @@ const REACH: f32 = 3.0;
 /// has, this being the same kind of thing: part of the image, marked out.
 const OUTLINE: f32 = 1.5;
 
+/// How much of the accent is laid over the picture inside the box that
+/// zooms: enough to read as a mark, not so much as to hide what is being
+/// aimed at.
+const ZOOM_BOX_WASH: u8 = 40;
+
 /// The room around a label's words, inside the pill they are written on.
 const INSET: [f32; 2] = [8.0, 4.0];
 
@@ -103,10 +108,11 @@ pub(super) fn grip_at(rect: Rect, handles: &[(Grip, Rect); 8], point: [f32; 2]) 
 
 /// The cursor a hold on the region wears: the crosshair for drawing one,
 /// the resize arrows across the axis a handle moves along, the move cursor
-/// for the whole of it.
+/// for the whole of it — and the magnifier for the box that zooms.
 pub(super) fn cursor(grab: Grab) -> CursorIcon {
     match grab {
         Grab::New => CursorIcon::Crosshair,
+        Grab::Zoom => CursorIcon::ZoomIn,
         Grab::Handle(Grip::Corner(Side::Left, Side::Top))
         | Grab::Handle(Grip::Corner(Side::Right, Side::Bottom)) => CursorIcon::ResizeNwSe,
         Grab::Handle(Grip::Corner(_, _)) => CursorIcon::ResizeNeSw,
@@ -290,6 +296,23 @@ pub(super) fn show(pass: &Pass, ui: &mut egui::Ui, current: &Current, content: R
             ink.into(),
         );
     }
+}
+
+/// Draws the box being dragged out to zoom to: an outline in the accent,
+/// with a wash of it inside, so that what will fill the window reads as one
+/// piece against the picture. Nothing else — no handles, no words — since it
+/// is gone the moment the drag lets go.
+pub(super) fn show_zoom_box(pass: &Pass, ui: &mut egui::Ui, current: &Current, content: Rect) {
+    let Some(boxed) = pass.input.zoom_box else {
+        return;
+    };
+    let grid = icon::Grid::new(ui.pixels_per_point());
+    let placement = pass.view.placement(current.size(), pass.input.viewport);
+    let rect = rect(boxed, placement, pass.input.scale);
+    let painter = ui.painter().with_clip_rect(content.into());
+    let accent = pass.theme.accent;
+    painter.rect_filled(rect.into(), 0.0, accent.with_alpha(ZOOM_BOX_WASH));
+    outline(&painter, grid, rect, OUTLINE, accent.into());
 }
 
 #[cfg(test)]

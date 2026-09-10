@@ -374,8 +374,14 @@ would be worse than either alone.
 region's own size asks for and centers it, and leaves the view out of fit
 mode: a fit is a zoom the viewport decides for the whole picture, and this is
 one chosen for part of it, so it is held as `1`..`5` are held and does not
-follow the window. Which of the two fits comes next is `App::region_fit`,
-kept apart from the view for the same reason.
+follow the window. With a region up the key runs a cycle of four rather than
+a toggle of two — the region fitted and filled, then the picture fitted and
+filled — since there are two things on screen to frame, and the region, being
+the thing under the hand, goes first. Where the cycle has got to is
+`App::framing`, an `input::Framing`, kept apart from the view for the same
+reason as the zoom; `App::select` puts it back to the start, so that a region
+just drawn or moved is what the next press shows whatever the press before it
+showed.
 
 `Esc` takes the region off after a message and before quitting: a message is
 about what was just done, the region is what was being done to, and the one
@@ -384,6 +390,35 @@ off, and so does the file coming back a different size — the pixels it
 marked out are no longer the pixels — while a reload at the same size keeps
 it, being the same picture read again. The key is `x` rather than `k`, which
 the histogram's planes toggle already holds in the j/k/l run.
+
+## The zoom box
+
+Holding `Space` and dragging a box on the picture zooms to the box: a drag
+started while the key is down is `Grab::Zoom`, whatever the selection, and
+goes through the same `Grab`, `Pull` and `Release` commands as a drag on the
+region does. The box in progress is `App::zoom_box`, a `Region` made by
+`Region::from_corners` exactly as a new region is, but held apart from the
+selection: it is painted by `ui::region::show_zoom_box` — an outline with a
+wash of the accent inside, and none of the region's handles or words, since it
+is gone the moment the drag lets go — and `App::release` takes it and moves
+the view to it through `View::fit_region`, as a move, the way any zoom asked
+for by name is made.
+
+The key is answered on its way up, not down. Down would fit the picture
+before the drag began, and the hand about to draw a box would find the
+picture moving under it; so a press only records that the key is held
+(`Pointer::space`, an `input::Space`), a drag begun while it is held marks it
+as spent, and the release fits only if nothing was drawn. A tap costs the
+fit the length of the tap, which is not noticed. The key's repeats arrive as
+presses while it is already held, and are not answered: a held key that
+toggled the fit as fast as the keyboard repeated would be no use held. The
+release is read by the key itself rather than through the table, so that a
+chord pressed while `Space` is down cannot leave it held for good, and
+`WindowEvent::Focused(false)` lets go of it too, since a key held as the
+focus goes is released somewhere else. `Esc` part way through the drag drops
+the box before it takes anything else off: egui aborts the drag on the same
+key, and the `Release` it sends on the next pass has to find nothing to zoom
+to.
 
 ## Layers and the pointer
 
