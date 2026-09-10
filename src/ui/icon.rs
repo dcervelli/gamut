@@ -378,6 +378,46 @@ pub(super) const COPY: &[Mark] = &[
     },
 ];
 
+/// Lucide's `external-link`: a box with one corner opened and an arrow
+/// leaving through it, which is a file going somewhere else — the mark the
+/// world already uses for a thing that opens away from where it is.
+///
+/// The box is written out the way `clipboard` above is, as sides and
+/// quarter turns, because the corner the arrow leaves by is not there: a
+/// whole rounded rectangle would draw a stroke straight across the arrow's
+/// path.
+pub(super) const EXTERNAL_LINK: &[Mark] = &[
+    // The arrow: its head in the corner, then the shaft down to the middle
+    // of the box.
+    Mark::Line([15.0, 3.0], [21.0, 3.0]),
+    Mark::Line([21.0, 3.0], [21.0, 9.0]),
+    Mark::Line([10.0, 14.0], [21.0, 3.0]),
+    // And the box, from where its top edge stops under the arrow, round to
+    // where it stops again beside the shaft.
+    Mark::Line([18.0, 13.0], [18.0, 19.0]),
+    Mark::Arc {
+        at: [16.0, 19.0],
+        radius: 2.0,
+        start: 0.0,
+        sweep: 90.0,
+    },
+    Mark::Line([16.0, 21.0], [5.0, 21.0]),
+    Mark::Arc {
+        at: [5.0, 19.0],
+        radius: 2.0,
+        start: 90.0,
+        sweep: 90.0,
+    },
+    Mark::Line([3.0, 19.0], [3.0, 8.0]),
+    Mark::Arc {
+        at: [5.0, 8.0],
+        radius: 2.0,
+        start: 180.0,
+        sweep: 90.0,
+    },
+    Mark::Line([5.0, 6.0], [11.0, 6.0]),
+];
+
 /// Lucide's `x`: the cross that takes a thing off the screen. Its two strokes
 /// cross at the middle of the grid and reach the same distance into each
 /// corner, so it stays square however the square it is fitted into rounds.

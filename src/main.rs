@@ -9,6 +9,7 @@ mod listing;
 mod loader;
 mod monitor;
 mod motion;
+mod openers;
 mod pasted;
 mod render;
 mod theme;

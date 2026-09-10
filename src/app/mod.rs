@@ -23,6 +23,7 @@ use crate::image::display::{Display, Headroom, Startup};
 use crate::loader::{Decoded, Loader, Opened, Ready, Reload, Request};
 use crate::monitor::{Mode, Monitors};
 use crate::motion::Motion;
+use crate::openers::{self, Opener};
 use crate::render::{HdrPreference, Placement, Renderer, Scene, Upscale};
 use crate::theme::{self, Theme};
 use crate::timing;
@@ -92,6 +93,18 @@ pub struct App {
     kept: Kept,
     /// The file on screen, watched for writes by anything else.
     watch: Watch,
+    /// What else on the desktop can open that file, read as it goes up: the
+    /// menu under the open button, and — by being empty or not — whether that
+    /// button answers at all.
+    ///
+    /// Once per file rather than once per frame. It is a handful of small
+    /// files to read and a millisecond or two to read them, which is nothing
+    /// beside decoding the picture and far too much to do sixty times a
+    /// second. A program installed while the window is open therefore joins
+    /// the menu at the next file rather than the next frame, which is as
+    /// close to the moment as anything short of watching the whole desktop
+    /// for changes could get.
+    openers: Vec<Opener>,
     /// The paths as the command line gave them, and a watch on each directory
     /// among them. A directory is a place to look rather than a fixed list:
     /// images appearing in it or disappearing from it while the window is open
@@ -215,6 +228,7 @@ impl App {
             motion: None,
             kept: Kept::default(),
             watch,
+            openers: Vec::new(),
             named,
             directories,
             theme: Theme::detect(),
@@ -883,6 +897,9 @@ impl App {
             // there is nothing for it to carry the eye across any more.
             self.motion = None;
         }
+        // And what else could open the file arriving, read here with the rest
+        // of what the file itself says about it.
+        self.openers = openers::for_file(&file.path);
         self.current = Some(Current {
             image: Arc::new(image),
             stats,
@@ -971,6 +988,11 @@ impl App {
             headroom,
             hdr_available,
             can_pan: self.view.can_pan(self.image_size(), viewport),
+            openers: self
+                .openers
+                .iter()
+                .map(|opener| opener.name.clone())
+                .collect(),
             toast: self.toasts.showing().cloned(),
         };
 

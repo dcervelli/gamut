@@ -25,6 +25,13 @@ Notable changes to `gamut`. The format follows
 
 ### Added
 
+- The file on screen can be handed to another program. A button under the
+  copy button opens a menu of everything the desktop says can open a file of
+  this kind — the same programs a file manager would offer, read from the
+  desktop's own database and the associations you have set — with the default
+  one first. Choosing one starts it with the file, and it goes on running
+  after this window is closed. The button is there but dead, and says why,
+  where nothing offers to open the file.
 - JPEG XL (`.jxl`) opens: both the lossy and the lossless halves of the
   format, in either the bare codestream or the container. The color space is
   read from the file's own statement of it, HDR included, or from an ICC

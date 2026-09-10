@@ -215,6 +215,14 @@ pub struct FrameInput {
     /// go, and the closed hand is a promise that dragging will move
     /// something.
     pub can_pan: bool,
+    /// What else can open the file on screen, in the order the menu under the
+    /// open button lists them and named as their desktop entries name them.
+    /// Empty where nothing offers, which draws that button dead.
+    ///
+    /// The names alone: what pressing one actually runs is the
+    /// application's, and an item comes back as its place in this list — see
+    /// [`crate::openers`].
+    pub openers: Vec<String>,
     /// The message about what was just done, while one is up. Copied out of
     /// the application's [`toast::Toasts`]: what a frame draws is what had
     /// settled when it was asked for.

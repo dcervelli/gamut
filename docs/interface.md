@@ -210,10 +210,12 @@ that disagreed with the image beside it would be worse than none.
 
 The strips are a bar's thickness wide — they hold a column of square toggles
 and nothing else, so a frame of even weight is the right one — and the left one
-holds the copy button above the paste button, the right one the histogram above
-the file information, the order the two panels they open are stacked in over
-the picture. The button that comes and goes with the clipboard is the last of
-the left-hand column, so that nothing above it moves under the pointer as it
+holds the copy button, the open button under it and the paste button under
+that, the right one the histogram above the file information, the order the
+two panels they open are stacked in over the picture. The first two are
+together because they are one gesture — this file, handed to something else —
+and the button that comes and goes with the clipboard is the last of the
+left-hand column, so that nothing above it moves under the pointer as it
 appears. The minimap toggle is in the left strip too, but it comes up from the
 foot of it rather than down from the top: it is the one toggle whose panel has
 a corner of its own, and it sits in that corner. The room the column above it
@@ -488,7 +490,8 @@ one had been read.
 
 Popups are egui's, hung off the button that opens them in `src/ui/chrome.rs`
 and aligned to it — below the zoom readout, above the pixel dot, beside the
-copy button — with what each holds laid out in `src/ui/menu.rs`. Only one is
+copy button and the open button under it — with what each holds laid out in
+`src/ui/menu.rs`. Only one is
 open at a time, a press on a cell chooses and closes, and a press anywhere off
 the panel is spent closing it. `Esc` closes it too, in front of the quit it
 would otherwise be. A menu that does not fit where it was hung is moved into
@@ -514,9 +517,75 @@ is a list rather than a grid, each item with its key printed beside it: the
 items are things done rather than states to be in, and what a reader wants
 from one is the key that would have done it without the menu.
 
+The menu of other applications is the one whose contents this program does not
+know: what is on it is whatever the desktop has installed, so an item is asked
+for by its place in the list rather than by a `Control` naming a choice, and
+there is no key beside any of them because there is nothing for a key table to
+have bound. Its items are also the only ones sized to the words on them —
+`TextWrapMode::Extend` — since nothing here chose how long an application's
+name would be, and a name left to wrap in a popup that opened at the width of
+the button below it comes out a letter to a line.
+
 The panels are opaque, and the image is drawn in the `Viewport` they leave
 rather than behind them: zoom, fit, pan limits and the wheel's anchor are all
 measured against that rectangle. It is derived per frame from the window and
 whether the panels are showing, never stored, so `` ` `` re-fits a fitted
 image without anything having to notice that it should.
+
+
+## Opening in another application
+
+The button under the copy button hands the file on screen to something else,
+and the menu it opens is read out of the desktop's own database rather than
+guessed at: `src/openers.rs`. Every installed program ships a desktop entry
+naming the MIME types it opens, `update-desktop-database` indexes those into a
+`mimeinfo.cache` beside them, and the user's `mimeapps.list` says which is the
+default and what associations they have added or removed by hand. Those three
+files are the whole answer, and it is the same one a file manager's "Open
+With" shows, because there is nowhere else it lives. Nothing is shelled out
+to: `xdg-open` knows only the default and could not fill a menu, and `gio`
+would be a runtime dependency on a package the user may not have.
+
+Which file is which type is decided by the extension — `MIME_TYPES`, one entry
+per extension the decoders read, listing every name the format is registered
+under so that a viewer claiming `image/x-bmp` and one claiming `image/bmp` are
+both found. That the decoders here sniff their way past a misleading name is a
+courtesy this table cannot pass on: the desktop's database is keyed by name,
+so a file whose extension lies about it is one no other program will recognize
+either. A test holds the table against `decode::supported_extensions`, since a
+format added to the decoders and not to it would be one this menu was silently
+empty for.
+
+An entry is left off the menu when pressing it could not work: it is not an
+application, it has been deleted by a `Hidden` entry standing in front of it,
+it wants a terminal there is none of here, or its program is not installed —
+`TryExec`, and the first word of `Exec`, both checked against `PATH`.
+`NoDisplay` is deliberately *not* one of those reasons: the specification
+gives it for exactly the program that wants to be handed files without
+appearing in the applications menu, which is this list and not that menu.
+`gamut`'s own entry is left off too. What remains is sorted with the desktop's
+default first and the rest by name, and any name two of them share is given
+the entry's own id after it, since one entry to open a file and another to
+open its directory are commonly both called the same thing.
+
+Starting one is `Exec` split the way a shell would split it — quotes and
+backslashes, and nothing expanded afterwards, because nothing goes through a
+shell — with the field codes resolved against the file: `%f` and `%F` take the
+path, `%u` and `%U` the `file:` URI that `clipboard::file_uri` writes, and an
+entry that asked for no file at all is given it on the end. The argument is
+built as an `OsString`, so a filename that is not valid UTF-8 reaches the
+program as the bytes the file system holds. The child is put in a process
+group of its own: a viewer started from a terminal and then closed would
+otherwise take everything it had opened down with it, and a thread parked in
+`wait` collects the child rather than leaving a zombie, while letting it be
+adopted and go on running if this window leaves first.
+
+The list is read once per file, in `App::apply`, beside the file's other
+facts. It is a handful of small files and a millisecond or two — nothing
+beside decoding a picture, and far too much to do sixty times a second — so a
+program installed while the window is open joins the menu at the next file
+rather than the next frame. Where it comes back empty the button is drawn
+dead and says so, rather than being left out: a control that comes and goes
+with the file on screen is one that has to be found again, and a missing
+button could not have explained itself.
 
