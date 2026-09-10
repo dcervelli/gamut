@@ -29,7 +29,7 @@ use anyhow::{Context, Result};
 use png::{BitDepth, ColorType, Compression, Encoder, SrgbRenderingIntent};
 
 use super::display::{Colormap, Display, Headroom};
-use super::{Channels, DecodedImage, Transfer};
+use super::{Channels, DecodedImage, Region, Transfer};
 
 /// Pixels below which the walk is not worth dividing: the threads cost more to
 /// start than they save on a picture this small.
@@ -46,7 +46,11 @@ pub struct Raster {
     pub data: Vec<u8>,
 }
 
-/// Runs the display pipeline over every pixel of `image`.
+/// Runs the display pipeline over every pixel of `image` inside `region`:
+/// the whole of it, as [`Region::whole`] says, or the part that was
+/// selected. What comes out is the region's own size, its top-left pixel
+/// first, so a copy of a selection is a crop of the copy of the picture and
+/// not a different rendering of it.
 ///
 /// A single-channel image stays single-channel, because that is what it is and
 /// storing the same number three times says nothing more. False color is the
@@ -55,7 +59,7 @@ pub struct Raster {
 ///
 /// Alpha is carried only where the file had some. An image that was opaque
 /// stays opaque rather than gaining a channel of nothing but 255.
-pub fn displayed(image: &DecodedImage, display: &Display) -> Raster {
+pub fn displayed(image: &DecodedImage, display: &Display, region: Region) -> Raster {
     let source = image.channels();
     let gray = source.is_gray() && display.colormap == Colormap::Gray;
     let alpha = source.alpha_index().is_some();
@@ -66,8 +70,8 @@ pub fn displayed(image: &DecodedImage, display: &Display) -> Raster {
         (false, true) => Channels::Rgba,
     };
 
-    let stride = image.width as usize * channels.count();
-    let height = image.height as usize;
+    let stride = region.width as usize * channels.count();
+    let height = region.height as usize;
     let mut data = vec![0u8; stride * height];
 
     // Divided by rows. Every pixel is decided by the file and the display
@@ -76,20 +80,20 @@ pub fn displayed(image: &DecodedImage, display: &Display) -> Raster {
     // the work is.
     let bands = bands(stride, height);
     if bands == 1 {
-        fill(&mut data, 0, image, display, channels);
+        fill(&mut data, region.y, image, display, channels, region);
     } else {
         let rows = height.div_ceil(bands);
         std::thread::scope(|scope| {
             for (index, band) in data.chunks_mut(stride * rows).enumerate() {
-                let first = (index * rows) as u32;
-                scope.spawn(move || fill(band, first, image, display, channels));
+                let first = region.y + (index * rows) as u32;
+                scope.spawn(move || fill(band, first, image, display, channels, region));
             }
         });
     }
 
     Raster {
-        width: image.width,
-        height: image.height,
+        width: region.width,
+        height: region.height,
         channels,
         data,
     }
@@ -106,17 +110,25 @@ fn bands(stride: usize, height: usize) -> usize {
         .min(height)
 }
 
-/// Writes the rows of `band`, which start at row `first` of the image.
-fn fill(band: &mut [u8], first: u32, image: &DecodedImage, display: &Display, channels: Channels) {
+/// Writes the rows of `band`, which start at row `first` of the image and
+/// run across the columns `region` takes in.
+fn fill(
+    band: &mut [u8],
+    first: u32,
+    image: &DecodedImage,
+    display: &Display,
+    channels: Channels,
+    region: Region,
+) {
     let levels = levels();
     let count = channels.count();
     let gray = channels.is_gray();
-    let stride = image.width as usize * count;
+    let stride = region.width as usize * count;
     for (offset, row) in band.chunks_exact_mut(stride).enumerate() {
         let y = first + offset as u32;
-        for (x, pixel) in row.chunks_exact_mut(count).enumerate() {
+        for (column, pixel) in row.chunks_exact_mut(count).enumerate() {
             // Only `None` outside the image, which this walk never goes.
-            let Some(sample) = image.sample(x as u32, y) else {
+            let Some(sample) = image.sample(region.x + column as u32, y) else {
                 continue;
             };
             // An SDR reading: a PNG stops at white, so what is copied is the
@@ -248,6 +260,11 @@ mod tests {
     /// exposure, nothing to tone map.
     fn plain() -> Display {
         Display::default()
+    }
+
+    /// The whole of `image`, walked.
+    fn displayed(image: &DecodedImage, display: &Display) -> Raster {
+        super::displayed(image, display, Region::whole([image.width, image.height]))
     }
 
     /// `(color type, bit depth, pixel bytes)` as a PNG decoder reads them
@@ -444,5 +461,44 @@ mod tests {
         let raster = displayed(&source, &plain());
         assert_eq!((raster.width, raster.height), (4, 3));
         assert_eq!(raster.data.len(), 4 * 3 * 3);
+    }
+
+    /// A region comes out as exactly the crop of the whole: the same pixels
+    /// through the same pipeline, and none of the others. Over an image
+    /// large enough to be divided between threads, so that the bands are
+    /// offset by the region's own rows and not the image's.
+    #[test]
+    fn a_region_is_a_crop_of_the_whole() {
+        let (width, height) = (320u32, 256u32);
+        let data = (0..width * height * 3)
+            .map(|index| (index % 253) as u8)
+            .collect();
+        let mut source = image(Channels::Rgb, data);
+        source.width = width;
+        source.height = height;
+        let mut display = plain();
+        display.exposure_stops = 0.4;
+
+        let whole = displayed(&source, &display);
+        let region = Region {
+            x: 17,
+            y: 40,
+            width: 200,
+            height: 190,
+        };
+        assert!(
+            bands(region.width as usize * 3, region.height as usize) > 1,
+            "the region has to be divided for the offset to be tested"
+        );
+        let part = super::displayed(&source, &display, region);
+        assert_eq!((part.width, part.height), (200, 190));
+
+        let mut expected = Vec::new();
+        for y in region.y..region.bottom() {
+            let row = y as usize * width as usize * 3;
+            let from = row + region.x as usize * 3;
+            expected.extend_from_slice(&whole.data[from..from + region.width as usize * 3]);
+        }
+        assert_eq!(part.data, expected);
     }
 }

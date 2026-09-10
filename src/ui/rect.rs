@@ -39,6 +39,16 @@ impl Rect {
             && point[1] < self.bottom()
     }
 
+    /// The rectangle this and `other` have in common, and `None` when that
+    /// is nothing.
+    pub fn intersect(self, other: Rect) -> Option<Rect> {
+        let x = self.x.max(other.x);
+        let y = self.y.max(other.y);
+        let right = self.right().min(other.right());
+        let bottom = self.bottom().min(other.bottom());
+        (right > x && bottom > y).then(|| Rect::new(x, y, right - x, bottom - y))
+    }
+
     pub fn inset(&self, dx: f32, dy: f32) -> Self {
         Self {
             x: self.x + dx,

@@ -82,4 +82,11 @@ impl Placement {
             (point[1] - self.y) / self.zoom,
         ]
     }
+
+    /// Where `point`, in image pixels, lands in physical window pixels: the
+    /// other way round from [`Placement::image_point`], for what is drawn
+    /// over the image at a place on it.
+    pub fn screen_point(&self, point: [f32; 2]) -> [f32; 2] {
+        [self.x + point[0] * self.zoom, self.y + point[1] * self.zoom]
+    }
 }

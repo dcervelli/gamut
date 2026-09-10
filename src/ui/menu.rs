@@ -303,7 +303,13 @@ pub(super) fn pixel_cells(pass: &mut Pass, ui: &mut Ui) {
 pub(super) fn copy_items(pass: &mut Pass, ui: &mut Ui) {
     for copies in Copies::ALL {
         let control = Control::Copies(copies);
-        let mut button = Button::new(copies.label());
+        // The picture's item takes the region while one is selected, as the
+        // key does, and says so.
+        let label = match copies {
+            Copies::Image if pass.input.selection.region().is_some() => "Region",
+            _ => copies.label(),
+        };
+        let mut button = Button::new(label);
         if let Some(key) = pass.namer.shortcut(control) {
             button = button.shortcut_text(key);
         }

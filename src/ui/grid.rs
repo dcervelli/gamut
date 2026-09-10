@@ -93,7 +93,7 @@ pub(super) fn paint(
         placement.width / scale,
         placement.height / scale,
     );
-    let Some(area) = intersect(image, content) else {
+    let Some(area) = image.intersect(content) else {
         return;
     };
     let spacing = step * placement.zoom / scale;
@@ -138,7 +138,7 @@ fn fill_around(painter: &egui::Painter, rect: Rect, hole: Option<Rect>, color: e
             color,
         );
     };
-    let Some(hole) = hole.and_then(|hole| intersect(rect, hole)) else {
+    let Some(hole) = hole.and_then(|hole| rect.intersect(hole)) else {
         fill(rect);
         return;
     };
@@ -196,15 +196,6 @@ fn lines(origin: f32, spacing: f32, end: f32, from: f32, to: f32) -> Vec<f32> {
         out.push(at);
         index += 1;
     }
-}
-
-/// The rectangle two of them have in common, and `None` when that is nothing.
-fn intersect(a: Rect, b: Rect) -> Option<Rect> {
-    let x = a.x.max(b.x);
-    let y = a.y.max(b.y);
-    let right = a.right().min(b.right());
-    let bottom = a.bottom().min(b.bottom());
-    (right > x && bottom > y).then(|| Rect::new(x, y, right - x, bottom - y))
 }
 
 /// How the spacing is written in the toggle: the number of image pixels
@@ -322,7 +313,7 @@ mod tests {
         // A line straight down the middle of it comes back as the part above
         // and the part below, and nothing in between.
         let line = Rect::new(60.0, 0.0, 1.0, 400.0);
-        let pieces: Vec<_> = around(line, intersect(line, hole).expect("crossed"))
+        let pieces: Vec<_> = around(line, line.intersect(hole).expect("crossed"))
             .into_iter()
             .filter(|p| p.width > 0.0 && p.height > 0.0)
             .collect();
@@ -337,17 +328,17 @@ mod tests {
         // The pieces of a line across it keep every part of the line the hole
         // does not cover, and none of what it does.
         let line = Rect::new(0.0, 40.0, 400.0, 1.0);
-        let pieces: Vec<_> = around(line, intersect(line, hole).expect("crossed"))
+        let pieces: Vec<_> = around(line, line.intersect(hole).expect("crossed"))
             .into_iter()
             .filter(|p| p.width > 0.0 && p.height > 0.0)
             .collect();
-        assert!(pieces.iter().all(|p| intersect(*p, hole).is_none()));
+        assert!(pieces.iter().all(|p| p.intersect(hole).is_none()));
         let covered: f32 = pieces.iter().map(|p| p.width * p.height).sum();
         assert_eq!(covered, line.width * line.height - hole.width * line.height);
 
         // And a line clear of it is left whole.
         let line = Rect::new(300.0, 0.0, 1.0, 400.0);
-        assert!(intersect(line, hole).is_none());
+        assert!(line.intersect(hole).is_none());
     }
 
     #[test]
