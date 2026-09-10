@@ -31,6 +31,7 @@ use std::sync::Arc;
 
 use crate::image::display::{Display, Headroom};
 use crate::image::exif::Exif;
+use crate::image::region::Region;
 use crate::image::stats::BINS;
 use crate::image::{DecodedImage, Stats};
 use egui::Sense;
@@ -242,6 +243,12 @@ pub struct FrameInput {
     /// pointer over a panel covering the region does not count, which is
     /// the same reading [`FrameInput::pointer`] is made from.
     pub over_region: bool,
+    /// Whether a drag on the picture draws a box to zoom to — `Space` is
+    /// held — rather than panning or taking hold of the region.
+    pub box_zoom: bool,
+    /// The box being dragged out to zoom to, while a drag is drawing one:
+    /// painted over the picture, and gone when the drag lets go.
+    pub zoom_box: Option<Region>,
 }
 
 /// One pass of the interface: the chrome and everything on it, laid out in
@@ -294,8 +301,8 @@ impl Pass<'_> {
             })
             .inner;
         let scale = self.input.scale;
-        // The region's share of the gestures first: a drag that is the
-        // region's is not the view's.
+        // The region's share of the gestures first, and the zoom box's: a
+        // drag that is either's is not the view's.
         let grabbed = self.region_gestures(ui, &response);
         if grabbed.is_none() && response.dragged_by(egui::PointerButton::Primary) {
             let delta = response.drag_delta();
@@ -339,15 +346,18 @@ impl Pass<'_> {
     }
 
     /// The region's reading of the picture's response, and the hold a drag
-    /// has on it, if any: `Some` while the drag is the region's, in which
-    /// case the view does not pan.
+    /// has on it, if any: `Some` while the drag is the region's — or the
+    /// zoom box's — in which case the view does not pan.
     ///
     /// A drag is decided where the button went down — `press_origin`, not
     /// the pointer's position on the frame the toolkit called it a drag,
-    /// which is already some points away — and what it is depends on the
-    /// selection: with one asked for, any drag draws a new region; with one
-    /// on screen, a drag from a handle or from inside it takes hold of that;
-    /// anywhere else it is the view's, as it always was. The hand's place
+    /// which is already some points away. With `Space` held it draws a box
+    /// to zoom to, whatever the selection: the key is held for exactly
+    /// that, and a region under the press does not take it. Otherwise what
+    /// it is depends on the selection: with one asked for, any drag draws a
+    /// new region; with one on screen, a drag from a handle or from inside
+    /// it takes hold of that; anywhere else it is the view's, as it always
+    /// was. The hand's place
     /// goes back in image pixels each frame, through the same placement the
     /// bar's readout uses, since the application's own pointer stands still
     /// while the toolkit holds a drag. Which handle the pointer rests on is
@@ -374,6 +384,7 @@ impl Pass<'_> {
             && let Some(origin) = ui.input(|input| input.pointer.press_origin())
         {
             let grab = match self.input.selection {
+                _ if self.input.box_zoom => Some(Grab::Zoom),
                 Selection::Armed => Some(Grab::New),
                 Selection::Shown(_) => grip_under(origin).map(Grab::Handle),
                 Selection::Off => None,
@@ -410,11 +421,15 @@ impl Pass<'_> {
                 ui.ctx().set_cursor_icon(region::cursor(Grab::Handle(grip)));
             }
         }
-        if grabbed.is_none()
-            && self.input.selection == Selection::Armed
-            && response.contains_pointer()
-        {
-            ui.ctx().set_cursor_icon(region::cursor(Grab::New));
+        // What the next drag would draw, while the pointer is on the
+        // picture with nothing in hand: the box if the key is held, else
+        // the region asked for.
+        if grabbed.is_none() && response.contains_pointer() {
+            if self.input.box_zoom {
+                ui.ctx().set_cursor_icon(region::cursor(Grab::Zoom));
+            } else if self.input.selection == Selection::Armed {
+                ui.ctx().set_cursor_icon(region::cursor(Grab::New));
+            }
         }
         grabbed
     }
@@ -448,8 +463,11 @@ impl Pass<'_> {
             );
         }
         // Under the panels, like the grid: the region marks up the picture,
-        // and a panel over the picture is over the region too.
+        // and a panel over the picture is over the region too. The box
+        // being dragged out to zoom to goes over the region, being the
+        // newer of the two marks and the one under the hand.
         region::show(self, ui, current, content);
+        region::show_zoom_box(self, ui, current, content);
         if self.input.minimap_on_screen {
             minimap::show(self, ui, current, content);
         }

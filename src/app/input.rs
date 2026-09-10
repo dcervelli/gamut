@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
 
+use winit::event::ElementState;
 use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey, PhysicalKey};
 
 use super::App;
@@ -26,6 +27,7 @@ use crate::ui::menu::{Copies, ZoomChoice};
 use crate::ui::toast::Level;
 use crate::ui::tooltip::Hdr;
 use crate::ui::{self, Control, Current, Grab, Naming, Room, Selection, Tip};
+use crate::view::Fit;
 
 /// Window pixels moved per arrow-key press. Shift moves one pixel instead,
 /// for placing a view exactly, and Ctrl goes as far as the image does.
@@ -512,8 +514,15 @@ pub const KEYS: &[Binding] = &[
         section: Section::Zoom,
         mods: PLAIN,
         shown: "Space",
-        help: "Toggle fit between the whole image and filling the window, or of the region",
+        help: "Fit the whole image or fill the window, in turn; with a region, fit it, fill it, then the image",
         keys: &[(Named(NamedKey::Space), ToggleFit)],
+    },
+    Binding {
+        section: Section::Zoom,
+        mods: PLAIN,
+        shown: "Space+Drag",
+        help: "Zoom to the box dragged out",
+        keys: &[],
     },
     Binding {
         section: Section::Zoom,
@@ -979,6 +988,50 @@ pub(super) struct Pointer {
     /// — said the same way, and what the arrows ask before they move the
     /// whole region.
     pub(super) grip: Option<Grip>,
+    /// Where `Space` is: the one key that is held as well as pressed.
+    pub(super) space: Space,
+}
+
+/// Where `Space` is. Held, a drag on the picture draws a box to zoom to,
+/// which is why the key fits nothing on its way down — the view would move
+/// under the hand about to draw — and fits on its way up instead, unless a
+/// box was drawn while it was down. The key's repeats are the same press
+/// still going, and are not answered.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub(super) enum Space {
+    #[default]
+    Up,
+    Held {
+        /// Whether a box has been drawn while it was down, which is what
+        /// letting go of it asks before it fits anything.
+        drawn: bool,
+    },
+}
+
+/// What `Space` frames next while a region is up: the region at either fit,
+/// then the picture at either, and round again. The picture on its own has
+/// two fits to toggle between; with a region up there are two things to
+/// frame, and the region — the thing being worked on — comes first.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Framing {
+    Region(Fit),
+    Picture(Fit),
+}
+
+impl Framing {
+    /// Where the cycle starts, and where a change to the region puts it
+    /// back: whatever was framed before, the region that was just drawn or
+    /// moved is what the next press should show.
+    pub(super) const FIRST: Framing = Framing::Region(Fit::Whole);
+
+    fn next(self) -> Framing {
+        match self {
+            Framing::Region(Fit::Whole) => Framing::Region(Fit::Fill),
+            Framing::Region(Fit::Fill) => Framing::Picture(Fit::Whole),
+            Framing::Picture(Fit::Whole) => Framing::Picture(Fit::Fill),
+            Framing::Picture(Fit::Fill) => Framing::Region(Fit::Whole),
+        }
+    }
 }
 
 /// The hold a drag on the picture has on the region, from the press to the
@@ -1026,11 +1079,56 @@ fn briefly(error: &anyhow::Error) -> String {
 }
 
 impl App {
-    pub(super) fn handle_key(&mut self, key: &Key, position: PhysicalKey) -> Effect {
+    pub(super) fn handle_key(
+        &mut self,
+        key: &Key,
+        position: PhysicalKey,
+        state: ElementState,
+    ) -> Effect {
+        // Space is answered on its way up — see `Space` — and its release
+        // is read whatever is held with it by then, so that a chord pressed
+        // while it was down cannot leave it held for good.
+        if *key == Key::Named(NamedKey::Space) && state == ElementState::Released {
+            return self.release_space();
+        }
+        if state == ElementState::Released {
+            return Effect::Nothing;
+        }
         match action_for(key, position, self.pointer.modifiers) {
+            Some(ToggleFit) => self.hold_space(),
             Some(action) => self.perform(action),
             None => Effect::Nothing,
         }
+    }
+
+    /// `Space` went down. Nothing moves, but the pointer over the picture
+    /// changes to say what a drag would now do, which takes a frame. A
+    /// repeat of a key already held is the same press still going, and
+    /// changes nothing.
+    fn hold_space(&mut self) -> Effect {
+        if self.pointer.space != Space::Up {
+            return Effect::Nothing;
+        }
+        self.pointer.space = Space::Held { drawn: false };
+        Effect::Redraw
+    }
+
+    /// `Space` came up: the fit it asked for, unless a box was drawn while
+    /// it was down — in which case the zoom was the box's, the key is
+    /// spent, and only the pointer has to change back.
+    fn release_space(&mut self) -> Effect {
+        let space = std::mem::take(&mut self.pointer.space);
+        match space {
+            Space::Held { drawn: false } => self.perform(ToggleFit),
+            Space::Held { drawn: true } => Effect::Redraw,
+            Space::Up => Effect::Nothing,
+        }
+    }
+
+    /// The window lost the keyboard: whatever was held is not held here
+    /// any more, and its release will go elsewhere.
+    pub(super) fn keys_lost(&mut self) {
+        self.pointer.space = Space::Up;
     }
 
     /// Does what a key asked for.
@@ -1074,6 +1172,14 @@ impl App {
                     return self.perform(ToggleInterface);
                 }
                 if self.toasts.dismiss() {
+                    return Effect::Redraw;
+                }
+                // A box being dragged out is dropped before the region is:
+                // the toolkit is taking the drag off the hand on this same
+                // key, and the release it sends next must find nothing to
+                // zoom to.
+                if self.zoom_box.take().is_some() {
+                    self.grabbing = None;
                     return Effect::Redraw;
                 }
                 // The region after the message: a message is about what
@@ -1258,8 +1364,9 @@ impl App {
     /// What `action` does to `region`, the region on screen, where it does
     /// something to it: the arrows move it a pixel — or the handle the
     /// pointer rests on, where it rests on one — with Ctrl grow it, `Space`
-    /// fits it, and the copy of the picture copies it. `None` for every
-    /// other action, which is the picture's as it always was.
+    /// frames it and then the picture, and the copy of the picture copies
+    /// it. `None` for every other action, which is the picture's as it
+    /// always was.
     ///
     /// Nothing here is animated: a region moves by a pixel at a time, and a
     /// pixel has nothing to animate.
@@ -1284,11 +1391,14 @@ impl App {
                 Effect::Redraw
             }
             ToggleFit => {
-                let fit = self.region_fit;
-                self.animate(|view, image, viewport| {
-                    view.fit_region(fit, region.as_f32(), image, viewport);
+                let framing = self.framing;
+                self.animate(|view, image, viewport| match framing {
+                    Framing::Region(fit) => {
+                        view.fit_region(fit, region.as_f32(), image, viewport);
+                    }
+                    Framing::Picture(fit) => view.set_fit(fit),
                 });
-                self.region_fit = fit.other();
+                self.framing = framing.next();
                 Effect::Redraw
             }
             CopyImage => {
@@ -1307,9 +1417,11 @@ impl App {
         })
     }
 
-    /// Puts `region` on screen.
+    /// Puts `region` on screen. A region drawn or moved is the region the
+    /// next press of `Space` should show, wherever the cycle had got to.
     fn select(&mut self, region: Region) {
         self.selection = Selection::Shown(region);
+        self.framing = Framing::FIRST;
     }
 
     /// Whether the pointer is on the region, which is what its size and its
@@ -1330,8 +1442,16 @@ impl App {
     }
 
     /// A drag on the picture has taken hold of the region — or of nothing
-    /// yet, to draw one — at `at`, in image pixels.
+    /// yet, to draw one, or to draw a box to zoom to — at `at`, in image
+    /// pixels.
     fn grab(&mut self, grab: Grab, at: [f32; 2]) {
+        // The box is what the held key was for, and the key is spent on it:
+        // letting go of it afterwards fits nothing.
+        if grab == Grab::Zoom
+            && let Space::Held { drawn } = &mut self.pointer.space
+        {
+            *drawn = true;
+        }
         self.grabbing = Some(Grabbing {
             grab,
             origin: self.selection.region(),
@@ -1339,15 +1459,24 @@ impl App {
         });
     }
 
-    /// The hand is at `to`, in image pixels: the region is what the hold
-    /// makes of that. A new region that has not yet enclosed a pixel — the
-    /// hand still off the picture — leaves things as they were.
+    /// The hand is at `to`, in image pixels: the region — or the box to
+    /// zoom to — is what the hold makes of that. A new region, or a box,
+    /// that has not yet enclosed a pixel — the hand still off the picture —
+    /// leaves things as they were.
     fn pull(&mut self, to: [f32; 2]) {
         let Some(Grabbing { grab, origin, from }) = self.grabbing else {
             return;
         };
         let image = self.image_pixels();
         let region = match (grab, origin) {
+            // The box is drawn as a new region is, but is not the
+            // selection: it is kept apart, and taken by the release.
+            (Grab::Zoom, _) => {
+                if let Some(boxed) = Region::from_corners(from, to, image) {
+                    self.zoom_box = Some(boxed);
+                }
+                return;
+            }
             (Grab::New, _) => Region::from_corners(from, to, image),
             (Grab::Handle(Grip::Inside), Some(origin)) => {
                 let by = |axis: usize| (to[axis] - from[axis]).round() as i64;
@@ -1362,9 +1491,16 @@ impl App {
     }
 
     /// The button came up. A hold that never drew anything leaves the
-    /// region asked for, so the next drag draws it.
+    /// region asked for, so the next drag draws it. A box dragged out is
+    /// what the view goes to: fitted whole, as a move, the way a zoom asked
+    /// for by name is.
     fn release(&mut self) {
         self.grabbing = None;
+        if let Some(boxed) = self.zoom_box.take() {
+            self.animate(|view, image, viewport| {
+                view.fit_region(Fit::Whole, boxed.as_f32(), image, viewport);
+            });
+        }
     }
 
     /// Closes whatever menu is open. Returns whether there was one: the

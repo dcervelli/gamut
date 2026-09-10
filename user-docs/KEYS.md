@@ -12,7 +12,8 @@ Every control `gamut` has. Letter keys work in either case except `a`,
 | `Shift`+`2`, `3`, `4` | 50%, 25%, 10% |
 | `+`, `=` | Zoom in one step, a factor of 1.25 |
 | `-`, `_` | Zoom out one step |
-| `Space` | Toggle how the image is fitted: the whole image, or filling the window — or the region, while one is selected |
+| `Space` | Toggle how the image is fitted: the whole image, or filling the window. With a region selected, fit the region, fill the window with it, then the image's two fits, in turn |
+| `Space`+Drag | Zoom to the box you drag out |
 | `p` | Cycle the filter used above 100%: nearest → bicubic |
 | Arrows | Pan by 64 pixels; with a region selected, move it one pixel |
 | `Shift`+Arrows | Pan by one pixel |
@@ -29,6 +30,12 @@ either one works out to is the image's shape against the window's.
 
 Zooming leaves fit mode; panning does not, so `Space` and then Down scrolls
 through a tall image filling the window.
+
+To zoom to a part of the picture, hold `Space` and drag a box around it: the
+box fills the window when you let go. The key answers when it comes up
+rather than when it goes down, so a tap still toggles the fit, and holding
+it while you drag does not move the picture first. `Esc` during the drag
+drops the box.
 
 `Shift` with an arrow places the view to the pixel, which is what lining two
 images up on the same detail takes; `Ctrl` with one runs to that side of the
@@ -366,10 +373,12 @@ pointer is on the region — including while you are dragging it — and go when
 you point somewhere else, leaving the outline. A region too small to hold
 all of it writes what fits, dropping the edges before the size.
 
-`Space` fits the region rather than the image: the whole of it in the
-window, then filling the window, in turn. It is a zoom like the ones on the
-number row rather than a fit the view keeps, so resizing the window does not
-re-fit it, and a region of a few pixels stops at 6400%. `Ctrl+C`, and the
+`Space` fits the region before the image: the whole of it in the window,
+then the window filled with it, then the image's own two fits, and round
+again. Drawing or moving the region starts over at fitting it. A fit of the
+region is a zoom like the ones on the number row rather than a fit the view
+keeps, so resizing the window does not re-fit it, and a region of a few
+pixels stops at 6400%. `Ctrl+C`, and the
 **Image** item of the copy menu — which reads **Region** while one is
 selected — copy the region instead of the whole picture, with the display
 settings applied exactly as they would be to the whole.
@@ -383,6 +392,7 @@ region behind: it belongs to the picture it was drawn on.
 | Action | What it does |
 | --- | --- |
 | Drag | Pan, with the image following the pointer; with a region selected, draw it, or move it or one of its handles |
+| `Space`+Drag | Zoom to the box dragged out, wherever the drag begins |
 | Wheel | Zoom about the pointer |
 | Trackpad scroll | The same, by fractions of a notch |
 | Click a panel button | Show or hide the histogram, the file information, or the minimap |

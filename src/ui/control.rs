@@ -211,13 +211,16 @@ impl Selection {
     }
 }
 
-/// What a drag on the picture has hold of, when it is the region's.
+/// What a drag on the picture has hold of, when it is not the view's.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Grab {
     /// Drawing a new region from the press outward.
     New,
     /// A handle of the region on screen, or the whole of it.
     Handle(Grip),
+    /// Drawing a box to zoom to, from the press outward: the drag `Space`
+    /// is held for.
+    Zoom,
 }
 
 /// The words the application has for the interface: what a thing is called
