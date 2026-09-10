@@ -106,7 +106,7 @@ fn input(logical: [f32; 2], count: usize) -> FrameInput {
         toast: None,
         selection: Selection::Off,
         grabbing: None,
-        dimensions_shown: false,
+        over_region: false,
     }
 }
 

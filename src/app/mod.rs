@@ -138,16 +138,12 @@ pub struct App {
     /// The hold a drag on the picture has on it, from the press to the
     /// release, while the drag is the region's rather than the view's.
     grabbing: Option<Grabbing>,
-    /// Until when the region's size is written at its middle: for a moment
-    /// after the size changes. The second thing on screen that time alone
-    /// changes.
-    dimensions_until: Option<Instant>,
     /// What `Space` does to the region next: the two fits in turn, as it
     /// does for the picture. Its own rather than the view's, since a fit
     /// of the region is not a fit the view keeps.
     region_fit: Fit,
     /// The message about what was just done, and when it takes itself off.
-    /// One of the two things on screen that time alone changes.
+    /// The one thing on screen that time alone changes.
     toasts: Toasts,
     /// How the copies being prepared on threads of their own turned out. A
     /// copy of the picture has to walk every pixel before it can say whether
@@ -241,7 +237,6 @@ impl App {
             pointer: Pointer::default(),
             selection: Selection::Off,
             grabbing: None,
-            dimensions_until: None,
             region_fit: Fit::Whole,
             toasts: Toasts::default(),
             copied: mpsc::channel(),
@@ -998,7 +993,7 @@ impl App {
             toast: self.toasts.showing().cloned(),
             selection: self.selection,
             grabbing: self.grabbing.as_ref().map(Grabbing::grab),
-            dimensions_shown: self.dimensions_until.is_some_and(|until| now < until),
+            over_region: self.over_region(),
         };
 
         let namer = self.namer();
@@ -1114,14 +1109,9 @@ impl ApplicationHandler<UserEvent> for App {
 
         // The things on screen that happen because time passed rather than
         // because anything arrived: the message about what was just done
-        // having been up long enough, the region's size having been read,
-        // and whatever egui is waiting on — a tooltip's delay, a hover
-        // fading.
+        // having been up long enough, and whatever egui is waiting on — a
+        // tooltip's delay, a hover fading.
         let mut timed = self.toasts.tick(now);
-        if self.dimensions_until.is_some_and(|until| now >= until) {
-            self.dimensions_until = None;
-            timed = true;
-        }
         if self.gui.as_mut().is_some_and(|gui| gui.due(now)) {
             timed = true;
         }
@@ -1136,7 +1126,6 @@ impl ApplicationHandler<UserEvent> for App {
         let mut deadline = self.next_poll;
         for due in [
             self.toasts.deadline(),
-            self.dimensions_until,
             self.gui.as_ref().and_then(Gui::deadline),
         ]
         .into_iter()
@@ -1611,10 +1600,12 @@ mod tests {
         };
         assert_eq!(app.selection, Selection::Shown(region));
         assert!(app.grabbing.is_none());
-        assert!(
-            app.dimensions_until.is_some(),
-            "the size is written for a moment"
-        );
+        // The words are written while the pointer is on the region, and not
+        // otherwise: no clock takes them off.
+        assert!(!app.over_region());
+        app.pointer.grip = Some(Grip::Inside);
+        assert!(app.over_region());
+        app.pointer.grip = None;
 
         // The arrows move the region and leave the view alone, at once.
         let (image, viewport) = (app.image_size(), app.viewport());
@@ -1676,7 +1667,7 @@ mod tests {
         assert!(app.selection.is_on());
         assert_eq!(app.perform(Action::Dismiss), Effect::Redraw);
         assert_eq!(app.selection, Selection::Off);
-        assert!(app.dimensions_until.is_none());
+        assert!(!app.over_region());
         assert_eq!(app.perform(Action::Dismiss), Effect::Quit);
 
         // The key with a region up takes it off too, and the arrows are the

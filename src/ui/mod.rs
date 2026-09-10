@@ -228,9 +228,12 @@ pub struct FrameInput {
     /// region's drag rather than the view's: said back to the interface so
     /// that the frames of one drag all go the same way.
     pub grabbing: Option<Grab>,
-    /// Whether the region's size is written at its middle this frame: for a
-    /// moment after the size changes, and not after that.
-    pub dimensions_shown: bool,
+    /// Whether the pointer is on the region — over it, or on one of its
+    /// handles, or dragging it — which is what its words are written for.
+    /// Asked of the application rather than worked out here so that a
+    /// pointer over a panel covering the region does not count, which is
+    /// the same reading [`FrameInput::pointer`] is made from.
+    pub over_region: bool,
 }
 
 /// One pass of the interface: the chrome and everything on it, laid out in
