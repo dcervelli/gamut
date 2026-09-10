@@ -29,13 +29,13 @@ use crate::timing;
 use crate::ui::chrome::{content_area, image_viewport};
 use crate::ui::toast::{self, Level, Toasts};
 use crate::ui::tooltip::Hdr;
-use crate::ui::{self, Current, FileFacts, FrameInput, Panels, Reading, Rect};
-use crate::view::{View, Viewport};
+use crate::ui::{self, Current, FileFacts, FrameInput, Panels, Reading, Rect, Selection};
+use crate::view::{Fit, View, Viewport};
 use crate::watch::{self, Watch};
 
 use files::{Announce, Files};
 use gui::Gui;
-use input::{Effect, Pointer};
+use input::{Effect, Grabbing, Pointer};
 use kept::{Kept, Settings};
 use window::{file_label, initial_window_size, loading_title, window_title};
 
@@ -61,9 +61,9 @@ pub struct Options {
     pub size: Option<[u32; 2]>,
 }
 
-/// What a copy prepared on a thread of its own did: took the selection, or
-/// failed with this much to say about it.
-type CopyOutcome = Result<(), String>;
+/// What a copy prepared on a thread of its own did: took the selection, and
+/// this is what to say about it, or failed with this much to say about it.
+type CopyOutcome = Result<&'static str, String>;
 
 pub struct App {
     files: Files,
@@ -132,8 +132,22 @@ pub struct App {
     gui: Option<Gui>,
     pointer: Pointer,
     panels: Panels,
+    /// The region on the picture: off, asked for, or drawn. What the arrows
+    /// move, `Space` fits and `Ctrl+C` copies while one is on screen.
+    selection: Selection,
+    /// The hold a drag on the picture has on it, from the press to the
+    /// release, while the drag is the region's rather than the view's.
+    grabbing: Option<Grabbing>,
+    /// Until when the region's size is written at its middle: for a moment
+    /// after the size changes. The second thing on screen that time alone
+    /// changes.
+    dimensions_until: Option<Instant>,
+    /// What `Space` does to the region next: the two fits in turn, as it
+    /// does for the picture. Its own rather than the view's, since a fit
+    /// of the region is not a fit the view keeps.
+    region_fit: Fit,
     /// The message about what was just done, and when it takes itself off.
-    /// The one thing on screen that time alone changes.
+    /// One of the two things on screen that time alone changes.
     toasts: Toasts,
     /// How the copies being prepared on threads of their own turned out. A
     /// copy of the picture has to walk every pixel before it can say whether
@@ -225,6 +239,10 @@ impl App {
             renderer: None,
             gui: None,
             pointer: Pointer::default(),
+            selection: Selection::Off,
+            grabbing: None,
+            dimensions_until: None,
+            region_fit: Fit::Whole,
             toasts: Toasts::default(),
             copied: mpsc::channel(),
             copying: Vec::new(),
@@ -514,7 +532,7 @@ impl App {
         let said = !outcomes.is_empty();
         for outcome in outcomes {
             match outcome {
-                Ok(()) => self.toast("Copied image.", Level::Message),
+                Ok(said) => self.toast(said, Level::Message),
                 Err(error) => self.toast(error, Level::Error),
             }
         }
@@ -857,6 +875,12 @@ impl App {
 
         self.files.shown(file.index);
         self.watch = file.watch;
+        // A region is of the picture it was drawn on. Stepping to another
+        // file takes it off, and so does the file coming back a different
+        // size, where the pixels it marked out are no longer the pixels.
+        if stepping || !same_size {
+            self.clear_region();
+        }
         match &kept {
             // A picture of the same size as the one it is arriving beside is
             // almost always part of a set to be compared — frames of a
@@ -972,6 +996,9 @@ impl App {
             hdr_available,
             can_pan: self.view.can_pan(self.image_size(), viewport),
             toast: self.toasts.showing().cloned(),
+            selection: self.selection,
+            grabbing: self.grabbing.as_ref().map(Grabbing::grab),
+            dimensions_shown: self.dimensions_until.is_some_and(|until| now < until),
         };
 
         let namer = self.namer();
@@ -1087,9 +1114,14 @@ impl ApplicationHandler<UserEvent> for App {
 
         // The things on screen that happen because time passed rather than
         // because anything arrived: the message about what was just done
-        // having been up long enough, and whatever egui is waiting on — a
-        // tooltip's delay, a hover fading.
+        // having been up long enough, the region's size having been read,
+        // and whatever egui is waiting on — a tooltip's delay, a hover
+        // fading.
         let mut timed = self.toasts.tick(now);
+        if self.dimensions_until.is_some_and(|until| now >= until) {
+            self.dimensions_until = None;
+            timed = true;
+        }
         if self.gui.as_mut().is_some_and(|gui| gui.due(now)) {
             timed = true;
         }
@@ -1104,6 +1136,7 @@ impl ApplicationHandler<UserEvent> for App {
         let mut deadline = self.next_poll;
         for due in [
             self.toasts.deadline(),
+            self.dimensions_until,
             self.gui.as_ref().and_then(Gui::deadline),
         ]
         .into_iter()
@@ -1540,6 +1573,131 @@ mod tests {
         assert!(app.said_how_to_restore);
         // And `q` leaves from under a hidden interface, as it always did.
         assert_eq!(app.perform(Action::Quit), Effect::Quit);
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// A region on screen takes the keys that move the picture: the arrows
+    /// move it a pixel — or the handle the pointer rests on — `Ctrl` with
+    /// one grows it, `Space` fits it, and `Esc` takes it off after a message
+    /// and before quitting. Stepping to another file takes it off as well.
+    #[test]
+    fn a_region_takes_the_keys_that_move_the_picture() {
+        use crate::image::region::{Grip, Region, Side};
+        use input::{Action, Direction, Effect, PanStep};
+        use ui::{Command, Grab};
+
+        let (mut app, dir) = app_over("region", &[("a.png", 64, 48), ("b.png", 64, 48)]);
+        assert_eq!(app.selection, Selection::Off);
+        assert_eq!(app.perform(Action::ToggleRegion), Effect::Redraw);
+        assert_eq!(app.selection, Selection::Armed);
+
+        // Drawn as a drag draws it: from the press to wherever the hand is,
+        // every pixel touched taken in.
+        let draw = |app: &mut App| {
+            app.act(Command::Grab {
+                grab: Grab::New,
+                at: [10.2, 5.5],
+            });
+            app.act(Command::Pull([20.9, 15.1]));
+            app.act(Command::Release);
+        };
+        draw(&mut app);
+        let region = Region {
+            x: 10,
+            y: 5,
+            width: 11,
+            height: 11,
+        };
+        assert_eq!(app.selection, Selection::Shown(region));
+        assert!(app.grabbing.is_none());
+        assert!(
+            app.dimensions_until.is_some(),
+            "the size is written for a moment"
+        );
+
+        // The arrows move the region and leave the view alone, at once.
+        let (image, viewport) = (app.image_size(), app.viewport());
+        let view = app.view.position(image, viewport);
+        let _ = app.perform(Action::Pan(Direction::Right, PanStep::Coarse));
+        assert_eq!(app.selection, Selection::Shown(Region { x: 11, ..region }));
+        assert_eq!(app.view.position(image, viewport), view);
+        assert!(app.motion.is_none());
+
+        // With the pointer resting on a handle, they move the handle.
+        app.pointer.grip = Some(Grip::Edge(Side::Right));
+        let _ = app.perform(Action::Pan(Direction::Right, PanStep::Coarse));
+        assert_eq!(
+            app.selection,
+            Selection::Shown(Region {
+                x: 11,
+                width: 12,
+                ..region
+            })
+        );
+        // An arrow along that edge moves the whole region instead.
+        let _ = app.perform(Action::Pan(Direction::Down, PanStep::Fine));
+        assert_eq!(
+            app.selection,
+            Selection::Shown(Region {
+                x: 11,
+                y: 6,
+                width: 12,
+                height: 11
+            })
+        );
+        app.pointer.grip = None;
+
+        // Ctrl grows it that way.
+        let _ = app.perform(Action::Pan(Direction::Up, PanStep::Edge));
+        assert_eq!(
+            app.selection,
+            Selection::Shown(Region {
+                x: 11,
+                y: 5,
+                width: 12,
+                height: 12
+            })
+        );
+
+        // Space fits it: a zoom of its own rather than a fit the view keeps,
+        // and the two fits in turn.
+        assert_eq!(app.view.fit(), Some(Fit::Whole));
+        let _ = app.perform(Action::ToggleFit);
+        assert_eq!(app.view.fit(), None);
+        assert_eq!(app.region_fit, Fit::Fill);
+        let _ = app.perform(Action::ToggleFit);
+        assert_eq!(app.region_fit, Fit::Whole);
+
+        // Escape takes it off after the message, and before quitting.
+        app.toast("Copied region.", Level::Message);
+        assert_eq!(app.perform(Action::Dismiss), Effect::Redraw);
+        assert!(app.toasts.showing().is_none());
+        assert!(app.selection.is_on());
+        assert_eq!(app.perform(Action::Dismiss), Effect::Redraw);
+        assert_eq!(app.selection, Selection::Off);
+        assert!(app.dimensions_until.is_none());
+        assert_eq!(app.perform(Action::Dismiss), Effect::Quit);
+
+        // The key with a region up takes it off too, and the arrows are the
+        // view's again.
+        let _ = app.perform(Action::ToggleRegion);
+        draw(&mut app);
+        assert!(app.selection.region().is_some());
+        let _ = app.perform(Action::ToggleRegion);
+        assert_eq!(app.selection, Selection::Off);
+        let _ = app.perform(Action::Pan(Direction::Right, PanStep::Coarse));
+        assert!(app.motion.is_some(), "a pan of the view is a move");
+
+        // And a region is of the picture it was drawn on: stepping to
+        // another file leaves it behind.
+        app.motion = None;
+        let _ = app.perform(Action::ToggleRegion);
+        draw(&mut app);
+        app.step(true);
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.files.index(), 1);
+        assert_eq!(app.selection, Selection::Off);
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }

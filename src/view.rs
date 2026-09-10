@@ -24,7 +24,7 @@ pub enum Fit {
 }
 
 impl Fit {
-    fn other(self) -> Fit {
+    pub fn other(self) -> Fit {
         match self {
             Fit::Whole => Fit::Fill,
             Fit::Fill => Fit::Whole,
@@ -370,6 +370,25 @@ impl View {
         });
     }
 
+    /// Fits `region` — `[x, y, width, height]` in image pixels — to the
+    /// viewport as `fit` says, and centers it. Not a fit the view keeps: a
+    /// fit is a zoom the viewport decides for the whole image, and this is
+    /// a zoom chosen for part of it, so it is held as a zoom asked for by
+    /// name is and does not follow the window. The zoom stops at the same
+    /// limits as any other, so a region of a few pixels is centered rather
+    /// than blown up past them.
+    pub fn fit_region(&mut self, fit: Fit, region: [f32; 4], image: [f32; 2], viewport: Viewport) {
+        let [x, y, width, height] = region;
+        self.zoom = Self::fit_zoom(fit, [width.max(1.0), height.max(1.0)], viewport.size())
+            .clamp(MIN_ZOOM, MAX_ZOOM);
+        self.fit = None;
+        let center = [
+            x + width / 2.0 - image[0] / 2.0,
+            y + height / 2.0 - image[1] / 2.0,
+        ];
+        self.pan = Self::clamp_pan(center, image, viewport.size(), self.zoom);
+    }
+
     /// Where the view is in space-scale coordinates. From the pan actually on
     /// screen rather than the one held, as `zoom_steps_at` reads it: a view
     /// against an edge is at the edge, wherever it was asked to go.
@@ -485,6 +504,43 @@ mod tests {
         assert_eq!(view.fit(), Some(Fit::Fill));
         view.toggle_fit();
         assert_eq!(view.fit(), Some(Fit::Whole));
+    }
+
+    /// A region fitted is a zoom of its own: the region spans the window the
+    /// way the whole image would, its middle in the middle, and the view is
+    /// no longer in fit mode.
+    #[test]
+    fn a_region_is_fitted_and_centered_like_an_image() {
+        let mut view = View::new();
+        // The middle third of the image.
+        let region = [300.0, 200.0, 300.0, 200.0];
+        view.fit_region(Fit::Whole, region, IMAGE, WINDOW);
+        assert_eq!(view.fit(), None);
+        assert!(close(view.zoom(IMAGE, WINDOW), 1200.0 / 300.0));
+        let placement = view.placement(IMAGE, WINDOW);
+        let corner = placement.screen_point([300.0, 200.0]);
+        assert!(close(corner[0], 0.0), "{corner:?}");
+        assert!(close(corner[1], 200.0), "{corner:?}");
+        let middle = placement.image_point([600.0, 600.0]);
+        assert!(
+            close(middle[0], 450.0) && close(middle[1], 300.0),
+            "{middle:?}"
+        );
+
+        // Filled, the region's short side spans the window instead.
+        view.fit_region(Fit::Fill, region, IMAGE, WINDOW);
+        assert!(close(view.zoom(IMAGE, WINDOW), 1200.0 / 200.0));
+
+        // A region of a few pixels stops at the zoom limit.
+        view.fit_region(Fit::Whole, [10.0, 10.0, 2.0, 2.0], IMAGE, WINDOW);
+        assert!(close(view.zoom(IMAGE, WINDOW), MAX_ZOOM));
+
+        // The view stays inside the image: a region in the corner is held
+        // against the edge rather than centered off it.
+        let viewport = Viewport::whole([400.0, 300.0]);
+        view.fit_region(Fit::Whole, [0.0, 0.0, 100.0, 100.0], IMAGE, viewport);
+        let placement = view.placement(IMAGE, viewport);
+        assert!(placement.x >= -0.5 && placement.y >= -0.5, "{placement:?}");
     }
 
     /// The two fits are the two axes of the image, each taken once: 900x600

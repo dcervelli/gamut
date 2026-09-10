@@ -13,7 +13,7 @@ use super::Rect;
 use crate::view::Viewport;
 
 use super::chrome::{Pass, content_area};
-use super::{Current, PADDING, icon};
+use super::{Current, PADDING, icon, outline};
 
 /// The largest the minimap's thumbnail may be. It keeps the image's own
 /// shape inside this, so a panorama gets a wide short one and a portrait a
@@ -207,44 +207,6 @@ pub(super) fn show(pass: &Pass, ui: &mut egui::Ui, current: &Current, content: R
             }
             outline(painter, grid, shown, 1.5, theme.accent.into());
         });
-}
-
-/// A rectangle drawn as four edges, so that what is behind it — the
-/// thumbnail under the minimap's border — stays visible. Four snapped lines,
-/// so that an outline is the same weight as itself wherever on the device's
-/// grid it lands, and the two down the sides stop where the two across meet
-/// them, so a translucent color is not laid twice at the corners.
-pub(super) fn outline(
-    painter: &egui::Painter,
-    grid: icon::Grid,
-    rect: Rect,
-    thickness: f32,
-    color: egui::Color32,
-) {
-    if rect.width <= 0.0 || rect.height <= 0.0 {
-        return;
-    }
-    let edge = grid.line_width(thickness);
-    let middle = (rect.height - 2.0 * edge).max(0.0);
-    let fill = |piece: Rect| {
-        let x = grid.snap(piece.x);
-        let y = grid.snap(piece.y);
-        painter.rect_filled(
-            egui::Rect::from_min_size(
-                egui::pos2(x, y),
-                egui::vec2(
-                    (grid.snap(piece.right()) - x).max(edge),
-                    (grid.snap(piece.bottom()) - y).max(edge),
-                ),
-            ),
-            0.0,
-            color,
-        );
-    };
-    fill(Rect::new(rect.x, rect.y, rect.width, edge));
-    fill(Rect::new(rect.x, rect.bottom() - edge, rect.width, edge));
-    fill(Rect::new(rect.x, rect.y + edge, edge, middle));
-    fill(Rect::new(rect.right() - edge, rect.y + edge, edge, middle));
 }
 
 #[cfg(test)]

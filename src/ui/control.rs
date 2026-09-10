@@ -6,6 +6,8 @@
 //! is also what lets a test drive the interface with no application behind
 //! it and read off what it asked for.
 
+use crate::image::region::{Grip, Region};
+
 use super::info::Copyable;
 use super::menu::{Copies, ZoomChoice};
 use super::pixel::PixelFormat;
@@ -31,6 +33,10 @@ pub enum Control {
     /// The button that pastes the picture on the clipboard. On screen only
     /// while there is one — see [`Panels::paste`](super::Panels::paste).
     Paste,
+    /// The button under those that starts a region: lit while one is being
+    /// asked for or is on screen, and a press while it is lit takes the
+    /// region off — see [`Selection`].
+    Region,
     Histogram,
     Info,
     Grid,
@@ -100,6 +106,7 @@ impl Control {
             Control::Minimap => "Minimap".to_string(),
             Control::Copy => "Copy".to_string(),
             Control::Paste => "Paste".to_string(),
+            Control::Region => "Region".to_string(),
             Control::Histogram => "Histogram".to_string(),
             Control::Info => "Information".to_string(),
             Control::Grid => "Grid".to_string(),
@@ -150,6 +157,59 @@ pub enum Command {
     /// Whether the pointer was over the picture with nothing of the
     /// interface between, which is what the bar's pixel readout asks.
     OverImage(bool),
+    /// A drag on the picture began that is the region's rather than the
+    /// view's: a new region while one was being asked for, or a hold on the
+    /// one on screen. `at` is where the button went down, in image pixels —
+    /// the press, not wherever the pointer had got to by the time the
+    /// toolkit decided it was a drag.
+    Grab { grab: Grab, at: [f32; 2] },
+    /// Where the hand is now, in image pixels, on each frame of that drag.
+    /// Carried here because the application's own pointer stops moving
+    /// while the toolkit holds a drag.
+    Pull([f32; 2]),
+    /// That drag ended: the button came up, or the toolkit let go of it.
+    Release,
+    /// Which handle of the region the pointer is resting on, said on every
+    /// pass a region is on screen, for the keys that move one.
+    OverGrip(Option<Grip>),
+}
+
+/// What a region on the picture is in: nothing, waiting for the drag that
+/// draws one, or drawn.
+///
+/// The interface reads it — the button is lit for the last two, the drag
+/// means something different in each — and the application holds it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Selection {
+    #[default]
+    Off,
+    /// Asked for, and the next drag on the picture draws it.
+    Armed,
+    Shown(Region),
+}
+
+impl Selection {
+    /// The region on screen, if there is one.
+    pub fn region(self) -> Option<Region> {
+        match self {
+            Selection::Shown(region) => Some(region),
+            Selection::Off | Selection::Armed => None,
+        }
+    }
+
+    /// Whether the button is lit: a region asked for or drawn.
+    pub fn is_on(self) -> bool {
+        self != Selection::Off
+    }
+}
+
+/// What a drag on the picture has hold of, when it is the region's.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Grab {
+    /// Drawing a new region from the press outward.
+    New,
+    /// A handle of the region on screen, or the whole of it.
+    Handle(Grip),
 }
 
 /// The words the application has for the interface: what a thing is called

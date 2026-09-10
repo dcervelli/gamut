@@ -290,6 +290,82 @@ stays in the strip either way: a control that is sometimes there is a control
 that has to be found again.
 
 
+## The region
+
+A region is a `Region` in `src/image/region.rs`: a rectangle of whole image
+pixels, half-open, never smaller than one. It lives in image pixels because
+it is about the file — the pixels copied out of it are the same pixels at
+any zoom — and in the data model because that is what it is a rectangle of;
+`image::encode::displayed` takes one and walks only what it holds, so a copy
+of a selection is a crop of the copy of the whole and cannot come out
+rendered differently. Every change to one is a pure function there — drawn
+from two corners, moved, pulled by a handle, grown, nudged — each clamped to
+the image, and each tested on its own with no interface in the way.
+
+What the application holds is a `Selection` — off, asked for, or drawn —
+and, during a drag, a `Grabbing`: what was taken hold of, the region as it
+stood at the press, and where the press was in image pixels. Every frame of
+the drag remakes the region from those three and the hand's place, rather
+than from the frame before, so a drag that goes off the picture and comes
+back has nothing accumulated in it. The interface reads all of this from
+`FrameInput` and never writes it: what it hands back is `Command::Grab`,
+`Pull` and `Release`, and `App::act` does the rest.
+
+The drag is classified where the button went down, not where the pointer is
+when the toolkit calls it a drag. egui defers the decision until the pointer
+has moved six points or the button has been held most of a second, and by
+then the pointer is off the press — so `Pass::region_gestures` reads
+`press_origin` and tests that against the handles. With a region asked for,
+any drag draws one; with a region on screen, a drag from a handle pulls it
+and a drag from inside moves it; a drag from anywhere else is the view's, as
+it always was, which is what keeps a picture navigable under a region
+larger than the window. The hand's place goes back to the application in
+image pixels on every frame of the drag, through the same placement the
+bar's readout uses, because the application's own pointer stands still for
+the duration: egui consumes the pointer events of a drag it holds, and
+`App::window_event` does not update `Pointer::cursor` for a consumed event.
+The drag ends when egui says the response is no longer dragged, which covers
+the button coming up and Escape aborting the drag alike; a release the
+application never heard about would leave it holding a drag that was over.
+
+The region is painted in `src/ui/region.rs` on the picture's own painter,
+under the floating panels, rather than in an area of its own: an area takes
+the pointer from what is under it, and the picture's response is what the
+drag on a handle is read off. The eight handles are placed on the device's
+grid through `icon::Grid`, like every other thin thing over the picture, and
+hit-tested with a little reach past their edges; a corner is asked before
+the edges it overlaps on a region drawn small, since it moves two edges
+where they move one. Which handle the pointer rests on goes back each pass
+as `Command::OverGrip`, a pass late like `OverImage`, and that is what the
+arrows consult: with the pointer on a handle they move the handle a pixel,
+and otherwise the region. An arrow along an edge — Up on the right edge's
+handle — moves the region rather than doing nothing, so no key is dead while
+a region is up. `Ctrl` with an arrow grows that side. None of it is animated:
+a region moves a pixel at a time, and a pixel has nothing to animate.
+
+The size is written at the region's middle for a second after it changes —
+`dimensions_until` on `App`, on the same deadline clock as the message about
+a copy — and at the middle of the part of the region that is on screen,
+since a region larger than the window has its middle wherever it has it and
+words written off screen are words nobody reads. It says the size and not the
+position because the size is the thing a drag is judged by; the position is
+where the outline is.
+
+`Space` fits the region through `View::fit_region`, which sets the zoom the
+region's own size asks for and centers it, and leaves the view out of fit
+mode: a fit is a zoom the viewport decides for the whole picture, and this is
+one chosen for part of it, so it is held as `1`..`5` are held and does not
+follow the window. Which of the two fits comes next is `App::region_fit`,
+kept apart from the view for the same reason.
+
+`Esc` takes the region off after a message and before quitting: a message is
+about what was just done, the region is what was being done to, and the one
+that stops being news first goes first. Stepping to another file takes it
+off, and so does the file coming back a different size — the pixels it
+marked out are no longer the pixels — while a reload at the same size keeps
+it, being the same picture read again. The key is `x` rather than `k`, which
+the histogram's planes toggle already holds in the j/k/l run.
+
 ## Layers and the pointer
 
 The window is a stack, and egui keeps it: the picture at the bottom, laid out

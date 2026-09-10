@@ -25,6 +25,16 @@ Notable changes to `gamut`. The format follows
 
 ### Added
 
+- A region of the picture can be selected and copied. `x`, or the button
+  under the copy button, asks for one; the next drag on the picture draws
+  it, in the image's own pixels, and it stays up with eight handles to pull.
+  Dragging inside it moves it, dragging anywhere else pans as before. The
+  arrows move it a pixel — or the handle the pointer is resting on — and
+  `Ctrl` with an arrow grows it that way; its size is written at its middle
+  for a moment after it changes. `Space` fits the region to the window
+  instead of the picture, and `Ctrl+C` and the copy menu copy the region
+  instead of the whole. `x` again, or `Esc`, takes it off, and so does
+  stepping to another file.
 - JPEG XL (`.jxl`) opens: both the lossy and the lossless halves of the
   format, in either the bare codestream or the container. The color space is
   read from the file's own statement of it, HDR included, or from an ICC

@@ -378,6 +378,30 @@ pub(super) const COPY: &[Mark] = &[
     },
 ];
 
+/// Lucide's `crop`: two right angles overlapping, each a corner of the
+/// rectangle they mark out between them — the button that starts a region.
+///
+/// Each is a straight run, a quarter turn, and another straight run, drawn
+/// as Lucide draws them: the corner is rounded, not mitered.
+pub(super) const CROP: &[Mark] = &[
+    Mark::Line([6.0, 2.0], [6.0, 16.0]),
+    Mark::Arc {
+        at: [8.0, 16.0],
+        radius: 2.0,
+        start: 180.0,
+        sweep: -90.0,
+    },
+    Mark::Line([8.0, 18.0], [22.0, 18.0]),
+    Mark::Line([18.0, 22.0], [18.0, 8.0]),
+    Mark::Arc {
+        at: [16.0, 8.0],
+        radius: 2.0,
+        start: 0.0,
+        sweep: -90.0,
+    },
+    Mark::Line([16.0, 6.0], [2.0, 6.0]),
+];
+
 /// Lucide's `x`: the cross that takes a thing off the screen. Its two strokes
 /// cross at the middle of the grid and reach the same distance into each
 /// corner, so it stays square however the square it is fitted into rounds.
@@ -718,12 +742,13 @@ mod tests {
 
     /// Every icon in the table, so that a new one is held to the same
     /// promises as the rest.
-    const ICONS: [&[Mark]; 11] = [
+    const ICONS: [&[Mark]; 12] = [
         CHART_AREA,
         INFO,
         SQUARE_SQUARE,
         GRID_3X3,
         COPY,
+        CROP,
         EXPAND,
         MAXIMIZE_2,
         CHEVRONS_LEFT_RIGHT,

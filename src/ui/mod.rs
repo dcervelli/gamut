@@ -20,6 +20,7 @@ pub mod histogram;
 mod icon;
 pub mod pixel;
 mod rect;
+pub mod region;
 mod status;
 pub mod style;
 
@@ -38,7 +39,7 @@ use crate::render::Backdrop;
 use crate::theme::Theme;
 use crate::view::{View, Viewport};
 
-pub use control::{Command, Control, Naming};
+pub use control::{Command, Control, Grab, Naming, Selection};
 pub use info::FileFacts;
 pub use pixel::PixelFormat;
 pub use rect::Rect;
@@ -219,6 +220,17 @@ pub struct FrameInput {
     /// the application's [`toast::Toasts`]: what a frame draws is what had
     /// settled when it was asked for.
     pub toast: Option<Toast>,
+    /// The region on the picture: off, asked for, or drawn. What the button
+    /// for it is lit by, what is painted over the picture, and what a drag
+    /// on the picture means.
+    pub selection: Selection,
+    /// The hold a drag under way has on the region, while it is the
+    /// region's drag rather than the view's: said back to the interface so
+    /// that the frames of one drag all go the same way.
+    pub grabbing: Option<Grab>,
+    /// Whether the region's size is written at its middle this frame: for a
+    /// moment after the size changes, and not after that.
+    pub dimensions_shown: bool,
 }
 
 /// One pass of the interface: the chrome and everything on it, laid out in
@@ -271,7 +283,10 @@ impl Pass<'_> {
             })
             .inner;
         let scale = self.input.scale;
-        if response.dragged_by(egui::PointerButton::Primary) {
+        // The region's share of the gestures first: a drag that is the
+        // region's is not the view's.
+        let grabbed = self.region_gestures(ui, &response);
+        if grabbed.is_none() && response.dragged_by(egui::PointerButton::Primary) {
             let delta = response.drag_delta();
             if delta != egui::Vec2::ZERO {
                 self.commands
@@ -312,11 +327,93 @@ impl Pass<'_> {
         }
     }
 
+    /// The region's reading of the picture's response, and the hold a drag
+    /// has on it, if any: `Some` while the drag is the region's, in which
+    /// case the view does not pan.
+    ///
+    /// A drag is decided where the button went down — `press_origin`, not
+    /// the pointer's position on the frame the toolkit called it a drag,
+    /// which is already some points away — and what it is depends on the
+    /// selection: with one asked for, any drag draws a new region; with one
+    /// on screen, a drag from a handle or from inside it takes hold of that;
+    /// anywhere else it is the view's, as it always was. The hand's place
+    /// goes back in image pixels each frame, through the same placement the
+    /// bar's readout uses, since the application's own pointer stands still
+    /// while the toolkit holds a drag. Which handle the pointer rests on is
+    /// said every pass a region is up, for the keys that move one.
+    fn region_gestures(&mut self, ui: &egui::Ui, response: &egui::Response) -> Option<Grab> {
+        let scale = self.input.scale;
+        let placement = self
+            .view
+            .placement(self.current?.size(), self.input.viewport);
+        let image_point = |pos: egui::Pos2| placement.image_point([pos.x * scale, pos.y * scale]);
+        let grid = icon::Grid::new(ui.pixels_per_point());
+        let handles = self.input.selection.region().map(|region| {
+            let rect = region::rect(region, placement, scale);
+            (rect, region::handles(rect, grid))
+        });
+        let grip_under = |pos: egui::Pos2| {
+            handles
+                .as_ref()
+                .and_then(|(rect, handles)| region::grip_at(*rect, handles, [pos.x, pos.y]))
+        };
+
+        let mut grabbed = self.input.grabbing;
+        if response.drag_started_by(egui::PointerButton::Primary)
+            && let Some(origin) = ui.input(|input| input.pointer.press_origin())
+        {
+            let grab = match self.input.selection {
+                Selection::Armed => Some(Grab::New),
+                Selection::Shown(_) => grip_under(origin).map(Grab::Handle),
+                Selection::Off => None,
+            };
+            if let Some(grab) = grab {
+                self.commands.push(Command::Grab {
+                    grab,
+                    at: image_point(origin),
+                });
+                grabbed = Some(grab);
+            }
+        }
+        if let Some(grab) = grabbed {
+            if response.dragged_by(egui::PointerButton::Primary)
+                && let Some(pos) = response.interact_pointer_pos()
+            {
+                self.commands.push(Command::Pull(image_point(pos)));
+            }
+            // Over when the toolkit is no longer dragging, however that came
+            // about: the button up, or Escape taking the drag off it.
+            if !response.dragged() {
+                self.commands.push(Command::Release);
+                grabbed = None;
+            } else {
+                ui.ctx().set_cursor_icon(region::cursor(grab));
+            }
+        }
+        if handles.is_some() {
+            let over = response.hover_pos().and_then(grip_under);
+            self.commands.push(Command::OverGrip(over));
+            if grabbed.is_none()
+                && let Some(grip) = over
+            {
+                ui.ctx().set_cursor_icon(region::cursor(Grab::Handle(grip)));
+            }
+        }
+        if grabbed.is_none()
+            && self.input.selection == Selection::Armed
+            && response.contains_pointer()
+        {
+            ui.ctx().set_cursor_icon(region::cursor(Grab::New));
+        }
+        grabbed
+    }
+
     /// What floats over the picture, in the order it is stacked: the grid
-    /// under everything, then the minimap, then the message about what was
-    /// just done — over the panels rather than among them, and there whether
-    /// or not the bars are, since what it says does not stop being true
-    /// because they are away.
+    /// under everything, then the region marked out on the picture, then
+    /// the minimap, then the message about what was just done — over the
+    /// panels rather than among them, and there whether or not the bars
+    /// are, since what it says does not stop being true because they are
+    /// away.
     fn overlays(&mut self, ui: &mut egui::Ui, current: &Current, content: Rect) {
         let zoom = self.view.zoom(current.size(), self.input.viewport);
         // Under the floating panels, which are read against the image and
@@ -339,6 +436,9 @@ impl Pass<'_> {
                 self.theme,
             );
         }
+        // Under the panels, like the grid: the region marks up the picture,
+        // and a panel over the picture is over the region too.
+        region::show(self, ui, current, content);
         if self.input.minimap_on_screen {
             minimap::show(self, ui, current, content);
         }
@@ -408,6 +508,45 @@ pub fn room(content: Rect, panels: &Panels) -> Room {
         histogram: histogram::panel(content).is_some(),
         info: info::panel(content, panels.show_histogram).is_some(),
     }
+}
+
+/// A rectangle drawn as four edges, so that what is behind it — the
+/// thumbnail under the minimap's border, the picture inside a region — stays
+/// visible. Four snapped lines, so that an outline is the same weight as
+/// itself wherever on the device's grid it lands, and the two down the sides
+/// stop where the two across meet them, so a translucent color is not laid
+/// twice at the corners.
+fn outline(
+    painter: &egui::Painter,
+    grid: icon::Grid,
+    rect: Rect,
+    thickness: f32,
+    color: egui::Color32,
+) {
+    if rect.width <= 0.0 || rect.height <= 0.0 {
+        return;
+    }
+    let edge = grid.line_width(thickness);
+    let middle = (rect.height - 2.0 * edge).max(0.0);
+    let fill = |piece: Rect| {
+        let x = grid.snap(piece.x);
+        let y = grid.snap(piece.y);
+        painter.rect_filled(
+            egui::Rect::from_min_size(
+                egui::pos2(x, y),
+                egui::vec2(
+                    (grid.snap(piece.right()) - x).max(edge),
+                    (grid.snap(piece.bottom()) - y).max(edge),
+                ),
+            ),
+            0.0,
+            color,
+        );
+    };
+    fill(Rect::new(rect.x, rect.y, rect.width, edge));
+    fill(Rect::new(rect.x, rect.bottom() - edge, rect.width, edge));
+    fill(Rect::new(rect.x, rect.y + edge, edge, middle));
+    fill(Rect::new(rect.right() - edge, rect.y + edge, edge, middle));
 }
 
 /// What the compositor paints behind the image: the panel color, with the
