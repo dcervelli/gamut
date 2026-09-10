@@ -61,6 +61,15 @@ pub struct Tooltip {
 /// sentence rather than as a label because it is a reason and not a name.
 pub const NO_ROOM: &str = "Disabled because display is too small.";
 
+/// What the open button says where nothing on the desktop offers to open the
+/// file on screen.
+///
+/// A sentence rather than a name, for the same reason as [`NO_ROOM`]: the
+/// button is drawn dead and the press is refused, so what it owes the reader
+/// is the reason. Said of this file rather than of the desktop, since the
+/// next file along may well have somewhere to go.
+pub const NOTHING_OPENS_IT: &str = "No other application offers to open this file.";
+
 /// What the surface switch says on a monitor that is not in HDR mode, and
 /// under it the one thing that would change the answer.
 ///
@@ -104,12 +113,13 @@ pub struct Refused {
 }
 
 /// Why `tip` is drawn dead, and `None` for anything taking presses — the two
-/// toggles in a window with room for what they open, and the surface switch
-/// on a monitor with room above white.
+/// toggles in a window with room for what they open, the surface switch on a
+/// monitor with room above white, and the open button where `openable` says
+/// something out there offers to open the file.
 ///
 /// Asked before a tooltip is composed out of the key table, since what a dead
 /// control owes the reader is the reason and not the binding.
-pub fn disabled(tip: Tip, room: Room, hdr: Hdr) -> Option<Refused> {
+pub fn disabled(tip: Tip, room: Room, hdr: Hdr, openable: bool) -> Option<Refused> {
     let no_room = match tip {
         Tip::Control(Control::Histogram) => !room.histogram,
         Tip::Control(Control::Info) => !room.info,
@@ -118,6 +128,12 @@ pub fn disabled(tip: Tip, room: Room, hdr: Hdr) -> Option<Refused> {
     if no_room {
         return Some(Refused {
             said: NO_ROOM,
+            hint: None,
+        });
+    }
+    if tip == Tip::Control(Control::OpenWith) && !openable {
+        return Some(Refused {
+            said: NOTHING_OPENS_IT,
             hint: None,
         });
     }
@@ -156,6 +172,10 @@ pub fn words(tip: Tip) -> Option<String> {
         // these copies takes, in a sentence, and saying it twice is saying
         // it in two places that can drift apart.
         Tip::Control(Control::Copies(_)) => return None,
+        // Nor these: an item of the open menu wears the name of the program
+        // it hands the file to, and there is nothing an interface that has
+        // never heard of that program could add to it.
+        Tip::Control(Control::OpenIn(_)) => return None,
         _ => {}
     }
     // The exposure's two steps say what they are worth, the buttons carrying
@@ -175,6 +195,9 @@ pub fn words(tip: Tip) -> Option<String> {
             // No one key opens it — every cell of it has a key of its own —
             // so the button says what the menu is of.
             Tip::Control(Control::Copy) => "Copy the file or the image",
+            // The same: no key opens it, and what is on it is whatever the
+            // desktop has installed rather than anything this program binds.
+            Tip::Control(Control::OpenWith) => "Open the file in another application",
             Tip::Control(Control::Paste) => "Paste an image",
             // No one key does this and only this — Escape dismisses whatever
             // is up, a menu first — so the cross names itself.
@@ -263,29 +286,29 @@ mod tests {
         });
 
         assert_eq!(
-            disabled(Tip::Control(Control::Histogram), none, Hdr::Available),
+            disabled(Tip::Control(Control::Histogram), none, Hdr::Available, true),
             no_room
         );
         assert_eq!(
-            disabled(Tip::Control(Control::Info), none, Hdr::Available),
+            disabled(Tip::Control(Control::Info), none, Hdr::Available, true),
             no_room
         );
         assert_eq!(
-            disabled(Tip::Control(Control::Histogram), all, Hdr::Available),
+            disabled(Tip::Control(Control::Histogram), all, Hdr::Available, true),
             None
         );
         assert_eq!(
-            disabled(Tip::Control(Control::Info), all, Hdr::Available),
+            disabled(Tip::Control(Control::Info), all, Hdr::Available, true),
             None
         );
 
         // Only those two: nothing else on the interface has a panel to make
         // room for, so nothing else goes dead when the window is small.
         assert_eq!(
-            disabled(Tip::Control(Control::Minimap), none, Hdr::Available),
+            disabled(Tip::Control(Control::Minimap), none, Hdr::Available, true),
             None
         );
-        assert_eq!(disabled(Tip::Name, none, Hdr::Available), None);
+        assert_eq!(disabled(Tip::Name, none, Hdr::Available, true), None);
 
         // And one at a time, the way the room itself comes out: a window with
         // height for the column but not for the plot above it.
@@ -294,11 +317,16 @@ mod tests {
             info: true,
         };
         assert_eq!(
-            disabled(Tip::Control(Control::Histogram), column, Hdr::Available),
+            disabled(
+                Tip::Control(Control::Histogram),
+                column,
+                Hdr::Available,
+                true
+            ),
             no_room
         );
         assert_eq!(
-            disabled(Tip::Control(Control::Info), column, Hdr::Available),
+            disabled(Tip::Control(Control::Info), column, Hdr::Available, true),
             None
         );
     }
@@ -315,16 +343,16 @@ mod tests {
         };
         let switch = Tip::Control(Control::Output);
 
-        assert_eq!(disabled(switch, all, Hdr::Available), None);
+        assert_eq!(disabled(switch, all, Hdr::Available, true), None);
         assert_eq!(
-            disabled(switch, all, Hdr::NotInHdrMode),
+            disabled(switch, all, Hdr::NotInHdrMode, true),
             Some(Refused {
                 said: NOT_HDR_MODE,
                 hint: Some(REQUEST_HDR_MODE),
             })
         );
         assert_eq!(
-            disabled(switch, all, Hdr::Unsupported),
+            disabled(switch, all, Hdr::Unsupported, true),
             Some(Refused {
                 said: NO_HDR_OUTPUT,
                 hint: None,
@@ -337,6 +365,40 @@ mod tests {
             histogram: false,
             info: false,
         };
-        assert_eq!(disabled(switch, none, Hdr::Available), None);
+        assert_eq!(disabled(switch, none, Hdr::Available, true), None);
+    }
+
+    /// The open button says that this file has nowhere to go, and says it
+    /// only while that is true and only of itself: the file on screen is what
+    /// the answer is about, and every other control on the interface is
+    /// unaffected by it.
+    #[test]
+    fn the_open_button_says_when_nothing_can_open_the_file() {
+        let all = Room {
+            histogram: true,
+            info: true,
+        };
+        let button = Tip::Control(Control::OpenWith);
+
+        assert_eq!(disabled(button, all, Hdr::Available, true), None);
+        assert_eq!(
+            disabled(button, all, Hdr::Available, false),
+            Some(Refused {
+                said: NOTHING_OPENS_IT,
+                hint: None,
+            })
+        );
+
+        // Nothing else goes dead with it, the copy button beside it least of
+        // all: what it takes is the picture, which is here whatever the
+        // desktop has installed.
+        assert_eq!(
+            disabled(Tip::Control(Control::Copy), all, Hdr::Available, false),
+            None
+        );
+        assert_eq!(
+            disabled(Tip::Control(Control::Paste), all, Hdr::Available, false),
+            None
+        );
     }
 }

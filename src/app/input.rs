@@ -16,6 +16,7 @@ use crate::clipboard;
 use crate::image::display::{AutoWindow, Colormap, Startup, ToneMap};
 use crate::image::encode;
 use crate::loader::Source;
+use crate::openers;
 use crate::pasted;
 use crate::timing;
 use crate::ui::histogram;
@@ -800,6 +801,9 @@ pub(super) struct Namer {
     room: Room,
     /// Whether the surface switch has anything to switch.
     hdr: Hdr,
+    /// Whether anything out there offers to open the file on screen, which
+    /// is what makes the open button dead.
+    openable: bool,
     /// The absolute path of the file on screen, for the tooltip on its name.
     path: String,
     /// Which file is on screen, out of how many.
@@ -825,7 +829,7 @@ impl Naming for Namer {
         // the surface switch on a monitor with no room above white — refuses
         // the press, so the label says why rather than naming the thing and
         // the key beside it, neither of which is going to happen.
-        if let Some(refused) = ui::tooltip::disabled(at, self.room, self.hdr) {
+        if let Some(refused) = ui::tooltip::disabled(at, self.room, self.hdr, self.openable) {
             return Some(ui::Tooltip {
                 title: vec![refused.said.to_string()],
                 hints: refused.hint.map(str::to_string).into_iter().collect(),
@@ -1204,6 +1208,7 @@ impl App {
         Namer {
             room: self.room(),
             hdr: self.hdr_state(),
+            openable: !self.openers.is_empty(),
             path: self.shown_path().display().to_string(),
             index: self.files.index(),
             count: self.files.len(),
@@ -1363,6 +1368,34 @@ impl App {
         }));
     }
 
+    /// Hands the file on screen to the program at `index` of the open menu.
+    ///
+    /// The file as it is on disk, not the picture as it is being shown: what
+    /// is being asked for is another program's reading of the same file, and
+    /// a copy with this window's exposure baked into it would be the one
+    /// thing that could not answer. The display settings stay here, which is
+    /// also why nothing has to be written out first.
+    ///
+    /// Out of range is not a failure: the list is the file's, and a menu left
+    /// open across a file arriving is a menu of the file that has gone.
+    fn open_in(&mut self, index: usize) {
+        let Some(opener) = self.openers.get(index) else {
+            return;
+        };
+        let name = opener.name.clone();
+        let path = self.shown_path();
+        match openers::open(opener, &path) {
+            // What was asked for and not what has happened: the program has
+            // been started, and how long it takes to put a window up is its
+            // own business.
+            Ok(()) => self.toast(format!("Opening in {name}."), Level::Message),
+            Err(error) => {
+                report(&error);
+                self.toast(briefly(&error), Level::Error);
+            }
+        }
+    }
+
     /// Writes the picture on the clipboard to a file of its own and shows it.
     ///
     /// A file and not just pixels: a paste comes from somewhere with no file
@@ -1481,9 +1514,12 @@ impl App {
                     self.panels.show_info = !self.panels.show_info;
                 }
             }
-            // The three buttons that open a menu: the menu is egui's, and
+            // The four buttons that open a menu: the menu is egui's, and
             // opens itself on the press, so there is nothing here to do.
-            Control::Zoom | Control::PixelFormat | Control::Copy => {}
+            Control::Zoom | Control::PixelFormat | Control::Copy | Control::OpenWith => {}
+            // An item of the open menu, by its place in the list the same
+            // frame was drawn from.
+            Control::OpenIn(index) => self.open_in(index),
             // The action the key runs, as with the reset below: the button
             // is on screen because the clipboard was holding a picture at the
             // last look, and the paste asks it again rather than trusting
@@ -1880,6 +1916,7 @@ mod tests {
                 info: true,
             },
             hdr: Hdr::Available,
+            openable: true,
             path: String::new(),
             index: 0,
             count: 1,

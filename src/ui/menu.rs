@@ -1,8 +1,8 @@
 //! Popup menus: what is on each, and how its cells are drawn. Where a popup
 //! goes and how it is dismissed are egui's.
 //!
-//! Three of them, one open at a time: a second would have to say which of
-//! the two a press outside dismisses. Adding another is a set of choices, a
+//! Four of them, one open at a time: a second would have to say which of the
+//! two a press outside dismisses. Adding another is a set of choices, a
 //! function that lays them out, and the button in the chrome that opens it.
 
 use egui::{Button, RichText, Sense, Ui, Vec2, WidgetInfo, WidgetType, vec2};
@@ -308,6 +308,36 @@ pub(super) fn copy_items(pass: &mut Pass, ui: &mut Ui) {
             button = button.shortcut_text(key);
         }
         let response = ui.add(button);
+        let response = pass.tooltip(response, Tip::Control(control), true);
+        if response.clicked() {
+            pass.press(control);
+        }
+    }
+}
+
+/// The menu of other programs: one item for each application the desktop
+/// says can open a file of this kind, wearing the name that application
+/// calls itself by.
+///
+/// No key beside any of them, unlike the menu of copies above: what is on
+/// this menu is whatever the desktop has installed, and there is nothing for
+/// a key table to have bound. An item is asked for by its place in the list
+/// rather than by name — the application is the one that knows what each one
+/// runs.
+pub(super) fn open_items(pass: &mut Pass, ui: &mut Ui) {
+    // Each item is sized to the name on it, rather than the name being
+    // fitted into whatever width the popup opened at. The zoom and format
+    // menus are laid out from cells of a size this file chose, and the menu
+    // of copies prints a key after every item, which is what gives that one
+    // its width; this one is a list of words nobody here chose the length of,
+    // and left to wrap they come out a letter to a line in a column as narrow
+    // as the button that opened it. How long a name may be is
+    // `openers::MAX_NAME`.
+    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+    let openers = pass.input.openers.as_slice();
+    for (index, name) in openers.iter().enumerate() {
+        let control = Control::OpenIn(index);
+        let response = ui.add(Button::new(name));
         let response = pass.tooltip(response, Tip::Control(control), true);
         if response.clicked() {
             pass.press(control);

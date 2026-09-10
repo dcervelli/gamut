@@ -28,6 +28,12 @@ pub enum Control {
     /// The button that opens the menu of copies, at the top of the left
     /// strip.
     Copy,
+    /// The button under it, which opens the menu of the other programs that
+    /// can open this file. Drawn dead where nothing offers to — see
+    /// [`FrameInput::openers`](super::FrameInput::openers).
+    OpenWith,
+    /// An item of that menu, by its place in that list.
+    OpenIn(usize),
     /// The button that pastes the picture on the clipboard. On screen only
     /// while there is one — see [`Panels::paste`](super::Panels::paste).
     Paste,
@@ -99,6 +105,8 @@ impl Control {
             Control::Next => "Next file".to_string(),
             Control::Minimap => "Minimap".to_string(),
             Control::Copy => "Copy".to_string(),
+            Control::OpenWith => "Open with".to_string(),
+            Control::OpenIn(index) => format!("Open in application {index}"),
             Control::Paste => "Paste".to_string(),
             Control::Histogram => "Histogram".to_string(),
             Control::Info => "Information".to_string(),

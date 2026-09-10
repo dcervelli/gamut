@@ -98,6 +98,7 @@ fn input(logical: [f32; 2], count: usize) -> FrameInput {
         headroom: Headroom::None,
         hdr_available: false,
         can_pan: false,
+        openers: Vec::new(),
         toast: None,
     }
 }
@@ -280,6 +281,40 @@ fn the_copy_menu_offers_every_copy() {
     harness.run();
     assert!(
         harness.query_by_label("Path").is_none(),
+        "the menu closes on the press"
+    );
+}
+
+/// The open button offers whatever the desktop says can open this file, and
+/// an item of it asks for that program by its place in the list. With
+/// nothing offering, the button is dead rather than opening an empty menu.
+#[test]
+fn the_open_menu_offers_the_applications_that_can_open_the_file() {
+    let mut harness = open(WINDOW, 1, panels());
+    assert!(
+        harness
+            .get_by_label("Open with")
+            .accesskit_node()
+            .is_disabled()
+    );
+    assert_eq!(click(&mut harness, "Open with"), []);
+
+    harness.state_mut().input.openers = vec!["Pinta".to_string(), "Darktable".to_string()];
+    harness.run();
+    assert!(
+        !harness
+            .get_by_label("Open with")
+            .accesskit_node()
+            .is_disabled()
+    );
+    assert_eq!(click(&mut harness, "Open with"), []);
+    assert_eq!(
+        click(&mut harness, "Darktable"),
+        [Command::Press(Control::OpenIn(1))]
+    );
+    harness.run();
+    assert!(
+        harness.query_by_label("Darktable").is_none(),
         "the menu closes on the press"
     );
 }

@@ -463,11 +463,43 @@ impl Pass<'_> {
             .show(|ui| menu::pixel_cells(self, ui));
     }
 
-    /// The left strip: the copy button, the paste button under it while the
-    /// clipboard holds a picture, and the minimap toggle up from the foot —
-    /// in the corner the minimap itself goes in, and clear of the column
-    /// coming down. A window too short for both ends drops the toggle at the
-    /// foot rather than standing it on the column.
+    /// The button that opens the menu of everything else that can open this
+    /// file. Lit while that menu is open, as the copy button above it is.
+    ///
+    /// Drawn dead where nothing offers to open it — an unusual format, or a
+    /// desktop with nothing installed that reads this one — rather than left
+    /// out: a button that comes and goes with the file on screen is a button
+    /// that has to be found again, and the label on the dead one says why it
+    /// is dead where a missing one could say nothing at all. The paste button
+    /// below is the other way round for the other reason: what it does is not
+    /// about the file at all, and there is nothing for it to explain.
+    fn open_button(&mut self, ui: &mut Ui) {
+        let id = egui::Id::new("open menu");
+        let open = egui::Popup::is_id_open(ui.ctx(), id);
+        let enabled = !self.input.openers.is_empty();
+        let button = self.icon_button(
+            ui,
+            icon::EXTERNAL_LINK,
+            Control::OpenWith,
+            open,
+            enabled,
+            Corners::All,
+        );
+        egui::Popup::menu(&button)
+            .id(id)
+            .align(egui::RectAlign::RIGHT_START)
+            .gap(PADDING)
+            .show(|ui| menu::open_items(self, ui));
+    }
+
+    /// The left strip: the copy button, the open button under it, the paste
+    /// button under that while the clipboard holds a picture, and the minimap
+    /// toggle up from the foot — in the corner the minimap itself goes in,
+    /// and clear of the column coming down. A window too short for both ends
+    /// drops the toggle at the foot rather than standing it on the column.
+    ///
+    /// The two menu buttons are together at the head of the column because
+    /// they are the same gesture: this file, handed to something else.
     fn left_strip(&mut self, ui: &mut Ui) {
         ui.spacing_mut().item_spacing = Vec2::ZERO;
         let height = ui.available_height();
@@ -483,6 +515,8 @@ impl Pass<'_> {
                 .align(egui::RectAlign::RIGHT_START)
                 .gap(PADDING)
                 .show(|ui| menu::copy_items(self, ui));
+            ui.add_space(BUTTON_GAP);
+            self.open_button(ui);
             if self.panels.paste {
                 ui.add_space(BUTTON_GAP);
                 let paste = self.icon_button(
@@ -501,7 +535,7 @@ impl Pass<'_> {
         // The room the column above keeps, whether or not the paste button
         // is on screen, so the toggle at the foot stays put as the clipboard
         // changes.
-        let taken = BAR_PADDING + 2.0 * (BUTTON_SIZE + BUTTON_GAP);
+        let taken = BAR_PADDING + 3.0 * (BUTTON_SIZE + BUTTON_GAP);
         if taken + BUTTON_SIZE + BAR_PADDING > height {
             return;
         }
