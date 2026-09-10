@@ -15,6 +15,7 @@ use super::App;
 use crate::clipboard;
 use crate::image::display::{AutoWindow, Colormap, Startup, ToneMap};
 use crate::image::encode;
+use crate::image::region::{Grip, Region, Side};
 use crate::loader::Source;
 use crate::pasted;
 use crate::timing;
@@ -23,7 +24,7 @@ use crate::ui::info::Copyable;
 use crate::ui::menu::{Copies, ZoomChoice};
 use crate::ui::toast::Level;
 use crate::ui::tooltip::Hdr;
-use crate::ui::{self, Control, Current, Naming, Room, Tip};
+use crate::ui::{self, Control, Current, Grab, Naming, Room, Selection, Tip};
 
 /// Window pixels moved per arrow-key press. Shift moves one pixel instead,
 /// for placing a view exactly, and Ctrl goes as far as the image does.
@@ -106,6 +107,11 @@ pub enum Action {
     CopyPixelValue,
     /// Put that pixel's coordinate on the clipboard, as `x,y`.
     CopyPixelCoordinate,
+    /// Ask for a region of the picture — the next drag on it draws one —
+    /// or, with one asked for or drawn, take it off. While a region is on
+    /// screen the arrows move it, `Space` fits it, and the copy of the
+    /// picture is a copy of it: see `App::perform_on_region`.
+    ToggleRegion,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -124,6 +130,23 @@ impl Direction {
             Direction::Right => [1.0, 0.0],
             Direction::Up => [0.0, -1.0],
             Direction::Down => [0.0, 1.0],
+        }
+    }
+
+    /// The same, as the whole pixels a region is moved in.
+    fn step(self) -> [i64; 2] {
+        let sign = self.sign();
+        [sign[0] as i64, sign[1] as i64]
+    }
+
+    /// The edge of a region that lies this way, which is the one that grows
+    /// when the region is grown this way.
+    fn side(self) -> Side {
+        match self {
+            Direction::Left => Side::Left,
+            Direction::Right => Side::Right,
+            Direction::Up => Side::Top,
+            Direction::Down => Side::Bottom,
         }
     }
 }
@@ -318,6 +341,7 @@ fn action_of(tip: Tip) -> Option<Action> {
         Tip::Control(Control::Maximize) => ToggleInterface,
         Tip::Control(Control::Output) => ToggleHdr,
         Tip::Control(Control::Paste) => Action::Paste,
+        Tip::Control(Control::Region) => ToggleRegion,
         // The dot at the head of the pixel readout, which the key steps
         // through exactly as a press on one of its cells chooses.
         Tip::Control(Control::PixelFormat) => CyclePixelFormat,
@@ -487,7 +511,7 @@ pub const KEYS: &[Binding] = &[
         section: Section::Zoom,
         mods: PLAIN,
         shown: "Space",
-        help: "Toggle fit between the whole image and filling the window",
+        help: "Toggle fit between the whole image and filling the window, or of the region",
         keys: &[(Named(NamedKey::Space), ToggleFit)],
     },
     Binding {
@@ -501,7 +525,7 @@ pub const KEYS: &[Binding] = &[
         section: Section::Zoom,
         mods: PLAIN,
         shown: "Arrows",
-        help: "Pan by 64 pixels",
+        help: "Pan by 64 pixels; move a region, or the handle under the pointer, a pixel",
         keys: &[
             (Named(NamedKey::ArrowLeft), Pan(Left, Coarse)),
             (Named(NamedKey::ArrowRight), Pan(Right, Coarse)),
@@ -528,7 +552,7 @@ pub const KEYS: &[Binding] = &[
         section: Section::Zoom,
         mods: CTRL,
         shown: "Ctrl+Arrows",
-        help: "Pan to the far side of the image",
+        help: "Pan to the far side of the image; grow a region that way a pixel",
         keys: &[
             (Named(NamedKey::ArrowLeft), Pan(Left, Edge)),
             (Named(NamedKey::ArrowRight), Pan(Right, Edge)),
@@ -581,7 +605,7 @@ pub const KEYS: &[Binding] = &[
         section: Section::Clipboard,
         mods: CTRL,
         shown: "Ctrl+C",
-        help: "Copy the image itself, as the display settings show it",
+        help: "Copy the image, or the region while one is selected, as displayed",
         keys: &[(Char("c"), CopyImage)],
     },
     Binding {
@@ -658,6 +682,13 @@ pub const KEYS: &[Binding] = &[
         help: "Toggle the grid over the image",
         keys: &[(Char("g"), ToggleGrid), (Char("G"), ToggleGrid)],
     },
+    Binding {
+        section: Section::Interface,
+        mods: PLAIN,
+        shown: "x",
+        help: "Select a region: drag to draw it, with handles to adjust; again, or Esc, removes it",
+        keys: &[(Char("x"), ToggleRegion), (Char("X"), ToggleRegion)],
+    },
     // The three that work the histogram's plot, under the key that opens it.
     Binding {
         section: Section::Interface,
@@ -693,7 +724,7 @@ pub const KEYS: &[Binding] = &[
         section: Section::Interface,
         mods: PLAIN,
         shown: "q, Esc",
-        help: "Quit; Esc closes a popup or message, or shows the interface",
+        help: "Quit; Esc closes a popup, message or region, or shows the interface",
         keys: &[
             (Char("q"), Quit),
             (Char("Q"), Quit),
@@ -940,6 +971,29 @@ pub(super) struct Pointer {
     /// frame after, which is one frame late only when a panel has appeared or
     /// gone under a still pointer — and that frame is being painted anyway.
     pub(super) over_image: bool,
+    /// The handle of the region it was resting on at the last pass, if any
+    /// — said the same way, and what the arrows ask before they move the
+    /// whole region.
+    pub(super) grip: Option<Grip>,
+}
+
+/// The hold a drag on the picture has on the region, from the press to the
+/// release: what was taken hold of, the region as it was when it was, and
+/// where the press was in image pixels. Each frame of the drag remakes the
+/// region from these and the hand's place, rather than from the frame
+/// before, so nothing accumulates.
+pub(super) struct Grabbing {
+    grab: Grab,
+    origin: Option<Region>,
+    from: [f32; 2],
+}
+
+impl Grabbing {
+    /// What the drag has hold of, for the frame to know which of the
+    /// picture's gestures it is reading.
+    pub(super) fn grab(&self) -> Grab {
+        self.grab
+    }
 }
 
 impl Pointer {
@@ -977,6 +1031,14 @@ impl App {
 
     /// Does what a key asked for.
     pub(super) fn perform(&mut self, action: Action) -> Effect {
+        // A region on screen takes the keys that move, fit and copy the
+        // picture: the picture is what is being looked at, and the region is
+        // what is being done to it.
+        if let Selection::Shown(region) = self.selection
+            && let Some(effect) = self.perform_on_region(region, action)
+        {
+            return effect;
+        }
         let image = self.image_size();
         let viewport = self.viewport();
         match action {
@@ -1008,6 +1070,13 @@ impl App {
                     return self.perform(ToggleInterface);
                 }
                 if self.toasts.dismiss() {
+                    return Effect::Redraw;
+                }
+                // The region after the message: a message is about what
+                // was just done, and the region is what was being done to
+                // — the one that stops being news first goes first.
+                if self.selection.is_on() {
+                    self.clear_region();
                     return Effect::Redraw;
                 }
                 return Effect::Quit;
@@ -1145,7 +1214,7 @@ impl App {
             // encoded on a thread of its own, and what it did is said when it
             // comes back — see `App::poll_copies`.
             CopyImage => {
-                self.copy_image();
+                self.copy_image(None);
                 return Effect::Nothing;
             }
             // Whether or not the panel is open: what it says is a fact about
@@ -1177,8 +1246,116 @@ impl App {
                 });
             }
             ToggleHdr => return Effect::redraw_if(self.toggle_hdr()),
+            ToggleRegion => self.press(Control::Region),
         }
         Effect::Redraw
+    }
+
+    /// What `action` does to `region`, the region on screen, where it does
+    /// something to it: the arrows move it a pixel — or the handle the
+    /// pointer rests on, where it rests on one — with Ctrl grow it, `Space`
+    /// fits it, and the copy of the picture copies it. `None` for every
+    /// other action, which is the picture's as it always was.
+    ///
+    /// Nothing here is animated: a region moves by a pixel at a time, and a
+    /// pixel has nothing to animate.
+    fn perform_on_region(&mut self, region: Region, action: Action) -> Option<Effect> {
+        let image = self.image_pixels();
+        Some(match action {
+            Pan(direction, Edge) => {
+                self.select(region.grown(direction.side(), 1, image));
+                Effect::Redraw
+            }
+            Pan(direction, Fine | Coarse) => {
+                let step = direction.step();
+                // A handle that has no edge to move the way the arrow
+                // points — an edge's own axis — moves the whole region, as
+                // the arrow would with the pointer anywhere else.
+                let moved = self
+                    .pointer
+                    .grip
+                    .and_then(|grip| region.nudged(grip, step, image))
+                    .unwrap_or_else(|| region.moved_by(step[0], step[1], image));
+                self.select(moved);
+                Effect::Redraw
+            }
+            ToggleFit => {
+                let fit = self.region_fit;
+                self.animate(|view, image, viewport| {
+                    view.fit_region(fit, region.as_f32(), image, viewport);
+                });
+                self.region_fit = fit.other();
+                Effect::Redraw
+            }
+            CopyImage => {
+                self.copy_image(Some(region));
+                Effect::Nothing
+            }
+            _ => return None,
+        })
+    }
+
+    /// The image on screen in whole pixels, which is what a region is
+    /// measured in.
+    fn image_pixels(&self) -> [u32; 2] {
+        self.current.as_ref().map_or([1, 1], |current| {
+            [current.image.width, current.image.height]
+        })
+    }
+
+    /// Puts `region` on screen, and — where its size is not what it was —
+    /// writes the size at its middle for a moment.
+    fn select(&mut self, region: Region) {
+        let before = self.selection.region().map(|region| region.size());
+        self.selection = Selection::Shown(region);
+        if before != Some(region.size()) {
+            self.dimensions_until = Some(Instant::now() + ui::region::LINGER);
+        }
+    }
+
+    /// Takes the region off, and the mode with it.
+    pub(super) fn clear_region(&mut self) {
+        self.selection = Selection::Off;
+        self.grabbing = None;
+        self.dimensions_until = None;
+    }
+
+    /// A drag on the picture has taken hold of the region — or of nothing
+    /// yet, to draw one — at `at`, in image pixels.
+    fn grab(&mut self, grab: Grab, at: [f32; 2]) {
+        self.grabbing = Some(Grabbing {
+            grab,
+            origin: self.selection.region(),
+            from: at,
+        });
+    }
+
+    /// The hand is at `to`, in image pixels: the region is what the hold
+    /// makes of that. A new region that has not yet enclosed a pixel — the
+    /// hand still off the picture — leaves things as they were.
+    fn pull(&mut self, to: [f32; 2]) {
+        let Some(Grabbing { grab, origin, from }) = self.grabbing else {
+            return;
+        };
+        let image = self.image_pixels();
+        let region = match (grab, origin) {
+            (Grab::New, _) => Region::from_corners(from, to, image),
+            (Grab::Handle(Grip::Inside), Some(origin)) => {
+                let by = |axis: usize| (to[axis] - from[axis]).round() as i64;
+                Some(origin.moved_by(by(0), by(1), image))
+            }
+            (Grab::Handle(grip), Some(origin)) => Some(origin.pulled(grip, to, image)),
+            (Grab::Handle(_), None) => None,
+        };
+        if let Some(region) = region {
+            self.select(region);
+        }
+    }
+
+    /// The button came up. A hold that never drew anything leaves the
+    /// region asked for, so the next drag draws it.
+    fn release(&mut self) {
+        self.grabbing = None;
     }
 
     /// Closes whatever menu is open. Returns whether there was one: the
@@ -1228,6 +1405,10 @@ impl App {
             }
             ui::Command::Wheel { steps, notched } => self.wheel(steps, notched),
             ui::Command::OverImage(over) => self.pointer.over_image = over,
+            ui::Command::Grab { grab, at } => self.grab(grab, at),
+            ui::Command::Pull(to) => self.pull(to),
+            ui::Command::Release => self.release(),
+            ui::Command::OverGrip(grip) => self.pointer.grip = grip,
         }
     }
 
@@ -1299,23 +1480,31 @@ impl App {
         }
     }
 
-    /// Puts the picture on screen on the clipboard as a PNG.
+    /// Puts the picture on screen on the clipboard as a PNG — the whole of
+    /// it, or `region` where one is selected.
     ///
     /// The image at its own size with the display settings baked in, not a
     /// picture of the window: the zoom, the pan and the panels are how this
     /// is being looked at, and none of them belong to what is being copied.
+    /// A region is the same picture cut down, at the size its pixels have in
+    /// the file.
     ///
     /// Done on a thread of its own. Walking every pixel takes long enough on
     /// a large image to be felt as the window going quiet, and a viewer that
     /// stops answering the pointer is a viewer that looks broken. The image
     /// is shared rather than copied, and the display state is a handful of
     /// numbers, so handing the work over costs nothing worth measuring.
-    fn copy_image(&mut self) {
+    fn copy_image(&mut self, region: Option<Region>) {
         let Some(current) = &self.current else {
             return;
         };
         let image = Arc::clone(&current.image);
         let display = current.display.clone();
+        let said = match region {
+            Some(_) => "Copied region.",
+            None => "Copied image.",
+        };
+        let region = region.unwrap_or_else(|| Region::whole([image.width, image.height]));
         let (asked, copies) = (self.claim_copy(), Arc::clone(&self.copies));
         // How it turned out, for the message the window shows about it. Sent
         // rather than said here: this thread has no business touching the
@@ -1328,10 +1517,10 @@ impl App {
         // rather than every copy the session has ever made.
         self.copying.retain(|thread| !thread.is_finished());
         self.copying.push(std::thread::spawn(move || {
-            let (width, height) = (image.width, image.height);
+            let (width, height) = (region.width, region.height);
 
             let walked = Instant::now();
-            let raster = encode::displayed(&image, &display);
+            let raster = encode::displayed(&image, &display, region);
             timing::mapped_image(width, height, walked.elapsed());
 
             let encoded = Instant::now();
@@ -1353,7 +1542,7 @@ impl App {
             }
             match clipboard::copy(&png, clipboard::PNG) {
                 Ok(()) => {
-                    let _ = outcome.send(Ok(()));
+                    let _ = outcome.send(Ok(said));
                 }
                 Err(error) => {
                     report(&error);
@@ -1490,6 +1679,13 @@ impl App {
             // that. A selection that has gone in between is answered the way
             // an empty clipboard is.
             Control::Paste => self.paste(),
+            // Asks for a region, or takes off the one asked for or drawn.
+            // The key's own action goes through here too, so that the
+            // button and `x` cannot come to mean different things.
+            Control::Region => match self.selection {
+                Selection::Off => self.selection = Selection::Armed,
+                Selection::Armed | Selection::Shown(_) => self.clear_region(),
+            },
             Control::Luma => self.panels.show_luma = !self.panels.show_luma,
             Control::Planes => self.panels.show_planes = !self.panels.show_planes,
             // The plot's own axis rather than anything about the rendering,
@@ -1676,6 +1872,7 @@ mod tests {
             Control::Minimap,
             Control::Copy,
             Control::Paste,
+            Control::Region,
             Control::Histogram,
             Control::Info,
             Control::Grid,
@@ -2022,6 +2219,8 @@ mod tests {
         assert_eq!(plain("a"), Some(ShiftWindow(-0.05)));
         assert_eq!(plain("A"), Some(Contrast(0.8)));
         assert_eq!(plain("w"), None);
+        assert_eq!(plain("x"), Some(ToggleRegion));
+        assert_eq!(plain("X"), Some(ToggleRegion));
         // The backquote and the tilde are the same key, and Shift is the
         // difference between hiding the bars and clearing the screen.
         assert_eq!(plain("`"), Some(ToggleInterface));

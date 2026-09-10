@@ -463,11 +463,14 @@ impl Pass<'_> {
             .show(|ui| menu::pixel_cells(self, ui));
     }
 
-    /// The left strip: the copy button, the paste button under it while the
-    /// clipboard holds a picture, and the minimap toggle up from the foot —
-    /// in the corner the minimap itself goes in, and clear of the column
-    /// coming down. A window too short for both ends drops the toggle at the
-    /// foot rather than standing it on the column.
+    /// The left strip: the copy button, the region button under it, the
+    /// paste button under that while the clipboard holds a picture, and the
+    /// minimap toggle up from the foot — in the corner the minimap itself
+    /// goes in, and clear of the column coming down. The region button sits
+    /// between the two clipboard buttons rather than after them so that it
+    /// stays put as the paste button comes and goes. A window too short for
+    /// both ends drops the toggle at the foot rather than standing it on the
+    /// column.
     fn left_strip(&mut self, ui: &mut Ui) {
         ui.spacing_mut().item_spacing = Vec2::ZERO;
         let height = ui.available_height();
@@ -483,6 +486,18 @@ impl Pass<'_> {
                 .align(egui::RectAlign::RIGHT_START)
                 .gap(PADDING)
                 .show(|ui| menu::copy_items(self, ui));
+            ui.add_space(BUTTON_GAP);
+            let region = self.icon_button(
+                ui,
+                icon::CROP,
+                Control::Region,
+                self.input.selection.is_on(),
+                true,
+                Corners::All,
+            );
+            if region.clicked() {
+                self.press(Control::Region);
+            }
             if self.panels.paste {
                 ui.add_space(BUTTON_GAP);
                 let paste = self.icon_button(
@@ -501,7 +516,7 @@ impl Pass<'_> {
         // The room the column above keeps, whether or not the paste button
         // is on screen, so the toggle at the foot stays put as the clipboard
         // changes.
-        let taken = BAR_PADDING + 2.0 * (BUTTON_SIZE + BUTTON_GAP);
+        let taken = BAR_PADDING + 3.0 * (BUTTON_SIZE + BUTTON_GAP);
         if taken + BUTTON_SIZE + BAR_PADDING > height {
             return;
         }

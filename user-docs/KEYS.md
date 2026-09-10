@@ -12,11 +12,11 @@ Every control `gamut` has. Letter keys work in either case except `a`,
 | `Shift`+`2`, `3`, `4` | 50%, 25%, 10% |
 | `+`, `=` | Zoom in one step, a factor of 1.25 |
 | `-`, `_` | Zoom out one step |
-| `Space` | Toggle how the image is fitted: the whole image, or filling the window |
+| `Space` | Toggle how the image is fitted: the whole image, or filling the window — or the region, while one is selected |
 | `p` | Cycle the filter used above 100%: nearest → bicubic |
-| Arrows | Pan by 64 pixels |
+| Arrows | Pan by 64 pixels; with a region selected, move it one pixel |
 | `Shift`+Arrows | Pan by one pixel |
-| `Ctrl`+Arrows | Pan to the far side of the image |
+| `Ctrl`+Arrows | Pan to the far side of the image; with a region selected, grow it that way one pixel |
 
 Zoom runs from 2% to 6400%. The zooms below 100% are the ones above it with
 `Shift` held, so each zoom is under the number it hangs off. The number row is
@@ -62,7 +62,7 @@ taken out of it.
 | `c` | Copy the name of the file on screen, without its path |
 | `Shift+C` | Copy the absolute path of the file on screen |
 | `Ctrl+Shift+C` | Copy the file on screen as a URI |
-| `Ctrl+C` | Copy the image itself, as you are seeing it |
+| `Ctrl+C` | Copy the image itself, as you are seeing it — or the region, while one is selected |
 | `Ctrl+I` | Copy everything the file information says about the file |
 | `Ctrl+.` | Copy the value of the pixel under the pointer |
 | `Ctrl+Shift+.` | Copy the coordinate of the pixel under the pointer |
@@ -235,10 +235,11 @@ where all of it is set.
 | `i` | Show or hide the file information |
 | `m` | Show or hide the minimap |
 | `g` | Show or hide the grid over the image |
+| `x` | Select a region of the image; again, or `Esc`, removes it |
 | `.` | Cycle how the pixel under the pointer is read out: hex → decimal → mapped |
 | `` ` `` | Show or hide the panels around the image |
 | `~` | The same, and closes the histogram, information and minimap |
-| `q`, `Esc` | Quit. `Esc` closes a popup or message, or brings the panels back |
+| `q`, `Esc` | Quit. `Esc` closes a popup, a message or a region, or brings the panels back |
 
 The panels are opaque and the image is fitted inside them, so hiding them
 gives a fitted image more room and it re-fits immediately.
@@ -335,16 +336,52 @@ screen pixels apart at whatever zoom the view is at. The button at the head of
 the bottom bar says which spacing is in force, in the reading beside its mark,
 so a distance on screen can be counted off in the image's own pixels.
 
+## Selecting a region
+
+`x`, or the button under the copy button in the left strip, asks for a
+region: the cursor becomes a crosshair over the image, and the next drag on
+it draws a rectangle. It is made of the image's own pixels — every pixel the
+drag touched, at whatever zoom you drew it — and it stays on screen, outlined
+in the accent with a handle at each corner and in the middle of each edge,
+until you take it off.
+
+Dragging a handle moves that edge, or that corner, and a handle pulled past
+the far side flips the rectangle over rather than shrinking it to nothing.
+Dragging inside the region moves the whole of it. Dragging anywhere else on
+the picture pans, as it always does, so a region larger than the window is
+still navigable; the wheel zooms as before.
+
+For the last pixel, use the keys. With a region up the arrows move it one
+pixel rather than panning the view, and with the pointer resting on a handle
+they move that handle instead: rest on the right edge's handle and press
+Right to make the region one pixel wider, or Left to make it one narrower.
+`Ctrl` with an arrow grows the region on that side, wherever the pointer is.
+Every change to its size writes the size at its middle, `640 × 480`, for a
+second.
+
+`Space` fits the region rather than the image: the whole of it in the
+window, then filling the window, in turn. It is a zoom like the ones on the
+number row rather than a fit the view keeps, so resizing the window does not
+re-fit it, and a region of a few pixels stops at 6400%. `Ctrl+C`, and the
+**Image** item of the copy menu — which reads **Region** while one is
+selected — copy the region instead of the whole picture, with the display
+settings applied exactly as they would be to the whole.
+
+`x` again, or the button, takes the region off. So does `Esc`, once any
+message is off, and before it quits. Stepping to another file leaves the
+region behind: it belongs to the picture it was drawn on.
+
 ## The mouse
 
 | Action | What it does |
 | --- | --- |
-| Drag | Pan, with the image following the pointer |
+| Drag | Pan, with the image following the pointer; with a region selected, draw it, or move it or one of its handles |
 | Wheel | Zoom about the pointer |
 | Trackpad scroll | The same, by fractions of a notch |
 | Click a panel button | Show or hide the histogram, the file information, or the minimap |
 | Click the grid button in the bottom left | Show or hide the grid |
 | Click the copy button | Open the menu of copies: the file, or the image |
+| Click the region button | Select a region, or take the selected one off |
 | Click the paste button | Paste the image on the clipboard, as `Ctrl+V` does |
 | Click a histogram control | Step the exposure, move or set the window, or choose the tone curve |
 | Wheel over the file information | Scroll it |
