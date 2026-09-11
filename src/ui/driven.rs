@@ -41,12 +41,17 @@ struct State {
 
 /// A small color photograph, on screen.
 fn photograph() -> Current {
+    picture(4, 3)
+}
+
+/// A gray color photograph of the given size, on screen.
+fn picture(width: u32, height: u32) -> Current {
     let image = DecodedImage::new(
-        4,
-        3,
+        width,
+        height,
         Samples::U8 {
             channels: Channels::Rgb,
-            data: vec![128; 36],
+            data: vec![128; (width * height * 3) as usize],
         },
         ColorSpace::SRGB,
         AlphaMode::Opaque,
@@ -542,6 +547,72 @@ fn a_drag_with_space_held_draws_a_box_to_zoom_to() {
                 ..
             })
         ),
+        "{commands:?}"
+    );
+}
+
+/// The hand on the minimap asks for the place under it to be put in the
+/// middle of the window: on the frame the button goes down, before the
+/// toolkit has decided whether it is a click or a drag, and on every frame
+/// it moves after that. None of it is a drag of the picture under the map.
+#[test]
+fn the_minimap_asks_to_center_on_what_is_pressed() {
+    let mut harness = open(WINDOW, 1, panels());
+    let image = [400.0, 300.0];
+    harness.state_mut().current = Some(picture(400, 300));
+    harness.state_mut().input.minimap_on_screen = true;
+    harness.state_mut().input.can_pan = true;
+    harness.run();
+    let content = super::chrome::content_area(WINDOW, true);
+    let map = super::minimap::thumbnail(content, image).expect("room for a map");
+    let close = |a: [f32; 2], b: [f32; 2]| (a[0] - b[0]).abs() < 0.5 && (a[1] - b[1]).abs() < 0.5;
+
+    // The button going down a quarter of the way across and half way down
+    // the map asks for that point of the image on that very frame.
+    let at = [map.x + map.width / 4.0, map.y + map.height / 2.0];
+    harness.state_mut().commands.clear();
+    harness.event(egui::Event::PointerMoved(egui::pos2(at[0], at[1])));
+    harness.step();
+    harness.event(egui::Event::PointerButton {
+        pos: egui::pos2(at[0], at[1]),
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.step();
+    let commands = asked(&harness);
+    assert!(
+        matches!(commands.as_slice(), [Command::Center(at)] if close(*at, [100.0, 150.0])),
+        "{commands:?}"
+    );
+
+    // Letting go asks for nothing more: the press already went there.
+    harness.state_mut().commands.clear();
+    harness.event(egui::Event::PointerButton {
+        pos: egui::pos2(at[0], at[1]),
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.step();
+    assert_eq!(asked(&harness), Vec::new());
+
+    // Moving across the map with the button held follows the hand, and
+    // pans nothing.
+    let to = [map.x + map.width * 3.0 / 4.0, map.y + map.height / 2.0];
+    let commands = drag(&mut harness, at, to);
+    assert!(
+        commands
+            .iter()
+            .all(|command| matches!(command, Command::Center(_))),
+        "{commands:?}"
+    );
+    assert!(
+        matches!(commands.first(), Some(Command::Center(at)) if close(*at, [100.0, 150.0])),
+        "{commands:?}"
+    );
+    assert!(
+        matches!(commands.last(), Some(Command::Center(at)) if close(*at, [300.0, 150.0])),
         "{commands:?}"
     );
 }

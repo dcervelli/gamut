@@ -363,6 +363,17 @@ impl View {
         self.pan = Self::clamp_pan(self.pan, image, viewport.size(), zoom);
     }
 
+    /// Puts `point`, in image pixels, at the center of the viewport, at the
+    /// zoom the view has. As near as the pan goes, that is: a point close to
+    /// an edge stops with the edge at the viewport's, as a drag there would,
+    /// and one on an axis the image does not overflow leaves that axis
+    /// centered as it was.
+    pub fn center_on(&mut self, point: [f32; 2], image: [f32; 2], viewport: Viewport) {
+        let zoom = self.zoom(image, viewport);
+        let center = [point[0] - image[0] / 2.0, point[1] - image[1] / 2.0];
+        self.pan = Self::clamp_pan(center, image, viewport.size(), zoom);
+    }
+
     pub fn toggle_fit(&mut self) {
         self.set_fit(match self.fit {
             None => Fit::Whole,
@@ -662,6 +673,45 @@ mod tests {
         let placement = view.placement(IMAGE, WINDOW);
         assert!(close(placement.x + placement.width, WINDOW.width));
         assert!(close(placement.y, 0.0));
+    }
+
+    /// Centering on a point puts that point in the middle of the window,
+    /// until the edge of the image gets there first.
+    #[test]
+    fn centering_on_a_point_goes_as_far_as_the_edge_lets_it() {
+        let mut view = View::new();
+        view.set_zoom(4.0, IMAGE, WINDOW);
+        let middle = [WINDOW.width / 2.0, WINDOW.height / 2.0];
+
+        // 4x zoom makes the image 3600x2400: a point well inside lands in
+        // the middle of the window, at the same zoom.
+        view.center_on([300.0, 200.0], IMAGE, WINDOW);
+        let placement = view.placement(IMAGE, WINDOW);
+        let shown = placement.image_point(middle);
+        assert!(
+            close(shown[0], 300.0) && close(shown[1], 200.0),
+            "{shown:?}"
+        );
+        assert!(close(placement.zoom, 4.0));
+
+        // A point by the corner stops with the image's edges at the
+        // window's, as a drag there would.
+        view.center_on([10.0, 590.0], IMAGE, WINDOW);
+        let placement = view.placement(IMAGE, WINDOW);
+        assert!(close(placement.x, 0.0), "{placement:?}");
+        assert!(
+            close(placement.y + placement.height, WINDOW.height),
+            "{placement:?}"
+        );
+
+        // Fitted, there is nowhere to go: the image stays centered.
+        let mut fitted = View::new();
+        fitted.center_on([10.0, 10.0], IMAGE, WINDOW);
+        let placement = fitted.placement(IMAGE, WINDOW);
+        assert!(close(
+            placement.x + placement.width / 2.0,
+            WINDOW.width / 2.0
+        ));
     }
 
     /// An image with nothing to pan stays where it is rather than being
