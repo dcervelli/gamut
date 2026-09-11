@@ -4,6 +4,7 @@ mod files;
 mod gui;
 pub mod input;
 mod kept;
+mod playback;
 mod window;
 
 use std::path::PathBuf;
@@ -20,10 +21,12 @@ use winit::window::{Window, WindowId};
 
 use crate::image::decode;
 use crate::image::display::{Display, Headroom, Startup};
+use crate::image::sequence::Sequence;
 use crate::loader::{Decoded, Loader, Opened, Ready, Reload, Request};
 use crate::monitor::{Mode, Monitors};
 use crate::motion::Motion;
 use crate::openers::{self, Opener};
+use crate::player::{self, Player};
 use crate::render::{HdrPreference, Placement, Renderer, Scene, Upscale};
 use crate::theme::{self, Theme};
 use crate::timing;
@@ -37,7 +40,8 @@ use crate::watch::{self, Watch};
 use files::{Announce, Files};
 use gui::Gui;
 use input::{Effect, Grabbing, Pointer};
-use kept::{Kept, Settings};
+use kept::{Kept, Left, Settings};
+use playback::Playback;
 use window::{file_label, initial_window_size, loading_title, window_title};
 
 /// What wakes the event loop from another thread.
@@ -47,6 +51,17 @@ pub enum UserEvent {
     Decoded(Box<Decoded>),
     /// A monitor's mode was learned, or changed.
     Monitor,
+    /// A player's cache changed: a frame arrived, or the decoder gave up.
+    Frame(player::Event),
+}
+
+/// The other threads, and how each reaches the loop: made in `main` from
+/// the event loop, which is the only place a proxy to it can come from.
+pub struct Threads {
+    pub loader: Loader,
+    /// How a player wakes the loop; one is started per animated file.
+    pub wake: player::Wake,
+    pub monitors: Option<Monitors>,
 }
 
 /// What the command line asked for, beyond which files to show.
@@ -60,6 +75,8 @@ pub struct Options {
     pub upscale: Upscale,
     /// What `--size` asked the window to open at, in logical pixels.
     pub size: Option<[u32; 2]>,
+    /// Whether an animation opens stopped on its first frame.
+    pub paused: bool,
 }
 
 /// What a copy prepared on a thread of its own did: took the selection, and
@@ -139,6 +156,27 @@ pub struct App {
     /// the thread that made it. See [`Loader::drop`] for what goes wrong when
     /// the thread is still running as the process leaves `main`.
     loader: Loader,
+    /// The thread decoding the frames of the animation on screen, and the
+    /// cache it fills. `None` for a still or a paged file. Before the
+    /// renderer for the loader's reason: it has no handle on the device,
+    /// but a thread still decoding as the process leaves `main` is a thread
+    /// to have joined.
+    player: Option<Player>,
+    /// The clock the animation on screen plays by. Beside `player`: one
+    /// without the other is never the case.
+    playback: Option<Playback>,
+    /// Which frame the texture and `current` hold. `None` for the file's
+    /// own decode, which is what a still is and what an animation opens as.
+    uploaded: Option<usize>,
+    /// How a player wakes the loop: what `main` made from the loop's proxy.
+    wake: player::Wake,
+    /// Numbers the players, so that news from one dropped with its file is
+    /// told from the one now playing.
+    players: u64,
+    /// Whether the player's failure, if it failed, has been reported.
+    player_failed: bool,
+    /// Whether an animation opens stopped on its first frame: `--paused`.
+    open_paused: bool,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     /// The toolkit's context and its adapter to the window, made with them.
@@ -203,9 +241,13 @@ impl App {
         index: usize,
         size: Option<[f32; 2]>,
         options: Options,
-        loader: Loader,
-        monitors: Option<Monitors>,
+        threads: Threads,
     ) -> Self {
+        let Threads {
+            loader,
+            wake,
+            monitors,
+        } = threads;
         let Options {
             overrides,
             startup,
@@ -215,6 +257,7 @@ impl App {
             minimap,
             upscale,
             size: asked_size,
+            paused,
         } = options;
         let watch = Watch::new(&files[index]);
         let directories = named
@@ -245,6 +288,13 @@ impl App {
             theme_watch,
             next_poll: Instant::now() + watch::INTERVAL,
             loader,
+            player: None,
+            playback: None,
+            uploaded: None,
+            wake,
+            players: 0,
+            player_failed: false,
+            open_paused: paused,
             window: None,
             renderer: None,
             gui: None,
@@ -499,7 +549,40 @@ impl App {
     /// works this out for itself; it is worked out here as well for the hit
     /// tests, which have to answer between frames.
     fn content(&self) -> Rect {
-        content_area(self.logical_size(), self.panels.show_ui)
+        content_area(
+            self.logical_size(),
+            self.panels.show_ui,
+            self.has_transport(),
+        )
+    }
+
+    /// Whether the file on screen brings the transport bar with it: an
+    /// animation, or a file of pages.
+    fn has_transport(&self) -> bool {
+        self.current
+            .as_ref()
+            .is_some_and(|current| current.sequence != Sequence::Still)
+    }
+
+    /// What the transport bar shows, for a file that has one.
+    fn transport(&self) -> Option<ui::Transport> {
+        let current = self.current.as_ref()?;
+        match (current.sequence, &self.playback, &self.player) {
+            (Sequence::Animation { .. }, Some(playback), Some(player)) => Some(ui::Transport {
+                index: playback.head(),
+                count: playback.count(),
+                kind: ui::transport::Kind::Animation {
+                    playing: playback.playing(),
+                    delays: player.read(|cache| cache.delays().to_vec()),
+                },
+            }),
+            (Sequence::Pages { count, .. }, _, _) => Some(ui::Transport {
+                index: current.page,
+                count,
+                kind: ui::transport::Kind::Pages,
+            }),
+            _ => None,
+        }
     }
 
     /// What the top bar says about a read that is taking its time, which is
@@ -553,7 +636,12 @@ impl App {
     /// than stored, so toggling the interface re-fits a fitted image without
     /// anything having to remember to.
     fn viewport(&self) -> Viewport {
-        image_viewport(self.window_size(), self.scale_factor(), self.panels.show_ui)
+        image_viewport(
+            self.window_size(),
+            self.scale_factor(),
+            self.panels.show_ui,
+            self.has_transport(),
+        )
     }
 
     /// The view as it is on screen at `now`: `view` itself once it has
@@ -679,6 +767,7 @@ impl App {
             logical,
             scale,
             self.panels.show_ui,
+            self.has_transport(),
             image,
             self.view.upscale(),
         )
@@ -786,7 +875,16 @@ impl App {
     /// [`App::user_event`] — which is the whole point of the exercise, and the
     /// reason everything the interface says about the image goes on describing
     /// the one being shown rather than the one being fetched.
-    fn send(&mut self, request: Request) {
+    fn send(&mut self, mut request: Request) {
+        // A paged file comes back to the page it was left on, which has to
+        // be asked for with the file: the page is what is decoded.
+        if request.page.is_none()
+            && request.mode == Reload::Fresh
+            && let Some(Left::Page(page)) = self.kept.left(&request.path).and_then(|left| left.left)
+        {
+            request.page = Some(page);
+            self.files.asked_for_page(page);
+        }
         self.loader.request(request);
         // With nothing on screen the title is the only thing naming the file,
         // so it follows the request rather than the pixels — including when a
@@ -813,6 +911,8 @@ impl App {
             stats,
             exif,
             gpu,
+            sequence,
+            page,
         } = ready;
         let size = [image.width as f32, image.height as f32];
         let same_size = self
@@ -823,8 +923,10 @@ impl App {
         // are watching one spot for the change: same exposure and tone map,
         // with only an automatic window re-derived from the new pixels. One
         // that has come back a different size is a new shape to fit, and is
-        // treated as a new picture below.
-        let in_place = file.mode == Reload::InPlace && same_size;
+        // treated as a new picture below. Another page of the same file is
+        // read the same way.
+        let same_file = file.mode != Reload::Fresh;
+        let in_place = same_file && same_size;
         // Whether this is a move between files at all. The file already on
         // screen being read again is not one, whatever it has become: it is
         // neither a departure to be put away nor a return to be restored.
@@ -832,11 +934,20 @@ impl App {
         // The picture being stepped away from, kept as it stands so that
         // stepping back to it finds it as it was left.
         if let Some(current) = self.current.as_ref().filter(|_| stepping) {
+            let left = match (&self.playback, current.sequence) {
+                (Some(playback), _) => Some(Left::Frame {
+                    frame: playback.head(),
+                    paused: !playback.playing(),
+                }),
+                (None, Sequence::Pages { .. }) => Some(Left::Page(current.page)),
+                (None, _) => None,
+            };
             self.kept.keep(
                 self.files.shown_path(),
                 Settings {
                     view: self.view,
                     display: current.display.clone(),
+                    left,
                 },
             );
         }
@@ -918,7 +1029,9 @@ impl App {
         }
         // And what else could open the file arriving, read here with the rest
         // of what the file itself says about it.
-        self.openers = openers::for_file(&file.path);
+        if !same_file {
+            self.openers = openers::for_file(&file.path);
+        }
         self.current = Some(Current {
             image: Arc::new(image),
             stats,
@@ -927,11 +1040,164 @@ impl App {
             file: file_facts(&file.path),
             exif,
             stored,
+            sequence,
+            page,
         });
+        self.start_player(
+            &file.path,
+            sequence,
+            kept.as_ref().and_then(|kept| kept.left),
+        );
         if let Some(window) = &self.window {
             window.set_title(&window_title(&file.path));
         }
         true
+    }
+
+    /// Starts decoding the frames of an animation that has just gone up,
+    /// with its clock, and stops whatever was playing before. A still or a
+    /// paged file has neither.
+    ///
+    /// The file's own decode is what is on screen at this point — its first
+    /// frame — and stays until the clock asks for another. A file that was
+    /// left part way through comes back to that frame, playing if it was
+    /// playing; every other animation opens playing from the start, unless
+    /// `--paused` said otherwise.
+    fn start_player(&mut self, path: &std::path::Path, sequence: Sequence, left: Option<Left>) {
+        self.player = None;
+        self.playback = None;
+        self.uploaded = None;
+        self.player_failed = false;
+        let Sequence::Animation { count, loops } = sequence else {
+            return;
+        };
+        let now = Instant::now();
+        let mut playback = Playback::new(count, loops, !self.open_paused, now);
+        if let Some(Left::Frame { frame, paused }) = left {
+            playback.seek(frame);
+            if !paused {
+                playback.toggle(now);
+            }
+        }
+        self.players += 1;
+        let wake = Arc::clone(&self.wake);
+        let player = Player::new(
+            self.players,
+            path.to_path_buf(),
+            self.files.overrides(),
+            count,
+            move |event| wake(event),
+        );
+        player.head(playback.head());
+        self.player = Some(player);
+        self.playback = Some(playback);
+    }
+
+    /// Puts the frame the clock says should be up on screen, where it is
+    /// not already and the player has it. Where the player has not got to
+    /// it yet, it is told where the head is and asked to wake us when it
+    /// has; the frame already up stays until then.
+    ///
+    /// The frame's pixels are written into the texture the last frame's
+    /// occupy, and the interface's picture and statistics are swapped for
+    /// the frame's, so that everything reading the picture — the histogram,
+    /// the readout, a copy — reads the frame on screen. The display is left
+    /// as it is: a window or an exposure is a setting, and a setting that
+    /// changed under the eye with every frame would be a picture that
+    /// pumped.
+    fn show_due_frame(&mut self) {
+        let (Some(playback), Some(player)) = (&self.playback, &self.player) else {
+            return;
+        };
+        let head = playback.head();
+        if self.uploaded == Some(head) {
+            return;
+        }
+        player.head(head);
+        let Some(frame) = player.read(|cache| cache.frame(head)) else {
+            return;
+        };
+        if let Some(renderer) = &mut self.renderer {
+            match renderer.refill_image(&frame.image) {
+                Ok(Some(note)) => eprintln!("gamut: {note}"),
+                Ok(None) => {}
+                Err(error) => {
+                    eprintln!("gamut: {}", crate::escape_controls(&format!("{error:#}")));
+                    return;
+                }
+            }
+        }
+        if let Some(current) = &mut self.current {
+            current.image = Arc::clone(&frame.image);
+            current.stats = frame.stats.clone();
+        }
+        self.uploaded = Some(head);
+    }
+
+    /// Moves the animation's clock on to `now`. Returns whether the frame
+    /// on screen is owed a change, and when the next one is due.
+    fn tick_playback(&mut self, now: Instant) -> (bool, Option<Instant>) {
+        let (Some(playback), Some(player)) = (&mut self.playback, &self.player) else {
+            return (false, None);
+        };
+        let (delays, count, error) = player.read(|cache| {
+            (
+                cache.delays().to_vec(),
+                cache.count(),
+                cache.error().map(str::to_string),
+            )
+        });
+        playback.shrink(count);
+        let tick = playback.tick(now, &delays);
+        let mut changed = tick.changed;
+        if let Some(error) = error
+            && !self.player_failed
+        {
+            self.player_failed = true;
+            eprintln!("gamut: {}", crate::escape_controls(&error));
+            self.toast("The animation could not be read to its end", Level::Error);
+            changed = true;
+        }
+        (changed, tick.deadline)
+    }
+
+    /// One frame on or back through the animation, or one page on or back
+    /// through a paged file: the same key for both, since a reader stepping
+    /// through what a file holds does not care which kind it is.
+    pub(super) fn step_frame(&mut self, by: isize) -> Effect {
+        if let Some(playback) = &mut self.playback {
+            playback.step(by);
+            return Effect::Redraw;
+        }
+        let Some(current) = &self.current else {
+            return Effect::Nothing;
+        };
+        let Sequence::Pages { count, .. } = current.sequence else {
+            return Effect::Nothing;
+        };
+        let page = (current.page as isize + by).rem_euclid(count as isize) as usize;
+        if let Some(request) = self.files.page(page) {
+            self.send(request);
+        }
+        Effect::Nothing
+    }
+
+    /// Plays a stopped animation, or stops a playing one.
+    pub(super) fn toggle_play(&mut self) -> Effect {
+        let Some(playback) = &mut self.playback else {
+            return Effect::Nothing;
+        };
+        playback.toggle(Instant::now());
+        Effect::Redraw
+    }
+
+    /// Straight to frame `frame` of the animation, stopped there.
+    pub(super) fn seek(&mut self, frame: usize) -> Effect {
+        let Some(playback) = &mut self.playback else {
+            return Effect::Nothing;
+        };
+        playback.seek(frame);
+        Effect::Redraw
     }
 
     /// Takes in a file the loader has finished with. Held apart from the
@@ -979,6 +1245,7 @@ impl App {
             self.motion = None;
         }
         let view = self.view_at(now);
+        self.show_due_frame();
 
         let scale = window.scale_factor() as f32;
         let physical = self.window_size();
@@ -1016,6 +1283,7 @@ impl App {
             selection: self.selection,
             grabbing: self.grabbing.as_ref().map(Grabbing::grab),
             over_region: self.over_region(),
+            transport: self.transport(),
         };
 
         let namer = self.namer();
@@ -1137,6 +1405,9 @@ impl ApplicationHandler<UserEvent> for App {
         if self.gui.as_mut().is_some_and(|gui| gui.due(now)) {
             timed = true;
         }
+        // And the animation's clock: the next frame being due.
+        let (frame_due, next_frame) = self.tick_playback(now);
+        timed |= frame_due;
         if timed && let Some(window) = &self.window {
             window.request_redraw();
         }
@@ -1149,6 +1420,7 @@ impl ApplicationHandler<UserEvent> for App {
         for due in [
             self.toasts.deadline(),
             self.gui.as_ref().and_then(Gui::deadline),
+            next_frame,
         ]
         .into_iter()
         .flatten()
@@ -1181,6 +1453,18 @@ impl ApplicationHandler<UserEvent> for App {
             }
             UserEvent::Monitor => {
                 if self.sync_monitor()
+                    && let Some(window) = &self.window
+                {
+                    window.request_redraw();
+                }
+            }
+            // A frame from the player of a file already stepped past is news
+            // about nothing on screen.
+            UserEvent::Frame(event) => {
+                if self
+                    .player
+                    .as_ref()
+                    .is_some_and(|player| player.generation == event.generation)
                     && let Some(window) = &self.window
                 {
                     window.request_redraw();
@@ -1362,6 +1646,7 @@ impl ApplicationHandler<UserEvent> for App {
 #[cfg(test)]
 mod tests {
     use std::path::Path;
+    use std::time::Duration;
 
     use super::*;
     use crate::image::{Stats, exif};
@@ -1415,6 +1700,7 @@ mod tests {
             minimap: false,
             upscale: Upscale::default(),
             size: None,
+            paused: false,
         };
         let size = decode::probe(&paths[0]).expect("we just wrote it");
         App::new(
@@ -1423,8 +1709,11 @@ mod tests {
             0,
             size.map(|(w, h)| [w as f32, h as f32]),
             options,
-            Loader::detached(),
-            None,
+            Threads {
+                loader: Loader::detached(),
+                wake: Arc::new(|_| true),
+                monitors: None,
+            },
         )
     }
 
@@ -1468,14 +1757,26 @@ mod tests {
     /// staleness check sees exactly what it would in the running program.
     fn answer(app: &mut App, mode: Reload) {
         let pending = app.files.pending().expect("a request is in flight");
-        let (generation, index) = (pending.generation, pending.index);
+        let (generation, index, asked) = (pending.generation, pending.index, pending.page);
         let path = app.files.path(index).to_path_buf();
         let watch = Watch::new(&path);
-        let outcome = decode::load(&path, app.files.overrides()).map(|image| Ready {
+        let sequence = decode::sequence(&path).expect("the header reads");
+        let page = match (asked, sequence) {
+            (Some(page), _) => page,
+            (None, Sequence::Pages { default, .. }) => default,
+            (None, _) => 0,
+        };
+        let decoded = match asked {
+            Some(page) => decode::load_page(&path, app.files.overrides(), page),
+            None => decode::load(&path, app.files.overrides()),
+        };
+        let outcome = decoded.map(|image| Ready {
             stats: Stats::scan(&image),
             exif: exif::Exif::read(&path),
             image,
             gpu: None,
+            sequence,
+            page,
         });
         app.deliver(Decoded {
             generation,
@@ -1950,6 +2251,8 @@ mod tests {
                 exif: exif::Exif::default(),
                 image,
                 gpu: None,
+                sequence: Sequence::Still,
+                page: 0,
             }),
         });
         assert_eq!(
@@ -2093,6 +2396,209 @@ mod tests {
         answer(&mut app, Reload::Fresh);
         assert_eq!(app.files.index(), 1);
         assert_eq!(app.view.fit(), Some(Fit::Whole));
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// A fixture from `test_images/`, opened on its own.
+    fn fixture(name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("test_images")
+            .join(name)
+    }
+
+    /// Waits for the player to have every frame, which a two-frame fixture
+    /// takes no time over.
+    fn decoded_to_the_end(app: &App) {
+        let player = app.player.as_ref().expect("an animation has a player");
+        let started = Instant::now();
+        while !player.read(|cache| cache.complete() || cache.error().is_some()) {
+            assert!(
+                started.elapsed() < Duration::from_secs(10),
+                "the player never finished"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        player.read(|cache| assert_eq!(cache.error(), None));
+    }
+
+    /// The pixel at `(x, y)` of the picture on screen, as bytes.
+    fn shown_pixel(app: &App, x: u32, y: u32) -> Vec<u8> {
+        let image = &app.current.as_ref().expect("a picture is up").image;
+        let count = image.channels().count();
+        let start = (y as usize * image.width as usize + x as usize) * count;
+        match &image.samples {
+            crate::image::Samples::U8 { data, .. } => data[start..start + count].to_vec(),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// An animation arriving starts playing from its first frame, and the
+    /// frame on screen follows the clock: the picture and its statistics
+    /// are the frame's, so that everything reading them reads the frame.
+    #[test]
+    fn an_animation_plays_and_the_picture_follows_the_clock() {
+        use input::Action::{NextFrame, PreviousFrame, TogglePlay};
+
+        let path = fixture("gif-animated.gif");
+        let mut app = open(vec![path.clone()], vec![path]);
+        answer(&mut app, Reload::Fresh);
+
+        let playback = app.playback.as_ref().expect("an animation has a clock");
+        assert!(playback.playing());
+        assert_eq!(playback.count(), 2);
+        assert_eq!(app.uploaded, None, "the file's own decode is up first");
+        let first = shown_pixel(&app, 8, 6);
+        assert_eq!(&first[..3], [255, 0, 0], "red quadrant first");
+        decoded_to_the_end(&app);
+
+        // A tenth and a half later the second frame is due.
+        let (changed, deadline) = app.tick_playback(Instant::now() + Duration::from_millis(150));
+        assert!(changed);
+        assert!(deadline.is_some(), "the next frame has a time");
+        assert_eq!(app.playback.as_ref().unwrap().head(), 1);
+        app.show_due_frame();
+        assert_eq!(app.uploaded, Some(1));
+        let second = shown_pixel(&app, 8, 6);
+        assert_eq!(&second[..3], [255, 255, 255], "the pattern upside down");
+
+        // A step pauses and moves; play resumes.
+        assert_eq!(app.perform(NextFrame), Effect::Redraw);
+        let playback = app.playback.as_ref().unwrap();
+        assert!(!playback.playing());
+        assert_eq!(playback.head(), 0);
+        assert_eq!(app.perform(PreviousFrame), Effect::Redraw);
+        assert_eq!(app.playback.as_ref().unwrap().head(), 1);
+        assert_eq!(app.perform(TogglePlay), Effect::Redraw);
+        assert!(app.playback.as_ref().unwrap().playing());
+        app.show_due_frame();
+        assert_eq!(app.uploaded, Some(1));
+    }
+
+    /// `--paused` opens an animation stopped, and a still has no clock for
+    /// the keys to act on.
+    #[test]
+    fn paused_opens_stopped_and_a_still_has_no_clock() {
+        use input::Action::TogglePlay;
+
+        let path = fixture("webp-animated.webp");
+        let mut app = open(vec![path.clone()], vec![path]);
+        app.open_paused = true;
+        answer(&mut app, Reload::Fresh);
+        let playback = app.playback.as_ref().expect("an animation has a clock");
+        assert!(!playback.playing());
+        assert_eq!(
+            app.tick_playback(Instant::now() + Duration::from_secs(1)),
+            (false, None)
+        );
+
+        let path = fixture("png-rgb8.png");
+        let mut app = open(vec![path.clone()], vec![path]);
+        answer(&mut app, Reload::Fresh);
+        assert!(app.playback.is_none() && app.player.is_none());
+        assert_eq!(app.perform(TogglePlay), Effect::Nothing);
+    }
+
+    /// Stepping away from an animation and back finds it on the frame it
+    /// was left on, stopped if it was stopped; a reload starts it over.
+    #[test]
+    fn an_animation_comes_back_to_the_frame_it_was_left_on() {
+        use input::Action::NextFrame;
+
+        let (dir, stills) = written("left-frame", &[("a.png", 32, 24)]);
+        let animated = fixture("gif-animated.gif");
+        let mut app = open(vec![animated.clone(), stills[0].clone()], vec![]);
+        answer(&mut app, Reload::Fresh);
+        let _ = app.perform(NextFrame);
+        assert_eq!(app.playback.as_ref().unwrap().head(), 1);
+
+        app.step(true);
+        answer(&mut app, Reload::Fresh);
+        assert!(app.playback.is_none(), "a still has no clock");
+        app.step(true);
+        answer(&mut app, Reload::Fresh);
+        let playback = app.playback.as_ref().expect("back on the animation");
+        assert_eq!(playback.head(), 1);
+        assert!(
+            !playback.playing(),
+            "left stopped, so it comes back stopped"
+        );
+
+        let request = app.files.reload().expect("nothing is in flight");
+        app.send(request);
+        answer(&mut app, Reload::InPlace);
+        let playback = app.playback.as_ref().expect("still an animation");
+        assert_eq!(playback.head(), 0);
+        assert!(playback.playing(), "read again, it starts over");
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// A paged file opens on its default page and steps through the rest,
+    /// keeping the display and, at the same size, the view; a page request
+    /// waits for the one in flight; and the page it was left on is the one
+    /// it comes back to.
+    #[test]
+    fn a_paged_file_steps_through_its_pages() {
+        use input::Action::{NextFrame, PreviousFrame};
+
+        let (dir, stills) = written("pages", &[("a.png", 32, 24)]);
+        let paged = fixture("tiff-pages.tif");
+        let mut app = open(vec![paged.clone(), stills[0].clone()], vec![]);
+        answer(&mut app, Reload::Fresh);
+        let current = app.current.as_ref().unwrap();
+        assert_eq!(current.page, 0);
+        assert!(matches!(current.sequence, Sequence::Pages { count: 2, .. }));
+        assert!(app.playback.is_none(), "pages have no clock");
+        assert_eq!(&shown_pixel(&app, 8, 6)[..3], [255, 0, 0]);
+
+        app.view.set_zoom(1.0, app.image_size(), VIEWPORT);
+        app.view.zoom_in(app.image_size(), VIEWPORT);
+        let zoom = app.view.zoom(app.image_size(), VIEWPORT);
+        if let Some(current) = app.current.as_mut() {
+            current.display.exposure_stops = 1.0;
+        }
+
+        assert_eq!(app.perform(NextFrame), Effect::Nothing);
+        assert_eq!(
+            app.files.pending().and_then(|pending| pending.page),
+            Some(1)
+        );
+        // Held down: the second press waits for the first to land.
+        assert_eq!(app.perform(NextFrame), Effect::Nothing);
+        answer(&mut app, Reload::Page);
+        let current = app.current.as_ref().unwrap();
+        assert_eq!(current.page, 1);
+        assert_eq!(
+            &shown_pixel(&app, 8, 6)[..3],
+            [255, 255, 255],
+            "upside down"
+        );
+        assert_eq!(current.display.exposure_stops, 1.0, "the display stays");
+        assert_eq!(
+            app.view.zoom(app.image_size(), VIEWPORT),
+            zoom,
+            "the view stays at the same size"
+        );
+
+        // Round the end, back to the first.
+        let _ = app.perform(NextFrame);
+        answer(&mut app, Reload::Page);
+        assert_eq!(app.current.as_ref().unwrap().page, 0);
+        let _ = app.perform(PreviousFrame);
+        answer(&mut app, Reload::Page);
+        assert_eq!(app.current.as_ref().unwrap().page, 1);
+
+        // Away and back: the page it was left on.
+        app.step(true);
+        answer(&mut app, Reload::Fresh);
+        app.step(true);
+        assert_eq!(
+            app.files.pending().and_then(|pending| pending.page),
+            Some(1)
+        );
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.current.as_ref().unwrap().page, 1);
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }

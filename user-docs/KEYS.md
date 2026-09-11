@@ -55,6 +55,29 @@ was named at startup, in that order; naming a directory puts the images in it
 on the list, and keeps it up to date as images are added to that directory or
 taken out of it.
 
+## Playing an animation
+
+| Key | What it does |
+| --- | --- |
+| `Enter` | Play or pause an animation |
+| `n` | Next frame of an animation, or page of a file that holds several pictures |
+| `N` | Previous frame, or page |
+
+An animated file plays as it opens, at the speed the file says, and loops as
+many times as it says; `--paused` opens it stopped on the first frame. A
+step with `n` or `N` pauses it on the frame it lands on, and goes round the
+ends, so `N` on the first frame is the last. Once an animation that plays a
+fixed number of times has finished, `Enter` plays it again from the start.
+
+The same two keys step through the pictures of a file that is not an
+animation — the icons in an ICO, the pages of a TIFF — one picture at a time,
+with nothing to play. The bar under the picture shows which frame or page is
+up, and for an animation how far into it that is; dragging along its timeline
+goes to any frame.
+
+A file left part way through comes back where it was left, playing if it was
+playing, when you step off it and back.
+
 ## Copying and pasting
 
 | Key | What it does |
@@ -390,6 +413,8 @@ region behind: it belongs to the picture it was drawn on.
 | Click the copy button | Open the menu of copies: the file, or the image |
 | Click the region button | Select a region, or take the selected one off |
 | Click the paste button | Paste the image on the clipboard, as `Ctrl+V` does |
+| Click the play, back or forward button under an animation | Play or pause it, or step a frame, as `Enter`, `N` and `n` do |
+| Click or drag along the timeline | Go to the frame under the pointer, and stop there |
 | Click a histogram control | Step the exposure, move or set the window, or choose the tone curve |
 | Wheel over the file information | Scroll it |
 | Drag the file information | Scroll it, as if dragging the scrollbar's handle |
@@ -456,7 +481,7 @@ Most of what these keys reach can be set before the first file opens, which is
 what scripting wants and what comparing two files on equal terms needs:
 `--exposure`, `--window`, `--tone-map`, `--colormap`, `--upscale`,
 `--histogram` and `--info`. The minimap starts on; `--no-minimap` starts
-without it.
+without it. An animation starts playing; `--paused` starts it stopped.
 
 The window itself opens at the image's size, shrunk to fit the screen.
 `--size <W> <H>` opens it at a size you choose instead, in the pixels your

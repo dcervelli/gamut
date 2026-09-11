@@ -327,7 +327,7 @@ mod tests {
     #[test]
     fn a_small_picture_still_opens_a_window_the_panels_fit_in() {
         let size = window_size(&MONITOR, Some([32.0, 24.0]), None);
-        let content = content_area([size.width as f32, size.height as f32], true);
+        let content = content_area([size.width as f32, size.height as f32], true, false);
         assert!(content.width >= ui::PANELS_ROOM[0], "{content:?}");
         assert!(content.height >= ui::PANELS_ROOM[1], "{content:?}");
 
@@ -335,7 +335,11 @@ mod tests {
         // compositor hands back: the window is laid out in logical pixels
         // and sized in device ones. Half a device pixel is the worst of it,
         // and the coarsest grid is a monitor at 1:1.
-        let rounded = content_area([size.width as f32 - 0.5, size.height as f32 - 0.5], true);
+        let rounded = content_area(
+            [size.width as f32 - 0.5, size.height as f32 - 0.5],
+            true,
+            false,
+        );
         assert!(rounded.width >= ui::PANELS_ROOM[0], "{rounded:?}");
         assert!(rounded.height >= ui::PANELS_ROOM[1], "{rounded:?}");
     }

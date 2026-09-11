@@ -25,6 +25,24 @@ Notable changes to `gamut`. The format follows
 
 ### Added
 
+- Animated GIF, PNG, WebP and JPEG XL files play. An animation starts
+  playing as it opens, at the speed the file says and for as many loops as
+  it says, and a bar of controls appears under the picture: a frame back,
+  play or pause, a frame on, a readout of which frame is up and how far into
+  the animation that is, and a timeline to drag along. `Enter` plays and
+  pauses, `n` and `N` step a frame and stop there, and `--paused` opens the
+  file stopped on its first frame. Everything that reads the picture — the
+  pixel under the pointer, the histogram, a copy, the information panel —
+  reads the frame on screen; the window, exposure and tone curve you set
+  stay set from frame to frame. The frames are decoded ahead of the clock
+  on a thread of their own, into a gigabyte at most: a file that fits is
+  held whole, so stepping and scrubbing are instant, and a longer one is
+  decoded again as the clock comes round to each frame. A file left part
+  way through comes back where it was left.
+- The other pictures in a file that holds several are reachable. A
+  multi-page TIFF opens on its first page and an ICO on its largest icon, as
+  before, and `n` and `N` — or the same bar, with the two step buttons and a
+  count — walk through the rest.
 - The file on screen can be handed to another program. A button under the
   copy button opens a menu of everything the desktop says can open a file of
   this kind — the same programs a file manager would offer, read from the
@@ -49,8 +67,7 @@ Notable changes to `gamut`. The format follows
   read from the file's own statement of it, HDR included, or from an ICC
   profile where it says it that way; depth is kept as authored, up to 16-bit
   integer or floating point; grayscale stays single-channel; and the
-  orientation is applied. An animation shows its first frame. CMYK files are
-  refused rather than approximated.
+  orientation is applied. CMYK files are refused rather than approximated.
 
 ## 0.1.0 - 2026-09-06
 

@@ -355,6 +355,7 @@ mod tests {
     use super::*;
     use crate::image::display::{Display, Startup};
     use crate::image::exif::Exif;
+    use crate::image::sequence::Sequence;
     use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples, Stats};
     use crate::ui::FileFacts;
 
@@ -384,6 +385,8 @@ mod tests {
             },
             exif: Exif::default(),
             stored: None,
+            sequence: Sequence::Still,
+            page: 0,
         }
     }
 

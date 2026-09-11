@@ -442,6 +442,45 @@ pub(super) const CROP: &[Mark] = &[
     Mark::Line([16.0, 6.0], [2.0, 6.0]),
 ];
 
+/// Lucide's `play`: the triangle every transport wears, stroked rather
+/// than filled as Lucide draws it, so that it weighs the same as the marks
+/// beside it.
+pub(super) const PLAY: &[Mark] = &[
+    Mark::Line([6.0, 3.0], [20.0, 12.0]),
+    Mark::Line([20.0, 12.0], [6.0, 21.0]),
+    Mark::Line([6.0, 21.0], [6.0, 3.0]),
+];
+
+/// Lucide's `pause`: two bars, which the play button wears while playing.
+pub(super) const PAUSE: &[Mark] = &[
+    Mark::Rect {
+        at: [6.0, 4.0],
+        size: [4.0, 16.0],
+        radius: 1.0,
+    },
+    Mark::Rect {
+        at: [14.0, 4.0],
+        size: [4.0, 16.0],
+        radius: 1.0,
+    },
+];
+
+/// Lucide's `step-back` and `step-forward`: a bar and a triangle pointing at
+/// it, for one frame back and one frame on.
+pub(super) const STEP_BACK: &[Mark] = &[
+    Mark::Line([18.0, 20.0], [18.0, 4.0]),
+    Mark::Line([14.0, 20.0], [4.0, 12.0]),
+    Mark::Line([4.0, 12.0], [14.0, 4.0]),
+    Mark::Line([14.0, 4.0], [14.0, 20.0]),
+];
+
+pub(super) const STEP_FORWARD: &[Mark] = &[
+    Mark::Line([6.0, 4.0], [6.0, 20.0]),
+    Mark::Line([10.0, 4.0], [20.0, 12.0]),
+    Mark::Line([20.0, 12.0], [10.0, 20.0]),
+    Mark::Line([10.0, 20.0], [10.0, 4.0]),
+];
+
 /// Lucide's `x`: the cross that takes a thing off the screen. Its two strokes
 /// cross at the middle of the grid and reach the same distance into each
 /// corner, so it stays square however the square it is fitted into rounds.

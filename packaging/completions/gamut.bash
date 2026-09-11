@@ -23,7 +23,7 @@ _gamut() {
     if [[ $cur == -* ]]; then
         COMPREPLY=($(compgen -W '-h --help -V --version --output --transfer --primaries
             --no-gain-map --colormap --tone-map --window --exposure --upscale
-            --size --histogram --info --no-minimap --timing --' -- "$cur"))
+            --size --histogram --info --no-minimap --paused --timing --' -- "$cur"))
         return
     fi
 

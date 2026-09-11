@@ -11,14 +11,18 @@ and WebP are the exceptions: HEIF's rotation lives in the container rather than
 in a metadata tag, and WebP's tag sits in a chunk its decoder already opens for
 the color profile.
 
-An ICO shows one entry of the several it holds — the largest — and the rest
-are not reachable. Showing them side by side is what the comparison view is
-for, but nothing below the decoder can return more than one image per file.
+A HEIF holding several images — a burst, a Live Photo, an AVIF image sequence
+— shows the one it marks as primary. The `libheif` binding exposes no
+sequence API, so the others are not reachable the way an ICO's entries are.
+An EXR shows its first layer for the same kind of reason: `image` hands back
+one.
 
-Animated WebP and animated GIF show their first frame and stop there. Playing
-the rest needs a clock in the event loop, which nothing else here wants; the
-frames themselves are already reachable through the decoders that read the
-first one.
+A 16-bit animated PNG shows its default image and does not play: `image`
+composites APNG frames at eight bits and refuses a deeper file. A TIFF's
+directories are all pages, so a pyramid's overviews and a file's thumbnail
+show as pages beside the picture; telling them apart by `NewSubfileType` is
+not done. Everything about how an animation is played is in
+[animation.md](animation.md).
 
 Embedded ICC profiles are read for JPEG, PNG, HEIF and WebP — and so for an
 ICO whose entry is a PNG — which is every format here that can carry one

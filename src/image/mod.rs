@@ -16,6 +16,7 @@ pub mod encode;
 pub mod exif;
 pub mod geo;
 pub mod region;
+pub mod sequence;
 pub mod stats;
 
 pub use color::{ColorSpace, Primaries, Transfer};
@@ -118,6 +119,15 @@ impl Samples {
             Samples::U8 { data, .. } => data.len(),
             Samples::U16 { data, .. } => data.len(),
             Samples::F32 { data, .. } => data.len(),
+        }
+    }
+
+    /// What the buffer costs to hold, in bytes.
+    pub fn byte_len(&self) -> usize {
+        match self {
+            Samples::U8 { data, .. } => data.len(),
+            Samples::U16 { data, .. } => data.len() * 2,
+            Samples::F32 { data, .. } => data.len() * 4,
         }
     }
 

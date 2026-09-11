@@ -28,7 +28,7 @@ base image and a half-size map that leaves one half alone and asks the other
 for two stops, assembled with the same crate that reads it back, so the round
 trip is exercised without a binary fixture.
 
-Seven of them run the real image pipeline on a real adapter — a headless
+Eight of them run the real image pipeline on a real adapter — a headless
 device, no window — and check what the shader and the passes actually produce
 against arithmetic done on the CPU: that minification is the exact mean of the
 texels a pixel covers, that
@@ -36,19 +36,23 @@ two levels of the coarse chain plus the draw's own filter come to the same
 number as averaging the source directly, that antialiased nearest is exactly
 nearest at a whole-number zoom, that Catmull-Rom passes texel centers through
 untouched, that a transparent texel does not bleed its color into its
-neighbor, and that the minimap's thumbnail lands beside the view as a second
+neighbor, that the minimap's thumbnail lands beside the view as a second
 draw of the same texture — building the coarse chain the view itself had no
-use for. Where no adapter can be had they report success rather than failing
+use for — and that a frame written into the texture the last one occupies
+is what the next draw shows, through a chain built again from it. Where no adapter can be had they report success rather than failing
 for a reason that has nothing to do with the code.
 
-`test_images/` holds 67 real fixtures — see its README — covering every pixel
+`test_images/` holds 89 real fixtures — see its README — covering every pixel
 layout the decoder can produce and every per-format encoding with its own code
 path: PNG bit depths, palettes and interlacing; progressive and subsampled
 JPEG; TIFF compressions, byte orders, tiling, BigTIFF, the floating-point
 predictor, signed samples and no-data; Radiance RGBE; EXR associated alpha;
 HEIC monochrome, 10-bit, `irot` and its color tags, and the same container
 with AV1 inside; WebP in both bitstreams, with and without alpha, tagged,
-rotated and animated; GIF interlaced, transparent and animated. Four of them
+rotated and animated; GIF interlaced, transparent and animated; an animated
+PNG and a two-page TIFF. Every animated fixture is the pattern followed by
+the pattern upside down, so that a frame read past the first is visibly not
+the first, and every one is walked to its end and rewound. Four of them
 exist for the color tags in particular: a
 PNG carrying `cICP` for BT.2100 PQ, a PNG carrying `iCCP` for Display P3, a
 HEIF tagged by ICC profile with no `nclx` box beside it, and a WebP carrying
@@ -62,7 +66,9 @@ Regenerate them with `test_images/generate.sh`, which needs ImageMagick,
 `heif-enc`, GDAL and Python. Neither `cICP` nor `iCCP` is a chunk ImageMagick
 will write, so those two are spliced in afterwards with their CRCs computed,
 and its WebP writer emits neither an `EXIF` chunk nor an animation, so those
-two fixtures are assembled around the bitstreams it did write.
+two fixtures are assembled around the bitstreams it did write; its APNG
+writer is a video delegate that lands a code value off, so that one is
+assembled from two stills' chunks as well.
 `display-p3.icc` sits beside the fixtures as an input rather than an output;
 `examples/make-icc.rs` is what produced it.
 

@@ -5,14 +5,14 @@ pixels, and where each format will surprise you.
 
 | Format | Extensions | Depth kept | What the file can tell us |
 | --- | --- | --- | --- |
-| PNG | `.png` | 8 and 16-bit | Color space, including HDR; ICC profile |
+| PNG | `.png` | 8 and 16-bit | Color space, including HDR; ICC profile; animation |
 | JPEG | `.jpg` `.jpeg` `.jpe` `.jfif` | 8-bit | ICC profile; HDR gain map |
-| GIF | `.gif` | 8-bit | Nothing — always sRGB |
-| TIFF | `.tif` `.tiff` | 8 to 64-bit, integer or float | Nothing — inferred from depth |
-| WebP | `.webp` | 8-bit | ICC profile; orientation |
-| JPEG XL | `.jxl` | 8 and 16-bit, or float | Color space, including HDR; ICC profile; orientation |
+| GIF | `.gif` | 8-bit | Animation — and always sRGB |
+| TIFF | `.tif` `.tiff` | 8 to 64-bit, integer or float | Nothing — inferred from depth; pages |
+| WebP | `.webp` | 8-bit | ICC profile; orientation; animation |
+| JPEG XL | `.jxl` | 8 and 16-bit, or float | Color space, including HDR; ICC profile; orientation; animation |
 | HEIF | `.heic` `.heif` `.hif` `.avif` | 8, 10 and 12-bit | Color space, including HDR; ICC profile; orientation |
-| ICO | `.ico` | Whatever the chosen icon holds | ICC profile, for the larger icons |
+| ICO | `.ico` | Whatever the chosen icon holds | ICC profile, for the larger icons; every icon in the file |
 | BMP | `.bmp` | 8-bit | Nothing — always sRGB |
 | Netpbm | `.pnm` `.pbm` `.pgm` `.ppm` `.pam` | 8 and 16-bit | Nothing — always sRGB |
 | Radiance HDR | `.hdr` | 32-bit float | Nothing — linear by definition |
@@ -46,15 +46,22 @@ at. The word appears about half a second after the file goes and takes itself
 off again if the file comes back; a file named on the command line and then
 deleted is marked the same way.
 
-**One image per file.** Nothing here shows more than one:
+**A file that holds several pictures.** An animated GIF, PNG, WebP or JPEG
+XL plays from the moment it opens, at the speed and for the number of loops
+the file says, and a bar of controls appears under the picture: pause and
+play, a frame back or on, and a timeline to drag along. `--paused` opens it
+stopped on the first frame instead. Everything that reads the picture — the
+pixel under the pointer, the histogram, a copy, the information panel — reads
+the frame on screen, and the window, exposure and tone curve you set stay set
+from frame to frame. See [the keys](KEYS.md#playing-an-animation).
 
-- an animated GIF, WebP or JPEG XL shows its first frame and stops — there is
-  no playback and no way to step through the frames;
-- a multi-page TIFF shows its first page;
-- a HEIF holding several images, such as a burst or a Live Photo, shows the
-  one it marks as primary;
-- an ICO shows its largest icon;
-- an EXR shows its first layer.
+A file whose pictures are not an animation gets the same bar with the two
+step buttons and a count, and no clock: a multi-page TIFF opens on its first
+page and an ICO on its largest icon, and `n` and `N` step through the rest.
+
+Two kinds are still one picture each: a HEIF holding several images, such as
+a burst or a Live Photo, shows the one it marks as primary, and an EXR shows
+its first layer.
 
 **Size limits.** An image may be at most 4 GB once decoded, and neither side
 may be longer than 32768 pixels. That is the largest image current graphics
@@ -127,8 +134,8 @@ and when it does — BT.2100 PQ or HLG — that is read and honored. An ICC
 profile is read where there is no such statement, so a Display P3 PNG shows as
 Display P3.
 
-An animated PNG shows its default image, the still one that any
-non-animated reader sees.
+An animated PNG plays. A 16-bit one does not: it shows its default image,
+the still that a reader with no notion of animation sees.
 
 ## JPEG
 
@@ -172,9 +179,12 @@ Transparency in a GIF is one palette entry that is a hole — all or nothing,
 with no partial transparency anywhere in the format — and the pixel behind the
 hole has no color of its own, unlike a transparent pixel in a PNG.
 
-An animated GIF shows its first frame on the full canvas the file declares, so
-a first frame stored as a small patch still arrives at the right size rather
-than cropped.
+An animated GIF plays, each frame on the full canvas the file declares, so a
+frame stored as a small patch still arrives at the right size rather than
+cropped. A frame timed at a hundredth of a second or less is shown for a
+tenth, which is what every browser does with the files that were authored
+that way; a file with no loop count plays once, and one saying it repeats
+once plays twice, as browsers read it.
 
 ## TIFF
 
@@ -210,7 +220,9 @@ Caveats:
 - CMYK, YCbCr and Lab TIFFs are refused, naming the color type. This takes
   JPEG-compressed TIFFs with it, since they are almost always stored as
   YCbCr; ZSTD- and WebP-compressed TIFFs do not open either.
-- Multi-page files show the first page.
+- Multi-page files open on the first page, and `n` and `N` step through the
+  rest. Every page counts, so a file holding a pyramid of reduced copies, or
+  a thumbnail beside the picture, shows those as pages too.
 - The orientation tag is not applied.
 
 ## WebP
@@ -222,8 +234,9 @@ transparency in either.
   own color. Without one it means sRGB.
 - The **orientation is applied**, one of only three places a rotation tag is
   honored.
-- An **animated** WebP shows its first frame on the full canvas, so a first
-  frame stored as a partial patch arrives whole.
+- An **animated** WebP plays, every frame on the full canvas, so a frame
+  stored as a partial patch arrives whole. The background color the file
+  names is ignored, as browsers ignore it.
 
 Nothing in WebP goes above 8 bits or outside three color channels, so there
 is no depth to preserve and no grayscale encoding: a gray WebP is a gray
@@ -254,7 +267,7 @@ Caveats:
 - **CMYK files do not open.** Separating them needs the output profile this
   program does not have, and the message says so rather than showing you
   approximate colors.
-- An **animated** JPEG XL shows its first frame.
+- An **animated** JPEG XL plays.
 - A JPEG XL made by recompressing a JPEG opens as the picture it holds. The
   original JPEG can be reconstructed byte for byte by other tools, but that is
   not something a viewer does.
@@ -290,8 +303,9 @@ Caveats:
 
 An ICO is not one image but a folder of them — the same one at 16, 32, 48
 and 256 pixels, so Windows can pick the size that fits where it is drawing. A
-viewer has no such slot, so it has to choose, and this one shows the largest
-icon, breaking a tie on color depth. The others are not reachable.
+viewer has no such slot, so it has to choose, and this one opens on the
+largest icon, breaking a tie on color depth. The others are pages: `n` and
+`N` step through them, and the bar under the picture counts them.
 
 That is deliberately the opposite of the usual choice, which is to prefer the
 deepest icon: in a file whose 256-pixel icon uses a palette and whose 16-pixel

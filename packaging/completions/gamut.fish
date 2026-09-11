@@ -18,4 +18,5 @@ complete -c gamut      -l size        -d 'Open the window at this size in logica
 complete -c gamut      -l histogram   -d 'Start with the histogram showing'
 complete -c gamut      -l info        -d 'Start with the file information panel showing'
 complete -c gamut      -l no-minimap  -d 'Start with the minimap off'
+complete -c gamut      -l paused      -d 'Open an animation stopped on its first frame'
 complete -c gamut      -l timing      -d 'Print decode and startup timings to stdout'

@@ -20,6 +20,16 @@ pub(crate) const MAX_DECODED_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 /// dimensions a decoder will accept, independently of the byte ceiling.
 pub(crate) const MAX_TEXTURE_DIMENSION: u32 = 32768;
 
+/// Ceiling on the frames of an animation held decoded at once, in bytes.
+///
+/// One frame is bounded by [`MAX_DECODED_BYTES`]; a sequence of them is not
+/// bounded by anything the file says, since a GIF can run to any length. A
+/// gibibyte holds a minute of 720p RGBA at 24 frames a second, or the whole
+/// of nearly any file a browser would play, and a machine that shows a
+/// 4 GiB still can spare it. Past it the player keeps a window of frames
+/// around the one on screen and decodes the rest again as it comes to them.
+pub(crate) const MAX_SEQUENCE_BYTES: u64 = 1024 * 1024 * 1024;
+
 /// Refuses an image too large to hold, using only what the header states, so
 /// that nothing is decoded before the decision is made.
 pub(crate) fn check_decoded_size(
@@ -63,6 +73,14 @@ mod tests {
     fn the_limit_matches_the_largest_displayable_texture() {
         assert_eq!(MAX_DECODED_BYTES, 32768 * 32768 * 4);
         assert!(check_decoded_size(32768, 32768, 1, 32).is_ok());
+    }
+
+    /// A single frame may be as large as any still, so the sequence budget
+    /// is never the thing that refuses one frame: it only decides how many
+    /// are kept.
+    #[test]
+    fn the_sequence_budget_is_within_the_still_ceiling() {
+        const { assert!(MAX_SEQUENCE_BYTES <= MAX_DECODED_BYTES) };
     }
 
     #[test]
