@@ -126,13 +126,18 @@ impl Chooser {
     }
 
     fn rematch(&mut self) {
-        let candidates: Vec<String> = self
-            .relative
-            .iter()
-            .map(|(dir, name)| candidate(dir, name))
-            .collect();
-        let borrowed: Vec<&str> = candidates.iter().map(String::as_str).collect();
-        self.matches = rank(self.matcher.as_ref(), &self.query, &borrowed);
+        self.matches = match index_query(&self.query) {
+            Some(digits) => rank_by_index(digits, self.paths.len()),
+            None => {
+                let candidates: Vec<String> = self
+                    .relative
+                    .iter()
+                    .map(|(dir, name)| candidate(dir, name))
+                    .collect();
+                let borrowed: Vec<&str> = candidates.iter().map(String::as_str).collect();
+                rank(self.matcher.as_ref(), &self.query, &borrowed)
+            }
+        };
         self.dirty = true;
     }
 
@@ -225,6 +230,7 @@ impl Chooser {
             cursor: self.cursor,
             current,
             several_dirs: self.several_dirs,
+            count: self.paths.len(),
             opened: std::mem::take(&mut self.opened),
             reveal: std::mem::take(&mut self.reveal),
             visible: self.visible.clone(),
@@ -310,6 +316,36 @@ pub fn rank(matcher: &dyn Matcher, query: &str, candidates: &[&str]) -> Vec<(usi
     scored
         .into_iter()
         .map(|(_, index, positions)| (index, positions))
+        .collect()
+}
+
+/// What follows the `:` of a query that asks for a file by its place in
+/// the list rather than by its name — `:12` — or `None` for a query that
+/// does not start with one.
+pub fn index_query(query: &str) -> Option<&str> {
+    query.strip_prefix(':')
+}
+
+/// The rows a query of `:digits` fits, over a list `count` long: the file
+/// at exactly that place first, where there is one, then every file whose
+/// place has those digits in it, in the list's order — `:1` is the first
+/// file and then the tenth through the nineteenth. Nothing but digits
+/// fits nothing, and `:` alone is the whole list. No chars are lit: the
+/// digits are the row's index, which is not a run of text.
+pub fn rank_by_index(digits: &str, count: usize) -> Vec<(usize, Vec<usize>)> {
+    if !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Vec::new();
+    }
+    let exact = digits
+        .parse::<usize>()
+        .ok()
+        .filter(|place| (1..=count).contains(place));
+    exact
+        .into_iter()
+        .chain(
+            (1..=count).filter(|place| Some(*place) != exact && place.to_string().contains(digits)),
+        )
+        .map(|place| (place - 1, Vec::new()))
         .collect()
 }
 
@@ -442,6 +478,51 @@ mod tests {
         let dir_chars = dir.chars().count() + 1;
         assert_eq!(positions[1] - dir_chars, 1);
         assert_eq!(name.chars().nth(1), Some('n'));
+    }
+
+    /// A query beginning with `:` asks by place in the list: the exact
+    /// place first, then every place with those digits in it, in order;
+    /// `:` alone keeps the whole list, and anything but digits after it
+    /// fits nothing.
+    #[test]
+    fn a_colon_query_asks_by_index() {
+        let rows = |digits: &str| -> Vec<usize> {
+            rank_by_index(digits, 25)
+                .into_iter()
+                .map(|(index, positions)| {
+                    assert!(positions.is_empty());
+                    index + 1
+                })
+                .collect()
+        };
+        assert_eq!(rows("3"), vec![3, 13, 23]);
+        assert_eq!(
+            rows("1"),
+            vec![1, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21]
+        );
+        assert_eq!(rows("25"), vec![25]);
+        assert_eq!(rows("26"), Vec::<usize>::new());
+        assert_eq!(rows("2"), vec![2, 12, 20, 21, 22, 23, 24, 25]);
+        assert_eq!(rows("").len(), 25);
+        assert_eq!(rows("1x"), Vec::<usize>::new());
+        assert_eq!(rows("99999999999999999999999"), Vec::<usize>::new());
+        assert_eq!(index_query(":12"), Some("12"));
+        assert_eq!(index_query("12"), None);
+
+        // Through the chooser: the cursor lands on the exact place, and
+        // the row's path is that file's.
+        let mut chooser = Chooser::with(Box::new(Plain));
+        let list: Vec<PathBuf> = (1..=12)
+            .map(|n| PathBuf::from(format!("{n}.png")))
+            .collect();
+        chooser.open(&list, 0);
+        chooser.set_query(":2".to_string());
+        assert_eq!(chooser.cursor, 0);
+        assert_eq!(chooser.path_at(0), Some(Path::new("2.png")));
+        assert_eq!(chooser.path_at(1), Some(Path::new("12.png")));
+        let input = chooser.input(&Thumbs::default(), None);
+        assert_eq!(input.count, 12);
+        assert_eq!(input.rows.len(), 2);
     }
 
     /// One directory is nothing to show; nested directories show their

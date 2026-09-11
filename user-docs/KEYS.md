@@ -68,7 +68,9 @@ every file on the list that fits what you have typed, best fit first, each
 with a thumbnail, its name, what kind of file it is, its place in the list
 and its size. The match is fuzzy — `dsc17` finds `DSC_0017.JPG` — and runs
 over the directory as well as the name when the list spans more than one, so
-`june/` narrows to that directory. The arrows move through the rows without
+`june/` narrows to that directory. A query beginning with `:` asks by place
+in the list instead: `:12` puts the twelfth file first, followed by every
+file whose number has `12` in it. The arrows move through the rows without
 opening anything; `Enter`, or a click on a row, opens that file and closes
 the chooser; `Esc`, a click outside it, or `Ctrl+P` again closes it. While
 it is open, keys go into the field rather than to the picture. The file on

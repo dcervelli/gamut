@@ -50,16 +50,16 @@ const FIELD_GAP: f32 = 8.0;
 /// The thumbnail's slot in a row, and what it is inset from the row's edge.
 const THUMB_SLOT: [f32; 2] = [72.0, 48.0];
 const THUMB_INSET: f32 = 4.0;
-/// The gap between the thumbnail and the words, and between the two runs
-/// of words.
+/// The gap between the index and the thumbnail, the thumbnail and the
+/// words, and the name and its directory.
 const ROW_GAP: f32 = 10.0;
-/// The columns down the right of a row: what kind of file, its place in
-/// the list, and its size.
-const KIND_WIDTH: f32 = 110.0;
-const INDEX_WIDTH: f32 = 44.0;
-const DIMENSIONS_WIDTH: f32 = 90.0;
-/// The room a row keeps at its right edge, past the last column.
+/// The room a row keeps at its right edge, past the words.
 const ROW_PADDING: f32 = 8.0;
+/// The space between the two lines of words in a row.
+const LINE_GAP: f32 = 2.0;
+/// What parts the kind of file from its size on a row's second line: the
+/// bar's own separator, the two being the same kind of fact.
+const SEPARATOR: &str = " \u{00b7} ";
 /// The bar at the left edge of the row of the file already on screen.
 const CURRENT_MARK: f32 = 2.0;
 /// The field's text is inset this far from its edge.
@@ -104,6 +104,9 @@ pub struct Input {
     pub cursor: usize,
     /// Which row is the file already on screen, if it is in the list.
     pub current: Option<usize>,
+    /// How many files the list holds, whatever the query has left of it:
+    /// what the index column is cut to the width of.
+    pub count: usize,
     /// Whether the session spans more than one directory, which is when a
     /// row says which one it is in.
     pub several_dirs: bool,
@@ -304,8 +307,21 @@ fn rows(pass: &mut Pass, ui: &mut egui::Ui, input: &Input, width: f32, height: f
                     vec2(width, ROW_HEIGHT),
                 )
             };
+            // The index column is as wide as the largest index in the list
+            // and no wider, so the digits line up down it and a short list
+            // does not carry a column cut for a long one.
+            let index_width = ui.ctx().fonts_mut(|fonts| {
+                fonts
+                    .layout_no_wrap(
+                        input.count.to_string(),
+                        egui::FontId::proportional(TEXT_SIZE),
+                        egui::Color32::PLACEHOLDER,
+                    )
+                    .size()
+                    .x
+            });
             for index in first..last {
-                row(pass, ui, input, index, row_rect(index));
+                row(pass, ui, input, index, row_rect(index), index_width);
             }
             if input.reveal && input.cursor < count {
                 ui.scroll_to_rect(row_rect(input.cursor), None);
@@ -317,11 +333,19 @@ fn rows(pass: &mut Pass, ui: &mut egui::Ui, input: &Input, width: f32, height: f
     }
 }
 
-/// One row: the thumbnail in its slot, the name and its directory after
-/// it, and the columns of facts down the right. Washed under the cursor,
-/// lit under the pointer, and marked at its left edge when it is the file
-/// already on screen.
-fn row(pass: &mut Pass, ui: &mut egui::Ui, input: &Input, index: usize, rect: egui::Rect) {
+/// One row: its place in the list, the thumbnail in its slot, and two
+/// lines of words — the name with its directory, and under it what kind
+/// of file it is and its size. Washed under the cursor, lit under the
+/// pointer, and marked at its left edge when it is the file already on
+/// screen.
+fn row(
+    pass: &mut Pass,
+    ui: &mut egui::Ui,
+    input: &Input,
+    index: usize,
+    rect: egui::Rect,
+    index_width: f32,
+) {
     let theme = pass.theme;
     let item = &input.rows[index];
     let control = Control::Choose(index);
@@ -345,10 +369,27 @@ fn row(pass: &mut Pass, ui: &mut egui::Ui, input: &Input, index: usize, rect: eg
         painter.rect_filled(mark, 0.0, theme.accent);
     }
 
-    // The thumbnail's slot, and the picture fitted and centered in it.
+    // The index first, right-aligned in its column so the digits line up.
+    let dim: egui::Color32 = theme.text_dim.into();
+    let body = egui::FontId::proportional(TEXT_SIZE);
+    let index_galley = ui
+        .ctx()
+        .fonts_mut(|fonts| fonts.layout_no_wrap(item.index.to_string(), body.clone(), dim));
+    let column = rect.left() + THUMB_INSET + CURRENT_MARK;
+    painter.galley(
+        pos2(
+            column + index_width - index_galley.size().x,
+            rect.center().y - index_galley.size().y / 2.0,
+        ),
+        index_galley,
+        dim,
+    );
+
+    // The thumbnail's slot after it, and the picture fitted and centered
+    // in the slot.
     let slot = egui::Rect::from_min_size(
         pos2(
-            rect.left() + THUMB_INSET + CURRENT_MARK,
+            column + index_width + ROW_GAP,
             rect.top() + (ROW_HEIGHT - THUMB_SLOT[1]) / 2.0,
         ),
         vec2(THUMB_SLOT[0], THUMB_SLOT[1]),
@@ -378,35 +419,12 @@ fn row(pass: &mut Pass, ui: &mut egui::Ui, input: &Input, index: usize, rect: eg
         }
     }
 
-    // The columns down the right, right-aligned each in its own width.
-    let dim: egui::Color32 = theme.text_dim.into();
-    let body = egui::FontId::proportional(TEXT_SIZE);
-    let mut right = rect.right() - ROW_PADDING;
-    for (text, column) in [
-        (
-            item.dimensions
-                .map(|(width, height)| format!("{width}\u{00d7}{height}")),
-            DIMENSIONS_WIDTH,
-        ),
-        (Some(item.index.to_string()), INDEX_WIDTH),
-        (Some(item.kind.clone()), KIND_WIDTH),
-    ] {
-        if let Some(text) = text {
-            let galley = ui
-                .ctx()
-                .fonts_mut(|fonts| fonts.layout_no_wrap(text, body.clone(), dim));
-            let at = pos2(
-                right - galley.size().x,
-                rect.center().y - galley.size().y / 2.0,
-            );
-            painter.galley(at, galley, dim);
-        }
-        right -= column;
-    }
-
-    // The name in bold, the directory dim after it, each with the chars
-    // the query was found at picked out in the accent. Laid out in their
-    // own inks, and cut to the room the columns leave.
+    // Two lines of words after the thumbnail: the name in bold with the
+    // directory dim after it, each with the chars the query was found at
+    // picked out in the accent; and under them what kind of file it is and
+    // its size, as the top bar writes them. Laid out in their own inks, and
+    // cut to the room the row has.
+    let right = rect.right() - ROW_PADDING;
     let bold = egui::FontId::new(TEXT_SIZE, egui::FontFamily::Name(fonts::BOLD.into()));
     let dir_chars = if item.dir.is_empty() {
         0
@@ -421,15 +439,25 @@ fn row(pass: &mut Pass, ui: &mut egui::Ui, input: &Input, index: usize, rect: eg
     let accent: egui::Color32 = theme.accent.into();
     let bright: egui::Color32 = theme.text_bright.into();
     let name = lit(ui, &item.name, &in_name, bold, bright, accent, room);
-    let at = pos2(left, rect.center().y - name.size().y / 2.0);
-    painter.galley(at, name.clone(), bright);
+    let mut facts = item.kind.clone();
+    if let Some((width, height)) = item.dimensions {
+        if !facts.is_empty() {
+            facts.push_str(SEPARATOR);
+        }
+        facts.push_str(&format!("{width}\u{00d7}{height}"));
+    }
+    let facts = lit(ui, &facts, &[], body.clone(), dim, accent, room);
+    // The two lines as one block, centered on the row.
+    let block = name.size().y + LINE_GAP + facts.size().y;
+    let top = rect.center().y - block / 2.0;
+    painter.galley(pos2(left, top), name.clone(), bright);
+    painter.galley(pos2(left, top + name.size().y + LINE_GAP), facts, dim);
     if input.several_dirs && !item.dir.is_empty() {
         let after = left + name.size().x + ROW_GAP;
         let room = (right - after).max(0.0);
         if room > 0.0 {
             let dir = lit(ui, &item.dir, &in_dir, body, dim, accent, room);
-            let at = pos2(after, rect.center().y - dir.size().y / 2.0);
-            painter.galley(at, dir, dim);
+            painter.galley(pos2(after, top), dir, dim);
         }
     }
 
