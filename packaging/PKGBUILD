@@ -6,7 +6,7 @@ pkgname=gamut
 # a window with its icon. `main.rs::APP_ID` is where it is set, and `cli`'s
 # tests check that this file still agrees with it.
 _appid=com.dcervelli.gamut
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="A modern image viewer optimized for getting work done, fast."
 arch=('x86_64' 'aarch64')

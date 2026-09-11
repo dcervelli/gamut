@@ -1,6 +1,6 @@
 [package]
 name = "gamut"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 # The floor egui sets: every crate of its family declares 1.95, and nothing
 # here is older than what they ask for. Nothing is pinned by this — Arch
