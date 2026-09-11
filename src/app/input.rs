@@ -4,7 +4,7 @@
 //! a binding added here is documented by the same edit. Each key names an
 //! [`Action`], and [`App::perform`] is the one place an action happens.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
@@ -33,6 +33,11 @@ use crate::view::Fit;
 /// for placing a view exactly, and Ctrl goes as far as the image does.
 const PAN_STEP: f32 = 64.0;
 
+/// How many rows of the chooser to ask thumbnails for as it opens, before
+/// the popup has said which rows it is showing: more than any window has
+/// room for, so that the first frame's rows are all on their way.
+const FIRST_ROWS: usize = 32;
+
 /// What the window says the first time the interface is hidden. Both keys,
 /// since the one that put it away is not the one a reader who pressed the
 /// button knows about.
@@ -56,6 +61,11 @@ pub enum Action {
     CycleUpscale,
     NextFile,
     PreviousFile,
+    /// Open the file chooser: a popup that lists the session's files, with
+    /// a field that narrows them as it is typed in. While it is up its own
+    /// keys are read by the popup — see `ui::chooser` — and the same
+    /// chord closes it.
+    OpenChooser,
     ToggleInterface,
     /// The interface, and the panels floating over the image with it: the
     /// bars come and go as [`Action::ToggleInterface`], and the map,
@@ -596,6 +606,13 @@ pub const KEYS: &[Binding] = &[
             (Char("["), PreviousFile),
             (Named(NamedKey::PageUp), PreviousFile),
         ],
+    },
+    Binding {
+        section: Section::Files,
+        mods: CTRL,
+        shown: "Ctrl+P",
+        help: "Choose a file from the list",
+        keys: &[(Char("p"), OpenChooser), (Char("P"), OpenChooser)],
     },
     Binding {
         section: Section::Playback,
@@ -1256,6 +1273,10 @@ impl App {
                 self.step(false);
                 return Effect::Nothing;
             }
+            // The button's own press, so that the key and a press from
+            // inside the popup — which is how the key arrives while the
+            // popup has the keyboard — cannot come to mean different things.
+            OpenChooser => self.press(Control::Chooser),
             // A fitted image re-fits on the next frame: the viewport it is
             // measured against is the one the panels leave, and they have
             // just come or gone.
@@ -1573,9 +1594,24 @@ impl App {
         }
     }
 
-    /// Acts on what a pass of the interface asked for.
-    pub(super) fn act(&mut self, command: ui::Command) {
+    /// Acts on what a pass of the interface asked for. Returns whether the
+    /// frame is now out of date.
+    ///
+    /// Nearly everything is a change to something drawn. The two exceptions
+    /// are the readings the pass makes on every frame — whether the pointer
+    /// is on the picture, and which handle of the region it rests on —
+    /// which owe a frame only when they differ from the last: counted as a
+    /// change every frame, they would have every frame asking for the
+    /// next, and the window spinning at whatever rate the surface allows
+    /// while nothing on it moved.
+    pub(super) fn act(&mut self, command: ui::Command) -> bool {
         match command {
+            ui::Command::OverImage(over) => {
+                return std::mem::replace(&mut self.pointer.over_image, over) != over;
+            }
+            ui::Command::OverGrip(grip) => {
+                return std::mem::replace(&mut self.pointer.grip, grip) != grip;
+            }
             ui::Command::Press(control) => self.press(control),
             // The image follows the pointer, so the viewport moves the other
             // way. Not animated: the hand is on the view.
@@ -1590,12 +1626,25 @@ impl App {
                 let (image, viewport) = (self.image_size(), self.viewport());
                 self.view.center_on(at, image, viewport);
             }
-            ui::Command::OverImage(over) => self.pointer.over_image = over,
             ui::Command::Grab { grab, at } => self.grab(grab, at),
             ui::Command::Pull(to) => self.pull(to),
             ui::Command::Release => self.release(),
-            ui::Command::OverGrip(grip) => self.pointer.grip = grip,
+            // The chooser's own: what was typed, where the cursor went, and
+            // which rows are on screen — whose thumbnails go to the front of
+            // the queue, and are the ones the screen keeps.
+            ui::Command::Query(query) => self.chooser.set_query(query),
+            ui::Command::Cursor(step) => self.chooser.step(step),
+            ui::Command::Visible(rows) => {
+                for row in rows.clone() {
+                    if let Some(path) = self.chooser.path_at(row) {
+                        self.thumbs.touch(path);
+                    }
+                }
+                let wanted = self.chooser.wanted(rows, &self.thumbs);
+                self.thumbnailer.prioritize(wanted);
+            }
         }
+        true
     }
 
     /// Zooms about the pointer by `steps` notches of the wheel.
@@ -1795,6 +1844,7 @@ impl App {
         };
         let request = self.files.adopt(path, Source::Clipboard(offer.mime));
         self.send(request);
+        self.list_changed();
     }
 
     /// Puts what the info panel says on the clipboard: as much of a table as
@@ -2001,6 +2051,40 @@ impl App {
             // highlight off a button that is no longer there.
             Control::Dismiss => {
                 self.toasts.dismiss();
+            }
+            // The chooser, toggled. Its open state is egui's, as a menu's is,
+            // so opening it is a matter of asking egui — which closes any
+            // menu on the way, one popup being open at a time — and closing
+            // it is what closes a menu. Opened, it starts over the list as it
+            // stands with the cursor on the file on screen, and the first
+            // rows' thumbnails are asked for ahead of the rest.
+            Control::Chooser => {
+                let Some(gui) = &self.gui else {
+                    return;
+                };
+                let open = egui::Popup::is_id_open(&gui.ctx, ui::chooser::id());
+                egui::Popup::close_all(&gui.ctx);
+                if !open {
+                    egui::Popup::open_id(&gui.ctx, ui::chooser::id());
+                    self.chooser.open(self.files.paths(), self.files.index());
+                    let wanted = self.chooser.wanted(0..FIRST_ROWS, &self.thumbs);
+                    self.thumbnailer.prioritize(wanted);
+                }
+            }
+            // A row of the chooser: the file it names, asked for as a file
+            // is when it is named outright rather than stepped to. The row
+            // is resolved to its path and the path to its place, since the
+            // list can have been rebuilt under the popup.
+            Control::Choose(row) => {
+                self.close_menus();
+                let chosen = self.chooser.path_at(row).map(Path::to_path_buf);
+                if let Some(path) = chosen
+                    && path != self.files.shown_path()
+                    && let Some(index) = self.files.position(&path)
+                {
+                    let request = self.files.go_to(index);
+                    self.send(request);
+                }
             }
         }
     }

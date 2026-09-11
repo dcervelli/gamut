@@ -1,4 +1,4 @@
-Cargo.lock sha256: fe7251774277b550174ddbff3fa7c1080a3027833db2377a27c94cbf1b657776
+Cargo.lock sha256: 1ecf0663d4623529322c5b9ed3ba70bfedf7f6e77a725835ef9ef7ef3fe2481c
 
                       gamut: third-party notices
 
@@ -17,7 +17,7 @@ or regenerating with
 
     cargo about generate --frozen packaging/about.hbs
 
-  MIT License — 212 crates
+  MIT License — 214 crates
   Apache License 2.0 — 15 crates
   BSD 2-Clause "Simplified" License — 6 crates
   BSD 3-Clause "New" or "Revised" License — 6 crates
@@ -2207,6 +2207,7 @@ Used by:
   lock_api 0.4.14
   parking_lot 0.12.5
   parking_lot_core 0.9.12
+  thread_local 1.1.10
 
 Copyright (c) 2016 The Rust Project Developers
 
@@ -4778,6 +4779,36 @@ Used by:
 The MIT License (MIT)
 
 Copyright (c) 2018 Yevhenii Reizner
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+--------------------------------------------------------------------------
+MIT License
+--------------------------------------------------------------------------
+
+Used by:
+  fuzzy-matcher 0.3.7
+
+The MIT License (MIT)
+
+Copyright (c) 2019 Jinzhou Zhang
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

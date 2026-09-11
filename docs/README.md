@@ -12,6 +12,7 @@ wants [`user-docs/`](../user-docs/) instead.
 | [Resampling](resampling.md) | The filters, and the coarse chain that makes minification affordable |
 | [Live reload](live-reload.md) | Watching the file and the directory, and why it is a `stat` rather than `inotify` |
 | [Animation and pages](animation.md) | The frames a decoder composites, the thread that decodes them ahead under a budget, and the clock they play by |
+| [The file chooser](chooser.md) | `Ctrl+P`: a popup that fuzzy-matches the session's files, the thread that thumbnails them into the desktop's own cache, and who gets the keys while it is up |
 | [Theme](theme.md) | Reading the desktop's palette, and the two things that resist being themed |
 | [Formats](formats.md) | Each decoder, what it can and cannot say, and how to add one |
 | [Known limits](limits.md) | What does not work yet, and why |

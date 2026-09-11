@@ -4,6 +4,7 @@ mod app;
 mod cli;
 mod clipboard;
 mod clock;
+mod fuzzy;
 mod image;
 mod listing;
 mod loader;
@@ -14,6 +15,8 @@ mod pasted;
 mod player;
 mod render;
 mod theme;
+mod thumbnail;
+mod thumbnailer;
 mod timing;
 mod ui;
 mod view;
@@ -111,6 +114,12 @@ fn run() -> Result<ExitCode> {
     let monitors = monitor::watch(move || {
         let _ = proxy.send_event(app::UserEvent::Monitor);
     });
+    let proxy = event_loop.create_proxy();
+    let thumbnailer = thumbnailer::Thumbnailer::new(args.options.overrides, move |delivered| {
+        proxy
+            .send_event(app::UserEvent::Thumbnail(Box::new(delivered)))
+            .is_ok()
+    });
     let mut app = App::new(
         args.files,
         args.named,
@@ -121,6 +130,7 @@ fn run() -> Result<ExitCode> {
             loader,
             wake,
             monitors,
+            thumbnailer,
         },
     );
     event_loop.run_app(&mut app)?;

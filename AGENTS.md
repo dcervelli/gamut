@@ -18,6 +18,8 @@ app/           the event loop's state and winit handlers
   kept.rs        what each file was left in — its view, its display, and its frame or page — so stepping back to it puts it back
   playback.rs    the clock an animation plays by: which frame is due at a moment, and when the next is;
                  pure, told the time and the delays decoded so far
+  chooser.rs     the file chooser's state: the query, which files fit it and where, the
+                 cursor, what is known about each file, and the thumbnails the screen holds
   input.rs       Action, KEYS table, Effect; perform() is where every key's action happens;
                  act() is where every Command from the interface happens; Namer composes tooltips from KEYS
   window.rs      opening size, titles
@@ -56,6 +58,8 @@ ui/            lays each frame's interface out with egui; no wgpu or winit impor
   toast.rs       the message about what was just done, at the foot of the content
                  area: Toast is what it says and how long it has, Toasts is the
                  clock, and show() draws it with the cross that dismisses it
+  chooser.rs     the file chooser's popup: the field, the rows and their thumbnails, and
+                 the keys read inside the pass while the field has the keyboard
   transport.rs   the bar a file of frames or pages brings with it, above the
                  bottom bar: the steps, the play button, the readout and the
                  timeline; Transport is what it shows, and timeline() lays the
@@ -77,6 +81,12 @@ loader.rs      the decode + upload thread; replies arrive as winit user events; 
 player.rs      the thread decoding an animation's frames ahead of the clock, and
                the cache it keeps them in under MAX_SEQUENCE_BYTES: whole for a
                file that fits, a window around the head for one that does not
+thumbnailer.rs the low-priority thread thumbnailing every file of the session for
+               the chooser, and the queue the chooser's visible rows go to the front of
+thumbnail.rs   the freedesktop thumbnail cache: the GLib-spelled URI a file is keyed
+               by, MD5, the chunks a thumbnail carries, and the temporary-then-rename write
+fuzzy.rs       the chooser's matcher behind a trait with skim's own signature; the
+               one file that names the fuzzy-matcher crate
 watch.rs       polling a file — or a directory — for a settled change
 monitor.rs     what the compositor says each monitor is in, SDR or HDR, over a Wayland connection of its own
 clipboard.rs   putting text or a file: URI on the clipboard, in a process that outlives
@@ -101,6 +111,7 @@ image/         the data model, nothing GPU
                  through, each composited whole by the decoder
   stats.rs       the scan an image gets on load: min/max, histogram, plot
   encode.rs      the displayed image walked back out to an 8-bit sRGB PNG, for the clipboard
+  resample.rs    a CPU box filter in the file's own encoding, for the thumbnails
   exif.rs        the file's own metadata, read and rendered for the info panel
   geo.rs         GeoTIFF's keys: where a raster's pixels are on the ground
   directory.rs   a TIFF directory the metadata reader cannot reach, rewritten
@@ -163,6 +174,8 @@ still agrees with both, so renaming either is editing the constant —
 | How an animation is timed, cached or shown | `app/playback.rs` for when a frame is due; `player.rs` for what is decoded ahead and what is let go; `App::show_due_frame` for how a frame reaches the texture and `Current`; the display is left alone on a frame change on purpose |
 | What the transport bar shows or does | `ui/transport.rs` for the bar and `App::transport` for what it is told; a press goes through `App::press` as `Control::{Play, StepBack, StepForward, Seek}`, and the keys through `App::step_frame` and `App::toggle_play` so the two cannot drift; `Chrome::new`'s flag is where the bar takes its height |
 | What a copy of the image contains | `image/encode.rs`, which walks the `Region` it is given; the chord that asks for it is in `app/input.rs` |
+| The chooser: what a row shows, how the query is matched, what a key does in it | `ui/chooser.rs` for the popup and the keys it reads before its field can; `app/chooser.rs` for the ranking, the relative paths and the cursor; `App::press` for `Control::Chooser` and `Control::Choose`, and `App::act` for `Command::{Query, Cursor, Visible}`. Its open state is egui's, under `ui::chooser::id()`. A different matcher is a new `impl Matcher` in `fuzzy.rs` |
+| A thumbnail: what is made, where it goes, what the row gets | `thumbnailer.rs` for the stages and the queue, `thumbnail.rs` for the cache's naming, chunks and write; `image/resample.rs` for the filter; `App::hold_thumb` for the texture and `app/chooser.rs::Thumbs` for how many the screen keeps |
 | What a region does, or what a key does while one is up | `image/region.rs` for the change to the rectangle; `App::perform_on_region` in `app/input.rs` for the keys a region takes, `App::pull` for what a drag makes of it; `ui/region.rs` for where it is drawn and which handle the pointer is on; `Pass::region_gestures` in `ui/mod.rs` for which drag is the region's and which the view's |
 | What a paste accepts, or where it is written | `clipboard.rs::IMAGE_TYPES` for the MIME types and the extensions they are saved under, `pasted.rs` for the directory and the name; `App::paste` starts it and `app/files.rs::adopt` puts it in the list. Whether the button for it is on screen is `Panels::paste`, looked at by `App::poll_clipboard` |
 | A color-space source (a new tag a format carries) | `image/color/` |

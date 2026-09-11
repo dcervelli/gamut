@@ -100,6 +100,24 @@ impl Files {
         &self.paths[self.index]
     }
 
+    /// The whole list, in the order it is walked.
+    pub(super) fn paths(&self) -> &[PathBuf] {
+        &self.paths
+    }
+
+    /// Where `path` stands in the list, if it is on it.
+    pub(super) fn position(&self, path: &Path) -> Option<usize> {
+        self.paths.iter().position(|held| held == path)
+    }
+
+    /// Straight to the file at `index`: what the chooser asks for. Not a
+    /// walk, since one particular file was named; and not held back by a
+    /// read in flight, as `adopt` is not — a pick wins over whatever step
+    /// was on its way.
+    pub(super) fn go_to(&mut self, index: usize) -> Request {
+        self.request(index, Reload::Fresh, None, Source::Disk)
+    }
+
     pub(super) fn overrides(&self) -> decode::Overrides {
         self.overrides
     }

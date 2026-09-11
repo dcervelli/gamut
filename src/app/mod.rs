@@ -1,5 +1,6 @@
 //! Window lifecycle, key handling, and building each frame's interface.
 
+mod chooser;
 mod files;
 mod gui;
 pub mod input;
@@ -30,6 +31,7 @@ use crate::openers::{self, Opener};
 use crate::player::{self, Player};
 use crate::render::{HdrPreference, Placement, Renderer, Scene, Upscale};
 use crate::theme::{self, Theme};
+use crate::thumbnailer::{Delivered, Facts, Thumb, Thumbnailer};
 use crate::timing;
 use crate::ui::chrome::{content_area, image_viewport};
 use crate::ui::toast::{self, Level, Toasts};
@@ -38,6 +40,7 @@ use crate::ui::{self, Current, FileFacts, FrameInput, Panels, Reading, Rect, Sel
 use crate::view::{View, Viewport};
 use crate::watch::{self, Watch};
 
+use chooser::{Chooser, Thumbs};
 use files::{Announce, Files};
 use gui::Gui;
 use input::{Effect, Framing, Grabbing, Pointer};
@@ -54,6 +57,9 @@ pub enum UserEvent {
     Monitor,
     /// A player's cache changed: a frame arrived, or the decoder gave up.
     Frame(player::Event),
+    /// The thumbnail thread has something to say about a file. Boxed for
+    /// the variant that carries pixels.
+    Thumbnail(Box<Delivered>),
 }
 
 /// The other threads, and how each reaches the loop: made in `main` from
@@ -63,6 +69,8 @@ pub struct Threads {
     /// How a player wakes the loop; one is started per animated file.
     pub wake: player::Wake,
     pub monitors: Option<Monitors>,
+    /// The thread making the chooser's thumbnails, over the whole session.
+    pub thumbnailer: Thumbnailer,
 }
 
 /// What the command line asked for, beyond which files to show.
@@ -166,6 +174,18 @@ pub struct App {
     /// The clock the animation on screen plays by. Beside `player`: one
     /// without the other is never the case.
     playback: Option<Playback>,
+    /// The thread making thumbnails of every file on the list, for the
+    /// chooser. Told to stop rather than joined — see its own account.
+    thumbnailer: Thumbnailer,
+    /// The chooser's state: the query, which files fit it, what is known
+    /// about each. Whether the popup is open is egui's — see
+    /// [`App::chooser_open`].
+    chooser: Chooser,
+    /// The thumbnails the screen holds, as egui textures.
+    thumbs: Thumbs,
+    /// Thumbnails that arrived before there was a context to make textures
+    /// in, taken up at the first frame.
+    pending_thumbs: Vec<(PathBuf, Thumb)>,
     /// Which frame the texture and `current` hold. `None` for the file's
     /// own decode, which is what a still is and what an animation opens as.
     uploaded: Option<usize>,
@@ -252,6 +272,7 @@ impl App {
             loader,
             wake,
             monitors,
+            thumbnailer,
         } = threads;
         let Options {
             overrides,
@@ -295,6 +316,10 @@ impl App {
             loader,
             player: None,
             playback: None,
+            thumbnailer,
+            chooser: Chooser::default(),
+            thumbs: Thumbs::default(),
+            pending_thumbs: Vec::new(),
             uploaded: None,
             wake,
             players: 0,
@@ -329,7 +354,54 @@ impl App {
         };
         let request = app.files.open_first();
         app.send(request);
+        // The whole list, from the start: the cache fills while the first
+        // file is being looked at, and the chooser then has thumbnails the
+        // moment it opens.
+        app.thumbnailer.enqueue(app.files.paths().to_vec());
         app
+    }
+
+    /// Whether the file chooser is up. Asked of egui, whose popup it is:
+    /// `Esc` and a click outside close it there, and nothing here would
+    /// know.
+    pub(super) fn chooser_open(&self) -> bool {
+        self.gui
+            .as_ref()
+            .is_some_and(|gui| egui::Popup::is_id_open(&gui.ctx, ui::chooser::id()))
+    }
+
+    /// The list has changed — a directory read again, a paste taken in —
+    /// so the chooser reads it again, and the thread is told about any
+    /// files new to it.
+    pub(super) fn list_changed(&mut self) {
+        self.chooser.relist(self.files.paths());
+        self.thumbnailer.enqueue(self.files.paths().to_vec());
+    }
+
+    /// Takes in what the thumbnail thread had to say.
+    fn take_thumbnail(&mut self, delivered: Delivered) {
+        if let Some((path, thumb)) = self.chooser.take(delivered) {
+            self.hold_thumb(path, thumb);
+        }
+    }
+
+    /// Puts a thumbnail in a texture for the screen to hold, or keeps it
+    /// until there is a context to make one in.
+    fn hold_thumb(&mut self, path: PathBuf, thumb: Thumb) {
+        let Some(gui) = &self.gui else {
+            self.pending_thumbs.push((path, thumb));
+            return;
+        };
+        let image = egui::ColorImage::from_rgba_unmultiplied(
+            [thumb.width as usize, thumb.height as usize],
+            &thumb.rgba,
+        );
+        let texture = gui.ctx.load_texture(
+            path.display().to_string(),
+            image,
+            egui::TextureOptions::LINEAR,
+        );
+        self.thumbs.insert(path, texture);
     }
 
     /// Whether anything ever reached the screen. False only when every file
@@ -820,7 +892,11 @@ impl App {
             let fired = watch.poll();
             fired || changed
         });
-        changed && self.files.relist(crate::listing::relist(&self.named))
+        let relisted = changed && self.files.relist(crate::listing::relist(&self.named));
+        if relisted {
+            self.list_changed();
+        }
+        relisted
     }
 
     /// Notices a picture arriving on the clipboard or leaving it, which is
@@ -1001,6 +1077,21 @@ impl App {
 
         self.files.shown(file.index);
         self.watch = file.watch;
+        // What this file is, for the chooser's row about it, ahead of the
+        // thumbnail thread reaching it. A thumbnail is asked for again for a
+        // file changed on disk — the one in the cache is of the file as it
+        // was, and its modification time no longer matches — and for one the
+        // thread had given up on, which has just decoded here.
+        let given_up = self.chooser.learn(
+            &file.path,
+            Facts {
+                size: Some((image.width, image.height)),
+                sequence,
+            },
+        );
+        if file.mode == Reload::InPlace || given_up {
+            self.thumbnailer.prioritize(vec![file.path.clone()]);
+        }
         // A region is of the picture it was drawn on. Stepping to another
         // file takes it off, and so does the file coming back a different
         // size, where the pixels it marked out are no longer the pixels.
@@ -1252,6 +1343,13 @@ impl App {
         }
         let view = self.view_at(now);
         self.show_due_frame();
+        for (path, thumb) in std::mem::take(&mut self.pending_thumbs) {
+            self.hold_thumb(path, thumb);
+        }
+        let chooser = self.chooser_open().then(|| {
+            let shown = self.current.is_some().then(|| self.files.shown_path());
+            self.chooser.input(&self.thumbs, shown)
+        });
 
         let scale = window.scale_factor() as f32;
         let physical = self.window_size();
@@ -1292,6 +1390,7 @@ impl App {
             box_zoom: self.pointer.space != input::Space::Up,
             zoom_box: self.zoom_box,
             transport: self.transport(),
+            chooser,
         };
 
         let namer = self.namer();
@@ -1343,16 +1442,16 @@ impl App {
         // What the interface asked for is done once the frame is off: it
         // was drawn from the state as it was, and the next frame shows what
         // the press did.
-        let pressed = !commands.is_empty();
+        let mut changed = false;
         for command in commands {
-            self.act(command);
+            changed |= self.act(command);
         }
 
         // A move still in flight owes the next frame. Asked for from here
         // rather than timed from the loop, so that it comes when the
         // compositor is ready for one and the move plays at the display's
         // own rate.
-        if self.motion.is_some() || pressed {
+        if self.motion.is_some() || changed {
             window.request_redraw();
         }
     }
@@ -1478,6 +1577,17 @@ impl ApplicationHandler<UserEvent> for App {
                     window.request_redraw();
                 }
             }
+            // A frame only while the chooser is up: with it closed nothing
+            // on screen shows a thumbnail, and the news is kept for when it
+            // opens.
+            UserEvent::Thumbnail(delivered) => {
+                self.take_thumbnail(*delivered);
+                if self.chooser_open()
+                    && let Some(window) = &self.window
+                {
+                    window.request_redraw();
+                }
+            }
         }
     }
 
@@ -1571,6 +1681,9 @@ impl ApplicationHandler<UserEvent> for App {
         // egui sees every event first. What it takes for itself — a press on
         // one of its widgets — goes no further; what it merely wants painted
         // for, a pointer crossing one of them, is a redraw and nothing else.
+        // Except for the redraw itself: egui answers `RedrawRequested` with
+        // "repaint" too, meaning paint now, and a frame asked for on the
+        // strength of that would be a frame asking for the next for ever.
         let response = match (&self.gui, &self.window) {
             (Some(_), Some(window)) => {
                 let window = window.clone();
@@ -1581,6 +1694,7 @@ impl ApplicationHandler<UserEvent> for App {
         };
         if let Some(response) = &response
             && response.repaint
+            && !matches!(event, WindowEvent::RedrawRequested)
             && let Some(window) = &self.window
         {
             window.request_redraw();
@@ -1726,6 +1840,7 @@ mod tests {
                 loader: Loader::detached(),
                 wake: Arc::new(|_| true),
                 monitors: None,
+                thumbnailer: Thumbnailer::detached(),
             },
         )
     }
@@ -1801,6 +1916,75 @@ mod tests {
             },
             outcome,
         });
+    }
+
+    /// A row of the chooser asks for the file it names, wherever the list
+    /// has put it, and a row naming the file already on screen asks for
+    /// nothing; and a list read again is a list the chooser reads again.
+    #[test]
+    fn choosing_a_row_asks_for_its_file() {
+        use crate::ui::Control;
+
+        let (mut app, dir) = app_over(
+            "choose",
+            &[("a.png", 8, 8), ("b.png", 8, 8), ("c.png", 8, 8)],
+        );
+        assert!(app.files.is_idle());
+        app.chooser.open(app.files.paths(), app.files.index());
+        let _ = app.act(ui::Command::Press(Control::Choose(0)));
+        assert!(
+            app.files.is_idle(),
+            "the file on screen is not asked for again"
+        );
+
+        let _ = app.act(ui::Command::Press(Control::Choose(2)));
+        let pending = app.files.pending().expect("the third file is asked for");
+        assert_eq!(pending.index, 2);
+        assert_eq!(app.files.path(2).file_name().unwrap(), "c.png");
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.files.index(), 2);
+
+        // A row past the list asks for nothing rather than panicking.
+        let _ = app.act(ui::Command::Press(Control::Choose(99)));
+        assert!(app.files.is_idle());
+
+        // The list rebuilt under the popup: the chooser sees the new file,
+        // and a row still resolves to its file by name.
+        write_png(&dir, "d.png", 8, 8);
+        assert!(
+            app.files
+                .relist(crate::listing::relist(std::slice::from_ref(&dir)))
+        );
+        app.list_changed();
+        let input = app.chooser.input(&app.thumbs, Some(app.files.shown_path()));
+        assert_eq!(input.rows.len(), 4);
+        assert_eq!(input.current, Some(2));
+        assert_eq!(
+            app.chooser
+                .path_at(3)
+                .map(|p| p.file_name().unwrap().to_owned())
+                .as_deref(),
+            Some(std::ffi::OsStr::new("d.png"))
+        );
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// The readings the pass makes on every frame owe a frame only when
+    /// they change: said again unchanged, they must not ask for another,
+    /// or an idle window would draw itself over and over.
+    #[test]
+    fn a_reading_said_again_unchanged_owes_no_frame() {
+        let (mut app, dir) = app_over("readings", &[("a.png", 8, 8)]);
+        assert!(app.act(ui::Command::OverImage(true)));
+        assert!(!app.act(ui::Command::OverImage(true)));
+        assert!(app.act(ui::Command::OverImage(false)));
+        assert!(!app.act(ui::Command::OverGrip(None)));
+        assert!(app.act(ui::Command::OverGrip(Some(
+            crate::image::region::Grip::Inside
+        ))));
+        assert!(app.act(ui::Command::Press(ui::Control::Grid)));
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
     }
 
     /// A key's pan is a move: the view is where it is going at once, and

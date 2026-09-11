@@ -4,6 +4,8 @@
 //! Four of them, one open at a time: a second would have to say which of the
 //! two a press outside dismisses. Adding another is a set of choices, a
 //! function that lays them out, and the button in the chrome that opens it.
+//! The file chooser is a fifth popup under the same rule, though not a menu
+//! — see `ui::chooser`.
 
 use egui::{Button, RichText, Sense, Ui, Vec2, WidgetInfo, WidgetType, vec2};
 

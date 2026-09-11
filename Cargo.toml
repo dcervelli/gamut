@@ -74,6 +74,15 @@ gif = "0.14.2"
 # the EXIF orientation and the animation canvas all live in the RIFF container
 # beside the pixels, and `ImageReader` hands back only the pixels.
 image-webp = "0.2.4"
+# The fuzzy matcher behind the file chooser: skim's algorithm as it stood
+# when it was cut out of that program in 2020 — the one library extraction
+# of it there is. skim's own tree has kept developing the same code since,
+# under `src/fuzzy_matcher/`, and skim itself is the whole terminal finder
+# rather than a library. `src/fuzzy.rs` is the one file that names this
+# crate, behind a trait with skim's own method signature, so a replacement —
+# a vendored copy of skim's current matcher, or anything else — is a new
+# implementation there and nothing else moves.
+fuzzy-matcher = "0.3.7"
 # JPEG XL, pure Rust: no shared library for the package to depend on and no C
 # toolchain for the build, which is what sets this apart from the HEIF path.
 # It renders into the color encoding the file itself declares and hands the
@@ -97,6 +106,18 @@ jxl-oxide = { version = "0.12.6", default-features = false, features = ["rayon"]
 # and careful with the files it is given: a chunk is read with `take`, so a
 # length claimed by a broken file allocates only what the file actually holds.
 kamadak-exif = "0.6.1"
+# For one thing: lowering the thumbnail thread's priority, CPU and I/O both,
+# so that it stays out of the decoder's way — see `thumbnailer.rs`. The
+# standard library has no way to say it, and the crate is already linked
+# under half the tree.
+libc = "0.2"
+# For one thing as well: building rayon's global thread pool before the
+# thumbnail thread lowers its priority. The pool is made lazily by whichever
+# thread first uses it, and its threads inherit that thread's nice value for
+# the life of the process — so left to chance it would be made by the
+# thumbnailer at nice 10, and every JPEG XL the loader then decoded on it
+# would run at the thumbnailer's priority. Already linked under `jxl-oxide`.
+rayon-core = "1"
 # `v1_23` to match the security-limits struct of the libheif this links
 # against. `SecurityLimits::new()` copies the C library's global limits, which
 # carry that library's own `version` field (4 for libheif 1.23); a binding

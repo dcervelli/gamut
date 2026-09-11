@@ -4,6 +4,28 @@ Notable changes to `gamut`. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- `Ctrl+P` opens a file chooser over the picture: type to filter the
+  session's files by name — fuzzily, and by directory too when the list
+  spans more than one — arrow through the rows, and `Enter` or a click
+  opens one. Each row shows a thumbnail, the name, the kind of file, its
+  place in the list and its size. The thumbnails are the desktop's own,
+  read from and written to `~/.cache/thumbnails` so that a file manager
+  and this program share them, and are made in the background at low
+  priority from the moment the program starts.
+
+### Fixed
+
+- An idle window no longer redraws itself continuously, holding a core at
+  whatever rate the surface allowed while nothing on screen moved. Two
+  things asked for the next frame on every frame: the toolkit's answer to
+  a redraw, which says "paint now" and was read as "paint again", and the
+  interface's report of whether the pointer was on the picture, which
+  counted as a change even when it had not changed.
+
 ## 0.2.0 - 2026-09-11
 
 ### Changed
