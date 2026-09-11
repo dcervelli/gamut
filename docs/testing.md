@@ -4,12 +4,17 @@
 cargo test
 ```
 
-374 tests over the transfer functions and primaries matrices, texture format
+475 tests over the transfer functions and primaries matrices, texture format
 selection (including the device-capability fallbacks), the statistics and
 window logic, the pixel readout's two halves and the colormaps behind its
 swatch, the decoder registry, the CICP translation, ICC profile recognition,
 gain map reconstruction, the view geometry, the key table, the words the
-interface says, and the reload watch's idea of when a write has finished.
+interface says, the reload watch's idea of when a write has finished, and
+the file chooser: its ranking over a matcher of the tests' own, the shared
+directory the rows are named relative to, the cursor's clamping, the
+thumbnail cache's URI spelling against GLib's and its MD5 against RFC
+1321's vectors, a thumbnail written and found again in a cache directory of
+the test's own, and the box filter's means.
 
 The interface is tested by driving it. `src/ui/driven.rs` lays the whole of
 it out headless with `egui_kittest`, presses a control by the name it gives
@@ -17,7 +22,10 @@ the accessibility tree, and reads off the commands the pass handed back: that
 a toggle comes back as its press and keeps no keyboard focus, that a toggle
 whose panel the window cannot take is dead and refuses the press, that the
 paste button and the step buttons are there only when they would do
-something, that each menu opens and each of its cells chooses what it says.
+something, that each menu opens and each of its cells chooses what it says,
+and that the file chooser takes the keyboard while it is up — what is typed,
+the arrows and `Enter` come back as commands rather than reaching the window
+— and hands it back when `Esc` closes it.
 Nothing about pixels: what the frame looks like is looked at, and what it
 does is tested. The geometry the panels are placed by — the four bars, the
 content area, where the histogram and the information column go and when

@@ -6,6 +6,7 @@
 //! geometry is — and what was pressed comes back as commands, so that a
 //! frame can be built and driven with no application behind it.
 
+pub mod chooser;
 pub mod chrome;
 pub mod control;
 pub mod fonts;
@@ -259,6 +260,11 @@ pub struct FrameInput {
     /// The transport bar's state, for a file of frames or pages, and
     /// `None` for a still — which is what decides whether the bar is there.
     pub transport: Option<Transport>,
+    /// The file chooser, on every frame it is open, and `None` while it is
+    /// not. Whether it is open is egui's to say — see
+    /// [`chooser::id`] — and this has to be handed over on every frame it
+    /// is, since a popup not drawn for a frame is a popup egui has closed.
+    pub chooser: Option<chooser::Input>,
 }
 
 /// One pass of the interface: the chrome and everything on it, laid out in
@@ -286,10 +292,15 @@ pub fn show(
         pass.bars(ui);
     }
     pass.picture(ui);
+    let content = chrome::content_area(input.logical, panels.show_ui, input.transport.is_some());
     if let Some(current) = current {
-        let content =
-            chrome::content_area(input.logical, panels.show_ui, input.transport.is_some());
         pass.overlays(ui, current, content);
+    }
+    // Over everything, and whether or not there is a picture yet: the
+    // chooser is about the list, and the list is there before the first
+    // file has been read.
+    if let Some(chooser) = &input.chooser {
+        chooser::show(&mut pass, ui, chooser, content);
     }
     pass.commands
 }

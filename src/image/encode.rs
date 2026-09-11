@@ -60,16 +60,27 @@ pub struct Raster {
 /// Alpha is carried only where the file had some. An image that was opaque
 /// stays opaque rather than gaining a channel of nothing but 255.
 pub fn displayed(image: &DecodedImage, display: &Display, region: Region) -> Raster {
-    let source = image.channels();
-    let gray = source.is_gray() && display.colormap == Colormap::Gray;
-    let alpha = source.alpha_index().is_some();
-    let channels = match (gray, alpha) {
-        (true, false) => Channels::Gray,
-        (true, true) => Channels::GrayAlpha,
-        (false, false) => Channels::Rgb,
-        (false, true) => Channels::Rgba,
-    };
+    let stride = region.width as usize * displayed_channels(image, display).count();
+    displayed_on(
+        image,
+        display,
+        region,
+        bands(stride, region.height as usize),
+    )
+}
 
+/// [`displayed`], divided between `bands` threads — or kept on one, for a
+/// caller that is already on a thread of its own and has no business
+/// taking the others: the thumbnailer, which walks a picture no larger
+/// than [`crate::thumbnail::SIDE`] a side and wants to stay out of the
+/// decoder's way. `displayed` itself picks the count from the picture.
+pub fn displayed_on(
+    image: &DecodedImage,
+    display: &Display,
+    region: Region,
+    bands: usize,
+) -> Raster {
+    let channels = displayed_channels(image, display);
     let stride = region.width as usize * channels.count();
     let height = region.height as usize;
     let mut data = vec![0u8; stride * height];
@@ -78,7 +89,7 @@ pub fn displayed(image: &DecodedImage, display: &Display, region: Region) -> Ras
     // state alone, so a band reads nothing another band writes and needs
     // nothing from it; the split is over who does the work, not over what
     // the work is.
-    let bands = bands(stride, height);
+    let bands = bands.clamp(1, height.max(1));
     if bands == 1 {
         fill(&mut data, region.y, image, display, channels, region);
     } else {
@@ -96,6 +107,20 @@ pub fn displayed(image: &DecodedImage, display: &Display, region: Region) -> Ras
         height: region.height,
         channels,
         data,
+    }
+}
+
+/// What each pixel of the raster carries, from what the file carried and
+/// what the display does to it — see [`displayed`].
+fn displayed_channels(image: &DecodedImage, display: &Display) -> Channels {
+    let source = image.channels();
+    let gray = source.is_gray() && display.colormap == Colormap::Gray;
+    let alpha = source.alpha_index().is_some();
+    match (gray, alpha) {
+        (true, false) => Channels::Gray,
+        (true, true) => Channels::GrayAlpha,
+        (false, false) => Channels::Rgb,
+        (false, true) => Channels::Rgba,
     }
 }
 
@@ -157,8 +182,21 @@ fn fill(
 /// and it is not being kept, so the time a smaller one would cost is time the
 /// window spends not answering.
 pub fn png(raster: &Raster) -> Result<Vec<u8>> {
+    png_with_text(raster, &[])
+}
+
+/// [`png()`], with `text` written into the file as `tEXt` chunks ahead of the
+/// pixels, one `(keyword, text)` each: what a thumbnail says about the file
+/// it was made of. Both halves must be Latin-1, which is all a `tEXt` chunk
+/// can hold; the thumbnail cache's are ASCII.
+pub fn png_with_text(raster: &Raster, text: &[(String, String)]) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
     let mut encoder = Encoder::new(&mut bytes, raster.width, raster.height);
+    for (keyword, text) in text {
+        encoder
+            .add_text_chunk(keyword.clone(), text.clone())
+            .with_context(|| format!("adding the {keyword} chunk"))?;
+    }
     encoder.set_color(match raster.channels {
         Channels::Gray => ColorType::Grayscale,
         Channels::GrayAlpha => ColorType::GrayscaleAlpha,
@@ -450,6 +488,31 @@ mod tests {
             "the walk has to actually be divided for this to be testing anything"
         );
         assert_eq!(displayed(&source, &display).data, expected);
+    }
+
+    /// A text chunk written goes in ahead of the pixels, where a reader of
+    /// the header alone finds it, and comes back as it went.
+    #[test]
+    fn a_text_chunk_survives_the_round_trip() {
+        let raster = displayed(&image(Channels::Gray, vec![7]), &plain());
+        let bytes = png_with_text(
+            &raster,
+            &[("Thumb::URI".to_string(), "file:///tmp/a.png".to_string())],
+        )
+        .expect("a valid raster encodes");
+        let reader = Decoder::new(Cursor::new(&bytes)).read_info().unwrap();
+        let chunks = &reader.info().uncompressed_latin1_text;
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].keyword, "Thumb::URI");
+        assert_eq!(chunks[0].text, "file:///tmp/a.png");
+
+        // One band is the same walk on one thread.
+        let region = Region::whole([1, 1]);
+        let source = image(Channels::Gray, vec![7]);
+        assert_eq!(
+            displayed_on(&source, &plain(), region, 1).data,
+            displayed_on(&source, &plain(), region, 8).data
+        );
     }
 
     /// Sizes come from the image, not from the window it is being viewed in.

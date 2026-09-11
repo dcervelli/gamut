@@ -54,9 +54,12 @@ column, the menus — is [the interface](interface.md).
 | --- | --- |
 | `src/main.rs` | Event-loop setup |
 | `src/cli.rs` | Argument parsing and `--help`, whose key sections come from the keymap |
-| `src/app/` | Window lifecycle and the event loop's state: `files.rs` is the file list and the read in flight, `input.rs` the keymap and what the interface asked for, `gui.rs` egui's context and its winit adapter, `window.rs` titles and opening size, `playback.rs` the clock an animation plays by |
+| `src/app/` | Window lifecycle and the event loop's state: `files.rs` is the file list and the read in flight, `input.rs` the keymap and what the interface asked for, `gui.rs` egui's context and its winit adapter, `window.rs` titles and opening size, `playback.rs` the clock an animation plays by, `chooser.rs` the file chooser's query, matches and cursor |
 | `src/player.rs` | The thread that decodes an animation's frames ahead of the clock, and the cache it keeps them in under a budget |
-| `src/ui/` | Laying each frame's interface out with egui: `chrome.rs` the panels, one file per widget, `pixel.rs` the pointer's readout, `status.rs` the words in the bars, `style.rs` the theme as egui's style, `fonts.rs` the desktop's faces |
+| `src/thumbnailer.rs` | The thread that thumbnails every file of the session for the chooser, at low priority, into the desktop's cache |
+| `src/thumbnail.rs` | The freedesktop thumbnail cache: the GLib-spelled URI a file is keyed by, MD5, the chunks, and the temporary-then-rename write |
+| `src/fuzzy.rs` | The chooser's matcher, behind a trait with skim's own signature; the one file that names the crate |
+| `src/ui/` | Laying each frame's interface out with egui: `chrome.rs` the panels, one file per widget, `pixel.rs` the pointer's readout, `status.rs` the words in the bars, `style.rs` the theme as egui's style, `fonts.rs` the desktop's faces, `chooser.rs` the file chooser's popup |
 | `src/view.rs` | Zoom / pan / fit geometry — pure maths |
 | `src/listing.rs` | What a path on the command line stands for: a directory is the images inside it, read again while the program runs |
 | `src/watch.rs` | Noticing that the file on screen has been rewritten, or that a directory named on the command line holds something else now |
@@ -67,6 +70,7 @@ column, the menus — is [the interface](interface.md).
 | `src/image/` | The data model: `Samples`, `color/` (transfer functions, primaries, ICC and CICP), stats, display state; `sequence.rs` is what a file holds beyond one image |
 | `src/image/decode/` | The decoder trait and its registry, one file per format |
 | `src/image/encode.rs` | The display pipeline run over every pixel, out to an 8-bit sRGB PNG |
+| `src/image/resample.rs` | A CPU box filter in the file's own encoding, for the thumbnails |
 | `src/render/` | Upload planning, the three layers, output selection; `shader_codes.rs` is every integer the shaders switch on |
 | `src/render/reduce.rs` | The coarse chain a minifying draw reads from |
 

@@ -16,6 +16,7 @@ pub mod encode;
 pub mod exif;
 pub mod geo;
 pub mod region;
+pub mod resample;
 pub mod sequence;
 pub mod stats;
 

@@ -48,6 +48,7 @@ on screen, since there is then nowhere to pan to.
 | --- | --- |
 | `]`, `Page Down` | Next file |
 | `[`, `Page Up` | Previous file |
+| `Ctrl+P` | Choose a file from the list: type to filter it, arrows to move, `Enter` to open, `Esc` to close |
 
 A file you have already looked at comes back exactly as you left it: the same
 pan and zoom, the same window and exposure, the same tone curve and false
@@ -61,6 +62,25 @@ image, and is fitted. Files that cannot be decoded are stepped over. The list is
 was named at startup, in that order; naming a directory puts the images in it
 on the list, and keeps it up to date as images are added to that directory or
 taken out of it.
+
+`Ctrl+P` opens a chooser over the picture: a field to type in, and under it
+every file on the list that fits what you have typed, best fit first, each
+with a thumbnail, its name, what kind of file it is, its place in the list
+and its size. The match is fuzzy — `dsc17` finds `DSC_0017.JPG` — and runs
+over the directory as well as the name when the list spans more than one, so
+`june/` narrows to that directory. The arrows move through the rows without
+opening anything; `Enter`, or a click on a row, opens that file and closes
+the chooser; `Esc`, a click outside it, or `Ctrl+P` again closes it. While
+it is open, keys go into the field rather than to the picture. The file on
+screen is marked in the list, and the cursor starts on it, so `Down` and
+`Enter` is the next file.
+
+The thumbnails are the desktop's own, kept under `~/.cache/thumbnails` where
+your file manager keeps them: one it has already made is shown without
+decoding the file, and one made here is one it will show. They are made in
+the background from the moment the program starts, at low priority, so a
+long list fills in over time rather than holding anything up, and a file
+whose thumbnail has not yet been made shows an empty slot until it has.
 
 ## Playing an animation
 
@@ -502,7 +522,7 @@ use when the window floats, and may lay the window out its own way regardless.
 
 ## Keys that are deliberately ignored
 
-Apart from the copying chords and `Ctrl` with an arrow, anything held with
+Apart from the copying chords, `Ctrl+P` and `Ctrl` with an arrow, anything held with
 `Ctrl`, `Alt` or a `Super`/`Command` key does nothing here, and neither does
 `Ctrl` with the wheel. Those combinations belong to the window manager, and a
 chord such as `Super+0` would otherwise move the view behind its back.

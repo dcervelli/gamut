@@ -16,6 +16,7 @@ use crate::view::{View, Viewport};
 
 use crate::image::region::{Grip, Region};
 
+use super::chooser::{self, Input, Row, Step};
 use super::chrome::{BAR_HEIGHT, SIDE_WIDTH};
 use super::control::Unnamed;
 use super::menu::Copies;
@@ -120,6 +121,7 @@ fn input(logical: [f32; 2], count: usize) -> FrameInput {
         box_zoom: false,
         zoom_box: None,
         transport: None,
+        chooser: None,
     }
 }
 
@@ -224,8 +226,8 @@ fn asked(harness: &Harness<'static, State>) -> Vec<Command> {
         .state()
         .commands
         .iter()
-        .copied()
         .filter(|command| !matches!(command, Command::OverImage(_) | Command::OverGrip(_)))
+        .cloned()
         .collect()
 }
 
@@ -710,4 +712,159 @@ fn the_pixel_menu_offers_every_format() {
         click(&mut harness, "Hex"),
         [Command::Press(Control::Format(PixelFormat::Hex))]
     );
+}
+
+/// The chooser: opened, its field takes the keyboard, and what is typed
+/// and pressed comes back as commands rather than reaching the window —
+/// the query, the cursor's moves, `Enter` on the row under the cursor, a
+/// click on a row, and `Ctrl+P` again. `Esc` closes it, and with it gone
+/// the keyboard is the window's again.
+#[test]
+fn the_chooser_takes_the_keys_while_open_and_gives_them_back() {
+    let mut harness = open(WINDOW, 3, panels());
+    assert!(!harness.ctx.egui_wants_keyboard_input());
+
+    egui::Popup::open_id(&harness.ctx, chooser::id());
+    let rows: Arc<[Row]> = ["alpha.png", "beta.png", "gamma.png"]
+        .into_iter()
+        .enumerate()
+        .map(|(index, name)| Row {
+            name: name.to_string(),
+            dir: String::new(),
+            kind: "PNG".to_string(),
+            index: index + 1,
+            dimensions: None,
+            thumb: None,
+            positions: Vec::new(),
+        })
+        .collect();
+    harness.state_mut().input.chooser = Some(Input {
+        query: String::new(),
+        rows,
+        cursor: 0,
+        current: Some(0),
+        several_dirs: false,
+        opened: true,
+        reveal: true,
+        visible: 0..0,
+    });
+    // The chord that opened it is still in egui's input on the first
+    // frame, and must not be read as the chord that closes it.
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::P);
+    harness.run();
+    assert!(egui::Popup::is_id_open(&harness.ctx, chooser::id()));
+    assert!(
+        !asked(&harness).contains(&Command::Press(Control::Chooser)),
+        "{:?}",
+        asked(&harness)
+    );
+    harness
+        .state_mut()
+        .input
+        .chooser
+        .as_mut()
+        .expect("set above")
+        .opened = false;
+    harness.run();
+    assert!(harness.ctx.egui_wants_keyboard_input());
+    // The rows on screen were said, so their thumbnails can be asked for.
+    assert!(
+        asked(&harness).iter().any(
+            |command| matches!(command, Command::Visible(rows) if rows.start == 0 && rows.end == 3)
+        ),
+        "{:?}",
+        asked(&harness)
+    );
+
+    let pressed = |harness: &mut Harness<'static, State>, key| {
+        harness.state_mut().commands.clear();
+        harness.key_press(key);
+        harness.step();
+        asked(harness)
+    };
+
+    harness.state_mut().commands.clear();
+    harness.event(egui::Event::Text("b".to_string()));
+    harness.step();
+    assert!(
+        asked(&harness).contains(&Command::Query("b".to_string())),
+        "{:?}",
+        asked(&harness)
+    );
+
+    assert!(pressed(&mut harness, egui::Key::ArrowDown).contains(&Command::Cursor(Step::Down)));
+    assert!(pressed(&mut harness, egui::Key::ArrowUp).contains(&Command::Cursor(Step::Up)));
+    assert!(pressed(&mut harness, egui::Key::End).contains(&Command::Cursor(Step::Last)));
+    assert!(pressed(&mut harness, egui::Key::Enter).contains(&Command::Press(Control::Choose(0))));
+    assert!(click(&mut harness, "Choose file 2").contains(&Command::Press(Control::Choose(1))));
+
+    harness.state_mut().commands.clear();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::P);
+    harness.step();
+    assert!(asked(&harness).contains(&Command::Press(Control::Chooser)));
+    // Still up: closing it is the application's, on that press.
+    assert!(egui::Popup::is_id_open(&harness.ctx, chooser::id()));
+
+    // Escape is egui's own, and closes the popup; the application then
+    // stops handing the chooser in, and the field goes with it.
+    harness.key_press(egui::Key::Escape);
+    harness.step();
+    assert!(!egui::Popup::is_id_open(&harness.ctx, chooser::id()));
+    harness.state_mut().input.chooser = None;
+    harness.run();
+    assert!(!harness.ctx.egui_wants_keyboard_input());
+    assert!(harness.query_by_label("Choose file 2").is_none());
+}
+
+/// A cursor moved by a key is scrolled into view, and the rows on screen
+/// are said again once they have changed: a long list opened with the
+/// cursor far down it shows the cursor's row, not the first.
+#[test]
+fn the_chooser_scrolls_a_moved_cursor_into_view() {
+    let mut harness = open(WINDOW, 200, panels());
+    egui::Popup::open_id(&harness.ctx, chooser::id());
+    let rows: Arc<[Row]> = (0..200)
+        .map(|index| Row {
+            name: format!("{index:03}.png"),
+            dir: String::new(),
+            kind: "PNG".to_string(),
+            index: index + 1,
+            dimensions: None,
+            thumb: None,
+            positions: Vec::new(),
+        })
+        .collect();
+    harness.state_mut().input.chooser = Some(Input {
+        query: String::new(),
+        rows,
+        cursor: 150,
+        current: None,
+        several_dirs: false,
+        opened: false,
+        reveal: true,
+        visible: 0..0,
+    });
+    // One frame asks for the scroll; the frames after it play the scroll
+    // animation out, as `run` will not while the caret is also blinking.
+    harness.step();
+    harness
+        .state_mut()
+        .input
+        .chooser
+        .as_mut()
+        .expect("set above")
+        .reveal = false;
+    harness.run_steps(30);
+    let visible = asked(&harness)
+        .into_iter()
+        .filter_map(|command| match command {
+            Command::Visible(rows) => Some(rows),
+            _ => None,
+        })
+        .next_back()
+        .expect("the rows on screen were said");
+    assert!(visible.contains(&150), "{visible:?}");
+    assert!(!visible.contains(&0), "{visible:?}");
+    assert!(harness.query_by_label("Choose file 151").is_some());
+    assert!(harness.query_by_label("Choose file 1").is_none());
 }

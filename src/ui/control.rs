@@ -6,8 +6,11 @@
 //! is also what lets a test drive the interface with no application behind
 //! it and read off what it asked for.
 
+use std::ops::Range;
+
 use crate::image::region::{Grip, Region};
 
+use super::chooser::Step;
 use super::info::Copyable;
 use super::menu::{Copies, ZoomChoice};
 use super::pixel::PixelFormat;
@@ -105,6 +108,13 @@ pub enum Control {
     /// A row of the information panel, or the button above the column that
     /// takes the whole of it.
     Facts(Copyable),
+    /// The file chooser: opened by `Ctrl+P`, and closed by the same key
+    /// pressed again while it is up — which arrives through here from the
+    /// popup itself, since the field in it has the keyboard.
+    Chooser,
+    /// A row of the chooser, by its place in the list the same frame was
+    /// drawn from: the file to open.
+    Choose(usize),
 }
 
 impl Control {
@@ -153,12 +163,17 @@ impl Control {
             Control::Facts(Copyable::All) => "Copy All".to_string(),
             Control::Facts(Copyable::Section(index)) => format!("Copy section {index}"),
             Control::Facts(Copyable::Fact(index)) => format!("Copy field {index}"),
+            Control::Chooser => "Choose a file".to_string(),
+            Control::Choose(index) => format!("Choose file {}", index + 1),
         }
     }
 }
 
 /// What one pass of the interface asked the application for.
-#[derive(Clone, Copy, PartialEq, Debug)]
+///
+/// Not `Copy`: the chooser's query is a string, and a command that carries
+/// one is cloned where it has to be.
+#[derive(Clone, PartialEq, Debug)]
 #[allow(
     dead_code,
     reason = "the picture's own gestures arrive as the panels move over"
@@ -196,6 +211,13 @@ pub enum Command {
     /// Which handle of the region the pointer is resting on, said on every
     /// pass a region is on screen, for the keys that move one.
     OverGrip(Option<Grip>),
+    /// The chooser's field changed: this is what it now says.
+    Query(String),
+    /// A key moved the chooser's cursor.
+    Cursor(Step),
+    /// Which of the chooser's rows are on screen, said when it changes, so
+    /// that their thumbnails can be asked for ahead of the rest.
+    Visible(Range<usize>),
 }
 
 /// What a region on the picture is in: nothing, waiting for the drag that
