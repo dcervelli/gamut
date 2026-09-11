@@ -396,6 +396,8 @@ region behind: it belongs to the picture it was drawn on.
 | Wheel | Zoom about the pointer |
 | Trackpad scroll | The same, by fractions of a notch |
 | Click a panel button | Show or hide the histogram, the file information, or the minimap |
+| Press the minimap | Center the view on the point pressed, as near as the image's edges allow, the moment the button goes down |
+| Drag the minimap | Move the view with the pointer, keeping the marked-out part of the map under it |
 | Click the grid button in the bottom left | Show or hide the grid |
 | Click the copy button | Open the menu of copies: the file, or the image |
 | Click the region button | Select a region, or take the selected one off |

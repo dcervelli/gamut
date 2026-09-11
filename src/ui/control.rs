@@ -162,6 +162,11 @@ pub enum Command {
     /// for by name and is animated as a key's would be; a trackpad's scroll
     /// is the hand on the view, and goes where the fingers put it.
     Wheel { steps: f32, notched: bool },
+    /// The hand is on the minimap, at `at` in image pixels, which is the
+    /// point to put in the middle of the window. Said on every frame the
+    /// button is down on the map, from the press on, so the marker follows
+    /// the hand rather than waiting for the button to come up.
+    Center([f32; 2]),
     /// Whether the pointer was over the picture with nothing of the
     /// interface between, which is what the bar's pixel readout asks.
     OverImage(bool),

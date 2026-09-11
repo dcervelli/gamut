@@ -49,6 +49,10 @@ Notable changes to `gamut`. The format follows
   the drag lets go. `Space` now answers when it comes up rather than when it
   goes down, so that the picture does not move under the hand about to draw;
   a tap toggles the fit as before, and holding the key repeats nothing.
+- The minimap can be used to go somewhere as well as to see where you are.
+  Pressing on it centers the view on the point pressed, the moment the
+  button goes down and as near as the image's edges allow, and holding on
+  and moving keeps the view following the pointer.
 - JPEG XL (`.jxl`) opens: both the lossy and the lossless halves of the
   format, in either the bare codestream or the container. The color space is
   read from the file's own statement of it, HDR included, or from an ICC

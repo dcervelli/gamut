@@ -171,6 +171,24 @@ window laid over the corner of it, so the widget leaves and comes back on the
 zoom that first cuts something off. The toggle keeps its state through that:
 the button stays lit, and the minimap returns without being asked for again.
 
+The map is also a way of saying where to look. The hand on it puts the point
+under it in the middle of the window, at the zoom the view has: from the
+frame the button goes down, so a press moves the view at once, and on every
+frame after that until it comes up, so holding on and moving keeps the
+marked-out part under the hand. It comes back from the pass as
+`Command::Center`, carrying the image pixel the hand is on, and
+`View::center_on` moves the pan there — clamped as any pan is, so a press by
+an edge stops with the edge at the window's, and an axis the image does not
+overflow stays centered. Not animated, on the rule the rest of the view
+follows: this is the hand on the view, as a drag on the picture is, and it
+lands where it is put. The press is read with `is_pointer_button_down_on`
+rather than `clicked` or `dragged`, both of which wait — the one for the
+button to come up, the other for the pointer to travel far enough that the
+toolkit is sure it is not a click — and a map that answered only then would
+feel stuck to the hand. The thumbnail is life size at most, so on a small
+image the map is a few pixels and a press on it coarse — which is what the
+map is for a small image anyway.
+
 The thumbnail is not a separate rendering of the image: it is a second quad in
 the image layer's pass, drawn from the same texture through the same shader as
 the view itself, reading whichever coarse level suits the size it is drawn at.

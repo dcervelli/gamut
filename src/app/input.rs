@@ -1550,6 +1550,12 @@ impl App {
                 self.view.pan_by(-dx, -dy, image, viewport);
             }
             ui::Command::Wheel { steps, notched } => self.wheel(steps, notched),
+            // The hand on the minimap: the view goes where it is put, as
+            // it does for a drag on the picture.
+            ui::Command::Center(at) => {
+                let (image, viewport) = (self.image_size(), self.viewport());
+                self.view.center_on(at, image, viewport);
+            }
             ui::Command::OverImage(over) => self.pointer.over_image = over,
             ui::Command::Grab { grab, at } => self.grab(grab, at),
             ui::Command::Pull(to) => self.pull(to),

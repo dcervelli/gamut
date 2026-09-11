@@ -13,7 +13,7 @@ use super::Rect;
 use crate::view::Viewport;
 
 use super::chrome::{Pass, content_area};
-use super::{Current, PADDING, icon, outline};
+use super::{Command, Current, PADDING, icon, outline};
 
 /// The largest the minimap's thumbnail may be. It keeps the image's own
 /// shape inside this, so a panorama gets a wide short one and a portrait a
@@ -93,6 +93,17 @@ pub fn thumbnail(content: Rect, image: [f32; 2]) -> Option<Rect> {
     ))
 }
 
+/// The image pixel a point of the thumbnail stands for: the other way
+/// round from [`minimap_marker`], for what a press on the map asks to see.
+/// Not clamped: a drag that runs off the map asks for a point past the
+/// image's edge, and the view stops at the edge as it does for any pan.
+fn image_point(rect: Rect, image: [f32; 2], point: [f32; 2]) -> [f32; 2] {
+    [
+        (point[0] - rect.x) / rect.width * image[0],
+        (point[1] - rect.y) / rect.height * image[1],
+    ]
+}
+
 /// The part of `rect` standing for what the viewport is showing.
 ///
 /// The viewport's corners in image pixels, clamped to the image and scaled
@@ -147,8 +158,13 @@ fn snap_to_pixels(rect: Rect, scale: f32) -> Rect {
 ///
 /// The thumbnail is opaque to the pointer: what lands on it belongs to it
 /// rather than to the picture it is covering, so it is laid out as an area
-/// of its own that takes the press and does nothing with it.
-pub(super) fn show(pass: &Pass, ui: &mut egui::Ui, current: &Current, content: Rect) {
+/// of its own. The hand on it asks for the place under it to be put in the
+/// middle of the window, from the frame the button goes down until it comes
+/// up again — a press moves the view at once, and holding on and moving
+/// keeps the marker under the hand. Handed back as [`Command::Center`],
+/// since the map is a way of saying where to look and the view is the
+/// application's to move.
+pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, content: Rect) {
     let image = current.size();
     let Some(rect) = thumbnail(content, image) else {
         return;
@@ -168,6 +184,16 @@ pub(super) fn show(pass: &Pass, ui: &mut egui::Ui, current: &Current, content: R
             response.widget_info(|| {
                 egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Minimap thumbnail")
             });
+            // From the press on, not from the toolkit's decision that the
+            // press became a drag: the view goes where the hand is the
+            // moment it lands.
+            let held = response.is_pointer_button_down_on()
+                && ui.input(|input| input.pointer.primary_down());
+            if let Some(pos) = response.interact_pointer_pos().filter(|_| held) {
+                pass.commands
+                    .push(Command::Center(image_point(rect, image, [pos.x, pos.y])));
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+            }
             let painter = ui.painter();
             let grid = icon::Grid::new(scale);
             outline(painter, grid, rect, 1.0, theme.minimap_edge.into());
