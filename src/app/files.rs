@@ -34,6 +34,8 @@ pub(super) struct Pending {
     /// Set when the request came from `]` or `[`, so that a file that will not
     /// decode can be stepped over rather than stopping the walk.
     pub(super) step: Option<Step>,
+    /// Which page of the file, where one was asked for by number.
+    pub(super) page: Option<usize>,
     pub(super) since: Instant,
     /// Whether the bar has been told to mention it. Latched so that the wait
     /// is announced once rather than on every frame it spans.
@@ -98,7 +100,6 @@ impl Files {
         &self.paths[self.index]
     }
 
-    #[cfg(test)]
     pub(super) fn overrides(&self) -> decode::Overrides {
         self.overrides
     }
@@ -170,6 +171,21 @@ impl Files {
         Some(self.request(self.index, Reload::InPlace, None, Source::Disk))
     }
 
+    /// Asks for another page of the file on screen. `None` while a read is
+    /// in flight, as for a reload: a key held down would otherwise stack up
+    /// a decode per repeat, each aimed at a page the next has moved past.
+    pub(super) fn page(&mut self, page: usize) -> Option<Request> {
+        if self.pending.is_some() {
+            return None;
+        }
+        let mut request = self.request(self.index, Reload::Page, None, Source::Disk);
+        request.page = Some(page);
+        if let Some(pending) = &mut self.pending {
+            pending.page = Some(page);
+        }
+        Some(request)
+    }
+
     /// Takes in a file that did not exist when the list was made — a picture
     /// pasted from the clipboard, whose bytes the loader fetches on its way
     /// to reading it — and asks for it.
@@ -202,6 +218,7 @@ impl Files {
             generation: self.generation,
             index,
             step,
+            page: None,
             since: Instant::now(),
             announced: false,
         });
@@ -212,6 +229,15 @@ impl Files {
             overrides: self.overrides,
             mode,
             source,
+            page: None,
+        }
+    }
+
+    /// Notes that the read in flight was aimed at a page by number: a file
+    /// coming back to the page it was left on.
+    pub(super) fn asked_for_page(&mut self, page: usize) {
+        if let Some(pending) = &mut self.pending {
+            pending.page = Some(page);
         }
     }
 

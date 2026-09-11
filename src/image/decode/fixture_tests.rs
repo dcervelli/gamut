@@ -11,7 +11,10 @@
 
 use std::path::PathBuf;
 
-use super::{Overrides, load, probe, supported_extensions};
+use std::time::Duration;
+
+use super::{Overrides, frames, load, load_page, probe, sequence, supported_extensions};
+use crate::image::sequence::{Loops, Sequence};
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
 
 /// Center of each quadrant, in the order the expectation tables use.
@@ -382,7 +385,7 @@ const FIXTURES: &[Fixture] = &[
         tolerance: EXACT,
     },
     // Two frames, the pattern first and an upside-down one second. Passing
-    // this table means the first frame is the one shown.
+    // this table means the first frame is what `load` shows.
     Fixture {
         file: "gif-animated.gif",
         covers: "animated GIF, first frame onto the logical screen",
@@ -390,6 +393,21 @@ const FIXTURES: &[Fixture] = &[
         kind: Kind::U8,
         color: SRGB,
         alpha: AlphaMode::Straight,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // Two frames, the pattern first and an upside-down one second, of which
+    // the first is also the default image. Passing this table means the
+    // default image is what `load` shows.
+    Fixture {
+        file: "png-animated.png",
+        covers: "animated PNG, default image",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
         tone: Tone::Color,
         coverage: Coverage::Opaque,
         nodata: None,
@@ -507,6 +525,20 @@ const FIXTURES: &[Fixture] = &[
     Fixture {
         file: "tiff-bigendian.tif",
         covers: "TIFF big-endian byte order",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // Two directories, the pattern first and an upside-down one second.
+    // Passing this table means the first is what `load` shows.
+    Fixture {
+        file: "tiff-pages.tif",
+        covers: "TIFF of two directories: pages",
         channels: Channels::Rgb,
         kind: Kind::U8,
         color: SRGB,
@@ -898,7 +930,7 @@ const FIXTURES: &[Fixture] = &[
     },
     Fixture {
         file: "jxl-animated.jxl",
-        covers: "JPEG XL animation, of which only the first keyframe is shown",
+        covers: "JPEG XL animation, first keyframe",
         channels: Channels::Rgb,
         kind: Kind::U8,
         color: SRGB,
@@ -1645,48 +1677,210 @@ fn webp_exif_orientation_is_applied_on_decode() {
     }
 }
 
-/// An animated WebP's frames are patches composited onto a canvas, and the
-/// one worth showing is the first. `webp-animated` puts the ordinary pattern
-/// there and a quarter-turned one after it, so running the animation to its
-/// end would be visible rather than silent.
-#[test]
-fn an_animated_webp_shows_its_first_frame() {
-    let animated = load(
-        &directory().join("webp-animated.webp"),
-        Overrides::default(),
-    )
-    .unwrap();
-    let still = load(
-        &directory().join("webp-lossless-rgb8.webp"),
-        Overrides::default(),
-    )
-    .unwrap();
+/// What each fixture holds beyond its first image. Everything not listed
+/// here is a still, and `every_fixture_says_what_else_it_holds` checks both
+/// halves of that.
+const SEQUENCES: &[(&str, Sequence)] = &[
+    (
+        "gif-animated.gif",
+        Sequence::Animation {
+            count: 2,
+            loops: Loops::Forever,
+        },
+    ),
+    (
+        "png-animated.png",
+        Sequence::Animation {
+            count: 2,
+            loops: Loops::Forever,
+        },
+    ),
+    (
+        "webp-animated.webp",
+        Sequence::Animation {
+            count: 2,
+            loops: Loops::Forever,
+        },
+    ),
+    (
+        "jxl-animated.jxl",
+        Sequence::Animation {
+            count: 2,
+            loops: Loops::Forever,
+        },
+    ),
+    (
+        "tiff-pages.tif",
+        Sequence::Pages {
+            count: 2,
+            default: 0,
+        },
+    ),
+    // The 32x24 entry is listed first and is the one shown.
+    (
+        "ico-multi.ico",
+        Sequence::Pages {
+            count: 2,
+            default: 0,
+        },
+    ),
+];
 
-    assert_eq!(
-        (animated.width, animated.height),
-        (still.width, still.height)
-    );
-    for (x, y) in PROBES {
-        assert_eq!(pixel(&animated, x, y), pixel(&still, x, y), "at {x},{y}");
+/// The four animated fixtures and the still each one's first frame is.
+const ANIMATIONS: &[(&str, &str)] = &[
+    ("gif-animated.gif", "gif-palette.gif"),
+    ("png-animated.png", "png-rgb8.png"),
+    ("webp-animated.webp", "webp-lossless-rgb8.webp"),
+    ("jxl-animated.jxl", "jxl-rgb8.jxl"),
+];
+
+/// The color of one pixel, alpha and all set aside: an animation's frames
+/// come back RGBA whatever the still they are compared with holds.
+fn rgb(image: &DecodedImage, x: u32, y: u32) -> [f32; 3] {
+    let pixel = pixel(image, x, y);
+    [pixel[0], pixel[1], pixel[2]]
+}
+
+/// A file that holds more than one image says so from its header, and one
+/// that does not says nothing — a still claiming to be an animation would
+/// open a transport bar over every photograph.
+#[test]
+fn every_fixture_says_what_else_it_holds() {
+    for fixture in FIXTURES {
+        let path = directory().join(fixture.file);
+        let found = sequence(&path).unwrap_or_else(|error| panic!("{}: {error:#}", fixture.file));
+        let want = SEQUENCES
+            .iter()
+            .find(|(file, _)| *file == fixture.file)
+            .map_or(Sequence::Still, |(_, sequence)| *sequence);
+        assert_eq!(found, want, "{} ({})", fixture.file, fixture.covers);
+    }
+    for (file, _) in SEQUENCES {
+        assert!(
+            FIXTURES.iter().any(|fixture| fixture.file == *file),
+            "{file} is in SEQUENCES but not in FIXTURES"
+        );
     }
 }
 
-/// An animated GIF is shown as its first frame, the same choice an animated
-/// WebP gets and for the same reason: nothing below the decoder has a clock.
-/// `gif-animated` puts the ordinary pattern first and a half-turned one after
-/// it, so running the animation to its end would be visible rather than
-/// silent.
+/// Each animated fixture is the pattern followed by the pattern upside
+/// down, a tenth of a second each, so the frames coming out in order, at the
+/// right time, and again after a rewind, is visible in the pixels.
 #[test]
-fn an_animated_gif_shows_its_first_frame() {
-    let animated = load(&directory().join("gif-animated.gif"), Overrides::default()).unwrap();
-    let still = load(&directory().join("gif-palette.gif"), Overrides::default()).unwrap();
+fn an_animation_yields_its_frames_in_order() {
+    for (animated, still) in ANIMATIONS {
+        let still = load(&directory().join(still), Overrides::default()).unwrap();
+        let mut source = frames(&directory().join(animated), Overrides::default())
+            .unwrap_or_else(|error| panic!("{animated}: {error:#}"));
 
-    assert_eq!(
-        (animated.width, animated.height),
-        (still.width, still.height)
-    );
+        for pass in 0..2 {
+            let first = source
+                .next()
+                .unwrap_or_else(|error| panic!("{animated}: {error:#}"))
+                .unwrap_or_else(|| panic!("{animated}: no first frame on pass {pass}"));
+            let second = source
+                .next()
+                .unwrap_or_else(|error| panic!("{animated}: {error:#}"))
+                .unwrap_or_else(|| panic!("{animated}: no second frame on pass {pass}"));
+            assert!(
+                source.next().unwrap().is_none(),
+                "{animated}: a third frame on pass {pass}"
+            );
+
+            for frame in [&first, &second] {
+                assert_eq!(
+                    (frame.image.width, frame.image.height),
+                    (still.width, still.height),
+                    "{animated}"
+                );
+                assert_eq!(frame.delay, Duration::from_millis(100), "{animated}");
+                frame
+                    .image
+                    .validate()
+                    .unwrap_or_else(|problem| panic!("{animated}: {problem}"));
+            }
+            for (x, y) in PROBES {
+                assert_eq!(
+                    rgb(&first.image, x, y),
+                    rgb(&still, x, y),
+                    "{animated} first frame at {x},{y} on pass {pass}"
+                );
+                assert_eq!(
+                    rgb(&second.image, x, y),
+                    rgb(&still, 31 - x, 23 - y),
+                    "{animated} second frame at {x},{y} on pass {pass}"
+                );
+            }
+            source
+                .rewind()
+                .unwrap_or_else(|error| panic!("{animated}: {error:#}"));
+        }
+    }
+}
+
+/// A frame and the still of the same file get the same finish on the way
+/// out — the command line's overrides included — so that a window set for
+/// one is right for the other.
+#[test]
+fn a_frame_is_finished_the_way_a_still_is() {
+    let overrides = Overrides {
+        transfer: Some(crate::image::Transfer::Linear),
+        primaries: None,
+        gain_map: true,
+    };
+    let path = directory().join("gif-animated.gif");
+    let still = load(&path, overrides).unwrap();
+    let frame = frames(&path, overrides).unwrap().next().unwrap().unwrap();
+    assert_eq!(frame.image.color, still.color);
+    assert_eq!(frame.image.color.transfer, crate::image::Transfer::Linear);
+}
+
+/// A paged file's other pages are reachable by number, and its default page
+/// is exactly what `load` shows — the two must agree, since the window opens
+/// at one and the bar counts from the other.
+#[test]
+fn a_paged_file_exposes_its_pages() {
+    let tiff = directory().join("tiff-pages.tif");
+    let first = load(&tiff, Overrides::default()).unwrap();
+    let second = load_page(&tiff, Overrides::default(), 1).unwrap();
     for (x, y) in PROBES {
-        assert_eq!(pixel(&animated, x, y), pixel(&still, x, y), "at {x},{y}");
+        assert_eq!(
+            rgb(&second, x, y),
+            rgb(&first, 31 - x, 23 - y),
+            "at {x},{y}"
+        );
+    }
+    assert!(load_page(&tiff, Overrides::default(), 2).is_err());
+
+    let ico = directory().join("ico-multi.ico");
+    let large = load_page(&ico, Overrides::default(), 0).unwrap();
+    assert_eq!((large.width, large.height), (32, 24));
+    let thumbnail = load_page(&ico, Overrides::default(), 1).unwrap();
+    assert_eq!((thumbnail.width, thumbnail.height), (16, 12));
+
+    for fixture in FIXTURES {
+        let path = directory().join(fixture.file);
+        let default = match sequence(&path).unwrap() {
+            Sequence::Pages { default, .. } => default,
+            _ => 0,
+        };
+        let shown = load(&path, Overrides::default()).unwrap();
+        let page = load_page(&path, Overrides::default(), default)
+            .unwrap_or_else(|error| panic!("{}: {error:#}", fixture.file));
+        assert_eq!(
+            (page.width, page.height),
+            (shown.width, shown.height),
+            "{}",
+            fixture.file
+        );
+        for (x, y) in PROBES {
+            assert_eq!(
+                pixel(&page, x, y),
+                pixel(&shown, x, y),
+                "{} at {x},{y}",
+                fixture.file
+            );
+        }
     }
 }
 

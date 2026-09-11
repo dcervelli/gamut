@@ -40,10 +40,10 @@ mapping.
 
 | Format | Files |
 | ------ | ----- |
-| PNG | gray / gray+alpha / RGB / RGBA at 8 and 16 bits, 1- and 4-bit depths, palette, palette + `tRNS`, Adam7 interlacing |
+| PNG | gray / gray+alpha / RGB / RGBA at 8 and 16 bits, 1- and 4-bit depths, palette, palette + `tRNS`, Adam7 interlacing, and a two-frame animation whose second frame is upside down |
 | PNG color tags | `cICP` for BT.2100 PQ on BT.2020 — the whole of how a PNG says it is HDR — and `iCCP` for Display P3 |
 | JPEG | baseline, grayscale, progressive, 4:2:0 subsampling |
-| TIFF | gray / RGB / RGBA at 8 and 16 bits, 32-bit float, LZW / Deflate / PackBits / uncompressed, big-endian, tiled |
+| TIFF | gray / RGB / RGBA at 8 and 16 bits, 32-bit float, LZW / Deflate / PackBits / uncompressed, big-endian, tiled, and two directories of which the second is upside down |
 | TIFF as raster data | BigTIFF, Deflate + floating-point predictor + tiling (how DEMs ship), signed Int16, GDAL no-data sentinel |
 | Radiance | RGBE with its shared exponent |
 | OpenEXR | RGB, RGBA with associated alpha, zip compression |

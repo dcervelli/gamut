@@ -11,6 +11,7 @@ mod monitor;
 mod motion;
 mod openers;
 mod pasted;
+mod player;
 mod render;
 mod theme;
 mod timing;
@@ -104,6 +105,9 @@ fn run() -> Result<ExitCode> {
             .is_ok()
     });
     let proxy = event_loop.create_proxy();
+    let wake: player::Wake =
+        std::sync::Arc::new(move |event| proxy.send_event(app::UserEvent::Frame(event)).is_ok());
+    let proxy = event_loop.create_proxy();
     let monitors = monitor::watch(move || {
         let _ = proxy.send_event(app::UserEvent::Monitor);
     });
@@ -113,8 +117,11 @@ fn run() -> Result<ExitCode> {
         index,
         size,
         args.options,
-        loader,
-        monitors,
+        app::Threads {
+            loader,
+            wake,
+            monitors,
+        },
     );
     event_loop.run_app(&mut app)?;
 

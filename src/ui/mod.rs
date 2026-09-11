@@ -14,6 +14,7 @@ pub mod menu;
 pub mod minimap;
 pub mod toast;
 pub mod tooltip;
+pub mod transport;
 
 mod grid;
 pub mod histogram;
@@ -31,9 +32,11 @@ use std::sync::Arc;
 
 use crate::image::display::{Display, Headroom};
 use crate::image::exif::Exif;
+use crate::image::sequence::Sequence;
 use crate::image::stats::BINS;
 use crate::image::{DecodedImage, Stats};
 use egui::Sense;
+pub use transport::Transport;
 
 use crate::render::Backdrop;
 use crate::theme::Theme;
@@ -114,6 +117,10 @@ pub struct Current {
     pub exif: Exif,
     /// What the GPU actually stored it as, which is not always what we asked.
     pub stored: Option<String>,
+    /// What else the file holds: the frames of an animation, or its pages.
+    pub sequence: Sequence,
+    /// Which page `image` is, where the file has pages; zero otherwise.
+    pub page: usize,
 }
 
 impl Current {
@@ -242,6 +249,9 @@ pub struct FrameInput {
     /// pointer over a panel covering the region does not count, which is
     /// the same reading [`FrameInput::pointer`] is made from.
     pub over_region: bool,
+    /// The transport bar's state, for a file of frames or pages, and
+    /// `None` for a still — which is what decides whether the bar is there.
+    pub transport: Option<Transport>,
 }
 
 /// One pass of the interface: the chrome and everything on it, laid out in
@@ -270,7 +280,8 @@ pub fn show(
     }
     pass.picture(ui);
     if let Some(current) = current {
-        let content = chrome::content_area(input.logical, panels.show_ui);
+        let content =
+            chrome::content_area(input.logical, panels.show_ui, input.transport.is_some());
         pass.overlays(ui, current, content);
     }
     pass.commands

@@ -25,6 +25,7 @@ use anyhow::{Result, anyhow};
 use crate::clipboard;
 use crate::image::decode::{self, Overrides};
 use crate::image::exif::Exif;
+use crate::image::sequence::Sequence;
 use crate::image::{DecodedImage, Stats};
 use crate::render::{GpuImage, Upload};
 use crate::timing;
@@ -39,6 +40,10 @@ pub enum Reload {
     /// The file already on screen, changed on disk. The user is presumably
     /// looking at something in particular, so what they set up stays.
     InPlace,
+    /// The file already on screen, another of the pictures it holds: an
+    /// entry of an ICO, a directory of a TIFF. What they set up stays, as
+    /// for a file changed on disk.
+    Page,
 }
 
 /// Where a read's bytes come from.
@@ -66,6 +71,9 @@ pub struct Request {
     pub overrides: Overrides,
     pub mode: Reload,
     pub source: Source,
+    /// Which of the file's pictures, where it holds several. `None` is the
+    /// one the decoder shows first.
+    pub page: Option<usize>,
 }
 
 /// A finished read, whether or not it produced an image.
@@ -99,6 +107,10 @@ pub struct Ready {
     /// put it. `None` only for a file requested before the renderer existed,
     /// which the event loop then uploads itself.
     pub gpu: Option<GpuImage>,
+    /// What else the file holds: frames to play, or pages to step through.
+    pub sequence: Sequence,
+    /// Which page `image` is, where the file has pages; zero otherwise.
+    pub page: usize,
 }
 
 /// The handle the event loop keeps. Dropping it stops the thread and waits
@@ -244,7 +256,7 @@ fn absorb(command: Command, queued: &mut Option<Request>, upload: &mut Option<Up
 /// Runs one fallible stage, turning a panic into an error rather than letting
 /// it unwind the loader thread. A panic elsewhere is a bug and still aborts;
 /// this is only for the decoders, which must survive a hostile file.
-fn guard<T>(stage: &str, work: impl FnOnce() -> Result<T>) -> Result<T> {
+pub(crate) fn guard<T>(stage: &str, work: impl FnOnce() -> Result<T>) -> Result<T> {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)) {
         Ok(result) => result,
         Err(payload) => {
@@ -273,6 +285,7 @@ fn read(request: Request, upload: Option<&Upload>, canceled: &AtomicBool) -> Opt
         overrides,
         mode,
         source,
+        page,
     } = request;
 
     // A paste has to be fetched before there is a file to read at all. The
@@ -290,24 +303,38 @@ fn read(request: Request, upload: Option<&Upload>, canceled: &AtomicBool) -> Opt
     // then answer nothing ever again, and the window would sit in "loading"
     // for good. Caught, a panic becomes an ordinary decode failure, which the
     // event loop already knows how to step over.
-    let decoded = received.and_then(|()| guard("decoding", || decode::load(&path, overrides)));
-    if canceled.load(Ordering::Relaxed) {
-        return None;
-    }
-
-    let scanned = decoded.and_then(|image| {
-        timing::decoded(&path, started.elapsed());
-        let stats = guard("scanning", || Ok(Stats::scan(&image)))?;
-        // A file with no metadata, or with metadata that will not parse, is
-        // not a failure: the panel simply has less to say about it.
-        let exif = guard("reading the metadata", || Ok(Exif::read(&path)))?;
-        Ok((image, stats, exif))
+    // What the file holds first, so that a page asked for by number is read
+    // of a file known to have it, and the default page is known by name.
+    let sequence = received.and_then(|()| guard("reading the header", || decode::sequence(&path)));
+    let decoded = sequence.and_then(|sequence| {
+        let shown = match (page, sequence) {
+            (Some(page), _) => page,
+            (None, Sequence::Pages { default, .. }) => default,
+            (None, _) => 0,
+        };
+        let image = guard("decoding", || match page {
+            Some(page) => decode::load_page(&path, overrides, page),
+            None => decode::load(&path, overrides),
+        })?;
+        Ok((image, sequence, shown))
     });
     if canceled.load(Ordering::Relaxed) {
         return None;
     }
 
-    let outcome = scanned.and_then(|(image, stats, exif)| {
+    let scanned = decoded.and_then(|(image, sequence, page)| {
+        timing::decoded(&path, started.elapsed());
+        let stats = guard("scanning", || Ok(Stats::scan(&image)))?;
+        // A file with no metadata, or with metadata that will not parse, is
+        // not a failure: the panel simply has less to say about it.
+        let exif = guard("reading the metadata", || Ok(Exif::read(&path)))?;
+        Ok((image, stats, exif, sequence, page))
+    });
+    if canceled.load(Ordering::Relaxed) {
+        return None;
+    }
+
+    let outcome = scanned.and_then(|(image, stats, exif, sequence, page)| {
         let gpu = match upload {
             Some(upload) => Some(guard("uploading to the GPU", || upload.run(&image))?),
             None => None,
@@ -317,6 +344,8 @@ fn read(request: Request, upload: Option<&Upload>, canceled: &AtomicBool) -> Opt
             stats,
             exif,
             gpu,
+            sequence,
+            page,
         })
     });
 

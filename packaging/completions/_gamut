@@ -22,6 +22,7 @@ _gamut() {
     '--histogram[Start with the histogram showing]' \
     '--info[Start with the file information panel showing]' \
     '--no-minimap[Start with the minimap off]' \
+    '--paused[Open an animation stopped on its first frame]' \
     '--timing[Print decode and startup timings to stdout]' \
     '--[Treat every later argument as a path]' \
     '*:image:_files -g "*.(#i)(jpg|jpeg|jpe|jfif|png|gif|bmp|tif|tiff|webp|jxl|avif|heic|heif|hif|ico|hdr|exr|pnm|pbm|pgm|ppm|pam)"'

@@ -36,6 +36,13 @@ pub enum Control {
     OpenWith,
     /// An item of that menu, by its place in that list.
     OpenIn(usize),
+    /// The transport bar's buttons, on screen only for a file of frames or
+    /// pages: play or pause, and one frame or page back or on. `Seek` is a
+    /// press on the timeline, at a frame.
+    Play,
+    StepBack,
+    StepForward,
+    Seek(usize),
     /// The button that pastes the picture on the clipboard. On screen only
     /// while there is one — see [`Panels::paste`](super::Panels::paste).
     Paste,
@@ -113,6 +120,10 @@ impl Control {
             Control::Copy => "Copy".to_string(),
             Control::OpenWith => "Open with".to_string(),
             Control::OpenIn(index) => format!("Open in application {index}"),
+            Control::Play => "Play".to_string(),
+            Control::StepBack => "Previous frame".to_string(),
+            Control::StepForward => "Next frame".to_string(),
+            Control::Seek(frame) => format!("Frame {frame}"),
             Control::Paste => "Paste".to_string(),
             Control::Region => "Region".to_string(),
             Control::Histogram => "Histogram".to_string(),

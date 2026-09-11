@@ -36,6 +36,19 @@ pub(super) struct Settings {
     /// what the file should come back to.
     pub(super) view: View,
     pub(super) display: Display,
+    /// Where in the file it was left, for one that holds more than one
+    /// picture.
+    pub(super) left: Option<Left>,
+}
+
+/// Where a file of several pictures was left.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Left {
+    /// An animation: the frame that was up, and whether it was stopped
+    /// there. One left playing comes back playing.
+    Frame { frame: usize, paused: bool },
+    /// A paged file: the page that was up.
+    Page(usize),
 }
 
 /// Every file seen so far, and what each was left in.

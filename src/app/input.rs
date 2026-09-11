@@ -113,6 +113,12 @@ pub enum Action {
     /// screen the arrows move it, `Space` fits it, and the copy of the
     /// picture is a copy of it: see `App::perform_on_region`.
     ToggleRegion,
+    /// Play a stopped animation, or stop a playing one.
+    TogglePlay,
+    /// One frame on or back through an animation, stopping it there; or
+    /// one page on or back through a file that holds several pictures.
+    NextFrame,
+    PreviousFrame,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -343,6 +349,9 @@ fn action_of(tip: Tip) -> Option<Action> {
         Tip::Control(Control::Output) => ToggleHdr,
         Tip::Control(Control::Paste) => Action::Paste,
         Tip::Control(Control::Region) => ToggleRegion,
+        Tip::Control(Control::Play) => TogglePlay,
+        Tip::Control(Control::StepBack) => PreviousFrame,
+        Tip::Control(Control::StepForward) => NextFrame,
         // The dot at the head of the pixel readout, which the key steps
         // through exactly as a press on one of its cells chooses.
         Tip::Control(Control::PixelFormat) => CyclePixelFormat,
@@ -382,7 +391,7 @@ fn action_of(tip: Tip) -> Option<Action> {
         // The words at the end of the bottom bar are about four settings at
         // once, so no one key does what they do; what a press on them opens
         // is the panel that sets all four, which the tooltip says outright.
-        Tip::Control(_) | Tip::Name | Tip::Counter | Tip::State => return None,
+        Tip::Control(_) | Tip::Name | Tip::Counter | Tip::State | Tip::Timeline => return None,
     })
 }
 
@@ -422,6 +431,7 @@ fn names(tip: Tip) -> Option<String> {
 pub enum Section {
     Zoom,
     Files,
+    Playback,
     Clipboard,
     Interface,
     Display,
@@ -577,6 +587,27 @@ pub const KEYS: &[Binding] = &[
             (Char("["), PreviousFile),
             (Named(NamedKey::PageUp), PreviousFile),
         ],
+    },
+    Binding {
+        section: Section::Playback,
+        mods: PLAIN,
+        shown: "Enter",
+        help: "Play or pause an animation",
+        keys: &[(Named(NamedKey::Enter), TogglePlay)],
+    },
+    Binding {
+        section: Section::Playback,
+        mods: PLAIN,
+        shown: "n",
+        help: "Next frame of an animation, or page of a file that holds several",
+        keys: &[(Char("n"), NextFrame)],
+    },
+    Binding {
+        section: Section::Playback,
+        mods: PLAIN,
+        shown: "N",
+        help: "Previous frame, or page",
+        keys: &[(Char("N"), PreviousFrame)],
     },
     Binding {
         section: Section::Clipboard,
@@ -1251,6 +1282,9 @@ impl App {
             }
             ToggleHdr => return Effect::redraw_if(self.toggle_hdr()),
             ToggleRegion => self.press(Control::Region),
+            TogglePlay => return self.toggle_play(),
+            NextFrame => return self.step_frame(1),
+            PreviousFrame => return self.step_frame(-1),
         }
         Effect::Redraw
     }
@@ -1727,6 +1761,20 @@ impl App {
                 Selection::Off => self.selection = Selection::Armed,
                 Selection::Armed | Selection::Shown(_) => self.clear_region(),
             },
+            // The keys' own actions, so that the bar and `Enter`, `n` and
+            // `N` cannot come to mean different things.
+            Control::Play => {
+                let _ = self.toggle_play();
+            }
+            Control::StepBack => {
+                let _ = self.step_frame(-1);
+            }
+            Control::StepForward => {
+                let _ = self.step_frame(1);
+            }
+            Control::Seek(frame) => {
+                let _ = self.seek(frame);
+            }
             Control::Luma => self.panels.show_luma = !self.panels.show_luma,
             Control::Planes => self.panels.show_planes = !self.panels.show_planes,
             // The plot's own axis rather than anything about the rendering,
