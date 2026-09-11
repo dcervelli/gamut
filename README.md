@@ -1,6 +1,6 @@
 # gamut
 
-A modern image viewer optimized for getting work done, fast.
+A modern Linux image viewer optimized for getting work done, fast.
 
 ![Main screenshot](user-docs/screenshots/main_screenshot.jpg)
 
@@ -37,7 +37,7 @@ Get file, image, EXIF, georeference, and more metadata. Easily copy all, by sect
 ![Image info/metadata/EXIF](user-docs/screenshots/info.jpg)
 
 ### Many formats
-PNG, JPEG (with gain maps), TIFF and BigTIFF, WebP, HEIF (HEIC and
+PNG, JPEG (with gain maps), JPEG XL, TIFF and BigTIFF, WebP, HEIF (HEIC and
 AVIF), GIF, ICO, BMP, netpbm, Radiance HDR and OpenEXR. 
 More details in [`user-docs/FORMATS.md`](user-docs/FORMATS.md).
 
