@@ -6,6 +6,7 @@
 | TIFF | [`tiff`](https://crates.io/crates/tiff) directly |
 | HEIF — HEIC, AVIF | [`libheif-rs`](https://crates.io/crates/libheif-rs), onto the system `libheif` |
 | WebP — lossy, lossless, animated | [`image-webp`](https://crates.io/crates/image-webp) directly |
+| GIF's frame count and loop extension | [`gif`](https://crates.io/crates/gif), which `image` already carries |
 | JPEG XL — codestream and container | [`jxl-oxide`](https://crates.io/crates/jxl-oxide) |
 | ICO | own directory reader, onto the PNG path and [`image`](https://crates.io/crates/image)'s bitmap one |
 | Ultra HDR containers, ICC profiles | [`ultrahdr-rs`](https://crates.io/crates/ultrahdr-rs), [`moxcms`](https://crates.io/crates/moxcms) |
@@ -88,6 +89,12 @@ something to normalize away. A no-data sentinel is read from the file and kept
 out of the statistics, so a clipped DEM's −9999 fill cannot set the bottom of
 the automatic window and squash the terrain into a sliver.
 
+A TIFF is a chain of directories, and where there is more than one they are
+pages: `sequence` walks the chain reading directories only, and
+`decode_page` seeks to one and reads it as `decode` reads the first. Nothing
+tells a page from an overview or a thumbnail, so a pyramid's reduced copies
+count as pages too.
+
 ## HEIF
 
 The only decoder that is not pure Rust, because there is no usable pure-Rust
@@ -163,11 +170,14 @@ because `JxlImage::width` reports the size with the orientation already
 applied, the size the window opens at and the size the pixels arrive at cannot
 disagree — `jxl-quarter-turn.jxl` is 24×32 on disk and 32×24 in both answers.
 
-**Two things the format can hold are deliberately not taken.** A CMYK file is
+**One thing the format can hold is deliberately not taken.** A CMYK file is
 refused by name: separating it needs an output profile this program does not
 have, and `Channels` has nowhere to put four color components, so a guess would
-read as a decode. An animation renders its first keyframe, as GIF and WebP do,
-nothing downstream of here having a clock.
+read as a decode. An animation is its keyframes rendered one at a time, each
+whole by construction; the decoder keeps every frame it has read, so going
+back to the start is an index reset and no reading. The header states the
+tick rate and the loop count, and a frame's duration is a count of ticks —
+see [animation.md](animation.md) for what is done with them.
 
 The two signatures are unrelated: a bare codestream opens `ff 0a`, and the
 container opens with a `JXL ` box. That box is not `ftyp`, so the HEIF family
@@ -200,14 +210,15 @@ profile, and reading it costs a rotation of a buffer that is already in hand.
 JPEG's EXIF orientation still is not applied — same tag, different decoder,
 and that one would have to grow a container pass to reach it.
 
-`ANIM` and `ANMF` make the file an animation, and the first frame is what is
-shown. That frame is not necessarily a picture: the format lets it be a patch
-at an offset, composited onto a canvas the `ANIM` chunk colors, so it is
-decoded through the animation path rather than read out directly and arrives
-whole either way. The frames after it are not shown. Nothing downstream of the
-decoder has a clock — an image is decoded once, uploaded once, and redrawn
-only when the view changes — so playing them would be a change to the event
-loop rather than to this decoder.
+`ANIM` and `ANMF` make the file an animation. A frame is not necessarily a
+picture: the format lets it be a patch at an offset, blended onto a canvas
+with the rectangle the last frame asked cleared cleared, so every frame is
+read through `read_frame`, which composites it, and arrives whole. `decode`
+shows the first that way; `frames` walks the rest for the player, and
+`reset_animation` takes the decoder back to the start without the file being
+opened again. The container states the frame count and the loop count, so
+`sequence` answers from the header. The `ANIM` chunk also names a background
+color, which browsers ignore and so does this: the canvas starts clear.
 
 ## GIF
 
@@ -220,10 +231,20 @@ transparency the format has: one palette entry is a hole, the rest are opaque,
 and the pixel behind the hole carries no color at all rather than a color
 with zero alpha the way a PNG's `tRNS` does.
 
-An animated GIF shows its first frame, the same choice an animated WebP gets.
-The crate composites that frame onto the logical screen the file declares, so
-a first frame stored as a patch at an offset still arrives at the full size
-rather than cropped to the patch.
+The crate's `AnimationDecoder` composites every frame onto the logical screen
+the file declares — disposal, transparency and offsets resolved — so a frame
+stored as a patch at an offset arrives at the full size rather than cropped
+to the patch. `decode` takes the first; `frames` walks them all. The crate's
+iterator takes the decoder and the decoder takes the reader, so a rewind is a
+fresh decoder over the same open file, seeked back to its start.
+
+A GIF's header says nothing about how many frames follow, so `sequence`
+counts them with the `gif` crate directly, decoding switched off: every
+frame's bytes are read past and none is decoded, which is a read of the file
+and no more. The same walk reads the loop extension, which `image` reports
+wrongly — a file with no extension comes back as looping for ever, where
+browsers play it once — and which counts *repeats*, so a file saying 1 plays
+twice.
 
 ## BMP and netpbm
 
@@ -257,6 +278,10 @@ An ICO is not an image but a folder of them — the same picture at 16, 32, 48
 and 256 pixels, so that Windows can pick the one that fits the slot it is
 drawing into. A viewer has no slot, so it has to choose, and the choice is the
 whole of what this decoder adds.
+
+Every entry is a page, reachable by number through `decode_page`, and the
+choice is which page `decode` shows first — `sequence` names it as the
+default, so that the window opens at the size `dimensions` reported.
 
 It picks the **largest** entry, breaking a tie on the stated depth. `image`'s
 own ICO decoder scores the other way round, depth before size, which is right
@@ -320,8 +345,18 @@ pub trait Decoder: Sync {
     fn sniff(&self, header: &[u8]) -> bool;
     fn decode(&self, source: &mut dyn ReadSeek, overrides: Overrides) -> Result<DecodedImage>;
     fn dimensions(&self, source: &mut dyn ReadSeek) -> Result<Option<(u32, u32)>> { Ok(None) }
+    fn sequence(&self, source: &mut dyn ReadSeek) -> Result<Sequence> { Ok(Sequence::Still) }
+    fn decode_page(&self, source: &mut dyn ReadSeek, overrides: Overrides, page: usize) -> Result<DecodedImage>;
+    fn frames(&self, source: BufReader<File>, overrides: Overrides) -> Result<Box<dyn FrameSource>>;
 }
 ```
+
+The last three have defaults — one image, page zero is that image, no frames
+— and a format that holds more overrides them: `sequence` from the header,
+`decode_page` for a file of pages, `frames` for an animation. What `decode`
+returns has to be what `sequence` says is the default page, and
+`dimensions` has to agree with both; the fixture tests hold every decoder to
+that.
 
 `DecodedImage` carries `Samples` (U8/U16/F32 × gray/gray+alpha/rgb/rgba),
 a `ColorSpace` (transfer function and primaries), an `AlphaMode`, and, for

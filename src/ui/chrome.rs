@@ -83,57 +83,70 @@ const BORDER_WIDTH: f32 = 1.0;
 /// and every pixel beyond that is one the mark does not have.
 pub(super) const ICON_SIDE: f32 = BUTTON_SIZE - 6.0;
 
-/// The window chrome: the four panels.
+/// The window chrome: the four panels, and the fifth a file of frames or
+/// pages brings with it.
 ///
 /// Top and bottom span the full width; left and right are nested between
 /// them, so the corners belong to the horizontal bars and the vertical ones
-/// never have to reason about where a bar ends.
+/// never have to reason about where a bar ends. The transport bar, where
+/// there is one, is a second bar above the bottom one and spans the width as
+/// the bars do: the strips end above it.
 #[derive(Clone, Copy)]
 pub struct Chrome {
     pub top: Rect,
     pub bottom: Rect,
     pub left: Rect,
     pub right: Rect,
+    /// The bar of playback controls, above the bottom bar, for an animation
+    /// or a file of pages. `None` for a still.
+    pub transport: Option<Rect>,
 }
 
 impl Chrome {
-    /// `size` is the window in logical pixels.
-    pub fn new(size: [f32; 2]) -> Self {
-        // Half the window each at the very smallest, so that a window dragged
-        // down to nothing shrinks the panels rather than letting the opposite
-        // pair pass through each other.
-        let bar = BAR_HEIGHT.min(size[1] / 2.0);
+    /// `size` is the window in logical pixels; `transport` is whether the
+    /// file on screen has frames or pages to step through.
+    pub fn new(size: [f32; 2], transport: bool) -> Self {
+        // An equal share of the window each at the very smallest, so that a
+        // window dragged down to nothing shrinks the panels rather than
+        // letting the opposite pair pass through each other.
+        let bars = if transport { 3.0 } else { 2.0 };
+        let bar = BAR_HEIGHT.min(size[1] / bars);
         let side = SIDE_WIDTH.min(size[0] / 2.0);
-        let middle = (size[1] - 2.0 * bar).max(0.0);
+        let middle = (size[1] - bars * bar).max(0.0);
 
         Self {
             top: Rect::new(0.0, 0.0, size[0], bar),
             left: Rect::new(0.0, bar, side, middle),
             right: Rect::new(size[0] - side, bar, side, middle),
+            transport: transport.then(|| Rect::new(0.0, size[1] - 2.0 * bar, size[0], bar)),
             bottom: Rect::new(0.0, size[1] - bar, size[0], bar),
         }
     }
 
-    /// What the four panels leave in the middle: the image is drawn in it,
-    /// and anything that floats over the image has to fit in it.
+    /// What the panels leave in the middle: the image is drawn in it, and
+    /// anything that floats over the image has to fit in it.
     pub fn content(&self) -> Rect {
+        let floor = self
+            .transport
+            .map_or(self.bottom.y, |transport| transport.y);
         Rect::new(
             self.left.right(),
             self.top.bottom(),
             (self.right.x - self.left.right()).max(0.0),
-            (self.bottom.y - self.top.bottom()).max(0.0),
+            (floor - self.top.bottom()).max(0.0),
         )
     }
 }
 
 /// What the interface leaves for the image, in logical pixels: the middle
 /// when the panels are showing, the whole window when they are not.
+/// `transport` is whether the file on screen brings the fifth bar with it.
 ///
 /// With the panels hidden a floating panel still sits in the corner of the
 /// window rather than where the panels that are not there would have put it.
-pub fn content_area(logical: [f32; 2], show_ui: bool) -> Rect {
+pub fn content_area(logical: [f32; 2], show_ui: bool, transport: bool) -> Rect {
     if show_ui {
-        Chrome::new(logical).content()
+        Chrome::new(logical, transport).content()
     } else {
         Rect::new(0.0, 0.0, logical[0], logical[1])
     }
@@ -146,11 +159,11 @@ pub fn content_area(logical: [f32; 2], show_ui: bool) -> Rect {
 /// they leave in the middle; with them off it has the window. Nothing caches
 /// this, which is why toggling the interface re-fits a fitted image on the
 /// very next frame.
-pub fn image_viewport(size: [f32; 2], scale: f32, show_ui: bool) -> Viewport {
+pub fn image_viewport(size: [f32; 2], scale: f32, show_ui: bool, transport: bool) -> Viewport {
     if !show_ui {
         return Viewport::whole(size);
     }
-    let content = Chrome::new([size[0] / scale, size[1] / scale]).content();
+    let content = Chrome::new([size[0] / scale, size[1] / scale], transport).content();
     Viewport::new(
         content.x * scale,
         content.y * scale,
@@ -171,11 +184,13 @@ pub(super) struct Pass<'a> {
 }
 
 /// Which of a button's corners are turned: all four for one standing on its
-/// own, and only the outer ones for each of a pair set together.
+/// own, only the outer ones for each end of a row set together, and none for
+/// one in the middle of such a row.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Corners {
     All,
     Leading,
+    Middle,
     Trailing,
 }
 
@@ -190,6 +205,7 @@ impl Corners {
                 ne: 0,
                 se: 0,
             },
+            Corners::Middle => CornerRadius::ZERO,
             Corners::Trailing => CornerRadius {
                 nw: 0,
                 sw: 0,
@@ -205,7 +221,8 @@ impl Pass<'_> {
         self.commands.push(Command::Press(control));
     }
 
-    /// The four panels, and everything on them.
+    /// The four panels, and everything on them; and the transport bar for a
+    /// file that has one.
     pub fn bars(&mut self, ui: &mut Ui) {
         let fill: egui::Color32 = self.theme.bar_background.into();
         let frame = egui::Frame::NONE.fill(fill);
@@ -224,6 +241,17 @@ impl Pass<'_> {
             .frame(frame)
             .show(ui, |ui| self.bottom_bar(ui));
         self.hairline(ui, bottom.response.rect, Edge::Top);
+        // After the bottom bar, so that it nests above it; before the
+        // strips, so that they end above it, as `Chrome` lays them out.
+        if let Some(transport) = self.input.transport.clone() {
+            let bar = egui::Panel::bottom("transport")
+                .exact_size(BAR_HEIGHT)
+                .resizable(false)
+                .show_separator_line(false)
+                .frame(frame)
+                .show(ui, |ui| super::transport::show(self, ui, &transport));
+            self.hairline(ui, bar.response.rect, Edge::Top);
+        }
         let left = egui::Panel::left("left")
             .exact_size(SIDE_WIDTH)
             .resizable(false)
@@ -583,7 +611,11 @@ impl Pass<'_> {
     fn right_strip(&mut self, ui: &mut Ui) {
         ui.spacing_mut().item_spacing = Vec2::ZERO;
         let room = super::room(
-            content_area(self.input.logical, self.panels.show_ui),
+            content_area(
+                self.input.logical,
+                self.panels.show_ui,
+                self.input.transport.is_some(),
+            ),
             self.panels,
         );
         ui.vertical_centered(|ui| {
@@ -728,7 +760,8 @@ mod tests {
 
     #[test]
     fn the_side_panels_are_nested_between_the_bars() {
-        let chrome = Chrome::new(WINDOW);
+        let chrome = Chrome::new(WINDOW, false);
+        assert_eq!(chrome.transport, None);
 
         // The bars own the full width, and so the corners.
         assert_eq!(chrome.top, Rect::new(0.0, 0.0, 1000.0, BAR_HEIGHT));
@@ -751,7 +784,7 @@ mod tests {
 
     #[test]
     fn the_content_area_is_what_the_four_leave_behind() {
-        let content = Chrome::new(WINDOW).content();
+        let content = Chrome::new(WINDOW, false).content();
         assert_eq!(
             content,
             Rect::new(
@@ -763,14 +796,48 @@ mod tests {
         );
     }
 
+    /// The transport bar is a bar's height taken off the bottom of the
+    /// content area, and the strips end above it.
+    #[test]
+    fn the_transport_bar_takes_a_bar_off_the_bottom() {
+        let chrome = Chrome::new(WINDOW, true);
+        let transport = chrome.transport.expect("asked for");
+        assert_eq!(
+            transport,
+            Rect::new(0.0, 700.0 - 2.0 * BAR_HEIGHT, 1000.0, BAR_HEIGHT)
+        );
+        assert_eq!(chrome.left.bottom(), transport.y);
+        assert_eq!(chrome.right.bottom(), transport.y);
+        assert_eq!(
+            chrome.content(),
+            Rect::new(
+                SIDE_WIDTH,
+                BAR_HEIGHT,
+                1000.0 - 2.0 * SIDE_WIDTH,
+                700.0 - 3.0 * BAR_HEIGHT
+            )
+        );
+        assert_eq!(
+            image_viewport([2000.0, 1400.0], 2.0, true, true).height,
+            1400.0 - 6.0 * BAR_HEIGHT
+        );
+    }
+
     #[test]
     fn a_window_smaller_than_its_own_chrome_stays_within_itself() {
         // Panels are laid out from the window size, so a window dragged down
         // to nothing must not produce rectangles that escape it or run
         // backwards — a negative width would be drawn as a flipped quad.
         for size in [[10.0, 10.0], [0.0, 0.0], [200.0, 20.0]] {
-            let chrome = Chrome::new(size);
-            for panel in [chrome.top, chrome.bottom, chrome.left, chrome.right] {
+            let chrome = Chrome::new(size, true);
+            let transport = chrome.transport.expect("asked for");
+            for panel in [
+                chrome.top,
+                chrome.bottom,
+                chrome.left,
+                chrome.right,
+                transport,
+            ] {
                 assert!(
                     panel.width >= 0.0 && panel.height >= 0.0,
                     "{panel:?} at {size:?}"
@@ -797,7 +864,7 @@ mod tests {
     fn the_image_is_fitted_between_the_panels_and_re_fitted_without_them() {
         // A 2x window, to catch a conversion that only holds at scale 1.
         let physical = [2000.0, 1400.0];
-        let shown = image_viewport(physical, 2.0, true);
+        let shown = image_viewport(physical, 2.0, true, false);
         assert_eq!(
             shown,
             Viewport::new(
@@ -808,7 +875,7 @@ mod tests {
             )
         );
 
-        let hidden = image_viewport(physical, 2.0, false);
+        let hidden = image_viewport(physical, 2.0, false, false);
         assert_eq!(hidden, Viewport::whole(physical));
 
         let view = View::new();

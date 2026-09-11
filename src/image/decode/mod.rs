@@ -9,10 +9,12 @@ use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 
+use super::sequence::{FrameSource, Sequence};
 use super::{ColorSpace, DecodedImage, Primaries, Transfer};
 
+pub(crate) use limits::MAX_SEQUENCE_BYTES;
 use limits::{MAX_DECODED_BYTES, MAX_TEXTURE_DIMENSION, check_decoded_size};
 
 mod dynamic;
@@ -66,6 +68,45 @@ pub trait Decoder: Sync {
     fn dimensions(&self, _source: &mut dyn ReadSeek) -> Result<Option<(u32, u32)>> {
         Ok(None)
     }
+
+    /// What the file holds beyond the image [`Decoder::decode`] returns:
+    /// nothing, the frames of an animation, or several pictures. Read from
+    /// the header where the format keeps it there. A decoder that does not
+    /// answer holds one image.
+    fn sequence(&self, _source: &mut dyn ReadSeek) -> Result<Sequence> {
+        Ok(Sequence::Still)
+    }
+
+    /// One picture of a file that holds several, by its place in the file.
+    /// Only where [`Decoder::sequence`] said [`Sequence::Pages`]; page zero
+    /// of anything else is the image itself.
+    fn decode_page(
+        &self,
+        source: &mut dyn ReadSeek,
+        overrides: Overrides,
+        page: usize,
+    ) -> Result<DecodedImage> {
+        if page == 0 {
+            self.decode(source, overrides)
+        } else {
+            bail!(
+                "{} holds one image, and page {page} was asked for",
+                self.name()
+            )
+        }
+    }
+
+    /// The frames of an animation, from the first. Only where
+    /// [`Decoder::sequence`] said [`Sequence::Animation`]. The source is
+    /// taken whole rather than borrowed, since the frames outlive the call
+    /// and rewinding may mean opening it again.
+    fn frames(
+        &self,
+        _source: BufReader<File>,
+        _overrides: Overrides,
+    ) -> Result<Box<dyn FrameSource>> {
+        bail!("{} is not animated", self.name())
+    }
 }
 
 /// Order matters only when two decoders claim the same extension, in which
@@ -115,6 +156,17 @@ impl Overrides {
             transfer: self.transfer.unwrap_or(color.transfer),
             primaries: self.primaries.unwrap_or(color.primaries),
         }
+    }
+
+    /// What every decoded image goes through on its way out, whether it was
+    /// a file's one picture, a page, or a frame: checked for consistency,
+    /// then relabeled as the command line asked.
+    pub(crate) fn finish(&self, mut image: DecodedImage, path: &Path) -> Result<DecodedImage> {
+        image
+            .validate()
+            .map_err(|problem| anyhow!("{}: {problem}", path.display()))?;
+        image.color = self.apply(image.color);
+        Ok(image)
     }
 }
 
@@ -188,16 +240,81 @@ fn open(path: &Path) -> Result<(BufReader<File>, &'static dyn Decoder)> {
 pub fn load(path: &Path, overrides: Overrides) -> Result<DecodedImage> {
     let (mut source, decoder) = open(path)?;
 
-    let mut image = decoder
+    let image = decoder
         .decode(&mut source, overrides)
         .with_context(|| format!("decoding {} as {}", path.display(), decoder.name()))?;
+    overrides.finish(image, path)
+}
 
-    image
-        .validate()
-        .map_err(|problem| anyhow!("{}: {problem}", path.display()))?;
+/// Reads one page of a file that holds several, chosen the way [`load`]
+/// chooses. What [`load`] returns is one of them: the decoder's default,
+/// which [`sequence`] names.
+pub fn load_page(path: &Path, overrides: Overrides, page: usize) -> Result<DecodedImage> {
+    let (mut source, decoder) = open(path)?;
 
-    image.color = overrides.apply(image.color);
-    Ok(image)
+    let image = decoder
+        .decode_page(&mut source, overrides, page)
+        .with_context(|| {
+            format!(
+                "decoding page {page} of {} as {}",
+                path.display(),
+                decoder.name()
+            )
+        })?;
+    overrides.finish(image, path)
+}
+
+/// What `path` holds beyond the image [`load`] returns, from its header.
+pub fn sequence(path: &Path) -> Result<Sequence> {
+    let (mut source, decoder) = open(path)?;
+    decoder.sequence(&mut source).with_context(|| {
+        format!(
+            "reading the header of {} as {}",
+            path.display(),
+            decoder.name()
+        )
+    })
+}
+
+/// The frames of the animation at `path`, from the first. Each comes out
+/// through [`Frames::next`] finished the way [`load`]'s image is.
+///
+/// [`Frames::next`]: FrameSource::next
+pub fn frames(path: &Path, overrides: Overrides) -> Result<Box<dyn FrameSource>> {
+    let (source, decoder) = open(path)?;
+    let source = decoder
+        .frames(source, overrides)
+        .with_context(|| format!("opening {} as {}", path.display(), decoder.name()))?;
+    Ok(Box::new(Finished {
+        source,
+        overrides,
+        path: path.to_path_buf(),
+    }))
+}
+
+/// A decoder's frames with the finish every decoded image gets on the way
+/// out of [`load`], so that a frame and a still of the same file agree.
+struct Finished {
+    source: Box<dyn FrameSource>,
+    overrides: Overrides,
+    path: std::path::PathBuf,
+}
+
+impl FrameSource for Finished {
+    fn next(&mut self) -> Result<Option<super::sequence::Frame>> {
+        let Some(frame) = self.source.next()? else {
+            return Ok(None);
+        };
+        let image = self.overrides.finish(frame.image, &self.path)?;
+        Ok(Some(super::sequence::Frame {
+            image,
+            delay: frame.delay,
+        }))
+    }
+
+    fn rewind(&mut self) -> Result<()> {
+        self.source.rewind()
+    }
 }
 
 /// Checks that `path` exists and holds a format we know, and asks that format
@@ -237,7 +354,7 @@ pub fn reader(path: &Path) -> Option<&'static str> {
 }
 
 /// Reads as much as `buffer` holds, tolerating a file shorter than that.
-fn fill(source: &mut impl Read, buffer: &mut [u8]) -> std::io::Result<usize> {
+pub(super) fn fill(source: &mut (impl Read + ?Sized), buffer: &mut [u8]) -> std::io::Result<usize> {
     let mut filled = 0;
     while filled < buffer.len() {
         match source.read(&mut buffer[filled..])? {

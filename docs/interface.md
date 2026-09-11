@@ -206,7 +206,22 @@ skinny left and right strips nested between them, so the corners belong to the
 bars and the strips never reason about where one ends. `Chrome` derives all
 four from the window size alone, before egui lays anything out, which is what
 lets the picture be fitted into what they leave without waiting a frame on
-the toolkit. The
+the toolkit. A file of frames or pages brings a fifth with it, the transport
+bar, above the bottom bar and the width of the window as the bars are, so
+the strips end above it; it is part of the same derivation, from the window
+size and one flag, so the picture is fitted above it on the first frame it
+is up rather than a frame later. It holds the one-frame-back and
+one-frame-on buttons as a pair, with the play button between them for an
+animation, then a readout — which frame of how many, and where that is in
+time — and, for an animation, a timeline in whatever width is left. The
+timeline is laid out in time rather than in frames, so a frame shown for a
+second takes ten times the track of one shown for a tenth and a drag along it
+runs at the speed the animation plays; its handle sits at the middle of the
+span of the frame on screen, so a press on the handle is a press on that
+frame. A file of pages has no clock and so no play button and no timeline:
+the steps and the count are the whole of its bar. What the bar shows comes
+down as `Transport`, and a press goes back as a `Command` like every other;
+`docs/animation.md` is where the clock behind it is explained. The
 top bar carries which file it is — its place in the list, in front of its
 name, so that the count is always in the same place whatever the name is — and
 what the image is: its size, its pixels, its color space, all fixed for as

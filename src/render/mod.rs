@@ -324,6 +324,18 @@ impl Renderer {
         note
     }
 
+    /// Shows `image` in place of the one on screen: written into the same
+    /// texture where it is the same shape, which the next frame of an
+    /// animation always is, and uploaded afresh where it is not. Returns the
+    /// precision note of a fresh upload; a refill keeps the one it had.
+    pub fn refill_image(&mut self, image: &DecodedImage) -> Result<Option<&'static str>> {
+        let upload = self.uploader();
+        if self.image_layer.refill(&upload, image)? {
+            return Ok(None);
+        }
+        self.set_image(image)
+    }
+
     /// What the current image was stored as on the device, for the interface
     /// to report. A label rather than the format itself, so that nothing above
     /// the renderer has to name a GPU type.

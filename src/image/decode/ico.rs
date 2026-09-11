@@ -3,7 +3,9 @@
 //! An ICO is not an image but a folder of them — the same picture at 16, 32,
 //! 48 and 256 pixels, so that Windows can pick the one that fits the slot it
 //! is drawing into. A viewer has no slot, so it has to choose, and the choice
-//! is the whole of what this module adds over `image`'s own ICO decoder.
+//! is what this module adds over `image`'s own ICO decoder. The others are
+//! not lost: every entry is a page, reachable by number through
+//! `decode_page`, and the chosen one is the page `decode` shows.
 //!
 //! `image` picks by `(bit depth, area)`, depth first, which is right for a
 //! toolkit asked for the best-quality rendition and wrong for a viewer: a file
@@ -42,6 +44,7 @@ use anyhow::{Context, Result, bail};
 
 use ::image::{ImageDecoder, ImageFormat};
 
+use crate::image::sequence::Sequence;
 use crate::image::{ColorSpace, DecodedImage};
 
 use super::{dynamic, png};
@@ -97,16 +100,45 @@ impl super::Decoder for Ico {
         _overrides: super::Overrides,
     ) -> Result<DecodedImage> {
         let entries = directory(source)?;
-        let chosen = choose(&entries);
-
-        let payload = payload(source, chosen)?;
-
-        if payload.starts_with(b"\x89PNG\r\n\x1a\n") {
-            return png::decode(&mut Cursor::new(&payload[..]))
-                .with_context(|| format!("the {chosen} entry, which holds a PNG"));
-        }
-        bitmap(&payload, chosen).with_context(|| format!("the {chosen} entry, which holds a BMP"))
+        entry(source, choose(&entries))
     }
+
+    /// Every entry is a page, and the largest is the one shown first.
+    fn sequence(&self, source: &mut dyn super::ReadSeek) -> Result<Sequence> {
+        let entries = directory(source)?;
+        Ok(if entries.len() > 1 {
+            Sequence::Pages {
+                count: entries.len(),
+                default: chosen_index(&entries),
+            }
+        } else {
+            Sequence::Still
+        })
+    }
+
+    fn decode_page(
+        &self,
+        source: &mut dyn super::ReadSeek,
+        _overrides: super::Overrides,
+        page: usize,
+    ) -> Result<DecodedImage> {
+        let entries = directory(source)?;
+        let Some(chosen) = entries.get(page) else {
+            bail!("the directory holds {} entries, not {page}", entries.len());
+        };
+        entry(source, chosen)
+    }
+}
+
+/// One entry's picture, by whichever of the two routes its bytes call for.
+fn entry(source: &mut dyn super::ReadSeek, chosen: &Entry) -> Result<DecodedImage> {
+    let payload = payload(source, chosen)?;
+
+    if payload.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return png::decode(&mut Cursor::new(&payload[..]))
+            .with_context(|| format!("the {chosen} entry, which holds a PNG"));
+    }
+    bitmap(&payload, chosen).with_context(|| format!("the {chosen} entry, which holds a BMP"))
 }
 
 /// One `ICONDIRENTRY`, read into the fields the selection and the two
@@ -130,9 +162,16 @@ struct Entry {
 /// file is one image at several sizes, and the biggest is the one worth the
 /// screen it is being given.
 fn choose(entries: &[Entry]) -> &Entry {
+    &entries[chosen_index(entries)]
+}
+
+/// Where in the directory the entry [`choose`] picks sits: its page number.
+fn chosen_index(entries: &[Entry]) -> usize {
     entries
         .iter()
-        .max_by_key(|entry| (entry.width as u32 * entry.height as u32, entry.depth))
+        .enumerate()
+        .max_by_key(|(_, entry)| (entry.width as u32 * entry.height as u32, entry.depth))
+        .map(|(index, _)| index)
         .expect("the directory is never empty")
 }
 

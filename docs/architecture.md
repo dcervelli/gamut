@@ -39,9 +39,10 @@ the key printed beside a menu item — come down through `Naming`, which the
 application implements from its key table.
 
 The redraw stays on demand. egui says with each pass how soon it wants
-painting again — at once for an animation, at some moment for a tooltip's
-delay, never until something happens — and `app/gui.rs` folds that into the
-same deadline the file watch and the message's clock sleep until.
+painting again — at once for an animation of its own, at some moment for a
+tooltip's delay, never until something happens — and `app/gui.rs` folds that
+into the same deadline the file watch, the message's clock and the frame
+clock of an animated picture sleep until.
 
 
 How those layers are dressed — the panels, the pointer, the information
@@ -53,7 +54,8 @@ column, the menus — is [the interface](interface.md).
 | --- | --- |
 | `src/main.rs` | Event-loop setup |
 | `src/cli.rs` | Argument parsing and `--help`, whose key sections come from the keymap |
-| `src/app/` | Window lifecycle and the event loop's state: `files.rs` is the file list and the read in flight, `input.rs` the keymap and what the interface asked for, `gui.rs` egui's context and its winit adapter, `window.rs` titles and opening size |
+| `src/app/` | Window lifecycle and the event loop's state: `files.rs` is the file list and the read in flight, `input.rs` the keymap and what the interface asked for, `gui.rs` egui's context and its winit adapter, `window.rs` titles and opening size, `playback.rs` the clock an animation plays by |
+| `src/player.rs` | The thread that decodes an animation's frames ahead of the clock, and the cache it keeps them in under a budget |
 | `src/ui/` | Laying each frame's interface out with egui: `chrome.rs` the panels, one file per widget, `pixel.rs` the pointer's readout, `status.rs` the words in the bars, `style.rs` the theme as egui's style, `fonts.rs` the desktop's faces |
 | `src/view.rs` | Zoom / pan / fit geometry — pure maths |
 | `src/listing.rs` | What a path on the command line stands for: a directory is the images inside it, read again while the program runs |
@@ -62,7 +64,7 @@ column, the menus — is [the interface](interface.md).
 | `src/pasted.rs` | Where a pasted picture is written and what it is called, by the desktop's own conventions |
 | `src/clock.rs` | A moment as a date and time, in UTC or in the zone the system is set to |
 | `src/theme/` | `palette.rs` reads the desktop's palette; `mod.rs` derives the colors drawn from it |
-| `src/image/` | The data model: `Samples`, `color/` (transfer functions, primaries, ICC and CICP), stats, display state |
+| `src/image/` | The data model: `Samples`, `color/` (transfer functions, primaries, ICC and CICP), stats, display state; `sequence.rs` is what a file holds beyond one image |
 | `src/image/decode/` | The decoder trait and its registry, one file per format |
 | `src/image/encode.rs` | The display pipeline run over every pixel, out to an 8-bit sRGB PNG |
 | `src/render/` | Upload planning, the three layers, output selection; `shader_codes.rs` is every integer the shaders switch on |

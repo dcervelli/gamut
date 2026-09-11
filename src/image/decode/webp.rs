@@ -15,19 +15,27 @@
 //! display-referred. There is no HDR path to preserve and no grayscale
 //! encoding to keep one channel wide — a gray WebP is a gray RGB WebP.
 //!
-//! Animation is decoded as far as its first frame. `read_image` composites
-//! that frame onto the canvas the `ANIM` chunk describes, so a file whose
-//! first frame is a partial patch still arrives whole; the frames after it
-//! are not shown, because nothing downstream of here has a clock.
+//! An animation's frames are patches: each is composited onto the canvas the
+//! `ANIM` chunk describes, blended over what the last frame left and with the
+//! rectangle the last frame asked to have cleared cleared, so a frame that is
+//! a partial patch still arrives whole. `read_image` does that for the first
+//! frame, which is what `decode` shows; `frames` walks the rest through
+//! `read_frame`, which does the same for each. The container states the frame
+//! count and the loop count outright, so `sequence` answers from the header.
+//! The `ANIM` chunk also names a background color, which browsers ignore and
+//! so does this: the canvas starts clear.
 
-use std::io::{BufReader, SeekFrom};
+use std::fs::File;
+use std::io::{BufReader, Read, Seek, SeekFrom};
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 
 use ::image::DynamicImage;
 use ::image::metadata::Orientation;
-use image_webp::WebPDecoder;
+use image_webp::{DecodingError, WebPDecoder};
 
+use crate::image::sequence::{Frame, FrameSource, Loops, Sequence};
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
 
 pub struct Webp;
@@ -70,6 +78,58 @@ impl super::Decoder for Webp {
         source: &mut dyn super::ReadSeek,
         _overrides: super::Overrides,
     ) -> Result<DecodedImage> {
+        let mut opened = Opened::new(source)?;
+        let mut data = opened.buffer()?;
+        opened
+            .decoder
+            .read_image(&mut data)
+            .context("decoding the image data")?;
+        opened.describe(data)
+    }
+
+    fn sequence(&self, source: &mut dyn super::ReadSeek) -> Result<Sequence> {
+        let decoder =
+            WebPDecoder::new(BufReader::new(source)).context("reading the WebP container")?;
+        if !decoder.is_animated() {
+            return Ok(Sequence::Still);
+        }
+        Ok(Sequence::Animation {
+            count: decoder.num_frames() as usize,
+            loops: match decoder.loop_count() {
+                image_webp::LoopCount::Forever => Loops::Forever,
+                image_webp::LoopCount::Times(times) => Loops::from_count(times.get().into()),
+            },
+        })
+    }
+
+    fn frames(
+        &self,
+        source: BufReader<File>,
+        _overrides: super::Overrides,
+    ) -> Result<Box<dyn FrameSource>> {
+        let opened = Opened::new(source.into_inner())?;
+        // `read_frame` and `reset_animation` are not questions a still can
+        // be asked: the decoder asserts rather than answers.
+        if !opened.decoder.is_animated() {
+            bail!("the WebP is not an animation");
+        }
+        Ok(Box::new(WebpFrames { opened }))
+    }
+}
+
+/// A WebP with its container read: the decoder, positioned to read pixels,
+/// and everything the chunks around them said.
+struct Opened<R: Read + Seek> {
+    decoder: WebPDecoder<BufReader<R>>,
+    width: u32,
+    height: u32,
+    channels: Channels,
+    color: ColorSpace,
+    orientation: Orientation,
+}
+
+impl<R: Read + Seek> Opened<R> {
+    fn new(mut source: R) -> Result<Self> {
         // The length settles how much a metadata chunk may claim: a chunk
         // lives in the file, so it cannot be larger than the file, however
         // large its declared size says. Taken before the decoder borrows the
@@ -120,25 +180,77 @@ impl super::Decoder for Webp {
             .and_then(Orientation::from_exif_chunk)
             .unwrap_or(Orientation::NoTransforms);
 
-        let size = decoder
-            .output_buffer_size()
-            .ok_or_else(|| anyhow!("{width}x{height} is more than this machine can address"))?;
-        let mut data = vec![0u8; size];
-        decoder
-            .read_image(&mut data)
-            .context("decoding the image data")?;
+        Ok(Self {
+            decoder,
+            width,
+            height,
+            channels,
+            color,
+            orientation,
+        })
+    }
 
-        let (data, width, height) = reorient(data, width, height, channels, orientation)?;
+    /// A buffer the size the decoder writes one picture into.
+    fn buffer(&self) -> Result<Vec<u8>> {
+        let size = self.decoder.output_buffer_size().ok_or_else(|| {
+            anyhow!(
+                "{}x{} is more than this machine can address",
+                self.width,
+                self.height
+            )
+        })?;
+        Ok(vec![0u8; size])
+    }
+
+    /// One picture the decoder wrote, turned the right way up and described.
+    fn describe(&self, data: Vec<u8>) -> Result<DecodedImage> {
+        let (data, width, height) = reorient(
+            data,
+            self.width,
+            self.height,
+            self.channels,
+            self.orientation,
+        )?;
 
         // WebP's alpha is straight, in both bitstreams and in the blending
         // the animation chunks describe.
         Ok(DecodedImage::new(
             width,
             height,
-            Samples::U8 { channels, data },
-            color,
-            AlphaMode::of(channels, false),
+            Samples::U8 {
+                channels: self.channels,
+                data,
+            },
+            self.color,
+            AlphaMode::of(self.channels, false),
         ))
+    }
+}
+
+/// An animated WebP's frames, each composited onto the canvas by the
+/// decoder, which keeps the canvas between calls and can be sent back to the
+/// start without the file being opened again.
+struct WebpFrames {
+    opened: Opened<File>,
+}
+
+impl FrameSource for WebpFrames {
+    fn next(&mut self) -> Result<Option<Frame>> {
+        let mut data = self.opened.buffer()?;
+        let delay = match self.opened.decoder.read_frame(&mut data) {
+            Ok(milliseconds) => Duration::from_millis(u64::from(milliseconds)),
+            Err(DecodingError::NoMoreFrames) => return Ok(None),
+            Err(error) => return Err(error).context("decoding a WebP frame"),
+        };
+        Ok(Some(Frame {
+            image: self.opened.describe(data)?,
+            delay,
+        }))
+    }
+
+    fn rewind(&mut self) -> Result<()> {
+        self.opened.decoder.reset_animation();
+        Ok(())
     }
 }
 

@@ -872,6 +872,7 @@ dependencies = [
  "egui_kittest",
  "fontconfig",
  "fontdb",
+ "gif",
  "half",
  "image",
  "image-webp",
