@@ -100,7 +100,11 @@ case-blind subsequence — so they state what the chooser needs of any
 matcher rather than what one library scores.
 
 `rank` sorts by score with a stable sort, so ties keep the list's order,
-and an empty query is the whole list in order with nothing lit.
+and an empty query is the whole list in order with nothing lit. A query
+beginning with `:` does not go to the matcher at all: `rank_by_index` puts
+the file at exactly that place first and every place with those digits in
+it after, in the list's order, which is what the index column is there
+for.
 
 ## The cache
 

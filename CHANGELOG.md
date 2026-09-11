@@ -10,8 +10,8 @@ Notable changes to `gamut`. The format follows
 
 - `Ctrl+P` opens a file chooser over the picture: type to filter the
   session's files by name — fuzzily, and by directory too when the list
-  spans more than one — arrow through the rows, and `Enter` or a click
-  opens one. Each row shows a thumbnail, the name, the kind of file, its
+  spans more than one, or by place in the list with `:12` — arrow through
+  the rows, and `Enter` or a click opens one. Each row shows a thumbnail, the name, the kind of file, its
   place in the list and its size. The thumbnails are the desktop's own,
   read from and written to `~/.cache/thumbnails` so that a file manager
   and this program share them, and are made in the background at low
