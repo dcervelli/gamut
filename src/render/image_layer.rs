@@ -36,6 +36,9 @@ struct Params {
 /// One uploaded image and the constants that describe it.
 pub struct GpuImage {
     size: [u32; 2],
+    /// Kept beside its view so that another frame of the same shape can be
+    /// written into it in place.
+    texture: wgpu::Texture,
     view: wgpu::TextureView,
     /// Bind groups indexed by level: 0 is the image as uploaded, the rest are
     /// the coarse chain. Empty past the first until a view zooms out far
@@ -170,6 +173,17 @@ impl ImageLayer {
         self.thumbnail_level = None;
     }
 
+    /// Writes `image`'s pixels into the texture already on screen, for the
+    /// next frame of an animation. Answers `false` where the picture on
+    /// screen is not the same shape — a different size, or a layout that
+    /// would store differently — and the caller uploads afresh instead.
+    pub fn refill(&mut self, upload: &Upload, image: &DecodedImage) -> Result<bool> {
+        let Some(held) = &mut self.image else {
+            return Ok(false);
+        };
+        upload.refill(held, image)
+    }
+
     /// `draw.thumbnail`, when there is one, is the minimap's copy of the same
     /// image: a second quad, drawn from the same texture in the same pass, so
     /// that it is tone mapped and windowed exactly as the image it stands for.
@@ -298,6 +312,61 @@ impl Upload {
             view_formats: &[],
         });
 
+        self.fill(&texture, &plan, image.width, image.height)?;
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let bindings = vec![binding(&self.device, &self.layout, &view)];
+
+        Ok(GpuImage {
+            size: [image.width, image.height],
+            texture,
+            view,
+            bindings,
+            levels: Vec::new(),
+            chain_built: false,
+            level_format: reduce::level_format(plan.format),
+            swizzle: shader_codes::swizzle(image.channels()),
+            alpha: image.alpha,
+            primaries: to_columns(image.color.primaries.to_bt709()),
+            format: plan.format,
+            precision_note: plan.precision_note,
+        })
+    }
+
+    /// Writes `image` into the texture `held` already has, in place of what
+    /// is there: the next frame of an animation, whose every frame is the
+    /// shape of the first. Answers `false`, and writes nothing, where it is
+    /// not that shape — the size differs, or the layout would store as a
+    /// different format — which the caller answers with a fresh upload.
+    ///
+    /// Filling in place rather than allocating is what makes a frame cost a
+    /// copy and nothing more. The coarse chain was reduced from the old
+    /// pixels and is let go of here; the next minified draw builds it again
+    /// from the new ones, as it built the first.
+    pub fn refill(&self, held: &mut GpuImage, image: &DecodedImage) -> Result<bool> {
+        let plan = upload::plan(image, self.capabilities);
+        if held.size != [image.width, image.height] || held.format != plan.format {
+            return Ok(false);
+        }
+        self.fill(&held.texture, &plan, image.width, image.height)?;
+        held.levels.clear();
+        held.bindings.truncate(1);
+        held.chain_built = false;
+        held.swizzle = shader_codes::swizzle(image.channels());
+        held.alpha = image.alpha;
+        held.primaries = to_columns(image.color.primaries.to_bt709());
+        Ok(true)
+    }
+
+    /// Copies `plan`'s bytes into `texture`, which is `width` by `height`
+    /// of `plan.format`.
+    fn fill(
+        &self,
+        texture: &wgpu::Texture,
+        plan: &upload::Plan<'_>,
+        width: u32,
+        height: u32,
+    ) -> Result<()> {
         // The bytes are copied into staging here and reach the texture at the
         // next submit, whichever thread makes it. That is always a later one
         // than this: the image is installed before it is ever drawn from.
@@ -316,15 +385,15 @@ impl Upload {
 
         let bytes = plan.pixels.as_bytes();
         let row = plan.bytes_per_row as usize;
-        let rows_per_band = (BAND_BYTES / row.max(1)).clamp(1, image.height as usize);
+        let rows_per_band = (BAND_BYTES / row.max(1)).clamp(1, height as usize);
         let mut y = 0u32;
-        while y < image.height {
-            let band = rows_per_band.min((image.height - y) as usize) as u32;
+        while y < height {
+            let band = rows_per_band.min((height - y) as usize) as u32;
             let start = y as usize * row;
             let end = start + band as usize * row;
             self.queue.write_texture(
                 wgpu::TexelCopyTextureInfo {
-                    texture: &texture,
+                    texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d { x: 0, y, z: 0 },
                     aspect: wgpu::TextureAspect::All,
@@ -336,7 +405,7 @@ impl Upload {
                     rows_per_image: Some(band),
                 },
                 wgpu::Extent3d {
-                    width: image.width,
+                    width,
                     height: band,
                     depth_or_array_layers: 1,
                 },
@@ -353,23 +422,7 @@ impl Upload {
         if let Some(error) = out_of_memory {
             return Err(anyhow!("not enough GPU memory for the image: {error}"));
         }
-
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let bindings = vec![binding(&self.device, &self.layout, &view)];
-
-        Ok(GpuImage {
-            size: [image.width, image.height],
-            view,
-            bindings,
-            levels: Vec::new(),
-            chain_built: false,
-            level_format: reduce::level_format(plan.format),
-            swizzle: shader_codes::swizzle(image.channels()),
-            alpha: image.alpha,
-            primaries: to_columns(image.color.primaries.to_bt709()),
-            format: plan.format,
-            precision_note: plan.precision_note,
-        })
+        Ok(())
     }
 }
 

@@ -9,6 +9,7 @@ use egui_kittest::kittest::{NodeT, Queryable};
 
 use crate::image::display::{Display, Headroom, Startup};
 use crate::image::exif::Exif;
+use crate::image::sequence::{Loops, Sequence};
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples, Stats};
 use crate::theme::Theme;
 use crate::view::{View, Viewport};
@@ -18,6 +19,7 @@ use crate::image::region::{Grip, Region};
 use super::chrome::{BAR_HEIGHT, SIDE_WIDTH};
 use super::control::Unnamed;
 use super::menu::Copies;
+use super::transport::{Kind, Transport};
 use super::{
     Command, Control, Current, FileFacts, FrameInput, Grab, PANELS_ROOM, Panels, PixelFormat,
     Selection,
@@ -70,6 +72,8 @@ fn picture(width: u32, height: u32) -> Current {
         },
         exif: Exif::default(),
         stored: None,
+        sequence: Sequence::Still,
+        page: 0,
     }
 }
 
@@ -115,7 +119,32 @@ fn input(logical: [f32; 2], count: usize) -> FrameInput {
         over_region: false,
         box_zoom: false,
         zoom_box: None,
+        transport: None,
     }
+}
+
+/// The harness over an animation of `count` frames a tenth of a second
+/// each, stopped on its first: the transport bar is up.
+fn animated(count: usize) -> Harness<'static, State> {
+    let mut harness = build(WINDOW, 1, panels());
+    let state = harness.state_mut();
+    if let Some(current) = state.current.as_mut() {
+        current.sequence = Sequence::Animation {
+            count,
+            loops: Loops::Forever,
+        };
+    }
+    state.input.transport = Some(Transport {
+        index: 0,
+        count,
+        kind: Kind::Animation {
+            playing: false,
+            delays: vec![std::time::Duration::from_millis(100); count],
+        },
+    });
+    state.input.viewport.height -= BAR_HEIGHT;
+    harness.run();
+    harness
 }
 
 /// The interface laid out in a window of `logical` pixels, over a list of
@@ -268,6 +297,60 @@ fn a_toggle_in_the_chrome_hands_back_its_press() {
             "{label} kept the keyboard"
         );
     }
+}
+
+/// The transport bar's buttons hand back their presses, and none keeps
+/// the keyboard; a press on the timeline comes back as the frame under it,
+/// and a drag along it as the frames it crosses, ending on the last.
+#[test]
+fn the_transport_bar_hands_back_its_presses() {
+    let mut harness = animated(4);
+    for (label, control) in [
+        ("Play", Control::Play),
+        ("Previous frame", Control::StepBack),
+        ("Next frame", Control::StepForward),
+    ] {
+        assert_eq!(
+            click(&mut harness, label),
+            [Command::Press(control)],
+            "{label}"
+        );
+        assert!(
+            !harness.ctx.egui_wants_keyboard_input(),
+            "{label} kept the keyboard"
+        );
+    }
+
+    let timeline = harness.get_by_label_contains("Timeline").rect();
+    let y = timeline.center().y;
+    let across = |fraction: f32| [timeline.min.x + timeline.width() * fraction, y];
+    let dragged = drag(&mut harness, across(0.3), across(0.99));
+    assert_eq!(dragged.first(), Some(&Command::Press(Control::Seek(1))));
+    assert_eq!(dragged.last(), Some(&Command::Press(Control::Seek(3))));
+}
+
+/// A file of pages gets the steps and the count, and neither a play button
+/// nor a timeline: there is no clock to play by. A still gets no bar at
+/// all, and its picture the whole height between the two bars.
+#[test]
+fn pages_get_the_steps_alone_and_a_still_gets_no_bar() {
+    let mut harness = build(WINDOW, 1, panels());
+    harness.state_mut().input.transport = Some(Transport {
+        index: 1,
+        count: 3,
+        kind: Kind::Pages,
+    });
+    harness.run();
+    assert!(harness.query_by_label("Play").is_none());
+    assert!(harness.query_by_label_contains("Timeline").is_none());
+    assert_eq!(
+        click(&mut harness, "Next frame"),
+        [Command::Press(Control::StepForward)]
+    );
+
+    let harness = open(WINDOW, 1, panels());
+    assert!(harness.query_by_label("Play").is_none());
+    assert!(harness.query_by_label("Next frame").is_none());
 }
 
 /// A toggle whose panel the window cannot take is drawn dead and refuses
@@ -563,7 +646,7 @@ fn the_minimap_asks_to_center_on_what_is_pressed() {
     harness.state_mut().input.minimap_on_screen = true;
     harness.state_mut().input.can_pan = true;
     harness.run();
-    let content = super::chrome::content_area(WINDOW, true);
+    let content = super::chrome::content_area(WINDOW, true, false);
     let map = super::minimap::thumbnail(content, image).expect("room for a map");
     let close = |a: [f32; 2], b: [f32; 2]| (a[0] - b[0]).abs() < 0.5 && (a[1] - b[1]).abs() < 0.5;
 

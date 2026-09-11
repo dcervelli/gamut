@@ -5,13 +5,14 @@
 //!
 //! GIF takes the plain route, because its container has nothing to say that
 //! this program could act on: no profile, no code points, no orientation, and
-//! a palette of sRGB bytes by definition. What it does have is animation, and
-//! the crate's decoder reads the first frame — composited onto the logical
-//! screen the file declares, so a first frame stored as a patch at an offset
-//! still arrives whole. The frames after it are not shown, for the same
-//! reason an animated WebP's are not: nothing downstream of here has a clock.
-//! Every GIF comes back RGBA, whatever its palette holds, because that is the
-//! one layout the crate's decoder produces.
+//! a palette of sRGB bytes by definition. What it does have is animation. The
+//! crate's decoder composites every frame onto the logical screen the file
+//! declares — disposal, transparency and offsets resolved — so a frame stored
+//! as a patch still arrives whole, and `decode` takes the first of them while
+//! `frames` walks them all for the player. A GIF's header does not say how
+//! many frames it holds, so `sequence` cannot either; the count is learned by
+//! reading to the end. Every GIF comes back RGBA, whatever its palette holds,
+//! because that is the one layout the crate's decoder produces.
 //!
 //! BMP takes it too. A `BITMAPV4` or `BITMAPV5` header can name a color space
 //! — sRGB, or a whole ICC profile appended after the pixels — but the crate's
@@ -39,10 +40,15 @@
 //! into a PGM is indistinguishable from the inside, and is what
 //! `--transfer linear` is for.
 
-use std::io::BufReader;
+use std::fs::File;
+use std::io::{BufReader, Seek, SeekFrom};
 
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 
+use ::image::codecs::gif::GifDecoder;
+use ::image::{AnimationDecoder, ImageDecoder, ImageFormat};
+
+use crate::image::sequence::{Frame, FrameSource, Loops, Sequence, gif_delay};
 use crate::image::{ColorSpace, DecodedImage};
 
 use super::{Overrides, ReadSeek, dynamic};
@@ -68,10 +74,7 @@ impl super::Decoder for ImageRs {
     }
 
     fn sniff(&self, header: &[u8]) -> bool {
-        // Both GIF versions; the four bytes after `GIF` are `87a` or `89a`,
-        // and only the first three are a signature.
-        header.starts_with(b"GIF87a")
-            || header.starts_with(b"GIF89a")
+        is_gif(header)
             || header.starts_with(b"#?RADIANCE")
             || header.starts_with(b"#?RGBE")
             || header.starts_with(b"\x76\x2f\x31\x01")
@@ -90,6 +93,116 @@ impl super::Decoder for ImageRs {
         let format = reader.format();
         let decoded = reader.decode()?;
         dynamic::describe(decoded, format, ColorSpace::SRGB)
+    }
+
+    /// Only a GIF here is ever more than one image. Its header says nothing
+    /// about how many frames follow, so they are counted by walking the file
+    /// with the decoding switched off: every frame's bytes are read past and
+    /// none is decoded. Whether it loops is in the extension block browsers
+    /// introduced for it, met on the same walk.
+    fn sequence(&self, source: &mut dyn ReadSeek) -> Result<Sequence> {
+        let mut signature = [0u8; 6];
+        source.rewind()?;
+        if super::fill(source, &mut signature)? < signature.len() || !is_gif(&signature) {
+            return Ok(Sequence::Still);
+        }
+        source.rewind()?;
+        let mut options = gif::DecodeOptions::new();
+        options.skip_frame_decoding(true);
+        let mut decoder = options
+            .read_info(BufReader::new(source))
+            .context("reading the GIF header")?;
+        let mut count = 0;
+        while decoder
+            .next_frame_info()
+            .context("reading the GIF frames")?
+            .is_some()
+        {
+            count += 1;
+        }
+        Ok(if count > 1 {
+            Sequence::Animation {
+                count,
+                loops: loops(decoder.repeat()),
+            }
+        } else {
+            Sequence::Still
+        })
+    }
+
+    fn frames(
+        &self,
+        source: BufReader<File>,
+        _overrides: Overrides,
+    ) -> Result<Box<dyn FrameSource>> {
+        let mut file = source.into_inner();
+        let mut signature = [0u8; 6];
+        file.rewind()?;
+        if super::fill(&mut file, &mut signature)? < signature.len() || !is_gif(&signature) {
+            bail!("only a GIF among these formats is animated");
+        }
+        let mut frames = GifFrames { file, frames: None };
+        frames.rewind()?;
+        Ok(Box::new(frames))
+    }
+}
+
+/// The loop extension as browsers read it. Its count is how many times to
+/// *repeat*, so a file saying 1 plays twice, and a file with no extension —
+/// which the crate reports as zero repeats — plays once. Zero in the
+/// extension itself means for ever, and the crate has already read it so.
+fn loops(repeat: gif::Repeat) -> Loops {
+    match repeat {
+        gif::Repeat::Infinite => Loops::Forever,
+        gif::Repeat::Finite(repeats) => Loops::from_count(u32::from(repeats) + 1),
+    }
+}
+
+fn is_gif(header: &[u8]) -> bool {
+    // Both GIF versions; the four bytes after `GIF` are `87a` or `89a`,
+    // and only the first three are a signature.
+    header.starts_with(b"GIF87a") || header.starts_with(b"GIF89a")
+}
+
+/// A GIF's frames, composited by `image` onto the logical screen.
+///
+/// The crate's iterator takes the decoder and the decoder takes the reader,
+/// so a rewind is a fresh decoder over the same open file: the handle is
+/// kept, seeked back to the start, and read again from there.
+struct GifFrames {
+    file: File,
+    frames: Option<::image::Frames<'static>>,
+}
+
+impl FrameSource for GifFrames {
+    fn next(&mut self) -> Result<Option<Frame>> {
+        let Some(frames) = self.frames.as_mut() else {
+            return Ok(None);
+        };
+        match frames.next() {
+            None => Ok(None),
+            Some(frame) => {
+                let frame = frame.context("decoding a GIF frame")?;
+                let mut frame = dynamic::frame(frame, ImageFormat::Gif, ColorSpace::SRGB)?;
+                frame.delay = gif_delay(frame.delay);
+                Ok(Some(frame))
+            }
+        }
+    }
+
+    fn rewind(&mut self) -> Result<()> {
+        // Dropped before the file is seeked: the old decoder holds a clone
+        // of the same handle, and the two share one offset.
+        self.frames = None;
+        self.file.seek(SeekFrom::Start(0))?;
+        let handle = self.file.try_clone().context("reopening the GIF")?;
+        let mut decoder =
+            GifDecoder::new(BufReader::new(handle)).context("reading the GIF header")?;
+        decoder
+            .set_limits(dynamic::limits())
+            .context("reading the GIF header")?;
+        self.frames = Some(decoder.into_frames());
+        Ok(())
     }
 }
 

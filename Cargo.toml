@@ -63,6 +63,13 @@ half = { version = "2.7.1", features = ["bytemuck"] }
 # `bmp`, which `decode::image_rs` now reads in its own right; it is named here
 # anyway, so that dropping `ico` could not quietly take `.bmp` with it.
 image = { version = "0.25.10", default-features = false, features = ["bmp", "exr", "gif", "hdr", "ico", "jpeg", "png", "pnm", "tiff"] }
+# The GIF container, read directly for the two things `image` does not say
+# about an animation: how many frames it holds, which the header does not
+# state and which is counted here without decoding a frame, and whether the
+# loop extension is there at all — `image` reports a file that says nothing as
+# looping for ever, where browsers play it once. Already linked as `image`'s
+# own GIF decoder, so this costs no new dependency.
+gif = "0.14.2"
 # WebP, direct rather than through `image`'s `webp` feature: the ICC profile,
 # the EXIF orientation and the animation canvas all live in the RIFF container
 # beside the pixels, and `ImageReader` hands back only the pixels.

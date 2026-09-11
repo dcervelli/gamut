@@ -9,11 +9,19 @@
 //! Going to `tiff` directly fixes both, and keeps a single-band raster
 //! single-band all the way to the GPU: a 5500x4700 elevation model uploads as
 //! 103 MB of `R32Float` rather than 413 MB of `Rgba32Float`.
+//!
+//! A TIFF is a chain of directories, each a picture in its own right, and
+//! most files have one. Where there are more they are pages here: the first
+//! is what `decode` shows, and any other is a decode of its own through
+//! `decode_page`, since a directory may differ from its neighbors in size,
+//! depth and layout. Nothing tells a page from an overview or a thumbnail,
+//! so a pyramid's reduced copies count as pages too.
 
 use anyhow::{Result, anyhow, bail};
 use tiff::decoder::{Decoder, DecodingResult, Limits};
 use tiff::tags::Tag;
 
+use crate::image::sequence::Sequence;
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
 
 /// GDAL writes the no-data value here, as an ASCII string.
@@ -47,7 +55,32 @@ impl super::Decoder for TiffRs {
     fn decode(
         &self,
         source: &mut dyn super::ReadSeek,
+        overrides: super::Overrides,
+    ) -> Result<DecodedImage> {
+        self.decode_page(source, overrides, 0)
+    }
+
+    /// How many directories the chain holds, walked without reading any
+    /// pixels.
+    fn sequence(&self, source: &mut dyn super::ReadSeek) -> Result<Sequence> {
+        let mut decoder = Decoder::new(source)?;
+        let mut count = 1;
+        while decoder.more_images() {
+            decoder.next_image()?;
+            count += 1;
+        }
+        Ok(if count > 1 {
+            Sequence::Pages { count, default: 0 }
+        } else {
+            Sequence::Still
+        })
+    }
+
+    fn decode_page(
+        &self,
+        source: &mut dyn super::ReadSeek,
         _overrides: super::Overrides,
+        page: usize,
     ) -> Result<DecodedImage> {
         // `Limits` is non-exhaustive, so start from the defaults and raise
         // only what needs raising.
@@ -57,6 +90,9 @@ impl super::Decoder for TiffRs {
         limits.ifd_value_size = MAX_IFD_VALUE_BYTES;
 
         let mut decoder = Decoder::new(source)?.with_limits(limits);
+        if page > 0 {
+            decoder.seek_to_image(page)?;
+        }
         let (width, height) = decoder.dimensions()?;
         let color = decoder.colortype()?;
 

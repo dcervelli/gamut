@@ -48,7 +48,17 @@ fn draw_all(
         .run(image)
         .expect("the image uploads");
     layer.install(uploaded);
+    draw_layer(gpu, &mut layer, target, quads)
+}
 
+/// Draws whatever `layer` holds into a `target`-sized texture and reads it
+/// back.
+fn draw_layer(
+    gpu: &gpu::TestContext,
+    layer: &mut ImageLayer,
+    target: [u32; 2],
+    quads: Draw,
+) -> Vec<[f32; 4]> {
     let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
         label: Some("filter test target"),
         size: wgpu::Extent3d {
@@ -176,6 +186,62 @@ fn at(pixels: &[[f32; 4]], width: usize, x: usize, y: usize) -> f32 {
 
 fn close(a: f32, b: f32, tolerance: f32) -> bool {
     (a - b).abs() <= tolerance
+}
+
+/// The next frame of an animation is written into the texture the last one
+/// has, and is what the next draw shows — through the coarse chain as well,
+/// which was reduced from the old pixels and has to be built again.
+#[test]
+fn a_refilled_texture_draws_the_new_frame() {
+    let Some(gpu) = gpu::test_context() else {
+        return;
+    };
+    const SIZE: u32 = 64;
+    let dark = gray_u8(SIZE, SIZE, vec![0; (SIZE * SIZE) as usize]);
+    let bright = gray_u8(SIZE, SIZE, vec![255; (SIZE * SIZE) as usize]);
+
+    let mut layer = ImageLayer::new(&gpu.device, WORKING_FORMAT);
+    let upload = layer.uploader(&gpu.device, &gpu.queue, gpu.capabilities);
+    layer.install(upload.run(&dark).expect("the image uploads"));
+    // Sixteen to one builds the chain from the dark frame.
+    let pixels = draw_layer(
+        gpu,
+        &mut layer,
+        [4, 4],
+        Draw {
+            view: whole([4, 4], &dark),
+            thumbnail: None,
+        },
+    );
+    assert!(close(at(&pixels, 4, 1, 1), 0.0, 1e-3));
+
+    assert!(
+        layer
+            .refill(&upload, &bright)
+            .expect("the refill is accepted")
+    );
+    let pixels = draw_layer(
+        gpu,
+        &mut layer,
+        [4, 4],
+        Draw {
+            view: whole([4, 4], &bright),
+            thumbnail: None,
+        },
+    );
+    assert!(
+        close(at(&pixels, 4, 1, 1), 1.0, 1e-3),
+        "got {}, expected the new frame through a rebuilt chain",
+        at(&pixels, 4, 1, 1)
+    );
+
+    // A frame of another shape is not written into it.
+    let other = gray_u8(SIZE / 2, SIZE, vec![0; (SIZE * SIZE / 2) as usize]);
+    assert!(
+        !layer
+            .refill(&upload, &other)
+            .expect("a mismatch is not an error")
+    );
 }
 
 /// The claim minification rests on: an output pixel is the mean of exactly the

@@ -51,9 +51,10 @@ with_alpha() {  # base -> base with the alpha quadrants applied
 with_alpha "$work/color.png" "$work/color-alpha.png"
 with_alpha "$work/gray.png"  "$work/gray-alpha.png"
 
-# The pattern the wrong way up, for the three fixtures that hold it and claim
-# otherwise: an animated GIF's second frame, a HEIF `irot`, and a WebP `EXIF`
-# orientation beside an animation of its own.
+# The pattern the wrong way up, for the fixtures that hold it and claim
+# otherwise — a HEIF `irot`, a WebP `EXIF` orientation — and for the second
+# frame of every animation and the second page of the paged TIFF, so that a
+# frame or page read past the first is visibly not the first.
 magick "$work/color.png" -rotate 180 "$work/color-upside-down.png"
 
 # ---------------------------------------------------------------- PNG
@@ -71,6 +72,52 @@ magick "$work/color-alpha.png" PNG8:png-palette-alpha.png
 magick "$work/gray.png" -depth 1 -define png:bit-depth=1 -define png:color-type=0 png-gray1.png
 magick "$work/gray.png" -depth 4 -define png:bit-depth=4 -define png:color-type=0 png-gray4.png
 magick "$work/color.png" -interlace PNG png-interlaced.png
+# An animation, assembled from two stills. ImageMagick's own APNG writer is
+# a video delegate and lands a code value off, so the chunks are written
+# here: `acTL` looping for ever, then each still's `IDAT` stream behind an
+# `fcTL` of a tenth of a second, the second as `fdAT`. The first frame is
+# also the default image, so a reader with no notion of animation sees the
+# pattern.
+png_anim() {  # dst first second
+  python3 - "$@" <<'ANIM'
+import struct, sys, zlib
+
+dst, first, second = sys.argv[1:4]
+
+def chunks(path):
+    data = open(path, "rb").read()
+    assert data[:8] == b"\x89PNG\r\n\x1a\n", path
+    offset = 8
+    while offset < len(data):
+        (length,) = struct.unpack_from(">I", data, offset)
+        yield data[offset + 4 : offset + 8], data[offset + 8 : offset + 8 + length]
+        offset += 12 + length
+
+def chunk(kind, body):
+    return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
+
+def fctl(sequence, width, height):
+    # Full canvas, no offset, 1/10 s, no disposal, source blending.
+    return chunk(b"fcTL", struct.pack(">IIIIIHHBB", sequence, width, height, 0, 0, 1, 10, 0, 0))
+
+heads = [dict(chunks(path))[b"IHDR"] for path in (first, second)]
+assert heads[0] == heads[1], "the two stills differ in layout"
+width, height = struct.unpack_from(">II", heads[0])
+streams = [b"".join(body for kind, body in chunks(path) if kind == b"IDAT") for path in (first, second)]
+
+out = bytearray(b"\x89PNG\r\n\x1a\n")
+out += chunk(b"IHDR", heads[0])
+out += chunk(b"acTL", struct.pack(">II", 2, 0))
+out += fctl(0, width, height)
+out += chunk(b"IDAT", streams[0])
+out += fctl(1, width, height)
+out += chunk(b"fdAT", struct.pack(">I", 2) + streams[1])
+out += chunk(b"IEND", b"")
+open(dst, "wb").write(bytes(out))
+ANIM
+}
+magick "$work/color-upside-down.png" -depth 8 -define png:color-type=2 "$work/upside-down.png"
+png_anim png-animated.png png-rgb8.png "$work/upside-down.png"
 
 # Neither `cICP` nor `iCCP` is a chunk ImageMagick will write, and between
 # them they are the whole of how a PNG says what its numbers mean, so both are
@@ -147,6 +194,9 @@ magick "$work/color.png" -depth 8 -type TrueColor -compress Zip      tiff-deflat
 magick "$work/color.png" -depth 8 -type TrueColor -compress RLE      tiff-packbits.tif
 magick "$work/color.png" -depth 8 -type TrueColor -compress None -define tiff:endian=msb tiff-bigendian.tif
 magick "$work/color.png" -depth 8 -type TrueColor -compress None -define tiff:tile-geometry=16x16 tiff-tiled.tif
+# Two directories, the pattern first and the upside-down one second: pages,
+# with no clock between them.
+magick "$work/color.png" "$work/color-upside-down.png" -depth 8 -type TrueColor -compress None tiff-pages.tif
 
 # ---------------------------------------------------------------- Radiance
 magick "$work/float.png" -set colorspace RGB -evaluate multiply 3.984375 hdr-rgbe.hdr

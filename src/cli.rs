@@ -52,6 +52,8 @@ OPTIONS:
         --histogram         Start with the histogram showing
         --info              Start with the file information panel showing
         --no-minimap        Start with the minimap off; it is on by default
+        --paused            Open an animation stopped on its first frame,
+                            rather than playing
         --timing            Print decode and startup timings to stdout
     --                      Treat every later argument as a path
 ";
@@ -59,9 +61,10 @@ OPTIONS:
 /// The headings the keys are listed under, in the order they are printed.
 /// Shared by `--help` and the manual page so that neither can grow a section
 /// the other does not have.
-const SECTIONS: [(Section, &str); 5] = [
+const SECTIONS: [(Section, &str); 6] = [
     (Section::Zoom, "ZOOM AND POSITION KEYS"),
     (Section::Files, "FILE KEYS"),
+    (Section::Playback, "PLAYBACK KEYS"),
     (Section::Clipboard, "CLIPBOARD KEYS"),
     (Section::Interface, "INTERFACE KEYS"),
     (Section::Display, "DISPLAY KEYS"),
@@ -248,6 +251,7 @@ pub fn parse_args() -> Result<Option<Args>> {
     let mut histogram = false;
     let mut info = false;
     let mut minimap = true;
+    let mut paused = false;
     let mut upscale = Upscale::default();
     let mut size = None;
     let mut only_files = false;
@@ -369,6 +373,10 @@ pub fn parse_args() -> Result<Option<Args>> {
                     minimap = false;
                     continue;
                 }
+                Some("--paused") => {
+                    paused = true;
+                    continue;
+                }
                 Some("--") => {
                     only_files = true;
                     continue;
@@ -400,6 +408,7 @@ pub fn parse_args() -> Result<Option<Args>> {
             minimap,
             upscale,
             size,
+            paused,
         },
     }))
 }

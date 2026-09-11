@@ -23,19 +23,26 @@
 //! rendering, so a rotated photograph arrives upright and the size reported
 //! from the header is already the size it will arrive at.
 //!
-//! Two things the format can hold are deliberately not taken. A CMYK file is
+//! One thing the format can hold is deliberately not taken. A CMYK file is
 //! refused rather than guessed at: separating it needs the output profile
 //! this program does not have, and a wrong guess would look like a decode.
-//! An animation shows its first keyframe, as an animated GIF or WebP does,
-//! nothing downstream of here having a clock.
+//!
+//! An animation is the keyframes the decoder has loaded, each rendered on
+//! request: `decode` renders the first, `frames` renders them in turn. The
+//! decoder keeps every frame it has read, so going back to the start costs a
+//! render and no reading. The header states the tick rate and the loop count;
+//! a frame's duration is in ticks, and is turned into time here.
 
-use std::io::SeekFrom;
+use std::fs::File;
+use std::io::{BufReader, SeekFrom};
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 
 use jxl_oxide::image::BitDepth;
 use jxl_oxide::{AllocTracker, InitializeResult, JxlImage, PixelFormat};
 
+use crate::image::sequence::{Frame, FrameSource, Loops, Sequence};
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
 
 pub struct Jxl;
@@ -92,60 +99,166 @@ impl super::Decoder for Jxl {
         if image.num_loaded_keyframes() == 0 {
             bail!("the JPEG XL file holds no complete frame");
         }
-        let render = image.render_frame(0).map_err(|error| anyhow!("{error}"))?;
+        render(&image, &layout, 0)
+    }
 
-        let mut stream = render.stream();
-        if (stream.width(), stream.height()) != (layout.width, layout.height) {
-            // A frame whose rendered size disagrees with the header would
-            // otherwise leave the tail of the buffer as it was allocated.
-            bail!(
-                "JPEG XL header says {}x{} but the rendered frame is {}x{}",
-                layout.width,
-                layout.height,
-                stream.width(),
-                stream.height(),
-            );
-        }
-        if stream.channels() as usize != layout.channels.count() {
-            bail!(
-                "JPEG XL frame streams {} channels, expected {} for {}",
-                stream.channels(),
-                layout.channels.count(),
-                layout.channels.label(),
-            );
-        }
-
-        // `write_to_buffer` scales into the full range of whichever type it
-        // is given — 0..255, 0..65535, or the nominal 0..1 of a float left
-        // unclamped — which is what `Samples::full_scale` goes on to assume.
-        let count = layout.width as usize * layout.height as usize * layout.channels.count();
-        let channels = layout.channels;
-        let samples = match layout.depth {
-            Depth::U8 => {
-                let mut data = vec![0u8; count];
-                fill(&mut stream, &mut data)?;
-                Samples::U8 { channels, data }
-            }
-            Depth::U16 => {
-                let mut data = vec![0u16; count];
-                fill(&mut stream, &mut data)?;
-                Samples::U16 { channels, data }
-            }
-            Depth::F32 => {
-                let mut data = vec![0f32; count];
-                fill(&mut stream, &mut data)?;
-                Samples::F32 { channels, data }
-            }
+    fn sequence(&self, source: &mut dyn super::ReadSeek) -> Result<Sequence> {
+        let mut reading = Reading::header(source)?;
+        let Some((_, loops)) = timing(&reading.image) else {
+            return Ok(Sequence::Still);
         };
+        // How many keyframes there are is known only once they have all been
+        // read, which `decode` is about to do anyway.
+        reading.finish(source)?;
+        let count = reading.image.num_loaded_keyframes();
+        Ok(if count > 1 {
+            Sequence::Animation { count, loops }
+        } else {
+            Sequence::Still
+        })
+    }
 
-        Ok(DecodedImage::new(
+    fn frames(
+        &self,
+        mut source: BufReader<File>,
+        _overrides: super::Overrides,
+    ) -> Result<Box<dyn FrameSource>> {
+        let mut reading = Reading::header(&mut source)?;
+        let layout = Layout::of(&reading.image)?;
+        super::check_decoded_size(
             layout.width,
             layout.height,
-            samples,
-            color_space(&image),
-            AlphaMode::of(channels, layout.premultiplied),
-        ))
+            layout.channels.count(),
+            layout.bits,
+        )?;
+        let Some((ticks, _)) = timing(&reading.image) else {
+            bail!("the JPEG XL file is not an animation");
+        };
+        reading.finish(&mut source)?;
+        Ok(Box::new(JxlFrames {
+            image: reading.image,
+            layout,
+            ticks,
+            next: 0,
+        }))
     }
+}
+
+/// What the header says about time, for a file that is an animation: the
+/// tick rate as `(numerator, denominator)` ticks a second, and how many
+/// times it plays.
+fn timing(image: &JxlImage) -> Option<((u32, u32), Loops)> {
+    let animation = image.image_header().metadata.animation.as_ref()?;
+    Some((
+        (animation.tps_numerator, animation.tps_denominator),
+        Loops::from_count(animation.num_loops),
+    ))
+}
+
+/// A JPEG XL animation, rendered a keyframe at a time from a decoder that
+/// holds them all.
+struct JxlFrames {
+    image: JxlImage,
+    layout: Layout,
+    /// Ticks per second, as a fraction: a frame's duration is a count of
+    /// them.
+    ticks: (u32, u32),
+    next: usize,
+}
+
+impl FrameSource for JxlFrames {
+    fn next(&mut self) -> Result<Option<Frame>> {
+        if self.next >= self.image.num_loaded_keyframes() {
+            return Ok(None);
+        }
+        let index = self.next;
+        self.next += 1;
+        let ticks = self
+            .image
+            .frame_header(index)
+            .map(|header| header.duration)
+            .unwrap_or(0);
+        Ok(Some(Frame {
+            image: render(&self.image, &self.layout, index)?,
+            delay: tick_duration(ticks, self.ticks),
+        }))
+    }
+
+    fn rewind(&mut self) -> Result<()> {
+        self.next = 0;
+        Ok(())
+    }
+}
+
+/// A count of ticks as time, at `(numerator, denominator)` ticks a second.
+/// A file declaring no ticks at all cannot time its frames, and gets none
+/// rather than a division by zero.
+fn tick_duration(ticks: u32, rate: (u32, u32)) -> Duration {
+    let (numerator, denominator) = rate;
+    if numerator == 0 {
+        return Duration::ZERO;
+    }
+    let micros = u64::from(ticks) * 1_000_000 * u64::from(denominator) / u64::from(numerator);
+    Duration::from_micros(micros)
+}
+
+/// Renders keyframe `index` into the samples the header promised.
+fn render(image: &JxlImage, layout: &Layout, index: usize) -> Result<DecodedImage> {
+    let render = image
+        .render_frame(index)
+        .map_err(|error| anyhow!("{error}"))?;
+
+    let mut stream = render.stream();
+    if (stream.width(), stream.height()) != (layout.width, layout.height) {
+        // A frame whose rendered size disagrees with the header would
+        // otherwise leave the tail of the buffer as it was allocated.
+        bail!(
+            "JPEG XL header says {}x{} but the rendered frame is {}x{}",
+            layout.width,
+            layout.height,
+            stream.width(),
+            stream.height(),
+        );
+    }
+    if stream.channels() as usize != layout.channels.count() {
+        bail!(
+            "JPEG XL frame streams {} channels, expected {} for {}",
+            stream.channels(),
+            layout.channels.count(),
+            layout.channels.label(),
+        );
+    }
+
+    // `write_to_buffer` scales into the full range of whichever type it
+    // is given — 0..255, 0..65535, or the nominal 0..1 of a float left
+    // unclamped — which is what `Samples::full_scale` goes on to assume.
+    let count = layout.width as usize * layout.height as usize * layout.channels.count();
+    let channels = layout.channels;
+    let samples = match layout.depth {
+        Depth::U8 => {
+            let mut data = vec![0u8; count];
+            fill(&mut stream, &mut data)?;
+            Samples::U8 { channels, data }
+        }
+        Depth::U16 => {
+            let mut data = vec![0u16; count];
+            fill(&mut stream, &mut data)?;
+            Samples::U16 { channels, data }
+        }
+        Depth::F32 => {
+            let mut data = vec![0f32; count];
+            fill(&mut stream, &mut data)?;
+            Samples::F32 { channels, data }
+        }
+    };
+
+    Ok(DecodedImage::new(
+        layout.width,
+        layout.height,
+        samples,
+        color_space(image),
+        AlphaMode::of(channels, layout.premultiplied),
+    ))
 }
 
 /// Is this a JPEG XL, by its leading bytes?
@@ -401,6 +514,19 @@ mod tests {
 
         assert!(Jxl.sniff(&CONTAINER) && !heif.sniff(&CONTAINER));
         assert!(heif.sniff(heic) && !Jxl.sniff(heic));
+    }
+
+    /// A JPEG XL frame's duration is a count of ticks at the rate the header
+    /// states, so a hundred ticks a second and ten ticks is a tenth of a
+    /// second; a file stating no rate cannot time anything.
+    #[test]
+    fn ticks_become_time_at_the_stated_rate() {
+        assert_eq!(tick_duration(10, (100, 1)), Duration::from_millis(100));
+        assert_eq!(
+            tick_duration(1, (24000, 1001)),
+            Duration::from_micros(41708)
+        );
+        assert_eq!(tick_duration(10, (0, 1)), Duration::ZERO);
     }
 
     /// The depth the file was authored at decides the sample type. Reading

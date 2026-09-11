@@ -29,6 +29,8 @@ pub enum Tip {
     Name,
     /// The count of files beside it.
     Counter,
+    /// The timeline in the transport bar, which a press or a drag scrubs.
+    Timeline,
     /// The words at the end of the bottom bar that say what is being done to
     /// the picture. What they say in the room a bar has is the names of the
     /// things in force; the tooltip is the whole of it in sentences, which is
@@ -244,6 +246,8 @@ pub fn words(tip: Tip) -> Option<String> {
                 ToneMap::Reinhard => "Reinhard curve",
                 ToneMap::Neutral => "Khronos PBR Neutral curve",
             },
+            // The timeline: no key scrubs, so it names itself.
+            Tip::Timeline => "Go to a frame",
             Tip::Control(_) | Tip::Name | Tip::Counter | Tip::State => return None,
         }
         .to_string(),

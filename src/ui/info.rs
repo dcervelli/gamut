@@ -21,6 +21,7 @@ use egui::{
 
 use crate::clock;
 use crate::image::AlphaMode;
+use crate::image::sequence::{Loops, Sequence};
 use crate::render::Color;
 
 use super::Rect;
@@ -632,7 +633,29 @@ fn image_facts(current: &Current) -> Vec<(&'static str, String)> {
         // by, and the one a reader asking why a file opened dark or stretched
         // is looking for.
         ("Referred to", image.referred.label().to_string()),
+        // What else the file holds, for the two kinds that hold more than
+        // one picture; nothing for the usual kind.
+        ("Holds", holds(current)),
     ]
+}
+
+/// The frames or pages a file holds, in a phrase: how many, and for an
+/// animation how it loops. Empty for a still.
+fn holds(current: &Current) -> String {
+    match current.sequence {
+        Sequence::Still => String::new(),
+        Sequence::Animation { count, loops } => {
+            let loops = match loops {
+                Loops::Forever => "looping for ever".to_string(),
+                Loops::Times(times) if times.get() == 1 => "played once".to_string(),
+                Loops::Times(times) => format!("played {times} times"),
+            };
+            format!("{count} frames, {loops}")
+        }
+        Sequence::Pages { count, .. } => {
+            format!("{count} pages, of which this is page {}", current.page + 1)
+        }
+    }
 }
 
 /// A file's size in the unit that reads best, and the exact count after it:
@@ -695,6 +718,7 @@ mod tests {
 
     use crate::image::display::{Display, Headroom, Startup};
     use crate::image::exif::{Entry, Exif, Section};
+    use crate::image::sequence::Sequence;
     use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples, Stats};
 
     /// A window's worth of content area, for the panel to be placed in.
@@ -730,6 +754,8 @@ mod tests {
             },
             exif: photograph(),
             stored: None,
+            sequence: Sequence::Still,
+            page: 0,
         }
     }
 
@@ -848,6 +874,43 @@ mod tests {
             assert!(!written.iter().any(|row| row == absent), "{written:?}");
         }
         assert!(written.iter().any(|row| row == "kingfisher.png"));
+    }
+
+    /// A file of frames or pages says how many it holds, and a still says
+    /// nothing about it: a line saying "one" would be a line about nothing.
+    #[test]
+    fn a_file_of_several_pictures_says_how_many() {
+        let mut current = current();
+        assert!(!written(&current).iter().any(|row| row == "Holds"));
+
+        current.sequence = Sequence::Animation {
+            count: 24,
+            loops: Loops::Forever,
+        };
+        let rows = written(&current);
+        let holds = rows.iter().position(|row| row == "Holds").expect("a line");
+        assert_eq!(rows[holds + 1], "24 frames, looping for ever");
+
+        current.sequence = Sequence::Animation {
+            count: 3,
+            loops: Loops::Times(std::num::NonZeroU32::new(2).unwrap()),
+        };
+        assert!(
+            written(&current)
+                .iter()
+                .any(|row| row == "3 frames, played 2 times")
+        );
+
+        current.sequence = Sequence::Pages {
+            count: 5,
+            default: 0,
+        };
+        current.page = 1;
+        assert!(
+            written(&current)
+                .iter()
+                .any(|row| row == "5 pages, of which this is page 2")
+        );
     }
 
     /// What the panel puts on the clipboard is as much of a table as the

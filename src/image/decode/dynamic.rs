@@ -6,6 +6,7 @@
 //! or floating-point data down to bytes.
 
 use std::io::{BufReader, Seek};
+use std::time::Duration;
 
 use ::image::{DynamicImage, ImageFormat};
 
@@ -25,6 +26,13 @@ pub(super) fn dimensions(source: &mut dyn ReadSeek) -> Result<Option<(u32, u32)>
 /// 16-bit scan passes easily. Match the ceiling the TIFF path uses so the two
 /// behave the same way.
 pub(super) fn limit<R: std::io::BufRead + Seek>(reader: &mut ::image::ImageReader<R>) {
+    reader.limits(limits());
+}
+
+/// The same ceiling, for a decoder built directly rather than through
+/// `ImageReader` — which is how an animation is opened, since the reader
+/// hands back one image and no frames.
+pub(super) fn limits() -> ::image::Limits {
     let mut limits = ::image::Limits::default();
     limits.max_alloc = Some(super::MAX_DECODED_BYTES);
     // `max_alloc` is documented as advisory — some decoders honor it, some do
@@ -33,7 +41,35 @@ pub(super) fn limit<R: std::io::BufRead + Seek>(reader: &mut ::image::ImageReade
     // consulting `max_alloc` (EXR, HDR) still cannot claim an unbounded size.
     limits.max_image_width = Some(super::MAX_TEXTURE_DIMENSION);
     limits.max_image_height = Some(super::MAX_TEXTURE_DIMENSION);
-    reader.limits(limits);
+    limits
+}
+
+/// One frame of an animation the crate composited, as this program's own
+/// frame. The crate's frames are always RGBA8, whatever the file held, so
+/// the bridge is the one `describe` already has for that layout.
+pub(super) fn frame(
+    frame: ::image::Frame,
+    format: ImageFormat,
+    stated: ColorSpace,
+) -> Result<crate::image::sequence::Frame> {
+    let delay = delay(frame.delay());
+    let image = describe(
+        DynamicImage::ImageRgba8(frame.into_buffer()),
+        Some(format),
+        stated,
+    )?;
+    Ok(crate::image::sequence::Frame { image, delay })
+}
+
+/// A frame's delay as a duration. The crate keeps it as a ratio of
+/// milliseconds, exact for what the file said; a denominator of zero is not
+/// something the crate produces, and reads as no delay rather than a panic.
+fn delay(delay: ::image::Delay) -> Duration {
+    let (numer, denom) = delay.numer_denom_ms();
+    if denom == 0 {
+        return Duration::ZERO;
+    }
+    Duration::from_micros(u64::from(numer) * 1000 / u64::from(denom))
 }
 
 pub(super) fn decode_as(bytes: &[u8], format: ::image::ImageFormat) -> Result<DynamicImage> {

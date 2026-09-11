@@ -35,10 +35,11 @@ pub fn placement(
     logical: [f32; 2],
     scale: f32,
     show_ui: bool,
+    transport: bool,
     image: [f32; 2],
     upscale: Upscale,
 ) -> Option<Placement> {
-    let rect = thumbnail(content_area(logical, show_ui), image)?;
+    let rect = thumbnail(content_area(logical, show_ui, transport), image)?;
     Some(Placement {
         x: rect.x * scale,
         y: rect.y * scale,
@@ -247,7 +248,7 @@ mod tests {
     /// and not the box it is fitted into.
     #[test]
     fn the_minimap_keeps_the_image_shape_and_never_enlarges_it() {
-        let content = Chrome::new(WINDOW).content();
+        let content = Chrome::new(WINDOW, false).content();
 
         let wide = thumbnail(content, [4000.0, 1000.0]).expect("room in a 1000x700 window");
         assert!(wide.width <= MINIMAP_SIZE[0] && wide.height <= MINIMAP_SIZE[1]);
@@ -283,7 +284,7 @@ mod tests {
         // And nothing at all when the window has no room to spare: a map
         // taking a third of a small content area would be in the way.
         assert_eq!(
-            thumbnail(Chrome::new([200.0, 160.0]).content(), [800.0, 600.0]),
+            thumbnail(Chrome::new([200.0, 160.0], false).content(), [800.0, 600.0]),
             None
         );
     }
