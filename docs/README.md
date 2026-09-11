@@ -17,3 +17,4 @@ wants [`user-docs/`](../user-docs/) instead.
 | [Known limits](limits.md) | What does not work yet, and why |
 | [Tests](testing.md) | What is covered, including the eight that run on a real adapter and the interface driven headless |
 | [Licensing](licensing.md) | The dual license, third-party work in the tree, and how the notices are generated |
+| [Releasing](releasing.md) | The tag, the release it becomes, and why the package is pointed at it in a commit of its own |
