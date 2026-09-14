@@ -37,6 +37,9 @@ Notable changes to `gamut`. The format follows
 - An Ultra HDR JPEG's gain map is applied across threads, through a table
   rather than a power function per sample. A 12-megapixel phone
   photograph that took 560 ms to open takes 90, most of it the JPEG decode.
+- A HEIC's tiles are decoded on as many threads as the machine has cores,
+  where `libheif` would use four. An iPhone's 24-megapixel photograph
+  opens in half the time on a 32-core machine.
 
 ### Fixed
 

@@ -151,6 +151,12 @@ Depth and channel count survive the same way they do elsewhere: a 10- or
 flattened to bytes, and a monochrome file stays one channel all the way to the
 GPU rather than being tripled into RGB.
 
+A phone's HEIC is a grid of tiles, and `libheif` decodes them on a thread
+pool of its own that is four deep by default; the decoder sets it to the
+machine's core count, which halved the decode of an iPhone's 24-megapixel
+frame on 32 cores. Rows of samples are then packed out of `libheif`'s
+buffer on one thread, which is a few percent of the whole.
+
 `libheif` applies the container's own geometric properties — `irot`, `imir`,
 `clap` — while decoding, so a rotated phone photograph arrives upright. That
 is a property of the format, not of this program: JPEG's EXIF orientation is a

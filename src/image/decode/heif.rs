@@ -56,6 +56,15 @@ fn container<'a>(source: &'a mut dyn super::ReadSeek) -> Result<HeifContext<'a>>
 
     let mut context = HeifContext::new()?;
     context.set_security_limits(&limits)?;
+    // A phone's HEIC is a grid of tiles — an iPhone's 24-megapixel frame is
+    // 45 of them — and `libheif` decodes the tiles on a pool of its own,
+    // four threads deep unless told otherwise. On this machine's core count
+    // the same photograph decodes in half the time. A single-tile file,
+    // which is what an AVIF usually is, is unaffected: the parallelism
+    // there is the codec's own.
+    context.set_max_decoding_threads(
+        std::thread::available_parallelism().map_or(4, |threads| threads.get() as u32),
+    );
     context.read_reader(Box::new(StreamReader::new(source, length)))?;
     Ok(context)
 }
