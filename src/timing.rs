@@ -1,4 +1,4 @@
-//! Where the time goes, printed to stdout while we are working on it.
+//! Where the time goes, printed to stderr while we are working on it.
 //!
 //! Three numbers, all measured from `begin`, which `main` calls before it does
 //! anything else:
@@ -21,8 +21,9 @@ use std::time::{Duration, Instant};
 static START: OnceLock<Instant> = OnceLock::new();
 
 /// Whether the timing marks are printed at all. Off unless `--timing` asks for
-/// them: a viewer should be silent on stdout, not narrate every file it opens
-/// — and the names it would print are attacker-chosen.
+/// them: a viewer should not narrate every file it opens — and the names it
+/// would print are attacker-chosen. On stderr, as diagnostics are, so that
+/// whatever stdout is piped into is not handed them.
 static ENABLED: AtomicBool = AtomicBool::new(false);
 
 /// Turns the timing marks on. Called from argument parsing when `--timing` is
@@ -59,15 +60,26 @@ pub fn window_open() {
 
 /// One file read and turned into pixels, however it was reached: the file the
 /// command line named, a step to the next one, or a re-read after a write.
-pub fn decoded(path: &Path, elapsed: Duration) {
+///
+/// `elapsed` is the whole of the loader's work on it; `decoding` is the part
+/// of that spent inside the format's own decoder. The line prints the two
+/// apart, with the difference as what this program added around the decoder
+/// — reading the header, checking and relabeling what came out, the
+/// statistics scan, the metadata, the upload — so that a slow file can be
+/// told from a slow stage.
+pub fn decoded(path: &Path, elapsed: Duration, decoding: Duration) {
     if enabled() {
         let name = path
             .file_name()
             .unwrap_or(path.as_os_str())
             .to_string_lossy();
-        report(
-            &format!("decode {}", crate::escape_controls(&name)),
-            elapsed,
+        let ours = elapsed.saturating_sub(decoding);
+        eprintln!(
+            "[timing] decode {}: {} (decoder {}, gamut {})",
+            crate::escape_controls(&name),
+            ms(elapsed),
+            ms(decoding),
+            ms(ours),
         );
     }
 }
@@ -116,5 +128,9 @@ fn report(event: &str, elapsed: Duration) {
     if !enabled() {
         return;
     }
-    println!("[timing] {event}: {:.2} ms", elapsed.as_secs_f64() * 1e3);
+    eprintln!("[timing] {event}: {}", ms(elapsed));
+}
+
+fn ms(elapsed: Duration) -> String {
+    format!("{:.2} ms", elapsed.as_secs_f64() * 1e3)
 }

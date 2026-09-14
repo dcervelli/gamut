@@ -95,6 +95,20 @@ pages: `sequence` walks the chain reading directories only, and
 tells a page from an overview or a thumbnail, so a pyramid's reduced copies
 count as pages too.
 
+The pixels are read a chunk at a time — a strip or a tile, each compressed
+on its own — with the rows of chunks divided between rayon's threads, rather
+than through the crate's `read_image`, which decodes them one after another:
+a 14000×9600 LZW map took 1.7 s that way and takes 150 ms across 32 cores.
+The crate's `Decoder` reads through one file position, so each band opens a
+decoder of its own over the same file. That needs a reader per thread on one
+descriptor, which is what `decode::Positioned` is: it keeps its position in
+itself and reads with `pread`, so the duplicate descriptor `ReadSeek::share`
+hands over — whose offset is shared with the original — is never seeked.
+The file-backed case is the only one that divides; bytes held in memory, and
+the rare planar layout that keeps each channel's chunks apart, go through
+`read_image` on the loader's thread as before. `tiff-strips.tif` and
+`tiff-tiled.tif` are the fixtures that read on more than one band.
+
 ## HEIF
 
 The only decoder that is not pure Rust, because there is no usable pure-Rust

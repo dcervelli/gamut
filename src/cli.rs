@@ -54,7 +54,7 @@ OPTIONS:
         --no-minimap        Start with the minimap off; it is on by default
         --paused            Open an animation stopped on its first frame,
                             rather than playing
-        --timing            Print decode and startup timings to stdout
+        --timing            Print decode and startup timings to stderr
     --                      Treat every later argument as a path
 ";
 

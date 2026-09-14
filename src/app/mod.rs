@@ -1894,11 +1894,8 @@ mod tests {
             (None, Sequence::Pages { default, .. }) => default,
             (None, _) => 0,
         };
-        let decoded = match asked {
-            Some(page) => decode::load_page(&path, app.files.overrides(), page),
-            None => decode::load(&path, app.files.overrides()),
-        };
-        let outcome = decoded.map(|image| Ready {
+        let decoded = decode::load_timed(&path, app.files.overrides(), asked);
+        let outcome = decoded.map(|(image, _)| Ready {
             stats: Stats::scan(&image),
             exif: exif::Exif::read(&path),
             image,

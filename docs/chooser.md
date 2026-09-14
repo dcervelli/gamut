@@ -154,9 +154,10 @@ global pool is built, by `rayon_core::ThreadPoolBuilder::build_global`.
 The pool is made lazily by whichever thread first uses it, and its threads
 inherit that thread's nice value for the life of the process, so left to
 chance a JPEG XL thumbnailed here before the loader decoded one would have
-left every JPEG XL the loader decoded afterwards running at nice 10 — the
-opposite of what lowering the priority was for. `top -H` shows the pool as
-`gamut rayon N` at nice 0 and the thumbnailer at nice 10.
+left every JPEG XL the loader decoded afterwards — and every statistics
+scan, which `Stats::scan` divides by rows over the same pool — running at
+nice 10, the opposite of what lowering the priority was for. `top -H` shows
+the pool as `gamut rayon N` at nice 0 and the thumbnailer at nice 10.
 
 Per file: the header first, and its facts — the size and whether the file
 holds frames or pages — delivered at once, so the row fills in before any
