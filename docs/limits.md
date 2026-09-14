@@ -40,6 +40,5 @@ since applying it backwards would brighten what was already bright.
 
 Reconstruction costs memory: the result is four 32-bit floats per pixel, so a
 12-megapixel photograph is a 200 MB buffer where the base image alone was 12
-MB, with a transient copy of the same size on the way out of the gain map
-crate.
+MB.
 

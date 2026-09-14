@@ -55,11 +55,18 @@ HDR half of the file is invisible with nothing to say it was ever there.
 
 `ultrahdr-rs` walks the container — MPF and the XMP directory Google writes
 beside it — and hands back the two JPEGs as raw bytes, so `image` remains the
-only JPEG decoder in the build; `ultrahdr-core` does the arithmetic and the
-upsample. What comes out is linear light with 1.0 at SDR reference white,
-which is already the working space, so past the decoder an Ultra HDR
-photograph is simply an HDR image: tone mapped on an SDR surface, sent out
-untouched on an HDR one.
+only JPEG decoder in the build; `ultrahdr-core` builds the table that says
+what gain each of the map's 256 values stands for. The walk over the pixels
+— the base decoded to linear through a table, the map sampled bilinearly at
+each pixel, the product written out — is `gain_map::reconstruct`, in bands
+of rows across the thread pool. The crate has a walk of its own,
+`apply_gainmap`, and it is what the tests check `reconstruct` against; it is
+not what runs because it decodes sRGB with a `powf` per sample on one
+thread, 460 ms of the 560 a 12-megapixel phone photograph took to open
+against 60 for the JPEG decode. What comes out is linear light with 1.0 at
+SDR reference white, which is already the working space, so past the
+decoder an Ultra HDR photograph is simply an HDR image: tone mapped on an
+SDR surface, sent out untouched on an HDR one.
 
 The whole boost is applied rather than a share of it chosen for an assumed
 display. This viewer has an exposure control and a choice of tone mapping

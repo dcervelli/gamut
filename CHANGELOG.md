@@ -34,6 +34,9 @@ Notable changes to `gamut`. The format follows
   linearizing 16-bit and float samples — is divided between threads too.
   For the same map the widening took 260 ms on one thread and takes a
   fraction of that.
+- An Ultra HDR JPEG's gain map is applied across threads, through a table
+  rather than a power function per sample. A 12-megapixel phone
+  photograph that took 560 ms to open takes 90, most of it the JPEG decode.
 
 ### Fixed
 
