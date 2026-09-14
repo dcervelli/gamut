@@ -214,19 +214,82 @@ fn float16_format(components: usize) -> wgpu::TextureFormat {
     }
 }
 
+/// Pixels below which a repack is not worth dividing: handing bands to the
+/// pool costs more than a picture this small takes to walk.
+const PARALLEL_FROM: usize = 1 << 16;
+
+/// The texels of an upload, `components` to a pixel, built from `source`
+/// samples to a pixel of `data`: `pixel` writes each from its samples, and
+/// any component past the source's — an alpha the texture has and the file
+/// does not — reads as `fill`.
+///
+/// Divided by pixels between rayon's threads. A 134-megapixel RGB file is
+/// 400 MB widened to 540, and one thread took a quarter of a second over it
+/// — most of what the upload cost, and more than the GPU's own copy.
+fn repack<S: Sync, T: bytemuck::Zeroable + Copy + Send + Sync>(
+    data: &[S],
+    source: usize,
+    components: usize,
+    fill: T,
+    pixel: impl Fn(&[S], &mut [T]) + Sync,
+) -> Vec<T> {
+    let pixels = data.len() / source;
+    // Zeroed rather than filled: a zeroed allocation is pages the kernel
+    // hands out on first touch, so the memory is first written by the
+    // threads below, in parallel, rather than by a fill here on one.
+    let mut out = vec![T::zeroed(); pixels * components];
+    let bands = if pixels < PARALLEL_FROM {
+        1
+    } else {
+        rayon_core::current_num_threads().clamp(1, pixels)
+    };
+    let per_band = pixels.div_ceil(bands);
+
+    let walk = |index: usize, band: &mut [T]| {
+        let from = index * per_band * source;
+        for (samples, texel) in data[from..]
+            .chunks_exact(source)
+            .zip(band.chunks_exact_mut(components))
+        {
+            texel[source..].fill(fill);
+            pixel(samples, &mut texel[..source]);
+        }
+    };
+    if bands == 1 {
+        walk(0, &mut out);
+    } else {
+        rayon_core::scope(|scope| {
+            for (index, band) in out.chunks_mut(per_band * components).enumerate() {
+                let walk = &walk;
+                scope.spawn(move |_| walk(index, band));
+            }
+        });
+    }
+    out
+}
+
 /// Widens each pixel to `components`, filling any added alpha with `opaque`.
 /// Only ever grows 3 to 4; 1 and 2 stay as they are, and `None` says the
 /// source can be uploaded as it is.
-fn expand<T: Copy>(data: &[T], channels: Channels, components: usize, opaque: T) -> Option<Vec<T>> {
+fn expand<T: bytemuck::Zeroable + Copy + Send + Sync>(
+    data: &[T],
+    channels: Channels,
+    components: usize,
+    opaque: T,
+) -> Option<Vec<T>> {
     let source = channels.count();
     if source == components {
         return None;
     }
-    let mut out = vec![opaque; data.len() / source * components];
-    for (pixel, chunk) in data.chunks_exact(source).enumerate() {
-        out[pixel * components..pixel * components + source].copy_from_slice(chunk);
-    }
-    Some(out)
+    Some(repack(
+        data,
+        source,
+        components,
+        opaque,
+        |samples, texel| {
+            texel.copy_from_slice(samples);
+        },
+    ))
 }
 
 fn expand_u8(data: &[u8], channels: Channels, components: usize, opaque: u8) -> Pixels<'_> {
@@ -246,7 +309,7 @@ fn expand_u16(data: &[u16], channels: Channels, components: usize, opaque: u16) 
 /// Linearizes integer samples through `lut`, widening to `components`.
 /// Alpha is a coverage fraction, never a light measurement, so it is scaled
 /// by `full_scale` and never put through the curve.
-fn map_to_f16<T: Copy + Into<u32>>(
+fn map_to_f16<T: Copy + Into<u32> + Sync>(
     data: &[T],
     channels: Channels,
     components: usize,
@@ -255,18 +318,16 @@ fn map_to_f16<T: Copy + Into<u32>>(
 ) -> Vec<f16> {
     let source = channels.count();
     let alpha = channels.alpha_index();
-    let mut out = vec![f16::ONE; data.len() / source * components];
-    for (pixel, chunk) in data.chunks_exact(source).enumerate() {
-        for (index, raw) in chunk.iter().enumerate() {
+    repack(data, source, components, f16::ONE, |samples, texel| {
+        for (index, (raw, slot)) in samples.iter().zip(texel).enumerate() {
             let raw: u32 = (*raw).into();
-            out[pixel * components + index] = if Some(index) == alpha {
+            *slot = if Some(index) == alpha {
                 f16::from_f32(raw as f32 / full_scale)
             } else {
                 lut[raw as usize]
             };
         }
-    }
-    out
+    })
 }
 
 fn map_f32(data: &[f32], channels: Channels, components: usize, transfer: Transfer) -> Pixels<'_> {
@@ -275,16 +336,15 @@ fn map_f32(data: &[f32], channels: Channels, components: usize, transfer: Transf
     if source == components && transfer.is_linear() {
         return Pixels::Borrowed(bytemuck::cast_slice(data));
     }
-    let mut out = vec![1.0f32; data.len() / source * components];
-    for (pixel, chunk) in data.chunks_exact(source).enumerate() {
-        for (index, raw) in chunk.iter().enumerate() {
-            out[pixel * components + index] = if Some(index) == alpha || transfer.is_linear() {
+    let out = repack(data, source, components, 1.0f32, |samples, texel| {
+        for (index, (raw, slot)) in samples.iter().zip(texel).enumerate() {
+            *slot = if Some(index) == alpha || transfer.is_linear() {
                 *raw
             } else {
                 transfer.to_linear(*raw)
             };
         }
-    }
+    });
     Pixels::F32(out)
 }
 
@@ -419,6 +479,33 @@ mod tests {
             (values[1].to_f32() - 128.0 / 255.0).abs() < 1e-3,
             "alpha is untouched"
         );
+    }
+
+    /// Dividing a repack between threads must not move a sample: every
+    /// pixel of a picture large enough to be divided lands where a plain
+    /// walk would put it, the added alpha included, and the last band —
+    /// which is short — with the rest.
+    #[test]
+    fn a_divided_repack_agrees_with_a_plain_one() {
+        let pixels = PARALLEL_FROM + 1234;
+        let data: Vec<u8> = (0..pixels * 3).map(|i| (i % 251) as u8).collect();
+        let widened = repack(&data, 3, 4, 0xEE, |samples, texel: &mut [u8]| {
+            texel.copy_from_slice(samples);
+        });
+        assert_eq!(widened.len(), pixels * 4);
+        let (samples, _) = data.as_chunks::<3>();
+        let (texels, _) = widened.as_chunks::<4>();
+        for (pixel, (samples, texel)) in samples.iter().zip(texels).enumerate() {
+            assert_eq!(&texel[..3], samples, "pixel {pixel}");
+            assert_eq!(texel[3], 0xEE, "pixel {pixel}");
+        }
+
+        // The same walk with nothing added, which the helper takes as a
+        // plain copy rather than a fill of nothing.
+        let same = repack(&data, 3, 3, 0u8, |samples, texel: &mut [u8]| {
+            texel.copy_from_slice(samples);
+        });
+        assert_eq!(same, data);
     }
 
     /// Whatever the path, the buffer must match what the texture expects, or

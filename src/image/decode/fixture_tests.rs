@@ -560,6 +560,18 @@ const FIXTURES: &[Fixture] = &[
         nodata: None,
         tolerance: EXACT,
     },
+    Fixture {
+        file: "tiff-strips.tif",
+        covers: "TIFF in five strips, the last one short, read across threads",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
     // TIFF as it turns up in mapping and science: single band, floating
     // point, and encodings `image` cannot read at all.
     Fixture {

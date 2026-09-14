@@ -194,6 +194,9 @@ magick "$work/color.png" -depth 8 -type TrueColor -compress Zip      tiff-deflat
 magick "$work/color.png" -depth 8 -type TrueColor -compress RLE      tiff-packbits.tif
 magick "$work/color.png" -depth 8 -type TrueColor -compress None -define tiff:endian=msb tiff-bigendian.tif
 magick "$work/color.png" -depth 8 -type TrueColor -compress None -define tiff:tile-geometry=16x16 tiff-tiled.tif
+# Five strips of five rows, the last of four: more rows of chunks than the
+# decoder has bands for them, and an edge that clips one.
+magick "$work/color.png" -depth 8 -type TrueColor -compress LZW -define tiff:rows-per-strip=5 tiff-strips.tif
 # Two directories, the pattern first and the upside-down one second: pages,
 # with no clock between them.
 magick "$work/color.png" "$work/color-upside-down.png" -depth 8 -type TrueColor -compress None tiff-pages.tif
