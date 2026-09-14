@@ -17,6 +17,30 @@ Notable changes to `gamut`. The format follows
   and this program share them, and are made in the background at low
   priority from the moment the program starts.
 
+### Changed
+
+- `--timing` prints to stderr rather than stdout, and its decode line
+  names the file and splits the time into what the format's decoder took
+  and what the program added around it — the header, the statistics scan,
+  the metadata and the upload.
+- The statistics scan every file gets on load — the range, the histogram
+  and the plot — is divided by rows between rayon's threads. It was the
+  larger part of opening a photograph, taking 50 ms on one thread for a
+  file the decoder read in 10; it now takes a few.
+- A TIFF's strips or tiles are decoded across threads, each thread reading
+  its own rows of them from the file. A 14000×9600 LZW map that took 1.7 s
+  to open takes 150 ms on a 32-core machine.
+- Repacking a decoded image for the GPU — widening RGB to RGBA, and
+  linearizing 16-bit and float samples — is divided between threads too.
+  For the same map the widening took 260 ms on one thread and takes a
+  fraction of that.
+- An Ultra HDR JPEG's gain map is applied across threads, through a table
+  rather than a power function per sample. A 12-megapixel phone
+  photograph that took 560 ms to open takes 90, most of it the JPEG decode.
+- A HEIC's tiles are decoded on as many threads as the machine has cores,
+  where `libheif` would use four. An iPhone's 24-megapixel photograph
+  opens in half the time on a 32-core machine.
+
 ### Fixed
 
 - An idle window no longer redraws itself continuously, holding a core at

@@ -30,6 +30,14 @@ function. Three-channel data is expanded to four because no graphics API has a
 three-component sampled texture; one- and two-channel data is *not* expanded,
 so a 20000×20000 16-bit gray scan costs 800 MB rather than 3.2 GB.
 
+Every repack in `render/upload.rs` — the expansion, and the two LUT and
+`to_linear` passes — goes through one `repack`, which divides the pixels
+between rayon's threads. The expansion is a copy, but a copy of hundreds of
+megabytes: widening a 14000×9600 RGB file to RGBA took 260 ms on one thread,
+more than the GPU's own `write_texture` of the result, and the widened buffer
+is zero-allocated rather than filled so that its pages are first touched by
+the threads writing them rather than by a fill on one.
+
 ## Display-referred and scene-referred
 
 Everything about how a file opens follows from one fact about it: whether its

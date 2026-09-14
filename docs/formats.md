@@ -55,11 +55,18 @@ HDR half of the file is invisible with nothing to say it was ever there.
 
 `ultrahdr-rs` walks the container — MPF and the XMP directory Google writes
 beside it — and hands back the two JPEGs as raw bytes, so `image` remains the
-only JPEG decoder in the build; `ultrahdr-core` does the arithmetic and the
-upsample. What comes out is linear light with 1.0 at SDR reference white,
-which is already the working space, so past the decoder an Ultra HDR
-photograph is simply an HDR image: tone mapped on an SDR surface, sent out
-untouched on an HDR one.
+only JPEG decoder in the build; `ultrahdr-core` builds the table that says
+what gain each of the map's 256 values stands for. The walk over the pixels
+— the base decoded to linear through a table, the map sampled bilinearly at
+each pixel, the product written out — is `gain_map::reconstruct`, in bands
+of rows across the thread pool. The crate has a walk of its own,
+`apply_gainmap`, and it is what the tests check `reconstruct` against; it is
+not what runs because it decodes sRGB with a `powf` per sample on one
+thread, 460 ms of the 560 a 12-megapixel phone photograph took to open
+against 60 for the JPEG decode. What comes out is linear light with 1.0 at
+SDR reference white, which is already the working space, so past the
+decoder an Ultra HDR photograph is simply an HDR image: tone mapped on an
+SDR surface, sent out untouched on an HDR one.
 
 The whole boost is applied rather than a share of it chosen for an assumed
 display. This viewer has an exposure control and a choice of tone mapping
@@ -95,6 +102,20 @@ pages: `sequence` walks the chain reading directories only, and
 tells a page from an overview or a thumbnail, so a pyramid's reduced copies
 count as pages too.
 
+The pixels are read a chunk at a time — a strip or a tile, each compressed
+on its own — with the rows of chunks divided between rayon's threads, rather
+than through the crate's `read_image`, which decodes them one after another:
+a 14000×9600 LZW map took 1.7 s that way and takes 150 ms across 32 cores.
+The crate's `Decoder` reads through one file position, so each band opens a
+decoder of its own over the same file. That needs a reader per thread on one
+descriptor, which is what `decode::Positioned` is: it keeps its position in
+itself and reads with `pread`, so the duplicate descriptor `ReadSeek::share`
+hands over — whose offset is shared with the original — is never seeked.
+The file-backed case is the only one that divides; bytes held in memory, and
+the rare planar layout that keeps each channel's chunks apart, go through
+`read_image` on the loader's thread as before. `tiff-strips.tif` and
+`tiff-tiled.tif` are the fixtures that read on more than one band.
+
 ## HEIF
 
 The only decoder that is not pure Rust, because there is no usable pure-Rust
@@ -129,6 +150,12 @@ Depth and channel count survive the same way they do elsewhere: a 10- or
 12-bit file arrives as 16-bit samples lifted to full scale rather than
 flattened to bytes, and a monochrome file stays one channel all the way to the
 GPU rather than being tripled into RGB.
+
+A phone's HEIC is a grid of tiles, and `libheif` decodes them on a thread
+pool of its own that is four deep by default; the decoder sets it to the
+machine's core count, which halved the decode of an iPhone's 24-megapixel
+frame on 32 cores. Rows of samples are then packed out of `libheif`'s
+buffer on one thread, which is a few percent of the whole.
 
 `libheif` applies the container's own geometric properties — `irot`, `imir`,
 `clap` — while decoding, so a rotated phone photograph arrives upright. That

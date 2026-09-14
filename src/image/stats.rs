@@ -136,9 +136,21 @@ impl Stats {
     /// relative luminance, which is what an exposure control should track.
     /// Color images additionally get per-channel counts, which the UI draws
     /// as a four-channel histogram.
+    ///
+    /// Two passes over the pixels, each divided by rows between rayon's
+    /// threads: the range first, then the counts, which cannot be binned
+    /// until the range is known. Every pixel is measured on its own, so a
+    /// band's numbers depend on nothing outside it, and the bands fold
+    /// together into exactly what one thread would have counted.
     pub fn scan(image: &DecodedImage) -> Self {
-        let channels = image.samples.channels();
         let stride = Self::stride(image);
+        Self::scan_in(image, stride, Values::bands_for(image, stride))
+    }
+
+    /// [`Stats::scan`] over a given number of bands, so that a test can hold
+    /// a divided scan against the same one undivided.
+    fn scan_in(image: &DecodedImage, stride: usize, bands: usize) -> Self {
+        let channels = image.samples.channels();
         let values = Values::new(image, channels, stride);
         let transfer = image.color.transfer;
         let nodata = image.nodata;
@@ -147,27 +159,33 @@ impl Stats {
 
         let color = !channels.is_gray();
         let plotted = if color { COLOR } else { 1 };
-        let (mut min, mut max) = (f32::INFINITY, f32::NEG_INFINITY);
-        let (mut axis_min, mut axis_max) = if transfer.is_linear() {
-            (f32::INFINITY, f32::NEG_INFINITY)
-        } else {
-            (0.0, 1.0)
-        };
-        values.clone().for_each(|encoded, linear| {
-            let value = luminance(linear, channels);
-            if is_data(value) {
-                min = min.min(value);
-                max = max.max(value);
-            }
-            // The axis spans the channels that get plotted, in the units they
-            // are plotted in.
-            for (stored, decoded) in encoded[..plotted].iter().zip(linear) {
-                if is_data(*decoded) {
-                    axis_min = axis_min.min(*stored);
-                    axis_max = axis_max.max(*stored);
-                }
-            }
-        });
+        let Range {
+            min,
+            max,
+            axis_min,
+            axis_max,
+        } = values
+            .bands(bands, |band| {
+                let mut range = Range::new(transfer);
+                band.for_each(|encoded, linear| {
+                    let value = luminance(linear, channels);
+                    if is_data(value) {
+                        range.min = range.min.min(value);
+                        range.max = range.max.max(value);
+                    }
+                    // The axis spans the channels that get plotted, in the
+                    // units they are plotted in.
+                    for (stored, decoded) in encoded[..plotted].iter().zip(linear) {
+                        if is_data(*decoded) {
+                            range.axis_min = range.axis_min.min(*stored);
+                            range.axis_max = range.axis_max.max(*stored);
+                        }
+                    }
+                });
+                range
+            })
+            .into_iter()
+            .fold(Range::new(transfer), Range::merge);
 
         if !min.is_finite() || !max.is_finite() {
             // Nothing measurable at all; fall back to unit range so
@@ -181,8 +199,6 @@ impl Stats {
             };
         }
 
-        let mut histogram = [0u32; BINS];
-        let mut counted = 0u32;
         let span = max - min;
         // A span at or below the smallest normal float is treated as flat:
         // dividing by a subnormal gives an infinite scale, which then bins
@@ -191,64 +207,69 @@ impl Stats {
         let scale = (span > f32::MIN_POSITIVE).then(|| (BINS - 1) as f32 / span);
 
         let axis_span = axis_max - axis_min;
-        let mut plot = Plot {
-            min: axis_min,
-            max: axis_max,
-            luma: [0; BINS],
-            color: if color {
-                Some([[0; BINS]; COLOR])
-            } else {
-                None
-            },
-        };
         // A flat image spans nothing to plot against; leaving the counts at
         // zero draws an empty panel rather than one misleading spike.
         let axis_scale = (axis_span > f32::MIN_POSITIVE).then(|| (BINS - 1) as f32 / axis_span);
 
+        let mut counts = Counts::new(color);
         if scale.is_some() || axis_scale.is_some() {
-            values.for_each(|encoded, linear| {
-                let value = luminance(linear, channels);
-                let counts = is_data(value);
-                if let Some(scale) = scale
-                    && counts
-                {
-                    // Rounded, not truncated: bins are sample points spread
-                    // from `min` to `max`, which is how `percentile` reads
-                    // them back, and what lands a code on its own bin
-                    // without a rounding error stealing the boundary.
-                    let bin = ((value - min) * scale + 0.5) as usize;
-                    histogram[bin.min(BINS - 1)] += 1;
-                    counted += 1;
-                }
-                if let Some(axis_scale) = axis_scale {
-                    let bin = |counts: &mut [u32; BINS], stored: f32| {
-                        let index = ((stored - axis_min) * axis_scale + 0.5) as usize;
-                        counts[index.min(BINS - 1)] += 1;
-                    };
-                    if counts {
-                        // Luminance is a linear quantity; it goes onto the
-                        // axis the same way the samples themselves did.
-                        bin(&mut plot.luma, encode(transfer, value));
-                    }
-                    if let Some(planes) = plot.color.as_mut() {
-                        for (plane, (stored, decoded)) in
-                            encoded[..COLOR].iter().zip(linear).enumerate()
+            counts = values
+                .bands(bands, |band| {
+                    let mut counts = Counts::new(color);
+                    band.for_each(|encoded, linear| {
+                        let value = luminance(linear, channels);
+                        let is_data_value = is_data(value);
+                        if let Some(scale) = scale
+                            && is_data_value
                         {
-                            if is_data(*decoded) {
-                                bin(&mut planes[plane], *stored);
+                            // Rounded, not truncated: bins are sample points
+                            // spread from `min` to `max`, which is how
+                            // `percentile` reads them back, and what lands a
+                            // code on its own bin without a rounding error
+                            // stealing the boundary.
+                            let bin = ((value - min) * scale + 0.5) as usize;
+                            counts.histogram[bin.min(BINS - 1)] += 1;
+                            counts.counted += 1;
+                        }
+                        if let Some(axis_scale) = axis_scale {
+                            let bin = |counts: &mut [u32; BINS], stored: f32| {
+                                let index = ((stored - axis_min) * axis_scale + 0.5) as usize;
+                                counts[index.min(BINS - 1)] += 1;
+                            };
+                            if is_data_value {
+                                // Luminance is a linear quantity; it goes
+                                // onto the axis the same way the samples
+                                // themselves did.
+                                bin(&mut counts.luma, encode(transfer, value));
+                            }
+                            if let Some(planes) = counts.color.as_mut() {
+                                for (plane, (stored, decoded)) in
+                                    encoded[..COLOR].iter().zip(linear).enumerate()
+                                {
+                                    if is_data(*decoded) {
+                                        bin(&mut planes[plane], *stored);
+                                    }
+                                }
                             }
                         }
-                    }
-                }
-            });
+                    });
+                    counts
+                })
+                .into_iter()
+                .fold(counts, Counts::merge);
         }
 
         Self {
             min,
             max,
-            histogram,
-            counted,
-            plot,
+            histogram: counts.histogram,
+            counted: counts.counted,
+            plot: Plot {
+                min: axis_min,
+                max: axis_max,
+                luma: counts.luma,
+                color: counts.color,
+            },
         }
     }
 
@@ -296,6 +317,88 @@ fn encode(transfer: Transfer, value: f32) -> f32 {
     }
 }
 
+/// What the first pass measures: the extremes of the luminance, in linear
+/// units, and of the plotted channels, in the file's own.
+#[derive(Clone, Copy)]
+struct Range {
+    min: f32,
+    max: f32,
+    axis_min: f32,
+    axis_max: f32,
+}
+
+impl Range {
+    /// Nothing seen yet. A curved file's axis starts at the range such a
+    /// file nominally holds, and only widens; a linear one's is whatever is
+    /// measured. See [`Plot`].
+    fn new(transfer: Transfer) -> Self {
+        let (axis_min, axis_max) = if transfer.is_linear() {
+            (f32::INFINITY, f32::NEG_INFINITY)
+        } else {
+            (0.0, 1.0)
+        };
+        Self {
+            min: f32::INFINITY,
+            max: f32::NEG_INFINITY,
+            axis_min,
+            axis_max,
+        }
+    }
+
+    fn merge(self, other: Self) -> Self {
+        Self {
+            min: self.min.min(other.min),
+            max: self.max.max(other.max),
+            axis_min: self.axis_min.min(other.axis_min),
+            axis_max: self.axis_max.max(other.axis_max),
+        }
+    }
+}
+
+/// What the second pass counts: the bins of [`Stats`] and of its [`Plot`].
+struct Counts {
+    histogram: [u32; BINS],
+    counted: u32,
+    luma: [u32; BINS],
+    color: Option<[[u32; BINS]; COLOR]>,
+}
+
+impl Counts {
+    fn new(color: bool) -> Self {
+        Self {
+            histogram: [0; BINS],
+            counted: 0,
+            luma: [0; BINS],
+            color: color.then_some([[0; BINS]; COLOR]),
+        }
+    }
+
+    fn merge(mut self, other: Self) -> Self {
+        fn add(into: &mut [u32; BINS], from: &[u32; BINS]) {
+            for (sum, count) in into.iter_mut().zip(from) {
+                *sum += count;
+            }
+        }
+        add(&mut self.histogram, &other.histogram);
+        self.counted += other.counted;
+        add(&mut self.luma, &other.luma);
+        if let (Some(planes), Some(others)) = (self.color.as_mut(), &other.color) {
+            for (plane, other) in planes.iter_mut().zip(others) {
+                add(plane, other);
+            }
+        }
+        self
+    }
+}
+
+/// Sampled pixels below which a pass is not worth dividing: handing bands to
+/// the pool costs more than a picture this small takes to walk.
+const PARALLEL_FROM: usize = 1 << 16;
+
+/// The fewest sampled pixels a band is given, so that a picture just over
+/// [`PARALLEL_FROM`] goes to two or three threads rather than thirty-two.
+const BAND_PIXELS: usize = 1 << 15;
+
 /// Iterator over each sampled pixel, as stored and as decoded.
 #[derive(Clone)]
 struct Values<'a> {
@@ -303,16 +406,76 @@ struct Values<'a> {
     color: ColorSpace,
     channels: Channels,
     stride: usize,
+    /// The rows this walk covers, as a range of pixel indices: the whole
+    /// image, or one band of it.
+    pixels: std::ops::Range<usize>,
+    width: usize,
 }
 
 impl<'a> Values<'a> {
     fn new(image: &'a DecodedImage, channels: Channels, stride: usize) -> Self {
+        let width = image.width as usize;
         Self {
             samples: &image.samples,
             color: image.color,
             channels,
             stride,
+            pixels: 0..width * image.height as usize,
+            width,
         }
+    }
+
+    /// How many ways to cut the walk: one for a picture too small to be
+    /// worth the threads, otherwise one per thread the pool will run at
+    /// once, and never more than there are rows to give them.
+    fn bands_for(image: &DecodedImage, stride: usize) -> usize {
+        let height = image.height as usize;
+        let sampled = image.width as usize * height / stride.max(1);
+        if image.width == 0 || height == 0 || sampled < PARALLEL_FROM {
+            return 1;
+        }
+        (sampled / BAND_PIXELS)
+            .clamp(1, rayon_core::current_num_threads().max(1))
+            .min(height)
+    }
+
+    /// The walk cut into `bands` bands of whole rows, and `pass` run over
+    /// each on rayon's pool. The results come back in row order, but nothing
+    /// a band measures depends on its neighbors, so the order does not
+    /// matter.
+    ///
+    /// A band walks its own rows on the whole image's stride, in the whole
+    /// image's phase, so that the bands together land on exactly the pixels
+    /// one walk would have. What the scan measures then does not depend on
+    /// how many threads the machine has.
+    fn bands<T: Send>(&self, bands: usize, pass: impl Fn(Values<'a>) -> T + Sync) -> Vec<T> {
+        let height = self.pixels.len() / self.width.max(1);
+        let bands = bands.clamp(1, height.max(1));
+        if bands == 1 {
+            return vec![pass(self.clone())];
+        }
+
+        // Whole rows each, so rounding up the rows can leave fewer bands
+        // than asked for; the count follows the rows, not the other way.
+        let rows = height.div_ceil(bands);
+        let bands = height.div_ceil(rows);
+        let mut results: Vec<Option<T>> = (0..bands).map(|_| None).collect();
+        rayon_core::scope(|scope| {
+            for (index, slot) in results.iter_mut().enumerate() {
+                let first = self.pixels.start + index * rows * self.width;
+                let last = (first + rows * self.width).min(self.pixels.end);
+                let band = Values {
+                    pixels: first..last,
+                    ..self.clone()
+                };
+                let pass = &pass;
+                scope.spawn(move |_| *slot = Some(pass(band)));
+            }
+        });
+        results
+            .into_iter()
+            .map(|result| result.expect("every band was walked"))
+            .collect()
     }
 
     /// Calls `visit` with one pixel's components twice over: first as the
@@ -324,6 +487,14 @@ impl<'a> Values<'a> {
         let transfer = self.color.transfer;
         let mut stored = [0.0f32; 4];
         let mut linear = [0.0f32; 4];
+        // From the first pixel of the band the whole image's stride would
+        // land on, not from the band's own first pixel.
+        let first = self
+            .pixels
+            .start
+            .next_multiple_of(self.stride.max(1))
+            .min(self.pixels.end);
+        let span = first * count..self.pixels.end * count;
 
         match self.samples {
             Samples::U8 { data, .. } => {
@@ -333,7 +504,7 @@ impl<'a> Values<'a> {
                 let lut: Vec<f32> = (0..=u8::MAX)
                     .map(|v| transfer.to_linear(v as f32 * scale))
                     .collect();
-                for chunk in data.chunks_exact(count).step_by(self.stride) {
+                for chunk in data[span].chunks_exact(count).step_by(self.stride) {
                     for (index, raw) in chunk.iter().enumerate() {
                         stored[index] = *raw as f32 * scale;
                         linear[index] = lut[*raw as usize];
@@ -343,7 +514,7 @@ impl<'a> Values<'a> {
             }
             Samples::U16 { data, .. } => {
                 let scale = 1.0 / u16::MAX as f32;
-                for chunk in data.chunks_exact(count).step_by(self.stride) {
+                for chunk in data[span].chunks_exact(count).step_by(self.stride) {
                     for (index, raw) in chunk.iter().enumerate() {
                         stored[index] = *raw as f32 * scale;
                         linear[index] = transfer.to_linear(stored[index]);
@@ -352,7 +523,7 @@ impl<'a> Values<'a> {
                 }
             }
             Samples::F32 { data, .. } => {
-                for chunk in data.chunks_exact(count).step_by(self.stride) {
+                for chunk in data[span].chunks_exact(count).step_by(self.stride) {
                     for (index, raw) in chunk.iter().enumerate() {
                         stored[index] = *raw;
                         linear[index] = if transfer.is_linear() {
@@ -429,6 +600,57 @@ mod tests {
 
         assert!((linear - 0.5).abs() < 1e-3, "{linear}");
         assert!((decoded - 0.2140).abs() < 1e-3, "{decoded}");
+    }
+
+    /// Dividing the scan between threads must not change a count. Held
+    /// against the same scan on one band, over an image with a stride of
+    /// one so that every pixel is looked at, and again on a stride so that
+    /// the bands are shown to keep its phase; both fold to exactly what a
+    /// plain walk would have — bins, extremes and the pixel count.
+    #[test]
+    fn a_divided_scan_agrees_with_a_plain_one() {
+        let (width, height) = (97u32, 61u32);
+        // Something with structure in every band: a gradient across, a ramp
+        // down, and a stripe of nodata-free NaNs the scan has to skip.
+        let mut data = Vec::with_capacity((width * height * 3) as usize);
+        for y in 0..height {
+            for x in 0..width {
+                let (x, y) = (x as f32 / width as f32, y as f32 / height as f32);
+                if y > 0.4 && y < 0.45 {
+                    data.extend([f32::NAN; 3]);
+                } else {
+                    data.extend([x, y, (x * 7.0 + y * 3.0).fract() * 1.5]);
+                }
+            }
+        }
+        let image = DecodedImage {
+            width,
+            height,
+            samples: Samples::F32 {
+                channels: Channels::Rgb,
+                data,
+            },
+            color: ColorSpace::SRGB,
+            alpha: AlphaMode::Opaque,
+            referred: Referred::Display,
+            nodata: None,
+        };
+
+        for stride in [1, 5] {
+            let plain = Stats::scan_in(&image, stride, 1);
+            assert!(plain.counted > 0);
+            for bands in [2, 7, 60, 200] {
+                let divided = Stats::scan_in(&image, stride, bands);
+                assert_eq!(divided.min, plain.min, "stride {stride}, {bands} bands");
+                assert_eq!(divided.max, plain.max, "stride {stride}, {bands} bands");
+                assert_eq!(divided.plot.min, plain.plot.min);
+                assert_eq!(divided.plot.max, plain.plot.max);
+                assert_eq!(divided.counted, plain.counted, "{bands} bands");
+                assert_eq!(divided.histogram, plain.histogram, "{bands} bands");
+                assert_eq!(divided.plot.luma, plain.plot.luma, "{bands} bands");
+                assert_eq!(divided.plot.color, plain.plot.color, "{bands} bands");
+            }
+        }
     }
 
     /// Every pixel's marker lands on a bar that actually has the pixel in it.

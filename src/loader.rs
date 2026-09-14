@@ -312,33 +312,34 @@ fn read(request: Request, upload: Option<&Upload>, canceled: &AtomicBool) -> Opt
             (None, Sequence::Pages { default, .. }) => default,
             (None, _) => 0,
         };
-        let image = guard("decoding", || match page {
-            Some(page) => decode::load_page(&path, overrides, page),
-            None => decode::load(&path, overrides),
-        })?;
-        Ok((image, sequence, shown))
+        let (image, decoding) = guard("decoding", || decode::load_timed(&path, overrides, page))?;
+        Ok((image, decoding, sequence, shown))
     });
     if canceled.load(Ordering::Relaxed) {
         return None;
     }
 
-    let scanned = decoded.and_then(|(image, sequence, page)| {
-        timing::decoded(&path, started.elapsed());
+    let scanned = decoded.and_then(|(image, decoding, sequence, page)| {
         let stats = guard("scanning", || Ok(Stats::scan(&image)))?;
         // A file with no metadata, or with metadata that will not parse, is
         // not a failure: the panel simply has less to say about it.
         let exif = guard("reading the metadata", || Ok(Exif::read(&path)))?;
-        Ok((image, stats, exif, sequence, page))
+        Ok((image, decoding, stats, exif, sequence, page))
     });
     if canceled.load(Ordering::Relaxed) {
         return None;
     }
 
-    let outcome = scanned.and_then(|(image, stats, exif, sequence, page)| {
+    let outcome = scanned.and_then(|(image, decoding, stats, exif, sequence, page)| {
         let gpu = match upload {
             Some(upload) => Some(guard("uploading to the GPU", || upload.run(&image))?),
             None => None,
         };
+        // Measured once the image is ready to hand over, so that the time
+        // reported is everything this thread did to it — the header, the
+        // decode, the scan, the metadata and the upload — with the decoder's
+        // own share picked out of it.
+        timing::decoded(&path, started.elapsed(), decoding);
         Ok(Ready {
             image,
             stats,
