@@ -8,6 +8,7 @@
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
 
@@ -34,8 +35,66 @@ mod fixture_tests;
 /// A seekable byte source. Decoders read from the file directly rather than
 /// from a slice, so that opening a 600 MB raster does not begin by copying it
 /// into memory whole.
-pub trait ReadSeek: Read + Seek {}
-impl<T: Read + Seek> ReadSeek for T {}
+pub trait ReadSeek: Read + Seek {
+    /// The file under the reader, where there is one, as a handle of its
+    /// own: a decoder that reads a file's parts on several threads at once
+    /// puts a [`Positioned`] reader over it for each. `None` for bytes held
+    /// in memory, which a decoder then reads on the one thread it has.
+    fn share(&self) -> std::io::Result<Option<File>> {
+        Ok(None)
+    }
+}
+
+impl ReadSeek for BufReader<File> {
+    fn share(&self) -> std::io::Result<Option<File>> {
+        self.get_ref().try_clone().map(Some)
+    }
+}
+
+impl<T: AsRef<[u8]>> ReadSeek for std::io::Cursor<T> {}
+
+/// A reader over a file that keeps its place in itself rather than in the
+/// file's descriptor, so that several can read the same file at once: each
+/// read is a `pread`, at the position this reader holds, and moves no other
+/// reader's. What [`ReadSeek::share`] hands back is a duplicate descriptor,
+/// whose offset is shared with the original — which is exactly why the
+/// offset cannot be used.
+pub struct Positioned<'a> {
+    file: &'a File,
+    position: u64,
+}
+
+impl<'a> Positioned<'a> {
+    pub fn new(file: &'a File) -> Self {
+        Self { file, position: 0 }
+    }
+}
+
+impl Read for Positioned<'_> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        use std::os::unix::fs::FileExt;
+        let read = self.file.read_at(buffer, self.position)?;
+        self.position += read as u64;
+        Ok(read)
+    }
+}
+
+impl Seek for Positioned<'_> {
+    fn seek(&mut self, to: SeekFrom) -> std::io::Result<u64> {
+        let (base, offset) = match to {
+            SeekFrom::Start(position) => (0, position as i64),
+            SeekFrom::Current(offset) => (self.position, offset),
+            SeekFrom::End(offset) => (self.file.metadata()?.len(), offset),
+        };
+        self.position = base.checked_add_signed(offset).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "seeking before the start of the file",
+            )
+        })?;
+        Ok(self.position)
+    }
+}
 
 /// Enough of the file for any decoder to recognize its own header.
 const HEADER: usize = 64;
@@ -238,30 +297,47 @@ fn open(path: &Path) -> Result<(BufReader<File>, &'static dyn Decoder)> {
 /// Reads and decodes `path`, picking a decoder by extension and falling back
 /// to content sniffing.
 pub fn load(path: &Path, overrides: Overrides) -> Result<DecodedImage> {
-    let (mut source, decoder) = open(path)?;
-
-    let image = decoder
-        .decode(&mut source, overrides)
-        .with_context(|| format!("decoding {} as {}", path.display(), decoder.name()))?;
-    overrides.finish(image, path)
+    load_timed(path, overrides, None).map(|(image, _)| image)
 }
 
 /// Reads one page of a file that holds several, chosen the way [`load`]
 /// chooses. What [`load`] returns is one of them: the decoder's default,
-/// which [`sequence`] names.
+/// which [`sequence`] names. The program itself reads a page through
+/// [`load_timed`]; this is the fixtures' way of asking for one by number.
+#[cfg(test)]
 pub fn load_page(path: &Path, overrides: Overrides, page: usize) -> Result<DecodedImage> {
+    load_timed(path, overrides, Some(page)).map(|(image, _)| image)
+}
+
+/// [`load`], or one page of a file that holds several given its number,
+/// saying as well how long the decoder itself took: the one call that hands
+/// the file to the format's own code, apart from the open before it and the
+/// finish after. The loader reports that beside the time the whole read took,
+/// so that a slow file can be laid at the decoder's door or at ours.
+pub fn load_timed(
+    path: &Path,
+    overrides: Overrides,
+    page: Option<usize>,
+) -> Result<(DecodedImage, Duration)> {
     let (mut source, decoder) = open(path)?;
 
-    let image = decoder
-        .decode_page(&mut source, overrides, page)
-        .with_context(|| {
-            format!(
-                "decoding page {page} of {} as {}",
-                path.display(),
-                decoder.name()
-            )
-        })?;
-    overrides.finish(image, path)
+    let started = Instant::now();
+    let image = match page {
+        None => decoder
+            .decode(&mut source, overrides)
+            .with_context(|| format!("decoding {} as {}", path.display(), decoder.name()))?,
+        Some(page) => decoder
+            .decode_page(&mut source, overrides, page)
+            .with_context(|| {
+                format!(
+                    "decoding page {page} of {} as {}",
+                    path.display(),
+                    decoder.name()
+                )
+            })?,
+    };
+    let decoding = started.elapsed();
+    Ok((overrides.finish(image, path)?, decoding))
 }
 
 /// What `path` holds beyond the image [`load`] returns, from its header.
@@ -380,6 +456,46 @@ mod tests {
         assert!(
             format!("{error:#}").contains("not a regular file"),
             "{error:#}"
+        );
+    }
+
+    /// Two readers over one file each keep their own place: a seek or a
+    /// read on one moves nothing on the other, and neither moves the file's
+    /// own offset — which is what lets a decoder per thread read the same
+    /// shared descriptor.
+    #[test]
+    fn positioned_readers_over_one_file_do_not_move_each_other() {
+        use std::io::{Read, Seek, SeekFrom};
+
+        let file = std::fs::File::open("test_images/tiff-strips.tif").unwrap();
+        let mut whole = Vec::new();
+        (&file).read_to_end(&mut whole).unwrap();
+
+        let mut first = Positioned::new(&file);
+        let mut second = Positioned::new(&file);
+        second.seek(SeekFrom::Start(100)).unwrap();
+
+        let mut head = [0u8; 8];
+        first.read_exact(&mut head).unwrap();
+        assert_eq!(head, whole[..8]);
+
+        let mut later = [0u8; 8];
+        second.read_exact(&mut later).unwrap();
+        assert_eq!(later, whole[100..108]);
+        assert_eq!(second.stream_position().unwrap(), 108);
+
+        // The first reader carried on from where it was, not from where the
+        // second left the descriptor.
+        first.read_exact(&mut head).unwrap();
+        assert_eq!(head, whole[8..16]);
+        assert_eq!(first.stream_position().unwrap(), 16);
+
+        let end = first.seek(SeekFrom::End(-4)).unwrap();
+        assert_eq!(end as usize, whole.len() - 4);
+        assert!(
+            first
+                .seek(SeekFrom::Current(-(whole.len() as i64)))
+                .is_err()
         );
     }
 
