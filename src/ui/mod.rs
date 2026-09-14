@@ -73,9 +73,9 @@ const WHEEL_PIXELS_PER_STEP: f32 = 50.0;
 /// either side of it.
 pub(super) const BECOMES: &str = "\u{00bb}";
 
-/// The gap between the file count and the name it belongs to. Tighter than
-/// the gap between two unrelated things in a bar, the two being one line
-/// about one file.
+/// The gap between the row of steps and count and the name it belongs to.
+/// Tighter than the gap between two unrelated things in a bar, the two being
+/// one line about one file.
 const COUNTER_GAP: f32 = 8.0;
 
 /// The gap between two neighbors: what floats over the content area from the

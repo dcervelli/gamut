@@ -195,7 +195,7 @@ pub(super) enum Corners {
 }
 
 impl Corners {
-    fn radius(self) -> CornerRadius {
+    pub(super) fn radius(self) -> CornerRadius {
         let r = TOGGLE_RADIUS as u8;
         match self {
             Corners::All => CornerRadius::same(r),
