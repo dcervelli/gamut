@@ -377,14 +377,16 @@ fn a_toggle_with_no_room_for_its_panel_is_dead() {
 }
 
 /// The paste button is on screen only while the clipboard is holding a
-/// picture, and the pair that steps through the list only while there is a
-/// list to step through.
+/// picture, and the pair that steps through the list, with the count
+/// between them that opens the chooser, only while there is a list to step
+/// through.
 #[test]
 fn buttons_that_would_do_nothing_are_not_there() {
     let harness = open(WINDOW, 1, panels());
     assert!(harness.query_by_label("Paste").is_none());
     assert!(harness.query_by_label("Previous file").is_none());
     assert!(harness.query_by_label("Next file").is_none());
+    assert!(harness.query_by_label("Choose a file").is_none());
     drop(harness);
 
     let mut pasteable = panels();
@@ -401,6 +403,10 @@ fn buttons_that_would_do_nothing_are_not_there() {
     assert_eq!(
         click(&mut harness, "Previous file"),
         [Command::Press(Control::Previous)]
+    );
+    assert_eq!(
+        click(&mut harness, "Choose a file"),
+        [Command::Press(Control::Chooser)]
     );
 }
 

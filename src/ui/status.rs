@@ -1,7 +1,9 @@
 //! The words in the bars: what the image is, and what the view is doing to
 //! it.
 
-use egui::{Align2, Label, RichText, Sense, TextFormat, pos2, text::LayoutJob, vec2};
+use egui::{
+    Align2, Label, RichText, Sense, TextFormat, WidgetInfo, WidgetType, pos2, text::LayoutJob, vec2,
+};
 
 use crate::image::display::{AutoWindow, Colormap, Headroom, ToneMap};
 
@@ -9,9 +11,7 @@ use super::chrome::{BAR_PADDING, Corners, Pass, STEP_SEAM, measure};
 use super::control::Control;
 use super::style::TOGGLE_RADIUS;
 use super::tooltip::Tip;
-use super::{
-    COUNTER_GAP, Current, PADDING, Reading, TEXT_SIZE, capitalized, fonts, histogram, icon,
-};
+use super::{COUNTER_GAP, Current, Reading, TEXT_SIZE, capitalized, fonts, histogram, icon};
 
 /// Between one segment of a bar and the next. A thin gap: the middot already
 /// parts them, and the bars are short of room before they are short of air.
@@ -55,12 +55,13 @@ pub(super) fn fit_segments(
 /// gone, and the name — the one thing in the window set bold, and the only
 /// thing drawn in the ink the theme keeps for it.
 pub(super) fn top_words(pass: &mut Pass, ui: &mut egui::Ui, current: &Current) {
-    let dim: egui::Color32 = pass.theme.text_dim.into();
-    // The pair that steps through the list, at the head of the bar in front
-    // of the count they move through. Only with a list to step through:
-    // stepping a list of one does nothing, and a button that did nothing
-    // when pressed would be worse than no button.
-    if pass.input.count > 1 {
+    // The pair that steps through the list, at the head of the bar, with
+    // the count they move through between them — one row of three, the
+    // count the press that opens the chooser, which is that list laid out
+    // to be picked from. Only with a list to step through: stepping a list
+    // of one does nothing, and a button that did nothing when pressed would
+    // be worse than no button.
+    if let Some(counter) = counter(pass.input.index, pass.input.count) {
         let previous = pass.icon_button(
             ui,
             icon::CHEVRON_LEFT,
@@ -73,6 +74,8 @@ pub(super) fn top_words(pass: &mut Pass, ui: &mut egui::Ui, current: &Current) {
             pass.press(Control::Previous);
         }
         ui.add_space(STEP_SEAM);
+        counter_button(pass, ui, &counter);
+        ui.add_space(STEP_SEAM);
         let next = pass.icon_button(
             ui,
             icon::CHEVRON_RIGHT,
@@ -84,14 +87,6 @@ pub(super) fn top_words(pass: &mut Pass, ui: &mut egui::Ui, current: &Current) {
         if next.clicked() {
             pass.press(Control::Next);
         }
-        ui.add_space(PADDING);
-    }
-    // The count is a fact about the list, not part of the name, and is set
-    // like the other facts in the bar: the name is the one thing here worth
-    // picking out, and picking out two things picks out neither.
-    if let Some(counter) = counter(pass.input.index, pass.input.count) {
-        let response = ui.add(Label::new(RichText::new(counter).color(dim)));
-        pass.tooltip(response, Tip::Counter, true);
         ui.add_space(COUNTER_GAP);
     }
     // In front of the name, on the side of the bar the name is read from, so
@@ -132,6 +127,38 @@ pub(super) fn top_label(shown: &str, reading: Option<&Reading>) -> String {
 /// and a file that really is called `DELETED` must not read as this.
 pub(super) const DELETED: &str = "DELETED";
 
+/// The count as a press: the middle piece of the row the two steps make,
+/// a button's height and ground with the words in the bar's dim ink, the
+/// hover wash under them while the pointer is on them, and the accent while
+/// the chooser they open is up. Square-cornered, the row's corners being the
+/// chevrons' outer ones.
+fn counter_button(pass: &mut Pass, ui: &mut egui::Ui, counter: &str) {
+    let open = egui::Popup::is_id_open(ui.ctx(), super::chooser::id());
+    let body = egui::TextStyle::Body.resolve(ui.style());
+    let galley = ui.ctx().fonts_mut(|fonts| {
+        fonts.layout_no_wrap(counter.to_string(), body, egui::Color32::PLACEHOLDER)
+    });
+    let (rect, response) = ui.allocate_exact_size(
+        vec2(
+            galley.size().x + 2.0 * STATE_PAD,
+            super::chrome::BUTTON_SIZE,
+        ),
+        Sense::CLICK,
+    );
+    response.widget_info(|| {
+        WidgetInfo::selected(WidgetType::Button, true, open, Control::Chooser.label())
+    });
+    let (wash, ink) = pass.button_ink(open, &response, true);
+    ui.painter()
+        .rect_filled(rect, Corners::Middle.radius(), wash);
+    let at = Align2::CENTER_CENTER.anchor_size(rect.center(), galley.size());
+    ui.painter().galley(pos2(at.min.x, at.min.y), galley, ink);
+    let response = pass.tooltip(response, Tip::Counter, true);
+    if response.clicked() {
+        pass.press(Control::Chooser);
+    }
+}
+
 /// Where the file on screen comes in the list it was opened with, for in
 /// front of its name — or `None` for a single file, "1 / 1" being a count of
 /// nothing.
@@ -150,9 +177,10 @@ pub(super) fn describe_pixels(current: &Current) -> String {
     current.image.samples.short_label()
 }
 
-/// The room a press keeps around the words at the end of the bottom bar: the
-/// wash that comes up under them is a button's wash, and ink laid tight
-/// against the letters would not read as one.
+/// The room a press keeps around words that are a button — the count in the
+/// top bar, the state at the end of the bottom one: the ground under them
+/// is a button's ground, and ink laid tight against its edges would not
+/// read as one.
 const STATE_PAD: f32 = 6.0;
 
 /// The words at the far end of the bottom bar: what is being done to the

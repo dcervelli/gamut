@@ -929,15 +929,22 @@ impl Naming for Namer {
             // the path in full — which is also exactly what the key beside it
             // copies.
             Tip::Name => (vec![self.path.clone()], Vec::from_iter(hint(CopyPath))),
-            // The count says which of the list is on screen; the keys are how
-            // to reach the rest of it.
-            Tip::Counter => (
-                vec![format!("File {} of {}", self.index + 1, self.count)],
-                [NextFile, PreviousFile]
-                    .into_iter()
-                    .filter_map(hint)
-                    .collect(),
-            ),
+            // The count says which of the list is on screen. A press on it
+            // opens the chooser, said the way the state's press is, with the
+            // key that opens it too; under that the keys that step through
+            // the list without opening anything.
+            Tip::Counter => {
+                let chooser = binding_for(OpenChooser).map(|binding| {
+                    format!("Click to choose a file from the list ({})", binding.shown)
+                });
+                (
+                    vec![format!("File {} of {}", self.index + 1, self.count)],
+                    chooser
+                        .into_iter()
+                        .chain([NextFile, PreviousFile].into_iter().filter_map(hint))
+                        .collect(),
+                )
+            }
             // The dot at the head of the pixel readout: what the key does to
             // it, and under that the two copies that take what it is showing
             // away with them — neither of which has a button anywhere.
@@ -2464,10 +2471,42 @@ mod tests {
     /// readout is left pointing at a key that does not exist.
     #[test]
     fn the_bars_own_readouts_have_keys_to_name() {
-        for action in [CopyPath, NextFile, PreviousFile] {
+        for action in [CopyPath, NextFile, PreviousFile, OpenChooser] {
             let hint = hint(action).unwrap_or_else(|| panic!("{action:?} is bound"));
             assert!(hint.ends_with(')'), "{hint}");
         }
+    }
+
+    /// The count in the top bar says which file this is, then that a press
+    /// on it opens the chooser — with the key that does the same — and
+    /// then the keys that step through the list instead.
+    #[test]
+    fn the_count_says_where_it_is_and_what_a_press_on_it_opens() {
+        let namer = Namer {
+            room: Room {
+                histogram: true,
+                info: true,
+            },
+            hdr: Hdr::Available,
+            openable: true,
+            path: String::new(),
+            index: 2,
+            count: 12,
+            show_histogram: false,
+            state: Vec::new(),
+        };
+        let tooltip = namer
+            .tooltip(Tip::Counter)
+            .expect("the count has a tooltip");
+        assert_eq!(tooltip.title, ["File 3 of 12"]);
+        assert_eq!(
+            tooltip.hints,
+            [
+                "Click to choose a file from the list (Ctrl+P)",
+                "Next file (], Page Down)",
+                "Previous file ([, Page Up)",
+            ]
+        );
     }
 
     /// A chord bound twice would do whichever came first in the table,
