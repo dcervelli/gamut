@@ -6,23 +6,49 @@ A modern Linux image viewer optimized for getting work done, fast.
 
 ## Features
 
+### Versatile Controls (Keyboard, UI, CLI)
+
+All features can be keyboard driven but the hideable UI also contains discoverable controls with tooltips to learn the keyboard shortcuts. Controls can also be set via CLI flags.
+
 ### OS themed
-Omarchy's Lupine and Tokyo Night themes:
+
+Respects OS theme colors. Here's an example of Omarchy's Lupine and Tokyo Night themes.
+
 ![Themes side by side](user-docs/screenshots/themes.gif)
+
+*Omarchy note:* Use the following window rule:
+
+```lua
+o.window("com.dcervelli.gamut", { float = true, center = true, tag = "-default-opacity", opacity = "1 1" })
+```
+
+This will have the window open centered and floating with a reasonable and dynamic default size. For accurate image viewing, the window should be forced fully opaque.
 
 ### Copy image
 
+Images can be copied in a variety of useful ways:
+
+* As a filename, with or without the path.
+* As a file URI, for copy/paste in a file explorer.
+* As an image/png, for copy/paste as an image. Useful for Slack, etc. Copied images have the current settings applied.
+
 ### Paste image
+
+Clipboard images can be pasted and saved to the standard pictures folder as `pasted_${date}.png`.
 
 ### Pixel info
 
+Get coordinate and color information for the moused-over pixel. Easily copy either the coordinate or color (in a variety of formats).
+
 ### Pixel grid
-Scale dynamic pixel grid.
+
+Scale-dynamic pixel grid.
+
 ![Pixel grid animation](user-docs/screenshots/pixel_grid.gif)
 
-### Histogram and basic level manipulation
-
 ### Single channel false color
+
+### Histogram and basic level manipulation
 
 ### HDR
 
@@ -33,17 +59,18 @@ Scale dynamic pixel grid.
 ### File/directory watch
 
 ### Metadata/EXIF extraction
-Get file, image, EXIF, georeference, and more metadata. Easily copy all, by section, or by item.
+
+Get file, image, EXIF, georeference, and other metadata. Easily copy all, by section, or by item.
+
 ![Image info/metadata/EXIF](user-docs/screenshots/info.jpg)
 
 ### Many formats
+
 PNG, JPEG (with gain maps), JPEG XL, TIFF and BigTIFF, WebP, HEIF (HEIC and
 AVIF), GIF, ICO, BMP, netpbm, Radiance HDR and OpenEXR. 
 More details in [`user-docs/FORMATS.md`](user-docs/FORMATS.md).
 
 ### Fast GPU display
-
-### All features are keyboard accessible, discoverable in the UI, and settable via the CLI
 
 ### Desktop integration
 
@@ -78,13 +105,13 @@ start-up flag, which `gamut --help` lists.
 
 ## Roadmap
 
-This is very much pre-v1.0. 
+See [Roadmap](ROADMAP.md).
 
 ## Contributing
 
 Issues and pull requests are welcome.
 
-[`docs/`](docs/) — AI generated and mainted notes on development.
+[`docs/`](docs/) — AI generated and maintained notes on development.
 
 ## License
 
