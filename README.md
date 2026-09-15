@@ -6,6 +6,26 @@ A modern Linux image viewer optimized for getting work done, fast.
 
 ## Features
 
+- [Versatile Controls (Keyboard, UI, CLI)](#versatile-controls-keyboard-ui-cli)
+- [OS themed](#os-themed)
+- [Region selection/measurement](#region-selectionmeasurement)
+- [Copy image](#copy-image)
+- [Paste image](#paste-image)
+- [Pixel info](#pixel-info)
+- [Pixel grid](#pixel-grid)
+- [Single channel false color](#single-channel-false-color)
+- [Histogram and basic level manipulation](#histogram-and-basic-level-manipulation)
+- [HDR](#hdr)
+- [Fuzzy file navigation](#fuzzy-file-navigation)
+- [Animated/multi-image formats](#animatedmulti-image-formats)
+- [Color management](#color-management)
+- [File comparison](#file-comparison)
+- [File/directory watch](#filedirectory-watch)
+- [Metadata/EXIF extraction](#metadataexif-extraction)
+- [Many formats](#many-formats)
+- [Fast GPU display](#fast-gpu-display)
+- [Desktop/shell integration](#desktopshell-integration)
+
 ### Versatile Controls (Keyboard, UI, CLI)
 
 All features can be keyboard driven but the hideable UI also contains discoverable controls with tooltips to learn the keyboard shortcuts. Controls can also be set via CLI flags.
