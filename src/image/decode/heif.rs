@@ -18,7 +18,9 @@
 //! upright. (JPEG's EXIF orientation still does not; that is a separate tag in
 //! a separate decoder.)
 
-use std::io::SeekFrom;
+use std::fs::File;
+use std::io::{BufReader, SeekFrom};
+use std::path::Path;
 use std::sync::OnceLock;
 
 use anyhow::{Result, anyhow, bail};
@@ -40,6 +42,24 @@ fn lib_heif() -> &'static LibHeif {
 }
 
 pub struct Heif;
+
+/// The XMP packet the file's primary image carries, if it carries one: a
+/// `mime` item of the packet's content type, which is where the container
+/// keeps it. Read through `libheif` rather than by walking the boxes, since
+/// an item is reached through the container's item tables rather than found
+/// at the top level, and the library already reads those. The file is opened
+/// as far as its structure and no further: nothing is decoded.
+pub fn xmp(path: &Path) -> Option<Vec<u8>> {
+    lib_heif();
+    let mut source = BufReader::new(File::open(path).ok()?);
+    let handle = container(&mut source).ok()?.primary_image_handle().ok()?;
+    let mut ids = vec![0; handle.number_of_metadata_blocks(b"mime").max(0) as usize];
+    let count = handle.metadata_block_ids(&mut ids, b"mime");
+    ids.truncate(count);
+    ids.into_iter()
+        .find(|&id| handle.metadata_content_type(id) == Some("application/rdf+xml"))
+        .and_then(|id| handle.metadata(id).ok())
+}
 
 /// Reads the container's structure — its boxes, not its pixels — which is
 /// enough to ask what the image is before deciding to decode it.

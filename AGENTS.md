@@ -82,7 +82,8 @@ player.rs      the thread decoding an animation's frames ahead of the clock, and
                the cache it keeps them in under MAX_SEQUENCE_BYTES: whole for a
                file that fits, a window around the head for one that does not
 thumbnailer.rs the low-priority thread thumbnailing every file of the session for
-               the chooser, and the queue the chooser's visible rows go to the front of
+               the chooser, in two passes — every header and title first, then the
+               thumbnails — and the queue the chooser's visible rows go to the front of
 thumbnail.rs   the freedesktop thumbnail cache: the GLib-spelled URI a file is keyed
                by, MD5, the chunks a thumbnail carries, and the temporary-then-rename write
 fuzzy.rs       the chooser's matcher behind a trait with skim's own signature; the
@@ -112,7 +113,10 @@ image/         the data model, nothing GPU
   stats.rs       the scan an image gets on load: min/max, histogram, plot
   encode.rs      the displayed image walked back out to an 8-bit sRGB PNG, for the clipboard
   resample.rs    a CPU box filter in the file's own encoding, for the thumbnails
-  exif.rs        the file's own metadata, read and rendered for the info panel
+  exif.rs        the file's own metadata, read and rendered for the info panel: the EXIF
+                 block, and the XMP packet's words merged into its About section
+  xmp.rs         the XMP packet: found in each container by walking its headers, and
+                 parsed into namespaced properties; which of them are shown is exif.rs's
   geo.rs         GeoTIFF's keys: where a raster's pixels are on the ground
   directory.rs   a TIFF directory the metadata reader cannot reach, rewritten
                  as a block it can: BigTIFF, or a directory past the prefix
@@ -163,7 +167,7 @@ still agrees with both, so renaming either is editing the constant —
 | What something is called when the pointer rests on it | a `Tip` variant in `ui/tooltip.rs` and one `pass.tooltip(response, tip, enabled)` on the widget's response; `Namer::tooltip` in `app/input.rs` composes the words, from `KEYS` by way of `action_of` wherever a key does the same job, so a tooltip and `--help` cannot disagree. Words of its own go in `ui/tooltip.rs::words`, a zoom cell's in `ZoomChoice::describe`. When it opens and where it goes are egui's, tuned in `ui/style.rs` |
 | A button's icon | `ui/icon.rs`: one `&[Mark]` on the 24-unit grid, and one `icon::paint` call where the button is drawn, in a square from `icon::square`. The caller sets aside a budget; whether the mark comes out sharp is `icon::Grid`'s business and whether its spacing stays even is `icon::fit`'s |
 | A panel or overlay | a new `ui/<name>.rs` with a `show(pass, ui, ..)` that opens an `egui::Area` at the rectangle its own `panel()` works out, and one call in `Pass::overlays`. An area that is `interactable` takes the pointer from the picture under it; `Order` is the height in the stack. A new color role goes in `theme/mod.rs` and, if a stock widget wears it, `ui/style.rs` |
-| What the info panel says about a file | `ui/info.rs` for the layout; the file's own facts are gathered in `app/mod.rs::file_facts`, its metadata in `image/exif.rs`, and its georeference in `image/geo.rs` |
+| What the info panel says about a file | `ui/info.rs` for the layout; the file's own facts are gathered in `app/mod.rs::file_facts`, its metadata in `image/exif.rs`, and its georeference in `image/geo.rs`. A field written in words is a `Described` entry in `image/exif.rs`, naming its EXIF tag and its XMP property; a container's XMP packet is found in `image/xmp.rs::packet` |
 | A popup menu | a function in `ui/menu.rs` that lays its cells out, each pushing `Command::Press` of a typed `Control` — `ZoomTo`, `Format`, `Copies`, or `OpenIn`, which is a place in a list the application built rather than a choice named in the source — and an `egui::Popup` hung off its button in `ui/chrome.rs`, aligned below, above or beside it with `RectAlign`. The popup opens, closes and takes the pointer by itself; `App::close_menus` is how a key closes one. An item that does something rather than setting something is performed in `App::press`, as the menu of copies is, and prints its key beside it from `Naming::shortcut` |
 | What else can open the file on screen, or what happens when one is chosen | `openers.rs`: `MIME_TYPES` says what the desktop calls a file this program reads, `read_entry` which entries are offered and which are left out, and `open` how one is started. The list is read once per file in `App::apply`; the button is `Pass::open_button`, the menu `ui/menu.rs::open_items`, and the press `App::open_in` |
 | A CLI flag | `cli.rs`, and the `Options` / `Startup` / `Overrides` field it sets |
@@ -174,7 +178,7 @@ still agrees with both, so renaming either is editing the constant —
 | How an animation is timed, cached or shown | `app/playback.rs` for when a frame is due; `player.rs` for what is decoded ahead and what is let go; `App::show_due_frame` for how a frame reaches the texture and `Current`; the display is left alone on a frame change on purpose |
 | What the transport bar shows or does | `ui/transport.rs` for the bar and `App::transport` for what it is told; a press goes through `App::press` as `Control::{Play, StepBack, StepForward, Seek}`, and the keys through `App::step_frame` and `App::toggle_play` so the two cannot drift; `Chrome::new`'s flag is where the bar takes its height |
 | What a copy of the image contains | `image/encode.rs`, which walks the `Region` it is given; the chord that asks for it is in `app/input.rs` |
-| The chooser: what a row shows, how the query is matched, what a key does in it | `ui/chooser.rs` for the popup and the keys it reads before its field can; `app/chooser.rs` for the ranking, the relative paths and the cursor; `App::press` for `Control::Chooser` and `Control::Choose`, and `App::act` for `Command::{Query, Cursor, Visible}`. Its open state is egui's, under `ui::chooser::id()`. A different matcher is a new `impl Matcher` in `fuzzy.rs` |
+| The chooser: what a row shows, how the query is matched, what a key does in it | `ui/chooser.rs` for the popup and the keys it reads before its field can; `app/chooser.rs` for the ranking, the relative paths, the title beside them (`candidate`) and the cursor; a new fact for a row is a field of `thumbnailer::Facts`, read in `thumbnailer::header`; `App::press` for `Control::Chooser` and `Control::Choose`, and `App::act` for `Command::{Query, Cursor, Visible}`. Its open state is egui's, under `ui::chooser::id()`. A different matcher is a new `impl Matcher` in `fuzzy.rs` |
 | A thumbnail: what is made, where it goes, what the row gets | `thumbnailer.rs` for the stages and the queue, `thumbnail.rs` for the cache's naming, chunks and write; `image/resample.rs` for the filter; `App::hold_thumb` for the texture and `app/chooser.rs::Thumbs` for how many the screen keeps |
 | What a region does, or what a key does while one is up | `image/region.rs` for the change to the rectangle; `App::perform_on_region` in `app/input.rs` for the keys a region takes, `App::pull` for what a drag makes of it; `ui/region.rs` for where it is drawn and which handle the pointer is on; `Pass::region_gestures` in `ui/mod.rs` for which drag is the region's and which the view's |
 | What a paste accepts, or where it is written | `clipboard.rs::IMAGE_TYPES` for the MIME types and the extensions they are saved under, `pasted.rs` for the directory and the name; `App::paste` starts it and `app/files.rs::adopt` puts it in the list. Whether the button for it is on screen is `Panels::paste`, looked at by `App::poll_clipboard` |

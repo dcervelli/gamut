@@ -19,7 +19,9 @@ pub(crate) use limits::MAX_SEQUENCE_BYTES;
 use limits::{MAX_DECODED_BYTES, MAX_TEXTURE_DIMENSION, check_decoded_size};
 
 mod dynamic;
-mod heif;
+// `pub` for its XMP reader, which `image::xmp` asks for the packet a HEIF
+// keeps in an item only the library's own tables lead to.
+pub mod heif;
 mod ico;
 mod image_rs;
 mod jpeg;

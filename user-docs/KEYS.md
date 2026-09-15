@@ -65,17 +65,21 @@ taken out of it.
 
 `Ctrl+P` opens a chooser over the picture: a field to type in, and under it
 every file on the list that fits what you have typed, best fit first, each
-with a thumbnail, its name, what kind of file it is, its place in the list
-and its size. The match is fuzzy — `dsc17` finds `DSC_0017.JPG` — and runs
-over the directory as well as the name when the list spans more than one, so
-`june/` narrows to that directory. A query beginning with `:` asks by place
-in the list instead: `:12` puts the twelfth file first, followed by every
-file whose number has `12` in it. The arrows move through the rows without
-opening anything; `Enter`, or a click on a row, opens that file and closes
-the chooser; `Esc`, a click outside it, or `Ctrl+P` again closes it. While
-it is open, keys go into the field rather than to the picture. The file on
-screen is marked in the list, and the cursor starts on it, so `Down` and
-`Enter` is the next file.
+with a thumbnail, its name, its title where the file carries one, what kind
+of file it is, its place in the list and its size. The match is fuzzy —
+`dsc17` finds `DSC_0017.JPG` — and runs over the directory as well as the
+name when the list spans more than one, so `june/` narrows to that
+directory, and over the title too, so `buzzard` finds `buteo-buteo.webp`
+by what a cataloging program called it. The titles are read as the program
+starts, ahead of the thumbnails, so on a long list they are all known
+within a moment of opening the chooser. A query beginning with `:` asks by
+place in the list instead: `:12` puts the twelfth file first, followed by
+every file whose number has `12` in it. The arrows move through the rows
+without opening anything; `Enter`, or a click on a row, opens that file and
+closes the chooser; `Esc`, a click outside it, or `Ctrl+P` again closes it.
+While it is open, keys go into the field rather than to the picture. The
+file on screen is marked in the list, and the cursor starts on it, so
+`Down` and `Enter` is the next file.
 
 The thumbnails are the desktop's own, kept under `~/.cache/thumbnails` where
 your file manager keeps them: one it has already made is shown without
@@ -355,10 +359,12 @@ will take, with whatever else it recorded about the place. A georeferenced
 raster — a scanned map, an elevation model — gets a section of its own: the
 coordinate system it names, the size of a pixel on the ground, where its
 corner sits, the ground it covers, and the value that stands for nothing
-measured. Anything somebody wrote in words — a description, a comment, who
-made the file and what may be done with it — is drawn out into a section of
-its own too, and everything left over is listed after all of them, field by
-field, as the file gives it.
+measured. Anything somebody wrote in words — a title, a caption, a comment,
+keywords, who made the file and what may be done with it — is drawn out into
+a section of its own, *About*, whether the camera wrote it as EXIF or a
+cataloging program wrote it since as XMP; where the two say the same thing
+differently, the EXIF field is the one shown. Everything left over is listed
+after all of them, field by field, as the file gives it.
 
 Clicking copies. A click on a field copies what it says; a click on a heading
 copies that whole section, one line per field as a name and a value; and the
@@ -373,8 +379,9 @@ not carry, so what you get is what was written.
 
 The file's own date is in UTC; the date the photograph was taken is whatever
 the camera recorded, with the offset from UTC it was set to where it recorded
-one. Metadata is read from JPEG, TIFF, PNG, WebP and HEIF files, and from a TIFF
-however large it is and wherever in the file it keeps it. Where it has more to say than
+one. EXIF is read from JPEG, TIFF, PNG, WebP and HEIF files, and from a TIFF
+however large it is and wherever in the file it keeps it; XMP from those and
+from JPEG XL as well. Where it has more to say than
 fits, the wheel scrolls it — point at the panel rather than at the image, and
 the wheel moves the words instead of the zoom. Dragging the panel scrolls it
 as well, the drag holding the scrollbar's handle rather than the words: drag

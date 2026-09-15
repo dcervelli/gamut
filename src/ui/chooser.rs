@@ -57,9 +57,14 @@ const ROW_GAP: f32 = 10.0;
 const ROW_PADDING: f32 = 8.0;
 /// The space between the two lines of words in a row.
 const LINE_GAP: f32 = 2.0;
-/// What parts the kind of file from its size on a row's second line: the
-/// bar's own separator, the two being the same kind of fact.
+/// What parts the kind of file from its size on a row's second line, and
+/// the title from both: the bar's own separator, the three being the same
+/// kind of fact.
 const SEPARATOR: &str = " \u{00b7} ";
+/// The least of the second line a title keeps when the facts after it would
+/// take the rest: the title is what was typed for, and it is not cut to
+/// nothing to make room for a file size.
+const TITLE_SHARE: f32 = 0.5;
 /// The bar at the left edge of the row of the file already on screen.
 const CURRENT_MARK: f32 = 2.0;
 /// The field's text is inset this far from its edge.
@@ -90,6 +95,11 @@ pub struct Row {
     /// The chars of `dir/name` — `name` alone where `dir` is empty — the
     /// query was found at, for lighting them.
     pub positions: Vec<usize>,
+    /// What the file calls itself, once its header has been read and where
+    /// it says.
+    pub title: Option<String>,
+    /// The chars of the title the query was found at.
+    pub title_positions: Vec<usize>,
 }
 
 /// What the chooser is drawn from, on each frame it is open.
@@ -421,9 +431,10 @@ fn row(
 
     // Two lines of words after the thumbnail: the name in bold with the
     // directory dim after it, each with the chars the query was found at
-    // picked out in the accent; and under them what kind of file it is and
-    // its size, as the top bar writes them. Laid out in their own inks, and
-    // cut to the room the row has.
+    // picked out in the accent; and under them the title, where the file
+    // has one, then what kind of file it is and its size, as the top bar
+    // writes them. Laid out in their own inks, and cut to the room the row
+    // has.
     let right = rect.right() - ROW_PADDING;
     let bold = egui::FontId::new(TEXT_SIZE, egui::FontFamily::Name(fonts::BOLD.into()));
     let dir_chars = if item.dir.is_empty() {
@@ -446,12 +457,48 @@ fn row(
         }
         facts.push_str(&format!("{width}\u{00d7}{height}"));
     }
-    let facts = lit(ui, &facts, &[], body.clone(), dim, accent, room);
+    if item.title.is_some() && !facts.is_empty() {
+        facts.insert_str(0, SEPARATOR);
+    }
+    // The facts are laid out first, at the width they want; the title takes
+    // what is left, but never less than its share, and the facts are then
+    // cut to what the title left them.
+    let facts_wanted = lit(ui, &facts, &[], body.clone(), dim, accent, room);
+    let title = item.title.as_ref().map(|title| {
+        let title_room = (room - facts_wanted.size().x).max(room * TITLE_SHARE);
+        lit(
+            ui,
+            title,
+            &item.title_positions,
+            body.clone(),
+            theme.text_primary.into(),
+            accent,
+            title_room,
+        )
+    });
+    let title_width = title.as_ref().map_or(0.0, |title| title.size().x);
+    let facts = if title_width + facts_wanted.size().x <= room {
+        facts_wanted
+    } else {
+        lit(
+            ui,
+            &facts,
+            &[],
+            body.clone(),
+            dim,
+            accent,
+            (room - title_width).max(0.0),
+        )
+    };
     // The two lines as one block, centered on the row.
     let block = name.size().y + LINE_GAP + facts.size().y;
     let top = rect.center().y - block / 2.0;
     painter.galley(pos2(left, top), name.clone(), bright);
-    painter.galley(pos2(left, top + name.size().y + LINE_GAP), facts, dim);
+    let line = top + name.size().y + LINE_GAP;
+    if let Some(title) = title {
+        painter.galley(pos2(left, line), title, theme.text_primary.into());
+    }
+    painter.galley(pos2(left + title_width, line), facts, dim);
     if input.several_dirs && !item.dir.is_empty() {
         let after = left + name.size().x + ROW_GAP;
         let room = (right - after).max(0.0);
