@@ -49,6 +49,10 @@ Notable changes to `gamut`. The format follows
   a redraw, which says "paint now" and was read as "paint again", and the
   interface's report of whether the pointer was on the picture, which
   counted as a change even when it had not changed.
+- The info panel's column no longer wears a dark band under its header
+  once scrolled, or above its foot while there is more below: the toolkit's
+  fade at a scroll area's edge, painted in the panel's translucent fill,
+  which came out as a shadow on a light theme.
 
 ## 0.2.0 - 2026-09-11
 

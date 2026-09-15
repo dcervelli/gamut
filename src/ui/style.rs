@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use egui::{
     Color32, CornerRadius, FontFamily, FontId, Margin, Shadow, Stroke, Style, TextStyle, Vec2,
     Visuals,
-    style::{ScrollStyle, WidgetVisuals},
+    style::{ScrollFadeStyle, ScrollStyle, WidgetVisuals},
 };
 
 use crate::render::Color;
@@ -92,12 +92,22 @@ pub fn style(theme: &Theme) -> Style {
     style.spacing.menu_margin = Margin::same(MENU_PADDING as i8);
     style.spacing.window_margin = Margin::same(MENU_PADDING as i8);
     style.spacing.tooltip_width = 400.0;
+    // No fade where a column runs on past its edge: egui paints one in
+    // the enclosing frame's fill, and the panels' fills are translucent,
+    // which the gradient of turns out darker than the panel rather than the
+    // same — a shadow on a light theme. The hairline under the panel's
+    // header and the scrollbar, always shown, already say the column goes
+    // on.
     style.spacing.scroll = ScrollStyle {
         floating: false,
         bar_width: SCROLLBAR_WIDTH,
         handle_min_length: THUMB_MIN,
         bar_inner_margin: 0.0,
         bar_outer_margin: 0.0,
+        fade: ScrollFadeStyle {
+            strength: 0.0,
+            ..ScrollFadeStyle::default()
+        },
         ..ScrollStyle::solid()
     };
 
