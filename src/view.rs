@@ -24,13 +24,6 @@ pub enum Fit {
 }
 
 impl Fit {
-    pub fn other(self) -> Fit {
-        match self {
-            Fit::Whole => Fit::Fill,
-            Fit::Fill => Fit::Whole,
-        }
-    }
-
     /// Which axis this fit is measured on: the pair of the viewport's edges
     /// the image lands exactly against, the other pair being the one it
     /// falls short of or runs past.
@@ -374,11 +367,16 @@ impl View {
         self.pan = Self::clamp_pan(center, image, viewport.size(), zoom);
     }
 
-    pub fn toggle_fit(&mut self) {
-        self.set_fit(match self.fit {
-            None => Fit::Whole,
-            Some(fit) => fit.other(),
-        });
+    /// What `Space` does: the whole image, the window filled, then actual
+    /// size, and round again. Actual size is a zoom like any other, so a
+    /// view zoomed by hand — to 100% or anything else — is at the same
+    /// point of the round, and the next press shows the whole image.
+    pub fn cycle_fit(&mut self, image: [f32; 2], viewport: Viewport) {
+        match self.fit {
+            None => self.set_fit(Fit::Whole),
+            Some(Fit::Whole) => self.set_fit(Fit::Fill),
+            Some(Fit::Fill) => self.set_zoom(1.0, image, viewport),
+        }
     }
 
     /// Fits `region` — `[x, y, width, height]` in image pixels — to the
@@ -508,12 +506,22 @@ mod tests {
     }
 
     #[test]
-    fn fit_toggles_between_the_whole_image_and_a_filled_viewport() {
+    fn fit_cycles_through_the_whole_image_a_filled_viewport_and_actual_size() {
         let mut view = View::new();
         assert_eq!(view.fit(), Some(Fit::Whole));
-        view.toggle_fit();
+        view.cycle_fit(IMAGE, WINDOW);
         assert_eq!(view.fit(), Some(Fit::Fill));
-        view.toggle_fit();
+        view.cycle_fit(IMAGE, WINDOW);
+        assert_eq!(view.fit(), None);
+        assert!(close(view.zoom(IMAGE, WINDOW), 1.0));
+        view.cycle_fit(IMAGE, WINDOW);
+        assert_eq!(view.fit(), Some(Fit::Whole));
+
+        // A zoom by hand is where actual size is on the round: the whole
+        // image comes next.
+        view.zoom_in(IMAGE, WINDOW);
+        assert_eq!(view.fit(), None);
+        view.cycle_fit(IMAGE, WINDOW);
         assert_eq!(view.fit(), Some(Fit::Whole));
     }
 
@@ -561,7 +569,7 @@ mod tests {
     fn the_two_fits_take_an_axis_each() {
         let mut view = View::new();
         assert!(close(view.zoom(IMAGE, WINDOW), 1200.0 / 900.0));
-        view.toggle_fit();
+        view.cycle_fit(IMAGE, WINDOW);
         assert!(close(view.zoom(IMAGE, WINDOW), 1200.0 / 600.0));
     }
 
@@ -734,7 +742,7 @@ mod tests {
     #[test]
     fn a_filled_viewport_still_pans_vertically() {
         let mut view = View::new();
-        view.toggle_fit();
+        view.cycle_fit(IMAGE, WINDOW);
         assert_eq!(view.fit(), Some(Fit::Fill));
         // 900x600 filling a 1200x600 window is 1200x800: taller than the
         // window, so there is room to scroll down but not sideways.
@@ -874,7 +882,7 @@ mod tests {
         assert_eq!(placement.y, placement.y.round());
 
         // Below 1:1 it is left alone.
-        view.toggle_fit();
+        view.cycle_fit(IMAGE, WINDOW);
         let placement = view.placement([4000.0, 4000.0], window);
         assert!(placement.zoom < 1.0);
         assert!(close(placement.x, 0.0));
@@ -896,7 +904,7 @@ mod tests {
         // 900x600 filling a 1200x600 window is 1200x800: taller than the
         // window, so the vertical axis has somewhere to go.
         view.reset();
-        view.toggle_fit();
+        view.cycle_fit(IMAGE, WINDOW);
         assert!(view.can_pan(IMAGE, Viewport::whole([1200.0, 600.0])));
     }
 

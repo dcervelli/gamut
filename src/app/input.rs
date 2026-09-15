@@ -57,7 +57,7 @@ pub enum Action {
     /// Go to this zoom, 1.0 being one image pixel to one screen pixel.
     ZoomTo(f32),
     Pan(Direction, PanStep),
-    ToggleFit,
+    CycleFit,
     CycleUpscale,
     NextFile,
     PreviousFile,
@@ -393,7 +393,7 @@ fn action_of(tip: Tip) -> Option<Action> {
         // step is not. A numbered cell of the zoom menu is the exception, its
         // key going straight to the same zoom.
         Tip::Control(Control::ZoomTo(ZoomChoice::Scale(scale))) => ZoomTo(scale),
-        Tip::Control(Control::ZoomTo(ZoomChoice::Fit(_))) => ToggleFit,
+        Tip::Control(Control::ZoomTo(ZoomChoice::Fit(_))) => CycleFit,
         Tip::Control(Control::ZoomTo(ZoomChoice::Filter(_))) => CycleUpscale,
         Tip::Control(Control::Format(_)) => CyclePixelFormat,
         // The one menu whose items are things done rather than states to be
@@ -534,8 +534,8 @@ pub const KEYS: &[Binding] = &[
         section: Section::Zoom,
         mods: PLAIN,
         shown: "Space",
-        help: "Fit the whole image or fill the window, in turn; with a region, fit it, fill it, then the image",
-        keys: &[(Named(NamedKey::Space), ToggleFit)],
+        help: "Fit the whole image, fill the window, then actual size, in turn; with a region, fit it, fill it, then the image",
+        keys: &[(Named(NamedKey::Space), CycleFit)],
     },
     Binding {
         section: Section::Zoom,
@@ -1064,13 +1064,16 @@ pub(super) enum Space {
 }
 
 /// What `Space` frames next while a region is up: the region at either fit,
-/// then the picture at either, and round again. The picture on its own has
-/// two fits to toggle between; with a region up there are two things to
-/// frame, and the region — the thing being worked on — comes first.
+/// then the picture at either and at actual size, and round again. The
+/// picture on its own has its three stops to cycle through; with a region
+/// up there are two things to frame, and the region — the thing being
+/// worked on — comes first.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Framing {
     Region(Fit),
     Picture(Fit),
+    /// The picture at 100%, as `1` shows it.
+    Actual,
 }
 
 impl Framing {
@@ -1084,7 +1087,8 @@ impl Framing {
             Framing::Region(Fit::Whole) => Framing::Region(Fit::Fill),
             Framing::Region(Fit::Fill) => Framing::Picture(Fit::Whole),
             Framing::Picture(Fit::Whole) => Framing::Picture(Fit::Fill),
-            Framing::Picture(Fit::Fill) => Framing::Region(Fit::Whole),
+            Framing::Picture(Fit::Fill) => Framing::Actual,
+            Framing::Actual => Framing::Region(Fit::Whole),
         }
     }
 }
@@ -1150,7 +1154,7 @@ impl App {
             return Effect::Nothing;
         }
         match action_for(key, position, self.pointer.modifiers) {
-            Some(ToggleFit) => self.hold_space(),
+            Some(CycleFit) => self.hold_space(),
             Some(action) => self.perform(action),
             None => Effect::Nothing,
         }
@@ -1174,7 +1178,7 @@ impl App {
     fn release_space(&mut self) -> Effect {
         let space = std::mem::take(&mut self.pointer.space);
         match space {
-            Space::Held { drawn: false } => self.perform(ToggleFit),
+            Space::Held { drawn: false } => self.perform(CycleFit),
             Space::Held { drawn: true } => Effect::Redraw,
             Space::Up => Effect::Nothing,
         }
@@ -1268,7 +1272,7 @@ impl App {
                     }),
                 }
             }
-            ToggleFit => self.animate(|view, _, _| view.toggle_fit()),
+            CycleFit => self.animate(|view, image, viewport| view.cycle_fit(image, viewport)),
             CycleUpscale => self.view.cycle_upscale(),
             // Nothing to draw yet: the file is only being asked for, and what
             // is on screen stays until it arrives.
@@ -1452,13 +1456,14 @@ impl App {
                 self.select(moved);
                 Effect::Redraw
             }
-            ToggleFit => {
+            CycleFit => {
                 let framing = self.framing;
                 self.animate(|view, image, viewport| match framing {
                     Framing::Region(fit) => {
                         view.fit_region(fit, region.as_f32(), image, viewport);
                     }
                     Framing::Picture(fit) => view.set_fit(fit),
+                    Framing::Actual => view.set_zoom(1.0, image, viewport),
                 });
                 self.framing = framing.next();
                 Effect::Redraw

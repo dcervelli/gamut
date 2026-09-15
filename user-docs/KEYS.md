@@ -12,7 +12,7 @@ Every control `gamut` has. Letter keys work in either case except `a`,
 | `Shift`+`2`, `3`, `4` | 50%, 25%, 10% |
 | `+`, `=` | Zoom in one step, a factor of 1.25 |
 | `-`, `_` | Zoom out one step |
-| `Space` | Toggle how the image is fitted: the whole image, or filling the window. With a region selected, fit the region, fill the window with it, then the image's two fits, in turn |
+| `Space` | Cycle through the whole image, the window filled, and actual size. With a region selected, fit the region, fill the window with it, then the image's three, in turn |
 | `Space`+Drag | Zoom to the box you drag out |
 | `p` | Cycle the filter used above 100%: nearest → bicubic |
 | Arrows | Pan by 64 pixels; with a region selected, move it one pixel |
@@ -26,14 +26,16 @@ types, so `Shift`+`2` is 50% whatever character your layout puts there.
 
 The two fits are the whole image, which leaves a margin on one side, and the
 window filled, which runs the image off the ends of the other. Which axis
-either one works out to is the image's shape against the window's.
+either one works out to is the image's shape against the window's. `Space`
+runs through them and then actual size, and starts over at the whole image
+from any zoom you chose by hand, actual size included.
 
 Zooming leaves fit mode; panning does not, so `Space` and then Down scrolls
 through a tall image filling the window.
 
 To zoom to a part of the picture, hold `Space` and drag a box around it: the
 box fills the window when you let go. The key answers when it comes up
-rather than when it goes down, so a tap still toggles the fit, and holding
+rather than when it goes down, so a tap still cycles the fit, and holding
 it while you drag does not move the picture first. `Esc` during the drag
 drops the box.
 
@@ -419,8 +421,8 @@ you point somewhere else, leaving the outline. A region too small to hold
 all of it writes what fits, dropping the edges before the size.
 
 `Space` fits the region before the image: the whole of it in the window,
-then the window filled with it, then the image's own two fits, and round
-again. Drawing or moving the region starts over at fitting it. A fit of the
+then the window filled with it, then the image's own two fits and its actual
+size, and round again. Drawing or moving the region starts over at fitting it. A fit of the
 region is a zoom like the ones on the number row rather than a fit the view
 keeps, so resizing the window does not re-fit it, and a region of a few
 pixels stops at 6400%. `Ctrl+C`, and the

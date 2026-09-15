@@ -19,6 +19,10 @@ Notable changes to `gamut`. The format follows
 
 ### Changed
 
+- `Space` cycles through three views rather than toggling between two: the
+  whole image, the window filled, then actual size. From a zoom chosen by
+  hand it starts over at the whole image, as before. With a region up the
+  picture's own three follow the region's two.
 - `--timing` prints to stderr rather than stdout, and its decode line
   names the file and splits the time into what the format's decoder took
   and what the program added around it — the header, the statistics scan,
