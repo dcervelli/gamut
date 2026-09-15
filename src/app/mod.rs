@@ -2170,22 +2170,26 @@ mod tests {
 
         // Space frames the region first and the picture after: the region
         // fitted and filled — a zoom of its own rather than a fit the view
-        // keeps — then the picture's two fits, and round again.
+        // keeps — then the picture's two fits and its actual size, and
+        // round again.
         assert_eq!(app.view.fit(), Some(Fit::Whole));
         assert_eq!(app.framing, Framing::Region(Fit::Whole));
-        let _ = app.perform(Action::ToggleFit);
+        let _ = app.perform(Action::CycleFit);
         assert_eq!(app.view.fit(), None);
         assert_eq!(app.framing, Framing::Region(Fit::Fill));
-        let _ = app.perform(Action::ToggleFit);
+        let _ = app.perform(Action::CycleFit);
         assert_eq!(app.view.fit(), None);
         assert_eq!(app.framing, Framing::Picture(Fit::Whole));
-        let _ = app.perform(Action::ToggleFit);
+        let _ = app.perform(Action::CycleFit);
         assert_eq!(app.view.fit(), Some(Fit::Whole));
-        let _ = app.perform(Action::ToggleFit);
+        let _ = app.perform(Action::CycleFit);
         assert_eq!(app.view.fit(), Some(Fit::Fill));
+        assert_eq!(app.framing, Framing::Actual);
+        let _ = app.perform(Action::CycleFit);
+        assert_eq!(app.view.fit(), None);
         assert_eq!(app.framing, Framing::Region(Fit::Whole));
         // A change to the region starts the cycle over at the region.
-        let _ = app.perform(Action::ToggleFit);
+        let _ = app.perform(Action::CycleFit);
         assert_eq!(app.framing, Framing::Region(Fit::Fill));
         let _ = app.perform(Action::Pan(Direction::Left, PanStep::Coarse));
         assert_eq!(app.framing, Framing::Region(Fit::Whole));

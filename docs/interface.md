@@ -407,10 +407,10 @@ would be worse than either alone.
 region's own size asks for and centers it, and leaves the view out of fit
 mode: a fit is a zoom the viewport decides for the whole picture, and this is
 one chosen for part of it, so it is held as `1`..`5` are held and does not
-follow the window. With a region up the key runs a cycle of four rather than
-a toggle of two — the region fitted and filled, then the picture fitted and
-filled — since there are two things on screen to frame, and the region, being
-the thing under the hand, goes first. Where the cycle has got to is
+follow the window. With a region up the key runs a cycle of five rather than
+its three — the region fitted and filled, then the picture fitted, filled
+and at actual size — since there are two things on screen to frame, and the
+region, being the thing under the hand, goes first. Where the cycle has got to is
 `App::framing`, an `input::Framing`, kept apart from the view for the same
 reason as the zoom; `App::select` puts it back to the start, so that a region
 just drawn or moved is what the next press shows whatever the press before it
