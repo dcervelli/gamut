@@ -9,14 +9,16 @@
 * Crop
 * File sort
 * RGBA channel toggle
+* Basic annotations
 
 ## Improve
+* Histogram cleanup
+* Output histogram
 * --recursive option
 * Red / blue color spectrum 
 * File forward/back
 * Better app icon
 * Comparison mode toggle
-* Output histogram
 * Chrome separators
 * Error toasts
 * Settings
