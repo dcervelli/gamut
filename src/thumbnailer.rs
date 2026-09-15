@@ -7,6 +7,15 @@
 //! filling while the first file is still being looked at, and the chooser
 //! moves whatever is on its screen to the front of the queue.
 //!
+//! Two passes over the session rather than one. Every file's header is
+//! read first — its size, its frames or pages, and its title, which is a
+//! walk of the container's headers and takes microseconds — and only then
+//! does the thread start on thumbnails, which take milliseconds from the
+//! cache and longer from a decode. The chooser matches on the title, so
+//! the titles of a session of thousands of files are all known within the
+//! first second, rather than arriving one by one over the minutes the
+//! thumbnails take, with the rows re-ranking under the hand as they come.
+//!
 //! What it makes goes into the desktop's own cache — see [`crate::thumbnail`]
 //! — and what it hands back is a small copy of that for the screen, so
 //! a second run of the program, or the file manager, reads the same files
@@ -20,7 +29,7 @@
 //! temporary name and renamed, so the process leaving mid-write leaves
 //! nothing under a thumbnail's name. It is told to stop, and left to notice.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -32,7 +41,8 @@ use anyhow::{Context, Result, anyhow};
 use crate::image::decode::{self, Overrides};
 use crate::image::display::{Display, Headroom, Startup};
 use crate::image::sequence::Sequence;
-use crate::image::{Channels, Region, Stats, encode, resample};
+use crate::image::xmp::{self, Xmp};
+use crate::image::{Channels, Region, Stats, encode, exif, resample};
 use crate::loader::guard;
 use crate::thumbnail::{self, Dirs, Key, Lookup};
 
@@ -65,11 +75,14 @@ pub enum News {
 }
 
 /// What a file's header says about it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Facts {
     /// `None` for a format whose header does not say.
     pub size: Option<(u32, u32)>,
     pub sequence: Sequence,
+    /// What the file calls itself, from its XMP, as the info panel shows
+    /// it: what the chooser matches on beside the name.
+    pub title: Option<String>,
 }
 
 /// The small copy for the screen: straight alpha, at most [`DISPLAY_SIDE`]
@@ -183,12 +196,32 @@ fn lower_priority() {
     }
 }
 
-/// The queue: paths in the order they are to be done, and every path that
-/// has ever been put in it, so that a file enqueued twice is done once.
+/// The queue: the files whose headers are yet to be read, the files whose
+/// thumbnails are, and every path that has ever been put in it, so that a
+/// file enqueued twice is done once. A file goes through the first queue
+/// and then the second; the first is served before the second, so the
+/// headers of a whole session are read before its first thumbnail is made.
+/// The one exception is a file the chooser wants now: its header is read
+/// at once and its thumbnail made straight after, ahead of the headers
+/// still waiting, so a list of ten thousand files does not keep the rows
+/// on screen waiting for the last of them.
 #[derive(Default)]
 struct Queue {
-    waiting: VecDeque<PathBuf>,
+    headers: VecDeque<PathBuf>,
+    thumbnails: VecDeque<PathBuf>,
     seen: HashSet<PathBuf>,
+    /// What each header said, kept for the thumbnail stage; a file that
+    /// failed its header is not here and is not thumbnailed.
+    known: HashMap<PathBuf, Facts>,
+    /// The files asked for now, which jump the header queue on their way
+    /// to the front of the thumbnail one.
+    urgent: HashSet<PathBuf>,
+}
+
+/// What the thread does next.
+enum Stage {
+    Header(PathBuf),
+    Thumbnail(PathBuf, Facts),
 }
 
 impl Queue {
@@ -197,19 +230,60 @@ impl Queue {
             Ask::Enqueue(paths) => {
                 for path in paths {
                     if self.seen.insert(path.clone()) {
-                        self.waiting.push_back(path);
+                        self.headers.push_back(path);
                     }
                 }
             }
             Ask::Prioritize(paths) => {
                 // Back to front, so that the first asked for ends up first.
                 for path in paths.into_iter().rev() {
-                    self.waiting.retain(|waiting| *waiting != path);
+                    self.headers.retain(|waiting| *waiting != path);
+                    self.thumbnails.retain(|waiting| *waiting != path);
                     self.seen.insert(path.clone());
-                    self.waiting.push_front(path);
+                    self.urgent.insert(path.clone());
+                    // A file changed on disk is asked for again with a
+                    // header that may have changed with it.
+                    self.known.remove(&path);
+                    self.headers.push_front(path);
                 }
             }
         }
+    }
+
+    fn next(&mut self) -> Option<Stage> {
+        if let Some(path) = self.thumbnails.front()
+            && self.urgent.contains(path)
+        {
+            let path = self.thumbnails.pop_front()?;
+            let facts = self.known.remove(&path)?;
+            return Some(Stage::Thumbnail(path, facts));
+        }
+        if let Some(path) = self.headers.pop_front() {
+            return Some(Stage::Header(path));
+        }
+        let path = self.thumbnails.pop_front()?;
+        let facts = self.known.remove(&path)?;
+        Some(Stage::Thumbnail(path, facts))
+    }
+
+    /// A header read: the file is next in line for a thumbnail, at the
+    /// front if it was asked for now and at the back otherwise.
+    fn read(&mut self, path: PathBuf, facts: Facts) {
+        if self.urgent.contains(&path) {
+            self.thumbnails.push_front(path.clone());
+        } else {
+            self.thumbnails.push_back(path.clone());
+        }
+        self.known.insert(path, facts);
+    }
+
+    fn done(&mut self, path: &Path) {
+        self.urgent.remove(path);
+    }
+
+    /// Whether anything is waiting to be done.
+    fn is_empty(&self) -> bool {
+        self.headers.is_empty() && self.thumbnails.is_empty()
     }
 }
 
@@ -236,7 +310,7 @@ fn run(
         // Block for one ask when there is nothing to do, and take everything
         // else already waiting before starting on a file, so that what the
         // chooser has just brought to the front is what is done next.
-        if queue.waiting.is_empty() {
+        if queue.is_empty() {
             let Ok(first) = incoming.recv() else {
                 return;
             };
@@ -248,19 +322,60 @@ fn run(
         if canceled.load(Ordering::Relaxed) {
             return;
         }
-        let Some(path) = queue.waiting.pop_front() else {
+        let Some(stage) = queue.next() else {
             continue;
         };
-        let mut deliver_news = |news| {
-            deliver(Delivered {
-                path: path.clone(),
-                news,
-            })
-        };
-        if !thumbnail_one(&path, dirs.as_ref(), overrides, canceled, &mut deliver_news) {
-            return;
+        match stage {
+            Stage::Header(path) => {
+                let news = match header(&path) {
+                    Ok(facts) => {
+                        queue.read(path.clone(), facts.clone());
+                        News::Facts(facts)
+                    }
+                    Err(error) => {
+                        report(&path, &error);
+                        queue.done(&path);
+                        News::Failed
+                    }
+                };
+                if !deliver(Delivered { path, news }) {
+                    return;
+                }
+            }
+            Stage::Thumbnail(path, facts) => {
+                queue.done(&path);
+                let news = thumbnail_one(&path, &facts, dirs.as_ref(), overrides, canceled);
+                if canceled.load(Ordering::Relaxed) || !deliver(Delivered { path, news }) {
+                    return;
+                }
+            }
         }
     }
+}
+
+/// What the file's header says, under the loader's own panic guard: the
+/// decoders parse bytes chosen by whoever wrote the file, and a panic in
+/// one must become a failed file rather than a thread that reads no more.
+/// The title is read with the rest because it costs the same — a walk of
+/// the container's headers — and the chooser matches on it.
+fn header(path: &Path) -> Result<Facts> {
+    let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    guard("reading the header", || {
+        Ok(Facts {
+            size: decode::probe(&absolute)?,
+            sequence: decode::sequence(&absolute)?,
+            title: title(&absolute),
+        })
+    })
+}
+
+/// The file's title as the info panel would show it, or nothing.
+fn title(path: &Path) -> Option<String> {
+    Xmp::read(path)
+        .property(xmp::DC, "title")?
+        .first()
+        .map(|title| exif::shorten(title))
+        .filter(|title| !title.is_empty())
 }
 
 /// What the file system says about the file: its modification time in
@@ -276,44 +391,35 @@ fn stat(path: &Path) -> Result<(u64, u64)> {
     Ok((modified, metadata.len()))
 }
 
-/// Does one file, delivering what it learns as it goes. Returns `false`
-/// when the loop has gone or the thread has been told to stop.
+/// The thumbnail of one file whose header has been read: from the cache
+/// where the cache has it, and made otherwise. What comes back is for the
+/// screen; `News::Failed` where there is no thumbnail to be had.
 ///
 /// Each stage runs under the loader's own panic guard: the decoders parse
 /// bytes chosen by whoever wrote the file, and a panic in one must become
 /// a failed thumbnail rather than a thread that makes no more.
 fn thumbnail_one(
     path: &Path,
+    facts: &Facts,
     dirs: Option<&Dirs>,
     overrides: Overrides,
     canceled: &AtomicBool,
-    deliver: &mut impl FnMut(News) -> bool,
-) -> bool {
+) -> News {
     let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
-    let facts = guard("reading the header", || {
-        Ok(Facts {
-            size: decode::probe(&absolute)?,
-            sequence: decode::sequence(&absolute)?,
-        })
-    });
-    let stat = stat(&absolute);
-    let (facts, (mtime, bytes)) = match (facts, stat) {
-        (Ok(facts), Ok(stat)) => (facts, stat),
-        (Err(error), _) | (_, Err(error)) => {
+    let (mtime, bytes) = match stat(&absolute) {
+        Ok(stat) => stat,
+        Err(error) => {
             report(path, &error);
-            return deliver(News::Failed);
+            return News::Failed;
         }
     };
-    if !deliver(News::Facts(facts)) || canceled.load(Ordering::Relaxed) {
-        return false;
-    }
     // A file inside the cache is never thumbnailed, the specification says,
     // and there is no cache to read or write without a home to keep it in.
     let Some(dirs) = dirs.filter(|dirs| !dirs.holds(&absolute)) else {
-        return deliver(News::Failed);
+        return News::Failed;
     };
     let key = thumbnail::key(&absolute);
-    let news = match thumbnail::lookup(dirs, &key, mtime) {
+    match thumbnail::lookup(dirs, &key, mtime) {
         Lookup::Fresh(png) => match guard("reading the cached thumbnail", || read_png(&png)) {
             Ok(thumb) => News::Thumb(thumb),
             // A file in the cache that will not read is not this file's
@@ -329,11 +435,7 @@ fn thumbnail_one(
         Lookup::Missing => make(
             &absolute, dirs, &key, facts, mtime, bytes, overrides, canceled,
         ),
-    };
-    if canceled.load(Ordering::Relaxed) {
-        return false;
     }
-    deliver(news)
 }
 
 /// Makes the thumbnail of `path` and puts it in the cache, or records that
@@ -346,7 +448,7 @@ fn make(
     path: &Path,
     dirs: &Dirs,
     key: &Key,
-    facts: Facts,
+    facts: &Facts,
     mtime: u64,
     bytes: u64,
     overrides: Overrides,
@@ -468,9 +570,16 @@ mod tests {
 
     /// Enqueuing keeps order and drops repeats; prioritizing brings a file
     /// to the front, in the order asked, whether or not it was waiting.
+    /// Every header is read before any thumbnail is made — except for a
+    /// file asked for now, whose thumbnail follows its header at once.
     #[test]
-    fn the_queue_keeps_order_and_puts_the_asked_for_first() {
+    fn the_queue_reads_every_header_before_a_thumbnail_and_the_asked_for_first() {
         let path = |name: &str| PathBuf::from(name);
+        let facts = Facts {
+            size: None,
+            sequence: Sequence::Still,
+            title: None,
+        };
         let mut queue = Queue::default();
         queue.take(Ask::Enqueue(vec![
             path("a"),
@@ -478,18 +587,57 @@ mod tests {
             path("c"),
             path("a"),
         ]));
-        assert_eq!(queue.waiting, [path("a"), path("b"), path("c")]);
+        assert_eq!(queue.headers, [path("a"), path("b"), path("c")]);
 
         queue.take(Ask::Prioritize(vec![path("c"), path("z")]));
-        assert_eq!(queue.waiting, [path("c"), path("z"), path("a"), path("b")]);
+        assert_eq!(queue.headers, [path("c"), path("z"), path("a"), path("b")]);
 
         // Seen is seen: a file brought to the front is not enqueued again
         // at the back, but can be prioritized again.
         queue.take(Ask::Enqueue(vec![path("z")]));
-        assert_eq!(queue.waiting.len(), 4);
-        queue.waiting.clear();
+        assert_eq!(queue.headers.len(), 4);
+
+        // The urgent file's header, then its thumbnail; then the rest of
+        // the headers; then their thumbnails, in the order read.
+        let mut stages = Vec::new();
+        while let Some(stage) = queue.next() {
+            match stage {
+                Stage::Header(path) => {
+                    queue.read(path.clone(), facts.clone());
+                    stages.push(format!("header {}", path.display()));
+                    // Only the first was asked for now.
+                    if path == Path::new("c") {
+                        continue;
+                    }
+                    queue.urgent.remove(&path);
+                }
+                Stage::Thumbnail(path, _) => {
+                    queue.done(&path);
+                    stages.push(format!("thumbnail {}", path.display()));
+                }
+            }
+        }
+        assert_eq!(
+            stages,
+            [
+                "header c",
+                "thumbnail c",
+                "header z",
+                "header a",
+                "header b",
+                "thumbnail z",
+                "thumbnail a",
+                "thumbnail b",
+            ]
+        );
+        assert!(queue.is_empty());
+        assert!(queue.known.is_empty());
+
+        // Prioritized again once done: its header is read again, since
+        // the file may have changed, and its thumbnail follows.
         queue.take(Ask::Prioritize(vec![path("a")]));
-        assert_eq!(queue.waiting, [path("a")]);
+        assert_eq!(queue.headers, [path("a")]);
+        assert!(matches!(queue.next(), Some(Stage::Header(_))));
     }
 
     /// The display copy widens every layout to straight RGBA and never
@@ -524,27 +672,22 @@ mod tests {
         let pixels = vec![200u8; 640 * 480 * 3];
         ::image::save_buffer(&picture, &pixels, 640, 480, ::image::ColorType::Rgb8).unwrap();
 
-        let mut news = Vec::new();
-        let done = thumbnail_one(
+        let facts = header(&picture).expect("the header reads");
+        assert_eq!(
+            facts,
+            Facts {
+                size: Some((640, 480)),
+                sequence: Sequence::Still,
+                title: None,
+            }
+        );
+        let News::Thumb(thumb) = thumbnail_one(
             &picture,
+            &facts,
             Some(&dirs),
             Overrides::default(),
             &AtomicBool::new(false),
-            &mut |item| {
-                news.push(item);
-                true
-            },
-        );
-        assert!(done);
-        assert_eq!(news.len(), 2);
-        assert!(matches!(
-            news[0],
-            News::Facts(Facts {
-                size: Some((640, 480)),
-                sequence: Sequence::Still
-            })
-        ));
-        let News::Thumb(thumb) = &news[1] else {
+        ) else {
             panic!("a thumbnail");
         };
         assert_eq!((thumb.width, thumb.height), (128, 96));
@@ -574,18 +717,14 @@ mod tests {
         // The second pass reads it back rather than decoding again: the
         // cache file is left exactly as it was.
         let before = std::fs::metadata(&cached).unwrap().modified().unwrap();
-        let mut again = Vec::new();
-        thumbnail_one(
+        let again = thumbnail_one(
             &picture,
+            &facts,
             Some(&dirs),
             Overrides::default(),
             &AtomicBool::new(false),
-            &mut |item| {
-                again.push(item);
-                true
-            },
         );
-        assert!(matches!(again[1], News::Thumb(_)));
+        assert!(matches!(again, News::Thumb(_)));
         assert_eq!(
             std::fs::metadata(&cached).unwrap().modified().unwrap(),
             before
@@ -594,18 +733,17 @@ mod tests {
         // A file that will not decode is a failure, and is remembered as one.
         let broken = dir.join("broken.png");
         std::fs::write(&broken, &std::fs::read(&picture).unwrap()[..400]).unwrap();
-        let mut failed = Vec::new();
-        thumbnail_one(
+        // Its header still reads — the cut is past it — so it gets as far
+        // as the decode.
+        let facts = header(&broken).expect("the header reads");
+        let failed = thumbnail_one(
             &broken,
+            &facts,
             Some(&dirs),
             Overrides::default(),
             &AtomicBool::new(false),
-            &mut |item| {
-                failed.push(item);
-                true
-            },
         );
-        assert!(matches!(failed.last(), Some(News::Failed)));
+        assert!(matches!(failed, News::Failed));
         let key = thumbnail::key(&std::path::absolute(&broken).unwrap());
         let (mtime, _) = stat(&broken).unwrap();
         assert_eq!(thumbnail::lookup(&dirs, &key, mtime), Lookup::Failed);

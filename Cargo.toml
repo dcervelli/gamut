@@ -134,6 +134,13 @@ moxcms = "0.8.1"
 # in the tree as `image`'s own decoder, so this costs no new dependency.
 png = "0.18.1"
 pollster = "1.0.1"
+# The XMP packet, for the info panel: the title, the caption and the
+# keywords, which are written in RDF/XML and so need an XML parser. This one
+# is already in the tree under `fontdb`, so it costs no new crate; it builds
+# a document of the packet rather than streaming it, which is the right
+# shape for a few kilobytes, and it refuses a document with a DTD, which is
+# where an XML parser's own trouble with untrusted input lives.
+roxmltree = "0.20"
 tiff = "0.11.3"
 # The container half of Ultra HDR: finds the gain map through MPF and XMP and
 # hands back raw JPEG bytes, leaving the decoding to whatever codec we already

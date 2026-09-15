@@ -742,6 +742,8 @@ fn the_chooser_takes_the_keys_while_open_and_gives_them_back() {
             dimensions: None,
             thumb: None,
             positions: Vec::new(),
+            title: (index == 1).then(|| "Common Buzzard".to_string()),
+            title_positions: Vec::new(),
         })
         .collect();
     harness.state_mut().input.chooser = Some(Input {
@@ -839,6 +841,8 @@ fn the_chooser_scrolls_a_moved_cursor_into_view() {
             dimensions: None,
             thumb: None,
             positions: Vec::new(),
+            title: None,
+            title_positions: Vec::new(),
         })
         .collect();
     harness.state_mut().input.chooser = Some(Input {

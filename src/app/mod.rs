@@ -1087,6 +1087,7 @@ impl App {
             Facts {
                 size: Some((image.width, image.height)),
                 sequence,
+                title: exif.title().map(str::to_string),
             },
         );
         if file.mode == Reload::InPlace || given_up {

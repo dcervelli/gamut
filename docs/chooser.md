@@ -2,11 +2,11 @@
 
 `Ctrl+P` opens a popup over the top of the picture: a field to type in, and
 under it every file of the session that fits what was typed, each row with a
-thumbnail, the name, what kind of file it is, its place in the list and its
-size. `Enter` or a click opens the row under the cursor; `Esc`, a click
-outside, or `Ctrl+P` again closes it. What a user does with it is in
-[`user-docs/KEYS.md`](../user-docs/KEYS.md); this page is how it is built,
-and why it is built that way.
+thumbnail, the name, the title where the file carries one, what kind of file
+it is, its place in the list and its size. `Enter` or a click opens the row
+under the cursor; `Esc`, a click outside, or `Ctrl+P` again closes it. What
+a user does with it is in [`user-docs/KEYS.md`](../user-docs/KEYS.md); this
+page is how it is built, and why it is built that way.
 
 Three files: `src/ui/chooser.rs` draws the popup and reads what was pressed
 in it, `src/app/chooser.rs` holds everything the popup is drawn from, and
@@ -84,6 +84,28 @@ the query at in `dir/name`, and the row splits them at the separator by the
 directory's char count, so a hit in a name with a multi-byte character
 before it lands on the right glyph.
 
+The title is matched on too, once the thumbnail thread has read it. The
+candidate handed to the matcher is `dir/name`, a space, and the title —
+`app::chooser::candidate` — one string rather than two scored separately,
+because skim's score already prefers the tighter fit wherever it falls, and
+one string lets a query with a space in it span the name and the title the
+way a slash lets it span the directory and the name. The positions come
+back over that string, and `Chooser::build` splits them at the path's char
+count into the name's and the title's, dropping a hit on the space itself,
+which is not a char of either. The title is what the info panel shows under
+*About*, shortened by the same `exif::shorten`, so a file found by its
+title reads the same in both.
+
+A title arriving while a query is up changes what fits it. The matches are
+not made again as each one lands — a session of ten thousand files is ten
+thousand arrivals, each a pass over ten thousand candidates — but marked
+`stale`, and `Chooser::refresh` makes them again once, at the top of the
+frame's `input`, with the cursor put back on the file it was on. An empty
+query and an index query never looked at the words, so a title changes
+nothing for them and they are left alone. The rows the frame drew and the
+`path_at` a click resolves against therefore always agree: both come from
+the matches as they stood when the frame was built.
+
 The matcher is behind a trait, `fuzzy::Matcher`, whose one method is skim's
 own `FuzzyMatcher::fuzzy_indices` signature for signature. The
 implementation is `fuzzy-matcher`, which is skim's algorithm as it was cut
@@ -159,12 +181,28 @@ scan, which `Stats::scan` divides by rows over the same pool — running at
 nice 10, the opposite of what lowering the priority was for. `top -H` shows
 the pool as `gamut rayon N` at nice 0 and the thumbnailer at nice 10.
 
-Per file: the header first, and its facts — the size and whether the file
-holds frames or pages — delivered at once, so the row fills in before any
-pixel work; then the cache; then, if the cache has nothing, the decode. A
-file whose header claims more than `MAX_THUMBNAIL_DECODE_BYTES` would hold
-at four channels of floats is refused before it is read and recorded as a
-failure — the same gigabyte the [player](animation.md) keeps its cache
+Two passes over the session, not one. `thumbnailer::header` reads every
+file's header first — the size, whether the file holds frames or pages, and
+the title out of its XMP, through `image::xmp` — and delivers the facts at
+once, so the row fills in before any pixel work; only when no header is
+left waiting does the thread start on thumbnails, from the cache where the
+cache has one and from a decode otherwise. The split is for the title. The
+chooser matches on it, and a header is microseconds — a walk of the
+container's headers, 837 WebPs in nine milliseconds on this machine —
+where a thumbnail is milliseconds from the cache and much longer from a
+decode: read in one pass, the titles of a long list would arrive one by
+one over the minutes the thumbnails take, re-ranking the rows under the
+hand as they came, and read in two they are all known within the first
+second. The `Queue` therefore has two deques and a map of what each header
+said, kept for the thumbnail stage rather than read twice; a file asked
+for now (`Ask::Prioritize`) is the one exception to headers-first, its
+header read at once and its thumbnail made straight after, so that a list
+of ten thousand files does not keep the rows on screen waiting for the last
+of them.
+
+A file whose header claims more than `MAX_THUMBNAIL_DECODE_BYTES` would
+hold at four channels of floats is refused before it is read and recorded
+as a failure — the same gigabyte the [player](animation.md) keeps its cache
 under, being the same question of what a background thread may hold. The
 decoded image is box-filtered to 512 pixels by `image::resample::downscale`,
 in the file's own encoding and with its no-data sentinel left out of every
@@ -177,9 +215,10 @@ black, and on a quarter of a megapixel the scan and the walk are cheap.
 thread stays on one core; `encode::png_with_text` writes it with the chunks.
 A copy at 128 pixels, at most 64 KiB of RGBA, is what goes to the screen.
 
-The queue is a deque plus the set of every path that has been in it: an
-enqueue skips what has been seen, a prioritize moves — or puts back — its
-paths at the front in the order asked. The chooser prioritizes the rows on
+The queue keeps the set of every path that has been in it: an enqueue
+skips what has been seen, a prioritize moves — or puts back — its paths at
+the front in the order asked, its header read again since the file may have
+changed. The chooser prioritizes the rows on
 its screen whenever they change (`Command::Visible`), and the first page of
 rows as it opens; a file changed on disk is prioritized as it is re-read,
 since its thumbnail's modification time no longer matches. Replies arrive
