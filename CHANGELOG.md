@@ -8,17 +8,28 @@ Notable changes to `gamut`. The format follows
 
 ### Added
 
+- The info panel reads a file's XMP as well as its EXIF: the title, the
+  caption, the keywords, the creator, the rights and the program that
+  wrote it, from JPEG, PNG, WebP, TIFF, HEIF and JPEG XL files. A file
+  given a title by a cataloging program, which has an XMP packet and no
+  EXIF block at all, used to show no metadata; it now shows the title.
 - `Ctrl+P` opens a file chooser over the picture: type to filter the
   session's files by name — fuzzily, and by directory too when the list
-  spans more than one, or by place in the list with `:12` — arrow through
-  the rows, and `Enter` or a click opens one. Each row shows a thumbnail, the name, the kind of file, its
-  place in the list and its size. The thumbnails are the desktop's own,
+  spans more than one, by the title the file's XMP gives it, or by place
+  in the list with `:12` — arrow through the rows, and `Enter` or a click
+  opens one. Each row shows a thumbnail, the name, the title where there
+  is one, the kind of file, its place in the list and its size. Every
+  file's header and title are read before any thumbnail is made, so the
+  titles of a long list are all known within a moment of starting. The thumbnails are the desktop's own,
   read from and written to `~/.cache/thumbnails` so that a file manager
   and this program share them, and are made in the background at low
   priority from the moment the program starts.
 
 ### Changed
 
+- The info panel's section of words about the file is headed *About*
+  rather than *Description*, and the row that was *Description* is
+  *Caption*: the heading no longer shares a word with a row under it.
 - `--timing` prints to stderr rather than stdout, and its decode line
   names the file and splits the time into what the format's decoder took
   and what the program added around it — the header, the statistics scan,

@@ -894,6 +894,7 @@ dependencies = [
  "png",
  "pollster",
  "rayon-core",
+ "roxmltree",
  "skrifa",
  "tiff",
  "ultrahdr-rs",
