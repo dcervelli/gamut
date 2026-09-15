@@ -23,6 +23,7 @@ use std::path::Path;
 
 use tiff::decoder::Decoder;
 use tiff::decoder::ifd::Value;
+use tiff::tags::Tag;
 
 use super::exif::MAX_COMPONENTS;
 
@@ -30,6 +31,25 @@ use super::exif::MAX_COMPONENTS;
 /// values — the long ones are left behind with everything else bulky — so
 /// this is a ceiling rather than a size anything reaches.
 const MAX_BLOCK: usize = 64 * 1024;
+
+/// The tag a TIFF keeps its XMP packet in.
+const XMP: u16 = 700;
+
+/// The XMP packet in `path`'s first directory, read through the decoder
+/// the same way as [`block`]: for the file whose directory the metadata
+/// reader's prefix does not reach, and for the thumbnail thread, which
+/// wants the title alone and not the 8 MB read that goes with the rest.
+/// The packet is bulk by the block's own rule, so the block never carries
+/// it and this is the only way it comes out of a directory read here.
+pub fn packet(path: &Path) -> Option<Vec<u8>> {
+    let file = File::open(path).ok()?;
+    let mut decoder = Decoder::new(BufReader::new(file)).ok()?;
+    decoder
+        .find_tag_unsigned_vec::<u8>(Tag::Unknown(XMP))
+        .ok()
+        .flatten()
+        .filter(|packet| !packet.is_empty())
+}
 
 /// The pointer tags, which are dropped.
 ///

@@ -538,6 +538,36 @@ group that came to nothing is not carried at all, an empty heading being a
 question about where the rest of it went. Nothing there is a tag number or an
 offset by the time the interface sees it.
 
+The words — the `About` section — are read from two blocks, because a file
+keeps them in two. EXIF is what the camera wrote, and has a tag for a caption,
+an artist and a copyright; XMP is what every program since has written — the title, the
+keywords, the caption a cataloging program keeps — and a file that was only
+ever given a title has an XMP packet and no EXIF block at all, which is a
+file the EXIF reader alone had nothing to say about. `src/image/xmp.rs` finds
+the packet in each container by walking its headers, the same way the EXIF
+reader finds its block: an `APP1` segment in a JPEG, told from the EXIF one by
+the namespace it opens with; an `iTXt` chunk in a PNG; the `XMP ` chunk of a
+WebP; the `xml ` box of a JPEG XL container; a `mime` item in a HEIF, which
+the container's own item tables lead to and so is asked of `libheif` through
+`decode::heif::xmp` rather than found by hand; and tag 700 of a TIFF, which
+the EXIF reader has already parsed and hands over. The packet is RDF/XML, so
+it is parsed rather than searched — `roxmltree`, already in the tree under
+`fontdb`, builds a document of it, and refuses one with a DTD, which is where
+an XML parser's trouble with untrusted input lives — and comes back as
+namespaced properties: a list's every item, a set of translations' default.
+Which of those the panel shows is `exif.rs`'s `DESCRIBED` table, one row per
+thing said in words, naming the EXIF tag and the XMP property that say it.
+Where a file has both, the EXIF field is shown: it is the older of the two,
+and a program that writes both writes them alike, so the choice rarely shows.
+Reconciling the two properly — the Metadata Working Group's rules for which
+is newer — was not done, because it wants the dates both blocks carry to be
+compared, and a panel that shows what is actually in the file is better
+served by a fixed rule it can state. The heading is "About" and not
+"Description" because one of its rows is the description, and a heading that
+shares a word with a row under it reads as a mistake; the row in turn is
+"Caption", the word the programs that write the field use for it, and what it
+holds — a sentence about the picture, not a description of the file.
+
 The panel is also the one part of the interface that is read out rather than
 merely read. A click on a field copies it, a click on a heading copies the
 section under it, and a button in a header above the column copies the lot.

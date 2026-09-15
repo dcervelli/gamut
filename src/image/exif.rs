@@ -12,10 +12,12 @@
 //! looked at through a different handful, which are not EXIF at all but
 //! GeoTIFF keys packed into the same directory, and [`super::geo`] takes
 //! those apart into `Georeference`. The fields somebody wrote in words are
-//! pulled out as `Description`, and whatever is left is listed under the
-//! directory it came out of, in the order the file carries it — because this
-//! is a viewer for looking at what is actually in a file rather than for a
-//! tidy précis of it.
+//! pulled out as `About` — from the EXIF block, and from the XMP packet
+//! beside it, which [`super::xmp`] reads and which is where a title, a
+//! caption or a keyword is written when a file has one at all — and whatever
+//! is left is listed under the directory it came out of, in the order the
+//! file carries it, because this is a viewer for looking at what is actually
+//! in a file rather than for a tidy précis of it.
 
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
@@ -23,6 +25,7 @@ use std::path::Path;
 
 use exif::{Context, In, Rational, Tag, Value};
 
+use super::xmp::{self, Xmp};
 use super::{directory, geo};
 
 /// How much of a TIFF is read to find its metadata.
@@ -91,10 +94,10 @@ pub struct Section {
     pub entries: Vec<Entry>,
 }
 
-/// A file's EXIF, ready to be read: no tags, no types, no offsets, only what
-/// the fields say. Empty when the file carries none, or carries one that will
-/// not parse — a photograph with unreadable metadata is still a photograph,
-/// so nothing here is an error anything else has to handle.
+/// A file's metadata, ready to be read: no tags, no types, no offsets, only
+/// what the fields say. Empty when the file carries none, or carries some
+/// that will not parse — a photograph with unreadable metadata is still a
+/// photograph, so nothing here is an error anything else has to handle.
 #[derive(Clone, Default, PartialEq, Eq, Debug)]
 pub struct Exif {
     /// The groups the file's fields fall into, in the order they are read:
@@ -106,11 +109,38 @@ pub struct Exif {
 impl Exif {
     /// Reads `path`'s metadata, or gives back nothing at all.
     pub fn read(path: &Path) -> Self {
-        Self::parse(path, TIFF_PREFIX).unwrap_or_default()
+        Self::read_with(path, TIFF_PREFIX)
     }
 
     /// `prefix` is how much of a TIFF to read; see [`TIFF_PREFIX`].
-    fn parse(path: &Path, prefix: u64) -> Option<Self> {
+    fn read_with(path: &Path, prefix: u64) -> Self {
+        let block = Self::parse(path, prefix);
+        // A TIFF keeps its packet in a tag of the directory just read, so it
+        // is taken from there where the read reached it; every other
+        // container keeps it in a chunk of its own, which is found by
+        // walking the file a second time — as is a TIFF's when the
+        // directory had to be read the long way round, since the block
+        // written back leaves anything this long behind.
+        let xmp = match block.as_ref().and_then(embedded_packet) {
+            Some(packet) => Xmp::parse(packet).unwrap_or_default(),
+            None => Xmp::read(path),
+        };
+        Self::assemble(block.as_ref(), &xmp)
+    }
+
+    /// What the file is called, as the panel shows it: the chooser's row
+    /// says the same words, so a file found by its title reads the same
+    /// in both.
+    pub fn title(&self) -> Option<&str> {
+        self.sections
+            .iter()
+            .find(|section| section.name == ABOUT)
+            .and_then(|section| section.entries.iter().find(|entry| entry.name == TITLE))
+            .map(|entry| entry.value.as_str())
+    }
+
+    /// The EXIF block, parsed; `None` where there is none to parse.
+    fn parse(path: &Path, prefix: u64) -> Option<exif::Exif> {
         let file = File::open(path).ok()?;
         let mut source = BufReader::new(file);
 
@@ -144,7 +174,7 @@ impl Exif {
         } else {
             reader.read_from_container(&mut source)
         };
-        let block = block
+        block
             .or_else(|error| error.distill_partial_result(|_| ()))
             .ok()
             // A TIFF whose directory is past the end of the prefix — which is
@@ -155,11 +185,24 @@ impl Exif {
             .or_else(|| {
                 tiff.then(|| reader.read_raw(directory::block(path)?).ok())
                     .flatten()
-            })?;
-        Some(Self::from_block(&block))
+            })
     }
 
-    fn from_block(exif: &exif::Exif) -> Self {
+    /// The sections, from an EXIF block where there is one and the XMP
+    /// packet, which may be all a file has.
+    fn assemble(exif: Option<&exif::Exif>, xmp: &Xmp) -> Self {
+        let described = described(exif, xmp);
+        let Some(exif) = exif else {
+            let sections = (!described.is_empty())
+                .then_some(Section {
+                    name: ABOUT,
+                    entries: described,
+                })
+                .into_iter()
+                .collect();
+            return Self { sections };
+        };
+
         let geo = geo::describe(&geo_tags(exif));
         // Whatever a group below has already said is not said again: the
         // listing is what is left in the file, not a second copy of the top
@@ -167,7 +210,7 @@ impl Exif {
         // came to something — a directory nothing could be read out of is
         // better listed raw than dropped.
         let mut told: Vec<Tag> = SUMMARIZED.to_vec();
-        told.extend(DESCRIBED.map(|(tag, _)| tag));
+        told.extend(DESCRIBED.iter().filter_map(|described| described.tag));
         if !geo.is_empty() {
             told.extend(GEOREFERENCED.map(|number| Tag(Context::Tiff, number)));
         }
@@ -206,7 +249,7 @@ impl Exif {
             ("Camera", camera(exif)),
             ("Location", place),
             ("Georeference", geo),
-            ("Description", described(exif)),
+            (ABOUT, described),
             ("Image metadata", image),
             ("Capture metadata", capture),
         ]
@@ -240,19 +283,89 @@ const SUMMARIZED: [Tag; 17] = [
     Tag::GPSAltitudeRef,
 ];
 
+/// The section the words go under, and the row among them that names the
+/// file: the two the chooser reads back out.
+const ABOUT: &str = "About";
+const TITLE: &str = "Title";
+
+/// One of the fields somebody wrote in words: what it is called when it is
+/// spoken of, the EXIF tag that holds it, and the XMP property that does —
+/// either of which a file may have, or both, or neither.
+struct Described {
+    name: &'static str,
+    tag: Option<Tag>,
+    /// The property's namespace and its name in it.
+    property: Option<(&'static str, &'static str)>,
+}
+
 /// The fields somebody wrote in words, or that the program writing the file
-/// wrote on their behalf: what the picture is of, who made it, what may be
-/// done with it. They are what a reader looking for sentences rather than
-/// numbers is looking for, and the listing below is long enough to lose them
-/// in — so they are pulled out of it and named as they would be spoken.
-const DESCRIBED: [(Tag, &str); 6] = [
-    (Tag::ImageDescription, "Description"),
-    (Tag::UserComment, "Comment"),
-    (Tag::Artist, "Artist"),
-    (Tag::Copyright, "Copyright"),
-    (Tag::Software, "Software"),
-    (Tag::DateTime, "Written"),
+/// wrote on their behalf: what the picture is called and what it is of, who
+/// made it, what may be done with it. They are what a reader looking for
+/// sentences rather than numbers is looking for, and the listing below is
+/// long enough to lose them in — so they are pulled out of it and named as
+/// they would be spoken.
+///
+/// Most have two homes. EXIF has a tag for the caption and the artist,
+/// and XMP's Dublin Core has a property for each; a title and a set of
+/// keywords have no EXIF tag at all, which is why a file that carries only
+/// those is one the EXIF reader alone had nothing to say about. Where both
+/// speak, the EXIF field is shown: it is the older of the two, and a program
+/// that writes both writes them alike.
+const DESCRIBED: [Described; 8] = [
+    Described {
+        name: TITLE,
+        tag: None,
+        property: Some((xmp::DC, "title")),
+    },
+    // "Caption" rather than "Description": it is the word the cataloging
+    // programs that write the field use for it, and it is what the field
+    // holds — a sentence about the picture, not a description of the file.
+    Described {
+        name: "Caption",
+        tag: Some(Tag::ImageDescription),
+        property: Some((xmp::DC, "description")),
+    },
+    Described {
+        name: "Comment",
+        tag: Some(Tag::UserComment),
+        property: None,
+    },
+    Described {
+        name: "Artist",
+        tag: Some(Tag::Artist),
+        property: Some((xmp::DC, "creator")),
+    },
+    Described {
+        name: "Keywords",
+        tag: None,
+        property: Some((xmp::DC, "subject")),
+    },
+    Described {
+        name: "Copyright",
+        tag: Some(Tag::Copyright),
+        property: Some((xmp::DC, "rights")),
+    },
+    Described {
+        name: "Software",
+        tag: Some(Tag::Software),
+        property: Some((xmp::BASIC, "CreatorTool")),
+    },
+    Described {
+        name: "Written",
+        tag: Some(Tag::DateTime),
+        property: None,
+    },
 ];
+
+/// The XMP packet a TIFF keeps in its own directory, under tag 700, as the
+/// parser hands it over: a run of bytes, typed as bytes or as undefined
+/// depending on who wrote the file.
+fn embedded_packet(exif: &exif::Exif) -> Option<&[u8]> {
+    match &primary(exif, Tag(Context::Tiff, 700))?.value {
+        Value::Byte(bytes) | Value::Undefined(bytes, _) => Some(bytes),
+        _ => None,
+    }
+}
 
 /// The tags the georeference speaks for: the two that place the raster, the
 /// matrix form of the same thing, the directory of keys and the pool of names
@@ -367,15 +480,20 @@ fn location(exif: &exif::Exif) -> Vec<Entry> {
 }
 
 /// What the file says in words, under the names those fields are spoken by
-/// rather than the ones the standard files them under.
-fn described(exif: &exif::Exif) -> Vec<Entry> {
+/// rather than the ones the standards file them under. A field with several
+/// values — the creators, the keywords — is one row, its values parted the
+/// way the bars part their segments.
+fn described(exif: Option<&exif::Exif>, xmp: &Xmp) -> Vec<Entry> {
     let mut rows = Vec::new();
-    for (tag, name) in DESCRIBED {
-        let value = match tag {
+    for described in &DESCRIBED {
+        let from_exif = exif.and_then(|exif| match described.tag? {
             Tag::UserComment => comment(exif),
             tag => primary(exif, tag).map(|field| tidy_numbers(&display(exif, field))),
-        };
-        push(&mut rows, name, value);
+        });
+        let from_xmp = described
+            .property
+            .and_then(|(namespace, name)| join(xmp.property(namespace, name)?));
+        push(&mut rows, described.name, from_exif.or(from_xmp));
     }
     rows
 }
@@ -626,8 +744,10 @@ fn is_bulk(value: &Value) -> bool {
 /// Cuts a rendered value down to something a panel can hold, and takes the
 /// control characters out of it. The text is whatever was written into the
 /// file: a newline in it would break the column it is laid out in, and a
-/// terminating null is not a character to draw.
-fn shorten(value: &str) -> String {
+/// terminating null is not a character to draw. `pub(crate)` for the
+/// thumbnail thread, whose title for a chooser row has to come out as the
+/// panel's does.
+pub(crate) fn shorten(value: &str) -> String {
     let value: String = value
         .chars()
         .map(|c| if c.is_control() { ' ' } else { c })
@@ -965,7 +1085,7 @@ mod tests {
         // The comment is read out of its character code rather than written
         // out as the hex the renderer would make of an undefined type.
         assert_eq!(
-            rows("Description"),
+            rows("About"),
             pairs(&[("Comment", "On a post by the jetty"), ("Software", "26.6")]),
             "{exif:?}"
         );
@@ -999,6 +1119,101 @@ mod tests {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("test_images")
             .join(name)
+    }
+
+    /// A packet saying the things EXIF has no tag for, and one it has.
+    const PACKET: &[u8] = br#"<x:xmpmeta xmlns:x="adobe:ns:meta/">
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+<rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/">
+<dc:title><rdf:Alt><rdf:li xml:lang="x-default">Common Buzzard</rdf:li></rdf:Alt></dc:title>
+<dc:subject><rdf:Bag><rdf:li>bird</rdf:li><rdf:li>raptor</rdf:li></rdf:Bag></dc:subject>
+<dc:description><rdf:Alt><rdf:li xml:lang="x-default">From the packet</rdf:li></rdf:Alt></dc:description>
+</rdf:Description></rdf:RDF></x:xmpmeta>"#;
+
+    fn description(exif: &Exif) -> Vec<(String, String)> {
+        section(exif, "About")
+            .iter()
+            .map(|entry| (entry.name.clone(), entry.value.clone()))
+            .collect()
+    }
+
+    /// A file with an XMP packet and no EXIF block at all — which is what a
+    /// file that was only ever given a title is — has an About section and
+    /// nothing else, the title first and the keywords as one row.
+    #[test]
+    fn a_title_is_read_from_a_file_with_no_exif() {
+        let mut webp = b"RIFF\0\0\0\0WEBPXMP ".to_vec();
+        webp.extend_from_slice(&(PACKET.len() as u32).to_le_bytes());
+        webp.extend_from_slice(PACKET);
+        let path = written("titled.webp", &webp);
+        let exif = Exif::read(&path);
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(
+            description(&exif),
+            [
+                ("Title".to_string(), "Common Buzzard".to_string()),
+                ("Caption".to_string(), "From the packet".to_string()),
+                ("Keywords".to_string(), "bird \u{00b7} raptor".to_string()),
+            ]
+        );
+        assert_eq!(exif.sections.len(), 1, "{exif:?}");
+    }
+
+    /// Where the block and the packet both describe the picture, the block's
+    /// words are the ones shown; the packet fills in what the block has no
+    /// field for.
+    #[test]
+    fn the_exif_field_stands_where_both_speak() {
+        let mut ifd0 = Block::new();
+        ifd0.ascii(0x010e, "From the block"); // ImageDescription
+        let mut block = b"II\x2a\x00\x08\x00\x00\x00".to_vec();
+        block.extend_from_slice(&ifd0.at(8));
+
+        let mut jpeg = b"\xff\xd8".to_vec();
+        let mut exif_payload = b"Exif\0\0".to_vec();
+        exif_payload.extend_from_slice(&block);
+        let mut xmp_payload = b"http://ns.adobe.com/xap/1.0/\0".to_vec();
+        xmp_payload.extend_from_slice(PACKET);
+        for payload in [exif_payload, xmp_payload] {
+            jpeg.extend_from_slice(b"\xff\xe1");
+            jpeg.extend_from_slice(&((payload.len() + 2) as u16).to_be_bytes());
+            jpeg.extend_from_slice(&payload);
+        }
+        jpeg.extend_from_slice(b"\xff\xd9");
+        let path = written("both.jpg", &jpeg);
+        let exif = Exif::read(&path);
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(
+            description(&exif),
+            [
+                ("Title".to_string(), "Common Buzzard".to_string()),
+                ("Caption".to_string(), "From the block".to_string()),
+                ("Keywords".to_string(), "bird \u{00b7} raptor".to_string()),
+            ]
+        );
+    }
+
+    /// A TIFF keeps its packet in its own directory, so it is read out of
+    /// the block rather than found in the file — and, being bulk, is not
+    /// listed raw beside what was read out of it.
+    #[test]
+    fn a_tiffs_packet_is_read_out_of_its_directory() {
+        let mut ifd0 = Block::new();
+        ifd0.short(0x0100, 32); // ImageWidth
+        ifd0.pooled(700, 1, PACKET.len() as u32, PACKET); // XMP, as bytes
+        let mut tiff = b"II\x2a\x00\x08\x00\x00\x00".to_vec();
+        tiff.extend_from_slice(&ifd0.at(8));
+        let path = written("titled.tif", &tiff);
+        let exif = Exif::read(&path);
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(
+            description(&exif).first(),
+            Some(&("Title".to_string(), "Common Buzzard".to_string())),
+            "{exif:?}"
+        );
+        let every: Vec<&str> = all(&exif).iter().map(|e| e.name.as_str()).collect();
+        assert!(every.contains(&"ImageWidth"), "{every:?}");
+        assert!(!every.contains(&"XMP"), "{every:?}");
     }
 
     /// A real file, read through the container it arrives in: the fixture
@@ -1074,17 +1289,15 @@ mod tests {
 
         // Read no further than the directory itself, and the fields are all
         // still there.
-        let bounded = Exif::parse(&path, directory as u64).expect("the directory parses");
-        let whole = Exif::parse(&path, u64::MAX).expect("the whole file parses");
+        let bounded = Exif::read_with(&path, directory as u64);
+        let whole = Exif::read_with(&path, u64::MAX);
         let _ = std::fs::remove_file(&path);
         assert_eq!(bounded.sections, whole.sections);
         assert!(!bounded.sections.is_empty());
 
         // And a prefix that stops short of it is a file with nothing to say,
         // rather than an error anything upstream has to handle.
-        assert!(empty(
-            &Exif::parse(Path::new("/nonexistent.tif"), 8).unwrap_or_default()
-        ));
+        assert!(empty(&Exif::read_with(Path::new("/nonexistent.tif"), 8)));
     }
 
     #[test]

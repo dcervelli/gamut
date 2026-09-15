@@ -6,13 +6,18 @@
 //! `App::act` to the methods below. The matching is done against the path
 //! relative to the deepest directory every file in the session shares, so
 //! that a session over one directory matches names alone and a session
-//! over several can be narrowed by where a file is.
+//! over several can be narrowed by where a file is — and against the
+//! file's title, once its header has been read, so that a file can be
+//! found by what it is called as well as by what it is named.
 //!
 //! What a row knows about its file arrives in pieces, from the thumbnail
 //! thread — the header's facts first, the thumbnail later, or a failure —
 //! and from the application itself for the file it has just put on screen.
 //! The rows are rebuilt only when something they are built from has
-//! changed, and shared with the frame rather than copied into it.
+//! changed, and shared with the frame rather than copied into it. A title
+//! arriving while a query is up changes what fits it, so the matches are
+//! made again — once per frame, however many titles arrived in it, and
+//! with the cursor kept on the file it was on.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Range;
@@ -41,8 +46,12 @@ pub struct Chooser {
     relative: Vec<(String, String)>,
     several_dirs: bool,
     /// Which files fit the query, best first, with where the query was
-    /// found in each: [`rank`] over `relative`, kept between frames.
+    /// found in each: [`rank`] over `relative` and the titles, kept between
+    /// frames.
     matches: Vec<(usize, Vec<usize>)>,
+    /// Whether a title has arrived since the matches were made, so that
+    /// they are made again before the rows are built.
+    stale: bool,
     facts: HashMap<PathBuf, Facts>,
     failed: HashSet<PathBuf>,
     /// The rows as the frame last saw them, and whether anything they were
@@ -75,6 +84,7 @@ impl Chooser {
             relative: Vec::new(),
             several_dirs: false,
             matches: Vec::new(),
+            stale: false,
             facts: HashMap::new(),
             failed: HashSet::new(),
             rows: None,
@@ -132,13 +142,51 @@ impl Chooser {
                 let candidates: Vec<String> = self
                     .relative
                     .iter()
-                    .map(|(dir, name)| candidate(dir, name))
+                    .zip(&self.paths)
+                    .map(|((dir, name), path)| candidate(dir, name, self.title_of(path)))
                     .collect();
                 let borrowed: Vec<&str> = candidates.iter().map(String::as_str).collect();
                 rank(self.matcher.as_ref(), &self.query, &borrowed)
             }
         };
+        self.stale = false;
         self.dirty = true;
+    }
+
+    /// Makes the matches again after a title arrived, keeping the cursor
+    /// on the file it was on where that file still fits. Only a query
+    /// that goes to the matcher can have changed: an empty query is the
+    /// list in order, and an index query never looked at the words.
+    fn refresh(&mut self) {
+        if !self.stale {
+            return;
+        }
+        if self.query.is_empty() || index_query(&self.query).is_some() {
+            self.stale = false;
+            return;
+        }
+        let under_cursor = self.matches.get(self.cursor).map(|(index, _)| *index);
+        self.rematch();
+        self.cursor = under_cursor
+            .and_then(|was| self.matches.iter().position(|(index, _)| *index == was))
+            .unwrap_or(0);
+    }
+
+    fn title_of(&self, path: &Path) -> Option<&str> {
+        self.facts
+            .get(path)
+            .and_then(|facts| facts.title.as_deref())
+    }
+
+    /// Takes in a file's facts from wherever they came, saying whether the
+    /// title among them is news to the matches.
+    fn know(&mut self, path: PathBuf, facts: Facts) {
+        let title_changed = self.title_of(&path) != facts.title.as_deref();
+        if self.facts.get(&path) != Some(&facts) {
+            self.facts.insert(path, facts);
+            self.dirty = true;
+        }
+        self.stale |= title_changed;
     }
 
     /// Moves the cursor, clamped to the list.
@@ -162,7 +210,7 @@ impl Chooser {
         self.dirty = true;
         match news {
             News::Facts(facts) => {
-                self.facts.insert(path, facts);
+                self.know(path, facts);
                 None
             }
             News::Failed => {
@@ -180,10 +228,7 @@ impl Chooser {
     /// the thread may have reached the empty file first. Returns whether it
     /// had been given up on, so that the caller can ask for it again.
     pub fn learn(&mut self, path: &Path, facts: Facts) -> bool {
-        if self.facts.get(path) != Some(&facts) {
-            self.facts.insert(path.to_path_buf(), facts);
-            self.dirty = true;
-        }
+        self.know(path.to_path_buf(), facts);
         let was_failed = self.failed.remove(path);
         self.dirty |= was_failed;
         was_failed
@@ -213,6 +258,7 @@ impl Chooser {
     /// What the frame draws, built afresh only where something changed.
     /// `current` is the file on screen, marked in the list.
     pub fn input(&mut self, thumbs: &Thumbs, current: Option<&Path>) -> Input {
+        self.refresh();
         if self.dirty || self.rows.is_none() || self.thumbs_seen != thumbs.generation {
             self.rows = Some(self.build(thumbs));
             self.dirty = false;
@@ -244,6 +290,17 @@ impl Chooser {
                 let path = &self.paths[*index];
                 let (dir, name) = &self.relative[*index];
                 let facts = self.facts.get(path);
+                let title = facts.and_then(|facts| facts.title.clone());
+                // The positions are over `dir/name`, then the gap, then
+                // the title: the title's are counted from its own first
+                // char, and a hit on the gap itself lights nothing.
+                let path_chars = candidate(dir, name, None).chars().count();
+                let title_from = path_chars + TITLE_GAP.len();
+                let (positions, in_title): (Vec<usize>, Vec<usize>) = positions
+                    .iter()
+                    .filter(|&&at| at < path_chars || at >= title_from)
+                    .partition(|&&at| at < path_chars);
+                let title_positions = in_title.into_iter().map(|at| at - title_from).collect();
                 Row {
                     name: name.clone(),
                     dir: dir.clone(),
@@ -251,7 +308,9 @@ impl Chooser {
                     index: index + 1,
                     dimensions: facts.and_then(|facts| facts.size),
                     thumb: thumbs.get(path),
-                    positions: positions.clone(),
+                    positions,
+                    title,
+                    title_positions,
                 }
             })
             .collect()
@@ -284,14 +343,26 @@ fn plural(count: usize, word: &str) -> String {
     }
 }
 
-/// `dir/name`, or `name` alone where there is no directory to say: what
-/// the query is matched against, so that a hit in either counts.
-fn candidate(dir: &str, name: &str) -> String {
-    if dir.is_empty() {
+/// What parts the path from the title in what the matcher is given. A
+/// space, so that a query with a space in it can span the two — `buteo
+/// buzzard` — the way it can span a directory and a name with a slash;
+/// one, so that the char count of the path says where the title starts.
+const TITLE_GAP: &str = " ";
+
+/// What the query is matched against: `dir/name`, or `name` alone where
+/// there is no directory to say, and after a space the title where one is
+/// known, so that a hit in any of them counts.
+fn candidate(dir: &str, name: &str, title: Option<&str>) -> String {
+    let mut words = if dir.is_empty() {
         name.to_string()
     } else {
         format!("{dir}/{name}")
+    };
+    if let Some(title) = title {
+        words.push_str(TITLE_GAP);
+        words.push_str(title);
     }
+    words
 }
 
 /// Which of `candidates` fit `query`, best first, each with the char
@@ -470,7 +541,7 @@ mod tests {
         let common = PathBuf::from("root");
         let (dir, name) = relative(Path::new("root/über/Ünïcode.png"), &common);
         assert_eq!((dir.as_str(), name.as_str()), ("über", "Ünïcode.png"));
-        let candidate = candidate(&dir, &name);
+        let candidate = candidate(&dir, &name, None);
         let (_, positions) = Plain.fuzzy_indices(&candidate, "ün").expect("found");
         // The first `ü` is in the directory; `n` is the third char of the
         // name, past the directory's four chars and the separator.
@@ -633,6 +704,7 @@ mod tests {
                     count: 12,
                     loops: crate::image::sequence::Loops::Forever,
                 },
+                title: None,
             },
         ));
         chooser.take(Delivered {
@@ -643,6 +715,7 @@ mod tests {
                     count: 1,
                     default: 0,
                 },
+                title: None,
             }),
         });
         let input = chooser.input(&thumbs, None);
@@ -658,6 +731,75 @@ mod tests {
         assert_eq!(input.rows[0].index, 3);
         assert_eq!(input.current, Some(0));
         assert_eq!(input.rows[0].positions, vec![0, 1, 2, 3, 4]);
+    }
+
+    /// A title, once it arrives, is matched on beside the name: a query
+    /// that fits only the title finds the file, the row shows the title
+    /// with the hit lit in it, and the matches are made again once for the
+    /// frame rather than as each title lands — with the cursor kept on the
+    /// file it was on.
+    #[test]
+    fn a_title_is_matched_on_once_it_is_known() {
+        let mut chooser = Chooser::with(Box::new(Plain));
+        let list = paths(&["buteo-buteo-2.webp", "falco-1.webp", "aquila-3.webp"]);
+        chooser.open(&list, 0);
+        let thumbs = Thumbs::default();
+        chooser.set_query("zzard".to_string());
+        assert!(chooser.input(&thumbs, None).rows.is_empty());
+
+        let titled = |title: &str| Facts {
+            size: Some((887, 1200)),
+            sequence: Sequence::Still,
+            title: Some(title.to_string()),
+        };
+        chooser.take(Delivered {
+            path: PathBuf::from("buteo-buteo-2.webp"),
+            news: News::Facts(titled("Common Buzzard")),
+        });
+        // Not yet: the matches wait for the frame.
+        assert!(chooser.stale);
+        assert_eq!(chooser.path_at(0), None);
+        let input = chooser.input(&thumbs, None);
+        assert_eq!(input.rows.len(), 1);
+        assert_eq!(input.rows[0].name, "buteo-buteo-2.webp");
+        assert_eq!(input.rows[0].title.as_deref(), Some("Common Buzzard"));
+        assert!(input.rows[0].positions.is_empty(), "{:?}", input.rows[0]);
+        // "zzard" starts at the tenth char of the title.
+        assert_eq!(input.rows[0].title_positions, (9..14).collect::<Vec<_>>());
+        assert_eq!(chooser.path_at(0), Some(Path::new("buteo-buteo-2.webp")));
+
+        // A query that spans the name and the title finds it too, with the
+        // hit in the name lit there and the space between the two lit
+        // nowhere.
+        chooser.set_query("buteo buzz".to_string());
+        let input = chooser.input(&thumbs, None);
+        assert_eq!(input.rows.len(), 1);
+        assert_eq!(input.rows[0].positions, vec![0, 1, 2, 3, 4]);
+        assert_eq!(input.rows[0].title_positions, vec![7, 8, 9, 10]);
+
+        // The cursor stays on its file when titles arriving reorder the
+        // rows around it.
+        chooser.set_query("a".to_string());
+        chooser.step(Step::Down);
+        let on = chooser.path_at(chooser.cursor).unwrap().to_path_buf();
+        chooser.take(Delivered {
+            path: PathBuf::from("aquila-3.webp"),
+            news: News::Facts(titled("Golden Eagle")),
+        });
+        chooser.take(Delivered {
+            path: PathBuf::from("falco-1.webp"),
+            news: News::Facts(titled("Peregrine Falcon")),
+        });
+        chooser.input(&thumbs, None);
+        assert_eq!(chooser.path_at(chooser.cursor), Some(on.as_path()));
+
+        // The same facts again are nothing new; a changed title is.
+        chooser.input(&thumbs, None);
+        assert!(!chooser.stale);
+        chooser.learn(Path::new("falco-1.webp"), titled("Peregrine Falcon"));
+        assert!(!chooser.stale);
+        chooser.learn(Path::new("falco-1.webp"), titled("Peregrine"));
+        assert!(chooser.stale);
     }
 
     /// What the visible rows want is what they lack and have not been
@@ -683,6 +825,7 @@ mod tests {
             Facts {
                 size: Some((1, 1)),
                 sequence: Sequence::Still,
+                title: None,
             },
         );
         assert_eq!(chooser.wanted(0..3, &thumbs), paths(&["a.png"]));
@@ -692,8 +835,9 @@ mod tests {
         let facts = Facts {
             size: Some((1, 1)),
             sequence: Sequence::Still,
+            title: None,
         };
-        assert!(chooser.learn(Path::new("b.png"), facts));
+        assert!(chooser.learn(Path::new("b.png"), facts.clone()));
         assert!(!chooser.learn(Path::new("b.png"), facts));
         assert_eq!(chooser.wanted(0..3, &thumbs), paths(&["a.png", "b.png"]));
     }
