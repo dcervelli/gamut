@@ -540,6 +540,12 @@ gdal_translate -q -of GTiff -co COMPRESS=DEFLATE -co PREDICTOR=3 -co TILED=YES \
   -co BLOCKXSIZE=16 -co BLOCKYSIZE=16 "$work/band1.tif" tiff-float-predictor.tif
 gdal_translate -q -ot Int16 -scale 0 3.984375 -1000 3000 \
   "$work/band1.tif" tiff-int16.tif
+# A scanned map or an aerial photograph as GDAL writes one: JPEG-compressed,
+# which stores the pixels as YCbCr with the chroma subsampled 2x2 and leaves
+# the conversion back to the reader. Tiled, so that the bottom row of tiles
+# is clipped.
+gdal_translate -q -of GTiff -co COMPRESS=JPEG -co JPEG_QUALITY=100 -co PHOTOMETRIC=YCBCR \
+  -co TILED=YES -co BLOCKXSIZE=16 -co BLOCKYSIZE=16 tiff-rgb8.tif tiff-jpeg.tif
 
 # A no-data sentinel with pixels actually set to it, built from raw floats so
 # the quadrant values are exact.

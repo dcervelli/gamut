@@ -622,6 +622,18 @@ const FIXTURES: &[Fixture] = &[
         nodata: Some(-9999.0),
         tolerance: EXACT,
     },
+    Fixture {
+        file: "tiff-jpeg.tif",
+        covers: "JPEG compression — YCbCr with the chroma subsampled, converted back here — in tiles the last row of which is short",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: LOSSY,
+    },
     // -------------------------------------------------------- Radiance
     Fixture {
         file: "hdr-rgbe.hdr",

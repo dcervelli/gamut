@@ -217,9 +217,13 @@ Caveats:
   linear measurement data. That is right nearly always and wrong for a 16-bit
   *scanned photograph*, which looks washed out until you pass `--transfer
   srgb`.
-- CMYK, YCbCr and Lab TIFFs are refused, naming the color type. This takes
-  JPEG-compressed TIFFs with it, since they are almost always stored as
-  YCbCr; ZSTD- and WebP-compressed TIFFs do not open either.
+- **JPEG-compressed TIFFs open** — a scanned map or an aerial photograph
+  exported from a GIS, its pixels stored as YCbCr with the color at half
+  resolution — and are converted back to RGB with the weights and the
+  range the file itself states.
+- CMYK and Lab TIFFs are refused, naming the color type, and so is a YCbCr
+  TIFF that is not JPEG-compressed but subsamples its color all the same.
+  ZSTD- and WebP-compressed TIFFs do not open either.
 - Multi-page files open on the first page, and `n` and `N` step through the
   rest. Every page counts, so a file holding a pyramid of reduced copies, or
   a thumbnail beside the picture, shows those as pages too.

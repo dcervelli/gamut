@@ -23,9 +23,16 @@
 //! own over the same file, since the crate's decoder reads through one
 //! position. `read_image` would decode the chunks one after another, and a
 //! 134-megapixel LZW map took 1.7 s that way on one core.
+//!
+//! A JPEG-compressed TIFF — what GDAL writes for a scanned map or an aerial
+//! photograph with `COMPRESS=JPEG` — stores its pixels as YCbCr, and the
+//! crate hands them back that way: it tells the JPEG decoder to upsample the
+//! chroma but not to convert, since the conversion is the container's to
+//! define. [`YCbCr`] does it here, from the file's own coefficients and
+//! coding range, chunk by chunk as they are read.
 
 use std::fs::File;
-use std::io::{BufReader, Read, Seek};
+use std::io::{self, BufReader, Seek};
 use std::ops::Range;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -38,6 +45,12 @@ use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
 
 /// GDAL writes the no-data value here, as an ASCII string.
 const GDAL_NODATA: u16 = 42113;
+
+/// `YCbCrCoefficients`: the three luma weights, as rationals.
+const YCBCR_COEFFICIENTS: u16 = 529;
+/// `ReferenceBlackWhite`: the code values of black and white in each
+/// channel, as six rationals.
+const REFERENCE_BLACK_WHITE: u16 = 532;
 
 const MAX_IFD_VALUE_BYTES: usize = 16 * 1024 * 1024;
 
@@ -114,10 +127,18 @@ impl super::Decoder for TiffRs {
         let channels = match color {
             tiff::ColorType::Gray(_) => Channels::Gray,
             tiff::ColorType::GrayA(_) => Channels::GrayAlpha,
-            // The decoder expands indexed data to RGB for us.
-            tiff::ColorType::RGB(_) | tiff::ColorType::Palette(_) => Channels::Rgb,
+            // The decoder expands indexed data to RGB for us; YCbCr it
+            // leaves to us, and only 8-bit is ever seen, since JPEG is the
+            // compression that carries it.
+            tiff::ColorType::RGB(_) | tiff::ColorType::Palette(_) | tiff::ColorType::YCbCr(8) => {
+                Channels::Rgb
+            }
             tiff::ColorType::RGBA(_) => Channels::Rgba,
             other => bail!("unsupported TIFF color type {other:?}"),
+        };
+        let ycbcr = match color {
+            tiff::ColorType::YCbCr(_) => Some(YCbCr::read(&mut decoder)?),
+            _ => None,
         };
 
         // Checked against what will be held rather than the stored depth:
@@ -141,22 +162,33 @@ impl super::Decoder for TiffRs {
             .is_none_or(|planar| planar == 1);
         let samples = if chunky {
             let geometry = Geometry::of(&decoder, width, height, channels)?;
+            let read = Read {
+                shared: shared.as_ref(),
+                limits: &limits,
+                page,
+                geometry: &geometry,
+                ycbcr: ycbcr.as_ref(),
+            };
             match held {
                 Held::U8 => Samples::U8 {
                     channels,
-                    data: read_chunks(&mut decoder, shared.as_ref(), &limits, page, &geometry)?,
+                    data: read_chunks(&mut decoder, &read)?,
                 },
                 Held::U16 => Samples::U16 {
                     channels,
-                    data: read_chunks(&mut decoder, shared.as_ref(), &limits, page, &geometry)?,
+                    data: read_chunks(&mut decoder, &read)?,
                 },
                 Held::F32 => Samples::F32 {
                     channels,
-                    data: read_chunks(&mut decoder, shared.as_ref(), &limits, page, &geometry)?,
+                    data: read_chunks(&mut decoder, &read)?,
                 },
             }
         } else {
-            into_samples(decoder.read_image()?, channels)?
+            let mut samples = into_samples(decoder.read_image()?, channels)?;
+            if let (Some(ycbcr), Samples::U8 { data, .. }) = (&ycbcr, &mut samples) {
+                ycbcr.to_rgb(data);
+            }
+            samples
         };
 
         let expected = width as usize * height as usize * channels.count();
@@ -218,6 +250,10 @@ impl Held {
 /// A sample type a file is held as: what one decoded chunk becomes in it.
 trait Resident: Copy + Default + Send {
     fn take(result: DecodingResult) -> Result<Vec<Self>>;
+
+    /// A chunk of YCbCr made RGB. Only 8-bit data ever arrives as YCbCr,
+    /// so the other types have nothing to do.
+    fn to_rgb(_chunk: &mut [Self], _ycbcr: &YCbCr) {}
 }
 
 impl Resident for u8 {
@@ -226,6 +262,10 @@ impl Resident for u8 {
             DecodingResult::U8(data) => Ok(data),
             _ => Err(mismatch()),
         }
+    }
+
+    fn to_rgb(chunk: &mut [Self], ycbcr: &YCbCr) {
+        ycbcr.to_rgb(chunk);
     }
 }
 
@@ -303,7 +343,7 @@ struct Geometry {
 }
 
 impl Geometry {
-    fn of<R: Read + Seek>(
+    fn of<R: io::Read + Seek>(
         decoder: &Decoder<R>,
         width: u32,
         height: u32,
@@ -332,27 +372,40 @@ impl Geometry {
     }
 }
 
+/// What every thread reading a directory's chunks is told.
+#[derive(Clone, Copy)]
+struct Read<'a> {
+    /// The file the other threads' decoders read, where there is one.
+    shared: Option<&'a File>,
+    limits: &'a Limits,
+    page: usize,
+    geometry: &'a Geometry,
+    /// The conversion each chunk gets on the way in, for a file that holds
+    /// its pixels as YCbCr.
+    ycbcr: Option<&'a YCbCr>,
+}
+
 /// The directory's samples, read a chunk at a time and each put where it
 /// belongs, the rows of chunks divided between rayon's threads. Every thread
-/// but the first opens a decoder of its own over `shared`; with no file to
-/// share, or one row of chunks, the decoder in hand reads them all.
+/// but the first opens a decoder of its own over `read.shared`; with no file
+/// to share, or one row of chunks, the decoder in hand reads them all.
 fn read_chunks<T: Resident>(
     decoder: &mut Decoder<&mut dyn super::ReadSeek>,
-    shared: Option<&File>,
-    limits: &Limits,
-    page: usize,
-    geometry: &Geometry,
+    read: &Read,
 ) -> Result<Vec<T>> {
+    let geometry = read.geometry;
     let mut data = vec![T::default(); geometry.width * geometry.height * geometry.samples];
-    let bands = match shared {
+    let bands = match read.shared {
         Some(_) => geometry.down.min(rayon_core::current_num_threads()).max(1),
         None => 1,
     };
     if bands == 1 {
-        read_rows(decoder, geometry, 0..geometry.down, &mut data)?;
+        read_rows(decoder, read, 0..geometry.down, &mut data)?;
         return Ok(data);
     }
-    let file = shared.expect("more than one band means a file to share");
+    let file = read
+        .shared
+        .expect("more than one band means a file to share");
 
     // Whole chunk rows each, so rounding up the rows can leave fewer bands
     // than asked for; the count follows the rows, not the other way.
@@ -372,11 +425,11 @@ fn read_chunks<T: Resident>(
                 *outcome = Some((|| {
                     let mut decoder = Decoder::new(BufReader::new(Positioned::new(file)))
                         .context("opening the file again for another thread")?
-                        .with_limits(limits.clone());
-                    if page > 0 {
-                        decoder.seek_to_image(page)?;
+                        .with_limits(read.limits.clone());
+                    if read.page > 0 {
+                        decoder.seek_to_image(read.page)?;
                     }
-                    read_rows(&mut decoder, geometry, first..last, band)
+                    read_rows(&mut decoder, read, first..last, band)
                 })());
             });
         }
@@ -389,12 +442,13 @@ fn read_chunks<T: Resident>(
 
 /// Reads the chunks of the chunk rows `chunk_rows` into `band`, which holds
 /// exactly the pixel rows they cover.
-fn read_rows<R: Read + Seek, T: Resident>(
+fn read_rows<R: io::Read + Seek, T: Resident>(
     decoder: &mut Decoder<R>,
-    geometry: &Geometry,
+    read: &Read,
     chunk_rows: Range<usize>,
     band: &mut [T],
 ) -> Result<()> {
+    let geometry = read.geometry;
     let row_samples = geometry.width * geometry.samples;
     let top = geometry.rows(0..chunk_rows.start).len();
     for chunk_row in chunk_rows {
@@ -403,7 +457,10 @@ fn read_rows<R: Read + Seek, T: Resident>(
             let index = u32::try_from(index).context("too many TIFF chunks")?;
             let (chunk_width, chunk_height) = decoder.chunk_data_dimensions(index);
             let (chunk_width, chunk_height) = (chunk_width as usize, chunk_height as usize);
-            let chunk = T::take(decoder.read_chunk(index)?)?;
+            let mut chunk = T::take(decoder.read_chunk(index)?)?;
+            if let Some(ycbcr) = read.ycbcr {
+                T::to_rgb(&mut chunk, ycbcr);
+            }
             let chunk_samples = chunk_width * geometry.samples;
             if chunk.len() != chunk_samples * chunk_height {
                 bail!(
@@ -423,6 +480,92 @@ fn read_rows<R: Read + Seek, T: Resident>(
     Ok(())
 }
 
+/// How a file's YCbCr samples are turned back into RGB: the luma weights
+/// the encoder used and the code values it put black and white at, both
+/// from the file's own tags, with the defaults TIFF 6.0 gives them.
+///
+/// The arithmetic is section 21 of the specification, as libtiff does it:
+/// each channel's code is first mapped by `ReferenceBlackWhite` onto the
+/// full range — 0..255 for luma, -127..127 for chroma — and then the
+/// weights undo the luma equation: `R = Y + Cr(2 - 2Kr)`, `B = Y + Cb(2 -
+/// 2Kb)`, `G = (Y - Kr R - Kb B) / Kg`. The defaults are BT.601's weights
+/// and the range JPEG itself codes in, black at 0 and neutral chroma at
+/// 128, which is what nearly every file says outright too.
+struct YCbCr {
+    /// Every code value of luma, mapped onto the full range.
+    luma: [f32; 256],
+    /// Every code value of each chroma channel, mapped onto its range and
+    /// already multiplied by that channel's weight in `R` or `B`.
+    cb: [f32; 256],
+    cr: [f32; 256],
+    /// The weights of `R` and `B` in luma, and the reciprocal of green's,
+    /// for finding `G` from the other two.
+    kr: f32,
+    kb: f32,
+    kg_inverse: f32,
+}
+
+impl YCbCr {
+    const DEFAULT_COEFFICIENTS: [f32; 3] = [0.299, 0.587, 0.114];
+    const DEFAULT_REFERENCE: [f32; 6] = [0.0, 255.0, 128.0, 255.0, 128.0, 255.0];
+
+    /// Reads the two tags off the directory in hand; a tag that is absent
+    /// or malformed takes its default. Only the 8-bit case is built, since
+    /// only 8-bit data reaches here.
+    fn read<R: io::Read + Seek>(decoder: &mut Decoder<R>) -> Result<Self> {
+        let coefficients = match decoder.get_tag_f32_vec(Tag::Unknown(YCBCR_COEFFICIENTS)) {
+            Ok(values) if values.len() == 3 => [values[0], values[1], values[2]],
+            _ => Self::DEFAULT_COEFFICIENTS,
+        };
+        let reference = match decoder.get_tag_f32_vec(Tag::Unknown(REFERENCE_BLACK_WHITE)) {
+            Ok(values) if values.len() == 6 => {
+                let mut reference = [0.0; 6];
+                reference.copy_from_slice(&values);
+                reference
+            }
+            _ => Self::DEFAULT_REFERENCE,
+        };
+        Self::new(coefficients, reference)
+    }
+
+    fn new(coefficients: [f32; 3], reference: [f32; 6]) -> Result<Self> {
+        let [kr, kg, kb] = coefficients;
+        if !(kr > 0.0 && kg > 0.0 && kb > 0.0) || !(kr + kg + kb).is_finite() {
+            bail!("TIFF YCbCr coefficients {coefficients:?}");
+        }
+        // libtiff's `Code2V`: the code's distance from black, scaled from
+        // the coded range onto the full one; a coded range of zero is taken
+        // as one rather than dividing by it.
+        let scale = |code: f32, black: f32, white: f32, full: f32| {
+            let coded = if white == black { 1.0 } else { white - black };
+            (code - black) * full / coded
+        };
+        let table = |f: &dyn Fn(f32) -> f32| std::array::from_fn(|code| f(code as f32));
+        Ok(Self {
+            luma: table(&|code| scale(code, reference[0], reference[1], 255.0)),
+            cb: table(&|code| scale(code, reference[2], reference[3], 127.0) * (2.0 - 2.0 * kb)),
+            cr: table(&|code| scale(code, reference[4], reference[5], 127.0) * (2.0 - 2.0 * kr)),
+            kr,
+            kb,
+            kg_inverse: 1.0 / kg,
+        })
+    }
+
+    /// Converts interleaved 8-bit YCbCr to RGB in place.
+    fn to_rgb(&self, pixels: &mut [u8]) {
+        let code = |value: f32| value.round().clamp(0.0, 255.0) as u8;
+        for pixel in pixels.as_chunks_mut::<3>().0 {
+            let y = self.luma[pixel[0] as usize];
+            let r = y + self.cr[pixel[2] as usize];
+            let b = y + self.cb[pixel[1] as usize];
+            let g = (y - self.kr * r - self.kb * b) * self.kg_inverse;
+            pixel[0] = code(r);
+            pixel[1] = code(g);
+            pixel[2] = code(b);
+        }
+    }
+}
+
 /// TIFF is the awkward container: the same tags carry a scanned photograph and
 /// a frame of sensor counts. Bit depth is the best signal available — 8-bit
 /// TIFFs are overwhelmingly pictures, deeper ones overwhelmingly measurements
@@ -431,5 +574,58 @@ fn color_space(samples: &Samples) -> ColorSpace {
     match samples {
         Samples::U8 { .. } => ColorSpace::SRGB,
         _ => ColorSpace::LINEAR_BT709,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::YCbCr;
+
+    fn rgb(ycbcr: &YCbCr, pixel: [u8; 3]) -> [u8; 3] {
+        let mut pixel = pixel;
+        ycbcr.to_rgb(&mut pixel);
+        pixel
+    }
+
+    /// Every channel within a code value: the weights are quoted to three
+    /// places, and a primary's chroma is 127 rather than the 127.5 that would
+    /// land it exactly.
+    fn near(actual: [u8; 3], expected: [u8; 3]) {
+        for (a, e) in actual.iter().zip(expected) {
+            assert!(
+                a.abs_diff(e) <= 1,
+                "{actual:?} is not within a code of {expected:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn defaults_are_jpegs_own_range() {
+        let ycbcr = YCbCr::new(YCbCr::DEFAULT_COEFFICIENTS, YCbCr::DEFAULT_REFERENCE).unwrap();
+        assert_eq!(rgb(&ycbcr, [0, 128, 128]), [0, 0, 0]);
+        assert_eq!(rgb(&ycbcr, [128, 128, 128]), [128, 128, 128]);
+        assert_eq!(rgb(&ycbcr, [255, 128, 128]), [255, 255, 255]);
+        // BT.601's primaries, as JPEG codes them.
+        near(rgb(&ycbcr, [76, 85, 255]), [255, 0, 0]);
+        near(rgb(&ycbcr, [150, 44, 21]), [0, 255, 0]);
+        near(rgb(&ycbcr, [29, 255, 107]), [0, 0, 255]);
+    }
+
+    #[test]
+    fn reference_maps_the_coded_range_onto_the_full_one() {
+        // Video range: luma from 16 to 235, chroma from 16 to 240 about 128.
+        let reference = [16.0, 235.0, 128.0, 240.0, 128.0, 240.0];
+        let ycbcr = YCbCr::new(YCbCr::DEFAULT_COEFFICIENTS, reference).unwrap();
+        assert_eq!(rgb(&ycbcr, [16, 128, 128]), [0, 0, 0]);
+        assert_eq!(rgb(&ycbcr, [235, 128, 128]), [255, 255, 255]);
+        // Past white clips rather than wraps.
+        assert_eq!(rgb(&ycbcr, [255, 128, 128]), [255, 255, 255]);
+        near(rgb(&ycbcr, [81, 90, 240]), [255, 0, 0]);
+    }
+
+    #[test]
+    fn coefficients_that_cannot_weigh_anything_are_refused() {
+        assert!(YCbCr::new([0.0, 1.0, 0.0], YCbCr::DEFAULT_REFERENCE).is_err());
+        assert!(YCbCr::new([0.3, f32::NAN, 0.1], YCbCr::DEFAULT_REFERENCE).is_err());
     }
 }
