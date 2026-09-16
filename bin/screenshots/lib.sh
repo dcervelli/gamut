@@ -30,7 +30,7 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 CLASS=com.dcervelli.gamut
 GAMUT="$ROOT/target/release/gamut"
 
-for tool in hyprctl jq wtype grim cargo gpu-screen-recorder ffmpeg; do
+for tool in hyprctl jq wtype grim cargo gpu-screen-recorder ffmpeg python3; do
     command -v "$tool" >/dev/null || { echo "$tool is not installed" >&2; exit 1; }
 done
 
@@ -110,6 +110,39 @@ cursor() {
     hyprctl eval "hl.dispatch(hl.dsp.cursor.move({ x = $1, y = $2 }))" >/dev/null
 }
 
+# Where in the layout image pixel X, Y of a W by H image is while the image
+# is fitted to the window: the picture is centered in the area the four
+# bars leave, at whichever of the two scales fits all of it in.
+#
+#   cursor $(fitted 6016 3384 960 2150)
+fitted() {
+    set -- "$1" "$2" "$3" "$4" $(window geometry) $(scale)
+    awk -v W="$1" -v H="$2" -v X="$3" -v Y="$4" \
+        -v wx="$5" -v wy="$6" -v ww="$7" -v wh="$8" -v scale="$9" -v bar=30 'BEGIN {
+        vw = (ww - 2 * bar) * scale; vh = (wh - 2 * bar) * scale
+        zoom = vw / W; if (vh / H < zoom) zoom = vh / H
+        x = (vw - W * zoom) / 2 + X * zoom; y = (vh - H * zoom) / 2 + Y * zoom
+        printf "%d %d\n", wx + bar + x / scale, wy + bar + y / scale
+    }'
+}
+
+# Device pixels to the logical one on the monitor the window is on.
+scale() {
+    monitor=$(window monitor)
+    hyprctl monitors -j | jq -r --argjson id "$monitor" '.[] | select(.id == $id) | .scale'
+}
+
+# Turn the wheel N notches under the pointer, positive away from the hand,
+# which zooms in about it; and drag the left button DX, DY logical pixels
+# from where the pointer is. Both are a device of our own: see mouse.py.
+wheel() {
+    python3 "$ROOT/bin/screenshots/mouse.py" wheel "$1"
+}
+
+drag() {
+    python3 "$ROOT/bin/screenshots/mouse.py" drag "$1" "$2"
+}
+
 # Press keys, one argument each, named as xkb names them: `plus`, `Up`,
 # `space`, `bracketright`, `c`, and `C` for the capital. Modifiers go in
 # front, joined with dashes: `ctrl-c`, `ctrl-shift-period`.
@@ -171,15 +204,18 @@ shoot() {
 
 # Start recording the window's rectangle to the path given, an MP4 at 60
 # frames a second, and return once the first frame is down. `cut` stops it.
+# The pointer is left out of the film unless a second argument says
+# `cursor`, for a recording of something the pointer does.
 #
 # The region is handed over in logical pixels, as `hyprctl clients` reports
 # it; the recorder scales to the monitor's own pixels itself.
 record() {
     park
-    set -- "$1" $(window geometry)
+    set -- "$1" "${2:-no}" $(window geometry)
     mkdir -p "$(dirname "$1")"
     rm -f "$1" "$1.ts"
-    gpu-screen-recorder -w "${4}x$5+$2+$3" -f 60 -fm cfr -k h264 -cursor no \
+    case $2 in cursor) shown=yes ;; *) shown=no ;; esac
+    gpu-screen-recorder -w "${5}x$6+$3+$4" -f 60 -fm cfr -k h264 -cursor "$shown" \
         -fallback-cpu-encoding yes -write-first-frame-ts yes -o "$1" 2>"$1.log" &
     RECORDER=$!
     RECORDING=$1
