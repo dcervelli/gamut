@@ -7,7 +7,9 @@ and come out the same size, in the same place, showing the same thing. What
 each one shows is the script: `main_screenshot` opens `~/git/mora` in a
 1200×800 window, presses `+` three times and `Up` six, and captures;
 `animated` opens a GIF paused in a 1000×600 window, records it playing
-through once, and turns the film into the README's `animated.gif`.
+through once, and turns the film into the README's `animated.gif`;
+`pixel_grid` turns the grid on, rolls the wheel over the stag until the
+grid is at single pixels, and presses Space.
 
 ## How a script takes a picture
 
@@ -52,6 +54,28 @@ bar.
 next window can be given the same address, and `open` tells the new window
 from the ones already open by address, so a script that opens twice in a row
 would otherwise take the second window for the first.
+
+## A mouse
+
+`wtype` has keys and no pointer, and Hyprland can warp the pointer but not
+press its buttons or turn its wheel. What the wheel does — zoom about the
+pointer — and what a drag does are half the program, and a recording that
+never showed them would be a poor one, so
+[`bin/screenshots/mouse.py`](../bin/screenshots/mouse.py) is a mouse of its
+own: a device registered through `/dev/uinput` for as long as one command
+runs, sending wheel notches or a held button and motion, then taken away
+again. It uses nothing outside Python's standard library; the ioctl numbers
+and the event record are written out from the kernel's own headers. Omarchy
+gives the user write access to `/dev/uinput` through an ACL, which is what
+makes this possible without root. `wheel` and `drag` in `lib.sh` call it,
+and `record FILE cursor` keeps the pointer in the film for a recording where
+the pointer is the point.
+
+The pointer is placed first with `cursor`, and `fitted W H X Y` says where
+image pixel X, Y of a W×H image is in the layout while the image is fitted
+to the window — the same sum `chrome::content_area` and `View::fit_zoom`
+do, redone in awk, so that a script can put the pointer on a feature of
+the picture by its own coordinates.
 
 ## A recording
 

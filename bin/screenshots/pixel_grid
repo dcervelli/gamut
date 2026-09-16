@@ -1,0 +1,36 @@
+#!/bin/sh
+# The README's pixel grid: a landscape in a 1000x600 window with the grid
+# on, the wheel turned over the stag until the grid is down to single
+# pixels, a beat, and Space to fit the whole picture again. The wheel is
+# mouse.py's, and the pointer is in the film, since what it is over is the
+# point.
+#
+#   bin/screenshots/pixel_grid            on ~/Downloads/0-winding-road.webp
+#   bin/screenshots/pixel_grid FILE X Y   on another picture, zooming into pixel X, Y
+
+. "$(dirname "$0")/lib.sh"
+
+file=${1:-$HOME/Downloads/0-winding-road.webp}
+x=${2:-957}
+y=${3:-2172}
+set -- $(magick identify -format '%w %h' "$file")
+
+open 1000 600 "$file"
+keys g
+record "$ROOT/target/screenshots/pixel_grid.mp4" cursor
+started=$(since_record)
+sleep 0.3
+cursor $(fitted "$1" "$2" "$x" "$y")
+sleep 0.3
+# Twenty-five notches from a fit of a quarter is past the zoom ceiling, and
+# the grid is at one pixel from about 5700% on.
+wheel 25
+# The last notch's motion has 200 ms to run, and the pause is 400 ms; the
+# wheel already waited 400 ms for its device to drain.
+sleep 0.2
+keys space
+settle
+sleep 0.8
+film=$(cut)
+close
+gif "$film" "$ROOT/user-docs/screenshots/pixel_grid.gif" 800 "$started"
