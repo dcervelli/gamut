@@ -109,7 +109,6 @@ impl Chooser {
             .unwrap_or(0);
         self.opened = true;
         self.reveal = true;
-        self.visible = 0..0;
     }
 
     /// Takes in the list as it now stands, keeping the query: the file on
@@ -151,6 +150,10 @@ impl Chooser {
         };
         self.stale = false;
         self.dirty = true;
+        // The rows under the screen's range are different files now, so
+        // the range is forgotten: the next pass reports it afresh, and what
+        // it shows goes to the front of the thumbnailer's queue.
+        self.visible = 0..0;
     }
 
     /// Makes the matches again after a title arrived, keeping the cursor
@@ -800,6 +803,21 @@ mod tests {
         assert!(!chooser.stale);
         chooser.learn(Path::new("falco-1.webp"), titled("Peregrine"));
         assert!(chooser.stale);
+    }
+
+    /// A query puts different files under the same rows, so the range
+    /// the screen reported is forgotten and the pass reports it again —
+    /// the interface asks for the visible rows' thumbnails only when the
+    /// range it sees differs from the one it was given.
+    #[test]
+    fn a_new_query_asks_for_the_rows_under_the_screen_again() {
+        let mut chooser = Chooser::with(Box::new(Plain));
+        chooser.open(&paths(&["a.png", "b.png", "c.png"]), 0);
+        let thumbs = Thumbs::default();
+        chooser.wanted(0..3, &thumbs);
+        assert_eq!(chooser.input(&thumbs, None).visible, 0..3);
+        chooser.set_query("c".into());
+        assert_eq!(chooser.input(&thumbs, None).visible, 0..0);
     }
 
     /// What the visible rows want is what they lack and have not been
