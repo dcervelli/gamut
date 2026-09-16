@@ -89,16 +89,17 @@ pub(super) const ICON_SIDE: f32 = BUTTON_SIZE - 6.0;
 /// Top and bottom span the full width; left and right are nested between
 /// them, so the corners belong to the horizontal bars and the vertical ones
 /// never have to reason about where a bar ends. The transport bar, where
-/// there is one, is a second bar above the bottom one and spans the width as
-/// the bars do: the strips end above it.
+/// there is one, is a second bar above the bottom one, nested between the
+/// strips as the picture is: the strips run down to the bottom bar either
+/// way, and the transport bar is taken off the foot of what they leave.
 #[derive(Clone, Copy)]
 pub struct Chrome {
     pub top: Rect,
     pub bottom: Rect,
     pub left: Rect,
     pub right: Rect,
-    /// The bar of playback controls, above the bottom bar, for an animation
-    /// or a file of pages. `None` for a still.
+    /// The bar of playback controls, above the bottom bar and between the
+    /// strips, for an animation or a file of pages. `None` for a still.
     pub transport: Option<Rect>,
 }
 
@@ -112,13 +113,15 @@ impl Chrome {
         let bars = if transport { 3.0 } else { 2.0 };
         let bar = BAR_HEIGHT.min(size[1] / bars);
         let side = SIDE_WIDTH.min(size[0] / 2.0);
-        let middle = (size[1] - bars * bar).max(0.0);
+        let middle = (size[1] - 2.0 * bar).max(0.0);
 
         Self {
             top: Rect::new(0.0, 0.0, size[0], bar),
             left: Rect::new(0.0, bar, side, middle),
             right: Rect::new(size[0] - side, bar, side, middle),
-            transport: transport.then(|| Rect::new(0.0, size[1] - 2.0 * bar, size[0], bar)),
+            transport: transport.then(|| {
+                Rect::new(side, size[1] - 2.0 * bar, (size[0] - 2.0 * side).max(0.0), bar)
+            }),
             bottom: Rect::new(0.0, size[1] - bar, size[0], bar),
         }
     }
@@ -241,17 +244,6 @@ impl Pass<'_> {
             .frame(frame)
             .show(ui, |ui| self.bottom_bar(ui));
         self.hairline(ui, bottom.response.rect, Edge::Top);
-        // After the bottom bar, so that it nests above it; before the
-        // strips, so that they end above it, as `Chrome` lays them out.
-        if let Some(transport) = self.input.transport.clone() {
-            let bar = egui::Panel::bottom("transport")
-                .exact_size(BAR_HEIGHT)
-                .resizable(false)
-                .show_separator_line(false)
-                .frame(frame)
-                .show(ui, |ui| super::transport::show(self, ui, &transport));
-            self.hairline(ui, bar.response.rect, Edge::Top);
-        }
         let left = egui::Panel::left("left")
             .exact_size(SIDE_WIDTH)
             .resizable(false)
@@ -266,6 +258,17 @@ impl Pass<'_> {
             .frame(frame)
             .show(ui, |ui| self.right_strip(ui));
         self.hairline(ui, right.response.rect, Edge::Left);
+        // After the strips, so that it nests between them and above the
+        // bottom bar, as `Chrome` lays it out.
+        if let Some(transport) = self.input.transport.clone() {
+            let bar = egui::Panel::bottom("transport")
+                .exact_size(BAR_HEIGHT)
+                .resizable(false)
+                .show_separator_line(false)
+                .frame(frame)
+                .show(ui, |ui| super::transport::show(self, ui, &transport));
+            self.hairline(ui, bar.response.rect, Edge::Top);
+        }
     }
 
     /// The hairline along a panel's inner edge, on the device's own grid so
@@ -797,17 +800,26 @@ mod tests {
     }
 
     /// The transport bar is a bar's height taken off the bottom of the
-    /// content area, and the strips end above it.
+    /// content area, between the strips, which run down to the bottom bar
+    /// as they do without it.
     #[test]
     fn the_transport_bar_takes_a_bar_off_the_bottom() {
         let chrome = Chrome::new(WINDOW, true);
         let transport = chrome.transport.expect("asked for");
         assert_eq!(
             transport,
-            Rect::new(0.0, 700.0 - 2.0 * BAR_HEIGHT, 1000.0, BAR_HEIGHT)
+            Rect::new(
+                SIDE_WIDTH,
+                700.0 - 2.0 * BAR_HEIGHT,
+                1000.0 - 2.0 * SIDE_WIDTH,
+                BAR_HEIGHT
+            )
         );
-        assert_eq!(chrome.left.bottom(), transport.y);
-        assert_eq!(chrome.right.bottom(), transport.y);
+        assert_eq!(chrome.left.bottom(), chrome.bottom.y);
+        assert_eq!(chrome.right.bottom(), chrome.bottom.y);
+        assert_eq!(chrome.left.right(), transport.x);
+        assert_eq!(chrome.right.x, transport.right());
+        assert_eq!(transport.bottom(), chrome.bottom.y);
         assert_eq!(
             chrome.content(),
             Rect::new(
