@@ -28,6 +28,7 @@ mod jpeg;
 mod jxl;
 mod limits;
 mod png;
+mod raw;
 mod tiff_rs;
 mod webp;
 
@@ -98,8 +99,11 @@ impl Seek for Positioned<'_> {
     }
 }
 
-/// Enough of the file for any decoder to recognize its own header.
-const HEADER: usize = 64;
+/// Enough of the file for any decoder to recognize its own header. Most
+/// need a few bytes; the raw decoder needs the first directory of a TIFF,
+/// which is the only way to tell a NEF or a DNG from a scan, and a camera
+/// writes that directory at byte 8 with a few dozen entries in it.
+const HEADER: usize = 4096;
 
 pub trait Decoder: Sync {
     /// Human-readable name, used in error messages.
@@ -157,6 +161,22 @@ pub trait Decoder: Sync {
         }
     }
 
+    /// A smaller picture the file carries of itself, where the format keeps
+    /// one: the JPEG a camera writes into its raw. `None` where the format
+    /// has no such thing, which is what most formats say, or the file has
+    /// none. What comes back is the file's own rendering rather than this
+    /// program's — a camera's preview has the camera's curve on it — and
+    /// is for standing in for the picture where a likeness will do, as a
+    /// thumbnail does, not for reading pixels off. The caller judges
+    /// whether it is large enough for its purpose.
+    fn preview(
+        &self,
+        _source: &mut dyn ReadSeek,
+        _overrides: Overrides,
+    ) -> Result<Option<DecodedImage>> {
+        Ok(None)
+    }
+
     /// The frames of an animation, from the first. Only where
     /// [`Decoder::sequence`] said [`Sequence::Animation`]. The source is
     /// taken whole rather than borrowed, since the frames outlive the call
@@ -173,6 +193,12 @@ pub trait Decoder: Sync {
 /// Order matters only when two decoders claim the same extension, in which
 /// case the first wins.
 static DECODERS: &[&dyn Decoder] = &[
+    // Before TIFF, whose header most raw formats wear: `decode::raw` claims
+    // a TIFF only when its first directory says a camera wrote it, so a
+    // scan still goes to `tiff_rs`, but a NEF asked of `tiff_rs` first
+    // would come back as its own thumbnail. Before HEIF as well, since a
+    // Canon CR3 is an ISO base media file too.
+    &raw::Raw,
     &tiff_rs::TiffRs,
     // Before the HEIF family, whose `ftyp` box it shares a container
     // structure with. `libheif`'s brand check should decline a `JXL ` box and
@@ -340,6 +366,32 @@ pub fn load_timed(
     };
     let decoding = started.elapsed();
     Ok((overrides.finish(image, path)?, decoding))
+}
+
+/// The smaller picture `path` carries of itself, if it carries one, finished
+/// the way [`load`]'s image is. See [`Decoder::preview`].
+pub fn preview(path: &Path, overrides: Overrides) -> Result<Option<DecodedImage>> {
+    let (mut source, decoder) = open(path)?;
+    let image = decoder.preview(&mut source, overrides).with_context(|| {
+        format!(
+            "reading the preview in {} as {}",
+            path.display(),
+            decoder.name()
+        )
+    })?;
+    image.map(|image| overrides.finish(image, path)).transpose()
+}
+
+/// What the raw decoder read out of `path`'s header, for the information
+/// panel, or nothing for a file that is not a raw or will not open: the
+/// camera and exposure as the library parsed them, and the sensor as a
+/// section of its own. See [`raw::facts`].
+pub fn raw_facts(path: &Path) -> Option<(Vec<super::exif::Entry>, super::exif::Section)> {
+    let (mut source, decoder) = open(path).ok()?;
+    if decoder.name() != raw::Raw.name() {
+        return None;
+    }
+    raw::facts(&mut source).ok()
 }
 
 /// What `path` holds beyond the image [`load`] returns, from its header.

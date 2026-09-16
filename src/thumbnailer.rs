@@ -460,38 +460,52 @@ fn make(
     let refused = facts.size.is_some_and(|(width, height)| {
         u64::from(width) * u64::from(height) * 16 > MAX_THUMBNAIL_DECODE_BYTES
     });
-    let made = if refused {
+    // The picture the file carries of itself, where it carries one large
+    // enough — a camera's JPEG of its raw — stands in for the picture: a
+    // likeness is all a thumbnail is, and it is had in a few milliseconds
+    // where developing the frame takes hundreds. Smaller than the thumbnail
+    // would be, it is passed over for the picture itself, so the cache is
+    // never filled with something blurrier than the format can give.
+    let preview = guard("reading the preview", || decode::preview(path, overrides))
+        .unwrap_or_else(|error| {
+            report(path, &error);
+            None
+        })
+        .filter(|image| image.width.max(image.height) >= thumbnail::SIDE);
+    let made = if let Some(preview) = preview {
+        Ok(preview)
+    } else if refused {
         Err(anyhow!("too large to thumbnail in the background"))
     } else {
-        guard("decoding", || decode::load(path, overrides)).and_then(|image| {
-            let small = resample::downscale(&image, thumbnail::SIDE);
-            drop(image);
-            if canceled.load(Ordering::Relaxed) {
-                return Err(anyhow!("stopped"));
-            }
-            // Windowed as the viewer would open it — a scene-referred
-            // picture shown with `Display::default` is black — on the
-            // small image, where the scan and the walk are cheap.
-            let stats = guard("scanning", || Ok(Stats::scan(&small)))?;
-            let display =
-                Display::for_image_with(&small, &stats, Startup::default(), Headroom::None);
-            let raster = encode::displayed_on(
-                &small,
-                &display,
-                Region::whole([small.width, small.height]),
-                1,
-            );
-            let chunks = thumbnail::text_chunks(key, mtime, bytes, facts.size);
-            let png = encode::png_with_text(&raster, &chunks)?;
-            thumbnail::write(dirs, &dirs.xlarge, key, &png)?;
-            Ok(display_copy(
-                raster.width,
-                raster.height,
-                raster.channels,
-                &raster.data,
-            ))
-        })
+        guard("decoding", || decode::load(path, overrides))
     };
+    let made = made.and_then(|image| {
+        let small = resample::downscale(&image, thumbnail::SIDE);
+        drop(image);
+        if canceled.load(Ordering::Relaxed) {
+            return Err(anyhow!("stopped"));
+        }
+        // Windowed as the viewer would open it — a scene-referred
+        // picture shown with `Display::default` is black — on the
+        // small image, where the scan and the walk are cheap.
+        let stats = guard("scanning", || Ok(Stats::scan(&small)))?;
+        let display = Display::for_image_with(&small, &stats, Startup::default(), Headroom::None);
+        let raster = encode::displayed_on(
+            &small,
+            &display,
+            Region::whole([small.width, small.height]),
+            1,
+        );
+        let chunks = thumbnail::text_chunks(key, mtime, bytes, facts.size);
+        let png = encode::png_with_text(&raster, &chunks)?;
+        thumbnail::write(dirs, &dirs.xlarge, key, &png)?;
+        Ok(display_copy(
+            raster.width,
+            raster.height,
+            raster.channels,
+            &raster.data,
+        ))
+    });
     match made {
         Ok(thumb) => News::Thumb(thumb),
         Err(error) => {

@@ -5,3 +5,8 @@
 /packaging/src/
 /packaging/*.pkg.tar.zst
 /packaging/*.tar.gz
+
+# The camera files decode::raw's sample test runs on, fetched by the script
+# beside them; tens of megabytes each, and not the tree's to carry.
+/test_images/raw-samples/*
+!/test_images/raw-samples/fetch.sh

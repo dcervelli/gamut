@@ -891,6 +891,7 @@ dependencies = [
  "libc",
  "libheif-rs",
  "moxcms",
+ "pkg-config",
  "png",
  "pollster",
  "rayon-core",

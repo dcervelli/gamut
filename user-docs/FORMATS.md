@@ -17,9 +17,10 @@ pixels, and where each format will surprise you.
 | Netpbm | `.pnm` `.pbm` `.pgm` `.ppm` `.pam` | 8 and 16-bit | Nothing — always sRGB |
 | Radiance HDR | `.hdr` | 32-bit float | Nothing — linear by definition |
 | OpenEXR | `.exr` | 32-bit float | Nothing — linear by definition |
+| Camera raw | `.dng` `.nef` `.nrw` `.cr2` `.cr3` `.crw` `.arw` `.srf` `.sr2` `.raf` `.orf` `.rw2` `.rwl` `.pef` `.srw` `.3fr` `.fff` `.iiq` `.mef` `.mos` `.erf` `.dcr` `.kdc` `.mrw` | 16-bit, developed from the sensor's counts | The camera's white balance and color matrix |
 
 Anything else is refused, with a message listing the extensions above. There
-is no support for camera raw or DNG, SVG, PSD, JPEG 2000, TGA, DDS or ICNS.
+is no support for SVG, PSD, JPEG 2000, TGA, DDS or ICNS.
 
 ## True of every format
 
@@ -98,9 +99,9 @@ than being expanded to color — which is a quarter of the memory on a large
 scan. The formats that cannot preserve them say so below.
 
 **How a file opens follows from what it is.** Content already graded for a
-display — sRGB, gamma, PQ, HLG, a JPEG with its gain map applied — opens
-untouched at 0–1, because second-guessing the grade would be wrong.
-Measurement data and other scene-referred content opens with an automatic
+display — sRGB, gamma, PQ, HLG, a JPEG with its gain map applied, a
+developed raw — opens untouched at 0–1, because second-guessing the grade
+would be wrong. Measurement data and other scene-referred content opens with an automatic
 99.8% window, because values occupying a fraction of the nominal range
 otherwise show as a black rectangle. Where that leaves highlights above white
 — a PQ frame, a gain-mapped photograph — the neutral tone map is on from the
@@ -361,6 +362,56 @@ might claim.
 
 Because the data is scene-referred, it opens on an automatic window rather
 than at 0–1, and the tone map (`t`) is what brings the highlights back.
+
+## Camera raw
+
+A raw file is not a picture but what the sensor counted, and `gamut`
+develops it the way a raw converter's defaults would, minus the taste: the
+camera's own white balance, its color matrix, and nothing else. No
+brightening, no contrast curve, no sharpening. What you see is linear light
+with white where the sensor saturates, so a frame looks flatter and often
+darker than the camera's own JPEG of it — that JPEG has a curve applied,
+and this has not. Exposure (`f` and `d`) and the tone map (`t`) are the
+controls; the window opens at 0–1 because the file has a white.
+
+Every make that the desktop's raw converters read is read here: Canon,
+Nikon, Sony, Fujifilm (X-Trans included), Olympus, Panasonic, Leica,
+Pentax, Samsung, Hasselblad, Phase One, and the older Kodak, Minolta,
+Mamiya, Leaf and Epson formats, along with DNG from anything. A file is
+recognized by its contents, so a DNG or a NEF renamed `.tif` still opens as
+a raw rather than as the thumbnail a TIFF reader finds in it.
+
+Caveats:
+
+- **This format needs support installed on the system.** Raw decoding uses
+  the system LibRaw library, version 0.21 or newer, and `gamut` will not
+  start without it: `libraw-dev` on Debian and Ubuntu, `libraw` on Arch,
+  `brew install libraw` on macOS.
+- **Developing takes time.** A 24-megapixel frame opens in about half a
+  second, a Fujifilm X-Trans frame in one or two. Stepping through a
+  directory of raws is a directory of half-second waits. The file chooser's
+  thumbnails are quick, because they are made from the JPEG the camera
+  wrote into the file — which also means a thumbnail looks like the
+  camera's own rendering, brighter and with more contrast than the
+  developed picture it opens into.
+- **The picture is wide-gamut.** It is developed into Rec. 2020, so colors
+  a camera records beyond what sRGB holds survive; on an ordinary monitor
+  they are brought into range on the way to the screen like any other
+  wide-gamut file.
+- **Lens corrections are not applied,** and neither is noise reduction: the
+  frame is the sensor's, distortion and vignetting included.
+- **The information panel reads every format's metadata,** including the
+  ones that keep it somewhere other than where a TIFF would, and adds a
+  Sensor section: the sensor's size and the picture's inside it, the color
+  filter pattern, the white level, the white balance the camera set and
+  the daylight one its matrix implies, and the matrix itself. The one
+  format with no metadata to read is Canon's old CRW, and there the panel
+  says what the file's own header does: the camera, the exposure, the
+  focal length and the time.
+- **A few cameras from the early 2000s open in a window of the wrong
+  shape,** then settle: those whose photosites were not square have their
+  picture stretched to fix that, by an amount the header does not state.
+- Sigma's Foveon files (`.x3f`) are not read.
 
 ## OpenEXR
 

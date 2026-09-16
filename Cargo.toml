@@ -128,6 +128,12 @@ rayon-core = "1"
 # library than the binding fails cleanly at build time via `system-deps`,
 # which is the safe direction to err in.
 libheif-rs = { version = "3.0.0", default-features = false, features = ["v1_23"] }
+# Camera raw files go to the system LibRaw, bound by hand in
+# `decode::raw::ffi` rather than through a crate: the two bindings on
+# crates.io were last published in 2015 and 2021, against libraries whose
+# structs have since moved. Like `libheif`, a runtime dependency of the
+# package rather than a crate in the notices; the version floor is in
+# `build.rs`.
 moxcms = "0.8.1"
 # Header parsing only: `image` decodes the pixels but surfaces nothing of a
 # PNG's `cICP` chunk, which is the whole of how a PNG says it is HDR. Already
@@ -162,6 +168,11 @@ wayland-protocols = { version = "0.32.13", features = ["client", "staging"] }
 # This speaks that protocol directly rather than shelling out to `wl-copy`,
 # which would be a runtime dependency on a package the user may not have.
 wl-clipboard-rs = "0.9.3"
+
+[build-dependencies]
+# Finds the system LibRaw for `decode::raw`, and refuses one older than the
+# struct layouts `raw/ffi.rs` transcribes — see `build.rs`.
+pkg-config = "0.3"
 
 [dev-dependencies]
 # Drives the interface without a window, through the accessibility tree egui
