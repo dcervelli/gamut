@@ -21,7 +21,7 @@ jobs:
       - name: Install the toolchain and the libraries it links
         run: |
           pacman -Syu --noconfirm --needed \
-            git rust cargo-audit reuse libheif vulkan-icd-loader fontconfig pkgconf
+            git rust cargo-audit reuse libheif libraw vulkan-icd-loader fontconfig pkgconf
 
       - uses: actions/checkout@v4
 
