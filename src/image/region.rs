@@ -255,7 +255,9 @@ impl Region {
         let axis = side.axis();
         let (low, high) = (axis, axis + 2);
         match side {
-            Side::Left | Side::Top => edges[low] = (edges[low] + i64::from(by)).min(edges[high] - 1),
+            Side::Left | Side::Top => {
+                edges[low] = (edges[low] + i64::from(by)).min(edges[high] - 1)
+            }
             Side::Right | Side::Bottom => {
                 edges[high] = (edges[high] - i64::from(by)).max(edges[low] + 1);
             }

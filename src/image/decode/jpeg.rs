@@ -72,7 +72,7 @@ impl super::Decoder for Jpeg {
 /// A file with a gain map comes back as linear light above SDR white; every
 /// other JPEG comes back exactly as it did before, but with its ICC profile
 /// believed.
-fn decode(bytes: &[u8], overrides: Overrides) -> Result<DecodedImage> {
+pub(super) fn decode(bytes: &[u8], overrides: Overrides) -> Result<DecodedImage> {
     let container = gain_map::Container::open(bytes);
 
     // sRGB stays the answer for a JPEG that carries no profile, which is what

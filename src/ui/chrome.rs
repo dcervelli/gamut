@@ -120,7 +120,12 @@ impl Chrome {
             left: Rect::new(0.0, bar, side, middle),
             right: Rect::new(size[0] - side, bar, side, middle),
             transport: transport.then(|| {
-                Rect::new(side, size[1] - 2.0 * bar, (size[0] - 2.0 * side).max(0.0), bar)
+                Rect::new(
+                    side,
+                    size[1] - 2.0 * bar,
+                    (size[0] - 2.0 * side).max(0.0),
+                    bar,
+                )
             }),
             bottom: Rect::new(0.0, size[1] - bar, size[0], bar),
         }

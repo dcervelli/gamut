@@ -5,6 +5,7 @@
 | PNG, JPEG, GIF, Radiance HDR, OpenEXR, BMP, netpbm | [`image`](https://crates.io/crates/image) |
 | TIFF | [`tiff`](https://crates.io/crates/tiff) directly |
 | HEIF — HEIC, AVIF | [`libheif-rs`](https://crates.io/crates/libheif-rs), onto the system `libheif` |
+| Camera raw — DNG, NEF, CR2, CR3, ARW, RAF, ORF, RW2, PEF and the rest | `decode::raw::ffi`, a hand-written binding onto the system LibRaw |
 | WebP — lossy, lossless, animated | [`image-webp`](https://crates.io/crates/image-webp) directly |
 | GIF's frame count and loop extension | [`gif`](https://crates.io/crates/gif), which `image` already carries |
 | JPEG XL — codestream and container | [`jxl-oxide`](https://crates.io/crates/jxl-oxide) |
@@ -183,6 +184,134 @@ buffer on one thread, which is a few percent of the whole.
 `clap` — while decoding, so a rotated phone photograph arrives upright. That
 is a property of the format, not of this program: JPEG's EXIF orientation is a
 separate tag in a separate decoder, and is still ignored.
+
+## Camera raw
+
+A raw file is the sensor's counts, one color per photosite under the
+color filter array, with the camera's white balance and its color matrix
+written beside them. Making a picture of that — demosaicing, balancing,
+converting out of the camera's own primaries, and the special case every
+camera model is — is what [LibRaw](https://www.libraw.org) does, and every
+raw developer on the desktop reads its files through it. So `decode::raw`
+binds the system library, the way HEIF does, and does not develop anything
+itself. The library's C interface is a handle and free functions, and the
+dozen this program calls are declared by hand in `decode::raw::ffi`: the two
+bindings on crates.io were last published in 2015 and 2021, against
+libraries whose structs have moved since. Two structs are transcribed, for
+the two facts the C interface has no accessor for — the orientation the
+camera recorded, which decides whether the picture is taller than it is
+wide, and the color count. `build.rs` pins the library at 0.21 or newer,
+where those structs took their present shape, and `Handle::check_layout`
+compares the transcription against the accessors the library does have when
+a file is opened, so a layout that has moved is an error rather than a
+garbled size.
+
+Every other decoder is pure Rust or, for HEIF, a crate's binding; this one
+is a binding of its own. It is also the second system library the package
+depends on, and it arrives under LGPL-2.1 or CDDL-1.0 at the taker's choice
+— a dynamically linked library rather than a crate, so `about.toml`'s
+allowlist, which is over the crate graph, has nothing to say about it, and
+the PKGBUILD's `depends=()` is where it is recorded. The pure-Rust
+alternatives were looked at and passed over: `rawler` and `rawloader` are
+LGPL-2.1 crates, which the allowlist refuses on purpose, and `rawkit` reads
+one make of camera.
+
+What LibRaw is asked for is the least developed picture it can make. AHD
+demosaic, dcraw's default and what every other developer is compared to;
+the camera's own white balance, handed back as the user's multipliers
+because the C interface has no switch for "use the camera's" and the
+arithmetic is the same; no auto-brightening; gamma 1 with a toe slope of 1,
+which is dcraw's `-g 1 1`; sixteen bits; and Rec. 2020 as the output space,
+the widest this program names, so that a saturated flower the sensor
+recorded clips less than it would in sRGB. The result is linear light with
+1.0 at the sensor's saturation point. That is a photograph with a white, so
+the decoder marks it display-referred: the window opens at 0..1 rather than
+being stretched to whatever the frame holds, and an underexposed frame
+arrives dark, as it was shot. `--transfer` and `--primaries` relabel it like
+anything else.
+
+**Recognition** is the part the library does not do. A CR3 is an ISO media
+file of the `crx ` brand, and CRW, ORF, RW2, RAF, MRW and IIQ each start
+with bytes of their own; those are read at their offsets. The rest — DNG,
+NEF, NRW, ARW, PEF, SRW, 3FR and the older ones — wear TIFF's four-byte
+header, and `decode::tiff_rs` asked first would show a NEF's 160×120
+thumbnail, which is what its first directory holds. So `raw::Raw` comes
+first in `DECODERS` and claims a TIFF only when its first directory says a
+camera wrote it: a `DNGVersion` tag; a `CFA` or `LinearRaw` photometric
+interpretation; a compression code that is one vendor's own; a first
+directory that is a reduced copy pointing at sub-directories, which is
+Nikon's and Sony's layout; or one that holds no picture at all, only the
+camera's name and the sub-directories, which is Samsung's. A scan matches
+none of these and goes to `tiff_rs` as before. Reading the directory is why
+`decode::HEADER` grew from 64 bytes to 4096: a camera writes its first
+directory at byte 8 with a few dozen entries. `raw::tests` covers each rule
+with a directory built by hand, and
+`samples_are_recognized_probed_and_developed` — ignored unless asked for —
+runs real cameras' files through recognition, the probe, the develop, the
+preview and the metadata. The files are not in the tree, being tens of
+megabytes each: `test_images/raw-samples/fetch.sh` brings one of each
+format down from raw.pixls.us, where photographers have put a file of
+nearly every camera under CC0, into a directory git ignores. Fifteen
+cameras' files pass it.
+
+The file is read whole and handed to `libraw_open_buffer`, as JPEG is read
+whole for its gain map: LibRaw reads by seeking about a stream, a buffer is
+the one form of stream its C interface takes short of a path, and a raw is
+tens of megabytes, which is a few milliseconds of copying beside the few
+hundred the demosaic takes. The probe reads it whole too, for the header's
+sake; the second read comes from the page cache.
+
+**What it costs.** A 24-megapixel Bayer frame develops in 400–600 ms on
+this machine, LibRaw's OpenMP threads doing the demosaic; an X-Trans frame
+takes three times that, its interpolation being three passes rather than
+one. Still to do: a mosaic view — the counts as one gray channel, for the
+false-color maps — which LibRaw hands back directly, and a white balance of
+the program's own, which is a per-channel gain and a 3×3 matrix in the
+shader rather than a second develop.
+
+**The preview.** Every raw carries the camera's own JPEG of the frame,
+which LibRaw copies out without decoding anything — `unpack_thumb` and
+`make_mem_thumb` — and `Raw::preview` hands it back through the JPEG
+decoder, turned by the orientation the header holds, since the JPEG is
+stored as the sensor saw the scene. That is what `Decoder::preview` is, and
+the thumbnailer asks every format for one before it decodes: a likeness is
+all a thumbnail is, and a preview arrives in 3–90 ms against 200–1400 for
+a develop. It is used only when its longer side reaches `thumbnail::SIDE`,
+so the cache never holds something blurrier than the format can give; of
+the fifteen cameras sampled the smallest preview is 644 pixels wide and
+most are the full frame. A thumbnail of a raw therefore looks like the
+camera's JPEG — its curve, its balance — rather than the flat linear
+picture the viewer opens; for finding a file that is the better likeness.
+`dynamic::reorient` is the turn, shared with nothing yet but written for
+any `DecodedImage`.
+
+**The metadata.** The panel reads a raw's EXIF where a TIFF-shaped one
+keeps it, at the front, and most formats are TIFF-shaped. Five are not, and
+`image/enclosed.rs` finds the block each keeps inside: an ORF or RW2 is a
+TIFF under its own four bytes, a RAF names the offset of a JPEG whose
+`APP1` is the EXIF, an MRW has a `TTW` block that is a TIFF, and a CR3 keeps
+four one-directory TIFFs in boxes under Canon's `uuid` — which, read alone,
+put Exif tags in the image's directory where they mean nothing, so three of
+them are written back out as one TIFF with the offsets moved. A CRW has no
+EXIF anywhere. What every raw has is LibRaw's own reading of its header,
+and `raw::facts` turns that into the panel's `Sensor` section — the frame
+and the picture inside it, the filter cell spelled from dcraw's bit
+pattern, the white level, the as-shot and daylight balances, the camera
+matrix, the DNG version — and into the entries of `Camera`, which
+`Exif::read` takes whatever of from that the EXIF did not say: all of it
+for a CRW, the exposure for a Phase One. Two structs more are transcribed
+for it, `Other` and the front of `Lens`, both reached through accessors so
+that only their leading fields have to be right.
+
+`dng-cfa.dng` is the fixture: the one raw format anything but a camera can
+write, mosaiced RGGB by a script in `generate.sh`, twelve-bit counts in
+sixteen-bit words so that the white level has to be read, and a color
+matrix that makes the camera's space Rec. 2020 exactly, so the developed
+quadrants are the pattern with nothing to balance or convert. AHD's
+interpolation is exact on a flat field; the tolerance is for LibRaw's
+output matrices, which are written to four decimal places.
+`bad-truncated.dng` is the same file cut inside its directory, claimed by
+the entries that survive and then refused by the library.
 
 ## JPEG XL
 

@@ -26,7 +26,7 @@ use std::path::Path;
 use exif::{Context, In, Rational, Tag, Value};
 
 use super::xmp::{self, Xmp};
-use super::{directory, geo};
+use super::{directory, enclosed, geo};
 
 /// How much of a TIFF is read to find its metadata.
 ///
@@ -109,7 +109,45 @@ pub struct Exif {
 impl Exif {
     /// Reads `path`'s metadata, or gives back nothing at all.
     pub fn read(path: &Path) -> Self {
-        Self::read_with(path, TIFF_PREFIX)
+        let mut exif = Self::read_with(path, TIFF_PREFIX);
+        // A raw has a second reader of its header, the library that will
+        // develop it. What that made of the sensor goes in with what the
+        // EXIF said, after the summaries and before the listings; and what
+        // it made of the exposure fills in whatever the `Camera` section
+        // is missing — all of it, for a CRW, which has no EXIF, and the
+        // exposure of a Phase One, whose EXIF names the camera and stops.
+        if let Some((camera, sensor)) = super::decode::raw_facts(path) {
+            let at = exif
+                .sections
+                .iter()
+                .position(|section| section.name == "Camera")
+                .unwrap_or_else(|| {
+                    exif.sections.insert(
+                        0,
+                        Section {
+                            name: "Camera",
+                            entries: Vec::new(),
+                        },
+                    );
+                    0
+                });
+            let section = &mut exif.sections[at];
+            for entry in camera {
+                if !section.entries.iter().any(|have| have.name == entry.name) {
+                    section.entries.push(entry);
+                }
+            }
+            if section.entries.is_empty() {
+                exif.sections.remove(at);
+            }
+            let at = exif
+                .sections
+                .iter()
+                .position(|section| section.name.ends_with(" metadata"))
+                .unwrap_or(exif.sections.len());
+            exif.sections.insert(at, sensor);
+        }
+        exif
     }
 
     /// `prefix` is how much of a TIFF to read; see [`TIFF_PREFIX`].
@@ -160,10 +198,24 @@ impl Exif {
         // Either way, what could be read is worth showing.
         reader.continue_on_error(true);
 
+        let enclosed = if tiff || bigtiff {
+            None
+        } else {
+            enclosed::block(path)
+        };
         let block = if bigtiff {
             // Not a form this reader knows: what it is handed is the same
             // directory written back out as the form it does.
             reader.read_raw(directory::block(path)?)
+        } else if let Some(enclosed) = enclosed {
+            // A raw container that is not a TIFF at the front, with the
+            // block it keeps inside it brought out.
+            match enclosed {
+                enclosed::Block::Tiff(block) => reader.read_raw(block),
+                enclosed::Block::Jpeg(jpeg) => {
+                    reader.read_from_container(&mut std::io::Cursor::new(jpeg))
+                }
+            }
         } else if tiff {
             // The file is the block, so as much of it as the prefix allows is
             // read and parsed as one, rather than handed back to a container
@@ -607,6 +659,23 @@ fn display(exif: &exif::Exif, field: &exif::Field) -> String {
     {
         return name.to_string();
     }
+    // A field of several strings — a lens name padded out with empty
+    // ones, a maker's name with a version byte after it — is the strings
+    // that read as words, and one alone is written without its quotes.
+    if let Value::Ascii(parts) = &field.value
+        && parts.len() > 1
+    {
+        let words: Vec<String> = parts
+            .iter()
+            .filter_map(|part| {
+                let text = std::str::from_utf8(part).ok()?.trim();
+                (!text.is_empty() && !text.chars().any(char::is_control)).then(|| text.to_string())
+            })
+            .collect();
+        if let Some(joined) = join(&words) {
+            return joined;
+        }
+    }
     let shown = field.display_value().with_unit(exif).to_string();
     let single = matches!(&field.value, Value::Ascii(parts) if parts.len() == 1);
     match shown
@@ -836,6 +905,35 @@ pub(super) fn tidy(number: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A raw's panel has the sensor the library read beside what the EXIF
+    /// said, after the summaries and before the listings, and the camera
+    /// named once.
+    #[test]
+    fn a_raw_gets_its_sensor_section_and_one_camera() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("test_images")
+            .join("dng-cfa.dng");
+        let exif = Exif::read(&path);
+        let names: Vec<&str> = exif.sections.iter().map(|section| section.name).collect();
+        let camera = names.iter().position(|name| *name == "Camera").unwrap();
+        let sensor = names.iter().position(|name| *name == "Sensor").unwrap();
+        let listing = names
+            .iter()
+            .position(|name| name.ends_with(" metadata"))
+            .unwrap();
+        assert!(camera < sensor && sensor < listing, "{names:?}");
+        assert_eq!(names.iter().filter(|name| **name == "Camera").count(), 1);
+        let camera = &exif.sections[camera];
+        assert_eq!(
+            camera
+                .entries
+                .iter()
+                .filter(|entry| entry.name == "Camera")
+                .count(),
+            1
+        );
+    }
 
     /// One IFD under construction: its entries, and the values too large to
     /// sit inside one. Laid out at a given offset from the start of the TIFF

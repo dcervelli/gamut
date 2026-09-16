@@ -332,6 +332,33 @@ const MIME_TYPES: &[(&str, &[&str])] = &[
     ("pgm", &["image/x-portable-graymap"]),
     ("ppm", &["image/x-portable-pixmap"]),
     ("pam", &["image/x-portable-arbitrarymap"]),
+    // The camera raw formats, each under the name shared-mime-info gives
+    // it. Every one is also a subclass of `image/x-dcraw` there, which is
+    // what a raw developer's desktop entry usually claims instead.
+    ("dng", &["image/x-adobe-dng", "image/x-dcraw"]),
+    ("nef", &["image/x-nikon-nef", "image/x-dcraw"]),
+    ("nrw", &["image/x-nikon-nrw", "image/x-dcraw"]),
+    ("cr2", &["image/x-canon-cr2", "image/x-dcraw"]),
+    ("cr3", &["image/x-canon-cr3", "image/x-dcraw"]),
+    ("crw", &["image/x-canon-crw", "image/x-dcraw"]),
+    ("arw", &["image/x-sony-arw", "image/x-dcraw"]),
+    ("srf", &["image/x-sony-srf", "image/x-dcraw"]),
+    ("sr2", &["image/x-sony-sr2", "image/x-dcraw"]),
+    ("raf", &["image/x-fuji-raf", "image/x-dcraw"]),
+    ("orf", &["image/x-olympus-orf", "image/x-dcraw"]),
+    ("rw2", &["image/x-panasonic-rw2", "image/x-dcraw"]),
+    ("rwl", &["image/x-panasonic-rw2", "image/x-dcraw"]),
+    ("pef", &["image/x-pentax-pef", "image/x-dcraw"]),
+    ("srw", &["image/x-samsung-srw", "image/x-dcraw"]),
+    ("3fr", &["image/x-hasselblad-3fr", "image/x-dcraw"]),
+    ("fff", &["image/x-hasselblad-fff", "image/x-dcraw"]),
+    ("iiq", &["image/x-phaseone-iiq", "image/x-dcraw"]),
+    ("mef", &["image/x-mamiya-mef", "image/x-dcraw"]),
+    ("mos", &["image/x-leaf-mos", "image/x-dcraw"]),
+    ("erf", &["image/x-epson-erf", "image/x-dcraw"]),
+    ("dcr", &["image/x-kodak-dcr", "image/x-dcraw"]),
+    ("kdc", &["image/x-kodak-kdc", "image/x-dcraw"]),
+    ("mrw", &["image/x-minolta-mrw", "image/x-dcraw"]),
 ];
 
 /// What the desktop would call `path`, judged by its extension alone.

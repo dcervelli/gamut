@@ -13,6 +13,22 @@ Notable changes to `gamut`. The format follows
   wrote it, from JPEG, PNG, WebP, TIFF, HEIF and JPEG XL files. A file
   given a title by a cataloging program, which has an XMP packet and no
   EXIF block at all, used to show no metadata; it now shows the title.
+
+- Camera raw files open: DNG, NEF, CR2, CR3, ARW, RAF, ORF, RW2, PEF, SRW
+  and the rest of what LibRaw reads, developed through the system library
+  with the camera's own white balance and matrix and nothing else — linear
+  light, sixteen bits, in Rec. 2020, shown at 0–1 like the photograph it is.
+  A raw under a `.tif` name is still recognized as one. The package now
+  depends on `libraw`. A raw's thumbnail is the JPEG the camera wrote into
+  it, turned the way the camera was held, so the chooser fills in
+  milliseconds rather than at half a second a file. The information panel
+  reads the metadata of every raw format — CR3, RAF, ORF, RW2 and MRW keep
+  it somewhere a TIFF reader cannot see — and adds a Sensor section: the
+  sensor and the picture inside it, the filter pattern, the white level,
+  the white balance and the camera matrix. For a CRW, which has no
+  metadata block at all, the header's own camera, exposure and time are
+  shown instead.
+
 - `Ctrl+P` opens a file chooser over the picture: type to filter the
   session's files by name — fuzzily, and by directory too when the list
   spans more than one, by the title the file's XMP gives it, or by place

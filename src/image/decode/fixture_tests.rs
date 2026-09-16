@@ -93,6 +93,9 @@ const NEAR_LOSSLESS: f32 = 0.01;
 /// the way to full — wider than JPEG's, because the error is in a channel
 /// JPEG would have kept and XYB spends its bits elsewhere.
 const VARDCT: f32 = 0.05;
+/// LibRaw's output matrices are written to four decimal places, and the
+/// developed pixel is the camera's counts through two of them.
+const DEVELOPED: f32 = 1e-3;
 
 const SRGB: ColorSpace = ColorSpace::SRGB;
 const LINEAR: ColorSpace = ColorSpace::LINEAR_BT709;
@@ -104,6 +107,11 @@ const P3: ColorSpace = ColorSpace {
 /// BT.2100 HDR, stated outright in the file's CICP tags.
 const PQ_2020: ColorSpace = ColorSpace {
     transfer: crate::image::Transfer::Pq,
+    primaries: crate::image::Primaries::Bt2020,
+};
+/// What a raw is developed to: linear light on the widest primaries here.
+const LINEAR_2020: ColorSpace = ColorSpace {
+    transfer: crate::image::Transfer::Linear,
     primaries: crate::image::Primaries::Bt2020,
 };
 
@@ -1322,6 +1330,25 @@ const FIXTURES: &[Fixture] = &[
         nodata: None,
         tolerance: EXACT,
     },
+    // ------------------------------------------------------ camera raw
+    // Sensor counts under a color filter, which LibRaw demosaics, balances
+    // and converts to Rec. 2020 on the way out: linear, with 1.0 where the
+    // sensor saturates, and shown display-referred for it. The matrix in
+    // the file makes the camera's space Rec. 2020 exactly, so the quadrants
+    // come back as the pattern — AHD's interpolation is exact on a flat
+    // field, and the tolerance is for the matrix's rounding.
+    Fixture {
+        file: "dng-cfa.dng",
+        covers: "DNG, mosaiced 12-bit counts developed by LibRaw",
+        channels: Channels::Rgb,
+        kind: Kind::U16,
+        color: LINEAR_2020,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: DEVELOPED,
+    },
     // A PNG under a TIFF name, decoded by sniffing rather than extension.
     Fixture {
         file: "mislabeled.tif",
@@ -1341,11 +1368,18 @@ const FIXTURES: &[Fixture] = &[
 const REJECTED: &[(&str, &str)] = &[
     ("unsupported.tga", "unsupported image format"),
     ("bad-truncated.png", "decoding"),
+    ("bad-truncated.dng", "decoding"),
 ];
 
 /// Extensions the registry advertises that share a decode path with another
-/// fixture and so do not need one of their own.
-const ALIASES: &[&str] = &["jpe", "jfif", "hif"];
+/// fixture and so do not need one of their own. Every camera's raw format
+/// goes through LibRaw the way the DNG does, and only a camera can write
+/// one; what tells them apart is the recognition, which `decode::raw`'s own
+/// tests cover header by header.
+const ALIASES: &[&str] = &[
+    "jpe", "jfif", "hif", "nef", "nrw", "cr2", "cr3", "crw", "arw", "srf", "sr2", "raf", "orf",
+    "rw2", "rwl", "pef", "srw", "3fr", "fff", "iiq", "mef", "mos", "erf", "dcr", "kdc", "mrw",
+];
 
 fn directory() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_images")
@@ -1486,6 +1520,19 @@ fn every_fixture_decodes_to_what_it_says_it_does() {
     }
 }
 
+/// A preview is a courtesy, never a failure: every fixture answers the
+/// question, and the one format here that could carry one — a DNG — says
+/// it has none, since nothing but a camera writes one in.
+#[test]
+fn every_fixture_answers_for_its_preview() {
+    for fixture in FIXTURES {
+        let path = directory().join(fixture.file);
+        let preview = crate::image::decode::preview(&path, Overrides::default())
+            .unwrap_or_else(|error| panic!("{}: {error:#}", fixture.file));
+        assert!(preview.is_none(), "{} carries a preview", fixture.file);
+    }
+}
+
 #[test]
 fn rejected_fixtures_fail_with_a_useful_message() {
     for (file, phrase) in REJECTED {
@@ -1509,7 +1556,11 @@ fn rejected_fixtures_fail_with_a_useful_message() {
 fn the_fixture_directory_and_the_table_agree() {
     let mut on_disk: Vec<String> = std::fs::read_dir(directory())
         .expect("test_images/ is missing")
-        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .map(|entry| entry.unwrap())
+        // `raw-samples/` is the camera files the ignored sample test runs
+        // on, fetched rather than kept.
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
         // `.icc` is an input to the generator, not a fixture in its own right.
         .filter(|name| !name.ends_with(".sh") && !name.ends_with(".md") && !name.ends_with(".icc"))
         .collect();
