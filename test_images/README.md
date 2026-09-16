@@ -8,7 +8,7 @@ from the outside world.
 Regenerate with `./generate.sh` — it is the authoritative description of how
 each file was made. Most fixtures need only ImageMagick; the HEIF ones need
 `heif-enc` from libheif, the JPEG XL ones `cjxl` from libjxl, and the
-measurement rasters at the end need GDAL. Eleven fixtures need Python as well,
+measurement rasters at the end need GDAL, and one of them libtiff's `tiffcp`. Eleven fixtures need Python as well,
 because ImageMagick will not write what they exist for: neither `cICP` nor
 `iCCP` for PNG, neither an `EXIF` chunk nor an animation for WebP, an `eXIf`
 chunk on the PNG that `cjxl` reads a JPEG XL's orientation from, for ICO
@@ -44,7 +44,7 @@ mapping.
 | PNG color tags | `cICP` for BT.2100 PQ on BT.2020 — the whole of how a PNG says it is HDR — and `iCCP` for Display P3 |
 | JPEG | baseline, grayscale, progressive, 4:2:0 subsampling |
 | TIFF | gray / RGB / RGBA at 8 and 16 bits, 32-bit float, LZW / Deflate / PackBits / uncompressed, big-endian, tiled, five strips of which the last is short, and two directories of which the second is upside down |
-| TIFF as raster data | BigTIFF, Deflate + floating-point predictor + tiling (how DEMs ship), signed Int16, GDAL no-data sentinel, JPEG compression with its YCbCr pixels and subsampled chroma (how scanned maps ship) |
+| TIFF as raster data | BigTIFF, Deflate + floating-point predictor + tiling (how DEMs ship), signed Int16, GDAL no-data sentinel, JPEG compression with its YCbCr pixels and subsampled chroma (how scanned maps ship), an internal mask directory between two pages |
 | Radiance | RGBE with its shared exponent |
 | OpenEXR | RGB, RGBA with associated alpha, zip compression |
 | HEIF | RGB / RGBA / monochrome / monochrome + a separate alpha plane at 8 bits, 10-bit, an `irot` rotation, and AV1 in the same container |

@@ -623,6 +623,18 @@ const FIXTURES: &[Fixture] = &[
         tolerance: EXACT,
     },
     Fixture {
+        file: "tiff-mask.tif",
+        covers: "a GDAL internal mask between the picture and its second page: not a page, and stepped over to reach the one after it",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
         file: "tiff-jpeg.tif",
         covers: "JPEG compression — YCbCr with the chroma subsampled, converted back here — in tiles the last row of which is short",
         channels: Channels::Rgb,
@@ -1740,6 +1752,14 @@ const SEQUENCES: &[(&str, Sequence)] = &[
             default: 0,
         },
     ),
+    // Three directories, of which the middle one is the first's mask.
+    (
+        "tiff-mask.tif",
+        Sequence::Pages {
+            count: 2,
+            default: 0,
+        },
+    ),
     // The 32x24 entry is listed first and is the one shown.
     (
         "ico-multi.ico",
@@ -1864,17 +1884,21 @@ fn a_frame_is_finished_the_way_a_still_is() {
 /// at one and the bar counts from the other.
 #[test]
 fn a_paged_file_exposes_its_pages() {
-    let tiff = directory().join("tiff-pages.tif");
-    let first = load(&tiff, Overrides::default()).unwrap();
-    let second = load_page(&tiff, Overrides::default(), 1).unwrap();
-    for (x, y) in PROBES {
-        assert_eq!(
-            rgb(&second, x, y),
-            rgb(&first, 31 - x, 23 - y),
-            "at {x},{y}"
-        );
+    // The second holds a mask between its two pages, which must be stepped
+    // over rather than shown, or refused, as a page.
+    for file in ["tiff-pages.tif", "tiff-mask.tif"] {
+        let tiff = directory().join(file);
+        let first = load(&tiff, Overrides::default()).unwrap();
+        let second = load_page(&tiff, Overrides::default(), 1).unwrap();
+        for (x, y) in PROBES {
+            assert_eq!(
+                rgb(&second, x, y),
+                rgb(&first, 31 - x, 23 - y),
+                "{file} at {x},{y}"
+            );
+        }
+        assert!(load_page(&tiff, Overrides::default(), 2).is_err(), "{file}");
     }
-    assert!(load_page(&tiff, Overrides::default(), 2).is_err());
 
     let ico = directory().join("ico-multi.ico");
     let large = load_page(&ico, Overrides::default(), 0).unwrap();
