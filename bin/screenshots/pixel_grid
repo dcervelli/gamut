@@ -2,7 +2,7 @@
 # The README's pixel grid: a landscape in a 1000x600 window with the grid
 # on, the wheel turned over the stag until the grid is down to single
 # pixels, a beat, and Space to fit the whole picture again. The wheel is
-# mouse.py's, and the pointer is in the film, since what it is over is the
+# device.py's, and the pointer is in the film, since what it is over is the
 # point.
 #
 #   bin/screenshots/pixel_grid            on ~/Downloads/0-winding-road.webp
