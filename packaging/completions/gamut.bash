@@ -27,7 +27,7 @@ _gamut() {
         return
     fi
 
-    _filedir '@(jpg|jpeg|jpe|jfif|png|gif|bmp|tif|tiff|webp|jxl|avif|heic|heif|hif|ico|hdr|exr|pnm|pbm|pgm|ppm|pam|JPG|JPEG|PNG|GIF|BMP|TIF|TIFF|WEBP|JXL|AVIF|HEIC|HEIF|HIF|ICO|HDR|EXR)'
+    _filedir '@(jpg|jpeg|jpe|jfif|png|gif|bmp|tif|tiff|webp|jxl|avif|heic|heif|hif|ico|hdr|exr|pnm|pbm|pgm|ppm|pam|dng|nef|nrw|cr2|cr3|crw|arw|srf|sr2|raf|orf|rw2|rwl|pef|srw|3fr|fff|iiq|mef|mos|erf|dcr|kdc|mrw|JPG|JPEG|PNG|GIF|BMP|TIF|TIFF|WEBP|JXL|AVIF|HEIC|HEIF|HIF|ICO|HDR|EXR|DNG|NEF|NRW|CR2|CR3|CRW|ARW|SRF|SR2|RAF|ORF|RW2|RWL|PEF|SRW|3FR|FFF|IIQ|MEF|MOS|ERF|DCR|KDC|MRW)'
 }
 
 complete -F _gamut gamut

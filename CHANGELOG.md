@@ -8,6 +8,13 @@ Notable changes to `gamut`. The format follows
 
 ### Added
 
+- Camera raw files open: DNG, NEF, CR2, CR3, ARW, RAF, ORF, RW2, PEF, SRW
+  and the rest of what LibRaw reads, developed through the system library
+  with the camera's own white balance and matrix and nothing else — linear
+  light, sixteen bits, in Rec. 2020, shown at 0–1 like the photograph it is.
+  A raw under a `.tif` name is still recognized as one. The package now
+  depends on `libraw`.
+
 - `Ctrl+P` opens a file chooser over the picture: type to filter the
   session's files by name — fuzzily, and by directory too when the list
   spans more than one, or by place in the list with `:12` — arrow through

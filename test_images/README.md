@@ -8,7 +8,7 @@ from the outside world.
 Regenerate with `./generate.sh` — it is the authoritative description of how
 each file was made. Most fixtures need only ImageMagick; the HEIF ones need
 `heif-enc` from libheif, the JPEG XL ones `cjxl` from libjxl, and the
-measurement rasters at the end need GDAL. Eleven fixtures need Python as well,
+measurement rasters at the end need GDAL. Twelve fixtures need Python as well,
 because ImageMagick will not write what they exist for: neither `cICP` nor
 `iCCP` for PNG, neither an `EXIF` chunk nor an animation for WebP, an `eXIf`
 chunk on the PNG that `cjxl` reads a JPEG XL's orientation from, for ICO
@@ -59,8 +59,9 @@ mapping.
 | ICO directory | a PNG entry that is not RGBA and one carrying an `iCCP` profile, both of which `image`'s own ICO decoder refuses, and a two-size directory whose larger entry is the shallower |
 | BMP | 24-bit, 32-bit with bitfield masks and alpha, a 4-bit palette, an 8-bit palette with `BI_RLE8` runs, and one whose rows are stored top-down |
 | netpbm | binary PPM and PGM at 8 bits, binary PPM at 16, an ASCII PPM, a bitmap at one bit per pixel, a PAM with alpha, and a PGM whose `MAXVAL` is 1023 rather than the width of its samples |
+| Camera raw | a DNG of RGGB-mosaiced counts, twelve bits in sixteen-bit words, with a color matrix that makes the camera's space Rec. 2020 — the one raw format anything but a camera can write, developed through LibRaw the way every other raw is |
 | Routing | `mislabeled.tif` (a PNG, found by sniffing), `.jpeg`, `.tiff`, `.heif` and `.pnm` spellings |
-| Failure | `unsupported.tga`, `bad-truncated.png` |
+| Failure | `unsupported.tga`, `bad-truncated.png`, `bad-truncated.dng` |
 
 `src/image/decode/fixture_tests.rs` asserts that this directory and its
 fixture table stay in step, so a file cannot be added without a test and a

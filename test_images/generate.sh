@@ -31,7 +31,7 @@ trap 'rm -rf "$work"' EXIT
 # Start clean, so a renamed fixture does not leave its predecessor behind.
 rm -f ./*.png ./*.jpg ./*.jpeg ./*.tif ./*.tiff ./*.hdr ./*.exr ./*.gif \
       ./*.heic ./*.heif ./*.avif ./*.webp ./*.jxl ./*.ico ./*.bmp ./*.tga \
-      ./*.pnm ./*.pbm ./*.pgm ./*.ppm ./*.pam
+      ./*.pnm ./*.pbm ./*.pgm ./*.ppm ./*.pam ./*.dng
 
 quad '#FF0000' '#00FF00' '#0000FF' '#FFFFFF' "$work/color.png"
 quad '#000000' '#555555' '#AAAAAA' '#FFFFFF' "$work/gray.png"
@@ -562,7 +562,88 @@ VRT
 gdal_translate -q -of GTiff -a_nodata -9999 -co COMPRESS=NONE \
   "$work/nodata.vrt" tiff-nodata.tif
 
+# ---------------------------------------------------------- camera raw
+# What a camera writes: not a picture but one count per photosite, under a
+# color filter, with the matrix that says what the counts mean. DNG is the
+# one raw format anything but a camera can write, so it stands for all of
+# them; LibRaw develops it through the same pipeline a NEF goes through.
+# The pattern is mosaiced RGGB — a red quadrant is red counts at the red
+# sites and nothing at the others — and the matrix makes the camera's space
+# Rec. 2020 exactly, so the developed quadrants come out as the pattern with
+# nothing to balance or convert. Twelve-bit counts in sixteen-bit words, so
+# that the white level has to be read rather than assumed.
+python3 - dng-cfa.dng <<'DNG'
+import struct, sys
+
+WIDTH, HEIGHT, WHITE = 32, 24, 4095
+
+# The four quadrants' colors, mosaiced RGGB: each photosite keeps the one
+# channel its filter passes.
+def quadrant(x, y):
+    return [(1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 1, 1)][(2 if y >= 12 else 0) + (1 if x >= 16 else 0)]
+counts = []
+for y in range(HEIGHT):
+    for x in range(WIDTH):
+        r, g, b = quadrant(x, y)
+        counts.append([r, g, g, b][(y % 2) * 2 + (x % 2)] * WHITE)
+pixels = struct.pack(f"<{len(counts)}H", *counts)
+
+# XYZ (D65) to Rec. 2020: with this as the camera's matrix, the camera's
+# space is Rec. 2020 and a developed pixel is its counts, balanced by nothing.
+matrix = [1716651, -355671, -253366, -666684, 1616481, 15769, 17640, -42771, 942103]
+
+SHORT, LONG, RATIONAL, SRATIONAL, ASCII, BYTE = 3, 4, 5, 10, 2, 1
+entries = [
+    (254, LONG, [0]),                       # NewSubfileType: the picture itself
+    (256, LONG, [WIDTH]), (257, LONG, [HEIGHT]),
+    (258, SHORT, [16]), (259, SHORT, [1]),  # BitsPerSample, uncompressed
+    (262, SHORT, [32803]),                  # PhotometricInterpretation: CFA
+    (271, ASCII, b"gamut\0"), (272, ASCII, b"fixture\0"),
+    (273, LONG, [0]),                       # StripOffsets, patched below
+    (274, SHORT, [1]), (277, SHORT, [1]), (278, LONG, [HEIGHT]),
+    (279, LONG, [len(pixels)]), (284, SHORT, [1]),
+    (33421, SHORT, [2, 2]), (33422, BYTE, bytes([0, 1, 1, 2])),   # RGGB
+    (50706, BYTE, bytes([1, 4, 0, 0])), (50707, BYTE, bytes([1, 1, 0, 0])),
+    (50708, ASCII, b"gamut fixture\0"),
+    (50717, LONG, [WHITE]),                                       # WhiteLevel
+    (50721, SRATIONAL, [(m, 1000000) for m in matrix]),           # ColorMatrix1
+    (50728, RATIONAL, [(1, 1)] * 3),                              # AsShotNeutral
+    (50778, SHORT, [21]),                                         # D65
+]
+entries.sort()
+
+def pack(kind, values):
+    if kind in (ASCII, BYTE):
+        return bytes(values), len(values)
+    if kind == SHORT:
+        return struct.pack(f"<{len(values)}H", *values), len(values)
+    if kind == LONG:
+        return struct.pack(f"<{len(values)}I", *values), len(values)
+    code = "<II" if kind == RATIONAL else "<ii"
+    return b"".join(struct.pack(code, *v) for v in values), len(values)
+
+directory_at = 8
+overflow_at = directory_at + 2 + 12 * len(entries) + 4
+directory, overflow = b"", b""
+for tag, kind, values in entries:
+    raw, count = pack(kind, values)
+    if tag == 273:
+        directory += struct.pack("<HHI", tag, kind, count) + b"STRP"
+    elif len(raw) <= 4:
+        directory += struct.pack("<HHI", tag, kind, count) + raw.ljust(4, b"\0")
+    else:
+        directory += struct.pack("<HHI", tag, kind, count) + struct.pack("<I", overflow_at + len(overflow))
+        overflow += raw + (b"\0" if len(raw) % 2 else b"")
+strip_at = overflow_at + len(overflow)
+directory = directory.replace(b"STRP", struct.pack("<I", strip_at))
+out = b"II\x2a\x00" + struct.pack("<I", directory_at) + struct.pack("<H", len(entries)) + directory + struct.pack("<I", 0) + overflow + pixels
+open(sys.argv[1], "wb").write(out)
+DNG
+
 # ------------------------------------------------------- negative fixtures
+# A DNG cut off inside its directory: claimed by the raw decoder, since the
+# entries that survive say what it is, then refused by LibRaw.
+head -c 100 dng-cfa.dng > bad-truncated.dng
 # A PNG header followed by rubbish: the decoder is chosen, then fails.
 { printf '\211PNG\r\n\032\n'; head -c 64 /dev/zero | tr '\0' 'X'; } > bad-truncated.png
 # A real image in a format this build does not include. Targa has no decoder
@@ -575,4 +656,4 @@ cp png-rgb8.png mislabeled.tif
 
 echo "generated $(ls -1 *.png *.jpg *.jpeg *.tif *.tiff *.hdr *.exr *.gif \
                     *.heic *.heif *.avif *.webp *.jxl *.ico *.bmp *.tga \
-                    *.pnm *.pbm *.pgm *.ppm *.pam | wc -l) fixtures"
+                    *.pnm *.pbm *.pgm *.ppm *.pam *.dng | wc -l) fixtures"
