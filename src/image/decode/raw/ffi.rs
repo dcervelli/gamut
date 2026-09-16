@@ -9,7 +9,8 @@
 //!
 //! Two structs are transcribed, because two facts have no accessor: the
 //! orientation the camera recorded, which decides whether the picture is
-//! taller than it is wide, and the color count. They sit at the front of
+//! taller than it is wide and which way the preview has to be turned, and
+//! the color count. They sit at the front of
 //! [`Data`], behind one pointer, and their layout is what `build.rs` pins the
 //! library version for. [`super::Raw`] checks the transcription against the
 //! accessors at run time as well, so a library whose layout has moved is an
@@ -74,6 +75,59 @@ pub struct Params {
     pub xmpdata: *mut c_char,
 }
 
+/// `libraw_gps_info_t`, as far as it is read: nothing, since the position
+/// is read from the EXIF where a file has one, but it sits inside
+/// [`Other`] and its size places what follows.
+#[repr(C)]
+pub struct Gps {
+    pub latitude: [c_float; 3],
+    pub longitude: [c_float; 3],
+    pub gpstimestamp: [c_float; 3],
+    pub altitude: c_float,
+    pub altref: c_char,
+    pub latref: c_char,
+    pub longref: c_char,
+    pub gpsstatus: c_char,
+    pub gpsparsed: c_char,
+}
+
+/// `libraw_imgother_t`: the exposure and the words, as LibRaw parsed them
+/// out of whatever the container keeps them in — which for a CRW is the
+/// only reading there is. Reached through `libraw_get_imgother`, so only
+/// the front of it need be right, and all of it is here.
+#[repr(C)]
+pub struct Other {
+    pub iso_speed: c_float,
+    pub shutter: c_float,
+    pub aperture: c_float,
+    pub focal_len: c_float,
+    pub timestamp: libc::time_t,
+    pub shot_order: c_uint,
+    pub gpsdata: [c_uint; 32],
+    pub parsed_gps: Gps,
+    pub desc: [c_char; 512],
+    pub artist: [c_char; 64],
+    pub analogbalance: [c_float; 4],
+}
+
+/// The front of `libraw_lensinfo_t`: the lens's name and range. The struct
+/// goes on with the maker's own view of the lens, which is not transcribed;
+/// it is reached through `libraw_get_lensinfo`, so a prefix reads the
+/// front of the real thing.
+#[repr(C)]
+pub struct Lens {
+    pub min_focal: c_float,
+    pub max_focal: c_float,
+    pub max_aperture_at_min_focal: c_float,
+    pub max_aperture_at_max_focal: c_float,
+    pub exif_max_aperture: c_float,
+    pub lens_make: [c_char; 128],
+    pub lens: [c_char; 128],
+    pub lens_serial: [c_char; 128],
+    pub internal_lens_serial: [c_char; 128],
+    pub focal_length_in_35mm_format: u16,
+}
+
 /// The front of `libraw_data_t`, as far as the two structs above. The real
 /// struct goes on for kilobytes past this, so one of these is only ever
 /// looked at through the pointer [`libraw_init`] hands back, never made.
@@ -98,11 +152,18 @@ pub struct Processed {
     pub data: [u8; 1],
 }
 
+/// `LIBRAW_IMAGE_JPEG`: [`Processed`] holds a JPEG file, byte for byte.
+pub const IMAGE_JPEG: c_int = 1;
 /// `LIBRAW_IMAGE_BITMAP`: [`Processed`] holds pixels rather than a JPEG.
 pub const IMAGE_BITMAP: c_int = 2;
 
 /// `LIBRAW_SUCCESS`.
 pub const SUCCESS: c_int = 0;
+/// `LIBRAW_NO_THUMBNAIL`: the file carries no preview.
+pub const NO_THUMBNAIL: c_int = -5;
+/// `LIBRAW_UNSUPPORTED_THUMBNAIL`: it carries one in a form the library
+/// cannot copy out.
+pub const UNSUPPORTED_THUMBNAIL: c_int = -6;
 
 /// The demosaic `user_qual` codes: AHD is dcraw's default and the one every
 /// other developer compares itself to.
@@ -124,6 +185,8 @@ unsafe extern "C" {
     pub fn libraw_dcraw_process(data: *mut Data) -> c_int;
     pub fn libraw_dcraw_make_mem_image(data: *mut Data, code: *mut c_int) -> *mut Processed;
     pub fn libraw_dcraw_clear_mem(image: *mut Processed);
+    pub fn libraw_unpack_thumb(data: *mut Data) -> c_int;
+    pub fn libraw_dcraw_make_mem_thumb(data: *mut Data, code: *mut c_int) -> *mut Processed;
 
     pub fn libraw_set_demosaic(data: *mut Data, value: c_int);
     pub fn libraw_set_output_color(data: *mut Data, value: c_int);
@@ -135,5 +198,10 @@ unsafe extern "C" {
     pub fn libraw_get_iwidth(data: *mut Data) -> c_int;
     pub fn libraw_get_iheight(data: *mut Data) -> c_int;
     pub fn libraw_get_cam_mul(data: *mut Data, index: c_int) -> c_float;
+    pub fn libraw_get_pre_mul(data: *mut Data, index: c_int) -> c_float;
+    pub fn libraw_get_rgb_cam(data: *mut Data, row: c_int, column: c_int) -> c_float;
+    pub fn libraw_get_color_maximum(data: *mut Data) -> c_int;
     pub fn libraw_get_iparams(data: *mut Data) -> *mut Params;
+    pub fn libraw_get_imgother(data: *mut Data) -> *mut Other;
+    pub fn libraw_get_lensinfo(data: *mut Data) -> *mut Lens;
 }

@@ -13,7 +13,15 @@ Notable changes to `gamut`. The format follows
   with the camera's own white balance and matrix and nothing else — linear
   light, sixteen bits, in Rec. 2020, shown at 0–1 like the photograph it is.
   A raw under a `.tif` name is still recognized as one. The package now
-  depends on `libraw`.
+  depends on `libraw`. A raw's thumbnail is the JPEG the camera wrote into
+  it, turned the way the camera was held, so the chooser fills in
+  milliseconds rather than at half a second a file. The information panel
+  reads the metadata of every raw format — CR3, RAF, ORF, RW2 and MRW keep
+  it somewhere a TIFF reader cannot see — and adds a Sensor section: the
+  sensor and the picture inside it, the filter pattern, the white level,
+  the white balance and the camera matrix. For a CRW, which has no
+  metadata block at all, the header's own camera, exposure and time are
+  shown instead.
 
 - `Ctrl+P` opens a file chooser over the picture: type to filter the
   session's files by name — fuzzily, and by directory too when the list

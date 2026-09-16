@@ -382,15 +382,26 @@ Caveats:
   start without it: `libraw-dev` on Debian and Ubuntu, `libraw` on Arch,
   `brew install libraw` on macOS.
 - **Developing takes time.** A 24-megapixel frame opens in about half a
-  second, a Fujifilm X-Trans frame in one or two, and the file chooser's
-  thumbnails are made the same slow way. Stepping through a directory of
-  raws is a directory of half-second waits.
+  second, a Fujifilm X-Trans frame in one or two. Stepping through a
+  directory of raws is a directory of half-second waits. The file chooser's
+  thumbnails are quick, because they are made from the JPEG the camera
+  wrote into the file — which also means a thumbnail looks like the
+  camera's own rendering, brighter and with more contrast than the
+  developed picture it opens into.
 - **The picture is wide-gamut.** It is developed into Rec. 2020, so colors
   a camera records beyond what sRGB holds survive; on an ordinary monitor
   they are brought into range on the way to the screen like any other
   wide-gamut file.
 - **Lens corrections are not applied,** and neither is noise reduction: the
   frame is the sensor's, distortion and vignetting included.
+- **The information panel reads every format's metadata,** including the
+  ones that keep it somewhere other than where a TIFF would, and adds a
+  Sensor section: the sensor's size and the picture's inside it, the color
+  filter pattern, the white level, the white balance the camera set and
+  the daylight one its matrix implies, and the matrix itself. The one
+  format with no metadata to read is Canon's old CRW, and there the panel
+  says what the file's own header does: the camera, the exposure, the
+  focal length and the time.
 - **A few cameras from the early 2000s open in a window of the wrong
   shape,** then settle: those whose photosites were not square have their
   picture stretched to fix that, by an amount the header does not state.

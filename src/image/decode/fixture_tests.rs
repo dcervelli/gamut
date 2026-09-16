@@ -1496,6 +1496,19 @@ fn every_fixture_decodes_to_what_it_says_it_does() {
     }
 }
 
+/// A preview is a courtesy, never a failure: every fixture answers the
+/// question, and the one format here that could carry one — a DNG — says
+/// it has none, since nothing but a camera writes one in.
+#[test]
+fn every_fixture_answers_for_its_preview() {
+    for fixture in FIXTURES {
+        let path = directory().join(fixture.file);
+        let preview = crate::image::decode::preview(&path, Overrides::default())
+            .unwrap_or_else(|error| panic!("{}: {error:#}", fixture.file));
+        assert!(preview.is_none(), "{} carries a preview", fixture.file);
+    }
+}
+
 #[test]
 fn rejected_fixtures_fail_with_a_useful_message() {
     for (file, phrase) in REJECTED {
@@ -1519,7 +1532,11 @@ fn rejected_fixtures_fail_with_a_useful_message() {
 fn the_fixture_directory_and_the_table_agree() {
     let mut on_disk: Vec<String> = std::fs::read_dir(directory())
         .expect("test_images/ is missing")
-        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .map(|entry| entry.unwrap())
+        // `raw-samples/` is the camera files the ignored sample test runs
+        // on, fetched rather than kept.
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
         // `.icc` is an input to the generator, not a fixture in its own right.
         .filter(|name| !name.ends_with(".sh") && !name.ends_with(".md") && !name.ends_with(".icc"))
         .collect();

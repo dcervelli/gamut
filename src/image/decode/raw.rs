@@ -19,6 +19,13 @@
 //! window opens at 0..1 rather than being stretched to whatever the frame
 //! holds, and a dark frame arrives dark, as it was shot.
 //!
+//! Every raw carries the camera's own JPEG of the frame, and that is what
+//! [`super::Decoder::preview`] hands back: turned the way the camera was
+//! held, since the JPEG is stored as the sensor saw it and the orientation
+//! beside it, and otherwise as the camera rendered it — its curve, its
+//! balance. A likeness of the picture for a thumbnail, found in a few
+//! milliseconds where developing the frame takes hundreds.
+//!
 //! The file is read whole and handed over as one buffer. LibRaw reads by
 //! seeking about a stream, and a buffer is the one form of stream its C
 //! interface takes; a raw is tens of megabytes, which is a few milliseconds
@@ -31,9 +38,12 @@ use std::os::raw::c_int;
 
 use anyhow::{Result, anyhow, bail};
 
+use crate::image::exif::{Entry, Section};
 use crate::image::{
     AlphaMode, Channels, ColorSpace, DecodedImage, Primaries, Referred, Samples, Transfer,
 };
+
+use super::dynamic;
 
 pub struct Raw;
 
@@ -63,6 +73,29 @@ impl super::Decoder for Raw {
             return Ok(None);
         }
         Ok(Some(handle.output_size()))
+    }
+
+    fn preview(
+        &self,
+        source: &mut dyn super::ReadSeek,
+        overrides: super::Overrides,
+    ) -> Result<Option<DecodedImage>> {
+        let handle = Handle::open(source)?;
+        // A file with no preview in it is a file with none, not a failure.
+        if !handle.unpack_thumbnail()? {
+            return Ok(None);
+        }
+        let thumbnail = handle.make_thumbnail()?;
+        let image = match thumbnail.kind() {
+            ffi::IMAGE_JPEG => super::jpeg::decode(thumbnail.bytes(), overrides)?,
+            ffi::IMAGE_BITMAP => thumbnail.bitmap()?,
+            other => bail!("LibRaw handed back a preview of kind {other}"),
+        };
+        // The JPEG is stored as the sensor saw the scene, with the way the
+        // camera was held beside it; the developed picture is turned to
+        // match, so the preview is too.
+        let image = dynamic::reorient(image, handle.orientation())?;
+        Ok(Some(image))
     }
 
     fn decode(
@@ -101,6 +134,24 @@ impl super::Decoder for Raw {
         image.referred = Referred::Display;
         Ok(image)
     }
+}
+
+/// What LibRaw read out of the header, for the information panel: the
+/// sensor and how the file describes it, as one section, and the exposure
+/// as the library parsed it from the maker's own block, as the entries the
+/// panel's `Camera` section is made of. The second is for the files the
+/// EXIF reader gets nothing or too little out of — a CRW has no EXIF at
+/// all, and a Phase One's names the camera and stops — and the panel takes
+/// from it whatever the EXIF did not say.
+pub(super) fn facts(source: &mut dyn super::ReadSeek) -> Result<(Vec<Entry>, Section)> {
+    let handle = Handle::open(source)?;
+    Ok((
+        handle.camera(),
+        Section {
+            name: "Sensor",
+            entries: handle.sensor(),
+        },
+    ))
 }
 
 /// One LibRaw handle over one file's bytes. The bytes live here because the
@@ -164,6 +215,171 @@ impl Handle {
         unsafe { &(*self.data).sizes }
     }
 
+    fn params(&self) -> &ffi::Params {
+        // SAFETY: as `sizes`.
+        unsafe { &(*self.data).idata }
+    }
+
+    fn other(&self) -> &ffi::Other {
+        // SAFETY: the accessor hands back a pointer into the open handle's
+        // own struct, which lives as long as the handle.
+        unsafe { &*ffi::libraw_get_imgother(self.data) }
+    }
+
+    fn lens(&self) -> &ffi::Lens {
+        // SAFETY: as `other`; `Lens` is a prefix of the struct pointed at.
+        unsafe { &*ffi::libraw_get_lensinfo(self.data) }
+    }
+
+    /// What took the picture and how, as LibRaw parsed it: the panel's
+    /// `Camera` section for a file the EXIF reader found nothing in.
+    fn camera(&self) -> Vec<Entry> {
+        let mut rows = Vec::new();
+        let params = self.params();
+        let make = text(&params.make);
+        let model = text(&params.model);
+        let camera = match (make, model) {
+            (Some(make), Some(model)) if model.starts_with(&make) => Some(model),
+            (Some(make), Some(model)) => Some(format!("{make} {model}")),
+            (some, None) | (None, some) => some,
+        };
+        push(&mut rows, "Camera", camera);
+        push(&mut rows, "Lens", text(&self.lens().lens));
+
+        let other = self.other();
+        if other.timestamp > 0 {
+            // dcraw makes the camera's date a `time_t` as if it were in this
+            // machine's zone, so the same zone gives the camera's fields back.
+            let taken = crate::clock::local(
+                std::time::UNIX_EPOCH + std::time::Duration::from_secs(other.timestamp as u64),
+            );
+            push(
+                &mut rows,
+                "Taken",
+                Some(format!(
+                    "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+                    taken.year, taken.month, taken.day, taken.hour, taken.minute, taken.second
+                )),
+            );
+        }
+        let mut exposure = Vec::new();
+        if other.shutter > 0.0 {
+            exposure.push(if other.shutter < 1.0 {
+                format!("1/{} s", tidy((1.0 / other.shutter).round()))
+            } else {
+                format!("{} s", tidy(other.shutter))
+            });
+        }
+        if other.aperture > 0.0 {
+            // To a tenth, which is how an f-number is spoken; the maker's
+            // block holds it to more places than the lens was ever set to.
+            let aperture = format!("{:.1}", other.aperture);
+            exposure.push(format!("f/{}", aperture.trim_end_matches(".0")));
+        }
+        if other.iso_speed > 0.0 {
+            exposure.push(format!("ISO {}", tidy(other.iso_speed)));
+        }
+        push(&mut rows, "Exposure", join(&exposure));
+        if other.focal_len > 0.0 {
+            push(
+                &mut rows,
+                "Focal length",
+                Some(format!("{} mm", tidy(other.focal_len))),
+            );
+        }
+        rows
+    }
+
+    /// The sensor and what the file says about it: the frame's size and the
+    /// picture's inside it, the filter pattern, the white level, the
+    /// balances, the matrix.
+    fn sensor(&self) -> Vec<Entry> {
+        let mut rows = Vec::new();
+        let sizes = self.sizes();
+        let params = self.params();
+        push(
+            &mut rows,
+            "Sensor",
+            Some(format!("{} × {}", sizes.raw_width, sizes.raw_height)),
+        );
+        let (width, height) = (u32::from(sizes.width), u32::from(sizes.height));
+        if (width, height) != (u32::from(sizes.raw_width), u32::from(sizes.raw_height)) {
+            let at = match (sizes.left_margin, sizes.top_margin) {
+                (0, 0) => String::new(),
+                (left, top) => format!(" at {left}, {top}"),
+            };
+            push(
+                &mut rows,
+                "Picture",
+                Some(format!("{width} × {height}{at}")),
+            );
+        }
+        push(&mut rows, "Filter pattern", Some(pattern(params)));
+        if params.colors > 0 {
+            push(&mut rows, "Colors", Some(params.colors.to_string()));
+        }
+        // SAFETY: accessors on an open handle.
+        let (maximum, camera, daylight, matrix) = unsafe {
+            let each = |get: unsafe extern "C" fn(*mut ffi::Data, c_int) -> f32| -> Vec<f32> {
+                (0..4).map(|index| get(self.data, index)).collect()
+            };
+            let mut matrix = [[0.0f32; 4]; 3];
+            for (row, values) in matrix.iter_mut().enumerate() {
+                for (column, value) in values.iter_mut().enumerate() {
+                    *value = ffi::libraw_get_rgb_cam(self.data, row as c_int, column as c_int);
+                }
+            }
+            (
+                ffi::libraw_get_color_maximum(self.data),
+                each(ffi::libraw_get_cam_mul),
+                each(ffi::libraw_get_pre_mul),
+                matrix,
+            )
+        };
+        if maximum > 0 {
+            push(&mut rows, "White level", Some(maximum.to_string()));
+        }
+        push(&mut rows, "White balance", multipliers(&camera));
+        push(&mut rows, "Daylight balance", multipliers(&daylight));
+        // Camera to sRGB, three rows of as many columns as the sensor has
+        // colors: what the library will develop through.
+        let columns = params.colors.clamp(3, 4) as usize;
+        if matrix.iter().flatten().any(|value| *value != 0.0) {
+            let rows_text: Vec<String> = matrix
+                .iter()
+                .map(|row| {
+                    row[..columns]
+                        .iter()
+                        .map(|value| format!("{value:.4}"))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+                .collect();
+            push(&mut rows, "Matrix to sRGB", Some(rows_text.join(" / ")));
+        }
+        if params.dng_version != 0 {
+            let version = params.dng_version;
+            push(
+                &mut rows,
+                "DNG version",
+                Some(format!(
+                    "{}.{}.{}.{}",
+                    version >> 24,
+                    (version >> 16) & 0xff,
+                    (version >> 8) & 0xff,
+                    version & 0xff
+                )),
+            );
+        }
+        if params.raw_count > 1 {
+            push(&mut rows, "Frames", Some(params.raw_count.to_string()));
+        }
+        if params.is_foveon != 0 {
+            push(&mut rows, "Sensor type", Some("Foveon".to_string()));
+        }
+        rows
+    }
+
     /// The developed picture's size: the cropped sensor, turned the way the
     /// camera was held.
     fn output_size(&self) -> (u32, u32) {
@@ -176,6 +392,42 @@ impl Handle {
         } else {
             (width, height)
         }
+    }
+
+    /// The way the camera was held, as `image` spells it. dcraw's `flip` is
+    /// its own numbering — 3 upside down, 5 a quarter turn one way, 6 the
+    /// other — and each of those is one of EXIF's, which `image` reads.
+    fn orientation(&self) -> ::image::metadata::Orientation {
+        use ::image::metadata::Orientation;
+        let exif = match self.sizes().flip {
+            3 => 3,
+            5 => 8,
+            6 => 6,
+            _ => 1,
+        };
+        Orientation::from_exif(exif).unwrap_or(Orientation::NoTransforms)
+    }
+
+    /// Reads the preview out of the file, saying whether there was one.
+    fn unpack_thumbnail(&self) -> Result<bool> {
+        // SAFETY: an open handle.
+        let code = unsafe { ffi::libraw_unpack_thumb(self.data) };
+        match code {
+            ffi::SUCCESS => Ok(true),
+            ffi::NO_THUMBNAIL | ffi::UNSUPPORTED_THUMBNAIL => Ok(false),
+            other => Err(anyhow!("reading the preview: {}", describe(other))),
+        }
+    }
+
+    fn make_thumbnail(&self) -> Result<Developed> {
+        let mut code = ffi::SUCCESS;
+        // SAFETY: the preview has been unpacked; the code is written through
+        // the pointer given.
+        let image = unsafe { ffi::libraw_dcraw_make_mem_thumb(self.data, &mut code) };
+        if image.is_null() {
+            bail!("copying the preview out: {}", describe(code));
+        }
+        Ok(Developed { image })
     }
 
     /// The least a raw can be developed: linear, unbrightened, sixteen bits,
@@ -241,6 +493,71 @@ impl Drop for Handle {
     }
 }
 
+/// A C string field as text, or nothing for an empty one.
+fn text(field: &[std::ffi::c_char]) -> Option<String> {
+    let bytes: Vec<u8> = field
+        .iter()
+        .map(|byte| *byte as u8)
+        .take_while(|byte| *byte != 0)
+        .collect();
+    let text = String::from_utf8_lossy(&bytes).trim().to_string();
+    (!text.is_empty()).then_some(text)
+}
+
+/// The color filter array as the letters of its repeating cell: `RGGB` for
+/// the common Bayer layouts, X-Trans by name, and none for a sensor that
+/// reads every color at every site.
+fn pattern(params: &ffi::Params) -> String {
+    match params.filters {
+        0 => "none".to_string(),
+        9 => "X-Trans".to_string(),
+        filters if params.colors > 0 => {
+            // dcraw's `FC`: two bits per site of a 2×2 cell, an index into
+            // the color names the camera lists.
+            let names: Vec<u8> = params.cdesc.iter().map(|byte| *byte as u8).collect();
+            let cell: String = (0..2)
+                .flat_map(|row| (0..2).map(move |column| (row, column)))
+                .map(|(row, column): (u32, u32)| {
+                    let index = (filters >> (((row << 1 & 14) + (column & 1)) << 1)) & 3;
+                    names.get(index as usize).copied().unwrap_or(b'?') as char
+                })
+                .collect();
+            cell
+        }
+        _ => "unknown".to_string(),
+    }
+}
+
+/// Multipliers as the panel writes them, green held at 1: what the balance
+/// does to red and blue against it, which is how a photographer reads one.
+fn multipliers(values: &[f32]) -> Option<String> {
+    let (red, green, blue) = (values[0], values[1], values[2]);
+    if red <= 0.0 || green <= 0.0 || blue <= 0.0 {
+        return None;
+    }
+    Some(format!(
+        "R {} · G 1 · B {}",
+        tidy(red / green),
+        tidy(blue / green)
+    ))
+}
+
+/// A number to a few decimals, without the trailing zeros.
+fn tidy(value: f32) -> String {
+    let text = format!("{value:.3}");
+    text.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+fn push(rows: &mut Vec<Entry>, name: &str, value: Option<String>) {
+    if let Some(value) = value.filter(|value| !value.is_empty()) {
+        rows.push(Entry::new(name, value));
+    }
+}
+
+fn join(parts: &[String]) -> Option<String> {
+    (!parts.is_empty()).then(|| parts.join(" \u{00b7} "))
+}
+
 /// What LibRaw says a code means.
 fn describe(code: c_int) -> String {
     // SAFETY: `libraw_strerror` returns a static string for any code.
@@ -248,40 +565,81 @@ fn describe(code: c_int) -> String {
     message.to_string_lossy().into_owned()
 }
 
-/// The picture LibRaw developed, in its own allocation, freed on drop.
+/// A picture LibRaw handed back — the developed frame, or the preview — in
+/// its own allocation, freed on drop.
 struct Developed {
     image: *mut ffi::Processed,
 }
 
 impl Developed {
-    /// The pixels, copied out as this program holds them.
-    fn take(&self) -> Result<(u32, u32, Channels, Vec<u16>)> {
-        // SAFETY: a non-null result of `dcraw_make_mem_image`, whose header
-        // fields say how many bytes follow it.
-        let header = unsafe { &*self.image };
+    fn header(&self) -> &ffi::Processed {
+        // SAFETY: a non-null result of `dcraw_make_mem_image` or
+        // `dcraw_make_mem_thumb`, whose header fields say how many bytes
+        // follow it.
+        unsafe { &*self.image }
+    }
+
+    fn kind(&self) -> c_int {
+        self.header().kind
+    }
+
+    /// Everything after the header: the JPEG, or the pixels.
+    fn bytes(&self) -> &[u8] {
+        let header = self.header();
+        // SAFETY: `data_size` bytes follow `data` in the allocation, which
+        // is what the library says it allocated.
+        unsafe { std::slice::from_raw_parts(header.data.as_ptr(), header.data_size as usize) }
+    }
+
+    /// The pixels of a bitmap, as `width`, `height`, channels and the
+    /// samples of `bits` each, checked against the byte count.
+    fn pixels(&self, bits: u16) -> Result<(u32, u32, Channels, &[u8])> {
+        let header = self.header();
         if header.kind != ffi::IMAGE_BITMAP {
-            bail!("LibRaw developed something other than a bitmap");
+            bail!("LibRaw handed back something other than a bitmap");
         }
-        if header.bits != 16 {
-            bail!("LibRaw developed {} bits per sample, not 16", header.bits);
+        if header.bits != bits {
+            bail!(
+                "LibRaw handed back {} bits per sample, not {bits}",
+                header.bits
+            );
         }
         let channels = match header.colors {
             1 => Channels::Gray,
             3 => Channels::Rgb,
-            other => bail!("LibRaw developed {other} colors per pixel"),
+            other => bail!("LibRaw handed back {other} colors per pixel"),
         };
         let (width, height) = (u32::from(header.width), u32::from(header.height));
         let samples = width as usize * height as usize * channels.count();
-        if header.data_size as usize != samples * 2 {
+        if header.data_size as usize != samples * usize::from(bits / 8) {
             bail!(
-                "LibRaw developed {width}x{height} with {} colors but handed back {} bytes",
+                "LibRaw handed back {width}x{height} with {} colors but {} bytes",
                 header.colors,
                 header.data_size
             );
         }
-        // SAFETY: `data_size` bytes follow `data` in the allocation, just
-        // checked to be the size the header implies.
-        let bytes = unsafe { std::slice::from_raw_parts(header.data.as_ptr(), samples * 2) };
+        Ok((width, height, channels, self.bytes()))
+    }
+
+    /// A preview kept as pixels rather than as a JPEG, which is what a few
+    /// makes write: eight-bit sRGB, the way a JPEG would decode.
+    fn bitmap(&self) -> Result<DecodedImage> {
+        let (width, height, channels, bytes) = self.pixels(8)?;
+        Ok(DecodedImage::new(
+            width,
+            height,
+            Samples::U8 {
+                channels,
+                data: bytes.to_vec(),
+            },
+            ColorSpace::SRGB,
+            AlphaMode::Opaque,
+        ))
+    }
+
+    /// The developed frame's pixels, copied out as this program holds them.
+    fn take(&self) -> Result<(u32, u32, Channels, Vec<u16>)> {
+        let (width, height, channels, bytes) = self.pixels(16)?;
         let data = bytes
             .as_chunks::<2>()
             .0
@@ -484,30 +842,87 @@ mod tests {
         assert!(tiff_holds_raw(&whole[..8 + 2 + 24]));
     }
 
-    /// Real cameras' files, from a directory named in `GAMUT_RAW_SAMPLES`:
-    /// each has to be recognized as a raw rather than as the TIFF or the
-    /// ISO media file it is dressed as, probe to the size it develops to,
-    /// and develop. The files are tens of megabytes each and belong to
-    /// their photographers, so they are not in the tree; raw.pixls.us has
-    /// one of nearly every camera under CC0.
+    /// The fixture's header, as the panel will read it: the sensor's size,
+    /// the filter cell the generator laid out, the white level it wrote in
+    /// twelve bits, and the balance of ones its neutral asks for. No
+    /// exposure, since nothing took the picture.
+    #[test]
+    fn the_fixture_reports_its_sensor() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("test_images")
+            .join("dng-cfa.dng");
+        let mut source = std::io::BufReader::new(std::fs::File::open(path).unwrap());
+        let (camera, sensor) = facts(&mut source).unwrap();
+
+        let names: Vec<&str> = camera.iter().map(|entry| entry.name.as_str()).collect();
+        assert_eq!(names, ["Camera"]);
+        assert_eq!(camera[0].value, "gamut fixture");
+
+        assert_eq!(sensor.name, "Sensor");
+        let find = |name: &str| {
+            sensor
+                .entries
+                .iter()
+                .find(|entry| entry.name == name)
+                .map(|entry| entry.value.as_str())
+        };
+        assert_eq!(find("Sensor"), Some("32 × 24"));
+        assert_eq!(find("Picture"), None, "the whole sensor is the picture");
+        assert_eq!(find("Filter pattern"), Some("RGGB"));
+        assert_eq!(find("White level"), Some("4095"));
+        assert_eq!(find("White balance"), Some("R 1 · G 1 · B 1"));
+        assert_eq!(find("DNG version"), Some("1.4.0.0"));
+        assert!(find("Matrix to sRGB").is_some());
+    }
+
+    #[test]
+    fn a_filter_cell_is_spelled_from_the_bit_pattern() {
+        let mut params: ffi::Params = unsafe { std::mem::zeroed() };
+        params.colors = 3;
+        for (index, byte) in b"RGBG".iter().enumerate() {
+            params.cdesc[index] = *byte as std::ffi::c_char;
+        }
+        // dcraw's code for RGGB, and X-Trans and none by their codes.
+        params.filters = 0x94949494;
+        assert_eq!(pattern(&params), "RGGB");
+        params.filters = 0x16161616;
+        assert_eq!(pattern(&params), "BGGR");
+        params.filters = 9;
+        assert_eq!(pattern(&params), "X-Trans");
+        params.filters = 0;
+        assert_eq!(pattern(&params), "none");
+    }
+
+    /// Real cameras' files, one of each format: each has to be recognized
+    /// as a raw rather than as the TIFF or the ISO media file it is dressed
+    /// as, probe to the size it develops to, develop, hand back its preview
+    /// the right way up and large enough to thumbnail from, and give up its
+    /// metadata. The files are tens of megabytes each and are not in the
+    /// tree: `test_images/raw-samples/fetch.sh` brings them down from
+    /// raw.pixls.us, and `GAMUT_RAW_SAMPLES` names another directory
+    /// instead.
     ///
     /// ```sh
-    /// GAMUT_RAW_SAMPLES=~/raws cargo test --release raw::tests::samples -- --ignored --nocapture
+    /// test_images/raw-samples/fetch.sh
+    /// cargo test --release raw::tests::samples -- --ignored --nocapture
     /// ```
     #[test]
-    #[ignore = "needs GAMUT_RAW_SAMPLES to name a directory of camera files"]
+    #[ignore = "needs the camera files test_images/raw-samples/fetch.sh brings down"]
     fn samples_are_recognized_probed_and_developed() {
-        use crate::image::decode::{Overrides, load_timed, probe, reader};
+        use crate::image::decode::{Overrides, load_timed, preview, probe, reader};
 
-        let Ok(directory) = std::env::var("GAMUT_RAW_SAMPLES") else {
-            return;
-        };
+        let directory = std::env::var("GAMUT_RAW_SAMPLES")
+            .unwrap_or_else(|_| format!("{}/test_images/raw-samples", env!("CARGO_MANIFEST_DIR")));
         let mut paths: Vec<_> = std::fs::read_dir(&directory)
             .expect("the samples directory")
             .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().is_some_and(|extension| extension != "sh"))
             .collect();
         paths.sort();
-        assert!(!paths.is_empty(), "{directory} holds no files");
+        assert!(
+            !paths.is_empty(),
+            "{directory} holds no camera files; run test_images/raw-samples/fetch.sh"
+        );
 
         for path in paths {
             let name = path.file_name().unwrap().to_string_lossy().into_owned();
@@ -527,13 +942,57 @@ mod tests {
                 );
             }
             assert_eq!(image.referred, Referred::Display, "{name}");
+
+            // The preview: present, turned the way the picture is, and
+            // large enough to thumbnail from.
+            let started = std::time::Instant::now();
+            let small = preview(&path, Overrides::default())
+                .unwrap_or_else(|error| panic!("{name}: {error:#}"))
+                .unwrap_or_else(|| panic!("{name} carries no preview"));
+            let preview_took = started.elapsed();
+            let landscape = |width: u32, height: u32| width >= height;
+            assert_eq!(
+                landscape(small.width, small.height),
+                landscape(image.width, image.height),
+                "{name}: the preview is {}x{} but the picture is {}x{}",
+                small.width,
+                small.height,
+                image.width,
+                image.height
+            );
+            assert!(
+                small.width.max(small.height) >= crate::thumbnail::SIDE,
+                "{name}: the preview is only {}x{}",
+                small.width,
+                small.height
+            );
+
+            let exif = crate::image::exif::Exif::read(&path);
+            let sections: Vec<String> = exif
+                .sections
+                .iter()
+                .map(|section| format!("{} ({})", section.name, section.entries.len()))
+                .collect();
             println!(
-                "{name}: {}x{} {:?} in {} ms",
+                "{name}: {}x{} {:?} in {} ms; preview {}x{} in {} ms; metadata: {}",
                 image.width,
                 image.height,
                 image.channels(),
-                took.as_millis()
+                took.as_millis(),
+                small.width,
+                small.height,
+                preview_took.as_millis(),
+                sections.join(", ")
             );
+            for section in exif
+                .sections
+                .iter()
+                .filter(|section| ["Camera", "Sensor"].contains(&section.name))
+            {
+                for entry in &section.entries {
+                    println!("    {}: {}", entry.name, entry.value);
+                }
+            }
         }
     }
 
