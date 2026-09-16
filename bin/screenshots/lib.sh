@@ -92,14 +92,8 @@ open() {
 
     # Focus follows the pointer, so the pointer goes in first; the keys
     # would otherwise land in whatever it was over.
-    set -- $(window geometry)
-    cursor $(($1 + $3 / 2)) $(($2 + $4 / 2))
-    hyprctl eval "hl.dispatch(hl.dsp.focus({ window = hl.get_window(\"address:$WINDOW\") }))" >/dev/null
-    for _ in $(seq 20); do
-        [ "$(hyprctl activewindow -j | jq -r .address)" = "$WINDOW" ] && break
-        sleep 0.1
-    done
-    sleep 0.5
+    park
+    sleep 0.3
 }
 
 # Wait for the file on its way to be on screen: the title says "loading"
@@ -110,9 +104,50 @@ loaded() {
     done
 }
 
-# Warp the pointer to a point in the compositor's layout, in logical pixels.
+# Put the pointer at a point in the compositor's layout, in logical pixels,
+# and make sure the window has the keyboard once it is there.
+#
+# It goes out of the window and back in rather than straight there: a warp
+# inside the window sends the window no motion, so the readout of wherever
+# the pointer last was over the picture would stay in the bar, and the
+# wheel would turn about the old place. Leaving and entering are events,
+# and the entering is what gives the window focus, since focus follows the
+# pointer.
+#
+# Whether it did is checked, because it does not always: the desk's own
+# mouse may have moved meanwhile, or a window may have come up over the
+# spot. The fallback is the compositor's own focus dispatch, which warps
+# the pointer to the window's center as a side effect, and then the same
+# leave and enter again to put it back where it was asked for.
 cursor() {
+    CURSOR_X=$1
+    CURSOR_Y=$2
+    set -- $(window geometry)
+    for attempt in 1 2 3; do
+        warp $(($1 - 8)) $(($2 - 8))
+        sleep 0.1
+        warp "$CURSOR_X" "$CURSOR_Y"
+        sleep 0.2
+        focused && return
+        hyprctl eval "hl.dispatch(hl.dsp.focus({ window = hl.get_window(\"address:$WINDOW\") }))" >/dev/null
+        sleep 0.2
+    done
+    echo "the window would not take focus" >&2
+    exit 1
+}
+
+warp() {
     hyprctl eval "hl.dispatch(hl.dsp.cursor.move({ x = $1, y = $2 }))" >/dev/null
+}
+
+focused() {
+    [ "$(hyprctl activewindow -j | jq -r .address)" = "$WINDOW" ]
+}
+
+# Before a key is sent: the window still has the keyboard, or gets it back
+# with the pointer put where it last was.
+keyboard() {
+    focused || cursor "$CURSOR_X" "$CURSOR_Y"
 }
 
 # Where in the layout image pixel X, Y of a W by H image is while the image
@@ -152,6 +187,7 @@ drag() {
 # 50%, `ctrl+shift+c` — through the same device, for the bindings that are
 # matched on the key's position and that wtype's own keymap cannot reach.
 press() {
+    keyboard
     for chord; do
         python3 "$ROOT/bin/screenshots/device.py" key "$chord"
     done
@@ -166,6 +202,7 @@ press() {
 # keymap the window has not read yet lands as whatever that keycode was
 # under the last one.
 keys() {
+    keyboard
     for key; do
         mods=
         while :; do
@@ -195,17 +232,9 @@ settle() {
 # between the title and the readout. Over the picture it would put a pixel
 # readout in the bottom bar, over a button a tooltip, and outside the
 # window it would take the keyboard with it, since focus follows it.
-#
-# It goes out of the window and back in rather than straight there: a warp
-# inside the window sends the window no motion, and the readout of wherever
-# the pointer last was over the picture would stay in the bar. Leaving and
-# entering are events.
 park() {
     set -- $(window geometry)
-    cursor $(($1 - 8)) $(($2 - 8))
-    sleep 0.1
     cursor $(($1 + $3 / 2)) $(($2 + 15))
-    sleep 0.2
 }
 
 # Capture the window's rectangle to the path given, as a JPEG.

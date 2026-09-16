@@ -12,7 +12,9 @@ through once, and turns the film into the README's `animated.gif`;
 grid is at single pixels, and presses Space; `info` opens an elevation
 model in turbo with the panel up, at 50%; `compare` flips through the three
 rasters of one mountain, zooming into the crater on the way; `false_color`
-holds the hillshade there and presses `r` through the four color maps.
+holds the hillshade there and presses `r` through the four color maps;
+`fuzzy_finder` opens a directory of several hundred pictures and chooses
+one by a few letters, then one by its number.
 
 ## How a script takes a picture
 
@@ -44,14 +46,21 @@ read it is interpreted under the old one, and `wtype -k plus -k Up` reaches
 the program as something other than `+` and `Up`. One keysym per process is
 one keymap per process, and every key lands as itself.
 
-The pointer is parked between shots on the middle of the top bar, the one
-place it shows in nothing. Over the picture it puts a pixel readout in the
-bottom bar; outside the window it takes the keyboard with it, since focus
-follows it, and the next key would go to whatever it was over. It is parked
-by leaving the window and coming back rather than by warping straight
-there, because a warp within the window sends the window no motion event,
-and the readout of wherever it last was over the picture would stay in the
-bar.
+The pointer is placed by `cursor`, which goes out of the window and back
+in rather than straight to the point, because a warp within the window
+sends the window no motion event: the readout of wherever the pointer last
+was over the picture would stay in the bar, and the wheel would turn about
+the old place. Leaving and entering are events, and the entering is also
+what gives the window the keyboard, since focus follows the pointer.
+`cursor` checks that it did, and when it did not — the desk's own mouse
+moved, a window came up over the spot — falls back on the compositor's
+focus dispatch, which warps the pointer to the window's center, and then
+leaves and enters again. `keys` and `press` make the same check before
+they send anything, so a key that would otherwise have gone to whatever
+had the focus goes to the window instead; one run of `fuzzy_finder` before
+that check typed its query into a browser's print dialog. Between shots
+the pointer is parked on the middle of the top bar, the one place it shows
+in nothing.
 
 `close` kills the window and then waits for the compositor to forget it. The
 next window can be given the same address, and `open` tells the new window
