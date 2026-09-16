@@ -333,8 +333,16 @@ fn rows(pass: &mut Pass, ui: &mut egui::Ui, input: &Input, width: f32, height: f
             for index in first..last {
                 row(pass, ui, input, index, row_rect(index), index_width);
             }
+            // Put there, not scrolled there: the list opens on the file
+            // on screen, which may be anywhere in it, and a glide across
+            // the whole list is a wait; a step by key is a jump in every
+            // other chooser too.
             if input.reveal && input.cursor < count {
-                ui.scroll_to_rect(row_rect(input.cursor), None);
+                ui.scroll_to_rect_animation(
+                    row_rect(input.cursor),
+                    None,
+                    egui::style::ScrollAnimation::none(),
+                );
             }
             first..last
         });
