@@ -375,8 +375,11 @@ as `Command::OverGrip`, a pass late like `OverImage`, and that is what the
 arrows consult: with the pointer on a handle they move the handle a pixel,
 and otherwise the region. An arrow along an edge — Up on the right edge's
 handle — moves the region rather than doing nothing, so no key is dead while
-a region is up. `Ctrl` with an arrow grows that side. None of it is animated:
-a region moves a pixel at a time, and a pixel has nothing to animate.
+a region is up. `Ctrl` with an arrow grows that side, and `Ctrl+Shift` with
+an arrow shrinks it that way, pulling in the side opposite — `Region::grown`
+and `Region::shrunk`, the second stopping a pixel short of the far edge so a
+region cannot be keyed out of existence. None of it is animated: a region
+moves a pixel at a time, and a pixel has nothing to animate.
 
 The region wears its measurements while the pointer is on it: its size at
 its middle, and each edge's coordinate inside the mark in the middle of that

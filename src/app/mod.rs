@@ -2168,6 +2168,17 @@ mod tests {
                 height: 12
             })
         );
+        // Ctrl+Shift shrinks it that way: Left brings the right edge in.
+        let _ = app.perform(Action::ShrinkRegion(Direction::Left));
+        assert_eq!(
+            app.selection,
+            Selection::Shown(Region {
+                x: 11,
+                y: 5,
+                width: 11,
+                height: 12
+            })
+        );
 
         // Space frames the region first and the picture after: the region
         // fitted and filled — a zoom of its own rather than a fit the view

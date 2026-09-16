@@ -57,6 +57,11 @@ pub enum Action {
     /// Go to this zoom, 1.0 being one image pixel to one screen pixel.
     ZoomTo(f32),
     Pan(Direction, PanStep),
+    /// Pull a region's far side in a pixel that way — Left brings the
+    /// right edge in — which is the opposite number of `Ctrl` with an
+    /// arrow pushing the near side out. Nothing without a region: there is
+    /// nothing else on screen that shrinks.
+    ShrinkRegion(Direction),
     CycleFit,
     CycleUpscale,
     NextFile,
@@ -252,6 +257,7 @@ pub type Mods = ModifiersState;
 const PLAIN: Mods = Mods::empty();
 const CTRL: Mods = Mods::CONTROL;
 const SHIFT: Mods = Mods::SHIFT;
+const CTRL_SHIFT: Mods = Mods::CONTROL.union(Mods::SHIFT);
 
 /// Whether the modifiers `held` are the ones a binding asked for, for a key
 /// of this kind. Shift is the difference between the two kinds.
@@ -588,6 +594,18 @@ pub const KEYS: &[Binding] = &[
             (Named(NamedKey::ArrowRight), Pan(Right, Edge)),
             (Named(NamedKey::ArrowUp), Pan(Up, Edge)),
             (Named(NamedKey::ArrowDown), Pan(Down, Edge)),
+        ],
+    },
+    Binding {
+        section: Section::Zoom,
+        mods: CTRL_SHIFT,
+        shown: "Ctrl+Shift+Arrows",
+        help: "Shrink a region that way a pixel, pulling its far side in",
+        keys: &[
+            (Named(NamedKey::ArrowLeft), ShrinkRegion(Left)),
+            (Named(NamedKey::ArrowRight), ShrinkRegion(Right)),
+            (Named(NamedKey::ArrowUp), ShrinkRegion(Up)),
+            (Named(NamedKey::ArrowDown), ShrinkRegion(Down)),
         ],
     },
     Binding {
@@ -1420,6 +1438,8 @@ impl App {
             }
             ToggleHdr => return Effect::redraw_if(self.toggle_hdr()),
             ToggleRegion => self.press(Control::Region),
+            // Only a region shrinks, and there is none: see `perform_on_region`.
+            ShrinkRegion(_) => return Effect::Nothing,
             TogglePlay => return self.toggle_play(),
             NextFrame => return self.step_frame(1),
             PreviousFrame => return self.step_frame(-1),
@@ -1429,10 +1449,10 @@ impl App {
 
     /// What `action` does to `region`, the region on screen, where it does
     /// something to it: the arrows move it a pixel — or the handle the
-    /// pointer rests on, where it rests on one — with Ctrl grow it, `Space`
-    /// frames it and then the picture, and the copy of the picture copies
-    /// it. `None` for every other action, which is the picture's as it
-    /// always was.
+    /// pointer rests on, where it rests on one — with Ctrl grow it, with
+    /// Ctrl and Shift shrink it, `Space` frames it and then the picture,
+    /// and the copy of the picture copies it. `None` for every other
+    /// action, which is the picture's as it always was.
     ///
     /// Nothing here is animated: a region moves by a pixel at a time, and a
     /// pixel has nothing to animate.
@@ -1441,6 +1461,13 @@ impl App {
         Some(match action {
             Pan(direction, Edge) => {
                 self.select(region.grown(direction.side(), 1, image));
+                Effect::Redraw
+            }
+            // Left pulls the right edge in: the edge that moves lies the
+            // other way from the arrow, where growing moves the one that
+            // lies its way.
+            ShrinkRegion(direction) => {
+                self.select(region.shrunk(direction.side().opposite(), 1));
                 Effect::Redraw
             }
             Pan(direction, Fine | Coarse) => {
@@ -2600,7 +2627,8 @@ mod tests {
         assert_eq!(held(PLAIN), Some(Pan(Left, Coarse)));
         assert_eq!(held(SHIFT), Some(Pan(Left, Fine)));
         assert_eq!(held(CTRL), Some(Pan(Left, Edge)));
-        assert_eq!(held(CTRL | SHIFT), None);
+        assert_eq!(held(CTRL | SHIFT), Some(ShrinkRegion(Left)));
+        assert_eq!(held(CTRL | SHIFT | Mods::ALT), None);
         // Escape is not bound with Shift, and so does not answer to it.
         assert_eq!(
             action_for(&Key::Named(NamedKey::Escape), ELSEWHERE, SHIFT),
