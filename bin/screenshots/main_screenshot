@@ -8,8 +8,8 @@
 
 . "$(dirname "$0")/lib.sh"
 
-open 1200 800 "${1:-$HOME/git/mora}"
-keys plus plus plus Up Up Up Up Up Up
+open 1000 600 "${1:-$HOME/git/mora}"
+keys plus plus plus Up Up Up Up Up
 settle
 shoot "$ROOT/user-docs/screenshots/main_screenshot.jpg"
 close
