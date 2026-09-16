@@ -546,6 +546,13 @@ gdal_translate -q -ot Int16 -scale 0 3.984375 -1000 3000 \
 # is clipped.
 gdal_translate -q -of GTiff -co COMPRESS=JPEG -co JPEG_QUALITY=100 -co PHOTOMETRIC=YCBCR \
   -co TILED=YES -co BLOCKXSIZE=16 -co BLOCKYSIZE=16 tiff-rgb8.tif tiff-jpeg.tif
+# A picture with an internal mask, as GDAL writes one from an alpha band: a
+# one-bit transparency-mask directory after the picture, which is not a page.
+# The upside-down page is appended after it, so that reaching the second page
+# means stepping over the mask.
+gdal_translate -q -b 1 -b 2 -b 3 -mask 4 --config GDAL_TIFF_INTERNAL_MASK YES \
+  -co COMPRESS=NONE tiff-rgba8.tif "$work/masked.tif"
+tiffcp "$work/masked.tif" tiff-pages.tif,1 tiff-mask.tif
 
 # A no-data sentinel with pixels actually set to it, built from raw floats so
 # the quadrant values are exact.

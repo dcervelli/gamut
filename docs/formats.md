@@ -100,7 +100,14 @@ A TIFF is a chain of directories, and where there is more than one they are
 pages: `sequence` walks the chain reading directories only, and
 `decode_page` seeks to one and reads it as `decode` reads the first. Nothing
 tells a page from an overview or a thumbnail, so a pyramid's reduced copies
-count as pages too.
+count as pages too. A transparency mask is told apart, by the
+`NewSubfileType` bit GDAL sets on the internal masks it writes — one after
+the picture, one after each reduced copy — and `tiff_rs::pages` leaves those
+out of the count and the numbering, since a mask is the coverage of the
+picture before it, not a picture, and at one bit a pixel not one the crate
+would decode either. `tiff-mask.tif` is the fixture, a mask between two
+pages. The mask is not applied as alpha; it could be, by reading the
+directory after the picture when that bit is set.
 
 The pixels are read a chunk at a time — a strip or a tile, each compressed
 on its own — with the rows of chunks divided between rayon's threads, rather

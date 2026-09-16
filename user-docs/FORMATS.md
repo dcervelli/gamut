@@ -226,7 +226,9 @@ Caveats:
   ZSTD- and WebP-compressed TIFFs do not open either.
 - Multi-page files open on the first page, and `n` and `N` step through the
   rest. Every page counts, so a file holding a pyramid of reduced copies, or
-  a thumbnail beside the picture, shows those as pages too.
+  a thumbnail beside the picture, shows those as pages too. A mask is not a
+  page: a GIS that writes one beside the picture, marking which pixels are
+  data, is stepped over — and not applied, so the picture shows whole.
 - The orientation tag is not applied.
 
 ## WebP

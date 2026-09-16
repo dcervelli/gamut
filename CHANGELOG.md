@@ -34,6 +34,11 @@ Notable changes to `gamut`. The format follows
   pixels are now converted back to RGB, tile by tile across threads, with
   the coefficients and the coding range the file's own tags give, or the
   TIFF defaults where it gives none.
+- A TIFF's transparency-mask directories are not pages. GDAL writes one
+  after the picture and one after each reduced copy, and stepping to the
+  next page of such a file used to fail on the mask, a one-bit image the
+  decoder refuses; the pages are now the pictures alone, and the masks
+  are stepped over.
 
 ### Changed
 

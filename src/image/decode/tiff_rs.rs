@@ -15,7 +15,10 @@
 //! is what `decode` shows, and any other is a decode of its own through
 //! `decode_page`, since a directory may differ from its neighbors in size,
 //! depth and layout. Nothing tells a page from an overview or a thumbnail,
-//! so a pyramid's reduced copies count as pages too.
+//! so a pyramid's reduced copies count as pages too. A transparency mask
+//! is told apart, by `NewSubfileType`, and is not a page: it is the
+//! coverage of the picture before it, one bit a pixel, and GDAL writes one
+//! after the picture and one after each reduced copy.
 //!
 //! The pixels are stored in chunks — strips, or tiles — each compressed on
 //! its own, and each is read here on its own too: the rows of chunks are
@@ -45,6 +48,11 @@ use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
 
 /// GDAL writes the no-data value here, as an ASCII string.
 const GDAL_NODATA: u16 = 42113;
+
+/// The bit of `NewSubfileType` that marks a directory as a transparency
+/// mask of another. The other two bits, a reduced-resolution copy and a
+/// page of a document, are both still pictures.
+const TRANSPARENCY_MASK: u32 = 4;
 
 /// `YCbCrCoefficients`: the three luma weights, as rationals.
 const YCBCR_COEFFICIENTS: u16 = 529;
@@ -85,15 +93,10 @@ impl super::Decoder for TiffRs {
         self.decode_page(source, overrides, 0)
     }
 
-    /// How many directories the chain holds, walked without reading any
+    /// How many pictures the chain holds, walked without reading any
     /// pixels.
     fn sequence(&self, source: &mut dyn super::ReadSeek) -> Result<Sequence> {
-        let mut decoder = Decoder::new(source)?;
-        let mut count = 1;
-        while decoder.more_images() {
-            decoder.next_image()?;
-            count += 1;
-        }
+        let count = pages(&mut Decoder::new(source)?)?.len();
         Ok(if count > 1 {
             Sequence::Pages { count, default: 0 }
         } else {
@@ -118,8 +121,16 @@ impl super::Decoder for TiffRs {
         // threads' decoders will read, where there is one.
         let shared = source.share()?;
         let mut decoder = Decoder::new(source)?.with_limits(limits.clone());
-        if page > 0 {
-            decoder.seek_to_image(page)?;
+        // The first page is the first directory, whatever it says of itself;
+        // any other is found past the masks.
+        let directory = match page {
+            0 => 0,
+            _ => *pages(&mut decoder)?
+                .get(page)
+                .ok_or_else(|| anyhow!("TIFF has no page {page}"))?,
+        };
+        if directory > 0 {
+            decoder.seek_to_image(directory)?;
         }
         let (width, height) = decoder.dimensions()?;
         let color = decoder.colortype()?;
@@ -165,7 +176,7 @@ impl super::Decoder for TiffRs {
             let read = Read {
                 shared: shared.as_ref(),
                 limits: &limits,
-                page,
+                directory,
                 geometry: &geometry,
                 ycbcr: ycbcr.as_ref(),
             };
@@ -210,6 +221,30 @@ impl super::Decoder for TiffRs {
         image.nodata = nodata;
         Ok(image)
     }
+}
+
+/// The directories that are pictures, in order, by index in the chain: every
+/// one but a transparency mask, which is the coverage of the picture before
+/// it rather than a page of its own — and one bit a pixel, which the crate
+/// would not decode as a picture anyway. The decoder is left on the last
+/// directory; `seek_to_image` finds any of them again from there.
+fn pages<R: io::Read + Seek>(decoder: &mut Decoder<R>) -> Result<Vec<usize>> {
+    let mut pages = Vec::new();
+    let mut index = 0;
+    loop {
+        let subfile = decoder
+            .find_tag_unsigned::<u32>(Tag::NewSubfileType)?
+            .unwrap_or(0);
+        if subfile & TRANSPARENCY_MASK == 0 {
+            pages.push(index);
+        }
+        if !decoder.more_images() {
+            break;
+        }
+        decoder.next_image()?;
+        index += 1;
+    }
+    Ok(pages)
 }
 
 /// Which of the three sample types the rest of the program works in a
@@ -378,7 +413,8 @@ struct Read<'a> {
     /// The file the other threads' decoders read, where there is one.
     shared: Option<&'a File>,
     limits: &'a Limits,
-    page: usize,
+    /// Which directory of the chain the page is.
+    directory: usize,
     geometry: &'a Geometry,
     /// The conversion each chunk gets on the way in, for a file that holds
     /// its pixels as YCbCr.
@@ -426,8 +462,8 @@ fn read_chunks<T: Resident>(
                     let mut decoder = Decoder::new(BufReader::new(Positioned::new(file)))
                         .context("opening the file again for another thread")?
                         .with_limits(read.limits.clone());
-                    if read.page > 0 {
-                        decoder.seek_to_image(read.page)?;
+                    if read.directory > 0 {
+                        decoder.seek_to_image(read.directory)?;
                     }
                     read_rows(&mut decoder, read, first..last, band)
                 })());
