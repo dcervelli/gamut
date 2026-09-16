@@ -207,10 +207,11 @@ bars and the strips never reason about where one ends. `Chrome` derives all
 four from the window size alone, before egui lays anything out, which is what
 lets the picture be fitted into what they leave without waiting a frame on
 the toolkit. A file of frames or pages brings a fifth with it, the transport
-bar, above the bottom bar and the width of the window as the bars are, so
-the strips end above it; it is part of the same derivation, from the window
-size and one flag, so the picture is fitted above it on the first frame it
-is up rather than a frame later. It holds the one-frame-back and
+bar, above the bottom bar and nested between the strips as the picture is,
+so its controls sit under the picture they act on and the strips run down to
+the bottom bar either way; it is part of the same derivation, from the
+window size and one flag, so the picture is fitted above it on the first
+frame it is up rather than a frame later. It holds the one-frame-back and
 one-frame-on buttons as a pair, with the play button between them for an
 animation, then a readout — which frame of how many, and where that is in
 time — and, for an animation, a timeline in whatever width is left. The

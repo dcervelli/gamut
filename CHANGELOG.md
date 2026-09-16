@@ -31,6 +31,9 @@ Notable changes to `gamut`. The format follows
 
 ### Changed
 
+- The transport bar of an animation or a file of pages sits between the
+  left and right strips, under the picture, rather than spanning the
+  window as a second bottom bar.
 - `Space` cycles through three views rather than toggling between two: the
   whole image, the window filled, then actual size. From a zoom chosen by
   hand it starts over at the whole image, as before. With a region up the
