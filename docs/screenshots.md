@@ -10,7 +10,8 @@ each one shows is the script: `main_screenshot` opens `~/git/mora` in a
 through once, and turns the film into the README's `animated.gif`;
 `pixel_grid` turns the grid on, rolls the wheel over the stag until the
 grid is at single pixels, and presses Space; `info` opens an elevation
-model in turbo with the panel up, at 50%.
+model in turbo with the panel up, at 50%; `compare` flips through the three
+rasters of one mountain, zooming into the crater on the way.
 
 ## How a script takes a picture
 

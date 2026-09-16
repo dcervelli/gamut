@@ -88,10 +88,7 @@ open() {
     done
     [ -n "$WINDOW" ] || { echo "gamut's window never appeared" >&2; exit 1; }
 
-    # The title says "loading" until the first file is up.
-    for _ in $(seq 100); do
-        case "$(window title)" in loading*) sleep 0.1 ;; *) break ;; esac
-    done
+    loaded
 
     # Focus follows the pointer, so the pointer goes in first; the keys
     # would otherwise land in whatever it was over.
@@ -103,6 +100,14 @@ open() {
         sleep 0.1
     done
     sleep 0.5
+}
+
+# Wait for the file on its way to be on screen: the title says "loading"
+# until it is. For after a step to another file, as well as for `open`.
+loaded() {
+    for _ in $(seq 100); do
+        case "$(window title)" in loading*) sleep 0.1 ;; *) break ;; esac
+    done
 }
 
 # Warp the pointer to a point in the compositor's layout, in logical pixels.
