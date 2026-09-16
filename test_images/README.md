@@ -20,6 +20,10 @@ did write.
 ICC-tagged files are tagged with, checked in beside them and not regenerated
 here. `examples/make-icc.rs` is what produced it.
 
+`raw-samples/` is not fixtures either: its script fetches one real camera
+file of each raw format into it, for the sample test in `decode::raw` that
+is ignored unless asked for, and git ignores what it fetches.
+
 ## The pattern
 
 Every image is 32×24, four 16×12 quadrants, probed at their centers:

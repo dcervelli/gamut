@@ -50,7 +50,7 @@ use for — and that a frame written into the texture the last one occupies
 is what the next draw shows, through a chain built again from it. Where no adapter can be had they report success rather than failing
 for a reason that has nothing to do with the code.
 
-`test_images/` holds 89 real fixtures — see its README — covering every pixel
+`test_images/` holds 97 real fixtures — see its README — covering every pixel
 layout the decoder can produce and every per-format encoding with its own code
 path: PNG bit depths, palettes and interlacing; progressive and subsampled
 JPEG; TIFF compressions, byte orders, tiling, BigTIFF, the floating-point
@@ -79,4 +79,13 @@ writer is a video delegate that lands a code value off, so that one is
 assembled from two stills' chunks as well.
 `display-p3.icc` sits beside the fixtures as an input rather than an output;
 `examples/make-icc.rs` is what produced it.
+
+The one raw fixture is a DNG, because only a camera can write any other raw
+format; a script in `generate.sh` mosaics the pattern and writes the matrix
+that makes the camera's space Rec. 2020. Real cameras' files are tested too,
+but not from the tree: `test_images/raw-samples/fetch.sh` brings one file of
+each format down from raw.pixls.us into a directory git ignores, and
+`decode::raw`'s `samples_are_recognized_probed_and_developed`, ignored
+unless asked for, runs each through recognition, the probe, the develop,
+the preview and the metadata. See [formats](formats.md#camera-raw).
 

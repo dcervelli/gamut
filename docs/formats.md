@@ -224,10 +224,13 @@ none of these and goes to `tiff_rs` as before. Reading the directory is why
 `decode::HEADER` grew from 64 bytes to 4096: a camera writes its first
 directory at byte 8 with a few dozen entries. `raw::tests` covers each rule
 with a directory built by hand, and
-`samples_are_recognized_probed_and_developed` — ignored unless
-`GAMUT_RAW_SAMPLES` names a directory — runs real cameras' files through
-recognition, the probe and the develop; raw.pixls.us has one of nearly
-every camera under CC0, and thirteen makes' files pass it.
+`samples_are_recognized_probed_and_developed` — ignored unless asked for —
+runs real cameras' files through recognition, the probe, the develop, the
+preview and the metadata. The files are not in the tree, being tens of
+megabytes each: `test_images/raw-samples/fetch.sh` brings one of each
+format down from raw.pixls.us, where photographers have put a file of
+nearly every camera under CC0, into a directory git ignores. Fifteen
+cameras' files pass it.
 
 The file is read whole and handed to `libraw_open_buffer`, as JPEG is read
 whole for its gain map: LibRaw reads by seeking about a stream, a buffer is
@@ -239,12 +242,44 @@ sake; the second read comes from the page cache.
 **What it costs.** A 24-megapixel Bayer frame develops in 400–600 ms on
 this machine, LibRaw's OpenMP threads doing the demosaic; an X-Trans frame
 takes three times that, its interpolation being three passes rather than
-one. The thumbnailer develops every raw whole at that cost, where it could
-be copying out the JPEG every raw embeds; that is the next thing to do. So
-is a mosaic view — the counts as one gray channel, for the false-color
-maps — which LibRaw hands back directly, and a white balance of the
-program's own, which is a per-channel gain and a 3×3 matrix in the shader
-rather than a second develop.
+one. Still to do: a mosaic view — the counts as one gray channel, for the
+false-color maps — which LibRaw hands back directly, and a white balance of
+the program's own, which is a per-channel gain and a 3×3 matrix in the
+shader rather than a second develop.
+
+**The preview.** Every raw carries the camera's own JPEG of the frame,
+which LibRaw copies out without decoding anything — `unpack_thumb` and
+`make_mem_thumb` — and `Raw::preview` hands it back through the JPEG
+decoder, turned by the orientation the header holds, since the JPEG is
+stored as the sensor saw the scene. That is what `Decoder::preview` is, and
+the thumbnailer asks every format for one before it decodes: a likeness is
+all a thumbnail is, and a preview arrives in 3–90 ms against 200–1400 for
+a develop. It is used only when its longer side reaches `thumbnail::SIDE`,
+so the cache never holds something blurrier than the format can give; of
+the fifteen cameras sampled the smallest preview is 644 pixels wide and
+most are the full frame. A thumbnail of a raw therefore looks like the
+camera's JPEG — its curve, its balance — rather than the flat linear
+picture the viewer opens; for finding a file that is the better likeness.
+`dynamic::reorient` is the turn, shared with nothing yet but written for
+any `DecodedImage`.
+
+**The metadata.** The panel reads a raw's EXIF where a TIFF-shaped one
+keeps it, at the front, and most formats are TIFF-shaped. Five are not, and
+`image/enclosed.rs` finds the block each keeps inside: an ORF or RW2 is a
+TIFF under its own four bytes, a RAF names the offset of a JPEG whose
+`APP1` is the EXIF, an MRW has a `TTW` block that is a TIFF, and a CR3 keeps
+four one-directory TIFFs in boxes under Canon's `uuid` — which, read alone,
+put Exif tags in the image's directory where they mean nothing, so three of
+them are written back out as one TIFF with the offsets moved. A CRW has no
+EXIF anywhere. What every raw has is LibRaw's own reading of its header,
+and `raw::facts` turns that into the panel's `Sensor` section — the frame
+and the picture inside it, the filter cell spelled from dcraw's bit
+pattern, the white level, the as-shot and daylight balances, the camera
+matrix, the DNG version — and into the entries of `Camera`, which
+`Exif::read` takes whatever of from that the EXIF did not say: all of it
+for a CRW, the exposure for a Phase One. Two structs more are transcribed
+for it, `Other` and the front of `Lens`, both reached through accessors so
+that only their leading fields have to be right.
 
 `dng-cfa.dng` is the fixture: the one raw format anything but a camera can
 write, mosaiced RGGB by a script in `generate.sh`, twelve-bit counts in
