@@ -76,7 +76,7 @@ pub fn usage() -> String {
     for (section, heading) in SECTIONS {
         let _ = writeln!(text, "\n{heading}:");
         for binding in KEYS.iter().filter(|binding| binding.section == section) {
-            let _ = writeln!(text, "    {:<17}{}", binding.shown, binding.help);
+            let _ = writeln!(text, "    {:<19}{}", binding.shown, binding.help);
         }
     }
     text
@@ -447,7 +447,7 @@ mod tests {
     fn the_help_text_lists_every_binding_once() {
         let text = usage();
         for binding in KEYS {
-            let line = format!("    {:<17}{}", binding.shown, binding.help);
+            let line = format!("    {:<19}{}", binding.shown, binding.help);
             assert_eq!(
                 text.matches(&line).count(),
                 1,

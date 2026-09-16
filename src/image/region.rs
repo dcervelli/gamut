@@ -41,6 +41,16 @@ impl Side {
             Side::Top | Side::Bottom => 1,
         }
     }
+
+    /// The edge across from this one.
+    pub fn opposite(self) -> Self {
+        match self {
+            Side::Left => Side::Right,
+            Side::Right => Side::Left,
+            Side::Top => Side::Bottom,
+            Side::Bottom => Side::Top,
+        }
+    }
 }
 
 /// Where a region is taken hold of: one of its eight handles, or anywhere
@@ -237,6 +247,27 @@ impl Region {
         )
     }
 
+    /// The region with the edge on `side` moved `by` pixels inward,
+    /// stopping a pixel short of the edge opposite: a region never shrinks
+    /// to nothing, since nothing would be left to grow again.
+    pub fn shrunk(self, side: Side, by: u32) -> Self {
+        let mut edges = self.edges();
+        let axis = side.axis();
+        let (low, high) = (axis, axis + 2);
+        match side {
+            Side::Left | Side::Top => edges[low] = (edges[low] + i64::from(by)).min(edges[high] - 1),
+            Side::Right | Side::Bottom => {
+                edges[high] = (edges[high] - i64::from(by)).max(edges[low] + 1);
+            }
+        }
+        Self::between(
+            edges[0] as u32,
+            edges[1] as u32,
+            edges[2] as u32,
+            edges[3] as u32,
+        )
+    }
+
     /// The region with the edges `grip` holds moved one pixel along
     /// `direction`, a sign on each axis: an arrow key pressed with the
     /// pointer resting on a handle. An edge never crosses the one opposite —
@@ -404,6 +435,22 @@ mod tests {
             region(10, 10, 20, 50)
         );
         assert_eq!(start.grown(Side::Left, 100, IMAGE), region(0, 10, 30, 10));
+    }
+
+    /// Shrinking moves one edge inward and stops a pixel short of the edge
+    /// opposite.
+    #[test]
+    fn shrinking_pulls_one_edge_in_and_leaves_a_pixel() {
+        let start = region(10, 10, 20, 10);
+        assert_eq!(start.shrunk(Side::Right, 1), region(10, 10, 19, 10));
+        assert_eq!(start.shrunk(Side::Left, 1), region(11, 10, 19, 10));
+        assert_eq!(start.shrunk(Side::Top, 3), region(10, 13, 20, 7));
+        assert_eq!(start.shrunk(Side::Bottom, 100), region(10, 10, 20, 1));
+        assert_eq!(start.shrunk(Side::Left, 100), region(29, 10, 1, 10));
+        // A region a pixel wide has nothing left to give.
+        let thin = region(10, 10, 1, 10);
+        assert_eq!(thin.shrunk(Side::Right, 1), thin);
+        assert_eq!(thin.shrunk(Side::Left, 1), thin);
     }
 
     /// A nudge moves a handle's edges a pixel the way the arrow points, never

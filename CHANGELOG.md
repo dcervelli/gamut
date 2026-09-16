@@ -25,6 +25,10 @@ Notable changes to `gamut`. The format follows
   and this program share them, and are made in the background at low
   priority from the moment the program starts.
 
+- `Ctrl+Shift` with an arrow shrinks a region that way a pixel, pulling
+  its far side in — `Ctrl+Shift+Left` moves the right edge left — as
+  `Ctrl` with an arrow grows it.
+
 ### Changed
 
 - `Space` cycles through three views rather than toggling between two: the

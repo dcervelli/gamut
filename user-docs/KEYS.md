@@ -18,6 +18,7 @@ Every control `gamut` has. Letter keys work in either case except `a`,
 | Arrows | Pan by 64 pixels; with a region selected, move it one pixel |
 | `Shift`+Arrows | Pan by one pixel |
 | `Ctrl`+Arrows | Pan to the far side of the image; with a region selected, grow it that way one pixel |
+| `Ctrl`+`Shift`+Arrows | With a region selected, shrink it that way one pixel, pulling its far side in |
 
 Zoom runs from 2% to 6400%. The zooms below 100% are the ones above it with
 `Shift` held, so each zoom is under the number it hangs off. The number row is
@@ -416,7 +417,10 @@ For the last pixel, use the keys. With a region up the arrows move it one
 pixel rather than panning the view, and with the pointer resting on a handle
 they move that handle instead: rest on the right edge's handle and press
 Right to make the region one pixel wider, or Left to make it one narrower.
-`Ctrl` with an arrow grows the region on that side, wherever the pointer is.
+`Ctrl` with an arrow grows the region on that side, wherever the pointer is,
+and `Ctrl`+`Shift` with an arrow shrinks it that way, pulling the far side in:
+`Ctrl`+`Shift`+Left moves the right edge one pixel to the left. A region never
+shrinks past one pixel.
 
 Point at the region and it says what it is: its size at its middle,
 `640 × 480`, and the coordinate of each edge written just inside the mark in
