@@ -28,6 +28,12 @@ Notable changes to `gamut`. The format follows
 - `Ctrl+Shift` with an arrow shrinks a region that way a pixel, pulling
   its far side in — `Ctrl+Shift+Left` moves the right edge left — as
   `Ctrl` with an arrow grows it.
+- JPEG-compressed TIFFs open. A scanned map or an aerial photograph as
+  GDAL writes one stores its pixels as YCbCr, with the chroma at half
+  resolution, and used to be refused as an unsupported color type; the
+  pixels are now converted back to RGB, tile by tile across threads, with
+  the coefficients and the coding range the file's own tags give, or the
+  TIFF defaults where it gives none.
 
 ### Changed
 

@@ -116,6 +116,21 @@ the rare planar layout that keeps each channel's chunks apart, go through
 `read_image` on the loader's thread as before. `tiff-strips.tif` and
 `tiff-tiled.tif` are the fixtures that read on more than one band.
 
+A JPEG-compressed TIFF — what GDAL writes for a scanned map or an aerial
+photograph with `COMPRESS=JPEG` — stores its pixels as YCbCr with the chroma
+subsampled, and the crate hands them back that way: it has the JPEG decoder
+upsample the chroma but not convert it, because the conversion is the
+container's to define, through `YCbCrCoefficients` and `ReferenceBlackWhite`,
+and the crate has no side channel to pass those tags out on. So
+`tiff_rs::YCbCr` reads the two tags — with TIFF 6.0's defaults, BT.601's
+weights and JPEG's own coding range, where a file leaves them out — and
+converts each chunk as it is read, on whichever thread read it, with libtiff's
+arithmetic: each channel's code mapped by the reference onto the full range,
+then the luma equation undone. `tiff-jpeg.tif` is the fixture, tiled so that
+the bottom row of tiles is clipped. A YCbCr file that is not JPEG-compressed
+but subsampled all the same is refused by the crate, since nothing would
+upsample it.
+
 ## HEIF
 
 The only decoder that is not pure Rust, because there is no usable pure-Rust
