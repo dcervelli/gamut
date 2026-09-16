@@ -25,7 +25,7 @@ _gamut() {
     '--paused[Open an animation stopped on its first frame]' \
     '--timing[Print decode and startup timings to stderr]' \
     '--[Treat every later argument as a path]' \
-    '*:image:_files -g "*.(#i)(jpg|jpeg|jpe|jfif|png|gif|bmp|tif|tiff|webp|jxl|avif|heic|heif|hif|ico|hdr|exr|pnm|pbm|pgm|ppm|pam)"'
+    '*:image:_files -g "*.(#i)(jpg|jpeg|jpe|jfif|png|gif|bmp|tif|tiff|webp|jxl|avif|heic|heif|hif|ico|hdr|exr|pnm|pbm|pgm|ppm|pam|dng|nef|nrw|cr2|cr3|crw|arw|srf|sr2|raf|orf|rw2|rwl|pef|srw|3fr|fff|iiq|mef|mos|erf|dcr|kdc|mrw)"'
 }
 
 _gamut "$@"

@@ -26,6 +26,7 @@ mod jpeg;
 mod jxl;
 mod limits;
 mod png;
+mod raw;
 mod tiff_rs;
 mod webp;
 
@@ -96,8 +97,11 @@ impl Seek for Positioned<'_> {
     }
 }
 
-/// Enough of the file for any decoder to recognize its own header.
-const HEADER: usize = 64;
+/// Enough of the file for any decoder to recognize its own header. Most
+/// need a few bytes; the raw decoder needs the first directory of a TIFF,
+/// which is the only way to tell a NEF or a DNG from a scan, and a camera
+/// writes that directory at byte 8 with a few dozen entries in it.
+const HEADER: usize = 4096;
 
 pub trait Decoder: Sync {
     /// Human-readable name, used in error messages.
@@ -171,6 +175,12 @@ pub trait Decoder: Sync {
 /// Order matters only when two decoders claim the same extension, in which
 /// case the first wins.
 static DECODERS: &[&dyn Decoder] = &[
+    // Before TIFF, whose header most raw formats wear: `decode::raw` claims
+    // a TIFF only when its first directory says a camera wrote it, so a
+    // scan still goes to `tiff_rs`, but a NEF asked of `tiff_rs` first
+    // would come back as its own thumbnail. Before HEIF as well, since a
+    // Canon CR3 is an ISO base media file too.
+    &raw::Raw,
     &tiff_rs::TiffRs,
     // Before the HEIF family, whose `ftyp` box it shares a container
     // structure with. `libheif`'s brand check should decline a `JXL ` box and

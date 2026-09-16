@@ -93,6 +93,9 @@ const NEAR_LOSSLESS: f32 = 0.01;
 /// the way to full — wider than JPEG's, because the error is in a channel
 /// JPEG would have kept and XYB spends its bits elsewhere.
 const VARDCT: f32 = 0.05;
+/// LibRaw's output matrices are written to four decimal places, and the
+/// developed pixel is the camera's counts through two of them.
+const DEVELOPED: f32 = 1e-3;
 
 const SRGB: ColorSpace = ColorSpace::SRGB;
 const LINEAR: ColorSpace = ColorSpace::LINEAR_BT709;
@@ -104,6 +107,11 @@ const P3: ColorSpace = ColorSpace {
 /// BT.2100 HDR, stated outright in the file's CICP tags.
 const PQ_2020: ColorSpace = ColorSpace {
     transfer: crate::image::Transfer::Pq,
+    primaries: crate::image::Primaries::Bt2020,
+};
+/// What a raw is developed to: linear light on the widest primaries here.
+const LINEAR_2020: ColorSpace = ColorSpace {
+    transfer: crate::image::Transfer::Linear,
     primaries: crate::image::Primaries::Bt2020,
 };
 
@@ -1298,6 +1306,25 @@ const FIXTURES: &[Fixture] = &[
         nodata: None,
         tolerance: EXACT,
     },
+    // ------------------------------------------------------ camera raw
+    // Sensor counts under a color filter, which LibRaw demosaics, balances
+    // and converts to Rec. 2020 on the way out: linear, with 1.0 where the
+    // sensor saturates, and shown display-referred for it. The matrix in
+    // the file makes the camera's space Rec. 2020 exactly, so the quadrants
+    // come back as the pattern — AHD's interpolation is exact on a flat
+    // field, and the tolerance is for the matrix's rounding.
+    Fixture {
+        file: "dng-cfa.dng",
+        covers: "DNG, mosaiced 12-bit counts developed by LibRaw",
+        channels: Channels::Rgb,
+        kind: Kind::U16,
+        color: LINEAR_2020,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: DEVELOPED,
+    },
     // A PNG under a TIFF name, decoded by sniffing rather than extension.
     Fixture {
         file: "mislabeled.tif",
@@ -1317,11 +1344,18 @@ const FIXTURES: &[Fixture] = &[
 const REJECTED: &[(&str, &str)] = &[
     ("unsupported.tga", "unsupported image format"),
     ("bad-truncated.png", "decoding"),
+    ("bad-truncated.dng", "decoding"),
 ];
 
 /// Extensions the registry advertises that share a decode path with another
-/// fixture and so do not need one of their own.
-const ALIASES: &[&str] = &["jpe", "jfif", "hif"];
+/// fixture and so do not need one of their own. Every camera's raw format
+/// goes through LibRaw the way the DNG does, and only a camera can write
+/// one; what tells them apart is the recognition, which `decode::raw`'s own
+/// tests cover header by header.
+const ALIASES: &[&str] = &[
+    "jpe", "jfif", "hif", "nef", "nrw", "cr2", "cr3", "crw", "arw", "srf", "sr2", "raf", "orf",
+    "rw2", "rwl", "pef", "srw", "3fr", "fff", "iiq", "mef", "mos", "erf", "dcr", "kdc", "mrw",
+];
 
 fn directory() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_images")

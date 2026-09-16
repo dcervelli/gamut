@@ -19,9 +19,11 @@ license=('MIT OR Apache-2.0' 'ISC' 'CC0-1.0' 'Apache-2.0')
 # libheif reads HEIC and AVIF, and its codec plugins decide which of the two
 # actually work: libde265 or ffmpeg for HEVC, dav1d or aom for AV1. Both are
 # ordinary on Arch, so they are left to libheif's own dependencies.
-# vulkan-icd-loader finds the driver wgpu draws through; fontconfig is how the
-# interface finds a sans and a mono face to set its text in.
-depends=('gcc-libs' 'glibc' 'libheif' 'vulkan-icd-loader' 'fontconfig')
+# libraw develops camera raw files; 0.21 or newer, which `build.rs` checks
+# through pkg-config. vulkan-icd-loader finds the driver wgpu draws through;
+# fontconfig is how the interface finds a sans and a mono face to set its
+# text in.
+depends=('gcc-libs' 'glibc' 'libheif' 'libraw' 'vulkan-icd-loader' 'fontconfig')
 makedepends=('cargo' 'pkgconf')
 options=('!debug')
 
