@@ -134,13 +134,22 @@ scale() {
 
 # Turn the wheel N notches under the pointer, positive away from the hand,
 # which zooms in about it; and drag the left button DX, DY logical pixels
-# from where the pointer is. Both are a device of our own: see mouse.py.
+# from where the pointer is. Both are a device of our own: see device.py.
 wheel() {
-    python3 "$ROOT/bin/screenshots/mouse.py" wheel "$1"
+    python3 "$ROOT/bin/screenshots/device.py" wheel "$1"
 }
 
 drag() {
-    python3 "$ROOT/bin/screenshots/mouse.py" drag "$1" "$2"
+    python3 "$ROOT/bin/screenshots/device.py" drag "$1" "$2"
+}
+
+# Press a key by its position rather than by what it says — `shift+2` for
+# 50%, `ctrl+shift+c` — through the same device, for the bindings that are
+# matched on the key's position and that wtype's own keymap cannot reach.
+press() {
+    for chord; do
+        python3 "$ROOT/bin/screenshots/device.py" key "$chord"
+    done
 }
 
 # Press keys, one argument each, named as xkb names them: `plus`, `Up`,

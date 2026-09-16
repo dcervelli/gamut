@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A mouse that is not there: wheel notches and drags through /dev/uinput.
+"""A mouse and a keyboard that are not there, through /dev/uinput.
 
 wtype has keys but no pointer, and Hyprland can warp the pointer but not press
 its buttons or turn its wheel, so what the wheel and a drag do — zooming about
@@ -9,9 +9,16 @@ sends the events, and takes it away again. Nothing but the standard library:
 the ioctls and the event record are spelled out here from linux/uinput.h and
 linux/input.h.
 
-    mouse.py wheel N          N notches: positive is away from the hand, which zooms in
-    mouse.py drag DX DY       the left button held while the pointer moves DX, DY
-    mouse.py click            the left button pressed and released
+It has keys as well, for the bindings wtype cannot reach. wtype types a
+keysym under a keymap of its own, at whatever keycode it chose for it, and
+a binding on a key's position — Shift+2 for 50%, matched by the key being
+the second digit and not by what it says — never sees the key it wants.
+A key from here is the real keycode, read under the real keymap.
+
+    device.py wheel N          N notches: positive is away from the hand, which zooms in
+    device.py drag DX DY       the left button held while the pointer moves DX, DY
+    device.py click            the left button pressed and released
+    device.py key CHORD        a key by its position, with modifiers: 2, shift+2, ctrl+shift+c
 
 /dev/uinput has to be writable by the user; Omarchy grants that through an
 ACL, and `getfacl /dev/uinput` says whether it has.
@@ -28,6 +35,21 @@ EV_SYN, EV_KEY, EV_REL = 0x00, 0x01, 0x02
 SYN_REPORT = 0
 REL_X, REL_Y, REL_WHEEL, REL_WHEEL_HI_RES = 0x00, 0x01, 0x08, 0x0B
 BTN_LEFT = 0x110
+
+# The keys a chord can name, by their evdev codes.
+KEYS = {
+    "esc": 1, "1": 2, "2": 3, "3": 4, "4": 5, "5": 6, "6": 7, "7": 8, "8": 9,
+    "9": 10, "0": 11, "minus": 12, "equal": 13, "backspace": 14, "tab": 15,
+    "q": 16, "w": 17, "e": 18, "r": 19, "t": 20, "y": 21, "u": 22, "i": 23,
+    "o": 24, "p": 25, "leftbrace": 26, "rightbrace": 27, "enter": 28,
+    "leftctrl": 29, "a": 30, "s": 31, "d": 32, "f": 33, "g": 34, "h": 35,
+    "j": 36, "k": 37, "l": 38, "semicolon": 39, "apostrophe": 40, "grave": 41,
+    "leftshift": 42, "backslash": 43, "z": 44, "x": 45, "c": 46, "v": 47,
+    "b": 48, "n": 49, "m": 50, "comma": 51, "dot": 52, "slash": 53,
+    "rightshift": 54, "leftalt": 56, "space": 57, "up": 103, "pageup": 104,
+    "left": 105, "right": 106, "end": 107, "down": 108, "pagedown": 109,
+}
+MODIFIERS = {"shift": "leftshift", "ctrl": "leftctrl", "alt": "leftalt"}
 
 # linux/uinput.h, with the _IO macros already applied: 'U' is 0x55, and
 # uinput_setup is an input_id (four u16), an 80-byte name and a u32.
@@ -46,11 +68,13 @@ NOTCH = 120
 SETTLE = 0.4
 
 
-class Mouse:
+class Device:
     def __init__(self):
         self.fd = os.open("/dev/uinput", os.O_WRONLY | os.O_NONBLOCK)
         fcntl.ioctl(self.fd, UI_SET_EVBIT, EV_KEY)
         fcntl.ioctl(self.fd, UI_SET_KEYBIT, BTN_LEFT)
+        for code in KEYS.values():
+            fcntl.ioctl(self.fd, UI_SET_KEYBIT, code)
         fcntl.ioctl(self.fd, UI_SET_EVBIT, EV_REL)
         for code in (REL_X, REL_Y, REL_WHEEL, REL_WHEEL_HI_RES):
             fcntl.ioctl(self.fd, UI_SET_RELBIT, code)
@@ -109,23 +133,37 @@ class Mouse:
         time.sleep(0.05)
         self.button(False)
 
+    def key(self, chord):
+        *modifiers, key = chord.lower().split("+")
+        codes = [KEYS[MODIFIERS[m]] for m in modifiers] + [KEYS[key]]
+        for code in codes:
+            self.emit(EV_KEY, code, 1)
+            self.sync()
+            time.sleep(0.02)
+        for code in reversed(codes):
+            self.emit(EV_KEY, code, 0)
+            self.sync()
+            time.sleep(0.02)
+
 
 def main(argv):
     if len(argv) < 2:
         sys.exit(__doc__)
-    mouse = Mouse()
+    device = Device()
     try:
         match argv[1:]:
             case ["wheel", notches]:
-                mouse.wheel(int(notches))
+                device.wheel(int(notches))
             case ["drag", dx, dy]:
-                mouse.drag(int(dx), int(dy))
+                device.drag(int(dx), int(dy))
             case ["click"]:
-                mouse.click()
+                device.click()
+            case ["key", chord]:
+                device.key(chord)
             case _:
                 sys.exit(__doc__)
     finally:
-        mouse.close()
+        device.close()
 
 
 if __name__ == "__main__":
