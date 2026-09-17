@@ -426,7 +426,9 @@ right edge's handle — moves the whole region. Click the center handle to go
 back to moving the whole. `Ctrl` with an arrow grows the region on that
 side, whichever handle is current, and `Ctrl`+`Shift` with an arrow shrinks
 it that way, pulling the far side in: `Ctrl`+`Shift`+Left moves the right
-edge one pixel to the left. A region never shrinks past one pixel.
+edge one pixel to the left. A region never shrinks past one pixel. `Shift`
+with an arrow is not the region's: it pans the picture a pixel under it, as
+it does with no region up.
 
 Point at the region and it says what it is: its size under the handle at
 its center, `640 × 480`, and the coordinate of each edge written just inside
