@@ -205,14 +205,10 @@ const HANDLE_GRIP: f32 = 14.0;
 const HANDLE_RADIUS: f32 = 1.5;
 const HANDLE_RING: f32 = 1.0;
 
-/// A quarter of a stop: what one press of the exposure row is worth, and what
-/// the keys that do the same job step by.
-///
-/// Held here, where the buttons that carry the number are drawn, and read by
-/// the key table from here: the two are one step, so a press and a keystroke
-/// move the exposure by the same amount and the label on the button cannot
-/// come to disagree with what pressing it does.
-pub const EV_STEP: f32 = 0.25;
+/// A quarter of a stop: what one press of the exposure row is worth. The
+/// model's, since the white handle snaps to it there; read through here by
+/// the key table and the tooltips, which are about the buttons.
+pub use crate::image::display::EV_STEP;
 
 /// How far the exposure's own number has to be dragged for one step of it.
 /// A drag is the same quarter stops a press is, so many as the hand has
@@ -1088,7 +1084,11 @@ fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect, content: Rec
             0.0,
             Color::from_linear(current.display.shade(value, channels, headroom)),
         );
-        if current.display.response(value, headroom) > ABOVE_WHITE {
+        if current
+            .display
+            .response(value, channels.is_gray(), headroom)
+            > ABOVE_WHITE
+        {
             painter.rect_filled(
                 egui::Rect::from_min_max(pos2(left, top), pos2(right, top + hair)),
                 0.0,
@@ -1148,7 +1148,10 @@ fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect, content: Rec
         .map(|column| {
             let across = column as f32 / columns as f32;
             let value = transfer.to_linear(axis_min + across * span);
-            let response = current.display.response(value, headroom).max(0.0);
+            let response = current
+                .display
+                .response(value, channels.is_gray(), headroom)
+                .max(0.0);
             transfer.to_encoded(response).max(0.0)
         })
         .collect();
@@ -1233,7 +1236,10 @@ fn header(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect, held: Opti
     let readout = held.or_else(|| {
         let bin = hovered_bin(bars, input.cursor)?;
         let value = transfer.to_linear(axis_min + bin_across(bin) * span);
-        let mapped = current.display.response(value, input.headroom).max(0.0);
+        let mapped = current
+            .display
+            .response(value, current.image.is_gray(), input.headroom)
+            .max(0.0);
         Some(format!(
             "{}  {BECOMES}  {}",
             axis_words(current, axis_min + bin_across(bin) * span),
@@ -1286,15 +1292,16 @@ fn button(
     rect: Rect,
     control: Control,
     active: bool,
+    enabled: bool,
     radius: f32,
 ) -> (egui::Response, Color32, Color32) {
     let response = ui.allocate_rect(area(rect), Sense::CLICK);
-    let (background, ink) = pass.button_ink(active, &response, true);
+    let (background, ink) = pass.button_ink(active, &response, enabled);
     ui.painter().rect_filled(area(rect), radius, background);
     response
-        .widget_info(|| WidgetInfo::selected(WidgetType::Button, true, active, control.label()));
-    let response = pass.tooltip(response, Tip::Control(control), true);
-    if response.clicked() {
+        .widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, active, control.label()));
+    let response = pass.tooltip(response, Tip::Control(control), enabled);
+    if enabled && response.clicked() {
         pass.press(control);
     }
     (response, background, ink)
@@ -1332,7 +1339,7 @@ fn controls(
             // holding a state is a button that has to explain itself.
             _ => false,
         };
-        let (_, background, ink) = button(pass, ui, rect, *widget, active, TOGGLE_RADIUS);
+        let (_, background, ink) = button(pass, ui, rect, *widget, active, true, TOGGLE_RADIUS);
         let grid = icon::Grid::new(ui.pixels_per_point());
         let square = icon::square(grid, area(rect), ICON_SIDE);
         let painter = ui.painter();
@@ -1396,7 +1403,15 @@ fn controls(
     for (index, map) in Colormap::ALL.into_iter().enumerate() {
         let rect = swatch_button(bars, index);
         let chosen = current.display.colormap == map;
-        button(pass, ui, rect, Control::Ramp(index), chosen, SWATCH_RADIUS);
+        button(
+            pass,
+            ui,
+            rect,
+            Control::Ramp(index),
+            chosen,
+            true,
+            SWATCH_RADIUS,
+        );
 
         // The gradient on the device's pixels, as the band above it is: a
         // swatch is the same row of one-pixel cells, over less room.
@@ -1430,13 +1445,15 @@ fn controls(
 /// which the toolkit takes down for the length of a drag, and a drag is
 /// exactly when the number is wanted.
 ///
-/// The handles set the values that come out black and white — exposure
+/// The handles stand at the values that come out black and white — exposure
 /// included, since those are the two ends of the band's black run and its
-/// white run — and [`Display::set_displayed_bounds`] works the window back
-/// from them. A handle is dragged to the pointer rather than by it, so a
-/// drag has no memory to lose: wherever the pointer is along the axis is
-/// where the handle goes, and a hand that runs off the end of the band puts
-/// the handle at the end.
+/// white run — and say where those values should be. What moves to put them
+/// there is the model's to decide, by the file: on a photograph the white
+/// handle is the exposure, and on measured light it is the window's top —
+/// see [`Display::put_white`]. A handle is dragged to the pointer rather
+/// than by it, so a drag has no memory to lose: wherever the pointer is
+/// along the axis is where the handle goes, and a hand that runs off the
+/// end of the band puts the handle at the end.
 ///
 /// The window can end past what is plotted, which a few stops of exposure
 /// is enough to do; such a handle is drawn hollow at the edge it went out
@@ -1489,22 +1506,36 @@ fn track(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, bars: Rect) -> O
         && let Some(pointer) = black_handle.interact_pointer_pos()
     {
         let ceiling = transfer.to_linear(transfer.to_encoded(white) - least);
-        let black = value_at(pointer.x).min(ceiling);
-        pass.commands.push(Command::Levels { black, white });
+        pass.commands
+            .push(Command::BlackPoint(value_at(pointer.x).min(ceiling)));
     } else if white_handle.dragged()
         && let Some(pointer) = white_handle.interact_pointer_pos()
     {
         let floor = transfer.to_linear(transfer.to_encoded(black) + least);
-        let white = value_at(pointer.x).max(floor);
-        pass.commands.push(Command::Levels { black, white });
+        pass.commands
+            .push(Command::WhitePoint(value_at(pointer.x).max(floor)));
     } else if between.dragged() {
         // Along the axis by what the hand moved, in the axis's own units,
         // both ends together: the width of the window is the handles'
-        // business, and the band's is where it is.
-        let moved = between.drag_delta().x / bars.width * span;
-        if moved != 0.0 {
+        // business, and the band's is where it is. Only as far as the plot
+        // goes, as the handles only go as far as the band: a window slid
+        // off what is plotted makes nothing black or nothing white, which
+        // is a lift and not a place to look. A window already wider than
+        // the plot has nowhere to slide to.
+        let room = (
+            axis_min - transfer.to_encoded(black),
+            axis_max - transfer.to_encoded(white),
+        );
+        let moved = if room.0 <= room.1 {
+            (between.drag_delta().x / bars.width * span).clamp(room.0, room.1)
+        } else {
+            0.0
+        };
+        // Short of the rounding an end that is already at the plot's edge
+        // comes back from the encoding with.
+        if moved.abs() > span * 1e-5 {
             let slid = |value: f32| transfer.to_linear(transfer.to_encoded(value) + moved);
-            pass.commands.push(Command::Levels {
+            pass.commands.push(Command::Slide {
                 black: slid(black),
                 white: slid(white),
             });
@@ -1648,11 +1679,16 @@ fn rows(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, panel: Rect, offe
         theme.text_primary.into(),
     );
 
+    // The curves are dead under a false color, which clips at the top of
+    // its ramp whatever curve is on — the row stays, since the panel's
+    // height is the file's, and says why when rested on.
+    let false_colored = display.false_colored(current.image.is_gray());
     for (widget, rect) in row_buttons(panel, offered) {
         let Some((label, active)) = row_label(widget, display) else {
             continue;
         };
-        let (_, _, ink) = button(pass, ui, rect, widget, active, TOGGLE_RADIUS);
+        let enabled = !(false_colored && matches!(widget, Control::Curve(_)));
+        let (_, _, ink) = button(pass, ui, rect, widget, active, enabled, TOGGLE_RADIUS);
         ui.painter().text(
             area(rect).center(),
             Align2::CENTER_CENTER,

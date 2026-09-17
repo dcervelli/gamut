@@ -74,7 +74,10 @@ Notable changes to `gamut`. The format follows
   The band under the plot is a levels track: a handle at the value that
   comes out black and one at the value that comes out white, each dragged
   to where it should stand, and the band between them dragged to slide the
-  window. The `0.000–1.000` readout and the four nudge buttons beside it
+  window along the plot, as far as the plot goes. On a photograph the white handle is the exposure, in the same
+  quarter stops as `f` and `d`, since its window is 0–1 and nothing else;
+  on linear data it is the top of the window, with the exposure left as
+  the push on top. The `0.000–1.000` readout and the four nudge buttons beside it
   are gone; `a`, `s`, `A` and `S` still move the window by steps. The share
   of the picture the window is clipping is written in the two top corners
   of the plot — `0.5%` at black, `1.4%` at white — only when there is one,
@@ -149,6 +152,11 @@ Notable changes to `gamut`. The format follows
   once scrolled, or above its foot while there is more below: the toolkit's
   fade at a scroll area's edge, painted in the panel's translucent fill,
   which came out as a shadow on a light theme.
+- The histogram's row of tone curves is dead while a false color is on,
+  and says why when rested on, and `t` does nothing there: a false color
+  clips at the top of its ramp whatever the curve, which the picture, the
+  bottom bar and the pointer's readout all knew, while the panel went on
+  lighting a curve that was doing nothing and drawing it over the plot.
 
 ## 0.2.0 - 2026-09-11
 

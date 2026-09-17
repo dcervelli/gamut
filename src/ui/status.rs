@@ -5,7 +5,7 @@ use egui::{
     Align2, Label, RichText, Sense, TextFormat, WidgetInfo, WidgetType, pos2, text::LayoutJob, vec2,
 };
 
-use crate::image::display::{AutoWindow, Colormap, Headroom, ToneMap};
+use crate::image::display::{AutoWindow, Headroom, ToneMap};
 
 use super::chrome::{BAR_PADDING, Corners, Pass, STEP_SEAM, measure};
 use super::control::Control;
@@ -273,7 +273,7 @@ fn describe_state(current: &Current, headroom: Headroom) -> Vec<String> {
     }
     // The false color is a reading of one channel, and the display leaves
     // it off a color image; so does the bar.
-    if current.image.is_gray() && current.display.colormap != Colormap::Gray {
+    if current.display.false_colored(current.image.is_gray()) {
         parts.push(current.display.colormap.label().to_string());
     }
     if let Some(highlights) = describe_highlights(current, headroom) {
@@ -300,7 +300,7 @@ pub(super) const CLIPPED: &str = "clipped";
 /// itself, in the segment before this one.
 fn describe_highlights(current: &Current, headroom: Headroom) -> Option<&'static str> {
     let display = &current.display;
-    if current.image.is_gray() && display.colormap != Colormap::Gray {
+    if display.false_colored(current.image.is_gray()) {
         return None;
     }
     match (display.tone_map, headroom) {
@@ -355,7 +355,7 @@ pub fn explain_state(current: &Current, headroom: Headroom) -> Vec<String> {
             histogram::stops_label(display.exposure_stops)
         ));
     }
-    if current.image.is_gray() && display.colormap != Colormap::Gray {
+    if display.false_colored(current.image.is_gray()) {
         said.push(format!(
             "{} false color.",
             capitalized(display.colormap.label())
@@ -374,7 +374,7 @@ pub fn explain_state(current: &Current, headroom: Headroom) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::image::display::{Display, Startup};
+    use crate::image::display::{Colormap, Display, Startup};
     use crate::image::exif::Exif;
     use crate::image::sequence::Sequence;
     use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples, Stats};

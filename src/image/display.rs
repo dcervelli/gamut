@@ -349,6 +349,19 @@ pub struct Startup {
 /// that the top of the window itself does not.
 const ABOVE_WHITE: f32 = 1.0 + 1e-3;
 
+/// A quarter of a stop: what one press of the histogram panel's exposure
+/// buttons is worth, what the keys that do the same job step by, and what
+/// the white handle's drag is snapped to on a photograph.
+///
+/// One step for all of them, so that a press, a keystroke and a drag cannot
+/// be worth different amounts, and the label on the button cannot come to
+/// disagree with what pressing it does. Held here rather than with the
+/// buttons because the model snaps to it too — see [`Display::put_white`].
+pub const EV_STEP: f32 = 0.25;
+
+/// The furthest the exposure goes either way, in stops.
+const EXPOSURE_LIMIT: f32 = 16.0;
+
 #[derive(Clone, Debug)]
 pub struct Display {
     /// Linear working-space values mapped to 0 and 1 respectively.
@@ -500,10 +513,17 @@ impl Display {
     /// the histogram's right corner is a share of, and the shader's mark on
     /// a white pixel waits on.
     pub fn clips_white(&self, gray: bool, headroom: Headroom) -> bool {
-        if gray && self.colormap != Colormap::Gray {
-            return true;
-        }
-        self.tone_map == ToneMap::None && headroom == Headroom::None
+        self.false_colored(gray) || (self.tone_map == ToneMap::None && headroom == Headroom::None)
+    }
+
+    /// Whether a false color is on the picture: a colormap other than the
+    /// gray one, on a `gray` image, which is the only kind it is a reading
+    /// of. The one test behind everything that changes under a false color
+    /// — the curve held at a clip, the bar naming the ramp instead of the
+    /// curve, the histogram's row of curves going dead — so that they cannot
+    /// come to disagree about when.
+    pub fn false_colored(&self, gray: bool) -> bool {
+        gray && self.colormap != Colormap::Gray
     }
 
     /// Whether the display is doing nothing at all: the window is 0..1, the
@@ -580,7 +600,46 @@ impl Display {
     }
 
     pub fn adjust_exposure(&mut self, stops: f32) {
-        self.exposure_stops = (self.exposure_stops + stops).clamp(-16.0, 16.0);
+        self.exposure_stops = (self.exposure_stops + stops).clamp(-EXPOSURE_LIMIT, EXPOSURE_LIMIT);
+    }
+
+    /// Puts the value that comes out black where it is told to, the value
+    /// that comes out white staying put: the black handle on the histogram's
+    /// band.
+    pub fn put_black(&mut self, black: f32) {
+        let (_, white) = self.displayed_bounds();
+        self.set_displayed_bounds(black, white);
+    }
+
+    /// Puts the value that comes out white where it is told to: the white
+    /// handle on the histogram's band. Which of the two things that can put
+    /// it there moves is the file's to say.
+    ///
+    /// A graded file's window is 0..1 and nothing else — that is what graded
+    /// means — so on one of those the handle is the exposure: the stops that
+    /// land white on `white` over the window as it is, snapped to the
+    /// quarter stops the buttons and the keys count in, so that the handle
+    /// reaches exactly the numbers they do and the exposure row reads as it
+    /// would after so many presses. Measured light has no white of its own,
+    /// and there the handle is the window's top, as the black handle is its
+    /// bottom, with the exposure left as the push on top of it.
+    ///
+    /// Refused where `white` is not above black, or is not a number: that is
+    /// not a white point.
+    pub fn put_white(&mut self, white: f32, referred: Referred) {
+        let (black, _) = self.displayed_bounds();
+        match referred {
+            Referred::Scene => self.set_displayed_bounds(black, white),
+            Referred::Display => {
+                let span = self.high - self.low;
+                if !(white.is_finite() && white > black && span > 0.0) {
+                    return;
+                }
+                let stops = (span / (white - black)).log2();
+                self.exposure_stops =
+                    ((stops / EV_STEP).round() * EV_STEP).clamp(-EXPOSURE_LIMIT, EXPOSURE_LIMIT);
+            }
+        }
     }
 
     /// Widens or narrows the window about its own center, the "level" half of
@@ -645,7 +704,7 @@ impl Display {
         Mapped {
             values,
             count,
-            color: self.curve(sample.channels, headroom, color),
+            color: self.curve(sample.channels.is_gray(), headroom, color),
             alpha: sample.alpha,
         }
     }
@@ -659,8 +718,8 @@ impl Display {
     /// above the top of the ramp is a color the ramp does not have. Every
     /// readout has to make the same choice, or it stops describing the screen
     /// it is meant to be describing.
-    fn curve(&self, channels: Channels, headroom: Headroom, color: [f32; 3]) -> [f32; 3] {
-        if channels.is_gray() && self.colormap != Colormap::Gray {
+    fn curve(&self, gray: bool, headroom: Headroom, color: [f32; 3]) -> [f32; 3] {
+        if self.false_colored(gray) {
             ToneMap::None.apply(color, Headroom::None)
         } else {
             self.tone_map.apply(color, headroom)
@@ -702,8 +761,10 @@ impl Display {
     /// the same arithmetic for a whole pixel, where the false color and a
     /// tone curve's cross-channel terms also come in; a curve for those would
     /// be three curves, and the panel is asking a one-dimensional question.
-    pub fn response(&self, value: f32, headroom: Headroom) -> f32 {
-        self.tone_map.apply([self.windowed(value); 3], headroom)[0]
+    /// It still needs to know whether the image is `gray`, since under a
+    /// false color the curve is the clip, whatever was chosen.
+    pub fn response(&self, value: f32, gray: bool, headroom: Headroom) -> f32 {
+        self.curve(gray, headroom, [self.windowed(value); 3])[0]
     }
 
     /// And the color it comes out as: the window, the false color and the
@@ -725,7 +786,7 @@ impl Display {
             (true, Colormap::Gray) | (false, _) => [windowed; 3],
             (true, colormap) => colormap.color(windowed),
         };
-        self.curve(channels, headroom, color)
+        self.curve(channels.is_gray(), headroom, color)
     }
 
     /// `(value - low) * gain`: one value through the window with its
@@ -1150,21 +1211,21 @@ mod tests {
             ..Default::default()
         };
         let (black, white) = display.displayed_bounds();
-        assert!(display.response(black, Headroom::None).abs() < 1e-6);
-        assert!((display.response(white, Headroom::None) - 1.0).abs() < 1e-6);
+        assert!(display.response(black, false, Headroom::None).abs() < 1e-6);
+        assert!((display.response(white, false, Headroom::None) - 1.0).abs() < 1e-6);
         // Clipping is flat on both sides of the window, which is the corner
         // the curve is drawn to show.
-        assert_eq!(display.response(0.0, Headroom::None), 0.0);
-        assert_eq!(display.response(4.0, Headroom::None), 1.0);
+        assert_eq!(display.response(0.0, false, Headroom::None), 0.0);
+        assert_eq!(display.response(4.0, false, Headroom::None), 1.0);
 
         display.tone_map = ToneMap::Neutral;
         assert!(
-            display.response(white, Headroom::None) < 1.0,
+            display.response(white, false, Headroom::None) < 1.0,
             "the shoulder rolls off"
         );
         let mut previous = f32::NEG_INFINITY;
         for step in 0..64 {
-            let response = display.response(step as f32 / 16.0, Headroom::None);
+            let response = display.response(step as f32 / 16.0, false, Headroom::None);
             assert!(response >= previous, "step {step}: {response} < {previous}");
             assert!((0.0..=1.0).contains(&response), "step {step}: {response}");
             previous = response;
@@ -1397,8 +1458,8 @@ mod tests {
     #[test]
     fn the_response_and_the_shade_run_past_white_only_where_the_surface_does() {
         let display = Display::default();
-        assert_eq!(display.response(4.0, Headroom::None), 1.0);
-        assert_eq!(display.response(4.0, Headroom::Above), 4.0);
+        assert_eq!(display.response(4.0, false, Headroom::None), 1.0);
+        assert_eq!(display.response(4.0, false, Headroom::Above), 4.0);
         assert_eq!(display.shade(4.0, Channels::Rgb, Headroom::Above), [4.0; 3]);
 
         let false_color = Display {
@@ -1409,6 +1470,31 @@ mod tests {
             false_color.shade(4.0, Channels::Gray, Headroom::Above),
             Colormap::Viridis.color(1.0)
         );
+    }
+
+    /// Under a false color the curve that was chosen is not the curve that
+    /// runs: the ramp clips at its end whatever the curve, and the response
+    /// says so, since the histogram draws it and a curve on the plot that
+    /// the picture is not under would be a curve for nothing. A color image
+    /// has no false color, so its curve runs as chosen.
+    #[test]
+    fn the_response_is_the_clip_under_a_false_color() {
+        let display = Display {
+            colormap: Colormap::Viridis,
+            tone_map: ToneMap::Reinhard,
+            ..Default::default()
+        };
+        assert!(display.false_colored(true));
+        assert!(!display.false_colored(false));
+        assert_eq!(display.response(4.0, true, Headroom::Above), 1.0);
+        assert_eq!(display.response(4.0, false, Headroom::Above), 0.8);
+
+        let gray = Display {
+            colormap: Colormap::Gray,
+            ..display
+        };
+        assert!(!gray.false_colored(true));
+        assert_eq!(gray.response(4.0, true, Headroom::Above), 0.8);
     }
 
     /// The handles put the values that come out black and white where they
@@ -1488,6 +1574,52 @@ mod tests {
             }
             .is_identity()
         );
+    }
+
+    /// The black handle moves the black point alone, and the white handle
+    /// is the exposure on a graded file and the white point on a measured
+    /// one: two dials for one effect on a photograph would be one too many,
+    /// and on linear data the two genuinely differ.
+    #[test]
+    fn the_white_handle_is_the_exposure_on_a_photograph_and_the_window_on_data() {
+        let mut display = Display::default();
+        display.put_black(0.1);
+        assert_eq!(display.displayed_bounds(), (0.1, 1.0));
+        assert_eq!(display.exposure_stops, 0.0);
+
+        // A photograph: white to the middle of the range above black is a
+        // stop, the window staying where it was.
+        display.put_white(0.55, Referred::Display);
+        assert_eq!(display.exposure_stops, 1.0);
+        assert_eq!((display.low, display.high), (0.1, 1.0));
+        let (black, white) = display.displayed_bounds();
+        assert!(
+            (black - 0.1).abs() < 1e-6 && (white - 0.55).abs() < 1e-6,
+            "{white}"
+        );
+        // Snapped to the quarter stops the buttons count in, so the row of
+        // them reads as it would after so many presses.
+        display.put_white(0.6, Referred::Display);
+        assert_eq!(display.exposure_stops, 0.75);
+        // And held to the limit the keys stop at.
+        display.put_white(0.1 + 1e-7, Referred::Display);
+        assert_eq!(display.exposure_stops, EXPOSURE_LIMIT);
+        // Refused where it is not a white point.
+        display.put_white(0.05, Referred::Display);
+        display.put_white(f32::NAN, Referred::Display);
+        assert_eq!(display.exposure_stops, EXPOSURE_LIMIT);
+
+        // Measured light: the same request moves the window's top, and the
+        // exposure it carries stays as the push on top of it.
+        let mut display = Display {
+            exposure_stops: 1.0,
+            ..Display::default()
+        };
+        display.put_white(0.25, Referred::Scene);
+        assert_eq!(display.exposure_stops, 1.0);
+        let (black, white) = display.displayed_bounds();
+        assert!(black == 0.0 && (white - 0.25).abs() < 1e-6, "{white}");
+        assert_eq!(display.auto, AutoWindow::Manual);
     }
 
     /// Whether a file has highlights above white is asked of it as it
