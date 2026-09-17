@@ -22,7 +22,7 @@ use winit::window::{Window, WindowId};
 
 use crate::image::decode;
 use crate::image::display::{Display, Headroom, Startup};
-use crate::image::region::Region;
+use crate::image::region::{Grip, Region};
 use crate::image::sequence::Sequence;
 use crate::loader::{Decoded, Loader, Opened, Ready, Reload, Request, Source};
 use crate::monitor::{Mode, Monitors};
@@ -207,6 +207,10 @@ pub struct App {
     /// The region on the picture: off, asked for, or drawn. What the arrows
     /// move, `Space` fits and `Ctrl+C` copies while one is on screen.
     selection: Selection,
+    /// The current handle of the region: the one the arrows move, and the
+    /// one lit apart from the others. The middle — the whole region — until
+    /// a handle is clicked or dragged, and again for every new region.
+    handle: Grip,
     /// The hold a drag on the picture has on it, from the press to the
     /// release, while the drag is the region's rather than the view's.
     grabbing: Option<Grabbing>,
@@ -333,6 +337,7 @@ impl App {
             gui: None,
             pointer: Pointer::default(),
             selection: Selection::Off,
+            handle: Grip::Middle,
             grabbing: None,
             framing: Framing::FIRST,
             zoom_box: None,
@@ -1389,9 +1394,11 @@ impl App {
                 .collect(),
             toast: self.toasts.showing().cloned(),
             selection: self.selection,
+            handle: self.handle,
             grabbing: self.grabbing.as_ref().map(Grabbing::grab),
             over_region: self.over_region(),
             box_zoom: self.pointer.space != input::Space::Up,
+            move_region: self.pointer.modifiers.shift_key(),
             zoom_box: self.zoom_box,
             transport: self.transport(),
             chooser,
@@ -2089,9 +2096,10 @@ mod tests {
     }
 
     /// A region on screen takes the keys that move the picture: the arrows
-    /// move it a pixel — or the handle the pointer rests on — `Ctrl` with
-    /// one grows it, `Space` fits it, and `Esc` takes it off after a message
-    /// and before quitting. Stepping to another file takes it off as well.
+    /// move it a pixel — or its current handle, once one has been clicked or
+    /// dragged — `Ctrl` with one grows it, `Space` fits it, and `Esc` takes
+    /// it off after a message and before quitting. Stepping to another file
+    /// takes it off as well.
     #[test]
     fn a_region_takes_the_keys_that_move_the_picture() {
         use crate::image::region::{Grip, Side};
@@ -2129,7 +2137,9 @@ mod tests {
         assert!(app.over_region());
         app.pointer.grip = None;
 
-        // The arrows move the region and leave the view alone, at once.
+        // The arrows move the region and leave the view alone, at once: a
+        // fresh region's current handle is its middle.
+        assert_eq!(app.handle, Grip::Middle);
         let (image, viewport) = (app.image_size(), app.viewport());
         let view = app.view.position(image, viewport);
         let _ = app.perform(Action::Pan(Direction::Right, PanStep::Coarse));
@@ -2137,8 +2147,11 @@ mod tests {
         assert_eq!(app.view.position(image, viewport), view);
         assert!(app.motion.is_none());
 
-        // With the pointer resting on a handle, they move the handle.
-        app.pointer.grip = Some(Grip::Edge(Side::Right));
+        // A handle clicked is the current one, and they move that instead.
+        // The pointer resting on another handle does not come into it.
+        app.act(Command::Handle(Grip::Edge(Side::Right)));
+        app.pointer.grip = Some(Grip::Corner(Side::Left, Side::Top));
+        assert_eq!(app.handle, Grip::Edge(Side::Right));
         let _ = app.perform(Action::Pan(Direction::Right, PanStep::Coarse));
         assert_eq!(
             app.selection,
@@ -2149,7 +2162,7 @@ mod tests {
             })
         );
         // An arrow along that edge moves the whole region instead.
-        let _ = app.perform(Action::Pan(Direction::Down, PanStep::Fine));
+        let _ = app.perform(Action::Pan(Direction::Down, PanStep::Coarse));
         assert_eq!(
             app.selection,
             Selection::Shown(Region {
@@ -2160,6 +2173,55 @@ mod tests {
             })
         );
         app.pointer.grip = None;
+
+        // A drag on a handle makes it current too, without moving it; a
+        // move of the whole by its inside leaves the handle as it was; and
+        // a hold on the middle handle brings the arrows back to the whole.
+        app.act(Command::Grab {
+            grab: Grab::Handle(Grip::Edge(Side::Top)),
+            at: [16.0, 6.0],
+        });
+        app.act(Command::Release);
+        assert_eq!(app.handle, Grip::Edge(Side::Top));
+        app.act(Command::Grab {
+            grab: Grab::Handle(Grip::Inside),
+            at: [16.0, 10.0],
+        });
+        app.act(Command::Release);
+        assert_eq!(app.handle, Grip::Edge(Side::Top));
+        app.act(Command::Grab {
+            grab: Grab::Handle(Grip::Middle),
+            at: [16.0, 11.0],
+        });
+        app.act(Command::Release);
+        assert_eq!(app.handle, Grip::Middle);
+        let _ = app.perform(Action::Pan(Direction::Up, PanStep::Coarse));
+        assert_eq!(
+            app.selection,
+            Selection::Shown(Region {
+                x: 11,
+                y: 5,
+                width: 12,
+                height: 11
+            })
+        );
+        // Grown back for the steps below, which read from here.
+        let _ = app.perform(Action::Pan(Direction::Down, PanStep::Coarse));
+
+        // Shift with an arrow is not the region's: it pans the picture by
+        // a pixel under it, as it does with no region up.
+        let view = app.view.position(image, viewport);
+        let _ = app.perform(Action::Pan(Direction::Down, PanStep::Fine));
+        assert_eq!(
+            app.selection,
+            Selection::Shown(Region {
+                x: 11,
+                y: 6,
+                width: 12,
+                height: 11
+            })
+        );
+        assert_ne!(app.view.position(image, viewport), view);
 
         // Ctrl grows it that way.
         let _ = app.perform(Action::Pan(Direction::Up, PanStep::Edge));

@@ -1058,8 +1058,7 @@ pub(super) struct Pointer {
     /// gone under a still pointer — and that frame is being painted anyway.
     pub(super) over_image: bool,
     /// The handle of the region it was resting on at the last pass, if any
-    /// — said the same way, and what the arrows ask before they move the
-    /// whole region.
+    /// — said the same way, and what the region's words are written for.
     pub(super) grip: Option<Grip>,
     /// Where `Space` is: the one key that is held as well as pressed.
     pub(super) space: Space,
@@ -1448,8 +1447,8 @@ impl App {
     }
 
     /// What `action` does to `region`, the region on screen, where it does
-    /// something to it: the arrows move it a pixel — or the handle the
-    /// pointer rests on, where it rests on one — with Ctrl grow it, with
+    /// something to it: the arrows move its current handle a pixel — the
+    /// whole of it, while that is the middle — with Ctrl grow it, with
     /// Ctrl and Shift shrink it, `Space` frames it and then the picture,
     /// and the copy of the picture copies it. `None` for every other
     /// action, which is the picture's as it always was.
@@ -1470,15 +1469,16 @@ impl App {
                 self.select(region.shrunk(direction.side().opposite(), 1));
                 Effect::Redraw
             }
-            Pan(direction, Fine | Coarse) => {
+            // The fine pan is left to the picture: a region moves by the
+            // pixel already, and the picture under it still wants moving by
+            // one.
+            Pan(direction, Coarse) => {
                 let step = direction.step();
-                // A handle that has no edge to move the way the arrow
-                // points — an edge's own axis — moves the whole region, as
-                // the arrow would with the pointer anywhere else.
-                let moved = self
-                    .pointer
-                    .grip
-                    .and_then(|grip| region.nudged(grip, step, image))
+                // The middle moves the whole region, and so does a handle
+                // that has no edge to move the way the arrow points — an
+                // edge's own axis — rather than leaving the key dead.
+                let moved = region
+                    .nudged(self.handle, step, image)
                     .unwrap_or_else(|| region.moved_by(step[0], step[1], image));
                 self.select(moved);
                 Effect::Redraw
@@ -1531,13 +1531,17 @@ impl App {
     /// Takes the region off, and the mode with it.
     pub(super) fn clear_region(&mut self) {
         self.selection = Selection::Off;
+        self.handle = Grip::Middle;
         self.grabbing = None;
         self.pointer.grip = None;
     }
 
     /// A drag on the picture has taken hold of the region — or of nothing
     /// yet, to draw one, or to draw a box to zoom to — at `at`, in image
-    /// pixels.
+    /// pixels. A handle taken hold of is the current one from then on, and
+    /// a region drawn afresh starts over at the middle; a hold on the
+    /// inside is a move and nothing more, and leaves the handle where it
+    /// was.
     fn grab(&mut self, grab: Grab, at: [f32; 2]) {
         // The box is what the held key was for, and the key is spent on it:
         // letting go of it afterwards fits nothing.
@@ -1545,6 +1549,11 @@ impl App {
             && let Space::Held { drawn } = &mut self.pointer.space
         {
             *drawn = true;
+        }
+        match grab {
+            Grab::New => self.handle = Grip::Middle,
+            Grab::Handle(Grip::Inside) | Grab::Zoom => {}
+            Grab::Handle(grip) => self.handle = grip,
         }
         self.grabbing = Some(Grabbing {
             grab,
@@ -1572,7 +1581,7 @@ impl App {
                 return;
             }
             (Grab::New, _) => Region::from_corners(from, to, image),
-            (Grab::Handle(Grip::Inside), Some(origin)) => {
+            (Grab::Handle(Grip::Middle | Grip::Inside), Some(origin)) => {
                 let by = |axis: usize| (to[axis] - from[axis]).round() as i64;
                 Some(origin.moved_by(by(0), by(1), image))
             }
@@ -1666,6 +1675,7 @@ impl App {
                 self.view.center_on(at, image, viewport);
             }
             ui::Command::Grab { grab, at } => self.grab(grab, at),
+            ui::Command::Handle(grip) => self.handle = grip,
             ui::Command::Pull(to) => self.pull(to),
             ui::Command::Release => self.release(),
             // The chooser's own: what was typed, where the cursor went, and
