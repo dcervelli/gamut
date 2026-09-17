@@ -923,6 +923,9 @@ pub(super) struct Namer {
     /// Whether anything out there offers to open the file on screen, which
     /// is what makes the open button dead.
     openable: bool,
+    /// Whether a false color is on the picture, which is what makes the
+    /// histogram's row of curves dead.
+    false_colored: bool,
     /// The absolute path of the file on screen, for the tooltip on its name.
     path: String,
     /// Which file is on screen, out of how many.
@@ -948,7 +951,9 @@ impl Naming for Namer {
         // the surface switch on a monitor with no room above white — refuses
         // the press, so the label says why rather than naming the thing and
         // the key beside it, neither of which is going to happen.
-        if let Some(refused) = ui::tooltip::disabled(at, self.room, self.hdr, self.openable) {
+        if let Some(refused) =
+            ui::tooltip::disabled(at, self.room, self.hdr, self.openable, self.false_colored)
+        {
             return Some(ui::Tooltip {
                 title: vec![refused.said.to_string()],
                 hints: refused.hint.map(str::to_string).into_iter().collect(),
@@ -1402,8 +1407,15 @@ impl App {
                     true
                 });
             }
+            // Not under a false color, which clips whatever the curve: the
+            // row of curves is dead there, and a key that changed what the
+            // dead row shows would have the picture change when the ramp
+            // came off, from a press made long before.
             CycleToneMap => {
                 return self.adjust(|current, _| {
+                    if current.display.false_colored(current.image.is_gray()) {
+                        return false;
+                    }
                     current.display.cycle_tone_map();
                     true
                 });
@@ -1672,6 +1684,10 @@ impl App {
             room: self.room(),
             hdr: self.hdr_state(),
             openable: !self.openers.is_empty(),
+            false_colored: self
+                .current
+                .as_ref()
+                .is_some_and(|current| current.display.false_colored(current.image.is_gray())),
             path: self.shown_path().display().to_string(),
             index: self.files.index(),
             count: self.files.len(),
@@ -1703,10 +1719,22 @@ impl App {
                 return std::mem::replace(&mut self.pointer.grip, grip) != grip;
             }
             ui::Command::Press(control) => self.press(control),
-            // The hand on the band under the histogram: the window goes
-            // where the handles are put, as the view goes where a drag puts
-            // it. Not animated, and not a step: the hand is on it.
-            ui::Command::Levels { black, white } => {
+            // The hand on the band under the histogram: the values that come
+            // out black and white go where the handles are put, as the view
+            // goes where a drag puts it. Not animated, and not a step: the
+            // hand is on it. Which of the display's dials moves to put white
+            // there is the file's to say, and the display asks it.
+            ui::Command::BlackPoint(black) => {
+                if let Some(current) = self.current.as_mut() {
+                    current.display.put_black(black);
+                }
+            }
+            ui::Command::WhitePoint(white) => {
+                if let Some(current) = self.current.as_mut() {
+                    current.display.put_white(white, current.image.referred);
+                }
+            }
+            ui::Command::Slide { black, white } => {
                 if let Some(current) = self.current.as_mut() {
                     current.display.set_displayed_bounds(black, white);
                 }
@@ -2108,6 +2136,7 @@ impl App {
             Control::Curve(index) => {
                 if let Some(current) = self.current.as_mut()
                     && let Some(curve) = ToneMap::ALL.get(index)
+                    && !current.display.false_colored(current.image.is_gray())
                 {
                     current.display.tone_map = *curve;
                 }
@@ -2433,6 +2462,7 @@ mod tests {
             },
             hdr: Hdr::Available,
             openable: false,
+            false_colored: false,
             path: String::new(),
             index: 0,
             count: 1,
@@ -2506,6 +2536,7 @@ mod tests {
             },
             hdr: Hdr::Available,
             openable: true,
+            false_colored: false,
             path: String::new(),
             index: 0,
             count: 1,
@@ -2595,6 +2626,7 @@ mod tests {
             },
             hdr: Hdr::Available,
             openable: true,
+            false_colored: false,
             path: String::new(),
             index: 2,
             count: 12,

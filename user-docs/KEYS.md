@@ -258,7 +258,16 @@ gray under the plot is what the display makes of each value along the axis,
 and the two handles on it are the window: the left one stands at the value
 that comes out black, the right one at the value that comes out white, and
 either can be dragged to a new value. Dragging the band between them slides
-the window along. The share of the picture the window is throwing away is
+the window along the plot, as far as the plot goes: once the window is
+narrower than the axis — after a stop or two of exposure on a photograph,
+or a trimmed window on data — the band is which part of the range you are
+looking at. On a photograph the white handle is the exposure — dragging
+it in is the same as pressing `f`, in the same quarter stops, and the number
+beside *Exposure* follows it — since a photograph's window is 0 to 1 and
+there is nothing else for the handle to be. On linear data the handle sets
+the top of the window itself, and the exposure stays a push on top of that
+window, which is what survives the window being found again. The share of
+the picture the window is throwing away is
 written in the top corners of the plot — how much is at or below black on
 the left, how much is at or above white on the right — and only when there
 is any, so a number there is news. Pointing at the plot names the value
@@ -311,7 +320,9 @@ the surface itself.
 
 False color applies to single-channel images only, and `r` does nothing on a
 color one. While a colormap is active, tone mapping is suspended — a curve on
-top of a colormap would distort the values you are reading off it.
+top of a colormap would distort the values you are reading off it — so the
+histogram's row of curves goes dim, `t` does nothing, and both come back
+with the gray ramp.
 
 Everything on this page shows up in one line at the right of the bottom bar,
 in front of the `HDR` button: the window by name, the exposure in the quarter
@@ -359,19 +370,12 @@ other once it is on, which is the point of it being a switch. It applies to
 whichever image is on screen and stays as you set it, and setting it while the
 histogram is closed leaves it that way for when you open it.
 
-Under the plot are the settings the plot is drawing, in three rows. **EV**
-steps the exposure a quarter of a stop a press, the same step `d` and `f`
-take, with the exposure in force in front of them. **Window** reads out the
-window's own bounds — in the source file's own units where it is counting
-things, and normalized otherwise — and after
-them four buttons that move the window you have: the outer
-two slide it down and up, as `a` and `s` do, and the inner two narrow and
-widen it about its middle, as `A` and `S` do. The four buttons under the
-reading set a window instead: `Auto` is the window this image opens with, and
-`0–1`, `Min/Max` and `99.8%` are those windows outright. Those four set rather
-than switch, so pressing one again after moving the window by hand puts it
-back where it says. **Curve** is the tone curve, a button each for `None`,
-`Reinhard` and `Neutral`, the one in force lit.
+Under the plot are the band and the rows of settings the plot is drawing,
+described under [The display](#the-display) above: the exposure for every
+file, the windows for a file of linear data, and the tone curves for a file
+with highlights above white. The buttons of the last two set rather than
+switch, so pressing one again after moving the window by hand puts it back
+where it says.
 
 The histogram, the file information and the minimap float over the image
 rather than sitting in the bars, so `` ` `` leaves them where they are.

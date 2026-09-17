@@ -72,22 +72,46 @@ out white, the band between them to slide the window along. That is what
 replaced the `0.000–1.000` reading and the four nudges, which were the same
 four operations spelled out as chevrons.
 
-The handles set the *displayed* bounds — `Display::displayed_bounds`, exposure
-folded in — because those are the values the band goes black and white at,
-and a handle that stood anywhere else would mark a value the shader is not
-clipping at. `Display::set_displayed_bounds` works the window back from them
-with the exposure left as it is, so a stop on top of a hand-set white point is
-still a stop. A handle is dragged *to* the pointer rather than *by* it —
-`Command::Levels` carries the two values the hand asks for, on every frame of
-the drag — so the interface holds no state about the drag and a hand that
-runs off the end of the band puts the handle at the end. The band's own drag
-is by the hand's movement, since what it is sliding is wherever the window
-already was.
+The handles stand at the *displayed* bounds — `Display::displayed_bounds`,
+exposure folded in — because those are the values the band goes black and
+white at, and a handle that stood anywhere else would mark a value the shader
+is not clipping at. A handle is dragged *to* the pointer rather than *by* it —
+`Command::BlackPoint` and `Command::WhitePoint` carry the value the hand asks
+for, on every frame of the drag — so the interface holds no state about the
+drag and a hand that runs off the end of the band puts the handle at the end.
+The band's own drag, `Command::Slide`, is by the hand's movement, since what
+it is sliding is wherever the window already was.
 
-A window can end past what is plotted, which a few stops of exposure is
-enough to do. Such a handle is drawn hollow at the edge it went out of: it
-can still be taken hold of and brought back, and it does not claim a boundary
-the curve running on past it says is not there.
+What moves to put white where the hand asks is the file's to say, and
+`Display::put_white` asks it. Exposure and the window's top are two dials for
+one effect: a stop up is white moved to half its value with black held. On a
+photograph the window is 0..1 and nothing else, so the white handle there is
+the exposure — the stops that land white under the pointer, snapped to the
+quarter stops the buttons and the keys count in, so that the exposure row
+reads as it would after so many presses and the handle reaches exactly the
+numbers they do. On measured light the two genuinely differ: the window is
+found from the pixels and found again when the file changes on disk or a
+Window rule is pressed, and the exposure survives that as the push on top,
+which is what lets `--exposure -1` mean the same thing over a directory of
+frames that each keep their own trimmed window. So there the white handle is
+the window's top, as the black handle is its bottom everywhere, and
+`Display::set_displayed_bounds` works the window back from the two with the
+exposure left as it is.
+
+The slide stops at the plot's ends, as the handles do because the band
+does. A window slid off what is plotted makes nothing black, or nothing
+white: a lift, which is a grading operation and not a place to look, and on
+a photograph it would move `high` off 1, which the white handle there is
+careful never to do. So the band pans within the plot — *which part of the
+range, at this width* — which is only a question once the window is
+narrower than the plot: after some exposure on a photograph, or a trimmed or
+hand-set window on data. A window as wide as the plot does not move, since
+there is nowhere for it to go.
+
+A window can still end past what is plotted, which a few stops of exposure
+the other way is enough to do. Such a handle is drawn hollow at the edge it
+went out of: it can still be taken hold of and brought back, and it does not
+claim a boundary the curve running on past it says is not there.
 
 The value under the hand is written on the line above the plot rather than in
 a tooltip. egui takes a tooltip down for the length of a drag, and a drag is
@@ -169,6 +193,21 @@ hedge of pure red, green and blue spikes that the eye could not leave alone.
 The ground is the same in every theme and so are the inks, so the reading is
 the same everywhere — see [theme](theme.md) for the two things that resist
 being themed.
+
+## What goes dead
+
+The row of curves is dead under a false color, and says why when rested on.
+The compositor holds the curve at a clip there — `Display::false_colored`
+is the test, and `composite.rs`, the bar's words and the pointer's readout
+all make the same one — because a ramp has no color past its end for a
+highlight to roll off into, and a curve over the ramp would bend the very
+mapping the reading is being taken off. The panel used to know none of
+this: it lit whichever curve was chosen, drew it over the plot, and let
+the buttons and `t` change it, so that a press changed nothing on screen
+and then changed the picture some time later, when the ramp came off. Now
+`Display::response` runs the curve the compositor runs, the buttons refuse
+the press and `t` does nothing, and the row stays where it is — the
+panel's height is the file's — rather than leaving.
 
 ## What stayed
 

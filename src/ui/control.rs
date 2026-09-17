@@ -179,12 +179,23 @@ pub enum Command {
     /// The wheel turned over the picture. A wheel's notch is a step asked
     /// for by name and is animated as a key's would be; a trackpad's scroll
     /// is the hand on the view, and goes where the fingers put it.
-    Wheel { steps: f32, notched: bool },
-    /// The hand is on the histogram's band: the two values, on the image's
-    /// own linear scale, that are to come out black and white. A handle
-    /// dragged along the band, or the band dragged along the axis — said on
-    /// every frame of the drag, the values being where the hand is now.
-    Levels { black: f32, white: f32 },
+    Wheel {
+        steps: f32,
+        notched: bool,
+    },
+    /// The hand is on one of the histogram band's handles: the value, on
+    /// the image's own linear scale, that is to come out black, or white.
+    /// Said on every frame of the drag, the value being where the hand is
+    /// now. What moves to put it there is the application's to decide — see
+    /// `Display::put_white`.
+    BlackPoint(f32),
+    WhitePoint(f32),
+    /// The hand is on the band between them, and both are to move: the
+    /// window slid along the axis, its width kept.
+    Slide {
+        black: f32,
+        white: f32,
+    },
     /// The hand is on the minimap, at `at` in image pixels, which is the
     /// point to put in the middle of the window. Said on every frame the
     /// button is down on the map, from the press on, so the marker follows
@@ -198,7 +209,10 @@ pub enum Command {
     /// one on screen. `at` is where the button went down, in image pixels —
     /// the press, not wherever the pointer had got to by the time the
     /// toolkit decided it was a drag.
-    Grab { grab: Grab, at: [f32; 2] },
+    Grab {
+        grab: Grab,
+        at: [f32; 2],
+    },
     /// Where the hand is now, in image pixels, on each frame of that drag.
     /// Carried here because the application's own pointer stops moving
     /// while the toolkit holds a drag.

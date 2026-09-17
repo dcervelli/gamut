@@ -405,23 +405,17 @@ fn the_histogram_panel_hands_back_the_hand_on_its_band() {
     assert!(black.center().x < white.center().x);
     let y = band.center().y;
     let across = |fraction: f32| [band.min.x + band.width() * fraction, y];
-    let levels = |commands: &[Command]| -> (f32, f32) {
-        match commands.last() {
-            Some(Command::Levels { black, white }) => (*black, *white),
-            other => panic!("{other:?}"),
-        }
-    };
-
-    // The white handle to the middle of the axis: white is the value halfway
-    // along it, decoded, and black is where it was.
+    // The white handle to the middle of the axis: the value halfway along
+    // it, decoded, is to come out white.
     let commands = drag(&mut harness, [white.center().x, y], across(0.5));
     assert!(
         commands
             .iter()
-            .all(|command| matches!(command, Command::Levels { .. }))
+            .all(|command| matches!(command, Command::WhitePoint(_)))
     );
-    let (low, high) = levels(&commands);
-    assert_eq!(low, 0.0);
+    let Some(Command::WhitePoint(high)) = commands.last() else {
+        panic!("{commands:?}");
+    };
     assert!(
         (high - Transfer::Srgb.to_linear(0.5)).abs() < 1e-3,
         "{high}"
@@ -429,22 +423,55 @@ fn the_histogram_panel_hands_back_the_hand_on_its_band() {
 
     // The black handle a quarter of the way along, the same way about.
     let commands = drag(&mut harness, [black.center().x, y], across(0.25));
-    let (low, high) = levels(&commands);
+    let Some(Command::BlackPoint(low)) = commands.last() else {
+        panic!("{commands:?}");
+    };
     assert!((low - Transfer::Srgb.to_linear(0.25)).abs() < 1e-3, "{low}");
-    assert_eq!(
-        high, 1.0,
-        "the interface holds no state: white is the display's own"
-    );
 
-    // The band itself, moved a tenth of the axis along: both ends go with
-    // it, in the axis's own units.
+    // The band itself has nowhere to go: the window is the whole of the
+    // axis — the interface holds no state, so the earlier drags moved
+    // nothing here — and a band slid off the plot would be a lift.
     let commands = drag(&mut harness, across(0.5), across(0.6));
-    let (low, high) = levels(&commands);
+    assert!(commands.is_empty(), "{commands:?}");
+
+    // A stop up brings white in to half, and then the band slides: a tenth
+    // of the axis along, both ends go with it, in the axis's own units; and
+    // as far as the pointer asks only up to the plot's end.
+    harness
+        .state_mut()
+        .current
+        .as_mut()
+        .expect("a picture is up")
+        .display
+        .exposure_stops = 1.0;
+    harness.run();
+    let commands = drag(&mut harness, across(0.25), across(0.35));
+    let Some(Command::Slide {
+        black: low,
+        white: high,
+    }) = commands.last()
+    else {
+        panic!("{commands:?}");
+    };
+    let half = Transfer::Srgb.to_encoded(0.5);
     assert!((low - Transfer::Srgb.to_linear(0.1)).abs() < 1e-3, "{low}");
     assert!(
-        (high - Transfer::Srgb.to_linear(1.1)).abs() < 1e-3,
+        (high - Transfer::Srgb.to_linear(half + 0.1)).abs() < 1e-3,
         "{high}"
     );
+    let commands = drag(&mut harness, across(0.25), across(1.0));
+    let Some(Command::Slide {
+        black: low,
+        white: high,
+    }) = commands.last()
+    else {
+        panic!("{commands:?}");
+    };
+    assert!(
+        (low - Transfer::Srgb.to_linear(1.0 - half)).abs() < 1e-3,
+        "{low}"
+    );
+    assert!((high - 1.0).abs() < 1e-3, "{high}");
 
     // And the exposure's number, dragged to the right: a press of the step
     // up for every stretch of the drag, and the number is not otherwise a
@@ -461,6 +488,67 @@ fn the_histogram_panel_hands_back_the_hand_on_its_band() {
     );
     let commands = drag(&mut harness, from, [from[0] - 12.0, from[1]]);
     assert_eq!(commands, [Command::Press(Control::ExposureDown)]);
+}
+
+/// The curves are dead under a false color, which clips at the top of its
+/// ramp whatever curve is chosen, and refuse the press; the ramps beside
+/// them stay live, and the gray one brings the curves back.
+#[test]
+fn the_curves_are_dead_under_a_false_color() {
+    use crate::image::display::Colormap;
+
+    // Gray, linear, with one sample far above the rest, which the trimmed
+    // window leaves out above white: a file that is offered both the false
+    // colors and the curves.
+    let mut data = vec![0.5f32; 1000];
+    data[3] = 50.0;
+    let image = DecodedImage::new(
+        40,
+        25,
+        Samples::F32 {
+            channels: Channels::Gray,
+            data,
+        },
+        ColorSpace::LINEAR_BT709,
+        AlphaMode::Opaque,
+    );
+    let stats = Stats::scan(&image);
+    let mut current = photograph();
+    current.display = Display::for_image_with(&image, &stats, Startup::default(), Headroom::None);
+    current.image = Arc::new(image);
+    current.stats = stats;
+
+    let mut with_histogram = panels();
+    with_histogram.show_histogram = true;
+    let mut harness = open(WINDOW, 1, with_histogram);
+    harness.state_mut().current = Some(current);
+    harness.run();
+    let dead = |harness: &Harness<'static, State>, label: &str| {
+        harness.get_by_label(label).accesskit_node().is_disabled()
+    };
+    assert!(!dead(&harness, "Curve 1"));
+    assert_eq!(
+        click(&mut harness, "Curve 1"),
+        [Command::Press(Control::Curve(1))]
+    );
+
+    harness
+        .state_mut()
+        .current
+        .as_mut()
+        .expect("a picture is up")
+        .display
+        .colormap = Colormap::Viridis;
+    harness.run();
+    for index in 0..3 {
+        assert!(dead(&harness, &format!("Curve {index}")), "curve {index}");
+    }
+    assert_eq!(click(&mut harness, "Curve 1"), []);
+    assert!(!dead(&harness, "False color 0"));
+    assert_eq!(
+        click(&mut harness, "False color 0"),
+        [Command::Press(Control::Ramp(0))]
+    );
 }
 
 /// The paste button is on screen only while the clipboard is holding a
