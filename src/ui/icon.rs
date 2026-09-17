@@ -215,9 +215,8 @@ pub(super) const EXPAND: &[Mark] = &[
 
 /// Lucide's `chevron-left` and `chevron-right`: one chevron pointing the way
 /// it goes, for the two buttons at the head of the top bar that step back and
-/// on through the file list. A single chevron rather than the doubled one the
-/// window's nudges wear: those move by a step of a size the button chose,
-/// where these go to the next thing along, which is what one chevron says
+/// on through the file list. A single chevron rather than a doubled one:
+/// these go to the next thing along, which is what one chevron says
 /// everywhere else.
 pub(super) const CHEVRON_LEFT: &[Mark] = &[
     Mark::Line([15.0, 18.0], [9.0, 12.0]),
@@ -229,36 +228,8 @@ pub(super) const CHEVRON_RIGHT: &[Mark] = &[
     Mark::Line([15.0, 12.0], [9.0, 6.0]),
 ];
 
-/// Lucide's `chevrons-left` and `chevrons-right`: a pair of chevrons pointing
-/// the one way, for the two nudges that slide the display window along the
-/// axis without changing how wide it is.
-pub(super) const CHEVRONS_LEFT: &[Mark] = &[
-    Mark::Line([11.0, 17.0], [6.0, 12.0]),
-    Mark::Line([6.0, 12.0], [11.0, 7.0]),
-    Mark::Line([18.0, 17.0], [13.0, 12.0]),
-    Mark::Line([13.0, 12.0], [18.0, 7.0]),
-];
-
-pub(super) const CHEVRONS_RIGHT: &[Mark] = &[
-    Mark::Line([6.0, 17.0], [11.0, 12.0]),
-    Mark::Line([11.0, 12.0], [6.0, 7.0]),
-    Mark::Line([13.0, 17.0], [18.0, 12.0]),
-    Mark::Line([18.0, 12.0], [13.0, 7.0]),
-];
-
-/// Lucide's `chevrons-right-left`: the two of them facing each other, for the
-/// nudge that narrows the window. [`CHEVRONS_LEFT_RIGHT`] below is the same
-/// pair back to back, and widens it — the marks are what the window's two
-/// ends do.
-pub(super) const CHEVRONS_RIGHT_LEFT: &[Mark] = &[
-    Mark::Line([4.0, 7.0], [9.0, 12.0]),
-    Mark::Line([9.0, 12.0], [4.0, 17.0]),
-    Mark::Line([20.0, 7.0], [15.0, 12.0]),
-    Mark::Line([15.0, 12.0], [20.0, 17.0]),
-];
-
-/// The nudge that widens the display window and, the marks being a pair of
-/// edges pushed apart, the fit that fills the window across.
+/// Lucide's `chevrons-left-right`: a pair of edges pushed apart, the mark
+/// for the fit that fills the window across.
 pub(super) const CHEVRONS_LEFT_RIGHT: &[Mark] = &[
     Mark::Line([9.0, 7.0], [4.0, 12.0]),
     Mark::Line([4.0, 12.0], [9.0, 17.0]),

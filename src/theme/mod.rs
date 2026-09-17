@@ -103,11 +103,12 @@ pub struct Theme {
     /// The luminance plane, under the color ones: a neutral gray, since it
     /// is the value of a pixel and not one of its channels.
     pub histogram_luma: Color,
-    /// Red, green and blue channel ink, in that order. The primaries
-    /// themselves rather than anything of the theme's: screened over one
-    /// another on a near-black ground they give the secondaries where two
-    /// planes meet and white where all three do, which is what makes a
-    /// channel histogram readable at a glance.
+    /// Red, green and blue channel ink, in that order. Not the theme's own
+    /// red, green and blue, which no theme chose for this — the plot's
+    /// ground is the same in every theme, and so are these: screened over
+    /// one another on it they give the secondaries where two planes meet
+    /// and white where all three do, which is what makes a channel
+    /// histogram readable at a glance.
     pub histogram_planes: [Color; COLOR],
 }
 
@@ -153,14 +154,18 @@ const PLOT_BACKGROUND: Color = Color::rgb(8, 8, 10);
 /// that stands for a pixel's value rather than for a channel, and a value
 /// with a hue on it would read as a fourth color.
 const HISTOGRAM_LUMA: Color = Color::rgba(170, 170, 170, 200);
-/// The color planes: the primaries themselves. Screened over one another on
-/// [`PLOT_BACKGROUND`] these give yellow, cyan and magenta where two overlap
-/// and white where all three do, which is the reading a channel histogram is
-/// looked at for — and is the same reading in every theme.
+/// The color planes: a red, a green and a blue, each taken some way back
+/// from its primary. Screened over one another on [`PLOT_BACKGROUND`] they
+/// still give a yellow, a cyan and a magenta where two overlap and a near
+/// white where all three do, which is the reading a channel histogram is
+/// looked at for — and is the same reading in every theme, the ground being
+/// the same in every theme. Held short of the primaries because the full
+/// ones, at a pixel to the bin, come out as a hedge of pure red, green and
+/// blue spikes that the eye cannot leave alone; these read as a plot.
 const HISTOGRAM_PLANES: [Color; COLOR] = [
-    Color::rgb(255, 0, 0),
-    Color::rgb(0, 255, 0),
-    Color::rgb(0, 0, 255),
+    Color::rgb(232, 76, 70),
+    Color::rgb(92, 200, 108),
+    Color::rgb(84, 132, 236),
 ];
 
 impl Theme {
@@ -481,36 +486,43 @@ darker_background = \"#b0b4bc\"
         assert_eq!(Theme::from_palette(&palette("")), Theme::FALLBACK);
     }
 
-    /// What the three color planes come to where they overlap. Screened, and
-    /// in light rather than in encoded values, which is where the blend
-    /// actually happens.
+    /// What the three color planes come to where they overlap. Screened in
+    /// the encoded values, which is what `ui::histogram::screened` does, the
+    /// panel's painter having one blend and that one on encoded colors.
     fn screened(planes: [Color; COLOR]) -> [f32; 3] {
         let mut out = [0.0f32; 3];
         for (channel, value) in out.iter_mut().enumerate() {
             *value = 1.0
                 - planes
                     .iter()
-                    .map(|plane| 1.0 - plane.to_linear()[channel])
+                    .map(|plane| 1.0 - [plane.r, plane.g, plane.b][channel] as f32 / 255.0)
                     .product::<f32>();
         }
         out
     }
 
-    /// The planes are the primaries and the same in every theme, which is
-    /// what makes the plot read the same everywhere: each plane owns one
-    /// channel outright, so two overlapping give a secondary and all three
-    /// give white.
+    /// The planes are the same in every theme, which is what makes the plot
+    /// read the same everywhere: each plane leads in its own channel by a
+    /// wide margin, so two overlapping give a secondary and all three give
+    /// a near white — and none of them is the primary itself, which at a
+    /// pixel to the bin is a spike the eye cannot leave alone.
     #[test]
-    fn the_color_planes_are_the_primaries_in_every_theme() {
+    fn the_color_planes_are_one_channel_each_in_every_theme() {
         for source in [TOKYO, SEMANTIC, ANSI, SPARSE] {
             let planes = Theme::from_palette(&palette(source)).histogram_planes;
             assert_eq!(planes, HISTOGRAM_PLANES, "{source}");
         }
-        assert_eq!(screened(HISTOGRAM_PLANES), [1.0, 1.0, 1.0]);
+        let white = screened(HISTOGRAM_PLANES);
+        assert!(white.iter().all(|channel| *channel > 0.9), "{white:?}");
         for (channel, plane) in HISTOGRAM_PLANES.iter().enumerate() {
             let levels = [plane.r, plane.g, plane.b];
             for (other, level) in levels.iter().enumerate() {
-                assert_eq!(*level, if other == channel { 255 } else { 0 }, "{plane:?}");
+                if other == channel {
+                    assert!(*level >= 200, "{plane:?} leads in its own channel");
+                    assert!(*level < 255, "{plane:?} is short of the primary");
+                } else {
+                    assert!(*level <= 140, "{plane:?} stays out of the others");
+                }
             }
         }
     }

@@ -242,6 +242,7 @@ that is not a paste; open it as an argument instead.
 | `S` | Widen the window, lowering contrast |
 | `e` | Cycle the automatic window: off (0–1) → min/max → 99.8% |
 | `t` | Cycle tone mapping: none → Reinhard → neutral |
+| `w` | While held, mark the clipped pixels: red where the picture has gone white, blue where it has gone black |
 | `o` | Turn the room above white off and on, where the monitor is in HDR mode |
 | `r` | Cycle false color: gray → viridis → magma → turbo |
 | `z` | Reset every display setting |
@@ -251,6 +252,36 @@ The window is the one place the case of a key matters: `a` and `s` move it,
 
 Sliding or resizing the window by hand takes it out of whichever automatic
 mode it was in; `e` cycles back into them. Exposure stops at ±16 stops.
+
+The histogram panel (`h`) is where all of this is seen and set. The band of
+gray under the plot is what the display makes of each value along the axis,
+and the two handles on it are the window: the left one stands at the value
+that comes out black, the right one at the value that comes out white, and
+either can be dragged to a new value. Dragging the band between them slides
+the window along. The share of the picture the window is throwing away is
+written in the top corners of the plot — how much is at or below black on
+the left, how much is at or above white on the right — and only when there
+is any, so a number there is news. Pointing at the plot names the value
+under the pointer, and what the display turns it into.
+
+Holding `w` paints the clipped pixels on the picture itself: red where every
+channel has gone to white, blue where every channel has gone to black. The
+corners of the plot count a channel at a time — a red flower blows its red
+long before the rest — so the corner can say more than the paint shows; the
+paint is where the picture has gone flat, and the corner is where a channel
+has. Neither marks white where nothing is being clipped: on an HDR surface
+with no curve, or under a curve, the highlights are shown or rolled off
+rather than lost.
+
+Under the band, every file gets the exposure, which can be dragged as well
+as stepped. A file of linear data — sensor counts, a float TIFF, an EXR —
+also gets the row of windows the `e` key cycles, named for what they do:
+*As stored* shows the values as they are, *Full range* stretches everything
+the file holds to black and white, and *Trimmed* leaves the outermost 0.2%
+out before stretching, which is what such a file opens with. A file with
+highlights above white gets the row of tone curves the `t` key cycles.
+An ordinary photograph has neither question to answer, so it gets neither
+row and a shorter panel; the keys still work on it.
 
 Tone mapping is a curve added to bring values brighter than white down into a
 surface that cannot show them. `none` is not a third curve but the absence of
@@ -479,7 +510,10 @@ region behind: it belongs to the picture it was drawn on.
 | Click the paste button | Paste the image on the clipboard, as `Ctrl+V` does |
 | Click the play, back or forward button under an animation | Play or pause it, or step a frame, as `Enter`, `N` and `n` do |
 | Click or drag along the timeline | Go to the frame under the pointer, and stop there |
-| Click a histogram control | Step the exposure, move or set the window, or choose the tone curve |
+| Click a histogram button | Step the exposure, set the window on one of its rules, or choose the tone curve |
+| Drag a handle on the histogram's band | Set the black point or the white point: the value that comes out black, or white |
+| Drag the band between the handles | Slide the window along the axis without changing its width |
+| Drag the exposure's number | Step the exposure, a quarter stop for every short stretch of the drag |
 | Wheel over the file information | Scroll it |
 | Drag the file information | Scroll it, as if dragging the scrollbar's handle |
 | Click the zoom percentage | Open the zoom menu: scale, fit and the magnification filter |

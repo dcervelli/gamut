@@ -78,17 +78,13 @@ pub enum Control {
     ExposureUp,
     /// One of the windows the row below those offers, by its place in
     /// [`super::histogram::WINDOWS`]. They set a window rather than showing
-    /// which one is in force: the line above them is what says that.
+    /// which one is in force: the handles on the band are what say that.
+    /// On the panel only for a file that has a use for them — see
+    /// [`super::histogram::Offered`].
     Window(usize),
-    /// The four nudges at the end of that line, which move the window the
-    /// user has rather than putting them on a new one: along the axis either
-    /// way, and narrower or wider about its own middle.
-    WindowDown,
-    WindowUp,
-    WindowNarrow,
-    WindowWiden,
     /// One of the tone curves in the row under that, by its place in
-    /// [`crate::image::display::ToneMap::ALL`].
+    /// [`crate::image::display::ToneMap::ALL`]. On the panel only for a
+    /// file with highlights above white, likewise.
     Curve(usize),
     /// The switch at the end of the bottom bar between the SDR and the HDR
     /// surface.
@@ -149,10 +145,6 @@ impl Control {
             Control::ExposureDown => "Exposure down".to_string(),
             Control::ExposureUp => "Exposure up".to_string(),
             Control::Window(index) => format!("Window {index}"),
-            Control::WindowDown => "Slide the window down".to_string(),
-            Control::WindowUp => "Slide the window up".to_string(),
-            Control::WindowNarrow => "Narrow the window".to_string(),
-            Control::WindowWiden => "Widen the window".to_string(),
             Control::Curve(index) => format!("Curve {index}"),
             Control::Output => "HDR".to_string(),
             Control::PixelFormat => "Pixel format".to_string(),
@@ -188,6 +180,11 @@ pub enum Command {
     /// for by name and is animated as a key's would be; a trackpad's scroll
     /// is the hand on the view, and goes where the fingers put it.
     Wheel { steps: f32, notched: bool },
+    /// The hand is on the histogram's band: the two values, on the image's
+    /// own linear scale, that are to come out black and white. A handle
+    /// dragged along the band, or the band dragged along the axis — said on
+    /// every frame of the drag, the values being where the hand is now.
+    Levels { black: f32, white: f32 },
     /// The hand is on the minimap, at `at` in image pixels, which is the
     /// point to put in the middle of the window. Said on every frame the
     /// button is down on the map, from the press on, so the marker follows

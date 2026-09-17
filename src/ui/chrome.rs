@@ -625,6 +625,7 @@ impl Pass<'_> {
                 self.input.transport.is_some(),
             ),
             self.panels,
+            self.current,
         );
         ui.vertical_centered(|ui| {
             ui.add_space(BAR_PADDING);

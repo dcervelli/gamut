@@ -378,6 +378,91 @@ fn a_toggle_with_no_room_for_its_panel_is_dead() {
     );
 }
 
+/// The band under the histogram is the levels track. A handle dragged
+/// along it asks for a window whose end is where the hand is; the band
+/// between the handles slides both ends by what the hand moved; and the
+/// exposure's own number, dragged, presses the same steps the buttons
+/// beside it press. A photograph is offered the exposure and nothing else
+/// under the band: no windows, and no curves.
+#[test]
+fn the_histogram_panel_hands_back_the_hand_on_its_band() {
+    use crate::image::Transfer;
+
+    let mut with_histogram = panels();
+    with_histogram.show_histogram = true;
+    let mut harness = open(WINDOW, 1, with_histogram);
+    assert!(
+        harness.query_by_label("Window 0").is_none(),
+        "a photograph has no window row"
+    );
+    assert!(harness.query_by_label("Curve 0").is_none(), "nor curves");
+
+    // The photograph is 8-bit sRGB, so the axis is 0..1 in sRGB and the two
+    // handles stand at its ends.
+    let band = harness.get_by_label("Window").rect();
+    let white = harness.get_by_label("White point").rect();
+    let black = harness.get_by_label("Black point").rect();
+    assert!(black.center().x < white.center().x);
+    let y = band.center().y;
+    let across = |fraction: f32| [band.min.x + band.width() * fraction, y];
+    let levels = |commands: &[Command]| -> (f32, f32) {
+        match commands.last() {
+            Some(Command::Levels { black, white }) => (*black, *white),
+            other => panic!("{other:?}"),
+        }
+    };
+
+    // The white handle to the middle of the axis: white is the value halfway
+    // along it, decoded, and black is where it was.
+    let commands = drag(&mut harness, [white.center().x, y], across(0.5));
+    assert!(
+        commands
+            .iter()
+            .all(|command| matches!(command, Command::Levels { .. }))
+    );
+    let (low, high) = levels(&commands);
+    assert_eq!(low, 0.0);
+    assert!(
+        (high - Transfer::Srgb.to_linear(0.5)).abs() < 1e-3,
+        "{high}"
+    );
+
+    // The black handle a quarter of the way along, the same way about.
+    let commands = drag(&mut harness, [black.center().x, y], across(0.25));
+    let (low, high) = levels(&commands);
+    assert!((low - Transfer::Srgb.to_linear(0.25)).abs() < 1e-3, "{low}");
+    assert_eq!(
+        high, 1.0,
+        "the interface holds no state: white is the display's own"
+    );
+
+    // The band itself, moved a tenth of the axis along: both ends go with
+    // it, in the axis's own units.
+    let commands = drag(&mut harness, across(0.5), across(0.6));
+    let (low, high) = levels(&commands);
+    assert!((low - Transfer::Srgb.to_linear(0.1)).abs() < 1e-3, "{low}");
+    assert!(
+        (high - Transfer::Srgb.to_linear(1.1)).abs() < 1e-3,
+        "{high}"
+    );
+
+    // And the exposure's number, dragged to the right: a press of the step
+    // up for every stretch of the drag, and the number is not otherwise a
+    // button.
+    let number = harness.get_by_label("Exposure").rect();
+    let from = [number.center().x, number.center().y];
+    let commands = drag(&mut harness, from, [from[0] + 25.0, from[1]]);
+    assert_eq!(
+        commands,
+        [
+            Command::Press(Control::ExposureUp),
+            Command::Press(Control::ExposureUp)
+        ]
+    );
+    let commands = drag(&mut harness, from, [from[0] - 12.0, from[1]]);
+    assert_eq!(commands, [Command::Press(Control::ExposureDown)]);
+}
+
 /// The paste button is on screen only while the clipboard is holding a
 /// picture, and the pair that steps through the list, with the count
 /// between them that opens the chooser, only while there is a list to step

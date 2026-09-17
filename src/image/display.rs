@@ -345,6 +345,10 @@ pub struct Startup {
     pub exposure_stops: Option<f32>,
 }
 
+/// How far past white a value has to reach to count as above it: a hair, so
+/// that the top of the window itself does not.
+const ABOVE_WHITE: f32 = 1.0 + 1e-3;
+
 #[derive(Clone, Debug)]
 pub struct Display {
     /// Linear working-space values mapped to 0 and 1 respectively.
@@ -455,13 +459,85 @@ impl Display {
     /// window the brightest pixel says nothing, and only exposure can carry
     /// the picture past white.
     pub fn exceeds_white(&self, stats: &Stats) -> bool {
-        // A hair over one, so that the window's own top does not count.
-        const TOLERANCE: f32 = 1e-3;
         let top = match self.auto {
             AutoWindow::Percentile => stats.percentile(0.999),
             AutoWindow::Off | AutoWindow::MinMax | AutoWindow::Manual => stats.max,
         };
-        self.windowed(top) > 1.0 + TOLERANCE
+        self.windowed(top) > ABOVE_WHITE
+    }
+
+    /// Whether the picture reaches past white on the window it opens with,
+    /// before anything has been asked of it: whether the file, shown as
+    /// [`Display::for_image_with`] would first show it, has highlights for a
+    /// curve to act on.
+    ///
+    /// A fact about the file rather than about the display in force, which
+    /// is what the histogram panel asks when it decides whether to offer the
+    /// curves at all: an SDR photograph never reaches white on its own, and
+    /// a row of curves under one is a row of things to do about a problem it
+    /// does not have. A picture pushed past white by hand can still have a
+    /// curve put on it with the key.
+    ///
+    /// Measured at the brightest pixel, where [`Display::exceeds_white`]
+    /// measures a percentile window at its percentile. That one asks whether
+    /// the picture is being clipped, and a percentile window leaves its
+    /// outliers above white on purpose; this asks whether there is anything
+    /// up there at all, and the outliers are exactly that.
+    pub fn opens_above_white(image: &DecodedImage, stats: &Stats) -> bool {
+        let mut display = Self {
+            auto: AutoWindow::default_for(image),
+            ..Self::default()
+        };
+        display.apply_auto(stats);
+        display.windowed(stats.max) > ABOVE_WHITE
+    }
+
+    /// Whether the values above white are being clipped, on a `gray` or a
+    /// color image going out with `headroom`: no curve to fold them into a
+    /// surface that stops at white, or a false color, which clips whatever
+    /// the curve since a ramp has no color past its end for headroom to
+    /// show as. The same question the bottom bar answers with its `clipped`,
+    /// the histogram's right corner is a share of, and the shader's mark on
+    /// a white pixel waits on.
+    pub fn clips_white(&self, gray: bool, headroom: Headroom) -> bool {
+        if gray && self.colormap != Colormap::Gray {
+            return true;
+        }
+        self.tone_map == ToneMap::None && headroom == Headroom::None
+    }
+
+    /// Whether the display is doing nothing at all: the window is 0..1, the
+    /// exposure is nothing and no curve is on, so every value comes out as
+    /// itself. What the histogram asks before it draws the response curve,
+    /// which on such a display is the diagonal, and says nothing the axis
+    /// under it does not.
+    pub fn is_identity(&self) -> bool {
+        self.low == 0.0
+            && self.high == 1.0
+            && self.exposure_stops == 0.0
+            && self.tone_map == ToneMap::None
+    }
+
+    /// Puts the two values that come out black and white where they are
+    /// told to, the exposure staying what it is: the levels track's handles,
+    /// each of which is dragged to the value it should stand at.
+    ///
+    /// The inverse of [`Display::displayed_bounds`]. Exposure lives in the
+    /// gain, so the bound that comes out white is `low` plus the window's
+    /// width scaled down by the exposure; putting white at `white` means
+    /// setting the width so that the scaling lands there. A hand on the
+    /// bounds is a hand-set window, whatever rule it was on before.
+    ///
+    /// Refused where the two are not a window: white at or below black
+    /// would divide the shader by zero or turn the picture inside out, and
+    /// a bound that is not a number is not a bound.
+    pub fn set_displayed_bounds(&mut self, black: f32, white: f32) {
+        if !(black.is_finite() && white.is_finite() && white > black) {
+            return;
+        }
+        self.low = black;
+        self.high = black + (white - black) * self.exposure_stops.exp2();
+        self.auto = AutoWindow::Manual;
     }
 
     fn apply_auto(&mut self, stats: &Stats) {
@@ -1333,6 +1409,109 @@ mod tests {
             false_color.shade(4.0, Channels::Gray, Headroom::Above),
             Colormap::Viridis.color(1.0)
         );
+    }
+
+    /// The handles put the values that come out black and white where they
+    /// are dragged to, and they stay put across the exposure: a stop on top
+    /// of a hand-set white point is a stop, not a different white point.
+    #[test]
+    fn the_displayed_bounds_go_where_they_are_put_whatever_the_exposure() {
+        let mut display = Display::default();
+        display.set_displayed_bounds(0.2, 0.6);
+        assert_eq!(display.displayed_bounds(), (0.2, 0.6));
+        assert_eq!(
+            display.auto,
+            AutoWindow::Manual,
+            "a hand on the bounds is a hand-set window"
+        );
+        assert_eq!(display.low, 0.2);
+        assert_eq!(display.high, 0.6);
+
+        // With a stop of exposure on, the same request lands the same two
+        // values at black and white — which means a wider window under the
+        // gain, since the gain is what carries the exposure.
+        display.exposure_stops = 1.0;
+        display.set_displayed_bounds(0.2, 0.6);
+        let (black, white) = display.displayed_bounds();
+        assert!((black - 0.2).abs() < 1e-6 && (white - 0.6).abs() < 1e-6);
+        assert!((display.high - 1.0).abs() < 1e-6, "{}", display.high);
+
+        // Refused where the two are not a window, and left as they were.
+        display.set_displayed_bounds(0.6, 0.6);
+        display.set_displayed_bounds(0.7, 0.6);
+        display.set_displayed_bounds(f32::NAN, 0.6);
+        display.set_displayed_bounds(0.2, f32::INFINITY);
+        assert!((display.high - 1.0).abs() < 1e-6);
+        assert_eq!(display.low, 0.2);
+    }
+
+    /// The display is the identity exactly when nothing has been asked of
+    /// it, and any one thing asked of it is enough to make it not.
+    #[test]
+    fn the_identity_is_the_display_with_nothing_asked_of_it() {
+        let identity = Display::default();
+        assert!(identity.is_identity());
+        assert!(
+            !Display {
+                exposure_stops: 0.25,
+                ..identity.clone()
+            }
+            .is_identity()
+        );
+        assert!(
+            !Display {
+                tone_map: ToneMap::Neutral,
+                ..identity.clone()
+            }
+            .is_identity()
+        );
+        assert!(
+            !Display {
+                high: 0.5,
+                ..identity.clone()
+            }
+            .is_identity()
+        );
+        assert!(
+            !Display {
+                low: 0.1,
+                ..identity.clone()
+            }
+            .is_identity()
+        );
+        // The false color is not a change to the values, so it is not one
+        // to the response.
+        assert!(
+            Display {
+                colormap: Colormap::Turbo,
+                ..identity
+            }
+            .is_identity()
+        );
+    }
+
+    /// Whether a file has highlights above white is asked of it as it
+    /// opens: an SDR photograph has none, a graded HDR one has, and linear
+    /// data has whatever its percentile window leaves out.
+    #[test]
+    fn a_file_opens_above_white_or_it_does_not() {
+        let sdr = gray(vec![0, 30000, 65535], Transfer::Srgb);
+        assert!(!Display::opens_above_white(&sdr, &Stats::scan(&sdr)));
+
+        // Graded light with headroom in it — what a PQ frame or a gain-map
+        // JPEG decodes to — opens at 0..1 and reaches past the 1.
+        let mut hdr = float_gray(vec![0.0, 0.5, 4.0]);
+        hdr.referred = Referred::Display;
+        assert!(Display::opens_above_white(&hdr, &Stats::scan(&hdr)));
+
+        // Linear data with a lone hot pixel: the percentile window leaves it
+        // out, and it stands above white.
+        let mut samples = vec![0.5; 2000];
+        samples[7] = 100.0;
+        let scene = float_gray(samples);
+        assert!(Display::opens_above_white(&scene, &Stats::scan(&scene)));
+        let flat = float_gray(vec![0.5; 2000]);
+        assert!(!Display::opens_above_white(&flat, &Stats::scan(&flat)));
     }
 
     /// Every curve has to be reachable from every other one, or a viewer on
