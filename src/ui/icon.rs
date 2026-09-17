@@ -76,6 +76,10 @@ pub(super) enum Mark {
     /// A filled dot one stroke across: a round cap on its own, which is how
     /// Lucide writes the tittle over an `i`.
     Dot([f32; 2]),
+    /// A filled circle of `radius` grid units: what a stroked circle too
+    /// small to have a hole comes out as, which is how Lucide draws the
+    /// point at the center of `circle-dot`.
+    Disc { at: [f32; 2], radius: f32 },
     /// The filled region between the polyline `top`, given left to right, and
     /// the horizontal line `baseline` under it: a plot standing on its axis.
     Area {
@@ -342,14 +346,17 @@ pub(super) const MAXIMIZE_2: &[Mark] = &[
 /// Lucide's `circle-dot`: a ring with a point at its center, which is one
 /// pixel picked out of everything around it — the button that says how the
 /// pixel under the pointer is read out.
+///
+/// Lucide's point is a circle of radius one stroked one stroke wide, which
+/// leaves no hole; it is drawn here as the solid disc that comes to.
 pub(super) const CIRCLE_DOT: &[Mark] = &[
     Mark::Circle {
         at: [12.0, 12.0],
         radius: 10.0,
     },
-    Mark::Circle {
+    Mark::Disc {
         at: [12.0, 12.0],
-        radius: 1.0,
+        radius: 2.0,
     },
 ];
 
@@ -787,6 +794,9 @@ pub(super) fn paint(
             Mark::Dot(at) => {
                 painter.circle_filled(point(place.at(*at)), stroke / 2.0, ink);
             }
+            Mark::Disc { at, radius } => {
+                painter.circle_filled(point(place.at(*at)), radius * place.unit, ink);
+            }
             Mark::Area { top, baseline } => {
                 let foot = grid.snap(place.free([0.0, *baseline])[1]);
                 // One trapezoid under each segment of the top, each of them
@@ -944,9 +954,11 @@ mod tests {
             }
             // A curve, a fill and a cap meet the grid at every angle;
             // there is no snapping of them to check.
-            Mark::Arc { .. } | Mark::Area { .. } | Mark::Dot(_) | Mark::Knockout { .. } => {
-                Vec::new()
-            }
+            Mark::Arc { .. }
+            | Mark::Area { .. }
+            | Mark::Dot(_)
+            | Mark::Disc { .. }
+            | Mark::Knockout { .. } => Vec::new(),
         }
     }
 
@@ -957,7 +969,7 @@ mod tests {
             Mark::Rect { at, size, .. } | Mark::Knockout { at, size, .. } => {
                 vec![*at, [at[0] + size[0], at[1] + size[1]]]
             }
-            Mark::Circle { at, radius } => vec![
+            Mark::Circle { at, radius } | Mark::Disc { at, radius } => vec![
                 [at[0] - radius, at[1] - radius],
                 [at[0] + radius, at[1] + radius],
             ],
