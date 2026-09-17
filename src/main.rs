@@ -89,12 +89,47 @@ fn run() -> Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     };
 
+    let cli::Args {
+        mut files,
+        named,
+        paste,
+        options,
+    } = args;
+
     // Only the header, which is cheap for every format we read. A bad path or
     // an unsupported format is still a plain command-line error rather than a
     // window that opens and closes, and the size it reports opens the window
     // at the right shape — but the pixels are left to the loader thread, so
     // that a large file no longer holds the window shut while it is read.
-    let (index, size) = cli::first_readable(&args.files)?;
+    //
+    // A paste goes ahead of the header check: the file reserved for it is
+    // empty until the loader fetches the picture, so there is no header to
+    // read and no size to open the window at, and it is the first file
+    // whatever else was named. A paste that will not arrive is walked past
+    // exactly as a file that will not decode is. A clipboard with nothing
+    // to show is worth a word, since the flag was given on purpose, and is
+    // a failure only when the paths named nothing either.
+    let offer = match paste {
+        true => clipboard::offered_image()?,
+        false => None,
+    };
+    let (index, source, size) = match offer {
+        Some(offer) => {
+            files.insert(0, pasted::reserve(offer.extension)?);
+            (0, loader::Source::Clipboard(offer.mime), None)
+        }
+        None => {
+            const NOTHING: &str = "nothing on the clipboard that could be shown";
+            if files.is_empty() {
+                anyhow::bail!(NOTHING);
+            }
+            if paste {
+                eprintln!("gamut: {NOTHING}");
+            }
+            let (index, size) = cli::first_readable(&files)?;
+            (index, loader::Source::Disk, size)
+        }
+    };
 
     // With a user event: it is how the loader hands finished images back and
     // how the monitor watch says a monitor has changed, and how either wakes
@@ -115,17 +150,18 @@ fn run() -> Result<ExitCode> {
         let _ = proxy.send_event(app::UserEvent::Monitor);
     });
     let proxy = event_loop.create_proxy();
-    let thumbnailer = thumbnailer::Thumbnailer::new(args.options.overrides, move |delivered| {
+    let thumbnailer = thumbnailer::Thumbnailer::new(options.overrides, move |delivered| {
         proxy
             .send_event(app::UserEvent::Thumbnail(Box::new(delivered)))
             .is_ok()
     });
     let mut app = App::new(
-        args.files,
-        args.named,
+        files,
+        named,
         index,
+        source,
         size,
-        args.options,
+        options,
         app::Threads {
             loader,
             wake,

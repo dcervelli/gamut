@@ -21,11 +21,13 @@ gamut — preview images
 
 USAGE:
     gamut [OPTIONS] <PATH>...
+    gamut --paste [OPTIONS] [PATH]...
 
 The first file is shown, stretched to fit the window, and re-read whenever
 something else writes to it. A directory stands for the images directly
 inside it, in name order, and is read again as it changes: an image added
-to it or taken out of it joins or leaves the list.
+to it or taken out of it joins or leaves the list. --paste puts the image
+on the clipboard at the front of the list, and needs no path at all.
 
 OPTIONS:
     -h, --help              Show this help
@@ -54,6 +56,8 @@ OPTIONS:
         --no-minimap        Start with the minimap off; it is on by default
         --paused            Open an animation stopped on its first frame,
                             rather than playing
+        --paste             Paste the image on the clipboard, saved among your
+                            pictures, and show it first, ahead of any PATH
         --timing            Print decode and startup timings to stderr
     --                      Treat every later argument as a path
 ";
@@ -157,18 +161,24 @@ pub fn man() -> String {
     );
     let _ = writeln!(text, ".SH NAME\n{} \\- {}", roff(PROGRAM), roff(tagline));
 
-    let _ = writeln!(text, ".SH SYNOPSIS\n.B {}", roff(PROGRAM));
+    // Both usage lines, each its own line of the synopsis.
+    let _ = writeln!(text, ".SH SYNOPSIS");
+    let _ = writeln!(text, ".B {}", roff(PROGRAM));
     let _ = writeln!(text, r"[\fIOPTIONS\fR] \fIPATH\fR\&...");
+    let _ = writeln!(text, ".br\n.B {} \\-\\-paste", roff(PROGRAM));
+    let _ = writeln!(text, r"[\fIOPTIONS\fR] [\fIPATH\fR]...");
 
-    // The prose between the usage line and the options list, as its own
-    // paragraphs; blank lines in the block are the paragraph breaks.
+    // The prose between the usage lines and the options list, as its own
+    // paragraphs; blank lines in the block are the paragraph breaks, and the
+    // first of them is where the usage lines end.
     let _ = writeln!(text, ".SH DESCRIPTION");
     let header = OPTIONS
         .split_once("\nOPTIONS:\n")
         .expect("OPTIONS has its heading")
         .0;
     let prose = header
-        .split_once("<PATH>...\n")
+        .split_once("USAGE:\n")
+        .and_then(|(_, usage)| usage.split_once("\n\n"))
         .map(|(_, rest)| rest)
         .unwrap_or("");
     for paragraph in prose.split("\n\n").filter(|p| !p.trim().is_empty()) {
@@ -235,6 +245,10 @@ pub fn first_readable(files: &[PathBuf]) -> Result<(usize, Option<[f32; 2]>)> {
 
 pub struct Args {
     pub files: Vec<PathBuf>,
+    /// Whether the image on the clipboard goes at the front of the list. The
+    /// clipboard is not looked at here: what is on it is a word with the
+    /// compositor, which `main` has when it puts the list together.
+    pub paste: bool,
     /// The paths as they were given, before any directory among them was
     /// replaced by the images inside it. Kept so that the list can be built
     /// again, in the same order, when one of those directories changes.
@@ -252,6 +266,7 @@ pub fn parse_args() -> Result<Option<Args>> {
     let mut info = false;
     let mut minimap = true;
     let mut paused = false;
+    let mut paste = false;
     let mut upscale = Upscale::default();
     let mut size = None;
     let mut only_files = false;
@@ -377,6 +392,10 @@ pub fn parse_args() -> Result<Option<Args>> {
                     paused = true;
                     continue;
                 }
+                Some("--paste") => {
+                    paste = true;
+                    continue;
+                }
                 Some("--") => {
                     only_files = true;
                     continue;
@@ -390,14 +409,31 @@ pub fn parse_args() -> Result<Option<Args>> {
         files.push(PathBuf::from(argument));
     }
 
-    if files.is_empty() {
+    // A paste is a file to show, so `--paste` alone is a complete command
+    // line; whether the clipboard actually holds one is found out when it is
+    // asked for.
+    if files.is_empty() && !paste {
         eprint!("{}", usage());
         bail!("no image files given");
     }
     let named = files;
-    let files = crate::listing::expand(named.clone())?;
+    let files = match crate::listing::expand(named.clone()) {
+        Ok(files) => files,
+        // Nothing to show among the paths is fatal only when they were all
+        // there was: with `--paste`, whether there is anything to show is
+        // the clipboard's to answer, and a directory with no images in it is
+        // worth the word it would get beside a path that could be read.
+        Err(error) if paste => {
+            if !named.is_empty() {
+                eprintln!("gamut: {}", crate::escape_controls(&format!("{error:#}")));
+            }
+            Vec::new()
+        }
+        Err(error) => return Err(error),
+    };
     Ok(Some(Args {
         files,
+        paste,
         named,
         options: Options {
             overrides,

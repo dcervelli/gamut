@@ -136,7 +136,17 @@ impl Files {
     /// check and then fails to decode is stepped over exactly as `]` would
     /// step over it. Nothing is on screen yet, so every file in the list is a
     /// candidate.
-    pub(super) fn open_first(&mut self) -> Request {
+    ///
+    /// `source` is where the first file's bytes come from. `--paste` puts a
+    /// file at the head of the list that the clipboard is still to fill, and
+    /// it is kept as a paste made later would be — through a relist, which no
+    /// named directory would otherwise put it back into. A paste that will
+    /// not arrive is walked past like a file that will not decode: the rest
+    /// of the list was asked for too.
+    pub(super) fn open_first(&mut self, source: Source) -> Request {
+        if let Source::Clipboard(_) = source {
+            self.adopted.push(self.paths[self.index].clone());
+        }
         let remaining = self.paths.len() - 1;
         self.request(
             self.index,
@@ -145,7 +155,7 @@ impl Files {
                 forward: true,
                 remaining,
             }),
-            Source::Disk,
+            source,
         )
     }
 
@@ -601,6 +611,39 @@ mod tests {
             "still between the file it was pasted beside and the next one"
         );
         assert_eq!(files.shown_path(), Path::new("2.png"));
+    }
+
+    /// `--paste` puts the clipboard's picture at the head of the list, and it
+    /// is a paste like any other from then on: fetched by the loader, kept
+    /// through a relist that no named directory would put it back into, and
+    /// walked past — since the rest of the list was asked for too — if it
+    /// never arrives.
+    #[test]
+    fn a_paste_at_the_head_of_the_list_is_kept_like_any_other() {
+        let mut files = Files::new(
+            named(&["pasted.png", "0.png", "1.png"]),
+            0,
+            decode::Overrides::default(),
+        );
+        let request = files.open_first(Source::Clipboard("image/png".into()));
+        assert_eq!(request.index, 0);
+        assert!(matches!(request.source, Source::Clipboard(_)));
+
+        let pending = files
+            .accept(request.generation)
+            .expect("the reply we waited for");
+        let next = files
+            .failed(0, pending.step)
+            .expect("a paste that never arrived is walked past");
+        assert_eq!(next.index, 1);
+        assert!(matches!(next.source, Source::Disk));
+        files.accept(next.generation);
+        files.shown(1);
+
+        assert!(files.relist(named(&["0.png", "1.png", "2.png"])));
+        assert_eq!(files.path(0), Path::new("pasted.png"), "still at the head");
+        assert_eq!(files.shown_path(), Path::new("0.png"));
+        assert_eq!(files.len(), 4);
     }
 
     /// Emptying the directory altogether leaves the picture that is up, with

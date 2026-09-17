@@ -216,6 +216,13 @@ goes back to where you were and `]` carries on. It stays on the list for as
 long as the window is open, even when what you opened was a directory that
 knows nothing about it.
 
+`--paste` on the command line does the same before the window opens: the
+image on the clipboard is written to your pictures directory and shown
+first, ahead of any path you named, so `gamut --paste` alone opens what you
+just copied. With nothing on the clipboard that `gamut` can show, it says so
+on the terminal and opens the paths instead — or, with no paths, does not
+open at all.
+
 What is pasted is whatever the image was copied as, saved as it stands:
 nothing is re-encoded, so a JPEG arrives a JPEG. `Ctrl+V` does nothing if the
 clipboard holds words rather than an image, or holds it in a format `gamut`
@@ -529,6 +536,8 @@ what scripting wants and what comparing two files on equal terms needs:
 `--exposure`, `--window`, `--tone-map`, `--colormap`, `--upscale`,
 `--histogram` and `--info`. The minimap starts on; `--no-minimap` starts
 without it. An animation starts playing; `--paused` starts it stopped.
+`--paste` opens on the image on the clipboard, as `Ctrl+V` would once the
+window was up.
 
 The window itself opens at the image's size, shrunk to fit the screen.
 `--size <W> <H>` opens it at a size you choose instead, in the pixels your

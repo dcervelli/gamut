@@ -79,6 +79,23 @@ all while the interface is hidden. A button that did nothing when pressed would
 be worse than no button, and one that comes and goes says what the clipboard
 holds without being asked.
 
+`--paste` is the same paste asked for before there is a window. `main::run`
+asks the clipboard what it offers, reserves the file through `pasted::reserve`
+as `App::paste` would, and puts it at the head of the list; the opening
+request then carries `Source::Clipboard` through `Files::open_first`, so the
+loader fetches the bytes into the file and reads it back exactly as it does
+for `Ctrl+V`, and the reply arrives through the same `App::apply`. What is
+different is what start-up can check: `cli::first_readable` probes headers to
+turn a bad path into a plain command-line error, and the paste's file is
+still empty at that point, so with a paste the probe is skipped and the
+window opens at the default size rather than the picture's. A paste that
+never arrives is walked past like a file that fails to decode, since the
+opening request is a walk — which is also why the paste goes first: with
+nothing on screen yet there is no neighbor to sit beside, and the user asked
+for the clipboard's picture rather than the first path. `Files::open_first`
+marks it adopted so that a relist keeps it, as `Files::adopt` does for a
+paste made later.
+
 The panels are opaque and the image is fitted inside them rather than passing
 behind them, so `` ` `` changes how much room a fitted image has and it re-fits
 on the spot.
