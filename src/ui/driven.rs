@@ -119,6 +119,7 @@ fn input(logical: [f32; 2], count: usize) -> FrameInput {
         grabbing: None,
         over_region: false,
         box_zoom: false,
+        move_region: false,
         zoom_box: None,
         transport: None,
         chooser: None,
@@ -546,10 +547,13 @@ fn a_drag_on_the_picture_is_the_regions_while_one_is_asked_for() {
     );
 }
 
-/// With a region on screen, a drag from inside it takes hold of it, and a
-/// drag from anywhere else on the picture pans as it always did.
+/// With a region on screen, a drag from inside it pans the picture as a
+/// drag from anywhere else does — a region that covers the window would
+/// otherwise pin the view — unless `Shift` is held, when it takes hold of
+/// the whole region. The handle at the region's middle takes hold of the
+/// whole with no key held, as the eight others take hold of their edges.
 #[test]
-fn a_region_on_screen_is_taken_hold_of_from_inside_it() {
+fn a_region_on_screen_is_moved_with_shift_or_by_its_middle() {
     let mut harness = open(WINDOW, 1, panels());
     // The middle pixel of a 4x3 picture fitted to the window: a good part
     // of the picture, with the picture's own margins outside it.
@@ -561,32 +565,45 @@ fn a_region_on_screen_is_taken_hold_of_from_inside_it() {
     };
     harness.state_mut().input.selection = Selection::Shown(region);
     harness.run();
-    let inside = screen_point(&harness, [1.5, 1.5]);
+    // Inside the region, well off its middle and its edges.
+    let inside = screen_point(&harness, [1.25, 1.25]);
     assert!(region.contains(image_point(&harness, inside)));
+    let to = screen_point(&harness, [2.25, 2.25]);
 
-    let to = screen_point(&harness, [2.5, 2.5]);
+    let panned = |commands: &[Command]| {
+        !commands.is_empty()
+            && commands
+                .iter()
+                .all(|command| matches!(command, Command::Drag(_)))
+    };
     let commands = drag(&mut harness, inside, to);
-    assert!(
+    assert!(panned(&commands), "{commands:?}");
+
+    let held = |commands: &[Command], grip: Grip| {
         matches!(
             commands.first(),
-            Some(Command::Grab {
-                grab: Grab::Handle(Grip::Inside),
-                ..
-            })
-        ),
-        "{commands:?}"
-    );
-    assert_eq!(commands.last(), Some(&Command::Release));
+            Some(Command::Grab { grab: Grab::Handle(g), .. }) if *g == grip
+        ) && commands.last() == Some(&Command::Release)
+            && !commands
+                .iter()
+                .any(|command| matches!(command, Command::Drag(_)))
+    };
+    harness.state_mut().input.move_region = true;
+    harness.run();
+    let commands = drag(&mut harness, inside, to);
+    assert!(held(&commands, Grip::Inside), "{commands:?}");
 
+    // Off the region, the key held changes nothing: the picture pans.
     let outside = [60.0, 100.0];
     assert!(!region.contains(image_point(&harness, outside)));
     let commands = drag(&mut harness, outside, [90.0, 130.0]);
-    assert!(
-        commands
-            .iter()
-            .all(|command| matches!(command, Command::Drag(_))),
-        "{commands:?}"
-    );
+    assert!(panned(&commands), "{commands:?}");
+
+    harness.state_mut().input.move_region = false;
+    harness.run();
+    let middle = screen_point(&harness, [1.5, 1.5]);
+    let commands = drag(&mut harness, middle, to);
+    assert!(held(&commands, Grip::Middle), "{commands:?}");
 }
 
 /// With `Space` held, a drag on the picture draws a box to zoom to,
@@ -626,7 +643,8 @@ fn a_drag_with_space_held_draws_a_box_to_zoom_to() {
         "the view did not pan: {commands:?}"
     );
 
-    // The key up again, the same drag takes hold of the region as before.
+    // The key up again, the same drag — from the region's middle handle —
+    // takes hold of the region as before.
     harness.state_mut().input.box_zoom = false;
     harness.run();
     let commands = drag(&mut harness, inside, to);
@@ -634,7 +652,7 @@ fn a_drag_with_space_held_draws_a_box_to_zoom_to() {
         matches!(
             commands.first(),
             Some(Command::Grab {
-                grab: Grab::Handle(Grip::Inside),
+                grab: Grab::Handle(Grip::Middle),
                 ..
             })
         ),

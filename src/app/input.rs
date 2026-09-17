@@ -1572,7 +1572,7 @@ impl App {
                 return;
             }
             (Grab::New, _) => Region::from_corners(from, to, image),
-            (Grab::Handle(Grip::Inside), Some(origin)) => {
+            (Grab::Handle(Grip::Middle | Grip::Inside), Some(origin)) => {
                 let by = |axis: usize| (to[axis] - from[axis]).round() as i64;
                 Some(origin.moved_by(by(0), by(1), image))
             }

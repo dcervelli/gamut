@@ -1389,6 +1389,7 @@ impl App {
             grabbing: self.grabbing.as_ref().map(Grabbing::grab),
             over_region: self.over_region(),
             box_zoom: self.pointer.space != input::Space::Up,
+            move_region: self.pointer.modifiers.shift_key(),
             zoom_box: self.zoom_box,
             transport: self.transport(),
             chooser,

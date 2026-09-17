@@ -1,8 +1,8 @@
-//! The region on the picture: where its outline and its eight handles go,
+//! The region on the picture: where its outline and its nine handles go,
 //! which of them the pointer is on, and the drawing of all of it — with the
-//! region's size written at its middle and its four edges' coordinates
-//! written inside the marks on those edges, for as long as the pointer is
-//! on it.
+//! region's size written under the handle at its middle and its four edges'
+//! coordinates written inside the marks on those edges, for as long as the
+//! pointer is on it.
 //!
 //! Painted straight on the picture's painter rather than in an area of its
 //! own: an area takes the pointer from what is under it, and the picture's
@@ -56,10 +56,11 @@ pub(super) fn rect(region: Region, placement: Placement, scale: f32) -> Rect {
     )
 }
 
-/// The eight handles of a region drawn at `rect`: a square on each corner
-/// and in the middle of each edge, on the device's own grid so that the
-/// squares are all the same size and their edges sharp.
-pub(super) fn handles(rect: Rect, grid: icon::Grid) -> [(Grip, Rect); 8] {
+/// The nine handles of a region drawn at `rect`: a square on each corner,
+/// in the middle of each edge and at the middle of the region, on the
+/// device's own grid so that the squares are all the same size and their
+/// edges sharp.
+pub(super) fn handles(rect: Rect, grid: icon::Grid) -> [(Grip, Rect); 9] {
     let side = grid.line_width(HANDLE);
     let along = |low: f32, high: f32, at: Side| match at {
         Side::Left | Side::Top => low,
@@ -78,7 +79,7 @@ pub(super) fn handles(rect: Rect, grid: icon::Grid) -> [(Grip, Rect); 8] {
             rect.x + rect.width / 2.0,
             along(rect.y, rect.bottom(), side),
         ],
-        Grip::Inside => [rect.x + rect.width / 2.0, rect.y + rect.height / 2.0],
+        Grip::Middle | Grip::Inside => [rect.x + rect.width / 2.0, rect.y + rect.height / 2.0],
     };
     Grip::HANDLES.map(|grip| {
         let [x, y] = center(grip);
@@ -97,8 +98,8 @@ pub(super) fn handles(rect: Rect, grid: icon::Grid) -> [(Grip, Rect); 8] {
 /// What the pointer at `point` has hold of: the handle under it, or the
 /// inside of the region, or nothing. The handles are asked first, and in
 /// the order [`Grip::HANDLES`] lists them, so a corner outranks the edge it
-/// overlaps on a region drawn small.
-pub(super) fn grip_at(rect: Rect, handles: &[(Grip, Rect); 8], point: [f32; 2]) -> Option<Grip> {
+/// overlaps on a region drawn small, and both outrank the middle.
+pub(super) fn grip_at(rect: Rect, handles: &[(Grip, Rect); 9], point: [f32; 2]) -> Option<Grip> {
     handles
         .iter()
         .find(|(_, handle)| handle.inset(-REACH, -REACH).contains(point))
@@ -108,7 +109,8 @@ pub(super) fn grip_at(rect: Rect, handles: &[(Grip, Rect); 8], point: [f32; 2]) 
 
 /// The cursor a hold on the region wears: the crosshair for drawing one,
 /// the resize arrows across the axis a handle moves along, the move cursor
-/// for the whole of it — and the magnifier for the box that zooms.
+/// for the whole of it, by its middle handle or its inside — and the
+/// magnifier for the box that zooms.
 pub(super) fn cursor(grab: Grab) -> CursorIcon {
     match grab {
         Grab::New => CursorIcon::Crosshair,
@@ -118,11 +120,11 @@ pub(super) fn cursor(grab: Grab) -> CursorIcon {
         Grab::Handle(Grip::Corner(_, _)) => CursorIcon::ResizeNeSw,
         Grab::Handle(Grip::Edge(Side::Left | Side::Right)) => CursorIcon::ResizeHorizontal,
         Grab::Handle(Grip::Edge(Side::Top | Side::Bottom)) => CursorIcon::ResizeVertical,
-        Grab::Handle(Grip::Inside) => CursorIcon::Move,
+        Grab::Handle(Grip::Middle | Grip::Inside) => CursorIcon::Move,
     }
 }
 
-/// What the label at the region's middle says.
+/// What the label under the region's middle handle says.
 pub(super) fn dimensions(region: Region) -> String {
     format!("{} \u{00d7} {}", region.width, region.height)
 }
@@ -139,8 +141,9 @@ pub(super) struct Label {
     pub size: bool,
 }
 
-/// The words a region wears, and where each goes: its size at the middle,
-/// and each edge's coordinate inside the mark in the middle of that edge.
+/// The words a region wears, and where each goes: its size under the
+/// handle at the middle, and each edge's coordinate inside the mark in the
+/// middle of that edge.
 ///
 /// A label is left out rather than written where it will not fit, so that
 /// the words never spill over the outline or cover one another on a region
@@ -152,8 +155,11 @@ pub(super) struct Label {
 /// `visible` is the part of the region that is on screen, and everything is
 /// measured against it: an edge that is off screen has no mark to be
 /// written inside of, and words written off screen are words nobody reads.
-/// The size is centered on it rather than on the region, so that a region
-/// larger than the window still says its size somewhere it can be read.
+/// The size hangs off the middle handle while that is on screen — under it,
+/// or over it where there is no room under, or on it where there is room
+/// for neither — and sits at the middle of `visible` when the handle is
+/// not, so that a region larger than the window still says its size
+/// somewhere it can be read.
 ///
 /// The coordinates are the region's boundaries and not the pixels beside
 /// them: the right minus the left is the width, which is the number written
@@ -178,37 +184,72 @@ pub(super) fn labels(
     ];
     let wanted = std::iter::once((dimensions(region), None))
         .chain(coordinates.map(|(side, at)| (at.to_string(), Some(side))));
+    let middle = [rect.x + rect.width / 2.0, rect.y + rect.height / 2.0];
+    let middle_shown = visible.contains(middle);
 
     for (text, side) in wanted {
         let measured = measure(&text);
         let (width, height) = (measured[0] + 2.0 * INSET[0], measured[1] + 2.0 * INSET[1]);
-        let at = match side {
+        // Where the label may go, first choice first. Only the size has
+        // more than one: under the middle handle, over it, and — on a region
+        // too short for either — on it, since the size is worth more than a
+        // handle the region has other ways of being moved by.
+        let places: [Option<[f32; 2]>; 3] = match side {
+            None if middle_shown => [
+                Some([middle[0] - width / 2.0, middle[1] + inset]),
+                Some([middle[0] - width / 2.0, middle[1] - inset - height]),
+                Some([middle[0] - width / 2.0, middle[1] - height / 2.0]),
+            ],
             None => [
-                visible.x + (visible.width - width) / 2.0,
-                visible.y + (visible.height - height) / 2.0,
+                Some([
+                    visible.x + (visible.width - width) / 2.0,
+                    visible.y + (visible.height - height) / 2.0,
+                ]),
+                None,
+                None,
             ],
-            Some(Side::Left) => [rect.x + inset, rect.y + (rect.height - height) / 2.0],
+            Some(Side::Left) => [
+                Some([rect.x + inset, rect.y + (rect.height - height) / 2.0]),
+                None,
+                None,
+            ],
             Some(Side::Right) => [
-                rect.right() - inset - width,
-                rect.y + (rect.height - height) / 2.0,
+                Some([
+                    rect.right() - inset - width,
+                    rect.y + (rect.height - height) / 2.0,
+                ]),
+                None,
+                None,
             ],
-            Some(Side::Top) => [rect.x + (rect.width - width) / 2.0, rect.y + inset],
+            Some(Side::Top) => [
+                Some([rect.x + (rect.width - width) / 2.0, rect.y + inset]),
+                None,
+                None,
+            ],
             Some(Side::Bottom) => [
-                rect.x + (rect.width - width) / 2.0,
-                rect.bottom() - inset - height,
+                Some([
+                    rect.x + (rect.width - width) / 2.0,
+                    rect.bottom() - inset - height,
+                ]),
+                None,
+                None,
             ],
         };
-        let pill = Rect::new(grid.snap(at[0]), grid.snap(at[1]), width, height);
-        if !within(pill, visible) {
+        let fits = |pill: Rect| {
+            let clear = pill.inset(-LABEL_GAP, -LABEL_GAP);
+            within(pill, visible)
+                && !placed
+                    .iter()
+                    .any(|other| clear.intersect(other.pill).is_some())
+        };
+        let Some(pill) = places
+            .into_iter()
+            .flatten()
+            .map(|at| Rect::new(grid.snap(at[0]), grid.snap(at[1]), width, height))
+            .find(|pill| fits(*pill))
+        else {
             continue;
-        }
-        let clear = pill.inset(-LABEL_GAP, -LABEL_GAP);
-        if placed
-            .iter()
-            .any(|other| clear.intersect(other.pill).is_some())
-        {
-            continue;
-        }
+        };
         placed.push(Label {
             text,
             pill,
@@ -226,7 +267,7 @@ fn within(inner: Rect, outer: Rect) -> bool {
         && inner.bottom() <= outer.bottom()
 }
 
-/// Draws the region over the picture: its outline in the accent, its eight
+/// Draws the region over the picture: its outline in the accent, its nine
 /// handles, and — while the pointer is on it — what [`labels`] gives room
 /// to. Clipped to `content`, since a region on a zoomed-in picture runs
 /// under the bars like the picture does.
@@ -346,11 +387,12 @@ mod tests {
         assert_eq!(rect, Rect::new(60.0, 45.0, 30.0, 40.0));
     }
 
-    /// Eight handles: one on each corner and one in the middle of each edge,
-    /// each a square of the same size, and each found by the pointer resting
-    /// on it — with a little reach past its edge.
+    /// Nine handles: one on each corner, one in the middle of each edge and
+    /// one at the middle, each a square of the same size, and each found by
+    /// the pointer resting on it — with a little reach past its edge. Inside
+    /// the region but off every handle is the inside.
     #[test]
-    fn the_handles_sit_on_the_corners_and_the_edges() {
+    fn the_handles_sit_on_the_corners_the_edges_and_the_middle() {
         let rect = Rect::new(100.0, 100.0, 200.0, 100.0);
         let handles = handles(rect, icon::Grid::new(1.0));
         let centered_on = |grip: Grip| {
@@ -370,6 +412,7 @@ mod tests {
         );
         assert_eq!(centered_on(Grip::Edge(Side::Top)), [200.0, 100.0]);
         assert_eq!(centered_on(Grip::Edge(Side::Left)), [100.0, 150.0]);
+        assert_eq!(centered_on(Grip::Middle), [200.0, 150.0]);
         for (_, handle) in &handles {
             assert_eq!(handle.width, HANDLE);
             assert_eq!(handle.height, HANDLE);
@@ -383,7 +426,8 @@ mod tests {
             grip_at(rect, &handles, [300.0 + HANDLE / 2.0 + REACH - 0.5, 150.0]),
             Some(Grip::Edge(Side::Right))
         );
-        assert_eq!(grip_at(rect, &handles, [200.0, 150.0]), Some(Grip::Inside));
+        assert_eq!(grip_at(rect, &handles, [200.0, 150.0]), Some(Grip::Middle));
+        assert_eq!(grip_at(rect, &handles, [150.0, 125.0]), Some(Grip::Inside));
         assert_eq!(grip_at(rect, &handles, [50.0, 50.0]), None);
         // Just off the region, past a handle's reach, is nothing.
         assert_eq!(
@@ -393,7 +437,9 @@ mod tests {
     }
 
     /// On a region drawn small the corners overlap the edges, and the corner
-    /// wins: it moves two edges where the other moves one.
+    /// wins: it moves two edges where the other moves one. The middle
+    /// overlaps all of them and loses to each, since the whole region can
+    /// be taken hold of from anywhere inside it as well.
     #[test]
     fn a_corner_outranks_the_edge_it_overlaps() {
         let rect = Rect::new(100.0, 100.0, 6.0, 6.0);
@@ -402,6 +448,7 @@ mod tests {
             grip_at(rect, &handles, [103.0, 100.0]),
             Some(Grip::Corner(Side::Left, Side::Top))
         );
+        assert_ne!(grip_at(rect, &handles, [103.0, 103.0]), Some(Grip::Middle));
     }
 
     /// Words wide enough to be worth fitting, and a line tall enough to
@@ -415,10 +462,10 @@ mod tests {
         labels.iter().map(|label| label.text.as_str()).collect()
     }
 
-    /// A region with room for all of it says its size at its middle and
-    /// each edge's coordinate inside the mark on that edge — the left and
-    /// right either side of the size, the top and bottom above and below
-    /// it.
+    /// A region with room for all of it says its size under the handle at
+    /// its middle and each edge's coordinate inside the mark on that edge —
+    /// the left and right either side of the size, the top and bottom above
+    /// and below it.
     #[test]
     fn a_region_with_room_wears_its_size_and_its_four_edges() {
         let region = Region {
@@ -438,13 +485,17 @@ mod tests {
         assert!(labels[1..].iter().all(|label| !label.size));
 
         // Each inside the region, clear of the others, and each where its
-        // own mark is: the coordinates on the middle lines of the edges.
+        // own mark is: the size just under the middle handle, clear of it,
+        // and the coordinates on the middle lines of the edges.
         for label in &labels {
             assert!(within(label.pill, rect), "{label:?}");
             assert!(within(label.pill, content), "{label:?}");
         }
         let middle = |pill: Rect| [pill.x + pill.width / 2.0, pill.y + pill.height / 2.0];
-        assert_eq!(middle(labels[0].pill), [200.0, 180.0]);
+        assert_eq!(middle(labels[0].pill)[0], 200.0);
+        assert_eq!(labels[0].pill.y, 180.0 + HANDLE / 2.0 + LABEL_GAP);
+        let (_, handle) = handles(rect, icon::Grid::new(1.0))[8];
+        assert!(labels[0].pill.intersect(handle).is_none());
         assert_eq!(
             middle(labels[1].pill)[1],
             180.0,
@@ -476,9 +527,21 @@ mod tests {
         };
         let grid = icon::Grid::new(1.0);
 
+        // Too short for the size under the middle handle or over it, and
+        // it goes on the handle rather than nowhere.
         let short = Rect::new(0.0, 0.0, 300.0, 40.0);
         let labels = super::labels(region, short, short, grid, measured);
         assert_eq!(written(&labels), ["300 \u{00d7} 300", "10", "310"]);
+        let size = labels[0].pill;
+        assert_eq!(size.y + size.height / 2.0, 20.0);
+
+        // Room over the handle but not under it — the region runs off the
+        // foot of the window just below its middle — and the size goes over.
+        let tall = Rect::new(0.0, 0.0, 300.0, 300.0);
+        let cut = Rect::new(0.0, 0.0, 300.0, 160.0);
+        let labels = super::labels(region, tall, cut, grid, measured);
+        assert_eq!(labels[0].text, "300 \u{00d7} 300");
+        assert_eq!(labels[0].pill.bottom(), 150.0 - HANDLE / 2.0 - LABEL_GAP);
 
         let narrow = Rect::new(0.0, 0.0, 90.0, 300.0);
         let labels = super::labels(region, narrow, narrow, grid, measured);
@@ -508,8 +571,9 @@ mod tests {
     }
 
     /// A region running off the window keeps only the words that are on
-    /// screen, and its size goes at the middle of what can be seen of it
-    /// rather than at the middle of the region.
+    /// screen. Its size stays with the middle handle while that is on
+    /// screen, and goes to the middle of what can be seen of the region
+    /// when the handle is not.
     #[test]
     fn a_region_off_the_window_writes_only_what_can_be_read() {
         let region = Region {
@@ -518,22 +582,32 @@ mod tests {
             width: 400,
             height: 300,
         };
-        // The left edge and the top are off the content area.
-        let rect = Rect::new(-200.0, -100.0, 600.0, 500.0);
+        let grid = icon::Grid::new(1.0);
         let content = Rect::new(0.0, 0.0, 500.0, 400.0);
+
+        // The left edge and the top are off the content area; the middle,
+        // at (100, 150), is on it.
+        let rect = Rect::new(-200.0, -100.0, 600.0, 500.0);
         let visible = rect.intersect(content).expect("part of it is on screen");
-        let labels = super::labels(region, rect, visible, icon::Grid::new(1.0), measured);
+        let labels = super::labels(region, rect, visible, grid, measured);
         assert_eq!(written(&labels), ["400 \u{00d7} 300", "400", "300"]);
         for label in &labels {
             assert!(within(label.pill, visible), "{label:?}");
         }
-        // Centered on what is visible, which is not the region's own middle:
-        // the region runs from -200 to 400 across and -100 to 400 down, and
-        // what is on screen of it is the square from the origin to 400.
         let size = labels[0].pill;
-        assert_eq!(size.x + size.width / 2.0, 200.0);
-        assert_eq!(size.y + size.height / 2.0, 200.0);
-        assert_ne!(size.y + size.height / 2.0, rect.y + rect.height / 2.0);
+        assert_eq!(size.x + size.width / 2.0, 100.0);
+        assert_eq!(size.y, 150.0 + HANDLE / 2.0 + LABEL_GAP);
+
+        // Only the bottom right corner of the region is on screen, and the
+        // middle is not: the size is centered on what can be seen, which is
+        // the square from the origin to 100, and nothing else fits there.
+        let rect = Rect::new(-500.0, -400.0, 600.0, 500.0);
+        let visible = rect.intersect(content).expect("part of it is on screen");
+        let labels = super::labels(region, rect, visible, grid, measured);
+        assert_eq!(written(&labels), ["400 \u{00d7} 300"]);
+        let size = labels[0].pill;
+        assert_eq!(size.x + size.width / 2.0, 50.0);
+        assert_eq!(size.y + size.height / 2.0, 50.0);
     }
 
     #[test]

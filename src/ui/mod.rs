@@ -33,7 +33,7 @@ use std::sync::Arc;
 
 use crate::image::display::{Display, Headroom};
 use crate::image::exif::Exif;
-use crate::image::region::Region;
+use crate::image::region::{Grip, Region};
 use crate::image::sequence::Sequence;
 use crate::image::stats::BINS;
 use crate::image::{DecodedImage, Stats};
@@ -254,6 +254,9 @@ pub struct FrameInput {
     /// Whether a drag on the picture draws a box to zoom to — `Space` is
     /// held — rather than panning or taking hold of the region.
     pub box_zoom: bool,
+    /// Whether a drag from inside the region moves it — `Shift` is held —
+    /// rather than panning the picture under it.
+    pub move_region: bool,
     /// The box being dragged out to zoom to, while a drag is drawing one:
     /// painted over the picture, and gone when the drag lets go.
     pub zoom_box: Option<Region>,
@@ -377,13 +380,15 @@ impl Pass<'_> {
     /// to zoom to, whatever the selection: the key is held for exactly
     /// that, and a region under the press does not take it. Otherwise what
     /// it is depends on the selection: with one asked for, any drag draws a
-    /// new region; with one on screen, a drag from a handle or from inside
-    /// it takes hold of that; anywhere else it is the view's, as it always
-    /// was. The hand's place
-    /// goes back in image pixels each frame, through the same placement the
-    /// bar's readout uses, since the application's own pointer stands still
-    /// while the toolkit holds a drag. Which handle the pointer rests on is
-    /// said every pass a region is up, for the keys that move one.
+    /// new region; with one on screen, a drag from a handle takes hold of
+    /// that, and a drag from inside it takes hold of the whole only with
+    /// `Shift` held — anywhere else, and inside without the key, it is the
+    /// view's, as it always was, so the picture stays navigable under a
+    /// region that covers it. The hand's place goes back in image pixels
+    /// each frame, through the same placement the bar's readout uses, since
+    /// the application's own pointer stands still while the toolkit holds a
+    /// drag. Which handle the pointer rests on is said every pass a region
+    /// is up, for the keys that move one.
     fn region_gestures(&mut self, ui: &egui::Ui, response: &egui::Response) -> Option<Grab> {
         let scale = self.input.scale;
         let placement = self
@@ -400,6 +405,8 @@ impl Pass<'_> {
                 .as_ref()
                 .and_then(|(rect, handles)| region::grip_at(*rect, handles, [pos.x, pos.y]))
         };
+        // The inside is a hold only while the key says so; a handle always is.
+        let holds = |grip: Grip| grip != Grip::Inside || self.input.move_region;
 
         let mut grabbed = self.input.grabbing;
         if response.drag_started_by(egui::PointerButton::Primary)
@@ -408,7 +415,9 @@ impl Pass<'_> {
             let grab = match self.input.selection {
                 _ if self.input.box_zoom => Some(Grab::Zoom),
                 Selection::Armed => Some(Grab::New),
-                Selection::Shown(_) => grip_under(origin).map(Grab::Handle),
+                Selection::Shown(_) => grip_under(origin)
+                    .filter(|grip| holds(*grip))
+                    .map(Grab::Handle),
                 Selection::Off => None,
             };
             if let Some(grab) = grab {
@@ -439,6 +448,7 @@ impl Pass<'_> {
             self.commands.push(Command::OverGrip(over));
             if grabbed.is_none()
                 && let Some(grip) = over
+                && holds(grip)
             {
                 ui.ctx().set_cursor_icon(region::cursor(Grab::Handle(grip)));
             }
