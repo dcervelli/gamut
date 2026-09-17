@@ -19,4 +19,3 @@ wants [`user-docs/`](../user-docs/) instead.
 | [Tests](testing.md) | What is covered, including the eight that run on a real adapter and the interface driven headless |
 | [Licensing](licensing.md) | The dual license, third-party work in the tree, and how the notices are generated |
 | [Releasing](releasing.md) | The tag, the release it becomes, and why the package is pointed at it in a commit of its own |
-| [Screenshots](screenshots.md) | The scripts that take the README's pictures: a floated window of a known size, keys typed into it, its rectangle captured |
