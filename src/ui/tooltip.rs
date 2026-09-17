@@ -31,6 +31,15 @@ pub enum Tip {
     Counter,
     /// The timeline in the transport bar, which a press or a drag scrubs.
     Timeline,
+    /// The histogram's band and the two handles on it: the value that
+    /// comes out black, the value that comes out white, and the window
+    /// between them, which a drag slides along the axis.
+    BlackPoint,
+    WhitePoint,
+    Window,
+    /// The exposure's own number on the histogram panel, which a drag
+    /// along moves by the same quarter stops the buttons beside it press.
+    Exposure,
     /// The words at the end of the bottom bar that say what is being done to
     /// the picture. What they say in the room a bar has is the names of the
     /// things in force; the tooltip is the whole of it in sentences, which is
@@ -218,27 +227,24 @@ pub fn words(tip: Tip) -> Option<String> {
                 Colormap::Magma => "Magma",
                 Colormap::Turbo => "Turbo",
             },
-            // What a window button sets, rather than the two or three
-            // characters it wears: a row of numbers needs saying in words
-            // once, and the button has no room to say it.
+            // What a window button sets, said out in full: the button wears
+            // two words for it, and what those two words stand for needs
+            // saying once.
             Tip::Control(Control::Window(index)) => match WINDOWS.get(index)?.1 {
-                None => "The image's own window",
-                Some(AutoWindow::Off) => "Window on 0 to 1",
-                Some(AutoWindow::MinMax) => "Window on the whole range",
-                Some(AutoWindow::Percentile) => "Window on the central 99.8%",
-                // Not one of the four: a hand-set window is where the window
-                // ends up, never something a button puts it on.
-                Some(AutoWindow::Manual) => return None,
+                AutoWindow::Off => "Show the values as they are, 0 to 1",
+                AutoWindow::MinMax => "Stretch the whole range of the image to 0 to 1",
+                AutoWindow::Percentile => "Stretch the central 99.8%, the outliers left out",
+                // Not one of the three: a hand-set window is where the
+                // window ends up, never something a button puts it on.
+                AutoWindow::Manual => return None,
             },
-            // The four nudges beside that reading, one at a time. The key
-            // that does the same job is bound on a line with its opposite —
-            // `a` and `s`, `A` and `S` — and the table's own words name the
-            // pair, which is right for `--help` and one word too many for a
-            // button that only goes one way.
-            Tip::Control(Control::WindowDown) => "Slide the window down",
-            Tip::Control(Control::WindowUp) => "Slide the window up",
-            Tip::Control(Control::WindowNarrow) => "Narrow the window",
-            Tip::Control(Control::WindowWiden) => "Widen the window",
+            // The band and its handles: what each is, in the words a levels
+            // tool uses. What dragging one does is the mark's own shape to
+            // say, and a key that does the same job is named under it.
+            Tip::BlackPoint => "Black point",
+            Tip::WhitePoint => "White point",
+            Tip::Window => "The window, from black to white: drag to slide it",
+            Tip::Exposure => "Exposure: drag to change it",
             // And what a curve is, the labels being the names of the things
             // rather than descriptions of them.
             Tip::Control(Control::Curve(index)) => match ToneMap::ALL.get(index)? {

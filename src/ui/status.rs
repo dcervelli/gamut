@@ -329,13 +329,6 @@ fn window_bounds(current: &Current) -> [String; 2] {
     }
 }
 
-/// Those bounds as the histogram panel writes them along its axis: the two of
-/// them with a dash between.
-pub(super) fn format_window(current: &Current) -> String {
-    let [low, high] = window_bounds(current);
-    format!("{low}\u{2013}{high}")
-}
-
 /// What is being done to the image, in sentences: the tooltip on the words at
 /// the end of the bottom bar.
 ///

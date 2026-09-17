@@ -8,6 +8,12 @@ Notable changes to `gamut`. The format follows
 
 ### Added
 
+- `w`, held, marks the clipped pixels on the picture: red where every
+  channel has gone to white, blue where every channel has gone to black.
+  White is marked only where the surface is actually clipping it — no curve
+  on, and no room above white — since a highlight rolled off or shown is
+  not lost.
+
 - The info panel reads a file's XMP as well as its EXIF: the title, the
   caption, the keywords, the creator, the rights and the program that
   wrote it, from JPEG, PNG, WebP, TIFF, HEIF and JPEG XL files. A file
@@ -63,6 +69,27 @@ Notable changes to `gamut`. The format follows
   are stepped over.
 
 ### Changed
+
+- The histogram panel speaks in a viewer's terms rather than the display's.
+  The band under the plot is a levels track: a handle at the value that
+  comes out black and one at the value that comes out white, each dragged
+  to where it should stand, and the band between them dragged to slide the
+  window. The `0.000–1.000` readout and the four nudge buttons beside it
+  are gone; `a`, `s`, `A` and `S` still move the window by steps. The share
+  of the picture the window is clipping is written in the two top corners
+  of the plot — `0.5%` at black, `1.4%` at white — only when there is one,
+  and only where the surface is actually clipping rather than showing or
+  rolling off the highlights. The response curve is drawn only once the
+  display is doing something, the line above the plot names the value
+  under the pointer only while the pointer is over the plot, a photograph's
+  axis no longer wears `0.0000` and `1.0000` at its ends, and the channel
+  planes are drawn in a red, green and blue held short of the primaries.
+  The rows under the band follow the file: every file gets *Exposure*,
+  whose number can be dragged as well as stepped; linear data gets the
+  *Window* row, its three rules named for what they do — *As stored*,
+  *Full range*, *Trimmed* — and a file with highlights above white gets the
+  *Highlights* row of curves. A photograph gets the exposure alone, and
+  the panel is shorter for it.
 
 - Dragging inside a region pans the picture, as dragging anywhere else
   does, so a region that fills the window no longer pins the picture under

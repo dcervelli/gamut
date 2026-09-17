@@ -77,16 +77,20 @@ gets when `lighter_background` resolves back to the background it sits on.
 
 Two more resist being themed and are not:
 
-* **The histogram's plot is drawn on a near-black ground, in the primaries
-  themselves.** The plot is drawn by screening the color planes over one
-  another, and screening only reads on a dark ground: what is under the plot
-  is added to every plane, so a ground light enough to see lifts each plane's
-  darkest channel several times over and three overlapping planes come out as
-  three washes of the same pale color. Pure red, green and blue on a
-  near-black are the one set that behaves: two planes overlapping give the
-  secondary between them and all three give white, which is the reading a
-  channel histogram is looked at for — and is the same reading in every
-  theme, which a plot made of a palette's own pastels is not.
+* **The histogram's plot is drawn on a near-black ground, in one red, one
+  green and one blue that no theme chose.** The plot is drawn by screening
+  the color planes over one another, and screening only reads on a dark
+  ground: what is under the plot is added to every plane, so a ground light
+  enough to see lifts each plane's darkest channel several times over and
+  three overlapping planes come out as three washes of the same pale color.
+  A red, green and blue that each lead in their own channel, on a
+  near-black, are the set that behaves: two planes overlapping give the
+  secondary between them and all three give a near white, which is the
+  reading a channel histogram is looked at for — and is the same reading in
+  every theme, which a plot made of a palette's own pastels is not. They are
+  held a way short of the pure primaries, which at a pixel to the bin came
+  out as a hedge of spikes the eye could not leave alone; see [the histogram
+  panel](histogram.md).
 
   Themed planes were tried: each pulled towards its own primary and then
   scaled, whole, until the three screened together landed on a neutral mid

@@ -13,7 +13,10 @@ use super::placement::Placement;
 use super::reduce::{self, Level, Reducer};
 use super::shader_codes;
 use super::upload::{self, Capabilities};
-use crate::image::{AlphaMode, DecodedImage, display::Display};
+use crate::image::{
+    AlphaMode, DecodedImage,
+    display::{Display, Headroom},
+};
 
 /// Layout must match `struct Params` in shaders/image.wgsl.
 #[repr(C)]
@@ -24,7 +27,8 @@ struct Params {
     window: [f32; 2],
     texels_per_pixel: [f32; 2],
     extent: [f32; 2],
-    _pad: [f32; 2],
+    marks: u32,
+    _pad: u32,
     /// Column-major, each column padded to 16 bytes, as WGSL wants a mat3x3.
     primaries: [[f32; 4]; 3],
     swizzle: u32,
@@ -69,11 +73,31 @@ struct Slot {
 /// What one frame draws: the view, and the minimap's thumbnail when it is on
 /// screen. Passed together because they share a pass, a texture and a coarse
 /// chain, and because whether the chain is needed at all is a question about
-/// the pair of them.
+/// the pair of them. With them, the two things about the frame that the
+/// shader's marks on clipped pixels depend on.
 #[derive(Clone, Copy)]
 pub struct Draw {
     pub view: Placement,
     pub thumbnail: Option<Placement>,
+    /// Whether the pixels the window has taken to black or to white are
+    /// painted in the warning colors — while the key for it is held.
+    pub mark_clipped: bool,
+    /// What decides whether white is being clipped at all, which is the
+    /// display's to say — see `Display::clips_white`.
+    pub headroom: Headroom,
+}
+
+impl Draw {
+    /// A draw with nothing marked, on an SDR surface: what a test draws.
+    #[cfg(test)]
+    pub fn plain(view: Placement, thumbnail: Option<Placement>) -> Self {
+        Self {
+            view,
+            thumbnail,
+            mark_clipped: false,
+            headroom: Headroom::None,
+        }
+    }
 }
 
 pub struct ImageLayer {
@@ -186,7 +210,8 @@ impl ImageLayer {
 
     /// `draw.thumbnail`, when there is one, is the minimap's copy of the same
     /// image: a second quad, drawn from the same texture in the same pass, so
-    /// that it is tone mapped and windowed exactly as the image it stands for.
+    /// that it is tone mapped and windowed exactly as the image it stands for
+    /// — and marked exactly as it is, where the marks are on.
     pub fn prepare(
         &mut self,
         device: &wgpu::Device,
@@ -196,11 +221,20 @@ impl ImageLayer {
         target: [f32; 2],
         display: &Display,
     ) {
-        let Draw { view, thumbnail } = draw;
+        let Draw {
+            view,
+            thumbnail,
+            mark_clipped,
+            headroom,
+        } = draw;
         let Some(image) = &mut self.image else {
             return;
         };
         let window = display.transform();
+        let marks = shader_codes::marks(
+            mark_clipped,
+            mark_clipped && display.clips_white(image.is_gray(), headroom),
+        );
 
         let factor = shrink(view);
         // The thumbnail is shrunk far harder than the view ever is, so it is
@@ -229,7 +263,7 @@ impl ImageLayer {
         self.level = reduce::level_for(factor, image.levels.len());
         self.main.write(
             queue,
-            params_for(image, view, target, display, window, self.level),
+            params_for(image, view, target, display, window, self.level, marks),
         );
 
         self.thumbnail_level =
@@ -237,7 +271,7 @@ impl ImageLayer {
         if let (Some(thumbnail), Some(level)) = (thumbnail, self.thumbnail_level) {
             self.thumbnail.write(
                 queue,
-                params_for(image, thumbnail, target, display, window, level),
+                params_for(image, thumbnail, target, display, window, level, marks),
             );
         }
     }
@@ -459,6 +493,7 @@ fn params_for(
     display: &Display,
     window: (f32, f32),
     level: usize,
+    marks: u32,
 ) -> Params {
     let divisor = (reduce::STEP as f32).powi(level as i32);
     let extent = [
@@ -484,7 +519,8 @@ fn params_for(
         window: [window.0, window.1],
         texels_per_pixel,
         extent,
-        _pad: [0.0; 2],
+        marks,
+        _pad: 0,
         primaries: image.primaries,
         swizzle: image.swizzle,
         alpha_mode: if level == 0 {

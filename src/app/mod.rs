@@ -627,7 +627,7 @@ impl App {
     /// worked out here as well for the presses and the tooltips, which have
     /// to answer between frames.
     pub(super) fn room(&self) -> ui::Room {
-        ui::room(self.content(), &self.panels)
+        ui::room(self.content(), &self.panels, self.current.as_ref())
     }
 
     /// What the panels leave free for the image and for whatever floats over
@@ -1439,6 +1439,7 @@ impl App {
             scale,
             backdrop,
             headroom,
+            mark_clipped: self.pointer.marking,
         };
         match renderer.render(scene, textures) {
             Ok(()) => self.reported_error = false,

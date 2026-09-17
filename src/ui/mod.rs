@@ -517,7 +517,7 @@ impl Pass<'_> {
         if self.input.minimap_on_screen {
             minimap::show(self, ui, current, content);
         }
-        let room = room(content, self.panels);
+        let room = room(content, self.panels, Some(current));
         if self.panels.show_histogram && room.histogram {
             histogram::show(self, ui, current, content);
         }
@@ -553,7 +553,7 @@ pub fn grid_spacing(show_grid: bool, zoom: f32, scale: f32) -> Option<String> {
 /// holds it to what [`room`] actually answers.
 pub const PANELS_ROOM: [f32; 2] = [
     PANEL_WIDTH + 2.0 * PADDING,
-    histogram::HISTOGRAM_SIZE[1] + info::INFO_MIN_HEIGHT + 3.0 * PADDING,
+    histogram::TALLEST[1] + info::INFO_MIN_HEIGHT + 3.0 * PADDING,
 ];
 
 /// Whether the content area has room for each of the two panels that float
@@ -576,13 +576,25 @@ pub struct Room {
 
 /// What `content` has room for, with `panels` saying which of the two is
 /// asked for — the histogram's take counting against the information panel
-/// only where the histogram is on screen, which [`info::panel`] settles for
-/// itself.
-pub fn room(content: Rect, panels: &Panels) -> Room {
+/// only where the histogram is on screen, see [`histogram_shown`] — and
+/// `current` the file, whose panel is as tall as the rows it is offered.
+/// With no file the histogram is measured at its tallest, which is the
+/// answer the window's own floor wants.
+pub fn room(content: Rect, panels: &Panels, current: Option<&Current>) -> Room {
     Room {
-        histogram: histogram::panel(content).is_some(),
-        info: info::panel(content, panels.show_histogram).is_some(),
+        histogram: histogram::panel(content, histogram::Offered::of(current)).is_some(),
+        info: info::panel(content, histogram_shown(content, panels, current)).is_some(),
     }
+}
+
+/// Where the histogram is on screen, or `None` where it is not: its toggle
+/// is off, or the window has no room for it. What the information column
+/// starts below.
+fn histogram_shown(content: Rect, panels: &Panels, current: Option<&Current>) -> Option<Rect> {
+    panels
+        .show_histogram
+        .then(|| histogram::panel(content, histogram::Offered::of(current)))
+        .flatten()
 }
 
 /// A rectangle drawn as four edges, so that what is behind it — the
@@ -667,7 +679,7 @@ mod tests {
             paste: false,
             pixel_format: PixelFormat::default(),
         };
-        let area = |width, height| room(Rect::new(0.0, 0.0, width, height), &panels);
+        let area = |width, height| room(Rect::new(0.0, 0.0, width, height), &panels, None);
 
         assert_eq!(
             area(PANELS_ROOM[0], PANELS_ROOM[1]),
