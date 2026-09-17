@@ -4,6 +4,14 @@ A modern Linux image viewer optimized for getting work done, fast.
 
 ![Main screenshot](user-docs/screenshots/main_screenshot.jpg)
 
+A modern image viewer has to serve many audiences: casual user, photographer, data scientist, programmer, designer, game developer, GIS analyst, etc.
+
+Some features are obviously useful to everyone: high performance, effective pan/zoom controls, copy/paste, etc. A more difficult decision is deciding which features exceed the bar for inclusion. Whether or not a feature is added to gamut is decided by considering questions like these:
+
+* Is the feature useful to a varied audience?
+* Is the feature something that is conceptually simple but would otherwise required specialized software to accomplish?
+* Is the feature's mere presence going to confuse a casual user?
+
 ## Features
 
 - [Versatile Controls (Keyboard, UI, CLI)](#versatile-controls-keyboard-ui-cli)
@@ -63,7 +71,7 @@ Clipboard images can be pasted and saved to the standard pictures folder as `pas
 ### Pixel info
 
 Get coordinate and color information for the moused-over pixel. Easily copy either the coordinate or color (in a variety of formats).
-q
+
 ![Pixel copying](user-docs/screenshots/pixel_copy.gif)
 
 ### Pixel grid
@@ -82,10 +90,6 @@ Grayscale, 16-bit and float single-channel images can be shown with various colo
 
 Luminance and per-channel histogram, with a linear or log count axis. Exposure in quarter stops, a window that slides and narrows, automatic windows (0–1, min/max, 99.8%), and tone mapping (none, Reinhard, neutral) for highlights above white. Nothing re-decodes; the histogram panel holds the controls.
 
-### HDR
-
-When available on the monitor, HDR sources are shown at their graded brightness. Tone mapped for SDR.
-
 ### Fuzzy file navigation
 
 `ctrl+p` style navigation over the file list with thumbnails and helpful metadata per row. Thumbnails integrated into desktop cache.
@@ -102,7 +106,11 @@ Play animated GIF, PNG, WebP and JPEG XL files at normal speed or frame-by-frame
 
 ### Color management
 
-Untagged files are treated as sRGB. ICC profiles (sRGB, Display P3, BT.2020 and Adobe RGB primaries, power-law tone response) and CICP tags are honored; PQ and HLG are decoded. 16-bit, float and single-channel data stay as they are rather than being flattened to 8-bit RGB. `--transfer` and `--primaries` override what a file says or fails to say.
+Untagged files are treated as sRGB. ICC profiles (sRGB, Display P3, BT.2020 and Adobe RGB primaries, power-law tone response) and CICP tags are honored; PQ and HLG are decoded. 16-bit, float and single-channel data stay as they are rather than being flattened to 8-bit RGB. 
+
+### HDR
+
+When available on the monitor, HDR sources are shown at their graded brightness. Tone mapped for SDR.
 
 ### File comparison
 
@@ -116,7 +124,7 @@ This example compares a zoomed in region across DEM, hillshade, and relief image
 
 Files and directories are watched for changes, additions, or deletions. 
 
-In this example, a simple program is zooming into a point on the Mandelbrot set and updating an image every second.
+In this example, a simple program is zooming into a point on the Mandelbrot set and updating an image every second. gamut updates as soon as the file changes maintains pan/zoom settings across reloads.
 
 ![Mandelbrot zoom via File Update](user-docs/screenshots/mandelbrot.gif)
 
