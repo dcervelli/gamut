@@ -46,6 +46,8 @@ This will make the window open centered and floating with a reasonable, dynamic 
 
 ### Region selection/measurement
 
+Select rectangular regions for measurement or copy. Pixel precision controls to move, grow, or shrink the region.
+
 ### Copy image
 
 Images can be copied in a variety of useful ways:
@@ -61,6 +63,8 @@ Clipboard images can be pasted and saved to the standard pictures folder as `pas
 ### Pixel info
 
 Get coordinate and color information for the moused-over pixel. Easily copy either the coordinate or color (in a variety of formats).
+q
+![Pixel copying](user-docs/screenshots/pixel_copy.gif)
 
 ### Pixel grid
 
@@ -85,6 +89,10 @@ When available on the monitor, HDR sources are shown at their graded brightness.
 ### Fuzzy file navigation
 
 `ctrl+p` style navigation over the file list with thumbnails and helpful metadata per row. Thumbnails integrated into desktop cache.
+
+![Fuzzy finder](user-docs/screenshots/fuzzy_finder.gif)
+
+Bird images from [Fugleramme](https://github.com/arnegiacomo/fugleramme), augmented to include common name in the metadata.
 
 ### Animated/multi-image formats
 
@@ -112,19 +120,18 @@ In this example, a simple program is zooming into a point on the Mandelbrot set 
 
 ![Mandelbrot zoom via File Update](user-docs/screenshots/mandelbrot.gif)
 
-### Metadata/EXIF extraction
+### Metadata extraction
 
-Get file, image, EXIF, georeference, and other metadata. Easily copy all, by section, or by item.
+Get file, image, EXIF, XMP, georeference, and other metadata. Easily copy all, by section, or by item.
 
 ![Image info/metadata/EXIF](user-docs/screenshots/info.jpg)
 
 ### Many formats
-
 PNG, JPEG (with gain maps), JPEG XL, TIFF and BigTIFF, WebP, HEIF (HEIC and AVIF), GIF, ICO, BMP, netpbm, Radiance HDR and OpenEXR. More details in [`user-docs/FORMATS.md`](user-docs/FORMATS.md).
 
-### Fast GPU display
+### High performance
 
-Decoding, uploading and thumbnailing run on their own threads; large TIFFs, HEICs and gain maps decode across every core. Exposure, window, tone map and false color are shader uniforms, so adjusting them never touches the pixels. Below 100% the image is drawn from a chain of exact area averages, so a frame costs the same however far out the view is. Images up to 4 GB decoded and 32768 pixels a side.
+All rendering is done on GPU and maintains full frame rate. Decoding and statistics generation is parallelized in background threads.
 
 ### Desktop/shell integration
 
@@ -149,7 +156,7 @@ Enough keys to get going:
 | Key | |
 | --- | --- |
 | `]`, `[` or `PgDn`, `PgUp` | Next / previous file |
-| Space | Cycle fit → fit width → fit height |
+| Space | Cycle fit → fill → 100% |
 | `1` | Actual size; wheel to zoom, drag to pan |
 | `d`, `f` | Exposure down / up |
 | `h`, `i`, `m` | Histogram, file information, minimap |
