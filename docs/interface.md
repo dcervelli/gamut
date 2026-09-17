@@ -352,10 +352,15 @@ when the toolkit calls it a drag. egui defers the decision until the pointer
 has moved six points or the button has been held most of a second, and by
 then the pointer is off the press — so `Pass::region_gestures` reads
 `press_origin` and tests that against the handles. With a region asked for,
-any drag draws one; with a region on screen, a drag from a handle pulls it
-and a drag from inside moves it; a drag from anywhere else is the view's, as
-it always was, which is what keeps a picture navigable under a region
-larger than the window. The hand's place goes back to the application in
+any drag draws one; with a region on screen, a drag from a handle pulls it —
+or moves the whole of it, from the handle at its middle — and a drag from
+inside it moves it only with `Shift` held, `FrameInput::move_region`. A drag
+from anywhere else, and from inside without the key, is the view's, as it
+always was: a region is drawn to be looked at, and one that covers the window
+would otherwise pin the view under it. Which the pointer is about to do is in
+the cursor — the move cursor on the middle handle, and inside only while the
+key is down — and egui repaints on a modifier change, so the cursor follows
+the key. The hand's place goes back to the application in
 image pixels on every frame of the drag, through the same placement the
 bar's readout uses, because the application's own pointer stands still for
 the duration: egui consumes the pointer events of a drag it holds, and
@@ -367,23 +372,31 @@ application never heard about would leave it holding a drag that was over.
 The region is painted in `src/ui/region.rs` on the picture's own painter,
 under the floating panels, rather than in an area of its own: an area takes
 the pointer from what is under it, and the picture's response is what the
-drag on a handle is read off. The eight handles are placed on the device's
+drag on a handle is read off. The nine handles are placed on the device's
 grid through `icon::Grid`, like every other thin thing over the picture, and
 hit-tested with a little reach past their edges; a corner is asked before
 the edges it overlaps on a region drawn small, since it moves two edges
-where they move one. Which handle the pointer rests on goes back each pass
-as `Command::OverGrip`, a pass late like `OverImage`, and that is what the
-arrows consult: with the pointer on a handle they move the handle a pixel,
-and otherwise the region. An arrow along an edge — Up on the right edge's
-handle — moves the region rather than doing nothing, so no key is dead while
-a region is up. `Ctrl` with an arrow grows that side, and `Ctrl+Shift` with
-an arrow shrinks it that way, pulling in the side opposite — `Region::grown`
-and `Region::shrunk`, the second stopping a pixel short of the far edge so a
-region cannot be keyed out of existence. None of it is animated: a region
-moves a pixel at a time, and a pixel has nothing to animate.
+where they move one, and the middle is asked last, since the whole region
+can be taken hold of from anywhere inside it as well. `Grip::Middle` and
+`Grip::Inside` do the same thing to the region and are kept apart because
+they do not do the same thing to the pointer: the one is a hold whenever it
+is under the hand, the other only with the key. Which handle the pointer
+rests on goes back each pass as `Command::OverGrip`, a pass late like
+`OverImage`, and that is what the arrows consult: with the pointer on a
+handle they move the handle a pixel, and otherwise the region. An arrow
+along an edge — Up on the right edge's handle — moves the region rather than
+doing nothing, so no key is dead while a region is up. `Ctrl` with an arrow
+grows that side, and `Ctrl+Shift` with an arrow shrinks it that way, pulling
+in the side opposite — `Region::grown` and `Region::shrunk`, the second
+stopping a pixel short of the far edge so a region cannot be keyed out of
+existence. None of it is animated: a region moves a pixel at a time, and a
+pixel has nothing to animate.
 
-The region wears its measurements while the pointer is on it: its size at
-its middle, and each edge's coordinate inside the mark in the middle of that
+The region wears its measurements while the pointer is on it: its size
+under the handle at its middle — over it where the region runs off the foot
+of the window, and on it where the region is too short for either, the size
+being worth more than a handle the region has another way of being moved
+by — and each edge's coordinate inside the mark in the middle of that
 edge. They come and go with the hand rather than with a clock, since the
 hand is what says which region is being worked on, and a region left on the
 picture keeps only its outline, which is the thing it is for. `App::over_region`

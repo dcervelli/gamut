@@ -53,23 +53,29 @@ impl Side {
     }
 }
 
-/// Where a region is taken hold of: one of its eight handles, or anywhere
+/// Where a region is taken hold of: one of its nine handles, or anywhere
 /// inside it.
 ///
 /// A corner is named by the two edges that meet there, across first, so
-/// that pulling one moves both edges and pulling an edge moves one.
+/// that pulling one moves both edges and pulling an edge moves one. The
+/// handle at the middle and the inside both move the whole of it; they are
+/// told apart because the inside is only taken hold of with a key held,
+/// where the handle is a handle like the others.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Grip {
     Corner(Side, Side),
     Edge(Side),
+    Middle,
     Inside,
 }
 
 impl Grip {
-    /// The eight handles, clockwise from the top left. The corners come
-    /// before the edges beside them so that, where a small region's handles
-    /// overlap, the one that moves two edges is the one found.
-    pub const HANDLES: [Grip; 8] = [
+    /// The nine handles, clockwise from the top left and the middle last.
+    /// The corners come before the edges beside them so that, where a small
+    /// region's handles overlap, the one that moves two edges is the one
+    /// found, and the middle comes after both since the whole region can be
+    /// taken hold of from anywhere inside it as well.
+    pub const HANDLES: [Grip; 9] = [
         Grip::Corner(Side::Left, Side::Top),
         Grip::Corner(Side::Right, Side::Top),
         Grip::Corner(Side::Right, Side::Bottom),
@@ -78,11 +84,12 @@ impl Grip {
         Grip::Edge(Side::Right),
         Grip::Edge(Side::Bottom),
         Grip::Edge(Side::Left),
+        Grip::Middle,
     ];
 
     /// The edge this grip moves on each axis, across then down: both for a
-    /// corner, one for an edge, and neither for the inside, which moves the
-    /// whole region rather than any edge of it.
+    /// corner, one for an edge, and neither for the middle or the inside,
+    /// which move the whole region rather than any edge of it.
     fn sides(self) -> [Option<Side>; 2] {
         match self {
             Grip::Corner(across, down) => [Some(across), Some(down)],
@@ -91,7 +98,7 @@ impl Grip {
                 sides[side.axis()] = Some(side);
                 sides
             }
-            Grip::Inside => [None, None],
+            Grip::Middle | Grip::Inside => [None, None],
         }
     }
 }
@@ -186,8 +193,8 @@ impl Region {
     /// than collapsing it: what is being drawn is the rectangle between the
     /// anchored edge and the hand, whichever side of it the hand has gone.
     ///
-    /// The inside is not pulled — it is moved, by [`Region::moved_by`] —
-    /// and asking leaves the region as it is.
+    /// The middle and the inside are not pulled — they are moved, by
+    /// [`Region::moved_by`] — and asking leaves the region as it is.
     pub fn pulled(self, grip: Grip, to: [f32; 2], image: [u32; 2]) -> Self {
         let mut edges = self.edges();
         for (axis, side) in grip.sides().into_iter().enumerate() {
@@ -418,6 +425,7 @@ mod tests {
 
         // The inside is not an edge to pull.
         assert_eq!(start.pulled(Grip::Inside, [0.0, 0.0], IMAGE), start);
+        assert_eq!(start.pulled(Grip::Middle, [0.0, 0.0], IMAGE), start);
         // Nor is a NaN a place to pull to.
         assert_eq!(
             start.pulled(Grip::Edge(Side::Right), [f32::NAN, 0.0], IMAGE),
@@ -489,6 +497,7 @@ mod tests {
         assert_eq!(flush.nudged(right, [1, 0], IMAGE), Some(flush));
         // The inside holds no edge.
         assert_eq!(start.nudged(Grip::Inside, [1, 0], IMAGE), None);
+        assert_eq!(start.nudged(Grip::Middle, [1, 0], IMAGE), None);
     }
 
     #[test]
