@@ -1469,7 +1469,10 @@ impl App {
                 self.select(region.shrunk(direction.side().opposite(), 1));
                 Effect::Redraw
             }
-            Pan(direction, Fine | Coarse) => {
+            // The fine pan is left to the picture: a region moves by the
+            // pixel already, and the picture under it still wants moving by
+            // one.
+            Pan(direction, Coarse) => {
                 let step = direction.step();
                 // The middle moves the whole region, and so does a handle
                 // that has no edge to move the way the arrow points — an

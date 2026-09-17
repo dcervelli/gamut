@@ -406,8 +406,11 @@ rather than doing nothing, so no key is dead while a region is up. `Ctrl`
 with an arrow grows that side, and `Ctrl+Shift` with an arrow shrinks it
 that way, pulling in the side opposite — `Region::grown` and
 `Region::shrunk`, the second stopping a pixel short of the far edge so a
-region cannot be keyed out of existence. None of it is animated: a region
-moves a pixel at a time, and a pixel has nothing to animate.
+region cannot be keyed out of existence. `Shift` with an arrow is not taken
+by the region at all: a region moves by the pixel already, so a fine step
+would duplicate the plain one, and the picture under the region still wants
+placing to the pixel. None of it is animated: a region moves a pixel at a
+time, and a pixel has nothing to animate.
 
 The region wears its measurements while the pointer is on it: its size
 under the handle at its middle — over it where the region runs off the foot

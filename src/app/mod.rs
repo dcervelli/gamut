@@ -2158,7 +2158,7 @@ mod tests {
             })
         );
         // An arrow along that edge moves the whole region instead.
-        let _ = app.perform(Action::Pan(Direction::Down, PanStep::Fine));
+        let _ = app.perform(Action::Pan(Direction::Down, PanStep::Coarse));
         assert_eq!(
             app.selection,
             Selection::Shown(Region {
@@ -2191,7 +2191,7 @@ mod tests {
         });
         app.act(Command::Release);
         assert_eq!(app.handle, Grip::Middle);
-        let _ = app.perform(Action::Pan(Direction::Up, PanStep::Fine));
+        let _ = app.perform(Action::Pan(Direction::Up, PanStep::Coarse));
         assert_eq!(
             app.selection,
             Selection::Shown(Region {
@@ -2202,7 +2202,22 @@ mod tests {
             })
         );
         // Grown back for the steps below, which read from here.
+        let _ = app.perform(Action::Pan(Direction::Down, PanStep::Coarse));
+
+        // Shift with an arrow is not the region's: it pans the picture by
+        // a pixel under it, as it does with no region up.
+        let view = app.view.position(image, viewport);
         let _ = app.perform(Action::Pan(Direction::Down, PanStep::Fine));
+        assert_eq!(
+            app.selection,
+            Selection::Shown(Region {
+                x: 11,
+                y: 6,
+                width: 12,
+                height: 11
+            })
+        );
+        assert_ne!(app.view.position(image, viewport), view);
 
         // Ctrl grows it that way.
         let _ = app.perform(Action::Pan(Direction::Up, PanStep::Edge));

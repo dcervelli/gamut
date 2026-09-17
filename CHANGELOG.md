@@ -69,7 +69,8 @@ Notable changes to `gamut`. The format follows
   The center handle is current for a region just drawn, so the arrows move
   the whole of it as before; clicking or dragging another handle makes
   that one current, and the arrows move it a pixel at a time with the
-  pointer anywhere.
+  pointer anywhere. `Shift` with an arrow pans the picture a pixel under
+  the region, as it does without one, rather than moving the region.
 
 - The transport bar of an animation or a file of pages sits between the
   left and right strips, under the picture, rather than spanning the
