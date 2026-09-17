@@ -15,7 +15,7 @@ Every control `gamut` has. Letter keys work in either case except `a`,
 | `Space` | Cycle through the whole image, the window filled, and actual size. With a region selected, fit the region, fill the window with it, then the image's three, in turn |
 | `Space`+Drag | Zoom to the box you drag out |
 | `p` | Cycle the filter used above 100%: nearest → bicubic |
-| Arrows | Pan by 64 pixels; with a region selected, move it one pixel |
+| Arrows | Pan by 64 pixels; with a region selected, move it — or its current handle — one pixel |
 | `Shift`+Arrows | Pan by one pixel |
 | `Ctrl`+Arrows | Pan to the far side of the image; with a region selected, grow it that way one pixel |
 | `Ctrl`+`Shift`+Arrows | With a region selected, shrink it that way one pixel, pulling its far side in |
@@ -411,27 +411,35 @@ so a distance on screen can be counted off in the image's own pixels.
 region: the cursor becomes a crosshair over the image, and the next drag on
 it draws a rectangle. It is made of the image's own pixels — every pixel the
 drag touched, at whatever zoom you drew it — and it stays on screen, outlined
-in the accent with a handle at each corner and in the middle of each edge,
-until you take it off.
+in the accent with a handle at each corner, in the middle of each edge and at
+its center, until you take it off.
 
-Dragging a handle moves that edge, or that corner, and a handle pulled past
-the far side flips the rectangle over rather than shrinking it to nothing.
-Dragging inside the region moves the whole of it. Dragging anywhere else on
-the picture pans, as it always does, so a region larger than the window is
-still navigable; the wheel zooms as before.
+Dragging a handle on an edge or a corner moves that edge, or that corner,
+and a handle pulled past the far side flips the rectangle over rather than
+shrinking it to nothing. Dragging the handle at the center moves the whole
+region, and so does dragging anywhere inside it with `Shift` held. Dragging
+anywhere else on the picture pans, as it always does — inside the region
+too, without `Shift`, so a region that fills the window does not pin the
+picture under it; the wheel zooms as before.
 
-For the last pixel, use the keys. With a region up the arrows move it one
-pixel rather than panning the view, and with the pointer resting on a handle
-they move that handle instead: rest on the right edge's handle and press
-Right to make the region one pixel wider, or Left to make it one narrower.
-`Ctrl` with an arrow grows the region on that side, wherever the pointer is,
-and `Ctrl`+`Shift` with an arrow shrinks it that way, pulling the far side in:
-`Ctrl`+`Shift`+Left moves the right edge one pixel to the left. A region never
-shrinks past one pixel.
+For the last pixel, use the keys. One handle is always the current one,
+drawn in a brighter color than the others, and the arrows move it one pixel
+rather than panning the view. A region just drawn has its center handle
+current, so the arrows move the whole of it; click or drag any other handle
+and it becomes current instead, and the arrows move that: click the right
+edge's handle and press Right to make the region one pixel wider, or Left to
+make it one narrower. An arrow the current handle cannot follow — Up, on the
+right edge's handle — moves the whole region. Click the center handle to go
+back to moving the whole. `Ctrl` with an arrow grows the region on that
+side, whichever handle is current, and `Ctrl`+`Shift` with an arrow shrinks
+it that way, pulling the far side in: `Ctrl`+`Shift`+Left moves the right
+edge one pixel to the left. A region never shrinks past one pixel. `Shift`
+with an arrow is not the region's: it pans the picture a pixel under it, as
+it does with no region up.
 
-Point at the region and it says what it is: its size at its middle,
-`640 × 480`, and the coordinate of each edge written just inside the mark in
-the middle of that edge. The left and right numbers are where those edges
+Point at the region and it says what it is: its size under the handle at
+its center, `640 × 480`, and the coordinate of each edge written just inside
+the mark in the middle of that edge. The left and right numbers are where those edges
 sit across the image and the top and bottom where they sit down it, so the
 right minus the left is the width beside them. They stay for as long as the
 pointer is on the region — including while you are dragging it — and go when
@@ -456,7 +464,9 @@ region behind: it belongs to the picture it was drawn on.
 
 | Action | What it does |
 | --- | --- |
-| Drag | Pan, with the image following the pointer; with a region selected, draw it, or move it or one of its handles |
+| Drag | Pan, with the image following the pointer; with a region selected, draw it, or pull one of its handles — the one at its center moves the whole of it |
+| `Shift`+Drag | Inside the region, move the whole of it |
+| Click a region handle | Make it the current handle, the one the arrows move |
 | `Space`+Drag | Zoom to the box dragged out, wherever the drag begins |
 | Wheel | Zoom about the pointer |
 | Trackpad scroll | The same, by fractions of a notch |

@@ -64,6 +64,20 @@ Notable changes to `gamut`. The format follows
 
 ### Changed
 
+- Dragging inside a region pans the picture, as dragging anywhere else
+  does, so a region that fills the window no longer pins the picture under
+  it. Moving the region is `Shift` with the drag, or a drag on the new
+  handle at its center; its size is written under that handle rather than
+  over it.
+
+- The arrows move a region's current handle, drawn brighter than the
+  others, rather than whichever handle the pointer happened to rest on.
+  The center handle is current for a region just drawn, so the arrows move
+  the whole of it as before; clicking or dragging another handle makes
+  that one current, and the arrows move it a pixel at a time with the
+  pointer anywhere. `Shift` with an arrow pans the picture a pixel under
+  the region, as it does without one, rather than moving the region.
+
 - The transport bar of an animation or a file of pages sits between the
   left and right strips, under the picture, rather than spanning the
   window as a second bottom bar.
