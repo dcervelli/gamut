@@ -24,7 +24,7 @@ use crate::image::decode;
 use crate::image::display::{Display, Headroom, Startup};
 use crate::image::region::Region;
 use crate::image::sequence::Sequence;
-use crate::loader::{Decoded, Loader, Opened, Ready, Reload, Request};
+use crate::loader::{Decoded, Loader, Opened, Ready, Reload, Request, Source};
 use crate::monitor::{Mode, Monitors};
 use crate::motion::Motion;
 use crate::openers::{self, Opener};
@@ -255,7 +255,9 @@ impl App {
     /// `size` is what the header of `files[index]` said, where it would say:
     /// enough to open the window at the right shape before the pixels exist.
     /// The file itself is asked for here, so that it is being read while the
-    /// window and the GPU are still being set up.
+    /// window and the GPU are still being set up. `source` is where its bytes
+    /// come from: the clipboard for `--paste`, whose file is the empty one
+    /// reserved for it until the loader has fetched the picture into it.
     ///
     /// `named` is the command line's own list, `files` before any directory in
     /// it was replaced by the images inside. Kept so that those directories
@@ -264,6 +266,7 @@ impl App {
         files: Vec<PathBuf>,
         named: Vec<PathBuf>,
         index: usize,
+        source: Source,
         size: Option<[f32; 2]>,
         options: Options,
         threads: Threads,
@@ -352,7 +355,7 @@ impl App {
             said_how_to_restore: false,
             reported_error: false,
         };
-        let request = app.files.open_first();
+        let request = app.files.open_first(source);
         app.send(request);
         // The whole list, from the start: the cache fills while the first
         // file is being looked at, and the chooser then has thumbnails the
@@ -1835,6 +1838,7 @@ mod tests {
             paths,
             named,
             0,
+            Source::Disk,
             size.map(|(w, h)| [w as f32, h as f32]),
             options,
             Threads {

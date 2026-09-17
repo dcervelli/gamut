@@ -41,6 +41,12 @@ Notable changes to `gamut`. The format follows
   and this program share them, and are made in the background at low
   priority from the moment the program starts.
 
+- `--paste` opens on the image on the clipboard: it is written to the
+  pictures directory and shown first, ahead of any path named, exactly as
+  `Ctrl+V` would paste it once the window was up, so `gamut --paste` alone
+  opens what was just copied. A clipboard with nothing to show is said on
+  the terminal, and the paths are opened instead.
+
 - `Ctrl+Shift` with an arrow shrinks a region that way a pixel, pulling
   its far side in — `Ctrl+Shift+Left` moves the right edge left — as
   `Ctrl` with an arrow grows it.
