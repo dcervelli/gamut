@@ -64,6 +64,13 @@ Notable changes to `gamut`. The format follows
   handle at its center; its size is written under that handle rather than
   over it.
 
+- The arrows move a region's current handle, drawn brighter than the
+  others, rather than whichever handle the pointer happened to rest on.
+  The center handle is current for a region just drawn, so the arrows move
+  the whole of it as before; clicking or dragging another handle makes
+  that one current, and the arrows move it a pixel at a time with the
+  pointer anywhere.
+
 - The transport bar of an animation or a file of pages sits between the
   left and right strips, under the picture, rather than spanning the
   window as a second bottom bar.

@@ -14,7 +14,7 @@ use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples, Stats
 use crate::theme::Theme;
 use crate::view::{View, Viewport};
 
-use crate::image::region::{Grip, Region};
+use crate::image::region::{Grip, Region, Side};
 
 use super::chooser::{self, Input, Row, Step};
 use super::chrome::{BAR_HEIGHT, SIDE_WIDTH};
@@ -116,6 +116,7 @@ fn input(logical: [f32; 2], count: usize) -> FrameInput {
         openers: Vec::new(),
         toast: None,
         selection: Selection::Off,
+        handle: Grip::Middle,
         grabbing: None,
         over_region: false,
         box_zoom: false,
@@ -604,6 +605,41 @@ fn a_region_on_screen_is_moved_with_shift_or_by_its_middle() {
     let middle = screen_point(&harness, [1.5, 1.5]);
     let commands = drag(&mut harness, middle, to);
     assert!(held(&commands, Grip::Middle), "{commands:?}");
+}
+
+/// A click on a handle of the region — the button down and up again in the
+/// same place — names it the current handle, and asks for nothing else: no
+/// hold, no pull, no pan. A click inside the region, off its handles, names
+/// nothing, and neither does a click on the bare picture.
+#[test]
+fn a_click_on_a_handle_makes_it_the_current_one() {
+    let mut harness = open(WINDOW, 1, panels());
+    let region = Region {
+        x: 1,
+        y: 1,
+        width: 1,
+        height: 1,
+    };
+    harness.state_mut().input.selection = Selection::Shown(region);
+    harness.run();
+    let click = |harness: &mut Harness<'static, State>, at: [f32; 2]| drag(harness, at, at);
+
+    let right = screen_point(&harness, [2.0, 1.5]);
+    assert_eq!(
+        click(&mut harness, right),
+        [Command::Handle(Grip::Edge(Side::Right))]
+    );
+    let corner = screen_point(&harness, [1.0, 1.0]);
+    assert_eq!(
+        click(&mut harness, corner),
+        [Command::Handle(Grip::Corner(Side::Left, Side::Top))]
+    );
+    let middle = screen_point(&harness, [1.5, 1.5]);
+    assert_eq!(click(&mut harness, middle), [Command::Handle(Grip::Middle)]);
+
+    let inside = screen_point(&harness, [1.25, 1.25]);
+    assert_eq!(click(&mut harness, inside), []);
+    assert_eq!(click(&mut harness, [60.0, 100.0]), []);
 }
 
 /// With `Space` held, a drag on the picture draws a box to zoom to,

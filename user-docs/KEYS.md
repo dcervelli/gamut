@@ -15,7 +15,7 @@ Every control `gamut` has. Letter keys work in either case except `a`,
 | `Space` | Cycle through the whole image, the window filled, and actual size. With a region selected, fit the region, fill the window with it, then the image's three, in turn |
 | `Space`+Drag | Zoom to the box you drag out |
 | `p` | Cycle the filter used above 100%: nearest → bicubic |
-| Arrows | Pan by 64 pixels; with a region selected, move it one pixel |
+| Arrows | Pan by 64 pixels; with a region selected, move it — or its current handle — one pixel |
 | `Shift`+Arrows | Pan by one pixel |
 | `Ctrl`+Arrows | Pan to the far side of the image; with a region selected, grow it that way one pixel |
 | `Ctrl`+`Shift`+Arrows | With a region selected, shrink it that way one pixel, pulling its far side in |
@@ -415,14 +415,18 @@ anywhere else on the picture pans, as it always does — inside the region
 too, without `Shift`, so a region that fills the window does not pin the
 picture under it; the wheel zooms as before.
 
-For the last pixel, use the keys. With a region up the arrows move it one
-pixel rather than panning the view, and with the pointer resting on a handle
-they move that handle instead: rest on the right edge's handle and press
-Right to make the region one pixel wider, or Left to make it one narrower.
-`Ctrl` with an arrow grows the region on that side, wherever the pointer is,
-and `Ctrl`+`Shift` with an arrow shrinks it that way, pulling the far side in:
-`Ctrl`+`Shift`+Left moves the right edge one pixel to the left. A region never
-shrinks past one pixel.
+For the last pixel, use the keys. One handle is always the current one,
+drawn in a brighter color than the others, and the arrows move it one pixel
+rather than panning the view. A region just drawn has its center handle
+current, so the arrows move the whole of it; click or drag any other handle
+and it becomes current instead, and the arrows move that: click the right
+edge's handle and press Right to make the region one pixel wider, or Left to
+make it one narrower. An arrow the current handle cannot follow — Up, on the
+right edge's handle — moves the whole region. Click the center handle to go
+back to moving the whole. `Ctrl` with an arrow grows the region on that
+side, whichever handle is current, and `Ctrl`+`Shift` with an arrow shrinks
+it that way, pulling the far side in: `Ctrl`+`Shift`+Left moves the right
+edge one pixel to the left. A region never shrinks past one pixel.
 
 Point at the region and it says what it is: its size under the handle at
 its center, `640 × 480`, and the coordinate of each edge written just inside
@@ -453,6 +457,7 @@ region behind: it belongs to the picture it was drawn on.
 | --- | --- |
 | Drag | Pan, with the image following the pointer; with a region selected, draw it, or pull one of its handles — the one at its center moves the whole of it |
 | `Shift`+Drag | Inside the region, move the whole of it |
+| Click a region handle | Make it the current handle, the one the arrows move |
 | `Space`+Drag | Zoom to the box dragged out, wherever the drag begins |
 | Wheel | Zoom about the pointer |
 | Trackpad scroll | The same, by fractions of a notch |

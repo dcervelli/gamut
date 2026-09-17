@@ -273,9 +273,12 @@ fn within(inner: Rect, outer: Rect) -> bool {
 }
 
 /// Draws the region over the picture: its outline in the accent, its nine
-/// handles, and — while the pointer is on it — what [`labels`] gives room
-/// to. Clipped to `content`, since a region on a zoomed-in picture runs
-/// under the bars like the picture does.
+/// handles — the current one in the ink that leads, edged in the accent,
+/// where the rest are the accent edged in the bars' ground, so that the
+/// one the arrows move is the one that stands out — and, while the pointer
+/// is on it, what [`labels`] gives room to. Clipped to `content`, since a
+/// region on a zoomed-in picture runs under the bars like the picture
+/// does.
 ///
 /// The words come and go with the pointer rather than with a clock: they
 /// are about the region under the hand, and the hand is what says which
@@ -295,12 +298,17 @@ pub(super) fn show(pass: &Pass, ui: &mut egui::Ui, current: &Current, content: R
 
     outline(&painter, grid, rect, OUTLINE, accent);
     let edge: egui::Color32 = theme.bar_background.into();
-    for (_, handle) in handles(rect, grid) {
-        painter.rect_filled(handle.into(), 0.0, accent);
+    let lit: egui::Color32 = theme.text_bright.into();
+    for (grip, handle) in handles(rect, grid) {
+        let (fill, stroke) = match grip == pass.input.handle {
+            true => (lit, accent),
+            false => (accent, edge),
+        };
+        painter.rect_filled(handle.into(), 0.0, fill);
         painter.rect_stroke(
             handle.into(),
             0.0,
-            Stroke::new(grid.line_width(1.0), edge),
+            Stroke::new(grid.line_width(1.0), stroke),
             egui::StrokeKind::Inside,
         );
     }

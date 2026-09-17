@@ -384,15 +384,30 @@ can be taken hold of from anywhere inside it as well. `Grip::Middle` and
 they do not do the same thing to the pointer: the one is a hold whenever it
 is under the hand, the other only with the key. Which handle the pointer
 rests on goes back each pass as `Command::OverGrip`, a pass late like
-`OverImage`, and that is what the arrows consult: with the pointer on a
-handle they move the handle a pixel, and otherwise the region. An arrow
-along an edge — Up on the right edge's handle — moves the region rather than
-doing nothing, so no key is dead while a region is up. `Ctrl` with an arrow
-grows that side, and `Ctrl+Shift` with an arrow shrinks it that way, pulling
-in the side opposite — `Region::grown` and `Region::shrunk`, the second
-stopping a pixel short of the far edge so a region cannot be keyed out of
-existence. None of it is animated: a region moves a pixel at a time, and a
-pixel has nothing to animate.
+`OverImage`; that is what the region's words are written for, and nothing
+else reads it.
+
+One handle is the *current* one, `App::handle`, and that is what the arrows
+move: the middle — the whole region — for a region just drawn, and after
+that whichever handle was last clicked or dragged. A drag says so through
+the `Command::Grab` it already sends; a click, which egui never turns into
+a drag, is read off `clicked_by` in `Pass::region_gestures` and sent as
+`Command::Handle`. A move of the whole by its inside leaves the current
+handle alone: it is not a handle, and the arrows should go on moving what
+they were moving. The arrows used to consult the handle under the pointer
+instead, which made precise sizing a matter of holding the pointer still on
+an eight-pixel square while pressing keys; a handle that stays chosen until
+another is chosen can be worked on with the hand anywhere. The current
+handle is drawn apart from the rest — filled in `text_bright`, the ink that
+leads, and edged in the accent, where the others are the accent edged in the
+bars' ground — so that what the arrows will move is always in view. An arrow
+along the current edge — Up on the right edge's handle — moves the region
+rather than doing nothing, so no key is dead while a region is up. `Ctrl`
+with an arrow grows that side, and `Ctrl+Shift` with an arrow shrinks it
+that way, pulling in the side opposite — `Region::grown` and
+`Region::shrunk`, the second stopping a pixel short of the far edge so a
+region cannot be keyed out of existence. None of it is animated: a region
+moves a pixel at a time, and a pixel has nothing to animate.
 
 The region wears its measurements while the pointer is on it: its size
 under the handle at its middle — over it where the region runs off the foot
