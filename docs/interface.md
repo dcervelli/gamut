@@ -358,9 +358,11 @@ inside it moves it only with `Shift` held, `FrameInput::move_region`. A drag
 from anywhere else, and from inside without the key, is the view's, as it
 always was: a region is drawn to be looked at, and one that covers the window
 would otherwise pin the view under it. Which the pointer is about to do is in
-the cursor — the move cursor on the middle handle, and inside only while the
-key is down — and egui repaints on a modifier change, so the cursor follows
-the key. The hand's place goes back to the application in
+the cursor — the four-way arrow on the middle handle, and inside only while
+the key is down — and egui repaints on a modifier change, so the cursor
+follows the key. The arrow is asked for as `AllScroll`, not `Move`: Adwaita,
+the cursor theme a desktop with none set falls back to, draws `move` as the
+plain arrow. The hand's place goes back to the application in
 image pixels on every frame of the drag, through the same placement the
 bar's readout uses, because the application's own pointer stands still for
 the duration: egui consumes the pointer events of a drag it holds, and

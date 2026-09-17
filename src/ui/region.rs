@@ -108,9 +108,14 @@ pub(super) fn grip_at(rect: Rect, handles: &[(Grip, Rect); 9], point: [f32; 2]) 
 }
 
 /// The cursor a hold on the region wears: the crosshair for drawing one,
-/// the resize arrows across the axis a handle moves along, the move cursor
-/// for the whole of it, by its middle handle or its inside — and the
+/// the resize arrows across the axis a handle moves along, the four-way
+/// arrow for the whole of it, by its middle handle or its inside — and the
 /// magnifier for the box that zooms.
+///
+/// The four-way arrow is asked for as `AllScroll` rather than `Move`: the
+/// cursor themes on the desktop draw `all-scroll` as the four arrows, and
+/// at least one of them — Adwaita, the one a desktop with no theme set
+/// falls back to — draws `move` as the plain arrow, which says nothing.
 pub(super) fn cursor(grab: Grab) -> CursorIcon {
     match grab {
         Grab::New => CursorIcon::Crosshair,
@@ -120,7 +125,7 @@ pub(super) fn cursor(grab: Grab) -> CursorIcon {
         Grab::Handle(Grip::Corner(_, _)) => CursorIcon::ResizeNeSw,
         Grab::Handle(Grip::Edge(Side::Left | Side::Right)) => CursorIcon::ResizeHorizontal,
         Grab::Handle(Grip::Edge(Side::Top | Side::Bottom)) => CursorIcon::ResizeVertical,
-        Grab::Handle(Grip::Middle | Grip::Inside) => CursorIcon::Move,
+        Grab::Handle(Grip::Middle | Grip::Inside) => CursorIcon::AllScroll,
     }
 }
 
