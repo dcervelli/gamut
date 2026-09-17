@@ -1,7 +1,9 @@
 # Roadmap
 
+## TODO
+* Ideally open to 100% with UI open for smaller images
+
 ## New Features
-* Raw decoder
 * SVG rasterizer
 * Export/save as…
 * Loupe
