@@ -241,6 +241,9 @@ pub struct FrameInput {
     /// for it is lit by, what is painted over the picture, and what a drag
     /// on the picture means.
     pub selection: Selection,
+    /// The region's current handle: the one the arrows move, drawn apart
+    /// from the others. Meaningless without a region on screen.
+    pub handle: Grip,
     /// The hold a drag under way has on the region, while it is the
     /// region's drag rather than the view's: said back to the interface so
     /// that the frames of one drag all go the same way.
@@ -387,8 +390,10 @@ impl Pass<'_> {
     /// region that covers it. The hand's place goes back in image pixels
     /// each frame, through the same placement the bar's readout uses, since
     /// the application's own pointer stands still while the toolkit holds a
-    /// drag. Which handle the pointer rests on is said every pass a region
-    /// is up, for the keys that move one.
+    /// drag. A click on a handle — a press that never became a drag — makes
+    /// it the current one, as a drag on it does. Which handle the pointer
+    /// rests on is said every pass a region is up, for the words the region
+    /// wears while it is.
     fn region_gestures(&mut self, ui: &egui::Ui, response: &egui::Response) -> Option<Grab> {
         let scale = self.input.scale;
         let placement = self
@@ -427,6 +432,15 @@ impl Pass<'_> {
                 });
                 grabbed = Some(grab);
             }
+        }
+        // The click's own place: `press_origin` is gone by the time the
+        // button is up, and a click has by definition not moved far from it.
+        if response.clicked_by(egui::PointerButton::Primary)
+            && let Some(pos) = response.interact_pointer_pos()
+            && let Some(grip) = grip_under(pos)
+            && grip != Grip::Inside
+        {
+            self.commands.push(Command::Handle(grip));
         }
         if let Some(grab) = grabbed {
             if response.dragged_by(egui::PointerButton::Primary)

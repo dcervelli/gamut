@@ -209,8 +209,12 @@ pub enum Command {
     /// That drag ended: the button came up, or the toolkit let go of it.
     Release,
     /// Which handle of the region the pointer is resting on, said on every
-    /// pass a region is on screen, for the keys that move one.
+    /// pass a region is on screen: what the region's words are written for.
     OverGrip(Option<Grip>),
+    /// A handle of the region was clicked, and is the current one now: the
+    /// one the arrows move. A drag on a handle says the same through
+    /// [`Command::Grab`].
+    Handle(Grip),
     /// The chooser's field changed: this is what it now says.
     Query(String),
     /// A key moved the chooser's cursor.
