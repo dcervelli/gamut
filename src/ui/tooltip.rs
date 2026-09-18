@@ -256,12 +256,11 @@ pub fn words(tip: Tip) -> Option<String> {
             Tip::WhitePoint => "White point",
             Tip::Window => "The window, from black to white: drag to slide it",
             Tip::Exposure => "Exposure: drag to set it",
-            // And what a curve is, the labels being the names of the things
-            // rather than descriptions of them.
+            // And what becomes of the highlights under each, the curve named
+            // where there is one.
             Tip::Control(Control::Curve(index)) => match ToneMap::ALL.get(index)? {
-                ToneMap::None => "No tone curve",
-                ToneMap::Reinhard => "Reinhard curve",
-                ToneMap::Neutral => "Khronos PBR Neutral curve",
+                ToneMap::None => "Clip highlights at white",
+                ToneMap::Neutral => "Roll highlights off: Neutral",
             },
             // The timeline: no key scrubs, so it names itself.
             Tip::Timeline => "Go to a frame",
@@ -445,7 +444,7 @@ mod tests {
             info: true,
             help: true,
         };
-        for index in 0..3 {
+        for index in 0..ToneMap::ALL.len() {
             let curve = Tip::Control(Control::Curve(index));
             assert_eq!(disabled(curve, all, Hdr::Available, true, false), None);
             assert_eq!(

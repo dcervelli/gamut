@@ -441,8 +441,8 @@ mod tests {
         let display = Display::for_image_with(&image, &stats, Startup::default(), Headroom::None);
 
         assert_eq!(display.auto, AutoWindow::Off);
-        assert_eq!(display.low, 0.0);
-        assert_eq!(display.high, 1.0);
+        assert_eq!(display.window_low, 0.0);
+        assert_eq!(display.window_high, 1.0);
         // And the highlights above that window get rolled off rather than cut.
         assert_eq!(display.tone_map, ToneMap::Neutral);
         assert!(stats.max > 1.0, "the scan has to see the boost too");

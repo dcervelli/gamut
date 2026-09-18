@@ -85,21 +85,26 @@ Notable changes to `gamut`. The format follows
   one, rather than both in one sentence; `Ctrl+C` likewise gets a line for
   each, both under `Clipboard`.
 
+- The window's rules are called the same thing everywhere: *stored*, *full*
+  and *trimmed* — *manual* once a handle has been moved — on the histogram
+  panel's buttons, in the bottom bar, in `e`'s help and on the command line
+  as `--window stored|full|trimmed`, where the bar used to say `unit`,
+  `min/max` and `99.8%` and the flag took `unit`, `minmax` and `pct`. The
+  old spellings are still accepted.
+
 - The histogram panel speaks in a viewer's terms rather than the display's.
   The band under the plot is a levels track: a handle at the value that
   comes out black and one at the value that comes out white, each dragged
   to where it should stand, and the band between them dragged to slide the
-  window along the plot, as far as the plot goes. On a graded file the
-  white handle is the exposure, in the same quarter stops as `f` and `d`,
-  since its window is 0–1 and nothing else; on linear data it is the top
-  of the window, with the exposure left as the push on top. The
-  `0.000–1.000` readout and the four nudge buttons beside it are gone.
+  window along the plot, as far as the plot goes. Either handle moves its
+  own end of the window, on every file, and the exposure stays what it
+  was: a push on top of whatever the window is. The `0.000–1.000` readout
+  and the four nudge buttons beside it are gone.
   The keys are the handles' own: `a` and `s` step the black point, `A` and
   `S` the white point, each by a twentieth of the window's width along
-  the plot and no further than the plot goes, where they used to slide the window and
-  narrow or widen it about its center — a slide that could put black
-  below the plot, and a narrowing that moved a graded file's window off
-  0–1, which the white handle never does. The share
+  the plot and no further than the plot goes, where they used to slide
+  the window and narrow or widen it about its center — a slide that could
+  put black below the plot. The share
   of the picture the window is clipping is written in the two top corners
   of the plot — `0.5%` at black, `1.4%` at white — only when there is one,
   and only where the surface is actually clipping rather than showing or
@@ -108,12 +113,12 @@ Notable changes to `gamut`. The format follows
   under the pointer only while the pointer is over the plot, a graded
   file's axis no longer wears `0.0000` and `1.0000` at its ends, and the channel
   planes are drawn in a red, green and blue held short of the primaries.
-  The rows under the band follow the file: every file gets *Exposure*, a
+  The rows under the band are the same for every file: *Exposure*, a
   slider over six stops each way with its reading at the end, in the
-  quarter stops `d` and `f` count in, and the *Curve* row, which `t`
-  cycles; linear data gets the *Window* row as well, its three
-  rules named for what they do — *As stored*, *Full range*, *Trimmed* — and
-  a graded file, whose window is 0–1, gets a shorter panel without it.
+  quarter stops `d` and `f` count in; *Window*, its three rules named for
+  what they do — *As stored*, *Full range*, *Trimmed* — where *As stored*
+  is what puts a graded file's window back at 0–1 once a handle has moved
+  it; and *Curve*, which `t` toggles.
 
 - Dragging inside a region pans the picture, as dragging anywhere else
   does, so a region that fills the window no longer pins the picture under
@@ -160,6 +165,17 @@ Notable changes to `gamut`. The format follows
 - A HEIC's tiles are decoded on as many threads as the machine has cores,
   where `libheif` would use four. An iPhone's 24-megapixel photograph
   opens in half the time on a 32-core machine.
+
+### Removed
+
+- The Reinhard tone curve. `t` now toggles between clipping the highlights
+  and rolling them off with the neutral curve, the histogram panel's
+  *Curve* row reads *Clip* and *Roll off*, the bottom bar says **rolled
+  off** where it named the curve, and `--tone-map` takes `none` or
+  `neutral` and refuses `reinhard`. Reinhard sends white to a half, so it
+  re-graded the whole in-range picture to make room for the highlights;
+  the neutral curve leaves everything below its shoulder where it was,
+  which is the one thing a viewer wants of a curve.
 
 ### Fixed
 

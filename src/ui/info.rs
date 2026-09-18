@@ -225,9 +225,8 @@ pub fn panel(content: Rect, above: Option<Rect>) -> Option<Rect> {
     // below it rather than being drawn over it. Only where the histogram is
     // on screen, which the caller settles from the window as well as the
     // toggle: a window with no room for the plot is not one the column has
-    // to start below. How tall it is depends on the file — see
-    // [`histogram::Offered`] — which is why it arrives as a rectangle
-    // rather than as a constant.
+    // to start below. It arrives as a rectangle rather than as a constant
+    // because it may not be there at all.
     let taken = above.map_or(0.0, |histogram| histogram.height + PADDING);
     let height = content.height - 2.0 * PADDING - taken;
     if height < INFO_MIN_HEIGHT {
@@ -338,10 +337,7 @@ pub(super) fn rule(pass: &Pass, ui: &mut egui::Ui, width: f32) {
 /// Draws the panel: the header, and under it the column of everything the
 /// file has to say, scrolled by egui and read out by a click.
 pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, content: Rect) {
-    let Some(panel) = panel(
-        content,
-        super::histogram_shown(content, pass.panels, pass.current),
-    ) else {
+    let Some(panel) = panel(content, super::histogram_shown(content, pass.panels)) else {
         return;
     };
     let theme = pass.theme;
@@ -985,8 +981,8 @@ mod tests {
     /// content area with, and stays off screen where it cannot.
     #[test]
     fn the_panel_gives_way_to_the_histogram_and_to_a_small_window() {
-        let tallest = histogram::TALLEST;
-        let histogram = histogram::panel(CONTENT, histogram::Offered::ALL);
+        let tallest = histogram::SIZE;
+        let histogram = histogram::panel(CONTENT);
         let with = panel(CONTENT, histogram).expect("room");
         let without = panel(CONTENT, None).expect("room");
         // The same width as the histogram, and the same width whether or not
@@ -1025,26 +1021,16 @@ mod tests {
             900.0,
             tallest[1] + 3.0 * PADDING + INFO_MIN_HEIGHT - 1.0,
         );
-        let plot = histogram::panel(squeezed, histogram::Offered::ALL);
+        let plot = histogram::panel(squeezed);
         assert!(plot.is_some(), "the plot fits");
         assert!(panel(squeezed, None).is_some());
         assert_eq!(panel(squeezed, plot), None);
-
-        // A shorter histogram — a file offered fewer rows — leaves the
-        // column the room it took.
-        let least = histogram::Offered { window: false };
-        let shorter = histogram::panel(squeezed, least);
-        assert!(shorter.is_some());
-        assert!(panel(squeezed, shorter).is_some());
 
         // And a window too short for the plot takes nothing off the column
         // for it. The toggle is on, but there is no plot on screen for the
         // column to start below — and its own toggle is dead as well.
         let short = Rect::new(0.0, 0.0, 900.0, 200.0);
-        assert!(
-            histogram::panel(short, histogram::Offered::ALL).is_none(),
-            "the plot does not fit"
-        );
+        assert!(histogram::panel(short).is_none(), "the plot does not fit");
         assert!(panel(short, None).is_some());
     }
 

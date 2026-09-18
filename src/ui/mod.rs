@@ -520,7 +520,7 @@ impl Pass<'_> {
         if self.input.minimap_on_screen {
             minimap::show(self, ui, current, content);
         }
-        let room = room(content, self.panels, Some(current));
+        let room = room(content, self.panels);
         if self.panels.show_histogram && room.histogram {
             histogram::show(self, ui, current, content);
         }
@@ -556,7 +556,7 @@ pub fn grid_spacing(show_grid: bool, zoom: f32, scale: f32) -> Option<String> {
 /// holds it to what [`room`] actually answers.
 pub const PANELS_ROOM: [f32; 2] = [
     PANEL_WIDTH + 2.0 * PADDING,
-    histogram::TALLEST[1] + info::INFO_MIN_HEIGHT + 3.0 * PADDING,
+    histogram::SIZE[1] + info::INFO_MIN_HEIGHT + 3.0 * PADDING,
 ];
 
 /// Whether the content area has room for each of the two panels that float
@@ -581,14 +581,12 @@ pub struct Room {
 
 /// What `content` has room for, with `panels` saying which of the two is
 /// asked for — the histogram's take counting against the information panel
-/// only where the histogram is on screen, see [`histogram_shown`] — and
-/// `current` the file, whose panel is as tall as the rows it is offered.
-/// With no file the histogram is measured at its tallest, which is the
-/// answer the window's own floor wants.
-pub fn room(content: Rect, panels: &Panels, current: Option<&Current>) -> Room {
+/// only where the histogram is on screen, see [`histogram_shown`]. The
+/// histogram is one height for every file, so the file has no say.
+pub fn room(content: Rect, panels: &Panels) -> Room {
     Room {
-        histogram: histogram::panel(content, histogram::Offered::of(current)).is_some(),
-        info: info::panel(content, histogram_shown(content, panels, current)).is_some(),
+        histogram: histogram::panel(content).is_some(),
+        info: info::panel(content, histogram_shown(content, panels)).is_some(),
         help: help::panel(content).is_some(),
     }
 }
@@ -596,10 +594,10 @@ pub fn room(content: Rect, panels: &Panels, current: Option<&Current>) -> Room {
 /// Where the histogram is on screen, or `None` where it is not: its toggle
 /// is off, or the window has no room for it. What the information column
 /// starts below.
-fn histogram_shown(content: Rect, panels: &Panels, current: Option<&Current>) -> Option<Rect> {
+fn histogram_shown(content: Rect, panels: &Panels) -> Option<Rect> {
     panels
         .show_histogram
-        .then(|| histogram::panel(content, histogram::Offered::of(current)))
+        .then(|| histogram::panel(content))
         .flatten()
 }
 
@@ -685,7 +683,7 @@ mod tests {
             paste: false,
             pixel_format: PixelFormat::default(),
         };
-        let area = |width, height| room(Rect::new(0.0, 0.0, width, height), &panels, None);
+        let area = |width, height| room(Rect::new(0.0, 0.0, width, height), &panels);
 
         assert_eq!(
             area(PANELS_ROOM[0], PANELS_ROOM[1]),

@@ -56,13 +56,12 @@ pub fn colormap(map: Colormap) -> u32 {
 /// Matches `tone_map` in `shaders/composite.wgsl`, and `ToneMap::apply` in
 /// `image/display.rs`, which is the same match on the CPU: no curve is a
 /// clip at white on an SDR surface and a pass-through on one with room above
-/// it, and the two curves are themselves whatever the surface.
+/// it, and the curve is itself whatever the surface.
 pub fn tone_map(map: ToneMap, headroom: Headroom) -> u32 {
     match (map, headroom) {
         (ToneMap::None, Headroom::None) => 0,
-        (ToneMap::Reinhard, _) => 1,
-        (ToneMap::Neutral, _) => 2,
-        (ToneMap::None, Headroom::Above) => 3,
+        (ToneMap::Neutral, _) => 1,
+        (ToneMap::None, Headroom::Above) => 2,
     }
 }
 

@@ -25,25 +25,39 @@ the window as two numbers with four nudges, the automatic rules as a row of
 buttons, the curves as another — so that it read as the struct rather than as
 an instrument. What follows is how it was brought back.
 
-## The rows follow the file
+## The rows are every file's
 
-`histogram::Offered` says which rows of settings a file gets under the band,
-and it is settled from the file alone: `Referred::Scene` for the window row.
-Every file gets the exposure and the curves.
+Three rows of settings under the band — *Exposure*, *Window*, *Curve* —
+and every file gets all three, so the panel is one height
+(`histogram::SIZE`) for every file and for the whole of a file's stay. The
+information column starts under the panel, and a column that jumped from one
+file to the next, or every time a handle was dragged past white, would be a
+column no one could read.
 
-Two audiences use this program, and the code already knew it —
-`AutoWindow::default_for` splits on `Referred`, and the colormaps, the float
-TIFF and the GeoTIFF keys say who the second audience is. The technical
-controls are the right controls for measurement data and noise under a JPEG.
-A graded file's window is 0..1 and nothing else, so a row that offers it two
-ways to be wrong is a row the panel has to explain. Linear data has no white
-of its own, and the three rules for finding one are the three buttons.
+It was not always so. Two audiences use this program, and the code already
+knew it — `AutoWindow::default_for` splits on `Referred`, and the colormaps,
+the float TIFF and the GeoTIFF keys say who the second audience is — so the
+rows followed the file at first: a `histogram::Offered` struct, settled from
+`Referred` alone, gave the window row to linear data and kept it from a
+graded file, on the reasoning that a graded file's window is 0..1 and
+nothing else, and a row that offered it two ways to be wrong was a row the
+panel had to explain. With it went the white handle's meaning on such a
+file: it was the exposure there, snapped to quarter stops, since exposure
+and the window's top are two dials for one effect and one dial seemed
+enough.
 
-The rows are decided from the file rather than from what has been done to it
-so that the panel is one height for the whole of a file's stay. The
-information column starts under the panel, and a column that jumped every
-time a handle was dragged past white would be a column no one could read
-while dragging.
+That was dropped because the black handle already moved the window on every
+file — a graded file's window left 0..1 at the bottom the moment the black
+handle was touched — so the top was the one special case: a handle that
+meant a different thing on the next file along, carried by a `Referred`
+branch in `Display::put_white` and `step_white`, an `Offered` struct, two
+panel heights, and a `Window` row the graded file then had every use for
+and did not have. Now the two dials are honestly two. The window is in the
+file's own units — both handles, both pairs of keys, the *Window* row — and
+the exposure is in stops — the slider, `d`/`f`, `--exposure` — a push on top
+of whatever the window is. On a graded file the *Window* row is where a
+hand-moved window is put back, *As stored* being 0..1, as much as where a
+rule is chosen.
 
 The curves were offered by the file too, at first — `opens_above_white`,
 whether the file had anything past white on the window it opened with —
@@ -54,26 +68,27 @@ no row for it, and the bottom bar naming a curve there was no button for.
 The row is every file's now, because the exposure is: a stop up puts the
 top of any file above white and the bar says **clipped**, and the curve is
 the answer to that. It is not the false-color case, where the key is dead
-because the curve does nothing; on an 8-bit file at 0 EV Reinhard takes
-white to a half, which is something, and the response curve on the plot
-shows it. The panel has two heights rather than four for it. The row was
-labeled *Highlights* while it was offered for them, and is *Curve* now,
-which is what the buttons choose: Neutral is a toe as well as a shoulder —
-it takes an offset out of the shadows before it compresses anything — and
-Reinhard rescales the whole range, so a label that named one end of it
-named the reason the row used to appear rather than what pressing it does.
+because the curve does nothing; on an 8-bit file at 0 EV the neutral curve
+still takes its offset out of the shadows, which is something, and the
+response curve on the plot shows it. The row was labeled *Highlights* while
+it was offered for them, and is *Curve* now; its two cells are *Clip* and
+*Roll off*, since what the row chooses is what becomes of the light above
+white on a surface that stops there, and a cell that named the curve named
+a thing to look up rather than a thing to see. There is one curve to roll
+off with — [color.md](color.md) says why the Reinhard curve went.
 
-`Offered::ALL` is the tallest the panel gets, and is what
-`ui::PANELS_ROOM` — the least window the interface fits in — is measured
-against. `ui::room` and `info::panel` take the file, or the tallest where
-there is none, so that the toggles and the column agree with the panel about
-how tall it is.
+`histogram::SIZE` is what `ui::PANELS_ROOM` — the least window the
+interface fits in — is measured against, and what `ui::room` and
+`info::panel` work from, so that the toggles and the column agree with the
+panel about how tall it is.
 
 The three windows are named for what they do — *As stored*, *Full range*,
-*Trimmed* — rather than for the rule that does it, which the tooltip says.
-There is no fourth button for "the image's own": the row is only offered to a
-scene-referred file, whose own window is the trimmed one, so it would be the
-third button twice.
+*Trimmed* — rather than for the rule that does it, which the tooltip says,
+and the bottom bar says the same in one word each: *stored*, *full*,
+*trimmed*, and *manual* once a handle has moved. There is no fourth button
+for "the image's own", because the file's own is always one of the three —
+*As stored* on a graded file, *Trimmed* on measured light — and the reset
+button puts it back.
 
 ## The band is the levels track
 
@@ -95,27 +110,23 @@ drag and a hand that runs off the end of the band puts the handle at the end.
 The band's own drag, `Command::Slide`, is by the hand's movement, since what
 it is sliding is wherever the window already was.
 
-What moves to put white where the hand asks is the file's to say, and
-`Display::put_white` asks it. Exposure and the window's top are two dials for
-one effect: a stop up is white moved to half its value with black held. On a
-graded file the window is 0..1 and nothing else, so the white handle there is
-the exposure — the stops that land white under the pointer, snapped to the
-quarter stops the slider and the keys count in, so that the exposure row
-reads as it would after so many presses and the handle reaches exactly the
-numbers they do. On measured light the two genuinely differ: the window is
-found from the pixels and found again when the file changes on disk or a
-Window rule is pressed, and the exposure survives that as the push on top,
-which is what lets `--exposure -1` mean the same thing over a directory of
-frames that each keep their own trimmed window. So there the white handle is
-the window's top, as the black handle is its bottom everywhere, and
-`Display::set_displayed_bounds` works the window back from the two with the
-exposure left as it is.
+Each handle moves its own end of the window and nothing else:
+`Display::put_black` and `Display::put_white`, twins. Exposure and the
+window's top are two dials for one effect — a stop up is white moved to
+half its value with black held — and they stay two dials, because they
+answer differently to everything else: the window is found from the pixels
+and found again when the file changes on disk or a *Window* rule is pressed,
+and the exposure survives that as the push on top, which is what lets
+`--exposure -1` mean the same thing over a directory of frames that each
+keep their own trimmed window. `Display::set_displayed_bounds` works the
+window back from the two displayed values with the exposure left as it is,
+so a hand-set white under a stop of exposure is that white with the stop
+still on top of it.
 
 The slide stops at the plot's ends, as the handles do because the band
 does. A window slid off what is plotted makes nothing black, or nothing
-white: a lift, which is a grading operation and not a place to look, and on
-a graded file it would move `high` off 1, which the white handle there is
-careful never to do. So the band pans within the plot — *which part of the
+white: a lift, which is a grading operation and not a place to look. So the
+band pans within the plot — *which part of the
 range, at this width* — which is only a question once the window is
 narrower than the plot: after some exposure on a graded file, or a trimmed
 or hand-set window on data. A window as wide as the plot does not move,
@@ -129,16 +140,17 @@ file's own curve, and not through linear light: the plot gives the shadows
 most of the band on a graded file, so a twentieth of the *light* is a
 quarter of the band on the first press from 0 and a tenth on the next, the
 handle bounding out of the shadows and then slowing. Stepped on the curve
-it moves the same distance on the band every time, as a drag does. The
-white step goes the way the handle goes, so on a graded file it is a
-quarter stop of exposure, the step the exposure counts in — a twentieth of
-the window is a fraction of a stop that would snap to nothing. They replaced a slide (`a`/`s`) and a
-narrowing about the window's center (`A`/`S`): window and level, the same
-two degrees of freedom in the basis the old panel showed, and the wrong
-basis once the panel showed two ends. The slide had no clamp, so `a` on a
-fresh 8-bit file was the lift the band's drag refuses; the narrowing moved
-`high` off 1 on a graded file, which the white handle never does; and the
-handle tooltips hinted the narrowing because it was the nearest key, which
+it moves the same distance on the band every time, as a drag does. A step
+that the plot's end stops short at is no step, and says so by returning
+`false` so the key does not redraw; a press at the end asks for the end,
+and the end can stand a rounding error off the handle, so a move of a hair
+is no move either. They replaced a slide (`a`/`s`) and a narrowing about
+the window's center (`A`/`S`): window and level, the same two degrees of
+freedom in the basis the old panel showed, and the wrong basis once the
+panel showed two ends. The slide had no clamp, so `a` on a fresh 8-bit file
+was the lift the band's drag refuses; the narrowing moved `high` off 1 on a
+graded file, which nothing then did; and the handle tooltips hinted the
+narrowing because it was the nearest key, which
 is not the same as a key that does what the handle does. Nothing slides the
 window from the keyboard now, and the band's tooltip says so by naming no
 key. A narrowing is two presses.

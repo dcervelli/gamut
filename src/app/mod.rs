@@ -627,7 +627,7 @@ impl App {
     /// worked out here as well for the presses and the tooltips, which have
     /// to answer between frames.
     pub(super) fn room(&self) -> ui::Room {
-        ui::room(self.content(), &self.panels, self.current.as_ref())
+        ui::room(self.content(), &self.panels)
     }
 
     /// What the panels leave free for the image and for whatever floats over
@@ -2100,15 +2100,45 @@ mod tests {
         }
         assert_eq!(display(&app).colormap, Colormap::Gray);
         assert_eq!(app.perform(Action::CycleToneMap), Effect::Redraw);
-        assert_eq!(display(&app).tone_map, ToneMap::Reinhard);
+        assert_eq!(display(&app).tone_map, ToneMap::Neutral);
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// A false color is a reading of one channel, and a color image's three
+    /// are colors already: `r` refuses one, and so does the panel's swatch,
+    /// or a press of it would put a map on the state that the picture, the
+    /// bar and the readout all ignore.
+    #[test]
+    fn a_false_color_button_is_dead_on_a_color_image() {
+        use crate::image::display::Colormap;
+        use crate::ui::{Command, Control};
+        use input::{Action, Effect};
+
+        let (mut app, dir) = app_over("ramp", &[("a.png", 8, 8)]);
+        assert!(
+            app.current
+                .as_ref()
+                .is_some_and(|current| !current.image.is_gray())
+        );
+        let _ = app.act(Command::Press(Control::Ramp(1)));
+        assert_eq!(
+            app.current
+                .as_ref()
+                .expect("a picture is up")
+                .display
+                .colormap,
+            Colormap::Gray
+        );
+        assert_eq!(app.perform(Action::CycleColormap), Effect::Nothing);
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }
 
     /// The keys step the handles, no further than the plot goes: on a
     /// graded file the plot is 0..1, so the black point cannot be stepped
-    /// below 0, and the white point's key is the exposure there, as its
-    /// handle is.
+    /// below 0 nor the white point above 1, and the exposure is left alone
+    /// by both.
     #[test]
     fn the_window_keys_step_the_handles_within_the_plot() {
         use input::{Action, Effect};
@@ -2128,11 +2158,50 @@ mod tests {
         assert!((crate::image::Transfer::Srgb.to_encoded(black) - 0.05).abs() < 1e-5);
         assert!((white - 1.0).abs() < 1e-6);
 
-        // White brought down is a quarter stop up, the window untouched.
+        // White is at the ceiling already, so a press upward is no press.
+        assert_eq!(app.perform(Action::StepWhite(0.05)), Effect::Nothing);
+        // And a press down moves it alone, a twentieth of the window along
+        // the plot, the exposure untouched.
         assert_eq!(app.perform(Action::StepWhite(-0.05)), Effect::Redraw);
-        assert_eq!(display(&app).exposure_stops, 0.25);
-        let (still_black, _) = display(&app).displayed_bounds();
+        assert_eq!(display(&app).exposure_stops, 0.0);
+        let (still_black, white) = display(&app).displayed_bounds();
         assert_eq!(still_black, black);
+        let encoded = crate::image::Transfer::Srgb.to_encoded(white);
+        assert!((encoded - 0.9525).abs() < 1e-4, "{encoded}");
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// The window row is every file's: on a graded file, whose window opens
+    /// at 0..1, *As stored* is what puts a hand-moved window back. It sets
+    /// the rule and nothing else, so an exposure on top of the window stays.
+    #[test]
+    fn as_stored_puts_a_hand_moved_window_back_on_a_graded_file() {
+        use crate::image::display::AutoWindow;
+        use crate::ui::{Command, Control};
+        use input::{Action, Effect};
+
+        let (mut app, dir) = app_over("stored", &[("a.png", 8, 8)]);
+        fn display(app: &App) -> &crate::image::display::Display {
+            &app.current.as_ref().expect("a picture is up").display
+        }
+        assert_eq!(app.perform(Action::StepBlack(0.05)), Effect::Redraw);
+        assert_eq!(app.perform(Action::StepWhite(-0.05)), Effect::Redraw);
+        assert_eq!(app.perform(Action::Exposure(0.5)), Effect::Redraw);
+        assert_eq!(display(&app).auto, AutoWindow::Manual);
+        assert_ne!(display(&app).displayed_bounds(), (0.0, 1.0));
+
+        let _ = app.act(Command::Press(Control::Window(0)));
+        assert_eq!(display(&app).auto, AutoWindow::Off);
+        assert_eq!(
+            (display(&app).window_low, display(&app).window_high),
+            (0.0, 1.0)
+        );
+        assert_eq!(
+            display(&app).exposure_stops,
+            0.5,
+            "the rule, not the exposure"
+        );
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }

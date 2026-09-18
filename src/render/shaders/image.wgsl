@@ -17,7 +17,7 @@
 struct Params {
     offset: vec2<f32>,           // top-left of the quad, in clip space
     scale: vec2<f32>,            // its size, in clip space
-    window: vec2<f32>,           // (low, gain): displayed = (value - low) * gain
+    window: vec2<f32>,           // (window_low, gain): displayed = (value - window_low) * gain
     texels_per_pixel: vec2<f32>, // source texels covered by one output pixel
     extent: vec2<f32>,           // image size, in the bound texture's texels
     marks: u32,                  // bit 1: mark pixels at or below black, bit 2: at or above white
