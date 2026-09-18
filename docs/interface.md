@@ -773,6 +773,33 @@ have bound. Its items are also the only ones sized to the words on them —
 name would be, and a name left to wrap in a popup that opened at the width of
 the button below it comes out a letter to a line.
 
+The help popup, `src/ui/help.rs`, is the one popup hung off nothing: it is
+anchored in the middle of the content area as the [chooser](chooser.md) is
+anchored at the top of it, and opened by `App::press` on `Control::Help`
+exactly as the chooser is, so `?`, `/` and the button at the foot of the
+right strip all go through the same arm. What it lays out is the key table
+itself, handed over as `Naming::help` — one `help::Section` per
+`input::Section`, one `help::Row` per `Binding` — so that the popup, `--help`
+and the manual page cannot list different keys; `cli.rs` derives its
+headings from the same `Section::title`. The third column is `Binding::when`,
+the condition on which a key does anything, kept apart from `help` because
+`--help` has no column for it and a sentence that carried both would be
+twice as long. Nothing on the popup can be pressed, which is why it reads the
+table rather than being handed rows to hand presses back from.
+
+egui has no layout that answers to its own width, so the table's is written
+out: above `help::STACK_BELOW` a row is three columns, the key and the
+condition at fixed widths and the description wrapping in what is left;
+under it the three go one beneath the other with the whole width each, and
+the column headings, which would then head nothing, are left out. The
+threshold is where the description's column would otherwise be down to a
+few words a line — and, not much narrower, to less than nothing, which egui
+panics on. The popup's own floor is the panels': `PANEL_WIDTH` wide and
+`INFO_MIN_HEIGHT` tall, inside the same padding, so `help::panel` is `None`
+in exactly the content area `info::panel` is, `Room` carries a `help` beside
+its `histogram` and `info`, and the button goes dead with theirs — the same
+`NO_ROOM` on it, and the key refused in `App::press` as the toggles are.
+
 The panels are opaque, and the image is drawn in the `Viewport` they leave
 rather than behind them: zoom, fit, pan limits and the wheel's anchor are all
 measured against that rectangle. It is derived per frame from the window and

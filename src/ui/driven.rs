@@ -18,8 +18,10 @@ use crate::image::region::{Grip, Region, Side};
 
 use super::chooser::{self, Input, Row, Step};
 use super::chrome::{BAR_HEIGHT, SIDE_WIDTH};
-use super::control::Unnamed;
+use super::control::{Naming, Unnamed};
+use super::help;
 use super::menu::Copies;
+use super::tooltip::{Tip, Tooltip};
 use super::transport::{Kind, Transport};
 use super::{
     Command, Control, Current, FileFacts, FrameInput, Grab, PANELS_ROOM, Panels, PixelFormat,
@@ -39,7 +41,28 @@ struct State {
     panels: Panels,
     current: Option<Current>,
     view: View,
+    /// What the help popup lays out: nothing, unless a test hands it a
+    /// table of its own.
+    help: Vec<help::Section>,
     commands: Vec<Command>,
+}
+
+/// The interface with a key table to lay out and nothing else to say:
+/// [`Unnamed`] with the help popup's rows.
+struct Keyed<'a>(&'a [help::Section]);
+
+impl Naming for Keyed<'_> {
+    fn tooltip(&self, tip: Tip) -> Option<Tooltip> {
+        Unnamed.tooltip(tip)
+    }
+
+    fn shortcut(&self, control: Control) -> Option<String> {
+        Unnamed.shortcut(control)
+    }
+
+    fn help(&self) -> Vec<help::Section> {
+        self.0.to_vec()
+    }
 }
 
 /// A small color photograph, on screen.
@@ -166,6 +189,7 @@ fn build(logical: [f32; 2], count: usize, panels: Panels) -> Harness<'static, St
         panels,
         current: Some(photograph()),
         view: View::new(),
+        help: Vec::new(),
         commands: Vec::new(),
     };
     Harness::builder()
@@ -190,7 +214,7 @@ fn build(logical: [f32; 2], count: usize, panels: Panels) -> Harness<'static, St
                     state.current.as_ref(),
                     &state.view,
                     &Theme::FALLBACK,
-                    &Unnamed,
+                    &Keyed(&state.help),
                 );
                 // The one thing the application says back to the interface
                 // about a gesture, done here as `App::act` does it: which
@@ -363,19 +387,20 @@ fn pages_get_the_steps_alone_and_a_still_gets_no_bar() {
 fn a_toggle_with_no_room_for_its_panel_is_dead() {
     let small = [PANELS_ROOM[0] - 10.0 + 2.0 * SIDE_WIDTH, 200.0];
     let mut harness = open(small, 1, panels());
-    for label in ["Histogram", "Information"] {
+    for label in ["Histogram", "Information", "Help"] {
         let node = harness.get_by_label(label);
         assert!(node.accesskit_node().is_disabled(), "{label}");
     }
     assert_eq!(click(&mut harness, "Histogram"), []);
+    assert_eq!(click(&mut harness, "Help"), []);
 
     let harness = open(WINDOW, 1, panels());
-    assert!(
-        !harness
-            .get_by_label("Histogram")
-            .accesskit_node()
-            .is_disabled()
-    );
+    for label in ["Histogram", "Help"] {
+        assert!(
+            !harness.get_by_label(label).accesskit_node().is_disabled(),
+            "{label}"
+        );
+    }
 }
 
 /// The band under the histogram is the levels track. A handle dragged
@@ -1112,4 +1137,138 @@ fn the_chooser_scrolls_a_moved_cursor_into_view() {
     assert!(!visible.contains(&0), "{visible:?}");
     assert!(harness.query_by_label("Choose file 151").is_some());
     assert!(harness.query_by_label("Choose file 1").is_none());
+}
+
+/// The help button at the foot of the right strip hands back its press; the popup
+/// it opens lays the table out — the three headings, each section's title
+/// and each row's three columns — and takes no key from the window.
+#[test]
+fn the_help_popup_lays_the_keys_out() {
+    let mut harness = open(WINDOW, 1, panels());
+    assert_eq!(click(&mut harness, "Help"), [Command::Press(Control::Help)]);
+
+    harness.state_mut().help = vec![
+        help::Section {
+            title: "Zoom and position",
+            rows: vec![
+                help::Row {
+                    key: "1, 0".to_string(),
+                    does: "Actual size (100%)",
+                    when: None,
+                },
+                help::Row {
+                    key: "Ctrl+Shift+Arrows".to_string(),
+                    does: "Shrink a region that way a pixel",
+                    when: Some("a region selected"),
+                },
+            ],
+        },
+        help::Section {
+            title: "Files",
+            rows: vec![help::Row {
+                key: "], Page Down".to_string(),
+                does: "Next file",
+                when: Some("more than one file"),
+            }],
+        },
+    ];
+    assert!(harness.query_by_label("Zoom and position").is_none());
+    egui::Popup::open_id(&harness.ctx, help::id());
+    harness.run();
+    assert!(egui::Popup::is_id_open(&harness.ctx, help::id()));
+    for label in [
+        "Key",
+        "Does",
+        "When",
+        "Zoom and position",
+        "1, 0",
+        "Actual size (100%)",
+        "Ctrl+Shift+Arrows",
+        "a region selected",
+        "Files",
+        "], Page Down",
+        "more than one file",
+    ] {
+        assert!(
+            harness.query_by_label(label).is_some(),
+            "{label} is on the popup"
+        );
+    }
+    assert!(!harness.ctx.egui_wants_keyboard_input());
+
+    // A click on the lit button hands back the same press, and the popup is
+    // still up when the frame is over: closing it is that press's to do.
+    // Closed by egui on the click and then opened by the press, it would
+    // never close from its button at all.
+    assert_eq!(click(&mut harness, "Help"), [Command::Press(Control::Help)]);
+    assert!(egui::Popup::is_id_open(&harness.ctx, help::id()));
+    // A click anywhere else closes it, as it closes a menu.
+    harness.state_mut().commands.clear();
+    drag(&mut harness, [60.0, 100.0], [60.0, 100.0]);
+    harness.run();
+    assert!(!egui::Popup::is_id_open(&harness.ctx, help::id()));
+}
+
+/// The chooser, the other popup the application opens: a click on the
+/// count while it is up leaves it up for the press to close, likewise.
+#[test]
+fn a_click_on_the_count_leaves_the_chooser_for_the_press_to_close() {
+    let mut harness = open(WINDOW, 3, panels());
+    egui::Popup::open_id(&harness.ctx, chooser::id());
+    harness.state_mut().input.chooser = Some(Input {
+        query: String::new(),
+        rows: Arc::from([]),
+        cursor: 0,
+        current: Some(0),
+        count: 3,
+        several_dirs: false,
+        opened: false,
+        reveal: false,
+        visible: 0..0,
+    });
+    harness.run();
+    harness.run();
+    assert!(egui::Popup::is_id_open(&harness.ctx, chooser::id()));
+    assert!(
+        click(&mut harness, "Choose a file").contains(&Command::Press(Control::Chooser)),
+        "{:?}",
+        asked(&harness)
+    );
+    assert!(egui::Popup::is_id_open(&harness.ctx, chooser::id()));
+}
+
+/// In a window too narrow for the three columns the rows stack, each part
+/// on a line of its own, and the column headings — which would then head
+/// nothing — are left out. The popup does not ask for a column less than
+/// nothing wide, which is what used to bring the program down.
+#[test]
+fn the_help_popup_stacks_its_rows_in_a_narrow_window() {
+    let mut harness = open(
+        [PANELS_ROOM[0] + 2.0 * SIDE_WIDTH + 20.0, 700.0],
+        1,
+        panels(),
+    );
+    harness.state_mut().help = vec![help::Section {
+        title: "Files",
+        rows: vec![help::Row {
+            key: "], Page Down".to_string(),
+            does: "Next file",
+            when: Some("more than one file"),
+        }],
+    }];
+    egui::Popup::open_id(&harness.ctx, help::id());
+    harness.run();
+    assert!(egui::Popup::is_id_open(&harness.ctx, help::id()));
+    for label in ["Files", "], Page Down", "Next file", "more than one file"] {
+        assert!(
+            harness.query_by_label(label).is_some(),
+            "{label} is on the popup"
+        );
+    }
+    for heading in ["Key", "Does", "When"] {
+        assert!(
+            harness.query_by_label(heading).is_none(),
+            "{heading} heads nothing when stacked"
+        );
+    }
 }

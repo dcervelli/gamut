@@ -11,6 +11,7 @@ use std::ops::Range;
 use crate::image::region::{Grip, Region};
 
 use super::chooser::Step;
+use super::help;
 use super::info::Copyable;
 use super::menu::{Copies, ZoomChoice};
 use super::pixel::PixelFormat;
@@ -87,6 +88,10 @@ pub enum Control {
     /// The switch at the end of the bottom bar between the SDR and the HDR
     /// surface.
     Output,
+    /// The button at the foot of the right strip, which opens the help
+    /// popup — every key, what it does and when — and closes it while it
+    /// is up. `?` and `/` do the same.
+    Help,
     /// The dot at the head of the pixel readout, at the other end of that
     /// bar, which opens the menu of ways to write a pixel's value.
     PixelFormat,
@@ -143,6 +148,7 @@ impl Control {
             Control::Window(index) => format!("Window {index}"),
             Control::Curve(index) => format!("Curve {index}"),
             Control::Output => "HDR".to_string(),
+            Control::Help => "Help".to_string(),
             Control::PixelFormat => "Pixel format".to_string(),
             Control::Dismiss => "Dismiss".to_string(),
             Control::ZoomTo(choice) => choice.label(),
@@ -291,6 +297,9 @@ pub trait Naming {
     /// What to press for `control`, as the key table writes it, where a key
     /// does the same job: what a menu prints beside an item.
     fn shortcut(&self, control: Control) -> Option<String>;
+
+    /// Every key there is, in sections, for the help popup to lay out.
+    fn help(&self) -> Vec<help::Section>;
 }
 
 /// The interface with nothing to say: for the tests that drive it and read
@@ -306,5 +315,9 @@ impl Naming for Unnamed {
 
     fn shortcut(&self, _: Control) -> Option<String> {
         None
+    }
+
+    fn help(&self) -> Vec<help::Section> {
+        Vec::new()
     }
 }

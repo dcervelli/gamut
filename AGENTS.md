@@ -60,6 +60,8 @@ ui/            lays each frame's interface out with egui; no wgpu or winit impor
                  clock, and show() draws it with the cross that dismisses it
   chooser.rs     the file chooser's popup: the field, the rows and their thumbnails, and
                  the keys read inside the pass while the field has the keyboard
+  help.rs        the help popup: the key table laid out in three columns — the keys, what
+                 they do, and when — from the Sections and Rows Naming::help hands over
   transport.rs   the bar a file of frames or pages brings with it, above the
                  bottom bar: the steps, the play button, the readout and the
                  timeline; Transport is what it shows, and timeline() lays the
@@ -160,7 +162,7 @@ still agrees with both, so renaming either is editing the constant —
 
 | Change | Edit |
 | --- | --- |
-| A key binding | `app/input.rs`: one `KEYS` entry, with the `mods` it is held with, and one `perform` arm. `--help` follows. |
+| A key binding | `app/input.rs`: one `KEYS` entry, with the `mods` it is held with and a `when` if it only does anything under some condition, and one `perform` arm. `--help`, the man page and the help popup follow. |
 | A button | a `Control` variant in `ui/control.rs` with its `label`, the widget where it is drawn — `Pass::icon_button` for a square toggle — pushing `Command::Press` on a click, and an arm of `App::press`. Keys that do the same job go through `press` too, so the two cannot drift apart |
 | A status-bar segment | `ui/status.rs`; the pointer's pixel readout is `ui/pixel.rs` |
 | What a file is left in when you step off it, and what comes back when you step on to it | `app/kept.rs`, and the arrival in `App::apply`, which trades the outgoing file's settings for the incoming one's |

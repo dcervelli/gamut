@@ -134,6 +134,27 @@ pub(super) const INFO: &[Mark] = &[
     Mark::Dot([12.0, 8.0]),
 ];
 
+/// Lucide's `circle-question-mark`: the mark the world already uses for
+/// the place to ask what something does, on the button that opens the
+/// keys.
+///
+/// Lucide draws the hook of the question mark as an arc and a curve that
+/// together turn about one point; here it is the one arc, from the left of
+/// the hook over the top and down to where the stem would start.
+pub(super) const CIRCLE_QUESTION_MARK: &[Mark] = &[
+    Mark::Circle {
+        at: [12.0, 12.0],
+        radius: 10.0,
+    },
+    Mark::Arc {
+        at: [12.0, 10.0],
+        radius: 3.0,
+        start: 199.0,
+        sweep: 251.0,
+    },
+    Mark::Dot([12.0, 17.0]),
+];
+
 /// Lucide's `square-square`: the whole inside a frame, and a smaller view of
 /// it inside that, which is what the minimap shows.
 pub(super) const SQUARE_SQUARE: &[Mark] = &[
@@ -802,9 +823,10 @@ mod tests {
 
     /// Every icon in the table, so that a new one is held to the same
     /// promises as the rest.
-    const ICONS: [&[Mark]; 12] = [
+    const ICONS: [&[Mark]; 13] = [
         CHART_AREA,
         INFO,
+        CIRCLE_QUESTION_MARK,
         SQUARE_SQUARE,
         GRID_3X3,
         COPY,
