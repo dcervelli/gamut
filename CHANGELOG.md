@@ -82,26 +82,31 @@ Notable changes to `gamut`. The format follows
   The band under the plot is a levels track: a handle at the value that
   comes out black and one at the value that comes out white, each dragged
   to where it should stand, and the band between them dragged to slide the
-  window along the plot, as far as the plot goes. On a photograph the white handle is the exposure, in the same
-  quarter stops as `f` and `d`, since its window is 0–1 and nothing else;
-  on linear data it is the top of the window, with the exposure left as
-  the push on top. The `0.000–1.000` readout and the four nudge buttons beside it
-  are gone; `a`, `s`, `A` and `S` still move the window by steps. The share
+  window along the plot, as far as the plot goes. On a graded file the
+  white handle is the exposure, in the same quarter stops as `f` and `d`,
+  since its window is 0–1 and nothing else; on linear data it is the top
+  of the window, with the exposure left as the push on top. The
+  `0.000–1.000` readout and the four nudge buttons beside it are gone.
+  The keys are the handles' own: `a` and `s` step the black point, `A` and
+  `S` the white point, each by a twentieth of the window's width along
+  the plot and no further than the plot goes, where they used to slide the window and
+  narrow or widen it about its center — a slide that could put black
+  below the plot, and a narrowing that moved a graded file's window off
+  0–1, which the white handle never does. The share
   of the picture the window is clipping is written in the two top corners
   of the plot — `0.5%` at black, `1.4%` at white — only when there is one,
   and only where the surface is actually clipping rather than showing or
   rolling off the highlights. The response curve is drawn only once the
   display is doing something, the line above the plot names the value
-  under the pointer only while the pointer is over the plot, a photograph's
-  axis no longer wears `0.0000` and `1.0000` at its ends, and the channel
+  under the pointer only while the pointer is over the plot, a graded
+  file's axis no longer wears `0.0000` and `1.0000` at its ends, and the channel
   planes are drawn in a red, green and blue held short of the primaries.
   The rows under the band follow the file: every file gets *Exposure*, a
   slider over six stops each way with its reading at the end, in the
-  quarter stops `d` and `f` count in; linear data gets the
-  *Window* row, its three rules named for what they do — *As stored*,
-  *Full range*, *Trimmed* — and a file with highlights above white gets the
-  *Highlights* row of curves. A photograph gets the exposure alone, and
-  the panel is shorter for it.
+  quarter stops `d` and `f` count in, and the *Curve* row, which `t`
+  cycles; linear data gets the *Window* row as well, its three
+  rules named for what they do — *As stored*, *Full range*, *Trimmed* — and
+  a graded file, whose window is 0–1, gets a shorter panel without it.
 
 - Dragging inside a region pans the picture, as dragging anywhere else
   does, so a region that fills the window no longer pins the picture under
