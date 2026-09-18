@@ -24,10 +24,14 @@ use super::{
 /// Which of the rows of settings under the band a file gets.
 ///
 /// The exposure is every file's: pushing a picture two stops up is how you
-/// find out whether a shadow is empty or merely dark, whatever the file. The
-/// other two are offered where they answer a question the file raises and
-/// left off where they do not, since a row of buttons that would only make
-/// a picture worse is a row the panel has to explain.
+/// find out whether a shadow is empty or merely dark, whatever the file.
+/// The curves are every file's too, because the exposure is: a stop up
+/// puts the top of any file above white, and the curve is what fits it
+/// back into a surface that stops there — and `t` sets one on any file, so
+/// a row that some file lacked would be a key with no button. The windows
+/// are offered where they answer a question the file raises and left off
+/// where they do not, since a row of buttons that would only make a
+/// picture worse is a row the panel has to explain.
 ///
 /// Settled from the file alone rather than from what has been done to it,
 /// so that the panel is one height for the whole of a file's stay on
@@ -42,20 +46,12 @@ pub struct Offered {
     /// 0..1 and nothing else, and offering it two ways to be wrong is not
     /// a kindness.
     pub window: bool,
-    /// The curves. A curve exists to fit values above white into a surface
-    /// that stops there, so it is offered where the file has any — graded
-    /// light with headroom in it, or measured light with outliers past the
-    /// window — and not under an SDR photograph, which never does.
-    pub curve: bool,
 }
 
 impl Offered {
     /// Every row there is: what the tallest panel holds, and what the window
     /// has to have room for.
-    pub const ALL: Offered = Offered {
-        window: true,
-        curve: true,
-    };
+    pub const ALL: Offered = Offered { window: true };
 
     /// What `current` gets, or every row where there is no file yet: the
     /// panel is not drawn without one, and the conservative answer is the
@@ -67,7 +63,6 @@ impl Offered {
     pub fn for_file(current: &Current) -> Self {
         Self {
             window: current.image.referred == Referred::Scene,
-            curve: Display::opens_above_white(&current.image, &current.stats),
         }
     }
 
@@ -76,11 +71,8 @@ impl Offered {
     /// rather than inside, so it is what is left over between the two and
     /// belongs to whatever comes next.
     const fn rows_height(self) -> f32 {
-        let mut height = PLOT_INSET + ROW_GAP + ROW_HEIGHT;
+        let mut height = PLOT_INSET + 2.0 * (ROW_GAP + ROW_HEIGHT);
         if self.window {
-            height += ROW_GAP + ROW_HEIGHT;
-        }
-        if self.curve {
             height += ROW_GAP + ROW_HEIGHT;
         }
         height
@@ -509,8 +501,8 @@ struct Rows {
     exposure_label: Rect,
     /// The three windows on offer, where they are offered.
     window: Option<(Rect, Rect)>,
-    /// And the three curves.
-    curve: Option<(Rect, Rect)>,
+    /// And the three curves, under whatever is above them.
+    curve: (Rect, Rect),
 }
 
 impl Rows {
@@ -531,7 +523,7 @@ impl Rows {
             line(y)
         };
         let window = offered.window.then(&mut next);
-        let curve = offered.curve.then(&mut next);
+        let curve = next();
         Self {
             exposure,
             exposure_label,
@@ -568,7 +560,7 @@ impl Rows {
         [
             Some(("Exposure", self.exposure_label)),
             self.window.map(|(_, label)| ("Window", label)),
-            self.curve.map(|(_, label)| ("Highlights", label)),
+            Some(("Curve", self.curve.1)),
         ]
         .into_iter()
         .flatten()
@@ -580,7 +572,7 @@ impl Rows {
         [
             Some(self.exposure),
             self.window.map(|(row, _)| row),
-            self.curve.map(|(row, _)| row),
+            Some(self.curve.0),
         ]
         .into_iter()
         .flatten()
@@ -615,10 +607,9 @@ fn row_buttons(panel: Rect, offered: Offered) -> impl Iterator<Item = (Control, 
         (0..WINDOWS.len())
             .map(move |index| (Control::Window(index), share(row, WINDOWS.len(), index)))
     });
-    let curves = rows.curve.into_iter().flat_map(|(row, _)| {
-        (0..ToneMap::ALL.len())
-            .map(move |index| (Control::Curve(index), share(row, ToneMap::ALL.len(), index)))
-    });
+    let (row, _) = rows.curve;
+    let curves = (0..ToneMap::ALL.len())
+        .map(move |index| (Control::Curve(index), share(row, ToneMap::ALL.len(), index)));
     windows.chain(curves)
 }
 
@@ -1223,8 +1214,8 @@ fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect, content: Rec
 /// is what the plot is for.
 ///
 /// The ends are written only where the axis is not the one a graded file
-/// always has. A photograph's plot runs from black to white, which every
-/// histogram of a photograph does and no one needs told; a linear file's
+/// always has. A graded file's plot runs from black to white, which every
+/// histogram of such a file does and no one needs told; a linear file's
 /// runs over whatever was measured, and what that was is the first thing to
 /// know about it.
 fn header(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect, held: Option<String>) {
@@ -1458,7 +1449,7 @@ fn controls(
 /// The handles stand at the values that come out black and white — exposure
 /// included, since those are the two ends of the band's black run and its
 /// white run — and say where those values should be. What moves to put them
-/// there is the model's to decide, by the file: on a photograph the white
+/// there is the model's to decide, by the file: on a graded file the white
 /// handle is the exposure, and on measured light it is the window's top —
 /// see [`Display::put_white`]. A handle is dragged to the pointer rather
 /// than by it, so a drag has no memory to lose: wherever the pointer is
@@ -1802,21 +1793,7 @@ mod tests {
     use crate::ui::FileFacts;
 
     /// Every combination of rows a file can be offered.
-    const EVERY_OFFER: [Offered; 4] = [
-        Offered::ALL,
-        Offered {
-            window: false,
-            curve: false,
-        },
-        Offered {
-            window: true,
-            curve: false,
-        },
-        Offered {
-            window: false,
-            curve: true,
-        },
-    ];
+    const EVERY_OFFER: [Offered; 2] = [Offered::ALL, Offered { window: false }];
 
     /// A content area with room for everything.
     fn content() -> Rect {
@@ -1898,7 +1875,7 @@ mod tests {
         assert_eq!(trimmed("-0.000".into()), "0");
         assert_eq!(trimmed("12".into()), "12");
 
-        let photograph = shown(DecodedImage::new(
+        let graded = shown(DecodedImage::new(
             2,
             1,
             Samples::U8 {
@@ -1908,8 +1885,8 @@ mod tests {
             ColorSpace::SRGB,
             AlphaMode::Opaque,
         ));
-        assert_eq!(axis_words(&photograph, 1.0), "1");
-        assert_eq!(axis_words(&photograph, 0.0), "0");
+        assert_eq!(axis_words(&graded, 1.0), "1");
+        assert_eq!(axis_words(&graded, 0.0), "0");
 
         // Linear integer data reads back as the counts it was stored in.
         let counts = shown(DecodedImage::new(
@@ -1926,12 +1903,11 @@ mod tests {
     }
 
     /// The rows a file is offered are the ones that answer a question it
-    /// raises: an SDR photograph gets the exposure alone, linear data gets
-    /// the windows, and anything with highlights above white gets the
-    /// curves as well.
+    /// raises: every file gets the exposure and the curves, and linear data
+    /// gets the windows as well.
     #[test]
     fn a_file_is_offered_the_rows_it_has_a_use_for() {
-        let photograph = shown(DecodedImage::new(
+        let graded = shown(DecodedImage::new(
             2,
             1,
             Samples::U8 {
@@ -1941,33 +1917,10 @@ mod tests {
             ColorSpace::SRGB,
             AlphaMode::Opaque,
         ));
-        assert_eq!(
-            Offered::for_file(&photograph),
-            Offered {
-                window: false,
-                curve: false
-            }
-        );
+        assert_eq!(Offered::for_file(&graded), Offered { window: false });
 
-        // Linear samples with one far above the rest: the trimmed window
-        // leaves it out, above white.
-        let mut samples = vec![0.5; 2000];
-        samples[3] = 50.0;
+        // Linear samples: the window has to be found in them.
         let render = shown(DecodedImage::new(
-            2000,
-            1,
-            Samples::F32 {
-                channels: Channels::Gray,
-                data: samples,
-            },
-            ColorSpace::LINEAR_BT709,
-            AlphaMode::Opaque,
-        ));
-        assert_eq!(Offered::for_file(&render), Offered::ALL);
-
-        // Linear samples with nothing above the window: spread evenly, so
-        // that the trimmed window's top is the brightest of them.
-        let flat = shown(DecodedImage::new(
             1000,
             1,
             Samples::F32 {
@@ -1977,18 +1930,12 @@ mod tests {
             ColorSpace::LINEAR_BT709,
             AlphaMode::Opaque,
         ));
-        assert_eq!(
-            Offered::for_file(&flat),
-            Offered {
-                window: true,
-                curve: false
-            }
-        );
+        assert_eq!(Offered::for_file(&render), Offered::ALL);
 
         // Nothing on screen: every row, which is the panel the window has to
         // have room for.
         assert_eq!(Offered::of(None), Offered::ALL);
-        assert_eq!(Offered::of(Some(&flat)), Offered::for_file(&flat));
+        assert_eq!(Offered::of(Some(&graded)), Offered::for_file(&graded));
     }
 
     /// The pointer reads a bin of the plot and nothing outside it — not the
@@ -2052,24 +1999,12 @@ mod tests {
             assert!(panel(Rect::new(0.0, 0.0, room[0] - 1.0, room[1]), offered).is_none());
             assert!(panel(Rect::new(0.0, 0.0, room[0], room[1] - 1.0), offered).is_none());
         }
-        let least = size(Offered {
-            window: false,
-            curve: false,
-        });
+        let least = size(Offered { window: false });
         assert!(least[1] < TALLEST[1]);
         assert_eq!(size(Offered::ALL), TALLEST);
         let short = Rect::new(0.0, 0.0, 800.0, least[1] + 2.0 * PADDING);
         assert!(panel(short, Offered::ALL).is_none());
-        assert!(
-            panel(
-                short,
-                Offered {
-                    window: false,
-                    curve: false
-                }
-            )
-            .is_some()
-        );
+        assert!(panel(short, Offered { window: false }).is_some());
     }
 
     /// Where it does fit it sits in the top right of the content area, its
@@ -2225,9 +2160,7 @@ mod tests {
             if offered.window {
                 expected.push("Window");
             }
-            if offered.curve {
-                expected.push("Highlights");
-            }
+            expected.push("Curve");
             assert_eq!(labels, expected);
         }
     }
@@ -2243,8 +2176,7 @@ mod tests {
                 .map(|(widget, _)| widget)
                 .collect();
             let windows = if offered.window { WINDOWS.len() } else { 0 };
-            let curves = if offered.curve { ToneMap::ALL.len() } else { 0 };
-            assert_eq!(widgets.len(), windows + curves, "{offered:?}");
+            assert_eq!(widgets.len(), windows + ToneMap::ALL.len(), "{offered:?}");
 
             let rows = Rows::new(panel, offered);
             let inside = panel.inset(PANEL_INSET, PANEL_INSET);

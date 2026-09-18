@@ -91,10 +91,12 @@ pub enum Action {
     /// Exposure, by this many stops.
     Exposure(f32),
     CycleAutoWindow,
-    /// Slide the window by this fraction of its width.
-    ShiftWindow(f32),
-    /// Scale the window's width by this factor.
-    Contrast(f32),
+    /// Move the value that comes out black by this fraction of the
+    /// window's width: the black handle's key.
+    StepBlack(f32),
+    /// And the value that comes out white — or, where that handle is the
+    /// exposure, a quarter stop of it: see `Display::step_white`.
+    StepWhite(f32),
     CycleToneMap,
     CycleColormap,
     ResetDisplay,
@@ -330,13 +332,11 @@ fn held(mods: Mods) -> String {
     prefix
 }
 
-/// How far one press of the keys moves the display window, as a fraction of
-/// its own width, and what one narrowing or widening scales that width by.
-/// The hand on the histogram's band moves it by no step at all — the
-/// handles go where they are put — so these are the keys' alone.
+/// How far one press of the keys moves an end of the display window, as a
+/// fraction of the window's width. The hand on the histogram's band moves
+/// it by no step at all — the handles go where they are put — so this is
+/// the keys' alone.
 const WINDOW_STEP: f32 = 0.05;
-const NARROWER: f32 = 0.8;
-const WIDER: f32 = 1.25;
 
 /// One line of a tooltip: what a key does, and what to press for it.
 ///
@@ -405,7 +405,7 @@ fn action_of(tip: Tip) -> Option<Action> {
         // once, so no one key does what they do; what a press on them opens
         // is the panel that sets all four, which the tooltip says outright.
         // The band under the histogram, its handles and the exposure's
-        // number are dragged, which no key does either: the keys that step
+        // slider are dragged, which no key does either: the keys that step
         // the same things come under them as hints — see `App::tooltip`.
         Tip::Control(_)
         | Tip::Name
@@ -825,25 +825,25 @@ pub const KEYS: &[Binding] = &[
             (Char("F"), Exposure(histogram::EV_STEP)),
         ],
     },
-    // One case each: the capitals are the width of the window, below.
+    // One case each: the capitals are the other handle, below.
     Binding {
         section: Section::Display,
         mods: PLAIN,
         shown: "a, s",
-        help: "Slide the window down / up",
+        help: "Black point down / up",
         keys: &[
-            (Char("a"), ShiftWindow(-WINDOW_STEP)),
-            (Char("s"), ShiftWindow(WINDOW_STEP)),
+            (Char("a"), StepBlack(-WINDOW_STEP)),
+            (Char("s"), StepBlack(WINDOW_STEP)),
         ],
     },
     Binding {
         section: Section::Display,
         mods: PLAIN,
         shown: "A, S",
-        help: "Narrow / widen the window",
+        help: "White point down / up",
         keys: &[
-            (Char("A"), Contrast(NARROWER)),
-            (Char("S"), Contrast(WIDER)),
+            (Char("A"), StepWhite(-WINDOW_STEP)),
+            (Char("S"), StepWhite(WINDOW_STEP)),
         ],
     },
     Binding {
@@ -1008,18 +1008,17 @@ impl Naming for Namer {
                     .filter_map(hint)
                     .collect(),
             ),
-            // The band under the plot and its two handles: what each is,
-            // and under it the keys that move the window the same way — the
-            // pair that slides it under the band, and the pair that widens
-            // and narrows it under either handle, a handle being one end of
-            // the width.
-            Tip::Window => (
+            // The two handles: what each is, and under it the pair of keys
+            // that step it. The band between them slides the window, which
+            // no key does, so it names itself and nothing more.
+            Tip::BlackPoint => (
                 vec![names(at)?],
-                Vec::from_iter(hint(ShiftWindow(-WINDOW_STEP))),
+                Vec::from_iter(hint(StepBlack(-WINDOW_STEP))),
             ),
-            Tip::BlackPoint | Tip::WhitePoint => {
-                (vec![names(at)?], Vec::from_iter(hint(Contrast(NARROWER))))
-            }
+            Tip::WhitePoint => (
+                vec![names(at)?],
+                Vec::from_iter(hint(StepWhite(-WINDOW_STEP))),
+            ),
             // The words at the end of the bottom bar: what the bar says in
             // the room it has, said out in full — a line for each of the
             // things in force — and under them that the panel which sets all
@@ -1393,16 +1392,26 @@ impl App {
                     true
                 });
             }
-            ShiftWindow(by) => {
+            // The handles' keys: each end of the window stepped along the
+            // plot, on the file's own curve and no further than the plot
+            // goes, as the handle it stands for is dragged.
+            StepBlack(by) => {
                 return self.adjust(|current, _| {
-                    current.display.shift_window(by);
-                    true
+                    let transfer = current.image.color.transfer;
+                    current
+                        .display
+                        .step_black(by, transfer, current.stats.plot.min)
                 });
             }
-            Contrast(by) => {
+            StepWhite(by) => {
                 return self.adjust(|current, _| {
-                    current.display.adjust_contrast(by);
-                    true
+                    let transfer = current.image.color.transfer;
+                    current.display.step_white(
+                        by,
+                        transfer,
+                        current.image.referred,
+                        current.stats.plot.max,
+                    )
                 });
             }
             // Not under a false color, which clips whatever the curve: the
@@ -2386,8 +2395,8 @@ mod tests {
         assert_eq!(named(Control::Ramp(Colormap::ALL.len())), None);
 
         // The band and its handles name themselves, no one key doing what
-        // a drag on them does; the keys that move the window come under
-        // them as hints — see `the_band_and_its_handles_say_which_keys_move_the_window`.
+        // a drag on them does; the keys that step the handles come under
+        // them as hints — see `the_handles_say_which_keys_step_them`.
         assert_eq!(names(Tip::BlackPoint).as_deref(), Some("Black point"));
         assert_eq!(names(Tip::WhitePoint).as_deref(), Some("White point"));
         assert!(names(Tip::Window).is_some());
@@ -2431,11 +2440,12 @@ mod tests {
         }
     }
 
-    /// The band under the plot and its two handles are dragged, which no
-    /// key does; what the keys do is move the same window by steps, and the
-    /// tooltip on each says which pair does what a drag there does.
+    /// The two handles under the plot are dragged, which no key does; what
+    /// the keys do is step the same handles, and the tooltip on each says
+    /// which pair. The band between them slides the window, which no key
+    /// does at all, so it says what it is and no more.
     #[test]
-    fn the_band_and_its_handles_say_which_keys_move_the_window() {
+    fn the_handles_say_which_keys_step_them() {
         let namer = Namer {
             room: Room {
                 histogram: true,
@@ -2451,11 +2461,15 @@ mod tests {
             state: Vec::new(),
         };
         let tooltip = |tip| namer.tooltip(tip).expect("named");
-        let band = tooltip(Tip::Window);
-        assert_eq!(band.hints, ["Slide the window down / up (a, s)"]);
-        for handle in [Tip::BlackPoint, Tip::WhitePoint] {
-            assert_eq!(tooltip(handle).hints, ["Narrow / widen the window (A, S)"]);
-        }
+        assert!(tooltip(Tip::Window).hints.is_empty());
+        assert_eq!(
+            tooltip(Tip::BlackPoint).hints,
+            ["Black point down / up (a, s)"]
+        );
+        assert_eq!(
+            tooltip(Tip::WhitePoint).hints,
+            ["White point down / up (A, S)"]
+        );
         // And the exposure's slider names the keys that step it.
         assert_eq!(
             tooltip(Tip::Exposure).hints,
@@ -2690,8 +2704,8 @@ mod tests {
         assert_eq!(plain("F"), Some(Exposure(histogram::EV_STEP)));
         // The window's position and its width are the same two keys in
         // different cases.
-        assert_eq!(plain("a"), Some(ShiftWindow(-0.05)));
-        assert_eq!(plain("A"), Some(Contrast(0.8)));
+        assert_eq!(plain("a"), Some(StepBlack(-0.05)));
+        assert_eq!(plain("A"), Some(StepWhite(-0.05)));
         assert_eq!(plain("w"), Some(MarkClipped));
         assert_eq!(plain("W"), Some(MarkClipped));
         assert_eq!(plain("u"), None);
