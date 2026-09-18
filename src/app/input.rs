@@ -502,13 +502,89 @@ pub struct Binding {
     /// The key column, as written for people: `q, Esc`, `Arrows`.
     pub shown: &'static str,
     pub help: &'static str,
-    /// When the key does anything at all, in a few words — `a region
-    /// selected`, `an animation` — for the help popup's third column, and
-    /// `None` for a key that always does. Not the whole story where a key
-    /// does one thing plainly and another under some condition, which
-    /// `help` tells; this is the condition on which it does anything.
-    pub when: Option<&'static str>,
+    /// When the key does anything at all, for the help popup's third
+    /// column, and `None` for a key that always does. Not the whole story
+    /// where a key does one thing plainly and another under some condition,
+    /// which `help` tells; this is the condition on which it does anything.
+    pub when: Option<When>,
     pub keys: &'static [(KeyName, Action)],
+}
+
+/// The condition on which a key does anything at all: the one thing about
+/// the moment that decides it, so that the popup can say whether it holds
+/// right now as well as what it is.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum When {
+    RegionSelected,
+    SeveralFiles,
+    Animation,
+    AnimationOrPages,
+    PointerOnPicture,
+    PictureOnClipboard,
+    HdrMode,
+    SingleChannel,
+}
+
+impl When {
+    /// Every condition, for a test to hold them all up against the
+    /// application.
+    #[cfg(test)]
+    pub const ALL: [When; 8] = [
+        When::RegionSelected,
+        When::SeveralFiles,
+        When::Animation,
+        When::AnimationOrPages,
+        When::PointerOnPicture,
+        When::PictureOnClipboard,
+        When::HdrMode,
+        When::SingleChannel,
+    ];
+
+    /// The condition in a few words, as the popup's column reads it: a
+    /// phrase, not a sentence.
+    pub fn describe(self) -> &'static str {
+        match self {
+            When::RegionSelected => "a region selected",
+            When::SeveralFiles => "more than one file",
+            When::Animation => "an animation",
+            When::AnimationOrPages => "an animation or a paged file",
+            When::PointerOnPicture => "the pointer on the picture",
+            When::PictureOnClipboard => "a picture on the clipboard",
+            When::HdrMode => "the monitor in HDR mode",
+            When::SingleChannel => "a single-channel image",
+        }
+    }
+}
+
+/// Which of the conditions hold at the moment, read off the application
+/// before a frame so that the help popup can dim the keys that would do
+/// nothing if pressed.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub(super) struct Conditions {
+    pub region_selected: bool,
+    pub several_files: bool,
+    pub animation: bool,
+    pub pages: bool,
+    pub pointer_on_picture: bool,
+    pub picture_on_clipboard: bool,
+    pub hdr_mode: bool,
+    pub single_channel: bool,
+}
+
+impl Conditions {
+    /// Whether `when` holds.
+    pub fn met(&self, when: When) -> bool {
+        match when {
+            When::RegionSelected => self.region_selected,
+            When::SeveralFiles => self.several_files,
+            When::Animation => self.animation,
+            When::AnimationOrPages => self.animation || self.pages,
+            When::PointerOnPicture => self.pointer_on_picture,
+            When::PictureOnClipboard => self.picture_on_clipboard,
+            When::HdrMode => self.hdr_mode,
+            When::SingleChannel => self.single_channel,
+        }
+    }
 }
 
 use Action::*;
@@ -657,7 +733,7 @@ pub const KEYS: &[Binding] = &[
         mods: CTRL_SHIFT,
         shown: "Ctrl+Shift+Arrows",
         help: "Shrink a region that way a pixel, pulling its far side in",
-        when: Some("a region selected"),
+        when: Some(When::RegionSelected),
         keys: &[
             (Named(NamedKey::ArrowLeft), ShrinkRegion(Left)),
             (Named(NamedKey::ArrowRight), ShrinkRegion(Right)),
@@ -670,7 +746,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "], Page Down",
         help: "Next file",
-        when: Some("more than one file"),
+        when: Some(When::SeveralFiles),
         keys: &[(Char("]"), NextFile), (Named(NamedKey::PageDown), NextFile)],
     },
     Binding {
@@ -678,7 +754,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "[, Page Up",
         help: "Previous file",
-        when: Some("more than one file"),
+        when: Some(When::SeveralFiles),
         keys: &[
             (Char("["), PreviousFile),
             (Named(NamedKey::PageUp), PreviousFile),
@@ -689,7 +765,7 @@ pub const KEYS: &[Binding] = &[
         mods: CTRL,
         shown: "Ctrl+P",
         help: "Choose a file from the list",
-        when: Some("more than one file"),
+        when: Some(When::SeveralFiles),
         keys: &[(Char("p"), OpenChooser), (Char("P"), OpenChooser)],
     },
     Binding {
@@ -697,7 +773,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "Enter",
         help: "Play or pause an animation",
-        when: Some("an animation"),
+        when: Some(When::Animation),
         keys: &[(Named(NamedKey::Enter), TogglePlay)],
     },
     Binding {
@@ -705,7 +781,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "n",
         help: "Next frame of an animation, or page of a file that holds several",
-        when: Some("an animation or a paged file"),
+        when: Some(When::AnimationOrPages),
         keys: &[(Char("n"), NextFrame)],
     },
     Binding {
@@ -713,7 +789,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "N",
         help: "Previous frame, or page",
-        when: Some("an animation or a paged file"),
+        when: Some(When::AnimationOrPages),
         keys: &[(Char("N"), PreviousFrame)],
     },
     Binding {
@@ -768,7 +844,7 @@ pub const KEYS: &[Binding] = &[
         mods: CTRL,
         shown: "Ctrl+.",
         help: "Copy the value of the pixel under the pointer, as read out",
-        when: Some("the pointer on the picture"),
+        when: Some(When::PointerOnPicture),
         keys: &[(Char("."), CopyPixelValue)],
     },
     Binding {
@@ -776,7 +852,7 @@ pub const KEYS: &[Binding] = &[
         mods: CTRL,
         shown: "Ctrl+Shift+.",
         help: "Copy the coordinate of the pixel under the pointer, as x,y",
-        when: Some("the pointer on the picture"),
+        when: Some(When::PointerOnPicture),
         keys: &[(Char(">"), CopyPixelCoordinate)],
     },
     Binding {
@@ -784,7 +860,7 @@ pub const KEYS: &[Binding] = &[
         mods: CTRL,
         shown: "Ctrl+V",
         help: "Paste an image, saved among your pictures and shown",
-        when: Some("a picture on the clipboard"),
+        when: Some(When::PictureOnClipboard),
         keys: &[(Char("v"), Paste), (Char("V"), Paste)],
     },
     Binding {
@@ -963,7 +1039,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "o",
         help: "Toggle HDR output, where the monitor is in HDR mode",
-        when: Some("the monitor in HDR mode"),
+        when: Some(When::HdrMode),
         keys: &[(Char("o"), ToggleHdr), (Char("O"), ToggleHdr)],
     },
     Binding {
@@ -971,7 +1047,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "r",
         help: "Cycle false color for single-channel images",
-        when: Some("a single-channel image"),
+        when: Some(When::SingleChannel),
         keys: &[(Char("r"), CycleColormap), (Char("R"), CycleColormap)],
     },
     Binding {
@@ -1030,6 +1106,8 @@ pub(super) struct Namer {
     show_histogram: bool,
     /// What is being done to the picture, in sentences.
     state: Vec<String>,
+    /// Which of the conditions the keys wait on hold this frame.
+    conditions: Conditions,
 }
 
 impl Naming for Namer {
@@ -1149,17 +1227,18 @@ impl Naming for Namer {
     }
 
     fn help(&self) -> Vec<ui::help::Section> {
-        help_sections()
+        help_sections(&self.conditions)
     }
 }
 
 /// The key table as the help popup lays it out: one section per heading,
 /// in `--help`'s order, and in each one row per line of the table, the key
-/// column spelled as the tooltips spell it.
+/// column spelled as the tooltips spell it, and each condition marked with
+/// whether it holds under `conditions`.
 ///
-/// Free of the `Namer` on purpose: nothing about the frame changes what the
-/// keys are, and a test can read the whole of it without one.
-pub(super) fn help_sections() -> Vec<ui::help::Section> {
+/// Free of the `Namer` on purpose: nothing else about the frame changes
+/// what the keys are, and a test can read the whole of it without one.
+pub(super) fn help_sections(conditions: &Conditions) -> Vec<ui::help::Section> {
     Section::ALL
         .into_iter()
         .map(|section| ui::help::Section {
@@ -1170,7 +1249,10 @@ pub(super) fn help_sections() -> Vec<ui::help::Section> {
                 .map(|binding| ui::help::Row {
                     key: binding.shown.to_string(),
                     does: binding.help,
-                    when: binding.when,
+                    when: binding.when.map(|when| ui::help::Condition {
+                        words: when.describe(),
+                        met: conditions.met(when),
+                    }),
                 })
                 .collect(),
         })
@@ -1818,6 +1900,28 @@ impl App {
                 .as_ref()
                 .map(|current| ui::explain_state(current, self.headroom()))
                 .unwrap_or_default(),
+            conditions: self.conditions(),
+        }
+    }
+
+    /// Which of the conditions the keys wait on hold right now, each read
+    /// from exactly what the key's own arm of [`App::perform`] reads.
+    fn conditions(&self) -> Conditions {
+        let current = self.current.as_ref();
+        Conditions {
+            region_selected: matches!(self.selection, Selection::Shown(_)),
+            several_files: self.files.len() > 1,
+            animation: self.playback.is_some(),
+            pages: current.is_some_and(|current| {
+                matches!(
+                    current.sequence,
+                    crate::image::sequence::Sequence::Pages { .. }
+                )
+            }),
+            pointer_on_picture: self.pointer_pixel().is_some(),
+            picture_on_clipboard: self.panels.paste,
+            hdr_mode: self.hdr_state() == Hdr::Available,
+            single_channel: current.is_some_and(|current| current.image.is_gray()),
         }
     }
 
@@ -2467,7 +2571,7 @@ mod tests {
     /// the front, no full stop at the end, and short enough for its column.
     #[test]
     fn the_help_popup_shows_every_line_of_the_table_once() {
-        let sections = help_sections();
+        let sections = help_sections(&Conditions::default());
         assert_eq!(sections.len(), Section::ALL.len());
         let rows: Vec<&ui::help::Row> = sections
             .iter()
@@ -2477,7 +2581,12 @@ mod tests {
         for (row, binding) in rows.iter().zip(KEYS) {
             assert_eq!(row.key, binding.shown);
             assert_eq!(row.does, binding.help);
-            assert_eq!(row.when, binding.when);
+            assert_eq!(
+                row.when.map(|when| when.words),
+                binding.when.map(When::describe)
+            );
+            // Nothing holds, so every condition is marked unmet.
+            assert!(row.when.is_none_or(|when| !when.met));
         }
         for (section, listed) in Section::ALL.into_iter().zip(&sections) {
             assert_eq!(listed.title, section.title());
@@ -2489,21 +2598,94 @@ mod tests {
                     == listed.rows.len()
             );
         }
-        for binding in KEYS {
-            let Some(when) = binding.when else {
-                continue;
-            };
+        for when in When::ALL {
+            let words = when.describe();
             assert!(
-                when.starts_with(char::is_lowercase) && !when.ends_with('.'),
-                "{:?}: {when:?} reads as a phrase",
-                binding.shown
+                words.starts_with(char::is_lowercase) && !words.ends_with('.'),
+                "{when:?}: {words:?} reads as a phrase"
             );
-            assert!(
-                when.len() <= 32,
-                "{:?}: {when:?} fits its column",
-                binding.shown
-            );
+            assert!(words.len() <= 32, "{when:?}: {words:?} fits its column");
         }
+    }
+
+    /// Each condition is answered from its own reading, and one reading
+    /// answers only the conditions that ask it — an animation is one where
+    /// a page is not, and a paged file is enough for the keys that step
+    /// through either.
+    #[test]
+    fn each_condition_is_met_by_its_own_reading() {
+        let none = Conditions::default();
+        for when in When::ALL {
+            assert!(!none.met(when), "{when:?} holds with nothing to hold it");
+        }
+        let readings = [
+            (
+                When::RegionSelected,
+                Conditions {
+                    region_selected: true,
+                    ..none
+                },
+            ),
+            (
+                When::SeveralFiles,
+                Conditions {
+                    several_files: true,
+                    ..none
+                },
+            ),
+            (
+                When::Animation,
+                Conditions {
+                    animation: true,
+                    ..none
+                },
+            ),
+            (
+                When::PointerOnPicture,
+                Conditions {
+                    pointer_on_picture: true,
+                    ..none
+                },
+            ),
+            (
+                When::PictureOnClipboard,
+                Conditions {
+                    picture_on_clipboard: true,
+                    ..none
+                },
+            ),
+            (
+                When::HdrMode,
+                Conditions {
+                    hdr_mode: true,
+                    ..none
+                },
+            ),
+            (
+                When::SingleChannel,
+                Conditions {
+                    single_channel: true,
+                    ..none
+                },
+            ),
+        ];
+        for (held, conditions) in readings {
+            for when in When::ALL {
+                let expected =
+                    when == held || (when == When::AnimationOrPages && held == When::Animation);
+                assert_eq!(
+                    conditions.met(when),
+                    expected,
+                    "{held:?} read, {when:?} asked"
+                );
+            }
+        }
+        let paged = Conditions {
+            pages: true,
+            ..none
+        };
+        assert!(paged.met(When::AnimationOrPages));
+        assert!(!paged.met(When::Animation));
     }
 
     /// The message raised when the interface goes names keys that really do
@@ -2645,6 +2827,7 @@ mod tests {
             count: 1,
             show_histogram: true,
             state: Vec::new(),
+            conditions: Conditions::default(),
         };
         let tooltip = |tip| namer.tooltip(tip).expect("named");
         let band = tooltip(Tip::Window);
@@ -2720,6 +2903,7 @@ mod tests {
             count: 1,
             show_histogram: false,
             state: Vec::new(),
+            conditions: Conditions::default(),
         };
         assert_eq!(
             namer.shortcut(Control::Copies(Copies::Path)).as_deref(),
@@ -2811,6 +2995,7 @@ mod tests {
             count: 12,
             show_histogram: false,
             state: Vec::new(),
+            conditions: Conditions::default(),
         };
         let tooltip = namer
             .tooltip(Tip::Counter)
