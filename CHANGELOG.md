@@ -178,6 +178,12 @@ Notable changes to `gamut`. The format follows
   clips at the top of its ramp whatever the curve, which the picture, the
   bottom bar and the pointer's readout all knew, while the panel went on
   lighting a curve that was doing nothing and drawing it over the plot.
+- A Radiance picture whose `#?RADIANCE` signature is not its first line
+  opens. Radiance's own tools read a picture's header as text lines up to a
+  blank one and know it by its `FORMAT=` line, so a `VIEW=` written in
+  front of the signature — Debevec's `memorial.hdr` goes around this way —
+  is a picture to them, and now to this program, which used to answer that
+  the format could not be determined.
 
 ## 0.2.0 - 2026-09-11
 
