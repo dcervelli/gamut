@@ -99,9 +99,9 @@ of the two it is, and the first of them names `--output hdr` as what would
 change the answer — see `ui::tooltip::disabled`, which reads `App::hdr_state`
 for the same answer the button is drawn from. Nothing is written to the
 terminal, since a switch that explains itself where the pointer is has no
-reason to explain itself where the window is not. Off Wayland, or under a compositor without the protocol,
-nothing says what the monitor is, and the switch moves the surface itself as
-it used to.
+reason to explain itself where the window is not. Off Wayland, or under a
+compositor without the protocol, nothing says what the monitor is, and the
+switch moves the surface itself, as the only lever there is.
 
 **The tone map** is a curve *added* to fit values above white into a surface
 that stops there: `neutral`, or `none` — which is not a second curve but the
@@ -113,13 +113,13 @@ surface switch rather than a third stop for `t`.
 There is one curve because a viewer wants exactly one thing of it: the
 highlights back under white and everything else left where it was, which is
 what Khronos PBR Neutral does — below its shoulder a value comes out as
-itself. A Reinhard curve, `c / (c + 1)`, was the other choice until it was
-dropped: it sends white to a half, so it re-grades the whole in-range picture
-to make room for the highlights, and on an 8-bit file at 0 EV it changes
-every pixel. That is the editing the [histogram panel's own line](histogram.md)
-rules out, and a second curve that only ever showed a worse rendering of the
-same highlights was a choice with nothing to choose. The panel's row calls
-the two *Clip* and *Roll off*, since that is what the choice is.
+itself. A curve that re-grades the in-range picture to make room for them —
+Reinhard's `c / (c + 1)` sends white to a half, and on an 8-bit file at 0 EV
+changes every pixel — is the editing the [histogram panel's own
+line](histogram.md) rules out, and a second curve that only ever showed a
+worse rendering of the same highlights would be a choice with nothing to
+choose. The panel's row calls the two *Clip* and *Roll off*, since that is
+what the choice is.
 
 What a picture opens with follows from both: none on an HDR surface, and on an
 SDR one a `neutral` roll-off where the window leaves highlights above white
@@ -142,7 +142,7 @@ holds the curve at a clip while active, on either surface — a curve on top of
 a colormap would distort the mapping you are reading values off, and there is
 no color past the end of the ramp for headroom to show as.
 
-Two things the HDR path does not do, deliberately for now: it clips wide-gamut
+Two things the HDR path does not do, deliberately: it clips wide-gamut
 color to BT.709 even on scRGB, which could carry the negatives a P3 or
 BT.2020 file produces; and a scene-referred file on an HDR surface is still
 windowed to 0..1, since without a reference white there is nothing to put

@@ -2450,7 +2450,6 @@ impl App {
             Control::ZoomTo(choice) => {
                 self.animate(|view, image, viewport| choice.apply(view, image, viewport));
             }
-            // A cell of the pixel menu is settled on the spot.
             Control::Format(format) => self.panels.pixel_format = format,
             // An item of the menu of copies runs the key's action, as the
             // reset and the paste buttons do: what it asks for is done rather
@@ -2458,7 +2457,6 @@ impl App {
             Control::Copies(what) => {
                 let _ = self.perform(copy_action(what));
             }
-            // A row of the information panel, or the button above it.
             Control::Facts(copies) => self.copy_facts(copies),
             // As with the reset: the key's action, so that the button and the
             // key cannot come to mean different things.
@@ -2978,7 +2976,6 @@ mod tests {
             Some("Copy the absolute path of the file on screen (Shift+C)")
         );
 
-        // Every item of it.
         for copies in Copies::ALL {
             let words = named(copies).unwrap_or_else(|| panic!("{copies:?} is named"));
             assert!(words.starts_with("Copy "), "{words}");

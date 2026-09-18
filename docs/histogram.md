@@ -18,12 +18,7 @@ anything in it. A black point and a white point do: they are how linear or
 do not. They answer no question about the file, they only make a different
 picture, and a viewer that makes a different picture it cannot save is a tease
 that ends in sidecar files. That work belongs to the programs on the open
-menu.
-
-The panel had drifted from that line: it laid `Display`'s fields out as rows —
-the window as two numbers with four nudges, the automatic rules as a row of
-buttons, the curves as another — so that it read as the struct rather than as
-an instrument. What follows is how it was brought back.
+menu. The panel is an instrument, not `Display`'s fields laid out as rows.
 
 ## The rows are every file's
 
@@ -34,48 +29,34 @@ information column starts under the panel, and a column that jumped from one
 file to the next, or every time a handle was dragged past white, would be a
 column no one could read.
 
-It was not always so. Two audiences use this program, and the code already
-knew it — `AutoWindow::default_for` splits on `Referred`, and the colormaps,
-the float TIFF and the GeoTIFF keys say who the second audience is — so the
-rows followed the file at first: a `histogram::Offered` struct, settled from
-`Referred` alone, gave the window row to linear data and kept it from a
-graded file, on the reasoning that a graded file's window is 0..1 and
-nothing else, and a row that offered it two ways to be wrong was a row the
-panel had to explain. With it went the white handle's meaning on such a
-file: it was the exposure there, snapped to quarter stops, since exposure
-and the window's top are two dials for one effect and one dial seemed
-enough.
+Two audiences use this program — `AutoWindow::default_for` splits on
+`Referred`, and the colormaps, the float TIFF and the GeoTIFF keys say who
+the second audience is — and a graded file's window is 0..1 by rights where
+measured light is windowed to what it holds. The rows do not follow that
+split, because the black handle moves the window on every file: a graded
+file's window leaves 0..1 at the bottom the moment the black handle is
+touched, so a white handle that meant the exposure on a graded file and the
+window's top on a measured one would be a handle that meant a different
+thing on the next file along. The two dials are honestly two. The window is
+in the file's own units — both handles, both pairs of keys, the *Window*
+row — and the exposure is in stops — the slider, `d`/`f`, `--exposure` — a
+push on top of whatever the window is. On a graded file the *Window* row is
+where a hand-moved window is put back, *As stored* being 0..1, as much as
+where a rule is chosen.
 
-That was dropped because the black handle already moved the window on every
-file — a graded file's window left 0..1 at the bottom the moment the black
-handle was touched — so the top was the one special case: a handle that
-meant a different thing on the next file along, carried by a `Referred`
-branch in `Display::put_white` and `step_white`, an `Offered` struct, two
-panel heights, and a `Window` row the graded file then had every use for
-and did not have. Now the two dials are honestly two. The window is in the
-file's own units — both handles, both pairs of keys, the *Window* row — and
-the exposure is in stops — the slider, `d`/`f`, `--exposure` — a push on top
-of whatever the window is. On a graded file the *Window* row is where a
-hand-moved window is put back, *As stored* being 0..1, as much as where a
-rule is chosen.
-
-The curves were offered by the file too, at first — `opens_above_white`,
-whether the file had anything past white on the window it opened with —
-on the reasoning that a curve exists to fit values above white into a
-surface that stops there, and under a file that never reaches white it is a
-bend for no reason. That left `t` putting a curve on a file whose panel had
-no row for it, and the bottom bar naming a curve there was no button for.
-The row is every file's now, because the exposure is: a stop up puts the
+The curve row is every file's because the exposure is: a stop up puts the
 top of any file above white and the bar says **clipped**, and the curve is
-the answer to that. It is not the false-color case, where the key is dead
-because the curve does nothing; on an 8-bit file at 0 EV the neutral curve
-still takes its offset out of the shadows, which is something, and the
-response curve on the plot shows it. The row was labeled *Highlights* while
-it was offered for them, and is *Curve* now; its two cells are *Clip* and
-*Roll off*, since what the row chooses is what becomes of the light above
-white on a surface that stops there, and a cell that named the curve named
-a thing to look up rather than a thing to see. There is one curve to roll
-off with — [color.md](color.md) says why the Reinhard curve went.
+the answer to that. A row offered only to a file that opens above white
+would leave `t` putting a curve on a file whose panel had no row for it, and
+the bottom bar naming a curve there was no button for. It is not the
+false-color case, where the key is dead because the curve does nothing; on
+an 8-bit file at 0 EV the neutral curve still takes its offset out of the
+shadows, which is something, and the response curve on the plot shows it.
+The row is *Curve*, and its two cells are *Clip* and *Roll off*, since what
+the row chooses is what becomes of the light above white on a surface that
+stops there, and a cell that named the curve would name a thing to look up
+rather than a thing to see. There is one curve to roll off with —
+[color.md](color.md) says why only one.
 
 `histogram::SIZE` is what `ui::PANELS_ROOM` — the least window the
 interface fits in — is measured against, and what `ui::room` and
@@ -92,13 +73,13 @@ button puts it back.
 
 ## The band is the levels track
 
-The band under the plot always was the axis — what the display makes of each
-value along it — and the ticks on it always marked the window. Now the ticks
-are handles, and the band is the levels track every editor has: drag the
-black handle to set what comes out black, the white handle to set what comes
-out white, the band between them to slide the window along. That is what
-replaced the `0.000–1.000` reading and the four nudges, which were the same
-four operations spelled out as chevrons.
+The band under the plot is the axis — what the display makes of each value
+along it — and the handles on it mark the window, which makes the band the
+levels track every editor has: drag the black handle to set what comes out
+black, the white handle to set what comes out white, the band between them
+to slide the window along. Nobody has to be told what the two handles do,
+where the same four operations spelled out as a reading and four chevrons
+would have to be explained.
 
 The handles stand at the *displayed* bounds — `Display::displayed_bounds`,
 exposure folded in — because those are the values the band goes black and
@@ -144,16 +125,11 @@ it moves the same distance on the band every time, as a drag does. A step
 that the plot's end stops short at is no step, and says so by returning
 `false` so the key does not redraw; a press at the end asks for the end,
 and the end can stand a rounding error off the handle, so a move of a hair
-is no move either. They replaced a slide (`a`/`s`) and a narrowing about
-the window's center (`A`/`S`): window and level, the same two degrees of
-freedom in the basis the old panel showed, and the wrong basis once the
-panel showed two ends. The slide had no clamp, so `a` on a fresh 8-bit file
-was the lift the band's drag refuses; the narrowing moved `high` off 1 on a
-graded file, which nothing then did; and the handle tooltips hinted the
-narrowing because it was the nearest key, which
-is not the same as a key that does what the handle does. Nothing slides the
-window from the keyboard now, and the band's tooltip says so by naming no
-key. A narrowing is two presses.
+is no move either. The keys are in the handles' basis — an end each —
+rather than window and level, so that each handle's tooltip can name a key
+that does what the handle does. Nothing slides the window from the
+keyboard, and the band's tooltip says so by naming no key. A narrowing is
+two presses.
 
 A window can still end past what is plotted, which a few stops of exposure
 the other way is enough to do. Such a handle is drawn hollow at the edge it
@@ -235,11 +211,12 @@ The channel planes are drawn in a red, a green and a blue held short of the
 primaries (`theme::HISTOGRAM_PLANES`). Screened over one another on the
 plot's ground they still give a yellow, a cyan and a magenta where two overlap
 and a near white where all three do, which is the reading a channel histogram
-is looked at for; the full primaries, at a pixel to the bin, came out as a
-hedge of pure red, green and blue spikes that the eye could not leave alone.
+is looked at for; the full primaries, at a pixel to the bin, come out as a
+hedge of pure red, green and blue spikes that the eye cannot leave alone.
 The ground is the same in every theme and so are the inks, so the reading is
 the same everywhere — see [theme](theme.md) for the two things that resist
-being themed.
+being themed. A bin is a logical pixel, which fixes the panel's width and is
+why nothing here smooths the plot.
 
 ## What goes dead
 
@@ -248,27 +225,18 @@ The compositor holds the curve at a clip there — `Display::false_colored`
 is the test, and `composite.rs`, the bar's words and the pointer's readout
 all make the same one — because a ramp has no color past its end for a
 highlight to roll off into, and a curve over the ramp would bend the very
-mapping the reading is being taken off. The panel used to know none of
-this: it lit whichever curve was chosen, drew it over the plot, and let
-the buttons and `t` change it, so that a press changed nothing on screen
-and then changed the picture some time later, when the ramp came off. Now
-`Display::response` runs the curve the compositor runs, the buttons refuse
-the press and `t` does nothing, and the row stays where it is — the
-panel's height is the file's — rather than leaving.
-
-## What stayed
-
-The strip down the left — the two plane toggles, the count axis and the
-reset — and the row of false colors under the band on a gray image are as
-they were; so is a bin to the logical pixel, which fixes the panel's width and
-is why nothing here smooths the plot.
+mapping the reading is being taken off. `Display::response` runs the curve
+the compositor runs, the buttons refuse the press and `t` does nothing, and
+the row stays where it is — the panel's height is the file's — rather than
+leaving. A panel that lit whichever curve was chosen and let the buttons
+change it would have a press change nothing on screen and then change the
+picture some time later, when the ramp came off.
 
 ## The exposure is a slider
 
-The exposure row was a number with a step either side of it, and the number
-could be dragged by the same steps. That is a spinner, and a spinner is the
-right control for a value that is mostly typed and occasionally nudged; the
-exposure is neither. It is swept — up until the shadow shows something,
+A spinner — a number with a step either side of it — is the right control
+for a value that is mostly typed and occasionally nudged; the exposure is
+neither. It is swept — up until the shadow shows something,
 back until the highlight stops clipping — and a sweep wants a line with a
 handle on it, where a length is the push and its direction is which way.
 So the row is a slider: a groove with a mark at nothing, the run from there

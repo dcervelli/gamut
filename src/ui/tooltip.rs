@@ -42,8 +42,8 @@ pub enum Tip {
     Exposure,
     /// The words at the end of the bottom bar that say what is being done to
     /// the picture. What they say in the room a bar has is the names of the
-    /// things in force; the tooltip is the whole of it in sentences, which is
-    /// where the window's own bounds went — see `App::tooltip`.
+    /// things in force; the tooltip is the whole of it in sentences, the
+    /// window's own bounds included — see `App::tooltip`.
     State,
 }
 
@@ -67,9 +67,9 @@ pub struct Tooltip {
 /// opens, in place of the name of the panel.
 ///
 /// The button is drawn dead and the press is refused, so naming the panel
-/// and the key beside it
-/// would be describing something that is not going to happen. Said as a
-/// sentence rather than as a label because it is a reason and not a name.
+/// and the key beside it would be describing something that is not going to
+/// happen. Said as a sentence rather than as a label because it is a reason
+/// and not a name.
 pub const NO_ROOM: &str = "Disabled because display is too small.";
 
 /// What the open button says where nothing on the desktop offers to open the

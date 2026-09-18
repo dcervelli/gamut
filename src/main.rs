@@ -100,7 +100,7 @@ fn run() -> Result<ExitCode> {
     // an unsupported format is still a plain command-line error rather than a
     // window that opens and closes, and the size it reports opens the window
     // at the right shape — but the pixels are left to the loader thread, so
-    // that a large file no longer holds the window shut while it is read.
+    // that a large file does not hold the window shut while it is read.
     //
     // A paste goes ahead of the header check: the file reserved for it is
     // empty until the loader fetches the picture, so there is no header to

@@ -55,9 +55,8 @@ open — and both toggle the same control, so the two cannot drift.
 One frame needs care. egui is handed every key whether or not it wants it,
 so the chord that opened the popup is still in egui's input on the first
 frame the popup is drawn, and read there it would close what it had just
-opened — which is exactly what happened before `Input::opened` existed. On
-that frame the chord is consumed, so it does not reach the field as text,
-but not acted on.
+opened. On that frame the chord is consumed, so it does not reach the field
+as text, but not acted on — `Input::opened`.
 
 The field asks for focus whenever nothing has it: on the first frame, and
 again after a click on the popup's own frame takes it away. When the popup
@@ -108,15 +107,10 @@ the matches as they stood when the frame was built.
 
 The matcher is behind a trait, `fuzzy::Matcher`, whose one method is skim's
 own `FuzzyMatcher::fuzzy_indices` signature for signature. The
-implementation is `fuzzy-matcher`, which is skim's algorithm as it was cut
-out of that program in 2020 and looks unmaintained since; skim's own tree
-has kept the same code moving under `src/fuzzy_matcher/`, and skim itself is
-the whole terminal finder — tokio, ratatui, crossterm — rather than a
-library. Should the crate ever need replacing, a vendored copy of skim's
-current `skim.rs` and `util.rs` (MIT, with a `[[annotations]]` entry in
-`REUSE.toml`) is a second `impl Matcher` in `src/fuzzy.rs` and nothing else
-moves. `nucleo`, the other candidate, is MPL, which `about.toml` does not
-accept. `src/fuzzy.rs` is the only file that names the crate, and the
+implementation is `fuzzy-matcher`, skim's algorithm as a library; `nucleo`,
+the other candidate, is MPL, which `about.toml` does not accept. A different
+matcher is a second `impl Matcher` in `src/fuzzy.rs` and nothing else
+moves. `src/fuzzy.rs` is the only file that names the crate, and the
 chooser's tests run over a matcher of their own — `Plain`, a leftmost
 case-blind subsequence — so they state what the chooser needs of any
 matcher rather than what one library scores.
@@ -236,7 +230,7 @@ mid-write leaves nothing behind.
 
 Thumbnails on screen are egui textures, made with `Context::load_texture`
 from the delivered RGBA; `Renderer::render` already applies egui's texture
-deltas, so no GPU code knew about them. `app::chooser::Thumbs` keeps at most
+deltas, so no GPU code knows about them. `app::chooser::Thumbs` keeps at most
 `MAX_THUMBS` of them, about 32 MiB, and lets the least recently seen go —
 seen meaning on the popup's screen, which is what `Command::Visible` touches.
 An evicted thumbnail is asked for again when its row is next on screen, and

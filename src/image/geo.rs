@@ -350,9 +350,8 @@ fn number(value: f64) -> String {
 mod tests {
     use super::*;
 
-    /// The Swiss national map series, as the file that prompted all this
-    /// holds it: a projected system named in the ASCII pool, a 2.5 m pixel,
-    /// and a corner at the top left.
+    /// The Swiss national map series: a projected system named in the ASCII
+    /// pool, a 2.5 m pixel, and a corner at the top left.
     fn swiss() -> Tags {
         Tags {
             // Version 1.1.0, seven keys.

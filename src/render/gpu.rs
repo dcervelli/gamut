@@ -1,8 +1,7 @@
 //! The wgpu incantations every pass repeats, written out once.
 //!
-//! Nothing here decides anything: each function is a descriptor that four
-//! modules used to spell out by hand, with the two or three fields that ever
-//! varied left as parameters.
+//! Nothing here decides anything: each function is a descriptor the passes
+//! share, with the two or three fields that ever vary left as parameters.
 
 /// A bind group layout holding one uniform buffer at binding 0.
 pub fn uniform_layout(

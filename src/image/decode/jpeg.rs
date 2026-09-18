@@ -70,7 +70,7 @@ impl super::Decoder for Jpeg {
 /// JPEG, container and all.
 ///
 /// A file with a gain map comes back as linear light above SDR white; every
-/// other JPEG comes back exactly as it did before, but with its ICC profile
+/// other JPEG comes back as `image` decodes it, with its ICC profile
 /// believed.
 pub(super) fn decode(bytes: &[u8], overrides: Overrides) -> Result<DecodedImage> {
     let container = gain_map::Container::open(bytes);

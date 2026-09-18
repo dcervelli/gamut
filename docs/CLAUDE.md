@@ -11,10 +11,10 @@ open, and a description that avoids naming `render/upload.rs` costs them the
 search.
 
 **Say why, not just what.** The code already says what it does. These pages
-exist for the reasoning that would otherwise be lost: the alternative that was
-tried and dropped, the constraint that forced a shape, the bug that a
-structure prevents. A paragraph that could be replaced by reading the function
-is not worth keeping.
+exist for the reasoning that would otherwise be lost: the constraint that
+forces a shape, the bug that a structure prevents. Describe the code as it
+works now — not how it used to work, nor why it changed. A paragraph that
+could be replaced by reading the function is not worth keeping.
 
 **One page per subsystem, and link across rather than repeating.** A fact
 belongs in exactly one page. Where another page needs it, link to it —

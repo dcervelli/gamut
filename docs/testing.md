@@ -4,7 +4,7 @@
 cargo test
 ```
 
-475 tests over the transfer functions and primaries matrices, texture format
+The unit tests cover the transfer functions and primaries matrices, texture format
 selection (including the device-capability fallbacks), the statistics and
 window logic, the pixel readout's two halves and the colormaps behind its
 swatch, the decoder registry, the CICP translation, ICC profile recognition,
@@ -50,7 +50,7 @@ use for — and that a frame written into the texture the last one occupies
 is what the next draw shows, through a chain built again from it. Where no adapter can be had they report success rather than failing
 for a reason that has nothing to do with the code.
 
-`test_images/` holds 97 real fixtures — see its README — covering every pixel
+`test_images/` holds a hundred real fixtures — see its README — covering every pixel
 layout the decoder can produce and every per-format encoding with its own code
 path: PNG bit depths, palettes and interlacing; progressive and subsampled
 JPEG; TIFF compressions, byte orders, tiling, BigTIFF, the floating-point
@@ -60,11 +60,10 @@ with AV1 inside; WebP in both bitstreams, with and without alpha, tagged,
 rotated and animated; GIF interlaced, transparent and animated; an animated
 PNG and a two-page TIFF. Every animated fixture is the pattern followed by
 the pattern upside down, so that a frame read past the first is visibly not
-the first, and every one is walked to its end and rewound. Four of them
-exist for the color tags in particular: a
-PNG carrying `cICP` for BT.2100 PQ, a PNG carrying `iCCP` for Display P3, a
-HEIF tagged by ICC profile with no `nclx` box beside it, and a WebP carrying
-`ICCP`. Each is checked for
+the first, and every one is walked to its end and rewound. Some exist for the
+color tags in particular: a PNG carrying `cICP` for BT.2100 PQ, and a PNG, a
+HEIF, a JPEG XL, a WebP and an ICO's PNG entry each carrying an ICC profile
+for Display P3. Each is checked for
 dimensions, channel layout, sample type, color space, alpha mode and actual
 pixel values, and then pushed through the upload planner under both GPU
 capability sets. A test asserts the directory and the fixture table stay in

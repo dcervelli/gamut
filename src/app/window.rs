@@ -50,8 +50,7 @@ const PANELS_WINDOW: [f64; 2] = [
 
 /// What a window opens at when the first file's header will not say how large
 /// its image is. Every format read here does say, so this is a fallback for a
-/// decoder added later without a header probe rather than a size anything
-/// reaches today.
+/// decoder without a header probe rather than a size anything reaches.
 const DEFAULT_IMAGE: [f32; 2] = [960.0, 640.0];
 
 /// The most characters of a name to keep in the title and status bar. A name

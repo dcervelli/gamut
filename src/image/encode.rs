@@ -211,6 +211,7 @@ pub fn png_with_text(raster: &Raster, text: &[(String, String)]) -> Result<Vec<u
     // — but only because Adaptive was choosing Paeth for that content anyway.
     // On content it would have chosen differently, the same fixed filter cost
     // half as much again in bytes, and the bytes are what the paste waits on.
+
     // Said outright rather than left to be assumed. Whatever the file's own
     // color space was, the window and the tone curve have taken it to what
     // the screen was showing, and that was resolved against sRGB.
@@ -252,8 +253,7 @@ fn levels() -> &'static [f32; 255] {
 fn quantize(linear: f32, levels: &[f32; 255]) -> u8 {
     // How many thresholds the value has passed is the code it lands on, which
     // clamps both ends by itself: nothing under the first is 0, everything
-    // over the last is 255. A NaN passes none of them and comes out 0, which
-    // is where the arithmetic form put it too.
+    // over the last is 255. A NaN passes none of them and comes out 0.
     levels.partition_point(|&level| level <= linear) as u8
 }
 

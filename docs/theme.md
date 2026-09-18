@@ -30,12 +30,12 @@ whatever the desktop calls `sans-serif` and `monospace`, with the bold sans
 for the one bold thing in the window, and ships no font of its own. Which
 face that is, is asked of fontconfig's own library — the answer `fc-match`
 prints — rather than worked out from its configuration files. `fontdb` can
-read those files itself, and did at first, but it honors only the
-`<alias>` elements, ignores the `<match>` rules Omarchy uses to name its
-faces, and lets the last alias in file order win; on an Arch desktop that
-lands on Nimbus Sans Narrow, a condensed face nothing else on the desktop
-is set in. The library is opened at run time, so a machine without it still
-gets a window, set from `fontdb`'s rougher reading. A face fontconfig
+read those files itself, but it honors only the `<alias>` elements, ignores
+the `<match>` rules Omarchy uses to name its faces, and lets the last alias
+in file order win; on an Arch desktop that lands on Nimbus Sans Narrow, a
+condensed face nothing else on the desktop is set in. The library is opened
+at run time, so a machine without it still gets a window, set from `fontdb`'s
+rougher reading. A face fontconfig
 answers with is checked against the question, since it always answers with
 its nearest: a bold that came back regular, or a monospace that came back
 proportional, is treated as no answer, and that family falls back to the
@@ -47,7 +47,7 @@ puts the baseline the ascent down from the top, and centers that box in a
 bar or a button; where the letters sit inside the box is the face's
 business, and faces differ. Nimbus Sans Narrow declares its ascent no
 higher than its capitals and a fifth of an em of line gap, all of it under
-the baseline, so its text rode a quarter of an em high in every button;
+the baseline, so its text would ride a quarter of an em high in every button;
 Liberation Sans and Adwaita Sans are centered to within a pixel. The
 number is the distance from the box's middle to the capitals' middle, set
 as the face's `y_offset_factor`, so the capitals sit at the middle of the
@@ -87,24 +87,20 @@ Two more resist being themed and are not:
   near-black, are the set that behaves: two planes overlapping give the
   secondary between them and all three give a near white, which is the
   reading a channel histogram is looked at for — and is the same reading in
-  every theme, which a plot made of a palette's own pastels is not. They are
-  held a way short of the pure primaries, which at a pixel to the bin came
-  out as a hedge of spikes the eye could not leave alone; see [the histogram
-  panel](histogram.md).
-
-  Themed planes were tried: each pulled towards its own primary and then
-  scaled, whole, until the three screened together landed on a neutral mid
-  gray. It works, in the sense that no theme blows the plot out — but the
-  overlaps come out muddier the further a palette sits from the primaries, so
-  how much a histogram can be read depends on the desktop's taste in reds.
-  That is the wrong thing to make themeable.
+  every theme, which a plot made of a palette's own pastels is not: the
+  overlaps come out muddier the further a palette sits from the primaries,
+  and how much a histogram can be read is the wrong thing to hang on the
+  desktop's taste in reds. They are held a way short of the pure primaries,
+  which at a pixel to the bin come out as a hedge of spikes the eye cannot
+  leave alone; see [the histogram panel](histogram.md).
 
   The screening itself is done on the CPU, one column of the plot at a time.
   egui has one blend, so the planes cannot be laid over one another and left
   to the GPU; instead each column — one to a bin, a logical pixel wide — is
   cut into stretches at the heights of the planes standing in it, and each
-  stretch is filled with what the planes over it come to, screened in code.
-  On pure primaries over near-black that is exactly the picture the GPU drew.
+  stretch is filled with what the planes over it come to, screened in code,
+  which on pure primaries over near-black is the same picture a GPU blend
+  would give.
 
   The panel *around* the plot is not one of these. Nothing is screened onto
   it, so it is the bars' own surface, mildly transparent, with the same ink on

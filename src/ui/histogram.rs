@@ -439,8 +439,7 @@ fn share(row: Rect, count: usize, index: usize) -> Rect {
 /// on a gray one. Those end on the same line — the room the swatches take is
 /// taken off the plot rather than off the panel, see [`plot_area`] — so this
 /// is one block either way, and the rows do not shift about from one file to
-/// the next — nor from one file to the next: the three rows are every
-/// file's.
+/// the next: the three rows are every file's.
 #[derive(Clone, Copy)]
 struct Rows {
     /// The exposure's line, and where its word goes: the slider along it
@@ -771,12 +770,10 @@ struct Cover {
 /// the plot's ground, the luminance plane laid over that, and the color
 /// planes screened over the lot.
 ///
-/// The display list drew the planes as translucent shapes screened over one
-/// another on the GPU; egui has one blend, so the screening is done here, per
-/// stretch of column, which comes to the same picture — the planes are the
-/// primaries on a near-black ground, so two of them give the secondary
-/// between and all three give white, which is the reading a channel
-/// histogram is looked at for.
+/// egui has one blend, so the screening is done here, per stretch of
+/// column: the planes are the primaries on a near-black ground, so two of
+/// them give the secondary between and all three give white, which is the
+/// reading a channel histogram is looked at for.
 fn screened(theme: &Theme, luma_ink: Color, cover: Cover) -> Color32 {
     let over = |ground: [f32; 3], ink: Color| -> [f32; 3] {
         let alpha = ink.a as f32 / 255.0;
@@ -1513,7 +1510,7 @@ fn track(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, bars: Rect) -> O
     // The handles themselves, over the band and standing up past it, in the
     // accent every mark on the plot wears, ringed in the panel's ground so
     // that one stays a shape against a band that has come round to the same
-    // color. Snapped to the device's grid, as the ticks they replace were.
+    // color. Snapped to the device's grid.
     let painter = ui.painter();
     let grid = icon::Grid::new(scale);
     for (t, on) in [(black_t, on_black), (white_t, on_white)] {
@@ -1904,10 +1901,9 @@ mod tests {
         assert_eq!(panel.y, content.y + PADDING);
     }
 
-    /// The panel grew a strip of buttons and a row of ramps around the plot,
-    /// and the plot itself did not move across: a bin is one logical pixel,
-    /// which is what keeps the bars from landing astride a pixel boundary.
-    /// Nor does it move down for the rows under it, which is what the panel
+    /// A bin is one logical pixel, which is what keeps the bars from landing
+    /// astride a pixel boundary, whatever stands beside the plot. Nor does
+    /// the plot move down for the rows under it, which is what the panel
     /// grows by.
     #[test]
     fn the_plot_keeps_one_pixel_to_the_bin_whatever_grows_around_it() {

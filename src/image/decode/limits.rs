@@ -58,8 +58,7 @@ mod tests {
     use super::*;
 
     /// The size a real survey elevation model needs, which both backends'
-    /// stock limits refuse. Mount Rainier at 3 m is the case that prompted
-    /// raising them.
+    /// stock limits refuse: Mount Rainier at 3 m.
     #[test]
     fn a_survey_grade_elevation_model_is_within_the_limit() {
         assert!(check_decoded_size(18333, 15667, 1, 32).is_ok());

@@ -14,7 +14,7 @@
 //! some drivers that is a modeset which blanks every display on the way.
 //! With the mode in hand the surface can follow the monitor rather than lead
 //! it. Off Wayland, or under a compositor without the protocol, there is
-//! nothing to read and the surface is chosen by hand as before.
+//! nothing to read and the surface is chosen from the request alone.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

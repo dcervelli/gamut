@@ -39,9 +39,7 @@ use super::{directory, enclosed, geo};
 /// was measured against keeps its first directory at byte 8 with every value
 /// inside the first 10 kB, which is what any writer that means the file to be
 /// read out of order does; this leaves room for that, its sub-directories, a
-/// maker note and a thumbnail besides. A file that keeps its directory past
-/// the end of the prefix reads as one with no metadata, which is the same
-/// answer as before and now a rare one rather than a certain one.
+/// maker note and a thumbnail besides.
 const TIFF_PREFIX: u64 = 8 << 20;
 
 /// The two byte orders a TIFF announces itself in, which is how the file that

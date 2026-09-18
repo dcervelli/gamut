@@ -795,8 +795,7 @@ const FIXTURES: &[Fixture] = &[
         tolerance: EXACT,
     },
     // The same color space said the other way: an ICC profile with no
-    // `nclx` box beside it, which is what some cameras write and what used to
-    // read as plain sRGB.
+    // `nclx` box beside it, which is what some cameras write.
     Fixture {
         file: "heic-icc-p3.heic",
         covers: "HEIF tagged by ICC profile rather than by `nclx`",
