@@ -31,8 +31,8 @@ way, opening a little under 100% rather than overrunning.
 
 A window also opens no smaller than one the interface itself fits in.
 `ui::PANELS_ROOM` is the content area the histogram and the information column
-need together — the strip's width, the plot's fixed height, the gap, and the
-least column the panel will show — and `PANELS_WINDOW` is that plus the chrome
+need together — the strip's width, the histogram at its tallest, the gap, and
+the least column the panel will show — and `PANELS_WINDOW` is that plus the chrome
 and a logical pixel of slack. A window opening below it would have both those
 toggles dead in it from the first frame, which is not something the viewer
 asked for; where the picture is smaller than the interface, the window is
@@ -313,18 +313,20 @@ at is the one thing that stays where it was.
 
 The two panels down the right of the window — the histogram and the
 information column — are both `PANEL_WIDTH` wide, and the histogram is one
-fixed height besides: its plot gives a bin to the logical pixel, and the rows
-under it are set to what they say, so there is nothing in either to give. A
-content area smaller than one of them gets no panel rather than one drawn over
-the picture it is about and off the edge of the window. `ui::room` asks the
-question for both at once, because they are stacked: the histogram takes the
-top of the strip, and what it takes is height the column below it does not
-have, so a window can have room for the column alone and none for it under an
-open plot. What it takes is settled inside `info::panel`, which asks whether
-the plot is on screen rather than whether its toggle is on — a window too
-short for the plot is not one the column has to start below, and putting that
-question in one place is what keeps the two panels from disagreeing about
-where the column begins.
+fixed height for a file besides: its plot gives a bin to the logical pixel,
+and the rows under it are set to what they say, so there is nothing in either
+to give. Which rows a file gets is decided from the file alone — see [the
+histogram panel](histogram.md) — so the height is a fact about the file and
+not about what has been done to it. A content area smaller than one of them
+gets no panel rather than one drawn over the picture it is about and off the
+edge of the window. `ui::room` asks the question for both at once, because
+they are stacked: the histogram takes the top of the strip, and what it takes
+is height the column below it does not have, so a window can have room for the
+column alone and none for it under an open plot. What it takes is settled by
+`ui::histogram_shown`, which asks whether the plot is on screen rather than
+whether its toggle is on — a window too short for the plot is not one the
+column has to start below — and hands `info::panel` the rectangle it took, so
+that the two panels cannot disagree about where the column begins.
 
 One answer serves both readers — the interface and the application — since a
 toggle that quietly set something no one could see would be worse than one

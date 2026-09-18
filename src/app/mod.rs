@@ -627,7 +627,7 @@ impl App {
     /// worked out here as well for the presses and the tooltips, which have
     /// to answer between frames.
     pub(super) fn room(&self) -> ui::Room {
-        ui::room(self.content(), &self.panels)
+        ui::room(self.content(), &self.panels, self.current.as_ref())
     }
 
     /// What the panels leave free for the image and for whatever floats over
@@ -1439,6 +1439,7 @@ impl App {
             scale,
             backdrop,
             headroom,
+            mark_clipped: self.pointer.marking,
         };
         match renderer.render(scene, textures) {
             Ok(()) => self.reported_error = false,
@@ -2058,6 +2059,48 @@ mod tests {
         // `q` leaves whether or not there is a message to read.
         raise(&mut app);
         assert_eq!(app.perform(Action::Quit), Effect::Quit);
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// `t` does nothing under a false color, where the curve does nothing:
+    /// a curve changed there would only show once the ramp came off, from a
+    /// press made long before. The ramp put back, the key is a key again.
+    #[test]
+    fn the_curve_key_is_dead_under_a_false_color() {
+        use crate::image::display::{Colormap, Display, ToneMap};
+        use crate::ui::{Command, Control};
+        use input::Action;
+
+        // A gray file, since a false color is a reading of one channel.
+        let (dir, paths) = written("false-color", &[("gray.png", 8, 8)]);
+        ::image::save_buffer(&paths[0], &[128u8; 64], 8, 8, ::image::ColorType::L8)
+            .expect("the temporary directory is writable");
+        let mut app = open(paths.clone(), paths);
+        answer(&mut app, Reload::Fresh);
+        fn display(app: &App) -> &Display {
+            &app.current.as_ref().expect("a picture is up").display
+        }
+        assert!(
+            app.current
+                .as_ref()
+                .is_some_and(|current| current.image.is_gray())
+        );
+        assert_eq!(display(&app).tone_map, ToneMap::None);
+
+        assert_eq!(app.perform(Action::CycleColormap), Effect::Redraw);
+        assert_eq!(display(&app).colormap, Colormap::Viridis);
+        assert_eq!(app.perform(Action::CycleToneMap), Effect::Nothing);
+        assert_eq!(display(&app).tone_map, ToneMap::None);
+        let _ = app.act(Command::Press(Control::Curve(1)));
+        assert_eq!(display(&app).tone_map, ToneMap::None);
+
+        for _ in 1..Colormap::ALL.len() {
+            let _ = app.perform(Action::CycleColormap);
+        }
+        assert_eq!(display(&app).colormap, Colormap::Gray);
+        assert_eq!(app.perform(Action::CycleToneMap), Effect::Redraw);
+        assert_eq!(display(&app).tone_map, ToneMap::Reinhard);
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }

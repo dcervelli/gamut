@@ -20,7 +20,8 @@ struct Params {
     window: vec2<f32>,           // (low, gain): displayed = (value - low) * gain
     texels_per_pixel: vec2<f32>, // source texels covered by one output pixel
     extent: vec2<f32>,           // image size, in the bound texture's texels
-    _pad: vec2<f32>,
+    marks: u32,                  // bit 1: mark pixels at or below black, bit 2: at or above white
+    _pad: u32,
     primaries: mat3x3<f32>,      // source primaries -> BT.709
     swizzle: u32,                // 0 gray, 1 gray+alpha, 2 rgb, 3 rgba
     alpha_mode: u32,             // 0 opaque, 1 straight, 2 premultiplied
@@ -30,6 +31,12 @@ struct Params {
 
 @group(0) @binding(0) var<uniform> params: Params;
 @group(1) @binding(0) var source: texture_2d<f32>;
+
+// The marks on clipped pixels, in linear light: a red and a blue that no
+// photograph is made of. Twinned by `MARKS` in render/shader_codes.rs, which
+// a test holds to these.
+const MARK_WHITE: vec3<f32> = vec3<f32>(1.0, 0.02, 0.02);
+const MARK_BLACK: vec3<f32> = vec3<f32>(0.02, 0.1, 1.0);
 
 struct VertexOut {
     @builtin(position) position: vec4<f32>,
@@ -272,6 +279,22 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     // The display window. One control serving both HDR exposure and the
     // window/level a measurement image needs.
     let windowed = (color - vec3<f32>(params.window.x)) * params.window.y;
+
+    // While the key for it is held, a pixel the window has taken to white
+    // or to black in every channel — where the picture has gone flat, and
+    // whatever was there is gone — is painted in a color that is not in any
+    // picture, in place of itself: red for the highlights, blue for the
+    // shadows, which is what every editor's warning looks like. Before the
+    // false color, since a ramp's ends are not white and black, and read
+    // in linear light, the same units the corners of the histogram count
+    // in. Which ends are marked is `shader_codes::marks`' to say: white is
+    // only marked where the surface is actually clipping it.
+    if (params.marks & 2u) != 0u && all(windowed >= vec3<f32>(1.0)) {
+        return vec4<f32>(MARK_WHITE * alpha, alpha);
+    }
+    if (params.marks & 1u) != 0u && all(windowed <= vec3<f32>(0.0)) {
+        return vec4<f32>(MARK_BLACK * alpha, alpha);
+    }
 
     var result: vec3<f32>;
     if is_gray && params.colormap != 0u {

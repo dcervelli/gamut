@@ -74,21 +74,15 @@ pub enum Control {
     Ramp(usize),
     /// The two steps of the exposure row under that ramp, a quarter of a stop
     /// each — see [`super::histogram::EV_STEP`].
-    ExposureDown,
-    ExposureUp,
     /// One of the windows the row below those offers, by its place in
     /// [`super::histogram::WINDOWS`]. They set a window rather than showing
-    /// which one is in force: the line above them is what says that.
+    /// which one is in force: the handles on the band are what say that.
+    /// On the panel only for a file that has a use for them — see
+    /// [`super::histogram::Offered`].
     Window(usize),
-    /// The four nudges at the end of that line, which move the window the
-    /// user has rather than putting them on a new one: along the axis either
-    /// way, and narrower or wider about its own middle.
-    WindowDown,
-    WindowUp,
-    WindowNarrow,
-    WindowWiden,
     /// One of the tone curves in the row under that, by its place in
-    /// [`crate::image::display::ToneMap::ALL`].
+    /// [`crate::image::display::ToneMap::ALL`]. On the panel only for a
+    /// file with highlights above white, likewise.
     Curve(usize),
     /// The switch at the end of the bottom bar between the SDR and the HDR
     /// surface.
@@ -146,13 +140,7 @@ impl Control {
             Control::Log => "Logarithmic counts".to_string(),
             Control::Reset => "Reset".to_string(),
             Control::Ramp(index) => format!("False color {index}"),
-            Control::ExposureDown => "Exposure down".to_string(),
-            Control::ExposureUp => "Exposure up".to_string(),
             Control::Window(index) => format!("Window {index}"),
-            Control::WindowDown => "Slide the window down".to_string(),
-            Control::WindowUp => "Slide the window up".to_string(),
-            Control::WindowNarrow => "Narrow the window".to_string(),
-            Control::WindowWiden => "Widen the window".to_string(),
             Control::Curve(index) => format!("Curve {index}"),
             Control::Output => "HDR".to_string(),
             Control::PixelFormat => "Pixel format".to_string(),
@@ -187,7 +175,26 @@ pub enum Command {
     /// The wheel turned over the picture. A wheel's notch is a step asked
     /// for by name and is animated as a key's would be; a trackpad's scroll
     /// is the hand on the view, and goes where the fingers put it.
-    Wheel { steps: f32, notched: bool },
+    Wheel {
+        steps: f32,
+        notched: bool,
+    },
+    /// The hand is on one of the histogram band's handles: the value, on
+    /// the image's own linear scale, that is to come out black, or white.
+    /// Said on every frame of the drag, the value being where the hand is
+    /// now. What moves to put it there is the application's to decide — see
+    /// `Display::put_white`.
+    BlackPoint(f32),
+    WhitePoint(f32),
+    /// The hand is on the band between them, and both are to move: the
+    /// window slid along the axis, its width kept.
+    Slide {
+        black: f32,
+        white: f32,
+    },
+    /// The hand is on the exposure's slider, and this is the exposure it
+    /// asks for, in stops.
+    Exposure(f32),
     /// The hand is on the minimap, at `at` in image pixels, which is the
     /// point to put in the middle of the window. Said on every frame the
     /// button is down on the map, from the press on, so the marker follows
@@ -201,7 +208,10 @@ pub enum Command {
     /// one on screen. `at` is where the button went down, in image pixels —
     /// the press, not wherever the pointer had got to by the time the
     /// toolkit decided it was a drag.
-    Grab { grab: Grab, at: [f32; 2] },
+    Grab {
+        grab: Grab,
+        at: [f32; 2],
+    },
     /// Where the hand is now, in image pixels, on each frame of that drag.
     /// Carried here because the application's own pointer stops moving
     /// while the toolkit holds a drag.

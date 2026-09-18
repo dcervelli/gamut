@@ -194,6 +194,7 @@ still agrees with both, so renaming either is editing the constant —
 | What the surface can be, SDR or HDR | `render/output.rs` chooses it; `monitor.rs` says what the monitor is in; `App::surface_hdr` and `App::headroom` put the two together, `App::sync_output` acts on them, and `App::toggle_hdr` is what the bar's `HDR` button and `o` both call |
 | A new render pass | build it from `render/gpu.rs`; add its target to `Renderer::render` |
 | Something about the display window, exposure or false color | `image/display.rs` (state) and `shaders/image.wgsl` / `composite.wgsl` (effect) |
+| Which rows the histogram panel offers a file, what a drag on its band does, or what its corners say | `ui/histogram.rs::Offered` for the rows, decided from the file alone; `track` for the band and its handles, which ask through `Command::{BlackPoint, WhitePoint, Slide}` and land in `Display::put_black`, `Display::put_white` — where the file decides whether the white handle is the exposure or the window — and `Display::set_displayed_bounds`; `slider` for the exposure, which asks through `Command::Exposure` and lands in `Display::set_exposure`, `SLIDER_STOPS` being how far it runs; `Plot::clipped` for the shares in the plot's corners, and `Display::clips_white` for whether white counts. The marks `w` paints on the picture are `marks` in `shaders/image.wgsl`, `shader_codes::marks`, and `Pointer::marking` |
 
 ## Conventions
 

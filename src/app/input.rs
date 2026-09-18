@@ -14,7 +14,7 @@ use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey, PhysicalKey};
 
 use super::App;
 use crate::clipboard;
-use crate::image::display::{AutoWindow, Colormap, Startup, ToneMap};
+use crate::image::display::{Colormap, Startup, ToneMap};
 use crate::image::encode;
 use crate::image::region::{Grip, Region, Side};
 use crate::loader::Source;
@@ -98,6 +98,10 @@ pub enum Action {
     CycleToneMap,
     CycleColormap,
     ResetDisplay,
+    /// Paint the pixels the window has taken to black or to white in the
+    /// warning colors, for as long as the key is held: it is answered on
+    /// the way down and taken back on the way up, like `Space`.
+    MarkClipped,
     /// Between the SDR and the HDR surface, where the driver offers the
     /// choice.
     ToggleHdr,
@@ -326,12 +330,10 @@ fn held(mods: Mods) -> String {
     prefix
 }
 
-/// How far one nudge of the display window moves it, as a fraction of its
-/// own width, and what one narrowing or widening scales that width by.
-///
-/// Named because the histogram panel's four nudges are the same four steps
-/// as the keys below: a button that moved the window by some other amount
-/// would be a second answer to a question that already has one.
+/// How far one press of the keys moves the display window, as a fraction of
+/// its own width, and what one narrowing or widening scales that width by.
+/// The hand on the histogram's band moves it by no step at all — the
+/// handles go where they are put — so these are the keys' alone.
 const WINDOW_STEP: f32 = 0.05;
 const NARROWER: f32 = 0.8;
 const WIDER: f32 = 1.25;
@@ -387,13 +389,6 @@ fn action_of(tip: Tip) -> Option<Action> {
         // windows and the curves in turn where a button names one outright.
         Tip::Control(Control::Window(index)) if index < histogram::WINDOWS.len() => CycleAutoWindow,
         Tip::Control(Control::Curve(index)) if index < ToneMap::ALL.len() => CycleToneMap,
-        // The four nudges beside the window's reading are the keys with a
-        // picture on them: the same four amounts, so a press and a keystroke
-        // move the window by the same step and are named by the same words.
-        Tip::Control(Control::WindowDown) => ShiftWindow(-WINDOW_STEP),
-        Tip::Control(Control::WindowUp) => ShiftWindow(WINDOW_STEP),
-        Tip::Control(Control::WindowNarrow) => Contrast(NARROWER),
-        Tip::Control(Control::WindowWiden) => Contrast(WIDER),
         // A cell of a menu sets one state directly where the key steps
         // through them all: the key is worth naming, the description of the
         // step is not. A numbered cell of the zoom menu is the exception, its
@@ -409,7 +404,18 @@ fn action_of(tip: Tip) -> Option<Action> {
         // The words at the end of the bottom bar are about four settings at
         // once, so no one key does what they do; what a press on them opens
         // is the panel that sets all four, which the tooltip says outright.
-        Tip::Control(_) | Tip::Name | Tip::Counter | Tip::State | Tip::Timeline => return None,
+        // The band under the histogram, its handles and the exposure's
+        // number are dragged, which no key does either: the keys that step
+        // the same things come under them as hints — see `App::tooltip`.
+        Tip::Control(_)
+        | Tip::Name
+        | Tip::Counter
+        | Tip::State
+        | Tip::Timeline
+        | Tip::BlackPoint
+        | Tip::WhitePoint
+        | Tip::Window
+        | Tip::Exposure => return None,
     })
 }
 
@@ -857,6 +863,13 @@ pub const KEYS: &[Binding] = &[
     Binding {
         section: Section::Display,
         mods: PLAIN,
+        shown: "w",
+        help: "Mark the clipped pixels while held: red at white, blue at black",
+        keys: &[(Char("w"), MarkClipped), (Char("W"), MarkClipped)],
+    },
+    Binding {
+        section: Section::Display,
+        mods: PLAIN,
         shown: "o",
         help: "Toggle HDR output, where the monitor is in HDR mode",
         keys: &[(Char("o"), ToggleHdr), (Char("O"), ToggleHdr)],
@@ -910,6 +923,9 @@ pub(super) struct Namer {
     /// Whether anything out there offers to open the file on screen, which
     /// is what makes the open button dead.
     openable: bool,
+    /// Whether a false color is on the picture, which is what makes the
+    /// histogram's row of curves dead.
+    false_colored: bool,
     /// The absolute path of the file on screen, for the tooltip on its name.
     path: String,
     /// Which file is on screen, out of how many.
@@ -935,7 +951,9 @@ impl Naming for Namer {
         // the surface switch on a monitor with no room above white — refuses
         // the press, so the label says why rather than naming the thing and
         // the key beside it, neither of which is going to happen.
-        if let Some(refused) = ui::tooltip::disabled(at, self.room, self.hdr, self.openable) {
+        if let Some(refused) =
+            ui::tooltip::disabled(at, self.room, self.hdr, self.openable, self.false_colored)
+        {
             return Some(ui::Tooltip {
                 title: vec![refused.said.to_string()],
                 hints: refused.hint.map(str::to_string).into_iter().collect(),
@@ -981,15 +999,27 @@ impl Naming for Namer {
                 vec![names(at)?],
                 Vec::from_iter(hint(ToggleInterfaceAndPanels)),
             ),
-            // The exposure's two steps: which way this one goes and what it
-            // is worth, and under it the keys that take the same step.
-            Tip::Control(Control::ExposureDown | Control::ExposureUp) => (
+            // The exposure's slider, and under it the keys that step what
+            // it sets.
+            Tip::Exposure => (
                 vec![names(at)?],
                 [Exposure(-histogram::EV_STEP)]
                     .into_iter()
                     .filter_map(hint)
                     .collect(),
             ),
+            // The band under the plot and its two handles: what each is,
+            // and under it the keys that move the window the same way — the
+            // pair that slides it under the band, and the pair that widens
+            // and narrows it under either handle, a handle being one end of
+            // the width.
+            Tip::Window => (
+                vec![names(at)?],
+                Vec::from_iter(hint(ShiftWindow(-WINDOW_STEP))),
+            ),
+            Tip::BlackPoint | Tip::WhitePoint => {
+                (vec![names(at)?], Vec::from_iter(hint(Contrast(NARROWER))))
+            }
             // The words at the end of the bottom bar: what the bar says in
             // the room it has, said out in full — a line for each of the
             // things in force — and under them that the panel which sets all
@@ -1060,8 +1090,12 @@ pub(super) struct Pointer {
     /// The handle of the region it was resting on at the last pass, if any
     /// — said the same way, and what the region's words are written for.
     pub(super) grip: Option<Grip>,
-    /// Where `Space` is: the one key that is held as well as pressed.
+    /// Where `Space` is: the one key that fits on its way up.
     pub(super) space: Space,
+    /// Whether the key that marks the clipped pixels is down. Held rather
+    /// than toggled, since the marks are a thing to glance at and not a
+    /// state to be left in; its repeats are the same press still going.
+    pub(super) marking: bool,
 }
 
 /// Where `Space` is. Held, a drag on the picture draws a box to zoom to,
@@ -1168,6 +1202,11 @@ impl App {
             return self.release_space();
         }
         if state == ElementState::Released {
+            // The marks on the clipped pixels come off with the key that put
+            // them on, whatever is held with it by then.
+            if action_for(key, position, self.pointer.modifiers) == Some(MarkClipped) {
+                return Effect::redraw_if(std::mem::take(&mut self.pointer.marking));
+            }
             return Effect::Nothing;
         }
         match action_for(key, position, self.pointer.modifiers) {
@@ -1205,6 +1244,7 @@ impl App {
     /// any more, and its release will go elsewhere.
     pub(super) fn keys_lost(&mut self) {
         self.pointer.space = Space::Up;
+        self.pointer.marking = false;
     }
 
     /// Does what a key asked for.
@@ -1365,11 +1405,23 @@ impl App {
                     true
                 });
             }
+            // Not under a false color, which clips whatever the curve: the
+            // row of curves is dead there, and a key that changed what the
+            // dead row shows would have the picture change when the ramp
+            // came off, from a press made long before.
             CycleToneMap => {
                 return self.adjust(|current, _| {
+                    if current.display.false_colored(current.image.is_gray()) {
+                        return false;
+                    }
                     current.display.cycle_tone_map();
                     true
                 });
+            }
+            // On the way down; the way up is read in `handle_key`. A repeat
+            // of a key already held changes nothing.
+            MarkClipped => {
+                return Effect::redraw_if(!std::mem::replace(&mut self.pointer.marking, true));
             }
             CycleColormap => {
                 return self.adjust(|current, _| {
@@ -1630,6 +1682,10 @@ impl App {
             room: self.room(),
             hdr: self.hdr_state(),
             openable: !self.openers.is_empty(),
+            false_colored: self
+                .current
+                .as_ref()
+                .is_some_and(|current| current.display.false_colored(current.image.is_gray())),
             path: self.shown_path().display().to_string(),
             index: self.files.index(),
             count: self.files.len(),
@@ -1661,6 +1717,31 @@ impl App {
                 return std::mem::replace(&mut self.pointer.grip, grip) != grip;
             }
             ui::Command::Press(control) => self.press(control),
+            // The hand on the band under the histogram: the values that come
+            // out black and white go where the handles are put, as the view
+            // goes where a drag puts it. Not animated, and not a step: the
+            // hand is on it. Which of the display's dials moves to put white
+            // there is the file's to say, and the display asks it.
+            ui::Command::BlackPoint(black) => {
+                if let Some(current) = self.current.as_mut() {
+                    current.display.put_black(black);
+                }
+            }
+            ui::Command::WhitePoint(white) => {
+                if let Some(current) = self.current.as_mut() {
+                    current.display.put_white(white, current.image.referred);
+                }
+            }
+            ui::Command::Slide { black, white } => {
+                if let Some(current) = self.current.as_mut() {
+                    current.display.set_displayed_bounds(black, white);
+                }
+            }
+            ui::Command::Exposure(stops) => {
+                if let Some(current) = self.current.as_mut() {
+                    current.display.set_exposure(stops);
+                }
+            }
             // The image follows the pointer, so the viewport moves the other
             // way. Not animated: the hand is on the view.
             ui::Command::Drag([dx, dy]) => {
@@ -2038,42 +2119,20 @@ impl App {
                     current.display.colormap = *map;
                 }
             }
-            // The keys' own action, as with the reset, and the keys' own step
-            // with it: a press here and `d` or `f` are worth the same quarter
-            // of a stop, so nothing but where it is pressed tells them apart.
-            Control::ExposureDown => {
-                let _ = self.perform(Exposure(-histogram::EV_STEP));
-            }
-            Control::ExposureUp => {
-                let _ = self.perform(Exposure(histogram::EV_STEP));
-            }
-            // A window named outright rather than the next one along: the
-            // image's own where the row offers that, which is the one of the
-            // four that only the image can answer.
+            // A window named outright rather than the next one along.
             Control::Window(index) => {
                 if let Some(current) = self.current.as_mut()
                     && let Some((_, window)) = histogram::WINDOWS.get(index)
                 {
-                    let window = window.unwrap_or_else(|| AutoWindow::default_for(&current.image));
-                    current.display.set_auto(window, &current.stats);
+                    current.display.set_auto(*window, &current.stats);
                 }
             }
             Control::Curve(index) => {
                 if let Some(current) = self.current.as_mut()
                     && let Some(curve) = ToneMap::ALL.get(index)
+                    && !current.display.false_colored(current.image.is_gray())
                 {
                     current.display.tone_map = *curve;
-                }
-            }
-            // Whatever the tooltip said the button does, done: these four
-            // stand for a key exactly, and asking the same table that names
-            // them is what keeps the two from ever meaning different things.
-            Control::WindowDown
-            | Control::WindowUp
-            | Control::WindowNarrow
-            | Control::WindowWiden => {
-                if let Some(action) = action_of(Tip::Control(widget)) {
-                    let _ = self.perform(action);
                 }
             }
             // A cell of the zoom menu: a zoom chosen here is a move.
@@ -2326,31 +2385,13 @@ mod tests {
         }
         assert_eq!(named(Control::Ramp(Colormap::ALL.len())), None);
 
-        // The exposure's two steps say what one press of them is worth, in
-        // the units the bottom bar reads an exposure out in — the quarter
-        // stop `d` and `f` take as well.
-        assert_eq!(
-            named(Control::ExposureDown).as_deref(),
-            Some("Exposure -\u{00bc} EV")
-        );
-        assert_eq!(
-            named(Control::ExposureUp).as_deref(),
-            Some("Exposure +\u{00bc} EV")
-        );
-
-        // The four nudges are the keys with a picture on them, and are named
-        // by those keys' own words: one case each, since the capitals are the
-        // width of the window and the small letters are where it sits.
-        // Each of them says which way it goes, where the key table's own
-        // words name the pair the key is bound with.
-        for (widget, expected) in [
-            (Control::WindowDown, "Slide the window down (a)"),
-            (Control::WindowUp, "Slide the window up (s)"),
-            (Control::WindowNarrow, "Narrow the window (A)"),
-            (Control::WindowWiden, "Widen the window (S)"),
-        ] {
-            assert_eq!(named(widget).as_deref(), Some(expected));
-        }
+        // The band and its handles name themselves, no one key doing what
+        // a drag on them does; the keys that move the window come under
+        // them as hints — see `the_band_and_its_handles_say_which_keys_move_the_window`.
+        assert_eq!(names(Tip::BlackPoint).as_deref(), Some("Black point"));
+        assert_eq!(names(Tip::WhitePoint).as_deref(), Some("White point"));
+        assert!(names(Tip::Window).is_some());
+        assert!(names(Tip::Exposure).is_some());
 
         // And the rows that set a state name the state, with the key that
         // steps through the row after it.
@@ -2377,15 +2418,49 @@ mod tests {
             Control::Log,
             Control::Reset,
             Control::Ramp(1),
-            Control::ExposureDown,
-            Control::WindowNarrow,
-            Control::Window(0),
-            Control::Window(3),
             Control::Curve(2),
         ] {
             let words = named(widget).expect("named above");
             assert!(words.len() <= 32, "{words} is too long for the panel");
         }
+        // The windows' are sentences, since the button wears two words that
+        // need saying in full; they still have to fit under the panel.
+        for index in 0..histogram::WINDOWS.len() {
+            let words = named(Control::Window(index)).expect("named above");
+            assert!(words.len() <= 56, "{words} is too long for the panel");
+        }
+    }
+
+    /// The band under the plot and its two handles are dragged, which no
+    /// key does; what the keys do is move the same window by steps, and the
+    /// tooltip on each says which pair does what a drag there does.
+    #[test]
+    fn the_band_and_its_handles_say_which_keys_move_the_window() {
+        let namer = Namer {
+            room: Room {
+                histogram: true,
+                info: true,
+            },
+            hdr: Hdr::Available,
+            openable: false,
+            false_colored: false,
+            path: String::new(),
+            index: 0,
+            count: 1,
+            show_histogram: true,
+            state: Vec::new(),
+        };
+        let tooltip = |tip| namer.tooltip(tip).expect("named");
+        let band = tooltip(Tip::Window);
+        assert_eq!(band.hints, ["Slide the window down / up (a, s)"]);
+        for handle in [Tip::BlackPoint, Tip::WhitePoint] {
+            assert_eq!(tooltip(handle).hints, ["Narrow / widen the window (A, S)"]);
+        }
+        // And the exposure's slider names the keys that step it.
+        assert_eq!(
+            tooltip(Tip::Exposure).hints,
+            ["Exposure down / up, a quarter stop (d, f)"]
+        );
     }
 
     /// The dot at the head of the pixel readout is named by the key that
@@ -2442,6 +2517,7 @@ mod tests {
             },
             hdr: Hdr::Available,
             openable: true,
+            false_colored: false,
             path: String::new(),
             index: 0,
             count: 1,
@@ -2531,6 +2607,7 @@ mod tests {
             },
             hdr: Hdr::Available,
             openable: true,
+            false_colored: false,
             path: String::new(),
             index: 2,
             count: 12,
@@ -2615,7 +2692,9 @@ mod tests {
         // different cases.
         assert_eq!(plain("a"), Some(ShiftWindow(-0.05)));
         assert_eq!(plain("A"), Some(Contrast(0.8)));
-        assert_eq!(plain("w"), None);
+        assert_eq!(plain("w"), Some(MarkClipped));
+        assert_eq!(plain("W"), Some(MarkClipped));
+        assert_eq!(plain("u"), None);
         assert_eq!(plain("x"), Some(ToggleRegion));
         assert_eq!(plain("X"), Some(ToggleRegion));
         // The backquote and the tilde are the same key, and Shift is the

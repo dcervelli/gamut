@@ -10,7 +10,7 @@ use super::gpu::{self, Fullscreen};
 use super::output::Output;
 use super::placement::Placement;
 use super::shader_codes;
-use crate::image::display::{Colormap, Headroom, ToneMap};
+use crate::image::display::{Headroom, ToneMap};
 
 /// The most regions the checkerboard can be cut into: the image, and the
 /// minimap's thumbnail.
@@ -132,7 +132,7 @@ impl Composite {
         // choice `Display::curve` makes for the readouts, and on the same
         // test: the display ignores a colormap on a color image, so the
         // compositor has to as well.
-        let tone_map = if gray && display.colormap != Colormap::Gray {
+        let tone_map = if display.false_colored(gray) {
             shader_codes::tone_map(ToneMap::None, Headroom::None)
         } else {
             shader_codes::tone_map(display.tone_map, headroom)

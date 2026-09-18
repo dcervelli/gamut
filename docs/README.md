@@ -9,6 +9,7 @@ wants [`user-docs/`](../user-docs/) instead.
 | [Architecture](architecture.md) | The three rendering layers, how egui fits under the compositor, and where each file's job is |
 | [The interface](interface.md) | Why the controls are shaped as they are: the chrome, the layers the pointer is routed by, the information panel, menus |
 | [Color management](color.md) | The one invariant, the working space, display- vs scene-referred, and what happens above white |
+| [The histogram panel](histogram.md) | What the panel is for, why its rows follow the file, the band as a levels track, and what is written in the plot's corners |
 | [Resampling](resampling.md) | The filters, and the coarse chain that makes minification affordable |
 | [Live reload](live-reload.md) | Watching the file and the directory, and why it is a `stat` rather than `inotify` |
 | [Animation and pages](animation.md) | The frames a decoder composites, the thread that decodes them ahead under a budget, and the clock they play by |

@@ -82,11 +82,55 @@ pub fn resampler(zoom: f32, upscale: Upscale) -> u32 {
     }
 }
 
+/// Which ends of the window the image shader paints its warning colors
+/// over, as the bits of `marks` in `shaders/image.wgsl`: the pixels at or
+/// below black, and the pixels at or above white. Nothing while the key for
+/// them is up, which is the usual state; and white only where the surface
+/// is actually clipping it — no curve on, and no room above white — since a
+/// highlight rolled off by a curve or shown by an HDR surface is not lost.
+pub fn marks(black: bool, white: bool) -> u32 {
+    u32::from(black) | (u32::from(white) << 1)
+}
+
+/// The two warning colors, in linear light, as `MARK_WHITE` and `MARK_BLACK`
+/// in `shaders/image.wgsl` have them: what a clipped highlight and a clipped
+/// shadow are painted. Here so that a test can hold the shader to them.
+#[cfg(test)]
+pub const MARKS: [[f32; 3]; 2] = [[1.0, 0.02, 0.02], [0.02, 0.1, 1.0]];
+
 /// Matches `encoding` in `shaders/composite.wgsl`.
 pub fn encoding(encoding: Encoding) -> u32 {
     match encoding {
         Encoding::Srgb => 0,
         Encoding::ScRgbLinear => 1,
         Encoding::Pq => 2,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The two bits are the two ends, and nothing is marked while the key
+    /// is up.
+    #[test]
+    fn the_marks_are_one_bit_an_end() {
+        assert_eq!(marks(false, false), 0);
+        assert_eq!(marks(true, false), 1);
+        assert_eq!(marks(false, true), 2);
+        assert_eq!(marks(true, true), 3);
+    }
+
+    /// The shader paints the two colors [`MARKS`] says it does: a line of
+    /// the WGSL source is held to each, so that a change to either side
+    /// without the other fails here rather than on screen.
+    #[test]
+    fn the_shader_paints_the_marks_the_codes_name() {
+        let source = include_str!("shaders/image.wgsl");
+        for (name, color) in [("MARK_WHITE", MARKS[0]), ("MARK_BLACK", MARKS[1])] {
+            let [r, g, b] = color.map(|channel| format!("{channel:?}"));
+            let line = format!("const {name}: vec3<f32> = vec3<f32>({r}, {g}, {b});");
+            assert!(source.contains(&line), "{line}");
+        }
     }
 }
