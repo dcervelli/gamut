@@ -78,12 +78,9 @@ pub enum Control {
     /// One of the windows the row below those offers, by its place in
     /// [`super::histogram::WINDOWS`]. They set a window rather than showing
     /// which one is in force: the handles on the band are what say that.
-    /// On the panel only for a file that has a use for them — see
-    /// [`super::histogram::Offered`].
     Window(usize),
-    /// One of the tone curves in the row under that, by its place in
-    /// [`crate::image::display::ToneMap::ALL`]. On the panel only for a
-    /// file with highlights above white, likewise.
+    /// One of the two choices for the curve in the row under that, by its
+    /// place in [`crate::image::display::ToneMap::ALL`].
     Curve(usize),
     /// The switch at the end of the bottom bar between the SDR and the HDR
     /// surface.
@@ -188,8 +185,8 @@ pub enum Command {
     /// The hand is on one of the histogram band's handles: the value, on
     /// the image's own linear scale, that is to come out black, or white.
     /// Said on every frame of the drag, the value being where the hand is
-    /// now. What moves to put it there is the application's to decide — see
-    /// `Display::put_white`.
+    /// now. Each lands in its own end of the window — `Display::put_black`,
+    /// `Display::put_white` — with the exposure left alone.
     BlackPoint(f32),
     WhitePoint(f32),
     /// The hand is on the band between them, and both are to move: the

@@ -289,25 +289,32 @@ fn describe_state(current: &Current, headroom: Headroom) -> Vec<String> {
 /// I ask for", and this is an answer to "what is happening to the picture".
 pub(super) const CLIPPED: &str = "clipped";
 
-/// What is becoming of the highlights: the curve that is on them, or —
-/// where there is none and the surface stops at white — that they are being
-/// clipped, said outright rather than left to be inferred from a picture
-/// that has gone flat at the top. Nothing at all where nothing is being
-/// done: no curve and nothing above white to clip, or no curve and a surface
-/// with the room to show what is.
+/// And the word for one whose highlights the curve is bringing back under
+/// white: the same question as [`CLIPPED`], with the other answer.
+pub(super) const ROLLED_OFF: &str = "rolled off";
+
+/// What is becoming of the highlights: that the curve is rolling them off,
+/// or — where there is none and the surface stops at white — that they are
+/// being clipped, said outright rather than left to be inferred from a
+/// picture that has gone flat at the top. Nothing at all where nothing is
+/// being done: no curve and nothing above white to clip, or no curve and a
+/// surface with the room to show what is.
 ///
 /// The false color clips whatever the curve, and says so by being named
-/// itself, in the segment before this one.
+/// itself, in the segment before this one. Whether the surface is clipping
+/// is [`crate::image::display::Display::clips_white`]'s to say, the same test the histogram's
+/// corner and the shader's mark make.
 fn describe_highlights(current: &Current, headroom: Headroom) -> Option<&'static str> {
     let display = &current.display;
-    if display.false_colored(current.image.is_gray()) {
+    let gray = current.image.is_gray();
+    if display.false_colored(gray) {
         return None;
     }
-    match (display.tone_map, headroom) {
-        (ToneMap::None, Headroom::Above) => None,
-        (ToneMap::None, Headroom::None) => display.exceeds_white(&current.stats).then_some(CLIPPED),
-        (curve, _) => Some(curve.label()),
+    if display.tone_map != ToneMap::None {
+        return Some(ROLLED_OFF);
     }
+    (display.clips_white(gray, headroom) && display.exceeds_white(&current.stats))
+        .then_some(CLIPPED)
 }
 
 /// The two ends of the display window, in the units of the source file where
@@ -320,8 +327,8 @@ fn window_bounds(current: &Current) -> [String; 2] {
     } else {
         1.0
     };
-    let low = current.display.low * scale;
-    let high = current.display.high * scale;
+    let low = current.display.window_low * scale;
+    let high = current.display.window_high * scale;
     if scale > 1.0 {
         [format!("{low:.0}"), format!("{high:.0}")]
     } else {
@@ -365,7 +372,10 @@ pub fn explain_state(current: &Current, headroom: Headroom) -> Vec<String> {
         // The one of them that is not a setting: what is becoming of the
         // picture, in the words the bar sets in bold.
         Some(CLIPPED) => said.push("The image is currently clipped.".to_string()),
-        Some(curve) => said.push(format!("{} tone curve.", capitalized(curve))),
+        Some(_) => said.push(format!(
+            "The highlights are rolled off by the {} curve.",
+            display.tone_map.label()
+        )),
         None => {}
     }
     said
@@ -435,7 +445,7 @@ mod tests {
         current.display.adjust_exposure(0.5);
         assert_eq!(
             describe_state(&current, Headroom::None),
-            ["min/max", "+\u{00bd} EV", CLIPPED],
+            ["full", "+\u{00bd} EV", CLIPPED],
             "the rule and not its numbers, and the exposure in halves and \
              quarters rather than rounded to a tenth"
         );
@@ -443,7 +453,7 @@ mod tests {
         current.display.colormap = Colormap::Viridis;
         assert_eq!(
             describe_state(&current, Headroom::None),
-            ["min/max", "+\u{00bd} EV", "viridis"],
+            ["full", "+\u{00bd} EV", "viridis"],
             "a false color is named itself, and clips whatever the curve"
         );
     }
@@ -461,7 +471,7 @@ mod tests {
         let whole = fit_segments(monospace, &segments, 1000.0);
         assert_eq!(
             whole,
-            format!("min/max{SEPARATOR}+\u{00bd} EV{SEPARATOR}{CLIPPED}"),
+            format!("full{SEPARATOR}+\u{00bd} EV{SEPARATOR}{CLIPPED}"),
             "a wide window has room for all of it"
         );
 
@@ -474,7 +484,7 @@ mod tests {
 
         assert_eq!(
             fit_segments(monospace, &segments, 1.0),
-            "min/max",
+            "full",
             "the first segment stays however narrow the window gets"
         );
     }
@@ -491,13 +501,13 @@ mod tests {
         );
 
         current.display.auto = AutoWindow::MinMax;
-        current.display.low = 0.012;
-        current.display.high = 1.0;
+        current.display.window_low = 0.012;
+        current.display.window_high = 1.0;
         current.display.adjust_exposure(0.25);
         assert_eq!(
             explain_state(&current, Headroom::None),
             [
-                "Min/max window spans 0.012 to 1.000.",
+                "Full window spans 0.012 to 1.000.",
                 "Exposure +\u{00bc} EV.",
                 "The image is currently clipped.",
             ],
@@ -508,16 +518,16 @@ mod tests {
         current.display.tone_map = ToneMap::Neutral;
         assert_eq!(
             explain_state(&current, Headroom::None).last().unwrap(),
-            "Neutral tone curve.",
-            "the curve takes the place of the word for losing the highlights"
+            "The highlights are rolled off by the neutral curve.",
+            "the roll-off takes the place of the word for losing the highlights"
         );
     }
 
     /// The bar says what is becoming of the highlights and nothing more: no
     /// word for a picture with none above white, `clipped` once exposure has
-    /// pushed some there on a surface that stops at white, the curve's own
-    /// name while one is on, and nothing under a false color, which is named
-    /// itself and clips whatever the curve.
+    /// pushed some there on a surface that stops at white, `rolled off`
+    /// while the curve is on, and nothing under a false color, which is
+    /// named itself and clips whatever the curve.
     #[test]
     fn the_bar_says_what_becomes_of_the_highlights() {
         let mut current = photograph();
@@ -541,7 +551,7 @@ mod tests {
         for headroom in [Headroom::None, Headroom::Above] {
             assert_eq!(
                 describe_highlights(&current, headroom),
-                Some("neutral"),
+                Some(ROLLED_OFF),
                 "{headroom:?}"
             );
         }

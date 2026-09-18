@@ -10,8 +10,8 @@ complete -c gamut      -l transfer    -d 'Override the transfer function' -x -a 
 complete -c gamut      -l primaries   -d 'Override the color primaries'  -x -a 'bt709 p3 bt2020 adobe'
 complete -c gamut      -l no-gain-map -d 'Show the SDR base image of an Ultra HDR JPEG'
 complete -c gamut      -l colormap    -d 'False color on single-channel images' -x -a 'gray viridis magma turbo'
-complete -c gamut      -l tone-map    -d 'Start with this tone map'       -x -a 'none reinhard neutral'
-complete -c gamut      -l window      -d 'Start with the window set this way' -x -a 'unit minmax pct'
+complete -c gamut      -l tone-map    -d 'Start with this tone map'       -x -a 'none neutral'
+complete -c gamut      -l window      -d 'Start with the window set this way' -x -a 'stored full trimmed'
 complete -c gamut      -l exposure    -d 'Start at this exposure, in stops' -x
 complete -c gamut      -l upscale     -d 'How to resample above 100%'     -x -a 'nearest bicubic'
 complete -c gamut      -l size        -d 'Open the window at this size in logical pixels' -x

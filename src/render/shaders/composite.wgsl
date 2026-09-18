@@ -5,7 +5,7 @@
 // neither the image layer nor the UI layer has to.
 
 struct Params {
-    tone_map: u32,     // 0 clip, 1 reinhard, 2 neutral, 3 none
+    tone_map: u32,     // 0 clip, 1 neutral, 2 none
     encoding: u32,     // 0 sRGB surface (hardware encodes), 1 scRGB linear, 2 PQ
     // Global output gain, applied after compositing. 1.0 means "1.0 is SDR
     // reference white", which is what both sRGB and scRGB want.
@@ -37,12 +37,9 @@ fn vs_main(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
     return vec4<f32>(x, y, 0.0, 1.0);
 }
 
-fn reinhard(color: vec3<f32>) -> vec3<f32> {
-    return color / (color + vec3<f32>(1.0));
-}
-
-// Khronos PBR Neutral. Holds hue and saturation far better than a Reinhard
-// curve and avoids the color cast of the ACES approximations.
+// Khronos PBR Neutral: a shoulder under white, a small toe, and a
+// desaturation toward the peak that holds hue where a channel would clip
+// first. Below the shoulder a value comes out as itself.
 fn neutral(color_in: vec3<f32>) -> vec3<f32> {
     let start_compression = 0.8 - 0.04;
     let desaturation = 0.15;
@@ -70,16 +67,15 @@ fn neutral(color_in: vec3<f32>) -> vec3<f32> {
 
 // Mirrored on the CPU by `ToneMap::apply` in image/display.rs, for the one
 // pixel the readout in the bottom bar has to describe. Which arm "no curve"
-// takes is the surface's to say — 0 on an SDR surface, 3 on one with room
+// takes is the surface's to say — 0 on an SDR surface, 2 on one with room
 // above white — and `shader_codes::tone_map` says it.
 fn tone_map(color: vec3<f32>) -> vec3<f32> {
     switch params.tone_map {
-        case 1u: { return reinhard(max(color, vec3<f32>(0.0))); }
-        case 2u: { return neutral(max(color, vec3<f32>(0.0))); }
+        case 1u: { return neutral(max(color, vec3<f32>(0.0))); }
         // Nothing to do: the surface has room above 1.0 and the highlights
         // are meant to use it. Negatives still go, being light that is not
         // there rather than headroom.
-        case 3u: { return max(color, vec3<f32>(0.0)); }
+        case 2u: { return max(color, vec3<f32>(0.0)); }
         default: { return clamp(color, vec3<f32>(0.0), vec3<f32>(1.0)); }
     }
 }

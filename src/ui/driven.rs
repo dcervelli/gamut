@@ -7,7 +7,7 @@ use std::sync::Arc;
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 
-use crate::image::display::{Display, Headroom, Startup};
+use crate::image::display::{Display, Headroom, Startup, ToneMap};
 use crate::image::exif::Exif;
 use crate::image::sequence::{Loops, Sequence};
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples, Stats};
@@ -406,9 +406,9 @@ fn a_toggle_with_no_room_for_its_panel_is_dead() {
 /// The band under the histogram is the levels track. A handle dragged
 /// along it asks for a window whose end is where the hand is; the band
 /// between the handles slides both ends by what the hand moved; and the
-/// exposure's slider asks for the exposure under the hand. An 8-bit sRGB
-/// file is offered the exposure and the curves under the band, and no
-/// windows.
+/// exposure's slider asks for the exposure under the hand. Every file has
+/// the three rows under the band, an 8-bit sRGB one included, and a press
+/// on a window's button reaches the application.
 #[test]
 fn the_histogram_panel_hands_back_the_hand_on_its_band() {
     use crate::image::Transfer;
@@ -417,12 +417,13 @@ fn the_histogram_panel_hands_back_the_hand_on_its_band() {
     with_histogram.show_histogram = true;
     let mut harness = open(WINDOW, 1, with_histogram);
     assert!(
-        harness.query_by_label("Window 0").is_none(),
-        "a graded file has no window row"
+        harness.query_by_label("Window 0").is_some(),
+        "every file has the window row"
     );
-    assert!(
-        harness.query_by_label("Curve 0").is_some(),
-        "but has the curves"
+    assert!(harness.query_by_label("Curve 0").is_some());
+    assert_eq!(
+        click(&mut harness, "Window 0"),
+        [Command::Press(Control::Window(0))]
     );
 
     // The file is 8-bit sRGB, so the axis is 0..1 in sRGB and the two
@@ -570,7 +571,7 @@ fn the_curves_are_dead_under_a_false_color() {
         .display
         .colormap = Colormap::Viridis;
     harness.run();
-    for index in 0..3 {
+    for index in 0..ToneMap::ALL.len() {
         assert!(dead(&harness, &format!("Curve {index}")), "curve {index}");
     }
     assert_eq!(click(&mut harness, "Curve 1"), []);

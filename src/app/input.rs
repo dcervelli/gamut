@@ -98,8 +98,7 @@ pub enum Action {
     /// Move the value that comes out black by this fraction of the
     /// window's width: the black handle's key.
     StepBlack(f32),
-    /// And the value that comes out white — or, where that handle is the
-    /// exposure, a quarter stop of it: see `Display::step_white`.
+    /// And the value that comes out white: the white handle's key.
     StepWhite(f32),
     CycleToneMap,
     CycleColormap,
@@ -1067,7 +1066,7 @@ pub const KEYS: &[Binding] = &[
         section: Section::Display,
         mods: PLAIN,
         shown: "e",
-        help: "Cycle the automatic window: unit, min/max, 99.8%",
+        help: "Cycle the window rule: stored, full, trimmed",
         when: None,
         keys: &[(Char("e"), CycleAutoWindow), (Char("E"), CycleAutoWindow)],
     },
@@ -1075,7 +1074,7 @@ pub const KEYS: &[Binding] = &[
         section: Section::Display,
         mods: PLAIN,
         shown: "t",
-        help: "Cycle tone mapping: none, reinhard, neutral",
+        help: "Toggle the curve on the highlights: clip, or roll off",
         when: None,
         keys: &[(Char("t"), CycleToneMap), (Char("T"), CycleToneMap)],
     },
@@ -1688,12 +1687,9 @@ impl App {
             StepWhite(by) => {
                 return self.adjust(|current, _| {
                     let transfer = current.image.color.transfer;
-                    current.display.step_white(
-                        by,
-                        transfer,
-                        current.image.referred,
-                        current.stats.plot.max,
-                    )
+                    current
+                        .display
+                        .step_white(by, transfer, current.stats.plot.max)
                 });
             }
             // Not under a false color, which clips whatever the curve: the
@@ -2033,8 +2029,7 @@ impl App {
             // The hand on the band under the histogram: the values that come
             // out black and white go where the handles are put, as the view
             // goes where a drag puts it. Not animated, and not a step: the
-            // hand is on it. Which of the display's dials moves to put white
-            // there is the file's to say, and the display asks it.
+            // hand is on it. The exposure is left alone by both.
             ui::Command::BlackPoint(black) => {
                 if let Some(current) = self.current.as_mut() {
                     current.display.put_black(black);
@@ -2042,7 +2037,7 @@ impl App {
             }
             ui::Command::WhitePoint(white) => {
                 if let Some(current) = self.current.as_mut() {
-                    current.display.put_white(white, current.image.referred);
+                    current.display.put_white(white);
                 }
             }
             ui::Command::Slide { black, white } => {
@@ -2425,8 +2420,11 @@ impl App {
                 // hands back says nothing the caller does not already know.
                 let _ = self.perform(ResetDisplay);
             }
+            // A false color is a reading of one channel: the key refuses a
+            // color image, and so does the button, or the two would drift.
             Control::Ramp(index) => {
                 if let Some(current) = self.current.as_mut()
+                    && current.image.is_gray()
                     && let Some(map) = Colormap::ALL.get(index)
                 {
                     current.display.colormap = *map;
@@ -2890,7 +2888,7 @@ mod tests {
             Control::Log,
             Control::Reset,
             Control::Ramp(1),
-            Control::Curve(2),
+            Control::Curve(1),
         ] {
             let words = named(widget).expect("named above");
             assert!(words.len() <= 32, "{words} is too long for the panel");

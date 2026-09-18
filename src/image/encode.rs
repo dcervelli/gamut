@@ -379,8 +379,8 @@ mod tests {
         );
 
         let mut windowed = plain();
-        windowed.low = 0.0;
-        windowed.high = 0.1;
+        windowed.window_low = 0.0;
+        windowed.window_high = 0.1;
         let windowed_byte = round_trip(&displayed(&source, &windowed)).2[0];
         assert_eq!(windowed_byte, 255, "a value over the window clips to white");
     }
@@ -409,11 +409,11 @@ mod tests {
         assert_eq!(round_trip(&displayed(&bright, &clipped)).2[0], 255);
 
         let mut rolled = plain();
-        rolled.tone_map = ToneMap::Reinhard;
+        rolled.tone_map = ToneMap::Neutral;
         let rolled_byte = round_trip(&displayed(&bright, &rolled)).2[0];
         assert!(
             rolled_byte < 255,
-            "Reinhard should pull 4.0 back under white, got {rolled_byte}"
+            "the roll-off should pull 4.0 back under white, got {rolled_byte}"
         );
     }
 
@@ -470,7 +470,7 @@ mod tests {
 
         let mut display = plain();
         display.exposure_stops = 0.7;
-        display.high = 0.8;
+        display.window_high = 0.8;
 
         let mut expected = Vec::with_capacity((width * height * 4) as usize);
         for y in 0..height {
