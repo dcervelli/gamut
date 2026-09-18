@@ -4,7 +4,6 @@ use egui::{
     Align2, Color32, CursorIcon, FontId, Sense, Stroke, WidgetInfo, WidgetType, pos2, vec2,
 };
 
-use crate::image::Referred;
 use crate::image::display::{AutoWindow, Colormap, Display, ToneMap};
 use crate::image::stats::BINS;
 use crate::render::Color;
@@ -20,87 +19,38 @@ use super::{
     BECOMES, Command, Control, Current, PADDING, PANEL_INSET, PANEL_RADIUS, PANEL_WIDTH, TEXT_SIZE,
 };
 
-/// Which of the rows of settings under the band a file gets.
+/// What the three rows of settings under the band take off the panel's
+/// height: each row and the gap above it, under the plot's own inset —
+/// which the band hangs below rather than inside, so it is what is left
+/// over between the two and belongs to whatever comes next.
 ///
-/// The exposure is every file's: pushing a picture two stops up is how you
-/// find out whether a shadow is empty or merely dark, whatever the file.
-/// The curves are every file's too, because the exposure is: a stop up
-/// puts the top of any file above white, and the curve is what fits it
-/// back into a surface that stops there — and `t` sets one on any file, so
-/// a row that some file lacked would be a key with no button. The windows
-/// are offered where they answer a question the file raises and left off
-/// where they do not, since a row of buttons that would only make a
-/// picture worse is a row the panel has to explain.
-///
-/// Settled from the file alone rather than from what has been done to it,
-/// so that the panel is one height for the whole of a file's stay on
-/// screen: the information column starts under it, and a column that
-/// jumped every time a handle was dragged would be a column no one could
-/// read while dragging.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct Offered {
-    /// The three windows named outright. Linear data has no white of its
-    /// own, so where the useful range is has to be found in the pixels, and
-    /// these are the three rules for finding it. A graded file's window is
-    /// 0..1 and nothing else, and offering it two ways to be wrong is not
-    /// a kindness.
-    pub window: bool,
-}
-
-impl Offered {
-    /// Every row there is: what the tallest panel holds, and what the window
-    /// has to have room for.
-    pub const ALL: Offered = Offered { window: true };
-
-    /// What `current` gets, or every row where there is no file yet: the
-    /// panel is not drawn without one, and the conservative answer is the
-    /// one the window's own floor is measured against.
-    pub fn of(current: Option<&Current>) -> Self {
-        current.map_or(Self::ALL, Self::for_file)
-    }
-
-    pub fn for_file(current: &Current) -> Self {
-        Self {
-            window: current.image.referred == Referred::Scene,
-        }
-    }
-
-    /// What the rows take off the panel's height: each row and the gap
-    /// above it, under the plot's own inset — which the band hangs below
-    /// rather than inside, so it is what is left over between the two and
-    /// belongs to whatever comes next.
-    const fn rows_height(self) -> f32 {
-        let mut height = PLOT_INSET + 2.0 * (ROW_GAP + ROW_HEIGHT);
-        if self.window {
-            height += ROW_GAP + ROW_HEIGHT;
-        }
-        height
-    }
-}
+/// Three rows, and every file's. The exposure: pushing a picture two stops
+/// up is how you find out whether a shadow is empty or merely dark,
+/// whatever the file. The window: a graded file's is 0..1 by rights, and
+/// the handles move it off that on any file, so the row is where it is put
+/// back as much as where a rule is chosen. The curve, because the exposure
+/// is: a stop up puts the top of any file above white, and the curve is
+/// what fits it back into a surface that stops there. One height for every
+/// file, so the information column under the panel never jumps.
+const ROWS_HEIGHT: f32 = PLOT_INSET + 3.0 * (ROW_GAP + ROW_HEIGHT);
 
 /// The panel: as wide as anything else floating over the content area, and
 /// tall enough for the line the readout is set on, a plot, the band of what
 /// the display makes of its axis, the row of false colors a gray image has
-/// under that, and the rows of settings this file is offered — see
-/// [`Offered`].
-pub const fn size(offered: Offered) -> [f32; 2] {
-    [
-        PANEL_WIDTH,
-        2.0 * PANEL_INSET
-            + LABEL_HEIGHT
-            + PLOT_INSET
-            + PLOT_HEIGHT
-            + RAMP_GAP
-            + SWATCH_HEIGHT
-            + RAMP_GAP
-            + RAMP_HEIGHT
-            + offered.rows_height(),
-    ]
-}
-
-/// The panel with every row on it, which is what a window has to have room
-/// for before either toggle is lit — see [`super::PANELS_ROOM`].
-pub(super) const TALLEST: [f32; 2] = size(Offered::ALL);
+/// under that, and the three rows of settings. What a window has to have
+/// room for before the toggle is lit — see [`super::PANELS_ROOM`].
+pub const SIZE: [f32; 2] = [
+    PANEL_WIDTH,
+    2.0 * PANEL_INSET
+        + LABEL_HEIGHT
+        + PLOT_INSET
+        + PLOT_HEIGHT
+        + RAMP_GAP
+        + SWATCH_HEIGHT
+        + RAMP_GAP
+        + RAMP_HEIGHT
+        + ROWS_HEIGHT,
+];
 
 /// The room the strip of buttons down the left takes: a button's width and
 /// the gap between it and the plot. Read by [`super::PANEL_WIDTH`], which is
@@ -266,9 +216,9 @@ pub fn stops_label(stops: f32) -> String {
 ///
 /// None of them says which window is in force: the handles on the band do
 /// that, and a press here puts the window on a rule rather than switching
-/// one on. Only a scene-referred file has the row — see [`Offered`] — and
-/// such a file's own window is the trimmed one, so there is no fourth
-/// button for "the image's own": it would be the third one twice.
+/// one on. There is no fourth button for "the image's own", because the
+/// file's own is always one of these — *As stored* on a graded file,
+/// *Trimmed* on measured light — and the reset button puts it back.
 pub const WINDOWS: [(&str, AutoWindow); 3] = [
     ("As stored", AutoWindow::Off),
     ("Full range", AutoWindow::MinMax),
@@ -375,8 +325,8 @@ fn readout_placement(bars: Rect, width: f32, ends: [f32; 2]) -> (f32, bool) {
 /// Public because the pointer is tested against the whole panel from outside
 /// the frame: what lands on it belongs to it, and must not reach the picture
 /// it is floating over.
-pub fn panel(content: Rect, offered: Offered) -> Option<Rect> {
-    let size = size(offered);
+pub fn panel(content: Rect) -> Option<Rect> {
+    let size = SIZE;
     if size[0] + 2.0 * PADDING > content.width || size[1] + 2.0 * PADDING > content.height {
         return None;
     }
@@ -489,23 +439,22 @@ fn share(row: Rect, count: usize, index: usize) -> Rect {
 /// on a gray one. Those end on the same line — the room the swatches take is
 /// taken off the plot rather than off the panel, see [`plot_area`] — so this
 /// is one block either way, and the rows do not shift about from one file to
-/// the next. What does change from file to file is which rows there are,
-/// which is [`Offered`]'s to say; a row not offered is `None` here, and the
-/// rows below it close up.
+/// the next — nor from one file to the next: the three rows are every
+/// file's.
 #[derive(Clone, Copy)]
 struct Rows {
     /// The exposure's line, and where its word goes: the slider along it
     /// and its reading at the end.
     exposure: Rect,
     exposure_label: Rect,
-    /// The three windows on offer, where they are offered.
-    window: Option<(Rect, Rect)>,
-    /// And the three curves, under whatever is above them.
+    /// The three windows.
+    window: (Rect, Rect),
+    /// And the two choices for the curve.
     curve: (Rect, Rect),
 }
 
 impl Rows {
-    fn new(panel: Rect, offered: Offered) -> Self {
+    fn new(panel: Rect) -> Self {
         let inside = panel.inset(PANEL_INSET, PANEL_INSET);
         let left = inside.x + ROW_LABEL + ROW_LABEL_GAP;
         let line = |y: f32| {
@@ -521,7 +470,7 @@ impl Rows {
             y += ROW_HEIGHT + ROW_GAP;
             line(y)
         };
-        let window = offered.window.then(&mut next);
+        let window = next();
         let curve = next();
         Self {
             exposure,
@@ -557,26 +506,20 @@ impl Rows {
     /// Each row's word and where it goes, in the order they are stacked.
     fn labels(&self) -> impl Iterator<Item = (&'static str, Rect)> {
         [
-            Some(("Exposure", self.exposure_label)),
-            self.window.map(|(_, label)| ("Window", label)),
-            Some(("Curve", self.curve.1)),
+            ("Exposure", self.exposure_label),
+            ("Window", self.window.1),
+            ("Curve", self.curve.1),
         ]
         .into_iter()
-        .flatten()
     }
 
     /// The bottom of the lowest row: where the block, and the panel, end.
     #[cfg(test)]
     fn bottom(&self) -> f32 {
-        [
-            Some(self.exposure),
-            self.window.map(|(row, _)| row),
-            Some(self.curve.0),
-        ]
-        .into_iter()
-        .flatten()
-        .map(|row| row.bottom())
-        .fold(0.0, f32::max)
+        [self.exposure, self.window.0, self.curve.0]
+            .into_iter()
+            .map(|row| row.bottom())
+            .fold(0.0, f32::max)
     }
 }
 
@@ -604,12 +547,11 @@ fn row_label(widget: Control, display: &Display) -> Option<(String, bool)> {
 
 /// Every button in that block, with where it goes. The one list the drawing,
 /// the pointer and the tooltips all work from.
-fn row_buttons(panel: Rect, offered: Offered) -> impl Iterator<Item = (Control, Rect)> {
-    let rows = Rows::new(panel, offered);
-    let windows = rows.window.into_iter().flat_map(|(row, _)| {
-        (0..WINDOWS.len())
-            .map(move |index| (Control::Window(index), share(row, WINDOWS.len(), index)))
-    });
+fn row_buttons(panel: Rect) -> impl Iterator<Item = (Control, Rect)> {
+    let rows = Rows::new(panel);
+    let (row, _) = rows.window;
+    let windows = (0..WINDOWS.len())
+        .map(move |index| (Control::Window(index), share(row, WINDOWS.len(), index)));
     let (row, _) = rows.curve;
     let curves = (0..ToneMap::ALL.len())
         .map(move |index| (Control::Curve(index), share(row, ToneMap::ALL.len(), index)));
@@ -736,7 +678,7 @@ pub fn marked(
     cursor: Option<[f32; 2]>,
     pointer: Option<[u32; 2]>,
 ) -> Option<usize> {
-    let panel = panel(content, Offered::for_file(current))?;
+    let panel = panel(content)?;
     let plot = plot_area(panel, current.image.is_gray());
     if let Some(bin) = hovered_bin(plot, cursor) {
         return Some(bin);
@@ -870,8 +812,7 @@ fn screened(theme: &Theme, luma_ink: Color, cover: Cover) -> Color32 {
 /// The panel is opaque to the pointer: what lands on it belongs to it rather
 /// than to the picture it is floating over.
 pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, content: Rect) {
-    let offered = Offered::for_file(current);
-    let Some(panel) = panel(content, offered) else {
+    let Some(panel) = panel(content) else {
         return;
     };
     let theme = pass.theme;
@@ -885,7 +826,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, conten
             ui.painter()
                 .rect_filled(area(panel), PANEL_RADIUS, theme.panel_background);
             plot(pass, ui, current, panel, content);
-            let held = controls(pass, ui, current, panel, offered);
+            let held = controls(pass, ui, current, panel);
             header(pass, ui, current, panel, held);
         });
 }
@@ -1319,13 +1260,7 @@ fn button(
 /// the panel: they say what the plot beside them is showing and what the band
 /// beneath them is painted with, and two of them are pictures of the very
 /// thing they switch.
-fn controls(
-    pass: &mut Pass,
-    ui: &mut egui::Ui,
-    current: &Current,
-    panel: Rect,
-    offered: Offered,
-) -> Option<String> {
+fn controls(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, panel: Rect) -> Option<String> {
     let theme = pass.theme;
     let panels = pass.panels;
     let scale = pass.input.scale;
@@ -1395,7 +1330,7 @@ fn controls(
     }
 
     let held = track(pass, ui, current, bars);
-    rows(pass, ui, current, panel, offered);
+    rows(pass, ui, current, panel);
 
     // The false colors, each showing itself, and only where the display
     // would act on the choice. The whole ramp rather than one color off it:
@@ -1451,10 +1386,9 @@ fn controls(
 ///
 /// The handles stand at the values that come out black and white — exposure
 /// included, since those are the two ends of the band's black run and its
-/// white run — and say where those values should be. What moves to put them
-/// there is the model's to decide, by the file: on a graded file the white
-/// handle is the exposure, and on measured light it is the window's top —
-/// see [`Display::put_white`]. A handle is dragged to the pointer rather
+/// white run — and each puts its own value where it is dragged to, the
+/// exposure left as it is: [`Display::put_black`] and
+/// [`Display::put_white`]. A handle is dragged to the pointer rather
 /// than by it, so a drag has no memory to lose: wherever the pointer is
 /// along the axis is where the handle goes, and a hand that runs off the
 /// end of the band puts the handle at the end.
@@ -1608,8 +1542,8 @@ fn track(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, bars: Rect) -> O
     said
 }
 
-/// The rows under the band: the exposure, and — where the file is offered
-/// them — the window and the curve.
+/// The rows under the band: the exposure, the window and the curve, for
+/// every file.
 ///
 /// What the plot draws, said in words and set: the handles on the band are
 /// the window, the curve over the bins is the curve, and the gain that moves
@@ -1623,9 +1557,9 @@ fn track(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, bars: Rect) -> O
 /// exposure under it — and a button lit for "full range" on a window that
 /// has since been shifted would be claiming something that stopped being
 /// true. The handles are what say where the window is.
-fn rows(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, panel: Rect, offered: Offered) {
+fn rows(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, panel: Rect) {
     let theme = pass.theme;
-    let rows = Rows::new(panel, offered);
+    let rows = Rows::new(panel);
     let display = &current.display;
     let font = FontId::proportional(ROW_TEXT);
     let grid = icon::Grid::new(ui.pixels_per_point());
@@ -1661,7 +1595,7 @@ fn rows(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, panel: Rect, offe
     // its ramp whatever curve is on — the row stays, since the panel's
     // height is the file's, and says why when rested on.
     let false_colored = display.false_colored(current.image.is_gray());
-    for (widget, rect) in row_buttons(panel, offered) {
+    for (widget, rect) in row_buttons(panel) {
         let Some((label, active)) = row_label(widget, display) else {
             continue;
         };
@@ -1795,16 +1729,13 @@ mod tests {
     use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples, Stats};
     use crate::ui::FileFacts;
 
-    /// Every combination of rows a file can be offered.
-    const EVERY_OFFER: [Offered; 2] = [Offered::ALL, Offered { window: false }];
-
     /// A content area with room for everything.
     fn content() -> Rect {
         Rect::new(0.0, 0.0, 800.0, 600.0)
     }
 
     fn full_panel() -> Rect {
-        panel(content(), Offered::ALL).expect("room")
+        panel(content()).expect("room")
     }
 
     /// `image`, on screen.
@@ -1905,42 +1836,6 @@ mod tests {
         assert_eq!(axis_words(&counts, 4095.0 / 65535.0), "4095");
     }
 
-    /// The rows a file is offered are the ones that answer a question it
-    /// raises: every file gets the exposure and the curves, and linear data
-    /// gets the windows as well.
-    #[test]
-    fn a_file_is_offered_the_rows_it_has_a_use_for() {
-        let graded = shown(DecodedImage::new(
-            2,
-            1,
-            Samples::U8 {
-                channels: Channels::Rgb,
-                data: vec![0, 0, 0, 255, 255, 255],
-            },
-            ColorSpace::SRGB,
-            AlphaMode::Opaque,
-        ));
-        assert_eq!(Offered::for_file(&graded), Offered { window: false });
-
-        // Linear samples: the window has to be found in them.
-        let render = shown(DecodedImage::new(
-            1000,
-            1,
-            Samples::F32 {
-                channels: Channels::Gray,
-                data: (0..1000).map(|i| i as f32 / 999.0).collect(),
-            },
-            ColorSpace::LINEAR_BT709,
-            AlphaMode::Opaque,
-        ));
-        assert_eq!(Offered::for_file(&render), Offered::ALL);
-
-        // Nothing on screen: every row, which is the panel the window has to
-        // have room for.
-        assert_eq!(Offered::of(None), Offered::ALL);
-        assert_eq!(Offered::of(Some(&graded)), Offered::for_file(&graded));
-    }
-
     /// The pointer reads a bin of the plot and nothing outside it — not the
     /// panel around it, and not the line the axis labels are set on.
     #[test]
@@ -1988,26 +1883,15 @@ mod tests {
         assert_eq!(bin_across(BINS - 1), 1.0);
     }
 
-    /// The panel is one fixed size for a file, so a content area smaller
-    /// than it in either direction gets no panel at all rather than one
-    /// hanging off the window over the picture it is about. A file with
-    /// fewer rows wants less room, and gets its panel in a window the
-    /// tallest would not.
+    /// The panel is one fixed size, so a content area smaller than it in
+    /// either direction gets no panel at all rather than one hanging off the
+    /// window over the picture it is about.
     #[test]
     fn a_content_area_too_small_gets_no_panel() {
-        for offered in EVERY_OFFER {
-            let size = size(offered);
-            let room = [size[0] + 2.0 * PADDING, size[1] + 2.0 * PADDING];
-            assert!(panel(Rect::new(0.0, 0.0, room[0], room[1]), offered).is_some());
-            assert!(panel(Rect::new(0.0, 0.0, room[0] - 1.0, room[1]), offered).is_none());
-            assert!(panel(Rect::new(0.0, 0.0, room[0], room[1] - 1.0), offered).is_none());
-        }
-        let least = size(Offered { window: false });
-        assert!(least[1] < TALLEST[1]);
-        assert_eq!(size(Offered::ALL), TALLEST);
-        let short = Rect::new(0.0, 0.0, 800.0, least[1] + 2.0 * PADDING);
-        assert!(panel(short, Offered::ALL).is_none());
-        assert!(panel(short, Offered { window: false }).is_some());
+        let room = [SIZE[0] + 2.0 * PADDING, SIZE[1] + 2.0 * PADDING];
+        assert!(panel(Rect::new(0.0, 0.0, room[0], room[1])).is_some());
+        assert!(panel(Rect::new(0.0, 0.0, room[0] - 1.0, room[1])).is_none());
+        assert!(panel(Rect::new(0.0, 0.0, room[0], room[1] - 1.0)).is_none());
     }
 
     /// Where it does fit it sits in the top right of the content area, its
@@ -2015,7 +1899,7 @@ mod tests {
     #[test]
     fn the_panel_sits_in_the_corner_with_its_padding_around_it() {
         let content = Rect::new(10.0, 20.0, 800.0, 600.0);
-        let panel = panel(content, Offered::ALL).expect("room");
+        let panel = panel(content).expect("room");
         assert_eq!(panel.right(), content.right() - PADDING);
         assert_eq!(panel.y, content.y + PADDING);
     }
@@ -2027,31 +1911,28 @@ mod tests {
     /// grows by.
     #[test]
     fn the_plot_keeps_one_pixel_to_the_bin_whatever_grows_around_it() {
-        for offered in EVERY_OFFER {
-            let panel = panel(content(), offered).expect("room");
-            for gray in [true, false] {
-                let bars = plot_area(panel, gray);
-                assert_eq!(bars.width, BINS as f32, "gray {gray}");
-                assert_eq!(bars.y, plot_area(full_panel(), gray).y, "{offered:?}");
+        let panel = full_panel();
+        for gray in [true, false] {
+            let bars = plot_area(panel, gray);
+            assert_eq!(bars.width, BINS as f32, "gray {gray}");
 
-                // Everything the panel holds is inside it, and clear of the
-                // plot.
-                let last = toolbar(gray).len() - 1;
-                let button = toolbar_button(panel, gray, last);
-                assert!(button.right() <= bars.x, "the strip clears the plot");
-                assert!(toolbar_button(panel, gray, 0).y >= panel.y);
-                assert!(button.bottom() <= panel.bottom(), "{button:?}");
-                // And it ends above the band of color, which is what the
-                // room under the plot is for: a button beside the ramp would
-                // read as belonging to it rather than to the plot it acts on.
-                assert!(
-                    button.bottom() <= ramp(bars).y,
-                    "gray {gray}: {button:?} against the band at {:?}",
-                    ramp(bars)
-                );
-                assert!(ramp(bars).y >= bars.bottom(), "the band is under the plot");
-                assert!(ramp(bars).bottom() <= panel.bottom());
-            }
+            // Everything the panel holds is inside it, and clear of the
+            // plot.
+            let last = toolbar(gray).len() - 1;
+            let button = toolbar_button(panel, gray, last);
+            assert!(button.right() <= bars.x, "the strip clears the plot");
+            assert!(toolbar_button(panel, gray, 0).y >= panel.y);
+            assert!(button.bottom() <= panel.bottom(), "{button:?}");
+            // And it ends above the band of color, which is what the
+            // room under the plot is for: a button beside the ramp would
+            // read as belonging to it rather than to the plot it acts on.
+            assert!(
+                button.bottom() <= ramp(bars).y,
+                "gray {gray}: {button:?} against the band at {:?}",
+                ramp(bars)
+            );
+            assert!(ramp(bars).y >= bars.bottom(), "the band is under the plot");
+            assert!(ramp(bars).bottom() <= panel.bottom());
         }
     }
 
@@ -2101,7 +1982,7 @@ mod tests {
             "{grip:?} over {plot:?}"
         );
         assert!(grip.bottom() <= swatch_button(plot, 0).y);
-        assert!(grip.bottom() <= Rows::new(full_panel(), Offered::ALL).exposure.y);
+        assert!(grip.bottom() <= Rows::new(full_panel()).exposure.y);
     }
 
     /// A control the display would ignore is not on the panel at all, and the
@@ -2134,66 +2015,54 @@ mod tests {
     /// The rows sit under the band, inside the panel, and land in the same
     /// place whether or not the image has a row of false colors — the band
     /// and the swatches under it end on the same line, so the controls
-    /// below them do not shift about from one file to the next. Whatever
-    /// rows a file is offered, the last of them ends the panel.
+    /// below them do not shift about from one file to the next. The last
+    /// of the three rows ends the panel.
     #[test]
     fn the_rows_sit_under_the_band_whatever_it_ends_in() {
-        for offered in EVERY_OFFER {
-            let panel = panel(content(), offered).expect("room");
-            let rows = Rows::new(panel, offered);
-            let inside = panel.inset(PANEL_INSET, PANEL_INSET);
+        let panel = full_panel();
+        let rows = Rows::new(panel);
+        let inside = panel.inset(PANEL_INSET, PANEL_INSET);
 
-            let lowest = swatch_button(plot_area(panel, true), 0).bottom();
-            assert_eq!(
-                lowest,
-                ramp(bars(panel)).bottom(),
-                "the false colors end where the band alone would have"
-            );
-            for (widget, rect) in row_buttons(panel, offered) {
-                assert!(rect.y >= lowest, "{widget:?} clears the band: {rect:?}");
-                assert!(rect.bottom() <= inside.bottom(), "{widget:?} {rect:?}");
-                assert!(rect.x >= inside.x + ROW_LABEL, "{widget:?} clears its word");
-                assert!(rect.right() <= inside.right() + 0.01, "{widget:?} {rect:?}");
-            }
-            // The last row is the last thing on the panel, and what it
-            // leaves under it is the panel's own inset and nothing more.
-            assert_eq!(rows.bottom(), inside.bottom(), "{offered:?}");
-            let labels: Vec<&str> = rows.labels().map(|(word, _)| word).collect();
-            let mut expected = vec!["Exposure"];
-            if offered.window {
-                expected.push("Window");
-            }
-            expected.push("Curve");
-            assert_eq!(labels, expected);
+        let lowest = swatch_button(plot_area(panel, true), 0).bottom();
+        assert_eq!(
+            lowest,
+            ramp(bars(panel)).bottom(),
+            "the false colors end where the band alone would have"
+        );
+        for (widget, rect) in row_buttons(panel) {
+            assert!(rect.y >= lowest, "{widget:?} clears the band: {rect:?}");
+            assert!(rect.bottom() <= inside.bottom(), "{widget:?} {rect:?}");
+            assert!(rect.x >= inside.x + ROW_LABEL, "{widget:?} clears its word");
+            assert!(rect.right() <= inside.right() + 0.01, "{widget:?} {rect:?}");
         }
+        // The last row is the last thing on the panel, and what it
+        // leaves under it is the panel's own inset and nothing more.
+        assert_eq!(rows.bottom(), inside.bottom());
+        let labels: Vec<&str> = rows.labels().map(|(word, _)| word).collect();
+        assert_eq!(labels, ["Exposure", "Window", "Curve"]);
     }
 
-    /// The windows and the curves cover everything there is to choose —
-    /// where they are offered at all — and the exposure's row is a slider
-    /// up to its reading, which ends where the rows' last buttons do.
+    /// The windows and the curves cover everything there is to choose, and
+    /// the exposure's row is a slider up to its reading, which ends where
+    /// the rows' last buttons do.
     #[test]
     fn the_rows_offer_every_choice_there_is() {
-        for offered in EVERY_OFFER {
-            let panel = panel(content(), offered).expect("room");
-            let widgets: Vec<Control> = row_buttons(panel, offered)
-                .map(|(widget, _)| widget)
-                .collect();
-            let windows = if offered.window { WINDOWS.len() } else { 0 };
-            assert_eq!(widgets.len(), windows + ToneMap::ALL.len(), "{offered:?}");
+        let panel = full_panel();
+        let widgets: Vec<Control> = row_buttons(panel).map(|(widget, _)| widget).collect();
+        assert_eq!(widgets.len(), WINDOWS.len() + ToneMap::ALL.len());
 
-            let rows = Rows::new(panel, offered);
-            let inside = panel.inset(PANEL_INSET, PANEL_INSET);
-            assert_eq!(rows.slider().x, rows.exposure.x);
-            assert!(rows.slider().right() < rows.stops().x);
-            assert_eq!(rows.stops().right(), inside.right());
-            assert!(
-                rows.slider().width - HANDLE_GRIP > 3.0 * 2.0 * SLIDER_STOPS / EV_STEP,
-                "a quarter stop is wider than a few pixels"
-            );
-        }
+        let rows = Rows::new(panel);
+        let inside = panel.inset(PANEL_INSET, PANEL_INSET);
+        assert_eq!(rows.slider().x, rows.exposure.x);
+        assert!(rows.slider().right() < rows.stops().x);
+        assert_eq!(rows.stops().right(), inside.right());
+        assert!(
+            rows.slider().width - HANDLE_GRIP > 3.0 * 2.0 * SLIDER_STOPS / EV_STEP,
+            "a quarter stop is wider than a few pixels"
+        );
 
-        // The three rules, and no fourth for the image's own: the row is
-        // only offered to a file whose own is the third.
+        // The three rules, and no fourth for the image's own, which is
+        // always one of these.
         let named: Vec<AutoWindow> = WINDOWS.iter().map(|(_, window)| *window).collect();
         assert_eq!(
             named,
