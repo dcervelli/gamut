@@ -148,6 +148,7 @@ pub fn disabled(
     let no_room = match tip {
         Tip::Control(Control::Histogram) => !room.histogram,
         Tip::Control(Control::Info) => !room.info,
+        Tip::Control(Control::Help) => !room.help,
         _ => false,
     };
     if no_room {
@@ -219,6 +220,7 @@ pub fn words(tip: Tip) -> Option<String> {
             // desktop has installed rather than anything this program binds.
             Tip::Control(Control::OpenWith) => "Open the file in another application",
             Tip::Control(Control::Paste) => "Paste an image",
+            Tip::Control(Control::Help) => "Keyboard shortcuts",
             // No one key does this and only this — Escape dismisses whatever
             // is up, a menu first — so the cross names itself.
             Tip::Control(Control::Dismiss) => "Dismiss this message",
@@ -294,10 +296,12 @@ mod tests {
         let all = Room {
             histogram: true,
             info: true,
+            help: true,
         };
         let none = Room {
             histogram: false,
             info: false,
+            help: false,
         };
         let no_room = Some(Refused {
             said: NO_ROOM,
@@ -364,6 +368,7 @@ mod tests {
         let column = Room {
             histogram: false,
             info: true,
+            help: true,
         };
         assert_eq!(
             disabled(
@@ -396,6 +401,7 @@ mod tests {
         let all = Room {
             histogram: true,
             info: true,
+            help: true,
         };
         let switch = Tip::Control(Control::Output);
 
@@ -420,6 +426,7 @@ mod tests {
         let none = Room {
             histogram: false,
             info: false,
+            help: false,
         };
         assert_eq!(disabled(switch, none, Hdr::Available, true, false), None);
     }
@@ -436,6 +443,7 @@ mod tests {
         let all = Room {
             histogram: true,
             info: true,
+            help: true,
         };
         for index in 0..3 {
             let curve = Tip::Control(Control::Curve(index));
@@ -465,6 +473,7 @@ mod tests {
         let all = Room {
             histogram: true,
             info: true,
+            help: true,
         };
         let button = Tip::Control(Control::OpenWith);
 

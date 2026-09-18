@@ -8,6 +8,11 @@ Notable changes to `gamut`. The format follows
 
 ### Added
 
+- A help popup: `?` or `/`, or the button at the foot of the right strip,
+  lists every key in the sections `--help` uses, with what each does and
+  when it does anything. The same again, `Esc` or a click outside closes
+  it.
+
 - `w`, held, marks the clipped pixels on the picture: red where every
   channel has gone to white, blue where every channel has gone to black.
   White is marked only where the surface is actually clipping it — no curve
@@ -69,6 +74,9 @@ Notable changes to `gamut`. The format follows
   are stepped over.
 
 ### Changed
+
+- `Ctrl+P` does nothing with a single file on the list, as the count it
+  stands beside is not shown for one: there is nothing to choose.
 
 - The histogram panel speaks in a viewer's terms rather than the display's.
   The band under the plot is a levels track: a handle at the value that

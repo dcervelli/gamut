@@ -62,23 +62,25 @@ OPTIONS:
     --                      Treat every later argument as a path
 ";
 
-/// The headings the keys are listed under, in the order they are printed.
-/// Shared by `--help` and the manual page so that neither can grow a section
-/// the other does not have.
-const SECTIONS: [(Section, &str); 6] = [
-    (Section::Zoom, "ZOOM AND POSITION KEYS"),
-    (Section::Files, "FILE KEYS"),
-    (Section::Playback, "PLAYBACK KEYS"),
-    (Section::Clipboard, "CLIPBOARD KEYS"),
-    (Section::Interface, "INTERFACE KEYS"),
-    (Section::Display, "DISPLAY KEYS"),
-];
+/// The heading a section's keys are listed under: its title in capitals,
+/// as the option heading is, with `KEYS` after it. `--help`, the manual page
+/// and the help popup all go by [`Section::ALL`], so none of the three can
+/// grow a section the others do not have.
+fn heading(section: Section) -> String {
+    let title = match section {
+        // The plural of the thing rather than the name of the section, the
+        // way the others read.
+        Section::Files => "FILE".to_string(),
+        _ => section.title().to_uppercase(),
+    };
+    format!("{title} KEYS")
+}
 
 /// The whole of `--help`: the options, then every key under its heading.
 pub fn usage() -> String {
     let mut text = OPTIONS.to_string();
-    for (section, heading) in SECTIONS {
-        let _ = writeln!(text, "\n{heading}:");
+    for section in Section::ALL {
+        let _ = writeln!(text, "\n{}:", heading(section));
         for binding in KEYS.iter().filter(|binding| binding.section == section) {
             let _ = writeln!(text, "    {:<19}{}", binding.shown, binding.help);
         }
@@ -190,8 +192,8 @@ pub fn man() -> String {
         let _ = writeln!(text, ".TP\n.B {}\n{}", roff(&flags), roff(&description));
     }
 
-    for (section, heading) in SECTIONS {
-        let _ = writeln!(text, ".SH {heading}");
+    for section in Section::ALL {
+        let _ = writeln!(text, ".SH {}", heading(section));
         for binding in KEYS.iter().filter(|binding| binding.section == section) {
             let _ = writeln!(
                 text,
@@ -491,12 +493,17 @@ mod tests {
                 binding.shown
             );
         }
-        for (_, heading) in SECTIONS {
+        for section in Section::ALL {
+            let heading = heading(section);
             assert!(
                 text.contains(&format!("{heading}:\n")),
                 "{heading} should be a heading of its own"
             );
         }
+        assert!(
+            text.contains("\nFILE KEYS:\n"),
+            "the file keys read as before"
+        );
     }
 
     fn packaging() -> PathBuf {

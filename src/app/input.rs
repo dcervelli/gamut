@@ -76,6 +76,10 @@ pub enum Action {
     /// bars come and go as [`Action::ToggleInterface`], and the map,
     /// histogram and information panel are closed on the way past.
     ToggleInterfaceAndPanels,
+    /// Open the help popup — every key, what it does and when — and close
+    /// it if it is up. The same toggle as the button at the foot of the
+    /// right strip.
+    ShowHelp,
     ToggleHistogram,
     /// Which of that panel's planes are plotted. Both can be off: the panel
     /// still has its response curve and its ramp to read.
@@ -369,6 +373,7 @@ fn action_of(tip: Tip) -> Option<Action> {
         Tip::Control(Control::Output) => ToggleHdr,
         Tip::Control(Control::Paste) => Action::Paste,
         Tip::Control(Control::Region) => ToggleRegion,
+        Tip::Control(Control::Help) => ShowHelp,
         Tip::Control(Control::Play) => TogglePlay,
         Tip::Control(Control::StepBack) => PreviousFrame,
         Tip::Control(Control::StepForward) => NextFrame,
@@ -450,7 +455,8 @@ fn names(tip: Tip) -> Option<String> {
     }
 }
 
-/// Which heading a binding is listed under in `--help`.
+/// Which heading a binding is listed under, in `--help`, the manual page
+/// and the help popup alike.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Section {
     Zoom,
@@ -459,6 +465,32 @@ pub enum Section {
     Clipboard,
     Interface,
     Display,
+}
+
+impl Section {
+    /// Every section, in the order the keys are listed in: the order the
+    /// table below keeps, and the one place it is written down.
+    pub const ALL: [Section; 6] = [
+        Section::Zoom,
+        Section::Files,
+        Section::Playback,
+        Section::Clipboard,
+        Section::Interface,
+        Section::Display,
+    ];
+
+    /// What the section is called, as the popup heads it; `--help` sets the
+    /// same words in capitals with `KEYS` after them.
+    pub fn title(self) -> &'static str {
+        match self {
+            Section::Zoom => "Zoom and position",
+            Section::Files => "Files",
+            Section::Playback => "Playback",
+            Section::Clipboard => "Clipboard",
+            Section::Interface => "Interface",
+            Section::Display => "Display",
+        }
+    }
 }
 
 /// One line of `--help`, and the keys that do it. A line may bind several
@@ -470,6 +502,12 @@ pub struct Binding {
     /// The key column, as written for people: `q, Esc`, `Arrows`.
     pub shown: &'static str,
     pub help: &'static str,
+    /// When the key does anything at all, in a few words — `a region
+    /// selected`, `an animation` — for the help popup's third column, and
+    /// `None` for a key that always does. Not the whole story where a key
+    /// does one thing plainly and another under some condition, which
+    /// `help` tells; this is the condition on which it does anything.
+    pub when: Option<&'static str>,
     pub keys: &'static [(KeyName, Action)],
 }
 
@@ -493,6 +531,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "1, 0",
         help: "Actual size (100%)",
+        when: None,
         keys: &[
             (Position(KeyCode::Digit1), ZoomTo(1.0)),
             (Position(KeyCode::Digit0), ZoomTo(1.0)),
@@ -503,6 +542,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "2, 3, 4, 5",
         help: "200%, 400%, 800%, 1600%",
+        when: None,
         keys: &[
             (Position(KeyCode::Digit2), ZoomTo(2.0)),
             (Position(KeyCode::Digit3), ZoomTo(4.0)),
@@ -515,6 +555,7 @@ pub const KEYS: &[Binding] = &[
         mods: SHIFT,
         shown: "Shift+2, 3, 4",
         help: "50%, 25%, 10%",
+        when: None,
         keys: &[
             (Position(KeyCode::Digit2), ZoomTo(0.5)),
             (Position(KeyCode::Digit3), ZoomTo(0.25)),
@@ -526,6 +567,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "+, =",
         help: "Zoom in",
+        when: None,
         keys: &[(Char("+"), ZoomIn), (Char("="), ZoomIn)],
     },
     Binding {
@@ -533,6 +575,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "-, _",
         help: "Zoom out",
+        when: None,
         keys: &[(Char("-"), ZoomOut), (Char("_"), ZoomOut)],
     },
     Binding {
@@ -540,6 +583,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "Wheel",
         help: "Zoom about the pointer",
+        when: None,
         keys: &[],
     },
     Binding {
@@ -547,6 +591,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "Space",
         help: "Fit the whole image, fill the window, then actual size, in turn; with a region, fit it, fill it, then the image",
+        when: None,
         keys: &[(Named(NamedKey::Space), CycleFit)],
     },
     Binding {
@@ -554,6 +599,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "Space+Drag",
         help: "Zoom to the box dragged out",
+        when: None,
         keys: &[],
     },
     Binding {
@@ -561,6 +607,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "p",
         help: "Cycle the filter used above 100%: nearest, bicubic",
+        when: None,
         keys: &[(Char("p"), CycleUpscale), (Char("P"), CycleUpscale)],
     },
     Binding {
@@ -568,6 +615,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "Arrows",
         help: "Pan by 64 pixels; move a region, or the handle under the pointer, a pixel",
+        when: None,
         keys: &[
             (Named(NamedKey::ArrowLeft), Pan(Left, Coarse)),
             (Named(NamedKey::ArrowRight), Pan(Right, Coarse)),
@@ -583,6 +631,7 @@ pub const KEYS: &[Binding] = &[
         mods: SHIFT,
         shown: "Shift+Arrows",
         help: "Pan by one pixel",
+        when: None,
         keys: &[
             (Named(NamedKey::ArrowLeft), Pan(Left, Fine)),
             (Named(NamedKey::ArrowRight), Pan(Right, Fine)),
@@ -595,6 +644,7 @@ pub const KEYS: &[Binding] = &[
         mods: CTRL,
         shown: "Ctrl+Arrows",
         help: "Pan to the far side of the image; grow a region that way a pixel",
+        when: None,
         keys: &[
             (Named(NamedKey::ArrowLeft), Pan(Left, Edge)),
             (Named(NamedKey::ArrowRight), Pan(Right, Edge)),
@@ -607,6 +657,7 @@ pub const KEYS: &[Binding] = &[
         mods: CTRL_SHIFT,
         shown: "Ctrl+Shift+Arrows",
         help: "Shrink a region that way a pixel, pulling its far side in",
+        when: Some("a region selected"),
         keys: &[
             (Named(NamedKey::ArrowLeft), ShrinkRegion(Left)),
             (Named(NamedKey::ArrowRight), ShrinkRegion(Right)),
@@ -619,6 +670,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "], Page Down",
         help: "Next file",
+        when: Some("more than one file"),
         keys: &[(Char("]"), NextFile), (Named(NamedKey::PageDown), NextFile)],
     },
     Binding {
@@ -626,6 +678,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "[, Page Up",
         help: "Previous file",
+        when: Some("more than one file"),
         keys: &[
             (Char("["), PreviousFile),
             (Named(NamedKey::PageUp), PreviousFile),
@@ -636,6 +689,7 @@ pub const KEYS: &[Binding] = &[
         mods: CTRL,
         shown: "Ctrl+P",
         help: "Choose a file from the list",
+        when: Some("more than one file"),
         keys: &[(Char("p"), OpenChooser), (Char("P"), OpenChooser)],
     },
     Binding {
@@ -643,6 +697,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "Enter",
         help: "Play or pause an animation",
+        when: Some("an animation"),
         keys: &[(Named(NamedKey::Enter), TogglePlay)],
     },
     Binding {
@@ -650,6 +705,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "n",
         help: "Next frame of an animation, or page of a file that holds several",
+        when: Some("an animation or a paged file"),
         keys: &[(Char("n"), NextFrame)],
     },
     Binding {
@@ -657,6 +713,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "N",
         help: "Previous frame, or page",
+        when: Some("an animation or a paged file"),
         keys: &[(Char("N"), PreviousFrame)],
     },
     Binding {
@@ -664,6 +721,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "c",
         help: "Copy the name of the file on screen, without its path",
+        when: None,
         keys: &[(Char("c"), CopyName)],
     },
     // The next two are both the capital, so both are typed with Shift held;
@@ -674,6 +732,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "Shift+C",
         help: "Copy the absolute path of the file on screen",
+        when: None,
         keys: &[(Char("C"), CopyPath)],
     },
     Binding {
@@ -681,6 +740,7 @@ pub const KEYS: &[Binding] = &[
         mods: CTRL,
         shown: "Ctrl+Shift+C",
         help: "Copy the file on screen as a URI another program can open",
+        when: None,
         keys: &[(Char("C"), CopyUri)],
     },
     Binding {
@@ -688,6 +748,7 @@ pub const KEYS: &[Binding] = &[
         mods: CTRL,
         shown: "Ctrl+C",
         help: "Copy the image, or the region while one is selected, as displayed",
+        when: None,
         keys: &[(Char("c"), CopyImage)],
     },
     Binding {
@@ -695,6 +756,7 @@ pub const KEYS: &[Binding] = &[
         mods: CTRL,
         shown: "Ctrl+I",
         help: "Copy everything the info panel says about the file",
+        when: None,
         keys: &[(Char("i"), CopyMetadata), (Char("I"), CopyMetadata)],
     },
     // The full stop and the greater-than are one key on most keyboards, and
@@ -706,6 +768,7 @@ pub const KEYS: &[Binding] = &[
         mods: CTRL,
         shown: "Ctrl+.",
         help: "Copy the value of the pixel under the pointer, as read out",
+        when: Some("the pointer on the picture"),
         keys: &[(Char("."), CopyPixelValue)],
     },
     Binding {
@@ -713,6 +776,7 @@ pub const KEYS: &[Binding] = &[
         mods: CTRL,
         shown: "Ctrl+Shift+.",
         help: "Copy the coordinate of the pixel under the pointer, as x,y",
+        when: Some("the pointer on the picture"),
         keys: &[(Char(">"), CopyPixelCoordinate)],
     },
     Binding {
@@ -720,6 +784,7 @@ pub const KEYS: &[Binding] = &[
         mods: CTRL,
         shown: "Ctrl+V",
         help: "Paste an image, saved among your pictures and shown",
+        when: Some("a picture on the clipboard"),
         keys: &[(Char("v"), Paste), (Char("V"), Paste)],
     },
     Binding {
@@ -727,6 +792,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "`",
         help: "Toggle the interface panels",
+        when: None,
         keys: &[(Char("`"), ToggleInterface)],
     },
     Binding {
@@ -734,6 +800,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "~",
         help: "Toggle the panels, closing the map, histogram and information",
+        when: None,
         keys: &[(Char("~"), ToggleInterfaceAndPanels)],
     },
     Binding {
@@ -741,6 +808,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "m",
         help: "Toggle the minimap",
+        when: None,
         keys: &[(Char("m"), ToggleMinimap), (Char("M"), ToggleMinimap)],
     },
     Binding {
@@ -748,6 +816,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "h",
         help: "Toggle the histogram",
+        when: None,
         keys: &[(Char("h"), ToggleHistogram), (Char("H"), ToggleHistogram)],
     },
     Binding {
@@ -755,6 +824,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "i",
         help: "Toggle the file information panel",
+        when: None,
         keys: &[(Char("i"), ToggleInfo), (Char("I"), ToggleInfo)],
     },
     Binding {
@@ -762,6 +832,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "g",
         help: "Toggle the grid over the image",
+        when: None,
         keys: &[(Char("g"), ToggleGrid), (Char("G"), ToggleGrid)],
     },
     Binding {
@@ -769,6 +840,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "x",
         help: "Select a region: drag to draw it, with handles to adjust; again, or Esc, removes it",
+        when: None,
         keys: &[(Char("x"), ToggleRegion), (Char("X"), ToggleRegion)],
     },
     // The three that work the histogram's plot, under the key that opens it.
@@ -777,6 +849,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "j",
         help: "Toggle the luminance plane on the histogram",
+        when: None,
         keys: &[(Char("j"), ToggleLuma), (Char("J"), ToggleLuma)],
     },
     Binding {
@@ -784,6 +857,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "k",
         help: "Toggle the color planes on the histogram",
+        when: None,
         keys: &[(Char("k"), TogglePlanes), (Char("K"), TogglePlanes)],
     },
     Binding {
@@ -791,6 +865,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "l",
         help: "Toggle a logarithmic count axis on the histogram",
+        when: None,
         keys: &[(Char("l"), ToggleLogCounts), (Char("L"), ToggleLogCounts)],
     },
     // The same key as the two copies above, with nothing held: what it
@@ -800,13 +875,23 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: ".",
         help: "Cycle the pixel readout: hex, decimal, mapped",
+        when: None,
         keys: &[(Char("."), CyclePixelFormat)],
+    },
+    Binding {
+        section: Section::Interface,
+        mods: PLAIN,
+        shown: "?, /",
+        help: "Show the keys",
+        when: None,
+        keys: &[(Char("?"), ShowHelp), (Char("/"), ShowHelp)],
     },
     Binding {
         section: Section::Interface,
         mods: PLAIN,
         shown: "q, Esc",
         help: "Quit; Esc closes a popup, message or region, or shows the interface",
+        when: None,
         keys: &[
             (Char("q"), Quit),
             (Char("Q"), Quit),
@@ -818,6 +903,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "d, f",
         help: "Exposure down / up, a quarter stop",
+        when: None,
         keys: &[
             (Char("d"), Exposure(-histogram::EV_STEP)),
             (Char("D"), Exposure(-histogram::EV_STEP)),
@@ -831,6 +917,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "a, s",
         help: "Slide the window down / up",
+        when: None,
         keys: &[
             (Char("a"), ShiftWindow(-WINDOW_STEP)),
             (Char("s"), ShiftWindow(WINDOW_STEP)),
@@ -841,6 +928,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "A, S",
         help: "Narrow / widen the window",
+        when: None,
         keys: &[
             (Char("A"), Contrast(NARROWER)),
             (Char("S"), Contrast(WIDER)),
@@ -851,6 +939,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "e",
         help: "Cycle the automatic window: unit, min/max, 99.8%",
+        when: None,
         keys: &[(Char("e"), CycleAutoWindow), (Char("E"), CycleAutoWindow)],
     },
     Binding {
@@ -858,6 +947,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "t",
         help: "Cycle tone mapping: none, reinhard, neutral",
+        when: None,
         keys: &[(Char("t"), CycleToneMap), (Char("T"), CycleToneMap)],
     },
     Binding {
@@ -865,6 +955,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "w",
         help: "Mark the clipped pixels while held: red at white, blue at black",
+        when: None,
         keys: &[(Char("w"), MarkClipped), (Char("W"), MarkClipped)],
     },
     Binding {
@@ -872,6 +963,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "o",
         help: "Toggle HDR output, where the monitor is in HDR mode",
+        when: Some("the monitor in HDR mode"),
         keys: &[(Char("o"), ToggleHdr), (Char("O"), ToggleHdr)],
     },
     Binding {
@@ -879,6 +971,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "r",
         help: "Cycle false color for single-channel images",
+        when: Some("a single-channel image"),
         keys: &[(Char("r"), CycleColormap), (Char("R"), CycleColormap)],
     },
     Binding {
@@ -886,6 +979,7 @@ pub const KEYS: &[Binding] = &[
         mods: PLAIN,
         shown: "z",
         help: "Reset the window, exposure and tone map",
+        when: None,
         keys: &[(Char("z"), ResetDisplay), (Char("Z"), ResetDisplay)],
     },
 ];
@@ -1053,6 +1147,34 @@ impl Naming for Namer {
         let binding = binding_for(action)?;
         Some(shown_for(binding, action))
     }
+
+    fn help(&self) -> Vec<ui::help::Section> {
+        help_sections()
+    }
+}
+
+/// The key table as the help popup lays it out: one section per heading,
+/// in `--help`'s order, and in each one row per line of the table, the key
+/// column spelled as the tooltips spell it.
+///
+/// Free of the `Namer` on purpose: nothing about the frame changes what the
+/// keys are, and a test can read the whole of it without one.
+pub(super) fn help_sections() -> Vec<ui::help::Section> {
+    Section::ALL
+        .into_iter()
+        .map(|section| ui::help::Section {
+            title: section.title(),
+            rows: KEYS
+                .iter()
+                .filter(|binding| binding.section == section)
+                .map(|binding| ui::help::Row {
+                    key: binding.shown.to_string(),
+                    does: binding.help,
+                    when: binding.when,
+                })
+                .collect(),
+        })
+        .collect()
 }
 
 /// What an event leaves the window owing.
@@ -1345,6 +1467,7 @@ impl App {
             // inside the popup — which is how the key arrives while the
             // popup has the keyboard — cannot come to mean different things.
             OpenChooser => self.press(Control::Chooser),
+            ShowHelp => self.press(Control::Help),
             // A fitted image re-fits on the next frame: the viewport it is
             // measured against is the one the panels leave, and they have
             // just come or gone.
@@ -2172,11 +2295,27 @@ impl App {
                 };
                 let open = egui::Popup::is_id_open(&gui.ctx, ui::chooser::id());
                 egui::Popup::close_all(&gui.ctx);
-                if !open {
+                // Nothing to choose from a list of one: the key does
+                // nothing, as the count it stands beside is not shown.
+                if !open && self.files.len() > 1 {
                     egui::Popup::open_id(&gui.ctx, ui::chooser::id());
                     self.chooser.open(self.files.paths(), self.files.index());
                     let wanted = self.chooser.wanted(0..FIRST_ROWS, &self.thumbs);
                     self.thumbnailer.prioritize(wanted);
+                }
+            }
+            // The help popup: opened, or closed if it is the popup that is
+            // up. Any other popup goes first, one being open at a time.
+            Control::Help => {
+                let Some(gui) = &self.gui else {
+                    return;
+                };
+                let open = egui::Popup::is_id_open(&gui.ctx, ui::help::id());
+                egui::Popup::close_all(&gui.ctx);
+                // Not opened where the window has no room to draw it, as
+                // the panels are not: it would be up and unseen.
+                if !open && self.room().help {
+                    egui::Popup::open_id(&gui.ctx, ui::help::id());
                 }
             }
             // A row of the chooser: the file it names, asked for as a file
@@ -2303,10 +2442,66 @@ mod tests {
             Control::Output,
             Control::Zoom,
             Control::PixelFormat,
+            Control::Help,
         ] {
             assert!(
                 names(Tip::Control(widget)).is_some(),
                 "{widget:?} names itself"
+            );
+        }
+    }
+
+    /// The help button is named in its own words and by both keys that open
+    /// the same popup, so that the tooltip on it teaches the keys.
+    #[test]
+    fn the_help_button_names_the_keys_that_open_it() {
+        assert_eq!(
+            names(Tip::Control(Control::Help)).as_deref(),
+            Some("Keyboard shortcuts (?, /)")
+        );
+    }
+
+    /// The help popup lays out the whole table and nothing else: every line
+    /// once, under the heading `--help` puts it under, in the order the
+    /// table keeps. A condition is a phrase, not a sentence: no capital at
+    /// the front, no full stop at the end, and short enough for its column.
+    #[test]
+    fn the_help_popup_shows_every_line_of_the_table_once() {
+        let sections = help_sections();
+        assert_eq!(sections.len(), Section::ALL.len());
+        let rows: Vec<&ui::help::Row> = sections
+            .iter()
+            .flat_map(|section| section.rows.iter())
+            .collect();
+        assert_eq!(rows.len(), KEYS.len());
+        for (row, binding) in rows.iter().zip(KEYS) {
+            assert_eq!(row.key, binding.shown);
+            assert_eq!(row.does, binding.help);
+            assert_eq!(row.when, binding.when);
+        }
+        for (section, listed) in Section::ALL.into_iter().zip(&sections) {
+            assert_eq!(listed.title, section.title());
+            assert!(!listed.rows.is_empty(), "{:?} has keys", section);
+            assert!(
+                KEYS.iter()
+                    .filter(|binding| binding.section == section)
+                    .count()
+                    == listed.rows.len()
+            );
+        }
+        for binding in KEYS {
+            let Some(when) = binding.when else {
+                continue;
+            };
+            assert!(
+                when.starts_with(char::is_lowercase) && !when.ends_with('.'),
+                "{:?}: {when:?} reads as a phrase",
+                binding.shown
+            );
+            assert!(
+                when.len() <= 32,
+                "{:?}: {when:?} fits its column",
+                binding.shown
             );
         }
     }
@@ -2440,6 +2635,7 @@ mod tests {
             room: Room {
                 histogram: true,
                 info: true,
+                help: true,
             },
             hdr: Hdr::Available,
             openable: false,
@@ -2514,6 +2710,7 @@ mod tests {
             room: Room {
                 histogram: true,
                 info: true,
+                help: true,
             },
             hdr: Hdr::Available,
             openable: true,
@@ -2604,6 +2801,7 @@ mod tests {
             room: Room {
                 histogram: true,
                 info: true,
+                help: true,
             },
             hdr: Hdr::Available,
             openable: true,

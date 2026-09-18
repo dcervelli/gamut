@@ -10,6 +10,7 @@ pub mod chooser;
 pub mod chrome;
 pub mod control;
 pub mod fonts;
+pub mod help;
 pub mod info;
 pub mod menu;
 pub mod minimap;
@@ -308,6 +309,8 @@ pub fn show(
     if let Some(chooser) = &input.chooser {
         chooser::show(&mut pass, ui, chooser, content);
     }
+    // And the keys, which are the same whatever is on screen.
+    help::show(&mut pass, ui, content);
     pass.commands
 }
 
@@ -572,6 +575,8 @@ pub const PANELS_ROOM: [f32; 2] = [
 pub struct Room {
     pub histogram: bool,
     pub info: bool,
+    /// The help popup, which needs what the information panel needs.
+    pub help: bool,
 }
 
 /// What `content` has room for, with `panels` saying which of the two is
@@ -584,6 +589,7 @@ pub fn room(content: Rect, panels: &Panels, current: Option<&Current>) -> Room {
     Room {
         histogram: histogram::panel(content, histogram::Offered::of(current)).is_some(),
         info: info::panel(content, histogram_shown(content, panels, current)).is_some(),
+        help: help::panel(content).is_some(),
     }
 }
 
@@ -685,7 +691,8 @@ mod tests {
             area(PANELS_ROOM[0], PANELS_ROOM[1]),
             Room {
                 histogram: true,
-                info: true
+                info: true,
+                help: true,
             }
         );
         assert!(!area(PANELS_ROOM[0] - 1.0, PANELS_ROOM[1]).histogram);

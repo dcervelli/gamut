@@ -429,6 +429,25 @@ impl Pass<'_> {
         }
     }
 
+    /// The button that opens the keys: lit while the popup is up, since the
+    /// same press closes it, and dead where the window has no room to draw
+    /// the popup — a press would put up nothing, and a lit button would
+    /// light for nothing on screen.
+    fn help_button(&mut self, ui: &mut Ui, room: bool) {
+        let open = room && egui::Popup::is_id_open(ui.ctx(), super::help::id());
+        let response = self.icon_button(
+            ui,
+            icon::CIRCLE_QUESTION_MARK,
+            Control::Help,
+            open,
+            room,
+            Corners::All,
+        );
+        if response.clicked() {
+            self.press(Control::Help);
+        }
+    }
+
     /// The grid toggle: the icon always, and — while the grid is on — how far
     /// apart its lines are, written after the mark it qualifies. The mark
     /// stays in the first button's width of the toggle, whether or not there
@@ -614,10 +633,15 @@ impl Pass<'_> {
     }
 
     /// The right strip: the histogram toggle above the information toggle,
-    /// the order the two panels they open are stacked in. Each is dead where
-    /// the window has no room for what it opens.
+    /// the order the two panels they open are stacked in, and the help
+    /// button up from the foot, where the minimap toggle is on the other
+    /// side. Each of the three is dead where the window has no room for
+    /// what it opens. A window too short for both ends drops the help
+    /// button rather than standing it on the column, as the left strip
+    /// drops its own.
     fn right_strip(&mut self, ui: &mut Ui) {
         ui.spacing_mut().item_spacing = Vec2::ZERO;
+        let height = ui.available_height();
         let room = super::room(
             content_area(
                 self.input.logical,
@@ -652,6 +676,14 @@ impl Pass<'_> {
             if info.clicked() {
                 self.press(Control::Info);
             }
+        });
+        let taken = BAR_PADDING + 2.0 * (BUTTON_SIZE + BUTTON_GAP);
+        if taken + BUTTON_SIZE + BAR_PADDING > height {
+            return;
+        }
+        ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
+            ui.add_space(BAR_PADDING);
+            self.help_button(ui, room.help);
         });
     }
 

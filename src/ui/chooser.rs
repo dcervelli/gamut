@@ -20,8 +20,8 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use egui::{
-    Align, Frame, Key, LayerId, Modifiers, PopupAnchor, PopupCloseBehavior, PopupKind, RectAlign,
-    Sense, TextEdit, WidgetInfo, WidgetType, load::SizedTexture, pos2, vec2,
+    Align, Frame, Key, LayerId, Modifiers, PopupAnchor, PopupKind, RectAlign, Sense, TextEdit,
+    WidgetInfo, WidgetType, load::SizedTexture, pos2, vec2,
 };
 
 use super::chrome::Pass;
@@ -193,7 +193,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input, content: R
     )
     .open_memory(None)
     .kind(PopupKind::Popup)
-    .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
+    .close_behavior(super::help::close_behavior(pass, Control::Chooser))
     .align(RectAlign::BOTTOM_START)
     .align_alternatives(&[])
     .gap(0.0)
