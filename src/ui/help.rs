@@ -11,7 +11,7 @@
 //!
 //! The table is three columns: the keys, what they do, and the condition
 //! on which they do anything. A row whose condition does not hold right
-//! now is dimmed whole, with the condition itself in the warning ink, so
+//! now is dimmed whole, with the condition itself in the caution ink, so
 //! that the keys that would do something are the ones that stand out.
 //! The headings stay at the top while the rows scroll under them, on a
 //! band of their own and parted from the rows by a hairline as the
@@ -244,7 +244,7 @@ fn headings(pass: &Pass, ui: &mut egui::Ui, width: f32) {
 /// The table: each section's title and rows. In columns, the key and the
 /// condition are a fixed width and what a key does wraps in what is left;
 /// stacked, each part has the whole width. A row whose condition does not
-/// hold is written in the dim ink throughout, its condition in the warning
+/// hold is written in the dim ink throughout, its condition in the caution
 /// ink: what the row says is true, and what it needs is what is missing.
 fn table(pass: &Pass, ui: &mut egui::Ui, sections: &[Section], width: f32) {
     let theme = pass.theme;
@@ -275,7 +275,7 @@ fn table(pass: &Pass, ui: &mut egui::Ui, sections: &[Section], width: f32) {
                 RichText::new(when.words).color(if when.met {
                     theme.text_dim
                 } else {
-                    theme.warning
+                    theme.caution
                 })
             });
             if stacked {

@@ -784,13 +784,22 @@ and the manual page cannot list different keys; `cli.rs` derives its
 headings from the same `Section::title`. The third column is `Binding::when`,
 the condition on which a key does anything, kept apart from `help` because
 `--help` has no column for it and a sentence that carried both would be
-twice as long. It is a `When`, one variant per condition, rather than the
-words themselves, so that the popup can say whether it holds as well as
-what it is: `App::conditions` reads each off the same state the key's own
+twice as long. A key that does one thing plainly and another with a region
+up — `Space`, the arrows, `Ctrl+C`, `x` — is two lines for the same reason,
+one under `When::NoRegion` and one under `When::RegionSelected`, each
+binding the same chord to the same action — the region's line in the
+region's own section, except `Ctrl+C`'s, which is a copy first and stays
+beside the image's: the table dispatches once, since `perform` decides what the
+action does from the selection, and describes twice.
+`no_chord_is_bound_twice_to_different_actions` allows exactly that doubling
+and no other, and `binding_for` names a doubled key by its plain line, since
+what asks is a button that does the plain thing. `When` is one variant per
+condition rather than the words themselves, so that the popup can say
+whether it holds as well as what it is: `App::conditions` reads each off the same state the key's own
 arm of `perform` reads, `Namer` carries the answers into the frame as
 `Conditions`, and `help_sections` marks each row's `help::Condition` met or
 not. A row whose condition does not hold is set in the dim ink throughout,
-its condition in `Theme::warning` — what the row says is still true, and
+its condition in `Theme::caution` — what the row says is still true, and
 what it needs is what is missing — so that the keys that would do something
 right now are the ones that stand out. Nothing on the popup can be pressed,
 which is why it reads the table rather than being handed rows to hand
