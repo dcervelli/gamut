@@ -320,8 +320,8 @@ fn window_bounds(current: &Current) -> [String; 2] {
     } else {
         1.0
     };
-    let low = current.display.low * scale;
-    let high = current.display.high * scale;
+    let low = current.display.window_low * scale;
+    let high = current.display.window_high * scale;
     if scale > 1.0 {
         [format!("{low:.0}"), format!("{high:.0}")]
     } else {
@@ -491,8 +491,8 @@ mod tests {
         );
 
         current.display.auto = AutoWindow::MinMax;
-        current.display.low = 0.012;
-        current.display.high = 1.0;
+        current.display.window_low = 0.012;
+        current.display.window_high = 1.0;
         current.display.adjust_exposure(0.25);
         assert_eq!(
             explain_state(&current, Headroom::None),

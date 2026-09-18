@@ -46,8 +46,8 @@ impl AutoWindow {
     /// unwindowed is how you get a black rectangle.
     ///
     /// Held apart from [`Display::for_image_with`] because it is also what
-    /// the panel's `Auto` button puts back — that button is this rule, where
-    /// the three beside it are the windows named outright.
+    /// [`Display::reset`] puts back, and what the histogram panel's row of
+    /// windows names outright: the file's own is always one of the three.
     pub fn default_for(image: &DecodedImage) -> Self {
         match image.referred {
             Referred::Display => AutoWindow::Off,
@@ -364,9 +364,12 @@ const EXPOSURE_LIMIT: f32 = 16.0;
 
 #[derive(Clone, Debug)]
 pub struct Display {
-    /// Linear working-space values mapped to 0 and 1 respectively.
-    pub low: f32,
-    pub high: f32,
+    /// The window in the file's own linear units: the value mapped to 0 and
+    /// the value mapped to 1 *before exposure*. Not the black and white
+    /// points — those are [`Display::displayed_bounds`], which folds the
+    /// exposure in.
+    pub window_low: f32,
+    pub window_high: f32,
     pub auto: AutoWindow,
     pub exposure_stops: f32,
     pub tone_map: ToneMap,
@@ -377,8 +380,8 @@ impl Default for Display {
     /// Used only when there is no image on screen.
     fn default() -> Self {
         Self {
-            low: 0.0,
-            high: 1.0,
+            window_low: 0.0,
+            window_high: 1.0,
             auto: AutoWindow::Off,
             exposure_stops: 0.0,
             tone_map: ToneMap::None,
@@ -418,8 +421,8 @@ impl Display {
         let auto = AutoWindow::default_for(image);
 
         let mut display = Self {
-            low: 0.0,
-            high: 1.0,
+            window_low: 0.0,
+            window_high: 1.0,
             auto,
             exposure_stops: 0.0,
             tone_map: ToneMap::None,
@@ -506,8 +509,8 @@ impl Display {
     /// which on such a display is the diagonal, and says nothing the axis
     /// under it does not.
     pub fn is_identity(&self) -> bool {
-        self.low == 0.0
-            && self.high == 1.0
+        self.window_low == 0.0
+            && self.window_high == 1.0
             && self.exposure_stops == 0.0
             && self.tone_map == ToneMap::None
     }
@@ -517,7 +520,7 @@ impl Display {
     /// each of which is dragged to the value it should stand at.
     ///
     /// The inverse of [`Display::displayed_bounds`]. Exposure lives in the
-    /// gain, so the bound that comes out white is `low` plus the window's
+    /// gain, so the bound that comes out white is `window_low` plus the window's
     /// width scaled down by the exposure; putting white at `white` means
     /// setting the width so that the scaling lands there. A hand on the
     /// bounds is a hand-set window, whatever rule it was on before.
@@ -529,8 +532,8 @@ impl Display {
         if !(black.is_finite() && white.is_finite() && white > black) {
             return;
         }
-        self.low = black;
-        self.high = black + (white - black) * self.exposure_stops.exp2();
+        self.window_low = black;
+        self.window_high = black + (white - black) * self.exposure_stops.exp2();
         self.auto = AutoWindow::Manual;
     }
 
@@ -541,9 +544,9 @@ impl Display {
             AutoWindow::Percentile => (stats.percentile(0.001), stats.percentile(0.999)),
             AutoWindow::Manual => return,
         };
-        self.low = low;
+        self.window_low = low;
         // A degenerate window would divide by zero in the shader.
-        self.high = if high > low { high } else { low + 1.0 };
+        self.window_high = if high > low { high } else { low + 1.0 };
     }
 
     /// Re-derives the window from a fresh scan of the same image's pixels,
@@ -613,7 +616,7 @@ impl Display {
         match referred {
             Referred::Scene => self.set_displayed_bounds(black, white),
             Referred::Display => {
-                let span = self.high - self.low;
+                let span = self.window_high - self.window_low;
                 if !(white.is_finite() && white > black && span > 0.0) {
                     return;
                 }
@@ -754,19 +757,19 @@ impl Display {
     /// `(offset, gain)` such that `(value - offset) * gain` is the displayed
     /// 0..1 value, exposure included.
     pub fn transform(&self) -> (f32, f32) {
-        let span = self.high - self.low;
+        let span = self.window_high - self.window_low;
         let gain = if span.abs() > f32::EPSILON {
             self.exposure_stops.exp2() / span
         } else {
             self.exposure_stops.exp2()
         };
-        (self.low, gain)
+        (self.window_low, gain)
     }
 
     /// The two values on the image's own scale that come out as displayed 0
     /// and 1: the window as the shader actually applies it.
     ///
-    /// Not `(low, high)`. Exposure is folded into the gain rather than into
+    /// Not `(window_low, window_high)`. Exposure is folded into the gain rather than into
     /// the bounds, so a stop of it halves the distance to white while leaving
     /// both where they were. The histogram's markers are drawn from this, and
     /// a marker taken from the bounds would name a value the shader is not
@@ -814,7 +817,7 @@ impl Display {
         self.curve(channels.is_gray(), headroom, color)
     }
 
-    /// `(value - low) * gain`: one value through the window with its
+    /// `(value - window_low) * gain`: one value through the window with its
     /// exposure, which is where everything the display does begins.
     fn windowed(&self, value: f32) -> f32 {
         let (offset, gain) = self.transform();
@@ -840,7 +843,7 @@ pub struct Mapped {
 }
 
 impl Mapped {
-    /// `(value - low) * gain` per color channel, before the tone curve: a
+    /// `(value - window_low) * gain` per color channel, before the tone curve: a
     /// highlight over the window reads as the number it is rather than as the
     /// 1.0 it is about to be clipped to, which is the whole use of a readout
     /// on measurement work.
@@ -902,7 +905,7 @@ mod tests {
             Headroom::None,
         );
         assert_eq!(display.auto, AutoWindow::Off);
-        assert_eq!((display.low, display.high), (0.0, 1.0));
+        assert_eq!((display.window_low, display.window_high), (0.0, 1.0));
 
         let measurement = gray(vec![0, 1000, 4095], Transfer::Linear);
         let display = Display::for_image_with(
@@ -912,7 +915,10 @@ mod tests {
             Headroom::None,
         );
         assert_eq!(display.auto, AutoWindow::Percentile);
-        assert!(display.high < 0.1, "12-bit data windowed to its own range");
+        assert!(
+            display.window_high < 0.1,
+            "12-bit data windowed to its own range"
+        );
     }
 
     /// PQ carries its grading in absolute luminance, so the window has to
@@ -931,7 +937,11 @@ mod tests {
 
             assert!(stats.max > 1.0, "{transfer:?} should exceed SDR white");
             assert_eq!(display.auto, AutoWindow::Off, "{transfer:?}");
-            assert_eq!((display.low, display.high), (0.0, 1.0), "{transfer:?}");
+            assert_eq!(
+                (display.window_low, display.window_high),
+                (0.0, 1.0),
+                "{transfer:?}"
+            );
             assert_eq!(display.tone_map, ToneMap::Neutral, "{transfer:?}");
         }
     }
@@ -942,7 +952,7 @@ mod tests {
     #[test]
     fn a_value_is_shaded_the_way_the_screen_shows_it() {
         let mut display = Display::default();
-        (display.low, display.high) = (0.25, 0.75);
+        (display.window_low, display.window_high) = (0.25, 0.75);
 
         let gray = |v: f32| display.shade(v, Channels::Rgb, Headroom::None);
         assert_eq!(gray(0.25), [0.0; 3], "the window's floor comes out black");
@@ -978,7 +988,7 @@ mod tests {
             tone_map: ToneMap::Reinhard,
             ..Default::default()
         };
-        (display.low, display.high) = (0.0, 2.0);
+        (display.window_low, display.window_high) = (0.0, 2.0);
 
         for headroom in [Headroom::None, Headroom::Above] {
             let shaded = display.shade(1.0, Channels::Gray, headroom);
@@ -1016,19 +1026,19 @@ mod tests {
         let stats = Stats::scan(&image);
         let display = Display::for_image_with(&image, &stats, Startup::default(), Headroom::None);
         assert_eq!(display.auto, AutoWindow::Off);
-        assert_eq!((display.low, display.high), (0.0, 1.0));
+        assert_eq!((display.window_low, display.window_high), (0.0, 1.0));
         assert_eq!(display.tone_map, ToneMap::Neutral);
     }
 
     /// The number a readout shows is the window's own scale: whatever was set
-    /// as `low` reads 0 and whatever was set as `high` reads 1, which is what
+    /// as `window_low` reads 0 and whatever was set as `window_high` reads 1, which is what
     /// lets someone check a pixel against the bounds the bar is naming.
     #[test]
     fn mapping_a_pixel_puts_the_window_ends_at_zero_and_one() {
         let image = gray(vec![0, u16::MAX / 2, u16::MAX], Transfer::Linear);
         let display = Display {
-            low: 0.0,
-            high: 0.5,
+            window_low: 0.0,
+            window_high: 0.5,
             ..Default::default()
         };
 
@@ -1177,8 +1187,8 @@ mod tests {
     #[test]
     fn the_transform_maps_the_window_onto_zero_to_one() {
         let display = Display {
-            low: 0.25,
-            high: 0.75,
+            window_low: 0.25,
+            window_high: 0.75,
             ..Default::default()
         };
         let (offset, gain) = display.transform();
@@ -1201,12 +1211,12 @@ mod tests {
 
     /// Exposure moves where white falls without moving the window, so the
     /// markers that say where the window lands have to be taken from the
-    /// transform rather than from `low` and `high`.
+    /// transform rather than from `window_low` and `window_high`.
     #[test]
     fn the_displayed_bounds_follow_exposure() {
         let mut display = Display {
-            low: 0.25,
-            high: 0.75,
+            window_low: 0.25,
+            window_high: 0.75,
             ..Default::default()
         };
         assert_eq!(display.displayed_bounds(), (0.25, 0.75));
@@ -1231,8 +1241,8 @@ mod tests {
     #[test]
     fn the_response_is_the_whole_pipeline_run_on_one_value() {
         let mut display = Display {
-            low: 0.25,
-            high: 0.75,
+            window_low: 0.25,
+            window_high: 0.75,
             ..Default::default()
         };
         let (black, white) = display.displayed_bounds();
@@ -1260,8 +1270,8 @@ mod tests {
     #[test]
     fn a_degenerate_window_still_yields_a_finite_gain() {
         let display = Display {
-            low: 0.5,
-            high: 0.5,
+            window_low: 0.5,
+            window_high: 0.5,
             ..Default::default()
         };
         let (_, gain) = display.transform();
@@ -1271,23 +1281,23 @@ mod tests {
     #[test]
     fn a_step_of_black_moves_that_end_alone_and_stops_at_the_floor() {
         let mut display = Display {
-            low: 0.2,
-            high: 0.6,
+            window_low: 0.2,
+            window_high: 0.6,
             ..Default::default()
         };
         assert!(display.step_black(0.5, Transfer::Linear, 0.0));
-        assert!((display.low - 0.4).abs() < 1e-6);
-        assert!((display.high - 0.6).abs() < 1e-6);
+        assert!((display.window_low - 0.4).abs() < 1e-6);
+        assert!((display.window_high - 0.6).abs() < 1e-6);
         assert_eq!(display.auto, AutoWindow::Manual);
         // Down by more than there is room for stops at the floor, and a
         // press against the floor moves nothing.
         assert!(display.step_black(-5.0, Transfer::Linear, 0.1));
-        assert!((display.low - 0.1).abs() < 1e-6);
+        assert!((display.window_low - 0.1).abs() < 1e-6);
         assert!(!display.step_black(-0.05, Transfer::Linear, 0.1));
-        assert!((display.low - 0.1).abs() < 1e-6);
+        assert!((display.window_low - 0.1).abs() < 1e-6);
         // A window that starts under the floor is not lifted to it.
         assert!(!display.step_black(-0.05, Transfer::Linear, 0.5));
-        assert!((display.low - 0.1).abs() < 1e-6);
+        assert!((display.window_low - 0.1).abs() < 1e-6);
     }
 
     /// A step is a twentieth of the band as drawn, which on a curved file
@@ -1297,50 +1307,50 @@ mod tests {
     #[test]
     fn a_step_is_along_the_plot_and_not_through_the_light() {
         let mut display = Display {
-            low: 0.0,
-            high: 1.0,
+            window_low: 0.0,
+            window_high: 1.0,
             ..Default::default()
         };
         assert!(display.step_black(0.05, Transfer::Srgb, 0.0));
-        assert!((Transfer::Srgb.to_encoded(display.low) - 0.05).abs() < 1e-5);
-        assert!(display.low < 0.005, "{}", display.low);
+        assert!((Transfer::Srgb.to_encoded(display.window_low) - 0.05).abs() < 1e-5);
+        assert!(display.window_low < 0.005, "{}", display.window_low);
         // And the second press is the same distance along the band again.
         assert!(display.step_black(0.05, Transfer::Srgb, 0.0));
-        assert!((Transfer::Srgb.to_encoded(display.low) - 0.0975).abs() < 1e-5);
-        assert!((display.high - 1.0).abs() < 1e-6);
+        assert!((Transfer::Srgb.to_encoded(display.window_low) - 0.0975).abs() < 1e-5);
+        assert!((display.window_high - 1.0).abs() < 1e-6);
     }
 
     #[test]
     fn a_step_of_white_is_the_windows_top_on_measured_light() {
         let mut display = Display {
-            low: 0.2,
-            high: 0.6,
+            window_low: 0.2,
+            window_high: 0.6,
             ..Default::default()
         };
         let linear = Transfer::Linear;
         assert!(display.step_white(0.5, linear, Referred::Scene, 1.0));
-        assert!((display.low - 0.2).abs() < 1e-6);
-        assert!((display.high - 0.8).abs() < 1e-6);
+        assert!((display.window_low - 0.2).abs() < 1e-6);
+        assert!((display.window_high - 0.8).abs() < 1e-6);
         assert_eq!(display.exposure_stops, 0.0);
         assert!(display.step_white(5.0, linear, Referred::Scene, 1.0));
-        assert!((display.high - 1.0).abs() < 1e-6);
+        assert!((display.window_high - 1.0).abs() < 1e-6);
         assert!(!display.step_white(0.05, linear, Referred::Scene, 1.0));
         assert!(!display.step_white(0.05, linear, Referred::Scene, 0.5));
-        assert!((display.high - 1.0).abs() < 1e-6);
+        assert!((display.window_high - 1.0).abs() < 1e-6);
     }
 
     #[test]
     fn a_step_of_white_is_a_quarter_stop_on_graded_light() {
         let mut display = Display {
-            low: 0.0,
-            high: 1.0,
+            window_low: 0.0,
+            window_high: 1.0,
             ..Default::default()
         };
         // White brought down is the picture brought up, and the plot's
         // ceiling has no say over the exposure.
         let srgb = Transfer::Srgb;
         assert!(display.step_white(-0.05, srgb, Referred::Display, 1.0));
-        assert_eq!((display.low, display.high), (0.0, 1.0));
+        assert_eq!((display.window_low, display.window_high), (0.0, 1.0));
         assert_eq!(display.exposure_stops, EV_STEP);
         assert!(display.step_white(0.05, srgb, Referred::Display, 1.0));
         assert!(display.step_white(0.05, srgb, Referred::Display, 1.0));
@@ -1456,7 +1466,7 @@ mod tests {
         let mut display = opened(&measurement, Headroom::None);
         assert_eq!(display.auto, AutoWindow::Percentile);
         assert!(
-            stats.max > display.high,
+            stats.max > display.window_high,
             "the hot pixel is above the window"
         );
         assert!(!display.exceeds_white(&stats));
@@ -1592,8 +1602,8 @@ mod tests {
             AutoWindow::Manual,
             "a hand on the bounds is a hand-set window"
         );
-        assert_eq!(display.low, 0.2);
-        assert_eq!(display.high, 0.6);
+        assert_eq!(display.window_low, 0.2);
+        assert_eq!(display.window_high, 0.6);
 
         // With a stop of exposure on, the same request lands the same two
         // values at black and white — which means a wider window under the
@@ -1602,15 +1612,19 @@ mod tests {
         display.set_displayed_bounds(0.2, 0.6);
         let (black, white) = display.displayed_bounds();
         assert!((black - 0.2).abs() < 1e-6 && (white - 0.6).abs() < 1e-6);
-        assert!((display.high - 1.0).abs() < 1e-6, "{}", display.high);
+        assert!(
+            (display.window_high - 1.0).abs() < 1e-6,
+            "{}",
+            display.window_high
+        );
 
         // Refused where the two are not a window, and left as they were.
         display.set_displayed_bounds(0.6, 0.6);
         display.set_displayed_bounds(0.7, 0.6);
         display.set_displayed_bounds(f32::NAN, 0.6);
         display.set_displayed_bounds(0.2, f32::INFINITY);
-        assert!((display.high - 1.0).abs() < 1e-6);
-        assert_eq!(display.low, 0.2);
+        assert!((display.window_high - 1.0).abs() < 1e-6);
+        assert_eq!(display.window_low, 0.2);
     }
 
     /// The display is the identity exactly when nothing has been asked of
@@ -1635,14 +1649,14 @@ mod tests {
         );
         assert!(
             !Display {
-                high: 0.5,
+                window_high: 0.5,
                 ..identity.clone()
             }
             .is_identity()
         );
         assert!(
             !Display {
-                low: 0.1,
+                window_low: 0.1,
                 ..identity.clone()
             }
             .is_identity()
@@ -1673,7 +1687,7 @@ mod tests {
         // the window staying where it was.
         display.put_white(0.55, Referred::Display);
         assert_eq!(display.exposure_stops, 1.0);
-        assert_eq!((display.low, display.high), (0.1, 1.0));
+        assert_eq!((display.window_low, display.window_high), (0.1, 1.0));
         let (black, white) = display.displayed_bounds();
         assert!(
             (black - 0.1).abs() < 1e-6 && (white - 0.55).abs() < 1e-6,
