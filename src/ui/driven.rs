@@ -1158,7 +1158,10 @@ fn the_help_popup_lays_the_keys_out() {
                 help::Row {
                     key: "Ctrl+Shift+Arrows".to_string(),
                     does: "Shrink a region that way a pixel",
-                    when: Some("a region selected"),
+                    when: Some(help::Condition {
+                        words: "a region selected",
+                        met: false,
+                    }),
                 },
             ],
         },
@@ -1167,7 +1170,10 @@ fn the_help_popup_lays_the_keys_out() {
             rows: vec![help::Row {
                 key: "], Page Down".to_string(),
                 does: "Next file",
-                when: Some("more than one file"),
+                when: Some(help::Condition {
+                    words: "more than one file",
+                    met: true,
+                }),
             }],
         },
     ];
@@ -1177,7 +1183,7 @@ fn the_help_popup_lays_the_keys_out() {
     assert!(egui::Popup::is_id_open(&harness.ctx, help::id()));
     for label in [
         "Key",
-        "Does",
+        "Action",
         "When",
         "Zoom and position",
         "1, 0",
@@ -1252,7 +1258,10 @@ fn the_help_popup_stacks_its_rows_in_a_narrow_window() {
         rows: vec![help::Row {
             key: "], Page Down".to_string(),
             does: "Next file",
-            when: Some("more than one file"),
+            when: Some(help::Condition {
+                words: "more than one file",
+                met: true,
+            }),
         }],
     }];
     egui::Popup::open_id(&harness.ctx, help::id());
@@ -1264,7 +1273,7 @@ fn the_help_popup_stacks_its_rows_in_a_narrow_window() {
             "{label} is on the popup"
         );
     }
-    for heading in ["Key", "Does", "When"] {
+    for heading in ["Key", "Action", "When"] {
         assert!(
             harness.query_by_label(heading).is_none(),
             "{heading} heads nothing when stacked"

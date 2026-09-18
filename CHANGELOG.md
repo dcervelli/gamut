@@ -78,6 +78,13 @@ Notable changes to `gamut`. The format follows
 - `Ctrl+P` does nothing with a single file on the list, as the count it
   stands beside is not shown for one: there is nothing to choose.
 
+- The keys a region takes are listed under a section of their own, `Region
+  selection`, in `--help`, the manual page and the help popup. `Space` and
+  the arrows each get a line there saying what they do with a region up,
+  and their lines in `Zoom and position` say only what they do without
+  one, rather than both in one sentence; `Ctrl+C` likewise gets a line for
+  each, both under `Clipboard`.
+
 - The histogram panel speaks in a viewer's terms rather than the display's.
   The band under the plot is a levels track: a handle at the value that
   comes out black and one at the value that comes out white, each dragged
