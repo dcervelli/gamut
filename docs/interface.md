@@ -17,8 +17,8 @@ whichever screen it lands on. Where none of them fits everywhere — a monitor
 smaller than `MIN_WINDOW`, say — the smallest answer is taken as the least bad
 of them.
 
-The whole calculation is in logical pixels, which is the correction that
-matters. The image's own pixels are physical, so a monitor's scale converts
+The whole calculation is in logical pixels. The image's own pixels are
+physical, so a monitor's scale converts
 them; the panel constants are logical already. Asking in physical pixels does
 not work, because winit's Wayland backend converts the size a window is
 created with at a scale of `1.0` — the surface has none until the compositor
@@ -313,11 +313,10 @@ at is the one thing that stays where it was.
 
 The two panels down the right of the window — the histogram and the
 information column — are both `PANEL_WIDTH` wide, and the histogram is one
-fixed height for a file besides: its plot gives a bin to the logical pixel,
-and the rows under it are set to what they say, so there is nothing in either
-to give. Which rows a file gets is decided from the file alone — see [the
-histogram panel](histogram.md) — so the height is a fact about the file and
-not about what has been done to it. A content area smaller than one of them
+fixed height besides: its plot gives a bin to the logical pixel, and the
+three rows under it are every file's — see [the histogram
+panel](histogram.md) — so there is nothing in either to give. A content area
+smaller than one of them
 gets no panel rather than one drawn over the picture it is about and off the
 edge of the window. `ui::room` asks the question for both at once, because
 they are stacked: the histogram takes the top of the strip, and what it takes
@@ -413,10 +412,10 @@ the `Command::Grab` it already sends; a click, which egui never turns into
 a drag, is read off `clicked_by` in `Pass::region_gestures` and sent as
 `Command::Handle`. A move of the whole by its inside leaves the current
 handle alone: it is not a handle, and the arrows should go on moving what
-they were moving. The arrows used to consult the handle under the pointer
-instead, which made precise sizing a matter of holding the pointer still on
-an eight-pixel square while pressing keys; a handle that stays chosen until
-another is chosen can be worked on with the hand anywhere. The current
+they were moving. A handle that stays chosen until another is chosen can be
+worked on with the hand anywhere, where arrows that consulted the handle
+under the pointer would make precise sizing a matter of holding the pointer
+still on an eight-pixel square while pressing keys. The current
 handle is drawn apart from the rest — filled in `text_bright`, the ink that
 leads, and edged in the accent, where the others are the accent edged in the
 bars' ground — so that what the arrows will move is always in view. An arrow
@@ -615,10 +614,10 @@ Which of those the panel shows is `exif.rs`'s `DESCRIBED` table, one row per
 thing said in words, naming the EXIF tag and the XMP property that say it.
 Where a file has both, the EXIF field is shown: it is the older of the two,
 and a program that writes both writes them alike, so the choice rarely shows.
-Reconciling the two properly — the Metadata Working Group's rules for which
-is newer — was not done, because it wants the dates both blocks carry to be
-compared, and a panel that shows what is actually in the file is better
-served by a fixed rule it can state. The heading is "About" and not
+The Metadata Working Group's rules for which is newer are not applied: they
+want the dates both blocks carry to be compared, and a panel that shows what
+is actually in the file is better served by a fixed rule it can state. The
+heading is "About" and not
 "Description" because one of its rows is the description, and a heading that
 shares a word with a row under it reads as a mistake; the row in turn is
 "Caption", the word the programs that write the field use for it, and what it
@@ -696,7 +695,7 @@ names covers them, and the compression codes are named here rather than left
 as "reserved compression 5", which is what the EXIF renderer calls the LZW the
 format has meant since 1992.
 
-Three things had to be decided rather than read. Numbers are rewritten to the
+Three things are decided rather than read. Numbers are rewritten to the
 digits they are worth: a file storing an aperture as 89/50 means exactly 1.78,
 and quoting it back as f/1.7799999713880652 says only that a rational went
 through binary floating point. Bulk values are left out — a maker note or a
@@ -714,14 +713,14 @@ exceptional, so the parse is asked to continue through them and hand back what
 it did read. Every other container carries the block in a chunk that is found
 by scanning headers, and costs a few hundred microseconds.
 
-Taking the block from the decode instead was the obvious other answer, and it
-is worse. The decoders that could give one cheaply — WebP already reads it for
-the orientation, JPEG holds the file whole — are the ones that cost nothing to
-re-read. The one that would benefit cannot: the TIFF decoder has the directory
-parsed, but the crate behind it will not follow the sub-directory pointers the
-exposure, the lens and the coordinates live behind, so a camera TIFF would
-come back with less than a second read gets, and its values would arrive as
-numbers needing a second renderer to say what they mean.
+The block is not taken from the decode instead. The decoders that could give
+one cheaply — WebP already reads it for the orientation, JPEG holds the file
+whole — are the ones that cost nothing to re-read. The one that would benefit
+cannot: the TIFF decoder has the directory parsed, but the crate behind it
+will not follow the sub-directory pointers the exposure, the lens and the
+coordinates live behind, so a camera TIFF would come back with less than a
+second read gets, and its values would arrive as numbers needing a second
+renderer to say what they mean.
 
 It is the one part of the interface with more to say than fits, and so the
 only part that scrolls, which is egui's scroll area's to do: the bar down the
@@ -742,9 +741,7 @@ copy button and the open button under it — with what each holds laid out in
 open at a time, a press on a cell chooses and closes, and a press anywhere off
 the panel is spent closing it. `Esc` closes it too, in front of the quit it
 would otherwise be. A menu that does not fit where it was hung is moved into
-the window by egui rather than withheld, which is the one thing here the
-display list did differently: it refused to open a menu the window had no
-room for.
+the window by egui rather than withheld.
 
 Each cell is a typed `Control` — a `ZoomChoice`, a `PixelFormat`, one of the
 `Copies` — so that a press comes back as exactly what was chosen, and the
@@ -809,11 +806,12 @@ egui has no layout that answers to its own width, so the table's is written
 out: above `help::STACK_BELOW` a row is three columns, the key and the
 condition at fixed widths and the description wrapping in what is left;
 under it the three go one beneath the other with the whole width each, and
-the column headings, which would then head nothing, are left out. A
-ledger's alternating wash on the rows was tried and dropped: the rows are of
-mixed height, so the stripes read as uneven blocks rather than as ruling. The threshold is where the
-description's column would otherwise be down to a few words a line — and,
-not much narrower, to less than nothing, which egui panics on. The headings
+the column headings, which would then head nothing, are left out. The rows
+are not striped: they are of mixed height, so a ledger's alternating wash
+would read as uneven blocks rather than as ruling. The threshold is where
+the description's column would otherwise be down to a few words a line —
+and, not much narrower, to less than nothing, which egui refuses to lay
+out. The headings
 are laid out above the scroll area rather than in it, so they stay while the
 rows go by under them, set in bold on a band of `Theme::heading` that runs
 edge to edge of the popup inside its stroke, with the information panel's

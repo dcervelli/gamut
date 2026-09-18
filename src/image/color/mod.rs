@@ -319,8 +319,8 @@ mod tests {
         }
     }
 
-    /// Windows can sit below zero once exposure and contrast have been at
-    /// them, and a NaN there would put a marker nowhere.
+    /// A window's end can sit below zero once a handle or a key has been at
+    /// it, and a NaN there would put a marker nowhere.
     #[test]
     fn encoding_a_negative_value_stays_finite_and_ordered() {
         for transfer in [Transfer::Srgb, Transfer::Gamma(2.2), Transfer::Pq] {

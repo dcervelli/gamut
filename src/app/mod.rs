@@ -809,10 +809,10 @@ impl App {
             .shown_view()
             .placement(image, viewport)
             .image_point(cursor);
-        // Written as a positive range test rather than four negated bounds so
-        // that a NaN coordinate is rejected: every `<`/`>=` comparison is
-        // false for NaN, so the old form let a NaN through to read as pixel
-        // (0, 0) — a coordinate the readout must never invent.
+        // A positive range test rather than four negated bounds, so that a
+        // NaN coordinate is rejected: every `<`/`>=` comparison is false for
+        // NaN, which would otherwise read as pixel (0, 0) — a coordinate the
+        // readout must never invent.
         let inside = (0.0..image[0]).contains(&point[0]) && (0.0..image[1]).contains(&point[1]);
         if !inside {
             return None;

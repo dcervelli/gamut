@@ -28,8 +28,9 @@ and they do it in two vocabularies.
 form, because they name a transfer function this program models exactly. HEIF
 carries them in an `nclx` box, PNG in a `cICP` chunk, and JPEG XL derives them
 from its enum color encoding; one translation in `decode::cicp` serves all
-three, which is what made the third of them a matter of reading two bytes. A `cICP` chunk is the whole of how a PNG says it is BT.2100
-PQ or HLG, and `image` surfaces nothing of it, which is why `png` is a direct
+three, so a further format that carries them is a matter of reading two
+bytes. A `cICP` chunk is the whole of how a PNG says it is BT.2100 PQ or
+HLG, and `image` surfaces nothing of it, which is why `png` is a direct
 dependency for the header pass.
 
 **ICC profiles** are the other form, and the one a phone JPEG uses — and the
@@ -107,8 +108,7 @@ the picture, one after each reduced copy — and `tiff_rs::pages` leaves those
 out of the count and the numbering, since a mask is the coverage of the
 picture before it, not a picture, and at one bit a pixel not one the crate
 would decode either. `tiff-mask.tif` is the fixture, a mask between two
-pages. The mask is not applied as alpha; it could be, by reading the
-directory after the picture when that bit is set.
+pages. The mask is not applied as alpha.
 
 The pixels are read a chunk at a time — a strip or a tile, each compressed
 on its own — with the rows of chunks divided between rayon's threads, rather
@@ -121,7 +121,7 @@ itself and reads with `pread`, so the duplicate descriptor `ReadSeek::share`
 hands over — whose offset is shared with the original — is never seeked.
 The file-backed case is the only one that divides; bytes held in memory, and
 the rare planar layout that keeps each channel's chunks apart, go through
-`read_image` on the loader's thread as before. `tiff-strips.tif` and
+`read_image` on the loader's thread. `tiff-strips.tif` and
 `tiff-tiled.tif` are the fixtures that read on more than one band.
 
 A JPEG-compressed TIFF — what GDAL writes for a scanned map or an aerial
@@ -183,7 +183,7 @@ buffer on one thread, which is a few percent of the whole.
 `libheif` applies the container's own geometric properties — `irot`, `imir`,
 `clap` — while decoding, so a rotated phone photograph arrives upright. That
 is a property of the format, not of this program: JPEG's EXIF orientation is a
-separate tag in a separate decoder, and is still ignored.
+separate tag in a separate decoder, and is not applied.
 
 ## Camera raw
 
@@ -212,9 +212,9 @@ depends on, and it arrives under LGPL-2.1 or CDDL-1.0 at the taker's choice
 — a dynamically linked library rather than a crate, so `about.toml`'s
 allowlist, which is over the crate graph, has nothing to say about it, and
 the PKGBUILD's `depends=()` is where it is recorded. The pure-Rust
-alternatives were looked at and passed over: `rawler` and `rawloader` are
-LGPL-2.1 crates, which the allowlist refuses on purpose, and `rawkit` reads
-one make of camera.
+alternatives do not serve: `rawler` and `rawloader` are LGPL-2.1 crates,
+which the allowlist refuses on purpose, and `rawkit` reads one make of
+camera.
 
 What LibRaw is asked for is the least developed picture it can make. AHD
 demosaic, dcraw's default and what every other developer is compared to;
@@ -242,9 +242,9 @@ interpretation; a compression code that is one vendor's own; a first
 directory that is a reduced copy pointing at sub-directories, which is
 Nikon's and Sony's layout; or one that holds no picture at all, only the
 camera's name and the sub-directories, which is Samsung's. A scan matches
-none of these and goes to `tiff_rs` as before. Reading the directory is why
-`decode::HEADER` grew from 64 bytes to 4096: a camera writes its first
-directory at byte 8 with a few dozen entries. `raw::tests` covers each rule
+none of these and goes to `tiff_rs`. Reading the directory is why
+`decode::HEADER` is 4096 bytes: a camera writes its first directory at byte
+8 with a few dozen entries. `raw::tests` covers each rule
 with a directory built by hand, and
 `samples_are_recognized_probed_and_developed` — ignored unless asked for —
 runs real cameras' files through recognition, the probe, the develop, the
@@ -264,10 +264,7 @@ sake; the second read comes from the page cache.
 **What it costs.** A 24-megapixel Bayer frame develops in 400–600 ms on
 this machine, LibRaw's OpenMP threads doing the demosaic; an X-Trans frame
 takes three times that, its interpolation being three passes rather than
-one. Still to do: a mosaic view — the counts as one gray channel, for the
-false-color maps — which LibRaw hands back directly, and a white balance of
-the program's own, which is a per-channel gain and a 3×3 matrix in the
-shader rather than a second develop.
+one.
 
 **The preview.** Every raw carries the camera's own JPEG of the frame,
 which LibRaw copies out without decoding anything — `unpack_thumb` and
@@ -282,8 +279,7 @@ the fifteen cameras sampled the smallest preview is 644 pixels wide and
 most are the full frame. A thumbnail of a raw therefore looks like the
 camera's JPEG — its curve, its balance — rather than the flat linear
 picture the viewer opens; for finding a file that is the better likeness.
-`dynamic::reorient` is the turn, shared with nothing yet but written for
-any `DecodedImage`.
+`dynamic::reorient` is the turn.
 
 **The metadata.** The panel reads a raw's EXIF where a TIFF-shaped one
 keeps it, at the front, and most formats are TIFF-shaped. Five are not, and
@@ -332,8 +328,8 @@ the highlights above 1.0 that are the point of it survive.
 `ImageStream::write_to_buffer` scales into the full range of whichever type it
 is handed, which is exactly what `Samples::full_scale` downstream assumes.
 
-**Color arrives in both vocabularies**, and both already had a translation
-here. `rendered_cicp` gives the code points for a file with an enum encoding,
+**Color arrives in both vocabularies**, and both have a translation here.
+`rendered_cicp` gives the code points for a file with an enum encoding,
 and `original_icc` the profile for one without; the CICP form wins where there
 is one, as it does for HEIF. Both are asked of the *rendered* encoding rather
 than the stored one, so what is described is what the buffer actually holds.
@@ -385,8 +381,8 @@ JPEG, PNG and HEIF use. Without one the file means sRGB.
 metadata tag is honored rather than ignored, and it is a deliberate
 exception: the tag sits in a chunk this decoder is already opening for the
 profile, and reading it costs a rotation of a buffer that is already in hand.
-JPEG's EXIF orientation still is not applied — same tag, different decoder,
-and that one would have to grow a container pass to reach it.
+JPEG's EXIF orientation is not applied — same tag, different decoder, and
+that one has no container pass to reach it with.
 
 `ANIM` and `ANMF` make the file an animation. A frame is not necessarily a
 picture: the format lets it be a patch at an offset, blended onto a canvas
@@ -427,7 +423,7 @@ twice.
 ## BMP and netpbm
 
 Both take the plain route through `image`, for the same reason GIF does, and
-both needed a sniff written with more care than a signature usually asks for.
+both need a sniff written with more care than a signature usually asks for.
 
 BMP's magic number is the two letters `BM`, which plain English wears often
 enough to matter; netpbm's is `P` and a digit. Neither is worth trusting on
@@ -525,16 +521,18 @@ pub trait Decoder: Sync {
     fn dimensions(&self, source: &mut dyn ReadSeek) -> Result<Option<(u32, u32)>> { Ok(None) }
     fn sequence(&self, source: &mut dyn ReadSeek) -> Result<Sequence> { Ok(Sequence::Still) }
     fn decode_page(&self, source: &mut dyn ReadSeek, overrides: Overrides, page: usize) -> Result<DecodedImage>;
+    fn preview(&self, source: &mut dyn ReadSeek, overrides: Overrides) -> Result<Option<DecodedImage>> { Ok(None) }
     fn frames(&self, source: BufReader<File>, overrides: Overrides) -> Result<Box<dyn FrameSource>>;
 }
 ```
 
-The last three have defaults — one image, page zero is that image, no frames
-— and a format that holds more overrides them: `sequence` from the header,
-`decode_page` for a file of pages, `frames` for an animation. What `decode`
-returns has to be what `sequence` says is the default page, and
-`dimensions` has to agree with both; the fixture tests hold every decoder to
-that.
+The last five have defaults — no size, one image, page zero is that image,
+no preview, no frames — and a format that holds more overrides them:
+`sequence` from the header, `decode_page` for a file of pages, `preview` for
+a format that carries a smaller picture of itself, `frames` for an
+animation. What `decode` returns has to be what `sequence` says is the
+default page, and `dimensions` has to agree with both; the fixture tests
+hold every decoder to that.
 
 `DecodedImage` carries `Samples` (U8/U16/F32 × gray/gray+alpha/rgb/rgba),
 a `ColorSpace` (transfer function and primaries), an `AlphaMode`, and, for

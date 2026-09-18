@@ -51,8 +51,7 @@ const LABEL_SIZE: f32 = TEXT_SIZE * 0.85;
 const FIELD_GAP: f32 = 6.0;
 /// The space above a section's name, which has to part two sections more
 /// plainly than a field parts two fields — near enough twice as plainly, with
-/// a hairline drawn through the middle of it doing the parting that the space
-/// used to have to do alone.
+/// a hairline drawn through the middle of it doing part of the parting.
 const SECTION_GAP: f32 = 11.0;
 /// The space between a field's name and its value. Less than nothing: a line
 /// box carries its own leading above the glyphs, so the two lines are pulled

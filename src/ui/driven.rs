@@ -1246,7 +1246,7 @@ fn a_click_on_the_count_leaves_the_chooser_for_the_press_to_close() {
 /// In a window too narrow for the three columns the rows stack, each part
 /// on a line of its own, and the column headings — which would then head
 /// nothing — are left out. The popup does not ask for a column less than
-/// nothing wide, which is what used to bring the program down.
+/// nothing wide, which egui refuses to lay out.
 #[test]
 fn the_help_popup_stacks_its_rows_in_a_narrow_window() {
     let mut harness = open(

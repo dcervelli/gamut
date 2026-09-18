@@ -536,7 +536,6 @@ impl Pass<'_> {
 /// What the grid toggle reads out while the grid is on: how far apart its
 /// lines are at `zoom`, on a display of `scale` physical pixels to the
 /// logical one. `None` while it is off, there being no spacing in force then.
-///
 pub fn grid_spacing(show_grid: bool, zoom: f32, scale: f32) -> Option<String> {
     show_grid.then(|| grid::label(grid::step(zoom, scale)))
 }

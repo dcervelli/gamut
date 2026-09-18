@@ -37,9 +37,9 @@ the cache is a window around the head, the frame farthest ahead going round —
 which is the one just behind the head — let go first, and a seek back behind
 the window sends the source back to the start to read forward to it. One
 shape rather than two, so that the small file and the large one are the same
-code and the budget alone decides which behavior a file gets; the alternative
-of refusing to play a file that will not fit was dropped because a long
-high-resolution WebP is exactly the file someone opens this program for.
+code and the budget alone decides which behavior a file gets — rather than
+refusing to play a file that will not fit, since a long high-resolution WebP
+is exactly the file someone opens this program for.
 The event loop is woken through a user event as frames arrive, the way the
 loader wakes it for a finished file, since the loop sleeps until something is
 due and a frame it is waiting on is something due.
@@ -68,9 +68,7 @@ size at the file's depth — falls back to a fresh upload. The refill runs on
 the event loop's thread, in `App::show_due_frame` at the head of a redraw: an
 8-bit sRGB frame takes the hardware path and costs a copy of tens of
 megabytes at most, which is a millisecond. A 16-bit JPEG XL animation pays
-the transfer-function table on every frame as well; if that ever shows, the
-seam for moving the refill onto the player's thread with two textures is
-`Renderer::refill_image`.
+the transfer-function table on every frame as well.
 
 The interface's picture and statistics are swapped for the frame's, so that
 everything reading `Current::image` — the readout, the histogram, a copy, the

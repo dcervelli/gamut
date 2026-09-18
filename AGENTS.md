@@ -259,10 +259,10 @@ how the README turned into a 1200-line specification once already.
   it, and never add a section describing something newly built.
 - **`user-docs/`** is for people who only run the program. It has its own
   CLAUDE.md with the rules for writing it.
-- **`docs/`** is for people reading or changing the code: the design, the
-  reasoning, the alternatives that were tried and dropped. It has its own
-  CLAUDE.md too. This is where implementation writing goes — new pages here,
-  not new README sections.
+- **`docs/`** is for people reading or changing the code: the design and the
+  reasoning behind it, as the code works now. It has its own CLAUDE.md too.
+  This is where implementation writing goes — new pages here, not new README
+  sections.
 - **`CHANGELOG.md`** takes anything of the form "what is new" or "what changed".
   Nothing of that shape goes in the README or in `docs/`.
 

@@ -76,7 +76,8 @@ impl Output {
 
     /// Whether an HDR surface is there to be asked for at all: the driver
     /// offers a color space with room above white for this window. Not
-    /// whether the monitor is HDR, which nothing on Linux will say.
+    /// whether the monitor is in HDR mode, which is the compositor's to say
+    /// — see `monitor`.
     pub fn hdr_available(capabilities: &wgpu::SurfaceCapabilities) -> bool {
         Self::extended_linear(capabilities).is_some() || Self::pq(capabilities).is_some()
     }

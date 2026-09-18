@@ -15,8 +15,7 @@
 //!
 //! `libheif` applies the container's own geometric transformations — `irot`,
 //! `imir`, `clap` — while decoding, so a rotated phone photograph arrives
-//! upright. (JPEG's EXIF orientation still does not; that is a separate tag in
-//! a separate decoder.)
+//! upright.
 
 use std::fs::File;
 use std::io::{BufReader, SeekFrom};

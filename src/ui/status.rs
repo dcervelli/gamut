@@ -490,7 +490,7 @@ mod tests {
     }
 
     /// What the bar names in the room it has, the tooltip says: the window's
-    /// own bounds, which the bar no longer writes out, and a sentence for
+    /// own bounds, which the bar does not write out, and a sentence for
     /// every other thing in force whether or not the bar had room for it.
     #[test]
     fn the_tooltip_says_in_full_what_the_bar_has_room_to_name() {

@@ -22,9 +22,9 @@ pub enum AutoWindow {
 
 impl AutoWindow {
     /// `stored`, `full` or `trimmed`, as the command line names them — the
-    /// words the histogram panel's buttons and the bottom bar use. The older
-    /// `unit`, `minmax` and `pct`, and the longer `off`, `min-max` and
-    /// `percentile`, are still taken.
+    /// words the histogram panel's buttons and the bottom bar use. `unit`,
+    /// `minmax` and `pct`, and `off`, `min-max` and `percentile`, are taken
+    /// as well.
     pub fn parse(value: &str) -> Option<Self> {
         Some(match value.to_ascii_lowercase().as_str() {
             "stored" | "unit" | "off" => AutoWindow::Off,
@@ -81,11 +81,10 @@ impl AutoWindow {
 /// to add the curve is the viewer's.
 ///
 /// One curve, because a viewer wants exactly one thing of it: the highlights
-/// brought back under white with everything else left alone. A Reinhard
-/// curve was the other choice until it went — `c / (c + 1)` sends white to
-/// a half, so it re-grades the whole in-range picture to make room for the
-/// highlights, and on an 8-bit file at 0 EV it changes every pixel. That is
-/// editing, which this panel does not do.
+/// brought back under white with everything else left alone. A curve that
+/// re-grades the in-range picture to make room for them — Reinhard's
+/// `c / (c + 1)` sends white to a half, and changes every pixel of an 8-bit
+/// file at 0 EV — is editing, which this panel does not do.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ToneMap {
     /// No curve. Clipping on an SDR surface, which is correct for measurement
@@ -614,14 +613,12 @@ impl Display {
     /// is: the white handle on the histogram's band, the twin of
     /// [`Display::put_black`].
     ///
-    /// The window's top on every file. Exposure and the window's top are two
-    /// dials for one effect — a stop up is white moved to half its value
-    /// with black held — and the handle used to be the exposure on a graded
-    /// file, whose window is 0..1 by rights. But the black handle moved the
-    /// window on every file, so the top was the one special case: a handle
-    /// that meant a different thing on the next file along. Now the two
-    /// dials are honestly two, the window in the file's own units and the
-    /// exposure in stops, and a hand on either handle is a hand-set window.
+    /// The window's top on every file, a graded one included. Exposure and
+    /// the window's top are two dials for one effect — a stop up is white
+    /// moved to half its value with black held — and they are kept honestly
+    /// two, the window in the file's own units and the exposure in stops,
+    /// so that a handle means the same thing on every file: a hand on
+    /// either handle is a hand-set window.
     ///
     /// Refused where `white` is not above black, or is not a number: that is
     /// not a white point.
@@ -1353,8 +1350,8 @@ mod tests {
     }
 
     /// The rules are named the same way everywhere — the buttons, the bar,
-    /// the key's help and the command line — and the names the command line
-    /// used to take still work, so a script written to them does not break.
+    /// the key's help and the command line — and the command line takes the
+    /// other spellings as well, so a script written to them does not break.
     #[test]
     fn the_window_rules_answer_to_their_old_names_too() {
         for (word, rule) in [

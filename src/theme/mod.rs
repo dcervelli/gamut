@@ -33,9 +33,8 @@ use palette::{BLACK, WHITE, mix};
 /// roles that a theme can be reasoned about whole.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Theme {
-    /// Whether the palette reads light-on-dark or dark-on-light. Nothing here
-    /// branches on it any more, the surfaces having been derived to work
-    /// either way round, but it is what the derivation itself reads.
+    /// Whether the palette reads light-on-dark or dark-on-light: what the
+    /// derivation reads to know which way is away from the page.
     pub mode: Mode,
     /// The four panels, and the window behind the image.
     pub bar_background: Color,

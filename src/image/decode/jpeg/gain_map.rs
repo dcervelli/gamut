@@ -4,8 +4,8 @@
 //! The base image is an ordinary graded photograph, so every viewer ever
 //! written shows something sensible. The gain map beside it is a per-pixel
 //! log2 multiplier which, applied in linear light, restores the highlights
-//! that grading compressed. A viewer that ignores it — as this one did — sees
-//! only the SDR half and has no way to know the rest was ever there.
+//! that grading compressed. A viewer that ignores it sees only the SDR half
+//! and has no way to know the rest was ever there.
 //!
 //! Two crates split the work. `ultrahdr-rs` walks the container (MPF, and the
 //! XMP directory Google writes alongside it) and hands back the two JPEGs as

@@ -23,16 +23,16 @@
 //! rows stored bottom-up or top-down — the crate resolves before it answers,
 //! so all of it arrives here as one of three layouts and means sRGB.
 //!
-//! Netpbm is the one whose header looked like it had something to say. A PBM,
-//! PGM, PPM or PAM states a `MAXVAL`, the value a fully bright sample has,
-//! and it need not be 255 or 65535: instrument pipelines write 1023 or 4095,
-//! and a bitmap writes 1. Left alone that would matter a great deal, because
-//! `Samples::full_scale` says a `U16` image's white is 65535 and a raster
-//! stated against 1023 would show at a sixteenth of its brightness — the
-//! correction a 10-bit HEIF needs and gets in `super::heif`. The crate
-//! already applies it, rescaling every sample to saturate its width before
-//! handing the buffer over, so there is nothing left here to do but say that
-//! it does. `pnm-maxval1023.pgm` is the fixture that keeps it true.
+//! Netpbm takes it as well. A PBM, PGM, PPM or PAM states a `MAXVAL`, the
+//! value a fully bright sample has, and it need not be 255 or 65535:
+//! instrument pipelines write 1023 or 4095, and a bitmap writes 1. Left
+//! alone that would matter a great deal, because `Samples::full_scale` says
+//! a `U16` image's white is 65535 and a raster stated against 1023 would
+//! show at a sixteenth of its brightness — the correction a 10-bit HEIF
+//! needs and gets in `super::heif`. The crate already applies it, rescaling
+//! every sample to saturate its width before handing the buffer over, so
+//! there is nothing left here to do but say that it does.
+//! `pnm-maxval1023.pgm` is the fixture that keeps it true.
 //!
 //! What netpbm says about color is nothing this program can act on either.
 //! Its specification names the BT.709 transfer function, which is close

@@ -3,13 +3,9 @@
 //!
 //! One trait, and the one implementation the program uses. The trait's
 //! method is skim's own `FuzzyMatcher::fuzzy_indices`, signature for
-//! signature, so that skim's matchers fit it unchanged: the crate this
-//! delegates to today is the 2020 extraction of skim's algorithm, and the
-//! program skim has kept the same code moving since, under
-//! `src/fuzzy_matcher/` of its own tree. Should that ever be wanted here —
-//! vendored, MIT, its thread-local caches swapped for a `RefCell` since the
-//! chooser matches on one thread — it is a second `impl Matcher` in this
-//! file and nothing else changes. This is the only file that names the crate.
+//! signature, so that skim's matchers fit it unchanged; a different matcher
+//! is a second `impl Matcher` in this file and nothing else changes. This is
+//! the only file that names the crate.
 //!
 //! The chooser's own tests run over `Plain`, a matcher small enough to
 //! reason about, so they state what the chooser needs of any matcher rather

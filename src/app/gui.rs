@@ -26,8 +26,8 @@ impl Gui {
         let ctx = egui::Context::default();
         ctx.set_fonts(ui::fonts::system()?);
         ui::style::apply(&ctx, theme);
-        // A repaint asked for from outside a frame — there are none yet, but
-        // a widget's animation could — wakes the loop the way any event does.
+        // A repaint asked for from outside a frame wakes the loop the way
+        // any event does.
         let handle = window.clone();
         ctx.set_request_repaint_callback(move |_| handle.request_redraw());
         let state = egui_winit::State::new(

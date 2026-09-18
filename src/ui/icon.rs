@@ -490,8 +490,7 @@ pub(super) const X: &[Mark] = &[
 
 /// The device's grid, in the terms a mark is placed on it: physical pixels
 /// to the logical one, and the arithmetic that puts a coordinate on a whole
-/// one. The same arithmetic the display list does for itself, held here so
-/// that an icon painted by egui lands where one drawn by the list did.
+/// one.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(super) struct Grid {
     scale: f32,

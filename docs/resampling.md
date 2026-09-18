@@ -20,7 +20,7 @@ All three filters are weighted sums of texel loads in `shaders/image.wgsl`
 rather than sampler taps — one bilinear tap is neither of the two above, and it
 covers four texels however far out the view is zoomed. Because the shader does
 the weighting, it can also multiply straight alpha through first, so a
-transparent texel no longer bleeds its color into the edge beside it.
+transparent texel does not bleed its color into the edge beside it.
 
 ## What it costs, and the coarse chain
 
