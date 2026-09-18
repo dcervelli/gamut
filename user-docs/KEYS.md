@@ -253,8 +253,11 @@ the value that comes out black, `A` and `S` the value that comes out white.
 Each press moves its end by a twentieth of the window's width as the
 histogram draws it, and no further than the histogram's axis goes.
 
-Moving either end by hand takes the window out of whichever automatic mode
-it was in; `e` cycles back into them. Exposure stops at ±16 stops.
+Moving either end by hand takes the window out of whichever rule it was
+on; `e` cycles back into them, and the *As stored* button on the histogram
+panel puts a graded file's window back at 0 to 1. The exposure is a push on
+top of whatever the window is, and neither handle touches it. Exposure
+stops at ±16 stops.
 
 The histogram panel (`h`) is where all of this is seen and set. The band of
 gray under the plot is what the display makes of each value along the axis,
@@ -264,15 +267,12 @@ either can be dragged to a new value — `a`/`s` and `A`/`S` step the same
 two handles. Dragging the band between them slides the window along the
 plot, as far as the plot goes: once the window is narrower than the axis —
 after a stop or two of exposure on a graded file, or a trimmed window on
-linear data — the band is which part of the range you are looking at. On a
-graded file — one stored on a curve, as an sRGB or PQ file is — the white
-handle is the exposure: dragging it in is the same as pressing `f`, in the
-same quarter stops, and the number beside *Exposure* follows it, since such
-a file's window is 0 to 1 and there is nothing else for the handle to be.
-`A` and `S` there are a quarter stop each, the same as `f` and `d`. On
-linear data the handle sets the top of the window itself, and the exposure
-stays a push on top of that window, which is what survives the window being
-found again. The share of the picture the window is throwing away is
+linear data — the band is which part of the range you are looking at. The
+handles are the window on every file, and the exposure is a separate thing
+on top of it: bringing the white handle in and raising the exposure make
+the same picture, but the window is found again when a file changes on disk
+or a *Window* rule is pressed, and the exposure survives that. The share
+of the picture the window is throwing away is
 written in the top corners of the plot — how much is at or below black on
 the left, how much is at or above white on the right — and only when there
 is any, so a number there is news. Pointing at the plot names the value
@@ -291,15 +291,15 @@ Under the band, every file gets the exposure: a slider over six stops each
 way, its reading at the end of the row. It snaps to the quarter stops `d`
 and `f` take, and a press anywhere along it puts the exposure there. The
 keys go on past the slider's ends, to ±16 stops, where the handle stands
-hollow at the end and the reading says where it is. A file of linear data — sensor counts, a float TIFF, an EXR —
-also gets the row of windows the `e` key cycles, named for what they do:
-*As stored* shows the values as they are, *Full range* stretches everything
-the file holds to black and white, and *Trimmed* leaves the outermost 0.2%
-out before stretching, which is what such a file opens with. Every file
-gets the *Curve* row — *Clip* or *Roll off* — that `t` toggles, since a
-stop or two of exposure puts the top of any file above white. A graded file
-has no window to find, so it gets no window row and a shorter panel; the
-keys still work on it.
+hollow at the end and the reading says where it is. Under that is the row
+of windows the `e` key cycles, named for what they do: *As stored* shows
+the values as they are, 0 to 1, which is what a graded file opens with;
+*Full range* stretches everything the file holds to black and white; and
+*Trimmed* leaves the outermost 0.2% out before stretching, which is what a
+file of linear data — sensor counts, a float TIFF, an EXR — opens with.
+Under that, the *Curve* row — *Clip* or *Roll off* — that `t` toggles,
+since a stop or two of exposure puts the top of any file above white. The
+three rows are the same for every file, so the panel is one height.
 
 The curve is added to bring values brighter than white back down into a
 surface that cannot show them. *Clip* is not a second curve but the absence
@@ -385,10 +385,10 @@ whichever image is on screen and stays as you set it, and setting it while the
 histogram is closed leaves it that way for when you open it.
 
 Under the plot are the band and the rows of settings the plot is drawing,
-described under [The display](#the-display) above: the exposure and the
-tone curves for every file, and the windows for a file of linear data. The
-buttons of both rows set rather than switch, so pressing a window's again
-after moving the window by hand puts it back where it says.
+described under [The display](#the-display) above: the exposure, the
+window and the curve, for every file. The buttons of the last two rows set
+rather than switch, so pressing a window's again after moving the window by
+hand puts it back where it says.
 
 The histogram, the file information and the minimap float over the image
 rather than sitting in the bars, so `` ` `` leaves them where they are.

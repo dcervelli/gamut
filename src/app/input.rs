@@ -98,8 +98,7 @@ pub enum Action {
     /// Move the value that comes out black by this fraction of the
     /// window's width: the black handle's key.
     StepBlack(f32),
-    /// And the value that comes out white — or, where that handle is the
-    /// exposure, a quarter stop of it: see `Display::step_white`.
+    /// And the value that comes out white: the white handle's key.
     StepWhite(f32),
     CycleToneMap,
     CycleColormap,
@@ -1529,12 +1528,9 @@ impl App {
             StepWhite(by) => {
                 return self.adjust(|current, _| {
                     let transfer = current.image.color.transfer;
-                    current.display.step_white(
-                        by,
-                        transfer,
-                        current.image.referred,
-                        current.stats.plot.max,
-                    )
+                    current
+                        .display
+                        .step_white(by, transfer, current.stats.plot.max)
                 });
             }
             // Not under a false color, which clips whatever the curve: the
@@ -1852,8 +1848,7 @@ impl App {
             // The hand on the band under the histogram: the values that come
             // out black and white go where the handles are put, as the view
             // goes where a drag puts it. Not animated, and not a step: the
-            // hand is on it. Which of the display's dials moves to put white
-            // there is the file's to say, and the display asks it.
+            // hand is on it. The exposure is left alone by both.
             ui::Command::BlackPoint(black) => {
                 if let Some(current) = self.current.as_mut() {
                     current.display.put_black(black);
@@ -1861,7 +1856,7 @@ impl App {
             }
             ui::Command::WhitePoint(white) => {
                 if let Some(current) = self.current.as_mut() {
-                    current.display.put_white(white, current.image.referred);
+                    current.display.put_white(white);
                 }
             }
             ui::Command::Slide { black, white } => {
