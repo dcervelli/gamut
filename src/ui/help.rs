@@ -9,6 +9,14 @@
 //! the table is read once from the application's [`Naming`] and laid out,
 //! and nothing on it can be pressed.
 //!
+//! The table is three columns: the keys, what they do, and the condition
+//! on which they do anything. A row whose condition does not hold right
+//! now is dimmed whole, with the condition itself in the caution ink, so
+//! that the keys that would do something are the ones that stand out.
+//! The headings stay at the top while the rows scroll under them, on a
+//! band of their own and parted from the rows by a hairline as the
+//! information panel's column is from its header.
+//!
 //! [`Naming`]: super::control::Naming
 
 use egui::{
@@ -18,6 +26,7 @@ use egui::{
 
 use super::chrome::Pass;
 use super::control::{Command, Control};
+use super::info::{HEADER_GAP, RULE_WIDTH, SCROLLBAR_GUTTER, SCROLLBAR_WIDTH, rule};
 use super::style::{MENU_PADDING, MENU_RADIUS};
 use super::{PADDING, Rect, TEXT_SIZE, fonts, info};
 
@@ -40,7 +49,15 @@ pub struct Section {
 pub struct Row {
     pub key: String,
     pub does: &'static str,
-    pub when: Option<&'static str>,
+    pub when: Option<Condition>,
+}
+
+/// The condition a key waits on: what it is in words, and whether it holds
+/// as the popup is drawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Condition {
+    pub words: &'static str,
+    pub met: bool,
 }
 
 /// The popup at most this wide and this tall.
@@ -66,9 +83,9 @@ const HAIRLINE: f32 = 1.0;
 const KEY_WIDTH: f32 = 150.0;
 const WHEN_WIDTH: f32 = 170.0;
 /// The gap between one column and the next, and between one row and the
-/// next; the room a stacked row leaves under itself, its lines being
-/// spaced as the columns' rows are and needing something more to read as
-/// one row rather than three.
+/// next; the room a stacked row leaves under itself over that, its lines
+/// being spaced as the columns' rows are and needing something more to
+/// read as one row rather than three.
 const COLUMN_GAP: f32 = 16.0;
 const ROW_GAP: f32 = 4.0;
 const STACK_GAP: f32 = 10.0;
@@ -77,7 +94,7 @@ const STACK_GAP: f32 = 10.0;
 const SECTION_GAP: f32 = 14.0;
 const TITLE_GAP: f32 = 6.0;
 /// What the three columns are headed.
-const HEADINGS: [&str; 3] = ["Key", "Does", "When"];
+const HEADINGS: [&str; 3] = ["Key", "Action", "When"];
 
 /// Where the popup goes: the middle of `content`, at most [`WIDTH_MAX`] by
 /// [`HEIGHT_MAX`] and inside the padding everything floating over the image
@@ -113,6 +130,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, content: Rect) {
         panel.height - 2.0 * MENU_PADDING,
     );
     let sections = pass.namer.help();
+    let width = table_width(panel.width);
     egui::Popup::new(
         id(),
         ui.ctx().clone(),
@@ -130,11 +148,50 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, content: Rect) {
     .show(|ui| {
         ui.set_min_size(inside);
         ui.set_max_size(inside);
+        ui.spacing_mut().item_spacing = vec2(COLUMN_GAP, 0.0);
+        // The headings stay put above the rows, which scroll under them;
+        // stacked, there are no columns for them to head. They sit on a
+        // band of their own, parted from the rows by the information
+        // panel's hairline under its header, which says the same: the
+        // table runs on under here.
+        if !stacked(width) {
+            // The band the headings sit on runs edge to edge of the popup
+            // and down to the hairline, inside the popup's own stroke;
+            // painted first, so that the headings and the hairline go
+            // over it.
+            let band = ui.painter().add(egui::Shape::Noop);
+            let frame = ui.max_rect().expand(MENU_PADDING).shrink(HAIRLINE);
+            headings(pass, ui, width);
+            ui.add_space((HEADER_GAP - RULE_WIDTH) / 2.0);
+            rule(pass, ui, width);
+            let rect = egui::Rect::from_min_max(frame.min, pos2(frame.max.x, ui.cursor().min.y));
+            let corners = egui::CornerRadius {
+                nw: (MENU_RADIUS - HAIRLINE) as u8,
+                ne: (MENU_RADIUS - HAIRLINE) as u8,
+                sw: 0,
+                se: 0,
+            };
+            ui.painter()
+                .set(band, egui::Shape::rect_filled(rect, corners, theme.heading));
+            ui.add_space((HEADER_GAP - RULE_WIDTH) / 2.0);
+        }
+        // The bar down the popup's inner edge, in a gutter kept clear for
+        // it as the information panel keeps one: the headings are laid out
+        // to the width the rows have, and the rows' width must not depend
+        // on whether the bar is showing.
+        ui.spacing_mut().scroll.bar_inner_margin = SCROLLBAR_GUTTER - SCROLLBAR_WIDTH;
         egui::ScrollArea::vertical()
             .id_salt("help table")
             .auto_shrink(false)
-            .show(ui, |ui| table(pass, ui, &sections, inside.x));
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+            .show(ui, |ui| table(pass, ui, &sections, width));
     });
+}
+
+/// How wide the table is in a popup `panel_width` wide: inside the
+/// popup's padding, and short of the scrollbar's gutter.
+fn table_width(panel_width: f32) -> f32 {
+    panel_width - 2.0 * MENU_PADDING - SCROLLBAR_GUTTER
 }
 
 /// How a popup the application opens and closes takes a click: closing on
@@ -158,26 +215,42 @@ pub(super) fn stacked(width: f32) -> bool {
     width < STACK_BELOW
 }
 
-/// The table: each section's title and rows, and above them all, where the
-/// rows are in columns, the three headings once. In columns, the key and
-/// the condition are a fixed width and what a key does wraps in what is
-/// left; stacked, each part has the whole width and the headings would
-/// head nothing.
+/// How wide the action's column is in a table `width` wide: what the two
+/// fixed columns and the gaps between the three leave.
+fn does_width(width: f32) -> f32 {
+    width - KEY_WIDTH - WHEN_WIDTH - 2.0 * COLUMN_GAP
+}
+
+/// The three headings, over the columns they head.
+fn headings(pass: &Pass, ui: &mut egui::Ui, width: f32) {
+    let theme = pass.theme;
+    ui.horizontal_top(|ui| {
+        for (heading, column) in
+            HEADINGS
+                .into_iter()
+                .zip([KEY_WIDTH, does_width(width), WHEN_WIDTH])
+        {
+            cell(
+                ui,
+                column,
+                RichText::new(heading)
+                    .family(egui::FontFamily::Name(fonts::BOLD.into()))
+                    .color(theme.text_primary),
+            );
+        }
+    });
+}
+
+/// The table: each section's title and rows. In columns, the key and the
+/// condition are a fixed width and what a key does wraps in what is left;
+/// stacked, each part has the whole width. A row whose condition does not
+/// hold is written in the dim ink throughout, its condition in the caution
+/// ink: what the row says is true, and what it needs is what is missing.
 fn table(pass: &Pass, ui: &mut egui::Ui, sections: &[Section], width: f32) {
     let theme = pass.theme;
     let stacked = stacked(width);
-    let does_width = width - KEY_WIDTH - WHEN_WIDTH - 2.0 * COLUMN_GAP;
+    let does_width = does_width(width);
     ui.spacing_mut().item_spacing = vec2(COLUMN_GAP, ROW_GAP);
-    if !stacked {
-        ui.horizontal_top(|ui| {
-            for (heading, column) in HEADINGS
-                .into_iter()
-                .zip([KEY_WIDTH, does_width, WHEN_WIDTH])
-            {
-                cell(ui, column, RichText::new(heading).color(theme.text_dim));
-            }
-        });
-    }
     for (index, section) in sections.iter().enumerate() {
         if index > 0 {
             ui.add_space(SECTION_GAP);
@@ -190,13 +263,21 @@ fn table(pass: &Pass, ui: &mut egui::Ui, sections: &[Section], width: f32) {
         );
         ui.add_space(TITLE_GAP);
         for row in &section.rows {
-            let key = RichText::new(&row.key)
-                .monospace()
-                .color(theme.text_primary);
-            let does = RichText::new(row.does).color(theme.text_primary);
-            let when = row
-                .when
-                .map(|when| RichText::new(when).color(theme.text_dim));
+            let met = row.when.is_none_or(|when| when.met);
+            let ink = if met {
+                theme.text_primary
+            } else {
+                theme.text_dim
+            };
+            let key = RichText::new(&row.key).monospace().color(ink);
+            let does = RichText::new(row.does).color(ink);
+            let when = row.when.map(|when| {
+                RichText::new(when.words).color(if when.met {
+                    theme.text_dim
+                } else {
+                    theme.caution
+                })
+            });
             if stacked {
                 cell(ui, width, key);
                 cell(ui, width, does);
@@ -277,9 +358,9 @@ mod tests {
     /// column less than nothing wide. The narrowest popup there is stacks.
     #[test]
     fn the_columns_never_come_to_less_than_nothing() {
-        let least_does = STACK_BELOW - KEY_WIDTH - WHEN_WIDTH - 2.0 * COLUMN_GAP;
+        let least_does = does_width(STACK_BELOW);
         assert!(least_does >= 120.0, "{least_does} for a sentence");
-        assert!(stacked(WIDTH_MIN - 2.0 * MENU_PADDING));
-        assert!(!stacked(WIDTH_MAX - 2.0 * MENU_PADDING));
+        assert!(stacked(table_width(WIDTH_MIN)));
+        assert!(!stacked(table_width(WIDTH_MAX)));
     }
 }

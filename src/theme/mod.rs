@@ -65,6 +65,11 @@ pub struct Theme {
     pub plot_background: Color,
     pub button_idle: Color,
     pub button_hover: Color,
+    /// The band a table's headings sit on, across the top of it — the help
+    /// popup's key table: the one row that is not a row, so the one drawn
+    /// on a ground of its own. A full step up from `button_idle`, so that
+    /// it is not taken for a button.
+    pub heading: Color,
     /// Text in the bars: what the image is, and what is being done to it.
     pub text_primary: Color,
     pub text_dim: Color,
@@ -180,6 +185,7 @@ impl Theme {
         plot_background: PLOT_BACKGROUND,
         button_idle: Color::rgba(255, 255, 255, 20),
         button_hover: Color::rgba(255, 255, 255, 45),
+        heading: Color::rgba(255, 255, 255, 48),
         text_primary: Color::rgb(238, 238, 238),
         text_dim: Color::rgb(150, 152, 160),
         // The set the interface was designed in already parts its two inks,
@@ -289,6 +295,7 @@ impl Theme {
             plot_background: PLOT_BACKGROUND,
             button_idle: foreground.with_alpha(Theme::FALLBACK.button_idle.a),
             button_hover: foreground.with_alpha(Theme::FALLBACK.button_hover.a),
+            heading: foreground.with_alpha(Theme::FALLBACK.heading.a),
             text_primary: bright,
             text_dim: foreground,
             text_bright,
@@ -350,6 +357,10 @@ mod tests {
         // The washes are the panel colors at the interface's own alphas.
         assert_eq!(theme.button_idle, theme.text_dim.with_alpha(20));
         assert_eq!(theme.minimap_edge, theme.text_dim.with_alpha(70));
+        // The headings' band is stronger than a button's wash, being the
+        // one row set apart.
+        assert_eq!(theme.heading, theme.text_dim.with_alpha(48));
+        assert!(theme.heading.a > theme.button_idle.a);
     }
 
     /// A menu is a handful of buttons, and buttons are drawn in ink made to

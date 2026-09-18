@@ -61,9 +61,10 @@ const SECTION_GAP: f32 = 11.0;
 const LABEL_GAP: f32 = -1.0;
 
 /// The hairline drawn across the column above every section but the first,
-/// and under the header. The same width as the hairline along a panel's edge,
+/// and under the header — and under the help popup's headings, which is the
+/// same kind of thing. The same width as the hairline along a panel's edge,
 /// being the same kind of thing.
-const RULE_WIDTH: f32 = 1.0;
+pub(super) const RULE_WIDTH: f32 = 1.0;
 
 /// The words at the top of the panel. An instruction rather than a fact about
 /// the file, so it is written small and dim: what it says is worth knowing
@@ -71,8 +72,9 @@ const RULE_WIDTH: f32 = 1.0;
 const HINT: &str = "Click to copy section or item.";
 
 /// The space under the header, with the hairline that parts it from the
-/// column through the middle of it.
-const HEADER_GAP: f32 = 11.0;
+/// column through the middle of it. The help popup keeps the same under its
+/// headings.
+pub(super) const HEADER_GAP: f32 = 11.0;
 
 /// A copy button: how tall it is, what is kept clear inside it at either end,
 /// and the space between its label and its mark.
@@ -87,9 +89,10 @@ const COPY_ICON: f32 = ICON_SIDE;
 
 /// The scrollbar down the panel's inner edge, and the room kept clear for it
 /// whether or not there is anything to scroll — text that reflowed the moment
-/// the bar appeared would be text that reflowed as it was being read.
-const SCROLLBAR_WIDTH: f32 = 3.0;
-const SCROLLBAR_GUTTER: f32 = SCROLLBAR_WIDTH + 7.0;
+/// the bar appeared would be text that reflowed as it was being read. The
+/// help popup's table scrolls the same way.
+pub(super) const SCROLLBAR_WIDTH: f32 = 3.0;
+pub(super) const SCROLLBAR_GUTTER: f32 = SCROLLBAR_WIDTH + 7.0;
 
 /// What the file itself says about the image, as opposed to what its pixels
 /// do: read once when the image opens, since none of it changes while the
@@ -321,7 +324,7 @@ fn copy_all(pass: &mut Pass, ui: &mut egui::Ui) {
 }
 
 /// A hairline across the column, on the device's grid.
-fn rule(pass: &Pass, ui: &mut egui::Ui, width: f32) {
+pub(super) fn rule(pass: &Pass, ui: &mut egui::Ui, width: f32) {
     let grid = icon::Grid::new(ui.pixels_per_point());
     let edge = grid.line_width(RULE_WIDTH);
     let (rect, _) = ui.allocate_exact_size(vec2(width, edge), Sense::HOVER);
