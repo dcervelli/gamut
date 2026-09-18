@@ -12,7 +12,7 @@ use crate::image::display::{AutoWindow, Colormap, ToneMap};
 use crate::theme::Theme;
 
 use super::control::Control;
-use super::histogram::{EV_STEP, WINDOWS, stops_label};
+use super::histogram::WINDOWS;
 use super::{Room, menu};
 
 /// Something in the interface that names itself when the pointer rests on it.
@@ -209,17 +209,6 @@ pub fn words(tip: Tip) -> Option<String> {
         Tip::Control(Control::OpenIn(_)) => return None,
         _ => {}
     }
-    // The exposure's two steps say what they are worth, the buttons carrying
-    // the number and these the units: one press of one of them, in the words
-    // the bottom bar reads an exposure out in.
-    if let Tip::Control(step @ (Control::ExposureDown | Control::ExposureUp)) = tip {
-        let stops = if step == Control::ExposureUp {
-            EV_STEP
-        } else {
-            -EV_STEP
-        };
-        return Some(format!("Exposure {} EV", stops_label(stops)));
-    }
     Some(
         match tip {
             Tip::Control(Control::Zoom) => "Zoom, fit and filter",
@@ -264,7 +253,7 @@ pub fn words(tip: Tip) -> Option<String> {
             Tip::BlackPoint => "Black point",
             Tip::WhitePoint => "White point",
             Tip::Window => "The window, from black to white: drag to slide it",
-            Tip::Exposure => "Exposure: drag to change it",
+            Tip::Exposure => "Exposure: drag to set it",
             // And what a curve is, the labels being the names of the things
             // rather than descriptions of them.
             Tip::Control(Control::Curve(index)) => match ToneMap::ALL.get(index)? {

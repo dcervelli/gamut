@@ -999,11 +999,9 @@ impl Naming for Namer {
                 vec![names(at)?],
                 Vec::from_iter(hint(ToggleInterfaceAndPanels)),
             ),
-            // The exposure's two steps: which way this one goes and what it
-            // is worth, and under it the keys that take the same step. The
-            // number between them, which a drag moves by those steps, names
-            // the same keys.
-            Tip::Control(Control::ExposureDown | Control::ExposureUp) | Tip::Exposure => (
+            // The exposure's slider, and under it the keys that step what
+            // it sets.
+            Tip::Exposure => (
                 vec![names(at)?],
                 [Exposure(-histogram::EV_STEP)]
                     .into_iter()
@@ -1739,6 +1737,11 @@ impl App {
                     current.display.set_displayed_bounds(black, white);
                 }
             }
+            ui::Command::Exposure(stops) => {
+                if let Some(current) = self.current.as_mut() {
+                    current.display.set_exposure(stops);
+                }
+            }
             // The image follows the pointer, so the viewport moves the other
             // way. Not animated: the hand is on the view.
             ui::Command::Drag([dx, dy]) => {
@@ -2116,15 +2119,6 @@ impl App {
                     current.display.colormap = *map;
                 }
             }
-            // The keys' own action, as with the reset, and the keys' own step
-            // with it: a press here and `d` or `f` are worth the same quarter
-            // of a stop, so nothing but where it is pressed tells them apart.
-            Control::ExposureDown => {
-                let _ = self.perform(Exposure(-histogram::EV_STEP));
-            }
-            Control::ExposureUp => {
-                let _ = self.perform(Exposure(histogram::EV_STEP));
-            }
             // A window named outright rather than the next one along.
             Control::Window(index) => {
                 if let Some(current) = self.current.as_mut()
@@ -2391,18 +2385,6 @@ mod tests {
         }
         assert_eq!(named(Control::Ramp(Colormap::ALL.len())), None);
 
-        // The exposure's two steps say what one press of them is worth, in
-        // the units the bottom bar reads an exposure out in — the quarter
-        // stop `d` and `f` take as well.
-        assert_eq!(
-            named(Control::ExposureDown).as_deref(),
-            Some("Exposure -\u{00bc} EV")
-        );
-        assert_eq!(
-            named(Control::ExposureUp).as_deref(),
-            Some("Exposure +\u{00bc} EV")
-        );
-
         // The band and its handles name themselves, no one key doing what
         // a drag on them does; the keys that move the window come under
         // them as hints — see `the_band_and_its_handles_say_which_keys_move_the_window`.
@@ -2436,7 +2418,6 @@ mod tests {
             Control::Log,
             Control::Reset,
             Control::Ramp(1),
-            Control::ExposureDown,
             Control::Curve(2),
         ] {
             let words = named(widget).expect("named above");
@@ -2475,7 +2456,7 @@ mod tests {
         for handle in [Tip::BlackPoint, Tip::WhitePoint] {
             assert_eq!(tooltip(handle).hints, ["Narrow / widen the window (A, S)"]);
         }
-        // And the exposure's number names the keys its own steps are.
+        // And the exposure's slider names the keys that step it.
         assert_eq!(
             tooltip(Tip::Exposure).hints,
             ["Exposure down / up, a quarter stop (d, f)"]

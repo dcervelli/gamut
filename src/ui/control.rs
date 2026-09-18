@@ -74,8 +74,6 @@ pub enum Control {
     Ramp(usize),
     /// The two steps of the exposure row under that ramp, a quarter of a stop
     /// each — see [`super::histogram::EV_STEP`].
-    ExposureDown,
-    ExposureUp,
     /// One of the windows the row below those offers, by its place in
     /// [`super::histogram::WINDOWS`]. They set a window rather than showing
     /// which one is in force: the handles on the band are what say that.
@@ -142,8 +140,6 @@ impl Control {
             Control::Log => "Logarithmic counts".to_string(),
             Control::Reset => "Reset".to_string(),
             Control::Ramp(index) => format!("False color {index}"),
-            Control::ExposureDown => "Exposure down".to_string(),
-            Control::ExposureUp => "Exposure up".to_string(),
             Control::Window(index) => format!("Window {index}"),
             Control::Curve(index) => format!("Curve {index}"),
             Control::Output => "HDR".to_string(),
@@ -196,6 +192,9 @@ pub enum Command {
         black: f32,
         white: f32,
     },
+    /// The hand is on the exposure's slider, and this is the exposure it
+    /// asks for, in stops.
+    Exposure(f32),
     /// The hand is on the minimap, at `at` in image pixels, which is the
     /// point to put in the middle of the window. Said on every frame the
     /// button is down on the map, from the press on, so the marker follows

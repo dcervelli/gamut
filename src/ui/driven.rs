@@ -381,9 +381,9 @@ fn a_toggle_with_no_room_for_its_panel_is_dead() {
 /// The band under the histogram is the levels track. A handle dragged
 /// along it asks for a window whose end is where the hand is; the band
 /// between the handles slides both ends by what the hand moved; and the
-/// exposure's own number, dragged, presses the same steps the buttons
-/// beside it press. A photograph is offered the exposure and nothing else
-/// under the band: no windows, and no curves.
+/// exposure's slider asks for the exposure under the hand. A photograph is
+/// offered the exposure and nothing else under the band: no windows, and
+/// no curves.
 #[test]
 fn the_histogram_panel_hands_back_the_hand_on_its_band() {
     use crate::image::Transfer;
@@ -473,21 +473,27 @@ fn the_histogram_panel_hands_back_the_hand_on_its_band() {
     );
     assert!((high - 1.0).abs() < 1e-3, "{high}");
 
-    // And the exposure's number, dragged to the right: a press of the step
-    // up for every stretch of the drag, and the number is not otherwise a
-    // button.
-    let number = harness.get_by_label("Exposure").rect();
-    let from = [number.center().x, number.center().y];
-    let commands = drag(&mut harness, from, [from[0] + 25.0, from[1]]);
-    assert_eq!(
-        commands,
-        [
-            Command::Press(Control::ExposureUp),
-            Command::Press(Control::ExposureUp)
-        ]
+    // And the exposure's slider, which is dragged to the pointer as the
+    // handles are: its middle is nothing, its far end is the run's end and
+    // so is a hand past it, and a press that does not move still lands.
+    // The exposure is a stop up from the test above, so the middle is a
+    // change — and stays one, on every frame the hand is down, since the
+    // interface here is never told it was done.
+    let slider = harness.get_by_label("Exposure").rect();
+    let y = slider.center().y;
+    let middle = [slider.center().x, y];
+    let commands = drag(&mut harness, middle, middle);
+    assert!(!commands.is_empty());
+    assert!(
+        commands
+            .iter()
+            .all(|command| *command == Command::Exposure(0.0)),
+        "{commands:?}"
     );
-    let commands = drag(&mut harness, from, [from[0] - 12.0, from[1]]);
-    assert_eq!(commands, [Command::Press(Control::ExposureDown)]);
+    let commands = drag(&mut harness, middle, [slider.max.x + 30.0, y]);
+    assert_eq!(commands.last(), Some(&Command::Exposure(6.0)));
+    let commands = drag(&mut harness, middle, [slider.min.x, y]);
+    assert_eq!(commands.last(), Some(&Command::Exposure(-6.0)));
 }
 
 /// The curves are dead under a false color, which clips at the top of its
