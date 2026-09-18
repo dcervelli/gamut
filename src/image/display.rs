@@ -73,33 +73,40 @@ impl AutoWindow {
 /// What to do with values that are still above 1.0 once windowed.
 ///
 /// A curve is something added: it exists to fit values above white into a
-/// surface that stops there. So there are the two curves, and `None` — which
-/// is not a third curve but the absence of one, and means whatever the
+/// surface that stops there. So there is the one curve, and `None` — which
+/// is not a second curve but the absence of one, and means whatever the
 /// surface makes of the highlights on its own: an SDR surface clamps them at
 /// white, and an HDR surface shows them at the brightness they were graded
-/// to. Which of the two is [`Headroom`]'s to say, and the surface's; the
-/// choice of curve is the viewer's.
+/// to. Which of the two is [`Headroom`]'s to say, and the surface's; whether
+/// to add the curve is the viewer's.
+///
+/// One curve, because a viewer wants exactly one thing of it: the highlights
+/// brought back under white with everything else left alone. A Reinhard
+/// curve was the other choice until it went — `c / (c + 1)` sends white to
+/// a half, so it re-grades the whole in-range picture to make room for the
+/// highlights, and on an 8-bit file at 0 EV it changes every pixel. That is
+/// editing, which this panel does not do.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ToneMap {
     /// No curve. Clipping on an SDR surface, which is correct for measurement
     /// work where clipping is a thing to be seen; the highlights as they are
     /// on an HDR one, which is the whole point of asking for one.
     None,
-    Reinhard,
-    /// Khronos PBR Neutral: keeps hue and saturation far better than a
-    /// Reinhard curve, and rolls off highlights without the ACES color cast.
+    /// Khronos PBR Neutral: a shoulder that rolls the highlights off under
+    /// white, a toe that takes a small offset out of the shadows, and a
+    /// desaturation toward the peak that holds hue where a channel would
+    /// otherwise clip first. Below the shoulder a value comes out as itself.
     Neutral,
 }
 
 impl ToneMap {
-    /// Every curve there is, in the order the key cycles them and the order
-    /// the histogram panel's own row of them is drawn in.
-    pub const ALL: [ToneMap; 3] = [ToneMap::None, ToneMap::Reinhard, ToneMap::Neutral];
+    /// Both choices, in the order the histogram panel's row of them is drawn
+    /// in; the key toggles between them.
+    pub const ALL: [ToneMap; 2] = [ToneMap::None, ToneMap::Neutral];
 
     pub fn label(self) -> &'static str {
         match self {
             ToneMap::None => "none",
-            ToneMap::Reinhard => "reinhard",
             ToneMap::Neutral => "neutral",
         }
     }
@@ -107,7 +114,6 @@ impl ToneMap {
     pub fn parse(value: &str) -> Option<Self> {
         Some(match value.to_ascii_lowercase().as_str() {
             "none" => ToneMap::None,
-            "reinhard" => ToneMap::Reinhard,
             "neutral" => ToneMap::Neutral,
             _ => return None,
         })
@@ -115,8 +121,7 @@ impl ToneMap {
 
     fn next(self) -> Self {
         match self {
-            ToneMap::None => ToneMap::Reinhard,
-            ToneMap::Reinhard => ToneMap::Neutral,
+            ToneMap::None => ToneMap::Neutral,
             ToneMap::Neutral => ToneMap::None,
         }
     }
@@ -157,10 +162,6 @@ impl ToneMap {
             // The negatives go, as they do under every other curve here:
             // undershoot from a bicubic lobe is not light.
             (ToneMap::None, Headroom::Above) => color.map(|c| c.max(0.0)),
-            (ToneMap::Reinhard, _) => color.map(|c| {
-                let c = c.max(0.0);
-                c / (c + 1.0)
-            }),
             (ToneMap::Neutral, _) => neutral(color.map(|c| c.max(0.0))),
         }
     }
@@ -990,7 +991,7 @@ mod tests {
     fn a_false_color_is_read_off_the_ramp_and_no_curve_bends_it() {
         let mut display = Display {
             colormap: Colormap::Magma,
-            tone_map: ToneMap::Reinhard,
+            tone_map: ToneMap::Neutral,
             ..Default::default()
         };
         (display.window_low, display.window_high) = (0.0, 2.0);
@@ -998,13 +999,13 @@ mod tests {
         for headroom in [Headroom::None, Headroom::Above] {
             let shaded = display.shade(1.0, Channels::Gray, headroom);
             assert_eq!(shaded, Colormap::Magma.color(0.5), "{headroom:?}");
-            let curved = ToneMap::Reinhard.apply(Colormap::Magma.color(0.5), headroom);
+            let curved = ToneMap::Neutral.apply(Colormap::Magma.color(0.5), headroom);
             assert_ne!(shaded, curved, "{headroom:?}: the curve is held off");
         }
         // Three colors are colors already, and the curve is on them.
         assert_eq!(
             display.shade(1.0, Channels::Rgb, Headroom::None),
-            ToneMap::Reinhard.apply([0.5; 3], Headroom::None)
+            ToneMap::Neutral.apply([0.5; 3], Headroom::None)
         );
     }
 
@@ -1164,19 +1165,14 @@ mod tests {
     }
 
     /// Mirrors of shader code are worth pinning to their anchors: clip is a
-    /// clamp, Reinhard sends infinity to one, and the neutral curve leaves
-    /// ordinary values where they are before rolling off the top.
+    /// clamp, and the neutral curve leaves ordinary values where they are
+    /// before rolling off the top.
     #[test]
     fn the_tone_curves_match_what_the_compositor_does() {
         assert_eq!(
             ToneMap::None.apply([-1.0, 0.5, 2.0], Headroom::None),
             [0.0, 0.5, 1.0]
         );
-
-        let reinhard = ToneMap::Reinhard.apply([-1.0, 1.0, 3.0], Headroom::None);
-        assert_eq!(reinhard[0], 0.0);
-        assert!((reinhard[1] - 0.5).abs() < 1e-6);
-        assert!((reinhard[2] - 0.75).abs() < 1e-6);
 
         let neutral = ToneMap::Neutral.apply([0.2, 0.4, 0.6], Headroom::None);
         for (got, want) in neutral.iter().zip([0.2, 0.4, 0.6]) {
@@ -1560,7 +1556,7 @@ mod tests {
 
     /// No curve means whatever the surface does: an SDR surface clamps at
     /// white, and an HDR one passes the highlights through and clips nothing
-    /// but the light that is not there — the shader's arms 0 and 3.
+    /// but the light that is not there — the shader's arms 0 and 2.
     #[test]
     fn no_curve_is_a_clip_on_sdr_and_a_pass_through_on_hdr() {
         let color = [-0.25, 0.5, 6.31];
@@ -1569,13 +1565,11 @@ mod tests {
             ToneMap::None.apply(color, Headroom::Above),
             [0.0, 0.5, 6.31]
         );
-        // The curves are the curves whatever the surface.
-        for map in [ToneMap::Reinhard, ToneMap::Neutral] {
-            assert_eq!(
-                map.apply(color, Headroom::None),
-                map.apply(color, Headroom::Above)
-            );
-        }
+        // The curve is the curve whatever the surface.
+        assert_eq!(
+            ToneMap::Neutral.apply(color, Headroom::None),
+            ToneMap::Neutral.apply(color, Headroom::Above)
+        );
     }
 
     /// And so does a readout of a value: on a surface with room above white
@@ -1608,20 +1602,22 @@ mod tests {
     fn the_response_is_the_clip_under_a_false_color() {
         let display = Display {
             colormap: Colormap::Viridis,
-            tone_map: ToneMap::Reinhard,
+            tone_map: ToneMap::Neutral,
             ..Default::default()
         };
+        let rolled = ToneMap::Neutral.apply([4.0; 3], Headroom::Above)[0];
+        assert!(rolled < 1.0, "{rolled}");
         assert!(display.false_colored(true));
         assert!(!display.false_colored(false));
         assert_eq!(display.response(4.0, true, Headroom::Above), 1.0);
-        assert_eq!(display.response(4.0, false, Headroom::Above), 0.8);
+        assert_eq!(display.response(4.0, false, Headroom::Above), rolled);
 
         let gray = Display {
             colormap: Colormap::Gray,
             ..display
         };
         assert!(!gray.false_colored(true));
-        assert_eq!(gray.response(4.0, true, Headroom::Above), 0.8);
+        assert_eq!(gray.response(4.0, true, Headroom::Above), rolled);
     }
 
     /// The handles put the values that come out black and white where they
@@ -1753,14 +1749,14 @@ mod tests {
         assert_eq!(display.auto, AutoWindow::Manual);
     }
 
-    /// Every curve has to be reachable from every other one, or a viewer on
+    /// Every choice has to be reachable from every other one, or a viewer on
     /// an HDR surface who presses `t` to see the SDR rendering has no way
     /// back to the one the surface was asked for.
     #[test]
     fn cycling_the_tone_map_returns_to_where_it_started() {
         let mut map = ToneMap::None;
         let mut seen = vec![map];
-        for _ in 0..2 {
+        for _ in 1..ToneMap::ALL.len() {
             map = map.next();
             assert!(!seen.contains(&map), "{map:?} came round twice");
             seen.push(map);

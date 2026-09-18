@@ -409,11 +409,11 @@ mod tests {
         assert_eq!(round_trip(&displayed(&bright, &clipped)).2[0], 255);
 
         let mut rolled = plain();
-        rolled.tone_map = ToneMap::Reinhard;
+        rolled.tone_map = ToneMap::Neutral;
         let rolled_byte = round_trip(&displayed(&bright, &rolled)).2[0];
         assert!(
             rolled_byte < 255,
-            "Reinhard should pull 4.0 back under white, got {rolled_byte}"
+            "the roll-off should pull 4.0 back under white, got {rolled_byte}"
         );
     }
 

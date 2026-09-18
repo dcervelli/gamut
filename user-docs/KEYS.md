@@ -242,7 +242,7 @@ that is not a paste; open it as an argument instead.
 | `A` | White point down |
 | `S` | White point up |
 | `e` | Cycle the window rule: as stored (0–1) → full range → trimmed (the central 99.8%) |
-| `t` | Cycle tone mapping: none → Reinhard → neutral |
+| `t` | Toggle the curve on the highlights: clip, or roll off |
 | `w` | While held, mark the clipped pixels: red where the picture has gone white, blue where it has gone black |
 | `o` | Turn the room above white off and on, where the monitor is in HDR mode |
 | `r` | Cycle false color: gray → viridis → magma → turbo |
@@ -296,24 +296,28 @@ also gets the row of windows the `e` key cycles, named for what they do:
 *As stored* shows the values as they are, *Full range* stretches everything
 the file holds to black and white, and *Trimmed* leaves the outermost 0.2%
 out before stretching, which is what such a file opens with. Every file
-gets the row of tone curves the `t` key cycles, since a stop or two of
-exposure puts the top of any file above white. A graded file has no window
-to find, so it gets no window row and a shorter panel; the keys still
-work on it.
+gets the *Curve* row — *Clip* or *Roll off* — that `t` toggles, since a
+stop or two of exposure puts the top of any file above white. A graded file
+has no window to find, so it gets no window row and a shorter panel; the
+keys still work on it.
 
-Tone mapping is a curve added to bring values brighter than white down into a
-surface that cannot show them. `none` is not a third curve but the absence of
-one: on an ordinary (SDR) surface the highlights are clipped at white, and on
-an HDR surface they are shown at the brightness they were graded to. An image
-starts with no curve on an HDR surface; on an SDR one it starts on neutral
-when there are highlights above white to roll off, and with none otherwise.
-Switching the room with `o`, or the window landing on a different kind of
-monitor, chooses the curve again for what it lands on; `t` changes it after
-that.
+The curve is added to bring values brighter than white back down into a
+surface that cannot show them. *Clip* is not a second curve but the absence
+of one: on an ordinary (SDR) surface the highlights are clipped at white,
+and on an HDR surface they are shown at the brightness they were graded to.
+*Roll off* brings them back under white with a curve that leaves everything
+below its shoulder as it was, so the rest of the picture does not move to
+make room. An image starts clipped on an HDR surface; on an SDR one it
+starts rolled off when there are highlights above white to roll off, and
+clipped otherwise. Switching the room with `o`, or the window landing on a
+different kind of monitor, chooses again for what it lands on; `t` changes
+it after that. `--tone-map none` and `--tone-map neutral` are the two
+choices at start-up.
 
-The bottom bar names the curve while one is on, and says **clipped** when
-there is none, the surface is SDR and highlights are being thrown away — so a
-photograph pushed a stop up says so rather than going flat in silence. The
+The bottom bar says **rolled off** while the curve is on, and **clipped**
+when there is none, the surface is SDR and highlights are being thrown away
+— so a photograph pushed a stop up says so rather than going flat in
+silence. The
 `HDR` button at the end of the bar is the switch for that room, lit while the
 image is going out with it. On Wayland the compositor says which monitors
 are in HDR mode, and gamut follows: the window gets an HDR surface on a

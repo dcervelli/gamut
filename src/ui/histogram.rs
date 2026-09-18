@@ -18,7 +18,6 @@ use super::outline;
 use super::tooltip::Tip;
 use super::{
     BECOMES, Command, Control, Current, PADDING, PANEL_INSET, PANEL_RADIUS, PANEL_WIDTH, TEXT_SIZE,
-    capitalized,
 };
 
 /// Which of the rows of settings under the band a file gets.
@@ -589,11 +588,15 @@ impl Rows {
 fn row_label(widget: Control, display: &Display) -> Option<(String, bool)> {
     Some(match widget {
         Control::Window(index) => (WINDOWS.get(index)?.0.to_string(), false),
-        // Capitalized, where the bar sets the same word in the middle of a
-        // line: a button wears a name, and a name starts with a capital.
+        // Named for what becomes of the light above white, since that is
+        // what the choice is: the bar says the same in the middle of a line.
         Control::Curve(index) => {
             let curve = *ToneMap::ALL.get(index)?;
-            (capitalized(curve.label()), display.tone_map == curve)
+            let label = match curve {
+                ToneMap::None => "Clip",
+                ToneMap::Neutral => "Roll off",
+            };
+            (label.to_string(), display.tone_map == curve)
         }
         _ => return None,
     })
@@ -1123,7 +1126,7 @@ fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect, content: Rec
     //
     // The curve is the whole of what the display does, and the only part of
     // the panel that can show a tone map at all: a shoulder is a shape, not
-    // a threshold, and there is no line that means "reinhard". The handles
+    // a threshold, and there is no line that means "rolled off". The handles
     // on the band place the two values that come out black and white,
     // exposure included, which a curve meeting its floor tangentially
     // cannot be read for by eye.
@@ -2196,7 +2199,7 @@ mod tests {
             named,
             [AutoWindow::Off, AutoWindow::MinMax, AutoWindow::Percentile]
         );
-        assert_eq!(ToneMap::ALL.len(), 3, "one button to a curve");
+        assert_eq!(ToneMap::ALL.len(), 2, "one button to a choice");
     }
 
     /// Either way of scaling the plot draws an empty bin flat on the axis and

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 
-use crate::image::display::{Display, Headroom, Startup};
+use crate::image::display::{Display, Headroom, Startup, ToneMap};
 use crate::image::exif::Exif;
 use crate::image::sequence::{Loops, Sequence};
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples, Stats};
@@ -570,7 +570,7 @@ fn the_curves_are_dead_under_a_false_color() {
         .display
         .colormap = Colormap::Viridis;
     harness.run();
-    for index in 0..3 {
+    for index in 0..ToneMap::ALL.len() {
         assert!(dead(&harness, &format!("Curve {index}")), "curve {index}");
     }
     assert_eq!(click(&mut harness, "Curve 1"), []);

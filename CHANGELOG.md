@@ -161,6 +161,17 @@ Notable changes to `gamut`. The format follows
   where `libheif` would use four. An iPhone's 24-megapixel photograph
   opens in half the time on a 32-core machine.
 
+### Removed
+
+- The Reinhard tone curve. `t` now toggles between clipping the highlights
+  and rolling them off with the neutral curve, the histogram panel's
+  *Curve* row reads *Clip* and *Roll off*, the bottom bar says **rolled
+  off** where it named the curve, and `--tone-map` takes `none` or
+  `neutral` and refuses `reinhard`. Reinhard sends white to a half, so it
+  re-graded the whole in-range picture to make room for the highlights;
+  the neutral curve leaves everything below its shoulder where it was,
+  which is the one thing a viewer wants of a curve.
+
 ### Fixed
 
 - An idle window no longer redraws itself continuously, holding a core at
