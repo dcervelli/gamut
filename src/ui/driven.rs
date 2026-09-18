@@ -406,9 +406,9 @@ fn a_toggle_with_no_room_for_its_panel_is_dead() {
 /// The band under the histogram is the levels track. A handle dragged
 /// along it asks for a window whose end is where the hand is; the band
 /// between the handles slides both ends by what the hand moved; and the
-/// exposure's slider asks for the exposure under the hand. A photograph is
-/// offered the exposure and nothing else under the band: no windows, and
-/// no curves.
+/// exposure's slider asks for the exposure under the hand. An 8-bit sRGB
+/// file is offered the exposure and the curves under the band, and no
+/// windows.
 #[test]
 fn the_histogram_panel_hands_back_the_hand_on_its_band() {
     use crate::image::Transfer;
@@ -418,11 +418,14 @@ fn the_histogram_panel_hands_back_the_hand_on_its_band() {
     let mut harness = open(WINDOW, 1, with_histogram);
     assert!(
         harness.query_by_label("Window 0").is_none(),
-        "a photograph has no window row"
+        "a graded file has no window row"
     );
-    assert!(harness.query_by_label("Curve 0").is_none(), "nor curves");
+    assert!(
+        harness.query_by_label("Curve 0").is_some(),
+        "but has the curves"
+    );
 
-    // The photograph is 8-bit sRGB, so the axis is 0..1 in sRGB and the two
+    // The file is 8-bit sRGB, so the axis is 0..1 in sRGB and the two
     // handles stand at its ends.
     let band = harness.get_by_label("Window").rect();
     let white = harness.get_by_label("White point").rect();
@@ -528,17 +531,13 @@ fn the_histogram_panel_hands_back_the_hand_on_its_band() {
 fn the_curves_are_dead_under_a_false_color() {
     use crate::image::display::Colormap;
 
-    // Gray, linear, with one sample far above the rest, which the trimmed
-    // window leaves out above white: a file that is offered both the false
-    // colors and the curves.
-    let mut data = vec![0.5f32; 1000];
-    data[3] = 50.0;
+    // Gray and linear: a file that is offered the false colors.
     let image = DecodedImage::new(
         40,
         25,
         Samples::F32 {
             channels: Channels::Gray,
-            data,
+            data: vec![0.5f32; 1000],
         },
         ColorSpace::LINEAR_BT709,
         AlphaMode::Opaque,

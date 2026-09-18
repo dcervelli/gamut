@@ -237,10 +237,10 @@ that is not a paste; open it as an argument instead.
 | --- | --- |
 | `d` | Exposure down a quarter stop |
 | `f` | Exposure up a quarter stop |
-| `a` | Slide the window down |
-| `s` | Slide the window up |
-| `A` | Narrow the window, raising contrast |
-| `S` | Widen the window, lowering contrast |
+| `a` | Black point down |
+| `s` | Black point up |
+| `A` | White point down |
+| `S` | White point up |
 | `e` | Cycle the automatic window: off (0–1) → min/max → 99.8% |
 | `t` | Cycle tone mapping: none → Reinhard → neutral |
 | `w` | While held, mark the clipped pixels: red where the picture has gone white, blue where it has gone black |
@@ -248,27 +248,31 @@ that is not a paste; open it as an argument instead.
 | `r` | Cycle false color: gray → viridis → magma → turbo |
 | `z` | Reset every display setting |
 
-The window is the one place the case of a key matters: `a` and `s` move it,
-`A` and `S` change how wide it is.
+The window is the one place the case of a key matters: `a` and `s` move
+the value that comes out black, `A` and `S` the value that comes out white.
+Each press moves its end by a twentieth of the window's width as the
+histogram draws it, and no further than the histogram's axis goes.
 
-Sliding or resizing the window by hand takes it out of whichever automatic
-mode it was in; `e` cycles back into them. Exposure stops at ±16 stops.
+Moving either end by hand takes the window out of whichever automatic mode
+it was in; `e` cycles back into them. Exposure stops at ±16 stops.
 
 The histogram panel (`h`) is where all of this is seen and set. The band of
 gray under the plot is what the display makes of each value along the axis,
 and the two handles on it are the window: the left one stands at the value
 that comes out black, the right one at the value that comes out white, and
-either can be dragged to a new value. Dragging the band between them slides
-the window along the plot, as far as the plot goes: once the window is
-narrower than the axis — after a stop or two of exposure on a photograph,
-or a trimmed window on data — the band is which part of the range you are
-looking at. On a photograph the white handle is the exposure — dragging
-it in is the same as pressing `f`, in the same quarter stops, and the number
-beside *Exposure* follows it — since a photograph's window is 0 to 1 and
-there is nothing else for the handle to be. On linear data the handle sets
-the top of the window itself, and the exposure stays a push on top of that
-window, which is what survives the window being found again. The share of
-the picture the window is throwing away is
+either can be dragged to a new value — `a`/`s` and `A`/`S` step the same
+two handles. Dragging the band between them slides the window along the
+plot, as far as the plot goes: once the window is narrower than the axis —
+after a stop or two of exposure on a graded file, or a trimmed window on
+linear data — the band is which part of the range you are looking at. On a
+graded file — one stored on a curve, as an sRGB or PQ file is — the white
+handle is the exposure: dragging it in is the same as pressing `f`, in the
+same quarter stops, and the number beside *Exposure* follows it, since such
+a file's window is 0 to 1 and there is nothing else for the handle to be.
+`A` and `S` there are a quarter stop each, the same as `f` and `d`. On
+linear data the handle sets the top of the window itself, and the exposure
+stays a push on top of that window, which is what survives the window being
+found again. The share of the picture the window is throwing away is
 written in the top corners of the plot — how much is at or below black on
 the left, how much is at or above white on the right — and only when there
 is any, so a number there is news. Pointing at the plot names the value
@@ -291,10 +295,11 @@ hollow at the end and the reading says where it is. A file of linear data — se
 also gets the row of windows the `e` key cycles, named for what they do:
 *As stored* shows the values as they are, *Full range* stretches everything
 the file holds to black and white, and *Trimmed* leaves the outermost 0.2%
-out before stretching, which is what such a file opens with. A file with
-highlights above white gets the row of tone curves the `t` key cycles.
-An ordinary photograph has neither question to answer, so it gets neither
-row and a shorter panel; the keys still work on it.
+out before stretching, which is what such a file opens with. Every file
+gets the row of tone curves the `t` key cycles, since a stop or two of
+exposure puts the top of any file above white. A graded file has no window
+to find, so it gets no window row and a shorter panel; the keys still
+work on it.
 
 Tone mapping is a curve added to bring values brighter than white down into a
 surface that cannot show them. `none` is not a third curve but the absence of
@@ -376,11 +381,10 @@ whichever image is on screen and stays as you set it, and setting it while the
 histogram is closed leaves it that way for when you open it.
 
 Under the plot are the band and the rows of settings the plot is drawing,
-described under [The display](#the-display) above: the exposure for every
-file, the windows for a file of linear data, and the tone curves for a file
-with highlights above white. The buttons of the last two set rather than
-switch, so pressing one again after moving the window by hand puts it back
-where it says.
+described under [The display](#the-display) above: the exposure and the
+tone curves for every file, and the windows for a file of linear data. The
+buttons of both rows set rather than switch, so pressing a window's again
+after moving the window by hand puts it back where it says.
 
 The histogram, the file information and the minimap float over the image
 rather than sitting in the bars, so `` ` `` leaves them where they are.
