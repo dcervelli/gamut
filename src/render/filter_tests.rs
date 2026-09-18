@@ -13,7 +13,7 @@ use super::WORKING_FORMAT;
 use super::gpu;
 use super::image_layer::{Draw, ImageLayer};
 use super::{Placement, Upscale};
-use crate::image::display::Display;
+use crate::image::display::{Display, Headroom};
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Referred, Samples};
 
 /// Draws `image` into a `target`-sized working-space texture and reads it
@@ -24,15 +24,7 @@ fn draw(
     target: [u32; 2],
     placement: Placement,
 ) -> Vec<[f32; 4]> {
-    draw_all(
-        gpu,
-        image,
-        target,
-        Draw {
-            view: placement,
-            thumbnail: None,
-        },
-    )
+    draw_all(gpu, image, target, Draw::plain(placement, None))
 }
 
 /// As [`draw`], for the frames that put down the minimap's thumbnail as well.
@@ -208,10 +200,7 @@ fn a_refilled_texture_draws_the_new_frame() {
         gpu,
         &mut layer,
         [4, 4],
-        Draw {
-            view: whole([4, 4], &dark),
-            thumbnail: None,
-        },
+        Draw::plain(whole([4, 4], &dark), None),
     );
     assert!(close(at(&pixels, 4, 1, 1), 0.0, 1e-3));
 
@@ -224,10 +213,7 @@ fn a_refilled_texture_draws_the_new_frame() {
         gpu,
         &mut layer,
         [4, 4],
-        Draw {
-            view: whole([4, 4], &bright),
-            thumbnail: None,
-        },
+        Draw::plain(whole([4, 4], &bright), None),
     );
     assert!(
         close(at(&pixels, 4, 1, 1), 1.0, 1e-3),
@@ -444,6 +430,8 @@ fn the_thumbnail_is_drawn_beside_the_view_and_builds_the_chain_it_needs() {
                 zoom: THUMBNAIL as f32 / SIZE as f32,
                 upscale: Upscale::Nearest,
             }),
+            mark_clipped: false,
+            headroom: Headroom::None,
         },
     );
 

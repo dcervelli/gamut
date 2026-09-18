@@ -8,6 +8,12 @@ Notable changes to `gamut`. The format follows
 
 ### Added
 
+- `w`, held, marks the clipped pixels on the picture: red where every
+  channel has gone to white, blue where every channel has gone to black.
+  White is marked only where the surface is actually clipping it — no curve
+  on, and no room above white — since a highlight rolled off or shown is
+  not lost.
+
 - The info panel reads a file's XMP as well as its EXIF: the title, the
   caption, the keywords, the creator, the rights and the program that
   wrote it, from JPEG, PNG, WebP, TIFF, HEIF and JPEG XL files. A file
@@ -63,6 +69,31 @@ Notable changes to `gamut`. The format follows
   are stepped over.
 
 ### Changed
+
+- The histogram panel speaks in a viewer's terms rather than the display's.
+  The band under the plot is a levels track: a handle at the value that
+  comes out black and one at the value that comes out white, each dragged
+  to where it should stand, and the band between them dragged to slide the
+  window along the plot, as far as the plot goes. On a photograph the white handle is the exposure, in the same
+  quarter stops as `f` and `d`, since its window is 0–1 and nothing else;
+  on linear data it is the top of the window, with the exposure left as
+  the push on top. The `0.000–1.000` readout and the four nudge buttons beside it
+  are gone; `a`, `s`, `A` and `S` still move the window by steps. The share
+  of the picture the window is clipping is written in the two top corners
+  of the plot — `0.5%` at black, `1.4%` at white — only when there is one,
+  and only where the surface is actually clipping rather than showing or
+  rolling off the highlights. The response curve is drawn only once the
+  display is doing something, the line above the plot names the value
+  under the pointer only while the pointer is over the plot, a photograph's
+  axis no longer wears `0.0000` and `1.0000` at its ends, and the channel
+  planes are drawn in a red, green and blue held short of the primaries.
+  The rows under the band follow the file: every file gets *Exposure*, a
+  slider over six stops each way with its reading at the end, in the
+  quarter stops `d` and `f` count in; linear data gets the
+  *Window* row, its three rules named for what they do — *As stored*,
+  *Full range*, *Trimmed* — and a file with highlights above white gets the
+  *Highlights* row of curves. A photograph gets the exposure alone, and
+  the panel is shorter for it.
 
 - Dragging inside a region pans the picture, as dragging anywhere else
   does, so a region that fills the window no longer pins the picture under
@@ -122,6 +153,11 @@ Notable changes to `gamut`. The format follows
   once scrolled, or above its foot while there is more below: the toolkit's
   fade at a scroll area's edge, painted in the panel's translucent fill,
   which came out as a shadow on a light theme.
+- The histogram's row of tone curves is dead while a false color is on,
+  and says why when rested on, and `t` does nothing there: a false color
+  clips at the top of its ramp whatever the curve, which the picture, the
+  bottom bar and the pointer's readout all knew, while the panel went on
+  lighting a curve that was doing nothing and drawing it over the plot.
 
 ## 0.2.0 - 2026-09-11
 

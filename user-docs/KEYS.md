@@ -242,6 +242,7 @@ that is not a paste; open it as an argument instead.
 | `S` | Widen the window, lowering contrast |
 | `e` | Cycle the automatic window: off (0–1) → min/max → 99.8% |
 | `t` | Cycle tone mapping: none → Reinhard → neutral |
+| `w` | While held, mark the clipped pixels: red where the picture has gone white, blue where it has gone black |
 | `o` | Turn the room above white off and on, where the monitor is in HDR mode |
 | `r` | Cycle false color: gray → viridis → magma → turbo |
 | `z` | Reset every display setting |
@@ -251,6 +252,48 @@ The window is the one place the case of a key matters: `a` and `s` move it,
 
 Sliding or resizing the window by hand takes it out of whichever automatic
 mode it was in; `e` cycles back into them. Exposure stops at ±16 stops.
+
+The histogram panel (`h`) is where all of this is seen and set. The band of
+gray under the plot is what the display makes of each value along the axis,
+and the two handles on it are the window: the left one stands at the value
+that comes out black, the right one at the value that comes out white, and
+either can be dragged to a new value. Dragging the band between them slides
+the window along the plot, as far as the plot goes: once the window is
+narrower than the axis — after a stop or two of exposure on a photograph,
+or a trimmed window on data — the band is which part of the range you are
+looking at. On a photograph the white handle is the exposure — dragging
+it in is the same as pressing `f`, in the same quarter stops, and the number
+beside *Exposure* follows it — since a photograph's window is 0 to 1 and
+there is nothing else for the handle to be. On linear data the handle sets
+the top of the window itself, and the exposure stays a push on top of that
+window, which is what survives the window being found again. The share of
+the picture the window is throwing away is
+written in the top corners of the plot — how much is at or below black on
+the left, how much is at or above white on the right — and only when there
+is any, so a number there is news. Pointing at the plot names the value
+under the pointer, and what the display turns it into.
+
+Holding `w` paints the clipped pixels on the picture itself: red where every
+channel has gone to white, blue where every channel has gone to black. The
+corners of the plot count a channel at a time — a red flower blows its red
+long before the rest — so the corner can say more than the paint shows; the
+paint is where the picture has gone flat, and the corner is where a channel
+has. Neither marks white where nothing is being clipped: on an HDR surface
+with no curve, or under a curve, the highlights are shown or rolled off
+rather than lost.
+
+Under the band, every file gets the exposure: a slider over six stops each
+way, its reading at the end of the row. It snaps to the quarter stops `d`
+and `f` take, and a press anywhere along it puts the exposure there. The
+keys go on past the slider's ends, to ±16 stops, where the handle stands
+hollow at the end and the reading says where it is. A file of linear data — sensor counts, a float TIFF, an EXR —
+also gets the row of windows the `e` key cycles, named for what they do:
+*As stored* shows the values as they are, *Full range* stretches everything
+the file holds to black and white, and *Trimmed* leaves the outermost 0.2%
+out before stretching, which is what such a file opens with. A file with
+highlights above white gets the row of tone curves the `t` key cycles.
+An ordinary photograph has neither question to answer, so it gets neither
+row and a shorter panel; the keys still work on it.
 
 Tone mapping is a curve added to bring values brighter than white down into a
 surface that cannot show them. `none` is not a third curve but the absence of
@@ -280,7 +323,9 @@ the surface itself.
 
 False color applies to single-channel images only, and `r` does nothing on a
 color one. While a colormap is active, tone mapping is suspended — a curve on
-top of a colormap would distort the values you are reading off it.
+top of a colormap would distort the values you are reading off it — so the
+histogram's row of curves goes dim, `t` does nothing, and both come back
+with the gray ramp.
 
 Everything on this page shows up in one line at the right of the bottom bar,
 in front of the `HDR` button: the window by name, the exposure in the quarter
@@ -328,19 +373,12 @@ other once it is on, which is the point of it being a switch. It applies to
 whichever image is on screen and stays as you set it, and setting it while the
 histogram is closed leaves it that way for when you open it.
 
-Under the plot are the settings the plot is drawing, in three rows. **EV**
-steps the exposure a quarter of a stop a press, the same step `d` and `f`
-take, with the exposure in force in front of them. **Window** reads out the
-window's own bounds — in the source file's own units where it is counting
-things, and normalized otherwise — and after
-them four buttons that move the window you have: the outer
-two slide it down and up, as `a` and `s` do, and the inner two narrow and
-widen it about its middle, as `A` and `S` do. The four buttons under the
-reading set a window instead: `Auto` is the window this image opens with, and
-`0–1`, `Min/Max` and `99.8%` are those windows outright. Those four set rather
-than switch, so pressing one again after moving the window by hand puts it
-back where it says. **Curve** is the tone curve, a button each for `None`,
-`Reinhard` and `Neutral`, the one in force lit.
+Under the plot are the band and the rows of settings the plot is drawing,
+described under [The display](#the-display) above: the exposure for every
+file, the windows for a file of linear data, and the tone curves for a file
+with highlights above white. The buttons of the last two set rather than
+switch, so pressing one again after moving the window by hand puts it back
+where it says.
 
 The histogram, the file information and the minimap float over the image
 rather than sitting in the bars, so `` ` `` leaves them where they are.
@@ -479,7 +517,10 @@ region behind: it belongs to the picture it was drawn on.
 | Click the paste button | Paste the image on the clipboard, as `Ctrl+V` does |
 | Click the play, back or forward button under an animation | Play or pause it, or step a frame, as `Enter`, `N` and `n` do |
 | Click or drag along the timeline | Go to the frame under the pointer, and stop there |
-| Click a histogram control | Step the exposure, move or set the window, or choose the tone curve |
+| Click a histogram button | Set the window on one of its rules, or choose the tone curve |
+| Drag a handle on the histogram's band | Set the black point or the white point: the value that comes out black, or white |
+| Drag the band between the handles | Slide the window along the axis without changing its width |
+| Click or drag the exposure's slider | Set the exposure to the quarter stop under the pointer |
 | Wheel over the file information | Scroll it |
 | Drag the file information | Scroll it, as if dragging the scrollbar's handle |
 | Click the zoom percentage | Open the zoom menu: scale, fit and the magnification filter |

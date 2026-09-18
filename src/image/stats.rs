@@ -105,6 +105,56 @@ impl Plot {
         (0.0..BINS as f32).contains(&bin).then_some(bin as usize)
     }
 
+    /// The share of the samples the display is throwing away at each end:
+    /// at or below `black`, and at or above `white`, both on the plot's own
+    /// axis. What the panel writes in the corners of the plot, so that how
+    /// much of a picture is clipped is a number to read rather than a spike
+    /// to guess the height of.
+    ///
+    /// Each plane on its own, and the worst of them: a red flower blows its
+    /// red channel long before its luminance goes, and the plane that has
+    /// piled into the end bin is the one the eye finds on the plot. On a gray
+    /// image the one plane is the answer.
+    ///
+    /// A bin is counted as clipped when its own value is at or past the
+    /// bound, so on a quantized file, whose codes land one to a bin, a bound
+    /// sitting on a code counts exactly that code and everything beyond it.
+    /// A bound off the axis clips nothing at that end, and so does one that
+    /// is not a number, every comparison against which is false.
+    pub fn clipped(&self, black: f32, white: f32) -> [f32; 2] {
+        // Written so that a non-finite axis fails as well, as `bin` does.
+        let span = self.max - self.min;
+        if span.partial_cmp(&f32::MIN_POSITIVE) != Some(std::cmp::Ordering::Greater) {
+            return [0.0; 2];
+        }
+        let position = |value: f32| (value - self.min) / span * (BINS - 1) as f32;
+        let (black, white) = (position(black), position(white));
+        let planes: &[[u32; BINS]] = match &self.color {
+            Some(planes) => planes,
+            None => std::slice::from_ref(&self.luma),
+        };
+        let mut worst = [0.0f32; 2];
+        for plane in planes {
+            let total: u64 = plane.iter().map(|&count| u64::from(count)).sum();
+            if total == 0 {
+                continue;
+            }
+            let (mut below, mut above) = (0u64, 0u64);
+            for (index, &count) in plane.iter().enumerate() {
+                let at = index as f32;
+                if at <= black {
+                    below += u64::from(count);
+                }
+                if at >= white {
+                    above += u64::from(count);
+                }
+            }
+            let share = |part: u64| part as f32 / total as f32;
+            worst = [worst[0].max(share(below)), worst[1].max(share(above))];
+        }
+        worst
+    }
+
     fn empty() -> Self {
         Self {
             min: 0.0,
@@ -874,6 +924,48 @@ mod tests {
         // a curve it would not: sRGB would put it past the half way mark.
         let quarter = (0.25 * (BINS - 1) as f32).round() as usize;
         assert_eq!(stats.plot.luma[quarter], 1);
+    }
+
+    /// A bound sitting on a code clips that code and everything past it,
+    /// and nothing else: the share is exact on a quantized file, which is
+    /// where a reader is most likely to hold it against the pixels.
+    #[test]
+    fn the_clipped_share_counts_the_end_bins_exactly() {
+        let mut plot = Plot::empty();
+        // Ten samples: two at black, one at code 1, six in the middle and
+        // one at white. The axis is 0..1, a bin to the code.
+        let code = |index: usize| index as f32 / (BINS - 1) as f32;
+        plot.luma[0] = 2;
+        plot.luma[1] = 1;
+        plot.luma[128] = 6;
+        plot.luma[BINS - 1] = 1;
+        assert_eq!(plot.clipped(0.0, 1.0), [0.2, 0.1]);
+        assert_eq!(
+            plot.clipped(code(1), code(128)),
+            [0.3, 0.7],
+            "a bound on a code takes that code with it"
+        );
+        assert_eq!(
+            plot.clipped(-0.5, 1.5),
+            [0.0, 0.0],
+            "a window wider than the axis clips nothing"
+        );
+        assert_eq!(plot.clipped(f32::NAN, f32::NAN), [0.0, 0.0]);
+
+        // Color: the plane that loses the most is the one reported, since
+        // it is the one that has piled up at the end of the plot.
+        let mut planes = [[0u32; BINS]; COLOR];
+        planes[0][BINS - 1] = 5;
+        planes[0][10] = 5;
+        planes[1][10] = 10;
+        planes[2][0] = 1;
+        planes[2][10] = 9;
+        plot.color = Some(planes);
+        assert_eq!(plot.clipped(0.0, 1.0), [0.1, 0.5]);
+
+        // No span, no shares: a flat image is not clipped, it is flat.
+        plot.max = plot.min;
+        assert_eq!(plot.clipped(0.0, 1.0), [0.0, 0.0]);
     }
 
     #[test]
