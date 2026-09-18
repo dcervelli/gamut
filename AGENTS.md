@@ -162,7 +162,7 @@ still agrees with both, so renaming either is editing the constant —
 
 | Change | Edit |
 | --- | --- |
-| A key binding | `app/input.rs`: one `KEYS` entry, with the `mods` it is held with and a `when` if it only does anything under some condition, and one `perform` arm. `--help`, the man page and the help popup follow. |
+| A key binding | `app/input.rs`: one `KEYS` entry, with the `mods` it is held with and a `when` if it only does anything under some condition, and one `perform` arm. `--help`, the man page and the help popup follow. A condition new to the table is a `When` variant, its words in `When::describe`, a field of `Conditions` and its reading in `App::conditions`, from the same state the `perform` arm reads |
 | A button | a `Control` variant in `ui/control.rs` with its `label`, the widget where it is drawn — `Pass::icon_button` for a square toggle — pushing `Command::Press` on a click, and an arm of `App::press`. Keys that do the same job go through `press` too, so the two cannot drift apart |
 | A status-bar segment | `ui/status.rs`; the pointer's pixel readout is `ui/pixel.rs` |
 | What a file is left in when you step off it, and what comes back when you step on to it | `app/kept.rs`, and the arrival in `App::apply`, which trades the outgoing file's settings for the incoming one's |

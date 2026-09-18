@@ -784,17 +784,35 @@ and the manual page cannot list different keys; `cli.rs` derives its
 headings from the same `Section::title`. The third column is `Binding::when`,
 the condition on which a key does anything, kept apart from `help` because
 `--help` has no column for it and a sentence that carried both would be
-twice as long. Nothing on the popup can be pressed, which is why it reads the
-table rather than being handed rows to hand presses back from.
+twice as long. It is a `When`, one variant per condition, rather than the
+words themselves, so that the popup can say whether it holds as well as
+what it is: `App::conditions` reads each off the same state the key's own
+arm of `perform` reads, `Namer` carries the answers into the frame as
+`Conditions`, and `help_sections` marks each row's `help::Condition` met or
+not. A row whose condition does not hold is set in the dim ink throughout,
+its condition in `Theme::warning` — what the row says is still true, and
+what it needs is what is missing — so that the keys that would do something
+right now are the ones that stand out. Nothing on the popup can be pressed,
+which is why it reads the table rather than being handed rows to hand
+presses back from.
 
 egui has no layout that answers to its own width, so the table's is written
 out: above `help::STACK_BELOW` a row is three columns, the key and the
 condition at fixed widths and the description wrapping in what is left;
 under it the three go one beneath the other with the whole width each, and
-the column headings, which would then head nothing, are left out. The
-threshold is where the description's column would otherwise be down to a
-few words a line — and, not much narrower, to less than nothing, which egui
-panics on. The popup's own floor is the panels': `PANEL_WIDTH` wide and
+the column headings, which would then head nothing, are left out. A
+ledger's alternating wash on the rows was tried and dropped: the rows are of
+mixed height, so the stripes read as uneven blocks rather than as ruling. The threshold is where the
+description's column would otherwise be down to a few words a line — and,
+not much narrower, to less than nothing, which egui panics on. The headings
+are laid out above the scroll area rather than in it, so they stay while the
+rows go by under them, set in bold on a band of `Theme::heading` that runs
+edge to edge of the popup inside its stroke, with the information panel's
+hairline under them saying the same thing it says there. The headings share
+the rows' width, which is why the scrollbar is always shown in its gutter,
+as the information panel's is: a bar that came and went would move the rows'
+right edge and not the headings'. The popup's own floor is the panels':
+`PANEL_WIDTH` wide and
 `INFO_MIN_HEIGHT` tall, inside the same padding, so `help::panel` is `None`
 in exactly the content area `info::panel` is, `Room` carries a `help` beside
 its `histogram` and `info`, and the button goes dead with theirs — the same
