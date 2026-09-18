@@ -103,7 +103,7 @@ impl Seek for Positioned<'_> {
 /// need a few bytes; the raw decoder needs the first directory of a TIFF,
 /// which is the only way to tell a NEF or a DNG from a scan, and a camera
 /// writes that directory at byte 8 with a few dozen entries in it.
-const HEADER: usize = 4096;
+pub(super) const HEADER: usize = 4096;
 
 pub trait Decoder: Sync {
     /// Human-readable name, used in error messages.

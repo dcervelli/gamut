@@ -667,6 +667,18 @@ const FIXTURES: &[Fixture] = &[
         nodata: None,
         tolerance: RGBE,
     },
+    Fixture {
+        file: "hdr-view-line.hdr",
+        covers: "Radiance RGBE with a VIEW= line ahead of the signature, as Debevec's memorial.hdr has",
+        channels: Channels::Rgb,
+        kind: Kind::F32,
+        color: LINEAR,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Float,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: RGBE,
+    },
     // --------------------------------------------------------- OpenEXR
     Fixture {
         file: "exr-rgb.exr",

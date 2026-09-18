@@ -203,6 +203,10 @@ magick "$work/color.png" "$work/color-upside-down.png" -depth 8 -type TrueColor 
 
 # ---------------------------------------------------------------- Radiance
 magick "$work/float.png" -set colorspace RGB -evaluate multiply 3.984375 hdr-rgbe.hdr
+# The same picture with a `VIEW=` line ahead of the signature, as Debevec's
+# memorial.hdr has: Radiance's own reader takes any text line first, and
+# readers that insist on the signature in the first ten bytes refuse it.
+{ echo 'VIEW= -vtv -vh 90 -vv 150'; cat hdr-rgbe.hdr; } > hdr-view-line.hdr
 
 # ---------------------------------------------------------------- OpenEXR
 magick "$work/float.png" -set colorspace RGB -evaluate multiply 3.984375 exr-rgb.exr

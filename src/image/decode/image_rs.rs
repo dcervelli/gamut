@@ -39,6 +39,20 @@
 //! enough to sRGB to call it that; a pipeline writing linear measurements
 //! into a PGM is indistinguishable from the inside, and is what
 //! `--transfer linear` is for.
+//!
+//! Radiance is read by the crate's decoder built by hand rather than through
+//! `ImageReader`, because the reader insists that `#?RADIANCE` be the first
+//! ten bytes of the file, and Radiance itself does not. To its own tools a
+//! picture's header is text lines up to a blank one, and any of them may
+//! come first: `rpict` writes its command line and `VIEW=`, `pfilt` and
+//! `pvalue` add theirs, and a line put in front by hand is as good as any.
+//! What says the file is a picture is the `FORMAT=` line, wherever it falls.
+//! Paul Debevec's `memorial.hdr`, the church every tone-mapping paper shows,
+//! goes around with a `VIEW=` line ahead of the signature, and is refused by
+//! everything that reads only the first ten bytes. So [`is_radiance`] reads
+//! the header the way Radiance does, and the decoder is built with the
+//! signature check off — the crate's own provision for the old `.pic` files
+//! that never had one.
 
 use std::fs::File;
 use std::io::{BufReader, Seek, SeekFrom};
@@ -46,7 +60,8 @@ use std::io::{BufReader, Seek, SeekFrom};
 use anyhow::{Context, Result, bail};
 
 use ::image::codecs::gif::GifDecoder;
-use ::image::{AnimationDecoder, ImageDecoder, ImageFormat};
+use ::image::codecs::hdr::HdrDecoder;
+use ::image::{AnimationDecoder, DynamicImage, ImageDecoder, ImageFormat};
 
 use crate::image::sequence::{Frame, FrameSource, Loops, Sequence, gif_delay};
 use crate::image::{ColorSpace, DecodedImage};
@@ -75,18 +90,28 @@ impl super::Decoder for ImageRs {
 
     fn sniff(&self, header: &[u8]) -> bool {
         is_gif(header)
-            || header.starts_with(b"#?RADIANCE")
-            || header.starts_with(b"#?RGBE")
+            || is_radiance(header)
             || header.starts_with(b"\x76\x2f\x31\x01")
             || is_bmp(header)
             || is_netpbm(header)
     }
 
     fn dimensions(&self, source: &mut dyn ReadSeek) -> Result<Option<(u32, u32)>> {
+        if let Some(decoder) = radiance(source)? {
+            return Ok(Some(decoder.dimensions()));
+        }
         dynamic::dimensions(source)
     }
 
     fn decode(&self, source: &mut dyn ReadSeek, _overrides: Overrides) -> Result<DecodedImage> {
+        if let Some(mut decoder) = radiance(source)? {
+            decoder
+                .set_limits(dynamic::limits())
+                .context("reading the Radiance header")?;
+            let decoded =
+                DynamicImage::from_decoder(decoder).context("decoding the Radiance picture")?;
+            return dynamic::describe(decoded, Some(ImageFormat::Hdr), ColorSpace::SRGB);
+        }
         let mut reader = ::image::ImageReader::new(BufReader::new(source)).with_guessed_format()?;
         dynamic::limit(&mut reader);
 
@@ -218,6 +243,52 @@ fn is_bmp(header: &[u8]) -> bool {
         && DIB_HEADER.contains(&u32::from_le_bytes(size.try_into().expect("four bytes")))
 }
 
+/// The crate's Radiance decoder over `source`, if `source` is a Radiance
+/// picture; `None` hands anything else on to `ImageReader`. The header is
+/// read the way Radiance reads it, so a `VIEW=` line ahead of the signature
+/// is a picture still.
+fn radiance(source: &mut dyn ReadSeek) -> Result<Option<HdrDecoder<BufReader<&mut dyn ReadSeek>>>> {
+    let mut header = [0u8; super::HEADER];
+    source.rewind()?;
+    let read = super::fill(source, &mut header)?;
+    if !is_radiance(&header[..read]) {
+        source.rewind()?;
+        return Ok(None);
+    }
+    source.rewind()?;
+    let decoder =
+        HdrDecoder::new_nonstrict(BufReader::new(source)).context("reading the Radiance header")?;
+    Ok(Some(decoder))
+}
+
+/// Whether `header` opens a Radiance picture. The signature, `#?RADIANCE`
+/// or the `#?RGBE` some writers put instead, is usually the first line, but
+/// Radiance's own reader takes the header as any text lines up to a blank
+/// one and identifies a picture by its `FORMAT=` line, so a picture whose
+/// signature comes second — or is missing, as the oldest `.pic` files' is —
+/// is read the same way here. A line that is not text ends the search: a
+/// header is text, and a file that is not cannot be claimed by a `FORMAT=`
+/// that happens to fall in its first few kilobytes.
+fn is_radiance(header: &[u8]) -> bool {
+    for line in header.split(|&b| b == b'\n') {
+        if line.is_empty()
+            || !line
+                .iter()
+                .all(|b| b.is_ascii_graphic() || *b == b' ' || *b == b'\t')
+        {
+            return false;
+        }
+        if line == b"#?RADIANCE"
+            || line == b"#?RGBE"
+            || line.starts_with(b"FORMAT=32-bit_rle_rgbe")
+            || line.starts_with(b"FORMAT=32-bit_rle_xyze")
+        {
+            return true;
+        }
+    }
+    false
+}
+
 /// Netpbm's magic number is `P` and a digit, which needs the whitespace that
 /// has to follow it to be worth trusting: the two letters alone would claim
 /// any file starting `P5`.
@@ -247,6 +318,29 @@ mod tests {
         for size in [12, 40, 52, 56, 108, 124] {
             assert!(is_bmp(&bmp_header(size)), "{size}");
         }
+    }
+
+    /// Debevec's `memorial.hdr`, as the copies of it going around have it:
+    /// the signature on the second line, behind the view someone wrote in
+    /// front of it.
+    #[test]
+    fn a_radiance_header_led_by_a_view_line_is_recognized() {
+        let header = b"VIEW= -vtv -vh 90 -vv 150\n#?RADIANCE\npvalue -r +e 0.1865 -s 15 -h -H +y 768 +x 512 -df\nFORMAT=32-bit_rle_rgbe\npflip -v\n\n-Y 768 +X 512\n\x02\x02\x02\x00";
+        assert!(is_radiance(header));
+        assert!(is_radiance(b"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n"));
+        assert!(is_radiance(b"#?RGBE\n"));
+        // The oldest pictures have no signature at all; the format line is
+        // what says what they are.
+        assert!(is_radiance(b"pvalue -r\nFORMAT=32-bit_rle_rgbe\n\n"));
+    }
+
+    /// The format line is only trusted inside a text header: past a blank
+    /// line, or past bytes that are not text, it is not a header any more.
+    #[test]
+    fn a_format_line_outside_a_text_header_is_not_a_radiance_picture() {
+        assert!(!is_radiance(b"pvalue -r\n\nFORMAT=32-bit_rle_rgbe\n"));
+        assert!(!is_radiance(b"\x89PNG\r\n\x1a\nFORMAT=32-bit_rle_rgbe\n"));
+        assert!(!is_radiance(b""));
     }
 
     /// PBM, PGM, PPM and PAM, in both their ASCII and binary spellings.
