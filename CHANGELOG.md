@@ -87,8 +87,9 @@ Notable changes to `gamut`. The format follows
   under the pointer only while the pointer is over the plot, a photograph's
   axis no longer wears `0.0000` and `1.0000` at its ends, and the channel
   planes are drawn in a red, green and blue held short of the primaries.
-  The rows under the band follow the file: every file gets *Exposure*,
-  whose number can be dragged as well as stepped; linear data gets the
+  The rows under the band follow the file: every file gets *Exposure*, a
+  slider over six stops each way with its reading at the end, in the
+  quarter stops `d` and `f` count in; linear data gets the
   *Window* row, its three rules named for what they do — *As stored*,
   *Full range*, *Trimmed* — and a file with highlights above white gets the
   *Highlights* row of curves. A photograph gets the exposure alone, and

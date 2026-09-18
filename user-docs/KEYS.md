@@ -282,8 +282,11 @@ has. Neither marks white where nothing is being clipped: on an HDR surface
 with no curve, or under a curve, the highlights are shown or rolled off
 rather than lost.
 
-Under the band, every file gets the exposure, which can be dragged as well
-as stepped. A file of linear data — sensor counts, a float TIFF, an EXR —
+Under the band, every file gets the exposure: a slider over six stops each
+way, its reading at the end of the row. It snaps to the quarter stops `d`
+and `f` take, and a press anywhere along it puts the exposure there. The
+keys go on past the slider's ends, to ±16 stops, where the handle stands
+hollow at the end and the reading says where it is. A file of linear data — sensor counts, a float TIFF, an EXR —
 also gets the row of windows the `e` key cycles, named for what they do:
 *As stored* shows the values as they are, *Full range* stretches everything
 the file holds to black and white, and *Trimmed* leaves the outermost 0.2%
@@ -514,10 +517,10 @@ region behind: it belongs to the picture it was drawn on.
 | Click the paste button | Paste the image on the clipboard, as `Ctrl+V` does |
 | Click the play, back or forward button under an animation | Play or pause it, or step a frame, as `Enter`, `N` and `n` do |
 | Click or drag along the timeline | Go to the frame under the pointer, and stop there |
-| Click a histogram button | Step the exposure, set the window on one of its rules, or choose the tone curve |
+| Click a histogram button | Set the window on one of its rules, or choose the tone curve |
 | Drag a handle on the histogram's band | Set the black point or the white point: the value that comes out black, or white |
 | Drag the band between the handles | Slide the window along the axis without changing its width |
-| Drag the exposure's number | Step the exposure, a quarter stop for every short stretch of the drag |
+| Click or drag the exposure's slider | Set the exposure to the quarter stop under the pointer |
 | Wheel over the file information | Scroll it |
 | Drag the file information | Scroll it, as if dragging the scrollbar's handle |
 | Click the zoom percentage | Open the zoom menu: scale, fit and the magnification filter |

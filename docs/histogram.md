@@ -87,7 +87,7 @@ What moves to put white where the hand asks is the file's to say, and
 one effect: a stop up is white moved to half its value with black held. On a
 photograph the window is 0..1 and nothing else, so the white handle there is
 the exposure — the stops that land white under the pointer, snapped to the
-quarter stops the buttons and the keys count in, so that the exposure row
+quarter stops the slider and the keys count in, so that the exposure row
 reads as it would after so many presses and the handle reaches exactly the
 numbers they do. On measured light the two genuinely differ: the window is
 found from the pixels and found again when the file changes on disk or a
@@ -214,7 +214,33 @@ panel's height is the file's — rather than leaving.
 The strip down the left — the two plane toggles, the count axis and the
 reset — and the row of false colors under the band on a gray image are as
 they were; so is a bin to the logical pixel, which fixes the panel's width and
-is why nothing here smooths the plot. The exposure is still stepped in quarter
-stops by two buttons, and the number between them can be dragged by the same
-quarters, pressed through the same two controls so that a drag and a keystroke
-cannot be worth different amounts.
+is why nothing here smooths the plot.
+
+## The exposure is a slider
+
+The exposure row was a number with a step either side of it, and the number
+could be dragged by the same steps. That is a spinner, and a spinner is the
+right control for a value that is mostly typed and occasionally nudged; the
+exposure is neither. It is swept — up until the shadow shows something,
+back until the highlight stops clipping — and a sweep wants a line with a
+handle on it, where a length is the push and its direction is which way.
+So the row is a slider: a groove with a mark at nothing, the run from there
+to the handle filled in the accent, and the handle drawn as the band's are
+because it is the same kind of thing. The reading stays, at the end of the
+row, since a slider with no number is a slider you have to read the picture
+to check.
+
+It runs six stops each way (`SLIDER_STOPS`), not the sixteen the keys and
+`--exposure` go to. A step is a quarter of a stop, and across the room the
+row has that is a few pixels each at six, which is a slider that can be
+put on a value, and under two at sixteen, which is not; and six is the
+whole of what a viewer does with an exposure, a shadow lifted out of black
+or a highlight brought back from four stops over. Past the end the handle
+stands hollow at it, as a band handle out past the plot does, and the
+reading says where the exposure really is. The slider is dragged *to* the
+pointer, as the handles are, and asks through `Command::Exposure` only for
+an exposure that is not already the one in force, so that a hand resting
+on it is not a redraw a frame. It snaps to the quarter stops, so the
+reading beside it is always one the keys could have reached, and so that
+the keys and the slider cannot take the picture to two different places
+that read the same.

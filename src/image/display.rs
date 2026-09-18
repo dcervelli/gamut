@@ -600,7 +600,15 @@ impl Display {
     }
 
     pub fn adjust_exposure(&mut self, stops: f32) {
-        self.exposure_stops = (self.exposure_stops + stops).clamp(-EXPOSURE_LIMIT, EXPOSURE_LIMIT);
+        self.set_exposure(self.exposure_stops + stops);
+    }
+
+    /// The exposure set outright, as the slider sets it: held to the same
+    /// limit a step is, and left alone if asked for nothing.
+    pub fn set_exposure(&mut self, stops: f32) {
+        if stops.is_finite() {
+            self.exposure_stops = stops.clamp(-EXPOSURE_LIMIT, EXPOSURE_LIMIT);
+        }
     }
 
     /// Puts the value that comes out black where it is told to, the value

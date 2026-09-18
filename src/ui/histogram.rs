@@ -205,15 +205,31 @@ const HANDLE_GRIP: f32 = 14.0;
 const HANDLE_RADIUS: f32 = 1.5;
 const HANDLE_RING: f32 = 1.0;
 
-/// A quarter of a stop: what one press of the exposure row is worth. The
-/// model's, since the white handle snaps to it there; read through here by
-/// the key table and the tooltips, which are about the buttons.
+/// A quarter of a stop: what one press of the exposure keys is worth, and
+/// what the slider snaps to. The model's, since the white handle snaps to
+/// it there; read through here by the key table, which is about the keys.
 pub use crate::image::display::EV_STEP;
 
-/// How far the exposure's own number has to be dragged for one step of it.
-/// A drag is the same quarter stops a press is, so many as the hand has
-/// covered — see [`rows`] — and this is how much hand each is worth.
-const EXPOSURE_DRAG: f32 = 10.0;
+/// How far the exposure's slider runs each way, in stops. Not the whole of
+/// what the exposure can be — the keys and `--exposure` go on to the
+/// model's own limit — but the run a hand wants at a quarter of a stop to
+/// the step: six stops each way is a shadow lifted out of black or a
+/// highlight brought back from four stops over, and across the slider a
+/// step is still a few pixels wide. Past the end the handle stands hollow,
+/// as the band's do, and the number beside it says where the exposure is.
+const SLIDER_STOPS: f32 = 6.0;
+/// The slider's track: how thick the groove is, and how tall the mark at
+/// nothing stands, either side of it.
+const SLIDER_TRACK: f32 = 2.0;
+const SLIDER_TICK: f32 = 4.0;
+/// How far the groove is faded toward the panel: the dim ink, held back so
+/// that a line two pixels thick reads as a groove under the handle rather
+/// than as a rule across the row, while a button's own ground, which is
+/// what the rows below are drawn in, comes out too faint at that width to
+/// be seen at all.
+const SLIDER_GROOVE_ALPHA: u8 = 90;
+/// How tall the handle on it stands, the band's handles' width wide.
+const SLIDER_HANDLE: f32 = 12.0;
 
 /// An exposure in stops, written the way the interface counts them.
 ///
@@ -282,16 +298,12 @@ const ROW_GAP: f32 = 8.0;
 const ROW_LABEL: f32 = 58.0;
 const ROW_LABEL_GAP: f32 = 6.0;
 
-/// How wide one of the exposure row's two steps is, and how much is set aside
-/// in front of them for the exposure itself.
-///
-/// The reading leads and the buttons follow it, close enough to touch: what a
-/// step does is change the number in front of it, and a number a button's
-/// width away from the button that moves it is a number that has to be looked
-/// for. The room the group does not take is left at the end of the line,
-/// where it is margin.
-const STEP_WIDTH: f32 = 54.0;
-const STOPS_WIDTH: f32 = 36.0;
+/// How much of the exposure's row is set aside at its end for the reading:
+/// the slider runs up to it, and it is set flush with the right edge of the
+/// rows below, where their last button ends. Wide enough for the stops the
+/// slider reaches and for the two-decimal reading a `--exposure` off the
+/// quarters falls back to.
+const STOPS_WIDTH: f32 = 40.0;
 
 /// Between one cell of a row and the next: the false colors under the band,
 /// and the buttons of the rows below them.
@@ -491,8 +503,8 @@ fn share(row: Rect, count: usize, index: usize) -> Rect {
 /// rows below it close up.
 #[derive(Clone, Copy)]
 struct Rows {
-    /// The exposure's line, and where its word goes: its reading at the
-    /// head and its two steps after it.
+    /// The exposure's line, and where its word goes: the slider along it
+    /// and its reading at the end.
     exposure: Rect,
     exposure_label: Rect,
     /// The three windows on offer, where they are offered.
@@ -528,21 +540,27 @@ impl Rows {
         }
     }
 
-    /// The exposure itself, at the head of its row: the number the two steps
-    /// beside it act on, and which a drag along it moves by the same steps.
+    /// The exposure's reading, at the end of its row.
     fn stops(&self) -> Rect {
         Rect::new(
-            self.exposure.x,
+            self.exposure.right() - STOPS_WIDTH,
             self.exposure.y,
             STOPS_WIDTH,
             self.exposure.height,
         )
     }
 
-    /// One of those two steps, following it: down first, then up.
-    fn step(&self, up: bool) -> Rect {
-        let x = self.stops().right() + CELL_GAP + if up { STEP_WIDTH + CELL_GAP } else { 0.0 };
-        Rect::new(x, self.exposure.y, STEP_WIDTH, self.exposure.height)
+    /// The slider, from the row's head to the reading: the room that takes
+    /// the pointer, the whole height of the row. The track itself is drawn
+    /// inside it, in from each end by half a grip, so that the handle at
+    /// either end still stands within the row.
+    fn slider(&self) -> Rect {
+        Rect::new(
+            self.exposure.x,
+            self.exposure.y,
+            self.stops().x - CELL_GAP - self.exposure.x,
+            self.exposure.height,
+        )
     }
 
     /// Each row's word and where it goes, in the order they are stacked.
@@ -578,10 +596,6 @@ impl Rows {
 /// measured against is a label that can outgrow its button.
 fn row_label(widget: Control, display: &Display) -> Option<(String, bool)> {
     Some(match widget {
-        // The step's own worth, written as it acts: one source for the number
-        // on the button and the number the press is worth.
-        Control::ExposureDown => (stops_label(-EV_STEP), false),
-        Control::ExposureUp => (stops_label(EV_STEP), false),
         Control::Window(index) => (WINDOWS.get(index)?.0.to_string(), false),
         // Capitalized, where the bar sets the same word in the middle of a
         // line: a button wears a name, and a name starts with a capital.
@@ -597,10 +611,6 @@ fn row_label(widget: Control, display: &Display) -> Option<(String, bool)> {
 /// the pointer and the tooltips all work from.
 fn row_buttons(panel: Rect, offered: Offered) -> impl Iterator<Item = (Control, Rect)> {
     let rows = Rows::new(panel, offered);
-    let steps = [
-        (Control::ExposureDown, rows.step(false)),
-        (Control::ExposureUp, rows.step(true)),
-    ];
     let windows = rows.window.into_iter().flat_map(|(row, _)| {
         (0..WINDOWS.len())
             .map(move |index| (Control::Window(index), share(row, WINDOWS.len(), index)))
@@ -609,7 +619,7 @@ fn row_buttons(panel: Rect, offered: Offered) -> impl Iterator<Item = (Control, 
         (0..ToneMap::ALL.len())
             .map(move |index| (Control::Curve(index), share(row, ToneMap::ALL.len(), index)))
     });
-    steps.into_iter().chain(windows).chain(curves)
+    windows.chain(curves)
 }
 
 /// The band of color under the plot, aligned with the bins so that a cell of
@@ -1609,11 +1619,10 @@ fn track(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, bars: Rect) -> O
 ///
 /// What the plot draws, said in words and set: the handles on the band are
 /// the window, the curve over the bins is the curve, and the gain that moves
-/// them both is the exposure. A reading and the buttons that change it,
+/// them both is the exposure. A reading and the control that changes it,
 /// together, so that a number on this panel is never one you have to go
-/// somewhere else to act on — and the exposure's own number is a thing to
-/// drag as well as to read, by the same quarter stops the buttons beside it
-/// press.
+/// somewhere else to act on: the exposure is a slider with its number at
+/// the end, in the same quarter stops the keys count in.
 ///
 /// The curves light the one that is in force; the windows do not. A window
 /// is set from the pixels and then moved by hand — a handle, a key, the
@@ -1640,40 +1649,15 @@ fn rows(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, panel: Rect, offe
         );
     }
 
-    // The exposure at the head of its row, in the units the rest of the
+    slider(pass, ui, display.exposure_stops, rows.slider());
+
+    // Its reading at the end of the row, in the units the rest of the
     // interface quotes it in: stops counted in quarters, as the bar and the
-    // keys count them. A drag along it is those same quarters, one for every
-    // [`EXPOSURE_DRAG`] the hand has covered, with what is left over carried
-    // to the next frame so that a slow hand still gets there — pressed
-    // through the same two controls the buttons press, so that a drag and a
-    // keystroke cannot be worth different amounts.
+    // keys count them.
     let stops = rows.stops();
-    let dragged = ui.interact(area(stops), ui.id().with("exposure"), Sense::DRAG);
-    dragged.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "Exposure"));
-    let carry = dragged.id.with("carry");
-    if dragged.dragged() {
-        let carried =
-            ui.data(|data| data.get_temp::<f32>(carry).unwrap_or(0.0)) + dragged.drag_delta().x;
-        let steps = (carried / EXPOSURE_DRAG).trunc();
-        ui.data_mut(|data| data.insert_temp(carry, carried - steps * EXPOSURE_DRAG));
-        let step = if steps > 0.0 {
-            Control::ExposureUp
-        } else {
-            Control::ExposureDown
-        };
-        for _ in 0..steps.abs() as usize {
-            pass.press(step);
-        }
-    } else if dragged.drag_stopped() {
-        ui.data_mut(|data| data.remove_temp::<f32>(carry));
-    }
-    if dragged.hovered() || dragged.dragged() {
-        ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
-    }
-    pass.tooltip(dragged, Tip::Exposure, true);
     ui.painter().text(
-        pos2(grid.snap(stops.x), stops.y + stops.height / 2.0),
-        Align2::LEFT_CENTER,
+        pos2(grid.snap(stops.right()), stops.y + stops.height / 2.0),
+        Align2::RIGHT_CENTER,
         stops_label(display.exposure_stops),
         font.clone(),
         theme.text_primary.into(),
@@ -1696,6 +1680,113 @@ fn rows(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, panel: Rect, offe
             font.clone(),
             ink,
         );
+    }
+}
+
+/// The exposure's slider: a groove with a mark at nothing, the run from
+/// there to the handle filled in the accent so that the push reads as a
+/// length and a direction before the number is read, and a handle drawn as
+/// the band's are — the same width, the same ring — since it is the same
+/// kind of thing, a value on a line.
+///
+/// Dragged to the pointer rather than by it, as the band's handles are, so
+/// that a press anywhere on the row puts the exposure there and a hand run
+/// off the end leaves it at the end. Snapped to the quarter stops the keys
+/// count in, so that the reading beside it is always one the keys could
+/// have reached. Asked for through [`Command::Exposure`], and only when it
+/// would change something, so that a hand resting still is not a frame a
+/// second.
+///
+/// The run is [`SLIDER_STOPS`] each way. An exposure past that, from the
+/// keys or `--exposure`, stands hollow at the end, as a band handle out past
+/// the plot does.
+fn slider(pass: &mut Pass, ui: &mut egui::Ui, exposure: f32, room: Rect) {
+    let theme = pass.theme;
+    let scale = pass.input.scale;
+    let grid = icon::Grid::new(scale);
+    let track = Rect::new(
+        room.x + HANDLE_GRIP / 2.0,
+        room.y,
+        room.width - HANDLE_GRIP,
+        room.height,
+    );
+    let along = |stops: f32| (stops / SLIDER_STOPS + 1.0) / 2.0;
+    let at = |t: f32| track.x + t.clamp(0.0, 1.0) * track.width;
+
+    let response = ui.interact(area(room), ui.id().with("exposure"), Sense::DRAG);
+    response.widget_info(|| WidgetInfo::slider(true, f64::from(exposure), "Exposure"));
+    if response.dragged()
+        && let Some(pointer) = response.interact_pointer_pos()
+    {
+        let t = ((pointer.x - track.x) / track.width).clamp(0.0, 1.0);
+        let asked = (((t * 2.0 - 1.0) * SLIDER_STOPS) / EV_STEP).round() * EV_STEP;
+        if asked != exposure {
+            pass.commands.push(Command::Exposure(asked));
+        }
+    }
+    let on = response.hovered() || response.dragged();
+    if on {
+        ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
+    }
+    pass.tooltip(response, Tip::Exposure, true);
+
+    // The groove, the mark at nothing, and the fill from there to the
+    // handle, each on the device's grid so that a line two pixels thick is
+    // two pixels thick.
+    let painter = ui.painter();
+    let middle = room.y + room.height / 2.0;
+    let groove = on_device(
+        Rect::new(
+            track.x,
+            middle - SLIDER_TRACK / 2.0,
+            track.width,
+            SLIDER_TRACK,
+        ),
+        scale,
+    );
+    painter.rect_filled(
+        area(groove),
+        SLIDER_TRACK / 2.0,
+        theme.text_dim.with_alpha(SLIDER_GROOVE_ALPHA),
+    );
+    let t = along(exposure);
+    let (from, to) = (at(0.5).min(at(t)), at(0.5).max(at(t)));
+    if to > from {
+        let fill = on_device(Rect::new(from, groove.y, to - from, groove.height), scale);
+        painter.rect_filled(area(fill), SLIDER_TRACK / 2.0, theme.accent);
+    }
+    let tick = on_device(
+        Rect::new(
+            at(0.5) - HANDLE_RING / 2.0,
+            middle - SLIDER_TICK,
+            HANDLE_RING,
+            2.0 * SLIDER_TICK,
+        ),
+        scale,
+    );
+    painter.rect_filled(area(tick), 0.0, theme.text_dim);
+
+    // The handle, as the band's are drawn.
+    let mark = on_device(
+        Rect::new(
+            at(t) - HANDLE_WIDTH / 2.0,
+            middle - SLIDER_HANDLE / 2.0,
+            HANDLE_WIDTH,
+            SLIDER_HANDLE,
+        ),
+        scale,
+    );
+    let ring = mark.inset(-HANDLE_RING, -HANDLE_RING);
+    painter.rect_filled(
+        area(ring),
+        HANDLE_RADIUS + HANDLE_RING,
+        theme.panel_background,
+    );
+    let ink: Color32 = if on { theme.text_primary } else { theme.accent }.into();
+    if (0.0..=1.0).contains(&t) {
+        painter.rect_filled(area(mark), HANDLE_RADIUS, ink);
+    } else {
+        outline(painter, grid, mark, grid.line_width(1.0), ink);
     }
 }
 
@@ -2141,9 +2232,9 @@ mod tests {
         }
     }
 
-    /// The exposure's two steps are worth what they say they are worth, and
-    /// the windows and the curves cover everything there is to choose —
-    /// where they are offered at all.
+    /// The windows and the curves cover everything there is to choose —
+    /// where they are offered at all — and the exposure's row is a slider
+    /// up to its reading, which ends where the rows' last buttons do.
     #[test]
     fn the_rows_offer_every_choice_there_is() {
         for offered in EVERY_OFFER {
@@ -2151,11 +2242,19 @@ mod tests {
             let widgets: Vec<Control> = row_buttons(panel, offered)
                 .map(|(widget, _)| widget)
                 .collect();
-            assert_eq!(widgets[0], Control::ExposureDown);
-            assert_eq!(widgets[1], Control::ExposureUp);
             let windows = if offered.window { WINDOWS.len() } else { 0 };
             let curves = if offered.curve { ToneMap::ALL.len() } else { 0 };
-            assert_eq!(widgets.len(), 2 + windows + curves, "{offered:?}");
+            assert_eq!(widgets.len(), windows + curves, "{offered:?}");
+
+            let rows = Rows::new(panel, offered);
+            let inside = panel.inset(PANEL_INSET, PANEL_INSET);
+            assert_eq!(rows.slider().x, rows.exposure.x);
+            assert!(rows.slider().right() < rows.stops().x);
+            assert_eq!(rows.stops().right(), inside.right());
+            assert!(
+                rows.slider().width - HANDLE_GRIP > 3.0 * 2.0 * SLIDER_STOPS / EV_STEP,
+                "a quarter stop is wider than a few pixels"
+            );
         }
 
         // The three rules, and no fourth for the image's own: the row is
