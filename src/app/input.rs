@@ -288,12 +288,17 @@ fn satisfies(required: Mods, held: Mods, key: KeyName) -> bool {
 /// The line of the key table that performs `action`: what to press for it,
 /// and what `--help` says it does.
 ///
-/// The first such line. An action bound on more than one line — the arrows
-/// and their modified forms — is a different action on each, so the first is
-/// the one that answers.
+/// The first such line that is not a region's own. An action bound on more
+/// than one line is either a different action on each — the arrows and
+/// their modified forms — or one that does one thing plainly and another
+/// with a region up, written on a line under each condition; the plain one
+/// answers, since what asks is a button that does the plain thing, and
+/// what it does with a region is the region's line to say.
 fn binding_for(action: Action) -> Option<&'static Binding> {
+    let binds = |binding: &&'static Binding| binding.keys.iter().any(|(_, bound)| *bound == action);
     KEYS.iter()
-        .find(|binding| binding.keys.iter().any(|(_, bound)| *bound == action))
+        .find(|binding| binds(binding) && binding.when != Some(When::RegionSelected))
+        .or_else(|| KEYS.iter().find(binds))
 }
 
 /// What to press for `action`, as the key table writes it.
@@ -460,6 +465,7 @@ fn names(tip: Tip) -> Option<String> {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Section {
     Zoom,
+    Region,
     Files,
     Playback,
     Clipboard,
@@ -470,13 +476,14 @@ pub enum Section {
 impl Section {
     /// Every section, in the order the keys are listed in: the order the
     /// table below keeps, and the one place it is written down.
-    pub const ALL: [Section; 6] = [
+    pub const ALL: [Section; 7] = [
         Section::Zoom,
-        Section::Files,
-        Section::Playback,
-        Section::Clipboard,
         Section::Interface,
+        Section::Files,
+        Section::Region,
+        Section::Clipboard,
         Section::Display,
+        Section::Playback,
     ];
 
     /// What the section is called, as the popup heads it; `--help` sets the
@@ -484,6 +491,7 @@ impl Section {
     pub fn title(self) -> &'static str {
         match self {
             Section::Zoom => "Zoom and position",
+            Section::Region => "Region selection",
             Section::Files => "Files",
             Section::Playback => "Playback",
             Section::Clipboard => "Clipboard",
@@ -503,9 +511,11 @@ pub struct Binding {
     pub shown: &'static str,
     pub help: &'static str,
     /// When the key does anything at all, for the help popup's third
-    /// column, and `None` for a key that always does. Not the whole story
-    /// where a key does one thing plainly and another under some condition,
-    /// which `help` tells; this is the condition on which it does anything.
+    /// column, and `None` for a key that always does. A key that does one
+    /// thing plainly and another with a region up is two lines, one under
+    /// each condition, binding the same keys to the same action: what the
+    /// action does is decided when it is performed, and each line says only
+    /// what it does then.
     pub when: Option<When>,
     pub keys: &'static [(KeyName, Action)],
 }
@@ -516,6 +526,7 @@ pub struct Binding {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum When {
     RegionSelected,
+    NoRegion,
     SeveralFiles,
     Animation,
     AnimationOrPages,
@@ -529,8 +540,9 @@ impl When {
     /// Every condition, for a test to hold them all up against the
     /// application.
     #[cfg(test)]
-    pub const ALL: [When; 8] = [
+    pub const ALL: [When; 9] = [
         When::RegionSelected,
+        When::NoRegion,
         When::SeveralFiles,
         When::Animation,
         When::AnimationOrPages,
@@ -545,6 +557,7 @@ impl When {
     pub fn describe(self) -> &'static str {
         match self {
             When::RegionSelected => "a region selected",
+            When::NoRegion => "no region selected",
             When::SeveralFiles => "more than one file",
             When::Animation => "an animation",
             When::AnimationOrPages => "an animation or a paged file",
@@ -576,6 +589,7 @@ impl Conditions {
     pub fn met(&self, when: When) -> bool {
         match when {
             When::RegionSelected => self.region_selected,
+            When::NoRegion => !self.region_selected,
             When::SeveralFiles => self.several_files,
             When::Animation => self.animation,
             When::AnimationOrPages => self.animation || self.pages,
@@ -666,8 +680,8 @@ pub const KEYS: &[Binding] = &[
         section: Section::Zoom,
         mods: PLAIN,
         shown: "Space",
-        help: "Fit the whole image, fill the window, then actual size, in turn; with a region, fit it, fill it, then the image",
-        when: None,
+        help: "Fit the whole image, fill the window, then actual size, in turn",
+        when: Some(When::NoRegion),
         keys: &[(Named(NamedKey::Space), CycleFit)],
     },
     Binding {
@@ -690,8 +704,8 @@ pub const KEYS: &[Binding] = &[
         section: Section::Zoom,
         mods: PLAIN,
         shown: "Arrows",
-        help: "Pan by 64 pixels; move a region, or the handle under the pointer, a pixel",
-        when: None,
+        help: "Pan by 64 pixels",
+        when: Some(When::NoRegion),
         keys: &[
             (Named(NamedKey::ArrowLeft), Pan(Left, Coarse)),
             (Named(NamedKey::ArrowRight), Pan(Right, Coarse)),
@@ -719,149 +733,14 @@ pub const KEYS: &[Binding] = &[
         section: Section::Zoom,
         mods: CTRL,
         shown: "Ctrl+Arrows",
-        help: "Pan to the far side of the image; grow a region that way a pixel",
-        when: None,
+        help: "Pan to the far side of the image",
+        when: Some(When::NoRegion),
         keys: &[
             (Named(NamedKey::ArrowLeft), Pan(Left, Edge)),
             (Named(NamedKey::ArrowRight), Pan(Right, Edge)),
             (Named(NamedKey::ArrowUp), Pan(Up, Edge)),
             (Named(NamedKey::ArrowDown), Pan(Down, Edge)),
         ],
-    },
-    Binding {
-        section: Section::Zoom,
-        mods: CTRL_SHIFT,
-        shown: "Ctrl+Shift+Arrows",
-        help: "Shrink a region that way a pixel, pulling its far side in",
-        when: Some(When::RegionSelected),
-        keys: &[
-            (Named(NamedKey::ArrowLeft), ShrinkRegion(Left)),
-            (Named(NamedKey::ArrowRight), ShrinkRegion(Right)),
-            (Named(NamedKey::ArrowUp), ShrinkRegion(Up)),
-            (Named(NamedKey::ArrowDown), ShrinkRegion(Down)),
-        ],
-    },
-    Binding {
-        section: Section::Files,
-        mods: PLAIN,
-        shown: "], Page Down",
-        help: "Next file",
-        when: Some(When::SeveralFiles),
-        keys: &[(Char("]"), NextFile), (Named(NamedKey::PageDown), NextFile)],
-    },
-    Binding {
-        section: Section::Files,
-        mods: PLAIN,
-        shown: "[, Page Up",
-        help: "Previous file",
-        when: Some(When::SeveralFiles),
-        keys: &[
-            (Char("["), PreviousFile),
-            (Named(NamedKey::PageUp), PreviousFile),
-        ],
-    },
-    Binding {
-        section: Section::Files,
-        mods: CTRL,
-        shown: "Ctrl+P",
-        help: "Choose a file from the list",
-        when: Some(When::SeveralFiles),
-        keys: &[(Char("p"), OpenChooser), (Char("P"), OpenChooser)],
-    },
-    Binding {
-        section: Section::Playback,
-        mods: PLAIN,
-        shown: "Enter",
-        help: "Play or pause an animation",
-        when: Some(When::Animation),
-        keys: &[(Named(NamedKey::Enter), TogglePlay)],
-    },
-    Binding {
-        section: Section::Playback,
-        mods: PLAIN,
-        shown: "n",
-        help: "Next frame of an animation, or page of a file that holds several",
-        when: Some(When::AnimationOrPages),
-        keys: &[(Char("n"), NextFrame)],
-    },
-    Binding {
-        section: Section::Playback,
-        mods: PLAIN,
-        shown: "N",
-        help: "Previous frame, or page",
-        when: Some(When::AnimationOrPages),
-        keys: &[(Char("N"), PreviousFrame)],
-    },
-    Binding {
-        section: Section::Clipboard,
-        mods: PLAIN,
-        shown: "c",
-        help: "Copy the name of the file on screen, without its path",
-        when: None,
-        keys: &[(Char("c"), CopyName)],
-    },
-    // The next two are both the capital, so both are typed with Shift held;
-    // only the Ctrl that parts one from the other is a modifier as far as the
-    // table is concerned. `shown` says what the fingers do.
-    Binding {
-        section: Section::Clipboard,
-        mods: PLAIN,
-        shown: "Shift+C",
-        help: "Copy the absolute path of the file on screen",
-        when: None,
-        keys: &[(Char("C"), CopyPath)],
-    },
-    Binding {
-        section: Section::Clipboard,
-        mods: CTRL,
-        shown: "Ctrl+Shift+C",
-        help: "Copy the file on screen as a URI another program can open",
-        when: None,
-        keys: &[(Char("C"), CopyUri)],
-    },
-    Binding {
-        section: Section::Clipboard,
-        mods: CTRL,
-        shown: "Ctrl+C",
-        help: "Copy the image, or the region while one is selected, as displayed",
-        when: None,
-        keys: &[(Char("c"), CopyImage)],
-    },
-    Binding {
-        section: Section::Clipboard,
-        mods: CTRL,
-        shown: "Ctrl+I",
-        help: "Copy everything the info panel says about the file",
-        when: None,
-        keys: &[(Char("i"), CopyMetadata), (Char("I"), CopyMetadata)],
-    },
-    // The full stop and the greater-than are one key on most keyboards, and
-    // as with the two `C`s above only the Ctrl that is held either way is a
-    // modifier as far as the table is concerned. `shown` says what the
-    // fingers do.
-    Binding {
-        section: Section::Clipboard,
-        mods: CTRL,
-        shown: "Ctrl+.",
-        help: "Copy the value of the pixel under the pointer, as read out",
-        when: Some(When::PointerOnPicture),
-        keys: &[(Char("."), CopyPixelValue)],
-    },
-    Binding {
-        section: Section::Clipboard,
-        mods: CTRL,
-        shown: "Ctrl+Shift+.",
-        help: "Copy the coordinate of the pixel under the pointer, as x,y",
-        when: Some(When::PointerOnPicture),
-        keys: &[(Char(">"), CopyPixelCoordinate)],
-    },
-    Binding {
-        section: Section::Clipboard,
-        mods: CTRL,
-        shown: "Ctrl+V",
-        help: "Paste an image, saved among your pictures and shown",
-        when: Some(When::PictureOnClipboard),
-        keys: &[(Char("v"), Paste), (Char("V"), Paste)],
     },
     Binding {
         section: Section::Interface,
@@ -910,14 +789,6 @@ pub const KEYS: &[Binding] = &[
         help: "Toggle the grid over the image",
         when: None,
         keys: &[(Char("g"), ToggleGrid), (Char("G"), ToggleGrid)],
-    },
-    Binding {
-        section: Section::Interface,
-        mods: PLAIN,
-        shown: "x",
-        help: "Select a region: drag to draw it, with handles to adjust; again, or Esc, removes it",
-        when: None,
-        keys: &[(Char("x"), ToggleRegion), (Char("X"), ToggleRegion)],
     },
     // The three that work the histogram's plot, under the key that opens it.
     Binding {
@@ -973,6 +844,188 @@ pub const KEYS: &[Binding] = &[
             (Char("Q"), Quit),
             (Named(NamedKey::Escape), Dismiss),
         ],
+    },
+    Binding {
+        section: Section::Files,
+        mods: PLAIN,
+        shown: "], Page Down",
+        help: "Next file",
+        when: Some(When::SeveralFiles),
+        keys: &[(Char("]"), NextFile), (Named(NamedKey::PageDown), NextFile)],
+    },
+    Binding {
+        section: Section::Files,
+        mods: PLAIN,
+        shown: "[, Page Up",
+        help: "Previous file",
+        when: Some(When::SeveralFiles),
+        keys: &[
+            (Char("["), PreviousFile),
+            (Named(NamedKey::PageUp), PreviousFile),
+        ],
+    },
+    Binding {
+        section: Section::Files,
+        mods: CTRL,
+        shown: "Ctrl+P",
+        help: "Choose a file from the list",
+        when: Some(When::SeveralFiles),
+        keys: &[(Char("p"), OpenChooser), (Char("P"), OpenChooser)],
+    },
+    // The region's own section: the key that puts one up, and what the
+    // keys of the other sections do differently while it is. Each of those
+    // is the same chord bound to the same action as its line in its own
+    // section — which is the one doubling
+    // `no_chord_is_bound_twice_to_different_actions` allows — so the table
+    // dispatches once and describes twice.
+    Binding {
+        section: Section::Region,
+        mods: PLAIN,
+        shown: "x",
+        help: "Select a region: drag to draw it, with handles to adjust",
+        when: Some(When::NoRegion),
+        keys: &[(Char("x"), ToggleRegion), (Char("X"), ToggleRegion)],
+    },
+    Binding {
+        section: Section::Region,
+        mods: PLAIN,
+        shown: "x, Esc",
+        help: "Remove the region",
+        when: Some(When::RegionSelected),
+        keys: &[
+            (Char("x"), ToggleRegion),
+            (Char("X"), ToggleRegion),
+            (Named(NamedKey::Escape), Dismiss),
+        ],
+    },
+    Binding {
+        section: Section::Region,
+        mods: PLAIN,
+        shown: "Space",
+        help: "Fit the region, fill the window with it, then the whole image, in turn",
+        when: Some(When::RegionSelected),
+        keys: &[(Named(NamedKey::Space), CycleFit)],
+    },
+    Binding {
+        section: Section::Region,
+        mods: PLAIN,
+        shown: "Arrows",
+        help: "Move the region, or the handle under the pointer, a pixel",
+        when: Some(When::RegionSelected),
+        keys: &[
+            (Named(NamedKey::ArrowLeft), Pan(Left, Coarse)),
+            (Named(NamedKey::ArrowRight), Pan(Right, Coarse)),
+            (Named(NamedKey::ArrowUp), Pan(Up, Coarse)),
+            (Named(NamedKey::ArrowDown), Pan(Down, Coarse)),
+        ],
+    },
+    Binding {
+        section: Section::Region,
+        mods: CTRL,
+        shown: "Ctrl+Arrows",
+        help: "Grow the region that way a pixel",
+        when: Some(When::RegionSelected),
+        keys: &[
+            (Named(NamedKey::ArrowLeft), Pan(Left, Edge)),
+            (Named(NamedKey::ArrowRight), Pan(Right, Edge)),
+            (Named(NamedKey::ArrowUp), Pan(Up, Edge)),
+            (Named(NamedKey::ArrowDown), Pan(Down, Edge)),
+        ],
+    },
+    Binding {
+        section: Section::Region,
+        mods: CTRL_SHIFT,
+        shown: "Ctrl+Shift+Arrows",
+        help: "Shrink the region that way a pixel, pulling its far side in",
+        when: Some(When::RegionSelected),
+        keys: &[
+            (Named(NamedKey::ArrowLeft), ShrinkRegion(Left)),
+            (Named(NamedKey::ArrowRight), ShrinkRegion(Right)),
+            (Named(NamedKey::ArrowUp), ShrinkRegion(Up)),
+            (Named(NamedKey::ArrowDown), ShrinkRegion(Down)),
+        ],
+    },
+    Binding {
+        section: Section::Clipboard,
+        mods: PLAIN,
+        shown: "c",
+        help: "Copy the name of the file on screen, without its path",
+        when: None,
+        keys: &[(Char("c"), CopyName)],
+    },
+    // The next two are both the capital, so both are typed with Shift held;
+    // only the Ctrl that parts one from the other is a modifier as far as the
+    // table is concerned. `shown` says what the fingers do.
+    Binding {
+        section: Section::Clipboard,
+        mods: PLAIN,
+        shown: "Shift+C",
+        help: "Copy the absolute path of the file on screen",
+        when: None,
+        keys: &[(Char("C"), CopyPath)],
+    },
+    Binding {
+        section: Section::Clipboard,
+        mods: CTRL,
+        shown: "Ctrl+Shift+C",
+        help: "Copy the file on screen as a URI another program can open",
+        when: None,
+        keys: &[(Char("C"), CopyUri)],
+    },
+    Binding {
+        section: Section::Clipboard,
+        mods: CTRL,
+        shown: "Ctrl+C",
+        help: "Copy the image as displayed",
+        when: Some(When::NoRegion),
+        keys: &[(Char("c"), CopyImage)],
+    },
+    // The region's copy stays beside the image's, rather than in the
+    // region's own section: it is a copy first, and where the two lines
+    // are read together they say what one chord does either way.
+    Binding {
+        section: Section::Clipboard,
+        mods: CTRL,
+        shown: "Ctrl+C",
+        help: "Copy the region as displayed",
+        when: Some(When::RegionSelected),
+        keys: &[(Char("c"), CopyImage)],
+    },
+    Binding {
+        section: Section::Clipboard,
+        mods: CTRL,
+        shown: "Ctrl+I",
+        help: "Copy everything the info panel says about the file",
+        when: None,
+        keys: &[(Char("i"), CopyMetadata), (Char("I"), CopyMetadata)],
+    },
+    // The full stop and the greater-than are one key on most keyboards, and
+    // as with the two `C`s above only the Ctrl that is held either way is a
+    // modifier as far as the table is concerned. `shown` says what the
+    // fingers do.
+    Binding {
+        section: Section::Clipboard,
+        mods: CTRL,
+        shown: "Ctrl+.",
+        help: "Copy the value of the pixel under the pointer, as read out",
+        when: Some(When::PointerOnPicture),
+        keys: &[(Char("."), CopyPixelValue)],
+    },
+    Binding {
+        section: Section::Clipboard,
+        mods: CTRL,
+        shown: "Ctrl+Shift+.",
+        help: "Copy the coordinate of the pixel under the pointer, as x,y",
+        when: Some(When::PointerOnPicture),
+        keys: &[(Char(">"), CopyPixelCoordinate)],
+    },
+    Binding {
+        section: Section::Clipboard,
+        mods: CTRL,
+        shown: "Ctrl+V",
+        help: "Paste an image, saved among your pictures and shown",
+        when: Some(When::PictureOnClipboard),
+        keys: &[(Char("v"), Paste), (Char("V"), Paste)],
     },
     Binding {
         section: Section::Display,
@@ -1057,6 +1110,30 @@ pub const KEYS: &[Binding] = &[
         help: "Reset the window, exposure and tone map",
         when: None,
         keys: &[(Char("z"), ResetDisplay), (Char("Z"), ResetDisplay)],
+    },
+    Binding {
+        section: Section::Playback,
+        mods: PLAIN,
+        shown: "Enter",
+        help: "Play or pause an animation",
+        when: Some(When::Animation),
+        keys: &[(Named(NamedKey::Enter), TogglePlay)],
+    },
+    Binding {
+        section: Section::Playback,
+        mods: PLAIN,
+        shown: "n",
+        help: "Next frame of an animation, or page of a file that holds several",
+        when: Some(When::AnimationOrPages),
+        keys: &[(Char("n"), NextFrame)],
+    },
+    Binding {
+        section: Section::Playback,
+        mods: PLAIN,
+        shown: "N",
+        help: "Previous frame, or page",
+        when: Some(When::AnimationOrPages),
+        keys: &[(Char("N"), PreviousFrame)],
     },
 ];
 
@@ -2585,8 +2662,12 @@ mod tests {
                 row.when.map(|when| when.words),
                 binding.when.map(When::describe)
             );
-            // Nothing holds, so every condition is marked unmet.
-            assert!(row.when.is_none_or(|when| !when.met));
+            // Nothing holds but the absence of a region, so every other
+            // condition is marked unmet.
+            assert_eq!(
+                row.when.map(|when| when.met),
+                binding.when.map(|when| when == When::NoRegion)
+            );
         }
         for (section, listed) in Section::ALL.into_iter().zip(&sections) {
             assert_eq!(listed.title, section.title());
@@ -2616,7 +2697,11 @@ mod tests {
     fn each_condition_is_met_by_its_own_reading() {
         let none = Conditions::default();
         for when in When::ALL {
-            assert!(!none.met(when), "{when:?} holds with nothing to hold it");
+            assert_eq!(
+                none.met(when),
+                when == When::NoRegion,
+                "{when:?} with nothing to hold it"
+            );
         }
         let readings = [
             (
@@ -2671,8 +2756,9 @@ mod tests {
         ];
         for (held, conditions) in readings {
             for when in When::ALL {
-                let expected =
-                    when == held || (when == When::AnimationOrPages && held == When::Animation);
+                let expected = when == held
+                    || (when == When::AnimationOrPages && held == When::Animation)
+                    || (when == When::NoRegion && held != When::RegionSelected);
                 assert_eq!(
                     conditions.met(when),
                     expected,
@@ -3011,21 +3097,60 @@ mod tests {
         );
     }
 
-    /// A chord bound twice would do whichever came first in the table,
-    /// silently. The same key under different modifiers is a different chord.
+    /// A chord bound twice to different things would do whichever came
+    /// first in the table, silently. The same key under different modifiers
+    /// is a different chord; and the same chord on two lines is allowed only
+    /// where both bind it to the same action and at most one of them holds
+    /// always — a key with one line for what it does plainly and one for
+    /// what it does with a region up — since then the table dispatches the
+    /// same whichever line is found first, and the lines do not both claim
+    /// the same moment.
     #[test]
-    fn no_chord_is_bound_twice() {
-        let mut seen: Vec<(Mods, KeyName)> = Vec::new();
+    fn no_chord_is_bound_twice_to_different_actions() {
+        let mut seen: Vec<((Mods, KeyName), Action, Option<When>)> = Vec::new();
         for binding in KEYS {
-            for (name, _) in binding.keys {
-                assert!(
-                    !seen.contains(&(binding.mods, *name)),
-                    "{name:?} with {:?} is bound more than once",
-                    binding.mods
-                );
-                seen.push((binding.mods, *name));
+            for (name, action) in binding.keys {
+                let chord = (binding.mods, *name);
+                if let Some((_, first, when)) = seen.iter().find(|(bound, ..)| *bound == chord) {
+                    assert_eq!(
+                        first, action,
+                        "{name:?} with {:?} is bound to two different things",
+                        binding.mods
+                    );
+                    assert!(
+                        when.is_some() || binding.when.is_some(),
+                        "{name:?} with {:?} is on two lines that both hold always",
+                        binding.mods
+                    );
+                    continue;
+                }
+                seen.push((chord, *action, binding.when));
             }
         }
+    }
+
+    /// A key on two lines, one for what it does plainly and one for what it
+    /// does with a region up, is named by the plain line: what asks is a
+    /// button that does the plain thing.
+    #[test]
+    fn a_key_with_a_region_line_is_named_by_its_plain_line() {
+        assert_eq!(
+            binding_for(CopyImage).map(|binding| binding.help),
+            Some("Copy the image as displayed")
+        );
+        assert_eq!(
+            binding_for(CycleFit).map(|binding| binding.section),
+            Some(Section::Zoom)
+        );
+        assert_eq!(
+            binding_for(ToggleRegion).map(|binding| binding.when),
+            Some(Some(When::NoRegion))
+        );
+        // A key only a region answers is still found.
+        assert_eq!(
+            binding_for(ShrinkRegion(Left)).map(|binding| binding.section),
+            Some(Section::Region)
+        );
     }
 
     /// Shift belongs to the character, not to the modifiers: a binding on a
