@@ -241,7 +241,7 @@ that is not a paste; open it as an argument instead.
 | `s` | Black point up |
 | `A` | White point down |
 | `S` | White point up |
-| `e` | Cycle the automatic window: off (0–1) → min/max → 99.8% |
+| `e` | Cycle the window rule: as stored (0–1) → full range → trimmed (the central 99.8%) |
 | `t` | Cycle tone mapping: none → Reinhard → neutral |
 | `w` | While held, mark the clipped pixels: red where the picture has gone white, blue where it has gone black |
 | `o` | Turn the room above white off and on, where the monitor is in HDR mode |

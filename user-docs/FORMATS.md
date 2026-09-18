@@ -101,9 +101,9 @@ scan. The formats that cannot preserve them say so below.
 **How a file opens follows from what it is.** Content already graded for a
 display — sRGB, gamma, PQ, HLG, a JPEG with its gain map applied, a
 developed raw — opens untouched at 0–1, because second-guessing the grade
-would be wrong. Measurement data and other scene-referred content opens with an automatic
-99.8% window, because values occupying a fraction of the nominal range
-otherwise show as a black rectangle. Where that leaves highlights above white
+would be wrong. Measurement data and other scene-referred content opens on a
+trimmed window, the central 99.8% of what it holds, because values occupying
+a fraction of the nominal range otherwise show as a black rectangle. Where that leaves highlights above white
 — a PQ frame, a gain-mapped photograph — the neutral tone map is on from the
 start rather than clipping, unless the image is going out to an HDR surface,
 where the highlights have somewhere to go and no curve is applied at all. All

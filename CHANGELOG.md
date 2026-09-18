@@ -78,6 +78,13 @@ Notable changes to `gamut`. The format follows
 - `Ctrl+P` does nothing with a single file on the list, as the count it
   stands beside is not shown for one: there is nothing to choose.
 
+- The window's rules are called the same thing everywhere: *stored*, *full*
+  and *trimmed* — *manual* once a handle has been moved — on the histogram
+  panel's buttons, in the bottom bar, in `e`'s help and on the command line
+  as `--window stored|full|trimmed`, where the bar used to say `unit`,
+  `min/max` and `99.8%` and the flag took `unit`, `minmax` and `pct`. The
+  old spellings are still accepted.
+
 - The histogram panel speaks in a viewer's terms rather than the display's.
   The band under the plot is a levels track: a handle at the value that
   comes out black and one at the value that comes out white, each dragged

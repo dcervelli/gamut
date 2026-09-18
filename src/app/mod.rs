@@ -2105,6 +2105,36 @@ mod tests {
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }
 
+    /// A false color is a reading of one channel, and a color image's three
+    /// are colors already: `r` refuses one, and so does the panel's swatch,
+    /// or a press of it would put a map on the state that the picture, the
+    /// bar and the readout all ignore.
+    #[test]
+    fn a_false_color_button_is_dead_on_a_color_image() {
+        use crate::image::display::Colormap;
+        use crate::ui::{Command, Control};
+        use input::{Action, Effect};
+
+        let (mut app, dir) = app_over("ramp", &[("a.png", 8, 8)]);
+        assert!(
+            app.current
+                .as_ref()
+                .is_some_and(|current| !current.image.is_gray())
+        );
+        let _ = app.act(Command::Press(Control::Ramp(1)));
+        assert_eq!(
+            app.current
+                .as_ref()
+                .expect("a picture is up")
+                .display
+                .colormap,
+            Colormap::Gray
+        );
+        assert_eq!(app.perform(Action::CycleColormap), Effect::Nothing);
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
     /// The keys step the handles, no further than the plot goes: on a
     /// graded file the plot is 0..1, so the black point cannot be stepped
     /// below 0, and the white point's key is the exposure there, as its

@@ -14,7 +14,7 @@ _gamut() {
         --colormap)   COMPREPLY=($(compgen -W 'gray viridis magma turbo' -- "$cur")); return ;;
         --output)     COMPREPLY=($(compgen -W 'sdr hdr' -- "$cur")); return ;;
         --tone-map)   COMPREPLY=($(compgen -W 'none reinhard neutral' -- "$cur")); return ;;
-        --window)     COMPREPLY=($(compgen -W 'unit minmax pct' -- "$cur")); return ;;
+        --window)     COMPREPLY=($(compgen -W 'stored full trimmed' -- "$cur")); return ;;
         --upscale)    COMPREPLY=($(compgen -W 'nearest bicubic' -- "$cur")); return ;;
         --exposure)   return ;;
         --size)       return ;;

@@ -435,7 +435,7 @@ mod tests {
         current.display.adjust_exposure(0.5);
         assert_eq!(
             describe_state(&current, Headroom::None),
-            ["min/max", "+\u{00bd} EV", CLIPPED],
+            ["full", "+\u{00bd} EV", CLIPPED],
             "the rule and not its numbers, and the exposure in halves and \
              quarters rather than rounded to a tenth"
         );
@@ -443,7 +443,7 @@ mod tests {
         current.display.colormap = Colormap::Viridis;
         assert_eq!(
             describe_state(&current, Headroom::None),
-            ["min/max", "+\u{00bd} EV", "viridis"],
+            ["full", "+\u{00bd} EV", "viridis"],
             "a false color is named itself, and clips whatever the curve"
         );
     }
@@ -461,7 +461,7 @@ mod tests {
         let whole = fit_segments(monospace, &segments, 1000.0);
         assert_eq!(
             whole,
-            format!("min/max{SEPARATOR}+\u{00bd} EV{SEPARATOR}{CLIPPED}"),
+            format!("full{SEPARATOR}+\u{00bd} EV{SEPARATOR}{CLIPPED}"),
             "a wide window has room for all of it"
         );
 
@@ -474,7 +474,7 @@ mod tests {
 
         assert_eq!(
             fit_segments(monospace, &segments, 1.0),
-            "min/max",
+            "full",
             "the first segment stays however narrow the window gets"
         );
     }
@@ -497,7 +497,7 @@ mod tests {
         assert_eq!(
             explain_state(&current, Headroom::None),
             [
-                "Min/max window spans 0.012 to 1.000.",
+                "Full window spans 0.012 to 1.000.",
                 "Exposure +\u{00bc} EV.",
                 "The image is currently clipped.",
             ],

@@ -21,21 +21,26 @@ pub enum AutoWindow {
 }
 
 impl AutoWindow {
-    /// `unit`, `minmax`, or `pct`, as the command line names them.
+    /// `stored`, `full` or `trimmed`, as the command line names them — the
+    /// words the histogram panel's buttons and the bottom bar use. The older
+    /// `unit`, `minmax` and `pct`, and the longer `off`, `min-max` and
+    /// `percentile`, are still taken.
     pub fn parse(value: &str) -> Option<Self> {
         Some(match value.to_ascii_lowercase().as_str() {
-            "unit" | "off" => AutoWindow::Off,
-            "minmax" | "min-max" => AutoWindow::MinMax,
-            "pct" | "percentile" => AutoWindow::Percentile,
+            "stored" | "unit" | "off" => AutoWindow::Off,
+            "full" | "minmax" | "min-max" => AutoWindow::MinMax,
+            "trimmed" | "pct" | "percentile" => AutoWindow::Percentile,
             _ => return None,
         })
     }
 
+    /// The rule in one word, the same one the panel's button expands —
+    /// *As stored*, *Full range*, *Trimmed* — and the command line takes.
     pub fn label(self) -> &'static str {
         match self {
-            AutoWindow::Off => "unit",
-            AutoWindow::MinMax => "min/max",
-            AutoWindow::Percentile => "99.8%",
+            AutoWindow::Off => "stored",
+            AutoWindow::MinMax => "full",
+            AutoWindow::Percentile => "trimmed",
             AutoWindow::Manual => "manual",
         }
     }
@@ -1357,6 +1362,36 @@ mod tests {
         assert_eq!(display.exposure_stops, -EV_STEP);
         display.exposure_stops = -EXPOSURE_LIMIT;
         assert!(!display.step_white(0.05, srgb, Referred::Display, 1.0));
+    }
+
+    /// The rules are named the same way everywhere — the buttons, the bar,
+    /// the key's help and the command line — and the names the command line
+    /// used to take still work, so a script written to them does not break.
+    #[test]
+    fn the_window_rules_answer_to_their_old_names_too() {
+        for (word, rule) in [
+            ("stored", AutoWindow::Off),
+            ("Stored", AutoWindow::Off),
+            ("unit", AutoWindow::Off),
+            ("off", AutoWindow::Off),
+            ("full", AutoWindow::MinMax),
+            ("minmax", AutoWindow::MinMax),
+            ("min-max", AutoWindow::MinMax),
+            ("trimmed", AutoWindow::Percentile),
+            ("pct", AutoWindow::Percentile),
+            ("percentile", AutoWindow::Percentile),
+        ] {
+            assert_eq!(AutoWindow::parse(word), Some(rule), "{word}");
+        }
+        assert_eq!(AutoWindow::parse("99.8%"), None);
+        assert_eq!(AutoWindow::parse("manual"), None, "not a rule to ask for");
+        for rule in [AutoWindow::Off, AutoWindow::MinMax, AutoWindow::Percentile] {
+            assert_eq!(
+                AutoWindow::parse(rule.label()),
+                Some(rule),
+                "the label is a spelling the command line takes"
+            );
+        }
     }
 
     #[test]
