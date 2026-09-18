@@ -946,7 +946,7 @@ pub const KEYS: &[Binding] = &[
         section: Section::Display,
         mods: PLAIN,
         shown: "t",
-        help: "Cycle tone mapping: none, reinhard, neutral",
+        help: "Toggle the curve on the highlights: clip, or roll off",
         when: None,
         keys: &[(Char("t"), CycleToneMap), (Char("T"), CycleToneMap)],
     },
@@ -2625,7 +2625,7 @@ mod tests {
             Control::Log,
             Control::Reset,
             Control::Ramp(1),
-            Control::Curve(2),
+            Control::Curve(1),
         ] {
             let words = named(widget).expect("named above");
             assert!(words.len() <= 32, "{words} is too long for the panel");

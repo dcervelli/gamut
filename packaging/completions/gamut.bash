@@ -13,7 +13,7 @@ _gamut() {
         --primaries)  COMPREPLY=($(compgen -W 'bt709 p3 bt2020 adobe' -- "$cur")); return ;;
         --colormap)   COMPREPLY=($(compgen -W 'gray viridis magma turbo' -- "$cur")); return ;;
         --output)     COMPREPLY=($(compgen -W 'sdr hdr' -- "$cur")); return ;;
-        --tone-map)   COMPREPLY=($(compgen -W 'none reinhard neutral' -- "$cur")); return ;;
+        --tone-map)   COMPREPLY=($(compgen -W 'none neutral' -- "$cur")); return ;;
         --window)     COMPREPLY=($(compgen -W 'stored full trimmed' -- "$cur")); return ;;
         --upscale)    COMPREPLY=($(compgen -W 'nearest bicubic' -- "$cur")); return ;;
         --exposure)   return ;;

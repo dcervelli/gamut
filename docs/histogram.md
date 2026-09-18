@@ -54,14 +54,15 @@ no row for it, and the bottom bar naming a curve there was no button for.
 The row is every file's now, because the exposure is: a stop up puts the
 top of any file above white and the bar says **clipped**, and the curve is
 the answer to that. It is not the false-color case, where the key is dead
-because the curve does nothing; on an 8-bit file at 0 EV Reinhard takes
-white to a half, which is something, and the response curve on the plot
-shows it. The panel has two heights rather than four for it. The row was
-labeled *Highlights* while it was offered for them, and is *Curve* now,
-which is what the buttons choose: Neutral is a toe as well as a shoulder —
-it takes an offset out of the shadows before it compresses anything — and
-Reinhard rescales the whole range, so a label that named one end of it
-named the reason the row used to appear rather than what pressing it does.
+because the curve does nothing; on an 8-bit file at 0 EV the neutral curve
+still takes its offset out of the shadows, which is something, and the
+response curve on the plot shows it. The panel has two heights rather than
+four for it. The row was labeled *Highlights* while it was offered for them,
+and is *Curve* now; its two cells are *Clip* and *Roll off*, since what the
+row chooses is what becomes of the light above white on a surface that
+stops there, and a cell that named the curve named a thing to look up rather
+than a thing to see. There is one curve to roll off with — [color.md](color.md)
+says why the Reinhard curve went.
 
 `Offered::ALL` is the tallest the panel gets, and is what
 `ui::PANELS_ROOM` — the least window the interface fits in — is measured

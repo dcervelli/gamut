@@ -104,11 +104,22 @@ nothing says what the monitor is, and the switch moves the surface itself as
 it used to.
 
 **The tone map** is a curve *added* to fit values above white into a surface
-that stops there: `reinhard`, `neutral`, or `none` — which is not a third
-curve but the absence of one, and means whatever the surface does on its own:
-a clip at white on SDR, a pass-through on HDR. So the same three-way choice
-means the same thing on either surface, and "what would this look like in
-SDR" is the surface switch rather than a fourth stop on the `t` cycle.
+that stops there: `neutral`, or `none` — which is not a second curve but the
+absence of one, and means whatever the surface does on its own: a clip at
+white on SDR, a pass-through on HDR. So the same two-way choice means the
+same thing on either surface, and "what would this look like in SDR" is the
+surface switch rather than a third stop for `t`.
+
+There is one curve because a viewer wants exactly one thing of it: the
+highlights back under white and everything else left where it was, which is
+what Khronos PBR Neutral does — below its shoulder a value comes out as
+itself. A Reinhard curve, `c / (c + 1)`, was the other choice until it was
+dropped: it sends white to a half, so it re-grades the whole in-range picture
+to make room for the highlights, and on an 8-bit file at 0 EV it changes
+every pixel. That is the editing the [histogram panel's own line](histogram.md)
+rules out, and a second curve that only ever showed a worse rendering of the
+same highlights was a choice with nothing to choose. The panel's row calls
+the two *Clip* and *Roll off*, since that is what the choice is.
 
 What a picture opens with follows from both: none on an HDR surface, and on an
 SDR one a `neutral` roll-off where the window leaves highlights above white
@@ -121,10 +132,10 @@ and `t` changes the answer afterwards. The surface is settled after the first
 file is decoded — the window opens later — so `App::adopt_headroom` asks once
 more at that point too.
 
-The bottom bar names what is being done and nothing else: the curve when one
-is on, and `clip` when there is none, the surface is SDR and there are
-highlights being thrown away — so an ordinary photograph pushed a stop up says
-so, and the picture never goes flat at the top in silence.
+The bottom bar names what is being done and nothing else: **rolled off** when
+the curve is on, and **clipped** when there is none, the surface is SDR and
+there are highlights being thrown away — so an ordinary photograph pushed a
+stop up says so, and the picture never goes flat at the top in silence.
 
 False color (`r`, or `--colormap`) applies to single-channel images, and
 holds the curve at a clip while active, on either surface — a curve on top of

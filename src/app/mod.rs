@@ -2100,7 +2100,7 @@ mod tests {
         }
         assert_eq!(display(&app).colormap, Colormap::Gray);
         assert_eq!(app.perform(Action::CycleToneMap), Effect::Redraw);
-        assert_eq!(display(&app).tone_map, ToneMap::Reinhard);
+        assert_eq!(display(&app).tone_map, ToneMap::Neutral);
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }
