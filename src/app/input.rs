@@ -938,7 +938,7 @@ pub const KEYS: &[Binding] = &[
         section: Section::Display,
         mods: PLAIN,
         shown: "e",
-        help: "Cycle the automatic window: unit, min/max, 99.8%",
+        help: "Cycle the window rule: stored, full, trimmed",
         when: None,
         keys: &[(Char("e"), CycleAutoWindow), (Char("E"), CycleAutoWindow)],
     },
@@ -2244,8 +2244,11 @@ impl App {
                 // hands back says nothing the caller does not already know.
                 let _ = self.perform(ResetDisplay);
             }
+            // A false color is a reading of one channel: the key refuses a
+            // color image, and so does the button, or the two would drift.
             Control::Ramp(index) => {
                 if let Some(current) = self.current.as_mut()
+                    && current.image.is_gray()
                     && let Some(map) = Colormap::ALL.get(index)
                 {
                     current.display.colormap = *map;

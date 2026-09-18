@@ -52,10 +52,11 @@ unless a decoder knows better:
   move white to wherever the frame's brightest pixel happens to be,
   differently for every frame of a sequence.
 - **Scene-referred** (linear: sensor counts, EXR, Radiance, float TIFF) has
-  no white. It gets a 99.8% percentile window, because 12-bit data in a 16-bit
-  container occupies a sixteenth of the nominal range and shows as a black
-  rectangle otherwise. Min/max is a stop on the `e` cycle rather than a
-  default, since one hot pixel is enough to ruin it.
+  no white. It gets the trimmed window (`AutoWindow::Percentile`, the central
+  99.8%), because 12-bit data in a 16-bit container occupies a sixteenth of
+  the nominal range and shows as a black rectangle otherwise. The full range
+  is a stop on the `e` cycle rather than a default, since one hot pixel is
+  enough to ruin it.
 
 `--transfer linear|srgb|pq|hlg|gamma:N` overrides the guess, which matters
 most for TIFF: the same container carries scanned photographs and frames of

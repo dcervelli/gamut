@@ -163,7 +163,7 @@ works if the same detail stays under the same pixels. A file of another size
 that has not been seen is a different picture, and is fitted.
 
 Every display control is also a start-up flag — `--colormap viridis`,
-`--tone-map neutral`, `--window minmax`, `--exposure -1.5`, `--output hdr`,
+`--tone-map neutral`, `--window full`, `--exposure -1.5`, `--output hdr`,
 `--histogram`, `--info`, `--no-minimap` — which is handy for scripting and for
 comparing two files side by side.
 
