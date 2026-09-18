@@ -349,9 +349,9 @@ pub struct Startup {
 /// that the top of the window itself does not.
 const ABOVE_WHITE: f32 = 1.0 + 1e-3;
 
-/// A quarter of a stop: what one press of the histogram panel's exposure
-/// buttons is worth, what the keys that do the same job step by, and what
-/// the white handle's drag is snapped to on a photograph.
+/// A quarter of a stop: what the histogram panel's exposure slider snaps
+/// to, what the keys that do the same job step by, and what the white
+/// handle's drag is snapped to on a graded file.
 ///
 /// One step for all of them, so that a press, a keystroke and a drag cannot
 /// be worth different amounts, and the label on the button cannot come to
@@ -477,32 +477,6 @@ impl Display {
             AutoWindow::Off | AutoWindow::MinMax | AutoWindow::Manual => stats.max,
         };
         self.windowed(top) > ABOVE_WHITE
-    }
-
-    /// Whether the picture reaches past white on the window it opens with,
-    /// before anything has been asked of it: whether the file, shown as
-    /// [`Display::for_image_with`] would first show it, has highlights for a
-    /// curve to act on.
-    ///
-    /// A fact about the file rather than about the display in force, which
-    /// is what the histogram panel asks when it decides whether to offer the
-    /// curves at all: an SDR photograph never reaches white on its own, and
-    /// a row of curves under one is a row of things to do about a problem it
-    /// does not have. A picture pushed past white by hand can still have a
-    /// curve put on it with the key.
-    ///
-    /// Measured at the brightest pixel, where [`Display::exceeds_white`]
-    /// measures a percentile window at its percentile. That one asks whether
-    /// the picture is being clipped, and a percentile window leaves its
-    /// outliers above white on purpose; this asks whether there is anything
-    /// up there at all, and the outliers are exactly that.
-    pub fn opens_above_white(image: &DecodedImage, stats: &Stats) -> bool {
-        let mut display = Self {
-            auto: AutoWindow::default_for(image),
-            ..Self::default()
-        };
-        display.apply_auto(stats);
-        display.windowed(stats.max) > ABOVE_WHITE
     }
 
     /// Whether the values above white are being clipped, on a `gray` or a
@@ -650,24 +624,67 @@ impl Display {
         }
     }
 
-    /// Widens or narrows the window about its own center, the "level" half of
-    /// a window/level control.
-    pub fn adjust_contrast(&mut self, factor: f32) {
-        let center = (self.low + self.high) / 2.0;
-        let half = (self.high - self.low) / 2.0 * factor;
-        if half.is_finite() && half > 0.0 {
-            self.low = center - half;
-            self.high = center + half;
-            self.auto = AutoWindow::Manual;
+    /// The black handle stepped by `fraction` of the window's width along
+    /// the plot, and no lower than `floor`, the bottom of the plot: what a
+    /// press of the black point's key does.
+    ///
+    /// Along the plot, which is on the file's own curve, `transfer`, rather
+    /// than in linear light: a step is the same distance on the band every
+    /// time, as a drag's is. In linear light a twentieth of a 0..1 window
+    /// on an sRGB file is a quarter of the band on the first press and a
+    /// tenth on the next, the handle bounding out of the shadows and then
+    /// slowing, since the curve gives the shadows most of the band.
+    ///
+    /// The handle stops at the floor because the band does, and a key that
+    /// went on past it would be a lift — nothing coming out black — which
+    /// is grading and not a place to look. Whether anything moved, since a
+    /// press against the floor is a press that did nothing.
+    pub fn step_black(&mut self, fraction: f32, transfer: Transfer, floor: f32) -> bool {
+        let (black, white) = self.displayed_bounds();
+        let (black, white) = (transfer.to_encoded(black), transfer.to_encoded(white));
+        // A window already under the floor is not pushed up to it by a
+        // press downward: the floor stops a step, it does not make one.
+        let asked = (black + (white - black) * fraction).max(floor.min(black));
+        if !asked.is_finite() || asked == black {
+            return false;
         }
+        self.put_black(transfer.to_linear(asked));
+        true
     }
 
-    /// Slides the window without changing its width, the "window" half.
-    pub fn shift_window(&mut self, fraction: f32) {
-        let offset = (self.high - self.low) * fraction;
-        self.low += offset;
-        self.high += offset;
-        self.auto = AutoWindow::Manual;
+    /// The white handle stepped by `fraction` of the window's width along
+    /// the plot, and no higher than `ceiling`, the top of the plot: what a
+    /// press of the white point's key does. What moves is what the handle
+    /// would move — [`Display::put_white`] — and so on a display-referred
+    /// file the step is the exposure's own, a quarter stop, since a
+    /// twentieth of the window is a fraction of a stop that would snap to
+    /// nothing; the ceiling is the plot's, and the exposure was never held
+    /// to that. Whether anything moved.
+    pub fn step_white(
+        &mut self,
+        fraction: f32,
+        transfer: Transfer,
+        referred: Referred,
+        ceiling: f32,
+    ) -> bool {
+        match referred {
+            Referred::Scene => {
+                let (black, white) = self.displayed_bounds();
+                let (black, white) = (transfer.to_encoded(black), transfer.to_encoded(white));
+                let asked = (white + (white - black) * fraction).min(ceiling.max(white));
+                if !asked.is_finite() || asked == white {
+                    return false;
+                }
+                self.put_white(transfer.to_linear(asked), referred);
+                true
+            }
+            // White brought down is the picture brought up.
+            Referred::Display => {
+                let before = self.exposure_stops;
+                self.adjust_exposure(-fraction.signum() * EV_STEP);
+                self.exposure_stops != before
+            }
+        }
     }
 
     /// Puts the rendering back to what this image would open with if nothing
@@ -1252,27 +1269,84 @@ mod tests {
     }
 
     #[test]
-    fn contrast_keeps_the_center_and_marks_the_window_manual() {
-        let mut display = Display {
-            low: 0.0,
-            high: 1.0,
-            ..Default::default()
-        };
-        display.adjust_contrast(0.5);
-        assert_eq!((display.low, display.high), (0.25, 0.75));
-        assert_eq!(display.auto, AutoWindow::Manual);
-    }
-
-    #[test]
-    fn shifting_the_window_keeps_its_width() {
+    fn a_step_of_black_moves_that_end_alone_and_stops_at_the_floor() {
         let mut display = Display {
             low: 0.2,
             high: 0.6,
             ..Default::default()
         };
-        display.shift_window(0.5);
-        assert!((display.high - display.low - 0.4).abs() < 1e-6);
+        assert!(display.step_black(0.5, Transfer::Linear, 0.0));
         assert!((display.low - 0.4).abs() < 1e-6);
+        assert!((display.high - 0.6).abs() < 1e-6);
+        assert_eq!(display.auto, AutoWindow::Manual);
+        // Down by more than there is room for stops at the floor, and a
+        // press against the floor moves nothing.
+        assert!(display.step_black(-5.0, Transfer::Linear, 0.1));
+        assert!((display.low - 0.1).abs() < 1e-6);
+        assert!(!display.step_black(-0.05, Transfer::Linear, 0.1));
+        assert!((display.low - 0.1).abs() < 1e-6);
+        // A window that starts under the floor is not lifted to it.
+        assert!(!display.step_black(-0.05, Transfer::Linear, 0.5));
+        assert!((display.low - 0.1).abs() < 1e-6);
+    }
+
+    /// A step is a twentieth of the band as drawn, which on a curved file
+    /// is a twentieth of the window on that curve: the first press from 0
+    /// on an sRGB file lands black at a twentieth of the plot, a value in
+    /// the deep shadows, not at a twentieth of the light.
+    #[test]
+    fn a_step_is_along_the_plot_and_not_through_the_light() {
+        let mut display = Display {
+            low: 0.0,
+            high: 1.0,
+            ..Default::default()
+        };
+        assert!(display.step_black(0.05, Transfer::Srgb, 0.0));
+        assert!((Transfer::Srgb.to_encoded(display.low) - 0.05).abs() < 1e-5);
+        assert!(display.low < 0.005, "{}", display.low);
+        // And the second press is the same distance along the band again.
+        assert!(display.step_black(0.05, Transfer::Srgb, 0.0));
+        assert!((Transfer::Srgb.to_encoded(display.low) - 0.0975).abs() < 1e-5);
+        assert!((display.high - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_step_of_white_is_the_windows_top_on_measured_light() {
+        let mut display = Display {
+            low: 0.2,
+            high: 0.6,
+            ..Default::default()
+        };
+        let linear = Transfer::Linear;
+        assert!(display.step_white(0.5, linear, Referred::Scene, 1.0));
+        assert!((display.low - 0.2).abs() < 1e-6);
+        assert!((display.high - 0.8).abs() < 1e-6);
+        assert_eq!(display.exposure_stops, 0.0);
+        assert!(display.step_white(5.0, linear, Referred::Scene, 1.0));
+        assert!((display.high - 1.0).abs() < 1e-6);
+        assert!(!display.step_white(0.05, linear, Referred::Scene, 1.0));
+        assert!(!display.step_white(0.05, linear, Referred::Scene, 0.5));
+        assert!((display.high - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_step_of_white_is_a_quarter_stop_on_graded_light() {
+        let mut display = Display {
+            low: 0.0,
+            high: 1.0,
+            ..Default::default()
+        };
+        // White brought down is the picture brought up, and the plot's
+        // ceiling has no say over the exposure.
+        let srgb = Transfer::Srgb;
+        assert!(display.step_white(-0.05, srgb, Referred::Display, 1.0));
+        assert_eq!((display.low, display.high), (0.0, 1.0));
+        assert_eq!(display.exposure_stops, EV_STEP);
+        assert!(display.step_white(0.05, srgb, Referred::Display, 1.0));
+        assert!(display.step_white(0.05, srgb, Referred::Display, 1.0));
+        assert_eq!(display.exposure_stops, -EV_STEP);
+        display.exposure_stops = -EXPOSURE_LIMIT;
+        assert!(!display.step_white(0.05, srgb, Referred::Display, 1.0));
     }
 
     #[test]
@@ -1282,7 +1356,7 @@ mod tests {
         let mut display =
             Display::for_image_with(&image, &stats, Startup::default(), Headroom::None);
 
-        display.adjust_contrast(0.5);
+        display.step_black(0.05, Transfer::Linear, 0.0);
         assert_eq!(display.auto, AutoWindow::Manual);
         display.cycle_auto(&stats);
         assert_eq!(display.auto, AutoWindow::Off);
@@ -1586,17 +1660,17 @@ mod tests {
 
     /// The black handle moves the black point alone, and the white handle
     /// is the exposure on a graded file and the white point on a measured
-    /// one: two dials for one effect on a photograph would be one too many,
+    /// one: two dials for one effect on a graded file would be one too many,
     /// and on linear data the two genuinely differ.
     #[test]
-    fn the_white_handle_is_the_exposure_on_a_photograph_and_the_window_on_data() {
+    fn the_white_handle_is_the_exposure_on_graded_light_and_the_window_on_data() {
         let mut display = Display::default();
         display.put_black(0.1);
         assert_eq!(display.displayed_bounds(), (0.1, 1.0));
         assert_eq!(display.exposure_stops, 0.0);
 
-        // A photograph: white to the middle of the range above black is a
-        // stop, the window staying where it was.
+        // Graded: white to the middle of the range above black is a stop,
+        // the window staying where it was.
         display.put_white(0.55, Referred::Display);
         assert_eq!(display.exposure_stops, 1.0);
         assert_eq!((display.low, display.high), (0.1, 1.0));
@@ -1628,30 +1702,6 @@ mod tests {
         let (black, white) = display.displayed_bounds();
         assert!(black == 0.0 && (white - 0.25).abs() < 1e-6, "{white}");
         assert_eq!(display.auto, AutoWindow::Manual);
-    }
-
-    /// Whether a file has highlights above white is asked of it as it
-    /// opens: an SDR photograph has none, a graded HDR one has, and linear
-    /// data has whatever its percentile window leaves out.
-    #[test]
-    fn a_file_opens_above_white_or_it_does_not() {
-        let sdr = gray(vec![0, 30000, 65535], Transfer::Srgb);
-        assert!(!Display::opens_above_white(&sdr, &Stats::scan(&sdr)));
-
-        // Graded light with headroom in it — what a PQ frame or a gain-map
-        // JPEG decodes to — opens at 0..1 and reaches past the 1.
-        let mut hdr = float_gray(vec![0.0, 0.5, 4.0]);
-        hdr.referred = Referred::Display;
-        assert!(Display::opens_above_white(&hdr, &Stats::scan(&hdr)));
-
-        // Linear data with a lone hot pixel: the percentile window leaves it
-        // out, and it stands above white.
-        let mut samples = vec![0.5; 2000];
-        samples[7] = 100.0;
-        let scene = float_gray(samples);
-        assert!(Display::opens_above_white(&scene, &Stats::scan(&scene)));
-        let flat = float_gray(vec![0.5; 2000]);
-        assert!(!Display::opens_above_white(&flat, &Stats::scan(&flat)));
     }
 
     /// Every curve has to be reachable from every other one, or a viewer on

@@ -1014,13 +1014,13 @@ mod tests {
         assert_eq!(panel(Rect::new(0.0, 0.0, 900.0, 140.0), None), None);
 
         // Room for the column, but not once the histogram has had the top of
-        // the strip: tall enough for the plot and a little less than a
-        // column more.
+        // the strip: the tallest panel, the gap under it, and a pixel short
+        // of a column below that.
         let squeezed = Rect::new(
             0.0,
             0.0,
             900.0,
-            tallest[1] + 2.0 * PADDING + INFO_MIN_HEIGHT - 40.0,
+            tallest[1] + 3.0 * PADDING + INFO_MIN_HEIGHT - 1.0,
         );
         let plot = histogram::panel(squeezed, histogram::Offered::ALL);
         assert!(plot.is_some(), "the plot fits");
@@ -1029,10 +1029,7 @@ mod tests {
 
         // A shorter histogram — a file offered fewer rows — leaves the
         // column the room it took.
-        let least = histogram::Offered {
-            window: false,
-            curve: false,
-        };
+        let least = histogram::Offered { window: false };
         let shorter = histogram::panel(squeezed, least);
         assert!(shorter.is_some());
         assert!(panel(squeezed, shorter).is_some());

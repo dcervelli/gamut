@@ -2105,6 +2105,38 @@ mod tests {
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }
 
+    /// The keys step the handles, no further than the plot goes: on a
+    /// graded file the plot is 0..1, so the black point cannot be stepped
+    /// below 0, and the white point's key is the exposure there, as its
+    /// handle is.
+    #[test]
+    fn the_window_keys_step_the_handles_within_the_plot() {
+        use input::{Action, Effect};
+
+        let (mut app, dir) = app_over("handles", &[("a.png", 8, 8)]);
+        fn display(app: &App) -> &crate::image::display::Display {
+            &app.current.as_ref().expect("a picture is up").display
+        }
+        assert_eq!(display(&app).displayed_bounds(), (0.0, 1.0));
+
+        // Black is at the floor already, so a press downward is no press.
+        assert_eq!(app.perform(Action::StepBlack(-0.05)), Effect::Nothing);
+        assert_eq!(display(&app).displayed_bounds(), (0.0, 1.0));
+        // A twentieth of the plot, which is on the file's sRGB curve.
+        assert_eq!(app.perform(Action::StepBlack(0.05)), Effect::Redraw);
+        let (black, white) = display(&app).displayed_bounds();
+        assert!((crate::image::Transfer::Srgb.to_encoded(black) - 0.05).abs() < 1e-5);
+        assert!((white - 1.0).abs() < 1e-6);
+
+        // White brought down is a quarter stop up, the window untouched.
+        assert_eq!(app.perform(Action::StepWhite(-0.05)), Effect::Redraw);
+        assert_eq!(display(&app).exposure_stops, 0.25);
+        let (still_black, _) = display(&app).displayed_bounds();
+        assert_eq!(still_black, black);
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
     /// Escape is what brings the interface back, and it does that before it
     /// takes off the message that said so: a window that dismissed its own
     /// instructions and left the bars hidden would be disagreeing with what
