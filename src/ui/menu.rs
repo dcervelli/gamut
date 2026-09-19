@@ -14,10 +14,11 @@ use crate::view::{Axis, Fit, View, Viewport};
 
 use super::chrome::Pass;
 use super::control::Control;
-use super::icon;
+use super::info::{HEADER_GAP, RULE_WIDTH};
 use super::pixel::PixelFormat;
 use super::style::TOGGLE_RADIUS;
 use super::tooltip::Tip;
+use super::{TEXT_SIZE, fonts, help, icon};
 
 /// An ordinary cell of a popup menu. Wider than it is tall because the
 /// widest thing in one is "1600%", and no taller than the word in it needs:
@@ -298,29 +299,80 @@ pub(super) fn pixel_cells(pass: &mut Pass, ui: &mut Ui) {
     });
 }
 
+/// A menu of items under a name — the name of the button that opened it, so
+/// that the two cannot disagree: `title` at its head, in bold on the band
+/// the help popup's headings sit on and over the same hairline, and the
+/// `items` laid out under that. The zoom and pixel menus name their sections
+/// in the accent instead, and are not headed: their cells say what they are
+/// — a percentage, a fit, a way of writing a number — where a list of names
+/// and a list of applications do not say what pressing one would do with
+/// them.
+///
+/// The menu is as wide as its widest item, which is not known until the
+/// items are laid out, so the band and the hairline are painted last, to the
+/// width the menu came out at — the band into a shape set aside for it
+/// first, so that the title goes over it.
+fn titled(pass: &mut Pass, ui: &mut Ui, title: &str, items: impl FnOnce(&mut Pass, &mut Ui)) {
+    let band = ui.painter().add(egui::Shape::Noop);
+    let spacing = ui.spacing().item_spacing;
+    ui.spacing_mut().item_spacing.y = 0.0;
+    // Set in from the edge by what an item's words are set in by, so that
+    // the title and the items start on one line.
+    let indent = ui.spacing().button_padding.x;
+    egui::Frame::NONE
+        .inner_margin(egui::Margin {
+            left: indent as i8,
+            ..egui::Margin::ZERO
+        })
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new(title)
+                    .family(egui::FontFamily::Name(fonts::BOLD.into()))
+                    .size(TEXT_SIZE)
+                    .color(pass.theme.text_primary),
+            );
+        });
+    ui.add_space((HEADER_GAP - RULE_WIDTH) / 2.0);
+    let edge = icon::Grid::new(ui.pixels_per_point()).line_width(RULE_WIDTH);
+    let (rule, _) = ui.allocate_exact_size(vec2(0.0, edge), Sense::HOVER);
+    let bottom = ui.cursor().min.y;
+    ui.add_space((HEADER_GAP - RULE_WIDTH) / 2.0);
+    ui.spacing_mut().item_spacing = spacing;
+    items(pass, ui);
+    let inside = ui.min_rect();
+    help::band(pass, ui, band, inside, bottom);
+    ui.painter().rect_filled(
+        egui::Rect::from_x_y_ranges(inside.x_range(), rule.y_range()),
+        0.0,
+        pass.theme.border,
+    );
+}
+
 /// The menu of copies: one item for everything that can be taken, each
 /// wearing the name of the thing it takes and, beside it, the key that takes
 /// the same thing. Never lit: a copy is something done, and there is no
 /// state for an item to be showing.
 pub(super) fn copy_items(pass: &mut Pass, ui: &mut Ui) {
-    for copies in Copies::ALL {
-        let control = Control::Copies(copies);
-        // The picture's item takes the region while one is selected, as the
-        // key does, and says so.
-        let label = match copies {
-            Copies::Image if pass.input.selection.region().is_some() => "Region",
-            _ => copies.label(),
-        };
-        let mut button = Button::new(label);
-        if let Some(key) = pass.namer.shortcut(control) {
-            button = button.shortcut_text(key);
+    titled(pass, ui, &Control::Copy.label(), |pass, ui| {
+        for copies in Copies::ALL {
+            let control = Control::Copies(copies);
+            // The picture's item takes the region while one is selected, as the
+            // key does, and says so.
+            let label = match copies {
+                Copies::Image if pass.input.selection.region().is_some() => "Region",
+                _ => copies.label(),
+            };
+            let mut button = Button::new(label);
+            if let Some(key) = pass.namer.shortcut(control) {
+                button = button.shortcut_text(key);
+            }
+            let response = ui.add(button);
+            let response = pass.tooltip(response, Tip::Control(control), true);
+            if response.clicked() {
+                pass.press(control);
+            }
         }
-        let response = ui.add(button);
-        let response = pass.tooltip(response, Tip::Control(control), true);
-        if response.clicked() {
-            pass.press(control);
-        }
-    }
+    });
 }
 
 /// The menu of other programs: one item for each application the desktop
@@ -342,15 +394,19 @@ pub(super) fn open_items(pass: &mut Pass, ui: &mut Ui) {
     // as the button that opened it. How long a name may be is
     // `openers::MAX_NAME`.
     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-    let openers = pass.input.openers.as_slice();
-    for (index, name) in openers.iter().enumerate() {
-        let control = Control::OpenIn(index);
-        let response = ui.add(Button::new(name));
-        let response = pass.tooltip(response, Tip::Control(control), true);
-        if response.clicked() {
-            pass.press(control);
+    // The button's own name, trailing off: the list is what it opens in.
+    let title = format!("{}…", Control::OpenIn.label());
+    titled(pass, ui, &title, |pass, ui| {
+        let openers = pass.input.openers.as_slice();
+        for (index, name) in openers.iter().enumerate() {
+            let control = Control::Opener(index);
+            let response = ui.add(Button::new(name));
+            let response = pass.tooltip(response, Tip::Control(control), true);
+            if response.clicked() {
+                pass.press(control);
+            }
         }
-    }
+    });
 }
 
 #[cfg(test)]

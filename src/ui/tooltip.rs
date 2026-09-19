@@ -157,7 +157,7 @@ pub fn disabled(
             hint: None,
         });
     }
-    if tip == Tip::Control(Control::OpenWith) && !openable {
+    if tip == Tip::Control(Control::OpenIn) && !openable {
         return Some(Refused {
             said: NOTHING_OPENS_IT,
             hint: None,
@@ -207,7 +207,7 @@ pub fn words(tip: Tip) -> Option<String> {
         // Nor these: an item of the open menu wears the name of the program
         // it hands the file to, and there is nothing an interface that has
         // never heard of that program could add to it.
-        Tip::Control(Control::OpenIn(_)) => return None,
+        Tip::Control(Control::Opener(_)) => return None,
         _ => {}
     }
     Some(
@@ -218,7 +218,7 @@ pub fn words(tip: Tip) -> Option<String> {
             Tip::Control(Control::Copy) => "Copy the file or the image",
             // The same: no key opens it, and what is on it is whatever the
             // desktop has installed rather than anything this program binds.
-            Tip::Control(Control::OpenWith) => "Open the file in another application",
+            Tip::Control(Control::OpenIn) => "Open the file in another application",
             Tip::Control(Control::Paste) => "Paste an image",
             Tip::Control(Control::Help) => "Keyboard shortcuts",
             // No one key does this and only this — Escape dismisses whatever
@@ -474,7 +474,7 @@ mod tests {
             info: true,
             help: true,
         };
-        let button = Tip::Control(Control::OpenWith);
+        let button = Tip::Control(Control::OpenIn);
 
         assert_eq!(disabled(button, all, Hdr::Available, true, false), None);
         assert_eq!(

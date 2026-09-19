@@ -75,6 +75,9 @@ Notable changes to `gamut`. The format follows
 
 ### Changed
 
+- The menu of copies and the menu of other applications are headed — `Copy`
+  and `Open in…` — on the band the help popup's column headings sit on.
+
 - `Ctrl+P` does nothing with a single file on the list, as the count it
   stands beside is not shown for one: there is nothing to choose.
 

@@ -770,6 +770,18 @@ have bound. Its items are also the only ones sized to the words on them —
 name would be, and a name left to wrap in a popup that opened at the width of
 the button below it comes out a letter to a line.
 
+These two menus of items are the two with a name at their head — **Copy**,
+**Open in…**, each the label of the button that opened it, so that the two
+cannot disagree — where the zoom and pixel menus name their sections in the
+accent and are not headed: a percentage or a fit says what it is, and a bare
+list of names or of applications does not say what pressing one would do with
+them. The name is set as the help popup's column headings are, in bold on the
+same band of `Theme::heading` over the same hairline, and `help::band` paints
+both; `menu::titled` is the wrapper. A menu is as wide as its widest item,
+which is not known until the items are laid out, so the band goes into a shape
+set aside before the title and is painted last, to the width the menu came
+out at.
+
 The help popup, `src/ui/help.rs`, is the one popup hung off nothing: it is
 anchored in the middle of the content area as the [chooser](chooser.md) is
 anchored at the top of it, and opened by `App::press` on `Control::Help`
