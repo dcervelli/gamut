@@ -3,7 +3,6 @@
 ## TODO
 * More intelligent auto-window sizing
 * Screenshot
-  * Regions
   * Desktop/shell integration
   * Move other sections under screenshotted ones
   * Regenerate all
@@ -21,6 +20,7 @@
 * Basic annotations
 
 ## Improve
+* Copy region handle
 * Honor GDAL NO_DATA
 * Histogram cleanup
 * Histogram marker icons so they can't overlap
