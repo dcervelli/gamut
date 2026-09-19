@@ -6,7 +6,7 @@ A modern Linux image viewer optimized for getting work done, fast.
 
 A modern image viewer has to serve many audiences: casual user, photographer, data scientist, programmer, designer, game developer, GIS analyst, etc.
 
-Some features are obviously useful to everyone: high performance, effective pan/zoom controls, copy/paste, etc. A more difficult decision is deciding which features exceed the bar for inclusion. Whether or not a feature is added to gamut is decided by considering questions like these:
+Some features are obviously useful to everyone: high performance, effective pan/zoom controls, copy/paste, etc. It's more difficult to decide if a feature exceeds the bar for inclusion. We consider questions like these:
 
 * Is the feature useful to a varied audience?
 * Is the feature something that is conceptually simple but would otherwise required specialized software to accomplish?
@@ -55,6 +55,8 @@ This will make the window open centered and floating with a reasonable, dynamic 
 ### Region selection/measurement
 
 Select rectangular regions for measurement or copy. Pixel precision controls to move, grow, or shrink the region.
+
+![Region selection](user-docs/screenshots/region.gif)
 
 ### Copy/paste image
 
