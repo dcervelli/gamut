@@ -667,24 +667,24 @@ fn the_open_menu_offers_the_applications_that_can_open_the_file() {
     let mut harness = open(WINDOW, 1, panels());
     assert!(
         harness
-            .get_by_label("Open with")
+            .get_by_label("Open in")
             .accesskit_node()
             .is_disabled()
     );
-    assert_eq!(click(&mut harness, "Open with"), []);
+    assert_eq!(click(&mut harness, "Open in"), []);
 
     harness.state_mut().input.openers = vec!["Pinta".to_string(), "Darktable".to_string()];
     harness.run();
     assert!(
         !harness
-            .get_by_label("Open with")
+            .get_by_label("Open in")
             .accesskit_node()
             .is_disabled()
     );
-    assert_eq!(click(&mut harness, "Open with"), []);
+    assert_eq!(click(&mut harness, "Open in"), []);
     assert_eq!(
         click(&mut harness, "Darktable"),
-        [Command::Press(Control::OpenIn(1))]
+        [Command::Press(Control::Opener(1))]
     );
     harness.run();
     assert!(

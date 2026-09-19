@@ -542,7 +542,7 @@ impl Pass<'_> {
         let button = self.icon_button(
             ui,
             icon::EXTERNAL_LINK,
-            Control::OpenWith,
+            Control::OpenIn,
             open,
             enabled,
             Corners::All,

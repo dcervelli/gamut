@@ -2361,10 +2361,10 @@ impl App {
             }
             // The four buttons that open a menu: the menu is egui's, and
             // opens itself on the press, so there is nothing here to do.
-            Control::Zoom | Control::PixelFormat | Control::Copy | Control::OpenWith => {}
+            Control::Zoom | Control::PixelFormat | Control::Copy | Control::OpenIn => {}
             // An item of the open menu, by its place in the list the same
             // frame was drawn from.
-            Control::OpenIn(index) => self.open_in(index),
+            Control::Opener(index) => self.open_in(index),
             // The action the key runs, as with the reset below: the button
             // is on screen because the clipboard was holding a picture at the
             // last look, and the paste asks it again rather than trusting
