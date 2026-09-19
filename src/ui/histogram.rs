@@ -217,8 +217,9 @@ pub fn stops_label(stops: f32) -> String {
 /// None of them says which window is in force: the handles on the band do
 /// that, and a press here puts the window on a rule rather than switching
 /// one on. There is no fourth button for "the image's own", because the
-/// file's own is always one of these — *As stored* on a graded file,
-/// *Trimmed* on measured light — and the reset button puts it back.
+/// file's own is always one of these — *As stored* on a graded file and on
+/// scene light, whose meter is on the exposure, *Trimmed* on a measurement
+/// — and the reset button puts it back.
 pub const WINDOWS: [(&str, AutoWindow); 3] = [
     ("As stored", AutoWindow::Off),
     ("Full range", AutoWindow::MinMax),

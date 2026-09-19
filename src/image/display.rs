@@ -47,16 +47,19 @@ impl AutoWindow {
 
     /// The window an image opens with, which is one rule: the image's own
     /// [`Referred`]. Something already graded has a white of its own and 0..1
-    /// is exactly right; linear sensor counts have no white, and showing them
-    /// unwindowed is how you get a black rectangle.
+    /// is exactly right. Scene light is in the file's own units too — a
+    /// render's, or cd/m² — and keeps them, the meter working on the
+    /// exposure instead ([`Display::for_image_with`]). Linear sensor counts
+    /// have neither a white nor a middle, and showing them unwindowed is how
+    /// you get a black rectangle.
     ///
     /// Held apart from [`Display::for_image_with`] because it is also what
     /// [`Display::reset`] puts back, and what the histogram panel's row of
     /// windows names outright: the file's own is always one of the three.
     pub fn default_for(image: &DecodedImage) -> Self {
         match image.referred {
-            Referred::Display => AutoWindow::Off,
-            Referred::Scene => AutoWindow::Percentile,
+            Referred::Display | Referred::Scene => AutoWindow::Off,
+            Referred::Measured => AutoWindow::Percentile,
         }
     }
 
@@ -374,6 +377,12 @@ pub const EV_STEP: f32 = 0.25;
 /// The furthest the exposure goes either way, in stops.
 const EXPOSURE_LIMIT: f32 = 16.0;
 
+/// Where a meter puts the key of a scene: the reflectance of a gray card,
+/// and the one number the people who make scene-linear files agree on — a
+/// render pipeline keeps its mid-gray here, and a light probe's ground
+/// lands near it once exposed. Not tuned; the convention.
+const MIDDLE_GRAY: f32 = 0.18;
+
 #[derive(Clone, Debug)]
 pub struct Display {
     /// The window in the file's own linear units: the value mapped to 0 and
@@ -414,13 +423,26 @@ impl Display {
     /// have no white, and showing them unwindowed is how you get a black
     /// rectangle, so they are windowed to what they hold.
     ///
-    /// The tone curve follows from the window rather than from the file: a
-    /// curve exists to fit values above white into a surface that stops
-    /// there, so it is wanted when the window leaves something above white
-    /// and the surface has no room for it — the highlights of a graded HDR
-    /// picture on an SDR surface — and not otherwise. The startup exposure is
-    /// applied after that decision is made: it is a setting like any other,
-    /// and what the file opens with is a fact about the file.
+    /// Scene light — a Radiance picture, an EXR — is the third case, and it
+    /// is metered. Its numbers are real, a renderer's units or cd/m², and
+    /// spread over more stops than a surface has; no window fits them, and
+    /// the one a percentile finds is sized for the light sources, which
+    /// leaves everything else black. A meter exposes for the bulk of the
+    /// light instead: the key of the scene, [`Stats::log_mean`], is put at
+    /// [`MIDDLE_GRAY`], and what that leaves above white is the curve's.
+    /// The window stays 0..1 in the file's own units and the meter's
+    /// decision goes on the exposure, in stops, where the slider shows it
+    /// and `d`/`f` nudge it — the same two dials the panel has for every
+    /// file, and a metered file opens with one of them already turned.
+    ///
+    /// The tone curve follows from the window and the exposure rather than
+    /// from the file: a curve exists to fit values above white into a
+    /// surface that stops there, so it is wanted when they leave something
+    /// above white and the surface has no room for it — the highlights of a
+    /// graded HDR picture, or of a metered scene, on an SDR surface — and
+    /// not otherwise. The startup exposure is applied after that decision
+    /// is made: it is a setting like any other, and what the file opens
+    /// with is a fact about the file.
     ///
     /// `headroom` is the surface's half of that decision. The surface can
     /// change under a picture, and [`Display::adopt`] asks again when it does.
@@ -445,6 +467,9 @@ impl Display {
             display.auto = auto;
             display.apply_auto(stats);
         }
+        if image.referred == Referred::Scene {
+            display.exposure_stops = Self::metered(stats);
+        }
         display.adopt(headroom, stats);
 
         // The false color is a reading of one channel, and a color image's
@@ -460,6 +485,19 @@ impl Display {
             display.exposure_stops = stops;
         }
         display
+    }
+
+    /// The exposure a meter would give the scene, in stops: what puts its
+    /// key at [`MIDDLE_GRAY`]. Zero where nothing was lit, and never past
+    /// the slider's ends.
+    fn metered(stats: &Stats) -> f32 {
+        match stats.log_mean {
+            Some(key) if key > 0.0 => {
+                let stops = (MIDDLE_GRAY / key).log2();
+                stops.clamp(-EXPOSURE_LIMIT, EXPOSURE_LIMIT)
+            }
+            _ => 0.0,
+        }
     }
 
     /// Takes the tone curve the surface wants for what is on screen: none
@@ -839,8 +877,8 @@ mod tests {
     use super::*;
     use crate::image::{AlphaMode, Channels, ColorSpace, Primaries, Referred, Samples};
 
-    /// Linear float gray, which is what every HDR path here comes out as:
-    /// 1.0 is SDR white and anything above it is the headroom.
+    /// Linear float gray as a measurement: numbers that need not be light,
+    /// windowed to what they hold.
     fn float_gray(data: Vec<f32>) -> DecodedImage {
         DecodedImage {
             width: data.len() as u32,
@@ -851,9 +889,18 @@ mod tests {
             },
             color: ColorSpace::LINEAR_BT709,
             alpha: AlphaMode::Opaque,
-            referred: Referred::Scene,
+            referred: Referred::Measured,
+            exposure: None,
             nodata: None,
         }
+    }
+
+    /// The same numbers as scene light, which is what a Radiance picture or
+    /// an EXR comes out as: in the file's own scale, with no white stated.
+    fn scene_gray(data: Vec<f32>) -> DecodedImage {
+        let mut image = float_gray(data);
+        image.referred = Referred::Scene;
+        image
     }
 
     fn gray(data: Vec<u16>, transfer: Transfer) -> DecodedImage {
@@ -870,6 +917,7 @@ mod tests {
             },
             alpha: AlphaMode::Opaque,
             referred: Referred::of(transfer),
+            exposure: None,
             nodata: None,
         }
     }
@@ -1050,6 +1098,7 @@ mod tests {
             color: ColorSpace::LINEAR_BT709,
             alpha: AlphaMode::Opaque,
             referred: Referred::Scene,
+            exposure: None,
             nodata: None,
         };
         let sample = image.sample(0, 0).expect("inside");
@@ -1398,11 +1447,13 @@ mod tests {
         Display::for_image_with(image, &Stats::scan(image), Startup::default(), headroom)
     }
 
-    /// The curve is for highlights the window leaves above white on a surface
-    /// that stops there. A graded HDR picture has them; an ordinary one does
-    /// not; and a measurement — however wide its numbers — is windowed to
-    /// what it holds first, which leaves nothing above white for a curve to
-    /// act on and would make a curve a bend in the data for no reason.
+    /// The curve is for highlights the window and the exposure leave above
+    /// white on a surface that stops there. A graded HDR picture has them; an
+    /// ordinary one does not; a measurement — however wide its numbers — is
+    /// windowed to what it holds first, which leaves nothing above white for
+    /// a curve to act on and would make a curve a bend in the data for no
+    /// reason; and a metered scene has whatever the meter left above white,
+    /// which is the curve's to roll off.
     #[test]
     fn a_curve_is_added_only_where_the_window_leaves_highlights_above_white() {
         let photograph = gray(vec![0, 4095], Transfer::Srgb);
@@ -1411,12 +1462,96 @@ mod tests {
         let pq = gray(vec![30_000, 60_000], Transfer::Pq);
         assert_eq!(opened(&pq, Headroom::None).tone_map, ToneMap::Neutral);
 
-        // Sensor counts, and a render: linear float that reaches well past
-        // 1.0, and is windowed to its own range rather than curved.
+        // Sensor counts: linear float that reaches well past 1.0, and is
+        // windowed to its own range rather than curved.
         let measurement = float_gray(vec![0.0, 100.0, 4000.0, 4095.0]);
         let display = opened(&measurement, Headroom::None);
         assert_eq!(display.auto, AutoWindow::Percentile);
         assert_eq!(display.tone_map, ToneMap::None);
+
+        // A render: a dim room and one light, in whatever units. Exposed for
+        // the room, which leaves the light above white for the curve.
+        let mut room = vec![0.02; 15];
+        room.push(50.0);
+        let render = scene_gray(room);
+        let display = opened(&render, Headroom::None);
+        assert_eq!(display.auto, AutoWindow::Off);
+        assert_eq!(display.tone_map, ToneMap::Neutral);
+        assert_eq!(opened(&render, Headroom::Above).tone_map, ToneMap::None);
+
+        // The same render with its light no brighter than its key has
+        // nothing above white once metered, and no curve for no reason.
+        let flat = scene_gray(vec![0.02; 16]);
+        assert_eq!(opened(&flat, Headroom::None).tone_map, ToneMap::None);
+    }
+
+    /// Scene light opens metered: the window left at 0..1 of the file's own
+    /// units, and the exposure turned to put the key of the scene at middle
+    /// gray — whatever the scale the file was made in, so a render in a
+    /// renderer's units and the same render in cd/m² open looking the same.
+    /// The panel then has the decision on its exposure slider, in stops,
+    /// where a hand can move it on from.
+    #[test]
+    fn scene_light_opens_with_its_key_at_middle_gray() {
+        // A flat scene: every pixel is the key.
+        let key = 0.03;
+        let scene = scene_gray(vec![key; 8]);
+        let stats = Stats::scan(&scene);
+        let display = Display::for_image_with(&scene, &stats, Startup::default(), Headroom::None);
+        assert_eq!(display.auto, AutoWindow::Off);
+        assert_eq!((display.window_low, display.window_high), (0.0, 1.0));
+        let shown = display
+            .map(&scene.sample(0, 0).unwrap(), Headroom::None)
+            .values()[0];
+        assert!((shown - MIDDLE_GRAY).abs() < 1e-3, "key shown at {shown}");
+
+        // The same scene a thousand times brighter opens the same.
+        let bright = scene_gray(vec![key * 1000.0; 8]);
+        let stats = Stats::scan(&bright);
+        let brighter = Display::for_image_with(&bright, &stats, Startup::default(), Headroom::None);
+        let shown = brighter
+            .map(&bright.sample(0, 0).unwrap(), Headroom::None)
+            .values()[0];
+        assert!((shown - MIDDLE_GRAY).abs() < 1e-3, "key shown at {shown}");
+        assert!((brighter.exposure_stops - (display.exposure_stops - 1000f32.log2())).abs() < 1e-3);
+
+        // What the command line says still wins, as it does for every file.
+        let asked = Display::for_image_with(
+            &scene,
+            &Stats::scan(&scene),
+            Startup {
+                exposure_stops: Some(1.0),
+                ..Startup::default()
+            },
+            Headroom::None,
+        );
+        assert_eq!(asked.exposure_stops, 1.0);
+
+        // And a reset puts the meter's reading back, not zero.
+        let mut moved = display.clone();
+        moved.adjust_exposure(3.0);
+        moved.reset(&Stats::scan(&scene), &scene, Headroom::None);
+        assert_eq!(moved.exposure_stops, display.exposure_stops);
+    }
+
+    /// A scene with nothing lit, or one that would want more than the slider
+    /// has, opens at the slider's ends rather than off them.
+    #[test]
+    fn the_meter_stays_on_the_slider() {
+        let dark = scene_gray(vec![0.0; 4]);
+        assert_eq!(opened(&dark, Headroom::None).exposure_stops, 0.0);
+
+        let faint = scene_gray(vec![1e-9; 4]);
+        assert_eq!(
+            opened(&faint, Headroom::None).exposure_stops,
+            EXPOSURE_LIMIT
+        );
+
+        let blinding = scene_gray(vec![1e9; 4]);
+        assert_eq!(
+            opened(&blinding, Headroom::None).exposure_stops,
+            -EXPOSURE_LIMIT
+        );
     }
 
     /// The whole point of asking for an HDR surface is the room above SDR

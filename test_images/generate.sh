@@ -207,6 +207,11 @@ magick "$work/float.png" -set colorspace RGB -evaluate multiply 3.984375 hdr-rgb
 # memorial.hdr has: Radiance's own reader takes any text line first, and
 # readers that insist on the signature in the first ten bytes refuse it.
 { echo 'VIEW= -vtv -vh 90 -vv 150'; cat hdr-rgbe.hdr; } > hdr-view-line.hdr
+# The same picture with `EXPOSURE=` lines, as `pfilt -e` leaves one once it
+# has scaled the picture to be looked at. Every line multiplies in: these
+# two say 2. A picture that states its exposure has been given its white,
+# and opens as stored rather than metered.
+{ head -n 1 hdr-rgbe.hdr; echo 'EXPOSURE=4'; echo 'EXPOSURE=0.5'; tail -n +2 hdr-rgbe.hdr; } > hdr-exposure.hdr
 
 # ---------------------------------------------------------------- OpenEXR
 magick "$work/float.png" -set colorspace RGB -evaluate multiply 3.984375 exr-rgb.exr

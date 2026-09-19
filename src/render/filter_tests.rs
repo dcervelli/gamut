@@ -155,6 +155,7 @@ fn gray_u8(width: u32, height: u32, data: Vec<u8>) -> DecodedImage {
         color: ColorSpace::LINEAR_BT709,
         alpha: AlphaMode::Opaque,
         referred: Referred::Scene,
+        exposure: None,
         nodata: None,
     }
 }
@@ -374,6 +375,7 @@ fn a_transparent_texel_does_not_bleed_its_color() {
         color: ColorSpace::LINEAR_BT709,
         alpha: AlphaMode::Straight,
         referred: Referred::Scene,
+        exposure: None,
         nodata: None,
     };
 

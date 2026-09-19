@@ -75,6 +75,19 @@ Notable changes to `gamut`. The format follows
 
 ### Changed
 
+- Radiance and OpenEXR files open metered, the way a camera would expose
+  the scene: the exposure is set to put the bulk of the light at middle
+  gray, the neutral tone map rolls off what that leaves above white, and
+  the histogram panel's slider shows the setting in stops. They used to open
+  on the trimmed window, which on a scene with bright light sources — a
+  sunlit window, a lamp — put white at the light and left the rest of the
+  picture black; Debevec's memorial church opened with 97% of its pixels in
+  the bottom code. A Radiance picture whose header states `EXPOSURE=` has
+  already been scaled for viewing and opens as stored; the info panel shows
+  the multiplier. Every other linear file — 16-bit and floating-point TIFF
+  included — opens on the trimmed window as before, and the info panel's
+  *Referred to* line now says which of the three a file is.
+
 - `Ctrl+P` does nothing with a single file on the list, as the count it
   stands beside is not shown for one: there is nothing to choose.
 

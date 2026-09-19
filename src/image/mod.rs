@@ -189,34 +189,44 @@ impl AlphaMode {
 }
 
 /// What the numbers stand for once decoded to linear light: light that was
-/// graded for a display, or light as a scene or a sensor had it.
+/// graded for a display, light as a scene had it, or a measurement.
 ///
-/// The distinction everything about the opening view rests on. A photograph
-/// — sRGB, a gamma curve, PQ, HLG, or a JPEG with its gain map applied — has
-/// a reference white: 1.0 is white, whoever made it put it there, and
-/// whatever sits above it is the highlights they meant to keep. Sensor counts
-/// and renders have no such point; 1.0 is wherever the file's scale happens
-/// to put it, and a 12-bit scan in a 16-bit container reaches a sixteenth of
-/// the way there. The first is shown as it is and the second is windowed to
-/// what it holds, and the tone curve is a question only the first can raise.
+/// The distinction everything about the opening view rests on. A graded
+/// file — sRGB, a gamma curve, PQ, HLG, or a JPEG with its gain map applied
+/// — has a reference white: 1.0 is white, whoever made it put it there, and
+/// whatever sits above it is the highlights they meant to keep. Scene light
+/// — a render, a light probe, a merge of exposures — has no such point: the
+/// numbers are in whatever units the file was made in, cd/m² or a
+/// renderer's own, and spread over more stops than a surface has, so it is
+/// exposed the way a meter would expose it, the bulk of its light put at
+/// middle gray and the highlights left to the curve. A measurement has
+/// neither a white nor a middle: a 12-bit scan in a 16-bit container
+/// reaches a sixteenth of the way to 1.0, and an elevation model is not
+/// light at all, so it is windowed to what it holds. The first is shown as
+/// it is; the tone curve is a question the second raises on its own once
+/// exposed, and the third only once a hand pushes it past white.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Referred {
     /// Graded: 1.0 is reference white, and the picture is meant as it is.
     Display,
-    /// Measured or rendered: no white is stated, and the useful range has to
-    /// be found in the pixels.
+    /// Light with no white stated, in the file's own scale: metered.
     Scene,
+    /// Numbers that need not be light at all: no white, no middle gray, and
+    /// the useful range has to be found in the pixels.
+    Measured,
 }
 
 impl Referred {
     /// What the transfer function alone says. A curve is only ever applied to
-    /// light that has been graded, so a curved file is display-referred and
-    /// a linear one is taken as scene-referred unless its decoder knows
-    /// better — which the gain-map path does, since its base image was a
-    /// graded photograph before the map lifted its highlights.
+    /// light that has been graded, so a curved file is display-referred; a
+    /// linear one is taken as a measurement, which is the safe reading of
+    /// numbers nobody has vouched for, unless its decoder knows better. The
+    /// gain-map path does, since its base image was a graded photograph
+    /// before the map lifted its highlights, and the Radiance and OpenEXR
+    /// paths do, since those formats carry nothing but light.
     pub fn of(transfer: Transfer) -> Self {
         match transfer {
-            Transfer::Linear => Referred::Scene,
+            Transfer::Linear => Referred::Measured,
             Transfer::Srgb | Transfer::Pq | Transfer::Hlg | Transfer::Gamma(_) => Referred::Display,
         }
     }
@@ -225,7 +235,8 @@ impl Referred {
     pub fn label(self) -> &'static str {
         match self {
             Referred::Display => "display (1.0 is white)",
-            Referred::Scene => "scene (no white stated)",
+            Referred::Scene => "scene (no white stated, metered)",
+            Referred::Measured => "measurement (no white stated)",
         }
     }
 }
@@ -241,6 +252,14 @@ pub struct DecodedImage {
     /// Whether 1.0 means reference white. Follows the transfer function
     /// unless the decoder says otherwise; see [`Referred`].
     pub referred: Referred,
+    /// The multiplier the file says has already been applied to its values,
+    /// where a format has a place to say it: Radiance's `EXPOSURE=` lines,
+    /// multiplied together, which `pfilt` writes once it has scaled a
+    /// picture to be looked at. A file that states one has had its white
+    /// put where it is by whoever wrote the line, so it is display-referred
+    /// and opens as stored; the number itself is for the information panel,
+    /// and for anyone wanting the physical units back.
+    pub exposure: Option<f32>,
     /// The value standing in for "no measurement here". Elevation models use
     /// -9999 and similar sentinels, which would otherwise dominate the
     /// automatic window and squash the real data into a sliver.
@@ -265,6 +284,7 @@ impl DecodedImage {
             color,
             alpha,
             referred: Referred::of(color.transfer),
+            exposure: None,
             nodata: None,
         }
     }
@@ -493,7 +513,8 @@ mod tests {
             },
             color: ColorSpace::LINEAR_BT709,
             alpha: AlphaMode::Opaque,
-            referred: Referred::Scene,
+            referred: Referred::Measured,
+            exposure: None,
             nodata: None,
         }
     }
@@ -560,6 +581,7 @@ mod tests {
             color: ColorSpace::LINEAR_BT709,
             alpha: AlphaMode::Premultiplied,
             referred: Referred::Scene,
+            exposure: None,
             nodata: None,
         };
 
@@ -605,8 +627,9 @@ mod tests {
     }
 
     /// A curve is only ever put on graded light, so the curve says which kind
-    /// of light it is; linear is taken as measured until a decoder says
-    /// otherwise.
+    /// of light it is; linear is taken as a measurement until a decoder says
+    /// otherwise, since that is the safe reading of numbers nobody has
+    /// vouched for.
     #[test]
     fn what_the_light_is_referred_to_follows_from_the_curve() {
         for transfer in [
@@ -617,10 +640,10 @@ mod tests {
         ] {
             assert_eq!(Referred::of(transfer), Referred::Display, "{transfer:?}");
         }
-        assert_eq!(Referred::of(Transfer::Linear), Referred::Scene);
+        assert_eq!(Referred::of(Transfer::Linear), Referred::Measured);
 
         let image = gray16(vec![0; 6], 3, 2);
-        assert_eq!(image.referred, Referred::Scene);
+        assert_eq!(image.referred, Referred::Measured);
         let photograph = DecodedImage::new(
             1,
             1,

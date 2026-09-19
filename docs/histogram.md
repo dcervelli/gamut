@@ -29,20 +29,25 @@ information column starts under the panel, and a column that jumped from one
 file to the next, or every time a handle was dragged past white, would be a
 column no one could read.
 
-Two audiences use this program — `AutoWindow::default_for` splits on
+Three kinds of file use this program — `AutoWindow::default_for` splits on
 `Referred`, and the colormaps, the float TIFF and the GeoTIFF keys say who
-the second audience is — and a graded file's window is 0..1 by rights where
-measured light is windowed to what it holds. The rows do not follow that
-split, because the black handle moves the window on every file: a graded
-file's window leaves 0..1 at the bottom the moment the black handle is
-touched, so a white handle that meant the exposure on a graded file and the
-window's top on a measured one would be a handle that meant a different
-thing on the next file along. The two dials are honestly two. The window is
-in the file's own units — both handles, both pairs of keys, the *Window*
-row — and the exposure is in stops — the slider, `d`/`f`, `--exposure` — a
-push on top of whatever the window is. On a graded file the *Window* row is
-where a hand-moved window is put back, *As stored* being 0..1, as much as
-where a rule is chosen.
+the measuring audience is — and a graded file's window is 0..1 by rights
+where a measurement is windowed to what it holds. Scene light — a Radiance
+picture, an EXR — keeps 0..1 too, in the file's own units, and opens with
+the exposure already turned: `Display::for_image_with` meters it, putting
+the key of the scene at middle gray, and the slider shows the reading in
+stops. The rows do not follow that split, because the black handle moves
+the window on every file: a graded file's window leaves 0..1 at the bottom
+the moment the black handle is touched, so a white handle that meant the
+exposure on a graded file and the window's top on a measured one would be a
+handle that meant a different thing on the next file along. The two dials
+are honestly two. The window is in the file's own units — both handles,
+both pairs of keys, the *Window* row — and the exposure is in stops — the
+slider, `d`/`f`, `--exposure` — a push on top of whatever the window is,
+which is exactly what a meter's reading is, and why a metered file arrives
+with the exposure dial turned rather than a fourth kind of window. On a
+graded file the *Window* row is where a hand-moved window is put back, *As
+stored* being 0..1, as much as where a rule is chosen.
 
 The curve row is every file's because the exposure is: a stop up puts the
 top of any file above white and the bar says **clipped**, and the curve is
@@ -68,8 +73,8 @@ The three windows are named for what they do — *As stored*, *Full range*,
 and the bottom bar says the same in one word each: *stored*, *full*,
 *trimmed*, and *manual* once a handle has moved. There is no fourth button
 for "the image's own", because the file's own is always one of the three —
-*As stored* on a graded file, *Trimmed* on measured light — and the reset
-button puts it back.
+*As stored* on a graded file and on scene light, *Trimmed* on a measurement
+— and the reset button puts it back, the meter's exposure with it.
 
 ## The band is the levels track
 

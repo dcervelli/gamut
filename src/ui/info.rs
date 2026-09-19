@@ -628,11 +628,21 @@ fn image_facts(current: &Current) -> Vec<(&'static str, String)> {
             },
         ),
         // What the numbers mean once they are light: graded, so that 1.0 is
-        // white and the picture opens as it is, or measured, so that it opens
-        // windowed to what it holds. The one fact the opening view is decided
-        // by, and the one a reader asking why a file opened dark or stretched
-        // is looking for.
+        // white and the picture opens as it is; scene light, so that it
+        // opens metered; or measured, so that it opens windowed to what it
+        // holds. The one fact the opening view is decided by, and the one a
+        // reader asking why a file opened dark or stretched is looking for.
         ("Referred to", image.referred.label().to_string()),
+        // The multiplier a Radiance picture says has already been applied
+        // to it, which is why it is graded rather than metered; nothing for
+        // a file with no place to say it.
+        (
+            "Exposure applied",
+            image
+                .exposure
+                .map(|exposure| format!("×{exposure}"))
+                .unwrap_or_default(),
+        ),
         // What else the file holds, for the two kinds that hold more than
         // one picture; nothing for the usual kind.
         ("Holds", holds(current)),
