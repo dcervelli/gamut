@@ -201,10 +201,10 @@ under, being the same question of what a background thread may hold. The
 decoded image is box-filtered to 512 pixels by `image::resample::downscale`,
 in the file's own encoding and with its no-data sentinel left out of every
 mean, and the full image is dropped before anything else is done. The small
-image is then scanned and windowed as the viewer would open it —
-`Display::for_image_with` with the default start-up state — because
-`Display::default` shows a scene-referred EXR or an elevation model as
-black, and on a quarter of a megapixel the scan and the walk are cheap.
+image is then scanned and windowed, or metered, as the viewer would open it
+— `Display::for_image_with` with the default start-up state — because
+`Display::default` shows an EXR or an elevation model as black, and on a
+quarter of a megapixel the scan and the walk are cheap.
 `encode::displayed_on` runs the display pipeline over it on one band, so the
 thread stays on one core; `encode::png_with_text` writes it with the chunks.
 A copy at 128 pixels, at most 64 KiB of RGBA, is what goes to the screen.

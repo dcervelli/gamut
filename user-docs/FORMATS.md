@@ -101,13 +101,20 @@ scan. The formats that cannot preserve them say so below.
 **How a file opens follows from what it is.** Content already graded for a
 display — sRGB, gamma, PQ, HLG, a JPEG with its gain map applied, a
 developed raw — opens untouched at 0–1, because second-guessing the grade
-would be wrong. Measurement data and other scene-referred content opens on a
-trimmed window, the central 99.8% of what it holds, because values occupying
-a fraction of the nominal range otherwise show as a black rectangle. Where that leaves highlights above white
-— a PQ frame, a gain-mapped photograph — the neutral tone map is on from the
-start rather than clipping, unless the image is going out to an HDR surface,
-where the highlights have somewhere to go and no curve is applied at all. All
-of it is adjustable: `e` cycles the automatic window, `t` the tone map, `o`
+would be wrong. Scene light — a Radiance picture or an OpenEXR file: a
+render, a light probe, a merge of exposures — opens metered, the way a
+camera would expose it: the exposure is set so that the bulk of the light
+lands at middle gray, and the exposure slider on the histogram panel shows
+the setting in stops, ready to be pushed either way with `d` and `f`.
+Measurement data — a 16-bit or floating-point TIFF, and any other linear
+file — opens on a trimmed window, the central 99.8% of what it holds,
+because values occupying a fraction of the nominal range otherwise show as a
+black rectangle. Where any of that leaves highlights above white — a PQ
+frame, a gain-mapped photograph, the windows of a metered church — the
+neutral tone map is on from the start rather than clipping, unless the image
+is going out to an HDR surface, where the highlights have somewhere to go
+and no curve is applied at all. All of it is adjustable: `e` cycles the
+automatic window, `t` the tone map, `o`
 the room above white, `z` resets. The information panel's "Referred to" line says
 which kind of light a file was taken for.
 
@@ -360,8 +367,15 @@ Read as scene-linear floating point. There is nothing in the file to configure
 and nothing to override: the format is linear by definition, whatever else it
 might claim.
 
-Because the data is scene-referred, it opens on an automatic window rather
-than at 0–1, and the tone map (`t`) is what brings the highlights back.
+A Radiance picture is light in whatever scale it was made in — a
+renderer's units, or cd/m² from a lighting simulation — so it opens metered:
+the exposure set to put the bulk of the light at middle gray, shown in stops
+on the histogram panel's slider, with the neutral tone map (`t`) rolling
+off whatever that leaves above white. `--exposure` sets the exposure
+instead, and `d`/`f` push it from wherever it opened. A picture whose header
+states an `EXPOSURE=` — as Radiance's own tools write after scaling a
+picture for viewing — has already been given its white, and opens as stored
+at 0–1; the info panel shows the multiplier.
 
 ## Camera raw
 
@@ -418,6 +432,15 @@ Caveats:
 Half and full floating point, uncompressed or with the common compressions
 (RLE, ZIP, PIZ, PXR24, B44), read as scene-linear. Alpha is taken as
 premultiplied, which is the format's own convention.
+
+An EXR opens metered, as a Radiance picture does: the exposure set to put
+the bulk of the light at middle gray, the neutral tone map rolling off what
+that leaves above white, and the reading on the histogram panel's exposure
+slider for `d`/`f` or `--exposure` to move on from. A render whose mid-gray
+already sits near 0.18 opens within a fraction of a stop of untouched; one
+in arbitrary units opens looking the same as it would in any other. Pixels
+that are transparent, or black, do not count toward the meter, so an
+element rendered over nothing is exposed for the element.
 
 The limits are worth knowing before reaching for EXR as a data container:
 

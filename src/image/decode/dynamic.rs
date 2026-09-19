@@ -12,7 +12,7 @@ use ::image::{DynamicImage, ImageFormat};
 
 use anyhow::{Result, anyhow, bail};
 
-use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
+use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Referred, Samples};
 
 use super::ReadSeek;
 
@@ -93,7 +93,22 @@ pub(super) fn describe(
 
     // `image` does not surface EXR's per-channel ranges, so the renderer
     // scans for a window instead.
-    Ok(DecodedImage::new(width, height, samples, color, alpha))
+    let mut image = DecodedImage::new(width, height, samples, color, alpha);
+    image.referred = referred(format, image.referred);
+    Ok(image)
+}
+
+/// What the light is referred to, where the format settles it. Radiance and
+/// OpenEXR carry nothing but light — a render, a light probe, a plate, a
+/// merge of exposures — in whatever scale it was made in, so a file of
+/// either is scene light to be metered rather than a measurement to be
+/// windowed. Any other linear buffer keeps the transfer function's own
+/// reading, `fallback`.
+fn referred(format: Option<ImageFormat>, fallback: Referred) -> Referred {
+    match format {
+        Some(ImageFormat::Hdr) | Some(ImageFormat::OpenExr) => Referred::Scene,
+        _ => fallback,
+    }
 }
 
 /// The image turned the way `orientation` says, with everything else about
@@ -115,6 +130,7 @@ pub(super) fn reorient(
         color,
         alpha,
         referred,
+        exposure,
         nodata,
     } = image;
     let mut dynamic = from_samples(width, height, samples)?;
@@ -127,6 +143,7 @@ pub(super) fn reorient(
         color,
         alpha,
         referred,
+        exposure,
         nodata,
     })
 }

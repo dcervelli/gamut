@@ -31,8 +31,9 @@ pub const COLOR: usize = 3;
 /// The second is that the eye's response is close to the curve a
 /// display-referred file is encoded with, so plotting against it gives equal
 /// width to equal perceived steps: mid gray sits in the middle rather than a
-/// fifth of the way along. Scene-referred files store linear samples, so
-/// their plot stays linear, which is what measurement work wants.
+/// fifth of the way along. Linear files — scene light and measurements —
+/// store linear samples, so their plot stays linear, which is what
+/// measurement work wants.
 ///
 /// The axis follows the same split. A curved file is display-referred, so it
 /// spans the range such a file can hold — 0..1, widened by any over-range
@@ -173,6 +174,15 @@ pub struct Stats {
     /// Counts over `min..max`, in linear units, for percentiles.
     pub histogram: [u32; BINS],
     pub counted: u32,
+    /// The geometric mean of the luminance — the mean of its logarithm,
+    /// taken back out — over the pixels that measured any light at all:
+    /// the key of the scene, in the file's own units, which a meter puts at
+    /// middle gray. Pixels at zero are left out rather than floored: a
+    /// render's black background and the transparent surround of a
+    /// premultiplied element measured nothing, and a floor under them
+    /// would set the exposure by how much of the frame they cover. `None`
+    /// where no pixel is above zero.
+    pub log_mean: Option<f32>,
     /// The same pixels binned for drawing. See [`Plot`] for why it is a
     /// second scan rather than the same one.
     pub plot: Plot,
@@ -209,11 +219,14 @@ impl Stats {
 
         let color = !channels.is_gray();
         let plotted = if color { COLOR } else { 1 };
+        let alpha = channels.alpha_index();
         let Range {
             min,
             max,
             axis_min,
             axis_max,
+            log_sum,
+            log_count,
         } = values
             .bands(bands, |band| {
                 let mut range = Range::new(transfer);
@@ -222,6 +235,11 @@ impl Stats {
                     if is_data(value) {
                         range.min = range.min.min(value);
                         range.max = range.max.max(value);
+                        let lit = value > 0.0 && alpha.is_none_or(|index| encoded[index] > 0.0);
+                        if lit {
+                            range.log_sum += f64::from(value.log2());
+                            range.log_count += 1;
+                        }
                     }
                     // The axis spans the channels that get plotted, in the
                     // units they are plotted in.
@@ -245,6 +263,7 @@ impl Stats {
                 max: 1.0,
                 histogram: [0; BINS],
                 counted: 0,
+                log_mean: None,
                 plot: Plot::empty(),
             };
         }
@@ -309,11 +328,14 @@ impl Stats {
                 .fold(counts, Counts::merge);
         }
 
+        let log_mean = (log_count > 0).then(|| (log_sum / f64::from(log_count)).exp2() as f32);
+
         Self {
             min,
             max,
             histogram: counts.histogram,
             counted: counts.counted,
+            log_mean,
             plot: Plot {
                 min: axis_min,
                 max: axis_max,
@@ -375,6 +397,11 @@ struct Range {
     max: f32,
     axis_min: f32,
     axis_max: f32,
+    /// The logarithms of the lit pixels' luminance, summed, and how many
+    /// went in; wide, since two million of them are added up. See
+    /// [`Stats::log_mean`].
+    log_sum: f64,
+    log_count: u32,
 }
 
 impl Range {
@@ -392,6 +419,8 @@ impl Range {
             max: f32::NEG_INFINITY,
             axis_min,
             axis_max,
+            log_sum: 0.0,
+            log_count: 0,
         }
     }
 
@@ -401,6 +430,8 @@ impl Range {
             max: self.max.max(other.max),
             axis_min: self.axis_min.min(other.axis_min),
             axis_max: self.axis_max.max(other.axis_max),
+            log_sum: self.log_sum + other.log_sum,
+            log_count: self.log_count + other.log_count,
         }
     }
 }
@@ -605,6 +636,7 @@ mod tests {
             color: ColorSpace::LINEAR_BT709,
             alpha: AlphaMode::Opaque,
             referred: Referred::Scene,
+            exposure: None,
             nodata: None,
         }
     }
@@ -618,6 +650,81 @@ mod tests {
         assert!(stats.min.abs() < 1e-6);
         assert!((stats.max - 4095.0 / 65535.0).abs() < 1e-5, "{}", stats.max);
         assert!(stats.max < 0.07);
+    }
+
+    /// The key of a scene is the geometric mean of its light, which is
+    /// what a meter reads: a dim room and one light meter to the room, and
+    /// the same room a thousand times brighter meters a thousand times
+    /// higher, so the meter's exposure comes out the same either way.
+    #[test]
+    fn the_log_mean_is_the_key_of_the_scene() {
+        let mut room = vec![0.02; 15];
+        room.push(50.0);
+        let key = Stats::scan(&linear_gray_f32(room.clone()))
+            .log_mean
+            .unwrap();
+        let expected = room.iter().map(|value| value.log2()).sum::<f32>() / 16.0;
+        assert!((key.log2() - expected).abs() < 1e-4, "{key}");
+        assert!(key < 0.05, "the one light does not carry the meter: {key}");
+
+        let brighter: Vec<f32> = room.iter().map(|value| value * 1000.0).collect();
+        let brighter = Stats::scan(&linear_gray_f32(brighter)).log_mean.unwrap();
+        assert!((brighter / key - 1000.0).abs() < 1.0, "{brighter}");
+    }
+
+    /// Pixels that measured nothing are not part of the key: a render's
+    /// black background, or the transparent surround of a premultiplied
+    /// element, would otherwise set the exposure by how much of the frame
+    /// they cover. Where nothing at all is lit there is no key.
+    #[test]
+    fn the_log_mean_leaves_out_pixels_that_measured_nothing() {
+        let lit = Stats::scan(&linear_gray_f32(vec![0.5; 4]))
+            .log_mean
+            .unwrap();
+        let mut over_black = vec![0.0; 12];
+        over_black.extend([0.5; 4]);
+        let with_black = Stats::scan(&linear_gray_f32(over_black)).log_mean.unwrap();
+        assert!(
+            (with_black - lit).abs() < 1e-6,
+            "{with_black} against {lit}"
+        );
+
+        // Premultiplied RGBA: three transparent pixels and one lit one.
+        let mut data = vec![0.0; 12];
+        data.extend([0.5, 0.5, 0.5, 1.0]);
+        let element = DecodedImage {
+            width: 4,
+            height: 1,
+            samples: Samples::F32 {
+                channels: Channels::Rgba,
+                data,
+            },
+            color: ColorSpace::LINEAR_BT709,
+            alpha: AlphaMode::Premultiplied,
+            referred: Referred::Scene,
+            exposure: None,
+            nodata: None,
+        };
+        let key = Stats::scan(&element).log_mean.unwrap();
+        assert!((key - 0.5).abs() < 1e-6, "{key}");
+
+        assert_eq!(Stats::scan(&linear_gray_f32(vec![0.0; 4])).log_mean, None);
+    }
+
+    fn linear_gray_f32(data: Vec<f32>) -> DecodedImage {
+        DecodedImage {
+            width: data.len() as u32,
+            height: 1,
+            samples: Samples::F32 {
+                channels: Channels::Gray,
+                data,
+            },
+            color: ColorSpace::LINEAR_BT709,
+            alpha: AlphaMode::Opaque,
+            referred: Referred::Scene,
+            exposure: None,
+            nodata: None,
+        }
     }
 
     #[test]
@@ -683,6 +790,7 @@ mod tests {
             color: ColorSpace::SRGB,
             alpha: AlphaMode::Opaque,
             referred: Referred::Display,
+            exposure: None,
             nodata: None,
         };
 
@@ -730,6 +838,7 @@ mod tests {
             },
             alpha: AlphaMode::Premultiplied,
             referred: Referred::Display,
+            exposure: None,
             nodata: None,
         };
         let plot = Stats::scan(&image).plot;
@@ -771,6 +880,7 @@ mod tests {
             color: ColorSpace::LINEAR_BT709,
             alpha: AlphaMode::Opaque,
             referred: Referred::Scene,
+            exposure: None,
             nodata: None,
         };
         // BT.709 luminance weights green at 0.7152.
@@ -788,6 +898,7 @@ mod tests {
             color: ColorSpace::LINEAR_BT709,
             alpha: AlphaMode::Opaque,
             referred: Referred::Scene,
+            exposure: None,
             nodata: None,
         }
     }
@@ -877,6 +988,7 @@ mod tests {
             },
             alpha: AlphaMode::Opaque,
             referred: Referred::Display,
+            exposure: None,
             nodata: None,
         }
     }
@@ -980,6 +1092,7 @@ mod tests {
             color: ColorSpace::LINEAR_BT709,
             alpha: AlphaMode::Opaque,
             referred: Referred::Scene,
+            exposure: None,
             nodata: None,
         };
         let stats = Stats::scan(&image);

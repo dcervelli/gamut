@@ -375,6 +375,7 @@ mod tests {
             },
             alpha: AlphaMode::Opaque,
             referred: Referred::of(transfer),
+            exposure: None,
             nodata: None,
         }
     }
@@ -535,6 +536,7 @@ mod tests {
                     },
                     alpha: AlphaMode::Opaque,
                     referred: Referred::of(transfer),
+                    exposure: None,
                     nodata: None,
                 };
                 let plan = plan(&decoded, capabilities);

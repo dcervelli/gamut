@@ -485,8 +485,8 @@ fn make(
         if canceled.load(Ordering::Relaxed) {
             return Err(anyhow!("stopped"));
         }
-        // Windowed as the viewer would open it — a scene-referred
-        // picture shown with `Display::default` is black — on the
+        // Windowed and metered as the viewer would open it — a scene or
+        // a measurement shown with `Display::default` is black — on the
         // small image, where the scan and the walk are cheap.
         let stats = guard("scanning", || Ok(Stats::scan(&small)))?;
         let display = Display::for_image_with(&small, &stats, Startup::default(), Headroom::None);

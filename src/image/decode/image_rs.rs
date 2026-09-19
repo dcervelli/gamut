@@ -64,7 +64,7 @@ use ::image::codecs::hdr::HdrDecoder;
 use ::image::{AnimationDecoder, DynamicImage, ImageDecoder, ImageFormat};
 
 use crate::image::sequence::{Frame, FrameSource, Loops, Sequence, gif_delay};
-use crate::image::{ColorSpace, DecodedImage};
+use crate::image::{ColorSpace, DecodedImage, Referred};
 
 use super::{Overrides, ReadSeek, dynamic};
 
@@ -108,9 +108,24 @@ impl super::Decoder for ImageRs {
             decoder
                 .set_limits(dynamic::limits())
                 .context("reading the Radiance header")?;
+            let exposure = decoder.metadata().exposure;
             let decoded =
                 DynamicImage::from_decoder(decoder).context("decoding the Radiance picture")?;
-            return dynamic::describe(decoded, Some(ImageFormat::Hdr), ColorSpace::SRGB);
+            let mut image = dynamic::describe(decoded, Some(ImageFormat::Hdr), ColorSpace::SRGB)?;
+            // `EXPOSURE=` is what `pfilt` writes once it has scaled the
+            // picture to be looked at: the multiplier already applied, every
+            // line multiplied in. A picture that carries one has been given
+            // its white, and is shown as stored, the way `ximage` shows it;
+            // one that does not — `rpict`'s own output, a light probe, a
+            // merge of exposures — is in whatever scale it was made in, and
+            // is metered.
+            if let Some(exposure) =
+                exposure.filter(|exposure| exposure.is_finite() && *exposure > 0.0)
+            {
+                image.exposure = Some(exposure);
+                image.referred = Referred::Display;
+            }
+            return Ok(image);
         }
         let mut reader = ::image::ImageReader::new(BufReader::new(source)).with_guessed_format()?;
         dynamic::limit(&mut reader);
