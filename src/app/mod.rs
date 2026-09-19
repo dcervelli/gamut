@@ -351,6 +351,7 @@ impl App {
                 show_luma: true,
                 show_planes: true,
                 log_counts: false,
+                mark_clipped: false,
                 show_info: info,
                 show_minimap: minimap,
                 show_grid: false,
@@ -1439,7 +1440,7 @@ impl App {
             scale,
             backdrop,
             headroom,
-            mark_clipped: self.pointer.marking,
+            mark_clipped: self.panels.mark_clipped,
         };
         match renderer.render(scene, textures) {
             Ok(()) => self.reported_error = false,

@@ -109,6 +109,7 @@ fn panels() -> Panels {
         show_luma: true,
         show_planes: true,
         log_counts: false,
+        mark_clipped: false,
         show_minimap: true,
         show_grid: false,
         paste: false,

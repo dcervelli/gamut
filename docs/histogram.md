@@ -163,21 +163,33 @@ the bins are wider than a code and the share is to the nearest bin.
 
 ## The marks on the picture
 
-`w`, held, paints the clipped pixels on the picture: `MARK_WHITE` and
-`MARK_BLACK` in `shaders/image.wgsl`, where every channel of the windowed
-value is at or past the bound, painted in place of the pixel and before the
-false color, whose ramp does not end in white and black. The whole test lives
-in the image shader because that is the one place the windowed value exists
-per pixel; the composite pass sees the image target, which for a
-false-colored file already holds the ramp's color.
+`w`, or the button beside the band at the foot of the strip down the left
+of the panel, paints the clipped pixels on the picture: `MARK_WHITE` and `MARK_BLACK` in
+`shaders/image.wgsl`, where every channel of the windowed value is at or
+past the bound, painted in place of the pixel and before the false color,
+whose ramp does not end in white and black. The whole test lives in the
+image shader because that is the one place the windowed value exists per
+pixel; the composite pass sees the image target, which for a false-colored
+file already holds the ramp's color.
 
-Held rather than toggled, and answered on the way down and taken back on the
-way up as `Space` is: the marks are a thing to glance at, not a state to be
-left in, and a toggle would need a button — which the strip down the left of
-the plot has no room for without growing the plot. `Pointer::marking` is the
-state, `shader_codes::marks` the two bits, and `Scene::mark_clipped` the way
-in, rather than a field of `Display`: `Display` is kept per file and restored
-when a file comes back, and a held key must not come back with it.
+A toggle, like the grid: a way of looking at the picture rather than a
+setting of it. `Panels::mark_clipped` is the state, beside the plane and
+count-axis toggles, `shader_codes::marks` the two bits, and
+`Scene::mark_clipped` the way in — not a field of `Display`, which is kept
+per file and restored when a file comes back, where the marks stay on across
+files and are left alone by every reset. The key and the button both go
+through `App::press(Control::Marks)`, so the two cannot drift.
+
+The button stands beside the band, centered on it
+(`histogram::marks_button`), and not in the stack of buttons above: those
+act on the plot, and this one paints the band's two ends — the pixels the
+window has taken to black and to white — on the picture. The strip's one
+stretch of room that is not the stack's is exactly there: on a color image
+the four buttons beside the plot end a gap above it, and the exposure row
+begins a hair below it, which is what `TOOLBAR_GAP` is tighter than the
+chrome's own gap for. The panel is no taller for it. The button wears
+Lucide's `triangle-alert` (`icon::TRIANGLE_ALERT`), the sign every editor's
+clipping warning wears.
 
 Which ends are marked follows `Display::clips_white`, the same rule the
 corner and the bottom bar's **clipped** use: white is only marked where the

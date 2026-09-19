@@ -70,6 +70,10 @@ pub enum Control {
     Planes,
     Log,
     Reset,
+    /// The toggle beside the band at the foot of that strip, which paints
+    /// the clipped pixels on the picture in the two colors the plot's
+    /// corners count.
+    Marks,
     /// One of the false colors offered under that panel's ramp, by its place
     /// in [`crate::image::display::Colormap::ALL`].
     Ramp(usize),
@@ -140,6 +144,7 @@ impl Control {
             Control::Luma => "Luminance plane".to_string(),
             Control::Planes => "Color planes".to_string(),
             Control::Log => "Logarithmic counts".to_string(),
+            Control::Marks => "Clipped pixels".to_string(),
             Control::Reset => "Reset".to_string(),
             Control::Ramp(index) => format!("False color {index}"),
             Control::Window(index) => format!("Window {index}"),

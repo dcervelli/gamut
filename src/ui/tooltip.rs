@@ -228,6 +228,7 @@ pub fn words(tip: Tip) -> Option<String> {
             Tip::Control(Control::Luma) => "Luminance plane",
             Tip::Control(Control::Planes) => "Color planes",
             Tip::Control(Control::Log) => "Logarithmic counts",
+            Tip::Control(Control::Marks) => "Mark the clipped pixels",
             Tip::Control(Control::Reset) => "Reset the display",
             // Named rather than merely shown: a swatch of viridis is a green
             // rectangle that could be anything, and the map has a name people

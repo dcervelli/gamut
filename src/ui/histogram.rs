@@ -56,8 +56,11 @@ pub const SIZE: [f32; 2] = [
 /// the gap between it and the plot. Read by [`super::PANEL_WIDTH`], which is
 /// this and the plot, so that a bin stays exactly one logical pixel wide.
 pub(super) const TOOLBAR_WIDTH: f32 = BUTTON_SIZE + PANEL_INSET;
-/// Between one button of that strip and the next.
-const TOOLBAR_GAP: f32 = 8.0;
+/// Between one button of that strip and the next. Tighter than the gap the
+/// chrome's own strips keep, so that on a color image the four buttons
+/// beside the plot leave a gap between the last of them and the one beside
+/// the band — see [`marks_button`].
+const TOOLBAR_GAP: f32 = 6.0;
 
 /// The corner a toolbar button is drawn with, and what is left around its
 /// icon. The same as the chrome's toggles, which are the same size — and the
@@ -371,7 +374,9 @@ fn plot_area(panel: Rect, gray: bool) -> Rect {
     Rect::new(bars.x, bars.y, bars.width, PLOT_HEIGHT)
 }
 
-/// The buttons down the left, in the order they are stacked.
+/// The buttons down the left that act on the plot, in the order they are
+/// stacked beside it. The one beside the band is not among them — see
+/// [`marks_button`].
 ///
 /// A control that could not act is left out rather than drawn dead: an image
 /// with one channel has no color planes to toggle, and the two that remain
@@ -390,6 +395,24 @@ fn toolbar_button(panel: Rect, gray: bool, index: usize) -> Rect {
     Rect::new(
         panel.x + PANEL_INSET,
         plot_area(panel, gray).y - PLOT_INSET + index as f32 * (BUTTON_SIZE + TOOLBAR_GAP),
+        BUTTON_SIZE,
+        BUTTON_SIZE,
+    )
+}
+
+/// The button that marks the clipped pixels on the picture: at the foot of
+/// the strip, beside the band, and centered on it. Beside the band rather
+/// than in the stack above, because what it paints is the band's two ends —
+/// the pixels the window has taken to black and to white — and not anything
+/// about the plot; the stack is the plot's. It sits in the strip's one
+/// stretch of room that is not the stack's: on a color image the stack
+/// ends a gap above it, and the row of settings under the band begins a
+/// hair below it.
+fn marks_button(panel: Rect) -> Rect {
+    let band = ramp(bars(panel));
+    Rect::new(
+        panel.x + PANEL_INSET,
+        band.y + (band.height - BUTTON_SIZE) / 2.0,
         BUTTON_SIZE,
         BUTTON_SIZE,
     )
@@ -1256,7 +1279,9 @@ fn button(
 /// Drawn here rather than with the chrome's toggles because these belong to
 /// the panel: they say what the plot beside them is showing and what the band
 /// beneath them is painted with, and two of them are pictures of the very
-/// thing they switch.
+/// thing they switch. The one beside the band is about the picture rather
+/// than the plot — the marks on the clipped pixels — but what it marks is
+/// the band's two ends, and this is where those are looked at.
 fn controls(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, panel: Rect) -> Option<String> {
     let theme = pass.theme;
     let panels = pass.panels;
@@ -1324,6 +1349,28 @@ fn controls(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, panel: Rect) 
             // Back to the start.
             _ => icon::paint(painter, icon::ROTATE_CCW, square, ink, background),
         }
+    }
+
+    // The marks on the picture, beside the band whose ends they are: lit
+    // while they are on, a state to be left in as the plane toggles are.
+    // The warning sign, for what the display has thrown away.
+    {
+        let rect = marks_button(panel);
+        let (_, background, ink) = button(
+            pass,
+            ui,
+            rect,
+            Control::Marks,
+            panels.mark_clipped,
+            true,
+            TOGGLE_RADIUS,
+        );
+        let square = icon::square(
+            icon::Grid::new(ui.pixels_per_point()),
+            area(rect),
+            ICON_SIDE,
+        );
+        icon::paint(ui.painter(), icon::TRIANGLE_ALERT, square, ink, background);
     }
 
     let held = track(pass, ui, current, bars);
@@ -1930,6 +1977,37 @@ mod tests {
             assert!(ramp(bars).y >= bars.bottom(), "the band is under the plot");
             assert!(ramp(bars).bottom() <= panel.bottom());
         }
+    }
+
+    /// The button that marks the clipped pixels stands beside the band, in
+    /// the strip's own column and centered on the band, in the room between
+    /// the stack above and the rows below — clear of both, whatever the
+    /// stack holds, and clear of the black handle's grip beside it.
+    #[test]
+    fn the_marks_button_stands_beside_the_band() {
+        let panel = full_panel();
+        let button = marks_button(panel);
+        let band = ramp(bars(panel));
+
+        assert_eq!(button.x, toolbar_button(panel, false, 0).x, "in the strip");
+        assert_eq!(
+            button.y + button.height / 2.0,
+            band.y + band.height / 2.0,
+            "centered on the band"
+        );
+        for gray in [true, false] {
+            let last = toolbar_button(panel, gray, toolbar(gray).len() - 1);
+            assert!(
+                button.y >= last.bottom() + TOOLBAR_GAP,
+                "gray {gray}: {button:?} against the stack ending at {last:?}"
+            );
+        }
+        assert!(button.bottom() <= Rows::new(panel).exposure.y, "{button:?}");
+        assert!(
+            button.right() <= grip(band, band.x).x,
+            "{button:?} against the handle at {:?}",
+            grip(band, band.x)
+        );
     }
 
     /// The false colors take their room off the plot rather than off the

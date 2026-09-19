@@ -81,7 +81,7 @@ pub struct Scene<'a> {
     /// monitor in SDR mode has none, and the switch can turn it off.
     pub headroom: Headroom,
     /// Whether the pixels the window has taken to black or to white are
-    /// painted in the warning colors: on while the key for it is held, and
+    /// painted in the warning colors: a toggle of the interface, and
     /// nothing to do with the file, which is why it is not in `display`.
     pub mark_clipped: bool,
 }
