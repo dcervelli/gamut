@@ -11,18 +11,18 @@ Some features are obviously useful to everyone: high performance, effective pan/
 * Is the feature useful to a varied audience?
 * Is the feature something that is conceptually simple but would otherwise required specialized software to accomplish?
 * Is the feature's mere presence going to confuse a casual user?
+* Does the feature help decide if the image will be regenerated or sent to a more specialized app?
 
 ## Features
 
 - [Versatile Controls (Keyboard, UI, CLI)](#versatile-controls-keyboard-ui-cli)
 - [OS themed](#os-themed)
 - [Region selection/measurement](#region-selectionmeasurement)
-- [Copy image](#copy-image)
-- [Paste image](#paste-image)
+- [Copy/paste image](#copypaste-image)
 - [Pixel info](#pixel-info)
 - [Pixel grid](#pixel-grid)
 - [Single channel false color](#single-channel-false-color)
-- [Histogram and basic level manipulation](#histogram-and-basic-level-manipulation)
+- [Histogram](#histogram)
 - [HDR](#hdr)
 - [Fuzzy file navigation](#fuzzy-file-navigation)
 - [Animated/multi-image formats](#animatedmulti-image-formats)
@@ -56,15 +56,13 @@ This will make the window open centered and floating with a reasonable, dynamic 
 
 Select rectangular regions for measurement or copy. Pixel precision controls to move, grow, or shrink the region.
 
-### Copy image
+### Copy/paste image
 
 Images can be copied in a variety of useful ways:
 
 * As a filename, with or without the path.
 * As a file URI, for copy/paste in a file explorer.
 * As an image/png, for copy/paste as an image. Useful for Slack, etc. Copied images have the current settings applied.
-
-### Paste image
 
 Clipboard images can be pasted and saved to the standard pictures folder as `pasted_${date}.png`.
 
@@ -86,9 +84,13 @@ Grayscale, 16-bit and float single-channel images can be shown with various colo
 
 ![False color maps](user-docs/screenshots/false_color.gif)
 
-### Histogram and basic level manipulation
+### Histogram
 
-Luminance and per-channel histogram, with a linear or log count axis. Exposure in quarter stops, a window that slides and narrows, automatic windows (0–1, min/max, 99.8%), and tone mapping (none, Reinhard, neutral) for highlights above white. Nothing re-decodes; the histogram panel holds the controls.
+A dynamic histogram primarily for inspecting the content of the image. While you can make some adjustments to better understand the content of the image, it's not the intent of this program (as alluded to in the description above) to be a full-fledged image editor.
+
+![Histogram](user-docs/screenshots/histogram.gif)
+
+**Link to separate histogram docs**
 
 ### Fuzzy file navigation
 
