@@ -20,8 +20,8 @@
 //! [`Naming`]: super::control::Naming
 
 use egui::{
-    Frame, Label, LayerId, PopupAnchor, PopupCloseBehavior, PopupKind, RectAlign, RichText, pos2,
-    vec2,
+    Frame, Label, LayerId, PopupAnchor, PopupCloseBehavior, PopupKind, RectAlign, RichText,
+    layers::ShapeIdx, pos2, vec2,
 };
 
 use super::chrome::Pass;
@@ -75,8 +75,9 @@ const HEIGHT_MIN: f32 = info::INFO_MIN_HEIGHT;
 /// nothing, which egui refuses to lay out. egui has no notion of a layout
 /// that answers to its width; this is that notion, for this one table.
 const STACK_BELOW: f32 = 520.0;
-/// The hairline around the popup.
-const HAIRLINE: f32 = 1.0;
+/// The hairline around a popup: what `ui/style.rs` sets egui's
+/// `window_stroke` to, which the frame of every popup wears.
+pub(super) const HAIRLINE: f32 = 1.0;
 /// The key column's width — room for `Ctrl+Shift+Arrows` in the monospace
 /// face on one line — and the condition column's; what each does gets the
 /// rest of the line.
@@ -155,24 +156,13 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, content: Rect) {
         // panel's hairline under its header, which says the same: the
         // table runs on under here.
         if !stacked(width) {
-            // The band the headings sit on runs edge to edge of the popup
-            // and down to the hairline, inside the popup's own stroke;
-            // painted first, so that the headings and the hairline go
-            // over it.
-            let band = ui.painter().add(egui::Shape::Noop);
-            let frame = ui.max_rect().expand(MENU_PADDING).shrink(HAIRLINE);
+            // The band the headings sit on is painted first, so that the
+            // headings and the hairline go over it.
+            let shape = ui.painter().add(egui::Shape::Noop);
             headings(pass, ui, width);
             ui.add_space((HEADER_GAP - RULE_WIDTH) / 2.0);
             rule(pass, ui, width);
-            let rect = egui::Rect::from_min_max(frame.min, pos2(frame.max.x, ui.cursor().min.y));
-            let corners = egui::CornerRadius {
-                nw: (MENU_RADIUS - HAIRLINE) as u8,
-                ne: (MENU_RADIUS - HAIRLINE) as u8,
-                sw: 0,
-                se: 0,
-            };
-            ui.painter()
-                .set(band, egui::Shape::rect_filled(rect, corners, theme.heading));
+            band(pass, ui, shape, ui.max_rect(), ui.cursor().min.y);
             ui.add_space((HEADER_GAP - RULE_WIDTH) / 2.0);
         }
         // The bar down the popup's inner edge, in a gutter kept clear for
@@ -186,6 +176,28 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, content: Rect) {
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
             .show(ui, |ui| table(pass, ui, &sections, width));
     });
+}
+
+/// Paints the band a popup's headings sit on, into `shape`, set aside for
+/// it before they were laid out so that they go over it: from the top of
+/// the popup down to `bottom`, edge to edge inside the popup's own stroke
+/// and rounded to its corners. `inside` is the room the popup gives its
+/// contents, which the popup's frame stands [`MENU_PADDING`] out from.
+/// The menus with a name at their head — see `menu::titled` — wear the same
+/// band, so that a popup's heading is one thing wherever it is seen.
+pub(super) fn band(pass: &Pass, ui: &egui::Ui, shape: ShapeIdx, inside: egui::Rect, bottom: f32) {
+    let frame = inside.expand(MENU_PADDING).shrink(HAIRLINE);
+    let rect = egui::Rect::from_min_max(frame.min, pos2(frame.max.x, bottom));
+    let corners = egui::CornerRadius {
+        nw: (MENU_RADIUS - HAIRLINE) as u8,
+        ne: (MENU_RADIUS - HAIRLINE) as u8,
+        sw: 0,
+        se: 0,
+    };
+    ui.painter().set(
+        shape,
+        egui::Shape::rect_filled(rect, corners, pass.theme.heading),
+    );
 }
 
 /// How wide the table is in a popup `panel_width` wide: inside the

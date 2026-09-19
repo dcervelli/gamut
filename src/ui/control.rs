@@ -37,9 +37,9 @@ pub enum Control {
     /// The button under it, which opens the menu of the other programs that
     /// can open this file. Drawn dead where nothing offers to — see
     /// [`FrameInput::openers`](super::FrameInput::openers).
-    OpenWith,
+    OpenIn,
     /// An item of that menu, by its place in that list.
-    OpenIn(usize),
+    Opener(usize),
     /// The transport bar's buttons, on screen only for a file of frames or
     /// pages: play or pause, and one frame or page back or on. `Seek` is a
     /// press on the timeline, at a frame.
@@ -124,8 +124,8 @@ impl Control {
             Control::Next => "Next file".to_string(),
             Control::Minimap => "Minimap".to_string(),
             Control::Copy => "Copy".to_string(),
-            Control::OpenWith => "Open with".to_string(),
-            Control::OpenIn(index) => format!("Open in application {index}"),
+            Control::OpenIn => "Open in".to_string(),
+            Control::Opener(index) => format!("Open in application {index}"),
             Control::Play => "Play".to_string(),
             Control::StepBack => "Previous frame".to_string(),
             Control::StepForward => "Next frame".to_string(),
