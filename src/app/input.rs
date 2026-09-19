@@ -389,6 +389,7 @@ fn action_of(tip: Tip) -> Option<Action> {
         Tip::Control(Control::Luma) => ToggleLuma,
         Tip::Control(Control::Planes) => TogglePlanes,
         Tip::Control(Control::Log) => ToggleLogCounts,
+        Tip::Control(Control::Marks) => MarkClipped,
         Tip::Control(Control::Reset) => ResetDisplay,
         // Only the swatches that are actually on offer: an index past the
         // end is not a false color, and naming it after the key that cycles
@@ -1082,7 +1083,7 @@ pub const KEYS: &[Binding] = &[
         section: Section::Display,
         mods: PLAIN,
         shown: "w",
-        help: "Mark the clipped pixels while held: red at white, blue at black",
+        help: "Toggle the marks on the clipped pixels: red at white, blue at black",
         when: None,
         keys: &[(Char("w"), MarkClipped), (Char("W"), MarkClipped)],
     },
@@ -1371,10 +1372,6 @@ pub(super) struct Pointer {
     pub(super) grip: Option<Grip>,
     /// Where `Space` is: the one key that fits on its way up.
     pub(super) space: Space,
-    /// Whether the key that marks the clipped pixels is down. Held rather
-    /// than toggled, since the marks are a thing to glance at and not a
-    /// state to be left in; its repeats are the same press still going.
-    pub(super) marking: bool,
 }
 
 /// Where `Space` is. Held, a drag on the picture draws a box to zoom to,
@@ -1481,11 +1478,6 @@ impl App {
             return self.release_space();
         }
         if state == ElementState::Released {
-            // The marks on the clipped pixels come off with the key that put
-            // them on, whatever is held with it by then.
-            if action_for(key, position, self.pointer.modifiers) == Some(MarkClipped) {
-                return Effect::redraw_if(std::mem::take(&mut self.pointer.marking));
-            }
             return Effect::Nothing;
         }
         match action_for(key, position, self.pointer.modifiers) {
@@ -1523,7 +1515,6 @@ impl App {
     /// any more, and its release will go elsewhere.
     pub(super) fn keys_lost(&mut self) {
         self.pointer.space = Space::Up;
-        self.pointer.marking = false;
     }
 
     /// Does what a key asked for.
@@ -1705,11 +1696,7 @@ impl App {
                     true
                 });
             }
-            // On the way down; the way up is read in `handle_key`. A repeat
-            // of a key already held changes nothing.
-            MarkClipped => {
-                return Effect::redraw_if(!std::mem::replace(&mut self.pointer.marking, true));
-            }
+            MarkClipped => self.press(Control::Marks),
             CycleColormap => {
                 return self.adjust(|current, _| {
                     if !current.image.is_gray() {
@@ -2411,6 +2398,9 @@ impl App {
             // which is why the reset below leaves it alone: it is how the
             // measurement is being read, not what is being read.
             Control::Log => self.panels.log_counts = !self.panels.log_counts,
+            // Where `w` lands too, so that the key and the button beside
+            // the panel's band cannot come to mean different things.
+            Control::Marks => self.panels.mark_clipped = !self.panels.mark_clipped,
             // The action the key runs, rather than a second reading of what
             // "reset" means: two of them would answer differently the first
             // time either was touched, and a button and a key that disagree
@@ -2837,6 +2827,10 @@ mod tests {
             Some("Logarithmic counts (l)")
         );
         assert_eq!(
+            named(Control::Marks).as_deref(),
+            Some("Mark the clipped pixels (w)")
+        );
+        assert_eq!(
             named(Control::Reset).as_deref(),
             Some("Reset the display (z)")
         );
@@ -2884,6 +2878,7 @@ mod tests {
             Control::Luma,
             Control::Planes,
             Control::Log,
+            Control::Marks,
             Control::Reset,
             Control::Ramp(1),
             Control::Curve(1),

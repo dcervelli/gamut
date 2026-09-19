@@ -306,6 +306,40 @@ pub(super) const SPLINE: &[Mark] = &[
     },
 ];
 
+/// Lucide's `triangle-alert`: the sign that says something is wrong here,
+/// for the toggle that paints the pixels the display has thrown away. What
+/// every editor's clipping warning wears, so it needs no learning.
+///
+/// The triangle as Lucide draws it: three straight sides and three corners
+/// as arcs of one stroke's radius, since a triangle this narrow at the top
+/// comes to a spike if its apex is left sharp. The stem and the point of the
+/// exclamation mark stand on the middle line.
+pub(super) const TRIANGLE_ALERT: &[Mark] = &[
+    Mark::Line([13.73, 4.0], [21.73, 18.0]),
+    Mark::Arc {
+        at: [20.0, 19.0],
+        radius: 2.0,
+        start: -30.0,
+        sweep: 120.0,
+    },
+    Mark::Line([20.0, 21.0], [4.0, 21.0]),
+    Mark::Arc {
+        at: [4.0, 19.0],
+        radius: 2.0,
+        start: 90.0,
+        sweep: 120.0,
+    },
+    Mark::Line([2.27, 18.0], [10.27, 4.0]),
+    Mark::Arc {
+        at: [12.0, 5.0],
+        radius: 2.0,
+        start: 210.0,
+        sweep: 120.0,
+    },
+    Mark::Line([12.0, 9.0], [12.0, 13.0]),
+    Mark::Dot([12.0, 17.0]),
+];
+
 /// Lucide's `grid-3x3`: a frame with two lines each way through it, which is
 /// the smallest thing that reads as squares rather than as a hash.
 pub(super) const GRID_3X3: &[Mark] = &[

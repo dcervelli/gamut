@@ -160,6 +160,11 @@ pub struct Panels {
     /// what a photograph wants; on, a measurement's one dominating bin — a
     /// masked sea, the surround of a scan — stops flattening everything else.
     pub log_counts: bool,
+    /// Whether the pixels the window has taken to black or to white are
+    /// painted in the warning colors. A way of looking at the picture, like
+    /// the grid, rather than a setting of it: it stays on from one file to
+    /// the next, and no reset of the display touches it.
+    pub mark_clipped: bool,
     /// Whether the minimap is switched on. Whether it is actually on screen
     /// also asks whether there is anything off screen for it to point out —
     /// see [`FrameInput::minimap_on_screen`].
@@ -677,6 +682,7 @@ mod tests {
             show_luma: true,
             show_planes: true,
             log_counts: false,
+            mark_clipped: false,
             show_minimap: true,
             show_grid: false,
             paste: false,

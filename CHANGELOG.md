@@ -13,11 +13,11 @@ Notable changes to `gamut`. The format follows
   when it does anything. The same again, `Esc` or a click outside closes
   it.
 
-- `w`, held, marks the clipped pixels on the picture: red where every
-  channel has gone to white, blue where every channel has gone to black.
-  White is marked only where the surface is actually clipping it — no curve
-  on, and no room above white — since a highlight rolled off or shown is
-  not lost.
+- `w`, or the button beside the band under the histogram, marks the clipped
+  pixels on the picture: red where every channel has gone to white, blue
+  where every channel has gone to black. White is marked only where the
+  surface is actually clipping it — no curve on, and no room above white —
+  since a highlight rolled off or shown is not lost.
 
 - The info panel reads a file's XMP as well as its EXIF: the title, the
   caption, the keywords, the creator, the rights and the program that

@@ -243,7 +243,7 @@ that is not a paste; open it as an argument instead.
 | `S` | White point up |
 | `e` | Cycle the window rule: as stored (0–1) → full range → trimmed (the central 99.8%) |
 | `t` | Toggle the curve on the highlights: clip, or roll off |
-| `w` | While held, mark the clipped pixels: red where the picture has gone white, blue where it has gone black |
+| `w` | Mark the clipped pixels, or stop: red where the picture has gone white, blue where it has gone black |
 | `o` | Turn the room above white off and on, where the monitor is in HDR mode |
 | `r` | Cycle false color: gray → viridis → magma → turbo |
 | `z` | Reset every display setting |
@@ -278,9 +278,11 @@ the left, how much is at or above white on the right — and only when there
 is any, so a number there is news. Pointing at the plot names the value
 under the pointer, and what the display turns it into.
 
-Holding `w` paints the clipped pixels on the picture itself: red where every
-channel has gone to white, blue where every channel has gone to black. The
-corners of the plot count a channel at a time — a red flower blows its red
+`w`, or the button beside the band under the plot, paints the clipped
+pixels on the picture itself: red where every channel has gone to white,
+blue where every channel has gone to black. The marks stay on until pressed
+off again, from one file to the next, and no reset of the display touches
+them. The corners of the plot count a channel at a time — a red flower blows its red
 long before the rest — so the corner can say more than the paint shows; the
 paint is where the picture has gone flat, and the corner is where a channel
 has. Neither marks white where nothing is being clipped: on an HDR surface
@@ -527,7 +529,7 @@ region behind: it belongs to the picture it was drawn on.
 | Click the paste button | Paste the image on the clipboard, as `Ctrl+V` does |
 | Click the play, back or forward button under an animation | Play or pause it, or step a frame, as `Enter`, `N` and `n` do |
 | Click or drag along the timeline | Go to the frame under the pointer, and stop there |
-| Click a histogram button | Set the window on one of its rules, or choose the tone curve |
+| Click a histogram button | Set the window on one of its rules, choose the tone curve, or mark the clipped pixels on the picture |
 | Drag a handle on the histogram's band | Set the black point or the white point: the value that comes out black, or white |
 | Drag the band between the handles | Slide the window along the axis without changing its width |
 | Click or drag the exposure's slider | Set the exposure to the quarter stop under the pointer |
