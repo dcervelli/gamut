@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use super::{Overrides, frames, load, load_page, probe, sequence, supported_extensions};
 use crate::image::sequence::{Loops, Sequence};
-use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
+use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Referred, Samples};
 
 /// Center of each quadrant, in the order the expectation tables use.
 const PROBES: [(u32, u32); 4] = [(8, 6), (24, 6), (8, 18), (24, 18)];
@@ -460,7 +460,7 @@ const FIXTURES: &[Fixture] = &[
     },
     Fixture {
         file: "tiff-gray16.tif",
-        covers: "TIFF grayscale, 16-bit — guessed scene-referred",
+        covers: "TIFF grayscale, 16-bit — guessed a measurement",
         channels: Channels::Gray,
         kind: Kind::U16,
         color: LINEAR,
@@ -670,6 +670,30 @@ const FIXTURES: &[Fixture] = &[
     Fixture {
         file: "hdr-view-line.hdr",
         covers: "Radiance RGBE with a VIEW= line ahead of the signature, as Debevec's memorial.hdr has",
+        channels: Channels::Rgb,
+        kind: Kind::F32,
+        color: LINEAR,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Float,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: RGBE,
+    },
+    Fixture {
+        file: "hdr-exposure.hdr",
+        covers: "Radiance RGBE with EXPOSURE= lines, as pfilt leaves a picture scaled to be looked at",
+        channels: Channels::Rgb,
+        kind: Kind::F32,
+        color: LINEAR,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Float,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: RGBE,
+    },
+    Fixture {
+        file: "hdr-unit-exposure.hdr",
+        covers: "Radiance RGBE with EXPOSURE=1, as Blender wrote on every picture it saved",
         channels: Channels::Rgb,
         kind: Kind::F32,
         color: LINEAR,
@@ -1534,6 +1558,39 @@ fn every_fixture_decodes_to_what_it_says_it_does() {
 /// A preview is a courtesy, never a failure: every fixture answers the
 /// question, and the one format here that could carry one — a DNG — says
 /// it has none, since nothing but a camera writes one in.
+/// What the light is referred to follows from the curve, except where the
+/// format settles it: Radiance and OpenEXR carry nothing but light, in
+/// whatever scale it was made in, so a file of either is scene light to be
+/// metered — unless a Radiance picture states an exposure other than 1,
+/// which is `pfilt` saying it has already been scaled to be looked at, and
+/// the picture is then graded as far as this program is concerned and shown
+/// as stored. An exposure of 1, which Blender wrote on every picture, says
+/// nothing was done, and the picture is metered like one that says
+/// nothing. Every other linear fixture is a measurement, windowed to what it
+/// holds, and every curved one is display-referred. A raw is linear too,
+/// but developed: its white balance applied and 1.0 where the sensor
+/// saturates, which is as much of a white as a photograph states, so
+/// `decode::raw` says display-referred and the fixture table agrees.
+#[test]
+fn every_fixture_says_what_its_light_is_referred_to() {
+    for fixture in FIXTURES {
+        let path = directory().join(fixture.file);
+        let image = load(&path, Overrides::default())
+            .unwrap_or_else(|error| panic!("{}: {error:#}", fixture.file));
+        let extension = path.extension().and_then(|extension| extension.to_str());
+        let (referred, exposure) = match (extension, fixture.file) {
+            (_, "hdr-exposure.hdr") => (Referred::Display, Some(2.0)),
+            (_, "hdr-unit-exposure.hdr") => (Referred::Scene, Some(1.0)),
+            (Some("hdr") | Some("exr"), _) => (Referred::Scene, None),
+            (Some("dng"), _) => (Referred::Display, None),
+            _ => (Referred::of(image.color.transfer), None),
+        };
+        let name = format!("{} ({})", fixture.file, fixture.covers);
+        assert_eq!(image.referred, referred, "{name}");
+        assert_eq!(image.exposure, exposure, "{name}");
+    }
+}
+
 #[test]
 fn every_fixture_answers_for_its_preview() {
     for fixture in FIXTURES {

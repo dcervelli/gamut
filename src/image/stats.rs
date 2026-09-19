@@ -15,6 +15,24 @@ const MAX_SAMPLED_PIXELS: usize = 1 << 21;
 /// Number of color components a pixel carries, alpha aside.
 pub const COLOR: usize = 3;
 
+/// The share of the lit pixels left out at each end when the key of a scene
+/// is read: the darkest, so that a floor of near-nothing — a render's
+/// residue where a bounce all but died, a merge's darkest exposure divided
+/// out — does not pull the meter down by however much of the frame it
+/// covers, and the brightest, which are the light sources the curve is
+/// for. A meter reads the scene between them.
+const KEY_TRIM: f64 = 0.05;
+
+/// The bins the lit pixels' luminance is counted in for the key, in stops:
+/// every finite positive `f32` has a logarithm in `LOG_FLOOR..LOG_CEIL`,
+/// and [`LOG_BINS_PER_STOP`] of them to the stop is finer than any meter
+/// reads. Fixed rather than fitted to the picture so that the range pass
+/// can bin as it goes.
+const LOG_FLOOR: f32 = -150.0;
+const LOG_CEIL: f32 = 128.0;
+const LOG_BINS_PER_STOP: usize = 8;
+const LOG_BINS: usize = (LOG_CEIL - LOG_FLOOR) as usize * LOG_BINS_PER_STOP;
+
 /// The histogram the interface draws.
 ///
 /// Binned on the curve the file stores its samples with, rather than on the
@@ -31,8 +49,9 @@ pub const COLOR: usize = 3;
 /// The second is that the eye's response is close to the curve a
 /// display-referred file is encoded with, so plotting against it gives equal
 /// width to equal perceived steps: mid gray sits in the middle rather than a
-/// fifth of the way along. Scene-referred files store linear samples, so
-/// their plot stays linear, which is what measurement work wants.
+/// fifth of the way along. Linear files — scene light and measurements —
+/// store linear samples, so their plot stays linear, which is what
+/// measurement work wants.
 ///
 /// The axis follows the same split. A curved file is display-referred, so it
 /// spans the range such a file can hold — 0..1, widened by any over-range
@@ -173,6 +192,16 @@ pub struct Stats {
     /// Counts over `min..max`, in linear units, for percentiles.
     pub histogram: [u32; BINS],
     pub counted: u32,
+    /// The key of the scene, in the file's own units: the geometric mean of
+    /// the luminance — the mean of its logarithm, taken back out — over the
+    /// pixels that measured any light at all, less the darkest and the
+    /// brightest [`KEY_TRIM`] of them. What a meter puts at middle gray.
+    /// Pixels at zero are left out rather than floored: a render's black
+    /// background and the transparent surround of a premultiplied element
+    /// measured nothing, and a floor under them would set the exposure by
+    /// how much of the frame they cover. `None` where no pixel is above
+    /// zero.
+    pub key: Option<f32>,
     /// The same pixels binned for drawing. See [`Plot`] for why it is a
     /// second scan rather than the same one.
     pub plot: Plot,
@@ -209,11 +238,14 @@ impl Stats {
 
         let color = !channels.is_gray();
         let plotted = if color { COLOR } else { 1 };
+        let alpha = channels.alpha_index();
         let Range {
             min,
             max,
             axis_min,
             axis_max,
+            log_counts,
+            log_sums,
         } = values
             .bands(bands, |band| {
                 let mut range = Range::new(transfer);
@@ -222,6 +254,14 @@ impl Stats {
                     if is_data(value) {
                         range.min = range.min.min(value);
                         range.max = range.max.max(value);
+                        let lit = value > 0.0 && alpha.is_none_or(|index| encoded[index] > 0.0);
+                        if lit {
+                            let log = value.log2();
+                            let bin = ((log - LOG_FLOOR) * LOG_BINS_PER_STOP as f32) as usize;
+                            let bin = bin.min(LOG_BINS - 1);
+                            range.log_counts[bin] += 1;
+                            range.log_sums[bin] += f64::from(log);
+                        }
                     }
                     // The axis spans the channels that get plotted, in the
                     // units they are plotted in.
@@ -245,6 +285,7 @@ impl Stats {
                 max: 1.0,
                 histogram: [0; BINS],
                 counted: 0,
+                key: None,
                 plot: Plot::empty(),
             };
         }
@@ -309,11 +350,14 @@ impl Stats {
                 .fold(counts, Counts::merge);
         }
 
+        let key = trimmed_log_mean(&log_counts, &log_sums).map(|log| log.exp2() as f32);
+
         Self {
             min,
             max,
             histogram: counts.histogram,
             counted: counts.counted,
+            key,
             plot: Plot {
                 min: axis_min,
                 max: axis_max,
@@ -369,12 +413,18 @@ fn encode(transfer: Transfer, value: f32) -> f32 {
 
 /// What the first pass measures: the extremes of the luminance, in linear
 /// units, and of the plotted channels, in the file's own.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct Range {
     min: f32,
     max: f32,
     axis_min: f32,
     axis_max: f32,
+    /// The lit pixels' luminance binned by its logarithm, [`LOG_BINS`]
+    /// wide, and the logarithms themselves summed bin by bin — wide, since
+    /// two million of them are added up — so that the key can be read
+    /// between the two trims without a second walk. See [`Stats::key`].
+    log_counts: Vec<u32>,
+    log_sums: Vec<f64>,
 }
 
 impl Range {
@@ -392,6 +442,8 @@ impl Range {
             max: f32::NEG_INFINITY,
             axis_min,
             axis_max,
+            log_counts: vec![0; LOG_BINS],
+            log_sums: vec![0.0; LOG_BINS],
         }
     }
 
@@ -401,8 +453,52 @@ impl Range {
             max: self.max.max(other.max),
             axis_min: self.axis_min.min(other.axis_min),
             axis_max: self.axis_max.max(other.axis_max),
+            log_counts: self
+                .log_counts
+                .iter()
+                .zip(&other.log_counts)
+                .map(|(mine, theirs)| mine + theirs)
+                .collect(),
+            log_sums: self
+                .log_sums
+                .iter()
+                .zip(&other.log_sums)
+                .map(|(mine, theirs)| mine + theirs)
+                .collect(),
         }
     }
+}
+
+/// The mean of the binned logarithms between the two trims: the darkest
+/// [`KEY_TRIM`] of the pixels and the brightest are left out, by count, and
+/// a bin the trim falls inside contributes the share of itself that is
+/// kept, taken at the bin's own mean. `None` where nothing was lit.
+fn trimmed_log_mean(counts: &[u32], sums: &[f64]) -> Option<f64> {
+    let total: u64 = counts.iter().map(|&count| u64::from(count)).sum();
+    if total == 0 {
+        return None;
+    }
+    let total = total as f64;
+    let (keep_from, keep_to) = (total * KEY_TRIM, total * (1.0 - KEY_TRIM));
+    let mut below = 0.0;
+    let mut kept_sum = 0.0;
+    let mut kept_count = 0.0;
+    for (&count, &sum) in counts.iter().zip(sums) {
+        if count == 0 {
+            continue;
+        }
+        let count = f64::from(count);
+        let above = below + count;
+        let kept = (above.min(keep_to) - below.max(keep_from)).max(0.0);
+        if kept > 0.0 {
+            kept_sum += sum * (kept / count);
+            kept_count += kept;
+        }
+        below = above;
+    }
+    // The trims leave nine tenths of the pixels between them whatever the
+    // count, so there is always something kept.
+    Some(kept_sum / kept_count)
 }
 
 /// What the second pass counts: the bins of [`Stats`] and of its [`Plot`].
@@ -605,6 +701,7 @@ mod tests {
             color: ColorSpace::LINEAR_BT709,
             alpha: AlphaMode::Opaque,
             referred: Referred::Scene,
+            exposure: None,
             nodata: None,
         }
     }
@@ -618,6 +715,112 @@ mod tests {
         assert!(stats.min.abs() < 1e-6);
         assert!((stats.max - 4095.0 / 65535.0).abs() < 1e-5, "{}", stats.max);
         assert!(stats.max < 0.07);
+    }
+
+    /// The key of a scene is the geometric mean of its light, which is
+    /// what a meter reads: a dim room and one light meter to the room, and
+    /// the same room a thousand times brighter meters a thousand times
+    /// higher, so the meter's exposure comes out the same either way.
+    #[test]
+    fn the_key_is_the_geometric_mean_of_the_scene() {
+        // A room lit unevenly, with one light: a hundred pixels, so that
+        // the trims fall on whole ones — the darkest five and the
+        // brightest five, the light among them.
+        let mut room: Vec<f32> = (0..99).map(|i| 0.01 + 0.0004 * i as f32).collect();
+        room.push(50.0);
+        let key = Stats::scan(&linear_gray_f32(room.clone())).key.unwrap();
+        let mut sorted = room.clone();
+        sorted.sort_by(f32::total_cmp);
+        let expected = sorted[5..95].iter().map(|value| value.log2()).sum::<f32>() / 90.0;
+        assert!(
+            (key.log2() - expected).abs() < 0.07,
+            "{key} against {}",
+            expected.exp2()
+        );
+        assert!(key < 0.05, "the one light does not carry the meter: {key}");
+
+        let brighter: Vec<f32> = room.iter().map(|value| value * 1000.0).collect();
+        let brighter = Stats::scan(&linear_gray_f32(brighter)).key.unwrap();
+        assert!(
+            ((brighter / key).log2() - 1000f32.log2()).abs() < 0.02,
+            "{brighter}"
+        );
+    }
+
+    /// A floor of near-nothing under part of the frame — a render's residue
+    /// where a bounce all but died — is not the scene, and a meter that
+    /// averaged it in would open the picture stops too bright. The darkest
+    /// few percent are left out, as are the brightest, so a light source
+    /// is not the scene either.
+    #[test]
+    fn the_key_leaves_out_the_floor_and_the_lights() {
+        let mut room = vec![0.1; 96];
+        room.extend([1e-7; 4]);
+        let key = Stats::scan(&linear_gray_f32(room)).key.unwrap();
+        assert!((key - 0.1).abs() < 0.01, "{key}");
+
+        let mut room = vec![0.1; 96];
+        room.extend([1e5; 4]);
+        let key = Stats::scan(&linear_gray_f32(room)).key.unwrap();
+        assert!((key - 0.1).abs() < 0.01, "{key}");
+
+        // A picture so small that the trims leave nothing is metered on
+        // all of it.
+        let key = Stats::scan(&linear_gray_f32(vec![0.02, 8.0])).key.unwrap();
+        assert!((key - 0.4).abs() < 0.02, "{key}");
+    }
+
+    /// Pixels that measured nothing are not part of the key: a render's
+    /// black background, or the transparent surround of a premultiplied
+    /// element, would otherwise set the exposure by how much of the frame
+    /// they cover. Where nothing at all is lit there is no key.
+    #[test]
+    fn the_key_leaves_out_pixels_that_measured_nothing() {
+        let lit = Stats::scan(&linear_gray_f32(vec![0.5; 4])).key.unwrap();
+        let mut over_black = vec![0.0; 12];
+        over_black.extend([0.5; 4]);
+        let with_black = Stats::scan(&linear_gray_f32(over_black)).key.unwrap();
+        assert!(
+            (with_black - lit).abs() < 1e-6,
+            "{with_black} against {lit}"
+        );
+
+        // Premultiplied RGBA: three transparent pixels and one lit one.
+        let mut data = vec![0.0; 12];
+        data.extend([0.5, 0.5, 0.5, 1.0]);
+        let element = DecodedImage {
+            width: 4,
+            height: 1,
+            samples: Samples::F32 {
+                channels: Channels::Rgba,
+                data,
+            },
+            color: ColorSpace::LINEAR_BT709,
+            alpha: AlphaMode::Premultiplied,
+            referred: Referred::Scene,
+            exposure: None,
+            nodata: None,
+        };
+        let key = Stats::scan(&element).key.unwrap();
+        assert!((key - 0.5).abs() < 1e-6, "{key}");
+
+        assert_eq!(Stats::scan(&linear_gray_f32(vec![0.0; 4])).key, None);
+    }
+
+    fn linear_gray_f32(data: Vec<f32>) -> DecodedImage {
+        DecodedImage {
+            width: data.len() as u32,
+            height: 1,
+            samples: Samples::F32 {
+                channels: Channels::Gray,
+                data,
+            },
+            color: ColorSpace::LINEAR_BT709,
+            alpha: AlphaMode::Opaque,
+            referred: Referred::Scene,
+            exposure: None,
+            nodata: None,
+        }
     }
 
     #[test]
@@ -683,6 +886,7 @@ mod tests {
             color: ColorSpace::SRGB,
             alpha: AlphaMode::Opaque,
             referred: Referred::Display,
+            exposure: None,
             nodata: None,
         };
 
@@ -730,6 +934,7 @@ mod tests {
             },
             alpha: AlphaMode::Premultiplied,
             referred: Referred::Display,
+            exposure: None,
             nodata: None,
         };
         let plot = Stats::scan(&image).plot;
@@ -771,6 +976,7 @@ mod tests {
             color: ColorSpace::LINEAR_BT709,
             alpha: AlphaMode::Opaque,
             referred: Referred::Scene,
+            exposure: None,
             nodata: None,
         };
         // BT.709 luminance weights green at 0.7152.
@@ -788,6 +994,7 @@ mod tests {
             color: ColorSpace::LINEAR_BT709,
             alpha: AlphaMode::Opaque,
             referred: Referred::Scene,
+            exposure: None,
             nodata: None,
         }
     }
@@ -877,6 +1084,7 @@ mod tests {
             },
             alpha: AlphaMode::Opaque,
             referred: Referred::Display,
+            exposure: None,
             nodata: None,
         }
     }
@@ -980,6 +1188,7 @@ mod tests {
             color: ColorSpace::LINEAR_BT709,
             alpha: AlphaMode::Opaque,
             referred: Referred::Scene,
+            exposure: None,
             nodata: None,
         };
         let stats = Stats::scan(&image);

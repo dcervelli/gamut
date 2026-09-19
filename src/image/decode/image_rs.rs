@@ -64,9 +64,13 @@ use ::image::codecs::hdr::HdrDecoder;
 use ::image::{AnimationDecoder, DynamicImage, ImageDecoder, ImageFormat};
 
 use crate::image::sequence::{Frame, FrameSource, Loops, Sequence, gif_delay};
-use crate::image::{ColorSpace, DecodedImage};
+use crate::image::{ColorSpace, DecodedImage, Referred};
 
 use super::{Overrides, ReadSeek, dynamic};
+
+/// The exposures a Radiance picture can state and have been scaled by
+/// nothing: `pfilt`'s own tolerance, inside which it writes no line at all.
+const UNSCALED: std::ops::RangeInclusive<f32> = 0.98..=1.02;
 
 /// The smallest DIB header a BMP can carry, and the largest anything writes.
 /// A file claiming less is malformed; one claiming wildly more is not a BMP
@@ -108,9 +112,29 @@ impl super::Decoder for ImageRs {
             decoder
                 .set_limits(dynamic::limits())
                 .context("reading the Radiance header")?;
+            let exposure = decoder.metadata().exposure;
             let decoded =
                 DynamicImage::from_decoder(decoder).context("decoding the Radiance picture")?;
-            return dynamic::describe(decoded, Some(ImageFormat::Hdr), ColorSpace::SRGB);
+            let mut image = dynamic::describe(decoded, Some(ImageFormat::Hdr), ColorSpace::SRGB)?;
+            // `EXPOSURE=` is what `pfilt` writes once it has scaled the
+            // picture to be looked at: the multiplier already applied, every
+            // line multiplied in. A picture that carries one has been given
+            // its white, and is shown as stored, the way `ximage` shows it;
+            // one that does not — `rpict`'s own output, a light probe, a
+            // merge of exposures — is in whatever scale it was made in, and
+            // is metered. So is one whose line says nothing was done:
+            // `pfilt` leaves the line out within two percent of 1, and
+            // Blender's own writer put `EXPOSURE=1` on every picture it
+            // saved, none of them scaled for anything.
+            if let Some(exposure) =
+                exposure.filter(|exposure| exposure.is_finite() && *exposure > 0.0)
+            {
+                image.exposure = Some(exposure);
+                if !UNSCALED.contains(&exposure) {
+                    image.referred = Referred::Display;
+                }
+            }
+            return Ok(image);
         }
         let mut reader = ::image::ImageReader::new(BufReader::new(source)).with_guessed_format()?;
         dynamic::limit(&mut reader);
