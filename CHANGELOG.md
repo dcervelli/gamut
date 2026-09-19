@@ -88,6 +88,9 @@ Notable changes to `gamut`. The format follows
   included — opens on the trimmed window as before, and the info panel's
   *Referred to* line now says which of the three a file is.
 
+- The menu of copies and the menu of other applications are headed — `Copy`
+  and `Open in…` — on the band the help popup's column headings sit on.
+
 - `Ctrl+P` does nothing with a single file on the list, as the count it
   stands beside is not shown for one: there is nothing to choose.
 
