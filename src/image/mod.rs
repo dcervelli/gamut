@@ -255,10 +255,13 @@ pub struct DecodedImage {
     /// The multiplier the file says has already been applied to its values,
     /// where a format has a place to say it: Radiance's `EXPOSURE=` lines,
     /// multiplied together, which `pfilt` writes once it has scaled a
-    /// picture to be looked at. A file that states one has had its white
-    /// put where it is by whoever wrote the line, so it is display-referred
-    /// and opens as stored; the number itself is for the information panel,
-    /// and for anyone wanting the physical units back.
+    /// picture to be looked at. A file that states one other than 1 has
+    /// had its white put where it is by whoever wrote the line, so it is
+    /// display-referred and opens as stored; one that states 1 — which
+    /// Blender wrote on every picture — has been scaled by nothing and is
+    /// scene light like a file that says nothing. The number itself is for
+    /// the information panel, and for anyone wanting the physical units
+    /// back.
     pub exposure: Option<f32>,
     /// The value standing in for "no measurement here". Elevation models use
     /// -9999 and similar sentinels, which would otherwise dominate the

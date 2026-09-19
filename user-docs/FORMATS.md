@@ -373,9 +373,11 @@ the exposure set to put the bulk of the light at middle gray, shown in stops
 on the histogram panel's slider, with the neutral tone map (`t`) rolling
 off whatever that leaves above white. `--exposure` sets the exposure
 instead, and `d`/`f` push it from wherever it opened. A picture whose header
-states an `EXPOSURE=` — as Radiance's own tools write after scaling a
-picture for viewing — has already been given its white, and opens as stored
-at 0–1; the info panel shows the multiplier.
+states an `EXPOSURE=` other than 1 — as Radiance's own tools write after
+scaling a picture for viewing — has already been given its white, and opens
+as stored at 0–1; the info panel shows the multiplier. An `EXPOSURE=1`,
+which Blender wrote on every picture it saved, says nothing was done, and
+the picture opens metered like one that says nothing.
 
 ## Camera raw
 
@@ -440,7 +442,9 @@ slider for `d`/`f` or `--exposure` to move on from. A render whose mid-gray
 already sits near 0.18 opens within a fraction of a stop of untouched; one
 in arbitrary units opens looking the same as it would in any other. Pixels
 that are transparent, or black, do not count toward the meter, so an
-element rendered over nothing is exposed for the element.
+element rendered over nothing is exposed for the element; nor do the
+darkest and the brightest few percent of the rest, so a noise floor in the
+shadows and the light sources themselves do not carry it either.
 
 The limits are worth knowing before reaching for EXR as a data container:
 

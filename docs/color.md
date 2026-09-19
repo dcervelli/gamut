@@ -60,14 +60,26 @@ transfer function decides it unless a decoder knows better:
   window to the percentile puts 97% of the picture in the bottom code. It is
   **metered** instead, the way a camera exposes a scene: the window stays
   0..1 in the file's own units and the exposure is set so that the key of
-  the scene — the geometric mean of its light, `Stats::log_mean` — lands at
-  middle gray, `display::MIDDLE_GRAY`, 0.18. What that leaves above white is
-  the tone curve's, as on a graded HDR picture. The meter is on the exposure
-  rather than the window because that is what it is: the panel's two dials
-  stay two, the slider shows the decision in stops, and `d`/`f` and
-  `--exposure` move on from it. A Radiance picture that states `EXPOSURE=`
-  has been scaled to be looked at already — `pfilt` writes the line after
-  scaling — and is display-referred, opening as stored.
+  the scene — the geometric mean of its light, `Stats::key` — lands at
+  middle gray, `display::MIDDLE_GRAY`, 0.18. The key is read between two
+  trims, `stats::KEY_TRIM`, the darkest and the brightest five percent of
+  the lit pixels left out: the brightest are the light sources, which are
+  the curve's, and the darkest can be a floor of near-nothing — a render's
+  residue where a bounce all but died — that would pull the geometric mean
+  down by however much of the frame it covers, since a pixel twenty stops
+  under the key weighs twenty stops in the mean. Pixels at zero, and
+  transparent ones, are not lit at all and are left out before the trims.
+  What the meter leaves above white is the tone curve's, as on a graded
+  HDR picture. The meter is on the exposure rather than the window because
+  that is what it is: the panel's two dials stay two, the slider shows the
+  decision in stops, and `d`/`f` and `--exposure` move on from it; a window
+  rule asked for on the command line takes the meter's place, since it has
+  put the scene's own range at 0..1 already. A Radiance picture that states
+  an `EXPOSURE=` other than 1 has been scaled to be looked at already —
+  `pfilt` writes the line after scaling, and writes none within two percent
+  of 1 — and is display-referred, opening as stored. `EXPOSURE=1`, which
+  Blender's own writer put on every picture it saved, says nothing was
+  done, and the picture is metered like one that says nothing.
 - **Measured** (every other linear file: 16-bit and float TIFF, a
   linear-declared PNG or JPEG XL, sensor counts) may not be light at all —
   an elevation model, a mask, a temperature grid — so neither a white nor a

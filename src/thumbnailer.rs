@@ -480,15 +480,19 @@ fn make(
         guard("decoding", || decode::load(path, overrides))
     };
     let made = made.and_then(|image| {
+        // Windowed and metered as the viewer would open it — a scene or a
+        // measurement shown with `Display::default` is black — from the
+        // picture itself, which is what the viewer scans: the box filter
+        // averages a hot pixel into its block and lifts a shadow's
+        // geometric mean, so a window or a meter read off the small image
+        // would not be the viewer's. The scan samples at most two million
+        // pixels whatever the picture, and allocates nothing but its bins.
+        let stats = guard("scanning", || Ok(Stats::scan(&image)))?;
         let small = resample::downscale(&image, thumbnail::SIDE);
         drop(image);
         if canceled.load(Ordering::Relaxed) {
             return Err(anyhow!("stopped"));
         }
-        // Windowed and metered as the viewer would open it — a scene or
-        // a measurement shown with `Display::default` is black — on the
-        // small image, where the scan and the walk are cheap.
-        let stats = guard("scanning", || Ok(Stats::scan(&small)))?;
         let display = Display::for_image_with(&small, &stats, Startup::default(), Headroom::None);
         let raster = encode::displayed_on(
             &small,

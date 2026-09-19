@@ -428,12 +428,15 @@ impl Display {
     /// spread over more stops than a surface has; no window fits them, and
     /// the one a percentile finds is sized for the light sources, which
     /// leaves everything else black. A meter exposes for the bulk of the
-    /// light instead: the key of the scene, [`Stats::log_mean`], is put at
+    /// light instead: the key of the scene, [`Stats::key`], is put at
     /// [`MIDDLE_GRAY`], and what that leaves above white is the curve's.
     /// The window stays 0..1 in the file's own units and the meter's
     /// decision goes on the exposure, in stops, where the slider shows it
     /// and `d`/`f` nudge it — the same two dials the panel has for every
-    /// file, and a metered file opens with one of them already turned.
+    /// file, and a metered file opens with one of them already turned. A
+    /// window rule asked for on the command line takes the meter's place:
+    /// it has already put the scene's own range at 0..1, and an exposure
+    /// pushed on top of that would open the picture stops too bright.
     ///
     /// The tone curve follows from the window and the exposure rather than
     /// from the file: a curve exists to fit values above white into a
@@ -467,7 +470,7 @@ impl Display {
             display.auto = auto;
             display.apply_auto(stats);
         }
-        if image.referred == Referred::Scene {
+        if image.referred == Referred::Scene && display.auto == AutoWindow::Off {
             display.exposure_stops = Self::metered(stats);
         }
         display.adopt(headroom, stats);
@@ -491,7 +494,7 @@ impl Display {
     /// key at [`MIDDLE_GRAY`]. Zero where nothing was lit, and never past
     /// the slider's ends.
     fn metered(stats: &Stats) -> f32 {
-        match stats.log_mean {
+        match stats.key {
             Some(key) if key > 0.0 => {
                 let stops = (MIDDLE_GRAY / key).log2();
                 stops.clamp(-EXPOSURE_LIMIT, EXPOSURE_LIMIT)
@@ -926,7 +929,7 @@ mod tests {
     /// been graded, so touching its window would be second-guessing whoever
     /// made it; sensor counts have not, and showing them raw is a black frame.
     #[test]
-    fn display_referred_images_are_left_alone_and_scene_referred_are_stretched() {
+    fn display_referred_images_are_left_alone_and_measurements_are_stretched() {
         let photographic = gray(vec![0, 1000, 4095], Transfer::Srgb);
         let display = Display::for_image_with(
             &photographic,
@@ -1532,6 +1535,20 @@ mod tests {
         moved.adjust_exposure(3.0);
         moved.reset(&Stats::scan(&scene), &scene, Headroom::None);
         assert_eq!(moved.exposure_stops, display.exposure_stops);
+
+        // A window rule asked for at startup has put the scene's range at
+        // 0..1 already; the meter would only push it past white.
+        let windowed = Display::for_image_with(
+            &scene,
+            &Stats::scan(&scene),
+            Startup {
+                auto: Some(AutoWindow::Percentile),
+                ..Startup::default()
+            },
+            Headroom::None,
+        );
+        assert_eq!(windowed.auto, AutoWindow::Percentile);
+        assert_eq!(windowed.exposure_stops, 0.0);
     }
 
     /// A scene with nothing lit, or one that would want more than the slider

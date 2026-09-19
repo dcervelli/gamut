@@ -82,9 +82,9 @@ Notable changes to `gamut`. The format follows
   on the trimmed window, which on a scene with bright light sources — a
   sunlit window, a lamp — put white at the light and left the rest of the
   picture black; Debevec's memorial church opened with 97% of its pixels in
-  the bottom code. A Radiance picture whose header states `EXPOSURE=` has
-  already been scaled for viewing and opens as stored; the info panel shows
-  the multiplier. Every other linear file — 16-bit and floating-point TIFF
+  the bottom code. A Radiance picture whose header states an `EXPOSURE=`
+  other than 1 has already been scaled for viewing and opens as stored; the
+  info panel shows the multiplier. Every other linear file — 16-bit and floating-point TIFF
   included — opens on the trimmed window as before, and the info panel's
   *Referred to* line now says which of the three a file is.
 

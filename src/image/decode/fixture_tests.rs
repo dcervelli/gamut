@@ -691,6 +691,18 @@ const FIXTURES: &[Fixture] = &[
         nodata: None,
         tolerance: RGBE,
     },
+    Fixture {
+        file: "hdr-unit-exposure.hdr",
+        covers: "Radiance RGBE with EXPOSURE=1, as Blender wrote on every picture it saved",
+        channels: Channels::Rgb,
+        kind: Kind::F32,
+        color: LINEAR,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Float,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: RGBE,
+    },
     // --------------------------------------------------------- OpenEXR
     Fixture {
         file: "exr-rgb.exr",
@@ -1549,10 +1561,12 @@ fn every_fixture_decodes_to_what_it_says_it_does() {
 /// What the light is referred to follows from the curve, except where the
 /// format settles it: Radiance and OpenEXR carry nothing but light, in
 /// whatever scale it was made in, so a file of either is scene light to be
-/// metered — unless a Radiance picture states its exposure, which is
-/// `pfilt` saying it has already been scaled to be looked at, and the
-/// picture is then graded as far as this program is concerned and shown as
-/// stored. Every other linear fixture is a measurement, windowed to what it
+/// metered — unless a Radiance picture states an exposure other than 1,
+/// which is `pfilt` saying it has already been scaled to be looked at, and
+/// the picture is then graded as far as this program is concerned and shown
+/// as stored. An exposure of 1, which Blender wrote on every picture, says
+/// nothing was done, and the picture is metered like one that says
+/// nothing. Every other linear fixture is a measurement, windowed to what it
 /// holds, and every curved one is display-referred. A raw is linear too,
 /// but developed: its white balance applied and 1.0 where the sensor
 /// saturates, which is as much of a white as a photograph states, so
@@ -1566,6 +1580,7 @@ fn every_fixture_says_what_its_light_is_referred_to() {
         let extension = path.extension().and_then(|extension| extension.to_str());
         let (referred, exposure) = match (extension, fixture.file) {
             (_, "hdr-exposure.hdr") => (Referred::Display, Some(2.0)),
+            (_, "hdr-unit-exposure.hdr") => (Referred::Scene, Some(1.0)),
             (Some("hdr") | Some("exr"), _) => (Referred::Scene, None),
             (Some("dng"), _) => (Referred::Display, None),
             _ => (Referred::of(image.color.transfer), None),
