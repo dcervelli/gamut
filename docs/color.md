@@ -38,25 +38,59 @@ more than the GPU's own `write_texture` of the result, and the widened buffer
 is zero-allocated rather than filled so that its pages are first touched by
 the threads writing them rather than by a fill on one.
 
-## Display-referred and scene-referred
+## Display-referred, scene-referred, and measured
 
-Everything about how a file opens follows from one fact about it: whether its
-numbers, once they are linear light, have a **reference white**.
-`DecodedImage::referred` says which, and the transfer function decides it
-unless a decoder knows better:
+Everything about how a file opens follows from one fact about it: what its
+numbers, once they are linear light, are referred to — a **reference
+white**, a scene, or nothing. `DecodedImage::referred` says which, and the
+transfer function decides it unless a decoder knows better:
 
-- **Display-referred** (sRGB, gamma, PQ, HLG, and a JPEG with its gain map
-  applied) has been graded by whoever made it. 1.0 is white, and anything
-  above it is the highlights they put there on purpose. The window stays at
-  0..1; touching it would second-guess them, and for the HDR curves it would
-  move white to wherever the frame's brightest pixel happens to be,
-  differently for every frame of a sequence.
-- **Scene-referred** (linear: sensor counts, EXR, Radiance, float TIFF) has
-  no white. It gets the trimmed window (`AutoWindow::Percentile`, the central
-  99.8%), because 12-bit data in a 16-bit container occupies a sixteenth of
-  the nominal range and shows as a black rectangle otherwise. The full range
-  is a stop on the `e` cycle rather than a default, since one hot pixel is
-  enough to ruin it.
+- **Display-referred** (sRGB, gamma, PQ, HLG, a JPEG with its gain map
+  applied, a developed raw) has been graded by whoever made it. 1.0 is
+  white, and anything above it is the highlights they put there on purpose.
+  The window stays at 0..1; touching it would second-guess them, and for the
+  HDR curves it would move white to wherever the frame's brightest pixel
+  happens to be, differently for every frame of a sequence.
+- **Scene-referred** (Radiance and OpenEXR, the two formats that carry
+  nothing but light) has no white but is light all the same: a render, a
+  light probe, a plate, a merge of exposures, in a renderer's units or in
+  cd/m², and spread over more stops than a surface has. No window fits it,
+  and the trimmed one is sized for the light sources — Debevec's memorial
+  church has a median luminance of 0.03 and a 99.9th percentile of 40, so a
+  window to the percentile puts 97% of the picture in the bottom code. It is
+  **metered** instead, the way a camera exposes a scene: the window stays
+  0..1 in the file's own units and the exposure is set so that the key of
+  the scene — the geometric mean of its light, `Stats::key` — lands at
+  middle gray, `display::MIDDLE_GRAY`, 0.18. The key is read between two
+  trims, `stats::KEY_TRIM`, the darkest and the brightest five percent of
+  the lit pixels left out: the brightest are the light sources, which are
+  the curve's, and the darkest can be a floor of near-nothing — a render's
+  residue where a bounce all but died — that would pull the geometric mean
+  down by however much of the frame it covers, since a pixel twenty stops
+  under the key weighs twenty stops in the mean. Pixels at zero, and
+  transparent ones, are not lit at all and are left out before the trims.
+  What the meter leaves above white is the tone curve's, as on a graded
+  HDR picture. The meter is on the exposure rather than the window because
+  that is what it is: the panel's two dials stay two, the slider shows the
+  decision in stops, and `d`/`f` and `--exposure` move on from it; a window
+  rule asked for on the command line takes the meter's place, since it has
+  put the scene's own range at 0..1 already. A Radiance picture that states
+  an `EXPOSURE=` other than 1 has been scaled to be looked at already —
+  `pfilt` writes the line after scaling, and writes none within two percent
+  of 1 — and is display-referred, opening as stored. `EXPOSURE=1`, which
+  Blender's own writer put on every picture it saved, says nothing was
+  done, and the picture is metered like one that says nothing.
+- **Measured** (every other linear file: 16-bit and float TIFF, a
+  linear-declared PNG or JPEG XL, sensor counts) may not be light at all —
+  an elevation model, a mask, a temperature grid — so neither a white nor a
+  middle gray means anything for it. It gets the trimmed window
+  (`AutoWindow::Percentile`, the central 99.8%), because 12-bit data in a
+  16-bit container occupies a sixteenth of the nominal range and shows as a
+  black rectangle otherwise. The full range is a stop on the `e` cycle
+  rather than a default, since one hot pixel is enough to ruin it. Linear is
+  taken as measured by default: it is the safe reading of numbers nobody
+  has vouched for, and only a decoder that knows its format carries light
+  says otherwise.
 
 `--transfer linear|srgb|pq|hlg|gamma:N` overrides the guess, which matters
 most for TIFF: the same container carries scanned photographs and frames of
