@@ -1,7 +1,6 @@
 # Roadmap
 
 ## TODO
-* More intelligent auto-window sizing
 * Screenshot
   * Desktop/shell integration
   * Move other sections under screenshotted ones
@@ -18,6 +17,8 @@
 * File sort
 * RGBA channel toggle
 * Basic annotations
+* >2^15 px images
+* Persistent settings
 
 ## Improve
 * Copy region handle

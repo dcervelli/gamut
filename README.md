@@ -1,21 +1,24 @@
 # gamut
 
-A modern Linux image viewer optimized for getting work done, fast.
+A modern Linux image viewer optimized for getting work done, fast. Modern technology like [native GPU performance, fast decoding](#high-performance), [color management](#color-management), [HDR](#hdr), and [fuzzy file picking](#fuzzy-file-navigation) combined with [features](#features) to quickly accomplish a wide range of image related tasks in a [themed](#os-themed) [keyboard or mouse driven UI](#versatile-controls-keyboard-ui-cli).
 
-![Main screenshot](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/main_screenshot.jpg)
+![Main gamut screenshot](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/main_screenshot.jpg)
 
-A modern image viewer has to serve many audiences: casual user, photographer, data scientist, programmer, designer, game developer, GIS analyst, etc.
+## What goes in an image viewer?
+
+A modern image viewer serves many audiences: photographer, data scientist, programmer, designer, game developer, GIS analyst, and, of course, the casual user.
 
 Some features are obviously useful to everyone: high performance, effective pan/zoom controls, copy/paste, etc. It's more difficult to decide if a feature exceeds the bar for inclusion. We consider questions like these:
 
 * Is the feature useful to a varied audience?
 * Is the feature something that is conceptually simple but would otherwise required specialized software to accomplish?
 * Is the feature's mere presence going to confuse a casual user?
-* Does the feature help decide if the image will be regenerated or sent to a more specialized app?
+* Does the feature help a user *act* on or *decide* about an image?
 
 ## Features
 
-- [Versatile Controls (Keyboard, UI, CLI)](#versatile-controls-keyboard-ui-cli)
+- [High performance](#high-performance)
+- [Versatile controls (Keyboard, UI, CLI)](#versatile-controls-keyboard-ui-cli)
 - [OS themed](#os-themed)
 - [Region selection/measurement](#region-selectionmeasurement)
 - [Copy/paste image](#copypaste-image)
@@ -30,13 +33,14 @@ Some features are obviously useful to everyone: high performance, effective pan/
 - [File comparison](#file-comparison)
 - [File/directory watch](#filedirectory-watch)
 - [Metadata/EXIF extraction](#metadataexif-extraction)
-- [Many formats](#many-formats)
-- [Fast GPU display](#fast-gpu-display)
 - [Desktop/shell integration](#desktopshell-integration)
+- [Many formats](#many-formats)
 
 ### Versatile Controls (Keyboard, UI, CLI)
 
 All features can be keyboard driven but the hideable UI also contains discoverable controls with tooltips to learn the keyboard shortcuts. Controls can also be set via CLI flags.
+
+![UI controls](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/ui.gif)
 
 ### OS themed
 
@@ -141,13 +145,19 @@ Get file, image, EXIF, XMP, georeference, and other metadata. Easily copy all, b
 ### Many formats
 PNG, JPEG (with gain maps), JPEG XL, TIFF and BigTIFF, WebP, HEIF (HEIC and AVIF), GIF, ICO, BMP, netpbm, Radiance HDR and OpenEXR. More details in [`user-docs/FORMATS.md`](user-docs/FORMATS.md).
 
+Feel free to submit a PR or open an issue for additional file formats.
+
 ### High performance
 
 All rendering is done on GPU and maintains full frame rate. Decoding and statistics generation is parallelized in background threads.
 
 ### Desktop/shell integration
 
-Registers as a handler for every format it reads, so it appears in file managers' "Open With" lists, and its own open button offers every other installed program that claims the file's type, read from the desktop's own MIME index. Ships a man page and bash, fish and zsh completions. Thumbnails are shared with the file manager through the freedesktop cache.
+* [Registers as a handler](packaging/com.dcervelli.gamut.desktop) for all formats it reads as well as directories;
+* man page;
+* bash, fish, and zsh completions;
+* "Open in…" menu:
+![Open in… menu](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/open_in.jpg)
 
 ## Install
 
