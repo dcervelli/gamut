@@ -91,7 +91,7 @@ thumbnail.rs   the freedesktop thumbnail cache: the GLib-spelled URI a file is k
 fuzzy.rs       the chooser's matcher behind a trait with skim's own signature; the
                one file that names the fuzzy-matcher crate
 watch.rs       polling a file — or a directory — for a settled change
-monitor.rs     what the compositor says each monitor is in, SDR or HDR, over a Wayland connection of its own
+monitor.rs     what the compositor says each monitor is, SDR or HDR and how large in logical pixels, over a Wayland connection of its own
 clipboard.rs   putting text or a file: URI on the clipboard, in a process that outlives
                the window; and reading a pasted picture off it
 pasted.rs      where a pasted picture is written and what it is called: the

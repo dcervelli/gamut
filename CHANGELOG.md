@@ -6,6 +6,18 @@ Notable changes to `gamut`. The format follows
 
 ## Unreleased
 
+### Fixed
+
+- The window opens at the picture's own size on a monitor at a fractional
+  scale. Wayland gives a monitor's scale as a whole number until a window
+  has a surface, so on one running 1.6 the size was worked out at 2, and a
+  picture that should have opened at 100% opened at 80% — and the room the
+  window was held inside was undercounted the same way, so a large picture
+  opened smaller than it needed to. The true scale is now read from the
+  compositor's `xdg_output` account of each monitor, on the connection that
+  already reads its mode; where a compositor lacks the protocol the old
+  reckoning stands.
+
 ### Changed
 
 - `--timing` reports the upload on a line of its own, `upload <file>`,

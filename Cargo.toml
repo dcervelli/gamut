@@ -162,7 +162,7 @@ winit = "0.30.13"
 # crates are already in the tree under winit; `staging` is where the protocol
 # lives.
 wayland-client = "0.31.15"
-wayland-protocols = { version = "0.32.13", features = ["client", "staging"] }
+wayland-protocols = { version = "0.32.13", features = ["client", "staging", "unstable"] }
 # The clipboard, which Wayland leaves to the client: there is no store to put
 # a string in, only a promise to hand the bytes over when someone later asks.
 # This speaks that protocol directly rather than shelling out to `wl-copy`,

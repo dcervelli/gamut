@@ -1,5 +1,5 @@
-//! What the compositor says each monitor is in: SDR, or HDR with room above
-//! white.
+//! What the compositor says each monitor is: the mode it is in, SDR or HDR
+//! with room above white, and the room it is laid out in.
 //!
 //! A driver offers an HDR color space for a window on any monitor, and
 //! nothing about the surface says what the monitor in front of it is doing.
@@ -15,13 +15,23 @@
 //! With the mode in hand the surface can follow the monitor rather than lead
 //! it. Off Wayland, or under a compositor without the protocol, there is
 //! nothing to read and the surface is chosen from the request alone.
+//!
+//! The room is read on the same connection, for the window's opening size
+//! (`app::window`). A `wl_output` carries its mode in device pixels and an
+//! integer scale, and winit passes both on; but a compositor running a
+//! fractional scale — 1.6, say — rounds it up to 2 there, and the true scale
+//! reaches a window only once it has a surface, which is after its size was
+//! asked for. `xdg_output` says how large the output is in the logical pixels
+//! the compositor lays windows out in, and that with the mode is the scale it
+//! is really running.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use wayland_client::protocol::{wl_output, wl_registry};
-use wayland_client::{Connection, Dispatch, QueueHandle};
+use wayland_client::protocol::wl_output::{self, Transform};
+use wayland_client::protocol::wl_registry;
+use wayland_client::{Connection, Dispatch, QueueHandle, WEnum};
 use wayland_protocols::wp::color_management::v1::client::wp_color_management_output_v1::{
     self as cm_output, WpColorManagementOutputV1,
 };
@@ -34,6 +44,12 @@ use wayland_protocols::wp::color_management::v1::client::wp_image_description_in
 use wayland_protocols::wp::color_management::v1::client::wp_image_description_v1::{
     self as description, WpImageDescriptionV1,
 };
+use wayland_protocols::xdg::xdg_output::zv1::client::zxdg_output_manager_v1::{
+    self as xdg_manager, ZxdgOutputManagerV1,
+};
+use wayland_protocols::xdg::xdg_output::zv1::client::zxdg_output_v1::{
+    self as xdg_output, ZxdgOutputV1,
+};
 
 /// Which mode a monitor is in.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -45,9 +61,30 @@ pub enum Mode {
     Hdr,
 }
 
-/// The monitors' modes, kept current by a thread that listens for changes.
+/// The room a monitor is laid out in: its mode in device pixels, turned the
+/// way the compositor has it, and the logical size the compositor lays it out
+/// at. The ratio of the two is the scale it is really running, fractional
+/// where the `wl_output` alone would have said an integer.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Room {
+    pub device: [u32; 2],
+    pub logical: [u32; 2],
+}
+
+/// What the compositor has said so far, shared with the listening thread.
+#[derive(Default, PartialEq, Eq)]
+struct Table {
+    modes: HashMap<String, Mode>,
+    rooms: Vec<Room>,
+}
+
+/// The monitors' modes and rooms, kept current by a thread that listens for
+/// changes.
 pub struct Monitors {
-    modes: Arc<Mutex<HashMap<String, Mode>>>,
+    table: Arc<Mutex<Table>>,
+    /// Whether the compositor speaks color management at all. Where it does
+    /// not, no monitor will ever have a mode, and the absence means nothing.
+    speaks_modes: bool,
 }
 
 impl Monitors {
@@ -55,41 +92,66 @@ impl Monitors {
     /// which is the name winit gives its handle for the same monitor — or
     /// `None` for one it has not described.
     pub fn mode(&self, name: &str) -> Option<Mode> {
-        self.modes.lock().ok()?.get(name).copied()
+        self.table.lock().ok()?.modes.get(name).copied()
+    }
+
+    /// Whether the compositor can say what mode a monitor is in. Where it
+    /// cannot, [`Monitors::mode`] is `None` for every monitor, and that is not
+    /// a monitor in SDR mode but a question nothing answers.
+    pub fn speaks_modes(&self) -> bool {
+        self.speaks_modes
+    }
+
+    /// The room of every monitor that has said both its mode and its logical
+    /// size. Empty under a compositor without `xdg_output`.
+    pub fn rooms(&self) -> Vec<Room> {
+        self.table
+            .lock()
+            .map(|table| table.rooms.clone())
+            .unwrap_or_default()
     }
 }
 
-/// Starts listening. `None` off Wayland, or under a compositor that does not
-/// speak color management: nothing then says what a monitor is.
+/// Starts listening. `None` off Wayland, or under a compositor that speaks
+/// neither color management nor `xdg_output`: nothing then says anything
+/// about a monitor that winit does not.
 ///
 /// The first answers are in hand before this returns, so that the window can
-/// open on the right surface; `notify` is called from the listening thread
-/// whenever an answer changes after that. The thread is left to die with the
-/// process: it holds nothing but a socket of its own.
+/// open at the right size and on the right surface; `notify` is called from
+/// the listening thread whenever an answer changes after that. The thread is
+/// left to die with the process: it holds nothing but a socket of its own.
 pub fn watch(notify: impl Fn() + Send + 'static) -> Option<Monitors> {
     let connection = Connection::connect_to_env().ok()?;
     let mut queue = connection.new_event_queue();
     let handle = queue.handle();
     let _registry = connection.display().get_registry(&handle, ());
-    let modes = Arc::new(Mutex::new(HashMap::new()));
+    let table = Arc::new(Mutex::new(Table::default()));
     let mut listener = Listener {
         manager: None,
+        xdg_manager: None,
         outputs: Vec::new(),
-        modes: Arc::clone(&modes),
+        table: Arc::clone(&table),
         notify: Box::new(notify),
     };
-    // One round trip for the globals, one for the outputs' names and the
-    // descriptions asked for once the manager is known, and one for what the
-    // descriptions hold.
-    for _ in 0..3 {
+    // One round trip for the globals; one for the outputs' names, modes and
+    // logical sizes, and the descriptions asked for once the manager is
+    // known; and one for what the descriptions hold.
+    queue.roundtrip(&mut listener).ok()?;
+    if listener.manager.is_none() && listener.xdg_manager.is_none() {
+        return None;
+    }
+    let speaks_modes = listener.manager.is_some();
+    for _ in 0..2 {
         queue.roundtrip(&mut listener).ok()?;
-        listener.manager.as_ref()?;
     }
     thread::Builder::new()
         .name("gamut monitors".into())
         .spawn(move || while queue.blocking_dispatch(&mut listener).is_ok() {})
         .ok()?;
-    Some(Monitors { modes })
+    Some(Monitors {
+        table,
+        speaks_modes,
+    })
 }
 
 /// What a description says that decides the mode, gathered event by event
@@ -126,6 +188,18 @@ fn mode_of(reading: Reading) -> Mode {
     }
 }
 
+/// The device pixels an output's current mode covers, turned the way the
+/// compositor has the output: a mode is given as the panel scans it, and a
+/// panel stood on its side is laid out with its height along the desk.
+fn device_size(mode: [u32; 2], transform: Transform) -> [u32; 2] {
+    match transform {
+        Transform::_90 | Transform::_270 | Transform::Flipped90 | Transform::Flipped270 => {
+            [mode[1], mode[0]]
+        }
+        _ => mode,
+    }
+}
+
 /// One output the compositor has advertised.
 struct Output {
     /// Its name in the registry, which is how its removal is announced and
@@ -134,30 +208,50 @@ struct Output {
     proxy: wl_output::WlOutput,
     /// Its color-management side, once the manager is known.
     managed: Option<WpColorManagementOutputV1>,
+    /// Its `xdg_output`, once that manager is known.
+    xdg: Option<ZxdgOutputV1>,
     name: Option<String>,
     reading: Reading,
     mode: Option<Mode>,
+    /// Its current mode's size, as the panel scans it.
+    scanned: Option<[u32; 2]>,
+    transform: Transform,
+    logical: Option<[u32; 2]>,
+}
+
+impl Output {
+    fn room(&self) -> Option<Room> {
+        Some(Room {
+            device: device_size(self.scanned?, self.transform),
+            logical: self.logical?,
+        })
+    }
 }
 
 struct Listener {
     manager: Option<WpColorManagerV1>,
+    xdg_manager: Option<ZxdgOutputManagerV1>,
     outputs: Vec<Output>,
-    modes: Arc<Mutex<HashMap<String, Mode>>>,
+    table: Arc<Mutex<Table>>,
     notify: Box<dyn Fn() + Send>,
 }
 
 impl Listener {
-    /// Asks for the description of every output not yet asked about, once
-    /// there is a manager to ask.
+    /// Asks for the description and the logical size of every output not yet
+    /// asked about, once there is a manager to ask.
     fn subscribe(&mut self, handle: &QueueHandle<Self>) {
-        let Some(manager) = &self.manager else {
-            return;
-        };
         for output in &mut self.outputs {
-            if output.managed.is_none() {
+            if let Some(manager) = &self.manager
+                && output.managed.is_none()
+            {
                 let managed = manager.get_output(&output.proxy, handle, output.global);
                 managed.get_image_description(handle, output.global);
                 output.managed = Some(managed);
+            }
+            if let Some(manager) = &self.xdg_manager
+                && output.xdg.is_none()
+            {
+                output.xdg = Some(manager.get_xdg_output(&output.proxy, handle, output.global));
             }
         }
     }
@@ -170,16 +264,19 @@ impl Listener {
 
     /// Writes what is known to the shared table, and says so if it changed.
     fn publish(&self) {
-        let modes: HashMap<String, Mode> = self
-            .outputs
-            .iter()
-            .filter_map(|output| Some((output.name.clone()?, output.mode?)))
-            .collect();
-        let Ok(mut shared) = self.modes.lock() else {
+        let table = Table {
+            modes: self
+                .outputs
+                .iter()
+                .filter_map(|output| Some((output.name.clone()?, output.mode?)))
+                .collect(),
+            rooms: self.outputs.iter().filter_map(Output::room).collect(),
+        };
+        let Ok(mut shared) = self.table.lock() else {
             return;
         };
-        if *shared != modes {
-            *shared = modes;
+        if *shared != table {
+            *shared = table;
             drop(shared);
             (self.notify)();
         }
@@ -208,14 +305,24 @@ impl Dispatch<wl_registry::WlRegistry, ()> for Listener {
                         global: name,
                         proxy,
                         managed: None,
+                        xdg: None,
                         name: None,
                         reading: Reading::default(),
                         mode: None,
+                        scanned: None,
+                        transform: Transform::Normal,
+                        logical: None,
                     });
                     state.subscribe(handle);
                 }
                 "wp_color_manager_v1" => {
                     state.manager = Some(registry.bind(name, 1, handle, ()));
+                    state.subscribe(handle);
+                }
+                // Version 3 is where the logical size stops waiting on a
+                // `done` of its own and follows the `wl_output`'s.
+                "zxdg_output_manager_v1" => {
+                    state.xdg_manager = Some(registry.bind(name, version.min(3), handle, ()));
                     state.subscribe(handle);
                 }
                 _ => {}
@@ -238,10 +345,60 @@ impl Dispatch<wl_output::WlOutput, u32> for Listener {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if let wl_output::Event::Name { name } = event
+        let Some(output) = state.output(*global) else {
+            return;
+        };
+        match event {
+            wl_output::Event::Name { name } => output.name = Some(name),
+            wl_output::Event::Mode {
+                flags: WEnum::Value(flags),
+                width,
+                height,
+                ..
+            } if flags.contains(wl_output::Mode::Current) => {
+                output.scanned = u32::try_from(width)
+                    .ok()
+                    .zip(u32::try_from(height).ok())
+                    .map(|(width, height)| [width, height]);
+            }
+            wl_output::Event::Geometry {
+                transform: WEnum::Value(transform),
+                ..
+            } => output.transform = transform,
+            _ => return,
+        }
+        state.publish();
+    }
+}
+
+impl Dispatch<ZxdgOutputManagerV1, ()> for Listener {
+    fn event(
+        _: &mut Self,
+        _: &ZxdgOutputManagerV1,
+        _: xdg_manager::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<ZxdgOutputV1, u32> for Listener {
+    fn event(
+        state: &mut Self,
+        _: &ZxdgOutputV1,
+        event: xdg_output::Event,
+        global: &u32,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let xdg_output::Event::LogicalSize { width, height } = event
             && let Some(output) = state.output(*global)
         {
-            output.name = Some(name);
+            output.logical = u32::try_from(width)
+                .ok()
+                .zip(u32::try_from(height).ok())
+                .map(|(width, height)| [width, height]);
             state.publish();
         }
     }
@@ -368,5 +525,16 @@ mod tests {
         assert_eq!(mode_of(reading(Some(Tf::ExtLinear), 80, 80)), Mode::Sdr);
         assert_eq!(mode_of(reading(None, 1000, 203)), Mode::Hdr);
         assert_eq!(mode_of(Reading::default()), Mode::Sdr);
+    }
+
+    /// A mode is the panel's own scan; a panel on its side is laid out the
+    /// other way round, and its room has to be too, or the scale worked out
+    /// from it would be one axis against the other.
+    #[test]
+    fn a_turned_output_has_its_mode_turned() {
+        assert_eq!(device_size([3840, 2160], Transform::Normal), [3840, 2160]);
+        assert_eq!(device_size([3840, 2160], Transform::_180), [3840, 2160]);
+        assert_eq!(device_size([3840, 2160], Transform::_90), [2160, 3840]);
+        assert_eq!(device_size([3840, 2160], Transform::Flipped270), [2160, 3840]);
     }
 }

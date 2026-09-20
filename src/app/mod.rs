@@ -480,7 +480,9 @@ impl App {
         if !self.renderer.as_ref().is_some_and(Renderer::hdr_available) {
             return Hdr::Unsupported;
         }
-        if self.monitors.is_some() && self.monitor != Some(Mode::Hdr) {
+        if self.monitors.as_ref().is_some_and(Monitors::speaks_modes)
+            && self.monitor != Some(Mode::Hdr)
+        {
             return Hdr::NotInHdrMode;
         }
         Hdr::Available
@@ -1621,7 +1623,12 @@ impl ApplicationHandler<UserEvent> for App {
             return;
         }
 
-        let size = initial_window_size(event_loop, self.opening_size(), self.asked_size);
+        let size = initial_window_size(
+            event_loop,
+            self.monitors.as_ref(),
+            self.opening_size(),
+            self.asked_size,
+        );
         let attributes = window::with_app_id(
             Window::default_attributes()
                 .with_title(self.title())

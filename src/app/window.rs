@@ -6,6 +6,7 @@ use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::WindowAttributes;
 
+use crate::monitor::{Monitors, Room};
 use crate::ui;
 use crate::ui::chrome::{BAR_HEIGHT, SIDE_WIDTH};
 use crate::{APP_ID, PROGRAM};
@@ -122,33 +123,75 @@ pub(super) fn with_app_id(attributes: WindowAttributes) -> WindowAttributes {
 /// Open at the image's own size, shrunk to fit comfortably on the monitors —
 /// or at the size `--size` asked for, where it asked for one.
 ///
-/// The monitors are the only thing here that has to be asked of the event
-/// loop; what is done with their answer is [`window_size`], which is testable.
-/// Every monitor is collected, not just one: `primary_monitor` is `None` on
-/// Wayland by definition, and nothing before the surface is mapped says which
-/// monitor the compositor will open the window on.
+/// What the monitors are is the only thing here that has to be asked of
+/// anyone; what is done with the answer is [`window_size`], which is testable.
+/// The compositor's own account is taken where `monitor.rs` has one, since it
+/// carries the scale each monitor is really running; the event loop's is the
+/// fallback. Every monitor is collected, not just one: `primary_monitor` is
+/// `None` on Wayland by definition, and nothing before the surface is mapped
+/// says which monitor the compositor will open the window on.
 pub(super) fn initial_window_size(
     event_loop: &ActiveEventLoop,
+    monitors: Option<&Monitors>,
     image: Option<[f32; 2]>,
     asked: Option<[u32; 2]>,
 ) -> LogicalSize<u32> {
-    let monitors: Vec<_> = event_loop
-        .available_monitors()
-        .map(|monitor| (monitor.size(), monitor.scale_factor()))
+    let mut measured: Vec<Monitor> = monitors
+        .map(Monitors::rooms)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(Monitor::measured)
         .collect();
-    window_size(&monitors, image, asked)
+    if measured.is_empty() {
+        measured = event_loop
+            .available_monitors()
+            .filter_map(|monitor| Monitor::reported(monitor.size(), monitor.scale_factor()))
+            .collect();
+    }
+    window_size(&measured, image, asked)
 }
 
-/// A monitor's room in the logical pixels a window is laid out in, or `None`
-/// for one that has not said what mode it is in — a Wayland output reports
-/// `0 × 0` until its mode arrives.
-fn monitor_room(size: PhysicalSize<u32>, scale: f64) -> Option<[f64; 2]> {
-    (size.width > 0 && size.height > 0 && scale > 0.0).then(|| {
-        [
-            f64::from(size.width) / scale,
-            f64::from(size.height) / scale,
-        ]
-    })
+/// A monitor as the sizing sees it: the room it is laid out in, in the
+/// logical pixels a window is asked for in, and the scale between its device
+/// pixels and them, which is what turns an image's pixels into a window's.
+#[derive(Clone, Copy, PartialEq, Debug)]
+struct Monitor {
+    room: [f64; 2],
+    scale: f64,
+}
+
+impl Monitor {
+    /// From what the compositor said over `monitor.rs`'s connection: the
+    /// output's mode and the logical size it is laid out at. The scale is
+    /// their ratio, and so the fractional one the compositor is really
+    /// running — 1.6 where the `wl_output` alone would have said 2.
+    fn measured(room: Room) -> Option<Self> {
+        let logical = [f64::from(room.logical[0]), f64::from(room.logical[1])];
+        let device = f64::from(room.device[0]);
+        (logical[0] > 0.0 && logical[1] > 0.0 && device > 0.0).then(|| Self {
+            room: logical,
+            scale: device / logical[0],
+        })
+    }
+
+    /// From what the event loop reports: the monitor's device pixels and the
+    /// scale it says it has. On Wayland that scale is the output's integer
+    /// one — 2 where the compositor is really running 1.6 — and the true
+    /// fractional scale does not reach a window until its surface is mapped.
+    /// The error is in the safe direction: a window that opens a little
+    /// smaller than 100% rather than one that overruns the screen.
+    ///
+    /// `None` for a monitor that has not said what mode it is in — a Wayland
+    /// output reports `0 × 0` until its mode arrives.
+    fn reported(size: PhysicalSize<u32>, scale: f64) -> Option<Self> {
+        (size.width > 0 && size.height > 0 && scale > 0.0).then(|| Self {
+            room: [
+                f64::from(size.width) / scale,
+                f64::from(size.height) / scale,
+            ],
+            scale,
+        })
+    }
 }
 
 /// The window this monitor would want: the image at its own pixels, held
@@ -160,11 +203,7 @@ fn monitor_room(size: PhysicalSize<u32>, scale: f64) -> Option<[f64; 2]> {
 /// still applies to the image itself.
 ///
 /// The image's pixels are physical and the window's are logical, so the
-/// monitor's scale converts between them. On Wayland that scale is the
-/// output's integer one — 2 where the compositor is really running 1.6 — and
-/// the true fractional scale does not arrive until the surface is mapped. The
-/// error is in the safe direction: a window that opens a little smaller than
-/// 100% rather than one that overruns the screen.
+/// monitor's scale converts between them.
 ///
 /// A picture smaller than the floor is given the floor: [`PANELS_WINDOW`]
 /// where this monitor can take it, and [`MIN_WINDOW`] where it cannot. The
@@ -172,7 +211,8 @@ fn monitor_room(size: PhysicalSize<u32>, scale: f64) -> Option<[f64; 2]> {
 /// [`MAX_WINDOW_FRACTION`] of it — the fraction is about leaving the desktop
 /// its share of a large window, and this is about a small one being usable at
 /// all, so it may exceed the fraction on a monitor with little to spare.
-fn wanted_window(room: [f64; 2], scale: f64, image: [f32; 2]) -> [f64; 2] {
+fn wanted_window(monitor: Monitor, image: [f32; 2]) -> [f64; 2] {
+    let Monitor { room, scale } = monitor;
     let mut width = f64::from(image[0]) / scale;
     let mut height = f64::from(image[1]) / scale;
 
@@ -217,7 +257,7 @@ fn floor_for(room: [f64; 2]) -> [f64; 2] {
 /// large one, and [`MIN_WINDOW`] below the small one's room — the smallest is
 /// taken, as the least bad of them.
 fn window_size(
-    monitors: &[(PhysicalSize<u32>, f64)],
+    monitors: &[Monitor],
     image: Option<[f32; 2]>,
     asked: Option<[u32; 2]>,
 ) -> LogicalSize<u32> {
@@ -234,26 +274,25 @@ fn window_size(
     // with nothing, and then a plain rectangle is the best that can be done.
     let image = image.unwrap_or(DEFAULT_IMAGE);
 
-    let rooms: Vec<([f64; 2], f64)> = monitors
-        .iter()
-        .filter_map(|&(size, scale)| monitor_room(size, scale).map(|room| (room, scale)))
-        .collect();
-
     // Nothing said what any monitor is: the image's own pixels, taken as
     // logical ones, is all that is left to open at.
-    if rooms.is_empty() {
-        return logical(wanted_window([f64::INFINITY; 2], 1.0, image));
+    if monitors.is_empty() {
+        let boundless = Monitor {
+            room: [f64::INFINITY; 2],
+            scale: 1.0,
+        };
+        return logical(wanted_window(boundless, image));
     }
 
-    let wanted: Vec<[f64; 2]> = rooms
+    let wanted: Vec<[f64; 2]> = monitors
         .iter()
-        .map(|&(room, scale)| wanted_window(room, scale, image))
+        .map(|&monitor| wanted_window(monitor, image))
         .collect();
 
     let fits = |size: &[f64; 2]| {
-        rooms
+        monitors
             .iter()
-            .all(|(room, _)| size[0] <= room[0] && size[1] <= room[1])
+            .all(|monitor| size[0] <= monitor.room[0] && size[1] <= monitor.room[1])
     };
     let area = |size: &[f64; 2]| size[0] * size[1];
 
@@ -282,8 +321,22 @@ mod tests {
     use super::*;
     use crate::ui::chrome::content_area;
 
+    /// A monitor as the event loop reports it, which is the only way a test
+    /// can be handed one that says nothing.
+    fn reported(width: u32, height: u32, scale: f64) -> Option<Monitor> {
+        Monitor::reported(PhysicalSize::new(width, height), scale)
+    }
+
+    /// A monitor the event loop reports, whole.
+    fn monitor(width: u32, height: u32, scale: f64) -> Monitor {
+        reported(width, height, scale).expect("a monitor with a mode")
+    }
+
     /// One ordinary monitor, unscaled.
-    const MONITOR: [(PhysicalSize<u32>, f64); 1] = [(PhysicalSize::new(2560, 1440), 1.0)];
+    const MONITOR: [Monitor; 1] = [Monitor {
+        room: [2560.0, 1440.0],
+        scale: 1.0,
+    }];
 
     /// A size asked for is given as it was asked for, in logical pixels: the
     /// chrome is not added to it, and the monitors do not shrink it.
@@ -348,7 +401,7 @@ mod tests {
     /// fit the screen is the thing the rest of this is here to prevent.
     #[test]
     fn a_monitor_too_small_for_the_panels_keeps_the_smallest_window() {
-        let cramped = [(PhysicalSize::new(500, 400), 1.0)];
+        let cramped = [monitor(500, 400, 1.0)];
         let size = window_size(&cramped, Some([32.0, 24.0]), None);
         assert_eq!(size, LogicalSize::new(MIN_WINDOW[0], MIN_WINDOW[1]));
     }
@@ -359,9 +412,46 @@ mod tests {
     /// 4K monitor at 2x is well past the screen.
     #[test]
     fn a_scaled_monitor_is_measured_in_logical_pixels() {
-        let monitors = [(PhysicalSize::new(3840, 2160), 2.0)];
+        let monitors = [monitor(3840, 2160, 2.0)];
         let size = window_size(&monitors, Some([3000.0, 2000.0]), None);
         assert!(size.width <= 1920 && size.height <= 1080, "{size:?}");
+    }
+
+    /// The compositor's own account of a monitor carries the scale it is
+    /// really running, which the event loop rounds up to a whole number on
+    /// Wayland. A 4K monitor laid out at 2400 × 1350 is at 1.6, and an
+    /// 800-pixel picture on it is 500 logical pixels wide, not the 400 that
+    /// a scale of 2 would make it — a window that opens at 80%.
+    #[test]
+    fn a_measured_monitor_has_its_fractional_scale() {
+        let measured = Monitor::measured(Room {
+            device: [3840, 2160],
+            logical: [2400, 1350],
+        })
+        .expect("a room with both sizes");
+        assert_eq!(measured.room, [2400.0, 1350.0]);
+        assert!((measured.scale - 1.6).abs() < 1e-9, "{measured:?}");
+
+        let size = window_size(&[measured], Some([800.0, 480.0]), None);
+        assert_eq!(size.width, 500 + 2 * SIDE_WIDTH as u32);
+
+        let rounded = window_size(&[monitor(3840, 2160, 2.0)], Some([800.0, 480.0]), None);
+        assert_eq!(rounded.width, 400 + 2 * SIDE_WIDTH as u32);
+    }
+
+    /// A room the compositor has not finished describing is no monitor yet.
+    #[test]
+    fn a_room_missing_a_size_is_not_a_monitor() {
+        let unlaid = Room {
+            device: [3840, 2160],
+            logical: [0, 0],
+        };
+        assert_eq!(Monitor::measured(unlaid), None);
+        let unmoded = Room {
+            device: [0, 0],
+            logical: [2400, 1350],
+        };
+        assert_eq!(Monitor::measured(unmoded), None);
     }
 
     /// The largest window that fits everywhere is taken, because which
@@ -370,8 +460,8 @@ mod tests {
     /// which fits on both — is the one used.
     #[test]
     fn the_largest_that_fits_on_every_monitor_wins() {
-        let big = (PhysicalSize::new(3840, 2160), 1.0);
-        let small = (PhysicalSize::new(1280, 800), 1.0);
+        let big = monitor(3840, 2160, 1.0);
+        let small = monitor(1280, 800, 1.0);
 
         let alone = window_size(&[big], Some([3000.0, 2000.0]), None);
         let together = window_size(&[big, small], Some([3000.0, 2000.0]), None);
@@ -391,8 +481,8 @@ mod tests {
     /// and then the smallest of the answers is the least bad of them.
     #[test]
     fn where_nothing_fits_the_smallest_is_taken() {
-        let tiny = (PhysicalSize::new(200, 150), 1.0);
-        let big = (PhysicalSize::new(3840, 2160), 1.0);
+        let tiny = monitor(200, 150, 1.0);
+        let big = monitor(3840, 2160, 1.0);
         let size = window_size(&[big, tiny], Some([3000.0, 2000.0]), None);
         assert_eq!(size, LogicalSize::new(MIN_WINDOW[0], MIN_WINDOW[1]));
     }
@@ -401,9 +491,9 @@ mod tests {
     /// counting its zero as room would shrink every window to the floor.
     #[test]
     fn a_monitor_that_says_nothing_is_ignored() {
-        let unknown = (PhysicalSize::new(0, 0), 1.0);
-        let size = window_size(&[MONITOR[0], unknown], Some([640.0, 480.0]), None);
-        assert_eq!(size, window_size(&MONITOR, Some([640.0, 480.0]), None));
+        assert_eq!(reported(0, 0, 1.0), None);
+        assert_eq!(reported(2560, 1440, 0.0), None);
+        assert_eq!(reported(2560, 1440, 1.0), Some(MONITOR[0]));
     }
 
     /// With no monitors at all there is nothing to hold the window inside, so

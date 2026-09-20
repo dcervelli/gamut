@@ -18,16 +18,30 @@ smaller than `MIN_WINDOW`, say — the smallest answer is taken as the least bad
 of them.
 
 The whole calculation is in logical pixels. The image's own pixels are
-physical, so a monitor's scale converts
-them; the panel constants are logical already. Asking in physical pixels does
-not work, because winit's Wayland backend converts the size a window is
-created with at a scale of `1.0` — the surface has none until the compositor
-configures it — so physical pixels are taken as logical ones and the window
-opens `scale` times too large, well past the screen on a 4K monitor at 2×.
-The scale used is the output's integer one, 2 where the compositor is really
-running 1.6; the true fractional scale only arrives with
-`wp_fractional_scale_v1` after the surface is mapped. That error goes the safe
-way, opening a little under 100% rather than overrunning.
+physical, so a monitor's scale converts them; the panel constants are logical
+already. Asking in physical pixels does not work, because winit's Wayland
+backend converts the size a window is created with at a scale of `1.0` — the
+surface has none until the compositor configures it — so physical pixels are
+taken as logical ones and the window opens `scale` times too large, well past
+the screen on a 4K monitor at 2×.
+
+Where that scale comes from matters. What winit reports for a monitor is the
+`wl_output`'s own scale, which the protocol makes an integer: a compositor
+running 1.6 says 2 there, and the true fractional scale reaches a window only
+through `wp_fractional_scale_v1`, once it has a surface — after its size was
+asked for. Sized from the integer, an 800-pixel picture on such a monitor is
+taken as 400 logical pixels, which the compositor maps at 1.6 to 640 device
+pixels: a window that opens at 80%. So `monitor.rs`, which already holds a
+connection of its own for each monitor's mode ([color](color.md)), also reads
+each output's `xdg_output` logical size, and `Monitor::measured` in
+`app::window` takes the room from that and the scale from its ratio to the
+output's mode — the scale the compositor is actually running, whatever it was
+configured as, since a compositor that adjusts a scale to make the logical
+size whole reports the adjusted result. The output's mode is turned to match
+its transform first, or a monitor on its side would have one axis measured
+against the other. `Monitor::reported`, from winit's account, is the fallback
+under a compositor without `xdg_output` or off Wayland, where the error goes
+the safe way: a little under 100% rather than overrunning.
 
 A window also opens no smaller than one the interface itself fits in.
 `ui::PANELS_ROOM` is the content area the histogram and the information column

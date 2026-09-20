@@ -113,7 +113,9 @@ color space whether or not the monitor in front of you is HDR — wgpu's
 `display_hdr_info` comes back empty everywhere but Windows and macOS — but on
 Wayland the compositor knows, and says: every output carries an image
 description under the color-management protocol, and `monitor.rs` reads
-them on a connection of its own and listens for changes. A monitor in HDR
+them on a connection of its own and listens for changes (the same connection
+reads each monitor's room for the opening window — see
+[interface](interface.md)). A monitor in HDR
 mode gets the HDR surface, one in SDR mode gets the sRGB one, and a window
 carried from one to the other switches on the way. Asking the other way
 round is what a compositor answers with a modeset: Hyprland switches a
@@ -135,7 +137,9 @@ for the same answer the button is drawn from. Nothing is written to the
 terminal, since a switch that explains itself where the pointer is has no
 reason to explain itself where the window is not. Off Wayland, or under a
 compositor without the protocol, nothing says what the monitor is, and the
-switch moves the surface itself, as the only lever there is.
+switch moves the surface itself, as the only lever there is —
+`Monitors::speaks_modes` is how `App::hdr_state` tells that case from a
+monitor that has simply not been described yet.
 
 **The tone map** is a curve *added* to fit values above white into a surface
 that stops there: `neutral`, or `none` — which is not a second curve but the
