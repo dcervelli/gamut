@@ -2,7 +2,7 @@
 
 A modern Linux image viewer optimized for getting work done, fast.
 
-![Main screenshot](user-docs/screenshots/main_screenshot.jpg)
+![Main screenshot](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/main_screenshot.jpg)
 
 A modern image viewer has to serve many audiences: casual user, photographer, data scientist, programmer, designer, game developer, GIS analyst, etc.
 
@@ -42,7 +42,7 @@ All features can be keyboard driven but the hideable UI also contains discoverab
 
 Respects OS theme colors. Here's an example of Omarchy's Tokyo Night and Gruvbox themes.
 
-![Themes side by side](user-docs/screenshots/themes.gif)
+![Themes side by side](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/themes.gif)
 
 *Omarchy note:* Use the following window rule:
 
@@ -56,7 +56,7 @@ This will make the window open centered and floating with a reasonable, dynamic 
 
 Select rectangular regions for measurement or copy. Pixel precision controls to move, grow, or shrink the region.
 
-![Region selection](user-docs/screenshots/region.gif)
+![Region selection](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/region.gif)
 
 ### Copy/paste image
 
@@ -72,25 +72,25 @@ Clipboard images can be pasted and saved to the standard pictures folder as `pas
 
 Get coordinate and color information for the moused-over pixel. Easily copy either the coordinate or color (in a variety of formats).
 
-![Pixel copying](user-docs/screenshots/pixel_copy.gif)
+![Pixel copying](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/pixel_copy.gif)
 
 ### Pixel grid
 
 Scale-dynamic pixel grid.
 
-![Pixel grid animation](user-docs/screenshots/pixel_grid.gif)
+![Pixel grid animation](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/pixel_grid.gif)
 
 ### Single channel false color
 
 Grayscale, 16-bit and float single-channel images can be shown with various color maps.
 
-![False color maps](user-docs/screenshots/false_color.gif)
+![False color maps](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/false_color.gif)
 
 ### Histogram
 
 A dynamic histogram primarily for inspecting the content of the image. While you can make some adjustments to better understand the content of the image, it's not the intent of this program (as alluded to in the description above) to be a full-fledged image editor.
 
-![Histogram](user-docs/screenshots/histogram.gif)
+![Histogram](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/histogram.gif)
 
 **Link to separate histogram docs**
 
@@ -98,7 +98,7 @@ A dynamic histogram primarily for inspecting the content of the image. While you
 
 `ctrl+p` style navigation over the file list with thumbnails and helpful metadata per row. Thumbnails integrated into desktop cache.
 
-![Fuzzy finder](user-docs/screenshots/fuzzy_finder.gif)
+![Fuzzy finder](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/fuzzy_finder.gif)
 
 Bird images from [Fugleramme](https://github.com/arnegiacomo/fugleramme), augmented to include common name in the metadata.
 
@@ -106,7 +106,7 @@ Bird images from [Fugleramme](https://github.com/arnegiacomo/fugleramme), augmen
 
 Play animated GIF, PNG, WebP and JPEG XL files at normal speed or frame-by-frame. View multi-page TIFFs and ICOs.
 
-![Animated GIF playback](user-docs/screenshots/animated.gif)
+![Animated GIF playback](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/animated.gif)
 
 ### Color management
 
@@ -122,7 +122,7 @@ Navigating between images with the same dimensions maintains pan and zoom making
 
 This example compares a zoomed in region across DEM, hillshade, and relief images.
 
-![File comparison example](user-docs/screenshots/compare.gif)
+![File comparison example](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/compare.gif)
 
 ### File/directory watch
 
@@ -130,13 +130,13 @@ Files and directories are watched for changes, additions, or deletions.
 
 In this example, a simple program is zooming into a point on the Mandelbrot set and updating an image every second. gamut updates as soon as the file changes maintains pan/zoom settings across reloads.
 
-![Mandelbrot zoom via File Update](user-docs/screenshots/mandelbrot.gif)
+![Mandelbrot zoom via File Update](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/mandelbrot.gif)
 
 ### Metadata extraction
 
 Get file, image, EXIF, XMP, georeference, and other metadata. Easily copy all, by section, or by item.
 
-![Image info/metadata/EXIF](user-docs/screenshots/info.jpg)
+![Image info/metadata/EXIF](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/info.jpg)
 
 ### Many formats
 PNG, JPEG (with gain maps), JPEG XL, TIFF and BigTIFF, WebP, HEIF (HEIC and AVIF), GIF, ICO, BMP, netpbm, Radiance HDR and OpenEXR. More details in [`user-docs/FORMATS.md`](user-docs/FORMATS.md).
