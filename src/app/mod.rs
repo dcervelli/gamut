@@ -8,7 +8,7 @@ mod kept;
 mod playback;
 mod window;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::mpsc;
@@ -20,6 +20,7 @@ use winit::event::{KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::{Window, WindowId};
 
+use crate::image::DecodedImage;
 use crate::image::decode;
 use crate::image::display::{Display, Headroom, Startup};
 use crate::image::region::{Grip, Region};
@@ -29,7 +30,7 @@ use crate::monitor::{Mode, Monitors};
 use crate::motion::Motion;
 use crate::openers::{self, Opener};
 use crate::player::{self, Player};
-use crate::render::{HdrPreference, Placement, Renderer, Scene, Upscale};
+use crate::render::{GpuImage, HdrPreference, Placement, Renderer, Scene, Upscale};
 use crate::theme::{self, Theme};
 use crate::thumbnailer::{Delivered, Facts, Thumb, Thumbnailer};
 use crate::timing;
@@ -1070,7 +1071,7 @@ impl App {
             // line. The fallback covers only that gap.
             let uploaded = match gpu {
                 Some(uploaded) => uploaded,
-                None => match renderer.uploader().run(&image) {
+                None => match upload_here(renderer, &file.path, &image) {
                     Ok(uploaded) => uploaded,
                     Err(error) => {
                         eprintln!("gamut: {}", crate::escape_controls(&format!("{error:#}")));
@@ -1470,6 +1471,17 @@ impl App {
     }
 }
 
+/// Uploads `image` on this thread, and reports the time the way the loader
+/// does for the files it uploads itself, so that the two lines can be read
+/// against each other. This is the path for a file the loader read before
+/// it had a renderer to upload to: the one named on the command line.
+fn upload_here(renderer: &Renderer, path: &Path, image: &DecodedImage) -> anyhow::Result<GpuImage> {
+    let began = Instant::now();
+    let uploaded = renderer.uploader().run(image)?;
+    timing::uploaded(path, began.elapsed());
+    Ok(uploaded)
+}
+
 /// What the file system says about the file on screen, for the info panel.
 ///
 /// One look at it as the image goes up, rather than a look per frame: none of
@@ -1635,10 +1647,14 @@ impl ApplicationHandler<UserEvent> for App {
             }
         };
 
+        // The file named on the command line, decoded while the window was
+        // being made, and waiting here for somewhere to go. There is nothing
+        // on screen yet for the wait to interrupt; everything opened
+        // afterwards is uploaded on the loader's thread.
         if let Some(current) = &mut self.current {
-            match renderer.set_image(&current.image) {
-                Ok(note) => {
-                    if let Some(note) = note {
+            match upload_here(&renderer, self.files.shown_path(), &current.image) {
+                Ok(uploaded) => {
+                    if let Some(note) = renderer.install_image(uploaded) {
                         eprintln!("gamut: {note}");
                     }
                     current.stored = renderer.image_format_label();
