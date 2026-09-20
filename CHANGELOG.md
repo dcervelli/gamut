@@ -1,10 +1,10 @@
 # Changelog
 
-Notable changes to `gamut`. The format follows
+Notable changes to `gamut` as maintained overly verbosely by AI. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 0.4.0 - 2026-09-21
 
 ### Fixed
 
@@ -27,6 +27,8 @@ Notable changes to `gamut`. The format follows
   the event loop once it exists, off the loader's clock. A large file so
   read as opening faster on its own than from a directory, when the only
   difference was where the upload was counted.
+
+## 0.3.1 - 2026-09-20
 
 ## 0.3.0 - 2026-09-20
 

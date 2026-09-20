@@ -8,39 +8,143 @@ A modern Linux image viewer optimized for getting work done, fast. Modern techno
 
 A modern image viewer serves many audiences: photographer, data scientist, programmer, designer, game developer, GIS analyst, and, of course, the casual user.
 
-Some features are obviously useful to everyone: high performance, effective pan/zoom controls, copy/paste, etc. It's more difficult to decide if a feature exceeds the bar for inclusion. We consider questions like these:
+Some features are obviously useful to everyone: high performance, effective pan/zoom controls, copy/paste, etc. It can be difficult to decide if a feature exceeds the bar for inclusion. To do so, we consider questions like these:
 
 * Is the feature useful to a varied audience?
-* Is the feature something that is conceptually simple but would otherwise required specialized software to accomplish?
+* Is the feature something that is conceptually simple but would otherwise require specialized software to accomplish?
 * Is the feature's mere presence going to confuse a casual user?
 * Does the feature help a user *act* on or *decide* about an image?
+
+Please open PRs or submit issues to suggest features that you think should be included. Also, see  [Roadmap](ROADMAP.md) for some features and improvements that we'd like to get to.
 
 ## Features
 
 - [High performance](#high-performance)
+- [Many formats](#many-formats)
+- [Animated/multi-image formats](#animatedmulti-image-formats)
 - [Versatile controls (Keyboard, UI, CLI)](#versatile-controls-keyboard-ui-cli)
-- [OS themed](#os-themed)
-- [Region selection/measurement](#region-selectionmeasurement)
+- [Metadata extraction](#metadata-extraction)
 - [Copy/paste image](#copypaste-image)
+- [Region selection/measurement](#region-selectionmeasurement)
 - [Pixel info](#pixel-info)
 - [Pixel grid](#pixel-grid)
-- [Single channel false color](#single-channel-false-color)
 - [Histogram](#histogram)
 - [HDR](#hdr)
-- [Fuzzy file navigation](#fuzzy-file-navigation)
-- [Animated/multi-image formats](#animatedmulti-image-formats)
 - [Color management](#color-management)
+- [Single channel false color](#single-channel-false-color)
+- [Fuzzy file navigation](#fuzzy-file-navigation)
 - [File comparison](#file-comparison)
 - [File/directory watch](#filedirectory-watch)
-- [Metadata/EXIF extraction](#metadataexif-extraction)
 - [Desktop/shell integration](#desktopshell-integration)
-- [Many formats](#many-formats)
+- [OS themed](#os-themed)
 
-### Versatile Controls (Keyboard, UI, CLI)
+### High performance
 
-All features can be keyboard driven but the hideable UI also contains discoverable controls with tooltips to learn the keyboard shortcuts. Controls can also be set via CLI flags.
+All rendering is done on GPU and maintains full frame rate through both user initiated and (rapidly) animated pans and zooms. Decoding and statistics generation is parallelized in background threads. Overall, the app is very snappy!
+
+### Many formats
+
+PNG, JPEG (with gain maps), JPEG XL, TIFF and BigTIFF, WebP, HEIF (HEIC and AVIF), GIF, ICO, BMP, raw camera files, netpbm, Radiance HDR and OpenEXR. More details in [`user-docs/FORMATS.md`](user-docs/FORMATS.md).
+
+Feel free to submit a PR or open an issue for additional file formats.
+
+### Animated/multi-image formats
+
+Play animated GIF, PNG, WebP and JPEG XL files at normal speed or frame-by-frame. View multi-page TIFFs and ICOs.
+
+![Animated GIF playback](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/animated.gif)
+
+### Versatile controls (Keyboard, UI, CLI)
+
+All features can be keyboard driven but the hideable UI also contains controls with tooltips to learn the keyboard shortcuts. Controls can also be set via CLI flags.
 
 ![UI controls](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/ui.gif)
+
+### Metadata extraction
+
+Get file, image, EXIF, XMP, georeference, and other metadata. Easily copy all, by section, or by item.
+
+![Image info/metadata/EXIF](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/info.jpg)
+
+### Copy/paste image
+
+Images can be copied in a variety of useful ways:
+
+* As a filename, with or without the path.
+* As a file URI, for copy/paste in a file explorer.
+* As an image/png, for copy/paste as an image. Useful for Slack, etc. Copied images have the current settings applied.
+
+Clipboard images can be pasted and saved to the standard pictures folder as `pasted_{date}.{extension}`.
+
+### Region selection/measurement
+
+Select rectangular regions for measurement or copy. Pixel precision controls to move, grow, or shrink the region. This example shows drawing a rough box then selecting handles and using keys to get it exact.
+
+![Region selection](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/region.gif)
+
+### Pixel info
+
+Get coordinate and color information for the moused-over pixel. Easily copy either the coordinate or color (in a variety of formats).
+
+![Pixel copying](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/pixel_copy.gif)
+
+### Pixel grid
+
+Scale-dynamic pixel grid.
+
+![Pixel grid animation](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/pixel_grid.gif)
+
+### Histogram
+
+A dynamic histogram primarily for inspecting the content of the image. While you can make some adjustments to better understand the content of the image, it's not the intent of this program (as alluded to in the description above) to be a full-fledged image editor.
+
+![Histogram](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/histogram.gif)
+
+### HDR
+
+When available on the monitor (`--output hdr` attempts to force the display into HDR), HDR sources are shown at their graded brightness.
+
+### Color management
+
+Untagged files are treated as sRGB. ICC profiles (sRGB, Display P3, BT.2020 and Adobe RGB primaries, power-law tone response) and CICP tags are honored; PQ and HLG are decoded. 16-bit, float and single-channel data are not flattened to 8-bit RGB. 
+
+### Single channel false color
+
+Grayscale, 16-bit and float single-channel images can be shown with various color maps.
+
+![False color maps](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/false_color.gif)
+
+### Fuzzy file navigation
+
+`ctrl+p` style navigation over the file list with thumbnails and helpful metadata per row. Thumbnails are integrated into the desktop cache.
+
+![Fuzzy finder](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/fuzzy_finder.gif)
+
+Bird images from [Fugleramme](https://github.com/arnegiacomo/fugleramme), augmented to include common name in the metadata.
+
+### File comparison
+
+Navigating between images with the same dimensions maintains pan and zoom making detailed image comparison straightforward.
+
+This example compares a zoomed in region across DEM, hillshade, and relief images.
+
+![File comparison example](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/compare.gif)
+
+### File/directory watch
+
+Files and directories are watched for changes, additions, or deletions. 
+
+In this example, a simple program is zooming into a point on the Mandelbrot set and updating an image every second. gamut updates as soon as the file changes and maintains pan/zoom settings across reloads.
+
+![Mandelbrot zoom via File Update](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/mandelbrot.gif)
+
+### Desktop/shell integration
+
+* [Registers as a handler](packaging/com.dcervelli.gamut.desktop) for all formats it reads as well as directories;
+* man page;
+* bash, fish, and zsh completions;
+* "Open in…" menu:
+![Open in… menu](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/open_in.jpg)
 
 ### OS themed
 
@@ -55,109 +159,6 @@ o.window("com.dcervelli.gamut", { float = true, center = true, tag = "-default-o
 ```
 
 This will make the window open centered and floating with a reasonable, dynamic default size. For accurate image viewing, the window should be forced fully opaque.
-
-### Region selection/measurement
-
-Select rectangular regions for measurement or copy. Pixel precision controls to move, grow, or shrink the region.
-
-![Region selection](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/region.gif)
-
-### Copy/paste image
-
-Images can be copied in a variety of useful ways:
-
-* As a filename, with or without the path.
-* As a file URI, for copy/paste in a file explorer.
-* As an image/png, for copy/paste as an image. Useful for Slack, etc. Copied images have the current settings applied.
-
-Clipboard images can be pasted and saved to the standard pictures folder as `pasted_${date}.png`.
-
-### Pixel info
-
-Get coordinate and color information for the moused-over pixel. Easily copy either the coordinate or color (in a variety of formats).
-
-![Pixel copying](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/pixel_copy.gif)
-
-### Pixel grid
-
-Scale-dynamic pixel grid.
-
-![Pixel grid animation](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/pixel_grid.gif)
-
-### Single channel false color
-
-Grayscale, 16-bit and float single-channel images can be shown with various color maps.
-
-![False color maps](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/false_color.gif)
-
-### Histogram
-
-A dynamic histogram primarily for inspecting the content of the image. While you can make some adjustments to better understand the content of the image, it's not the intent of this program (as alluded to in the description above) to be a full-fledged image editor.
-
-![Histogram](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/histogram.gif)
-
-**Link to separate histogram docs**
-
-### Fuzzy file navigation
-
-`ctrl+p` style navigation over the file list with thumbnails and helpful metadata per row. Thumbnails integrated into desktop cache.
-
-![Fuzzy finder](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/fuzzy_finder.gif)
-
-Bird images from [Fugleramme](https://github.com/arnegiacomo/fugleramme), augmented to include common name in the metadata.
-
-### Animated/multi-image formats
-
-Play animated GIF, PNG, WebP and JPEG XL files at normal speed or frame-by-frame. View multi-page TIFFs and ICOs.
-
-![Animated GIF playback](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/animated.gif)
-
-### Color management
-
-Untagged files are treated as sRGB. ICC profiles (sRGB, Display P3, BT.2020 and Adobe RGB primaries, power-law tone response) and CICP tags are honored; PQ and HLG are decoded. 16-bit, float and single-channel data stay as they are rather than being flattened to 8-bit RGB. 
-
-### HDR
-
-When available on the monitor, HDR sources are shown at their graded brightness. Tone mapped for SDR.
-
-### File comparison
-
-Navigating between images with the same dimensions maintains pan and zoom making detailed image comparison straightforward.
-
-This example compares a zoomed in region across DEM, hillshade, and relief images.
-
-![File comparison example](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/compare.gif)
-
-### File/directory watch
-
-Files and directories are watched for changes, additions, or deletions. 
-
-In this example, a simple program is zooming into a point on the Mandelbrot set and updating an image every second. gamut updates as soon as the file changes maintains pan/zoom settings across reloads.
-
-![Mandelbrot zoom via File Update](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/mandelbrot.gif)
-
-### Metadata extraction
-
-Get file, image, EXIF, XMP, georeference, and other metadata. Easily copy all, by section, or by item.
-
-![Image info/metadata/EXIF](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/info.jpg)
-
-### Many formats
-PNG, JPEG (with gain maps), JPEG XL, TIFF and BigTIFF, WebP, HEIF (HEIC and AVIF), GIF, ICO, BMP, netpbm, Radiance HDR and OpenEXR. More details in [`user-docs/FORMATS.md`](user-docs/FORMATS.md).
-
-Feel free to submit a PR or open an issue for additional file formats.
-
-### High performance
-
-All rendering is done on GPU and maintains full frame rate. Decoding and statistics generation is parallelized in background threads.
-
-### Desktop/shell integration
-
-* [Registers as a handler](packaging/com.dcervelli.gamut.desktop) for all formats it reads as well as directories;
-* man page;
-* bash, fish, and zsh completions;
-* "Open in…" menu:
-![Open in… menu](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/open_in.jpg)
 
 ## Install
 
@@ -185,12 +186,7 @@ Enough keys to get going:
 | `` ` `` | Hide the interface |
 | `q` | Quit |
 
-All controls are documented by the AI in [`user-docs/KEYS.md`](user-docs/KEYS.md). Every display control is also a
-start-up flag, which `gamut --help` lists.
-
-## Roadmap
-
-See [Roadmap](ROADMAP.md).
+All controls are documented in [`user-docs/KEYS.md`](user-docs/KEYS.md). CLI help is availabel via `gamut --help`.
 
 ## Contributing
 
@@ -207,8 +203,7 @@ Dual-licensed under either of
 
 at your option. 
 
-[Lucide](https://lucide.dev) icon
-geometries licensed under ISC.
+[Lucide](https://lucide.dev) icon geometries licensed under ISC.
 
 Polynomial false-color ramps are CC0 or Apache-2.0.
 Further information in [`docs/licensing.md`](docs/licensing.md).
