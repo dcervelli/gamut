@@ -4,6 +4,18 @@ Notable changes to `gamut`. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+
+- `--timing` reports the upload on a line of its own, `upload <file>`,
+  rather than inside the decode line's `gamut` share. The share took the
+  upload in for every file but the first: the file named on the command
+  line is decoded while the window is still being made and uploaded by
+  the event loop once it exists, off the loader's clock. A large file so
+  read as opening faster on its own than from a directory, when the only
+  difference was where the upload was counted.
+
 ## 0.3.0 - 2026-09-20
 
 ### Added

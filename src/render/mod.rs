@@ -300,18 +300,6 @@ impl Renderer {
             .bind_targets(&self.device, &self.targets.image, &self.targets.ui);
     }
 
-    /// Uploads `image` and puts it on screen, replacing whatever was there.
-    /// Returns a note when the device forced a lossy storage format.
-    ///
-    /// The synchronous path, for the file named on the command line: it is
-    /// already decoded by the time the window exists, and there is nothing on
-    /// screen yet for the wait to interrupt. Everything opened afterwards
-    /// goes through [`Renderer::uploader`] instead.
-    pub fn set_image(&mut self, image: &DecodedImage) -> Result<Option<&'static str>> {
-        let uploaded = self.uploader().run(image)?;
-        Ok(self.install_image(uploaded))
-    }
-
     /// A handle for uploading images from another thread. Safe to keep: it
     /// holds the device, the queue and the bind group layout, all of which
     /// outlive any one image.
@@ -337,7 +325,8 @@ impl Renderer {
         if self.image_layer.refill(&upload, image)? {
             return Ok(None);
         }
-        self.set_image(image)
+        let uploaded = upload.run(image)?;
+        Ok(self.install_image(uploaded))
     }
 
     /// What the current image was stored as on the device, for the interface

@@ -61,27 +61,50 @@ pub fn window_open() {
 /// One file read and turned into pixels, however it was reached: the file the
 /// command line named, a step to the next one, or a re-read after a write.
 ///
-/// `elapsed` is the whole of the loader's work on it; `decoding` is the part
-/// of that spent inside the format's own decoder. The line prints the two
-/// apart, with the difference as what this program added around the decoder
-/// — reading the header, checking and relabeling what came out, the
-/// statistics scan, the metadata, the upload — so that a slow file can be
-/// told from a slow stage.
+/// `elapsed` is the loader's work on it up to the point the pixels are
+/// ready; `decoding` is the part of that spent inside the format's own
+/// decoder. The line prints the two apart, with the difference as what this
+/// program added around the decoder — reading the header, checking and
+/// relabeling what came out, the statistics scan, the metadata — so that a
+/// slow file can be told from a slow stage. The upload is not in it: that is
+/// [`uploaded`]'s line, which is what lets the two files that are uploaded
+/// differently be compared.
 pub fn decoded(path: &Path, elapsed: Duration, decoding: Duration) {
     if enabled() {
-        let name = path
-            .file_name()
-            .unwrap_or(path.as_os_str())
-            .to_string_lossy();
         let ours = elapsed.saturating_sub(decoding);
         eprintln!(
             "[timing] decode {}: {} (decoder {}, gamut {})",
-            crate::escape_controls(&name),
+            name_of(path),
             ms(elapsed),
             ms(decoding),
             ms(ours),
         );
     }
+}
+
+/// One file's pixels repacked and copied to the GPU, on whichever thread did
+/// it. That is the loader's for every file it read with a renderer to hand,
+/// and the main one for the file named on the command line, which is
+/// decoded while the window is still being made; kept out of [`decoded`]'s
+/// line so that the two read the same whichever way the file came.
+///
+/// Measured over the copy into staging, which is where the time goes: the
+/// bytes reach the texture at a later submit, on the frame that first draws
+/// from them.
+pub fn uploaded(path: &Path, elapsed: Duration) {
+    if enabled() {
+        eprintln!("[timing] upload {}: {}", name_of(path), ms(elapsed));
+    }
+}
+
+/// The file's own name, safe to print: whoever named the file chose the
+/// bytes, and a control character among them would write on the terminal.
+fn name_of(path: &Path) -> String {
+    let name = path
+        .file_name()
+        .unwrap_or(path.as_os_str())
+        .to_string_lossy();
+    crate::escape_controls(&name)
 }
 
 /// One image encoded as a PNG for the clipboard. Measured over the encoder

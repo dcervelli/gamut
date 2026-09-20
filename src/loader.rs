@@ -331,15 +331,23 @@ fn read(request: Request, upload: Option<&Upload>, canceled: &AtomicBool) -> Opt
     }
 
     let outcome = scanned.and_then(|(image, decoding, stats, exif, sequence, page)| {
+        // Measured once the pixels are ready to hand over, so that the time
+        // reported is everything this thread did to them — the header, the
+        // decode, the scan, the metadata — with the decoder's own share
+        // picked out of it. The upload has a line of its own: a file read
+        // before the renderer existed is uploaded by the event loop instead,
+        // and a decode line that took the upload in only sometimes would
+        // read as a slower decode.
+        timing::decoded(&path, started.elapsed(), decoding);
         let gpu = match upload {
-            Some(upload) => Some(guard("uploading to the GPU", || upload.run(&image))?),
+            Some(upload) => {
+                let began = Instant::now();
+                let gpu = guard("uploading to the GPU", || upload.run(&image))?;
+                timing::uploaded(&path, began.elapsed());
+                Some(gpu)
+            }
             None => None,
         };
-        // Measured once the image is ready to hand over, so that the time
-        // reported is everything this thread did to it — the header, the
-        // decode, the scan, the metadata and the upload — with the decoder's
-        // own share picked out of it.
-        timing::decoded(&path, started.elapsed(), decoding);
         Ok(Ready {
             image,
             stats,
