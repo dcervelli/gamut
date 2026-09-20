@@ -535,6 +535,9 @@ mod tests {
         assert_eq!(device_size([3840, 2160], Transform::Normal), [3840, 2160]);
         assert_eq!(device_size([3840, 2160], Transform::_180), [3840, 2160]);
         assert_eq!(device_size([3840, 2160], Transform::_90), [2160, 3840]);
-        assert_eq!(device_size([3840, 2160], Transform::Flipped270), [2160, 3840]);
+        assert_eq!(
+            device_size([3840, 2160], Transform::Flipped270),
+            [2160, 3840]
+        );
     }
 }
