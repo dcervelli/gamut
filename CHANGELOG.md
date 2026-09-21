@@ -8,6 +8,18 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Added
 
+- The program opens with nothing: `gamut` alone, or from the desktop's
+  menu, puts up an empty window with three buttons in the middle of it —
+  **Open files…**, **Open folder…** and **Paste** — and comes back to them
+  when nothing it was handed could be opened, with the reason at its foot.
+  `Ctrl+O` puts up the desktop's own file dialog from any window, narrowed
+  to the formats read here, and `Ctrl+Shift+O` the same dialog for a
+  folder; what is chosen replaces the list as a new command line would,
+  and the picture on screen goes at once, kept as it was left. The dialog
+  is asked for through the desktop portal over a session-bus connection of
+  the program's own, so nothing new is linked. `--paste` with nothing on
+  the clipboard now opens the empty window rather than failing.
+
 - A menu of the file itself, off a button before its name in the top bar:
   copy its name, copy its path, rename it, delete it. `F2` opens the rename
   dialog, which says what is wrong with the name as it is typed — taken, a

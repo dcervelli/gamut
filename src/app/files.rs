@@ -54,6 +54,12 @@ pub(super) struct Step {
     remaining: usize,
 }
 
+/// The list can be empty: the program opened on nothing, and is waiting
+/// for the window to be handed something. Then there is no file on screen
+/// for [`Files::shown_path`] to name and no index worth reading, and the
+/// first thing that fills the list — [`Files::replace`] for what the
+/// desktop's dialog chose, [`Files::adopt`] for a paste — is what starts
+/// the first read.
 pub(super) struct Files {
     paths: Vec<PathBuf>,
     /// Files written while the program was running — a picture pasted from
@@ -77,7 +83,8 @@ pub(super) struct Files {
 
 impl Files {
     /// `index` is the file to open first: the first one whose header could be
-    /// read, which is not necessarily the first one named.
+    /// read, which is not necessarily the first one named. An empty list is
+    /// a program opened on nothing, and `index` is then nothing either.
     pub(super) fn new(paths: Vec<PathBuf>, index: usize, overrides: decode::Overrides) -> Self {
         Self {
             paths,
@@ -94,7 +101,7 @@ impl Files {
         self.paths.len()
     }
 
-    /// Which file is on screen.
+    /// Which file is on screen. Meaningless on an empty list.
     pub(super) fn index(&self) -> usize {
         self.index
     }
@@ -103,8 +110,10 @@ impl Files {
         &self.paths[index]
     }
 
-    pub(super) fn shown_path(&self) -> &Path {
-        &self.paths[self.index]
+    /// The file on screen — or the one being asked for first, before
+    /// anything is — and `None` on an empty list.
+    pub(super) fn shown_path(&self) -> Option<&Path> {
+        self.paths.get(self.index).map(PathBuf::as_path)
     }
 
     /// The whole list, in the order it is walked.
@@ -200,7 +209,7 @@ impl Files {
     /// decode every interval, and the reply already on its way carries a
     /// watch taken later than this one anyway.
     pub(super) fn reload(&mut self) -> Option<Request> {
-        if self.pending.is_some() {
+        if self.pending.is_some() || self.paths.is_empty() {
             return None;
         }
         Some(self.request(self.index, Reload::InPlace, None, Source::Disk))
@@ -210,7 +219,7 @@ impl Files {
     /// in flight, as for a reload: a key held down would otherwise stack up
     /// a decode per repeat, each aimed at a page the next has moved past.
     pub(super) fn page(&mut self, page: usize) -> Option<Request> {
-        if self.pending.is_some() {
+        if self.pending.is_some() || self.paths.is_empty() {
             return None;
         }
         let mut request = self.request(self.index, Reload::Page, None, Source::Disk);
@@ -235,10 +244,30 @@ impl Files {
     /// asked for, and wandering off to a neighbor instead would answer a
     /// question nobody put.
     pub(super) fn adopt(&mut self, path: PathBuf, source: Source) -> Request {
-        let at = self.index + 1;
+        // Beside the file on screen, or at the head of a list with nothing
+        // on it yet.
+        let at = match self.paths.is_empty() {
+            true => 0,
+            false => self.index + 1,
+        };
         self.paths.insert(at, path.clone());
         self.adopted.push(path);
         self.request(at, Reload::Fresh, None, source)
+    }
+
+    /// Makes `paths` the list, in place of whatever was on it, and asks for
+    /// the first of them as [`Files::open_first`] does: what the desktop's
+    /// dialog chose is a new command line, not an addition to the old one.
+    /// Only the request numbering carries over, so that a reply still on
+    /// its way for the old list cannot be taken for one of the new.
+    pub(super) fn replace(&mut self, paths: Vec<PathBuf>) -> Request {
+        debug_assert!(!paths.is_empty(), "a list is replaced with something");
+        self.paths = paths;
+        self.adopted.clear();
+        self.index = 0;
+        self.leaving = None;
+        self.pending = None;
+        self.open_first(Source::Disk)
     }
 
     /// The step a deletion takes away from the file on screen: on to the
@@ -397,6 +426,12 @@ impl Files {
     /// request in flight is aimed at the old one.
     pub(super) fn relist(&mut self, mut paths: Vec<PathBuf>) -> bool {
         debug_assert!(self.is_idle(), "the list is rebuilt between reads");
+        // Nothing to keep from an empty list: it is what the rebuild says.
+        if self.paths.is_empty() {
+            let changed = !paths.is_empty();
+            self.paths = paths;
+            return changed;
+        }
         // In the order they stand in now, so that each is placed against a
         // list the ones before it are already back in.
         let keep: Vec<(usize, PathBuf)> = self
@@ -574,6 +609,44 @@ mod tests {
         names.iter().map(PathBuf::from).collect()
     }
 
+    /// A program opened on nothing has an empty list: nothing to step to,
+    /// nothing to reload, nothing on screen to name — and the first thing
+    /// handed to it, whether chosen or pasted, goes at the head.
+    #[test]
+    fn an_empty_list_names_nothing_and_takes_the_first_thing_it_is_given() {
+        let mut files = list(0);
+        assert_eq!(files.len(), 0);
+        assert_eq!(files.shown_path(), None);
+        assert!(files.step(true).is_none());
+        assert!(files.reload().is_none());
+        assert!(files.page(1).is_none());
+        assert!(!files.relist(Vec::new()));
+        assert!(files.is_idle());
+
+        let pasted = files.adopt(PathBuf::from("pasted.png"), Source::Disk);
+        assert_eq!(pasted.index, 0);
+        assert_eq!(files.shown_path(), Some(Path::new("pasted.png")));
+        assert!(files.is_adopted(Path::new("pasted.png")));
+
+        // What the dialog chose is the list, whatever was on it before, and
+        // is asked for as a walk from its head; the reply to the paste,
+        // still on its way, is not a reply to it.
+        let chosen = files.replace(named(&["a.png", "b.png"]));
+        assert_eq!(chosen.index, 0);
+        assert_ne!(chosen.generation, pasted.generation);
+        assert!(files.accept(pasted.generation).is_none());
+        let pending = files
+            .accept(chosen.generation)
+            .expect("the walk's own reply");
+        assert!(
+            pending.step.is_some(),
+            "a walk, so a bad file is stepped over"
+        );
+        assert_eq!(files.len(), 2);
+        assert!(!files.is_adopted(Path::new("pasted.png")));
+        assert!(files.failed(0, pending.step).is_some(), "on to b.png");
+    }
+
     /// A directory read again is a list read again: a file written into it
     /// joins the walk, and the one on screen goes on being the one on screen.
     #[test]
@@ -582,7 +655,7 @@ mod tests {
         files.shown(1);
         assert!(files.relist(named(&["0.png", "1.png", "2.png"])));
         assert_eq!(files.len(), 3);
-        assert_eq!(files.shown_path(), Path::new("1.png"));
+        assert_eq!(files.shown_path(), Some(Path::new("1.png")));
         assert_eq!(files.index(), 1);
         assert_eq!(files.step(true).map(|r| r.index), Some(2));
 
@@ -606,7 +679,7 @@ mod tests {
         let mut files = list(4);
         files.shown(1);
         assert!(files.relist(named(&["0.png", "2.png"])));
-        assert_eq!(files.shown_path(), Path::new("1.png"));
+        assert_eq!(files.shown_path(), Some(Path::new("1.png")));
         assert_eq!(files.len(), 3, "the file on screen, and what is left");
         assert_eq!(files.step(true).map(|r| r.index), Some(2));
         assert_eq!(files.path(2), Path::new("2.png"));
@@ -622,7 +695,7 @@ mod tests {
         let mut files = list(5);
         files.shown(2);
         assert!(files.relist(named(&["0.png", "4.png"])));
-        assert_eq!(files.shown_path(), Path::new("2.png"));
+        assert_eq!(files.shown_path(), Some(Path::new("2.png")));
         assert_eq!(files.index(), 1);
         assert_eq!(files.path(0), Path::new("0.png"));
         assert_eq!(files.path(2), Path::new("4.png"));
@@ -652,13 +725,13 @@ mod tests {
         // A file arrives after it: the one on screen has not moved.
         assert!(files.relist(named(&["0.png", "2.png", "3.png"])));
         assert_eq!(files.index(), 1);
-        assert_eq!(files.shown_path(), Path::new("1.png"));
+        assert_eq!(files.shown_path(), Some(Path::new("1.png")));
         assert_eq!(files.len(), 4);
 
         // One arrives before it, and it moves along with the rest.
         assert!(files.relist(named(&["0.png", "0a.png", "2.png", "3.png"])));
         assert_eq!(files.index(), 2);
-        assert_eq!(files.shown_path(), Path::new("1.png"));
+        assert_eq!(files.shown_path(), Some(Path::new("1.png")));
 
         // And the file itself comes back: it is an ordinary member again,
         // in the place the directory gives it rather than the place we kept.
@@ -706,7 +779,7 @@ mod tests {
         );
         files.accept(request.generation);
         files.shown(request.index);
-        assert_eq!(files.shown_path(), Path::new("pasted.png"));
+        assert_eq!(files.shown_path(), Some(Path::new("pasted.png")));
 
         // Stepped off it, and the directory changes underneath.
         let request = files.step(true).expect("somewhere to step");
@@ -719,7 +792,7 @@ mod tests {
             Path::new("pasted.png"),
             "still between the file it was pasted beside and the next one"
         );
-        assert_eq!(files.shown_path(), Path::new("2.png"));
+        assert_eq!(files.shown_path(), Some(Path::new("2.png")));
     }
 
     /// `--paste` puts the clipboard's picture at the head of the list, and it
@@ -751,7 +824,7 @@ mod tests {
 
         assert!(files.relist(named(&["0.png", "1.png", "2.png"])));
         assert_eq!(files.path(0), Path::new("pasted.png"), "still at the head");
-        assert_eq!(files.shown_path(), Path::new("0.png"));
+        assert_eq!(files.shown_path(), Some(Path::new("0.png")));
         assert_eq!(files.len(), 4);
     }
 
@@ -762,7 +835,7 @@ mod tests {
         let mut files = list(2);
         assert!(files.relist(Vec::new()));
         assert_eq!(files.len(), 1);
-        assert_eq!(files.shown_path(), Path::new("0.png"));
+        assert_eq!(files.shown_path(), Some(Path::new("0.png")));
         assert!(files.step(true).is_none());
     }
 
@@ -820,7 +893,7 @@ mod tests {
         files.accept(request.generation);
         files.shown(2);
         assert_eq!(files.len(), 3);
-        assert_eq!(files.shown_path(), Path::new("2.png"));
+        assert_eq!(files.shown_path(), Some(Path::new("2.png")));
         assert_eq!(files.index(), 1, "the file on screen moved up with it");
         assert!(!files.is_condemned(Path::new("1.png")));
         assert_eq!(
@@ -892,7 +965,7 @@ mod tests {
         files.shown(4);
         assert!(files.relist(named(&["0.png", "1.png", "2.png"])));
         assert_eq!(files.len(), 4);
-        assert_eq!(files.shown_path(), Path::new("9.png"));
+        assert_eq!(files.shown_path(), Some(Path::new("9.png")));
     }
 
     /// A renamed file keeps its place on the list under its new name, and
@@ -904,7 +977,7 @@ mod tests {
         files.accept(request.generation);
         files.shown(1);
         files.rename(1, PathBuf::from("kept.png"));
-        assert_eq!(files.shown_path(), Path::new("kept.png"));
+        assert_eq!(files.shown_path(), Some(Path::new("kept.png")));
         assert_eq!(files.position(Path::new("pasted.png")), None);
         assert!(files.is_adopted(Path::new("kept.png")));
         files.shown(0);

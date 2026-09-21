@@ -56,6 +56,18 @@ impl Watch {
         }
     }
 
+    /// A watch on nothing: for a window with no file on screen. It never
+    /// fires and never reports anything missing, so that what reads it
+    /// need not ask whether there is a file to have gone.
+    pub fn idle() -> Self {
+        Self {
+            path: PathBuf::new(),
+            loaded: None,
+            settling: None,
+            missing: false,
+        }
+    }
+
     /// Whether there is nothing at the path any more, as of the last poll.
     ///
     /// Deleting the file does not take the picture off the screen — its
@@ -68,6 +80,11 @@ impl Watch {
     /// Returns `true` when the file has changed and then stopped changing,
     /// and so is worth reading again. Costs one `stat`.
     pub fn poll(&mut self) -> bool {
+        // The watch on nothing: there is no path to look at, and nothing
+        // to report gone.
+        if self.path.as_os_str().is_empty() {
+            return false;
+        }
         let seen = signature(&self.path);
         self.advance(seen)
     }
@@ -119,6 +136,16 @@ mod tests {
             loaded,
             settling: loaded,
             missing: loaded.is_none(),
+        }
+    }
+
+    /// The watch on nothing stays quiet however often it is asked.
+    #[test]
+    fn a_watch_on_nothing_never_fires() {
+        let mut watch = Watch::idle();
+        for _ in 0..3 {
+            assert!(!watch.poll());
+            assert!(!watch.missing());
         }
     }
 

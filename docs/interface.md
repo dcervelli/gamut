@@ -916,3 +916,94 @@ dead and says so, rather than being left out: a control that comes and goes
 with the file on screen is one that has to be found again, and a missing
 button could not have explained itself.
 
+
+## The empty window and the file dialog
+
+A program started with no path opens on nothing, and `ui/empty.rs` is what
+it shows: three buttons in the middle of the content area — the desktop's
+file dialog for image files, the same dialog for a folder, and a paste of
+the picture on the clipboard — each printing the key that does the same
+thing from anywhere, and each a press of the same `Control` its key goes
+through, so the two cannot drift. The state is not merely `current` being
+`None`: that is also the moment before the first file arrives, and the
+buttons up for the length of a decode would be a window changing its mind.
+`App::is_empty` asks for nothing on screen *and* nothing in flight, and
+`FrameInput::empty` carries the answer. The window comes back to the same
+state when everything it was handed fails to open, with the message about
+the failure under the buttons, where a picture would have had it under the
+panels.
+
+Nothing about the empty window is a mode. The keys stay on the one table;
+the buttons about the picture in the strips — the copies and the region —
+are drawn dead with `NOTHING_OPEN` for their reason, and the toggles that
+outlast any picture stay live, since what they set is waiting for the next
+one. The strip's own paste button is left out while the middle one is up,
+one control being enough for one thing. The renderer is told to
+`clear_image` when a picture leaves for the empty state, so that the frame
+draws the backdrop alone as the first frame does; and `resumed` asks for a
+first frame outright, since with nothing on the way there would otherwise
+be nothing to ask for one.
+
+Two buttons for the dialog because that is how every desktop's dialog is
+built: it picks files or it picks a folder, never both in one, and a
+program that offers both puts up two. `Ctrl+O` and `Ctrl+Shift+O` are the
+same two presses from any window, bound one case each as the two `C`s of
+the clipboard section are.
+
+The dialog is the desktop's, asked for through `xdg-desktop-portal`'s
+`FileChooser` — the one dialog a Wayland program can put up that looks like
+the rest of the desk and carries the user's bookmarks. The ask is one
+method, `OpenFile`, and the answer is a `Response` signal on a request
+object, which arrives whenever the user has chosen. `src/portal.rs` makes
+the call: the filter is one glob per extension the decoders read, in each
+case, since a portal's globs match by their letters; the request's handle
+is named ahead of the call with `handle_token` and subscribed to before it,
+because the portal may answer before it has returned the handle, and a
+signal nobody was waiting for is lost. The window is left unparented — a
+parent takes an exported handle the toolkit does not hand out — and the
+compositor places the dialog itself. The URIs that come back are `file:`
+URIs, undone into the bytes of the path, so a name that is not UTF-8
+survives.
+
+The whole exchange blocks, on a thread of its own, and the answer comes
+back through the event loop as `UserEvent::Picked`, the way a decode does.
+`App::picking` is the one bit of state: set as the thread starts, cleared
+as the answer lands, and what draws the two buttons dead — with
+`DIALOG_UP` for their reason — and makes the keys refuse a second dialog
+under the first. The thread is not joined: a dialog left up is up for as
+long as the user leaves it, and the process leaving takes the dialog down
+with it, the portal closing a request whose sender has gone.
+
+The bus is spoken directly, in `src/dbus.rs`, for the reason the clipboard
+and the monitors are: the whole need is one connection, three calls and one
+signal, and the crates that do it bring an async runtime and forty crates
+behind them. What is there is the wire format — a `Value` marshaled and
+unmarshaled by signature, with the alignment and the array lengths the
+specification asks — and a blocking `Connection` that authenticates with
+`EXTERNAL`, says `Hello`, and reads messages one at a time, keeping any
+signal that arrives while a reply is being waited for. A message is
+refused before anything is allocated for it if it claims more than the
+specification's maximum, and every read is bounded by the body's length,
+since what is on the other end is a peer this program did not write.
+
+What the dialog chose is opened as the command line would have opened it:
+`App::open_named` runs the names through `listing::expand` — a folder for
+the images in it, and a folder holding none refused before anything moves
+— replaces the list through `Files::replace`, and asks for the first file
+as a walk, so a file that will not decode is stepped over as it is at
+start-up. Opening replaces rather than adds: `Ctrl+O` means what it means
+everywhere else, and a list that grew would have needed a way to shrink.
+The picture on screen is put away at once rather than kept up until the
+first new file arrives, as it is when stepping — this is the list ending,
+not a step along it — and `App::leave_picture` keeps what it was left in
+under its path, stops the player and the watch, clears the region and the
+openers, and takes the image off the renderer. A file coming back through
+the dialog is then restored as a step back to it would be: `App::apply`
+looks the arriving file up in `kept` for any fresh read, not only one
+arriving beside a picture.
+
+Whether nothing showing means leaving is `App::from_command_line`. A
+command line whose every file fails to decode is answered by leaving with a
+failing status, as it always was; a choice made in the window that fails is
+answered in the window, which stays up for the next choice, and a program
+opened on nothing and closed on nothing has not failed.

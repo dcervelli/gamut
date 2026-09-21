@@ -4,6 +4,7 @@ mod app;
 mod cli;
 mod clipboard;
 mod clock;
+mod dbus;
 mod fuzzy;
 mod image;
 mod listing;
@@ -13,6 +14,7 @@ mod motion;
 mod openers;
 mod pasted;
 mod player;
+mod portal;
 mod render;
 mod theme;
 mod thumbnail;
@@ -108,29 +110,41 @@ fn run() -> Result<ExitCode> {
     // read and no size to open the window at, and it is the first file
     // whatever else was named. A paste that will not arrive is walked past
     // exactly as a file that will not decode is. A clipboard with nothing
-    // to show is worth a word, since the flag was given on purpose, and is
-    // a failure only when the paths named nothing either.
+    // to show is worth a word, since the flag was given on purpose; where
+    // the paths named nothing either, the window opens on nothing, with
+    // the buttons that give it something, as it does with no command line
+    // at all.
     let offer = match paste {
         true => clipboard::offered_image()?,
         false => None,
     };
-    let (index, source, size) = match offer {
+    let opening = match offer {
         Some(offer) => {
             files.insert(0, pasted::reserve(offer.extension)?);
-            (0, loader::Source::Clipboard(offer.mime), None)
+            Some(app::Opening {
+                index: 0,
+                source: loader::Source::Clipboard(offer.mime),
+                size: None,
+            })
         }
         None => {
-            const NOTHING: &str = "nothing on the clipboard that could be shown";
-            if files.is_empty() {
-                anyhow::bail!(NOTHING);
-            }
             if paste {
-                eprintln!("gamut: {NOTHING}");
+                eprintln!("gamut: nothing on the clipboard that could be shown");
             }
-            let (index, size) = cli::first_readable(&files)?;
-            (index, loader::Source::Disk, size)
+            match files.is_empty() {
+                true => None,
+                false => {
+                    let (index, size) = cli::first_readable(&files)?;
+                    Some(app::Opening {
+                        index,
+                        source: loader::Source::Disk,
+                        size,
+                    })
+                }
+            }
         }
     };
+    let opened_on_nothing = opening.is_none();
 
     // With a user event: it is how the loader hands finished images back and
     // how the monitor watch says a monitor has changed, and how either wakes
@@ -156,20 +170,28 @@ fn run() -> Result<ExitCode> {
             .send_event(app::UserEvent::Thumbnail(Box::new(delivered)))
             .is_ok()
     });
+    let proxy = event_loop.create_proxy();
+    let picker: portal::Deliver = std::sync::Arc::new(move |picked| {
+        let _ = proxy.send_event(app::UserEvent::Picked(picked));
+    });
     let mut app = App::new(
         files,
         named,
-        index,
-        source,
-        size,
+        opening,
         options,
         app::Threads {
             loader,
             wake,
             monitors,
             thumbnailer,
+            picker,
         },
     );
+    // `--paste` on purpose, and nothing to paste: said in the window as
+    // well as on the terminal, since the window is where the reader is.
+    if paste && opened_on_nothing {
+        app.say("Nothing on the clipboard that could be shown.");
+    }
     event_loop.run_app(&mut app)?;
 
     // Every file passed the header check and then failed to decode. Each

@@ -42,9 +42,14 @@ fn images_in(dir: &Path) -> Result<Vec<PathBuf>> {
 }
 
 /// Replaces every directory named on the command line with the images
-/// directly inside it. Fails only when that leaves nothing at all to show,
-/// which is a command line worth answering rather than an empty window.
+/// directly inside it. Fails only when what was named leaves nothing at all
+/// to show, which is a command line worth answering rather than an empty
+/// window; a command line naming nothing is answered with the empty window
+/// itself, and expands to nothing without complaint.
 pub fn expand(named: Vec<PathBuf>) -> Result<Vec<PathBuf>> {
+    if named.is_empty() {
+        return Ok(Vec::new());
+    }
     let mut files = Vec::new();
     let mut empty = Vec::new();
     for path in named {
@@ -142,6 +147,16 @@ mod tests {
             PathBuf::from("no-such-file"),
         ];
         assert_eq!(expand(named.clone()).expect("names to pass through"), named);
+    }
+
+    /// Nothing named is nothing to complain about: the list is empty, and
+    /// the window opens on the buttons that fill it.
+    #[test]
+    fn nothing_named_expands_to_nothing() {
+        assert_eq!(
+            expand(Vec::new()).expect("nothing to fail on"),
+            Vec::<PathBuf>::new()
+        );
     }
 
     /// A directory with nothing to show in it is an error worth naming,

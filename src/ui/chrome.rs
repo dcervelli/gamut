@@ -565,14 +565,20 @@ impl Pass<'_> {
     /// they are the same gesture: this file, handed to something else. The
     /// region button sits above the paste button rather than after it so
     /// that it stays put as the paste button comes and goes.
+    ///
+    /// The copy button and the region button are about the picture, and
+    /// are drawn dead while there is none — a window opened on nothing —
+    /// with the label saying so. The open button is dead then too, for its
+    /// own reason: nothing offers to open a file there is not.
     fn left_strip(&mut self, ui: &mut Ui) {
         ui.spacing_mut().item_spacing = Vec2::ZERO;
         let height = ui.available_height();
+        let picture = self.current.is_some();
         ui.vertical_centered(|ui| {
             ui.add_space(BAR_PADDING);
             let id = egui::Id::new("copy menu");
             let open = egui::Popup::is_id_open(ui.ctx(), id);
-            let copy = self.icon_button(ui, icon::COPY, Control::Copy, open, true, Corners::All);
+            let copy = self.icon_button(ui, icon::COPY, Control::Copy, open, picture, Corners::All);
             // From a button in a column, which has its neighbors above and
             // below it and its room to the side.
             egui::Popup::menu(&copy)
@@ -588,13 +594,15 @@ impl Pass<'_> {
                 icon::CROP,
                 Control::Region,
                 self.input.selection.is_on(),
-                true,
+                picture,
                 Corners::All,
             );
             if region.clicked() {
                 self.press(Control::Region);
             }
-            if self.panels.paste {
+            // Not in an empty window, where the same paste is one of the
+            // three buttons in the middle: one control for one thing.
+            if self.panels.paste && !self.input.empty {
                 ui.add_space(BUTTON_GAP);
                 let paste = self.icon_button(
                     ui,

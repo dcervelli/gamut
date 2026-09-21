@@ -65,6 +65,8 @@ column, the menus — is [the interface](interface.md).
 | `src/watch.rs` | Noticing that the file on screen has been rewritten, or that a directory named on the command line holds something else now |
 | `src/clipboard.rs` | The clipboard and `file:` URIs, held by a process of its own so a copy outlives the window; and reading a pasted picture off it |
 | `src/pasted.rs` | Where a pasted picture is written and what it is called, by the desktop's own conventions |
+| `src/portal.rs` | The desktop's file dialog, through the file chooser portal: what is asked for, and the paths that come back |
+| `src/dbus.rs` | The session bus, spoken directly: the wire format, and a blocking connection that calls a method and waits for a signal |
 | `src/clock.rs` | A moment as a date and time, in UTC or in the zone the system is set to |
 | `src/theme/` | `palette.rs` reads the desktop's palette; `mod.rs` derives the colors drawn from it |
 | `src/image/` | The data model: `Samples`, `color/` (transfer functions, primaries, ICC and CICP), stats, display state; `sequence.rs` is what a file holds beyond one image |

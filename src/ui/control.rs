@@ -129,6 +129,12 @@ pub enum Control {
     /// outside it also do.
     RenameTo,
     CancelRename,
+    /// The buttons in the middle of an empty window that put up the
+    /// desktop's file dialog, for image files and for a folder — see
+    /// `ui::empty`. `Ctrl+O` and `Ctrl+Shift+O` come through here too,
+    /// from anywhere. Dead while the dialog is up.
+    OpenFiles,
+    OpenFolder,
 }
 
 impl Control {
@@ -180,6 +186,8 @@ impl Control {
             Control::Delete => "Delete".to_string(),
             Control::RenameTo => "OK".to_string(),
             Control::CancelRename => "Cancel".to_string(),
+            Control::OpenFiles => "Open files".to_string(),
+            Control::OpenFolder => "Open folder".to_string(),
         }
     }
 }

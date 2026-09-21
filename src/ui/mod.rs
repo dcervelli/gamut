@@ -9,6 +9,7 @@
 pub mod chooser;
 pub mod chrome;
 pub mod control;
+pub mod empty;
 pub mod fonts;
 pub mod help;
 pub mod info;
@@ -283,6 +284,15 @@ pub struct FrameInput {
     /// which is why it is a modal rather than a popup: nothing egui does
     /// on its own can close it.
     pub rename: Option<rename::Input>,
+    /// Whether there is nothing on screen and nothing on its way: the
+    /// window opened on nothing, or everything it was handed failed. What
+    /// puts the buttons for opening something in the middle of the content
+    /// area — see [`empty`]. Not merely `current` being `None`, which is
+    /// also the moment before the first file arrives.
+    pub empty: bool,
+    /// Whether the desktop's file dialog is up, which draws the buttons that
+    /// put it up dead.
+    pub picking: bool,
 }
 
 /// One pass of the interface: the chrome and everything on it, laid out in
@@ -311,8 +321,20 @@ pub fn show(
     }
     pass.picture(ui);
     let content = chrome::content_area(input.logical, panels.show_ui, input.transport.is_some());
-    if let Some(current) = current {
-        pass.overlays(ui, current, content);
+    match current {
+        Some(current) => pass.overlays(ui, current, content),
+        // Nothing to lay over: the buttons that would give the window
+        // something, where the picture would be, and the message about
+        // what was just done — a failure to open, most likely — under
+        // them, as it goes under the panels when there is a picture.
+        None => {
+            if input.empty {
+                empty::show(&mut pass, ui, content);
+            }
+            if let Some(message) = &input.toast {
+                toast::show(&mut pass, ui, message, content);
+            }
+        }
     }
     // Over everything, and whether or not there is a picture yet: the
     // chooser is about the list, and the list is there before the first

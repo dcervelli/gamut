@@ -88,7 +88,9 @@ impl App {
         if !self.files.is_idle() {
             return;
         }
-        let listed = self.files.shown_path().to_path_buf();
+        let Some(listed) = self.files.shown_path().map(Path::to_path_buf) else {
+            return;
+        };
         if self.files.is_condemned(&listed) {
             self.toast("Already in the trash.", Level::Warning);
             return;
@@ -129,7 +131,9 @@ impl App {
         // One thing at a time: a menu still open under a dialog would be a
         // second thing on screen asking for a press.
         self.close_menus();
-        let path = self.files.shown_path().to_path_buf();
+        let Some(path) = self.files.shown_path().map(Path::to_path_buf) else {
+            return;
+        };
         let name = name_of(&path);
         self.renaming = Some(Renaming {
             verdict: rename::judge(&name, &name, |_| false),
@@ -321,7 +325,7 @@ impl App {
             self.list_changed();
         }
         self.kept.rename(from, to);
-        if self.files.shown_path() == to
+        if self.files.shown_path() == Some(to)
             && let Some(current) = self.current.as_mut()
         {
             self.watch = Watch::new(to);

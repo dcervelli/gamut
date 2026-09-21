@@ -31,6 +31,7 @@ use crate::monitor::{Mode, Monitors};
 use crate::motion::Motion;
 use crate::openers::{self, Opener};
 use crate::player::{self, Player};
+use crate::portal::{self, Pick, Picked};
 use crate::render::{GpuImage, HdrPreference, Placement, Renderer, Scene, Upscale};
 use crate::theme::{self, Theme};
 use crate::thumbnailer::{Delivered, Facts, Thumb, Thumbnailer};
@@ -64,6 +65,9 @@ pub enum UserEvent {
     /// The thumbnail thread has something to say about a file. Boxed for
     /// the variant that carries pixels.
     Thumbnail(Box<Delivered>),
+    /// The desktop's file dialog has come down: what was chosen in it, if
+    /// anything.
+    Picked(Picked),
 }
 
 /// The other threads, and how each reaches the loop: made in `main` from
@@ -75,6 +79,25 @@ pub struct Threads {
     pub monitors: Option<Monitors>,
     /// The thread making the chooser's thumbnails, over the whole session.
     pub thumbnailer: Thumbnailer,
+    /// How the desktop's file dialog hands its answer back.
+    pub picker: portal::Deliver,
+}
+
+/// The file the command line asked for first, for the window to open on:
+/// where it stands in the list, where its bytes come from, and the size
+/// its header claims. `None` for a program opened on nothing, whose window
+/// opens on the buttons that give it something.
+pub struct Opening {
+    /// Which file of the list: the first whose header could be read, which
+    /// is not necessarily the first named.
+    pub index: usize,
+    /// Where its bytes come from: the clipboard for `--paste`, whose file
+    /// is the empty one reserved for it until the loader has fetched the
+    /// picture into it.
+    pub source: Source,
+    /// What its header said its size was, where it would say: enough to
+    /// open the window at the right shape before the pixels exist.
+    pub size: Option<[f32; 2]>,
 }
 
 /// What the command line asked for, beyond which files to show.
@@ -258,6 +281,18 @@ pub struct App {
     edits: Vec<Edit>,
     /// The rename dialog, while it is up.
     renaming: Option<Renaming>,
+    /// How the desktop's file dialog hands its answer back: what `main`
+    /// made from the loop's proxy.
+    picker: portal::Deliver,
+    /// Whether that dialog is up. One at a time: the buttons that open it
+    /// are drawn dead while it is, and the key does nothing.
+    picking: bool,
+    /// Whether the list is still the one the command line gave, with
+    /// nothing opened from the window since. A command line whose every
+    /// file fails to decode is a command line to answer by leaving, with a
+    /// failing status; a choice made in the window that fails is answered
+    /// in the window, which stays up for the next choice.
+    from_command_line: bool,
     /// Whether the window has already said how to bring the interface back.
     /// The message goes up the first time the bars are hidden and not again:
     /// with them gone there is nothing on screen that could say it, and a
@@ -270,12 +305,10 @@ pub struct App {
 }
 
 impl App {
-    /// `size` is what the header of `files[index]` said, where it would say:
-    /// enough to open the window at the right shape before the pixels exist.
-    /// The file itself is asked for here, so that it is being read while the
-    /// window and the GPU are still being set up. `source` is where its bytes
-    /// come from: the clipboard for `--paste`, whose file is the empty one
-    /// reserved for it until the loader has fetched the picture into it.
+    /// `opening` is the file to open on, if the command line named any: it
+    /// is asked for here, so that it is being read while the window and the
+    /// GPU are still being set up. With `None` the list is empty and the
+    /// window opens on nothing but the buttons that give it something.
     ///
     /// `named` is the command line's own list, `files` before any directory in
     /// it was replaced by the images inside. Kept so that those directories
@@ -283,9 +316,7 @@ impl App {
     pub fn new(
         files: Vec<PathBuf>,
         named: Vec<PathBuf>,
-        index: usize,
-        source: Source,
-        size: Option<[f32; 2]>,
+        opening: Option<Opening>,
         options: Options,
         threads: Threads,
     ) -> Self {
@@ -294,6 +325,7 @@ impl App {
             wake,
             monitors,
             thumbnailer,
+            picker,
         } = threads;
         let Options {
             overrides,
@@ -306,7 +338,18 @@ impl App {
             size: asked_size,
             paused,
         } = options;
-        let watch = Watch::new(&files[index]);
+        let (index, source, size) = match opening {
+            Some(Opening {
+                index,
+                source,
+                size,
+            }) => (index, Some(source), size),
+            None => (0, None, None),
+        };
+        let watch = match files.get(index) {
+            Some(path) => Watch::new(path),
+            None => Watch::idle(),
+        };
         let directories = named
             .iter()
             .filter(|path| path.is_dir())
@@ -375,16 +418,129 @@ impl App {
             trash: Trash::detect(),
             edits: Vec::new(),
             renaming: None,
+            picker,
+            picking: false,
+            from_command_line: source.is_some(),
             said_how_to_restore: false,
             reported_error: false,
         };
-        let request = app.files.open_first(source);
-        app.send(request);
+        if let Some(source) = source {
+            let request = app.files.open_first(source);
+            app.send(request);
+        }
         // The whole list, from the start: the cache fills while the first
         // file is being looked at, and the chooser then has thumbnails the
         // moment it opens.
         app.thumbnailer.enqueue(app.files.paths().to_vec());
         app
+    }
+
+    /// Puts up the desktop's file dialog, for files or for a folder, unless
+    /// it is up already. What it answers arrives as [`UserEvent::Picked`].
+    pub(super) fn pick(&mut self, pick: Pick) {
+        if self.picking {
+            return;
+        }
+        self.picking = true;
+        self.close_menus();
+        portal::choose_on_thread(pick, Arc::clone(&self.picker));
+    }
+
+    /// Takes in what the dialog answered.
+    fn picked(&mut self, picked: Picked) {
+        self.picking = false;
+        match picked.outcome {
+            Ok(Some(paths)) => self.open_named(paths),
+            // Dismissed: nothing was asked for.
+            Ok(None) => {}
+            Err(error) => {
+                input::report(&error);
+                self.toast(input::briefly(&error), Level::Error);
+            }
+        }
+    }
+
+    /// Opens `named` as a command line naming them would have: a directory
+    /// among them stands for the images inside it, and the list is what
+    /// they come to, in place of whatever was on it. The first of them is
+    /// asked for as a walk, so a file that will not decode is stepped over
+    /// as it is at start-up.
+    ///
+    /// The picture on screen is put away now rather than kept up until the
+    /// first new file arrives, as it is when stepping: this is not a step
+    /// along the list but the list replaced, and a picture left up would be
+    /// one of a session that has ended.
+    pub(super) fn open_named(&mut self, named: Vec<PathBuf>) {
+        let files = match crate::listing::expand(named.clone()) {
+            Ok(files) => files,
+            Err(error) => {
+                input::report(&error);
+                self.toast(input::briefly(&error), Level::Warning);
+                return;
+            }
+        };
+        self.leave_picture();
+        self.from_command_line = false;
+        self.named = named;
+        self.directories = self
+            .named
+            .iter()
+            .filter(|path| path.is_dir())
+            .map(|path| Watch::new(path))
+            .collect();
+        let request = self.files.replace(files);
+        self.send(request);
+        self.list_changed();
+    }
+
+    /// Takes the picture off the screen, keeping what it was left in for
+    /// its return, and stops everything that was about it: the animation
+    /// playing, the watch on its file, the region drawn on it, the move it
+    /// was in the middle of, and the menu of what else could open it.
+    fn leave_picture(&mut self) {
+        if self.current.is_none() {
+            return;
+        }
+        self.keep_shown();
+        self.current = None;
+        self.player = None;
+        self.playback = None;
+        self.uploaded = None;
+        self.motion = None;
+        self.watch = Watch::idle();
+        self.openers.clear();
+        self.clear_region();
+        if let Some(renderer) = &mut self.renderer {
+            renderer.clear_image();
+        }
+        if let Some(window) = &self.window {
+            window.set_title(&self.title());
+        }
+    }
+
+    /// Keeps what the picture on screen was left in — its view, its
+    /// display, and the frame or page it was on — under the file's path,
+    /// so that stepping back to it puts it back.
+    fn keep_shown(&mut self) {
+        let (Some(current), Some(path)) = (&self.current, self.files.shown_path()) else {
+            return;
+        };
+        let left = match (&self.playback, current.sequence) {
+            (Some(playback), _) => Some(Left::Frame {
+                frame: playback.head(),
+                paused: !playback.playing(),
+            }),
+            (None, Sequence::Pages { .. }) => Some(Left::Page(current.page)),
+            (None, _) => None,
+        };
+        self.kept.keep(
+            path,
+            Settings {
+                view: self.view,
+                display: current.display.clone(),
+                left,
+            },
+        );
     }
 
     /// Whether the file chooser is up. Asked of egui, whose popup it is:
@@ -430,10 +586,20 @@ impl App {
         self.thumbs.insert(path, texture);
     }
 
-    /// Whether anything ever reached the screen. False only when every file
-    /// named on the command line failed to decode.
+    /// Whether the command line asked for something and none of it ever
+    /// reached the screen: every file it named failed to decode, and
+    /// nothing was opened from the window in the meantime. A program
+    /// opened on nothing and closed on nothing has not failed.
     pub fn showed_nothing(&self) -> bool {
-        self.current.is_none()
+        self.from_command_line && self.current.is_none()
+    }
+
+    /// Whether the window is showing nothing and waiting for nothing: the
+    /// state that puts the buttons for opening something in the middle of
+    /// it. Not while a read is in flight, since what is coming is a
+    /// picture, and the buttons would be up for the length of a decode.
+    fn is_empty(&self) -> bool {
+        self.current.is_none() && self.files.is_idle()
     }
 
     /// The size to open the window at: the image's, once there is one, and
@@ -718,6 +884,12 @@ impl App {
             .show(Instant::now(), message.into(), level, toast::LINGER);
     }
 
+    /// Raises a warning before the window opens: what the command line asked
+    /// for and could not have, said where the reader will be looking.
+    pub fn say(&mut self, message: &str) {
+        self.toast(message, Level::Warning);
+    }
+
     /// Says what the copies prepared on their own threads did. Returns
     /// whether anything was said, and so whether a redraw is owed.
     ///
@@ -963,18 +1135,20 @@ impl App {
         changed
     }
 
-    /// What the window is called: the image on screen, or the file being read
-    /// while there is nothing on screen to name.
+    /// What the window is called: the image on screen, the file being read
+    /// while there is nothing on screen to name, or the program's own name
+    /// while there is nothing at all.
     fn title(&self) -> String {
-        match &self.current {
-            Some(_) => window_title(self.files.shown_path()),
-            None => {
-                let index = self
-                    .files
-                    .pending()
-                    .map_or(self.files.index(), |pending| pending.index);
-                loading_title(self.files.path(index))
-            }
+        match (&self.current, self.files.pending()) {
+            (Some(_), _) => match self.files.shown_path() {
+                Some(path) => window_title(path),
+                None => crate::PROGRAM.to_string(),
+            },
+            (None, Some(pending)) => loading_title(self.files.path(pending.index)),
+            (None, None) => match self.files.shown_path() {
+                Some(path) => loading_title(path),
+                None => crate::PROGRAM.to_string(),
+            },
         }
     }
 
@@ -1040,32 +1214,20 @@ impl App {
         // Whether this is a move between files at all. The file already on
         // screen being read again is not one, whatever it has become: it is
         // neither a departure to be put away nor a return to be restored.
-        let stepping = self.current.is_some() && self.files.shown_path() != file.path;
+        let stepping =
+            self.current.is_some() && self.files.shown_path() != Some(file.path.as_path());
         // The picture being stepped away from, kept as it stands so that
         // stepping back to it finds it as it was left.
-        if let Some(current) = self.current.as_ref().filter(|_| stepping) {
-            let left = match (&self.playback, current.sequence) {
-                (Some(playback), _) => Some(Left::Frame {
-                    frame: playback.head(),
-                    paused: !playback.playing(),
-                }),
-                (None, Sequence::Pages { .. }) => Some(Left::Page(current.page)),
-                (None, _) => None,
-            };
-            self.kept.keep(
-                self.files.shown_path(),
-                Settings {
-                    view: self.view,
-                    display: current.display.clone(),
-                    left,
-                },
-            );
+        if stepping {
+            self.keep_shown();
         }
         // And what the file arriving left the last time it was on screen, if
-        // it has been here. Its window is re-derived where it was automatic,
+        // it has been here — whether it is arriving beside a picture or
+        // into an empty window, which is where a list replaced from the
+        // dialog lands it. Its window is re-derived where it was automatic,
         // the file being free to have changed on disk since; one set by hand
         // is left exactly where it was put.
-        let kept = stepping
+        let kept = (!same_file)
             .then(|| self.kept.left(&file.path).cloned())
             .flatten();
         let display = match (self.current.as_ref().filter(|_| in_place), &kept) {
@@ -1336,17 +1498,32 @@ impl App {
         };
 
         let index = decoded.file.index;
+        let name = file_label(&decoded.file.path);
         // A file that will not go on screen is a file to step over, whether it
         // was the decode or the upload that would not have it.
         let failed = match decoded.outcome {
-            Ok(ready) => !self.apply(decoded.file, ready),
+            Ok(ready) => match self.apply(decoded.file, ready) {
+                true => None,
+                false => Some(format!("Could not show {name}.")),
+            },
             Err(error) => {
-                eprintln!("gamut: {}", crate::escape_controls(&format!("{error:#}")));
-                true
+                input::report(&error);
+                Some(format!("Could not read {name}: {}", input::briefly(&error)))
             }
         };
-        if failed && let Some(request) = self.files.failed(index, pending.step) {
-            self.send(request);
+        if let Some(said) = failed {
+            match self.files.failed(index, pending.step) {
+                Some(request) => self.send(request),
+                // The walk is over, or this was no walk, and the failure is
+                // the last word: worth saying in the window where there is
+                // a window left to say it in — with nothing on screen and
+                // the list the command line's, the window is about to go.
+                None => {
+                    if !self.from_command_line || self.current.is_some() {
+                        self.toast(said, Level::Error);
+                    }
+                }
+            }
         }
 
         // Owed either way: on success for the new image, and on failure
@@ -1376,7 +1553,7 @@ impl App {
             self.hold_thumb(path, thumb);
         }
         let chooser = self.chooser_open().then(|| {
-            let shown = self.current.is_some().then(|| self.files.shown_path());
+            let shown = self.current.as_ref().and_then(|_| self.files.shown_path());
             self.chooser.input(&self.thumbs, shown)
         });
         let rename = self.rename_input();
@@ -1424,6 +1601,8 @@ impl App {
             transport: self.transport(),
             chooser,
             rename,
+            empty: self.is_empty(),
+            picking: self.picking,
         };
 
         let namer = self.namer();
@@ -1598,9 +1777,16 @@ impl ApplicationHandler<UserEvent> for App {
                 // Nothing ever reached the screen and nothing else is coming:
                 // every file named on the command line failed to decode.
                 // Stop, rather than sit in an empty window with nothing on
-                // the way.
-                if self.current.is_none() && self.files.is_idle() {
+                // the way. A choice made in the window is answered in the
+                // window instead, which stays up for the next choice.
+                if self.showed_nothing() && self.files.is_idle() {
                     event_loop.exit();
+                }
+            }
+            UserEvent::Picked(picked) => {
+                self.picked(picked);
+                if let Some(window) = &self.window {
+                    window.request_redraw();
                 }
             }
             UserEvent::Monitor => {
@@ -1676,8 +1862,8 @@ impl ApplicationHandler<UserEvent> for App {
         // being made, and waiting here for somewhere to go. There is nothing
         // on screen yet for the wait to interrupt; everything opened
         // afterwards is uploaded on the loader's thread.
-        if let Some(current) = &mut self.current {
-            match upload_here(&renderer, self.files.shown_path(), &current.image) {
+        if let (Some(current), Some(path)) = (&mut self.current, self.files.shown_path()) {
+            match upload_here(&renderer, path, &current.image) {
                 Ok(uploaded) => {
                     if let Some(note) = renderer.install_image(uploaded) {
                         eprintln!("gamut: {note}");
@@ -1729,6 +1915,12 @@ impl ApplicationHandler<UserEvent> for App {
         // monitor it is on is not known until it has been shown, and the
         // surface follows it from `about_to_wait`.
         self.adopt_headroom();
+        // A first frame, asked for outright. With a file on the way its
+        // arrival asks for one; a window opened on nothing has nothing
+        // coming, and its buttons are owed a frame all the same.
+        if let Some(window) = &self.window {
+            window.request_redraw();
+        }
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -1872,7 +2064,28 @@ mod tests {
     }
 
     fn open(paths: Vec<PathBuf>, named: Vec<PathBuf>) -> App {
-        let options = Options {
+        let size = decode::probe(&paths[0]).expect("we just wrote it");
+        App::new(
+            paths,
+            named,
+            Some(Opening {
+                index: 0,
+                source: Source::Disk,
+                size: size.map(|(w, h)| [w as f32, h as f32]),
+            }),
+            options(),
+            threads(),
+        )
+    }
+
+    /// The application as `gamut` alone opens it: no list, and nothing
+    /// asked for.
+    fn opened_on_nothing() -> App {
+        App::new(Vec::new(), Vec::new(), None, options(), threads())
+    }
+
+    fn options() -> Options {
+        Options {
             overrides: decode::Overrides::default(),
             startup: Startup::default(),
             hdr: HdrPreference::default(),
@@ -1882,22 +2095,19 @@ mod tests {
             upscale: Upscale::default(),
             size: None,
             paused: false,
-        };
-        let size = decode::probe(&paths[0]).expect("we just wrote it");
-        App::new(
-            paths,
-            named,
-            0,
-            Source::Disk,
-            size.map(|(w, h)| [w as f32, h as f32]),
-            options,
-            Threads {
-                loader: Loader::detached(),
-                wake: Arc::new(|_| true),
-                monitors: None,
-                thumbnailer: Thumbnailer::detached(),
-            },
-        )
+        }
+    }
+
+    /// The other threads, each detached: a test has no event loop for them
+    /// to reach.
+    fn threads() -> Threads {
+        Threads {
+            loader: Loader::detached(),
+            wake: Arc::new(|_| true),
+            monitors: None,
+            thumbnailer: Thumbnailer::detached(),
+            picker: Arc::new(|_| {}),
+        }
     }
 
     /// As [`opening`], with the application's own opening request answered:
@@ -2008,7 +2218,7 @@ mod tests {
                 .relist(crate::listing::relist(std::slice::from_ref(&dir)))
         );
         app.list_changed();
-        let input = app.chooser.input(&app.thumbs, Some(app.files.shown_path()));
+        let input = app.chooser.input(&app.thumbs, app.files.shown_path());
         assert_eq!(input.rows.len(), 4);
         assert_eq!(input.current, Some(2));
         assert_eq!(
@@ -2017,6 +2227,156 @@ mod tests {
                 .map(|p| p.file_name().unwrap().to_owned())
                 .as_deref(),
             Some(std::ffi::OsStr::new("d.png"))
+        );
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// A program opened on nothing is empty rather than failed: it has no
+    /// file to name, and every key about the file is a key that does
+    /// nothing, rather than one that reaches for a file that is not there.
+    #[test]
+    fn opened_on_nothing_the_window_is_empty_and_the_file_keys_are_dead() {
+        use crate::ui::Naming;
+        use input::Action;
+
+        let mut app = opened_on_nothing();
+        assert!(app.is_empty());
+        assert!(
+            !app.showed_nothing(),
+            "nothing was asked for, so nothing failed"
+        );
+        assert_eq!(app.title(), crate::PROGRAM);
+        assert_eq!(app.files.len(), 0);
+        assert!(app.reading().is_none());
+        assert!(!app.poll_file());
+        assert!(!app.poll_directories());
+
+        for action in [
+            Action::CopyName,
+            Action::CopyPath,
+            Action::CopyUri,
+            Action::CopyImage,
+            Action::CopyMetadata,
+            Action::NextFile,
+            Action::PreviousFile,
+            Action::Rename,
+            Action::Delete,
+            Action::NextFrame,
+            Action::TogglePlay,
+            Action::ZoomIn,
+            Action::CycleFit,
+        ] {
+            let _ = app.perform(action);
+            assert!(app.is_empty(), "{action:?} changes nothing");
+            assert!(app.renaming.is_none());
+            assert!(app.files.is_idle());
+        }
+        let namer = app.namer();
+        assert!(
+            namer
+                .tooltip(ui::Tip::Name)
+                .is_some_and(|tip| tip.title == [""])
+        );
+        assert_eq!(
+            namer
+                .tooltip(ui::Tip::Control(ui::Control::Copy))
+                .expect("a reason")
+                .title,
+            [ui::tooltip::NOTHING_OPEN]
+        );
+    }
+
+    /// What the dialog chose is opened as a command line naming it would
+    /// be: a folder for the images in it, the first asked for as a walk,
+    /// the list replaced; the picture up goes away as the list does, and
+    /// comes back as it was left. A choice that fails leaves the window
+    /// empty and says so, rather than leaving.
+    #[test]
+    fn what_the_dialog_chose_replaces_the_list() {
+        use input::Action;
+
+        let (dir, paths) = written("chosen", &[("a.png", 16, 8), ("b.png", 8, 16)]);
+        let mut app = opened_on_nothing();
+
+        // Dismissed: nothing changes.
+        app.picking = true;
+        app.picked(Picked { outcome: Ok(None) });
+        assert!(!app.picking);
+        assert!(app.is_empty());
+        assert!(app.toasts.showing().is_none());
+
+        // The dialog could not be had: said, and the window stays empty.
+        app.picked(Picked {
+            outcome: Err(anyhow::anyhow!("no portal")),
+        });
+        assert!(app.is_empty());
+        assert!(app.toasts.showing().is_some());
+        app.toasts.dismiss();
+
+        // A folder: the images in it, in name order, the first on its way.
+        app.picked(Picked {
+            outcome: Ok(Some(vec![dir.clone()])),
+        });
+        assert!(!app.is_empty(), "a read is in flight");
+        assert_eq!(app.files.len(), 2);
+        assert_eq!(app.named, vec![dir.clone()]);
+        assert_eq!(app.directories.len(), 1, "the folder is watched");
+        answer(&mut app, Reload::Fresh);
+        assert!(app.current.is_some());
+        assert_eq!(app.files.shown_path(), Some(paths[0].as_path()));
+        assert!(!app.showed_nothing());
+        assert!(!app.from_command_line);
+
+        // A zoom to remember it by.
+        let _ = app.perform(Action::ZoomTo(4.0));
+        let zoomed = app.view.zoom(app.image_size(), app.viewport());
+        let zoom = |app: &App| app.view.zoom(app.image_size(), app.viewport());
+
+        // A file chosen while a picture is up: the picture goes at once,
+        // kept as it was left, and the list is the file alone.
+        app.open_named(vec![paths[1].clone()]);
+        assert!(app.current.is_none());
+        assert!(app.files.pending().is_some());
+        assert!(!app.is_empty(), "a read is in flight");
+        assert_eq!(app.files.len(), 1);
+        assert!(app.directories.is_empty());
+        assert!(app.kept.left(&paths[0]).is_some());
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.files.shown_path(), Some(paths[1].as_path()));
+        assert_ne!(zoom(&app), zoomed, "a new shape, fitted afresh");
+
+        // Back to the first, through the dialog again: as it was left.
+        app.open_named(vec![paths[0].clone()]);
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(zoom(&app), zoomed);
+
+        // A folder with no images in it is refused before anything moves:
+        // the picture stays, and the list with it.
+        let empty = dir.join("empty");
+        std::fs::create_dir_all(&empty).expect("the temporary directory is writable");
+        app.open_named(vec![empty]);
+        assert!(app.current.is_some());
+        assert_eq!(app.files.len(), 1);
+        assert!(app.toasts.showing().is_some());
+        app.toasts.dismiss();
+
+        // A file that will not read: the picture goes, the walk fails, and
+        // the window is empty and says why, rather than gone.
+        let broken = dir.join("broken.png");
+        std::fs::write(&broken, b"not a png at all").expect("the file is writable");
+        app.open_named(vec![broken]);
+        assert!(app.current.is_none());
+        answer(&mut app, Reload::Fresh);
+        assert!(app.is_empty());
+        assert!(
+            !app.showed_nothing(),
+            "the window stays up for the next choice"
+        );
+        assert!(
+            app.toasts
+                .showing()
+                .is_some_and(|toast| toast.message.starts_with("Could not read broken.png")),
         );
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
@@ -2636,7 +2996,7 @@ mod tests {
         // And on to b.png again: at a.png's zoom, not the 4x it was left in.
         app.step(true);
         answer(&mut app, Reload::Fresh);
-        assert_eq!(app.files.shown_path(), dir.join("b.png"));
+        assert_eq!(app.files.shown_path(), Some(dir.join("b.png").as_path()));
         assert_eq!(app.view.fit(), None);
         assert_eq!(app.view.zoom(app.image_size(), VIEWPORT), zoom);
 
@@ -2670,7 +3030,7 @@ mod tests {
         // And back, to everything a.png was left in.
         app.step(false);
         answer(&mut app, Reload::Fresh);
-        assert_eq!(app.files.shown_path(), dir.join("a.png"));
+        assert_eq!(app.files.shown_path(), Some(dir.join("a.png").as_path()));
         assert_eq!(app.view.fit(), None);
         assert_eq!(app.view.zoom(app.image_size(), VIEWPORT), zoom);
         let display = &app.current.as_ref().expect("a.png is on screen").display;
@@ -2718,7 +3078,7 @@ mod tests {
         assert_eq!(app.files.path(2), dir.join("c.png"));
         assert_eq!(
             app.files.shown_path(),
-            dir.join("a.png"),
+            Some(dir.join("a.png").as_path()),
             "the picture on screen is undisturbed"
         );
 
@@ -2757,7 +3117,7 @@ mod tests {
         assert!(!app.poll_directories());
         assert!(!app.poll_directories());
         assert_eq!(app.files.len(), 2);
-        assert_eq!(app.files.shown_path(), dir.join("a.png"));
+        assert_eq!(app.files.shown_path(), Some(dir.join("a.png").as_path()));
         app.step(true);
         assert_eq!(
             app.files.pending().map(|pending| pending.index),
@@ -3249,7 +3609,7 @@ mod tests {
 
         answer(&mut app, Reload::Fresh);
         assert_eq!(app.files.len(), 2);
-        assert_eq!(app.files.shown_path(), dir.join("b.png"));
+        assert_eq!(app.files.shown_path(), Some(dir.join("b.png").as_path()));
         assert_eq!(app.files.index(), 0);
         assert!(app.conditions().undoable);
 
@@ -3264,7 +3624,7 @@ mod tests {
             "and shown again"
         );
         answer(&mut app, Reload::Fresh);
-        assert_eq!(app.files.shown_path(), dir.join("a.png"));
+        assert_eq!(app.files.shown_path(), Some(dir.join("a.png").as_path()));
         assert!(!app.conditions().undoable);
         assert_eq!(app.perform(Action::Undo), Effect::Redraw);
         assert_eq!(said(&app), "Nothing to undo.");
@@ -3363,7 +3723,7 @@ mod tests {
         assert!(app.act(ui::Command::Press(ui::Control::RenameTo)));
         assert!(app.rename_input().is_none());
         assert!(dir.join("c.jpg").exists() && !dir.join("a.png").exists());
-        assert_eq!(app.files.shown_path(), dir.join("c.jpg"));
+        assert_eq!(app.files.shown_path(), Some(dir.join("c.jpg").as_path()));
         assert_eq!(
             app.current.as_ref().map(|current| current.label.as_str()),
             Some("c.jpg")
@@ -3374,13 +3734,13 @@ mod tests {
         // Step away, then undo: the old name is back, and so is the file.
         app.step(true);
         answer(&mut app, Reload::Fresh);
-        assert_eq!(app.files.shown_path(), dir.join("b.png"));
+        assert_eq!(app.files.shown_path(), Some(dir.join("b.png").as_path()));
         let _ = app.perform(Action::Undo);
         assert!(dir.join("a.png").exists() && !dir.join("c.jpg").exists());
         assert_eq!(app.files.path(0), dir.join("a.png"));
         assert_eq!(app.files.pending().map(|pending| pending.index), Some(0));
         answer(&mut app, Reload::Fresh);
-        assert_eq!(app.files.shown_path(), dir.join("a.png"));
+        assert_eq!(app.files.shown_path(), Some(dir.join("a.png").as_path()));
         assert_eq!(
             app.current.as_ref().map(|current| current.label.as_str()),
             Some("a.png")
@@ -3400,7 +3760,7 @@ mod tests {
         write_png(&dir, "b.png", 4, 4);
         assert!(app.act(ui::Command::Press(ui::Control::RenameTo)));
         assert!(dir.join("a.png").exists());
-        assert_eq!(app.files.shown_path(), dir.join("a.png"));
+        assert_eq!(app.files.shown_path(), Some(dir.join("a.png").as_path()));
         assert!(said(&app).contains("already there"), "{}", said(&app));
         assert!(!app.conditions().undoable);
 

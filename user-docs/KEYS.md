@@ -52,6 +52,8 @@ on screen, since there is then nowhere to pan to.
 | `]`, `Page Down` | Next file |
 | `[`, `Page Up` | Previous file |
 | `Ctrl+P` | Choose a file from the list: type to filter it, arrows to move, `Enter` to open, `Esc` to close |
+| `Ctrl+O` | Open image files chosen in the desktop's file dialog |
+| `Ctrl+Shift+O` | Open a folder chosen in the desktop's file dialog |
 | `F2` | Rename the file on screen |
 | `Del`, `⌫` (`Backspace`) | Move the file on screen to the trash, and show the next |
 | `Ctrl+Z` | Undo the last rename or deletion |
@@ -94,6 +96,33 @@ decoding the file, and one made here is one it will show. They are made in
 the background from the moment the program starts, at low priority, so a
 long list fills in over time rather than holding anything up, and a file
 whose thumbnail has not yet been made shows an empty slot until it has.
+
+### Opening something else
+
+`Ctrl+O` puts up your desktop's own file dialog, narrowed to the image
+formats this program reads, with an **All files** filter for a file named
+without its extension. Choose one file or several: what you choose is the
+list from then on, exactly as if it had been named on the command line, and
+the first of it is shown. `Ctrl+Shift+O` puts up the same dialog for a
+folder, which stands for the images inside it as a directory on the command
+line does — kept up to date as images arrive in it or leave. Two keys rather
+than one because a desktop's dialog picks files or it picks a folder, never
+both at once. Cancel the dialog and nothing changes.
+
+Opening replaces the list rather than adding to it: the picture on screen
+goes at once, the way it would if the program had been started again on
+what you chose, and comes back as you left it should you open it again.
+Started with no path at all — `gamut` on its own, or from the desktop's
+menu — the window opens empty, with three buttons in the middle of it: the
+two dialogs, and a paste of the picture on the clipboard, which is dead
+until there is one. The window comes back to those buttons when nothing it
+was handed could be opened, and says why at its foot. While the dialog is
+up, the keys and the buttons that put it up do nothing more.
+
+The dialog is the desktop's, asked for through its portal, so it looks and
+behaves as the dialog of every other program on your desk does. A desktop
+without one — no `xdg-desktop-portal` and a backend for it running — cannot
+put one up, and the window says so instead.
 
 ### Renaming and deleting
 
@@ -566,6 +595,7 @@ region behind: it belongs to the picture it was drawn on.
 | Click the copy button | Open the menu of copies: the file, or the image |
 | Click the region button | Select a region, or take the selected one off |
 | Click the paste button | Paste the image on the clipboard, as `Ctrl+V` does |
+| Click **Open files…** or **Open folder…** in an empty window | Put up the desktop's file dialog, as `Ctrl+O` and `Ctrl+Shift+O` do |
 | Click the play, back or forward button under an animation | Play or pause it, or step a frame, as `Enter`, `N` and `n` do |
 | Click or drag along the timeline | Go to the frame under the pointer, and stop there |
 | Click a histogram button | Set the window on one of its rules, choose the tone curve, or mark the clipped pixels on the picture |
@@ -639,7 +669,8 @@ what scripting wants and what comparing two files on equal terms needs:
 `--histogram` and `--info`. The minimap starts on; `--no-minimap` starts
 without it. An animation starts playing; `--paused` starts it stopped.
 `--paste` opens on the image on the clipboard, as `Ctrl+V` would once the
-window was up.
+window was up. No path at all opens an empty window, with the buttons that
+give it something — see [Opening something else](#opening-something-else).
 
 The window itself opens at the image's size, shrunk to fit the screen.
 `--size <W> <H>` opens it at a size you choose instead, in the pixels your
@@ -648,7 +679,7 @@ use when the window floats, and may lay the window out its own way regardless.
 
 ## Keys that are deliberately ignored
 
-Apart from the copying chords, `Ctrl+P` and `Ctrl` with an arrow, anything held with
+Apart from the copying chords, `Ctrl+P`, `Ctrl+O` and `Ctrl` with an arrow, anything held with
 `Ctrl`, `Alt` or a `Super`/`Command` key does nothing here, and neither does
 `Ctrl` with the wheel. Those combinations belong to the window manager, and a
 chord such as `Super+0` would otherwise move the view behind its back.

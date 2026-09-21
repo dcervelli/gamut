@@ -20,14 +20,17 @@ const OPTIONS: &str = "\
 gamut — preview images
 
 USAGE:
-    gamut [OPTIONS] <PATH>...
+    gamut [OPTIONS] [PATH]...
     gamut --paste [OPTIONS] [PATH]...
 
 The first file is shown, stretched to fit the window, and re-read whenever
 something else writes to it. A directory stands for the images directly
 inside it, in name order, and is read again as it changes: an image added
 to it or taken out of it joins or leaves the list. --paste puts the image
-on the clipboard at the front of the list, and needs no path at all.
+on the clipboard at the front of the list, and needs no path at all. With
+no path and no paste the window opens empty, offering to open files or a
+folder through the desktop's file dialog, or to paste; Ctrl+O opens that
+dialog from any window.
 
 OPTIONS:
     -h, --help              Show this help
@@ -166,7 +169,7 @@ pub fn man() -> String {
     // Both usage lines, each its own line of the synopsis.
     let _ = writeln!(text, ".SH SYNOPSIS");
     let _ = writeln!(text, ".B {}", roff(PROGRAM));
-    let _ = writeln!(text, r"[\fIOPTIONS\fR] \fIPATH\fR\&...");
+    let _ = writeln!(text, r"[\fIOPTIONS\fR] [\fIPATH\fR]...");
     let _ = writeln!(text, ".br\n.B {} \\-\\-paste", roff(PROGRAM));
     let _ = writeln!(text, r"[\fIOPTIONS\fR] [\fIPATH\fR]...");
 
@@ -411,13 +414,10 @@ pub fn parse_args() -> Result<Option<Args>> {
         files.push(PathBuf::from(argument));
     }
 
-    // A paste is a file to show, so `--paste` alone is a complete command
-    // line; whether the clipboard actually holds one is found out when it is
-    // asked for.
-    if files.is_empty() && !paste {
-        eprint!("{}", usage());
-        bail!("no image files given");
-    }
+    // No path at all is a complete command line: the window opens on the
+    // buttons that give it something. So is `--paste` alone, a paste being
+    // a file to show; whether the clipboard actually holds one is found out
+    // when it is asked for.
     let named = files;
     let files = match crate::listing::expand(named.clone()) {
         Ok(files) => files,

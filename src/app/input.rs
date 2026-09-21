@@ -20,13 +20,14 @@ use crate::image::region::{Grip, Region, Side};
 use crate::loader::Source;
 use crate::openers;
 use crate::pasted;
+use crate::portal::Pick;
 use crate::timing;
 use crate::ui::histogram;
 use crate::ui::info::Copyable;
 use crate::ui::menu::{Copies, ZoomChoice};
 use crate::ui::toast::Level;
-use crate::ui::tooltip::Hdr;
-use crate::ui::{self, Control, Current, Grab, Naming, Room, Selection, Tip};
+use crate::ui::tooltip::{Hdr, Reasons};
+use crate::ui::{self, Control, Current, Grab, Naming, Selection, Tip};
 use crate::view::Fit;
 
 /// Window pixels moved per arrow-key press. Shift moves one pixel instead,
@@ -153,6 +154,13 @@ pub enum Action {
     /// Put back the last thing done to a file on disk: the file restored
     /// from the trash, or its old name — see `app::edits`.
     Undo,
+    /// Put up the desktop's file dialog for image files, and open what is
+    /// chosen in it as a command line naming them would — see
+    /// `App::open_named`.
+    OpenFiles,
+    /// The same dialog for a folder, which stands for the images inside
+    /// it as a directory on the command line does.
+    OpenFolder,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -423,6 +431,10 @@ fn action_of(tip: Tip) -> Option<Action> {
         // named the same way: by the key that does the same thing.
         Tip::Control(Control::Rename) => Rename,
         Tip::Control(Control::Delete) => Delete,
+        // The two buttons in the middle of an empty window, by the keys
+        // that put up the same dialog.
+        Tip::Control(Control::OpenFiles) => OpenFiles,
+        Tip::Control(Control::OpenFolder) => OpenFolder,
         // The words at the end of the bottom bar are about four settings at
         // once, so no one key does what they do; what a press on them opens
         // is the panel that sets all four, which the tooltip says outright.
@@ -891,6 +903,25 @@ pub const KEYS: &[Binding] = &[
         when: Some(When::SeveralFiles),
         keys: &[(Char("p"), OpenChooser), (Char("P"), OpenChooser)],
     },
+    // The desktop's own dialog, for files and for a folder: one case each,
+    // the Ctrl that both are held with being the only modifier the table
+    // sees, as with the two `C`s of the clipboard section.
+    Binding {
+        section: Section::Files,
+        mods: CTRL,
+        shown: "Ctrl+O",
+        help: "Open image files chosen in the desktop's file dialog",
+        when: None,
+        keys: &[(Char("o"), OpenFiles)],
+    },
+    Binding {
+        section: Section::Files,
+        mods: CTRL,
+        shown: "Ctrl+Shift+O",
+        help: "Open a folder chosen in the desktop's file dialog",
+        when: None,
+        keys: &[(Char("O"), OpenFolder)],
+    },
     // What is done to the file itself, under the keys that walk the list:
     // the two that change the disk, and the one that changes it back.
     Binding {
@@ -1210,17 +1241,9 @@ pub fn action_for(key: &Key, position: PhysicalKey, mods: Mods) -> Option<Action
 /// A handful of values rather than the application itself, since the frame
 /// is drawn from the application's state while this is read.
 pub(super) struct Namer {
-    /// Whether the content area has room for each floating panel, which is
-    /// what makes a toggle dead.
-    room: Room,
-    /// Whether the surface switch has anything to switch.
-    hdr: Hdr,
-    /// Whether anything out there offers to open the file on screen, which
-    /// is what makes the open button dead.
-    openable: bool,
-    /// Whether a false color is on the picture, which is what makes the
-    /// histogram's row of curves dead.
-    false_colored: bool,
+    /// Everything that could make a control dead this frame, for the
+    /// tooltip that then says why instead of what.
+    reasons: Reasons,
     /// The absolute path of the file on screen, for the tooltip on its name.
     path: String,
     /// Which file is on screen, out of how many.
@@ -1248,9 +1271,7 @@ impl Naming for Namer {
         // the surface switch on a monitor with no room above white — refuses
         // the press, so the label says why rather than naming the thing and
         // the key beside it, neither of which is going to happen.
-        if let Some(refused) =
-            ui::tooltip::disabled(at, self.room, self.hdr, self.openable, self.false_colored)
-        {
+        if let Some(refused) = ui::tooltip::disabled(at, self.reasons) {
             return Some(ui::Tooltip {
                 title: vec![refused.said.to_string()],
                 hints: refused.hint.map(str::to_string).into_iter().collect(),
@@ -1759,11 +1780,15 @@ impl App {
             // it happened at all — and the only way to tell a copy that
             // worked from a key that was never read.
             CopyName => {
-                let name = self.shown_name();
+                let Some(name) = self.shown_name() else {
+                    return Effect::Nothing;
+                };
                 self.copy(name.as_bytes(), clipboard::TEXT, "Copied file name.");
             }
             CopyPath => {
-                let path = self.shown_path();
+                let Some(path) = self.shown_path() else {
+                    return Effect::Nothing;
+                };
                 self.copy(
                     path.to_string_lossy().as_bytes(),
                     clipboard::TEXT,
@@ -1771,7 +1796,10 @@ impl App {
                 );
             }
             CopyUri => {
-                let list = clipboard::uri_list(&self.shown_path());
+                let Some(path) = self.shown_path() else {
+                    return Effect::Nothing;
+                };
+                let list = clipboard::uri_list(&path);
                 self.copy(list.as_bytes(), clipboard::URI_LIST, "Copied file URI.");
             }
             // The one copy with nothing to say yet: the picture is walked and
@@ -1821,6 +1849,18 @@ impl App {
             Rename => self.press(Control::Rename),
             Delete => self.press(Control::Delete),
             Undo => self.undo(),
+            // The buttons' own presses, so that the key and the button in
+            // the middle of an empty window cannot come to mean different
+            // things. Nothing to draw: the dialog is the desktop's, and what
+            // it answers arrives later.
+            OpenFiles => {
+                self.press(Control::OpenFiles);
+                return Effect::Nothing;
+            }
+            OpenFolder => {
+                self.press(Control::OpenFolder);
+                return Effect::Nothing;
+            }
         }
         Effect::Redraw
     }
@@ -2006,14 +2046,22 @@ impl App {
     /// the application keeps them.
     pub(super) fn namer(&self) -> Namer {
         Namer {
-            room: self.room(),
-            hdr: self.hdr_state(),
-            openable: !self.openers.is_empty(),
-            false_colored: self
-                .current
-                .as_ref()
-                .is_some_and(|current| current.display.false_colored(current.image.is_gray())),
-            path: self.shown_path().display().to_string(),
+            reasons: Reasons {
+                room: self.room(),
+                hdr: self.hdr_state(),
+                openable: !self.openers.is_empty(),
+                false_colored: self
+                    .current
+                    .as_ref()
+                    .is_some_and(|current| current.display.false_colored(current.image.is_gray())),
+                picking: self.picking,
+                clipboard: self.panels.paste,
+                nothing_open: self.current.is_none(),
+            },
+            path: self
+                .shown_path()
+                .map(|path| path.display().to_string())
+                .unwrap_or_default(),
             index: self.files.index(),
             count: self.files.len(),
             show_histogram: self.panels.show_histogram,
@@ -2172,29 +2220,31 @@ impl App {
         Effect::redraw_if(change(current, startup))
     }
 
-    /// The absolute path of the file on screen. Absolute because what is
-    /// copied is bound for somewhere else, where the directory this was
-    /// started in means nothing — and because a URI has no other kind. The
-    /// path as given stands in if it cannot be made absolute, which needs the
-    /// working directory and so can fail.
-    fn shown_path(&self) -> PathBuf {
-        let path = self.files.shown_path();
-        std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf())
+    /// The absolute path of the file on screen, and `None` with nothing on
+    /// the list. Absolute because what is copied is bound for somewhere
+    /// else, where the directory this was started in means nothing — and
+    /// because a URI has no other kind. The path as given stands in if it
+    /// cannot be made absolute, which needs the working directory and so
+    /// can fail.
+    fn shown_path(&self) -> Option<PathBuf> {
+        let path = self.files.shown_path()?;
+        Some(std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf()))
     }
 
     /// The name of the file on screen, with nothing of the directory it sits
-    /// in — what the top bar shows, at whatever length it actually is.
+    /// in — what the top bar shows, at whatever length it actually is — and
+    /// `None` with nothing on the list.
     ///
     /// Taken from the path as it was given rather than from the absolute one:
     /// the two end in the same name, and there is nothing here that needs the
     /// working directory. The whole path stands in for one that ends in no
     /// name at all, which a file on the list never does.
-    fn shown_name(&self) -> String {
-        let path = self.files.shown_path();
-        match path.file_name() {
+    fn shown_name(&self) -> Option<String> {
+        let path = self.files.shown_path()?;
+        Some(match path.file_name() {
             Some(name) => name.to_string_lossy().into_owned(),
             None => path.to_string_lossy().into_owned(),
-        }
+        })
     }
 
     /// Puts the picture on screen on the clipboard as a PNG — the whole of
@@ -2284,7 +2334,9 @@ impl App {
             return;
         };
         let name = opener.name.clone();
-        let path = self.shown_path();
+        let Some(path) = self.shown_path() else {
+            return;
+        };
         match openers::open(opener, &path) {
             // What was asked for and not what has happened: the program has
             // been started, and how long it takes to put a window up is its
@@ -2324,6 +2376,9 @@ impl App {
             Ok(path) => path,
             Err(error) => return report(&error),
         };
+        // A paste is the window's own doing: from here on nothing showing
+        // is the window's to answer, not the command line's.
+        self.from_command_line = false;
         let request = self.files.adopt(path, Source::Clipboard(offer.mime));
         self.send(request);
         self.list_changed();
@@ -2431,6 +2486,10 @@ impl App {
             Control::Delete => self.delete_shown(),
             Control::RenameTo => self.rename_shown(),
             Control::CancelRename => self.cancel_rename(),
+            // The two buttons in the middle of an empty window, and the
+            // keys that put up the same dialog from anywhere.
+            Control::OpenFiles => self.pick(Pick::Files),
+            Control::OpenFolder => self.pick(Pick::Folder),
             // An item of the open menu, by its place in the list the same
             // frame was drawn from.
             Control::Opener(index) => self.open_in(index),
@@ -2571,7 +2630,7 @@ impl App {
                 self.close_menus();
                 let chosen = self.chooser.path_at(row).map(Path::to_path_buf);
                 if let Some(path) = chosen
-                    && path != self.files.shown_path()
+                    && Some(path.as_path()) != self.files.shown_path()
                     && let Some(index) = self.files.position(&path)
                 {
                     let request = self.files.go_to(index);
@@ -2703,12 +2762,79 @@ mod tests {
             Control::PixelFormat,
             Control::Help,
             Control::FileMenu,
+            Control::OpenFiles,
+            Control::OpenFolder,
         ] {
             assert!(
                 names(Tip::Control(widget)).is_some(),
                 "{widget:?} names itself"
             );
         }
+    }
+
+    /// The two buttons in the middle of an empty window are named in their
+    /// own words and by the keys that put up the same dialog, and the
+    /// shortcut printed on each is that key: `Ctrl+O` for files, and the
+    /// same with Shift for a folder — one case each, as the two `C`s are.
+    #[test]
+    fn the_open_buttons_name_the_keys_that_open_the_dialog() {
+        assert_eq!(
+            names(Tip::Control(Control::OpenFiles)).as_deref(),
+            Some("Choose image files to open (Ctrl+O)")
+        );
+        assert_eq!(
+            names(Tip::Control(Control::OpenFolder)).as_deref(),
+            Some("Choose a folder of images to open (Ctrl+Shift+O)")
+        );
+        let namer = Namer {
+            reasons: Reasons::NONE,
+            path: String::new(),
+            index: 0,
+            count: 0,
+            show_histogram: false,
+            state: Vec::new(),
+            conditions: Conditions::default(),
+        };
+        assert_eq!(
+            namer.shortcut(Control::OpenFiles).as_deref(),
+            Some("Ctrl+O")
+        );
+        assert_eq!(
+            namer.shortcut(Control::OpenFolder).as_deref(),
+            Some("Ctrl+Shift+O")
+        );
+        assert_eq!(namer.shortcut(Control::Paste).as_deref(), Some("Ctrl+V"));
+
+        // And the keys reach them: `o` with Ctrl, `O` with Ctrl and the
+        // Shift the capital carries.
+        let key = |text: &str, mods| {
+            action_for(
+                &Key::Character(text.into()),
+                PhysicalKey::Code(KeyCode::KeyO),
+                mods,
+            )
+        };
+        assert_eq!(key("o", CTRL), Some(OpenFiles));
+        assert_eq!(key("O", CTRL_SHIFT), Some(OpenFolder));
+        assert_eq!(key("o", PLAIN), Some(ToggleHdr));
+
+        // Dead while the dialog is up, and the label says so instead.
+        let picking = Namer {
+            reasons: Reasons {
+                picking: true,
+                ..Reasons::NONE
+            },
+            path: String::new(),
+            index: 0,
+            count: 0,
+            show_histogram: false,
+            state: Vec::new(),
+            conditions: Conditions::default(),
+        };
+        let tooltip = picking
+            .tooltip(Tip::Control(Control::OpenFiles))
+            .expect("a reason");
+        assert_eq!(tooltip.title, [ui::tooltip::DIALOG_UP]);
     }
 
     /// The help button is named in its own words and by both keys that open
@@ -2992,14 +3118,10 @@ mod tests {
     #[test]
     fn the_handles_say_which_keys_step_them() {
         let namer = Namer {
-            room: Room {
-                histogram: true,
-                info: true,
-                help: true,
+            reasons: Reasons {
+                openable: false,
+                ..Reasons::NONE
             },
-            hdr: Hdr::Available,
-            openable: false,
-            false_colored: false,
             path: String::new(),
             index: 0,
             count: 1,
@@ -3071,14 +3193,7 @@ mod tests {
         // The menu prints the key beside each item, and it is the key the
         // table binds to the same copy.
         let namer = Namer {
-            room: Room {
-                histogram: true,
-                info: true,
-                help: true,
-            },
-            hdr: Hdr::Available,
-            openable: true,
-            false_colored: false,
+            reasons: Reasons::NONE,
             path: String::new(),
             index: 0,
             count: 1,
@@ -3163,14 +3278,7 @@ mod tests {
     #[test]
     fn the_count_says_where_it_is_and_what_a_press_on_it_opens() {
         let namer = Namer {
-            room: Room {
-                histogram: true,
-                info: true,
-                help: true,
-            },
-            hdr: Hdr::Available,
-            openable: true,
-            false_colored: false,
+            reasons: Reasons::NONE,
             path: String::new(),
             index: 2,
             count: 12,

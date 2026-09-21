@@ -150,6 +150,8 @@ fn input(logical: [f32; 2], count: usize) -> FrameInput {
         transport: None,
         chooser: None,
         rename: None,
+        empty: false,
+        picking: false,
     }
 }
 
@@ -617,6 +619,92 @@ fn buttons_that_would_do_nothing_are_not_there() {
         click(&mut harness, "Choose a file"),
         [Command::Press(Control::Chooser)]
     );
+}
+
+/// The interface over nothing: no list, no picture, nothing on its way.
+fn empty(paste: bool, picking: bool) -> Harness<'static, State> {
+    let mut panels = panels();
+    panels.paste = paste;
+    let mut harness = build(WINDOW, 0, panels);
+    let state = harness.state_mut();
+    state.current = None;
+    state.input.empty = true;
+    state.input.picking = picking;
+    harness.run();
+    harness
+}
+
+/// A window with nothing open offers the three ways of giving it
+/// something, in the middle, each handing back the press its key would;
+/// the paste is dead without a picture on the clipboard, and the two that
+/// put up the dialog are dead while it is up. The buttons about the
+/// picture are dead in the strip, and the ones that would only ever be
+/// about a file are not there. With a picture up, or one on its way,
+/// none of the three is on screen.
+#[test]
+fn an_empty_window_offers_to_be_given_something() {
+    let mut harness = empty(false, false);
+    assert_eq!(
+        click(&mut harness, "Open files"),
+        [Command::Press(Control::OpenFiles)]
+    );
+    assert_eq!(
+        click(&mut harness, "Open folder"),
+        [Command::Press(Control::OpenFolder)]
+    );
+    assert!(harness.get_by_label("Paste").accesskit_node().is_disabled());
+    for label in ["Copy", "Region"] {
+        assert!(
+            harness.get_by_label(label).accesskit_node().is_disabled(),
+            "{label}"
+        );
+    }
+    assert!(harness.query_by_label("File").is_none());
+    assert!(harness.query_by_label("Zoom").is_none());
+    // The toggles that outlast the picture stay live: what they set is
+    // waiting for the next one.
+    for label in ["Histogram", "Information", "Help", "Minimap"] {
+        assert!(
+            !harness.get_by_label(label).accesskit_node().is_disabled(),
+            "{label}"
+        );
+    }
+    drop(harness);
+
+    let mut harness = empty(true, false);
+    assert_eq!(
+        click(&mut harness, "Paste"),
+        [Command::Press(Control::Paste)]
+    );
+    drop(harness);
+
+    let harness = empty(true, true);
+    for label in ["Open files", "Open folder"] {
+        assert!(
+            harness.get_by_label(label).accesskit_node().is_disabled(),
+            "{label}"
+        );
+    }
+    assert!(!harness.get_by_label("Paste").accesskit_node().is_disabled());
+    drop(harness);
+
+    // A picture up: the buttons are gone, and the strip's are live again.
+    let harness = open(WINDOW, 1, panels());
+    assert!(harness.query_by_label("Open files").is_none());
+    assert!(harness.query_by_label("Open folder").is_none());
+    for label in ["Copy", "Region"] {
+        assert!(
+            !harness.get_by_label(label).accesskit_node().is_disabled(),
+            "{label}"
+        );
+    }
+    drop(harness);
+
+    // A picture on its way: nothing yet, and no buttons either.
+    let mut harness = build(WINDOW, 1, panels());
+    harness.state_mut().current = None;
+    harness.run();
+    assert!(harness.query_by_label("Open files").is_none());
 }
 
 /// The surface switch is dead where the driver offers nothing to switch
