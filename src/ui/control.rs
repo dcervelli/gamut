@@ -115,6 +115,20 @@ pub enum Control {
     /// A row of the chooser, by its place in the list the same frame was
     /// drawn from: the file to open.
     Choose(usize),
+    /// The button before the file's name in the top bar, which opens the
+    /// menu of what can be done to the file itself: its name and path
+    /// copied, and the file renamed or moved to the trash.
+    FileMenu,
+    /// The item of that menu that opens the rename dialog, and the item
+    /// that moves the file to the trash. `F2` and `Delete` come through
+    /// here too.
+    Rename,
+    Delete,
+    /// The rename dialog's two buttons: the rename itself, which `Enter`
+    /// also asks for, and putting the dialog away, which `Esc` and a click
+    /// outside it also do.
+    RenameTo,
+    CancelRename,
 }
 
 impl Control {
@@ -161,6 +175,11 @@ impl Control {
             Control::Facts(Copyable::Fact(index)) => format!("Copy field {index}"),
             Control::Chooser => "Choose a file".to_string(),
             Control::Choose(index) => format!("Choose file {}", index + 1),
+            Control::FileMenu => "File".to_string(),
+            Control::Rename => "Rename".to_string(),
+            Control::Delete => "Delete".to_string(),
+            Control::RenameTo => "OK".to_string(),
+            Control::CancelRename => "Cancel".to_string(),
         }
     }
 }
@@ -235,6 +254,8 @@ pub enum Command {
     Handle(Grip),
     /// The chooser's field changed: this is what it now says.
     Query(String),
+    /// The rename dialog's field changed: this is the name it now holds.
+    Name(String),
     /// A key moved the chooser's cursor.
     Cursor(Step),
     /// Which of the chooser's rows are on screen, said when it changes, so

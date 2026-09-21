@@ -14,6 +14,7 @@ pub mod help;
 pub mod info;
 pub mod menu;
 pub mod minimap;
+pub mod rename;
 pub mod toast;
 pub mod tooltip;
 pub mod transport;
@@ -277,6 +278,11 @@ pub struct FrameInput {
     /// [`chooser::id`] — and this has to be handed over on every frame it
     /// is, since a popup not drawn for a frame is a popup egui has closed.
     pub chooser: Option<chooser::Input>,
+    /// The rename dialog, on every frame it is up, and `None` while it is
+    /// not. Its open state is the application's — see `App::renaming` —
+    /// which is why it is a modal rather than a popup: nothing egui does
+    /// on its own can close it.
+    pub rename: Option<rename::Input>,
 }
 
 /// One pass of the interface: the chrome and everything on it, laid out in
@@ -316,6 +322,11 @@ pub fn show(
     }
     // And the keys, which are the same whatever is on screen.
     help::show(&mut pass, ui, content);
+    // Over all of it: a rename is a question, and nothing else answers
+    // until it has.
+    if let Some(rename) = &input.rename {
+        rename::show(&mut pass, ui, rename);
+    }
     pass.commands
 }
 

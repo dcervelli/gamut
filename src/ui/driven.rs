@@ -21,6 +21,7 @@ use super::chrome::{BAR_HEIGHT, SIDE_WIDTH};
 use super::control::{Naming, Unnamed};
 use super::help;
 use super::menu::Copies;
+use super::rename::{self, Verdict};
 use super::tooltip::{Tip, Tooltip};
 use super::transport::{Kind, Transport};
 use super::{
@@ -148,6 +149,7 @@ fn input(logical: [f32; 2], count: usize) -> FrameInput {
         zoom_box: None,
         transport: None,
         chooser: None,
+        rename: None,
     }
 }
 
@@ -1082,6 +1084,124 @@ fn the_chooser_takes_the_keys_while_open_and_gives_them_back() {
     harness.run();
     assert!(!harness.ctx.egui_wants_keyboard_input());
     assert!(harness.query_by_label("Choose file 2").is_none());
+}
+
+/// The button before the name opens the menu of the file: its name and
+/// path copied, the rename and the deletion, each asking for its own
+/// control, and the menu closing on the press.
+#[test]
+fn the_file_menu_offers_the_copies_the_rename_and_the_deletion() {
+    let mut harness = open(WINDOW, 1, panels());
+    assert!(harness.query_by_label("Copy name").is_none());
+    assert_eq!(click(&mut harness, "File"), []);
+    for label in ["Copy name", "Copy path", "Rename\u{2026}", "Delete"] {
+        assert!(
+            harness
+                .query_by_role_and_label(egui::accesskit::Role::Button, label)
+                .is_some(),
+            "{label} is on the menu"
+        );
+    }
+    assert_eq!(
+        click(&mut harness, "Rename\u{2026}"),
+        [Command::Press(Control::Rename)]
+    );
+    harness.run();
+    assert!(
+        harness.query_by_label("Delete").is_none(),
+        "the menu closes on the press"
+    );
+    assert_eq!(click(&mut harness, "File"), []);
+    assert_eq!(
+        click(&mut harness, "Delete"),
+        [Command::Press(Control::Delete)]
+    );
+    assert_eq!(click(&mut harness, "File"), []);
+    assert_eq!(
+        click(&mut harness, "Copy name"),
+        [Command::Press(Control::Copies(Copies::Name))]
+    );
+}
+
+/// The rename dialog takes the keyboard with the name's stem selected, so
+/// that typing replaces the stem and keeps the extension; says what the
+/// field holds as it changes; renames on `Enter` and OK only while the
+/// name will do, OK being dead otherwise; and goes on `Esc`, giving the
+/// keyboard back.
+#[test]
+fn the_rename_dialog_takes_the_keys_and_hands_back_the_name() {
+    let mut harness = open(WINDOW, 1, panels());
+    assert!(!harness.ctx.egui_wants_keyboard_input());
+    let dialog = |name: &str, verdict: Verdict, opened: bool| {
+        Some(rename::Input {
+            current: "photo.png".to_string(),
+            name: name.to_string(),
+            verdict,
+            opened,
+        })
+    };
+    harness.state_mut().input.rename = dialog("photo.png", Verdict::Unchanged, true);
+    harness.run();
+    harness.state_mut().input.rename = dialog("photo.png", Verdict::Unchanged, false);
+    harness.run();
+    assert!(harness.ctx.egui_wants_keyboard_input());
+
+    harness.state_mut().commands.clear();
+    harness.event(egui::Event::Text("x".to_string()));
+    harness.step();
+    assert!(
+        asked(&harness).contains(&Command::Name("x.png".to_string())),
+        "{:?}",
+        asked(&harness)
+    );
+
+    let pressed = |harness: &mut Harness<'static, State>, key| {
+        harness.state_mut().commands.clear();
+        harness.key_press(key);
+        harness.step();
+        asked(harness)
+    };
+    // The name as it is: `Enter` has nothing to do but put the dialog away.
+    assert!(
+        pressed(&mut harness, egui::Key::Enter).contains(&Command::Press(Control::CancelRename))
+    );
+
+    // A name that will not do: OK is dead, and `Enter` does nothing.
+    harness.state_mut().input.rename = dialog("b.png", Verdict::Taken, false);
+    harness.run();
+    assert!(harness.get_by_label("OK").accesskit_node().is_disabled());
+    let after_enter = pressed(&mut harness, egui::Key::Enter);
+    assert!(
+        !after_enter.iter().any(|command| matches!(
+            command,
+            Command::Press(Control::RenameTo | Control::CancelRename)
+        )),
+        "{after_enter:?}"
+    );
+
+    // One that will: `Enter` and OK both rename.
+    harness.state_mut().input.rename = dialog("c.png", Verdict::Fine(None), false);
+    harness.run();
+    assert!(!harness.get_by_label("OK").accesskit_node().is_disabled());
+    assert!(pressed(&mut harness, egui::Key::Enter).contains(&Command::Press(Control::RenameTo)));
+    assert_eq!(
+        click(&mut harness, "OK"),
+        [Command::Press(Control::RenameTo)]
+    );
+    assert_eq!(
+        click(&mut harness, "Cancel"),
+        [Command::Press(Control::CancelRename)]
+    );
+
+    // `Esc` is the modal's own, and comes back as the cancel.
+    assert!(
+        pressed(&mut harness, egui::Key::Escape).contains(&Command::Press(Control::CancelRename))
+    );
+    harness.state_mut().input.rename = None;
+    harness.run();
+    harness.run();
+    assert!(!harness.ctx.egui_wants_keyboard_input());
+    assert!(harness.query_by_label("OK").is_none());
 }
 
 /// A cursor moved by a key is scrolled into view, and the rows on screen

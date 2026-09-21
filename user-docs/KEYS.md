@@ -52,6 +52,9 @@ on screen, since there is then nowhere to pan to.
 | `]`, `Page Down` | Next file |
 | `[`, `Page Up` | Previous file |
 | `Ctrl+P` | Choose a file from the list: type to filter it, arrows to move, `Enter` to open, `Esc` to close |
+| `F2` | Rename the file on screen |
+| `Del`, `⌫` (`Backspace`) | Move the file on screen to the trash, and show the next |
+| `Ctrl+Z` | Undo the last rename or deletion |
 
 A file you have already looked at comes back exactly as you left it: the same
 pan and zoom, the same window and exposure, the same tone curve and false
@@ -91,6 +94,42 @@ decoding the file, and one made here is one it will show. They are made in
 the background from the moment the program starts, at low priority, so a
 long list fills in over time rather than holding anything up, and a file
 whose thumbnail has not yet been made shows an empty slot until it has.
+
+### Renaming and deleting
+
+The button before the file's name in the top bar opens a menu of the file
+itself: copy its name, copy its path, rename it, delete it. The keys above do
+the same without the menu.
+
+`Delete` moves the file to your desktop's trash — the same one your file
+manager shows, so it is there to restore or empty from there whether or not
+this window is still open — and shows the next file, or the previous one
+from the end of the list. The file leaves the list once its neighbor is up.
+With only one file there is nowhere to go: it stays on screen, marked
+`DELETED` in the bar, until you undo or step away. A file on another disk
+or a removable drive goes to the trash on that drive; where that cannot be
+made, it is copied into your home trash instead, which takes as long as the
+copy takes.
+
+`F2` opens a dialog with the name in a field, the part before the extension
+selected so that typing replaces it and keeps the extension. What is wrong
+with the name is said under the field as you type — a name already taken, a
+slash, since the dialog renames and does not move — and the field's outline
+turns red while the name will not do; `Enter` and OK then do nothing. A
+change of extension is allowed, and noted in yellow: the file's contents do
+not change with its name. `Enter` or OK renames, `Esc`, Cancel or a click
+outside puts the dialog away. Everything that knew the file by its name
+follows it: the bar, the title, the list, and the pan and exposure it will
+come back to.
+
+`Ctrl+Z` undoes the last of these, and then the one before, back through the
+session: a deleted file comes out of the trash and back into the list where
+it was, a renamed file gets its old name back, and either way it is the file
+on screen afterwards. Only what touched the disk is on that stack — zoom,
+exposure and the rest are put back by hand, or by `z`. An undo that cannot
+be done says why: the trash was emptied in the meantime, or something else
+now has the name. Nothing is remembered across a restart; after that the
+trash itself is the record.
 
 ## Playing an animation
 

@@ -145,6 +145,14 @@ pub enum Action {
     /// one page on or back through a file that holds several pictures.
     NextFrame,
     PreviousFrame,
+    /// Open the rename dialog on the file on screen — see `ui::rename`.
+    Rename,
+    /// Move the file on screen to the desktop's trash and step on to the
+    /// next — see `App::delete_shown`.
+    Delete,
+    /// Put back the last thing done to a file on disk: the file restored
+    /// from the trash, or its old name — see `app::edits`.
+    Undo,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -295,7 +303,7 @@ fn satisfies(required: Mods, held: Mods, key: KeyName) -> bool {
 /// with a region up, written on a line under each condition; the plain one
 /// answers, since what asks is a button that does the plain thing, and
 /// what it does with a region is the region's line to say.
-fn binding_for(action: Action) -> Option<&'static Binding> {
+pub(super) fn binding_for(action: Action) -> Option<&'static Binding> {
     let binds = |binding: &&'static Binding| binding.keys.iter().any(|(_, bound)| *bound == action);
     KEYS.iter()
         .find(|binding| binds(binding) && binding.when != Some(When::RegionSelected))
@@ -411,6 +419,10 @@ fn action_of(tip: Tip) -> Option<Action> {
         // in: the key does exactly what the item does, and its line of the
         // table is what names both.
         Tip::Control(Control::Copies(what)) => copy_action(what),
+        // And the two items of the menu of the file that are not copies,
+        // named the same way: by the key that does the same thing.
+        Tip::Control(Control::Rename) => Rename,
+        Tip::Control(Control::Delete) => Delete,
         // The words at the end of the bottom bar are about four settings at
         // once, so no one key does what they do; what a press on them opens
         // is the panel that sets all four, which the tooltip says outright.
@@ -534,13 +546,16 @@ pub enum When {
     PictureOnClipboard,
     HdrMode,
     SingleChannel,
+    /// A rename or a deletion has been made this session and not yet
+    /// undone.
+    Undoable,
 }
 
 impl When {
     /// Every condition, for a test to hold them all up against the
     /// application.
     #[cfg(test)]
-    pub const ALL: [When; 9] = [
+    pub const ALL: [When; 10] = [
         When::RegionSelected,
         When::NoRegion,
         When::SeveralFiles,
@@ -550,6 +565,7 @@ impl When {
         When::PictureOnClipboard,
         When::HdrMode,
         When::SingleChannel,
+        When::Undoable,
     ];
 
     /// The condition in a few words, as the popup's column reads it: a
@@ -565,6 +581,7 @@ impl When {
             When::PictureOnClipboard => "a picture on the clipboard",
             When::HdrMode => "the monitor in HDR mode",
             When::SingleChannel => "a single-channel image",
+            When::Undoable => "a rename or deletion to undo",
         }
     }
 }
@@ -582,6 +599,7 @@ pub(super) struct Conditions {
     pub picture_on_clipboard: bool,
     pub hdr_mode: bool,
     pub single_channel: bool,
+    pub undoable: bool,
 }
 
 impl Conditions {
@@ -597,6 +615,7 @@ impl Conditions {
             When::PictureOnClipboard => self.picture_on_clipboard,
             When::HdrMode => self.hdr_mode,
             When::SingleChannel => self.single_channel,
+            When::Undoable => self.undoable,
         }
     }
 }
@@ -871,6 +890,35 @@ pub const KEYS: &[Binding] = &[
         help: "Choose a file from the list",
         when: Some(When::SeveralFiles),
         keys: &[(Char("p"), OpenChooser), (Char("P"), OpenChooser)],
+    },
+    // What is done to the file itself, under the keys that walk the list:
+    // the two that change the disk, and the one that changes it back.
+    Binding {
+        section: Section::Files,
+        mods: PLAIN,
+        shown: "F2",
+        help: "Rename the file on screen",
+        when: None,
+        keys: &[(Named(NamedKey::F2), Rename)],
+    },
+    Binding {
+        section: Section::Files,
+        mods: PLAIN,
+        shown: "Del, \u{232b}",
+        help: "Move the file on screen to the trash, and show the next",
+        when: None,
+        keys: &[
+            (Named(NamedKey::Delete), Delete),
+            (Named(NamedKey::Backspace), Delete),
+        ],
+    },
+    Binding {
+        section: Section::Files,
+        mods: CTRL,
+        shown: "Ctrl+Z",
+        help: "Undo the last rename or deletion",
+        when: Some(When::Undoable),
+        keys: &[(Char("z"), Undo), (Char("Z"), Undo)],
     },
     // The region's own section: the key that puts one up, and what the
     // keys of the other sections do differently while it is. Each of those
@@ -1454,13 +1502,13 @@ impl Pointer {
 /// chain of why. What the window says about the same failure is one line —
 /// see [`App::toast`] — since a message at the foot of a picture is read at a
 /// glance and a cause worth following is worth following at leisure.
-fn report(error: &anyhow::Error) {
+pub(super) fn report(error: &anyhow::Error) {
     eprintln!("gamut: {}", crate::escape_controls(&format!("{error:#}")));
 }
 
 /// The one line about it that goes in the window: the failure itself, without
 /// the chain under it.
-fn briefly(error: &anyhow::Error) -> String {
+pub(super) fn briefly(error: &anyhow::Error) -> String {
     crate::escape_controls(&error.to_string())
 }
 
@@ -1768,6 +1816,11 @@ impl App {
             TogglePlay => return self.toggle_play(),
             NextFrame => return self.step_frame(1),
             PreviousFrame => return self.step_frame(-1),
+            // The menu's own items, so that the key and the item cannot
+            // come to mean different things.
+            Rename => self.press(Control::Rename),
+            Delete => self.press(Control::Delete),
+            Undo => self.undo(),
         }
         Effect::Redraw
     }
@@ -1975,7 +2028,7 @@ impl App {
 
     /// Which of the conditions the keys wait on hold right now, each read
     /// from exactly what the key's own arm of [`App::perform`] reads.
-    fn conditions(&self) -> Conditions {
+    pub(super) fn conditions(&self) -> Conditions {
         let current = self.current.as_ref();
         Conditions {
             region_selected: matches!(self.selection, Selection::Shown(_)),
@@ -1991,6 +2044,7 @@ impl App {
             picture_on_clipboard: self.panels.paste,
             hdr_mode: self.hdr_state() == Hdr::Available,
             single_channel: current.is_some_and(|current| current.image.is_gray()),
+            undoable: !self.edits.is_empty(),
         }
     }
 
@@ -2058,6 +2112,9 @@ impl App {
             // which rows are on screen — whose thumbnails go to the front of
             // the queue, and are the ones the screen keeps.
             ui::Command::Query(query) => self.chooser.set_query(query),
+            // The rename dialog's field: what it says now, judged for the
+            // next frame to say what is wrong with it.
+            ui::Command::Name(name) => self.set_rename_name(name),
             ui::Command::Cursor(step) => self.chooser.step(step),
             ui::Command::Visible(rows) => {
                 for row in rows.clone() {
@@ -2359,9 +2416,21 @@ impl App {
                     self.panels.show_info = !self.panels.show_info;
                 }
             }
-            // The four buttons that open a menu: the menu is egui's, and
+            // The five buttons that open a menu: the menu is egui's, and
             // opens itself on the press, so there is nothing here to do.
-            Control::Zoom | Control::PixelFormat | Control::Copy | Control::OpenIn => {}
+            Control::Zoom
+            | Control::PixelFormat
+            | Control::Copy
+            | Control::OpenIn
+            | Control::FileMenu => {}
+            // The menu of the file's own items, and the keys that do the
+            // same, so that the two cannot come to mean different things;
+            // and the dialog's two buttons, which `Enter` and `Esc` reach
+            // through the dialog itself.
+            Control::Rename => self.open_rename(),
+            Control::Delete => self.delete_shown(),
+            Control::RenameTo => self.rename_shown(),
+            Control::CancelRename => self.cancel_rename(),
             // An item of the open menu, by its place in the list the same
             // frame was drawn from.
             Control::Opener(index) => self.open_in(index),
@@ -2598,6 +2667,20 @@ mod tests {
         // it to name.
         let zoom = named(Control::Zoom).expect("the readout names itself");
         assert!(!zoom.contains('('), "{zoom}");
+
+        // The two items of the file menu that are not copies, by the keys
+        // that do the same; the button that opens the menu names itself,
+        // every item of it having a key of its own.
+        assert_eq!(
+            named(Control::Rename).as_deref(),
+            Some("Rename the file on screen (F2)")
+        );
+        assert_eq!(
+            named(Control::Delete).as_deref(),
+            Some("Move the file on screen to the trash, and show the next (Del, \u{232b})")
+        );
+        let file = named(Control::FileMenu).expect("the button names itself");
+        assert!(!file.contains('('), "{file}");
     }
 
     /// Nothing in the chrome is left unnamed: a button with no tooltip is one
@@ -2619,6 +2702,7 @@ mod tests {
             Control::Zoom,
             Control::PixelFormat,
             Control::Help,
+            Control::FileMenu,
         ] {
             assert!(
                 names(Tip::Control(widget)).is_some(),
@@ -2745,6 +2829,13 @@ mod tests {
                 When::SingleChannel,
                 Conditions {
                     single_channel: true,
+                    ..none
+                },
+            ),
+            (
+                When::Undoable,
+                Conditions {
+                    undoable: true,
                     ..none
                 },
             ),
@@ -3200,6 +3291,26 @@ mod tests {
         );
         assert_eq!(plain("]"), Some(NextFile));
         assert_eq!(plain("F"), Some(Exposure(histogram::EV_STEP)));
+        // What is done to the file: two named keys for the trash, one for
+        // the dialog, and the undo under Ctrl — the plain `z` being the
+        // display's reset.
+        assert_eq!(
+            action_for(&Key::Named(NamedKey::Delete), ELSEWHERE, PLAIN),
+            Some(Delete)
+        );
+        assert_eq!(
+            action_for(&Key::Named(NamedKey::Backspace), ELSEWHERE, PLAIN),
+            Some(Delete)
+        );
+        assert_eq!(
+            action_for(&Key::Named(NamedKey::F2), ELSEWHERE, PLAIN),
+            Some(Rename)
+        );
+        assert_eq!(
+            action_for(&Key::Character(SmolStr::new("z")), ELSEWHERE, CTRL),
+            Some(Undo)
+        );
+        assert_eq!(plain("z"), Some(ResetDisplay));
         // The window's position and its width are the same two keys in
         // different cases.
         assert_eq!(plain("a"), Some(StepBlack(-0.05)));

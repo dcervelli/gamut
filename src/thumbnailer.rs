@@ -517,7 +517,13 @@ fn make(
                 return News::Failed;
             }
             report(path, &error);
-            if let Err(error) = thumbnail::write_failure(dirs, key, mtime) {
+            // Remembered as broken only if it is the file that was looked
+            // at: one that has gone, or been written since, while it was
+            // being read — moved to the trash under the decode, say — is
+            // not a broken file, and a marker for it would stand against
+            // the same file coming back with the same modification time.
+            let unchanged = stat(path).is_ok_and(|(now, _)| now == mtime);
+            if unchanged && let Err(error) = thumbnail::write_failure(dirs, key, mtime) {
                 report(path, &error);
             }
             News::Failed
@@ -765,6 +771,28 @@ mod tests {
         let key = thumbnail::key(&std::path::absolute(&broken).unwrap());
         let (mtime, _) = stat(&broken).unwrap();
         assert_eq!(thumbnail::lookup(&dirs, &key, mtime), Lookup::Failed);
+
+        // A file that has gone by the time the decode gets to it — moved
+        // to the trash under the thread — is not remembered as broken: the
+        // marker would stand against the same file put back.
+        let gone = dir.join("gone.png");
+        std::fs::copy(&picture, &gone).unwrap();
+        let facts = header(&gone).expect("the header reads");
+        let key = thumbnail::key(&std::path::absolute(&gone).unwrap());
+        let (mtime, bytes) = stat(&gone).unwrap();
+        std::fs::remove_file(&gone).unwrap();
+        let vanished = make(
+            &std::path::absolute(&gone).unwrap(),
+            &dirs,
+            &key,
+            &facts,
+            mtime,
+            bytes,
+            Overrides::default(),
+            &AtomicBool::new(false),
+        );
+        assert!(matches!(vanished, News::Failed));
+        assert_eq!(thumbnail::lookup(&dirs, &key, mtime), Lookup::Missing);
 
         std::fs::remove_dir_all(dir).unwrap();
     }

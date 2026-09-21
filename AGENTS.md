@@ -16,6 +16,8 @@ app/           the event loop's state and winit handlers
                  when egui wants painting again into the loop's deadline
   files.rs       Files: the file list, the read in flight, walks past broken files (pure, tested)
   kept.rs        what each file was left in — its view, its display, and its frame or page — so stepping back to it puts it back
+  edits.rs       what is done to the file on disk — moved to the trash, renamed — and the
+                 stack that undoes it; the rename dialog's state while it is up
   playback.rs    the clock an animation plays by: which frame is due at a moment, and when the next is;
                  pure, told the time and the delays decoded so far
   chooser.rs     the file chooser's state: the query, which files fit it and where, the
@@ -50,8 +52,10 @@ ui/            lays each frame's interface out with egui; no wgpu or winit impor
   info.rs        the file's own facts, in a scroll area, each block a press that copies it
   pixel.rs       the pointer's readout: coordinate, swatch, and the pixel's
                  value in whichever of `PixelFormat`'s three ways is in force
-  menu.rs        the three popups' contents: the zoom menu's choices and cells, the
-                 pixel-format cells, and the menu of copies with each item's key beside it
+  menu.rs        the popup menus' contents: the zoom menu's choices and cells, the
+                 pixel-format cells, and the menus of copies and of the file with each item's key beside it
+  rename.rs      the rename dialog: a modal with the name in a field, judge() saying what is
+                 wrong with what has been typed as it is typed, and OK and Cancel
   tooltip.rs     the label naming what the pointer is resting on: Tip is what can
                  have one, Tooltip is what is said, disabled() why a dead control is dead;
                  when it opens and where it goes are egui's
@@ -91,6 +95,8 @@ thumbnail.rs   the freedesktop thumbnail cache: the GLib-spelled URI a file is k
 fuzzy.rs       the chooser's matcher behind a trait with skim's own signature; the
                one file that names the fuzzy-matcher crate
 watch.rs       polling a file — or a directory — for a settled change
+trash.rs       the desktop's trash, by the freedesktop specification: put() moves a file
+               into it and says which Entry it became, restore() moves that entry back
 monitor.rs     what the compositor says each monitor is, SDR or HDR and how large in logical pixels, over a Wayland connection of its own
 clipboard.rs   putting text or a file: URI on the clipboard, in a process that outlives
                the window; and reading a pasted picture off it
@@ -188,6 +194,7 @@ still agrees with both, so renaming either is editing the constant —
 | The chooser: what a row shows, how the query is matched, what a key does in it | `ui/chooser.rs` for the popup and the keys it reads before its field can; `app/chooser.rs` for the ranking, the relative paths, the title beside them (`candidate`) and the cursor; a new fact for a row is a field of `thumbnailer::Facts`, read in `thumbnailer::header`; `App::press` for `Control::Chooser` and `Control::Choose`, and `App::act` for `Command::{Query, Cursor, Visible}`. Its open state is egui's, under `ui::chooser::id()`. A different matcher is a new `impl Matcher` in `fuzzy.rs` |
 | A thumbnail: what is made, where it goes, what the row gets | `thumbnailer.rs` for the stages and the queue, `thumbnail.rs` for the cache's naming, chunks and write; `image/resample.rs` for the filter; `App::hold_thumb` for the texture and `app/chooser.rs::Thumbs` for how many the screen keeps |
 | What a region does, or what a key does while one is up | `image/region.rs` for the change to the rectangle; `App::perform_on_region` in `app/input.rs` for the keys a region takes, `App::pull` for what a drag makes of it; `ui/region.rs` for where it is drawn and which handle the pointer is on; `Pass::region_gestures` in `ui/mod.rs` for which drag is the region's and which the view's |
+| What deleting or renaming a file does, or what undo puts back | `app/edits.rs`: `App::delete_shown` moves the file to the trash through `trash::put` and steps away, `App::rename_shown` renames through `trash::rename_no_replace`, and each pushes an `Edit` that `App::undo` pops. The list's side is `app/files.rs`: a trashed file is `condemn`ed and leaves in `shown`, comes back by `reinstate`, and a renamed one is `rename`d in place. The dialog is `ui/rename.rs` — its words, and `judge` for what is wrong with a name — with `App::set_rename_name` asking the directory whether the name is taken. The menu is `menu::file_items`, hung off `status::file_button` |
 | What a paste accepts, or where it is written | `clipboard.rs::IMAGE_TYPES` for the MIME types and the extensions they are saved under, `pasted.rs` for the directory and the name; `App::paste` starts it and `app/files.rs::adopt` puts it in the list. Whether the button for it is on screen is `Panels::paste`, looked at by `App::poll_clipboard` |
 | A color-space source (a new tag a format carries) | `image/color/` |
 | Someone else's work brought into the tree | say where it came from beside the code that carries it, then one `[[annotations]]` entry in `REUSE.toml`; if its license is new to the tree, its text goes in `LICENSES/` named by SPDX identifier, and the PKGBUILD's `license=()` grows an entry |

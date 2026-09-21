@@ -4,6 +4,19 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- A menu of the file itself, off a button before its name in the top bar:
+  copy its name, copy its path, rename it, delete it. `F2` opens the rename
+  dialog, which says what is wrong with the name as it is typed — taken, a
+  slash — and notes an extension that changes; `Delete` or `Backspace` moves
+  the file to the desktop's trash, where the file manager shows it, and
+  shows the next file. `Ctrl+Z` undoes either, back through the session:
+  the file comes out of the trash and back into the list, or gets its old
+  name back.
+
 ## 0.4.0 - 2026-09-21
 
 ### Fixed

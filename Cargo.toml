@@ -106,10 +106,11 @@ jxl-oxide = { version = "0.12.6", default-features = false, features = ["rayon"]
 # and careful with the files it is given: a chunk is read with `take`, so a
 # length claimed by a broken file allocates only what the file actually holds.
 kamadak-exif = "0.6.1"
-# For one thing: lowering the thumbnail thread's priority, CPU and I/O both,
-# so that it stays out of the decoder's way — see `thumbnailer.rs`. The
-# standard library has no way to say it, and the crate is already linked
-# under half the tree.
+# For a few things the standard library has no way to say: lowering the
+# thumbnail thread's priority, CPU and I/O both, so that it stays out of the
+# decoder's way — see `thumbnailer.rs` — and, in `trash.rs`, a rename that
+# refuses to replace (`renameat2`) and the uid a per-volume trash is named
+# by. The crate is already linked under half the tree.
 libc = "0.2"
 # For one thing as well: building rayon's global thread pool before the
 # thumbnail thread lowers its priority. The pool is made lazily by whichever

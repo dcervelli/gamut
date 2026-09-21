@@ -1,10 +1,10 @@
 //! Popup menus: what is on each, and how its cells are drawn. Where a popup
 //! goes and how it is dismissed are egui's.
 //!
-//! Four of them, one open at a time: a second would have to say which of the
+//! Five of them, one open at a time: a second would have to say which of the
 //! two a press outside dismisses. Adding another is a set of choices, a
 //! function that lays them out, and the button in the chrome that opens it.
-//! The file chooser is a fifth popup under the same rule, though not a menu
+//! The file chooser is a sixth popup under the same rule, though not a menu
 //! — see `ui::chooser`.
 
 use egui::{Button, RichText, Sense, Ui, Vec2, WidgetInfo, WidgetType, vec2};
@@ -312,7 +312,12 @@ pub(super) fn pixel_cells(pass: &mut Pass, ui: &mut Ui) {
 /// items are laid out, so the band and the hairline are painted last, to the
 /// width the menu came out at — the band into a shape set aside for it
 /// first, so that the title goes over it.
-fn titled(pass: &mut Pass, ui: &mut Ui, title: &str, items: impl FnOnce(&mut Pass, &mut Ui)) {
+pub(super) fn titled(
+    pass: &mut Pass,
+    ui: &mut Ui,
+    title: &str,
+    items: impl FnOnce(&mut Pass, &mut Ui),
+) {
     let band = ui.painter().add(egui::Shape::Noop);
     let spacing = ui.spacing().item_spacing;
     ui.spacing_mut().item_spacing.y = 0.0;
@@ -362,6 +367,36 @@ pub(super) fn copy_items(pass: &mut Pass, ui: &mut Ui) {
                 Copies::Image if pass.input.selection.region().is_some() => "Region",
                 _ => copies.label(),
             };
+            let mut button = Button::new(label);
+            if let Some(key) = pass.namer.shortcut(control) {
+                button = button.shortcut_text(key);
+            }
+            let response = ui.add(button);
+            let response = pass.tooltip(response, Tip::Control(control), true);
+            if response.clicked() {
+                pass.press(control);
+            }
+        }
+    });
+}
+
+/// The menu of the file itself, off the button before its name: its name
+/// and its path copied — the same two items the menu of copies has, since
+/// they are what is most often wanted of a file's name — and the file
+/// renamed or moved to the trash, each with its key beside it. The rename
+/// item trails off: it opens a dialog rather than doing anything yet.
+pub(super) fn file_items(pass: &mut Pass, ui: &mut Ui) {
+    titled(pass, ui, &Control::FileMenu.label(), |pass, ui| {
+        let items = [
+            (Control::Copies(Copies::Name), "Copy name".to_string()),
+            (Control::Copies(Copies::Path), "Copy path".to_string()),
+            (
+                Control::Rename,
+                format!("{}\u{2026}", Control::Rename.label()),
+            ),
+            (Control::Delete, Control::Delete.label()),
+        ];
+        for (control, label) in items {
             let mut button = Button::new(label);
             if let Some(key) = pass.namer.shortcut(control) {
                 button = button.shortcut_text(key);

@@ -1,6 +1,7 @@
 //! Window lifecycle, key handling, and building each frame's interface.
 
 mod chooser;
+mod edits;
 mod files;
 mod gui;
 pub mod input;
@@ -34,6 +35,7 @@ use crate::render::{GpuImage, HdrPreference, Placement, Renderer, Scene, Upscale
 use crate::theme::{self, Theme};
 use crate::thumbnailer::{Delivered, Facts, Thumb, Thumbnailer};
 use crate::timing;
+use crate::trash::Trash;
 use crate::ui::chrome::{content_area, image_viewport};
 use crate::ui::toast::{self, Level, Toasts};
 use crate::ui::tooltip::Hdr;
@@ -42,6 +44,7 @@ use crate::view::{View, Viewport};
 use crate::watch::{self, Watch};
 
 use chooser::{Chooser, Thumbs};
+use edits::{Edit, Renaming};
 use files::{Announce, Files};
 use gui::Gui;
 use input::{Effect, Framing, Grabbing, Pointer};
@@ -245,6 +248,16 @@ pub struct App {
     /// and the clipboard should end up holding the one asked for last rather
     /// than whichever finished last. Shared with the threads doing the work.
     copies: Arc<AtomicU64>,
+    /// Where a deleted file goes: the desktop's trash, where the file
+    /// manager shows it. `None` where there is no way to find it — no home
+    /// directory — in which case a deletion is refused rather than done
+    /// some other way.
+    trash: Option<Trash>,
+    /// What has been done to files on disk this session, last first, for
+    /// undo — see [`edits`].
+    edits: Vec<Edit>,
+    /// The rename dialog, while it is up.
+    renaming: Option<Renaming>,
     /// Whether the window has already said how to bring the interface back.
     /// The message goes up the first time the bars are hidden and not again:
     /// with them gone there is nothing on screen that could say it, and a
@@ -359,6 +372,9 @@ impl App {
                 paste: false,
                 pixel_format: ui::PixelFormat::default(),
             },
+            trash: Trash::detect(),
+            edits: Vec::new(),
+            renaming: None,
             said_how_to_restore: false,
             reported_error: false,
         };
@@ -1363,6 +1379,7 @@ impl App {
             let shown = self.current.is_some().then(|| self.files.shown_path());
             self.chooser.input(&self.thumbs, shown)
         });
+        let rename = self.rename_input();
 
         let scale = window.scale_factor() as f32;
         let physical = self.window_size();
@@ -1406,6 +1423,7 @@ impl App {
             zoom_box: self.zoom_box,
             transport: self.transport(),
             chooser,
+            rename,
         };
 
         let namer = self.namer();
@@ -3157,6 +3175,234 @@ mod tests {
         );
         answer(&mut app, Reload::Fresh);
         assert_eq!(app.current.as_ref().unwrap().page, 1);
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// What the window last said, for the tests about what a deletion or
+    /// a rename says.
+    fn said(app: &App) -> String {
+        app.toasts
+            .showing()
+            .map(|toast| toast.message.clone())
+            .unwrap_or_default()
+    }
+
+    /// The key that undoes, as the messages name it, is the key that
+    /// undoes: a message naming a key that did something else would send
+    /// the reader to the wrong key at the worst moment.
+    #[test]
+    fn the_messages_name_the_key_that_undoes() {
+        use crate::app::input::{Action, KEYS, KeyName};
+        let binding = KEYS
+            .iter()
+            .find(|binding| {
+                binding
+                    .keys
+                    .iter()
+                    .any(|(_, action)| *action == Action::Undo)
+            })
+            .expect("undo is bound");
+        assert_eq!(binding.shown, "Ctrl+Z");
+        assert!(binding.mods.control_key());
+        assert!(
+            binding
+                .keys
+                .iter()
+                .any(|(key, _)| *key == KeyName::Char("z")),
+            "the plain letter under Ctrl"
+        );
+    }
+
+    /// A deletion moves the file to the trash and steps on; the file leaves
+    /// the list once its neighbor is up; undo puts it back on disk and on
+    /// the list, and shows it again.
+    #[test]
+    fn a_deleted_file_goes_to_the_trash_and_comes_back_on_undo() {
+        use crate::app::input::Action;
+        let (mut app, dir) = opening_directory(
+            "trash-step",
+            &[("a.png", 8, 8), ("b.png", 8, 8), ("c.png", 8, 8)],
+        );
+        answer(&mut app, Reload::Fresh);
+        app.trash = Some(Trash::under(dir.join("Trash")));
+
+        assert_eq!(app.perform(Action::Delete), Effect::Redraw);
+        assert!(!dir.join("a.png").exists());
+        assert!(dir.join("Trash/files/a.png").exists());
+        assert!(dir.join("Trash/info/a.png.trashinfo").exists());
+        assert_eq!(said(&app), "Trashed a.png. Ctrl+Z to undo.");
+        assert!(app.watch.missing(), "the bar says so at once");
+        assert_eq!(
+            app.files.len(),
+            3,
+            "still on the list while it is on screen"
+        );
+        assert_eq!(
+            app.files.pending().map(|pending| pending.index),
+            Some(1),
+            "the next file is asked for"
+        );
+        // Held down: nothing more happens until the neighbor is up.
+        assert_eq!(app.perform(Action::Delete), Effect::Redraw);
+        assert!(dir.join("b.png").exists());
+
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.files.len(), 2);
+        assert_eq!(app.files.shown_path(), dir.join("b.png"));
+        assert_eq!(app.files.index(), 0);
+        assert!(app.conditions().undoable);
+
+        assert_eq!(app.perform(Action::Undo), Effect::Redraw);
+        assert!(dir.join("a.png").exists(), "back where it was");
+        assert!(!dir.join("Trash/files/a.png").exists());
+        assert_eq!(app.files.len(), 3);
+        assert_eq!(app.files.path(0), dir.join("a.png"));
+        assert_eq!(
+            app.files.pending().map(|pending| pending.index),
+            Some(0),
+            "and shown again"
+        );
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.files.shown_path(), dir.join("a.png"));
+        assert!(!app.conditions().undoable);
+        assert_eq!(app.perform(Action::Undo), Effect::Redraw);
+        assert_eq!(said(&app), "Nothing to undo.");
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// The only file has nowhere to step to: it stays on screen, marked as
+    /// gone, a second press does nothing, and undo puts it back where it
+    /// stands.
+    #[test]
+    fn deleting_the_only_file_keeps_it_on_screen() {
+        use crate::app::input::Action;
+        let (mut app, dir) = app_over("trash-alone", &[("a.png", 8, 8)]);
+        app.trash = Some(Trash::under(dir.join("Trash")));
+
+        let _ = app.perform(Action::Delete);
+        assert!(!dir.join("a.png").exists());
+        assert!(app.files.is_idle());
+        assert!(app.watch.missing());
+        assert_eq!(app.files.len(), 1);
+        assert!(app.files.is_condemned(&dir.join("a.png")));
+
+        let _ = app.perform(Action::Delete);
+        assert_eq!(said(&app), "Already in the trash.");
+        assert_eq!(app.edits.len(), 1);
+
+        let _ = app.perform(Action::Undo);
+        assert!(dir.join("a.png").exists());
+        assert!(!app.watch.missing());
+        assert!(!app.files.is_condemned(&dir.join("a.png")));
+        assert!(app.files.is_idle(), "still on screen: nothing to ask for");
+        assert_eq!(app.files.len(), 1);
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// A file that has been emptied from the trash cannot come back, and
+    /// the window says so rather than failing quietly.
+    #[test]
+    fn an_emptied_trash_has_nothing_to_put_back() {
+        use crate::app::input::Action;
+        let (mut app, dir) = app_over("trash-emptied", &[("a.png", 8, 8), ("b.png", 8, 8)]);
+        app.trash = Some(Trash::under(dir.join("Trash")));
+        let _ = app.perform(Action::Delete);
+        answer(&mut app, Reload::Fresh);
+        std::fs::remove_dir_all(dir.join("Trash")).expect("emptied");
+
+        let _ = app.perform(Action::Undo);
+        assert!(
+            said(&app).contains("no longer in the trash"),
+            "{}",
+            said(&app)
+        );
+        assert!(app.files.is_idle());
+        assert_eq!(app.files.len(), 1);
+        assert!(!app.conditions().undoable, "the entry is spent");
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// The dialog judges the name as it is typed — taken, unchanged, an
+    /// extension changing — and OK renames the file everywhere it is known
+    /// by name; undo renames it back, and shows it if it had been left.
+    #[test]
+    fn a_rename_is_judged_as_typed_and_undone_by_name() {
+        use crate::app::input::Action;
+        use crate::ui::rename::{ExtensionChange, Verdict};
+        let (mut app, dir) = app_over("rename", &[("a.png", 8, 8), ("b.png", 8, 8)]);
+
+        let _ = app.perform(Action::Rename);
+        let input = app.rename_input().expect("the dialog is up");
+        assert_eq!(input.name, "a.png");
+        assert_eq!(input.verdict, Verdict::Unchanged);
+        assert!(input.opened);
+        assert!(!app.rename_input().expect("still up").opened);
+
+        assert!(app.act(ui::Command::Name("b.png".to_string())));
+        assert_eq!(app.rename_input().expect("up").verdict, Verdict::Taken);
+        assert!(app.act(ui::Command::Name("c.jpg".to_string())));
+        assert_eq!(
+            app.rename_input().expect("up").verdict,
+            Verdict::Fine(Some(ExtensionChange {
+                from: Some("png".to_string()),
+                to: Some("jpg".to_string()),
+            }))
+        );
+
+        // Cancel changes nothing.
+        assert!(app.act(ui::Command::Press(ui::Control::CancelRename)));
+        assert!(app.rename_input().is_none());
+        assert!(dir.join("a.png").exists());
+
+        let _ = app.perform(Action::Rename);
+        assert!(app.act(ui::Command::Name("c.jpg".to_string())));
+        assert!(app.act(ui::Command::Press(ui::Control::RenameTo)));
+        assert!(app.rename_input().is_none());
+        assert!(dir.join("c.jpg").exists() && !dir.join("a.png").exists());
+        assert_eq!(app.files.shown_path(), dir.join("c.jpg"));
+        assert_eq!(
+            app.current.as_ref().map(|current| current.label.as_str()),
+            Some("c.jpg")
+        );
+        assert_eq!(said(&app), "Renamed a.png. Ctrl+Z to undo.");
+        assert!(app.conditions().undoable);
+
+        // Step away, then undo: the old name is back, and so is the file.
+        app.step(true);
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.files.shown_path(), dir.join("b.png"));
+        let _ = app.perform(Action::Undo);
+        assert!(dir.join("a.png").exists() && !dir.join("c.jpg").exists());
+        assert_eq!(app.files.path(0), dir.join("a.png"));
+        assert_eq!(app.files.pending().map(|pending| pending.index), Some(0));
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.files.shown_path(), dir.join("a.png"));
+        assert_eq!(
+            app.current.as_ref().map(|current| current.label.as_str()),
+            Some("a.png")
+        );
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// A rename refuses to replace: a file made under the new name since
+    /// the dialog judged it is left alone, and the window says so.
+    #[test]
+    fn a_rename_does_not_replace_a_file_that_has_arrived() {
+        use crate::app::input::Action;
+        let (mut app, dir) = app_over("rename-race", &[("a.png", 8, 8)]);
+        let _ = app.perform(Action::Rename);
+        assert!(app.act(ui::Command::Name("b.png".to_string())));
+        write_png(&dir, "b.png", 4, 4);
+        assert!(app.act(ui::Command::Press(ui::Control::RenameTo)));
+        assert!(dir.join("a.png").exists());
+        assert_eq!(app.files.shown_path(), dir.join("a.png"));
+        assert!(said(&app).contains("already there"), "{}", said(&app));
+        assert!(!app.conditions().undoable);
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }

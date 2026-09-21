@@ -784,9 +784,11 @@ have bound. Its items are also the only ones sized to the words on them —
 name would be, and a name left to wrap in a popup that opened at the width of
 the button below it comes out a letter to a line.
 
-These two menus of items are the two with a name at their head — **Copy**,
-**Open in…**, each the label of the button that opened it, so that the two
-cannot disagree — where the zoom and pixel menus name their sections in the
+These menus of items are the ones with a name at their head — **Copy**,
+**Open in…**, and **File**, the menu of the file's own name and path, its
+rename and its deletion, off the button before its name in the top bar (see
+[editing](editing.md)) — each the label of the button that opened it, so
+that the two cannot disagree — where the zoom and pixel menus name their sections in the
 accent and are not headed: a percentage or a fit says what it is, and a bare
 list of names or of applications does not say what pressing one would do with
 them. The name is set as the help popup's column headings are, in bold on the

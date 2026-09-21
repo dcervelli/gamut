@@ -67,4 +67,12 @@ impl Kept {
     pub(super) fn left(&self, path: &Path) -> Option<&Settings> {
         self.0.get(path)
     }
+
+    /// The file at `from` is called `to` now: what it left comes with it,
+    /// since a renamed file is still the same file.
+    pub(super) fn rename(&mut self, from: &Path, to: &Path) {
+        if let Some(settings) = self.0.remove(from) {
+            self.0.insert(to.to_path_buf(), settings);
+        }
+    }
 }

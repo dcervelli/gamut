@@ -15,7 +15,7 @@ into the desktop's own cache through `src/thumbnail.rs`.
 
 ## A fifth popup
 
-The chooser is an egui popup like the four menus in
+The chooser is an egui popup like the five menus in
 [the interface](interface.md#popups-and-menus), and its open state lives
 where theirs does: in egui's memory, under the id `ui::chooser::id()`.
 `App::press(Control::Chooser)` opens it with `Popup::open_id` — after

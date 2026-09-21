@@ -219,6 +219,9 @@ pub fn words(tip: Tip) -> Option<String> {
             // The same: no key opens it, and what is on it is whatever the
             // desktop has installed rather than anything this program binds.
             Tip::Control(Control::OpenIn) => "Open the file in another application",
+            // And the same again for the menu of the file: every item of it
+            // has a key of its own, and the button says what the menu is of.
+            Tip::Control(Control::FileMenu) => "Copy, rename or delete the file",
             Tip::Control(Control::Paste) => "Paste an image",
             Tip::Control(Control::Help) => "Keyboard shortcuts",
             // No one key does this and only this — Escape dismisses whatever

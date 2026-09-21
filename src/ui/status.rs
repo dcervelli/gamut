@@ -11,7 +11,9 @@ use super::chrome::{BAR_PADDING, Corners, Pass, STEP_SEAM, measure};
 use super::control::Control;
 use super::style::TOGGLE_RADIUS;
 use super::tooltip::Tip;
-use super::{COUNTER_GAP, Current, Reading, TEXT_SIZE, capitalized, fonts, histogram, icon};
+use super::{
+    COUNTER_GAP, Current, PADDING, Reading, TEXT_SIZE, capitalized, fonts, histogram, icon, menu,
+};
 
 /// Between one segment of a bar and the next. A thin gap: the middot already
 /// parts them, and the bars are short of room before they are short of air.
@@ -51,9 +53,10 @@ pub(super) fn fit_segments(
 }
 
 /// The top bar's own words, from the near end: the pair that steps through
-/// the list while there is one, the count, the word for a file that has
-/// gone, and the name — the one thing in the window set bold, and the only
-/// thing drawn in the ink the theme keeps for it.
+/// the list while there is one, the count, the button that opens the menu
+/// of the file, the word for a file that has gone, and the name — the one
+/// thing in the window set bold, and the only thing drawn in the ink the
+/// theme keeps for it.
 pub(super) fn top_words(pass: &mut Pass, ui: &mut egui::Ui, current: &Current) {
     // The pair that steps through the list, at the head of the bar, with
     // the count they move through between them — one row of three, the
@@ -89,6 +92,8 @@ pub(super) fn top_words(pass: &mut Pass, ui: &mut egui::Ui, current: &Current) {
         }
         ui.add_space(COUNTER_GAP);
     }
+    file_button(pass, ui);
+    ui.add_space(COUNTER_GAP);
     // In front of the name, on the side of the bar the name is read from, so
     // that it is seen before the file it is about rather than after it.
     if pass.input.deleted {
@@ -118,6 +123,28 @@ pub(super) fn top_label(shown: &str, reading: Option<&Reading>) -> String {
         Some(Reading::Again) => format!("{shown}, reloading"),
         None => shown.to_string(),
     }
+}
+
+/// The button before the name that opens the menu of the file — its name
+/// and path copied, the file renamed or moved to the trash. Lit while that
+/// menu is open, as the other menu buttons are; hung below, where the name
+/// it is about is read along the bar.
+fn file_button(pass: &mut Pass, ui: &mut egui::Ui) {
+    let id = egui::Id::new("file menu");
+    let open = egui::Popup::is_id_open(ui.ctx(), id);
+    let button = pass.icon_button(
+        ui,
+        icon::SQUARE_MENU,
+        Control::FileMenu,
+        open,
+        true,
+        Corners::All,
+    );
+    egui::Popup::menu(&button)
+        .id(id)
+        .align(egui::RectAlign::BOTTOM_START)
+        .gap(PADDING)
+        .show(|ui| menu::file_items(pass, ui));
 }
 
 /// The word that goes in front of the name when the file behind the picture

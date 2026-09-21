@@ -3,7 +3,7 @@
 //! each with its thumbnail. `Ctrl+P` opens it; `Enter` or a click opens the
 //! file under the cursor and closes it; `Esc` or a click outside closes it.
 //!
-//! A fifth popup, and egui's like the four menus: its open state is in
+//! A sixth popup, and egui's like the five menus: its open state is in
 //! egui's memory under [`id`], so `Esc`, a click outside, and the rule that
 //! one popup is open at a time all come from the toolkit, and the
 //! application opens and closes it exactly as it closes a menu. What is

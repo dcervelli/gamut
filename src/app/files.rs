@@ -63,6 +63,12 @@ pub(super) struct Files {
     adopted: Vec<PathBuf>,
     /// The file on screen.
     index: usize,
+    /// The file on screen once it has been moved to the trash, while it is
+    /// still on screen. It stays on the list until another file has taken
+    /// the screen from it — the picture is still what is being looked at,
+    /// and the list still has to say which file that is — and leaves the
+    /// list in [`Files::shown`], the moment it does. `None` otherwise.
+    leaving: Option<PathBuf>,
     overrides: decode::Overrides,
     /// Numbers the requests. Only the newest one's reply is acted on.
     generation: u64,
@@ -77,6 +83,7 @@ impl Files {
             paths,
             adopted: Vec::new(),
             index,
+            leaving: None,
             overrides,
             generation: 0,
             pending: None,
@@ -234,6 +241,99 @@ impl Files {
         self.request(at, Reload::Fresh, None, source)
     }
 
+    /// The step a deletion takes away from the file on screen: on to the
+    /// next, or back to the previous from the last of the list — the walk
+    /// that was being made, rather than a wrap round to the first. `None`
+    /// with nowhere to go.
+    pub(super) fn step_away(&mut self) -> Option<Request> {
+        let forward = self.index + 1 < self.paths.len();
+        self.step(forward)
+    }
+
+    /// Notes that the file on screen has been moved to the trash. It stays
+    /// on the list until another file arrives — see [`Files::leaving`].
+    pub(super) fn condemn(&mut self) {
+        self.leaving = Some(self.paths[self.index].clone());
+    }
+
+    /// Whether the file on screen is one that has been moved to the trash
+    /// and not yet left the list.
+    pub(super) fn is_condemned(&self, path: &Path) -> bool {
+        self.leaving.as_deref() == Some(path)
+    }
+
+    /// The file that was moved to the trash is back: it stays on the list
+    /// after all.
+    pub(super) fn reprieve(&mut self) {
+        self.leaving = None;
+    }
+
+    /// Whether `path` is a file taken in while the program ran, which a
+    /// rebuild of the list keeps — what a file put back after a deletion
+    /// has to be again.
+    pub(super) fn is_adopted(&self, path: &Path) -> bool {
+        self.adopted.iter().any(|held| held == path)
+    }
+
+    /// Puts a file back on the list that had left it — one restored from
+    /// the trash — at `index`, or at the end where the list has grown
+    /// shorter than that, and asks for it. `adopted` is whether a rebuild
+    /// of the list should keep it, as it was kept before.
+    pub(super) fn reinstate(&mut self, path: PathBuf, index: usize, adopted: bool) -> Request {
+        let at = index.min(self.paths.len());
+        self.paths.insert(at, path.clone());
+        if at <= self.index && !self.paths.is_empty() {
+            self.index += 1;
+        }
+        if let Some(pending) = &mut self.pending
+            && at <= pending.index
+        {
+            pending.index += 1;
+        }
+        if adopted {
+            self.adopted.push(path);
+        }
+        self.go_to(at)
+    }
+
+    /// The file at `index` is called `to` now. Its place in the list is
+    /// kept: the list is rebuilt from the directory by name in its own
+    /// time, where a directory is what was named, and a file named on the
+    /// command line stays where the command line put it.
+    pub(super) fn rename(&mut self, index: usize, to: PathBuf) {
+        let from = std::mem::replace(&mut self.paths[index], to.clone());
+        for held in &mut self.adopted {
+            if *held == from {
+                *held = to.clone();
+            }
+        }
+        if self.leaving.as_deref() == Some(from.as_path()) {
+            self.leaving = Some(to);
+        }
+    }
+
+    /// Takes `path` off the list, wherever it is, keeping the file on
+    /// screen and a read in flight aimed where they were.
+    fn drop_path(&mut self, path: &Path) {
+        let Some(at) = self.position(path) else {
+            return;
+        };
+        self.paths.remove(at);
+        self.adopted.retain(|held| held != path);
+        if at < self.index {
+            self.index -= 1;
+        }
+        if let Some(pending) = &mut self.pending {
+            if pending.index == at {
+                // A read of the file that has gone: its reply is of nothing
+                // on the list, and is dropped.
+                self.pending = None;
+            } else if at < pending.index {
+                pending.index -= 1;
+            }
+        }
+    }
+
     fn request(
         &mut self,
         index: usize,
@@ -349,9 +449,18 @@ impl Files {
             .count()
     }
 
-    /// A reply has reached the screen.
+    /// A reply has reached the screen. A file moved to the trash while it
+    /// was on screen leaves the list here, the moment another file has
+    /// taken the screen from it.
     pub(super) fn shown(&mut self, index: usize) {
         self.index = index;
+        if let Some(leaving) = self.leaving.take() {
+            if self.paths[index] == leaving {
+                self.leaving = Some(leaving);
+            } else {
+                self.drop_path(&leaving);
+            }
+        }
     }
 
     /// A reply would not go on screen. Carries a walk on past the file, so
@@ -691,5 +800,135 @@ mod tests {
             files.announce_slow_read(since + SLOW_READ * 2),
             Announce::Nothing
         );
+    }
+
+    /// A file moved to the trash stays on the list, and on screen, until
+    /// its neighbor has taken the screen from it, and leaves the list then
+    /// — with the file on screen and a read in flight aimed where they
+    /// were. From the last of the list the step away is back rather than
+    /// round to the first: the walk goes on the way it was going.
+    #[test]
+    fn a_trashed_file_leaves_the_list_once_another_has_the_screen() {
+        let mut files = list(4);
+        files.shown(1);
+        files.condemn();
+        assert!(files.is_condemned(Path::new("1.png")));
+        let request = files.step_away().expect("somewhere to go");
+        assert_eq!(request.index, 2);
+        assert_eq!(files.len(), 4, "still on the list while it is on screen");
+
+        files.accept(request.generation);
+        files.shown(2);
+        assert_eq!(files.len(), 3);
+        assert_eq!(files.shown_path(), Path::new("2.png"));
+        assert_eq!(files.index(), 1, "the file on screen moved up with it");
+        assert!(!files.is_condemned(Path::new("1.png")));
+        assert_eq!(
+            files.paths(),
+            &[
+                PathBuf::from("0.png"),
+                PathBuf::from("2.png"),
+                PathBuf::from("3.png")
+            ]
+        );
+
+        // From the end of the list, back.
+        files.shown(2);
+        files.condemn();
+        let request = files.step_away().expect("somewhere to go");
+        assert_eq!(request.index, 1);
+        files.accept(request.generation);
+        files.shown(1);
+        assert_eq!(
+            files.paths(),
+            &[PathBuf::from("0.png"), PathBuf::from("2.png")]
+        );
+        assert_eq!(files.index(), 1);
+
+        // The only file has nowhere to go and stays, condemned.
+        let mut alone = list(1);
+        alone.condemn();
+        assert!(alone.step_away().is_none());
+        assert!(alone.is_condemned(Path::new("0.png")));
+        alone.reprieve();
+        assert!(!alone.is_condemned(Path::new("0.png")));
+        assert_eq!(alone.len(), 1);
+    }
+
+    /// A neighbor that will not decode leaves the trashed file on screen,
+    /// and on the list: what is on screen is still what the list has to
+    /// name.
+    #[test]
+    fn a_trashed_file_stays_while_nothing_takes_the_screen() {
+        let mut files = list(2);
+        files.condemn();
+        let request = files.step_away().expect("a neighbor");
+        let pending = files.accept(request.generation).expect("ours");
+        assert!(files.failed(pending.index, pending.step).is_none());
+        files.shown(0);
+        assert_eq!(files.len(), 2);
+        assert!(files.is_condemned(Path::new("0.png")));
+    }
+
+    /// A file put back from the trash goes back where it stood — or at the
+    /// end of a list that has grown shorter — and is asked for; the file on
+    /// screen and a read in flight keep their places.
+    #[test]
+    fn a_reinstated_file_goes_back_where_it_was() {
+        let mut files = list(3);
+        files.shown(2);
+        let request = files.reinstate(PathBuf::from("1b.png"), 1, false);
+        assert_eq!(request.index, 1);
+        assert_eq!(files.path(1), Path::new("1b.png"));
+        assert_eq!(files.index(), 3, "the file on screen moved along");
+        assert_eq!(files.pending().map(|pending| pending.index), Some(1));
+
+        let request = files.reinstate(PathBuf::from("9.png"), 10, true);
+        assert_eq!(request.index, 4, "past the end goes at the end");
+        assert!(files.is_adopted(Path::new("9.png")));
+        assert!(!files.is_adopted(Path::new("1b.png")));
+        // A rebuild that does not list it keeps it, as it keeps a paste.
+        files.accept(request.generation);
+        files.shown(4);
+        assert!(files.relist(named(&["0.png", "1.png", "2.png"])));
+        assert_eq!(files.len(), 4);
+        assert_eq!(files.shown_path(), Path::new("9.png"));
+    }
+
+    /// A renamed file keeps its place on the list under its new name, and
+    /// stays kept through a rebuild if it was a paste.
+    #[test]
+    fn a_renamed_file_keeps_its_place() {
+        let mut files = list(3);
+        let request = files.adopt(PathBuf::from("pasted.png"), Source::Disk);
+        files.accept(request.generation);
+        files.shown(1);
+        files.rename(1, PathBuf::from("kept.png"));
+        assert_eq!(files.shown_path(), Path::new("kept.png"));
+        assert_eq!(files.position(Path::new("pasted.png")), None);
+        assert!(files.is_adopted(Path::new("kept.png")));
+        files.shown(0);
+        assert!(
+            !files.relist(named(&["0.png", "1.png", "2.png"])),
+            "put back where it was, the list is as it was"
+        );
+        assert_eq!(files.position(Path::new("kept.png")), Some(1));
+    }
+
+    /// A read in flight of the very file that has left the list is a read
+    /// of nothing: its reply is dropped rather than shown under another
+    /// file's index.
+    #[test]
+    fn a_read_of_a_file_that_left_the_list_is_dropped() {
+        let mut files = list(3);
+        files.shown(1);
+        files.condemn();
+        let reload = files.reload().expect("idle");
+        // Another file arrives first — a pick from the chooser, say.
+        let pick = files.go_to(2);
+        files.accept(pick.generation);
+        files.shown(2);
+        assert_eq!(files.len(), 2);
+        assert!(files.accept(reload.generation).is_none());
     }
 }

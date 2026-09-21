@@ -170,6 +170,20 @@ pub(super) const SQUARE_SQUARE: &[Mark] = &[
     },
 ];
 
+/// Lucide's `square-menu`: three lines in a frame, the mark the world uses
+/// for a list of things to do, on the button before the file's name that
+/// opens the list of what can be done to the file.
+pub(super) const SQUARE_MENU: &[Mark] = &[
+    Mark::Rect {
+        at: [3.0, 3.0],
+        size: [18.0, 18.0],
+        radius: 2.0,
+    },
+    Mark::Line([7.0, 8.0], [17.0, 8.0]),
+    Mark::Line([7.0, 12.0], [17.0, 12.0]),
+    Mark::Line([7.0, 16.0], [17.0, 16.0]),
+];
+
 /// Lucide's `clipboard`: the board a pasted picture arrives on.
 ///
 /// Lucide draws the board as one path that starts beside the clip, runs all

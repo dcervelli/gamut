@@ -18,6 +18,7 @@ mod theme;
 mod thumbnail;
 mod thumbnailer;
 mod timing;
+mod trash;
 mod ui;
 mod view;
 mod watch;
