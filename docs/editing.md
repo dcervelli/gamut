@@ -48,7 +48,14 @@ show the next", but everything the interface says about the picture — the
 title, the tooltip on the name, what `kept.rs` puts settings away under —
 is read from `Files::shown_path`, and for the milliseconds (or, with a
 neighbor that will not decode, for good) between the deletion and the next
-file arriving, that path has to still be the deleted file's. So
+file arriving, that path has to still be the deleted file's. The one
+exception is the last file on the list, which has no neighbor to wait for:
+`Files::step_away` answers `None`, `App::leave_picture` takes the picture
+down — keeping what it was left in under its path first, since undo will
+want it back — and `Files::remove_shown` empties the list, leaving the
+empty window described in [the interface](interface.md#the-empty-window-and-the-file-dialog).
+Undo then `reinstate`s the file at the head of an empty list, where
+nothing is on screen to be moved along by it, and asks for it. Otherwise
 `App::delete_shown` trashes the file, `condemn`s it on the list, points the
 watch at it so the bar says `DELETED` at once rather than half a second on,
 and asks for the neighbor as a step — forward, or back from the end of the

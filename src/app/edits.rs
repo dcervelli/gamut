@@ -79,9 +79,12 @@ impl App {
     ///
     /// The file stays on the list, and on screen, until its neighbor has
     /// arrived: the picture is still what is being looked at, and the list
-    /// is what says which file it is. With no neighbor — a list of one, or
-    /// none that will decode — it stays for good, marked in the bar as a
-    /// file deleted under us is, and undo puts it back where it stands.
+    /// is what says which file it is. With no neighbor that will decode it
+    /// stays for good, marked in the bar as a file deleted under us is, and
+    /// undo puts it back where it stands. The last file on the list has no
+    /// neighbor to wait for: it leaves the list and the screen at once, and
+    /// the window shows nothing until something is opened — or undo puts
+    /// the file back at the head of the list, where it is shown again.
     pub(super) fn delete_shown(&mut self) {
         // One at a time: a key held down deletes as fast as the neighbors
         // decode, and never the file already on its way out.
@@ -113,12 +116,20 @@ impl App {
             adopted: self.files.is_adopted(&listed),
             listed: listed.clone(),
         });
-        self.files.condemn();
-        // The bar says the file has gone at once, rather than half a second
-        // on when the watch would notice.
-        self.watch = Watch::new(&listed);
-        if let Some(request) = self.files.step_away() {
-            self.send(request);
+        match self.files.step_away() {
+            Some(request) => {
+                self.files.condemn();
+                // The bar says the file has gone at once, rather than half
+                // a second on when the watch would notice.
+                self.watch = Watch::new(&listed);
+                self.send(request);
+            }
+            // The picture first, kept under its path while the list still
+            // names it; then the list.
+            None => {
+                self.leave_picture();
+                self.files.remove_shown();
+            }
         }
         self.toast(
             format!("Trashed {}. {} to undo.", name_of(&listed), undo_key()),

@@ -317,6 +317,16 @@ impl Files {
         self.leaving = None;
     }
 
+    /// The file on screen leaves the list now, with nothing to take the
+    /// screen from it: the last file deleted, after which the list is
+    /// empty and the window shows nothing.
+    pub(super) fn remove_shown(&mut self) {
+        if let Some(path) = self.shown_path().map(Path::to_path_buf) {
+            self.drop_path(&path);
+        }
+        self.leaving = None;
+    }
+
     /// Whether `path` is a file taken in while the program ran, which a
     /// rebuild of the list keeps — what a file put back after a deletion
     /// has to be again.
@@ -330,8 +340,12 @@ impl Files {
     /// of the list should keep it, as it was kept before.
     pub(super) fn reinstate(&mut self, path: PathBuf, index: usize, adopted: bool) -> Request {
         let at = index.min(self.paths.len());
+        // The file on screen moves along when the newcomer goes in ahead of
+        // it — where there is one: an empty list has nothing on screen to
+        // move, and the newcomer is what the list now holds.
+        let shifts = !self.paths.is_empty() && at <= self.index;
         self.paths.insert(at, path.clone());
-        if at <= self.index && !self.paths.is_empty() {
+        if shifts {
             self.index += 1;
         }
         if let Some(pending) = &mut self.pending
@@ -966,14 +980,20 @@ mod tests {
         );
         assert_eq!(files.index(), 1);
 
-        // The only file has nowhere to go and stays, condemned.
+        // The only file has nowhere to go: it leaves the list, which is
+        // then empty, and comes back by being put back at the head.
         let mut alone = list(1);
-        alone.condemn();
         assert!(alone.step_away().is_none());
-        assert!(alone.is_condemned(Path::new("0.png")));
-        alone.reprieve();
-        assert!(!alone.is_condemned(Path::new("0.png")));
+        alone.remove_shown();
+        assert_eq!(alone.len(), 0);
+        assert_eq!(alone.shown_path(), None);
+        assert!(alone.is_idle());
+        let back = alone.reinstate(PathBuf::from("0.png"), 0, false);
+        assert_eq!(back.index, 0);
         assert_eq!(alone.len(), 1);
+        alone.accept(back.generation);
+        alone.shown(0);
+        assert_eq!(alone.shown_path(), Some(Path::new("0.png")));
     }
 
     /// A neighbor that will not decode leaves the trashed file on screen,

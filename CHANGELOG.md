@@ -18,7 +18,16 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   on the command line after the rest, and the first of it is shown. The dialog
   is asked for through the desktop portal over a session-bus connection of
   the program's own, so nothing new is linked. `--paste` with nothing on
-  the clipboard now opens the empty window rather than failing.
+  the clipboard now opens the empty window rather than failing. The first
+  picture to arrive in an empty window sizes it as the window would have
+  opened on that picture, unless `--size` chose the size.
+
+### Changed
+
+- Deleting the only file on the list takes it off the list and off the
+  screen, leaving the empty window and its buttons, rather than keeping it
+  up marked `DELETED`. Undo puts it back and shows it, as it was left. A
+  file whose neighbor will not open still stays up, marked, as before.
 
 - A menu of the file itself, off a button before its name in the top bar:
   copy its name, copy its path, rename it, delete it. `F2` opens the rename

@@ -183,6 +183,12 @@ pub struct App {
     /// asked for one. Read once, when the window is made; every size after
     /// that is the compositor's to give.
     asked_size: Option<[u32; 2]>,
+    /// Whether the next picture to arrive is to size the window, as the
+    /// first sizes it at start-up: set while the window shows nothing — it
+    /// opened on nothing, or the last file was deleted — and spent by the
+    /// arrival. A window opened at `--size` keeps the size it was asked
+    /// for, that being a choice rather than a default.
+    size_to_next: bool,
     /// The thread that reads files.
     ///
     /// Declared before the renderer on purpose: fields are dropped in the
@@ -363,6 +369,7 @@ impl App {
             current: None,
             header_size: size,
             asked_size,
+            size_to_next: source.is_none(),
             startup,
             hdr,
             monitors,
@@ -493,6 +500,36 @@ impl App {
             self.send(request);
         }
         self.list_changed();
+    }
+
+    /// Takes the picture off the screen — the last file deleted — keeping
+    /// what it was left in for its return, and stops everything that was
+    /// about it: the animation playing, the watch on its file, the region
+    /// drawn on it, the move it was in the middle of, and the menu of what
+    /// else could open it. The window then shows nothing, and the next
+    /// picture sizes it as the first did; nothing showing is no longer the
+    /// command line's failure, whatever the list was.
+    fn leave_picture(&mut self) {
+        if self.current.is_none() {
+            return;
+        }
+        self.keep_shown();
+        self.current = None;
+        self.player = None;
+        self.playback = None;
+        self.uploaded = None;
+        self.motion = None;
+        self.watch = Watch::idle();
+        self.openers.clear();
+        self.clear_region();
+        self.from_command_line = false;
+        self.size_to_next = true;
+        if let Some(renderer) = &mut self.renderer {
+            renderer.clear_image();
+        }
+        if let Some(window) = &self.window {
+            window.set_title(&self.title());
+        }
     }
 
     /// Keeps what the picture on screen was left in — its view, its
@@ -1242,6 +1279,21 @@ impl App {
             stored = renderer.image_format_label();
         }
 
+        // A window that showed nothing takes the size it would have opened
+        // at on this picture, as if it had; the fit follows on the frame
+        // the new size brings.
+        if std::mem::take(&mut self.size_to_next)
+            && self.asked_size.is_none()
+            && let Some(window) = &self.window
+        {
+            let wanted = initial_window_size(
+                window.available_monitors(),
+                self.monitors.as_ref(),
+                Some(size),
+                None,
+            );
+            let _ = window.request_inner_size(wanted);
+        }
         self.files.shown(file.index);
         self.watch = file.watch;
         // What this file is, for the chooser's row about it, ahead of the
@@ -1805,7 +1857,7 @@ impl ApplicationHandler<UserEvent> for App {
         }
 
         let size = initial_window_size(
-            event_loop,
+            event_loop.available_monitors(),
             self.monitors.as_ref(),
             self.opening_size(),
             self.asked_size,
@@ -3615,32 +3667,44 @@ mod tests {
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }
 
-    /// The only file has nowhere to step to: it stays on screen, marked as
-    /// gone, a second press does nothing, and undo puts it back where it
-    /// stands.
+    /// The only file has nowhere to step to: it leaves the list and the
+    /// screen at once, and the window shows nothing — the empty window,
+    /// with the next picture to size it — until undo puts the file back
+    /// at the head of the list and shows it, as it was left.
     #[test]
-    fn deleting_the_only_file_keeps_it_on_screen() {
+    fn deleting_the_only_file_empties_the_window() {
         use crate::app::input::Action;
         let (mut app, dir) = app_over("trash-alone", &[("a.png", 8, 8)]);
         app.trash = Some(Trash::under(dir.join("Trash")));
+        let _ = app.perform(Action::ZoomTo(4.0));
+        let zoom = |app: &App| app.view.zoom(app.image_size(), app.viewport());
+        let zoomed = zoom(&app);
 
         let _ = app.perform(Action::Delete);
         assert!(!dir.join("a.png").exists());
-        assert!(app.files.is_idle());
-        assert!(app.watch.missing());
-        assert_eq!(app.files.len(), 1);
-        assert!(app.files.is_condemned(&dir.join("a.png")));
+        assert!(app.is_empty());
+        assert!(app.current.is_none());
+        assert_eq!(app.files.len(), 0);
+        assert!(!app.watch.missing());
+        assert!(app.size_to_next);
+        assert!(!app.from_command_line, "nothing showing is no failure now");
+        assert!(!app.showed_nothing());
+        assert_eq!(app.title(), crate::PROGRAM);
+        assert!(said(&app).starts_with("Trashed a.png"), "{}", said(&app));
 
         let _ = app.perform(Action::Delete);
-        assert_eq!(said(&app), "Already in the trash.");
-        assert_eq!(app.edits.len(), 1);
+        assert_eq!(app.edits.len(), 1, "nothing to delete twice");
 
         let _ = app.perform(Action::Undo);
         assert!(dir.join("a.png").exists());
-        assert!(!app.watch.missing());
-        assert!(!app.files.is_condemned(&dir.join("a.png")));
-        assert!(app.files.is_idle(), "still on screen: nothing to ask for");
         assert_eq!(app.files.len(), 1);
+        assert_eq!(app.files.pending().map(|pending| pending.index), Some(0));
+        answer(&mut app, Reload::Fresh);
+        assert!(app.current.is_some());
+        assert_eq!(app.files.index(), 0);
+        assert_eq!(app.files.shown_path(), Some(dir.join("a.png").as_path()));
+        assert!(!app.size_to_next, "spent on the arrival");
+        assert_eq!(zoom(&app), zoomed, "as it was left");
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }

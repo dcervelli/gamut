@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use winit::dpi::{LogicalSize, PhysicalSize};
-use winit::event_loop::ActiveEventLoop;
+use winit::monitor::MonitorHandle;
 use winit::window::WindowAttributes;
 
 use crate::monitor::{Monitors, Room};
@@ -121,17 +121,21 @@ pub(super) fn with_app_id(attributes: WindowAttributes) -> WindowAttributes {
 }
 
 /// Open at the image's own size, shrunk to fit comfortably on the monitors —
-/// or at the size `--size` asked for, where it asked for one.
+/// or at the size `--size` asked for, where it asked for one. The same
+/// sizing serves a window that opened on nothing and is given a picture
+/// later, which is then sized as if it had opened on it.
 ///
 /// What the monitors are is the only thing here that has to be asked of
 /// anyone; what is done with the answer is [`window_size`], which is testable.
 /// The compositor's own account is taken where `monitor.rs` has one, since it
-/// carries the scale each monitor is really running; the event loop's is the
-/// fallback. Every monitor is collected, not just one: `primary_monitor` is
-/// `None` on Wayland by definition, and nothing before the surface is mapped
-/// says which monitor the compositor will open the window on.
+/// carries the scale each monitor is really running; `available` — the
+/// event loop's account before there is a window, the window's own after —
+/// is the fallback. Every monitor is collected, not just one:
+/// `primary_monitor` is `None` on Wayland by definition, and nothing before
+/// the surface is mapped says which monitor the compositor will open the
+/// window on.
 pub(super) fn initial_window_size(
-    event_loop: &ActiveEventLoop,
+    available: impl Iterator<Item = MonitorHandle>,
     monitors: Option<&Monitors>,
     image: Option<[f32; 2]>,
     asked: Option<[u32; 2]>,
@@ -143,8 +147,7 @@ pub(super) fn initial_window_size(
         .filter_map(Monitor::measured)
         .collect();
     if measured.is_empty() {
-        measured = event_loop
-            .available_monitors()
+        measured = available
             .filter_map(|monitor| Monitor::reported(monitor.size(), monitor.scale_factor()))
             .collect();
     }

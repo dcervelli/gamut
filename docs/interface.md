@@ -919,8 +919,9 @@ button could not have explained itself.
 
 ## The empty window and the file dialog
 
-A program started with no path opens on nothing, and `ui/empty.rs` is what
-it shows: three buttons in the middle of the content area — the desktop's
+A program started with no path opens on nothing — and comes back to
+nothing when the last file on the list is deleted — and `ui/empty.rs` is
+what it shows: three buttons in the middle of the content area — the desktop's
 file dialog for image files, the same dialog for a folder, and a paste of
 the picture on the clipboard — each printing the key that does the same
 thing from anywhere, and each a press of the same `Control` its key goes
@@ -940,7 +941,21 @@ outlast any picture stay live, since what they set is waiting for the next
 one. The strip's own paste button is left out while the middle one is up,
 one control being enough for one thing. `resumed` asks for a first frame
 outright, since with nothing on the way there would otherwise be nothing
-to ask for one.
+to ask for one; and `App::leave_picture`, which takes the last deleted
+picture down, tells the renderer to `clear_image` so that the frame draws
+the backdrop alone, as the first did.
+
+The first picture to arrive in an empty window sizes it, as the first file
+sizes the window at start-up: `App::size_to_next` is set while the window
+shows nothing and spent by the arrival in `App::apply`, which runs the
+picture's size through the same `window::initial_window_size` that
+`resumed` used — the window's own account of the monitors standing in for
+the event loop's — and asks the compositor for that size with
+`request_inner_size`. Whether it is granted is the compositor's business,
+as the opening size is; a tiling one may ignore it. A window opened at
+`--size` is not resized, that having been a choice rather than a default.
+The fit follows on its own: the view is reset for a new picture, and a
+fitted view is re-fitted against whatever viewport the next frame has.
 
 Two buttons for the dialog because that is how every desktop's dialog is
 built: it picks files or it picks a folder, never both in one, and a

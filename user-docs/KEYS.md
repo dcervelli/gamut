@@ -113,12 +113,17 @@ Opening adds to the list rather than replacing it: `]` and `[` and the
 chooser walk everything named so far, in the order it was named, and a
 file already on the list is not added twice — choosing it again simply
 shows it, as you left it. The picture on screen stays until the first new
-file has arrived, as it does when stepping. Started with no path at all — `gamut` on its own, or from the desktop's
+file has arrived, as it does when stepping.
+
+Started with no path at all — `gamut` on its own, or from the desktop's
 menu — the window opens empty, with three buttons in the middle of it: the
 two dialogs, and a paste of the picture on the clipboard, which is dead
-until there is one. The window comes back to those buttons when nothing it
-was handed could be opened, and says why at its foot. While the dialog is
-up, the keys and the buttons that put it up do nothing more.
+until there is one. The first picture to arrive in an empty window sizes
+it as the window would have opened on that picture, unless `--size` chose
+the size. The window comes back to those buttons when nothing it was
+handed could be opened, and says why at its foot, and when the last file
+on the list is deleted. While the dialog is up, the keys and the buttons
+that put it up do nothing more.
 
 The dialog is the desktop's, asked for through its portal, so it looks and
 behaves as the dialog of every other program on your desk does. A desktop
@@ -135,7 +140,10 @@ the same without the menu.
 manager shows, so it is there to restore or empty from there whether or not
 this window is still open — and shows the next file, or the previous one
 from the end of the list. The file leaves the list once its neighbor is up.
-With only one file there is nowhere to go: it stays on screen, marked
+With only one file there is nowhere to go: the file leaves at once, and
+the window is empty — the three buttons that give it something — until
+you open something or undo, which puts the file back and shows it. A
+neighbor that will not open leaves the deleted file on screen, marked
 `DELETED` in the bar, until you undo or step away. A file on another disk
 or a removable drive goes to the trash on that drive; where that cannot be
 made, it is copied into your home trash instead, which takes as long as the

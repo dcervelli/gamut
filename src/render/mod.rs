@@ -316,6 +316,12 @@ impl Renderer {
         note
     }
 
+    /// Takes the image off the screen, for a window with nothing left to
+    /// show: the next frame draws the backdrop alone, as the first did.
+    pub fn clear_image(&mut self) {
+        self.image_layer.remove();
+    }
+
     /// Shows `image` in place of the one on screen: written into the same
     /// texture where it is the same shape, which the next frame of an
     /// animation always is, and uploaded afresh where it is not. Returns the

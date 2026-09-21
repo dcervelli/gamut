@@ -197,6 +197,14 @@ impl ImageLayer {
         self.thumbnail_level = None;
     }
 
+    /// Takes the image off, and its coarse chain with it: nothing is drawn
+    /// until another is installed.
+    pub fn remove(&mut self) {
+        self.image = None;
+        self.level = 0;
+        self.thumbnail_level = None;
+    }
+
     /// Writes `image`'s pixels into the texture already on screen, for the
     /// next frame of an animation. Answers `false` where the picture on
     /// screen is not the same shape — a different size, or a layout that
