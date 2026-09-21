@@ -460,16 +460,16 @@ impl App {
         }
     }
 
-    /// Opens `named` as a command line naming them would have: a directory
-    /// among them stands for the images inside it, and the list is what
-    /// they come to, in place of whatever was on it. The first of them is
-    /// asked for as a walk, so a file that will not decode is stepped over
-    /// as it is at start-up.
+    /// Opens `named` as a command line naming them beside what was already
+    /// named would have: a directory among them stands for the images
+    /// inside it, and what they come to joins the end of the list. The
+    /// first of the newcomers is asked for as a walk, so a file that will
+    /// not decode is stepped over as it is at start-up; the picture on
+    /// screen stays up until it arrives, as it does for a step.
     ///
-    /// The picture on screen is put away now rather than kept up until the
-    /// first new file arrives, as it is when stepping: this is not a step
-    /// along the list but the list replaced, and a picture left up would be
-    /// one of a session that has ended.
+    /// The names join `named` too — those not already there — so that a
+    /// directory chosen is watched, and a rebuild of the list puts the
+    /// newcomers back in the order they were chosen in.
     pub(super) fn open_named(&mut self, named: Vec<PathBuf>) {
         let files = match crate::listing::expand(named.clone()) {
             Ok(files) => files,
@@ -479,43 +479,20 @@ impl App {
                 return;
             }
         };
-        self.leave_picture();
         self.from_command_line = false;
-        self.named = named;
-        self.directories = self
-            .named
-            .iter()
-            .filter(|path| path.is_dir())
-            .map(|path| Watch::new(path))
-            .collect();
-        let request = self.files.replace(files);
-        self.send(request);
+        for path in named {
+            if self.named.contains(&path) {
+                continue;
+            }
+            if path.is_dir() {
+                self.directories.push(Watch::new(&path));
+            }
+            self.named.push(path);
+        }
+        if let Some(request) = self.files.append(files) {
+            self.send(request);
+        }
         self.list_changed();
-    }
-
-    /// Takes the picture off the screen, keeping what it was left in for
-    /// its return, and stops everything that was about it: the animation
-    /// playing, the watch on its file, the region drawn on it, the move it
-    /// was in the middle of, and the menu of what else could open it.
-    fn leave_picture(&mut self) {
-        if self.current.is_none() {
-            return;
-        }
-        self.keep_shown();
-        self.current = None;
-        self.player = None;
-        self.playback = None;
-        self.uploaded = None;
-        self.motion = None;
-        self.watch = Watch::idle();
-        self.openers.clear();
-        self.clear_region();
-        if let Some(renderer) = &mut self.renderer {
-            renderer.clear_image();
-        }
-        if let Some(window) = &self.window {
-            window.set_title(&self.title());
-        }
     }
 
     /// Keeps what the picture on screen was left in — its view, its
@@ -1223,8 +1200,8 @@ impl App {
         }
         // And what the file arriving left the last time it was on screen, if
         // it has been here — whether it is arriving beside a picture or
-        // into an empty window, which is where a list replaced from the
-        // dialog lands it. Its window is re-derived where it was automatic,
+        // into an empty window, which is where the dialog's first choice
+        // lands. Its window is re-derived where it was automatic,
         // the file being free to have changed on disk since; one set by hand
         // is left exactly where it was put.
         let kept = (!same_file)
@@ -2287,13 +2264,14 @@ mod tests {
         );
     }
 
-    /// What the dialog chose is opened as a command line naming it would
-    /// be: a folder for the images in it, the first asked for as a walk,
-    /// the list replaced; the picture up goes away as the list does, and
-    /// comes back as it was left. A choice that fails leaves the window
-    /// empty and says so, rather than leaving.
+    /// What the dialog chose is opened as a command line naming it beside
+    /// the rest would be: a folder for the images in it, the newcomers
+    /// joining the end of the list and the first of them asked for as a
+    /// walk; the picture up stays until it arrives, and comes back as it
+    /// was left. A choice that fails leaves the window as it was and says
+    /// so, rather than leaving.
     #[test]
-    fn what_the_dialog_chose_replaces_the_list() {
+    fn what_the_dialog_chose_joins_the_list() {
         use input::Action;
 
         let (dir, paths) = written("chosen", &[("a.png", 16, 8), ("b.png", 8, 16)]);
@@ -2314,17 +2292,15 @@ mod tests {
         assert!(app.toasts.showing().is_some());
         app.toasts.dismiss();
 
-        // A folder: the images in it, in name order, the first on its way.
+        // One file: the list is that file, on its way.
         app.picked(Picked {
-            outcome: Ok(Some(vec![dir.clone()])),
+            outcome: Ok(Some(vec![paths[1].clone()])),
         });
         assert!(!app.is_empty(), "a read is in flight");
-        assert_eq!(app.files.len(), 2);
-        assert_eq!(app.named, vec![dir.clone()]);
-        assert_eq!(app.directories.len(), 1, "the folder is watched");
+        assert_eq!(app.files.len(), 1);
         answer(&mut app, Reload::Fresh);
         assert!(app.current.is_some());
-        assert_eq!(app.files.shown_path(), Some(paths[0].as_path()));
+        assert_eq!(app.files.shown_path(), Some(paths[1].as_path()));
         assert!(!app.showed_nothing());
         assert!(!app.from_command_line);
 
@@ -2333,46 +2309,53 @@ mod tests {
         let zoomed = app.view.zoom(app.image_size(), app.viewport());
         let zoom = |app: &App| app.view.zoom(app.image_size(), app.viewport());
 
-        // A file chosen while a picture is up: the picture goes at once,
-        // kept as it was left, and the list is the file alone.
-        app.open_named(vec![paths[1].clone()]);
-        assert!(app.current.is_none());
-        assert!(app.files.pending().is_some());
-        assert!(!app.is_empty(), "a read is in flight");
-        assert_eq!(app.files.len(), 1);
-        assert!(app.directories.is_empty());
-        assert!(app.kept.left(&paths[0]).is_some());
+        // A folder chosen while a picture is up: the images in it join the
+        // end of the list — the one already there not twice — the folder
+        // is watched, the first newcomer is on its way, and the picture
+        // stays until it arrives, kept as it was left.
+        app.open_named(vec![dir.clone()]);
+        assert!(app.current.is_some());
+        assert_eq!(app.files.len(), 2);
+        assert_eq!(app.files.path(1), paths[0]);
+        assert_eq!(app.named, vec![paths[1].clone(), dir.clone()]);
+        assert_eq!(app.directories.len(), 1, "the folder is watched");
+        assert_eq!(app.files.pending().map(|pending| pending.index), Some(1));
         answer(&mut app, Reload::Fresh);
-        assert_eq!(app.files.shown_path(), Some(paths[1].as_path()));
+        assert_eq!(app.files.shown_path(), Some(paths[0].as_path()));
+        assert!(app.kept.left(&paths[1]).is_some());
         assert_ne!(zoom(&app), zoomed, "a new shape, fitted afresh");
 
-        // Back to the first, through the dialog again: as it was left.
-        app.open_named(vec![paths[0].clone()]);
+        // The first again, through the dialog: nothing new to add, so it
+        // is gone to by name, and comes back as it was left.
+        app.open_named(vec![paths[1].clone()]);
+        assert_eq!(app.files.len(), 2);
+        assert_eq!(app.named.len(), 2, "named once already");
         answer(&mut app, Reload::Fresh);
+        assert_eq!(app.files.shown_path(), Some(paths[1].as_path()));
         assert_eq!(zoom(&app), zoomed);
 
-        // A folder with no images in it is refused before anything moves:
-        // the picture stays, and the list with it.
+        // The file on screen chosen: nothing to ask for.
+        app.open_named(vec![paths[1].clone()]);
+        assert!(app.files.is_idle());
+
+        // A folder with no images in it is refused before anything moves.
         let empty = dir.join("empty");
         std::fs::create_dir_all(&empty).expect("the temporary directory is writable");
         app.open_named(vec![empty]);
         assert!(app.current.is_some());
-        assert_eq!(app.files.len(), 1);
+        assert_eq!(app.files.len(), 2);
         assert!(app.toasts.showing().is_some());
         app.toasts.dismiss();
 
-        // A file that will not read: the picture goes, the walk fails, and
-        // the window is empty and says why, rather than gone.
+        // A file that will not read: it joins the list, the walk over it
+        // fails, and the picture stays up with the reason under it.
         let broken = dir.join("broken.png");
         std::fs::write(&broken, b"not a png at all").expect("the file is writable");
         app.open_named(vec![broken]);
-        assert!(app.current.is_none());
+        assert_eq!(app.files.len(), 3);
         answer(&mut app, Reload::Fresh);
-        assert!(app.is_empty());
-        assert!(
-            !app.showed_nothing(),
-            "the window stays up for the next choice"
-        );
+        assert!(app.current.is_some());
+        assert_eq!(app.files.shown_path(), Some(paths[1].as_path()));
         assert!(
             app.toasts
                 .showing()

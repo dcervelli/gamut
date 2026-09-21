@@ -14,8 +14,8 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   when nothing it was handed could be opened, with the reason at its foot.
   `Ctrl+O` puts up the desktop's own file dialog from any window, narrowed
   to the formats read here, and `Ctrl+Shift+O` the same dialog for a
-  folder; what is chosen replaces the list as a new command line would,
-  and the picture on screen goes at once, kept as it was left. The dialog
+  folder; what is chosen joins the end of the list as if it had been named
+  on the command line after the rest, and the first of it is shown. The dialog
   is asked for through the desktop portal over a session-bus connection of
   the program's own, so nothing new is linked. `--paste` with nothing on
   the clipboard now opens the empty window rather than failing.

@@ -938,11 +938,9 @@ the buttons about the picture in the strips — the copies and the region —
 are drawn dead with `NOTHING_OPEN` for their reason, and the toggles that
 outlast any picture stay live, since what they set is waiting for the next
 one. The strip's own paste button is left out while the middle one is up,
-one control being enough for one thing. The renderer is told to
-`clear_image` when a picture leaves for the empty state, so that the frame
-draws the backdrop alone as the first frame does; and `resumed` asks for a
-first frame outright, since with nothing on the way there would otherwise
-be nothing to ask for one.
+one control being enough for one thing. `resumed` asks for a first frame
+outright, since with nothing on the way there would otherwise be nothing
+to ask for one.
 
 Two buttons for the dialog because that is how every desktop's dialog is
 built: it picks files or it picks a folder, never both in one, and a
@@ -986,21 +984,23 @@ refused before anything is allocated for it if it claims more than the
 specification's maximum, and every read is bounded by the body's length,
 since what is on the other end is a peer this program did not write.
 
-What the dialog chose is opened as the command line would have opened it:
-`App::open_named` runs the names through `listing::expand` — a folder for
-the images in it, and a folder holding none refused before anything moves
-— replaces the list through `Files::replace`, and asks for the first file
-as a walk, so a file that will not decode is stepped over as it is at
-start-up. Opening replaces rather than adds: `Ctrl+O` means what it means
-everywhere else, and a list that grew would have needed a way to shrink.
-The picture on screen is put away at once rather than kept up until the
-first new file arrives, as it is when stepping — this is the list ending,
-not a step along it — and `App::leave_picture` keeps what it was left in
-under its path, stops the player and the watch, clears the region and the
-openers, and takes the image off the renderer. A file coming back through
-the dialog is then restored as a step back to it would be: `App::apply`
-looks the arriving file up in `kept` for any fresh read, not only one
-arriving beside a picture.
+What the dialog chose is opened as a command line naming it after the
+rest would have: `App::open_named` runs the names through
+`listing::expand` — a folder for the images in it, and a folder holding
+none refused before anything moves — and `Files::append` puts the
+newcomers at the end of the list, a path already on it not twice, and
+asks for the first of them as a walk over the newcomers alone, so a file
+that will not decode is stepped over as it is at start-up. The names join
+`App::named` as well, those not already there, so a chosen directory is
+watched and a rebuild of the list keeps the newcomers in the order they
+were chosen; where nothing chosen is new, the first of it is gone to by
+name, the way a row of the chooser is. Opening adds rather than replaces:
+the session is the list, `]` and the chooser walk all of it, and a
+picture opened is one the user can step back to. The picture on screen
+stays until the first newcomer arrives, exactly as for a step, and a file
+coming back through the dialog into an empty window is restored as a step
+back to it would be: `App::apply` looks the arriving file up in `kept` for
+any fresh read, not only one arriving beside a picture.
 
 Whether nothing showing means leaving is `App::from_command_line`. A
 command line whose every file fails to decode is answered by leaving with a

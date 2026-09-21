@@ -101,18 +101,19 @@ whose thumbnail has not yet been made shows an empty slot until it has.
 
 `Ctrl+O` puts up your desktop's own file dialog, narrowed to the image
 formats this program reads, with an **All files** filter for a file named
-without its extension. Choose one file or several: what you choose is the
-list from then on, exactly as if it had been named on the command line, and
-the first of it is shown. `Ctrl+Shift+O` puts up the same dialog for a
+without its extension. Choose one file or several: what you choose joins
+the end of the list, exactly as if it had been named on the command line
+after everything else, and the first of it is shown. `Ctrl+Shift+O` puts up the same dialog for a
 folder, which stands for the images inside it as a directory on the command
 line does — kept up to date as images arrive in it or leave. Two keys rather
 than one because a desktop's dialog picks files or it picks a folder, never
 both at once. Cancel the dialog and nothing changes.
 
-Opening replaces the list rather than adding to it: the picture on screen
-goes at once, the way it would if the program had been started again on
-what you chose, and comes back as you left it should you open it again.
-Started with no path at all — `gamut` on its own, or from the desktop's
+Opening adds to the list rather than replacing it: `]` and `[` and the
+chooser walk everything named so far, in the order it was named, and a
+file already on the list is not added twice — choosing it again simply
+shows it, as you left it. The picture on screen stays until the first new
+file has arrived, as it does when stepping. Started with no path at all — `gamut` on its own, or from the desktop's
 menu — the window opens empty, with three buttons in the middle of it: the
 two dialogs, and a paste of the picture on the clipboard, which is dead
 until there is one. The window comes back to those buttons when nothing it

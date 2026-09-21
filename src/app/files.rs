@@ -57,7 +57,7 @@ pub(super) struct Step {
 /// The list can be empty: the program opened on nothing, and is waiting
 /// for the window to be handed something. Then there is no file on screen
 /// for [`Files::shown_path`] to name and no index worth reading, and the
-/// first thing that fills the list — [`Files::replace`] for what the
+/// first thing that fills the list — [`Files::append`] for what the
 /// desktop's dialog chose, [`Files::adopt`] for a paste — is what starts
 /// the first read.
 pub(super) struct Files {
@@ -255,19 +255,39 @@ impl Files {
         self.request(at, Reload::Fresh, None, source)
     }
 
-    /// Makes `paths` the list, in place of whatever was on it, and asks for
-    /// the first of them as [`Files::open_first`] does: what the desktop's
-    /// dialog chose is a new command line, not an addition to the old one.
-    /// Only the request numbering carries over, so that a reply still on
-    /// its way for the old list cannot be taken for one of the new.
-    pub(super) fn replace(&mut self, paths: Vec<PathBuf>) -> Request {
-        debug_assert!(!paths.is_empty(), "a list is replaced with something");
-        self.paths = paths;
-        self.adopted.clear();
-        self.index = 0;
-        self.leaving = None;
-        self.pending = None;
-        self.open_first(Source::Disk)
+    /// Adds `paths` to the end of the list — what the desktop's dialog
+    /// chose, joining whatever was named before it — and asks for the
+    /// first of the newcomers as a walk over them, so that one that will
+    /// not decode is stepped over as it is at start-up. A path already on
+    /// the list is not added again; where none is new, the first of them
+    /// is asked for by name instead, unless it is the file on screen, in
+    /// which case there is nothing to do and the answer is `None`.
+    ///
+    /// At the end rather than beside the file on screen, as a paste goes:
+    /// a paste is one picture that belongs next to where the user is, and
+    /// this is a set of files that keeps the order it was chosen in.
+    pub(super) fn append(&mut self, paths: Vec<PathBuf>) -> Option<Request> {
+        let first = paths.first()?.clone();
+        let fresh: Vec<PathBuf> = paths
+            .into_iter()
+            .filter(|path| !self.paths.contains(path))
+            .collect();
+        if fresh.is_empty() {
+            let at = self.position(&first)?;
+            return (self.shown_path() != Some(first.as_path())).then(|| self.go_to(at));
+        }
+        let at = self.paths.len();
+        let remaining = fresh.len() - 1;
+        self.paths.extend(fresh);
+        Some(self.request(
+            at,
+            Reload::Fresh,
+            Some(Step {
+                forward: true,
+                remaining,
+            }),
+            Source::Disk,
+        ))
     }
 
     /// The step a deletion takes away from the file on screen: on to the
@@ -628,11 +648,13 @@ mod tests {
         assert_eq!(files.shown_path(), Some(Path::new("pasted.png")));
         assert!(files.is_adopted(Path::new("pasted.png")));
 
-        // What the dialog chose is the list, whatever was on it before, and
-        // is asked for as a walk from its head; the reply to the paste,
-        // still on its way, is not a reply to it.
-        let chosen = files.replace(named(&["a.png", "b.png"]));
-        assert_eq!(chosen.index, 0);
+        // What the dialog chose joins the end of the list and is asked for
+        // as a walk over the newcomers; the reply to the paste, still on
+        // its way, is not a reply to it.
+        let chosen = files
+            .append(named(&["a.png", "b.png"]))
+            .expect("something new");
+        assert_eq!(chosen.index, 1);
         assert_ne!(chosen.generation, pasted.generation);
         assert!(files.accept(pasted.generation).is_none());
         let pending = files
@@ -642,9 +664,35 @@ mod tests {
             pending.step.is_some(),
             "a walk, so a bad file is stepped over"
         );
-        assert_eq!(files.len(), 2);
-        assert!(!files.is_adopted(Path::new("pasted.png")));
-        assert!(files.failed(0, pending.step).is_some(), "on to b.png");
+        assert_eq!(files.len(), 3);
+        assert!(files.is_adopted(Path::new("pasted.png")));
+        let again = files.failed(1, pending.step).expect("on to b.png");
+        assert_eq!(again.index, 2);
+        let pending = files.accept(again.generation).expect("its reply");
+        assert!(
+            files.failed(2, pending.step).is_none(),
+            "the walk is over the newcomers alone"
+        );
+        files.shown(2);
+
+        // A file already on the list is not added again, and one that is
+        // the only thing chosen is gone to rather than added.
+        let again = files
+            .append(named(&["a.png", "c.png"]))
+            .expect("c.png is new");
+        assert_eq!(again.index, 3);
+        assert_eq!(files.len(), 4);
+        files.accept(again.generation);
+        let back = files.append(named(&["a.png"])).expect("a.png, by name");
+        assert_eq!(back.index, 1);
+        let pending = files.accept(back.generation).expect("its reply");
+        assert!(pending.step.is_none(), "not a walk");
+        files.shown(1);
+        assert!(
+            files.append(named(&["a.png"])).is_none(),
+            "the file on screen is nothing to ask for"
+        );
+        assert_eq!(files.len(), 4);
     }
 
     /// A directory read again is a list read again: a file written into it
