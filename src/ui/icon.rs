@@ -110,6 +110,33 @@ pub(super) enum Mark {
     },
 }
 
+impl Mark {
+    /// A stroked rectangle, `radius` grid units round at the corners.
+    pub(super) const fn rect(at: [f32; 2], size: [f32; 2], radius: f32) -> Mark {
+        Mark::Rect { at, size, radius }
+    }
+
+    /// A stroked circle.
+    pub(super) const fn circle(at: [f32; 2], radius: f32) -> Mark {
+        Mark::Circle { at, radius }
+    }
+
+    /// A stroked arc of `sweep` degrees from `start`, about `at`.
+    pub(super) const fn arc(at: [f32; 2], radius: f32, start: f32, sweep: f32) -> Mark {
+        Mark::Arc {
+            at,
+            radius,
+            start,
+            sweep,
+        }
+    }
+
+    /// A filled circle of `radius` grid units.
+    pub(super) const fn disc(at: [f32; 2], radius: f32) -> Mark {
+        Mark::Disc { at, radius }
+    }
+}
+
 /// How many degrees of an arc one straight stroke stands in for. Twelve
 /// leaves under a sixth of a pixel between the chord and the curve at the
 /// sizes a button draws, which is less than the feather either side of it.
@@ -142,10 +169,7 @@ pub(super) const CHART_AREA: &[Mark] = &[
 /// rather than a picture of anything, so the mark for it is the one the rest
 /// of the world already uses for that.
 pub(super) const INFO: &[Mark] = &[
-    Mark::Circle {
-        at: [12.0, 12.0],
-        radius: 10.0,
-    },
+    Mark::circle([12.0, 12.0], 10.0),
     Mark::Line([12.0, 16.0], [12.0, 12.0]),
     Mark::Dot([12.0, 8.0]),
 ];
@@ -158,43 +182,23 @@ pub(super) const INFO: &[Mark] = &[
 /// together turn about one point; here it is the one arc, from the left of
 /// the hook over the top and down to where the stem would start.
 pub(super) const CIRCLE_QUESTION_MARK: &[Mark] = &[
-    Mark::Circle {
-        at: [12.0, 12.0],
-        radius: 10.0,
-    },
-    Mark::Arc {
-        at: [12.0, 10.0],
-        radius: 3.0,
-        start: 199.0,
-        sweep: 251.0,
-    },
+    Mark::circle([12.0, 12.0], 10.0),
+    Mark::arc([12.0, 10.0], 3.0, 199.0, 251.0),
     Mark::Dot([12.0, 17.0]),
 ];
 
 /// Lucide's `square-square`: the whole inside a frame, and a smaller view of
 /// it inside that, which is what the minimap shows.
 pub(super) const SQUARE_SQUARE: &[Mark] = &[
-    Mark::Rect {
-        at: [3.0, 3.0],
-        size: [18.0, 18.0],
-        radius: 2.0,
-    },
-    Mark::Rect {
-        at: [8.0, 8.0],
-        size: [8.0, 8.0],
-        radius: 1.0,
-    },
+    Mark::rect([3.0, 3.0], [18.0, 18.0], 2.0),
+    Mark::rect([8.0, 8.0], [8.0, 8.0], 1.0),
 ];
 
 /// Lucide's `square-menu`: three lines in a frame, the mark the world uses
 /// for a list of things to do, on the button before the file's name that
 /// opens the list of what can be done to the file.
 pub(super) const SQUARE_MENU: &[Mark] = &[
-    Mark::Rect {
-        at: [3.0, 3.0],
-        size: [18.0, 18.0],
-        radius: 2.0,
-    },
+    Mark::rect([3.0, 3.0], [18.0, 18.0], 2.0),
     Mark::Line([7.0, 8.0], [17.0, 8.0]),
     Mark::Line([7.0, 12.0], [17.0, 12.0]),
     Mark::Line([7.0, 16.0], [17.0, 16.0]),
@@ -209,49 +213,21 @@ pub(super) const SQUARE_MENU: &[Mark] = &[
 pub(super) const FILE_IMAGE: &[Mark] = &[
     // The sheet, from the fold's foot round to the fold's head.
     Mark::Line([15.0, 2.0], [6.0, 2.0]),
-    Mark::Arc {
-        at: [6.0, 4.0],
-        radius: 2.0,
-        start: -90.0,
-        sweep: -90.0,
-    },
+    Mark::arc([6.0, 4.0], 2.0, -90.0, -90.0),
     Mark::Line([4.0, 4.0], [4.0, 20.0]),
-    Mark::Arc {
-        at: [6.0, 20.0],
-        radius: 2.0,
-        start: 180.0,
-        sweep: -90.0,
-    },
+    Mark::arc([6.0, 20.0], 2.0, 180.0, -90.0),
     Mark::Line([6.0, 22.0], [18.0, 22.0]),
-    Mark::Arc {
-        at: [18.0, 20.0],
-        radius: 2.0,
-        start: 90.0,
-        sweep: -90.0,
-    },
+    Mark::arc([18.0, 20.0], 2.0, 90.0, -90.0),
     Mark::Line([20.0, 20.0], [20.0, 7.0]),
     Mark::Line([20.0, 7.0], [15.0, 2.0]),
     // The fold.
     Mark::Line([14.0, 2.0], [14.0, 6.0]),
-    Mark::Arc {
-        at: [16.0, 6.0],
-        radius: 2.0,
-        start: 180.0,
-        sweep: -90.0,
-    },
+    Mark::arc([16.0, 6.0], 2.0, 180.0, -90.0),
     Mark::Line([16.0, 8.0], [20.0, 8.0]),
     // The picture: a sun, and a hill running off the sheet's foot.
-    Mark::Circle {
-        at: [10.0, 12.0],
-        radius: 2.0,
-    },
+    Mark::circle([10.0, 12.0], 2.0),
     Mark::Line([20.0, 17.0], [18.704, 15.704]),
-    Mark::Arc {
-        at: [17.0, 17.41],
-        radius: 2.41,
-        start: -45.0,
-        sweep: -90.0,
-    },
+    Mark::arc([17.0, 17.41], 2.41, -45.0, -90.0),
     Mark::Line([15.296, 15.704], [9.0, 22.0]),
 ];
 
@@ -260,47 +236,17 @@ pub(super) const FILE_IMAGE: &[Mark] = &[
 /// two shoulders are the arcs Lucide's path implies, about the centers
 /// its radius and end points fix.
 pub(super) const FOLDER: &[Mark] = &[
-    Mark::Arc {
-        at: [20.0, 18.0],
-        radius: 2.0,
-        start: 90.0,
-        sweep: -90.0,
-    },
+    Mark::arc([20.0, 18.0], 2.0, 90.0, -90.0),
     Mark::Line([22.0, 18.0], [22.0, 8.0]),
-    Mark::Arc {
-        at: [20.0, 8.0],
-        radius: 2.0,
-        start: 0.0,
-        sweep: -90.0,
-    },
+    Mark::arc([20.0, 8.0], 2.0, 0.0, -90.0),
     Mark::Line([20.0, 6.0], [12.1, 6.0]),
-    Mark::Arc {
-        at: [12.08, 4.0],
-        radius: 2.0,
-        start: 90.0,
-        sweep: 56.6,
-    },
+    Mark::arc([12.08, 4.0], 2.0, 90.0, 56.6),
     Mark::Line([10.41, 5.1], [9.6, 3.9]),
-    Mark::Arc {
-        at: [7.93, 5.0],
-        radius: 2.0,
-        start: -33.4,
-        sweep: -56.6,
-    },
+    Mark::arc([7.93, 5.0], 2.0, -33.4, -56.6),
     Mark::Line([7.93, 3.0], [4.0, 3.0]),
-    Mark::Arc {
-        at: [4.0, 5.0],
-        radius: 2.0,
-        start: -90.0,
-        sweep: -90.0,
-    },
+    Mark::arc([4.0, 5.0], 2.0, -90.0, -90.0),
     Mark::Line([2.0, 5.0], [2.0, 18.0]),
-    Mark::Arc {
-        at: [4.0, 18.0],
-        radius: 2.0,
-        start: 180.0,
-        sweep: -90.0,
-    },
+    Mark::arc([4.0, 18.0], 2.0, 180.0, -90.0),
     Mark::Line([4.0, 20.0], [20.0, 20.0]),
 ];
 
@@ -315,40 +261,16 @@ pub(super) const FOLDER: &[Mark] = &[
 pub(super) const CLIPBOARD: &[Mark] = &[
     Mark::Line([6.0, 4.0], [8.0, 4.0]),
     Mark::Line([16.0, 4.0], [18.0, 4.0]),
-    Mark::Arc {
-        at: [18.0, 6.0],
-        radius: 2.0,
-        start: -90.0,
-        sweep: 90.0,
-    },
+    Mark::arc([18.0, 6.0], 2.0, -90.0, 90.0),
     Mark::Line([20.0, 6.0], [20.0, 20.0]),
-    Mark::Arc {
-        at: [18.0, 20.0],
-        radius: 2.0,
-        start: 0.0,
-        sweep: 90.0,
-    },
+    Mark::arc([18.0, 20.0], 2.0, 0.0, 90.0),
     Mark::Line([18.0, 22.0], [6.0, 22.0]),
-    Mark::Arc {
-        at: [6.0, 20.0],
-        radius: 2.0,
-        start: 90.0,
-        sweep: 90.0,
-    },
+    Mark::arc([6.0, 20.0], 2.0, 90.0, 90.0),
     Mark::Line([4.0, 20.0], [4.0, 6.0]),
-    Mark::Arc {
-        at: [6.0, 6.0],
-        radius: 2.0,
-        start: 180.0,
-        sweep: 90.0,
-    },
+    Mark::arc([6.0, 6.0], 2.0, 180.0, 90.0),
     // The clip, last so that it is drawn over the ends of the top edge
     // rather than under them.
-    Mark::Rect {
-        at: [8.0, 2.0],
-        size: [8.0, 4.0],
-        radius: 1.0,
-    },
+    Mark::rect([8.0, 2.0], [8.0, 4.0], 1.0),
 ];
 
 /// Lucide's `expand`: four corners with an arrow reaching out to each. The
@@ -411,12 +333,7 @@ pub(super) const CHEVRONS_UP_DOWN: &[Mark] = &[
 /// rest; one radius throughout is a difference no button is large enough to
 /// show.
 pub(super) const ROTATE_CCW: &[Mark] = &[
-    Mark::Arc {
-        at: [12.0, 12.0],
-        radius: 9.0,
-        start: 180.0,
-        sweep: -336.0,
-    },
+    Mark::arc([12.0, 12.0], 9.0, 180.0, -336.0),
     Mark::Line([3.0, 3.0], [3.0, 8.0]),
     Mark::Line([3.0, 8.0], [8.0, 8.0]),
 ];
@@ -424,20 +341,9 @@ pub(super) const ROTATE_CCW: &[Mark] = &[
 /// Lucide's `spline`: a curve between two of its own control points, for the
 /// switch that bends the count axis.
 pub(super) const SPLINE: &[Mark] = &[
-    Mark::Arc {
-        at: [17.0, 17.0],
-        radius: 12.0,
-        start: 180.0,
-        sweep: 90.0,
-    },
-    Mark::Circle {
-        at: [5.0, 19.0],
-        radius: 2.0,
-    },
-    Mark::Circle {
-        at: [19.0, 5.0],
-        radius: 2.0,
-    },
+    Mark::arc([17.0, 17.0], 12.0, 180.0, 90.0),
+    Mark::circle([5.0, 19.0], 2.0),
+    Mark::circle([19.0, 5.0], 2.0),
 ];
 
 /// Lucide's `triangle-alert`: the sign that says something is wrong here,
@@ -450,26 +356,11 @@ pub(super) const SPLINE: &[Mark] = &[
 /// exclamation mark stand on the middle line.
 pub(super) const TRIANGLE_ALERT: &[Mark] = &[
     Mark::Line([13.73, 4.0], [21.73, 18.0]),
-    Mark::Arc {
-        at: [20.0, 19.0],
-        radius: 2.0,
-        start: -30.0,
-        sweep: 120.0,
-    },
+    Mark::arc([20.0, 19.0], 2.0, -30.0, 120.0),
     Mark::Line([20.0, 21.0], [4.0, 21.0]),
-    Mark::Arc {
-        at: [4.0, 19.0],
-        radius: 2.0,
-        start: 90.0,
-        sweep: 120.0,
-    },
+    Mark::arc([4.0, 19.0], 2.0, 90.0, 120.0),
     Mark::Line([2.27, 18.0], [10.27, 4.0]),
-    Mark::Arc {
-        at: [12.0, 5.0],
-        radius: 2.0,
-        start: 210.0,
-        sweep: 120.0,
-    },
+    Mark::arc([12.0, 5.0], 2.0, 210.0, 120.0),
     Mark::Line([12.0, 9.0], [12.0, 13.0]),
     Mark::Dot([12.0, 17.0]),
 ];
@@ -477,11 +368,7 @@ pub(super) const TRIANGLE_ALERT: &[Mark] = &[
 /// Lucide's `grid-3x3`: a frame with two lines each way through it, which is
 /// the smallest thing that reads as squares rather than as a hash.
 pub(super) const GRID_3X3: &[Mark] = &[
-    Mark::Rect {
-        at: [3.0, 3.0],
-        size: [18.0, 18.0],
-        radius: 2.0,
-    },
+    Mark::rect([3.0, 3.0], [18.0, 18.0], 2.0),
     Mark::Line([3.0, 9.0], [21.0, 9.0]),
     Mark::Line([3.0, 15.0], [21.0, 15.0]),
     Mark::Line([9.0, 3.0], [9.0, 21.0]),
@@ -510,14 +397,8 @@ pub(super) const MAXIMIZE_2: &[Mark] = &[
 /// Lucide's point is a circle of radius one stroked one stroke wide, which
 /// leaves no hole; it is drawn here as the solid disc that comes to.
 pub(super) const CIRCLE_DOT: &[Mark] = &[
-    Mark::Circle {
-        at: [12.0, 12.0],
-        radius: 10.0,
-    },
-    Mark::Disc {
-        at: [12.0, 12.0],
-        radius: 2.0,
-    },
+    Mark::circle([12.0, 12.0], 10.0),
+    Mark::disc([12.0, 12.0], 2.0),
 ];
 
 /// Lucide's `copy`: one sheet behind another and offset from it, which is
@@ -528,21 +409,13 @@ pub(super) const CIRCLE_DOT: &[Mark] = &[
 /// ground first instead, which draws the same silhouette and does not need
 /// the path to know what is in front of it.
 pub(super) const COPY: &[Mark] = &[
-    Mark::Rect {
-        at: [2.0, 2.0],
-        size: [14.0, 14.0],
-        radius: 2.0,
-    },
+    Mark::rect([2.0, 2.0], [14.0, 14.0], 2.0),
     Mark::Knockout {
         at: [8.0, 8.0],
         size: [14.0, 14.0],
         radius: 2.0,
     },
-    Mark::Rect {
-        at: [8.0, 8.0],
-        size: [14.0, 14.0],
-        radius: 2.0,
-    },
+    Mark::rect([8.0, 8.0], [14.0, 14.0], 2.0),
 ];
 
 /// Lucide's `external-link`: a box with one corner opened and an arrow
@@ -562,26 +435,11 @@ pub(super) const EXTERNAL_LINK: &[Mark] = &[
     // And the box, from where its top edge stops under the arrow, round to
     // where it stops again beside the shaft.
     Mark::Line([18.0, 13.0], [18.0, 19.0]),
-    Mark::Arc {
-        at: [16.0, 19.0],
-        radius: 2.0,
-        start: 0.0,
-        sweep: 90.0,
-    },
+    Mark::arc([16.0, 19.0], 2.0, 0.0, 90.0),
     Mark::Line([16.0, 21.0], [5.0, 21.0]),
-    Mark::Arc {
-        at: [5.0, 19.0],
-        radius: 2.0,
-        start: 90.0,
-        sweep: 90.0,
-    },
+    Mark::arc([5.0, 19.0], 2.0, 90.0, 90.0),
     Mark::Line([3.0, 19.0], [3.0, 8.0]),
-    Mark::Arc {
-        at: [5.0, 8.0],
-        radius: 2.0,
-        start: 180.0,
-        sweep: 90.0,
-    },
+    Mark::arc([5.0, 8.0], 2.0, 180.0, 90.0),
     Mark::Line([5.0, 6.0], [11.0, 6.0]),
 ];
 
@@ -592,20 +450,10 @@ pub(super) const EXTERNAL_LINK: &[Mark] = &[
 /// as Lucide draws them: the corner is rounded, not mitered.
 pub(super) const CROP: &[Mark] = &[
     Mark::Line([6.0, 2.0], [6.0, 16.0]),
-    Mark::Arc {
-        at: [8.0, 16.0],
-        radius: 2.0,
-        start: 180.0,
-        sweep: -90.0,
-    },
+    Mark::arc([8.0, 16.0], 2.0, 180.0, -90.0),
     Mark::Line([8.0, 18.0], [22.0, 18.0]),
     Mark::Line([18.0, 22.0], [18.0, 8.0]),
-    Mark::Arc {
-        at: [16.0, 8.0],
-        radius: 2.0,
-        start: 0.0,
-        sweep: -90.0,
-    },
+    Mark::arc([16.0, 8.0], 2.0, 0.0, -90.0),
     Mark::Line([16.0, 6.0], [2.0, 6.0]),
 ];
 
@@ -620,16 +468,8 @@ pub(super) const PLAY: &[Mark] = &[
 
 /// Lucide's `pause`: two bars, which the play button wears while playing.
 pub(super) const PAUSE: &[Mark] = &[
-    Mark::Rect {
-        at: [6.0, 4.0],
-        size: [4.0, 16.0],
-        radius: 1.0,
-    },
-    Mark::Rect {
-        at: [14.0, 4.0],
-        size: [4.0, 16.0],
-        radius: 1.0,
-    },
+    Mark::rect([6.0, 4.0], [4.0, 16.0], 1.0),
+    Mark::rect([14.0, 4.0], [4.0, 16.0], 1.0),
 ];
 
 /// Lucide's `step-back` and `step-forward`: a bar and a triangle pointing at
