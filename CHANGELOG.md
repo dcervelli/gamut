@@ -8,6 +8,27 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Added
 
+- The orientation tag is applied in every format that carries one. A
+  JPEG's EXIF orientation, a TIFF's `Orientation` tag and a PNG's `eXIf`
+  chunk join WebP, HEIF and JPEG XL: a photograph taken with the camera on
+  its side arrives upright, as it does in a browser, and the window opens
+  in the shape it will arrive in. An Ultra HDR file is turned the same
+  way, and so is every frame of an animated PNG and every page of a TIFF.
+  The preview a raw carries of itself is left as stored and turned by the
+  camera's own orientation, as before, so a preview that repeats the tag
+  is not turned twice.
+
+- A TIFF's embedded ICC profile is read, through the same reader JPEG,
+  PNG, WebP and HEIF's go through, and it settles what the file means: a
+  16-bit export from Lightroom or Photoshop no longer arrives as linear
+  measurement data to be windowed, but as the Adobe RGB or Display P3
+  picture it was graded as. Without a profile the reading by depth stands.
+
+- A PNG's `gAMA` and `cHRM` chunks are read where it carries neither code
+  points, a profile nor an `sRGB` chunk: a gamma of 1.0 marks the file as
+  linear light, as a renderer writes it, and primaries stated as
+  chromaticities are matched against the four the program can name.
+
 - The program opens with nothing: `gamut` alone, or from the desktop's
   menu, puts up an empty window with three buttons in the middle of it —
   **Open files…**, **Open folder…** and **Paste** — and comes back to them

@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use ::image::{DynamicImage, ImageFormat};
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, anyhow};
 
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Referred, Samples};
 
@@ -72,12 +72,6 @@ fn delay(delay: ::image::Delay) -> Duration {
     Duration::from_micros(u64::from(numer) * 1000 / u64::from(denom))
 }
 
-pub(super) fn decode_as(bytes: &[u8], format: ::image::ImageFormat) -> Result<DynamicImage> {
-    let mut reader = ::image::ImageReader::with_format(std::io::Cursor::new(bytes), format);
-    limit(&mut reader);
-    Ok(reader.decode()?)
-}
-
 /// Wraps a decoded buffer in what we know about it. `stated` is the color
 /// space the container claimed, used wherever the pixel type does not settle
 /// the question by itself.
@@ -109,88 +103,6 @@ fn referred(format: Option<ImageFormat>, fallback: Referred) -> Referred {
         Some(ImageFormat::Hdr) | Some(ImageFormat::OpenExr) => Referred::Scene,
         _ => fallback,
     }
-}
-
-/// The image turned the way `orientation` says, with everything else about
-/// it kept. A quarter turn swaps width and height. The eight cases are
-/// `image`'s, which has them tested; the buffer goes across to it and back
-/// through the same one-to-one mapping the decoders use, so nothing is
-/// converted on the way.
-pub(super) fn reorient(
-    image: DecodedImage,
-    orientation: ::image::metadata::Orientation,
-) -> Result<DecodedImage> {
-    if orientation == ::image::metadata::Orientation::NoTransforms {
-        return Ok(image);
-    }
-    let DecodedImage {
-        width,
-        height,
-        samples,
-        color,
-        alpha,
-        referred,
-        exposure,
-        nodata,
-    } = image;
-    let mut dynamic = from_samples(width, height, samples)?;
-    dynamic.apply_orientation(orientation);
-    let (width, height) = (dynamic.width(), dynamic.height());
-    Ok(DecodedImage {
-        width,
-        height,
-        samples: into_samples(dynamic)?,
-        color,
-        alpha,
-        referred,
-        exposure,
-        nodata,
-    })
-}
-
-/// The other direction of [`into_samples`]: the buffer lent to `image` for
-/// something it does better, such as a turn.
-fn from_samples(width: u32, height: u32, samples: Samples) -> Result<DynamicImage> {
-    let short = || anyhow!("the buffer holds fewer pixels than {width}x{height}");
-    Ok(match samples {
-        Samples::U8 { channels, data } => match channels {
-            Channels::Gray => DynamicImage::ImageLuma8(
-                ::image::ImageBuffer::from_raw(width, height, data).ok_or_else(short)?,
-            ),
-            Channels::GrayAlpha => DynamicImage::ImageLumaA8(
-                ::image::ImageBuffer::from_raw(width, height, data).ok_or_else(short)?,
-            ),
-            Channels::Rgb => DynamicImage::ImageRgb8(
-                ::image::ImageBuffer::from_raw(width, height, data).ok_or_else(short)?,
-            ),
-            Channels::Rgba => DynamicImage::ImageRgba8(
-                ::image::ImageBuffer::from_raw(width, height, data).ok_or_else(short)?,
-            ),
-        },
-        Samples::U16 { channels, data } => match channels {
-            Channels::Gray => DynamicImage::ImageLuma16(
-                ::image::ImageBuffer::from_raw(width, height, data).ok_or_else(short)?,
-            ),
-            Channels::GrayAlpha => DynamicImage::ImageLumaA16(
-                ::image::ImageBuffer::from_raw(width, height, data).ok_or_else(short)?,
-            ),
-            Channels::Rgb => DynamicImage::ImageRgb16(
-                ::image::ImageBuffer::from_raw(width, height, data).ok_or_else(short)?,
-            ),
-            Channels::Rgba => DynamicImage::ImageRgba16(
-                ::image::ImageBuffer::from_raw(width, height, data).ok_or_else(short)?,
-            ),
-        },
-        Samples::F32 { channels, data } => match channels {
-            Channels::Rgb => DynamicImage::ImageRgb32F(
-                ::image::ImageBuffer::from_raw(width, height, data).ok_or_else(short)?,
-            ),
-            Channels::Rgba => DynamicImage::ImageRgba32F(
-                ::image::ImageBuffer::from_raw(width, height, data).ok_or_else(short)?,
-            ),
-            gray => bail!("`image` has no floating-point {gray:?} layout to turn"),
-        },
-    })
 }
 
 /// Moves the decoded buffer across without touching the values. Every

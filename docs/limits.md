@@ -5,11 +5,6 @@ A file is decoded whole, on the loader thread. Mount Rainier at 3 m
 1.4 GB of resident memory against a 1.15 GB decoded buffer. Nothing is
 streamed to the GPU in tiles, so an image also has to fit in one texture.
 
-EXIF orientation is not applied, so a rotated phone JPEG shows unrotated. HEIF,
-JPEG XL and WebP are the exceptions: the first two keep their rotation in the
-container rather than in a metadata tag, and WebP's tag sits in a chunk its
-decoder already opens for the color profile.
-
 A HEIF holding several images — a burst, a Live Photo, an AVIF image sequence
 — shows the one it marks as primary. The `libheif` binding exposes no
 sequence API, so the others are not reachable the way an ICO's entries are.

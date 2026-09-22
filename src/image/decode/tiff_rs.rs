@@ -38,11 +38,12 @@ use std::fs::File;
 use std::io::{self, BufReader, Seek};
 use std::ops::Range;
 
+use ::image::metadata::Orientation;
 use anyhow::{Context, Result, anyhow, bail};
 use tiff::decoder::{Decoder, DecodingResult, DecodingSampleType, Limits};
 use tiff::tags::Tag;
 
-use super::Positioned;
+use super::{Positioned, orient};
 use crate::image::sequence::Sequence;
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
 
@@ -82,7 +83,13 @@ impl super::Decoder for TiffRs {
     }
 
     fn dimensions(&self, source: &mut dyn super::ReadSeek) -> Result<Option<(u32, u32)>> {
-        Ok(Some(Decoder::new(source)?.dimensions()?))
+        let mut decoder = Decoder::new(source)?;
+        let (width, height) = decoder.dimensions()?;
+        Ok(Some(orient::size(
+            width,
+            height,
+            orientation(&mut decoder)?,
+        )))
     }
 
     fn decode(
@@ -164,6 +171,8 @@ impl super::Decoder for TiffRs {
             .get_tag_ascii_string(Tag::Unknown(GDAL_NODATA))
             .ok()
             .and_then(|value| value.trim().parse::<f32>().ok());
+        let orientation = orientation(&mut decoder)?;
+        let profile = decoder.find_tag(Tag::IccProfile)?;
 
         // Chunk by chunk, across threads, wherever the layout is the plain
         // one. A planar file keeps each channel's chunks apart, which is
@@ -210,7 +219,7 @@ impl super::Decoder for TiffRs {
             ));
         }
 
-        let color = color_space(&samples);
+        let color = color_space(&samples, profile);
         let mut image = DecodedImage::new(
             width,
             height,
@@ -219,7 +228,7 @@ impl super::Decoder for TiffRs {
             AlphaMode::of(channels, false),
         );
         image.nodata = nodata;
-        Ok(image)
+        Ok(orient::apply(image, orientation))
     }
 }
 
@@ -602,11 +611,29 @@ impl YCbCr {
     }
 }
 
+/// The way the directory says the picture is to be turned: the
+/// `Orientation` tag, which a scanner or a camera writing TIFF sets and a
+/// GIS leaves out. A value the tag does not define asks for nothing.
+fn orientation<R: io::Read + Seek>(decoder: &mut Decoder<R>) -> Result<Orientation> {
+    Ok(decoder
+        .find_tag_unsigned::<u8>(Tag::Orientation)?
+        .and_then(Orientation::from_exif)
+        .unwrap_or(Orientation::NoTransforms))
+}
+
 /// TIFF is the awkward container: the same tags carry a scanned photograph and
-/// a frame of sensor counts. Bit depth is the best signal available — 8-bit
-/// TIFFs are overwhelmingly pictures, deeper ones overwhelmingly measurements
-/// — and `--transfer` overrides it when the guess is wrong.
-fn color_space(samples: &Samples) -> ColorSpace {
+/// a frame of sensor counts. An embedded profile settles it — a measurement
+/// has none, and a picture out of Lightroom or Photoshop has the one it was
+/// graded in, which is Adobe RGB or ProPhoto far more often than sRGB — and
+/// is read through the same reader every other format's goes through, with
+/// sRGB assumed for whatever it does not state. Without one, bit depth is
+/// the best signal available — 8-bit TIFFs are overwhelmingly pictures,
+/// deeper ones overwhelmingly measurements — and `--transfer` overrides it
+/// when the guess is wrong.
+fn color_space(samples: &Samples, profile: Option<tiff::decoder::ifd::Value>) -> ColorSpace {
+    if let Some(profile) = profile.and_then(|value| value.into_u8_vec().ok()) {
+        return crate::image::color::icc::color_space(&profile, ColorSpace::SRGB);
+    }
     match samples {
         Samples::U8 { .. } => ColorSpace::SRGB,
         _ => ColorSpace::LINEAR_BT709,

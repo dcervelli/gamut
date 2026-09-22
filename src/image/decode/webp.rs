@@ -31,7 +31,6 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 
-use ::image::DynamicImage;
 use ::image::metadata::Orientation;
 use image_webp::{DecodingError, WebPDecoder};
 
@@ -66,11 +65,7 @@ impl super::Decoder for Webp {
             .as_deref()
             .and_then(Orientation::from_exif_chunk)
             .unwrap_or(Orientation::NoTransforms);
-        Ok(Some(if quarter_turn(orientation) {
-            (height, width)
-        } else {
-            (width, height)
-        }))
+        Ok(Some(super::orient::size(width, height, orientation)))
     }
 
     fn decode(
@@ -202,28 +197,24 @@ impl<R: Read + Seek> Opened<R> {
         Ok(vec![0u8; size])
     }
 
-    /// One picture the decoder wrote, turned the right way up and described.
+    /// One picture the decoder wrote, described and turned the right way
+    /// up. HEIF's rotation lives in the container and `libheif` applies it;
+    /// WebP's lives in a metadata chunk, and applying it is this decoder's
+    /// choice.
     fn describe(&self, data: Vec<u8>) -> Result<DecodedImage> {
-        let (data, width, height) = reorient(
-            data,
-            self.width,
-            self.height,
-            self.channels,
-            self.orientation,
-        )?;
-
         // WebP's alpha is straight, in both bitstreams and in the blending
         // the animation chunks describe.
-        Ok(DecodedImage::new(
-            width,
-            height,
+        let image = DecodedImage::new(
+            self.width,
+            self.height,
             Samples::U8 {
                 channels: self.channels,
                 data,
             },
             self.color,
             AlphaMode::of(self.channels, false),
-        ))
+        );
+        Ok(super::orient::apply(image, self.orientation))
     }
 }
 
@@ -264,65 +255,6 @@ fn is_webp(header: &[u8]) -> bool {
     header.len() >= 12 && &header[..4] == b"RIFF" && &header[8..12] == b"WEBP"
 }
 
-/// Whether an orientation turns the image on its side, and so swaps its
-/// width and height.
-fn quarter_turn(orientation: Orientation) -> bool {
-    matches!(
-        orientation,
-        Orientation::Rotate90
-            | Orientation::Rotate270
-            | Orientation::Rotate90FlipH
-            | Orientation::Rotate270FlipH
-    )
-}
-
-/// Applies the EXIF orientation, returning the buffer and the dimensions the
-/// picture has once it is the right way up.
-///
-/// A quarter turn swaps width and height, which is why this hands back both
-/// rather than transforming in place. The eight cases are `image`'s, which is
-/// already a dependency and has them tested; what is not delegated is the
-/// decision to apply them at all. HEIF's rotation lives in the container and
-/// `libheif` applies it; WebP's lives in a metadata chunk, and applying it is
-/// this decoder's choice.
-fn reorient(
-    data: Vec<u8>,
-    width: u32,
-    height: u32,
-    channels: Channels,
-    orientation: Orientation,
-) -> Result<(Vec<u8>, u32, u32)> {
-    if orientation == Orientation::NoTransforms {
-        return Ok((data, width, height));
-    }
-
-    let short = || anyhow!("WebP decoded to fewer pixels than {width}x{height}");
-    let mut image = match channels {
-        Channels::Rgb => DynamicImage::ImageRgb8(
-            ::image::RgbImage::from_raw(width, height, data).ok_or_else(short)?,
-        ),
-        Channels::Rgba => DynamicImage::ImageRgba8(
-            ::image::RgbaImage::from_raw(width, height, data).ok_or_else(short)?,
-        ),
-        // Neither bitstream has a one-channel encoding, so this is not a
-        // layout a WebP can arrive in.
-        gray => bail!("a WebP decoded to {gray:?}"),
-    };
-    image.apply_orientation(orientation);
-
-    let (width, height) = (image.width(), image.height());
-    let data = match image {
-        DynamicImage::ImageRgb8(buffer) => buffer.into_raw(),
-        DynamicImage::ImageRgba8(buffer) => buffer.into_raw(),
-        // `apply_orientation` moves pixels about; it does not convert them.
-        other => bail!(
-            "rotating a WebP changed its pixel layout to {:?}",
-            other.color()
-        ),
-    };
-    Ok((data, width, height))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -340,39 +272,5 @@ mod tests {
         // Long enough for the signature but not for the form type.
         assert!(!is_webp(b"RIFF\x3c\x00\x00\x00"));
         assert!(!is_webp(b""));
-    }
-
-    /// A quarter turn has to hand back swapped dimensions, or every later
-    /// reader of the buffer walks off the end of a row.
-    #[test]
-    fn a_quarter_turn_swaps_the_dimensions() {
-        // A 2x1 RGB image: red then green.
-        let data = vec![255, 0, 0, 0, 255, 0];
-        let (turned, width, height) =
-            reorient(data.clone(), 2, 1, Channels::Rgb, Orientation::Rotate90).unwrap();
-        assert_eq!((width, height), (1, 2));
-        // Clockwise: the left pixel ends up on top.
-        assert_eq!(turned, vec![255, 0, 0, 0, 255, 0]);
-
-        let (flipped, width, height) =
-            reorient(data.clone(), 2, 1, Channels::Rgb, Orientation::Rotate180).unwrap();
-        assert_eq!((width, height), (2, 1));
-        assert_eq!(flipped, vec![0, 255, 0, 255, 0, 0]);
-
-        // And the common case costs nothing: the same buffer straight back.
-        let (untouched, width, height) =
-            reorient(data.clone(), 2, 1, Channels::Rgb, Orientation::NoTransforms).unwrap();
-        assert_eq!((width, height), (2, 1));
-        assert_eq!(untouched, data);
-    }
-
-    /// Alpha has to survive the turn as well as color.
-    #[test]
-    fn rotation_carries_the_alpha_channel() {
-        let data = vec![1, 2, 3, 64, 5, 6, 7, 128];
-        let (turned, width, height) =
-            reorient(data, 2, 1, Channels::Rgba, Orientation::Rotate180).unwrap();
-        assert_eq!((width, height), (2, 1));
-        assert_eq!(turned, vec![5, 6, 7, 128, 1, 2, 3, 64]);
     }
 }

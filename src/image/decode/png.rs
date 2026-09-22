@@ -7,6 +7,17 @@
 //! all precede the pixels, so they are read on the way past and the file is
 //! then rewound; a PNG keeps the streaming every other format here gets.
 //!
+//! Two older chunks say the same thing in a weaker vocabulary, and are read
+//! where the file carries neither of the two above: `gAMA`, the encoding
+//! exponent, which is how a renderer or a game pipeline marks a PNG as
+//! linear; and `cHRM`, the primaries as chromaticities, matched against the
+//! four this program can name. An `sRGB` chunk, which the specification has
+//! win over both, means what the absence of any chunk means.
+//!
+//! An `eXIf` chunk can carry an orientation, as a JPEG's EXIF does, and it
+//! is applied the same way — to the still, and to every frame of an
+//! animation.
+//!
 //! An animated PNG keeps its frame count and loop count in the same run of
 //! chunks, so `sequence` reads them on the same pass. `decode` shows the
 //! default image — the still that a reader with no notion of animation sees
@@ -20,12 +31,13 @@ use std::io::{BufReader, Seek, SeekFrom};
 use anyhow::{Context, Result, bail};
 
 use ::image::codecs::png::PngDecoder;
+use ::image::metadata::Orientation;
 use ::image::{AnimationDecoder, ImageFormat};
 
 use crate::image::sequence::{Frame, FrameSource, Loops, Sequence};
-use crate::image::{ColorSpace, DecodedImage};
+use crate::image::{ColorSpace, DecodedImage, Primaries, Transfer};
 
-use super::{Overrides, ReadSeek, dynamic};
+use super::{Overrides, ReadSeek, dynamic, orient};
 
 pub struct Png;
 
@@ -43,8 +55,16 @@ impl super::Decoder for Png {
     }
 
     fn dimensions(&self, source: &mut dyn ReadSeek) -> Result<Option<(u32, u32)>> {
-        // The chunks read on the way past change nothing about the size.
-        dynamic::dimensions(source)
+        // Of the chunks read on the way past, only the orientation changes
+        // the size: a quarter turn swaps it, as `decode` will.
+        let orientation = header(&mut *source).orientation;
+        source
+            .seek(SeekFrom::Start(0))
+            .context("reading the file")?;
+        let (width, height) =
+            ::image::ImageReader::with_format(BufReader::new(source), ImageFormat::Png)
+                .into_dimensions()?;
+        Ok(Some(orient::size(width, height, orientation)))
     }
 
     fn decode(&self, source: &mut dyn ReadSeek, _overrides: Overrides) -> Result<DecodedImage> {
@@ -74,6 +94,7 @@ impl super::Decoder for Png {
         let mut frames = PngFrames {
             file,
             color: stated.color.unwrap_or(ColorSpace::SRGB),
+            orientation: stated.orientation,
             frames: None,
         };
         frames.rewind()?;
@@ -88,6 +109,7 @@ impl super::Decoder for Png {
 struct PngFrames {
     file: File,
     color: ColorSpace,
+    orientation: Orientation,
     frames: Option<::image::Frames<'static>>,
 }
 
@@ -100,7 +122,9 @@ impl FrameSource for PngFrames {
             None => Ok(None),
             Some(frame) => {
                 let frame = frame.context("decoding a PNG frame")?;
-                Ok(Some(dynamic::frame(frame, ImageFormat::Png, self.color)?))
+                let mut frame = dynamic::frame(frame, ImageFormat::Png, self.color)?;
+                frame.image = orient::apply(frame.image, self.orientation);
+                Ok(Some(frame))
             }
         }
     }
@@ -126,7 +150,7 @@ pub(super) fn decode(source: &mut dyn ReadSeek) -> Result<DecodedImage> {
     // The chunks that say what the numbers mean all precede the pixels, so
     // they are read on the way past and the source is then rewound.
     let start = source.stream_position().context("reading the file")?;
-    let color = header(&mut *source).color.unwrap_or(ColorSpace::SRGB);
+    let stated = header(&mut *source);
     source
         .seek(SeekFrom::Start(start))
         .context("reading the file")?;
@@ -135,15 +159,24 @@ pub(super) fn decode(source: &mut dyn ReadSeek) -> Result<DecodedImage> {
         ::image::ImageReader::with_format(BufReader::new(source), ::image::ImageFormat::Png);
     dynamic::limit(&mut reader);
     let decoded = reader.decode()?;
-    dynamic::describe(decoded, Some(::image::ImageFormat::Png), color)
+    let image = dynamic::describe(
+        decoded,
+        Some(::image::ImageFormat::Png),
+        stated.color.unwrap_or(ColorSpace::SRGB),
+    )?;
+    Ok(orient::apply(image, stated.orientation))
 }
 
-/// What the chunks before the pixels say: the color, and the animation.
+/// What the chunks before the pixels say: the color, the orientation, and
+/// the animation.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Header {
-    /// `None` where the file carries neither `cICP` nor `iCCP`, and so means
-    /// sRGB, which is what the format has always meant.
+    /// `None` where the file says nothing about its color that this program
+    /// can act on, and so means sRGB, which is what the format has always
+    /// meant.
     color: Option<ColorSpace>,
+    /// The `eXIf` chunk's orientation, where there is one.
+    orientation: Orientation,
     /// The `acTL` chunk, where there is one.
     animation: Option<Animation>,
 }
@@ -164,7 +197,8 @@ struct Animation {
 /// `cICP` is preferred over `iCCP` where a file carries both, for the same
 /// reason HEIF prefers its `nclx` box: code points name a transfer function
 /// this program models exactly, while a profile can only approximate the HDR
-/// curves with a table.
+/// curves with a table. `sRGB` comes next, then `gAMA` and `cHRM`, which is
+/// the order the specification gives.
 ///
 /// `read_info` rather than `read_header_info`: the latter stops at `IHDR`,
 /// before any of these chunks has been seen, and reports them all absent.
@@ -175,6 +209,7 @@ fn header(source: impl std::io::Read + Seek) -> Header {
     let Ok(reader) = decoder.read_info() else {
         return Header {
             color: None,
+            orientation: Orientation::NoTransforms,
             animation: None,
         };
     };
@@ -185,17 +220,64 @@ fn header(source: impl std::io::Read + Seek) -> Header {
             points.color_primaries,
             points.transfer_function,
         ))
+    } else if let Some(profile) = info.icc_profile.as_ref() {
+        Some(crate::image::color::icc::color_space(
+            profile,
+            ColorSpace::SRGB,
+        ))
+    } else if info.srgb.is_some() {
+        None
     } else {
-        info.icc_profile
-            .as_ref()
-            .map(|profile| crate::image::color::icc::color_space(profile, ColorSpace::SRGB))
+        // `gama_chunk` and `chrm_chunk` rather than `source_gamma` and
+        // `source_chromaticities`: the latter are filled in for an `sRGB`
+        // chunk too, which has just been answered.
+        let transfer = info.gama_chunk.map(|gamma| transfer(gamma.into_value()));
+        let primaries = info.chrm_chunk.and_then(|chrm| {
+            let xy =
+                |(x, y): (::png::ScaledFloat, ::png::ScaledFloat)| (x.into_value(), y.into_value());
+            Primaries::from_chromaticities(xy(chrm.red), xy(chrm.green), xy(chrm.blue))
+        });
+        (transfer.is_some() || primaries.is_some()).then(|| ColorSpace {
+            transfer: transfer.unwrap_or(Transfer::Srgb),
+            primaries: primaries.unwrap_or(Primaries::Bt709),
+        })
     };
+    let orientation = info
+        .exif_metadata
+        .as_deref()
+        .and_then(Orientation::from_exif_chunk)
+        .unwrap_or(Orientation::NoTransforms);
     let animation = info.animation_control().map(|control| Animation {
         frames: control.num_frames,
         plays: control.num_plays,
         playable: info.bit_depth as u8 <= 8,
     });
-    Header { color, animation }
+    Header {
+        color,
+        orientation,
+        animation,
+    }
+}
+
+/// What a `gAMA` chunk's value means. The chunk holds the encoding
+/// exponent — 1/2.2 for a conventional picture, 1 for linear light — so
+/// the transfer function is its reciprocal. Two values are named rather
+/// than taken as a power law: 1.0, which is [`Transfer::Linear`] and the
+/// reason a renderer writes the chunk at all; and 0.45455, which the
+/// specification gives as the value for an sRGB picture, and which every
+/// encoder writes beside sRGB data — the sRGB curve is what such a file
+/// holds, and a power of 2.2 would put its shadows visibly wrong.
+fn transfer(gamma: f32) -> Transfer {
+    if !(gamma.is_finite() && gamma > 0.0) {
+        return Transfer::Srgb;
+    }
+    if (gamma - 1.0).abs() < 0.001 {
+        Transfer::Linear
+    } else if (gamma - 0.45455).abs() < 0.001 {
+        Transfer::Srgb
+    } else {
+        Transfer::Gamma(1.0 / gamma)
+    }
 }
 
 #[cfg(test)]
@@ -218,8 +300,24 @@ mod tests {
         let tagged = color("test_images/png-icc-p3.png").expect("iCCP is read");
         assert_eq!(tagged.primaries, Primaries::DisplayP3);
 
-        // A PNG with neither says nothing, and the caller supplies sRGB.
-        assert_eq!(color("test_images/png-rgb8.png"), None);
+        // A PNG with neither is left to its older chunks. ImageMagick writes
+        // a `cHRM` naming sRGB's own primaries on every file, and that is
+        // read as saying sRGB rather than as saying nothing.
+        assert_eq!(color("test_images/png-rgb8.png"), Some(ColorSpace::SRGB));
+    }
+
+    /// `gAMA` holds the encoding exponent, and the two values encoders
+    /// actually write are named rather than turned into a power law: a
+    /// linear file is linear, and the specification's own value for sRGB
+    /// is sRGB, since a power of 2.2 in place of the sRGB curve would put
+    /// the shadows visibly wrong.
+    #[test]
+    fn gamma_is_read_as_the_curve_it_stands_for() {
+        assert_eq!(transfer(1.0), Transfer::Linear);
+        assert_eq!(transfer(0.45455), Transfer::Srgb);
+        assert_eq!(transfer(0.5), Transfer::Gamma(2.0));
+        assert_eq!(transfer(0.0), Transfer::Srgb);
+        assert_eq!(transfer(f32::NAN), Transfer::Srgb);
     }
 
     /// A still PNG has no `acTL`, and says so rather than claiming one frame.

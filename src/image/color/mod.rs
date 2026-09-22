@@ -177,6 +177,47 @@ impl Primaries {
         })
     }
 
+    /// The CIE xy chromaticities of the red, green and blue primaries,
+    /// as the standards give them. The white point is D65 in all four.
+    pub fn chromaticities(self) -> [(f32, f32); 3] {
+        match self {
+            Primaries::Bt709 => [(0.64, 0.33), (0.30, 0.60), (0.15, 0.06)],
+            Primaries::DisplayP3 => [(0.680, 0.320), (0.265, 0.690), (0.150, 0.060)],
+            Primaries::Bt2020 => [(0.708, 0.292), (0.170, 0.797), (0.131, 0.046)],
+            Primaries::AdobeRgb => [(0.64, 0.33), (0.21, 0.71), (0.15, 0.06)],
+        }
+    }
+
+    /// The primaries whose chromaticities these are, or `None` where they
+    /// are nobody's that can be named here. For a container that states
+    /// its primaries as coordinates — PNG's `cHRM` — rather than by code or
+    /// profile. The four are far apart: the closest pair, sRGB and Display
+    /// P3, differ by 0.04 in the red x, and the tolerance need only cover
+    /// the rounding of a coordinate written to five places.
+    pub fn from_chromaticities(
+        red: (f32, f32),
+        green: (f32, f32),
+        blue: (f32, f32),
+    ) -> Option<Self> {
+        const TOLERANCE: f32 = 0.005;
+        [
+            Primaries::Bt709,
+            Primaries::DisplayP3,
+            Primaries::Bt2020,
+            Primaries::AdobeRgb,
+        ]
+        .into_iter()
+        .find(|candidate| {
+            candidate
+                .chromaticities()
+                .iter()
+                .zip([red, green, blue])
+                .all(|(known, given)| {
+                    (known.0 - given.0).abs() <= TOLERANCE && (known.1 - given.1).abs() <= TOLERANCE
+                })
+        })
+    }
+
     /// Row-major 3x3 taking these primaries to the linear BT.709 working
     /// space, both with a D65 white point.
     pub fn to_bt709(self) -> [[f32; 3]; 3] {
@@ -247,6 +288,32 @@ impl ColorSpace {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Each set of primaries is found from its own coordinates, written
+    /// the way a PNG writes them, to five places; and the coordinates of
+    /// nothing nameable are refused rather than rounded to a neighbor.
+    #[test]
+    fn primaries_are_recognized_from_their_chromaticities() {
+        for primaries in [
+            Primaries::Bt709,
+            Primaries::DisplayP3,
+            Primaries::Bt2020,
+            Primaries::AdobeRgb,
+        ] {
+            let [red, green, blue] = primaries
+                .chromaticities()
+                .map(|(x, y)| ((x * 1e5).round() / 1e5, (y * 1e5).round() / 1e5));
+            assert_eq!(
+                Primaries::from_chromaticities(red, green, blue),
+                Some(primaries)
+            );
+        }
+        // ProPhoto RGB, which is nobody's here.
+        assert_eq!(
+            Primaries::from_chromaticities((0.7347, 0.2653), (0.1596, 0.8404), (0.0366, 0.0001)),
+            None
+        );
+    }
 
     /// The other way: linear BT.709 to BT.2020, which is the gamut an HDR10
     /// surface reads its signal in. Row-major, and the inverse of

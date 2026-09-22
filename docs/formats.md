@@ -11,7 +11,7 @@
 | JPEG XL — codestream and container | [`jxl-oxide`](https://crates.io/crates/jxl-oxide) |
 | ICO | own directory reader, onto the PNG path and [`image`](https://crates.io/crates/image)'s bitmap one |
 | Ultra HDR containers, ICC profiles | [`ultrahdr-rs`](https://crates.io/crates/ultrahdr-rs), [`moxcms`](https://crates.io/crates/moxcms) |
-| PNG `cICP` and `iCCP` chunks | [`png`](https://crates.io/crates/png), which `image` already carries |
+| PNG `cICP`, `iCCP`, `gAMA`, `cHRM` and `eXIf` chunks | [`png`](https://crates.io/crates/png), which `image` already carries |
 
 The decoder is chosen by content, falling back to the file extension for
 formats without a recognizable header. Files are streamed rather than read
@@ -34,12 +34,25 @@ HLG, and `image` surfaces nothing of it, which is why `png` is a direct
 dependency for the header pass.
 
 **ICC profiles** are the other form, and the one a phone JPEG uses — and the
-only form WebP has. Only what
+only form WebP and TIFF have. Only what
 this program's color model can act on is taken from a profile: the primaries,
 matched against the four it can name by comparing colorants rather than by
 reading description text, and a transfer function only where the profile
 states a plain power law. Where a file carries both vocabularies the code
 points win.
+
+PNG has a third, older vocabulary, read by `decode::png::header` where a
+file carries none of the above and no `sRGB` chunk either, which the
+specification has win over it: `gAMA`, the encoding exponent, and `cHRM`,
+the primaries as chromaticities. Two `gAMA` values are named rather than
+taken as a power law — 1.0 is `Transfer::Linear`, and the reason a renderer
+writes the chunk at all, and 0.45455 is the specification's own value for an
+sRGB picture, which every encoder writes beside sRGB data and which the sRGB
+curve, not a power of 2.2, describes. `cHRM` goes through
+`Primaries::from_chromaticities`, the coordinates' counterpart of the
+colorant match. ImageMagick writes a `cHRM` naming sRGB's own primaries on
+every PNG it saves, so most of the fixtures carry one, and it has to read as
+sRGB; `png-gama-linear.png` and `png-chrm-p3.png` carry the other answers.
 
 PQ and HLG are treated as display-referred alongside sRGB. They are absolute
 curves — 1.0 is reference white and the headroom above it was put there on
@@ -80,6 +93,44 @@ The same pass reads the ICC profile, because a phone JPEG is Display P3 far
 more often than it is sRGB, and P3 numbers shown as sRGB come out visibly
 flat.
 
+## Orientation
+
+Every format that carries an orientation tag has it applied, and the
+turn is one function, `decode::orient::apply`, whichever tag asked for it.
+HEIF and JPEG XL keep their rotation in the container and their libraries
+apply it while decoding; the other four keep EXIF's tag beside the pixels,
+and each decoder reads it its own way:
+
+- JPEG from `image`'s own `JpegDecoder`, built by hand over the bytes
+  rather than reached through `ImageReader`: the decoder keeps the `APP1`
+  segment it passed on the way to the pixels and answers `orientation()`
+  from it, and `ImageReader` would hand back the pixels alone. An Ultra HDR
+  file's tag is the primary image's, and the reconstruction is turned the
+  same way.
+- TIFF from the `Orientation` tag of the directory being read, so a page
+  keeps its own.
+- PNG from the `eXIf` chunk, on the same header pass that reads its color
+  chunks; an animation's frames are each turned as the still is.
+- WebP from its `EXIF` chunk, which its decoder opens beside the profile.
+
+The turn is written here rather than borrowed from `image`'s
+`apply_orientation` because that takes a `DynamicImage`, which has no
+single-band floating-point layout, and a one-band elevation model is
+exactly the TIFF that might carry the tag. `orient::tests` checks all eight
+values against the crate's turn where both can do it, so the meaning of
+each is the crate's — and the browsers' — rather than a reading of the
+standard made here. Every decoder's `dimensions` reports the size after the
+turn through `orient::size`, so the window opens in the shape the picture
+arrives in: each of `jpeg-quarter-turn.jpg`, `png-quarter-turn.png`,
+`tiff-quarter-turn.tif` and `jxl-quarter-turn.jxl` is 24×32 on disk and
+32×24 in both answers.
+
+The one picture decoded as stored is the JPEG a raw carries of itself.
+LibRaw reads the camera's orientation from the raw's own header and
+`decode::raw` turns the preview by that; a preview that repeats the tag in
+an EXIF of its own — a RAF's does — would otherwise be turned twice, so it
+goes through `jpeg::decode_stored`.
+
 ## TIFF
 
 TIFF goes to the `tiff` crate rather than through `image` because `image`
@@ -97,6 +148,17 @@ an elevation model holds meters, and −86 at the Dead Sea is a real value, not
 something to normalize away. A no-data sentinel is read from the file and kept
 out of the statistics, so a clipped DEM's −9999 fill cannot set the bottom of
 the automatic window and squash the terrain into a sliver.
+
+What the numbers mean is the one thing the container is bad at saying. An
+embedded profile (`IccProfile`, tag 34675) settles it where there is one:
+a measurement carries none, and a picture out of Lightroom or Photoshop
+carries the one it was graded in, so `tiff_rs::color_space` reads it through
+`icc::color_space` with sRGB assumed for whatever it does not state, at any
+depth — `tiff-icc-p3-16.tif` is the 16-bit file that would otherwise be
+taken for linear counts. Without a profile, depth is the best signal there
+is: 8-bit files are overwhelmingly pictures and deeper ones overwhelmingly
+measurements, and `--transfer` is the override for the 16-bit scan saved
+without one.
 
 A TIFF is a chain of directories, and where there is more than one they are
 pages: `sequence` walks the chain reading directories only, and
@@ -182,8 +244,8 @@ buffer on one thread, which is a few percent of the whole.
 
 `libheif` applies the container's own geometric properties — `irot`, `imir`,
 `clap` — while decoding, so a rotated phone photograph arrives upright. That
-is a property of the format, not of this program: JPEG's EXIF orientation is a
-separate tag in a separate decoder, and is not applied.
+is a property of the format rather than a choice made here; the formats that
+keep the tag beside the pixels are turned by [`decode::orient`](#orientation).
 
 ## Camera raw
 
@@ -377,12 +439,8 @@ read.
 carries no CICP code points — and it goes through the same profile reader
 JPEG, PNG and HEIF use. Without one the file means sRGB.
 
-`EXIF` carries the orientation, and it is applied. This is the one place a
-metadata tag is honored rather than ignored, and it is a deliberate
-exception: the tag sits in a chunk this decoder is already opening for the
-profile, and reading it costs a rotation of a buffer that is already in hand.
-JPEG's EXIF orientation is not applied — same tag, different decoder, and
-that one has no container pass to reach it with.
+`EXIF` carries the orientation, and it is applied — see
+[orientation](#orientation).
 
 `ANIM` and `ANMF` make the file an animation. A frame is not necessarily a
 picture: the format lets it be a patch at an offset, blended onto a canvas

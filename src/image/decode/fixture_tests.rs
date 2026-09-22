@@ -299,6 +299,58 @@ const FIXTURES: &[Fixture] = &[
         nodata: None,
         tolerance: EXACT,
     },
+    Fixture {
+        file: "png-gama-linear.png",
+        covers: "PNG `gAMA` of 1.0: linear light, as a renderer marks it",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: LINEAR,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "png-chrm-p3.png",
+        covers: "PNG `cHRM`: Display P3 stated as chromaticities",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: P3,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // Stored upside down with an `eXIf` chunk saying so, the PNG counterpart
+    // of `webp-exif-rotated.webp`.
+    Fixture {
+        file: "png-exif-rotated.png",
+        covers: "PNG `eXIf` orientation applied while decoding",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // Stored 24x32 and displayed 32x24, so that `probe` and `decode` have to
+    // agree about a size neither reads off the frame.
+    Fixture {
+        file: "png-quarter-turn.png",
+        covers: "PNG whose `eXIf` orientation swaps the size its header reports",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
     // ------------------------------------------------------------ JPEG
     Fixture {
         file: "jpeg-rgb.jpg",
@@ -339,6 +391,35 @@ const FIXTURES: &[Fixture] = &[
     Fixture {
         file: "jpeg-subsampled.jpg",
         covers: "JPEG 4:2:0 chroma subsampling",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: LOSSY,
+    },
+    // Stored upside down with an EXIF orientation saying so, the JPEG
+    // counterpart of `webp-exif-rotated.webp`.
+    Fixture {
+        file: "jpeg-exif-rotated.jpg",
+        covers: "JPEG EXIF orientation applied while decoding",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: LOSSY,
+    },
+    // Stored 24x32 and displayed 32x24, as `jxl-quarter-turn.jxl` is, so
+    // that `probe` and `decode` have to agree about a size neither reads
+    // off the frame.
+    Fixture {
+        file: "jpeg-quarter-turn.jpg",
+        covers: "JPEG whose EXIF orientation swaps the size its header reports",
         channels: Channels::Rgb,
         kind: Kind::U8,
         color: SRGB,
@@ -547,6 +628,56 @@ const FIXTURES: &[Fixture] = &[
     Fixture {
         file: "tiff-pages.tif",
         covers: "TIFF of two directories: pages",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "tiff-icc-p3.tif",
+        covers: "TIFF with an embedded profile: Display P3",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: P3,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    Fixture {
+        file: "tiff-icc-p3-16.tif",
+        covers: "16-bit TIFF whose profile overrides the reading of a deep file as linear",
+        channels: Channels::Rgb,
+        kind: Kind::U16,
+        color: P3,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // Stored upside down with the `Orientation` tag saying so.
+    Fixture {
+        file: "tiff-rotated.tif",
+        covers: "TIFF `Orientation` applied while decoding",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // Stored 24x32 and displayed 32x24: the header and the pixels have to agree.
+    Fixture {
+        file: "tiff-quarter-turn.tif",
+        covers: "TIFF whose `Orientation` swaps the size its header reports",
         channels: Channels::Rgb,
         kind: Kind::U8,
         color: SRGB,
@@ -1829,6 +1960,38 @@ fn webp_exif_orientation_is_applied_on_decode() {
             pixel(&upright, x, y),
             "at {x},{y}: the EXIF orientation was not applied"
         );
+    }
+}
+
+/// The orientation tag in the formats that keep it as a tag beside the
+/// pixels — EXIF's, in a JPEG's own header, a PNG's `eXIf` chunk and a
+/// TIFF's directory — all read by their own decoders and all turned by
+/// `decode::orient`. Each rotated fixture holds the ordinary pattern upside
+/// down with a tag saying so, and should decode to what the untagged one
+/// does, to within the format's own error.
+#[test]
+fn a_tagged_orientation_is_applied_on_decode() {
+    for (rotated, upright, tolerance) in [
+        ("jpeg-exif-rotated.jpg", "jpeg-rgb.jpg", LOSSY),
+        ("png-exif-rotated.png", "png-rgb8.png", EXACT),
+        ("tiff-rotated.tif", "tiff-rgb8.tif", EXACT),
+    ] {
+        let upright = load(&directory().join(upright), Overrides::default()).unwrap();
+        let rotated = load(&directory().join(rotated), Overrides::default()).unwrap();
+
+        assert_eq!(
+            (rotated.width, rotated.height),
+            (upright.width, upright.height)
+        );
+        for (x, y) in PROBES {
+            let (ours, theirs) = (pixel(&rotated, x, y), pixel(&upright, x, y));
+            for (a, b) in ours.iter().zip(theirs.iter()) {
+                assert!(
+                    (a - b).abs() <= tolerance,
+                    "at {x},{y}: the orientation was not applied ({ours:?} against {theirs:?})"
+                );
+            }
+        }
     }
 }
 

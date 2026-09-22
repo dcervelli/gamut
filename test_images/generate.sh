@@ -121,8 +121,12 @@ png_anim png-animated.png png-rgb8.png "$work/upside-down.png"
 
 # Neither `cICP` nor `iCCP` is a chunk ImageMagick will write, and between
 # them they are the whole of how a PNG says what its numbers mean, so both are
-# spliced in after `IHDR` with their CRCs computed.
-png_tag() {  # cicp src dst p t m r  |  iccp src dst profile
+# spliced in after `IHDR` with their CRCs computed. The two older chunks,
+# `gAMA` and `cHRM`, ImageMagick does write — a `cHRM` naming sRGB's
+# primaries goes on every file above — so a fixture stating something else
+# has the ones it wrote taken out, and an `sRGB` chunk with them, since the
+# specification has that one win over both.
+png_tag() {  # cicp src dst p t m r  |  iccp src dst profile  |  gama src dst g  |  chrm src dst rx ry gx gy bx by
   python3 - "$@" <<'TAG'
 import struct, sys, zlib
 
@@ -130,6 +134,14 @@ mode, src, dst = sys.argv[1:4]
 if mode == "cicp":
     # Color primaries, transfer function, matrix coefficients, full range.
     kind, body = b"cICP", bytes(int(value) for value in sys.argv[4:8])
+elif mode == "gama":
+    # The encoding exponent, times 100000.
+    kind, body = b"gAMA", struct.pack(">I", round(float(sys.argv[4]) * 100000))
+elif mode == "chrm":
+    # D65 white, then the red, green and blue primaries, each x then y,
+    # times 100000.
+    kind = b"cHRM"
+    body = struct.pack(">8I", 31270, 32900, *(round(float(value) * 100000) for value in sys.argv[4:10]))
 else:
     profile = open(sys.argv[4], "rb").read()
     kind = b"iCCP"
@@ -142,8 +154,10 @@ out, offset, done = bytearray(data[:8]), 8, False
 while offset < len(data):
     (length,) = struct.unpack_from(">I", data, offset)
     chunk = data[offset : offset + 12 + length]
-    out += chunk
     offset += 12 + length
+    if mode in ("gama", "chrm") and chunk[4:8] in (b"gAMA", b"cHRM", b"sRGB"):
+        continue
+    out += chunk
     if chunk[4:8] == b"IHDR":
         out += struct.pack(">I", len(body)) + kind + body
         out += struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
@@ -159,12 +173,73 @@ png_tag cicp png-rgb16.png png-cicp-pq.png 9 16 0 1
 # Display P3 with the sRGB curve, stated by a profile rather than by code
 # points: what a phone writes, and what the ICC reader is for.
 png_tag iccp png-rgb8.png png-icc-p3.png display-p3.icc
+# The older vocabulary, for a file with none of the above: `gAMA` of 1.0 is
+# how a renderer marks a PNG as linear light, and `cHRM` states the
+# primaries as chromaticities — Display P3's here.
+png_tag gama png-rgb8.png png-gama-linear.png 1.0
+png_tag chrm png-rgb8.png png-chrm-p3.png 0.680 0.320 0.265 0.690 0.150 0.060
+
+# An `eXIf` chunk holding an orientation: the same tag a JPEG carries, in
+# the one place a PNG can carry it. Both store the pattern the wrong way
+# round and say so, so they come back the right way up only if the tag is
+# applied; the quarter turn stores 24x32 and reports 32x24, which the header
+# and the pixels have to agree on. `cjxl` reads the same chunk to set a JPEG
+# XL's orientation field, which is what the two PNGs it is given below hold.
+png_exif() {  # src dst orientation
+  python3 - "$@" <<'EXIF'
+import struct, sys, zlib
+
+src, dst, orientation = sys.argv[1], sys.argv[2], int(sys.argv[3])
+# A bare TIFF header with one IFD entry: tag 0x0112, SHORT, the orientation.
+tiff = (b"II\x2a\x00" + struct.pack("<I", 8) + struct.pack("<H", 1)
+        + struct.pack("<HHIHH", 0x0112, 3, 1, orientation, 0) + struct.pack("<I", 0))
+payload = struct.pack(">I", len(tiff)) + b"eXIf" + tiff
+payload += struct.pack(">I", zlib.crc32(b"eXIf" + tiff) & 0xFFFFFFFF)
+data = open(src, "rb").read()
+# After the signature and `IHDR`, which is always the first chunk and always
+# thirteen bytes of payload.
+at = 8 + 25
+open(dst, "wb").write(data[:at] + payload + data[at:])
+EXIF
+}
+png_exif "$work/color-upside-down.png" "$work/upside-down-exif.png" 3
+magick "$work/upside-down-exif.png" -depth 8 -define png:color-type=2 png-exif-rotated.png
+magick "$work/color.png" -rotate -90 "$work/color-quarter-turn.png"
+png_exif "$work/color-quarter-turn.png" "$work/quarter-turn-exif.png" 6
+magick "$work/quarter-turn-exif.png" -depth 8 -define png:color-type=2 png-quarter-turn.png
 
 # ---------------------------------------------------------------- JPEG
 magick "$work/color.png" -quality 95 -sampling-factor 4:4:4 jpeg-rgb.jpg
 magick "$work/gray.png"  -colorspace gray -quality 95 jpeg-gray.jpg
 magick "$work/color.png" -quality 95 -interlace JPEG jpeg-progressive.jpeg
 magick "$work/color.png" -quality 95 -sampling-factor 4:2:0 jpeg-subsampled.jpg
+
+# The orientation is an EXIF tag in an `APP1` segment, and ImageMagick writes
+# no EXIF onto a JPEG made from a PNG, so the segment is put in by hand
+# after the `SOI` marker, where a camera puts it. Both store the pattern the
+# wrong way round and say so, like the WebP and the JPEG XL: they come back
+# the right way up only if the tag is applied, and the quarter turn stores
+# 24x32 and reports 32x24, which the header and the pixels have to agree on.
+jpeg_exif() {  # src dst orientation
+  python3 - "$@" <<'EXIF'
+import struct, sys
+
+src, dst, orientation = sys.argv[1], sys.argv[2], int(sys.argv[3])
+# A bare TIFF header with one IFD entry: tag 0x0112, SHORT, the orientation.
+tiff = (b"II\x2a\x00" + struct.pack("<I", 8) + struct.pack("<H", 1)
+        + struct.pack("<HHIHH", 0x0112, 3, 1, orientation, 0) + struct.pack("<I", 0))
+payload = b"Exif\0\0" + tiff
+segment = b"\xff\xe1" + struct.pack(">H", len(payload) + 2) + payload
+data = open(src, "rb").read()
+assert data[:2] == b"\xff\xd8", "not a JPEG"
+open(dst, "wb").write(data[:2] + segment + data[2:])
+EXIF
+}
+
+magick "$work/color-upside-down.png" -quality 95 -sampling-factor 4:4:4 "$work/upside-down.jpg"
+jpeg_exif "$work/upside-down.jpg" jpeg-exif-rotated.jpg 3
+magick "$work/color.png" -rotate -90 -quality 95 -sampling-factor 4:4:4 "$work/quarter-turn.jpg"
+jpeg_exif "$work/quarter-turn.jpg" jpeg-quarter-turn.jpg 6
 
 # ----------------------------------------------------------------- GIF
 # Always a palette, always 8-bit, and always RGBA once decoded: the crate's
@@ -200,6 +275,19 @@ magick "$work/color.png" -depth 8 -type TrueColor -compress LZW -define tiff:row
 # Two directories, the pattern first and the upside-down one second: pages,
 # with no clock between them.
 magick "$work/color.png" "$work/color-upside-down.png" -depth 8 -type TrueColor -compress None tiff-pages.tif
+# An embedded profile, which is what a picture out of a photo editor
+# carries and a measurement never does: Display P3 with the sRGB curve, on
+# an 8-bit file and on a 16-bit one, where it overrides the reading of a
+# deep TIFF as linear. `-profile` on an image with no profile attaches it
+# without converting the pixels.
+magick "$work/color.png" -depth 8  -type TrueColor -compress None -profile display-p3.icc tiff-icc-p3.tif
+magick "$work/color.png" -depth 16 -type TrueColor -compress None -profile display-p3.icc tiff-icc-p3-16.tif
+# The `Orientation` tag, which a scanner or a camera writing TIFF sets:
+# the pattern stored upside down and saying so, and stored a quarter turn
+# anticlockwise, 24x32 on disk and 32x24 once the tag is honored. `-orient`
+# sets the tag and leaves the pixels alone.
+magick "$work/color-upside-down.png" -depth 8 -type TrueColor -compress None -orient bottom-right tiff-rotated.tif
+magick "$work/color-quarter-turn.png" -depth 8 -type TrueColor -compress None -orient right-top tiff-quarter-turn.tif
 
 # ---------------------------------------------------------------- Radiance
 magick "$work/float.png" -set colorspace RGB -evaluate multiply 3.984375 hdr-rgbe.hdr
@@ -300,34 +388,11 @@ cjxl -d 0 -x color_space=Rec2100PQ "$work/color16.ppm" jxl-cicp-pq.jxl > /dev/nu
 cjxl -d 0 png-icc-p3.png jxl-icc-p3.jxl > /dev/null 2>&1
 
 # Orientation is a field in the codestream rather than a tag beside it, and
-# `cjxl` fills it in from the input's EXIF. These two store the pattern the
-# wrong way round and say so, so they come back the right way up only if the
-# field is applied — and the quarter turn additionally swaps the size the
-# header reports, which is what the window opens at.
-png_exif() {  # src dst orientation
-  python3 - "$@" <<'EXIF'
-import struct, sys, zlib
-
-src, dst, orientation = sys.argv[1], sys.argv[2], int(sys.argv[3])
-# A bare TIFF header with one IFD entry: tag 0x0112, SHORT, the orientation.
-tiff = (b"II\x2a\x00" + struct.pack("<I", 8) + struct.pack("<H", 1)
-        + struct.pack("<HHIHH", 0x0112, 3, 1, orientation, 0) + struct.pack("<I", 0))
-payload = struct.pack(">I", len(tiff)) + b"eXIf" + tiff
-payload += struct.pack(">I", zlib.crc32(b"eXIf" + tiff) & 0xFFFFFFFF)
-data = open(src, "rb").read()
-# After the signature and `IHDR`, which is always the first chunk and always
-# thirteen bytes of payload.
-at = 8 + 25
-open(dst, "wb").write(data[:at] + payload + data[at:])
-EXIF
-}
-
-png_exif "$work/color-upside-down.png" "$work/upside-down-exif.png" 3
+# `cjxl` fills it in from the input's EXIF — the `eXIf` chunk `png_exif` put
+# on these two PNGs above. The half turn comes back the right way up only if
+# the field is applied; the quarter turn is stored 24x32 and reported 32x24
+# once the header is honored, which is what the window opens at.
 cjxl -d 0 "$work/upside-down-exif.png" jxl-rotated.jxl > /dev/null 2>&1
-# Stored a quarter turn anticlockwise, tagged to be turned back: 24x32 on
-# disk, 32x24 once the header is honored.
-magick "$work/color.png" -rotate -90 "$work/color-quarter-turn.png"
-png_exif "$work/color-quarter-turn.png" "$work/quarter-turn-exif.png" 6
 cjxl -d 0 "$work/quarter-turn-exif.png" jxl-quarter-turn.jxl > /dev/null 2>&1
 
 # Two frames, the pattern first and the upside-down one second, so a decoder

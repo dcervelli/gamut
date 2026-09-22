@@ -43,8 +43,6 @@ use crate::image::{
     AlphaMode, Channels, ColorSpace, DecodedImage, Primaries, Referred, Samples, Transfer,
 };
 
-use super::dynamic;
-
 pub struct Raw;
 
 impl super::Decoder for Raw {
@@ -87,14 +85,16 @@ impl super::Decoder for Raw {
         }
         let thumbnail = handle.make_thumbnail()?;
         let image = match thumbnail.kind() {
-            ffi::IMAGE_JPEG => super::jpeg::decode(thumbnail.bytes(), overrides)?,
+            ffi::IMAGE_JPEG => super::jpeg::decode_stored(thumbnail.bytes(), overrides)?,
             ffi::IMAGE_BITMAP => thumbnail.bitmap()?,
             other => bail!("LibRaw handed back a preview of kind {other}"),
         };
         // The JPEG is stored as the sensor saw the scene, with the way the
         // camera was held beside it; the developed picture is turned to
-        // match, so the preview is too.
-        let image = dynamic::reorient(image, handle.orientation())?;
+        // match, so the preview is too — by this orientation alone, since
+        // a preview that repeats the tag in an EXIF of its own, as a RAF's
+        // does, would otherwise be turned twice.
+        let image = super::orient::apply(image, handle.orientation());
         Ok(Some(image))
     }
 

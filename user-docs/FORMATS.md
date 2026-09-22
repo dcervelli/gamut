@@ -5,10 +5,10 @@ pixels, and where each format will surprise you.
 
 | Format | Extensions | Depth kept | What the file can tell us |
 | --- | --- | --- | --- |
-| PNG | `.png` | 8 and 16-bit | Color space, including HDR; ICC profile; animation |
-| JPEG | `.jpg` `.jpeg` `.jpe` `.jfif` | 8-bit | ICC profile; HDR gain map |
+| PNG | `.png` | 8 and 16-bit | Color space, including HDR; ICC profile; gamma and primaries; orientation; animation |
+| JPEG | `.jpg` `.jpeg` `.jpe` `.jfif` | 8-bit | ICC profile; orientation; HDR gain map |
 | GIF | `.gif` | 8-bit | Animation — and always sRGB |
-| TIFF | `.tif` `.tiff` | 8 to 64-bit, integer or float | Nothing — inferred from depth; pages |
+| TIFF | `.tif` `.tiff` | 8 to 64-bit, integer or float | ICC profile, otherwise inferred from depth; orientation; pages |
 | WebP | `.webp` | 8-bit | ICC profile; orientation; animation |
 | JPEG XL | `.jxl` | 8 and 16-bit, or float | Color space, including HDR; ICC profile; orientation; animation |
 | HEIF | `.heic` `.heif` `.hif` `.avif` | 8, 10 and 12-bit | Color space, including HDR; ICC profile; orientation |
@@ -118,9 +118,10 @@ automatic window, `t` the tone map, `o`
 the room above white, `z` resets. The information panel's "Referred to" line says
 which kind of light a file was taken for.
 
-**Rotation is usually ignored.** An image tagged with an orientation is shown
-the way its pixels are stored, except in WebP, HEIF and JPEG XL. If a JPEG
-from a phone appears on its side, that is why.
+**Rotation is applied.** A file tagged with an orientation — a JPEG, PNG,
+TIFF, WebP, HEIF or JPEG XL — arrives upright, as it does in a browser, and
+the window opens in the shape it will arrive in. The information panel still
+reports the tag, since the file is unchanged.
 
 **Failures are reported in the terminal.** Given several files, the first one
 that opens is shown and the ones that did not are named on the way past. `]`
@@ -140,7 +141,14 @@ expanded. Transparency on an indexed image becomes a real alpha channel.
 PNG is one of only two formats here that can state outright that it is HDR,
 and when it does — BT.2100 PQ or HLG — that is read and honored. An ICC
 profile is read where there is no such statement, so a Display P3 PNG shows as
-Display P3.
+Display P3. A file with neither is read by its older tags, where it has them:
+a gamma of 1.0, which is how a renderer or a game pipeline marks a PNG as
+linear light, is taken as linear, and primaries stated as chromaticities are
+matched against sRGB, Display P3, BT.2020 and Adobe RGB. Anything else means
+sRGB.
+
+**The orientation is applied** where a PNG carries one, which is rare but
+happens to a photograph saved out of an editor.
 
 An animated PNG plays. A 16-bit one does not: it shows its default image,
 the still that a reader with no notion of animation sees.
@@ -154,6 +162,9 @@ files; all three are rare and none is produced by a camera.
 **The ICC profile is read**, which matters more here than anywhere else: a
 photograph from a phone is Display P3 far more often than it is sRGB, and P3
 numbers shown as sRGB come out visibly flat.
+
+**The orientation is applied**, so a photograph taken with the camera on its
+side arrives upright, as it does in a browser or a phone's gallery.
 
 **Gain maps are applied.** A JPEG from a recent phone is two images: the
 ordinary graded photograph every viewer has always shown, and a smaller *gain
@@ -220,11 +231,16 @@ automatic window and squash the real terrain into a sliver.
 
 Caveats:
 
-- **A TIFF says nothing about color.** No profile is read, and the tone
+- **The ICC profile is read** where there is one, and it settles the
+  question: a 16-bit export from a photo editor carries the profile it was
+  graded in, and arrives as the picture it is. Adobe RGB, Display P3 and
+  BT.2020 are recognized; a ProPhoto RGB file is shown with sRGB primaries,
+  and looks flat.
+- **Without a profile, a TIFF says nothing about color**, and the tone
   response is inferred from depth: 8-bit is taken as sRGB, anything deeper as
   linear measurement data. That is right nearly always and wrong for a 16-bit
-  *scanned photograph*, which looks washed out until you pass `--transfer
-  srgb`.
+  *scanned photograph* saved without a profile, which looks washed out until
+  you pass `--transfer srgb`.
 - **JPEG-compressed TIFFs open** — a scanned map or an aerial photograph
   exported from a GIS, its pixels stored as YCbCr with the color at half
   resolution — and are converted back to RGB with the weights and the
@@ -237,7 +253,8 @@ Caveats:
   a thumbnail beside the picture, shows those as pages too. A mask is not a
   page: a GIS that writes one beside the picture, marking which pixels are
   data, is stepped over — and not applied, so the picture shows whole.
-- The orientation tag is not applied.
+- **The orientation tag is applied**, as a scanner or a camera writing TIFF
+  sets it. A page keeps its own.
 
 ## WebP
 
@@ -246,8 +263,7 @@ transparency in either.
 
 - The **ICC profile** is read, and is the only thing a WebP can say about its
   own color. Without one it means sRGB.
-- The **orientation is applied**, one of only three places a rotation tag is
-  honored.
+- The **orientation is applied**, as a JPEG's is.
 - An **animated** WebP plays, every frame on the full canvas, so a frame
   stored as a partial patch arrives whole. The background color the file
   names is ignored, as browsers ignore it.
