@@ -462,10 +462,7 @@ mod tests {
     /// `ALL` has one of every kind of control, and no kind twice.
     #[test]
     fn every_kind_of_control_is_listed_once() {
-        let kinds: Vec<_> = Control::ALL
-            .iter()
-            .map(std::mem::discriminant)
-            .collect();
+        let kinds: Vec<_> = Control::ALL.iter().map(std::mem::discriminant).collect();
         for (index, kind) in kinds.iter().enumerate() {
             assert!(Control::listed(Control::ALL[index]));
             assert!(

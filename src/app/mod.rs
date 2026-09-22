@@ -904,9 +904,6 @@ impl App {
     /// opens: the switch chooses the curve the room wants for what is on
     /// screen, and `t` changes it afterwards.
     pub(super) fn toggle_hdr(&mut self) -> Effect {
-        if !self.hdr_available() {
-            return Effect::Nothing;
-        }
         self.hdr = if self.headroom() == Headroom::Above {
             HdrPreference::Off
         } else {
@@ -4054,17 +4051,31 @@ mod tests {
     /// A press says what it left the window owing: a frame for a toggle,
     /// nothing for a step — the picture stays until the file arrives — and
     /// nothing for a panel the window has no room for, which is refused.
+    /// The refusal and the tooltip that says why are one reading: the
+    /// button is drawn dead, says there is no room, and does nothing, all
+    /// from the same answer.
     #[test]
     fn a_press_says_what_it_owes() {
+        use crate::ui::Naming;
+
         let (mut app, _dir) = app_over("owed", &[("a.png", 4, 3), ("b.png", 4, 3)]);
         assert_eq!(app.press(ui::Control::Grid), Effect::Redraw);
         assert_eq!(app.press(ui::Control::Next), Effect::Nothing);
         // A window a pixel across has no room for the histogram.
+        let histogram = ui::Tip::Control(ui::Control::Histogram);
         assert_eq!(app.press(ui::Control::Histogram), Effect::Nothing);
         assert!(!app.panels.show_histogram);
+        assert_eq!(
+            app.namer().tooltip(histogram).map(|tooltip| tooltip.title),
+            Some(vec![ui::tooltip::NO_ROOM.to_string()])
+        );
         app.headless = Some(WINDOW);
         assert_eq!(app.press(ui::Control::Histogram), Effect::Redraw);
         assert!(app.panels.show_histogram);
+        assert_ne!(
+            app.namer().tooltip(histogram).map(|tooltip| tooltip.title),
+            Some(vec![ui::tooltip::NO_ROOM.to_string()])
+        );
     }
 
     /// A click on the interface reaches the application: the grid button,

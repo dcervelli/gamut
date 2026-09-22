@@ -617,10 +617,13 @@ impl When {
     }
 }
 
-/// Which of the conditions hold at the moment, read off the application
-/// before a frame so that the help popup can dim the keys that would do
-/// nothing if pressed.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+/// What holds at the moment, read off the application once: which of the
+/// conditions the keys wait on, for the help popup to dim the keys that
+/// would do nothing; and everything that makes a control dead, for the
+/// tooltip that says why and for the press that is refused. One reading
+/// for all three, so that a button drawn dead, its label and its press
+/// cannot come to disagree.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) struct Conditions {
     pub region_selected: bool,
     pub several_files: bool,
@@ -628,12 +631,76 @@ pub(super) struct Conditions {
     pub pages: bool,
     pub pointer_on_picture: bool,
     pub picture_on_clipboard: bool,
-    pub hdr_mode: bool,
     pub single_channel: bool,
     pub undoable: bool,
+    /// Whether the content area has room for each floating panel.
+    pub room: ui::Room,
+    /// Whether the surface switch has anything to switch, and why not.
+    pub hdr: Hdr,
+    /// Whether anything out there offers to open the file on screen.
+    pub openable: bool,
+    /// Whether a false color is on the picture.
+    pub false_colored: bool,
+    /// Whether the desktop's file dialog is up.
+    pub picking: bool,
+    /// Whether there is no picture at all.
+    pub nothing_open: bool,
+}
+
+impl Default for Conditions {
+    /// Nothing holds: no room, no surface to switch to, nothing open.
+    fn default() -> Self {
+        Self {
+            region_selected: false,
+            several_files: false,
+            animation: false,
+            pages: false,
+            pointer_on_picture: false,
+            picture_on_clipboard: false,
+            single_channel: false,
+            undoable: false,
+            room: ui::Room {
+                histogram: false,
+                info: false,
+                help: false,
+            },
+            hdr: Hdr::Unsupported,
+            openable: false,
+            false_colored: false,
+            picking: false,
+            nothing_open: true,
+        }
+    }
 }
 
 impl Conditions {
+    /// Nothing dead for any reason, and no key's condition met: a large
+    /// window, a monitor in HDR mode, a file something else opens, a
+    /// picture up in its own colors, the dialog down and a picture on the
+    /// clipboard — which is the one condition that does hold, the paste
+    /// button being alive only then.
+    #[cfg(test)]
+    pub const ALIVE: Conditions = Conditions {
+        region_selected: false,
+        several_files: false,
+        animation: false,
+        pages: false,
+        pointer_on_picture: false,
+        picture_on_clipboard: true,
+        single_channel: false,
+        undoable: false,
+        room: ui::Room {
+            histogram: true,
+            info: true,
+            help: true,
+        },
+        hdr: Hdr::Available,
+        openable: true,
+        false_colored: false,
+        picking: false,
+        nothing_open: false,
+    };
+
     /// Whether `when` holds.
     pub fn met(&self, when: When) -> bool {
         match when {
@@ -644,9 +711,23 @@ impl Conditions {
             When::AnimationOrPages => self.animation || self.pages,
             When::PointerOnPicture => self.pointer_on_picture,
             When::PictureOnClipboard => self.picture_on_clipboard,
-            When::HdrMode => self.hdr_mode,
+            When::HdrMode => self.hdr == Hdr::Available,
             When::SingleChannel => self.single_channel,
             When::Undoable => self.undoable,
+        }
+    }
+
+    /// What makes a control dead, in the form the interface's tooltips
+    /// read it: the same reading, projected.
+    pub fn reasons(&self) -> Reasons {
+        Reasons {
+            room: self.room,
+            hdr: self.hdr,
+            openable: self.openable,
+            false_colored: self.false_colored,
+            picking: self.picking,
+            clipboard: self.picture_on_clipboard,
+            nothing_open: self.nothing_open,
         }
     }
 }
@@ -1260,9 +1341,6 @@ pub fn action_for(key: &Key, position: PhysicalKey, mods: Mods) -> Option<Action
 /// A handful of values rather than the application itself, since the frame
 /// is drawn from the application's state while this is read.
 pub(super) struct Namer {
-    /// Everything that could make a control dead this frame, for the
-    /// tooltip that then says why instead of what.
-    reasons: Reasons,
     /// The absolute path of the file on screen, for the tooltip on its name.
     path: String,
     /// Which file is on screen, out of how many.
@@ -1273,7 +1351,8 @@ pub(super) struct Namer {
     show_histogram: bool,
     /// What is being done to the picture, in sentences.
     state: Vec<String>,
-    /// Which of the conditions the keys wait on hold this frame.
+    /// What holds this frame: which keys' conditions, and what makes a
+    /// control dead, for the tooltip that then says why instead of what.
     conditions: Conditions,
 }
 
@@ -1290,7 +1369,7 @@ impl Naming for Namer {
         // the surface switch on a monitor with no room above white — refuses
         // the press, so the label says why rather than naming the thing and
         // the key beside it, neither of which is going to happen.
-        if let Some(refused) = ui::tooltip::disabled(at, self.reasons) {
+        if let Some(refused) = ui::tooltip::disabled(at, self.conditions.reasons()) {
             return Some(ui::Tooltip {
                 title: vec![refused.said.to_string()],
                 hints: refused.hint.map(str::to_string).into_iter().collect(),
@@ -1852,7 +1931,7 @@ impl App {
                     true
                 });
             }
-            ToggleHdr => return self.toggle_hdr(),
+            ToggleHdr => return self.press(Control::Output),
             ToggleRegion => return self.press(Control::Region),
             // Only a region shrinks, and there is none: see `perform_on_region`.
             ShrinkRegion(_) => return Effect::Nothing,
@@ -2054,18 +2133,6 @@ impl App {
     /// the application keeps them.
     pub(super) fn namer(&self) -> Namer {
         Namer {
-            reasons: Reasons {
-                room: self.room(),
-                hdr: self.hdr_state(),
-                openable: !self.openers.is_empty(),
-                false_colored: self
-                    .current
-                    .as_ref()
-                    .is_some_and(|current| current.display.false_colored(current.image.is_gray())),
-                picking: self.picking,
-                clipboard: self.panels.paste,
-                nothing_open: self.current.is_none(),
-            },
             path: self
                 .shown_path()
                 .map(|path| path.display().to_string())
@@ -2082,8 +2149,10 @@ impl App {
         }
     }
 
-    /// Which of the conditions the keys wait on hold right now, each read
-    /// from exactly what the key's own arm of [`App::perform`] reads.
+    /// What holds right now: which of the conditions the keys wait on,
+    /// each read from exactly what the key's own arm of [`App::perform`]
+    /// reads, and what makes a control dead. The one reading behind the
+    /// help popup's dimming, the tooltips' refusals and [`App::refuses`].
     pub(super) fn conditions(&self) -> Conditions {
         let current = self.current.as_ref();
         Conditions {
@@ -2098,10 +2167,24 @@ impl App {
             }),
             pointer_on_picture: self.pointer_pixel().is_some(),
             picture_on_clipboard: self.panels.paste,
-            hdr_mode: self.hdr_state() == Hdr::Available,
             single_channel: current.is_some_and(|current| current.image.is_gray()),
             undoable: !self.edits.is_empty(),
+            room: self.room(),
+            hdr: self.hdr_state(),
+            openable: !self.openers.is_empty(),
+            false_colored: current
+                .is_some_and(|current| current.display.false_colored(current.image.is_gray())),
+            picking: self.picking,
+            nothing_open: current.is_none(),
         }
+    }
+
+    /// Whether a press on `control` is refused: exactly when the control
+    /// is drawn dead, and its tooltip says why, since the three read one
+    /// [`Conditions`]. A press on a dead control that quietly set something
+    /// no one could see would be worse than one that does nothing.
+    fn refuses(&self, control: Control) -> bool {
+        ui::tooltip::disabled(Tip::Control(control), self.conditions().reasons()).is_some()
     }
 
     /// Acts on what a pass of the interface asked for, and says what the
@@ -2452,6 +2535,9 @@ impl App {
     /// stand in for the toggles come through here too, so that a key and a
     /// click cannot drift apart.
     pub(super) fn press(&mut self, widget: Control) -> Effect {
+        if self.refuses(widget) {
+            return Effect::Nothing;
+        }
         match widget {
             // The key's own action, so that a press and a keystroke cannot
             // come to mean different things. Nothing is drawn differently
@@ -2469,15 +2555,10 @@ impl App {
                 self.panels.show_minimap = !self.panels.show_minimap;
                 Effect::Redraw
             }
-            // Refused where the window has no room for the panel, the way the
-            // surface switch refuses where there is no headroom to switch to:
-            // the toggle is drawn dead, and a press on a dead control that
-            // quietly set something no one could see would be worse than one
-            // that does nothing.
+            // Where the window has no room for the panel the press was
+            // refused above, as the surface switch is where there is no
+            // headroom to switch to.
             Control::Histogram => {
-                if !self.room().histogram {
-                    return Effect::Nothing;
-                }
                 self.panels.show_histogram = !self.panels.show_histogram;
                 Effect::Redraw
             }
@@ -2497,9 +2578,6 @@ impl App {
                 self.perform(action)
             }
             Control::Info => {
-                if !self.room().info {
-                    return Effect::Nothing;
-                }
                 self.panels.show_info = !self.panels.show_info;
                 Effect::Redraw
             }
@@ -2681,9 +2759,10 @@ impl App {
                 };
                 let open = egui::Popup::is_id_open(&gui.ctx, ui::help::id());
                 egui::Popup::close_all(&gui.ctx);
-                // Not opened where the window has no room to draw it, as
-                // the panels are not: it would be up and unseen.
-                if !open && self.room().help {
+                // Where the window has no room to draw it the press was
+                // refused above, as the panels' are: it would be up and
+                // unseen.
+                if !open {
                     egui::Popup::open_id(&gui.ctx, ui::help::id());
                 }
                 Effect::Redraw
@@ -2855,13 +2934,12 @@ mod tests {
             Some("Choose a folder of images to open (Ctrl+Shift+O)")
         );
         let namer = Namer {
-            reasons: Reasons::NONE,
             path: String::new(),
             index: 0,
             count: 0,
             show_histogram: false,
             state: Vec::new(),
-            conditions: Conditions::default(),
+            conditions: Conditions::ALIVE,
         };
         assert_eq!(
             namer.shortcut(Control::OpenFiles).as_deref(),
@@ -2888,16 +2966,15 @@ mod tests {
 
         // Dead while the dialog is up, and the label says so instead.
         let picking = Namer {
-            reasons: Reasons {
-                picking: true,
-                ..Reasons::NONE
-            },
             path: String::new(),
             index: 0,
             count: 0,
             show_histogram: false,
             state: Vec::new(),
-            conditions: Conditions::default(),
+            conditions: Conditions {
+                picking: true,
+                ..Conditions::ALIVE
+            },
         };
         let tooltip = picking
             .tooltip(Tip::Control(Control::OpenFiles))
@@ -3015,7 +3092,7 @@ mod tests {
             (
                 When::HdrMode,
                 Conditions {
-                    hdr_mode: true,
+                    hdr: Hdr::Available,
                     ..none
                 },
             ),
@@ -3186,16 +3263,15 @@ mod tests {
     #[test]
     fn the_handles_say_which_keys_step_them() {
         let namer = Namer {
-            reasons: Reasons {
-                openable: false,
-                ..Reasons::NONE
-            },
             path: String::new(),
             index: 0,
             count: 1,
             show_histogram: true,
             state: Vec::new(),
-            conditions: Conditions::default(),
+            conditions: Conditions {
+                openable: false,
+                ..Conditions::ALIVE
+            },
         };
         let tooltip = |tip| namer.tooltip(tip).expect("named");
         assert!(tooltip(Tip::Window).hints.is_empty());
@@ -3261,13 +3337,12 @@ mod tests {
         // The menu prints the key beside each item, and it is the key the
         // table binds to the same copy.
         let namer = Namer {
-            reasons: Reasons::NONE,
             path: String::new(),
             index: 0,
             count: 1,
             show_histogram: false,
             state: Vec::new(),
-            conditions: Conditions::default(),
+            conditions: Conditions::ALIVE,
         };
         assert_eq!(
             namer.shortcut(Control::Copies(Copies::Path)).as_deref(),
@@ -3346,13 +3421,12 @@ mod tests {
     #[test]
     fn the_count_says_where_it_is_and_what_a_press_on_it_opens() {
         let namer = Namer {
-            reasons: Reasons::NONE,
             path: String::new(),
             index: 2,
             count: 12,
             show_histogram: false,
             state: Vec::new(),
-            conditions: Conditions::default(),
+            conditions: Conditions::ALIVE,
         };
         let tooltip = namer
             .tooltip(Tip::Counter)

@@ -824,7 +824,9 @@ condition rather than the words themselves, so that the popup can say
 whether it holds as well as what it is: `App::conditions` reads each off the same state the key's own
 arm of `perform` reads, `Namer` carries the answers into the frame as
 `Conditions`, and `help_sections` marks each row's `help::Condition` met or
-not. A row whose condition does not hold is set in the dim ink throughout,
+not. The same reading is what makes a control dead: `Conditions::reasons`
+is the tooltips' view of it and `App::refuses` the press's, so a button
+drawn dead, its label and its press cannot disagree. A row whose condition does not hold is set in the dim ink throughout,
 its condition in `Theme::caution` — what the row says is still true, and
 what it needs is what is missing — so that the keys that would do something
 right now are the ones that stand out. Nothing on the popup can be pressed,
