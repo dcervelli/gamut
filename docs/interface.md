@@ -371,14 +371,16 @@ rendered differently. Every change to one is a pure function there — drawn
 from two corners, moved, pulled by a handle, grown, nudged — each clamped to
 the image, and each tested on its own with no interface in the way.
 
-What the application holds is a `Selection` — off, asked for, or drawn —
-and, during a drag, a `Grabbing`: what was taken hold of, the region as it
-stood at the press, and where the press was in image pixels. Every frame of
-the drag remakes the region from those three and the hand's place, rather
-than from the frame before, so a drag that goes off the picture and comes
-back has nothing accumulated in it. The interface reads all of this from
-`FrameInput` and never writes it: what it hands back is `Command::Grab`,
-`Pull` and `Release`, and `App::act` does the rest.
+What the application holds is a `Marking`, in `app/region.rs`: a
+`Selection` — off, asked for, or drawn — and, during a drag, what was
+taken hold of, the region as it stood at the press, and where the press was
+in image pixels. Every frame of the drag remakes the region from those
+three and the hand's place, rather than from the frame before, so a drag
+that goes off the picture and comes back has nothing accumulated in it. The
+interface reads all of this from `FrameInput` and never writes it: what it
+hands back is `Command::Grab`, `Pull` and `Release`, and `App::act` hands
+those to `Marking`'s `grab`, `pull` and `release`, which are tested with no
+picture and no window.
 
 The drag is classified where the button went down, not where the pointer is
 when the toolkit calls it a drag. egui defers the decision until the pointer
@@ -452,8 +454,8 @@ being worth more than a handle the region has another way of being moved
 by — and each edge's coordinate inside the mark in the middle of that
 edge. They come and go with the hand rather than with a clock, since the
 hand is what says which region is being worked on, and a region left on the
-picture keeps only its outline, which is the thing it is for. `App::over_region`
-is the reading, and it is `Pointer::grip` — the hit test the interface
+picture keeps only its outline, which is the thing it is for. `Marking::over`
+is the reading, and it is `Marking::grip` — the hit test the interface
 already reports, so a panel covering the region does not count — or a drag
 in flight, since a corner dragged to the edge of the image leaves the
 pointer off the region it is still resizing and the size is exactly what is
