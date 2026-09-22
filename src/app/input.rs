@@ -16,7 +16,7 @@ use super::App;
 use crate::clipboard;
 use crate::image::display::{Colormap, Startup, ToneMap};
 use crate::image::encode;
-use crate::image::region::{Grip, Region, Side};
+use crate::image::region::{Region, Side};
 use crate::loader::Source;
 use crate::openers;
 use crate::pasted;
@@ -28,6 +28,8 @@ use crate::ui::menu::{Copies, ZoomChoice};
 use crate::ui::toast::Level;
 use crate::ui::tooltip::{Hdr, Reasons};
 use crate::ui::{self, Control, Current, Grab, Naming, Selection, Tip};
+
+use super::region::Framing;
 use crate::view::Fit;
 
 /// Window pixels moved per arrow-key press. Shift moves one pixel instead,
@@ -1542,9 +1544,6 @@ pub(super) struct Pointer {
     /// frame after, which is one frame late only when a panel has appeared or
     /// gone under a still pointer — and that frame is being painted anyway.
     pub(super) over_image: bool,
-    /// The handle of the region it was resting on at the last pass, if any
-    /// — said the same way, and what the region's words are written for.
-    pub(super) grip: Option<Grip>,
     /// Where `Space` is: the one key that fits on its way up.
     pub(super) space: Space,
 }
@@ -1563,55 +1562,6 @@ pub(super) enum Space {
         /// letting go of it asks before it fits anything.
         drawn: bool,
     },
-}
-
-/// What `Space` frames next while a region is up: the region at either fit,
-/// then the picture at either and at actual size, and round again. The
-/// picture on its own has its three stops to cycle through; with a region
-/// up there are two things to frame, and the region — the thing being
-/// worked on — comes first.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) enum Framing {
-    Region(Fit),
-    Picture(Fit),
-    /// The picture at 100%, as `1` shows it.
-    Actual,
-}
-
-impl Framing {
-    /// Where the cycle starts, and where a change to the region puts it
-    /// back: whatever was framed before, the region that was just drawn or
-    /// moved is what the next press should show.
-    pub(super) const FIRST: Framing = Framing::Region(Fit::Whole);
-
-    fn next(self) -> Framing {
-        match self {
-            Framing::Region(Fit::Whole) => Framing::Region(Fit::Fill),
-            Framing::Region(Fit::Fill) => Framing::Picture(Fit::Whole),
-            Framing::Picture(Fit::Whole) => Framing::Picture(Fit::Fill),
-            Framing::Picture(Fit::Fill) => Framing::Actual,
-            Framing::Actual => Framing::Region(Fit::Whole),
-        }
-    }
-}
-
-/// The hold a drag on the picture has on the region, from the press to the
-/// release: what was taken hold of, the region as it was when it was, and
-/// where the press was in image pixels. Each frame of the drag remakes the
-/// region from these and the hand's place, rather than from the frame
-/// before, so nothing accumulates.
-pub(super) struct Grabbing {
-    grab: Grab,
-    origin: Option<Region>,
-    from: [f32; 2],
-}
-
-impl Grabbing {
-    /// What the drag has hold of, for the frame to know which of the
-    /// picture's gestures it is reading.
-    pub(super) fn grab(&self) -> Grab {
-        self.grab
-    }
 }
 
 impl Pointer {
@@ -1697,7 +1647,7 @@ impl App {
         // A region on screen takes the keys that move, fit and copy the
         // picture: the picture is what is being looked at, and the region is
         // what is being done to it.
-        if let Selection::Shown(region) = self.selection
+        if let Selection::Shown(region) = self.marking.selection
             && let Some(effect) = self.perform_on_region(region, action)
         {
             return effect;
@@ -1739,15 +1689,14 @@ impl App {
                 // the toolkit is taking the drag off the hand on this same
                 // key, and the release it sends next must find nothing to
                 // zoom to.
-                if self.zoom_box.take().is_some() {
-                    self.grabbing = None;
+                if self.marking.drop_box() {
                     return Effect::Redraw;
                 }
                 // The region after the message: a message is about what
                 // was just done, and the region is what was being done to
                 // — the one that stops being news first goes first.
-                if self.selection.is_on() {
-                    self.clear_region();
+                if self.marking.selection.is_on() {
+                    self.marking.clear();
                     return Effect::Redraw;
                 }
                 return Effect::Quit;
@@ -1965,14 +1914,16 @@ impl App {
         let image = self.image_pixels();
         Some(match action {
             Pan(direction, Edge) => {
-                self.select(region.grown(direction.side(), 1, image));
+                self.marking
+                    .select(region.grown(direction.side(), 1, image));
                 Effect::Redraw
             }
             // Left pulls the right edge in: the edge that moves lies the
             // other way from the arrow, where growing moves the one that
             // lies its way.
             ShrinkRegion(direction) => {
-                self.select(region.shrunk(direction.side().opposite(), 1));
+                self.marking
+                    .select(region.shrunk(direction.side().opposite(), 1));
                 Effect::Redraw
             }
             // The fine pan is left to the picture: a region moves by the
@@ -1984,13 +1935,13 @@ impl App {
                 // that has no edge to move the way the arrow points — an
                 // edge's own axis — rather than leaving the key dead.
                 let moved = region
-                    .nudged(self.handle, step, image)
+                    .nudged(self.marking.handle, step, image)
                     .unwrap_or_else(|| region.moved_by(step[0], step[1], image));
-                self.select(moved);
+                self.marking.select(moved);
                 Effect::Redraw
             }
             CycleFit => {
-                let framing = self.framing;
+                let framing = self.marking.framing;
                 self.animate(|view, image, viewport| match framing {
                     Framing::Region(fit) => {
                         view.fit_region(fit, region.as_f32(), image, viewport);
@@ -1998,7 +1949,7 @@ impl App {
                     Framing::Picture(fit) => view.set_fit(fit),
                     Framing::Actual => view.set_zoom(1.0, image, viewport),
                 });
-                self.framing = framing.next();
+                self.marking.framing = framing.next();
                 Effect::Redraw
             }
             CopyImage => {
@@ -2017,95 +1968,29 @@ impl App {
         })
     }
 
-    /// Puts `region` on screen. A region drawn or moved is the region the
-    /// next press of `Space` should show, wherever the cycle had got to.
-    fn select(&mut self, region: Region) {
-        self.selection = Selection::Shown(region);
-        self.framing = Framing::FIRST;
-    }
-
-    /// Whether the pointer is on the region, which is what its size and its
-    /// coordinates are written for. The hand counts as being on it for as
-    /// long as it has hold of it: a corner dragged to the edge of the image
-    /// leaves the pointer off the region it is still resizing, and the size
-    /// is exactly what is being watched then.
-    pub(super) fn over_region(&self) -> bool {
-        self.selection.region().is_some()
-            && (self.pointer.grip.is_some() || self.grabbing.is_some())
-    }
-
-    /// Takes the region off, and the mode with it.
-    pub(super) fn clear_region(&mut self) {
-        self.selection = Selection::Off;
-        self.handle = Grip::Middle;
-        self.grabbing = None;
-        self.pointer.grip = None;
-    }
-
     /// A drag on the picture has taken hold of the region — or of nothing
     /// yet, to draw one, or to draw a box to zoom to — at `at`, in image
-    /// pixels. A handle taken hold of is the current one from then on, and
-    /// a region drawn afresh starts over at the middle; a hold on the
-    /// inside is a move and nothing more, and leaves the handle where it
-    /// was.
+    /// pixels. The box is what the held key was for, and the key is spent
+    /// on it: letting go of it afterwards fits nothing.
     fn grab(&mut self, grab: Grab, at: [f32; 2]) {
-        // The box is what the held key was for, and the key is spent on it:
-        // letting go of it afterwards fits nothing.
         if grab == Grab::Zoom
             && let Space::Held { drawn } = &mut self.pointer.space
         {
             *drawn = true;
         }
-        match grab {
-            Grab::New => self.handle = Grip::Middle,
-            Grab::Handle(Grip::Inside) | Grab::Zoom => {}
-            Grab::Handle(grip) => self.handle = grip,
-        }
-        self.grabbing = Some(Grabbing {
-            grab,
-            origin: self.selection.region(),
-            from: at,
-        });
+        self.marking.grab(grab, at);
     }
 
-    /// The hand is at `to`, in image pixels: the region — or the box to
-    /// zoom to — is what the hold makes of that. A new region, or a box,
-    /// that has not yet enclosed a pixel — the hand still off the picture —
-    /// leaves things as they were.
+    /// The hand is at `to`, in image pixels.
     fn pull(&mut self, to: [f32; 2]) {
-        let Some(Grabbing { grab, origin, from }) = self.grabbing else {
-            return;
-        };
         let image = self.image_pixels();
-        let region = match (grab, origin) {
-            // The box is drawn as a new region is, but is not the
-            // selection: it is kept apart, and taken by the release.
-            (Grab::Zoom, _) => {
-                if let Some(boxed) = Region::from_corners(from, to, image) {
-                    self.zoom_box = Some(boxed);
-                }
-                return;
-            }
-            (Grab::New, _) => Region::from_corners(from, to, image),
-            (Grab::Handle(Grip::Middle | Grip::Inside), Some(origin)) => {
-                let by = |axis: usize| (to[axis] - from[axis]).round() as i64;
-                Some(origin.moved_by(by(0), by(1), image))
-            }
-            (Grab::Handle(grip), Some(origin)) => Some(origin.pulled(grip, to, image)),
-            (Grab::Handle(_), None) => None,
-        };
-        if let Some(region) = region {
-            self.select(region);
-        }
+        self.marking.pull(to, image);
     }
 
-    /// The button came up. A hold that never drew anything leaves the
-    /// region asked for, so the next drag draws it. A box dragged out is
-    /// what the view goes to: fitted whole, as a move, the way a zoom asked
-    /// for by name is.
+    /// The button came up. A box dragged out is what the view goes to:
+    /// fitted whole, as a move, the way a zoom asked for by name is.
     fn release(&mut self) {
-        self.grabbing = None;
-        if let Some(boxed) = self.zoom_box.take() {
+        if let Some(boxed) = self.marking.release() {
             self.animate(|view, image, viewport| {
                 view.fit_region(Fit::Whole, boxed.as_f32(), image, viewport);
             });
@@ -2156,7 +2041,7 @@ impl App {
     pub(super) fn conditions(&self) -> Conditions {
         let current = self.current.as_ref();
         Conditions {
-            region_selected: matches!(self.selection, Selection::Shown(_)),
+            region_selected: matches!(self.marking.selection, Selection::Shown(_)),
             several_files: self.files.len() > 1,
             animation: self.playback.is_some(),
             pages: current.is_some_and(|current| {
@@ -2205,7 +2090,7 @@ impl App {
                 );
             }
             ui::Command::OverGrip(grip) => {
-                return Effect::redraw_if(std::mem::replace(&mut self.pointer.grip, grip) != grip);
+                return Effect::redraw_if(std::mem::replace(&mut self.marking.grip, grip) != grip);
             }
             // A press owes a frame whatever it did — egui repaints the
             // button it was on for its own reasons, and the press may have
@@ -2250,7 +2135,7 @@ impl App {
                 self.view.center_on(at, image, viewport);
             }
             ui::Command::Grab { grab, at } => self.grab(grab, at),
-            ui::Command::Handle(grip) => self.handle = grip,
+            ui::Command::Handle(grip) => self.marking.handle = grip,
             ui::Command::Pull(to) => self.pull(to),
             ui::Command::Release => self.release(),
             // The chooser's own: what was typed, where the cursor went, and
@@ -2639,9 +2524,9 @@ impl App {
             // The key's own action goes through here too, so that the
             // button and `x` cannot come to mean different things.
             Control::Region => {
-                match self.selection {
-                    Selection::Off => self.selection = Selection::Armed,
-                    Selection::Armed | Selection::Shown(_) => self.clear_region(),
+                match self.marking.selection {
+                    Selection::Off => self.marking.selection = Selection::Armed,
+                    Selection::Armed | Selection::Shown(_) => self.marking.clear(),
                 }
                 Effect::Redraw
             }

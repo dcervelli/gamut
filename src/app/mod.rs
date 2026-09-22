@@ -7,6 +7,7 @@ mod gui;
 pub mod input;
 mod kept;
 mod playback;
+mod region;
 mod window;
 
 use std::path::{Path, PathBuf};
@@ -23,7 +24,6 @@ use winit::window::{Window, WindowId};
 
 use crate::image::decode;
 use crate::image::display::{Display, Headroom, Startup};
-use crate::image::region::{Grip, Region};
 use crate::image::sequence::Sequence;
 use crate::image::{DecodedImage, Stats};
 use crate::loader::{Decoded, Loader, Opened, Ready, Reload, Request, Source};
@@ -40,7 +40,7 @@ use crate::trash::Trash;
 use crate::ui::chrome::{content_area, image_viewport};
 use crate::ui::toast::{self, Level, Toasts};
 use crate::ui::tooltip::Hdr;
-use crate::ui::{self, Current, FileFacts, FrameInput, Panels, Reading, Rect, Selection};
+use crate::ui::{self, Current, FileFacts, FrameInput, Panels, Reading, Rect};
 use crate::view::{View, Viewport};
 use crate::watch::{self, Watch};
 
@@ -48,9 +48,10 @@ use chooser::{Chooser, Thumbs};
 use edits::{Edit, Renaming};
 use files::{Announce, Files};
 use gui::Gui;
-use input::{Effect, Framing, Grabbing, Pointer};
+use input::{Effect, Pointer};
 use kept::{Kept, Left, Settings};
 use playback::Playback;
+use region::Marking;
 use window::{file_label, initial_window_size, loading_title, window_title};
 
 /// What wakes the event loop from another thread.
@@ -262,24 +263,8 @@ pub struct App {
     shown: Option<Shown>,
     pointer: Pointer,
     panels: Panels,
-    /// The region on the picture: off, asked for, or drawn. What the arrows
-    /// move, `Space` fits and `Ctrl+C` copies while one is on screen.
-    selection: Selection,
-    /// The current handle of the region: the one the arrows move, and the
-    /// one lit apart from the others. The middle — the whole region — until
-    /// a handle is clicked or dragged, and again for every new region.
-    handle: Grip,
-    /// The hold a drag on the picture has on it, from the press to the
-    /// release, while the drag is the region's rather than the view's.
-    grabbing: Option<Grabbing>,
-    /// What `Space` frames next while a region is up: the region at either
-    /// fit, then the picture at either. Its own rather than the view's,
-    /// since a fit of the region is not a fit the view keeps.
-    framing: Framing,
-    /// The box being dragged out to zoom to, with `Space` held, while the
-    /// drag is under way: painted over the picture, and what the view goes
-    /// to when the drag lets go.
-    zoom_box: Option<Region>,
+    /// The region marked out on the picture, and the hand on it.
+    marking: Marking,
     /// The message about what was just done, and when it takes itself off.
     /// The one thing on screen that time alone changes.
     toasts: Toasts,
@@ -429,11 +414,7 @@ impl App {
             open_paused: paused,
             shown: None,
             pointer: Pointer::default(),
-            selection: Selection::Off,
-            handle: Grip::Middle,
-            grabbing: None,
-            framing: Framing::FIRST,
-            zoom_box: None,
+            marking: Marking::default(),
             toasts: Toasts::default(),
             copied: mpsc::channel(),
             copying: Vec::new(),
@@ -605,7 +586,7 @@ impl App {
         self.motion = None;
         self.watch = Watch::idle();
         self.openers.clear();
-        self.clear_region();
+        self.marking.clear();
         self.from_command_line = false;
         self.size_to_next = true;
         let title = self.title();
@@ -1142,13 +1123,13 @@ impl App {
                 .map(|opener| opener.name.clone())
                 .collect(),
             toast: self.toasts.showing().cloned(),
-            selection: self.selection,
-            handle: self.handle,
-            grabbing: self.grabbing.as_ref().map(Grabbing::grab),
-            over_region: self.over_region(),
+            selection: self.marking.selection,
+            handle: self.marking.handle,
+            grabbing: self.marking.grabbed(),
+            over_region: self.marking.over(),
             box_zoom: self.pointer.space != input::Space::Up,
             move_region: self.pointer.modifiers.shift_key(),
-            zoom_box: self.zoom_box,
+            zoom_box: self.marking.zoom_box(),
             transport: self.transport(),
             chooser,
             rename,
@@ -1528,7 +1509,7 @@ impl App {
         // file takes it off, and so does the file coming back a different
         // size, where the pixels it marked out are no longer the pixels.
         if stepping || !same_size {
-            self.clear_region();
+            self.marking.clear();
         }
         match &kept {
             // A picture of the same size as the one it is arriving beside is
@@ -2175,8 +2156,11 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::image::region::Region;
     use crate::image::{Stats, exif};
+    use crate::ui::Selection;
     use crate::view::Fit;
+    use region::Framing;
 
     const WINDOW: [f32; 2] = [1000.0, 700.0];
     /// The same window with nothing taken out of it, for the tests that are
@@ -2818,9 +2802,9 @@ mod tests {
         use ui::{Command, Grab};
 
         let (mut app, dir) = app_over("region", &[("a.png", 64, 48), ("b.png", 64, 48)]);
-        assert_eq!(app.selection, Selection::Off);
+        assert_eq!(app.marking.selection, Selection::Off);
         assert_eq!(app.perform(Action::ToggleRegion), Effect::Redraw);
-        assert_eq!(app.selection, Selection::Armed);
+        assert_eq!(app.marking.selection, Selection::Armed);
 
         // Drawn as a drag draws it: from the press to wherever the hand is,
         // every pixel touched taken in.
@@ -2839,33 +2823,36 @@ mod tests {
             width: 11,
             height: 11,
         };
-        assert_eq!(app.selection, Selection::Shown(region));
-        assert!(app.grabbing.is_none());
+        assert_eq!(app.marking.selection, Selection::Shown(region));
+        assert!(app.marking.grabbed().is_none());
         // The words are written while the pointer is on the region, and not
         // otherwise: no clock takes them off.
-        assert!(!app.over_region());
-        app.pointer.grip = Some(Grip::Inside);
-        assert!(app.over_region());
-        app.pointer.grip = None;
+        assert!(!app.marking.over());
+        app.marking.grip = Some(Grip::Inside);
+        assert!(app.marking.over());
+        app.marking.grip = None;
 
         // The arrows move the region and leave the view alone, at once: a
         // fresh region's current handle is its middle.
-        assert_eq!(app.handle, Grip::Middle);
+        assert_eq!(app.marking.handle, Grip::Middle);
         let (image, viewport) = (app.image_size(), app.viewport());
         let view = app.view.position(image, viewport);
         let _ = app.perform(Action::Pan(Direction::Right, PanStep::Coarse));
-        assert_eq!(app.selection, Selection::Shown(Region { x: 11, ..region }));
+        assert_eq!(
+            app.marking.selection,
+            Selection::Shown(Region { x: 11, ..region })
+        );
         assert_eq!(app.view.position(image, viewport), view);
         assert!(app.motion.is_none());
 
         // A handle clicked is the current one, and they move that instead.
         // The pointer resting on another handle does not come into it.
         let _ = app.act(Command::Handle(Grip::Edge(Side::Right)));
-        app.pointer.grip = Some(Grip::Corner(Side::Left, Side::Top));
-        assert_eq!(app.handle, Grip::Edge(Side::Right));
+        app.marking.grip = Some(Grip::Corner(Side::Left, Side::Top));
+        assert_eq!(app.marking.handle, Grip::Edge(Side::Right));
         let _ = app.perform(Action::Pan(Direction::Right, PanStep::Coarse));
         assert_eq!(
-            app.selection,
+            app.marking.selection,
             Selection::Shown(Region {
                 x: 11,
                 width: 12,
@@ -2875,7 +2862,7 @@ mod tests {
         // An arrow along that edge moves the whole region instead.
         let _ = app.perform(Action::Pan(Direction::Down, PanStep::Coarse));
         assert_eq!(
-            app.selection,
+            app.marking.selection,
             Selection::Shown(Region {
                 x: 11,
                 y: 6,
@@ -2883,7 +2870,7 @@ mod tests {
                 height: 11
             })
         );
-        app.pointer.grip = None;
+        app.marking.grip = None;
 
         // A drag on a handle makes it current too, without moving it; a
         // move of the whole by its inside leaves the handle as it was; and
@@ -2893,22 +2880,22 @@ mod tests {
             at: [16.0, 6.0],
         });
         let _ = app.act(Command::Release);
-        assert_eq!(app.handle, Grip::Edge(Side::Top));
+        assert_eq!(app.marking.handle, Grip::Edge(Side::Top));
         let _ = app.act(Command::Grab {
             grab: Grab::Handle(Grip::Inside),
             at: [16.0, 10.0],
         });
         let _ = app.act(Command::Release);
-        assert_eq!(app.handle, Grip::Edge(Side::Top));
+        assert_eq!(app.marking.handle, Grip::Edge(Side::Top));
         let _ = app.act(Command::Grab {
             grab: Grab::Handle(Grip::Middle),
             at: [16.0, 11.0],
         });
         let _ = app.act(Command::Release);
-        assert_eq!(app.handle, Grip::Middle);
+        assert_eq!(app.marking.handle, Grip::Middle);
         let _ = app.perform(Action::Pan(Direction::Up, PanStep::Coarse));
         assert_eq!(
-            app.selection,
+            app.marking.selection,
             Selection::Shown(Region {
                 x: 11,
                 y: 5,
@@ -2924,7 +2911,7 @@ mod tests {
         let view = app.view.position(image, viewport);
         let _ = app.perform(Action::Pan(Direction::Down, PanStep::Fine));
         assert_eq!(
-            app.selection,
+            app.marking.selection,
             Selection::Shown(Region {
                 x: 11,
                 y: 6,
@@ -2937,7 +2924,7 @@ mod tests {
         // Ctrl grows it that way.
         let _ = app.perform(Action::Pan(Direction::Up, PanStep::Edge));
         assert_eq!(
-            app.selection,
+            app.marking.selection,
             Selection::Shown(Region {
                 x: 11,
                 y: 5,
@@ -2948,7 +2935,7 @@ mod tests {
         // Ctrl+Shift shrinks it that way: Left brings the right edge in.
         let _ = app.perform(Action::ShrinkRegion(Direction::Left));
         assert_eq!(
-            app.selection,
+            app.marking.selection,
             Selection::Shown(Region {
                 x: 11,
                 y: 5,
@@ -2962,44 +2949,44 @@ mod tests {
         // keeps — then the picture's two fits and its actual size, and
         // round again.
         assert_eq!(app.view.fit(), Some(Fit::Whole));
-        assert_eq!(app.framing, Framing::Region(Fit::Whole));
+        assert_eq!(app.marking.framing, Framing::Region(Fit::Whole));
         let _ = app.perform(Action::CycleFit);
         assert_eq!(app.view.fit(), None);
-        assert_eq!(app.framing, Framing::Region(Fit::Fill));
+        assert_eq!(app.marking.framing, Framing::Region(Fit::Fill));
         let _ = app.perform(Action::CycleFit);
         assert_eq!(app.view.fit(), None);
-        assert_eq!(app.framing, Framing::Picture(Fit::Whole));
+        assert_eq!(app.marking.framing, Framing::Picture(Fit::Whole));
         let _ = app.perform(Action::CycleFit);
         assert_eq!(app.view.fit(), Some(Fit::Whole));
         let _ = app.perform(Action::CycleFit);
         assert_eq!(app.view.fit(), Some(Fit::Fill));
-        assert_eq!(app.framing, Framing::Actual);
+        assert_eq!(app.marking.framing, Framing::Actual);
         let _ = app.perform(Action::CycleFit);
         assert_eq!(app.view.fit(), None);
-        assert_eq!(app.framing, Framing::Region(Fit::Whole));
+        assert_eq!(app.marking.framing, Framing::Region(Fit::Whole));
         // A change to the region starts the cycle over at the region.
         let _ = app.perform(Action::CycleFit);
-        assert_eq!(app.framing, Framing::Region(Fit::Fill));
+        assert_eq!(app.marking.framing, Framing::Region(Fit::Fill));
         let _ = app.perform(Action::Pan(Direction::Left, PanStep::Coarse));
-        assert_eq!(app.framing, Framing::Region(Fit::Whole));
+        assert_eq!(app.marking.framing, Framing::Region(Fit::Whole));
 
         // Escape takes it off after the message, and before quitting.
         app.toast("Copied region.", Level::Message);
         assert_eq!(app.perform(Action::Dismiss), Effect::Redraw);
         assert!(app.toasts.showing().is_none());
-        assert!(app.selection.is_on());
+        assert!(app.marking.selection.is_on());
         assert_eq!(app.perform(Action::Dismiss), Effect::Redraw);
-        assert_eq!(app.selection, Selection::Off);
-        assert!(!app.over_region());
+        assert_eq!(app.marking.selection, Selection::Off);
+        assert!(!app.marking.over());
         assert_eq!(app.perform(Action::Dismiss), Effect::Quit);
 
         // The key with a region up takes it off too, and the arrows are the
         // view's again.
         let _ = app.perform(Action::ToggleRegion);
         draw(&mut app);
-        assert!(app.selection.region().is_some());
+        assert!(app.marking.selection.region().is_some());
         let _ = app.perform(Action::ToggleRegion);
-        assert_eq!(app.selection, Selection::Off);
+        assert_eq!(app.marking.selection, Selection::Off);
         let _ = app.perform(Action::Pan(Direction::Right, PanStep::Coarse));
         assert!(app.motion.is_some(), "a pan of the view is a move");
 
@@ -3011,7 +2998,7 @@ mod tests {
         app.step(true);
         answer(&mut app, Reload::Fresh);
         assert_eq!(app.files.index(), 1);
-        assert_eq!(app.selection, Selection::Off);
+        assert_eq!(app.marking.selection, Selection::Off);
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }
@@ -3057,7 +3044,7 @@ mod tests {
         assert_eq!(app.pointer.space, Space::Held { drawn: true });
         let _ = app.act(Command::Pull([20.9, 15.1]));
         assert_eq!(
-            app.zoom_box,
+            app.marking.zoom_box(),
             Some(Region {
                 x: 10,
                 y: 5,
@@ -3065,10 +3052,10 @@ mod tests {
                 height: 11
             })
         );
-        assert_eq!(app.selection, Selection::Off);
+        assert_eq!(app.marking.selection, Selection::Off);
         let _ = app.act(Command::Release);
-        assert_eq!(app.zoom_box, None);
-        assert!(app.grabbing.is_none());
+        assert_eq!(app.marking.zoom_box(), None);
+        assert!(app.marking.grabbed().is_none());
         assert!(app.motion.is_some(), "the zoom to the box is a move");
         assert_eq!(app.view.fit(), None);
         // Centered on the box — through whatever viewport the application
@@ -3095,12 +3082,12 @@ mod tests {
             at: [1.0, 1.0],
         });
         let _ = app.act(Command::Pull([30.0, 30.0]));
-        assert!(app.zoom_box.is_some());
+        assert!(app.marking.zoom_box().is_some());
         app.motion = None;
         let before = app.view.position(image, viewport);
         assert_eq!(app.perform(Action::Dismiss), Effect::Redraw);
-        assert_eq!(app.zoom_box, None);
-        assert!(app.grabbing.is_none());
+        assert_eq!(app.marking.zoom_box(), None);
+        assert!(app.marking.grabbed().is_none());
         let _ = app.act(Command::Release);
         assert!(app.motion.is_none());
         assert_eq!(app.view.position(image, viewport), before);
