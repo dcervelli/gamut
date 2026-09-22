@@ -108,7 +108,143 @@ pub fn encoding(encoding: Encoding) -> u32 {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::*;
+
+    const IMAGE: &str = include_str!("shaders/image.wgsl");
+    const REDUCE: &str = include_str!("shaders/reduce.wgsl");
+    const COMPOSITE: &str = include_str!("shaders/composite.wgsl");
+
+    /// The `case Nu:` arms of every `switch <selector> {` in `source`, one
+    /// set per switch in the order they appear. Each switch has a `default`
+    /// arm besides, so what a set leaves out is what the default takes.
+    fn cases(source: &str, selector: &str) -> Vec<BTreeSet<u32>> {
+        let opening = format!("switch {selector} {{");
+        let switches: Vec<_> = source
+            .match_indices(&opening)
+            .map(|(at, _)| {
+                let body = &source[at + opening.len()..];
+                let mut depth = 1;
+                let end = body
+                    .char_indices()
+                    .find(|&(_, c)| {
+                        match c {
+                            '{' => depth += 1,
+                            '}' => depth -= 1,
+                            _ => {}
+                        }
+                        depth == 0
+                    })
+                    .map(|(at, _)| at)
+                    .expect("the switch closes");
+                body[..end]
+                    .lines()
+                    .filter_map(|line| {
+                        let arm = line.trim().strip_prefix("case ")?;
+                        let digits: String = arm.chars().take_while(char::is_ascii_digit).collect();
+                        digits.parse().ok()
+                    })
+                    .collect()
+            })
+            .collect();
+        assert!(!switches.is_empty(), "no `{opening}`");
+        switches
+    }
+
+    fn set(codes: impl IntoIterator<Item = u32>) -> BTreeSet<u32> {
+        codes.into_iter().collect()
+    }
+
+    /// Both image-reading shaders switch on the layout twice over: to
+    /// premultiply, where gray and RGB have no alpha and are left to the
+    /// default, and to expand to RGBA, where RGBA is the default.
+    #[test]
+    fn the_layouts_are_the_shaders_swizzle_arms() {
+        let with_alpha = set([swizzle(Channels::GrayAlpha), swizzle(Channels::Rgba)]);
+        let expanded = set([
+            swizzle(Channels::Gray),
+            swizzle(Channels::GrayAlpha),
+            swizzle(Channels::Rgb),
+        ]);
+        assert_eq!(
+            cases(IMAGE, "params.swizzle"),
+            [with_alpha.clone(), expanded]
+        );
+        assert_eq!(cases(REDUCE, "params.swizzle"), [with_alpha]);
+    }
+
+    /// Alpha is compared rather than switched on: straight alpha is the
+    /// one mode that is multiplied through, in both shaders, and opaque the
+    /// one the image shader does not divide back out.
+    #[test]
+    fn the_alpha_modes_are_the_shaders_comparisons() {
+        let straight = format!("params.alpha_mode != {}u", alpha(AlphaMode::Straight));
+        assert!(IMAGE.contains(&straight), "{straight}");
+        assert!(REDUCE.contains(&straight), "{straight}");
+        let opaque = format!("params.alpha_mode == {}u", alpha(AlphaMode::Opaque));
+        assert!(IMAGE.contains(&opaque), "{opaque}");
+        assert_eq!(
+            level_alpha(AlphaMode::Straight),
+            alpha(AlphaMode::Premultiplied)
+        );
+    }
+
+    /// Every ramp but gray is an arm; gray is the default.
+    #[test]
+    fn the_colormaps_are_the_shaders_arms() {
+        let ramps = set(Colormap::ALL
+            .iter()
+            .filter(|map| **map != Colormap::Gray)
+            .map(|map| colormap(*map)));
+        assert_eq!(cases(IMAGE, "which"), [ramps]);
+        assert_eq!(
+            colormap(Colormap::Gray),
+            0,
+            "no false color is the default arm"
+        );
+    }
+
+    /// The curve and the pass-through are arms; the clip is the default.
+    #[test]
+    fn the_tone_maps_are_the_compositors_arms() {
+        let arms = set([
+            tone_map(ToneMap::Neutral, Headroom::None),
+            tone_map(ToneMap::None, Headroom::Above),
+        ]);
+        assert_eq!(cases(COMPOSITE, "params.tone_map"), [arms]);
+        assert_eq!(
+            tone_map(ToneMap::None, Headroom::None),
+            0,
+            "the clip is the default arm"
+        );
+        assert_eq!(
+            tone_map(ToneMap::Neutral, Headroom::Above),
+            tone_map(ToneMap::Neutral, Headroom::None),
+            "the curve is itself whatever the surface"
+        );
+    }
+
+    /// The two magnifiers are arms; the area filter is the default.
+    #[test]
+    fn the_magnifiers_are_the_shaders_arms() {
+        let arms = set([
+            resampler(2.0, Upscale::Nearest),
+            resampler(2.0, Upscale::Bicubic),
+        ]);
+        assert_eq!(cases(IMAGE, "params.resampler"), [arms]);
+        for upscale in [Upscale::Nearest, Upscale::Bicubic] {
+            assert_eq!(resampler(0.5, upscale), 0, "minifying is the default arm");
+        }
+    }
+
+    /// The two SDR-shaped encodings are arms; PQ is the default.
+    #[test]
+    fn the_encodings_are_the_compositors_arms() {
+        let arms = set([encoding(Encoding::Srgb), encoding(Encoding::ScRgbLinear)]);
+        assert_eq!(cases(COMPOSITE, "params.encoding"), [arms]);
+        assert_eq!(encoding(Encoding::Pq), 2, "PQ is the default arm");
+    }
 
     /// The two bits are the two ends, and nothing is marked while the key
     /// is up.
