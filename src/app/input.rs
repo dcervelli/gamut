@@ -2119,13 +2119,13 @@ impl App {
     /// it closes one on Escape itself, and this is what keeps the key that
     /// puts things away from quitting out from under one.
     pub(super) fn close_menus(&mut self) -> bool {
-        let Some(gui) = &self.gui else {
+        let Some(shown) = &self.shown else {
             return false;
         };
-        if !gui.ctx.any_popup_open() {
+        if !shown.gui.ctx.any_popup_open() {
             return false;
         }
-        egui::Popup::close_all(&gui.ctx);
+        egui::Popup::close_all(&shown.gui.ctx);
         true
     }
 
@@ -2736,15 +2736,16 @@ impl App {
             // stands with the cursor on the file on screen, and the first
             // rows' thumbnails are asked for ahead of the rest.
             Control::Chooser => {
-                let Some(gui) = &self.gui else {
+                let Some(shown) = &self.shown else {
                     return Effect::Nothing;
                 };
-                let open = egui::Popup::is_id_open(&gui.ctx, ui::chooser::id());
-                egui::Popup::close_all(&gui.ctx);
+                let ctx = &shown.gui.ctx;
+                let open = egui::Popup::is_id_open(ctx, ui::chooser::id());
+                egui::Popup::close_all(ctx);
                 // Nothing to choose from a list of one: the key does
                 // nothing, as the count it stands beside is not shown.
                 if !open && self.files.len() > 1 {
-                    egui::Popup::open_id(&gui.ctx, ui::chooser::id());
+                    egui::Popup::open_id(ctx, ui::chooser::id());
                     self.chooser.open(self.files.paths(), self.files.index());
                     let wanted = self.chooser.wanted(0..FIRST_ROWS, &self.thumbs);
                     self.thumbnailer.prioritize(wanted);
@@ -2754,16 +2755,17 @@ impl App {
             // The help popup: opened, or closed if it is the popup that is
             // up. Any other popup goes first, one being open at a time.
             Control::Help => {
-                let Some(gui) = &self.gui else {
+                let Some(shown) = &self.shown else {
                     return Effect::Nothing;
                 };
-                let open = egui::Popup::is_id_open(&gui.ctx, ui::help::id());
-                egui::Popup::close_all(&gui.ctx);
+                let ctx = &shown.gui.ctx;
+                let open = egui::Popup::is_id_open(ctx, ui::help::id());
+                egui::Popup::close_all(ctx);
                 // Where the window has no room to draw it the press was
                 // refused above, as the panels' are: it would be up and
                 // unseen.
                 if !open {
-                    egui::Popup::open_id(&gui.ctx, ui::help::id());
+                    egui::Popup::open_id(ctx, ui::help::id());
                 }
                 Effect::Redraw
             }

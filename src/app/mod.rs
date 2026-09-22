@@ -125,6 +125,15 @@ type CopyOutcome = Result<&'static str, String>;
 /// window tiled never does, and must not leave the window pinned.
 const SIZING_GRACE: Duration = Duration::from_secs(1);
 
+/// What there is once the window is open, made together in `resumed`.
+struct Shown {
+    /// First, so that the surface goes before the window it draws into.
+    renderer: Renderer,
+    /// The toolkit's context and its adapter to the window.
+    gui: Gui,
+    window: Arc<Window>,
+}
+
 pub struct App {
     files: Files,
     current: Option<Current>,
@@ -246,10 +255,11 @@ pub struct App {
     player_failed: bool,
     /// Whether an animation opens stopped on its first frame: `--paused`.
     open_paused: bool,
-    window: Option<Arc<Window>>,
-    renderer: Option<Renderer>,
-    /// The toolkit's context and its adapter to the window, made with them.
-    gui: Option<Gui>,
+    /// The window, the renderer drawing into it and the toolkit's context
+    /// on it, which are made together in `resumed`: one without the others
+    /// is never the case. `None` until then, and in a test, which has no
+    /// window. After the loader and the player on purpose — see `loader`.
+    shown: Option<Shown>,
     pointer: Pointer,
     panels: Panels,
     /// The region on the picture: off, asked for, or drawn. What the arrows
@@ -417,9 +427,7 @@ impl App {
             players: 0,
             player_failed: false,
             open_paused: paused,
-            window: None,
-            renderer: None,
-            gui: None,
+            shown: None,
             pointer: Pointer::default(),
             selection: Selection::Off,
             handle: Grip::Middle,
@@ -546,9 +554,10 @@ impl App {
     /// answers with nothing, since a window that could not be resized by
     /// hand afterwards would be worse than one that opened small.
     fn size_window_to(&mut self, image: [f32; 2]) {
-        let Some(window) = self.window.clone() else {
+        let Some(shown) = &mut self.shown else {
             return;
         };
+        let window = &shown.window;
         let wanted = initial_window_size(
             window.available_monitors(),
             self.monitors.as_ref(),
@@ -558,9 +567,8 @@ impl App {
         let before = window.inner_size();
         if let Some(applied) = window.request_inner_size(wanted)
             && applied != before
-            && let Some(renderer) = &mut self.renderer
         {
-            renderer.resize(applied.width, applied.height);
+            shown.renderer.resize(applied.width, applied.height);
         }
         window.set_min_inner_size(Some(wanted));
         window.set_max_inner_size(Some(wanted));
@@ -570,8 +578,9 @@ impl App {
     /// Lets go of the size the window was held to, if it was.
     fn release_size(&mut self) {
         if self.sizing.take().is_some()
-            && let Some(window) = &self.window
+            && let Some(shown) = &self.shown
         {
+            let window = &shown.window;
             window.set_min_inner_size(None::<winit::dpi::LogicalSize<u32>>);
             window.set_max_inner_size(None::<winit::dpi::LogicalSize<u32>>);
         }
@@ -599,11 +608,17 @@ impl App {
         self.clear_region();
         self.from_command_line = false;
         self.size_to_next = true;
-        if let Some(renderer) = &mut self.renderer {
-            renderer.clear_image();
+        let title = self.title();
+        if let Some(shown) = &mut self.shown {
+            shown.renderer.clear_image();
+            shown.window.set_title(&title);
         }
-        if let Some(window) = &self.window {
-            window.set_title(&self.title());
+    }
+
+    /// Puts `title` on the window, where there is one.
+    pub(super) fn set_title(&self, title: &str) {
+        if let Some(shown) = &self.shown {
+            shown.window.set_title(title);
         }
     }
 
@@ -636,9 +651,9 @@ impl App {
     /// `Esc` and a click outside close it there, and nothing here would
     /// know.
     pub(super) fn chooser_open(&self) -> bool {
-        self.gui
+        self.shown
             .as_ref()
-            .is_some_and(|gui| egui::Popup::is_id_open(&gui.ctx, ui::chooser::id()))
+            .is_some_and(|shown| egui::Popup::is_id_open(&shown.gui.ctx, ui::chooser::id()))
     }
 
     /// The list has changed — a directory read again, a paste taken in —
@@ -659,7 +674,7 @@ impl App {
     /// Puts a thumbnail in a texture for the screen to hold, or keeps it
     /// until there is a context to make one in.
     fn hold_thumb(&mut self, path: PathBuf, thumb: Thumb) {
-        let Some(gui) = &self.gui else {
+        let Some(shown) = &self.shown else {
             self.pending_thumbs.push((path, thumb));
             return;
         };
@@ -667,7 +682,7 @@ impl App {
             [thumb.width as usize, thumb.height as usize],
             &thumb.rgba,
         );
-        let texture = gui.ctx.load_texture(
+        let texture = shown.gui.ctx.load_texture(
             path.display().to_string(),
             image,
             egui::TextureOptions::LINEAR,
@@ -724,9 +739,9 @@ impl App {
     /// again whenever any of the three moves.
     fn headroom(&self) -> Headroom {
         let surface = self
-            .renderer
+            .shown
             .as_ref()
-            .is_some_and(|renderer| renderer.output().is_hdr);
+            .is_some_and(|shown| shown.renderer.output().is_hdr);
         if surface && self.monitor != Some(Mode::Sdr) && self.hdr != HdrPreference::Off {
             Headroom::Above
         } else {
@@ -748,7 +763,11 @@ impl App {
     /// ([`ui::tooltip::disabled`]) — so a dead switch cannot come to give a
     /// reason it is not dead for.
     fn hdr_state(&self) -> Hdr {
-        if !self.renderer.as_ref().is_some_and(Renderer::hdr_available) {
+        if !self
+            .shown
+            .as_ref()
+            .is_some_and(|shown| shown.renderer.hdr_available())
+        {
             return Hdr::Unsupported;
         }
         if self.monitors.as_ref().is_some_and(Monitors::speaks_modes)
@@ -775,11 +794,11 @@ impl App {
         let before = self.headroom();
         let wanted = self.surface_hdr();
         let mut changed = false;
-        if let Some(renderer) = &mut self.renderer
-            && renderer.output().is_hdr != wanted
-            && renderer.set_hdr(wanted)
+        if let Some(shown) = &mut self.shown
+            && shown.renderer.output().is_hdr != wanted
+            && shown.renderer.set_hdr(wanted)
         {
-            eprintln!("gamut: {} output", renderer.output().label);
+            eprintln!("gamut: {} output", shown.renderer.output().label);
             changed = true;
         }
         if self.headroom() != before {
@@ -799,9 +818,9 @@ impl App {
             return Effect::Nothing;
         };
         let name = self
-            .window
+            .shown
             .as_ref()
-            .and_then(|window| window.current_monitor())
+            .and_then(|shown| shown.window.current_monitor())
             .and_then(|monitor| monitor.name());
         let mode = name.as_deref().and_then(|name| monitors.mode(name));
         let headroom = name.as_deref().and_then(|name| monitors.headroom(name));
@@ -924,16 +943,16 @@ impl App {
         if let Some(size) = self.headless {
             return size;
         }
-        self.renderer
+        self.shown
             .as_ref()
-            .map(Renderer::size)
+            .map(|shown| shown.renderer.size())
             .unwrap_or([1.0, 1.0])
     }
 
     fn scale_factor(&self) -> f32 {
-        self.window
+        self.shown
             .as_ref()
-            .map(|window| window.scale_factor() as f32)
+            .map(|shown| shown.window.scale_factor() as f32)
             .unwrap_or(1.0)
     }
 
@@ -1071,7 +1090,7 @@ impl App {
     /// frame is due if one is.
     fn tick(&mut self, now: Instant) -> (Effect, Option<Instant>) {
         let mut timed = self.toasts.tick(now);
-        if self.gui.as_mut().is_some_and(|gui| gui.due(now)) {
+        if self.shown.as_mut().is_some_and(|shown| shown.gui.due(now)) {
             timed = true;
         }
         let (frame_due, next_frame) = self.tick_playback(now);
@@ -1345,8 +1364,8 @@ impl App {
         let theme = Theme::detect();
         let changed = theme != self.theme;
         self.theme = theme;
-        if changed && let Some(gui) = &self.gui {
-            gui.retint(&self.theme);
+        if changed && let Some(shown) = &self.shown {
+            shown.gui.retint(&self.theme);
         }
         Effect::redraw_if(changed)
     }
@@ -1390,9 +1409,9 @@ impl App {
         // so it follows the request rather than the pixels — including when a
         // walk moves on past one that would not decode.
         if self.current.is_none()
-            && let Some(window) = &self.window
+            && let Some(shown) = &self.shown
         {
-            window.set_title(&self.title());
+            shown.window.set_title(&self.title());
         }
     }
 
@@ -1461,7 +1480,7 @@ impl App {
         };
 
         let mut stored = None;
-        if let Some(renderer) = &mut self.renderer {
+        if let Some(renderer) = self.shown.as_mut().map(|shown| &mut shown.renderer) {
             // Already across whenever the window was open when the read
             // started, which is every file but the one named on the command
             // line. The fallback covers only that gap.
@@ -1562,9 +1581,7 @@ impl App {
             sequence,
             kept.as_ref().and_then(|kept| kept.left),
         );
-        if let Some(window) = &self.window {
-            window.set_title(&window_title(&file.path));
-        }
+        self.set_title(&window_title(&file.path));
         true
     }
 
@@ -1631,7 +1648,7 @@ impl App {
         let Some(frame) = player.read(|cache| cache.frame(head)) else {
             return;
         };
-        if let Some(renderer) = &mut self.renderer {
+        if let Some(renderer) = self.shown.as_mut().map(|shown| &mut shown.renderer) {
             match renderer.refill_image(&frame.image) {
                 Ok(Some(note)) => eprintln!("gamut: {note}"),
                 Ok(None) => {}
@@ -1763,10 +1780,7 @@ impl App {
     /// comes when the compositor is ready for one and the move plays at the
     /// display's own rate — or for what a press changed.
     fn redraw(&mut self) -> Effect {
-        let Some(window) = self.window.clone() else {
-            return Effect::Nothing;
-        };
-        if self.renderer.is_none() {
+        if self.shown.is_none() {
             return Effect::Nothing;
         }
 
@@ -1782,7 +1796,7 @@ impl App {
             self.hold_thumb(path, thumb);
         }
 
-        let scale = window.scale_factor() as f32;
+        let scale = self.scale_factor();
         let physical = self.window_size();
         let logical = [physical[0] / scale, physical[1] / scale];
         let viewport = self.viewport();
@@ -1790,13 +1804,14 @@ impl App {
         let thumbnail = self.minimap_placement(logical, scale);
         let headroom = self.headroom();
         let input = self.frame_input(logical, scale);
-
         let namer = self.namer();
-        let Some(gui) = self.gui.as_mut() else {
+        let backdrop = ui::backdrop(&self.theme);
+
+        let Some(shown) = &mut self.shown else {
             return Effect::Nothing;
         };
         let mut commands = Vec::new();
-        let (painted, textures) = gui.run(&window, |ui| {
+        let (painted, textures) = shown.gui.run(&shown.window, |ui| {
             commands = ui::show(
                 ui,
                 &input,
@@ -1815,9 +1830,6 @@ impl App {
             .map(|current| &current.display)
             .unwrap_or(&fallback);
 
-        let backdrop = ui::backdrop(&self.theme);
-
-        let renderer = self.renderer.as_mut().expect("checked above");
         let scene = Scene {
             placement,
             thumbnail,
@@ -1833,7 +1845,7 @@ impl App {
                 .and_then(|current| current.lift.as_ref())
                 .map_or(0.0, |table| table.weight()),
         };
-        match renderer.render(scene, textures) {
+        match shown.renderer.render(scene, textures) {
             Ok(()) => self.reported_error = false,
             Err(error) => {
                 if !self.reported_error {
@@ -1859,8 +1871,8 @@ impl App {
     fn settle(&mut self, effect: Effect, event_loop: &ActiveEventLoop) {
         match effect {
             Effect::Redraw => {
-                if let Some(window) = &self.window {
-                    window.request_redraw();
+                if let Some(shown) = &self.shown {
+                    shown.window.request_redraw();
                 }
             }
             Effect::Quit => event_loop.exit(),
@@ -1921,7 +1933,7 @@ impl ApplicationHandler<UserEvent> for App {
         let mut deadline = self.next_poll;
         for due in [
             self.toasts.deadline(),
-            self.gui.as_ref().and_then(Gui::deadline),
+            self.shown.as_ref().and_then(|shown| shown.gui.deadline()),
             next_frame,
             self.sizing.map(|since| since + SIZING_GRACE),
         ]
@@ -1978,7 +1990,7 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.window.is_some() {
+        if self.shown.is_some() {
             return;
         }
 
@@ -2062,9 +2074,11 @@ impl ApplicationHandler<UserEvent> for App {
         // From here on the loader uploads as well as decodes, so that
         // stepping to the next file costs the event loop nothing but the swap.
         self.loader.attach(renderer.uploader());
-        self.renderer = Some(renderer);
-        self.gui = Some(gui);
-        self.window = Some(window);
+        self.shown = Some(Shown {
+            renderer,
+            gui,
+            window,
+        });
         // The surface exists at last, so whatever was decoded before the
         // window opened can find out what it is being drawn onto. Which
         // monitor it is on is not known until it has been shown, and the
@@ -2083,14 +2097,10 @@ impl ApplicationHandler<UserEvent> for App {
         // Except for the redraw itself: egui answers `RedrawRequested` with
         // "repaint" too, meaning paint now, and a frame asked for on the
         // strength of that would be a frame asking for the next for ever.
-        let response = match (&self.gui, &self.window) {
-            (Some(_), Some(window)) => {
-                let window = window.clone();
-                let gui = self.gui.as_mut().expect("matched above");
-                Some(gui.on_event(&window, &event))
-            }
-            _ => None,
-        };
+        let response = self
+            .shown
+            .as_mut()
+            .map(|shown| shown.gui.on_event(&shown.window, &event));
         let repaint = Effect::redraw_if(
             response.as_ref().is_some_and(|response| response.repaint)
                 && !matches!(event, WindowEvent::RedrawRequested),
@@ -2100,7 +2110,7 @@ impl ApplicationHandler<UserEvent> for App {
             _ if consumed && !matches!(event, WindowEvent::RedrawRequested) => Effect::Nothing,
             WindowEvent::CloseRequested => Effect::Quit,
             WindowEvent::Resized(size) => {
-                if let Some(renderer) = &mut self.renderer {
+                if let Some(renderer) = self.shown.as_mut().map(|shown| &mut shown.renderer) {
                     renderer.resize(size.width, size.height);
                 }
                 // The compositor has answered the size the window asked

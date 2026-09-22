@@ -344,8 +344,8 @@ impl App {
             self.watch = Watch::new(to);
             current.label = super::window::file_label(to);
             current.file = super::file_facts(to);
-            if let Some(window) = &self.window {
-                window.set_title(&super::window::window_title(to));
+            if let Some(shown) = &self.shown {
+                shown.window.set_title(&super::window::window_title(to));
             }
         }
     }
