@@ -68,7 +68,7 @@ impl Gui {
             .get(&egui::ViewportId::ROOT)
             .map(|viewport| viewport.repaint_delay)
             .unwrap_or(Duration::MAX);
-        self.schedule(delay, window);
+        self.schedule(delay);
         let primitives = self.ctx.tessellate(full.shapes, full.pixels_per_point);
         (
             Painted {
@@ -80,12 +80,11 @@ impl Gui {
     }
 
     /// Takes in how soon egui wants painting again: now, at some moment, or
-    /// not until something happens.
-    fn schedule(&mut self, delay: Duration, window: &Window) {
-        self.repaint_due = if delay == Duration::ZERO {
-            window.request_redraw();
-            None
-        } else if delay == Duration::MAX {
+    /// not until something happens. Now is a moment like any other: the
+    /// loop asks `due` after every batch of events, and owes the frame from
+    /// there, as it does every other frame.
+    fn schedule(&mut self, delay: Duration) {
+        self.repaint_due = if delay == Duration::MAX {
             None
         } else {
             Some(Instant::now() + delay)

@@ -260,7 +260,10 @@ still agrees with both, so renaming either is editing the constant —
 - The interface's face has no U+2192, and the arrow the fallback supplies sits
   low, so a readout showing one thing become another uses `ui::BECOMES`.
 - Handlers return an `Effect` (`Redraw` / `Nothing` / `Quit`), never call
-  `request_redraw` themselves.
+  `request_redraw` themselves: `App::settle`, called last by each winit
+  handler, is the one place a frame is asked for, and two effects fold
+  with `Effect::also`. A helper that changes what is on screen returns an
+  `Effect` too, so that the caller cannot forget the frame it owes.
 - Docs: three directories, three audiences — see **Docs ownership** below.
 - American spelling throughout — code, comments, docs, and every word a user
   reads: `color`, `gray`, `center`, `normalize`, `license`, `behavior`,

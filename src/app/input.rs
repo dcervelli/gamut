@@ -1404,13 +1404,15 @@ pub(super) fn help_sections(conditions: &Conditions) -> Vec<ui::help::Section> {
         .collect()
 }
 
-/// What an event leaves the window owing.
+/// What an event leaves the window owing. Ordered: a frame is more than
+/// nothing, and leaving is more than a frame, which is what lets two
+/// effects fold into one with [`Effect::also`].
 #[must_use]
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Effect {
+    Nothing,
     /// The frame is out of date.
     Redraw,
-    Nothing,
     /// The user has asked to leave.
     Quit,
 }
@@ -1422,6 +1424,12 @@ impl Effect {
         } else {
             Effect::Nothing
         }
+    }
+
+    /// This effect and `other` together: a frame owed by either is owed,
+    /// and asking to leave outweighs a frame.
+    pub fn also(self, other: Effect) -> Effect {
+        self.max(other)
     }
 }
 
@@ -1683,8 +1691,8 @@ impl App {
             // The button's own press, so that the key and a press from
             // inside the popup — which is how the key arrives while the
             // popup has the keyboard — cannot come to mean different things.
-            OpenChooser => self.press(Control::Chooser),
-            ShowHelp => self.press(Control::Help),
+            OpenChooser => return self.press(Control::Chooser),
+            ShowHelp => return self.press(Control::Help),
             // A fitted image re-fits on the next frame: the viewport it is
             // measured against is the one the panels leave, and they have
             // just come or gone.
@@ -1714,13 +1722,13 @@ impl App {
                 self.panels.show_info = false;
                 return self.perform(ToggleInterface);
             }
-            ToggleHistogram => self.press(Control::Histogram),
-            ToggleLuma => self.press(Control::Luma),
-            TogglePlanes => self.press(Control::Planes),
-            ToggleLogCounts => self.press(Control::Log),
-            ToggleInfo => self.press(Control::Info),
-            ToggleMinimap => self.press(Control::Minimap),
-            ToggleGrid => self.press(Control::Grid),
+            ToggleHistogram => return self.press(Control::Histogram),
+            ToggleLuma => return self.press(Control::Luma),
+            TogglePlanes => return self.press(Control::Planes),
+            ToggleLogCounts => return self.press(Control::Log),
+            ToggleInfo => return self.press(Control::Info),
+            ToggleMinimap => return self.press(Control::Minimap),
+            ToggleGrid => return self.press(Control::Grid),
             Exposure(stops) => {
                 return self.adjust(|current, _| {
                     current.display.adjust_exposure(stops);
@@ -1765,7 +1773,7 @@ impl App {
                     true
                 });
             }
-            MarkClipped => self.press(Control::Marks),
+            MarkClipped => return self.press(Control::Marks),
             CycleColormap => {
                 return self.adjust(|current, _| {
                     if !current.image.is_gray() {
@@ -1837,8 +1845,8 @@ impl App {
                     true
                 });
             }
-            ToggleHdr => return Effect::redraw_if(self.toggle_hdr()),
-            ToggleRegion => self.press(Control::Region),
+            ToggleHdr => return self.toggle_hdr(),
+            ToggleRegion => return self.press(Control::Region),
             // Only a region shrinks, and there is none: see `perform_on_region`.
             ShrinkRegion(_) => return Effect::Nothing,
             TogglePlay => return self.toggle_play(),
@@ -1846,21 +1854,14 @@ impl App {
             PreviousFrame => return self.step_frame(-1),
             // The menu's own items, so that the key and the item cannot
             // come to mean different things.
-            Rename => self.press(Control::Rename),
-            Delete => self.press(Control::Delete),
-            Undo => self.undo(),
+            Rename => return self.press(Control::Rename),
+            Delete => return self.press(Control::Delete),
+            Undo => return self.undo(),
             // The buttons' own presses, so that the key and the button in
             // the middle of an empty window cannot come to mean different
-            // things. Nothing to draw: the dialog is the desktop's, and what
-            // it answers arrives later.
-            OpenFiles => {
-                self.press(Control::OpenFiles);
-                return Effect::Nothing;
-            }
-            OpenFolder => {
-                self.press(Control::OpenFolder);
-                return Effect::Nothing;
-            }
+            // things.
+            OpenFiles => return self.press(Control::OpenFiles),
+            OpenFolder => return self.press(Control::OpenFolder),
         }
         Effect::Redraw
     }
@@ -2096,8 +2097,8 @@ impl App {
         }
     }
 
-    /// Acts on what a pass of the interface asked for. Returns whether the
-    /// frame is now out of date.
+    /// Acts on what a pass of the interface asked for, and says what the
+    /// window owes for it.
     ///
     /// Nearly everything is a change to something drawn. The two exceptions
     /// are the readings the pass makes on every frame — whether the pointer
@@ -2106,15 +2107,21 @@ impl App {
     /// change every frame, they would have every frame asking for the
     /// next, and the window spinning at whatever rate the surface allows
     /// while nothing on it moved.
-    pub(super) fn act(&mut self, command: ui::Command) -> bool {
+    pub(super) fn act(&mut self, command: ui::Command) -> Effect {
         match command {
             ui::Command::OverImage(over) => {
-                return std::mem::replace(&mut self.pointer.over_image, over) != over;
+                return Effect::redraw_if(
+                    std::mem::replace(&mut self.pointer.over_image, over) != over,
+                );
             }
             ui::Command::OverGrip(grip) => {
-                return std::mem::replace(&mut self.pointer.grip, grip) != grip;
+                return Effect::redraw_if(std::mem::replace(&mut self.pointer.grip, grip) != grip);
             }
-            ui::Command::Press(control) => self.press(control),
+            // A press owes a frame whatever it did — egui repaints the
+            // button it was on for its own reasons, and the press may have
+            // changed what is under it — over and above what the press
+            // itself says it owes.
+            ui::Command::Press(control) => return self.press(control).also(Effect::Redraw),
             // The hand on the band under the histogram: the values that come
             // out black and white go where the handles are put, as the view
             // goes where a drag puts it. Not animated, and not a step: the
@@ -2174,7 +2181,7 @@ impl App {
                 self.thumbnailer.prioritize(wanted);
             }
         }
-        true
+        Effect::Redraw
     }
 
     /// Zooms about the pointer by `steps` notches of the wheel.
@@ -2434,28 +2441,43 @@ impl App {
         self.copies.fetch_add(1, Ordering::Relaxed) + 1
     }
 
-    /// Acts on a press. The keys that stand in for the toggles come through
-    /// here too, so that a key and a click cannot drift apart.
-    fn press(&mut self, widget: Control) {
+    /// Acts on a press, and says what the window owes for it. The keys that
+    /// stand in for the toggles come through here too, so that a key and a
+    /// click cannot drift apart.
+    pub(super) fn press(&mut self, widget: Control) -> Effect {
         match widget {
             // The key's own action, so that a press and a keystroke cannot
             // come to mean different things. Nothing is drawn differently
             // yet: the file is only being asked for, and what is on screen
             // stays until it arrives.
-            Control::Previous => self.step(false),
-            Control::Next => self.step(true),
-            Control::Minimap => self.panels.show_minimap = !self.panels.show_minimap,
+            Control::Previous => {
+                self.step(false);
+                Effect::Nothing
+            }
+            Control::Next => {
+                self.step(true);
+                Effect::Nothing
+            }
+            Control::Minimap => {
+                self.panels.show_minimap = !self.panels.show_minimap;
+                Effect::Redraw
+            }
             // Refused where the window has no room for the panel, the way the
             // surface switch refuses where there is no headroom to switch to:
             // the toggle is drawn dead, and a press on a dead control that
             // quietly set something no one could see would be worse than one
             // that does nothing.
             Control::Histogram => {
-                if self.room().histogram {
-                    self.panels.show_histogram = !self.panels.show_histogram;
+                if !self.room().histogram {
+                    return Effect::Nothing;
                 }
+                self.panels.show_histogram = !self.panels.show_histogram;
+                Effect::Redraw
             }
-            Control::Grid => self.panels.show_grid = !self.panels.show_grid,
+            Control::Grid => {
+                self.panels.show_grid = !self.panels.show_grid;
+                Effect::Redraw
+            }
             // The keys' own actions, and which of the two by the modifier
             // the keys are told apart by: a plain press hides the bars, and
             // Shift closes the panels floating over the picture on the way,
@@ -2465,12 +2487,14 @@ impl App {
                     true => ToggleInterfaceAndPanels,
                     false => ToggleInterface,
                 };
-                let _ = self.perform(action);
+                self.perform(action)
             }
             Control::Info => {
-                if self.room().info {
-                    self.panels.show_info = !self.panels.show_info;
+                if !self.room().info {
+                    return Effect::Nothing;
                 }
+                self.panels.show_info = !self.panels.show_info;
+                Effect::Redraw
             }
             // The five buttons that open a menu: the menu is egui's, and
             // opens itself on the press, so there is nothing here to do.
@@ -2478,67 +2502,96 @@ impl App {
             | Control::PixelFormat
             | Control::Copy
             | Control::OpenIn
-            | Control::FileMenu => {}
+            | Control::FileMenu => Effect::Nothing,
             // The menu of the file's own items, and the keys that do the
             // same, so that the two cannot come to mean different things;
             // and the dialog's two buttons, which `Enter` and `Esc` reach
             // through the dialog itself.
-            Control::Rename => self.open_rename(),
-            Control::Delete => self.delete_shown(),
-            Control::RenameTo => self.rename_shown(),
-            Control::CancelRename => self.cancel_rename(),
+            Control::Rename => {
+                self.open_rename();
+                Effect::Redraw
+            }
+            Control::Delete => {
+                self.delete_shown();
+                Effect::Redraw
+            }
+            Control::RenameTo => {
+                self.rename_shown();
+                Effect::Redraw
+            }
+            Control::CancelRename => {
+                self.cancel_rename();
+                Effect::Redraw
+            }
             // The two buttons in the middle of an empty window, and the
-            // keys that put up the same dialog from anywhere.
-            Control::OpenFiles => self.pick(Pick::Files),
-            Control::OpenFolder => self.pick(Pick::Folder),
+            // keys that put up the same dialog from anywhere. Nothing to
+            // draw: the dialog is the desktop's, and what it answers
+            // arrives later.
+            Control::OpenFiles => {
+                self.pick(Pick::Files);
+                Effect::Nothing
+            }
+            Control::OpenFolder => {
+                self.pick(Pick::Folder);
+                Effect::Nothing
+            }
             // An item of the open menu, by its place in the list the same
             // frame was drawn from.
-            Control::Opener(index) => self.open_in(index),
+            Control::Opener(index) => {
+                self.open_in(index);
+                Effect::Redraw
+            }
             // The action the key runs, as with the reset below: the button
             // is on screen because the clipboard was holding a picture at the
             // last look, and the paste asks it again rather than trusting
             // that. A selection that has gone in between is answered the way
             // an empty clipboard is.
-            Control::Paste => self.paste(),
+            Control::Paste => {
+                self.paste();
+                Effect::Redraw
+            }
             // Asks for a region, or takes off the one asked for or drawn.
             // The key's own action goes through here too, so that the
             // button and `x` cannot come to mean different things.
-            Control::Region => match self.selection {
-                Selection::Off => self.selection = Selection::Armed,
-                Selection::Armed | Selection::Shown(_) => self.clear_region(),
-            },
+            Control::Region => {
+                match self.selection {
+                    Selection::Off => self.selection = Selection::Armed,
+                    Selection::Armed | Selection::Shown(_) => self.clear_region(),
+                }
+                Effect::Redraw
+            }
             // The keys' own actions, so that the bar and `Enter`, `n` and
             // `N` cannot come to mean different things.
-            Control::Play => {
-                let _ = self.toggle_play();
+            Control::Play => self.toggle_play(),
+            Control::StepBack => self.step_frame(-1),
+            Control::StepForward => self.step_frame(1),
+            Control::Seek(frame) => self.seek(frame),
+            Control::Luma => {
+                self.panels.show_luma = !self.panels.show_luma;
+                Effect::Redraw
             }
-            Control::StepBack => {
-                let _ = self.step_frame(-1);
+            Control::Planes => {
+                self.panels.show_planes = !self.panels.show_planes;
+                Effect::Redraw
             }
-            Control::StepForward => {
-                let _ = self.step_frame(1);
-            }
-            Control::Seek(frame) => {
-                let _ = self.seek(frame);
-            }
-            Control::Luma => self.panels.show_luma = !self.panels.show_luma,
-            Control::Planes => self.panels.show_planes = !self.panels.show_planes,
             // The plot's own axis rather than anything about the rendering,
             // which is why the reset below leaves it alone: it is how the
             // measurement is being read, not what is being read.
-            Control::Log => self.panels.log_counts = !self.panels.log_counts,
+            Control::Log => {
+                self.panels.log_counts = !self.panels.log_counts;
+                Effect::Redraw
+            }
             // Where `w` lands too, so that the key and the button beside
             // the panel's band cannot come to mean different things.
-            Control::Marks => self.panels.mark_clipped = !self.panels.mark_clipped,
+            Control::Marks => {
+                self.panels.mark_clipped = !self.panels.mark_clipped;
+                Effect::Redraw
+            }
             // The action the key runs, rather than a second reading of what
             // "reset" means: two of them would answer differently the first
             // time either was touched, and a button and a key that disagree
             // about one word are worse than either alone.
-            Control::Reset => {
-                // The caller redraws for every press, so the effect this
-                // hands back says nothing the caller does not already know.
-                let _ = self.perform(ResetDisplay);
-            }
+            Control::Reset => self.perform(ResetDisplay),
             // A false color is a reading of one channel: the key refuses a
             // color image, and so does the button, or the two would drift.
             Control::Ramp(index) => {
@@ -2547,7 +2600,9 @@ impl App {
                     && let Some(map) = Colormap::ALL.get(index)
                 {
                     current.display.colormap = *map;
+                    return Effect::Redraw;
                 }
+                Effect::Nothing
             }
             // A window named outright rather than the next one along.
             Control::Window(index) => {
@@ -2555,7 +2610,9 @@ impl App {
                     && let Some((_, window)) = histogram::WINDOWS.get(index)
                 {
                     current.display.set_auto(*window, &current.stats);
+                    return Effect::Redraw;
                 }
+                Effect::Nothing
             }
             Control::Curve(index) => {
                 if let Some(current) = self.current.as_mut()
@@ -2563,30 +2620,36 @@ impl App {
                     && !current.display.false_colored(current.image.is_gray())
                 {
                     current.display.tone_map = *curve;
+                    return Effect::Redraw;
                 }
+                Effect::Nothing
             }
             // A cell of the zoom menu: a zoom chosen here is a move.
             Control::ZoomTo(choice) => {
                 self.animate(|view, image, viewport| choice.apply(view, image, viewport));
+                Effect::Redraw
             }
-            Control::Format(format) => self.panels.pixel_format = format,
+            Control::Format(format) => {
+                self.panels.pixel_format = format;
+                Effect::Redraw
+            }
             // An item of the menu of copies runs the key's action, as the
             // reset and the paste buttons do: what it asks for is done rather
             // than set.
-            Control::Copies(what) => {
-                let _ = self.perform(copy_action(what));
+            Control::Copies(what) => self.perform(copy_action(what)),
+            Control::Facts(copies) => {
+                self.copy_facts(copies);
+                Effect::Redraw
             }
-            Control::Facts(copies) => self.copy_facts(copies),
             // As with the reset: the key's action, so that the button and the
             // key cannot come to mean different things.
-            Control::Output => {
-                let _ = self.toggle_hdr();
-            }
-            // The cross on the message at the foot of the window. The caller
-            // redraws and re-tests the pointer, which is what takes the
-            // highlight off a button that is no longer there.
+            Control::Output => self.toggle_hdr(),
+            // The cross on the message at the foot of the window. The frame
+            // after re-tests the pointer, which is what takes the highlight
+            // off a button that is no longer there.
             Control::Dismiss => {
                 self.toasts.dismiss();
+                Effect::Redraw
             }
             // The chooser, toggled. Its open state is egui's, as a menu's is,
             // so opening it is a matter of asking egui — which closes any
@@ -2596,7 +2659,7 @@ impl App {
             // rows' thumbnails are asked for ahead of the rest.
             Control::Chooser => {
                 let Some(gui) = &self.gui else {
-                    return;
+                    return Effect::Nothing;
                 };
                 let open = egui::Popup::is_id_open(&gui.ctx, ui::chooser::id());
                 egui::Popup::close_all(&gui.ctx);
@@ -2608,12 +2671,13 @@ impl App {
                     let wanted = self.chooser.wanted(0..FIRST_ROWS, &self.thumbs);
                     self.thumbnailer.prioritize(wanted);
                 }
+                Effect::Redraw
             }
             // The help popup: opened, or closed if it is the popup that is
             // up. Any other popup goes first, one being open at a time.
             Control::Help => {
                 let Some(gui) = &self.gui else {
-                    return;
+                    return Effect::Nothing;
                 };
                 let open = egui::Popup::is_id_open(&gui.ctx, ui::help::id());
                 egui::Popup::close_all(&gui.ctx);
@@ -2622,6 +2686,7 @@ impl App {
                 if !open && self.room().help {
                     egui::Popup::open_id(&gui.ctx, ui::help::id());
                 }
+                Effect::Redraw
             }
             // A row of the chooser: the file it names, asked for as a file
             // is when it is named outright rather than stepped to. The row
@@ -2637,6 +2702,7 @@ impl App {
                     let request = self.files.go_to(index);
                     self.send(request);
                 }
+                Effect::Redraw
             }
         }
     }

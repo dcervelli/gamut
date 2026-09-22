@@ -476,8 +476,9 @@ impl App {
         portal::choose_on_thread(pick, Arc::clone(&self.picker));
     }
 
-    /// Takes in what the dialog answered.
-    fn picked(&mut self, picked: Picked) {
+    /// Takes in what the dialog answered. A frame is owed either way: the
+    /// buttons that put the dialog up were drawn dead while it was.
+    fn picked(&mut self, picked: Picked) -> Effect {
         self.picking = false;
         match picked.outcome {
             Ok(Some(paths)) => self.open_named(paths),
@@ -488,6 +489,7 @@ impl App {
                 self.toast(input::briefly(&error), Level::Error);
             }
         }
+        Effect::Redraw
     }
 
     /// Opens `named` as a command line naming them beside what was already
@@ -763,13 +765,13 @@ impl App {
     }
 
     /// Puts the surface where [`App::surface_hdr`] says and the curve where
-    /// the headroom that leaves says, and reports whether the picture
-    /// changed. Called whenever an input to either moves: the window landing
-    /// on a monitor, the monitor changing mode, the switch being pressed.
-    /// Which surface it is goes to stderr when it changes, the way the choice
-    /// at start-up does, since the bar has room for one word and the
-    /// surface's name is several.
-    fn sync_output(&mut self) -> bool {
+    /// the headroom that leaves says, and says whether the picture changed.
+    /// Called whenever an input to either moves: the window landing on a
+    /// monitor, the monitor changing mode, the switch being pressed. Which
+    /// surface it is goes to stderr when it changes, the way the choice at
+    /// start-up does, since the bar has room for one word and the surface's
+    /// name is several.
+    fn sync_output(&mut self) -> Effect {
         let before = self.headroom();
         let wanted = self.surface_hdr();
         let mut changed = false;
@@ -784,17 +786,17 @@ impl App {
             self.adopt_headroom();
             changed = true;
         }
-        changed
+        Effect::redraw_if(changed)
     }
 
     /// Reads which monitor the window is on and what the compositor says it
     /// is in, and follows a change. Cheap enough to ask after every batch of
     /// events, which is how a window carried to another monitor is noticed:
-    /// nothing else says. Returns whether anything on screen changed — the
+    /// nothing else says. Says whether anything on screen changed — the
     /// picture, or only the switch, which a monitor's mode lights or kills.
-    fn sync_monitor(&mut self) -> bool {
+    fn sync_monitor(&mut self) -> Effect {
         let Some(monitors) = &self.monitors else {
-            return false;
+            return Effect::Nothing;
         };
         let name = self
             .window
@@ -804,7 +806,7 @@ impl App {
         let mode = name.as_deref().and_then(|name| monitors.mode(name));
         let headroom = name.as_deref().and_then(|name| monitors.headroom(name));
         if mode == self.monitor && headroom == self.monitor_headroom {
-            return false;
+            return Effect::Nothing;
         }
         self.monitor_headroom = headroom;
         // Worth a line, since it is what lights the switch or kills it.
@@ -816,8 +818,8 @@ impl App {
             eprintln!("gamut: monitor {name} is in {mode} mode");
         }
         self.monitor = mode;
-        self.sync_output();
-        true
+        // The switch changed whatever the picture did.
+        self.sync_output().also(Effect::Redraw)
     }
 
     /// Re-derives the tone map for whatever is on screen, for the moment the
@@ -901,9 +903,9 @@ impl App {
     /// The curve follows the headroom, as it does when the window first
     /// opens: the switch chooses the curve the room wants for what is on
     /// screen, and `t` changes it afterwards.
-    pub(super) fn toggle_hdr(&mut self) -> bool {
+    pub(super) fn toggle_hdr(&mut self) -> Effect {
         if !self.hdr_available() {
-            return false;
+            return Effect::Nothing;
         }
         self.hdr = if self.headroom() == Headroom::Above {
             HdrPreference::Off
@@ -1035,7 +1037,7 @@ impl App {
     /// finishes: a copy of a large picture takes far longer than the wait
     /// itself, and a quarter of a second either way on a message about it is
     /// not a difference anyone can see.
-    fn poll_copies(&mut self) -> bool {
+    fn poll_copies(&mut self) -> Effect {
         let outcomes: Vec<CopyOutcome> = self.copied.1.try_iter().collect();
         let said = !outcomes.is_empty();
         for outcome in outcomes {
@@ -1044,7 +1046,39 @@ impl App {
                 Err(error) => self.toast(error, Level::Error),
             }
         }
-        said
+        Effect::redraw_if(said)
+    }
+
+    /// Everything that is asked rather than waited for, on one cadence:
+    /// the file on screen, the directories named, the desktop's theme, the
+    /// clipboard, and the copies in flight. All of them, always: each has a
+    /// watch that only advances when it is polled. Says what the window
+    /// owes for what they found; nothing between looks.
+    fn poll(&mut self, now: Instant) -> Effect {
+        if now < self.next_poll {
+            return Effect::Nothing;
+        }
+        self.next_poll = now + watch::INTERVAL;
+        self.poll_file()
+            .also(self.poll_directories())
+            .also(self.poll_theme())
+            .also(self.poll_clipboard())
+            .also(self.poll_copies())
+    }
+
+    /// The things on screen that happen because time passed rather than
+    /// because anything arrived: the message about what was just done
+    /// having been up long enough, whatever egui is waiting on — a
+    /// tooltip's delay, a hover fading — and the animation's clock, the
+    /// next frame being due. Says what the window owes, and when the next
+    /// frame is due if one is.
+    fn tick(&mut self, now: Instant) -> (Effect, Option<Instant>) {
+        let mut timed = self.toasts.tick(now);
+        if self.gui.as_mut().is_some_and(|gui| gui.due(now)) {
+            timed = true;
+        }
+        let (frame_due, next_frame) = self.tick_playback(now);
+        (Effect::redraw_if(timed || frame_due), next_frame)
     }
 
     /// Where the image is drawn, in physical pixels: what the panels leave in
@@ -1239,16 +1273,16 @@ impl App {
     /// Re-reads the file on screen if something else has written to it, which
     /// is what makes this usable next to whatever produced the image.
     ///
-    /// Returns whether the window owes a redraw, which it does when the file
+    /// Says whether the window owes a redraw, which it does when the file
     /// has gone or come back: the picture is untouched either way, and the bar
     /// is the only thing that changes.
-    fn poll_file(&mut self) -> bool {
+    fn poll_file(&mut self) -> Effect {
         // Not while a read is already in flight. A file being written
         // continuously would otherwise stack up a decode every interval, and
         // the reply already on its way carries a watch taken later than this
         // one anyway.
         if !self.files.is_idle() {
-            return false;
+            return Effect::Nothing;
         }
         let was_missing = self.watch.missing();
         if self.watch.poll()
@@ -1256,20 +1290,20 @@ impl App {
         {
             self.send(request);
         }
-        self.watch.missing() != was_missing
+        Effect::redraw_if(self.watch.missing() != was_missing)
     }
 
     /// Notices images arriving in or leaving a directory that was named on the
-    /// command line, and builds the list from it again. Returns whether the
+    /// command line, and builds the list from it again. Says whether the
     /// window owes a redraw, which it does only when the list really changed —
     /// the bar counts the files and says which of them is on screen.
-    fn poll_directories(&mut self) -> bool {
+    fn poll_directories(&mut self) -> Effect {
         // Between reads only: rebuilding moves the file on screen to a new
         // index, and a reply on its way is aimed at the old one. Nothing is
         // lost by waiting, since a watch not polled is a watch that has not
         // seen the change yet and will see it at a later look.
         if self.directories.is_empty() || !self.files.is_idle() {
-            return false;
+            return Effect::Nothing;
         }
         // Every one of them is polled, not just as far as the first that
         // fires: each has its own idea of what has settled to keep up to date.
@@ -1281,11 +1315,11 @@ impl App {
         if relisted {
             self.list_changed();
         }
-        relisted
+        Effect::redraw_if(relisted)
     }
 
     /// Notices a picture arriving on the clipboard or leaving it, which is
-    /// what puts the paste button on screen and takes it off again. Returns
+    /// what puts the paste button on screen and takes it off again. Says
     /// whether the answer changed, and so whether the window owes a redraw.
     ///
     /// Asked rather than waited for, as everything else on this tick is:
@@ -1294,22 +1328,22 @@ impl App {
     /// the interface is on screen, since the button is the only thing that
     /// depends on the answer — `` ` `` therefore stops the looking as well as
     /// hiding the button.
-    fn poll_clipboard(&mut self) -> bool {
+    fn poll_clipboard(&mut self) -> Effect {
         let offered =
             self.panels.show_ui && matches!(crate::clipboard::offered_image(), Ok(Some(_)));
         if offered == self.panels.paste {
-            return false;
+            return Effect::Nothing;
         }
         self.panels.paste = offered;
-        true
+        Effect::Redraw
     }
 
-    /// Notices that the desktop's theme has changed. Returns whether the
+    /// Notices that the desktop's theme has changed. Says whether the
     /// window owes a redraw, which it does only when the new palette actually
     /// resolves to different colors.
-    fn poll_theme(&mut self) -> bool {
+    fn poll_theme(&mut self) -> Effect {
         if !self.theme_watch.poll() {
-            return false;
+            return Effect::Nothing;
         }
         let theme = Theme::detect();
         let changed = theme != self.theme;
@@ -1317,7 +1351,7 @@ impl App {
         if changed && let Some(gui) = &self.gui {
             gui.retint(&self.theme);
         }
-        changed
+        Effect::redraw_if(changed)
     }
 
     /// What the window is called: the image on screen, the file being read
@@ -1685,11 +1719,14 @@ impl App {
 
     /// Takes in a file the loader has finished with. Held apart from the
     /// handler that receives it, since nothing here needs the event loop.
-    fn deliver(&mut self, decoded: Decoded) {
+    /// A frame is owed either way: on success for the new image, and on
+    /// failure because the bar may have been saying that a read was under
+    /// way.
+    fn deliver(&mut self, decoded: Decoded) -> Effect {
         // Anything but the newest request is a file the user has stepped past
         // while it was being read. Its pixels are correct and unwanted.
         let Some(pending) = self.files.accept(decoded.generation) else {
-            return;
+            return Effect::Nothing;
         };
 
         let index = decoded.file.index;
@@ -1720,20 +1757,20 @@ impl App {
                 }
             }
         }
-
-        // Owed either way: on success for the new image, and on failure
-        // because the bar may have been saying that a read was under way.
-        if let Some(window) = &self.window {
-            window.request_redraw();
-        }
+        Effect::Redraw
     }
 
-    fn redraw(&mut self) {
+    /// Draws one frame, and does what the interface on it asked for. Says
+    /// whether the next frame is owed already: for a move still in flight —
+    /// asked for from here rather than timed from the loop, so that it
+    /// comes when the compositor is ready for one and the move plays at the
+    /// display's own rate — or for what a press changed.
+    fn redraw(&mut self) -> Effect {
         let Some(window) = self.window.clone() else {
-            return;
+            return Effect::Nothing;
         };
         if self.renderer.is_none() {
-            return;
+            return Effect::Nothing;
         }
 
         // A move that has landed is over: what is on screen is `view`
@@ -1759,7 +1796,7 @@ impl App {
 
         let namer = self.namer();
         let Some(gui) = self.gui.as_mut() else {
-            return;
+            return Effect::Nothing;
         };
         let mut commands = Vec::new();
         let (painted, textures) = gui.run(&window, |ui| {
@@ -1812,17 +1849,25 @@ impl App {
         // What the interface asked for is done once the frame is off: it
         // was drawn from the state as it was, and the next frame shows what
         // the press did.
-        let mut changed = false;
+        let mut owed = Effect::redraw_if(self.motion.is_some());
         for command in commands {
-            changed |= self.act(command);
+            owed = owed.also(self.act(command));
         }
+        owed
+    }
 
-        // A move still in flight owes the next frame. Asked for from here
-        // rather than timed from the loop, so that it comes when the
-        // compositor is ready for one and the move plays at the display's
-        // own rate.
-        if self.motion.is_some() || changed {
-            window.request_redraw();
+    /// Pays what an event left the window owing: the frame, or the exit.
+    /// The one place a frame is asked for, called last by each of the
+    /// handlers.
+    fn settle(&mut self, effect: Effect, event_loop: &ActiveEventLoop) {
+        match effect {
+            Effect::Redraw => {
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+            }
+            Effect::Quit => event_loop.exit(),
+            Effect::Nothing => {}
         }
     }
 }
@@ -1862,47 +1907,15 @@ impl ApplicationHandler<UserEvent> for App {
     /// that a stream of events — a drag, a resize — cannot keep pushing the
     /// next look out of reach.
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        if self.sync_monitor()
-            && let Some(window) = &self.window
-        {
-            window.request_redraw();
-        }
+        let moved = self.sync_monitor();
 
         let now = Instant::now();
         // The hold on the window's size, given up unanswered.
         if self.sizing.is_some_and(|since| now >= since + SIZING_GRACE) {
             self.release_size();
         }
-        if now >= self.next_poll {
-            self.next_poll = now + watch::INTERVAL;
-            // All of them, always: each has a watch that only advances when
-            // it is polled.
-            let vanished = self.poll_file();
-            let relisted = self.poll_directories();
-            let retinted = self.poll_theme();
-            let offered = self.poll_clipboard();
-            let copied = self.poll_copies();
-            if (vanished || relisted || retinted || offered || copied)
-                && let Some(window) = &self.window
-            {
-                window.request_redraw();
-            }
-        }
-
-        // The things on screen that happen because time passed rather than
-        // because anything arrived: the message about what was just done
-        // having been up long enough, and whatever egui is waiting on — a
-        // tooltip's delay, a hover fading.
-        let mut timed = self.toasts.tick(now);
-        if self.gui.as_mut().is_some_and(|gui| gui.due(now)) {
-            timed = true;
-        }
-        // And the animation's clock: the next frame being due.
-        let (frame_due, next_frame) = self.tick_playback(now);
-        timed |= frame_due;
-        if timed && let Some(window) = &self.window {
-            window.request_redraw();
-        }
+        let polled = self.poll(now);
+        let (timed, next_frame) = self.tick(now);
 
         // Sleep until the next thing with a time on it: the file check, the
         // moment a read that is still going becomes worth mentioning, the
@@ -1920,68 +1933,51 @@ impl ApplicationHandler<UserEvent> for App {
         {
             deadline = deadline.min(due);
         }
-        match self.files.announce_slow_read(now) {
-            Announce::Waiting(due) => deadline = deadline.min(due),
-            Announce::Now => {
-                if let Some(window) = &self.window {
-                    window.request_redraw();
-                }
+        let announced = match self.files.announce_slow_read(now) {
+            Announce::Waiting(due) => {
+                deadline = deadline.min(due);
+                Effect::Nothing
             }
-            Announce::Nothing => {}
-        }
+            Announce::Now => Effect::Redraw,
+            Announce::Nothing => Effect::Nothing,
+        };
         event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
+        self.settle(moved.also(polled).also(timed).also(announced), event_loop);
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
-        match event {
+        let effect = match event {
             UserEvent::Decoded(decoded) => {
-                self.deliver(*decoded);
+                let delivered = self.deliver(*decoded);
                 // Nothing ever reached the screen and nothing else is coming:
                 // every file named on the command line failed to decode.
                 // Stop, rather than sit in an empty window with nothing on
                 // the way. A choice made in the window is answered in the
                 // window instead, which stays up for the next choice.
                 if self.showed_nothing() && self.files.is_idle() {
-                    event_loop.exit();
+                    Effect::Quit
+                } else {
+                    delivered
                 }
             }
-            UserEvent::Picked(picked) => {
-                self.picked(picked);
-                if let Some(window) = &self.window {
-                    window.request_redraw();
-                }
-            }
-            UserEvent::Monitor => {
-                if self.sync_monitor()
-                    && let Some(window) = &self.window
-                {
-                    window.request_redraw();
-                }
-            }
+            UserEvent::Picked(picked) => self.picked(picked),
+            UserEvent::Monitor => self.sync_monitor(),
             // A frame from the player of a file already stepped past is news
             // about nothing on screen.
-            UserEvent::Frame(event) => {
-                if self
-                    .player
+            UserEvent::Frame(event) => Effect::redraw_if(
+                self.player
                     .as_ref()
-                    .is_some_and(|player| player.generation == event.generation)
-                    && let Some(window) = &self.window
-                {
-                    window.request_redraw();
-                }
-            }
+                    .is_some_and(|player| player.generation == event.generation),
+            ),
             // A frame only while the chooser is up: with it closed nothing
             // on screen shows a thumbnail, and the news is kept for when it
             // opens.
             UserEvent::Thumbnail(delivered) => {
                 self.take_thumbnail(*delivered);
-                if self.chooser_open()
-                    && let Some(window) = &self.window
-                {
-                    window.request_redraw();
-                }
+                Effect::redraw_if(self.chooser_open())
             }
-        }
+        };
+        self.settle(effect, event_loop);
     }
 
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
@@ -2080,9 +2076,7 @@ impl ApplicationHandler<UserEvent> for App {
         // A first frame, asked for outright. With a file on the way its
         // arrival asks for one; a window opened on nothing has nothing
         // coming, and its buttons are owed a frame all the same.
-        if let Some(window) = &self.window {
-            window.request_redraw();
-        }
+        self.settle(Effect::Redraw, event_loop);
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -2100,13 +2094,10 @@ impl ApplicationHandler<UserEvent> for App {
             }
             _ => None,
         };
-        if let Some(response) = &response
-            && response.repaint
-            && !matches!(event, WindowEvent::RedrawRequested)
-            && let Some(window) = &self.window
-        {
-            window.request_redraw();
-        }
+        let repaint = Effect::redraw_if(
+            response.as_ref().is_some_and(|response| response.repaint)
+                && !matches!(event, WindowEvent::RedrawRequested),
+        );
         let consumed = response.is_some_and(|response| response.consumed);
         let effect = match event {
             _ if consumed && !matches!(event, WindowEvent::RedrawRequested) => Effect::Nothing,
@@ -2154,21 +2145,10 @@ impl ApplicationHandler<UserEvent> for App {
                 self.keys_lost();
                 Effect::Nothing
             }
-            WindowEvent::RedrawRequested => {
-                self.redraw();
-                Effect::Nothing
-            }
+            WindowEvent::RedrawRequested => self.redraw(),
             _ => Effect::Nothing,
         };
-        match effect {
-            Effect::Redraw => {
-                if let Some(window) = &self.window {
-                    window.request_redraw();
-                }
-            }
-            Effect::Quit => event_loop.exit(),
-            Effect::Nothing => {}
-        }
+        self.settle(repaint.also(effect), event_loop);
     }
 
     /// The loop is done. A copy that is still being prepared gets to finish
@@ -2334,7 +2314,7 @@ mod tests {
             sequence,
             page,
         });
-        app.deliver(Decoded {
+        let _ = app.deliver(Decoded {
             generation,
             file: Opened {
                 index,
@@ -2415,8 +2395,8 @@ mod tests {
         assert_eq!(app.title(), crate::PROGRAM);
         assert_eq!(app.files.len(), 0);
         assert!(app.reading().is_none());
-        assert!(!app.poll_file());
-        assert!(!app.poll_directories());
+        assert_eq!(Effect::Nothing, app.poll_file());
+        assert_eq!(Effect::Nothing, app.poll_directories());
 
         for action in [
             Action::CopyName,
@@ -2468,13 +2448,13 @@ mod tests {
 
         // Dismissed: nothing changes.
         app.picking = true;
-        app.picked(Picked { outcome: Ok(None) });
+        let _ = app.picked(Picked { outcome: Ok(None) });
         assert!(!app.picking);
         assert!(app.is_empty());
         assert!(app.toasts.showing().is_none());
 
         // The dialog could not be had: said, and the window stays empty.
-        app.picked(Picked {
+        let _ = app.picked(Picked {
             outcome: Err(anyhow::anyhow!("no portal")),
         });
         assert!(app.is_empty());
@@ -2482,7 +2462,7 @@ mod tests {
         app.toasts.dismiss();
 
         // One file: the list is that file, on its way.
-        app.picked(Picked {
+        let _ = app.picked(Picked {
             outcome: Ok(Some(vec![paths[1].clone()])),
         });
         assert!(!app.is_empty(), "a read is in flight");
@@ -2560,14 +2540,20 @@ mod tests {
     #[test]
     fn a_reading_said_again_unchanged_owes_no_frame() {
         let (mut app, dir) = app_over("readings", &[("a.png", 8, 8)]);
-        assert!(app.act(ui::Command::OverImage(true)));
-        assert!(!app.act(ui::Command::OverImage(true)));
-        assert!(app.act(ui::Command::OverImage(false)));
-        assert!(!app.act(ui::Command::OverGrip(None)));
-        assert!(app.act(ui::Command::OverGrip(Some(
-            crate::image::region::Grip::Inside
-        ))));
-        assert!(app.act(ui::Command::Press(ui::Control::Grid)));
+        assert_eq!(Effect::Redraw, app.act(ui::Command::OverImage(true)));
+        assert_eq!(Effect::Nothing, app.act(ui::Command::OverImage(true)));
+        assert_eq!(Effect::Redraw, app.act(ui::Command::OverImage(false)));
+        assert_eq!(Effect::Nothing, app.act(ui::Command::OverGrip(None)));
+        assert_eq!(
+            Effect::Redraw,
+            app.act(ui::Command::OverGrip(Some(
+                crate::image::region::Grip::Inside
+            )))
+        );
+        assert_eq!(
+            Effect::Redraw,
+            app.act(ui::Command::Press(ui::Control::Grid))
+        );
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }
 
@@ -2832,12 +2818,12 @@ mod tests {
         // Drawn as a drag draws it: from the press to wherever the hand is,
         // every pixel touched taken in.
         let draw = |app: &mut App| {
-            app.act(Command::Grab {
+            let _ = app.act(Command::Grab {
                 grab: Grab::New,
                 at: [10.2, 5.5],
             });
-            app.act(Command::Pull([20.9, 15.1]));
-            app.act(Command::Release);
+            let _ = app.act(Command::Pull([20.9, 15.1]));
+            let _ = app.act(Command::Release);
         };
         draw(&mut app);
         let region = Region {
@@ -2867,7 +2853,7 @@ mod tests {
 
         // A handle clicked is the current one, and they move that instead.
         // The pointer resting on another handle does not come into it.
-        app.act(Command::Handle(Grip::Edge(Side::Right)));
+        let _ = app.act(Command::Handle(Grip::Edge(Side::Right)));
         app.pointer.grip = Some(Grip::Corner(Side::Left, Side::Top));
         assert_eq!(app.handle, Grip::Edge(Side::Right));
         let _ = app.perform(Action::Pan(Direction::Right, PanStep::Coarse));
@@ -2895,23 +2881,23 @@ mod tests {
         // A drag on a handle makes it current too, without moving it; a
         // move of the whole by its inside leaves the handle as it was; and
         // a hold on the middle handle brings the arrows back to the whole.
-        app.act(Command::Grab {
+        let _ = app.act(Command::Grab {
             grab: Grab::Handle(Grip::Edge(Side::Top)),
             at: [16.0, 6.0],
         });
-        app.act(Command::Release);
+        let _ = app.act(Command::Release);
         assert_eq!(app.handle, Grip::Edge(Side::Top));
-        app.act(Command::Grab {
+        let _ = app.act(Command::Grab {
             grab: Grab::Handle(Grip::Inside),
             at: [16.0, 10.0],
         });
-        app.act(Command::Release);
+        let _ = app.act(Command::Release);
         assert_eq!(app.handle, Grip::Edge(Side::Top));
-        app.act(Command::Grab {
+        let _ = app.act(Command::Grab {
             grab: Grab::Handle(Grip::Middle),
             at: [16.0, 11.0],
         });
-        app.act(Command::Release);
+        let _ = app.act(Command::Release);
         assert_eq!(app.handle, Grip::Middle);
         let _ = app.perform(Action::Pan(Direction::Up, PanStep::Coarse));
         assert_eq!(
@@ -3057,12 +3043,12 @@ mod tests {
         // go of the key afterwards fits nothing.
         app.motion = None;
         let _ = app.handle_key(&space, at, Pressed);
-        app.act(Command::Grab {
+        let _ = app.act(Command::Grab {
             grab: Grab::Zoom,
             at: [10.2, 5.5],
         });
         assert_eq!(app.pointer.space, Space::Held { drawn: true });
-        app.act(Command::Pull([20.9, 15.1]));
+        let _ = app.act(Command::Pull([20.9, 15.1]));
         assert_eq!(
             app.zoom_box,
             Some(Region {
@@ -3073,7 +3059,7 @@ mod tests {
             })
         );
         assert_eq!(app.selection, Selection::Off);
-        app.act(Command::Release);
+        let _ = app.act(Command::Release);
         assert_eq!(app.zoom_box, None);
         assert!(app.grabbing.is_none());
         assert!(app.motion.is_some(), "the zoom to the box is a move");
@@ -3097,18 +3083,18 @@ mod tests {
         // off the hand on the same key, and the release that follows finds
         // nothing to zoom to.
         let _ = app.handle_key(&space, at, Pressed);
-        app.act(Command::Grab {
+        let _ = app.act(Command::Grab {
             grab: Grab::Zoom,
             at: [1.0, 1.0],
         });
-        app.act(Command::Pull([30.0, 30.0]));
+        let _ = app.act(Command::Pull([30.0, 30.0]));
         assert!(app.zoom_box.is_some());
         app.motion = None;
         let before = app.view.position(image, viewport);
         assert_eq!(app.perform(Action::Dismiss), Effect::Redraw);
         assert_eq!(app.zoom_box, None);
         assert!(app.grabbing.is_none());
-        app.act(Command::Release);
+        let _ = app.act(Command::Release);
         assert!(app.motion.is_none());
         assert_eq!(app.view.position(image, viewport), before);
         assert_eq!(app.handle_key(&space, at, Released), Effect::Redraw);
@@ -3241,11 +3227,19 @@ mod tests {
         let (mut app, dir) = opening_directory("relist", &[("a.png", 8, 8), ("b.png", 8, 8)]);
         answer(&mut app, Reload::Fresh);
         assert_eq!(app.files.len(), 2);
-        assert!(!app.poll_directories(), "nothing has happened to it");
+        assert_eq!(
+            Effect::Nothing,
+            app.poll_directories(),
+            "nothing has happened to it"
+        );
 
         write_png(&dir, "c.png", 8, 8);
-        assert!(!app.poll_directories(), "the change has not settled yet");
-        assert!(app.poll_directories());
+        assert_eq!(
+            Effect::Nothing,
+            app.poll_directories(),
+            "the change has not settled yet"
+        );
+        assert_eq!(Effect::Redraw, app.poll_directories());
         assert_eq!(app.files.len(), 3);
         assert_eq!(app.files.path(2), dir.join("c.png"));
         assert_eq!(
@@ -3255,8 +3249,12 @@ mod tests {
         );
 
         std::fs::remove_file(dir.join("b.png")).expect("we just wrote it");
-        assert!(!app.poll_directories(), "the change has not settled yet");
-        assert!(app.poll_directories());
+        assert_eq!(
+            Effect::Nothing,
+            app.poll_directories(),
+            "the change has not settled yet"
+        );
+        assert_eq!(Effect::Redraw, app.poll_directories());
         assert_eq!(app.files.len(), 2);
         assert_eq!(app.files.path(1), dir.join("c.png"));
 
@@ -3270,15 +3268,28 @@ mod tests {
     fn a_deleted_file_stays_on_screen_and_is_marked() {
         let (mut app, dir) = opening_directory("deleted", &[("a.png", 8, 8), ("b.png", 8, 8)]);
         answer(&mut app, Reload::Fresh);
-        assert!(!app.poll_file(), "nothing has happened to it");
+        assert_eq!(
+            Effect::Nothing,
+            app.poll_file(),
+            "nothing has happened to it"
+        );
         assert!(!app.watch.missing());
 
         std::fs::remove_file(dir.join("a.png")).expect("we just wrote it");
-        assert!(!app.poll_file(), "one poll into a save is not a deletion");
-        assert!(app.poll_file(), "the bar has something new to say");
+        assert_eq!(
+            Effect::Nothing,
+            app.poll_file(),
+            "one poll into a save is not a deletion"
+        );
+        assert_eq!(
+            Effect::Redraw,
+            app.poll_file(),
+            "the bar has something new to say"
+        );
         assert!(app.watch.missing());
-        assert!(
-            !app.poll_file(),
+        assert_eq!(
+            app.poll_file(),
+            Effect::Nothing,
             "and having been said once it is not said again"
         );
         assert!(app.current.is_some(), "the picture is untouched");
@@ -3286,8 +3297,8 @@ mod tests {
         // The list still names it, and still steps around it. Rebuilding it
         // changes nothing: the file on screen goes back in where it was, so
         // the count in the bar and the walk are the same as they were.
-        assert!(!app.poll_directories());
-        assert!(!app.poll_directories());
+        assert_eq!(Effect::Nothing, app.poll_directories());
+        assert_eq!(Effect::Nothing, app.poll_directories());
         assert_eq!(app.files.len(), 2);
         assert_eq!(app.files.shown_path(), Some(dir.join("a.png").as_path()));
         app.step(true);
@@ -3312,13 +3323,21 @@ mod tests {
         app.step(true);
         assert!(!app.files.is_idle());
         for _ in 0..4 {
-            assert!(!app.poll_directories(), "not while a read is in flight");
+            assert_eq!(
+                Effect::Nothing,
+                app.poll_directories(),
+                "not while a read is in flight"
+            );
         }
         assert_eq!(app.files.len(), 2);
 
         answer(&mut app, Reload::Fresh);
-        assert!(!app.poll_directories(), "the first look at the change");
-        assert!(app.poll_directories());
+        assert_eq!(
+            Effect::Nothing,
+            app.poll_directories(),
+            "the first look at the change"
+        );
+        assert_eq!(Effect::Redraw, app.poll_directories());
         assert_eq!(app.files.len(), 3);
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
@@ -3346,7 +3365,7 @@ mod tests {
         // The first file arrives late, after the user has moved past it.
         let path = app.files.path(1).to_path_buf();
         let image = decode::load(&path, app.files.overrides()).expect("we just wrote it");
-        app.deliver(Decoded {
+        let _ = app.deliver(Decoded {
             generation: overtaken,
             file: Opened {
                 index: 1,
@@ -3886,9 +3905,15 @@ mod tests {
         assert!(input.opened);
         assert!(!app.rename_input().expect("still up").opened);
 
-        assert!(app.act(ui::Command::Name("b.png".to_string())));
+        assert_eq!(
+            Effect::Redraw,
+            app.act(ui::Command::Name("b.png".to_string()))
+        );
         assert_eq!(app.rename_input().expect("up").verdict, Verdict::Taken);
-        assert!(app.act(ui::Command::Name("c.jpg".to_string())));
+        assert_eq!(
+            Effect::Redraw,
+            app.act(ui::Command::Name("c.jpg".to_string()))
+        );
         assert_eq!(
             app.rename_input().expect("up").verdict,
             Verdict::Fine(Some(ExtensionChange {
@@ -3898,13 +3923,22 @@ mod tests {
         );
 
         // Cancel changes nothing.
-        assert!(app.act(ui::Command::Press(ui::Control::CancelRename)));
+        assert_eq!(
+            Effect::Redraw,
+            app.act(ui::Command::Press(ui::Control::CancelRename))
+        );
         assert!(app.rename_input().is_none());
         assert!(dir.join("a.png").exists());
 
         let _ = app.perform(Action::Rename);
-        assert!(app.act(ui::Command::Name("c.jpg".to_string())));
-        assert!(app.act(ui::Command::Press(ui::Control::RenameTo)));
+        assert_eq!(
+            Effect::Redraw,
+            app.act(ui::Command::Name("c.jpg".to_string()))
+        );
+        assert_eq!(
+            Effect::Redraw,
+            app.act(ui::Command::Press(ui::Control::RenameTo))
+        );
         assert!(app.rename_input().is_none());
         assert!(dir.join("c.jpg").exists() && !dir.join("a.png").exists());
         assert_eq!(app.files.shown_path(), Some(dir.join("c.jpg").as_path()));
@@ -3940,9 +3974,15 @@ mod tests {
         use crate::app::input::Action;
         let (mut app, dir) = app_over("rename-race", &[("a.png", 8, 8)]);
         let _ = app.perform(Action::Rename);
-        assert!(app.act(ui::Command::Name("b.png".to_string())));
+        assert_eq!(
+            Effect::Redraw,
+            app.act(ui::Command::Name("b.png".to_string()))
+        );
         write_png(&dir, "b.png", 4, 4);
-        assert!(app.act(ui::Command::Press(ui::Control::RenameTo)));
+        assert_eq!(
+            Effect::Redraw,
+            app.act(ui::Command::Press(ui::Control::RenameTo))
+        );
         assert!(dir.join("a.png").exists());
         assert_eq!(app.files.shown_path(), Some(dir.join("a.png").as_path()));
         assert!(said(&app).contains("already there"), "{}", said(&app));
@@ -3989,7 +4029,7 @@ mod tests {
                         &namer,
                     );
                     for command in commands {
-                        app.act(command);
+                        let _ = app.act(command);
                     }
                 },
                 app,
@@ -4007,6 +4047,22 @@ mod tests {
             .get_by_role_and_label(egui::accesskit::Role::Button, label)
             .click();
         harness.run();
+    }
+
+    /// A press says what it left the window owing: a frame for a toggle,
+    /// nothing for a step — the picture stays until the file arrives — and
+    /// nothing for a panel the window has no room for, which is refused.
+    #[test]
+    fn a_press_says_what_it_owes() {
+        let (mut app, _dir) = app_over("owed", &[("a.png", 4, 3), ("b.png", 4, 3)]);
+        assert_eq!(app.press(ui::Control::Grid), Effect::Redraw);
+        assert_eq!(app.press(ui::Control::Next), Effect::Nothing);
+        // A window a pixel across has no room for the histogram.
+        assert_eq!(app.press(ui::Control::Histogram), Effect::Nothing);
+        assert!(!app.panels.show_histogram);
+        app.headless = Some(WINDOW);
+        assert_eq!(app.press(ui::Control::Histogram), Effect::Redraw);
+        assert!(app.panels.show_histogram);
     }
 
     /// A click on the interface reaches the application: the grid button,

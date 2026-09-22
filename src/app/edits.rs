@@ -22,6 +22,7 @@
 use std::path::{Path, PathBuf};
 
 use super::App;
+use super::input::Effect;
 use super::input::{Action, binding_for};
 use crate::trash::{self, Entry, Refused};
 use crate::ui::rename::{self, Verdict};
@@ -234,10 +235,10 @@ impl App {
     /// name put back on it. Either way the file it acted on is the one on
     /// screen afterwards, since the message about it is the only other
     /// sign anything happened.
-    pub(super) fn undo(&mut self) {
+    pub(super) fn undo(&mut self) -> Effect {
         let Some(edit) = self.edits.pop() else {
             self.toast("Nothing to undo.", Level::Warning);
-            return;
+            return Effect::Redraw;
         };
         match edit {
             Edit::Trashed {
@@ -258,7 +259,7 @@ impl App {
                             ),
                             Level::Warning,
                         );
-                        return;
+                        return Effect::Redraw;
                     }
                     Err(error) => {
                         let error = anyhow::Error::from(error).context(format!(
@@ -268,7 +269,7 @@ impl App {
                         ));
                         super::input::report(&error);
                         self.toast(super::input::briefly(&error), Level::Error);
-                        return;
+                        return Effect::Redraw;
                     }
                 }
                 self.renamed(&to, &from);
@@ -284,6 +285,7 @@ impl App {
                 );
             }
         }
+        Effect::Redraw
     }
 
     /// Puts a trashed file back: on disk, and on the list — where it still
