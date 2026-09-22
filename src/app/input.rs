@@ -6,7 +6,6 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use winit::event::ElementState;
@@ -2255,18 +2254,7 @@ impl App {
             None => "Copied image.",
         };
         let region = region.unwrap_or_else(|| Region::whole([image.width, image.height]));
-        let (asked, copies) = (self.claim_copy(), Arc::clone(&self.copies));
-        // How it turned out, for the message the window shows about it. Sent
-        // rather than said here: this thread has no business touching the
-        // interface, and the loop picks the outcome up on the same cadence it
-        // looks at the file and the clipboard on.
-        let outcome = self.copied.0.clone();
-
-        // Threads that have already handed their bytes over are dropped as
-        // each new copy is asked for, so the list is what is still in flight
-        // rather than every copy the session has ever made.
-        self.copying.retain(|thread| !thread.is_finished());
-        self.copying.push(std::thread::spawn(move || {
+        self.copying.spawn(move |ticket| {
             let (width, height) = (region.width, region.height);
 
             let walked = Instant::now();
@@ -2278,28 +2266,23 @@ impl App {
                 Ok(png) => png,
                 Err(error) => {
                     report(&error);
-                    let _ = outcome.send(Err(briefly(&error)));
+                    ticket.report(Err(briefly(&error)));
                     return;
                 }
             };
             timing::encoded_png(width, height, png.len(), encoded.elapsed());
 
-            // Something has been copied since this was asked for, and taking
-            // the selection now would put back a picture the user has already
-            // moved on from.
-            if copies.load(Ordering::Relaxed) != asked {
+            if ticket.superseded() {
                 return;
             }
             match clipboard::copy(&png, clipboard::PNG) {
-                Ok(()) => {
-                    let _ = outcome.send(Ok(said));
-                }
+                Ok(()) => ticket.report(Ok(said)),
                 Err(error) => {
                     report(&error);
-                    let _ = outcome.send(Err(briefly(&error)));
+                    ticket.report(Err(briefly(&error)));
                 }
             }
-        }));
+        });
     }
 
     /// Hands the file on screen to the program at `index` of the open menu.
@@ -2399,7 +2382,7 @@ impl App {
     /// a copy the user follows straight away with `q` should be on the
     /// clipboard before the window goes.
     fn copy(&mut self, content: &[u8], mime_type: &str, said: &str) {
-        self.claim_copy();
+        self.copying.claim();
         match clipboard::copy(content, mime_type) {
             Ok(()) => self.toast(said, Level::Message),
             Err(error) => {
@@ -2407,13 +2390,6 @@ impl App {
                 self.toast(briefly(&error), Level::Error);
             }
         }
-    }
-
-    /// Marks a copy as the one most recently asked for, and says which number
-    /// it is. A copy that has to go away and prepare itself compares this
-    /// against the counter when it comes back.
-    fn claim_copy(&self) -> u64 {
-        self.copies.fetch_add(1, Ordering::Relaxed) + 1
     }
 
     /// Acts on a press, and says what the window owes for it. The keys that

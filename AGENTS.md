@@ -27,6 +27,8 @@ app/           the event loop's state and winit handlers
                  next, the box being dragged out to zoom to — and the gestures, in image pixels
   chooser.rs     the file chooser's state: the query, which files fit it and where, the
                  cursor, what is known about each file, and the thumbnails the screen holds
+  copying.rs     Copying: the copies of the picture being prepared on threads of their own,
+                 each with the Ticket it reports through and tells whether it was superseded by
   input.rs       Action, KEYS table, Effect; perform() is where every key's action happens;
                  act() is where every Command from the interface happens; Namer composes tooltips from KEYS
   window.rs      opening size, titles

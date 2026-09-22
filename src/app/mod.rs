@@ -2,6 +2,7 @@
 
 mod animation;
 mod chooser;
+mod copying;
 mod edits;
 mod files;
 mod gui;
@@ -13,9 +14,6 @@ mod window;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
-use std::sync::mpsc;
-use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use winit::application::ApplicationHandler;
@@ -47,6 +45,7 @@ use crate::watch::{self, Watch};
 
 use animation::Animation;
 use chooser::{Chooser, Thumbs};
+use copying::Copying;
 use edits::{Edit, Renaming};
 use files::{Announce, Files};
 use gui::Gui;
@@ -116,10 +115,6 @@ pub struct Options {
     /// Whether an animation opens stopped on its first frame.
     pub paused: bool,
 }
-
-/// What a copy prepared on a thread of its own did: took the selection, and
-/// this is what to say about it, or failed with this much to say about it.
-type CopyOutcome = Result<&'static str, String>;
 
 /// How long the window is held to the size it asked for, waiting on the
 /// compositor to answer — see [`App::size_window_to`]. A compositor that
@@ -261,25 +256,9 @@ pub struct App {
     /// The message about what was just done, and when it takes itself off.
     /// The one thing on screen that time alone changes.
     toasts: Toasts,
-    /// How the copies being prepared on threads of their own turned out. A
-    /// copy of the picture has to walk every pixel before it can say whether
-    /// it worked, and the thread doing that has no business touching the
-    /// interface — so it sends the outcome here, and the loop picks it up on
-    /// the same cadence it looks at the file, the palette and the clipboard
-    /// on. `Err` carries the one line the window shows; the whole chain has
-    /// already gone to the terminal.
-    copied: (mpsc::Sender<CopyOutcome>, mpsc::Receiver<CopyOutcome>),
-    /// Copies of the picture still being prepared, joined before the loop
-    /// leaves. A copy is often followed straight away by `q`, and a thread
-    /// that has not yet handed its bytes over dies with the process — the
-    /// copy would go missing for no reason the user could see.
-    copying: Vec<JoinHandle<()>>,
-    /// Counts copies asked for, so that one still being prepared can tell it
-    /// has been superseded. Copying the picture takes long enough on a large
-    /// image for a second press to arrive while the first is still working,
-    /// and the clipboard should end up holding the one asked for last rather
-    /// than whichever finished last. Shared with the threads doing the work.
-    copies: Arc<AtomicU64>,
+    /// The copies of the picture being prepared on threads of their own,
+    /// and how they report back.
+    copying: Copying,
     /// Where a deleted file goes: the desktop's trash, where the file
     /// manager shows it. `None` where there is no way to find it — no home
     /// directory — in which case a deletion is refused rather than done
@@ -406,9 +385,7 @@ impl App {
             pointer: Pointer::default(),
             marking: Marking::default(),
             toasts: Toasts::default(),
-            copied: mpsc::channel(),
-            copying: Vec::new(),
-            copies: Arc::new(AtomicU64::new(0)),
+            copying: Copying::default(),
             panels: Panels {
                 show_ui: true,
                 show_histogram: histogram,
@@ -1013,7 +990,7 @@ impl App {
     /// itself, and a quarter of a second either way on a message about it is
     /// not a difference anyone can see.
     fn poll_copies(&mut self) -> Effect {
-        let outcomes: Vec<CopyOutcome> = self.copied.1.try_iter().collect();
+        let outcomes = self.copying.poll();
         let said = !outcomes.is_empty();
         for outcome in outcomes {
             match outcome {
@@ -2093,9 +2070,7 @@ impl ApplicationHandler<UserEvent> for App {
     /// down with the process, and the whole point of copying here is that it
     /// outlasts the window.
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
-        for thread in self.copying.drain(..) {
-            let _ = thread.join();
-        }
+        self.copying.join_all();
     }
 }
 
