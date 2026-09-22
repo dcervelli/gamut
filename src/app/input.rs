@@ -13,7 +13,7 @@ use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey, PhysicalKey};
 
 use super::App;
 use crate::clipboard;
-use crate::image::display::{Colormap, Startup, ToneMap};
+use crate::image::display::{Colormap, EV_STEP, Startup, ToneMap};
 use crate::image::encode;
 use crate::image::region::{Region, Side};
 use crate::loader::Source;
@@ -1214,10 +1214,10 @@ pub const KEYS: &[Binding] = &[
         help: "Exposure down / up, a quarter stop",
         when: None,
         keys: &[
-            (Char("d"), Exposure(-histogram::EV_STEP)),
-            (Char("D"), Exposure(-histogram::EV_STEP)),
-            (Char("f"), Exposure(histogram::EV_STEP)),
-            (Char("F"), Exposure(histogram::EV_STEP)),
+            (Char("d"), Exposure(-EV_STEP)),
+            (Char("D"), Exposure(-EV_STEP)),
+            (Char("f"), Exposure(EV_STEP)),
+            (Char("F"), Exposure(EV_STEP)),
         ],
     },
     // One case each: the capitals are the other handle, below.
@@ -1420,10 +1420,7 @@ impl Naming for Namer {
             // it sets.
             Tip::Exposure => (
                 vec![names(at)?],
-                [Exposure(-histogram::EV_STEP)]
-                    .into_iter()
-                    .filter_map(hint)
-                    .collect(),
+                [Exposure(-EV_STEP)].into_iter().filter_map(hint).collect(),
             ),
             // The two handles: what each is, and under it the pair of keys
             // that step it. The band between them slides the window, which
@@ -3403,7 +3400,7 @@ mod tests {
             Some(NextFile)
         );
         assert_eq!(plain("]"), Some(NextFile));
-        assert_eq!(plain("F"), Some(Exposure(histogram::EV_STEP)));
+        assert_eq!(plain("F"), Some(Exposure(EV_STEP)));
         // What is done to the file: two named keys for the trash, one for
         // the dialog, and the undo under Ctrl — the plain `z` being the
         // display's reset.

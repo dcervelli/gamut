@@ -78,7 +78,7 @@ pub enum Control {
     /// in [`crate::image::display::Colormap::ALL`].
     Ramp(usize),
     /// The two steps of the exposure row under that ramp, a quarter of a stop
-    /// each — see [`super::histogram::EV_STEP`].
+    /// each — see [`crate::image::display::EV_STEP`].
     /// One of the windows the row below those offers, by its place in
     /// [`super::histogram::WINDOWS`]. They set a window rather than showing
     /// which one is in force: the handles on the band are what say that.

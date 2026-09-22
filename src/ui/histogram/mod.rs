@@ -1,10 +1,21 @@
-//! The floating histogram panel.
+//! The floating histogram panel: its geometry, the words on it, and the
+//! header and rows it is laid out with. The plot is `plot`, the band and
+//! its handles `track`, the buttons `controls` and the exposure's slider
+//! `slider`, each a file beside this one.
 
-use egui::{
-    Align2, Color32, CursorIcon, FontId, Sense, Stroke, WidgetInfo, WidgetType, pos2, vec2,
-};
+mod controls;
+mod plot;
+mod slider;
+mod track;
 
-use crate::image::display::{AutoWindow, Colormap, Display, ToneMap};
+use controls::controls;
+use plot::{bin_across, plot};
+use slider::slider;
+use track::track;
+
+use egui::{Align2, Color32, FontId, Sense, WidgetInfo, WidgetType, pos2, vec2};
+
+use crate::image::display::{AutoWindow, Colormap, Display, EV_STEP, ToneMap};
 use crate::image::stats::BINS;
 use crate::render::Color;
 
@@ -149,11 +160,6 @@ const HANDLE_GRIP: f32 = 14.0;
 const HANDLE_RADIUS: f32 = 1.5;
 const HANDLE_RING: f32 = 1.0;
 
-/// A quarter of a stop: what one press of the exposure keys is worth, and
-/// what the slider snaps to. The model's, since the white handle snaps to
-/// it there; read through here by the key table, which is about the keys.
-pub use crate::image::display::EV_STEP;
-
 /// How far the exposure's slider runs each way, in stops. Not the whole of
 /// what the exposure can be — the keys and `--exposure` go on to the
 /// model's own limit — but the run a hand wants at a quarter of a stop to
@@ -270,36 +276,6 @@ const WHITE_LABEL: &str = "white";
 /// How far past white a value has to reach before it is marked as beyond it:
 /// a hair, so that the window's own top does not count.
 const ABOVE_WHITE: f32 = 1.0 + 1e-3;
-
-/// How the response curve is scaled up the plot: in the file's own encoding,
-/// as the bins across are, from 0 at the axis to `ceiling` at the top.
-///
-/// The ceiling is white — encoded, so that a display doing nothing draws the
-/// diagonal — except where the curve runs past it, which it does on a surface
-/// with room above white and no curve on: the top of the plot is then
-/// wherever the response gets to, and white is a line drawn across it.
-/// `white` is where that line goes, as a fraction of the plot's height, and
-/// `None` where white is the top and the line would be the plot's own edge.
-struct Scale {
-    ceiling: f32,
-    white: Option<f32>,
-}
-
-impl Scale {
-    fn new(encoded_white: f32, highest: f32) -> Self {
-        let ceiling = highest.max(encoded_white).max(f32::MIN_POSITIVE);
-        let white = encoded_white / ceiling;
-        Self {
-            ceiling,
-            white: (white < 1.0 - 1e-3).then_some(white),
-        }
-    }
-
-    /// An encoded response as a fraction of the plot's height.
-    fn up(&self, encoded: f32) -> f32 {
-        (encoded / self.ceiling).clamp(0.0, 1.0)
-    }
-}
 
 /// Where the pointer's readout goes on the label line — the middle of it —
 /// and whether the two ends of the axis still fit either side of it.
@@ -604,44 +580,6 @@ fn grip(band: Rect, x: f32) -> Rect {
     )
 }
 
-/// Where a bin's bar is drawn across the plot, from 0 at the left edge to 1
-/// at the right. The two end bins are carried out to the edges so that the
-/// shape fills the plot's width; the rest stand at their centers.
-fn bin_across(index: usize) -> f32 {
-    match index {
-        0 => 0.0,
-        last if last == BINS - 1 => 1.0,
-        _ => (index as f32 + 0.5) / BINS as f32,
-    }
-}
-
-/// How tall a bin's bar stands, from 0 on the axis to 1 at the top of the
-/// plot, against the fullest bin drawn beside it.
-///
-/// Linear is what a photograph wants and what a photo editor draws: the
-/// height of a bin is its share of the fullest one, and the shape read off
-/// the plot is the distribution itself. It is the wrong plot for measurement
-/// data, where one bin often holds most of the image — a masked sea, the
-/// surround of a scan — and flattens everything the rest of the range is
-/// doing into the axis. A value the file declares as nodata is already
-/// thrown out by [`crate::image::Stats::scan`], so the bin that does this is
-/// a background the file says nothing about. Logarithmic is that same plot
-/// with the tall bin cut down to where the short ones can be seen beside it.
-///
-/// `ln(1 + n)` rather than `ln(n)`: an empty bin stays flat on the axis,
-/// where a floored logarithm would lift it off and draw a count that is not
-/// there, and the fullest bin still reaches the top either way. What is lost
-/// is that two bars can no longer be compared by their heights — which is the
-/// switch's whole point, and why it is a switch and not the plot.
-fn bar_fraction(count: u32, peak: u32, log: bool) -> f32 {
-    let (count, peak) = (count as f32, peak.max(1) as f32);
-    if log {
-        count.ln_1p() / peak.ln_1p()
-    } else {
-        count / peak
-    }
-}
-
 /// `value` moved onto the device's own pixel grid.
 ///
 /// The interface is laid out in logical pixels, which is right for a panel
@@ -784,44 +722,27 @@ fn share_words(share: f32) -> Option<String> {
     })
 }
 
-/// The planes a column of the plot is drawn from: which of them stand this
-/// high, as a set. What the color of a stretch of the column is a function of.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-struct Cover {
-    luma: bool,
-    planes: [bool; 3],
-}
-
-/// What a stretch of a column comes out as, with `cover` standing over it:
-/// the plot's ground, the luminance plane laid over that, and the color
-/// planes screened over the lot.
-///
-/// egui has one blend, so the screening is done here, per stretch of
-/// column: the planes are the primaries on a near-black ground, so two of
-/// them give the secondary between and all three give white, which is the
-/// reading a channel histogram is looked at for.
-fn screened(theme: &Theme, luma_ink: Color, cover: Cover) -> Color32 {
-    let over = |ground: [f32; 3], ink: Color| -> [f32; 3] {
-        let alpha = ink.a as f32 / 255.0;
-        let ink = [ink.r, ink.g, ink.b].map(|channel| channel as f32 / 255.0);
-        [0, 1, 2].map(|c| ground[c] * (1.0 - alpha) + ink[c] * alpha)
-    };
-    let screen = |ground: [f32; 3], ink: Color| -> [f32; 3] {
-        let ink = [ink.r, ink.g, ink.b].map(|channel| channel as f32 / 255.0);
-        [0, 1, 2].map(|c| 1.0 - (1.0 - ground[c]) * (1.0 - ink[c]))
-    };
-    let ground = theme.plot_background;
-    let mut color = [ground.r, ground.g, ground.b].map(|channel| channel as f32 / 255.0);
-    if cover.luma {
-        color = over(color, luma_ink);
+/// A handle on a line — the band's two, and the exposure's — drawn as the
+/// same kind of thing, a value on a line: `mark`, already on the device's
+/// grid, in the accent every mark on the plot wears, or the primary ink
+/// while the hand is `on` it, ringed in the panel's ground so that it
+/// stays a shape against a band that has come round to the same color.
+/// Hollow where `t`, its place along the line, is out past either end, so
+/// that it can be taken hold of and brought back without claiming a
+/// boundary that is not there.
+fn handle(painter: &egui::Painter, theme: &Theme, grid: icon::Grid, mark: Rect, on: bool, t: f32) {
+    let ring = mark.inset(-HANDLE_RING, -HANDLE_RING);
+    painter.rect_filled(
+        area(ring),
+        HANDLE_RADIUS + HANDLE_RING,
+        theme.panel_background,
+    );
+    let ink: Color32 = if on { theme.text_primary } else { theme.accent }.into();
+    if (0.0..=1.0).contains(&t) {
+        painter.rect_filled(area(mark), HANDLE_RADIUS, ink);
+    } else {
+        outline(painter, grid, mark, grid.line_width(1.0), ink);
     }
-    for (plane, ink) in cover.planes.into_iter().zip(theme.histogram_planes) {
-        if plane {
-            color = screen(color, ink);
-        }
-    }
-    let [r, g, b] = color.map(|channel| (channel.clamp(0.0, 1.0) * 255.0).round() as u8);
-    Color32::from_rgb(r, g, b)
 }
 
 /// Draws the histogram in the top-right of `content`, the area the panels
@@ -854,320 +775,11 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, conten
         });
 }
 
-/// The plot itself: the bins, the pointer's rule, the shares clipped at
-/// either end, the band along the foot and — where the display is doing
-/// anything — the response curve over the lot.
-fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect, content: Rect) {
-    let theme = pass.theme;
-    let panels = pass.panels;
-    let input = pass.input;
-    let painter = ui.painter();
-    let scale = input.scale;
-
-    // What applies to this image: the false colors are for a single channel
-    // and the color planes are for three, and the panel leaves out whichever
-    // the display would ignore rather than drawing it dead.
-    let gray = current.image.is_gray();
-    let bars = plot_area(panel, gray);
-    painter.rect_filled(
-        area(bars.inset(-PLOT_INSET, -PLOT_INSET)),
-        PLOT_RADIUS,
-        theme.plot_background,
-    );
-
-    // Luminance always goes down first, underneath the color planes: it
-    // runs as tall as the tallest of them about as often as not, and painting
-    // it on top swamps the color the panel exists to show.
-    let plotted = &current.stats.plot;
-    let luma: Option<&[u32; BINS]> = panels.show_luma.then_some(&plotted.luma);
-    let color: &[[u32; BINS]] = match plotted.color.as_ref() {
-        Some(planes) if panels.show_planes => planes,
-        _ => &[],
-    };
-    let (axis_min, axis_max) = (plotted.min, plotted.max);
-    let span = axis_max - axis_min;
-    let transfer = current.image.color.transfer;
-    let headroom = input.headroom;
-
-    // One peak across every plane on screen, so their heights stay
-    // comparable — and only across those, so that a plane left on its own
-    // fills the plot rather than keeping the room a hidden one wanted.
-    let peak = color
-        .iter()
-        .chain(luma)
-        .flatten()
-        .copied()
-        .max()
-        .unwrap_or(1);
-    let height_of = |count: u32| bar_fraction(count, peak, panels.log_counts) * bars.height;
-
-    // Dimmed only when it is a backdrop; with the color planes off — or on
-    // a gray image, which has none — it is the plot.
-    let luma_ink = if color.is_empty() {
-        theme.histogram_luma
-    } else {
-        theme.histogram_luma.with_alpha(HISTOGRAM_LUMA_UNDER)
-    };
-
-    // One column to a bin — the bins are a logical pixel each, which is what
-    // the panel's width was fixed for — cut into stretches by the heights of
-    // the planes standing in it, each stretch filled with what the planes
-    // over it come to. On the device's grid, like every other mark here.
-    let snap = |value: f32| device(value, scale);
-    let edge = |index: usize| snap(bars.x + bars.width * index as f32 / BINS as f32);
-    for bin in 0..BINS {
-        let (left, right) = (edge(bin), edge(bin + 1));
-        let mut heights: Vec<(f32, usize)> = Vec::with_capacity(4);
-        if let Some(counts) = luma {
-            heights.push((height_of(counts[bin]), 3));
-        }
-        for (plane, counts) in color.iter().enumerate() {
-            heights.push((height_of(counts[bin]), plane));
-        }
-        heights.sort_by(|a, b| a.0.total_cmp(&b.0));
-        let mut cover = Cover {
-            luma: luma.is_some(),
-            planes: [!color.is_empty(); 3],
-        };
-        let mut from = 0.0;
-        for (height, plane) in heights {
-            let (bottom, top) = (snap(bars.bottom() - from), snap(bars.bottom() - height));
-            if top < bottom {
-                painter.rect_filled(
-                    egui::Rect::from_min_max(pos2(left, top), pos2(right, bottom)),
-                    0.0,
-                    screened(theme, luma_ink, cover),
-                );
-            }
-            from = height;
-            match plane {
-                3 => cover.luma = false,
-                plane => cover.planes[plane] = false,
-            }
-        }
-    }
-
-    // The pointer's rule: over the bins it is picking one of, and under the
-    // response curve, since where that curve runs at this value is half of
-    // what the readout above says and the line must not cover it.
-    //
-    // Full height, where the window's own marks are handles on the band. A
-    // rule standing through the plot is what a pointer wants and what a
-    // permanent annotation does not: this one is only there while it is
-    // being aimed, and it has to be followed up from the axis to the curve.
-    let marked = marked(current, content, input.cursor, input.pointer);
-    if let Some(across) = marked.map(bin_across) {
-        painter.rect_filled(
-            area(on_device(
-                Rect::new(
-                    bars.x + across * bars.width - CURSOR_WIDTH / 2.0,
-                    bars.y,
-                    CURSOR_WIDTH,
-                    bars.height,
-                ),
-                scale,
-            )),
-            0.0,
-            theme.accent.with_alpha(CURSOR_ALPHA),
-        );
-    }
-
-    if span <= 0.0 {
-        return;
-    }
-
-    // How much of the picture the window is throwing away, in the corner
-    // it is being thrown out of: the share of the pixels at or below what
-    // comes out black in the left corner, and at or above what comes out
-    // white in the right — where the surface is actually clipping them,
-    // rather than showing them or rolling them off. Only where there is a
-    // share to write, so that a corner with a number in it is news.
-    //
-    // This is the question the panel is most often opened to answer, and a
-    // spike against the edge of the plot cannot answer it: the spike says
-    // there is clipping and the number says how much.
-    let (black, white) = current.display.displayed_bounds();
-    let [below, above] = current
-        .stats
-        .plot
-        .clipped(transfer.to_encoded(black), transfer.to_encoded(white));
-    let above = if current.display.clips_white(gray, headroom) {
-        above
-    } else {
-        0.0
-    };
-    let clip_font = FontId::proportional(CLIP_TEXT);
-    for (share, right) in [(below, false), (above, true)] {
-        let Some(words) = share_words(share) else {
-            continue;
-        };
-        let width = width_of(ui, &words, CLIP_TEXT);
-        let x = if right {
-            bars.right() - CLIP_INSET - width
-        } else {
-            bars.x + CLIP_INSET
-        };
-        let text = Rect::new(x, bars.y + CLIP_INSET, width, CLIP_TEXT);
-        painter.rect_filled(
-            area(text.inset(-CLIP_PAD, -CLIP_PAD)),
-            CLIP_PAD,
-            theme.plot_background.with_alpha(CLIP_BACKING_ALPHA),
-        );
-        painter.text(
-            pos2(text.x, text.y),
-            Align2::LEFT_TOP,
-            words,
-            clip_font.clone(),
-            theme.accent.into(),
-        );
-    }
-
-    // What the display turns each value into, in a band along the foot of
-    // the plot: the bin above a cell, and the color it comes out as under it.
-    //
-    // The curve says how much and this says what of, which are different
-    // questions on a false-colored image — a curve cannot draw viridis —
-    // and the same question answered twice on a gray one, where the band is
-    // the tone curve as a wedge and the curve is it as a shape. It is where
-    // clipping stops being an inference: everything left of the window
-    // comes out black and everything right of it comes out at the top of
-    // the ramp, so the two flat runs at the ends are the range the display
-    // is throwing away, drawn at the width they occupy. The handles that
-    // set those ends are drawn over it, in [`track`].
-    let band = ramp(bars);
-    let (top, bottom) = (snap(band.y), snap(band.bottom()));
-    // A cell above white — which only a surface with room above white has,
-    // and only with no curve on — is drawn white, since the panel cannot
-    // glow, with the accent along its top edge to say that the screen does:
-    // the same ink as the handle that marks white on the band, and the run
-    // of it is how much of the axis is out past that.
-    let channels = current.image.channels();
-    let hair = 1.0 / scale;
-    for index in 0..BINS {
-        let (left, right) = (edge(index), edge(index + 1));
-        let across = (index as f32 + 0.5) / BINS as f32;
-        let value = transfer.to_linear(axis_min + across * span);
-        painter.rect_filled(
-            egui::Rect::from_min_max(pos2(left, top), pos2(right, bottom)),
-            0.0,
-            Color::from_linear(current.display.shade(value, channels, headroom)),
-        );
-        if current
-            .display
-            .response(value, channels.is_gray(), headroom)
-            > ABOVE_WHITE
-        {
-            painter.rect_filled(
-                egui::Rect::from_min_max(pos2(left, top), pos2(right, top + hair)),
-                0.0,
-                theme.accent,
-            );
-        }
-    }
-    // Outside the color rather than over it, so that the band keeps its
-    // full depth. A window left of everything makes the whole ramp black,
-    // and a black band on a dark panel is a gap in it without this. One
-    // physical pixel, snapped like the band it rings.
-    let (left, right) = (edge(0), edge(BINS));
-    outline(
-        painter,
-        icon::Grid::new(scale),
-        Rect::new(
-            left - hair,
-            top - hair,
-            right - left + 2.0 * hair,
-            bottom - top + 2.0 * hair,
-        ),
-        hair,
-        theme.border.into(),
-    );
-
-    // What the display is doing to the values underneath, drawn over them —
-    // and only where it is doing something. On a display with nothing asked
-    // of it the curve is the diagonal from corner to corner, which says
-    // nothing the axis under it does not, and a line across every plot is a
-    // line no one looks at; drawn only when it bends, or leans, it is news.
-    //
-    // The curve is the whole of what the display does, and the only part of
-    // the panel that can show a tone map at all: a shoulder is a shape, not
-    // a threshold, and there is no line that means "rolled off". The handles
-    // on the band place the two values that come out black and white,
-    // exposure included, which a curve meeting its floor tangentially
-    // cannot be read for by eye.
-    if current.display.is_identity() {
-        return;
-    }
-    // Sampled per column rather than per bin: the response is a continuous
-    // function of the value, and stepping it where the transform does not
-    // step would draw a stair that is not there.
-    //
-    // The same one check for every column, the arithmetic being the same
-    // for all of them: a window left non-finite would otherwise put NaN
-    // vertices in the buffer, which no clamp downstream can undo.
-    let (offset, gain) = current.display.transform();
-    if !(offset.is_finite() && gain.is_finite()) {
-        return;
-    }
-    let columns = bars.width.max(1.0) as usize;
-    // Decoded to run the transform on, then encoded again to be drawn: both
-    // axes are in the file's own units, so a display doing nothing would be
-    // the diagonal.
-    let responses: Vec<f32> = (0..=columns)
-        .map(|column| {
-            let across = column as f32 / columns as f32;
-            let value = transfer.to_linear(axis_min + across * span);
-            let response = current
-                .display
-                .response(value, channels.is_gray(), headroom)
-                .max(0.0);
-            transfer.to_encoded(response).max(0.0)
-        })
-        .collect();
-    // The plot's height is white, unless the response runs past it — a
-    // surface with room above white, and no curve on — in which case the
-    // top is wherever the response gets to and white is a line across the
-    // plot, so that the room above it can be seen as the room it is rather
-    // than as a clip that is not happening.
-    let highest = responses.iter().copied().fold(0.0, f32::max);
-    let plot_scale = Scale::new(transfer.to_encoded(1.0), highest);
-    if let Some(white) = plot_scale.white {
-        let y = device(bars.bottom() - white * bars.height, scale);
-        painter.rect_filled(
-            egui::Rect::from_min_size(pos2(bars.x, y), vec2(bars.width, 1.0 / scale)),
-            0.0,
-            theme.text_dim,
-        );
-        let size = TEXT_SIZE * 0.75;
-        painter.text(
-            pos2(bars.right() - 2.0, y - size * 0.3),
-            Align2::RIGHT_BOTTOM,
-            WHITE_LABEL,
-            FontId::proportional(size),
-            theme.text_dim.into(),
-        );
-    }
-    let curve: Vec<egui::Pos2> = responses
-        .iter()
-        .enumerate()
-        .map(|(column, &response)| {
-            let across = column as f32 / columns as f32;
-            pos2(
-                bars.x + across * bars.width,
-                bars.bottom() - plot_scale.up(response) * bars.height,
-            )
-        })
-        .collect();
-    painter.add(egui::Shape::line(
-        curve,
-        Stroke::new(CURVE_WIDTH, theme.accent),
-    ));
-}
-
 /// The line above the plot: what the pointer is reading, in the middle, and
 /// the two ends of the axis at its ends where they are worth writing.
 ///
 /// The middle is the words the hand on the band asked for, where it is on
-/// one — `held`, which [`track`] hands back — and otherwise the bin under
+/// one — `held`, which [`track()`] hands back — and otherwise the bin under
 /// the pointer while the pointer is over the plot: the value the bins under
 /// the rule were counted at, and what the display makes of that value,
 /// which is the height of the response curve where the rule crosses it and
@@ -1275,320 +887,6 @@ fn button(
     (response, background, ink)
 }
 
-/// The strip of buttons down the left of the panel, the handles on the
-/// band, the rows under it, and the row of false colors under its ramp.
-/// Hands back what the hand on the band wants written above the plot.
-///
-/// Drawn here rather than with the chrome's toggles because these belong to
-/// the panel: they say what the plot beside them is showing and what the band
-/// beneath them is painted with, and two of them are pictures of the very
-/// thing they switch. The one beside the band is about the picture rather
-/// than the plot — the marks on the clipped pixels — but what it marks is
-/// the band's two ends, and this is where those are looked at.
-fn controls(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, panel: Rect) -> Option<String> {
-    let theme = pass.theme;
-    let panels = pass.panels;
-    let scale = pass.input.scale;
-    let gray = current.image.is_gray();
-    let bars = plot_area(panel, gray);
-
-    for (slot, widget) in toolbar(gray).iter().enumerate() {
-        let rect = toolbar_button(panel, gray, slot);
-        let active = match widget {
-            Control::Luma => panels.show_luma,
-            Control::Planes => panels.show_planes,
-            Control::Log => panels.log_counts,
-            // The reset is never lit, where the two above it are: it does
-            // something rather than being something, and a momentary button
-            // holding a state is a button that has to explain itself.
-            _ => false,
-        };
-        let (_, background, ink) = button(pass, ui, rect, *widget, active, true, TOGGLE_RADIUS);
-        let grid = icon::Grid::new(ui.pixels_per_point());
-        let square = icon::square(grid, area(rect), ICON_SIDE);
-        let painter = ui.painter();
-        match widget {
-            // The two plane toggles are drawn here rather than taken from
-            // `ui::icon` because they are pictures of the planes themselves,
-            // each in the color that plane is plotted in — which is not
-            // something a mark drawn in one ink can be.
-            //
-            // Luminance is one plane, so it is one disc, in the neutral the
-            // plot draws that plane in.
-            Control::Luma => {
-                let place = icon::Placer::new(
-                    grid,
-                    Rect::new(square.min.x, square.min.y, square.width(), square.height()),
-                );
-                let at = place.free([GRID_MIDDLE, GRID_MIDDLE]);
-                painter.circle_filled(
-                    pos2(at[0], at[1]),
-                    place.units(LUMA_DISC),
-                    theme.histogram_luma,
-                );
-            }
-            // And the color planes are three, so they are three smaller
-            // discs, in their own colors: nothing else in the window is red,
-            // green and blue together.
-            Control::Planes => {
-                let place = icon::Placer::new(
-                    grid,
-                    Rect::new(square.min.x, square.min.y, square.width(), square.height()),
-                );
-                for (turn, plane) in theme.histogram_planes.into_iter().enumerate() {
-                    // Struck about the middle at a third of a turn each,
-                    // starting at the top, so the three read as one mark
-                    // rather than as a row.
-                    let angle = (-90.0 + 120.0 * turn as f32).to_radians();
-                    let at = place.free([
-                        GRID_MIDDLE + PLANE_ORBIT * angle.cos(),
-                        GRID_MIDDLE + PLANE_ORBIT * angle.sin(),
-                    ]);
-                    painter.circle_filled(pos2(at[0], at[1]), place.units(PLANE_DISC), plane);
-                }
-            }
-            // The count axis as a curve, which is what the switch puts it on.
-            Control::Log => icon::paint(painter, icon::SPLINE, square, ink, background),
-            // Back to the start.
-            _ => icon::paint(painter, icon::ROTATE_CCW, square, ink, background),
-        }
-    }
-
-    // The marks on the picture, beside the band whose ends they are: lit
-    // while they are on, a state to be left in as the plane toggles are.
-    // The warning sign, for what the display has thrown away.
-    {
-        let rect = marks_button(panel);
-        let (_, background, ink) = button(
-            pass,
-            ui,
-            rect,
-            Control::Marks,
-            panels.mark_clipped,
-            true,
-            TOGGLE_RADIUS,
-        );
-        let square = icon::square(
-            icon::Grid::new(ui.pixels_per_point()),
-            area(rect),
-            ICON_SIDE,
-        );
-        icon::paint(ui.painter(), icon::TRIANGLE_ALERT, square, ink, background);
-    }
-
-    let held = track(pass, ui, current, bars);
-    rows(pass, ui, current, panel);
-
-    // The false colors, each showing itself, and only where the display
-    // would act on the choice. The whole ramp rather than one color off it:
-    // a map is a sequence, and a single swatch of viridis is a green
-    // rectangle that could be anything.
-    if !gray {
-        return held;
-    }
-    for (index, map) in Colormap::ALL.into_iter().enumerate() {
-        let rect = swatch_button(bars, index);
-        let chosen = current.display.colormap() == map;
-        button(
-            pass,
-            ui,
-            rect,
-            Control::Ramp(index),
-            chosen,
-            true,
-            SWATCH_RADIUS,
-        );
-
-        // The gradient on the device's pixels, as the band above it is: a
-        // swatch is the same row of one-pixel cells, over less room.
-        let face = rect.inset(SWATCH_INSET, SWATCH_INSET);
-        let snap = |value: f32| device(value, scale);
-        let (top, bottom) = (snap(face.y), snap(face.bottom()));
-        let steps = (face.width * scale).max(1.0) as usize;
-        for step in 0..steps {
-            let edge = |step: usize| snap(face.x + face.width * step as f32 / steps as f32);
-            let (left, right) = (edge(step), edge(step + 1));
-            let t = (step as f32 + 0.5) / steps as f32;
-            ui.painter().rect_filled(
-                egui::Rect::from_min_max(pos2(left, top), pos2(right, bottom)),
-                0.0,
-                Color::from_linear(map.color(t)),
-            );
-        }
-    }
-    held
-}
-
-/// The band under the plot as the levels track it is: a handle at the value
-/// that comes out black and another at the value that comes out white, each
-/// dragged to where it should stand, and the stretch of band between them,
-/// which drags the window along the axis without changing its width. What
-/// every levels tool in every editor looks like, so that no one has to be
-/// told what the two handles do.
-///
-/// Hands back what to write above the plot while the hand is on it: the
-/// value under the handle, or the two the band runs between. Not a tooltip,
-/// which the toolkit takes down for the length of a drag, and a drag is
-/// exactly when the number is wanted.
-///
-/// The handles stand at the values that come out black and white — exposure
-/// included, since those are the two ends of the band's black run and its
-/// white run — and each puts its own value where it is dragged to, the
-/// exposure left as it is: [`Display::put_black`] and
-/// [`Display::put_white`]. A handle is dragged to the pointer rather
-/// than by it, so a drag has no memory to lose: wherever the pointer is
-/// along the axis is where the handle goes, and a hand that runs off the
-/// end of the band puts the handle at the end.
-///
-/// The window can end past what is plotted, which a few stops of exposure
-/// is enough to do; such a handle is drawn hollow at the edge it went out
-/// of, so that it can be taken hold of and brought back, and so that it
-/// does not claim a boundary the curve running on past it says is not
-/// there.
-fn track(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, bars: Rect) -> Option<String> {
-    let theme = pass.theme;
-    let scale = pass.input.scale;
-    let band = ramp(bars);
-    let plotted = &current.stats.plot;
-    let (axis_min, axis_max) = (plotted.min, plotted.max);
-    let span = axis_max - axis_min;
-    if span <= 0.0 {
-        return None;
-    }
-    let transfer = current.image.color.transfer;
-    let display = &current.display;
-    let (black, white) = display.displayed_bounds();
-    if !(black.is_finite() && white.is_finite()) {
-        return None;
-    }
-
-    // Along the band from 0 at its left end to 1 at its right, which is the
-    // plot's own axis: encoded, so that a handle stands under the bin its
-    // value was counted in.
-    let along = |value: f32| (transfer.to_encoded(value) - axis_min) / span;
-    let at = |t: f32| bars.x + t.clamp(0.0, 1.0) * bars.width;
-    let value_at = |x: f32| {
-        let t = ((x - bars.x) / bars.width).clamp(0.0, 1.0);
-        transfer.to_linear(axis_min + t * span)
-    };
-    // The least a window can be: a bin, so that the two handles cannot be
-    // dragged through each other into a window the shader would divide by.
-    let least = span / BINS as f32;
-    let (black_t, white_t) = (along(black), along(white));
-
-    let id = ui.id().with("levels");
-    // The stretch between the handles first and the handles after, so that
-    // where they overlap it is the handle that is under the pointer.
-    let between = ui.interact(area(band), id.with("window"), Sense::DRAG);
-    let black_handle = ui.interact(area(grip(band, at(black_t))), id.with("black"), Sense::DRAG);
-    let white_handle = ui.interact(area(grip(band, at(white_t))), id.with("white"), Sense::DRAG);
-    between.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "Window"));
-    black_handle.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "Black point"));
-    white_handle.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "White point"));
-
-    let mut said = None;
-    if black_handle.dragged()
-        && let Some(pointer) = black_handle.interact_pointer_pos()
-    {
-        let ceiling = transfer.to_linear(transfer.to_encoded(white) - least);
-        pass.commands
-            .push(Command::BlackPoint(value_at(pointer.x).min(ceiling)));
-    } else if white_handle.dragged()
-        && let Some(pointer) = white_handle.interact_pointer_pos()
-    {
-        let floor = transfer.to_linear(transfer.to_encoded(black) + least);
-        pass.commands
-            .push(Command::WhitePoint(value_at(pointer.x).max(floor)));
-    } else if between.dragged() {
-        // Along the axis by what the hand moved, in the axis's own units,
-        // both ends together: the width of the window is the handles'
-        // business, and the band's is where it is. Only as far as the plot
-        // goes, as the handles only go as far as the band: a window slid
-        // off what is plotted makes nothing black or nothing white, which
-        // is a lift and not a place to look. A window already wider than
-        // the plot has nowhere to slide to.
-        let room = (
-            axis_min - transfer.to_encoded(black),
-            axis_max - transfer.to_encoded(white),
-        );
-        let moved = if room.0 <= room.1 {
-            (between.drag_delta().x / bars.width * span).clamp(room.0, room.1)
-        } else {
-            0.0
-        };
-        // Short of the rounding an end that is already at the plot's edge
-        // comes back from the encoding with.
-        if moved.abs() > span * 1e-5 {
-            let slid = |value: f32| transfer.to_linear(transfer.to_encoded(value) + moved);
-            pass.commands.push(Command::Slide {
-                black: slid(black),
-                white: slid(white),
-            });
-        }
-    }
-    let on_black = black_handle.hovered() || black_handle.dragged();
-    let on_white = white_handle.hovered() || white_handle.dragged();
-    let on_band = between.hovered() || between.dragged();
-    if on_black {
-        said = Some(format!(
-            "Black at {}",
-            axis_words(current, transfer.to_encoded(black))
-        ));
-    } else if on_white {
-        said = Some(format!(
-            "White at {}",
-            axis_words(current, transfer.to_encoded(white))
-        ));
-    } else if on_band {
-        said = Some(format!(
-            "{} \u{2013} {}",
-            axis_words(current, transfer.to_encoded(black)),
-            axis_words(current, transfer.to_encoded(white))
-        ));
-    }
-    if on_black || on_white {
-        ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
-    } else if between.dragged() {
-        ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
-    } else if on_band {
-        ui.ctx().set_cursor_icon(CursorIcon::Grab);
-    }
-    pass.tooltip(between, Tip::Window, true);
-    pass.tooltip(black_handle, Tip::BlackPoint, true);
-    pass.tooltip(white_handle, Tip::WhitePoint, true);
-
-    // The handles themselves, over the band and standing up past it, in the
-    // accent every mark on the plot wears, ringed in the panel's ground so
-    // that one stays a shape against a band that has come round to the same
-    // color. Snapped to the device's grid.
-    let painter = ui.painter();
-    let grid = icon::Grid::new(scale);
-    for (t, on) in [(black_t, on_black), (white_t, on_white)] {
-        let mark = on_device(
-            Rect::new(
-                at(t) - HANDLE_WIDTH / 2.0,
-                band.y - HANDLE_REACH,
-                HANDLE_WIDTH,
-                band.height + 2.0 * HANDLE_REACH,
-            ),
-            scale,
-        );
-        let ring = mark.inset(-HANDLE_RING, -HANDLE_RING);
-        painter.rect_filled(
-            area(ring),
-            HANDLE_RADIUS + HANDLE_RING,
-            theme.panel_background,
-        );
-        let ink: Color32 = if on { theme.text_primary } else { theme.accent }.into();
-        if (0.0..=1.0).contains(&t) {
-            painter.rect_filled(area(mark), HANDLE_RADIUS, ink);
-        } else {
-            outline(painter, grid, mark, grid.line_width(1.0), ink);
-        }
-    }
-    said
-}
-
 /// The rows under the band: the exposure, the window and the curve, for
 /// every file.
 ///
@@ -1655,113 +953,6 @@ fn rows(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, panel: Rect) {
             font.clone(),
             ink,
         );
-    }
-}
-
-/// The exposure's slider: a groove with a mark at nothing, the run from
-/// there to the handle filled in the accent so that the push reads as a
-/// length and a direction before the number is read, and a handle drawn as
-/// the band's are — the same width, the same ring — since it is the same
-/// kind of thing, a value on a line.
-///
-/// Dragged to the pointer rather than by it, as the band's handles are, so
-/// that a press anywhere on the row puts the exposure there and a hand run
-/// off the end leaves it at the end. Snapped to the quarter stops the keys
-/// count in, so that the reading beside it is always one the keys could
-/// have reached. Asked for through [`Command::Exposure`], and only when it
-/// would change something, so that a hand resting still is not a frame a
-/// second.
-///
-/// The run is [`SLIDER_STOPS`] each way. An exposure past that, from the
-/// keys or `--exposure`, stands hollow at the end, as a band handle out past
-/// the plot does.
-fn slider(pass: &mut Pass, ui: &mut egui::Ui, exposure: f32, room: Rect) {
-    let theme = pass.theme;
-    let scale = pass.input.scale;
-    let grid = icon::Grid::new(scale);
-    let track = Rect::new(
-        room.x + HANDLE_GRIP / 2.0,
-        room.y,
-        room.width - HANDLE_GRIP,
-        room.height,
-    );
-    let along = |stops: f32| (stops / SLIDER_STOPS + 1.0) / 2.0;
-    let at = |t: f32| track.x + t.clamp(0.0, 1.0) * track.width;
-
-    let response = ui.interact(area(room), ui.id().with("exposure"), Sense::DRAG);
-    response.widget_info(|| WidgetInfo::slider(true, f64::from(exposure), "Exposure"));
-    if response.dragged()
-        && let Some(pointer) = response.interact_pointer_pos()
-    {
-        let t = ((pointer.x - track.x) / track.width).clamp(0.0, 1.0);
-        let asked = (((t * 2.0 - 1.0) * SLIDER_STOPS) / EV_STEP).round() * EV_STEP;
-        if asked != exposure {
-            pass.commands.push(Command::Exposure(asked));
-        }
-    }
-    let on = response.hovered() || response.dragged();
-    if on {
-        ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
-    }
-    pass.tooltip(response, Tip::Exposure, true);
-
-    // The groove, the mark at nothing, and the fill from there to the
-    // handle, each on the device's grid so that a line two pixels thick is
-    // two pixels thick.
-    let painter = ui.painter();
-    let middle = room.y + room.height / 2.0;
-    let groove = on_device(
-        Rect::new(
-            track.x,
-            middle - SLIDER_TRACK / 2.0,
-            track.width,
-            SLIDER_TRACK,
-        ),
-        scale,
-    );
-    painter.rect_filled(
-        area(groove),
-        SLIDER_TRACK / 2.0,
-        theme.text_dim.with_alpha(SLIDER_GROOVE_ALPHA),
-    );
-    let t = along(exposure);
-    let (from, to) = (at(0.5).min(at(t)), at(0.5).max(at(t)));
-    if to > from {
-        let fill = on_device(Rect::new(from, groove.y, to - from, groove.height), scale);
-        painter.rect_filled(area(fill), SLIDER_TRACK / 2.0, theme.accent);
-    }
-    let tick = on_device(
-        Rect::new(
-            at(0.5) - HANDLE_RING / 2.0,
-            middle - SLIDER_TICK,
-            HANDLE_RING,
-            2.0 * SLIDER_TICK,
-        ),
-        scale,
-    );
-    painter.rect_filled(area(tick), 0.0, theme.text_dim);
-
-    // The handle, as the band's are drawn.
-    let mark = on_device(
-        Rect::new(
-            at(t) - HANDLE_WIDTH / 2.0,
-            middle - SLIDER_HANDLE / 2.0,
-            HANDLE_WIDTH,
-            SLIDER_HANDLE,
-        ),
-        scale,
-    );
-    let ring = mark.inset(-HANDLE_RING, -HANDLE_RING);
-    painter.rect_filled(
-        area(ring),
-        HANDLE_RADIUS + HANDLE_RING,
-        theme.panel_background,
-    );
-    let ink: Color32 = if on { theme.text_primary } else { theme.accent }.into();
-    if (0.0..=1.0).contains(&t) {
-        painter.rect_filled(area(mark), HANDLE_RADIUS, ink);
-    } else {
-        outline(painter, grid, mark, grid.line_width(1.0), ink);
     }
 }
 
@@ -2147,48 +1338,6 @@ mod tests {
             [AutoWindow::Off, AutoWindow::MinMax, AutoWindow::Percentile]
         );
         assert_eq!(ToneMap::ALL.len(), 2, "one button to a choice");
-    }
-
-    /// Either way of scaling the plot draws an empty bin flat on the axis and
-    /// the fullest one at the top of it: what changes is only what the bins
-    /// between them do with the room.
-    #[test]
-    fn both_count_axes_run_from_the_axis_to_the_top_of_the_plot() {
-        for log in [false, true] {
-            assert_eq!(bar_fraction(0, 1000, log), 0.0, "an empty bin is flat");
-            assert_eq!(bar_fraction(1000, 1000, log), 1.0, "the peak fills it");
-            // A plot of nothing at all, which a blank image gives: no bar is
-            // drawn off the top of it.
-            assert_eq!(bar_fraction(0, 0, log), 0.0);
-        }
-    }
-
-    /// And the logarithm lifts the short bars towards the tall one, which is
-    /// the whole reason to reach for it: a bin holding a thousandth of what
-    /// the fullest one holds is a hair off the axis linearly, and half the
-    /// height of the plot once the axis is logarithmic.
-    #[test]
-    fn the_logarithm_lifts_the_bins_a_dominating_one_flattens() {
-        let (linear, log) = (
-            bar_fraction(1_000, 1_000_000, false),
-            bar_fraction(1_000, 1_000_000, true),
-        );
-        assert!(linear < 0.01, "{linear}");
-        assert!((0.4..0.6).contains(&log), "{log}");
-
-        // Monotone either way: a fuller bin is never drawn shorter than an
-        // emptier one, which is what keeps the shape on the plot readable as
-        // the distribution however it is scaled.
-        for log in [false, true] {
-            let heights: Vec<f32> = [0, 1, 2, 10, 500, 999, 1000]
-                .into_iter()
-                .map(|count| bar_fraction(count, 1000, log))
-                .collect();
-            assert!(
-                heights.windows(2).all(|pair| pair[0] < pair[1]),
-                "log {log}: {heights:?}"
-            );
-        }
     }
 
     /// The readout is set in the middle of the line, and the ends of the axis

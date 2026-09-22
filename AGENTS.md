@@ -44,7 +44,10 @@ ui/            lays each frame's interface out with egui; no wgpu or winit impor
   fonts.rs       the desktop's sans, bold and monospace faces, as fontconfig resolves
                  them, each with its capitals centered in egui's rows
   rect.rs        Rect, the logical-pixel rectangle the panels are placed by
-  histogram.rs / minimap.rs / grid.rs   one widget each, drawn with egui's painter
+  histogram/     the histogram panel: mod.rs its geometry, words, header and rows, plot.rs the
+                 plot, track.rs the band and its handles, controls.rs the buttons, slider.rs the
+                 exposure's slider; handle() in mod.rs is the one handle the band and the slider draw
+  minimap.rs / grid.rs   one widget each, drawn with egui's painter
   region.rs      the region marked out on the picture: where its outline and
                  eight handles go, which handle the pointer is on, and the
                  words it wears while the pointer is on it — its size at its
@@ -229,7 +232,7 @@ still agrees with both, so renaming either is editing the constant —
 | What the surface can be, SDR or HDR | `render/output.rs` chooses it; `monitor.rs` says what the monitor is in; `App::surface_hdr` and `App::headroom` put the two together, `App::sync_output` acts on them, and `App::toggle_hdr` is what the bar's `HDR` button and `o` both call |
 | A new render pass | build it from `render/gpu.rs`; add its target to `Renderer::render` |
 | Something about the display window, exposure or false color | `image/display/` (state) and `shaders/image.wgsl` / `composite.wgsl` (effect) |
-| What the histogram panel's rows hold, what a drag on its band does, or what its corners say | `ui/histogram.rs::Rows` for the three rows, which are every file's; `track` for the band and its handles, which ask through `Command::{BlackPoint, WhitePoint, Slide}` and land in `Display::put_black`, `Display::put_white` — each its own end of the window, the exposure left alone — and `Display::set_displayed_bounds`; the keys that step the handles are `Action::{StepBlack, StepWhite}`, landing in `Display::step_black`, `Display::step_white`, by `input::WINDOW_STEP`; `slider` for the exposure, which asks through `Command::Exposure` and lands in `Display::set_exposure`, `SLIDER_STOPS` being how far it runs; `Plot::clipped` for the shares in the plot's corners, and `Display::clips_white` for whether white counts. The marks `w` and the button beside the panel's band paint on the picture are `marks` in `shaders/image.wgsl`, `shader_codes::marks`, and `Panels::mark_clipped`, toggled in `App::press` by `Control::Marks` |
+| What the histogram panel's rows hold, what a drag on its band does, or what its corners say | `ui/histogram/mod.rs::Rows` for the three rows, which are every file's; `ui/histogram/track.rs` for the band and its handles, which ask through `Command::{BlackPoint, WhitePoint, Slide}` and land in `Display::put_black`, `Display::put_white` — each its own end of the window, the exposure left alone — and `Display::set_displayed_bounds`; the keys that step the handles are `Action::{StepBlack, StepWhite}`, landing in `Display::step_black`, `Display::step_white`, by `input::WINDOW_STEP`; `ui/histogram/slider.rs` for the exposure, which asks through `Command::Exposure` and lands in `Display::set_exposure`, `SLIDER_STOPS` being how far it runs; `Plot::clipped` for the shares in the plot's corners, and `Display::clips_white` for whether white counts. The marks `w` and the button beside the panel's band paint on the picture are `marks` in `shaders/image.wgsl`, `shader_codes::marks`, and `Panels::mark_clipped`, toggled in `App::press` by `Control::Marks` |
 
 ## Conventions
 

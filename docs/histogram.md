@@ -1,6 +1,6 @@
 # The histogram panel
 
-`src/ui/histogram.rs` draws the panel; `src/image/stats.rs` counts what it
+`src/ui/histogram/` draws the panel; `src/image/stats.rs` counts what it
 plots; `src/image/display/` holds what its controls set. This page is about
 the shape of the panel — what is on it, what is not, and why — rather than
 about the plot's arithmetic, which the code explains beside itself. What the

@@ -497,7 +497,7 @@ darker_background = \"#b0b4bc\"
     }
 
     /// What the three color planes come to where they overlap. Screened in
-    /// the encoded values, which is what `ui::histogram::screened` does, the
+    /// the encoded values, which is what `screened` in `ui/histogram/plot.rs` does, the
     /// panel's painter having one blend and that one on encoded colors.
     fn screened(planes: [Color; COLOR]) -> [f32; 3] {
         let mut out = [0.0f32; 3];
