@@ -175,7 +175,8 @@ pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect, c
     // the panel's width was fixed for — cut into stretches by the heights of
     // the planes standing in it, each stretch filled with what the planes
     // over it come to. On the device's grid, like every other mark here.
-    let snap = |value: f32| device(value, scale);
+    let grid = icon::Grid::new(scale);
+    let snap = |value: f32| grid.snap(value);
     let edge = |index: usize| snap(bars.x + bars.width * index as f32 / BINS as f32);
     for bin in 0..BINS {
         let (left, right) = (edge(bin), edge(bin + 1));
@@ -220,15 +221,12 @@ pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect, c
     let marked = marked(current, content, input.cursor, input.pointer);
     if let Some(across) = marked.map(bin_across) {
         painter.rect_filled(
-            area(on_device(
-                Rect::new(
-                    bars.x + across * bars.width - CURSOR_WIDTH / 2.0,
-                    bars.y,
-                    CURSOR_WIDTH,
-                    bars.height,
-                ),
-                scale,
-            )),
+            area(grid.rect(Rect::new(
+                bars.x + across * bars.width - CURSOR_WIDTH / 2.0,
+                bars.y,
+                CURSOR_WIDTH,
+                bars.height,
+            ))),
             0.0,
             theme.accent.with_alpha(CURSOR_ALPHA),
         );
@@ -333,7 +331,7 @@ pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect, c
     let (left, right) = (edge(0), edge(BINS));
     outline(
         painter,
-        icon::Grid::new(scale),
+        grid,
         Rect::new(
             left - hair,
             top - hair,
@@ -393,7 +391,7 @@ pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect, c
     let highest = responses.iter().copied().fold(0.0, f32::max);
     let plot_scale = Scale::new(transfer.to_encoded(1.0), highest);
     if let Some(white) = plot_scale.white {
-        let y = device(bars.bottom() - white * bars.height, scale);
+        let y = grid.snap(bars.bottom() - white * bars.height);
         painter.rect_filled(
             egui::Rect::from_min_size(pos2(bars.x, y), vec2(bars.width, 1.0 / scale)),
             0.0,

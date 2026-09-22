@@ -216,10 +216,6 @@ impl Contents {
 /// it is on screen because it was asked for, and the minimap is a guide to a
 /// picture the panel is already covering.
 pub fn panel(content: Rect, above: Option<Rect>) -> Option<Rect> {
-    let width = PANEL_WIDTH;
-    if width + 2.0 * PADDING > content.width {
-        return None;
-    }
     // The histogram takes the top of the column's strip; the panel starts
     // below it rather than being drawn over it. Only where the histogram is
     // on screen, which the caller settles from the window as well as the
@@ -227,16 +223,18 @@ pub fn panel(content: Rect, above: Option<Rect>) -> Option<Rect> {
     // to start below. It arrives as a rectangle rather than as a constant
     // because it may not be there at all.
     let taken = above.map_or(0.0, |histogram| histogram.height + PADDING);
-    let height = content.height - 2.0 * PADDING - taken;
-    if height < INFO_MIN_HEIGHT {
-        return None;
-    }
-    Some(Rect::new(
-        (content.right() - width - PADDING).round(),
-        (content.y + PADDING + taken).round(),
-        width,
-        height,
-    ))
+    let below = Rect::new(
+        content.x,
+        content.y + taken,
+        content.width,
+        content.height - taken,
+    );
+    super::panel::fit(
+        below,
+        [PANEL_WIDTH, f32::INFINITY],
+        [PANEL_WIDTH, INFO_MIN_HEIGHT],
+        super::panel::Place::TopRight,
+    )
 }
 
 /// The width of the button for `copies`: its mark, whatever label goes
@@ -341,49 +339,45 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, conten
     };
     let theme = pass.theme;
     let area = egui::Rect::from_min_size(pos2(panel.x, panel.y), vec2(panel.width, panel.height));
-    egui::Area::new(egui::Id::new("info"))
-        .order(egui::Order::Middle)
-        .fixed_pos(area.min)
-        .interactable(true)
-        .show(ui.ctx(), |ui| {
-            egui::Frame::NONE
-                .fill(theme.panel_background.into())
-                .corner_radius(PANEL_RADIUS)
-                .inner_margin(egui::Margin::same(PANEL_INSET as i8))
-                .show(ui, |ui| {
-                    let inside = area.size() - Vec2::splat(2.0 * PANEL_INSET);
-                    ui.set_min_size(inside);
-                    ui.set_max_size(inside);
-                    ui.spacing_mut().item_spacing = Vec2::ZERO;
+    super::panel::area("info", panel, egui::Order::Middle).show(ui.ctx(), |ui| {
+        egui::Frame::NONE
+            .fill(theme.panel_background.into())
+            .corner_radius(PANEL_RADIUS)
+            .inner_margin(egui::Margin::same(PANEL_INSET as i8))
+            .show(ui, |ui| {
+                let inside = area.size() - Vec2::splat(2.0 * PANEL_INSET);
+                ui.set_min_size(inside);
+                ui.set_max_size(inside);
+                ui.spacing_mut().item_spacing = Vec2::ZERO;
 
-                    // The header: the button first, and the hint takes what
-                    // is left, wrapping into it. The button has a size it
-                    // must be to be pressed and the hint is words, which set
-                    // on two lines as readily as on one.
-                    ui.horizontal(|ui| {
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            copy_all(pass, ui);
-                            ui.add_space(CHIP_GAP);
-                            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                                ui.add(
-                                    Label::new(
-                                        RichText::new(HINT).size(LABEL_SIZE).color(theme.text_dim),
-                                    )
-                                    .wrap(),
-                                );
-                            });
+                // The header: the button first, and the hint takes what
+                // is left, wrapping into it. The button has a size it
+                // must be to be pressed and the hint is words, which set
+                // on two lines as readily as on one.
+                ui.horizontal(|ui| {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        copy_all(pass, ui);
+                        ui.add_space(CHIP_GAP);
+                        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                            ui.add(
+                                Label::new(
+                                    RichText::new(HINT).size(LABEL_SIZE).color(theme.text_dim),
+                                )
+                                .wrap(),
+                            );
                         });
                     });
-                    // A hairline between the header and the column, which
-                    // says that the column runs on under the header rather
-                    // than stopping short of it.
-                    ui.add_space((HEADER_GAP - RULE_WIDTH) / 2.0);
-                    rule(pass, ui, inside.x - SCROLLBAR_GUTTER);
-                    ui.add_space((HEADER_GAP - RULE_WIDTH) / 2.0);
-
-                    column(pass, ui, current);
                 });
-        });
+                // A hairline between the header and the column, which
+                // says that the column runs on under the header rather
+                // than stopping short of it.
+                ui.add_space((HEADER_GAP - RULE_WIDTH) / 2.0);
+                rule(pass, ui, inside.x - SCROLLBAR_GUTTER);
+                ui.add_space((HEADER_GAP - RULE_WIDTH) / 2.0);
+
+                column(pass, ui, current);
+            });
+    });
 }
 
 /// The column, in a scroll area with the bar down the panel's inner edge and

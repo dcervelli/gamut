@@ -31,7 +31,7 @@ use super::control::Control;
 use super::icon::{self, Mark};
 use super::style::TOGGLE_RADIUS;
 use super::tooltip::Tip;
-use super::{PADDING, Rect};
+use super::{Rect, panel};
 
 /// One of the three buttons: wide enough for the longest of their labels
 /// with its mark before it and its key after it, and taller than a button
@@ -57,16 +57,8 @@ const COLUMN_HEIGHT: f32 = 3.0 * BUTTON[1] + 2.0 * GAP;
 /// is too small to hold it — a window dragged down to nothing, where the
 /// keys still work and the buttons would only be cut off.
 pub fn panel(content: Rect) -> Option<Rect> {
-    let width = BUTTON[0];
-    if content.width < width + 2.0 * PADDING || content.height < COLUMN_HEIGHT + 2.0 * PADDING {
-        return None;
-    }
-    Some(Rect::new(
-        content.x + (content.width - width) / 2.0,
-        content.y + (content.height - COLUMN_HEIGHT) / 2.0,
-        width,
-        COLUMN_HEIGHT,
-    ))
+    let size = [BUTTON[0], COLUMN_HEIGHT];
+    panel::fit(content, size, size, panel::Place::Center)
 }
 
 /// Draws the three buttons, and reads what was pressed.
@@ -78,42 +70,38 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, content: Rect) {
         egui::pos2(panel.x, panel.y),
         vec2(panel.width, panel.height),
     );
-    egui::Area::new(egui::Id::new("empty"))
-        .order(egui::Order::Middle)
-        .fixed_pos(area.min)
-        .interactable(true)
-        .show(ui.ctx(), |ui| {
-            ui.set_min_size(area.size());
-            ui.set_max_size(area.size());
-            ui.with_layout(Layout::top_down(Align::Center), |ui| {
-                ui.spacing_mut().item_spacing = vec2(0.0, GAP);
-                let picking = pass.input.picking;
-                button(
-                    pass,
-                    ui,
-                    Control::OpenFiles,
-                    icon::FILE_IMAGE,
-                    "Open files\u{2026}",
-                    !picking,
-                );
-                button(
-                    pass,
-                    ui,
-                    Control::OpenFolder,
-                    icon::FOLDER,
-                    "Open folder\u{2026}",
-                    !picking,
-                );
-                button(
-                    pass,
-                    ui,
-                    Control::Paste,
-                    icon::CLIPBOARD,
-                    "Paste",
-                    pass.panels.paste,
-                );
-            });
+    panel::area("empty", panel, egui::Order::Middle).show(ui.ctx(), |ui| {
+        ui.set_min_size(area.size());
+        ui.set_max_size(area.size());
+        ui.with_layout(Layout::top_down(Align::Center), |ui| {
+            ui.spacing_mut().item_spacing = vec2(0.0, GAP);
+            let picking = pass.input.picking;
+            button(
+                pass,
+                ui,
+                Control::OpenFiles,
+                icon::FILE_IMAGE,
+                "Open files\u{2026}",
+                !picking,
+            );
+            button(
+                pass,
+                ui,
+                Control::OpenFolder,
+                icon::FOLDER,
+                "Open folder\u{2026}",
+                !picking,
+            );
+            button(
+                pass,
+                ui,
+                Control::Paste,
+                icon::CLIPBOARD,
+                "Paste",
+                pass.panels.paste,
+            );
         });
+    });
 }
 
 /// One button: its mark at the head, its label after that, and the key
@@ -198,6 +186,7 @@ fn button(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::PADDING;
 
     /// The column sits in the middle of the area, and is not drawn at all
     /// where the area cannot hold it.

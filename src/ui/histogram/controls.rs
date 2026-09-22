@@ -137,7 +137,8 @@ pub(super) fn controls(
         // The gradient on the device's pixels, as the band above it is: a
         // swatch is the same row of one-pixel cells, over less room.
         let face = rect.inset(SWATCH_INSET, SWATCH_INSET);
-        let snap = |value: f32| device(value, scale);
+        let grid = icon::Grid::new(scale);
+        let snap = |value: f32| grid.snap(value);
         let (top, bottom) = (snap(face.y), snap(face.bottom()));
         let steps = (face.width * scale).max(1.0) as usize;
         for step in 0..steps {

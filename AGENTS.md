@@ -44,6 +44,9 @@ ui/            lays each frame's interface out with egui; no wgpu or winit impor
   fonts.rs       the desktop's sans, bold and monospace faces, as fontconfig resolves
                  them, each with its capitals centered in egui's rows
   rect.rs        Rect, the logical-pixel rectangle the panels are placed by
+  panel.rs       where a thing floating over the picture goes — fit(), the one placement every
+                 panel is fitted by, refused rather than shrunk — and area(), the one opening
+                 every panel makes
   histogram/     the histogram panel: mod.rs its geometry, words, header and rows, plot.rs the
                  plot, track.rs the band and its handles, controls.rs the buttons, slider.rs the
                  exposure's slider; handle() in mod.rs is the one handle the band and the slider draw
@@ -203,7 +206,7 @@ still agrees with both, so renaming either is editing the constant —
 | What the window says about something that just happened | `ui/toast.rs` for how long it stays and how it is drawn, `App::toast` to raise one, and `App::poll_copies` for the copies that only know how they went once their thread is done |
 | What something is called when the pointer rests on it | a `Tip` variant in `ui/tooltip.rs` and one `pass.tooltip(response, tip, enabled)` on the widget's response; `Namer::tooltip` in `app/input.rs` composes the words, from `KEYS` by way of `action_of` wherever a key does the same job, so a tooltip and `--help` cannot disagree. Words of its own go in `ui/tooltip.rs::words`, a zoom cell's in `ZoomChoice::describe`. When it opens and where it goes are egui's, tuned in `ui/style.rs` |
 | A button's icon | `ui/icon.rs`: one `&[Mark]` on the 24-unit grid, and one `icon::paint` call where the button is drawn, in a square from `icon::square`. The caller sets aside a budget; whether the mark comes out sharp is `icon::Grid`'s business and whether its spacing stays even is `icon::fit`'s |
-| A panel or overlay | a new `ui/<name>.rs` with a `show(pass, ui, ..)` that opens an `egui::Area` at the rectangle its own `panel()` works out, and one call in `Pass::overlays`. An area that is `interactable` takes the pointer from the picture under it; `Order` is the height in the stack. A new color role goes in `theme/mod.rs` and, if a stock widget wears it, `ui/style.rs` |
+| A panel or overlay | a new `ui/<name>.rs` with a `show(pass, ui, ..)` that opens `panel::area` at the rectangle its own `panel()` works out through `panel::fit`, and one call in `Pass::overlays`. An area that is `interactable` takes the pointer from the picture under it; `Order` is the height in the stack. A new color role goes in `theme/mod.rs` and, if a stock widget wears it, `ui/style.rs` |
 | What the info panel says about a file | `ui/info.rs` for the layout; the file's own facts are gathered in `app/mod.rs::file_facts`, its metadata in `image/exif.rs`, and its georeference in `image/geo.rs`. A field written in words is a `Described` entry in `image/exif.rs`, naming its EXIF tag and its XMP property; a container's XMP packet is found in `image/xmp.rs::packet`. A raw's `Sensor` section, and the exposure of one whose EXIF says nothing, are what LibRaw read, in `decode/raw.rs::facts`; a raw container's EXIF block is found by `image/enclosed.rs` |
 | A thumbnail's source | `Decoder::preview` for a format that carries a smaller picture of itself, which the thumbnailer asks for before it decodes anything; `thumbnail::SIDE` is the size it has to reach to be used |
 | A popup menu | a function in `ui/menu.rs` that lays its cells out, each pushing `Command::Press` of a typed `Control` — `ZoomTo`, `Format`, `Copies`, or `Opener`, which is a place in a list the application built rather than a choice named in the source — and an `egui::Popup` hung off its button in `ui/chrome.rs`, aligned below, above or beside it with `RectAlign`. The popup opens, closes and takes the pointer by itself; `App::close_menus` is how a key closes one. An item that does something rather than setting something is performed in `App::press`, as the menu of copies is, and prints its key beside it from `Naming::shortcut` |
@@ -244,7 +247,7 @@ still agrees with both, so renaming either is editing the constant —
   physical ones. `FrameInput.scale` converts. A display need not have a whole
   number of device pixels to the logical one, so anything thin — a rule, an
   icon's stroke — is put on the device's own grid before it is drawn
-  (`icon::Grid`'s `snap`, `line_width` and `stroke_center_in_device`).
+  (`icon::Grid`'s `snap`, `rect`, `line_width` and `stroke_center_in_device`).
   Rounding to a whole logical pixel is not the same thing and is not enough.
 - The geometry the picture is fitted into is worked out before egui lays
   anything out (`chrome::content_area`, from the window size alone), and

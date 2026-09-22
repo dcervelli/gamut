@@ -23,6 +23,7 @@ pub mod transport;
 mod grid;
 pub mod histogram;
 mod icon;
+pub mod panel;
 pub mod pixel;
 mod rect;
 pub mod region;

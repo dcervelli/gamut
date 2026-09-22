@@ -25,9 +25,10 @@ use crate::theme::Theme;
 use super::chrome::{BUTTON_SIZE, ICON_SIDE, Pass};
 use super::icon;
 use super::outline;
+use super::panel;
 use super::tooltip::Tip;
 use super::{
-    BECOMES, Command, Control, Current, PADDING, PANEL_INSET, PANEL_RADIUS, PANEL_WIDTH, TEXT_SIZE,
+    BECOMES, Command, Control, Current, PANEL_INSET, PANEL_RADIUS, PANEL_WIDTH, TEXT_SIZE,
 };
 
 /// What the three rows of settings under the band take off the panel's
@@ -306,17 +307,7 @@ fn readout_placement(bars: Rect, width: f32, ends: [f32; 2]) -> (f32, bool) {
 /// the frame: what lands on it belongs to it, and must not reach the picture
 /// it is floating over.
 pub fn panel(content: Rect) -> Option<Rect> {
-    let size = SIZE;
-    if size[0] + 2.0 * PADDING > content.width || size[1] + 2.0 * PADDING > content.height {
-        return None;
-    }
-    // Rounded, so that the whole-pixel bin spacing starts on a pixel edge.
-    Some(Rect::new(
-        (content.right() - size[0] - PADDING).round(),
-        (content.y + PADDING).round(),
-        size[0],
-        size[1],
-    ))
+    panel::fit(content, SIZE, SIZE, panel::Place::TopRight)
 }
 
 /// The ground the bins stand on inside that panel, with the label line
@@ -580,36 +571,6 @@ fn grip(band: Rect, x: f32) -> Rect {
     )
 }
 
-/// `value` moved onto the device's own pixel grid.
-///
-/// The interface is laid out in logical pixels, which is right for a panel
-/// and the words on it. The marks on this plot are the exception: they are a
-/// pixel or two wide, and shapes are drawn with a pixel of feathering at
-/// their edges, so an edge landing mid-pixel makes a mark that is mostly
-/// edge. On its own that is a soft line; in a row of them it is a ripple at
-/// the beat of the scale factor, which on a 1.6 display is every fifth pixel.
-/// Snapped, the feather resolves to fully in or fully out at each pixel
-/// center and a mark comes out as the shape it is.
-fn device(value: f32, scale: f32) -> f32 {
-    (value * scale).round() / scale
-}
-
-/// One mark moved onto that grid, kept at least a whole pixel so that
-/// something thinner than one is still drawn rather than rounded away.
-///
-/// Not what the ramp's cells use: they tile, so what matters there is that
-/// each shares an edge exactly with its neighbor, and a floor under their
-/// width would make them overlap and run past the end of the band.
-fn on_device(rect: Rect, scale: f32) -> Rect {
-    let (x, y) = (device(rect.x, scale), device(rect.y, scale));
-    Rect::new(
-        x,
-        y,
-        (device(rect.right(), scale) - x).max(1.0 / scale),
-        (device(rect.bottom(), scale) - y).max(1.0 / scale),
-    )
-}
-
 /// Which bin the pointer is over, or `None` when it is not over the plot.
 fn hovered_bin(bars: Rect, cursor: Option<[f32; 2]>) -> Option<usize> {
     let cursor = cursor.filter(|point| bars.contains(*point))?;
@@ -760,19 +721,15 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, conten
         return;
     };
     let theme = pass.theme;
-    egui::Area::new(egui::Id::new("histogram"))
-        .order(egui::Order::Middle)
-        .fixed_pos(area(panel).min)
-        .interactable(true)
-        .show(ui.ctx(), |ui| {
-            let (_, body) = ui.allocate_exact_size(area(panel).size(), Sense::CLICK | Sense::DRAG);
-            body.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "Histogram panel"));
-            ui.painter()
-                .rect_filled(area(panel), PANEL_RADIUS, theme.panel_background);
-            plot(pass, ui, current, panel, content);
-            let held = controls(pass, ui, current, panel);
-            header(pass, ui, current, panel, held);
-        });
+    panel::area("histogram", panel, egui::Order::Middle).show(ui.ctx(), |ui| {
+        let (_, body) = ui.allocate_exact_size(area(panel).size(), Sense::CLICK | Sense::DRAG);
+        body.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "Histogram panel"));
+        ui.painter()
+            .rect_filled(area(panel), PANEL_RADIUS, theme.panel_background);
+        plot(pass, ui, current, panel, content);
+        let held = controls(pass, ui, current, panel);
+        header(pass, ui, current, panel, held);
+    });
 }
 
 /// The line above the plot: what the pointer is reading, in the middle, and
@@ -966,6 +923,7 @@ mod tests {
     use crate::image::sequence::Sequence;
     use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples, Stats};
     use crate::ui::FileFacts;
+    use crate::ui::PADDING;
 
     /// A content area with room for everything.
     fn content() -> Rect {

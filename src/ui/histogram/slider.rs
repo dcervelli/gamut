@@ -56,15 +56,12 @@ pub(super) fn slider(pass: &mut Pass, ui: &mut egui::Ui, exposure: f32, room: Re
     // two pixels thick.
     let painter = ui.painter();
     let middle = room.y + room.height / 2.0;
-    let groove = on_device(
-        Rect::new(
-            track.x,
-            middle - SLIDER_TRACK / 2.0,
-            track.width,
-            SLIDER_TRACK,
-        ),
-        scale,
-    );
+    let groove = grid.rect(Rect::new(
+        track.x,
+        middle - SLIDER_TRACK / 2.0,
+        track.width,
+        SLIDER_TRACK,
+    ));
     painter.rect_filled(
         area(groove),
         SLIDER_TRACK / 2.0,
@@ -73,29 +70,23 @@ pub(super) fn slider(pass: &mut Pass, ui: &mut egui::Ui, exposure: f32, room: Re
     let t = along(exposure);
     let (from, to) = (at(0.5).min(at(t)), at(0.5).max(at(t)));
     if to > from {
-        let fill = on_device(Rect::new(from, groove.y, to - from, groove.height), scale);
+        let fill = grid.rect(Rect::new(from, groove.y, to - from, groove.height));
         painter.rect_filled(area(fill), SLIDER_TRACK / 2.0, theme.accent);
     }
-    let tick = on_device(
-        Rect::new(
-            at(0.5) - HANDLE_RING / 2.0,
-            middle - SLIDER_TICK,
-            HANDLE_RING,
-            2.0 * SLIDER_TICK,
-        ),
-        scale,
-    );
+    let tick = grid.rect(Rect::new(
+        at(0.5) - HANDLE_RING / 2.0,
+        middle - SLIDER_TICK,
+        HANDLE_RING,
+        2.0 * SLIDER_TICK,
+    ));
     painter.rect_filled(area(tick), 0.0, theme.text_dim);
 
     // The handle, as the band's are drawn.
-    let mark = on_device(
-        Rect::new(
-            at(t) - HANDLE_WIDTH / 2.0,
-            middle - SLIDER_HANDLE / 2.0,
-            HANDLE_WIDTH,
-            SLIDER_HANDLE,
-        ),
-        scale,
-    );
+    let mark = grid.rect(Rect::new(
+        at(t) - HANDLE_WIDTH / 2.0,
+        middle - SLIDER_HANDLE / 2.0,
+        HANDLE_WIDTH,
+        SLIDER_HANDLE,
+    ));
     handle(painter, theme, grid, mark, on, t);
 }

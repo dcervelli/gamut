@@ -28,7 +28,7 @@ use super::chrome::Pass;
 use super::control::{Command, Control};
 use super::info::{HEADER_GAP, RULE_WIDTH, SCROLLBAR_GUTTER, SCROLLBAR_WIDTH, rule};
 use super::style::{MENU_PADDING, MENU_RADIUS};
-use super::{PADDING, Rect, TEXT_SIZE, fonts, info};
+use super::{Rect, TEXT_SIZE, fonts, info, panel};
 
 /// The popup's id in egui's memory: what the application opens, and what
 /// it asks whether it is open.
@@ -102,17 +102,12 @@ const HEADINGS: [&str; 3] = ["Key", "Action", "When"];
 /// keeps. `None` when the window is too small for it to be read, in which
 /// case the popup stays off.
 pub fn panel(content: Rect) -> Option<Rect> {
-    let width = WIDTH_MAX.min(content.width - 2.0 * PADDING);
-    let height = HEIGHT_MAX.min(content.height - 2.0 * PADDING);
-    if width < WIDTH_MIN || height < HEIGHT_MIN {
-        return None;
-    }
-    Some(Rect::new(
-        (content.x + (content.width - width) / 2.0).round(),
-        (content.y + (content.height - height) / 2.0).round(),
-        width.round(),
-        height.round(),
-    ))
+    panel::fit(
+        content,
+        [WIDTH_MAX, HEIGHT_MAX],
+        [WIDTH_MIN, HEIGHT_MIN],
+        panel::Place::Center,
+    )
 }
 
 /// Draws the popup, if it is open.
@@ -321,6 +316,7 @@ fn cell(ui: &mut egui::Ui, width: f32, text: RichText) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::PADDING;
 
     /// A window with room to spare gets the popup at its full size, in the
     /// middle of the content area.

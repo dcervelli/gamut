@@ -694,6 +694,27 @@ impl Grid {
         }
     }
 
+    /// `rect` with its edges on whole device pixels, and never thinner
+    /// than one: something narrower than a pixel is still drawn rather
+    /// than rounded away, so an edge never rounds onto the one opposite it.
+    ///
+    /// Shapes are drawn with a pixel of feathering at their edges, so an
+    /// edge landing mid-pixel makes a mark that is mostly edge — a soft
+    /// line on its own, and in a row of them a ripple at the beat of the
+    /// scale factor — and two feathered edges meeting part-way through a
+    /// pixel each cover part of it, which shows as a seam. Snapped, a
+    /// mark comes out as the shape it is and pieces tile exactly.
+    pub(super) fn rect(self, rect: super::Rect) -> super::Rect {
+        let (x, y) = (self.snap(rect.x), self.snap(rect.y));
+        let least = self.device_pixels(1.0);
+        super::Rect::new(
+            x,
+            y,
+            (self.snap(rect.right()) - x).max(least),
+            (self.snap(rect.bottom()) - y).max(least),
+        )
+    }
+
     /// The largest whole number of `step`s that fits inside `value`, and
     /// never fewer than one — see [`fit`] for what it is for.
     fn snap_within(self, value: f32, step: f32) -> f32 {

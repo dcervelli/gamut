@@ -28,7 +28,7 @@ use super::chrome::Pass;
 use super::control::{Command, Control};
 use super::icon;
 use super::style::{MENU_PADDING, MENU_RADIUS, TOGGLE_RADIUS};
-use super::{PADDING, Rect, TEXT_SIZE, fonts};
+use super::{PADDING, Rect, TEXT_SIZE, fonts, panel};
 
 /// The popup's id in egui's memory: what the application opens, and what
 /// it asks whether it is open.
@@ -156,18 +156,17 @@ pub enum Step {
 /// when the window has no room for the field and three rows, or is too
 /// narrow for a row to say anything, in which case the chooser stays off.
 pub fn panel(content: Rect) -> Option<Rect> {
-    let width = WIDTH_MAX.min(content.width - 2.0 * PADDING);
     let height = (HEIGHT_SHARE * content.height).round();
     let least = 2.0 * MENU_PADDING + FIELD_HEIGHT + FIELD_GAP + 3.0 * ROW_HEIGHT;
-    if width < WIDTH_MIN || height < least || height > content.height - 2.0 * PADDING {
+    if height > content.height - 2.0 * PADDING {
         return None;
     }
-    Some(Rect::new(
-        (content.x + (content.width - width) / 2.0).round(),
-        (content.y + PADDING).round(),
-        width.round(),
-        height,
-    ))
+    panel::fit(
+        content,
+        [WIDTH_MAX, height],
+        [WIDTH_MIN, least],
+        panel::Place::TopCenter,
+    )
 }
 
 /// Draws the popup, if it is open, and reads what was pressed in it.

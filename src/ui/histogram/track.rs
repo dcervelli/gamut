@@ -154,15 +154,12 @@ pub(super) fn track(
     let painter = ui.painter();
     let grid = icon::Grid::new(scale);
     for (t, on) in [(black_t, on_black), (white_t, on_white)] {
-        let mark = on_device(
-            Rect::new(
-                at(t) - HANDLE_WIDTH / 2.0,
-                band.y - HANDLE_REACH,
-                HANDLE_WIDTH,
-                band.height + 2.0 * HANDLE_REACH,
-            ),
-            scale,
-        );
+        let mark = grid.rect(Rect::new(
+            at(t) - HANDLE_WIDTH / 2.0,
+            band.y - HANDLE_REACH,
+            HANDLE_WIDTH,
+            band.height + 2.0 * HANDLE_REACH,
+        ));
         handle(painter, theme, grid, mark, on, t);
     }
     said

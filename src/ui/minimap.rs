@@ -13,7 +13,7 @@ use super::Rect;
 use crate::view::Viewport;
 
 use super::chrome::{Pass, content_area};
-use super::{Command, Current, PADDING, icon, outline};
+use super::{Command, Current, PADDING, icon, outline, panel};
 
 /// The largest the minimap's thumbnail may be. It keeps the image's own
 /// shape inside this, so a panorama gets a wide short one and a portrait a
@@ -124,27 +124,6 @@ fn minimap_marker(rect: Rect, image: [f32; 2], placement: Placement, viewport: V
     Rect::new(start[0], start[1], end[0] - start[0], end[1] - start[1])
 }
 
-/// `rect` with its edges on whole physical pixels.
-///
-/// The quad shader feathers every edge over a pixel, which is what keeps the
-/// interface's corners and thin lines smooth. Two feathered edges that meet
-/// part-way through a pixel each cover part of it, and two translucent fills
-/// covering a pixel between them do not add up to one covering all of it: the
-/// join stays visible as a lighter line. The wash around the marker is four
-/// quads meeting along the marker's edges, so those edges go on the grid and
-/// the four pieces tile exactly.
-fn snap_to_pixels(rect: Rect, scale: f32) -> Rect {
-    let snap = |value: f32| (value * scale).round() / scale;
-    let x = snap(rect.x);
-    let y = snap(rect.y);
-    // A marker smaller than a pixel — the view into a very large image — still
-    // has to be somewhere on the map, so an edge never rounds onto the one
-    // opposite it.
-    let right = snap(rect.right()).max(x + 1.0 / scale);
-    let bottom = snap(rect.bottom()).max(y + 1.0 / scale);
-    Rect::new(x, y, right - x, bottom - y)
-}
-
 /// Draws the minimap over the thumbnail the image layer has already put in
 /// the bottom-left of `content`: a border around the whole image, and the part
 /// of it the viewport is showing left bright while the rest is washed over.
@@ -176,64 +155,62 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, conten
         egui::pos2(rect.x, rect.y),
         egui::vec2(rect.width, rect.height),
     );
-    egui::Area::new(egui::Id::new("minimap"))
-        .order(egui::Order::Middle)
-        .fixed_pos(area.min)
-        .interactable(true)
-        .show(ui.ctx(), |ui| {
-            let (_, response) = ui.allocate_exact_size(area.size(), Sense::CLICK | Sense::DRAG);
-            response.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Minimap thumbnail")
-            });
-            // From the press on, not from the toolkit's decision that the
-            // press became a drag: the view goes where the hand is the
-            // moment it lands.
-            let held = response.is_pointer_button_down_on()
-                && ui.input(|input| input.pointer.primary_down());
-            if let Some(pos) = response.interact_pointer_pos().filter(|_| held) {
-                pass.commands
-                    .push(Command::Center(image_point(rect, image, [pos.x, pos.y])));
-                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-            }
-            let painter = ui.painter();
-            let grid = icon::Grid::new(scale);
-            outline(painter, grid, rect, 1.0, theme.minimap_edge.into());
-
-            let placement = pass.view.placement(image, pass.input.viewport);
-            let shown = snap_to_pixels(
-                minimap_marker(rect, image, placement, pass.input.viewport),
-                scale,
-            );
-            let wash: egui::Color32 = theme.minimap_dim.into();
-            for aside in [
-                Rect::new(rect.x, rect.y, rect.width, shown.y - rect.y),
-                Rect::new(
-                    rect.x,
-                    shown.bottom(),
-                    rect.width,
-                    rect.bottom() - shown.bottom(),
-                ),
-                Rect::new(rect.x, shown.y, shown.x - rect.x, shown.height),
-                Rect::new(
-                    shown.right(),
-                    shown.y,
-                    rect.right() - shown.right(),
-                    shown.height,
-                ),
-            ] {
-                if aside.width > 0.0 && aside.height > 0.0 {
-                    painter.rect_filled(
-                        egui::Rect::from_min_size(
-                            egui::pos2(aside.x, aside.y),
-                            egui::vec2(aside.width, aside.height),
-                        ),
-                        0.0,
-                        wash,
-                    );
-                }
-            }
-            outline(painter, grid, shown, 1.5, theme.accent.into());
+    panel::area("minimap", rect, egui::Order::Middle).show(ui.ctx(), |ui| {
+        let (_, response) = ui.allocate_exact_size(area.size(), Sense::CLICK | Sense::DRAG);
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Minimap thumbnail")
         });
+        // From the press on, not from the toolkit's decision that the
+        // press became a drag: the view goes where the hand is the
+        // moment it lands.
+        let held =
+            response.is_pointer_button_down_on() && ui.input(|input| input.pointer.primary_down());
+        if let Some(pos) = response.interact_pointer_pos().filter(|_| held) {
+            pass.commands
+                .push(Command::Center(image_point(rect, image, [pos.x, pos.y])));
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        }
+        let painter = ui.painter();
+        let grid = icon::Grid::new(scale);
+        outline(painter, grid, rect, 1.0, theme.minimap_edge.into());
+
+        let placement = pass.view.placement(image, pass.input.viewport);
+        let shown = icon::Grid::new(scale).rect(minimap_marker(
+            rect,
+            image,
+            placement,
+            pass.input.viewport,
+        ));
+        let wash: egui::Color32 = theme.minimap_dim.into();
+        for aside in [
+            Rect::new(rect.x, rect.y, rect.width, shown.y - rect.y),
+            Rect::new(
+                rect.x,
+                shown.bottom(),
+                rect.width,
+                rect.bottom() - shown.bottom(),
+            ),
+            Rect::new(rect.x, shown.y, shown.x - rect.x, shown.height),
+            Rect::new(
+                shown.right(),
+                shown.y,
+                rect.right() - shown.right(),
+                shown.height,
+            ),
+        ] {
+            if aside.width > 0.0 && aside.height > 0.0 {
+                painter.rect_filled(
+                    egui::Rect::from_min_size(
+                        egui::pos2(aside.x, aside.y),
+                        egui::vec2(aside.width, aside.height),
+                    ),
+                    0.0,
+                    wash,
+                );
+            }
+        }
+        outline(painter, grid, shown, 1.5, theme.accent.into());
+    });
 }
 
 #[cfg(test)]
@@ -333,7 +310,7 @@ mod tests {
     #[test]
     fn the_marker_lands_on_whole_physical_pixels() {
         for scale in [1.0, 1.5, 2.0] {
-            let snapped = snap_to_pixels(Rect::new(10.3, 20.7, 40.4, 30.9), scale);
+            let snapped = icon::Grid::new(scale).rect(Rect::new(10.3, 20.7, 40.4, 30.9));
             for edge in [snapped.x, snapped.y, snapped.right(), snapped.bottom()] {
                 let physical = edge * scale;
                 assert!(
@@ -347,7 +324,7 @@ mod tests {
 
         // The view into a very large image marks out less than a pixel of the
         // map, and still has to be somewhere on it.
-        let thin = snap_to_pixels(Rect::new(10.1, 20.1, 0.05, 0.05), 2.0);
+        let thin = icon::Grid::new(2.0).rect(Rect::new(10.1, 20.1, 0.05, 0.05));
         assert_eq!(thin.width, 0.5);
         assert_eq!(thin.height, 0.5);
     }
