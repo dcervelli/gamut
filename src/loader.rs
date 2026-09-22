@@ -32,7 +32,7 @@ use crate::timing;
 use crate::watch::Watch;
 
 /// Why a file is being read, which decides what survives the reading.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Reload {
     /// A different file: display settings start over, and so does the view
     /// unless the new file happens to be the same size as the old one.

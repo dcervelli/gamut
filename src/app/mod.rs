@@ -1370,23 +1370,12 @@ impl App {
             page,
         } = ready;
         let size = [image.width as f32, image.height as f32];
-        let same_size = self
+        let shown = self
             .current
             .as_ref()
-            .is_some_and(|current| current.size() == size);
-        // Re-reading the same file keeps the user where they were, since they
-        // are watching one spot for the change: same exposure and tone map,
-        // with only an automatic window re-derived from the new pixels. One
-        // that has come back a different size is a new shape to fit, and is
-        // treated as a new picture below. Another page of the same file is
-        // read the same way.
-        let same_file = file.mode != Reload::Fresh;
-        let in_place = same_file && same_size;
-        // Whether this is a move between files at all. The file already on
-        // screen being read again is not one, whatever it has become: it is
-        // neither a departure to be put away nor a return to be restored.
-        let stepping =
-            self.current.is_some() && self.files.shown_path() != Some(file.path.as_path());
+            .zip(self.files.shown_path())
+            .map(|(current, path)| (path, current.size()));
+        let (arrival, stepping) = arrival(file.mode, &file.path, size, shown);
         // The picture being stepped away from, kept as it stands so that
         // stepping back to it finds it as it was left.
         if stepping {
@@ -1398,21 +1387,23 @@ impl App {
         // lands. Its window is re-derived where it was automatic,
         // the file being free to have changed on disk since; one set by hand
         // is left exactly where it was put.
-        let kept = (!same_file)
-            .then(|| self.kept.left(&file.path).cloned())
-            .flatten();
-        let display = match (self.current.as_ref().filter(|_| in_place), &kept) {
-            (Some(current), _) => {
-                let mut display = current.display.clone();
-                display.refresh_auto(&stats);
-                display
-            }
-            (None, Some(settings)) => {
-                let mut display = settings.display.clone();
-                display.refresh_auto(&stats);
-                display
-            }
-            (None, None) => Display::for_image_with(&image, &stats, self.startup, self.headroom()),
+        let kept = match arrival {
+            Arrival::Beside | Arrival::Anew => self.kept.left(&file.path).cloned(),
+            Arrival::Reread | Arrival::Reshaped => None,
+        };
+        let refreshed = |display: &Display| {
+            let mut display = display.clone();
+            display.refresh_auto(&stats);
+            display
+        };
+        let display = match (arrival, &self.current, &kept) {
+            // Re-reading the same file keeps the user where they were, since
+            // they are watching one spot for the change: same exposure and
+            // tone map, with only an automatic window re-derived from the
+            // new pixels.
+            (Arrival::Reread, Some(current), _) => refreshed(&current.display),
+            (_, _, Some(settings)) => refreshed(&settings.display),
+            _ => Display::for_image_with(&image, &stats, self.startup, self.headroom()),
         };
 
         let mut stored = None;
@@ -1463,38 +1454,39 @@ impl App {
         // A region is of the picture it was drawn on. Stepping to another
         // file takes it off, and so does the file coming back a different
         // size, where the pixels it marked out are no longer the pixels.
-        if stepping || !same_size {
+        if stepping || matches!(arrival, Arrival::Reshaped | Arrival::Anew) {
             self.marking.clear();
         }
-        match &kept {
-            // A picture of the same size as the one it is arriving beside is
-            // almost always part of a set to be compared — frames of a
-            // sequence, or one exposure against another — and there the point
-            // is that the same detail stays under the same pixels. So the pan
-            // and zoom carry over from the picture leaving the screen, ahead
-            // of anything this file was left in itself: what the comparison
-            // is being made at is where the eye already is, not where this
-            // file happened to be the last time it was looked at.
-            _ if same_size => {}
+        match (arrival, &kept) {
+            // The same picture, or one of the same size as the one it is
+            // arriving beside — which is almost always part of a set to be
+            // compared: frames of a sequence, or one exposure against
+            // another, where the point is that the same detail stays under
+            // the same pixels. So the pan and zoom carry over from the
+            // picture leaving the screen, ahead of anything this file was
+            // left in itself: what the comparison is being made at is where
+            // the eye already is, not where this file happened to be the
+            // last time it was looked at.
+            (Arrival::Reread | Arrival::Beside, _) => {}
             // Back to a file of another size that has been here before:
             // exactly where it was left. The magnification filter is not part
             // of a view — it is a standing preference — so it stays as it is.
-            Some(settings) => {
+            (Arrival::Anew, Some(settings)) => {
                 let upscale = self.view.upscale();
                 self.view = settings.view;
                 self.view.set_upscale(upscale);
             }
             // A new shape, seen for the first time, so it is fitted afresh.
-            None => self.view.reset(),
+            (Arrival::Anew, None) | (Arrival::Reshaped, _) => self.view.reset(),
         }
-        if !in_place {
+        if arrival != Arrival::Reread {
             // A move under way was about the picture that has just left, and
             // there is nothing for it to carry the eye across any more.
             self.motion = None;
         }
         // And what else could open the file arriving, read here with the rest
         // of what the file itself says about it.
-        if !same_file {
+        if matches!(arrival, Arrival::Beside | Arrival::Anew) {
             self.openers = openers::for_file(&file.path);
         }
         self.current = Some(Current {
@@ -1786,6 +1778,48 @@ impl App {
             Effect::Nothing => {}
         }
     }
+}
+
+/// How a file arriving stands to the picture on screen, which is what
+/// decides what carries over to it and what starts afresh.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Arrival {
+    /// The file on screen read again at the size it was — changed on disk,
+    /// or another page of it: everything stays, the user watching one spot
+    /// for the change.
+    Reread,
+    /// The file on screen read again at another size: a new shape to fit,
+    /// its settings started over.
+    Reshaped,
+    /// Another file, of the same size as the picture on screen: the view
+    /// carries over, the display is its own.
+    Beside,
+    /// Another file of another size, or a file into an empty window: put
+    /// back as it was left, or fitted afresh.
+    Anew,
+}
+
+/// How a file `size` pixels across, read in `mode`, stands to the picture
+/// on screen — `shown`, its path and size, where there is one — and whether
+/// its arrival is a step between files at all. The file on screen being
+/// read again is not a step, whatever it has become: it is neither a
+/// departure to be put away nor a return to be restored.
+fn arrival(
+    mode: Reload,
+    path: &Path,
+    size: [f32; 2],
+    shown: Option<(&Path, [f32; 2])>,
+) -> (Arrival, bool) {
+    let same_size = shown.is_some_and(|(_, shown)| shown == size);
+    let same_file = mode != Reload::Fresh;
+    let stepping = shown.is_some_and(|(shown, _)| shown != path);
+    let arrival = match (same_file, same_size) {
+        (true, true) => Arrival::Reread,
+        (true, false) => Arrival::Reshaped,
+        (false, true) => Arrival::Beside,
+        (false, false) => Arrival::Anew,
+    };
+    (arrival, stepping)
 }
 
 /// Uploads `image` on this thread, and reports the time the way the loader
@@ -4015,5 +4049,75 @@ mod tests {
         assert!(harness.state().panels.show_grid);
         click(&mut harness, &ui::Control::Grid.label());
         assert!(!harness.state().panels.show_grid);
+    }
+
+    /// What arrives is named by how it stands to what is up: read again at
+    /// its size or at another; another file of the same size or of
+    /// another, whether or not anything is up. A step is a move between
+    /// files, which a file read again is not, whatever it has become.
+    #[test]
+    fn an_arrival_is_named_by_what_it_stands_to() {
+        let a = Path::new("a.png");
+        let b = Path::new("b.png");
+        let small = [4.0, 3.0];
+        let large = [8.0, 6.0];
+        let cases = [
+            (
+                Reload::InPlace,
+                a,
+                small,
+                Some((a, small)),
+                Arrival::Reread,
+                false,
+            ),
+            (
+                Reload::Page,
+                a,
+                small,
+                Some((a, small)),
+                Arrival::Reread,
+                false,
+            ),
+            (
+                Reload::InPlace,
+                a,
+                large,
+                Some((a, small)),
+                Arrival::Reshaped,
+                false,
+            ),
+            (
+                Reload::Fresh,
+                b,
+                small,
+                Some((a, small)),
+                Arrival::Beside,
+                true,
+            ),
+            (
+                Reload::Fresh,
+                b,
+                large,
+                Some((a, small)),
+                Arrival::Anew,
+                true,
+            ),
+            (Reload::Fresh, b, large, None, Arrival::Anew, false),
+            (
+                Reload::Fresh,
+                a,
+                small,
+                Some((a, small)),
+                Arrival::Beside,
+                false,
+            ),
+        ];
+        for (mode, path, size, shown, expected, stepping) in cases {
+            assert_eq!(
+                arrival(mode, path, size, shown),
+                (expected, stepping),
+                "{mode:?} {path:?} {size:?} beside {shown:?}"
+            );
+        }
     }
 }
