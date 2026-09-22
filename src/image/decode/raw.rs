@@ -50,6 +50,10 @@ impl super::Decoder for Raw {
         "camera raw"
     }
 
+    fn facts(&self, source: &mut dyn super::ReadSeek) -> Result<Option<(Vec<Entry>, Section)>> {
+        facts(source).map(Some)
+    }
+
     fn extensions(&self) -> &'static [&'static str] {
         &[
             "dng", "nef", "nrw", "cr2", "cr3", "crw", "arw", "srf", "sr2", "raf", "orf", "rw2",

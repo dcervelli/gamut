@@ -23,7 +23,6 @@ use std::path::Path;
 
 use roxmltree::{Document, Node};
 
-use super::decode::heif;
 use super::{directory, tiff};
 
 /// How large a packet is allowed to be. A packet is a few kilobytes of text,
@@ -233,7 +232,7 @@ pub fn packet(path: &Path) -> Option<Vec<u8>> {
     } else if signature == JXL_SIGNATURE {
         jxl(&mut source)
     } else if signature.get(4..8) == Some(b"ftyp") {
-        heif::xmp(path)
+        super::decode::xmp(path)
     } else if tiff::header(signature).is_some() {
         directory::packet(path)
     } else {

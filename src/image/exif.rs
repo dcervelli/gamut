@@ -90,7 +90,7 @@ impl Exif {
         // it made of the exposure fills in whatever the `Camera` section
         // is missing — all of it, for a CRW, which has no EXIF, and the
         // exposure of a Phase One, whose EXIF names the camera and stops.
-        if let Some((camera, sensor)) = super::decode::raw_facts(path) {
+        if let Some((camera, sensor)) = super::decode::facts(path) {
             let at = exif
                 .sections
                 .iter()

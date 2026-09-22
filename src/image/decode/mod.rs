@@ -21,7 +21,7 @@ use limits::{MAX_DECODED_BYTES, MAX_TEXTURE_DIMENSION, check_decoded_size};
 mod dynamic;
 // `pub` for its XMP reader, which `image::xmp` asks for the packet a HEIF
 // keeps in an item only the library's own tables lead to.
-pub mod heif;
+mod heif;
 mod ico;
 mod image_rs;
 mod jpeg;
@@ -131,7 +131,25 @@ pub trait Decoder: Sync {
     ///
     /// Whatever this returns has to match what [`Decoder::decode`] goes on to
     /// produce, orientation and all. Every fixture is checked for that.
-    fn dimensions(&self, _source: &mut dyn ReadSeek) -> Result<Option<(u32, u32)>> {
+    fn dimensions(&self, source: &mut dyn ReadSeek) -> Result<Option<(u32, u32)>>;
+
+    /// What the format's own reader of the file has to say about it, for
+    /// the information panel, beyond what the EXIF reader gets out of it:
+    /// the exposure as the library parsed it from the maker's own block,
+    /// and a section of its own. `None` where the format has no reader of
+    /// its own, which is what every format but the camera raws says.
+    fn facts(
+        &self,
+        _source: &mut dyn ReadSeek,
+    ) -> Result<Option<(Vec<super::exif::Entry>, super::exif::Section)>> {
+        Ok(None)
+    }
+
+    /// The XMP packet, where the container keeps it somewhere only the
+    /// format's own library reaches: a HEIF's, which is an item of its
+    /// `meta` box. `None` where the packet is found by walking the file —
+    /// see `image::xmp` — or where there is none.
+    fn xmp(&self, _source: &mut dyn ReadSeek) -> Result<Option<Vec<u8>>> {
         Ok(None)
     }
 
@@ -383,16 +401,19 @@ pub fn preview(path: &Path, overrides: Overrides) -> Result<Option<DecodedImage>
     image.map(|image| overrides.finish(image, path)).transpose()
 }
 
-/// What the raw decoder read out of `path`'s header, for the information
-/// panel, or nothing for a file that is not a raw or will not open: the
-/// camera and exposure as the library parsed them, and the sensor as a
-/// section of its own. See [`raw::facts`].
-pub fn raw_facts(path: &Path) -> Option<(Vec<super::exif::Entry>, super::exif::Section)> {
+/// What the decoder of `path` read out of its header, for the information
+/// panel — see [`Decoder::facts`] — or nothing for a file whose decoder
+/// has nothing of its own to say, or that will not open.
+pub fn facts(path: &Path) -> Option<(Vec<super::exif::Entry>, super::exif::Section)> {
     let (mut source, decoder) = open(path).ok()?;
-    if decoder.name() != raw::Raw.name() {
-        return None;
-    }
-    raw::facts(&mut source).ok()
+    decoder.facts(&mut source).ok().flatten()
+}
+
+/// The XMP packet of `path`, where its decoder is the one thing that can
+/// reach it — see [`Decoder::xmp`].
+pub fn xmp(path: &Path) -> Option<Vec<u8>> {
+    let (mut source, decoder) = open(path).ok()?;
+    decoder.xmp(&mut source).ok().flatten()
 }
 
 /// What `path` holds beyond the image [`load`] returns, from its header.
@@ -569,5 +590,47 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Every fixture is claimed by the decoder its name says, which is what
+    /// holds the registry's order: a raw that wears a TIFF header has to go
+    /// to the raw decoder ahead of the TIFF one, and a JPEG XL container to
+    /// its own ahead of the HEIF family it shares a box structure with.
+    /// The one mislabeled fixture is claimed by what it is, not by what it
+    /// is called.
+    #[test]
+    fn every_fixture_is_claimed_by_the_decoder_its_name_says() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("test_images");
+        let mut seen = 0;
+        for entry in std::fs::read_dir(&dir).expect("the fixtures are there") {
+            let path = entry.expect("readable").path();
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .expect("named");
+            let expected = match name.split(['-', '.']).next().unwrap_or("") {
+                "png" => "png",
+                "jpeg" => "jpeg",
+                "tiff" => "tiff",
+                "webp" => "webp",
+                "jxl" => "jpeg xl",
+                "heic" | "heif" | "avif" => "heif/heic/avif",
+                "ico" => "ico",
+                "dng" => "camera raw",
+                "gif" | "hdr" | "exr" | "bmp" | "pnm" => "gif/hdr/exr/bmp/netpbm",
+                // A PNG under a TIFF name: sniffed for what it is.
+                "mislabeled" => "png",
+                // The two truncated files still say what they are.
+                "bad" if name.ends_with(".png") => "png",
+                "bad" if name.ends_with(".dng") => "camera raw",
+                // Not fixtures: the script, the notes, a profile, the raw
+                // samples' directory, and the one format nothing reads.
+                _ => continue,
+            };
+            let (_, decoder) = open(&path).unwrap_or_else(|error| panic!("{name}: {error:#}"));
+            assert_eq!(decoder.name(), expected, "{name}");
+            seen += 1;
+        }
+        assert!(seen > 100, "{seen} fixtures were claimed");
     }
 }
