@@ -39,7 +39,7 @@ pub(super) fn controls(
             _ => false,
         };
         let (_, background, ink) = button(pass, ui, rect, *widget, active, true, TOGGLE_RADIUS);
-        let grid = icon::Grid::new(ui.pixels_per_point());
+        let grid = pass.grid;
         let square = icon::square(grid, area(rect), ICON_SIDE);
         let painter = ui.painter();
         match widget {
@@ -103,11 +103,7 @@ pub(super) fn controls(
             true,
             TOGGLE_RADIUS,
         );
-        let square = icon::square(
-            icon::Grid::new(ui.pixels_per_point()),
-            area(rect),
-            ICON_SIDE,
-        );
+        let square = icon::square(pass.grid, area(rect), ICON_SIDE);
         icon::paint(ui.painter(), icon::TRIANGLE_ALERT, square, ink, background);
     }
 
@@ -137,7 +133,7 @@ pub(super) fn controls(
         // The gradient on the device's pixels, as the band above it is: a
         // swatch is the same row of one-pixel cells, over less room.
         let face = rect.inset(SWATCH_INSET, SWATCH_INSET);
-        let grid = icon::Grid::new(scale);
+        let grid = pass.grid;
         let snap = |value: f32| grid.snap(value);
         let (top, bottom) = (snap(face.y), snap(face.bottom()));
         let steps = (face.width * scale).max(1.0) as usize;

@@ -21,7 +21,6 @@ use egui::{Align, Label, Layout, RichText, Sense, WidgetInfo, WidgetType, vec2};
 
 use crate::theme::Theme;
 
-use super::Rect;
 use super::chrome::Pass;
 use super::control::Control;
 use super::style::TOGGLE_RADIUS;
@@ -152,7 +151,8 @@ impl Toasts {
 ///
 /// Held to what the area can carry: a long message is cut rather than hung
 /// off the side of the window, so the cross is always reachable.
-pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, toast: &Toast, content: Rect) {
+pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, toast: &Toast) {
+    let content = pass.content;
     let theme = pass.theme;
     let held = 2.0 * INSET[0] + GAP + CLOSE;
     let room = content.width - 2.0 * LIFT - held;
@@ -199,7 +199,7 @@ fn cross(pass: &mut Pass, ui: &mut egui::Ui) {
     icon::paint(
         ui.painter(),
         icon::X,
-        icon::square(icon::Grid::new(ui.pixels_per_point()), rect, CLOSE - 4.0),
+        icon::square(pass.grid, rect, CLOSE - 4.0),
         ink,
         background,
     );

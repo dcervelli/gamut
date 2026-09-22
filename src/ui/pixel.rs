@@ -19,7 +19,6 @@ use crate::image::display::Mapped;
 use crate::image::{DecodedImage, Sample, Samples};
 use crate::render::Color;
 
-use super::Current;
 use super::chrome::{Pass, measure};
 
 /// Side of the color swatch, in logical pixels: the height of a line of
@@ -87,7 +86,10 @@ impl PixelFormat {
 /// is set to a fixed width so that they stay put while the pointer moves.
 /// Whatever else has to go in a narrow bar, the coordinate stays: it is the
 /// one thing the readout says that nothing else in the window says.
-pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, current: &Current) {
+pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
+    let Some(current) = pass.current else {
+        return;
+    };
     let Some(at) = pass.input.pointer else {
         return;
     };

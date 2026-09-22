@@ -23,8 +23,7 @@ use super::*;
 /// the plot does.
 pub(super) fn slider(pass: &mut Pass, ui: &mut egui::Ui, exposure: f32, room: Rect) {
     let theme = pass.theme;
-    let scale = pass.input.scale;
-    let grid = icon::Grid::new(scale);
+    let grid = pass.grid;
     let track = Rect::new(
         room.x + HANDLE_GRIP / 2.0,
         room.y,

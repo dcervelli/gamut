@@ -40,7 +40,6 @@ pub(super) fn track(
     bars: Rect,
 ) -> Option<String> {
     let theme = pass.theme;
-    let scale = pass.input.scale;
     let band = ramp(bars);
     let plotted = &current.stats.plot;
     let (axis_min, axis_max) = (plotted.min, plotted.max);
@@ -152,7 +151,7 @@ pub(super) fn track(
 
     // The handles themselves, over the band and standing up past it.
     let painter = ui.painter();
-    let grid = icon::Grid::new(scale);
+    let grid = pass.grid;
     for (t, on) in [(black_t, on_black), (white_t, on_white)] {
         let mark = grid.rect(Rect::new(
             at(t) - HANDLE_WIDTH / 2.0,

@@ -13,7 +13,7 @@ use super::Rect;
 use crate::view::Viewport;
 
 use super::chrome::{Pass, content_area};
-use super::{Command, Current, PADDING, icon, outline, panel};
+use super::{Command, PADDING, outline, panel};
 
 /// The largest the minimap's thumbnail may be. It keeps the image's own
 /// shape inside this, so a panorama gets a wide short one and a portrait a
@@ -144,13 +144,16 @@ fn minimap_marker(rect: Rect, image: [f32; 2], placement: Placement, viewport: V
 /// keeps the marker under the hand. Handed back as [`Command::Center`],
 /// since the map is a way of saying where to look and the view is the
 /// application's to move.
-pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, content: Rect) {
+pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
+    let Some(current) = pass.current else {
+        return;
+    };
+    let content = pass.content;
     let image = current.size();
     let Some(rect) = thumbnail(content, image) else {
         return;
     };
     let theme = pass.theme;
-    let scale = pass.input.scale;
     let area = egui::Rect::from_min_size(
         egui::pos2(rect.x, rect.y),
         egui::vec2(rect.width, rect.height),
@@ -171,16 +174,13 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, conten
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
         }
         let painter = ui.painter();
-        let grid = icon::Grid::new(scale);
+        let grid = pass.grid;
         outline(painter, grid, rect, 1.0, theme.minimap_edge.into());
 
         let placement = pass.view.placement(image, pass.input.viewport);
-        let shown = icon::Grid::new(scale).rect(minimap_marker(
-            rect,
-            image,
-            placement,
-            pass.input.viewport,
-        ));
+        let shown = pass
+            .grid
+            .rect(minimap_marker(rect, image, placement, pass.input.viewport));
         let wash: egui::Color32 = theme.minimap_dim.into();
         for aside in [
             Rect::new(rect.x, rect.y, rect.width, shown.y - rect.y),
@@ -217,6 +217,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, conten
 mod tests {
     use super::*;
     use crate::ui::chrome::Chrome;
+    use crate::ui::icon;
     use crate::view::View;
 
     const WINDOW: [f32; 2] = [1000.0, 700.0];

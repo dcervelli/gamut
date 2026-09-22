@@ -260,7 +260,7 @@ fn fit_cell(pass: &mut Pass, ui: &mut Ui, fit: Fit, fills: Axis, active: bool) -
     icon::paint(
         ui.painter(),
         marks,
-        icon::square(icon::Grid::new(ui.pixels_per_point()), rect, FIT_ICON),
+        icon::square(pass.grid, rect, FIT_ICON),
         ink,
         background,
     );
@@ -338,7 +338,7 @@ pub(super) fn titled(
             );
         });
     ui.add_space((HEADER_GAP - RULE_WIDTH) / 2.0);
-    let edge = icon::Grid::new(ui.pixels_per_point()).line_width(RULE_WIDTH);
+    let edge = pass.grid.line_width(RULE_WIDTH);
     let (rule, _) = ui.allocate_exact_size(vec2(0.0, edge), Sense::HOVER);
     let bottom = ui.cursor().min.y;
     ui.add_space((HEADER_GAP - RULE_WIDTH) / 2.0);

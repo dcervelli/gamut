@@ -111,7 +111,8 @@ pub fn panel(content: Rect) -> Option<Rect> {
 }
 
 /// Draws the popup, if it is open.
-pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, content: Rect) {
+pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
+    let content = pass.content;
     let Some(panel) = panel(content) else {
         return;
     };

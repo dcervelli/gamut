@@ -175,7 +175,7 @@ pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect, c
     // the panel's width was fixed for — cut into stretches by the heights of
     // the planes standing in it, each stretch filled with what the planes
     // over it come to. On the device's grid, like every other mark here.
-    let grid = icon::Grid::new(scale);
+    let grid = pass.grid;
     let snap = |value: f32| grid.snap(value);
     let edge = |index: usize| snap(bars.x + bars.width * index as f32 / BINS as f32);
     for bin in 0..BINS {

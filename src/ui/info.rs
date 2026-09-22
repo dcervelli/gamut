@@ -298,7 +298,7 @@ fn chip(pass: &Pass, ui: &egui::Ui, rect: egui::Rect, copies: Copyable, hover: b
     icon::paint(
         painter,
         icon::COPY,
-        icon::square(icon::Grid::new(ui.pixels_per_point()), mark, COPY_ICON),
+        icon::square(pass.grid, mark, COPY_ICON),
         ink,
         ground,
     );
@@ -321,7 +321,7 @@ fn copy_all(pass: &mut Pass, ui: &mut egui::Ui) {
 
 /// A hairline across the column, on the device's grid.
 pub(super) fn rule(pass: &Pass, ui: &mut egui::Ui, width: f32) {
-    let grid = icon::Grid::new(ui.pixels_per_point());
+    let grid = pass.grid;
     let edge = grid.line_width(RULE_WIDTH);
     let (rect, _) = ui.allocate_exact_size(vec2(width, edge), Sense::HOVER);
     ui.painter().rect_filled(
@@ -333,7 +333,11 @@ pub(super) fn rule(pass: &Pass, ui: &mut egui::Ui, width: f32) {
 
 /// Draws the panel: the header, and under it the column of everything the
 /// file has to say, scrolled by egui and read out by a click.
-pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, content: Rect) {
+pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
+    let Some(current) = pass.current else {
+        return;
+    };
+    let content = pass.content;
     let Some(panel) = panel(content, super::histogram_shown(content, pass.panels)) else {
         return;
     };

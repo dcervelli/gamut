@@ -62,7 +62,8 @@ pub fn panel(content: Rect) -> Option<Rect> {
 }
 
 /// Draws the three buttons, and reads what was pressed.
-pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, content: Rect) {
+pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
+    let content = pass.content;
     let Some(panel) = panel(content) else {
         return;
     };
@@ -122,7 +123,7 @@ fn button(
     let (background, ink) = pass.button_ink(false, &response, enabled);
     ui.painter().rect_filled(rect, TOGGLE_RADIUS, background);
 
-    let grid = icon::Grid::new(ui.pixels_per_point());
+    let grid = pass.grid;
     let mark = egui::Rect::from_center_size(
         pos2(rect.min.x + INSET + MARK / 2.0, rect.center().y),
         vec2(MARK, MARK),

@@ -17,7 +17,7 @@ use crate::render::Placement;
 
 use super::chrome::Pass;
 use super::control::Grab;
-use super::{Current, PANEL_RADIUS, Rect, icon, outline};
+use super::{PANEL_RADIUS, Rect, icon, outline};
 
 /// The side of a handle, in logical pixels: large enough to take hold of,
 /// small enough not to hide what is at the corner it marks.
@@ -284,13 +284,17 @@ fn within(inner: Rect, outer: Rect) -> bool {
 /// are about the region under the hand, and the hand is what says which
 /// region is being worked on. A region left on the picture keeps only its
 /// outline, which is the thing it is for.
-pub(super) fn show(pass: &Pass, ui: &mut egui::Ui, current: &Current, content: Rect) {
+pub(super) fn show(pass: &Pass, ui: &mut egui::Ui) {
+    let Some(current) = pass.current else {
+        return;
+    };
+    let content = pass.content;
     let Some(region) = pass.input.selection.region() else {
         return;
     };
     let theme = pass.theme;
     let scale = pass.input.scale;
-    let grid = icon::Grid::new(ui.pixels_per_point());
+    let grid = pass.grid;
     let placement = pass.view.placement(current.size(), pass.input.viewport);
     let rect = rect(region, placement, scale);
     let painter = ui.painter().with_clip_rect(content.into());
@@ -356,11 +360,15 @@ pub(super) fn show(pass: &Pass, ui: &mut egui::Ui, current: &Current, content: R
 /// with a wash of it inside, so that what will fill the window reads as one
 /// piece against the picture. Nothing else — no handles, no words — since it
 /// is gone the moment the drag lets go.
-pub(super) fn show_zoom_box(pass: &Pass, ui: &mut egui::Ui, current: &Current, content: Rect) {
+pub(super) fn show_zoom_box(pass: &Pass, ui: &mut egui::Ui) {
+    let Some(current) = pass.current else {
+        return;
+    };
+    let content = pass.content;
     let Some(boxed) = pass.input.zoom_box else {
         return;
     };
-    let grid = icon::Grid::new(ui.pixels_per_point());
+    let grid = pass.grid;
     let placement = pass.view.placement(current.size(), pass.input.viewport);
     let rect = rect(boxed, placement, pass.input.scale);
     let painter = ui.painter().with_clip_rect(content.into());

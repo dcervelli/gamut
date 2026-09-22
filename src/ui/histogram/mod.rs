@@ -716,7 +716,11 @@ fn handle(painter: &egui::Painter, theme: &Theme, grid: icon::Grid, mark: Rect, 
 ///
 /// The panel is opaque to the pointer: what lands on it belongs to it rather
 /// than to the picture it is floating over.
-pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, content: Rect) {
+pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
+    let Some(current) = pass.current else {
+        return;
+    };
+    let content = pass.content;
     let Some(panel) = panel(content) else {
         return;
     };
@@ -864,7 +868,7 @@ fn rows(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, panel: Rect) {
     let rows = Rows::new(panel);
     let display = &current.display;
     let font = FontId::proportional(ROW_TEXT);
-    let grid = icon::Grid::new(ui.pixels_per_point());
+    let grid = pass.grid;
 
     // The words down the left, set back the way a fact in a bar is set behind
     // the name it is about: the rows are read for their values, and these say

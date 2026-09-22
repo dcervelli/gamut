@@ -312,6 +312,7 @@ pub fn show(
     theme: &Theme,
     namer: &dyn Naming,
 ) -> Vec<Command> {
+    let content = chrome::content_area(input.logical, panels.show_ui, input.transport.is_some());
     let mut pass = Pass {
         input,
         panels,
@@ -319,25 +320,27 @@ pub fn show(
         view,
         theme,
         namer,
+        grid: icon::Grid::new(input.scale),
+        content,
+        room: room(content, panels),
         commands: Vec::new(),
     };
     if panels.show_ui {
         pass.bars(ui);
     }
     pass.picture(ui);
-    let content = chrome::content_area(input.logical, panels.show_ui, input.transport.is_some());
     match current {
-        Some(current) => pass.overlays(ui, current, content),
+        Some(current) => pass.overlays(ui, current),
         // Nothing to lay over: the buttons that would give the window
         // something, where the picture would be, and the message about
         // what was just done — a failure to open, most likely — under
         // them, as it goes under the panels when there is a picture.
         None => {
             if input.empty {
-                empty::show(&mut pass, ui, content);
+                empty::show(&mut pass, ui);
             }
             if let Some(message) = &input.toast {
-                toast::show(&mut pass, ui, message, content);
+                toast::show(&mut pass, ui, message);
             }
         }
     }
@@ -345,10 +348,10 @@ pub fn show(
     // chooser is about the list, and the list is there before the first
     // file has been read.
     if let Some(chooser) = &input.chooser {
-        chooser::show(&mut pass, ui, chooser, content);
+        chooser::show(&mut pass, ui, chooser);
     }
     // And the keys, which are the same whatever is on screen.
-    help::show(&mut pass, ui, content);
+    help::show(&mut pass, ui);
     // Over all of it: a rename is a question, and nothing else answers
     // until it has.
     if let Some(rename) = &input.rename {
@@ -446,7 +449,7 @@ impl Pass<'_> {
             .view
             .placement(self.current?.size(), self.input.viewport);
         let image_point = |pos: egui::Pos2| placement.image_point([pos.x * scale, pos.y * scale]);
-        let grid = icon::Grid::new(ui.pixels_per_point());
+        let grid = self.grid;
         let handles = self.input.selection.region().map(|region| {
             let rect = region::rect(region, placement, scale);
             (rect, region::handles(rect, grid))
@@ -532,7 +535,8 @@ impl Pass<'_> {
     /// panels rather than among them, and there whether or not the bars
     /// are, since what it says does not stop being true because they are
     /// away.
-    fn overlays(&mut self, ui: &mut egui::Ui, current: &Current, content: Rect) {
+    fn overlays(&mut self, ui: &mut egui::Ui, current: &Current) {
+        let content = self.content;
         let zoom = self.view.zoom(current.size(), self.input.viewport);
         // Under the floating panels, which are read against the image and
         // would be harder to read over a grid as well. The minimap's
@@ -558,20 +562,19 @@ impl Pass<'_> {
         // and a panel over the picture is over the region too. The box
         // being dragged out to zoom to goes over the region, being the
         // newer of the two marks and the one under the hand.
-        region::show(self, ui, current, content);
-        region::show_zoom_box(self, ui, current, content);
+        region::show(self, ui);
+        region::show_zoom_box(self, ui);
         if self.input.minimap_on_screen {
-            minimap::show(self, ui, current, content);
+            minimap::show(self, ui);
         }
-        let room = room(content, self.panels);
-        if self.panels.show_histogram && room.histogram {
-            histogram::show(self, ui, current, content);
+        if self.panels.show_histogram && self.room.histogram {
+            histogram::show(self, ui);
         }
-        if self.panels.show_info && room.info {
-            info::show(self, ui, current, content);
+        if self.panels.show_info && self.room.info {
+            info::show(self, ui);
         }
         if let Some(message) = &self.input.toast {
-            toast::show(self, ui, message, content);
+            toast::show(self, ui, message);
         }
     }
 }

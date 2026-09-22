@@ -20,7 +20,7 @@ use super::control::{Command, Control, Naming};
 use super::icon::{self, Mark};
 use super::style::TOGGLE_RADIUS;
 use super::tooltip::Tip;
-use super::{Current, FrameInput, PADDING, Panels, Reading, menu, pixel, status};
+use super::{Current, FrameInput, PADDING, Panels, Reading, Room, menu, pixel, status};
 use crate::image::display::Headroom;
 use crate::theme::Theme;
 use crate::view::View;
@@ -180,7 +180,9 @@ pub fn image_viewport(size: [f32; 2], scale: f32, show_ui: bool, transport: bool
     )
 }
 
-/// One pass of the interface: what it is drawn from, and what it asks for.
+/// One pass of the interface: what it is drawn from, what every widget on
+/// it would otherwise work out again — the device's grid, the content area
+/// and what it has room for — and what it asks for.
 pub(super) struct Pass<'a> {
     pub input: &'a FrameInput,
     pub panels: &'a Panels,
@@ -188,6 +190,13 @@ pub(super) struct Pass<'a> {
     pub view: &'a View,
     pub theme: &'a Theme,
     pub namer: &'a dyn Naming,
+    /// The device's grid, for everything thin that has to land on it.
+    pub grid: icon::Grid,
+    /// What the panels leave in the middle, where the picture is and the
+    /// things floating over it are placed.
+    pub content: Rect,
+    /// Which of the floating panels the content has room for.
+    pub room: Room,
     pub commands: Vec<Command>,
 }
 
@@ -279,9 +288,8 @@ impl Pass<'_> {
     /// The hairline along a panel's inner edge, on the device's own grid so
     /// that it is one pixel wide wherever it lands.
     fn hairline(&self, ui: &Ui, panel: Area, edge: Edge) {
-        let ppp = ui.pixels_per_point();
-        let width = icon::Grid::new(ppp).line_width(BORDER_WIDTH);
-        let snap = |v: f32| icon::Grid::new(ppp).snap(v);
+        let width = self.grid.line_width(BORDER_WIDTH);
+        let snap = |v: f32| self.grid.snap(v);
         let line = match edge {
             Edge::Bottom => Area::from_min_size(
                 pos2(panel.min.x, snap(panel.max.y - width)),
@@ -406,7 +414,7 @@ impl Pass<'_> {
                     ui.add_space(BUTTON_GAP);
                     self.pixel_dot(ui);
                     ui.add_space(pixel::GAP);
-                    pixel::show(self, ui, current);
+                    pixel::show(self, ui);
                 });
             });
         });
@@ -478,7 +486,7 @@ impl Pass<'_> {
         icon::paint(
             ui.painter(),
             icon::GRID_3X3,
-            icon::square(icon::Grid::new(ui.pixels_per_point()), mark, ICON_SIDE),
+            icon::square(self.grid, mark, ICON_SIDE),
             ink,
             background,
         );
@@ -650,14 +658,7 @@ impl Pass<'_> {
     fn right_strip(&mut self, ui: &mut Ui) {
         ui.spacing_mut().item_spacing = Vec2::ZERO;
         let height = ui.available_height();
-        let room = super::room(
-            content_area(
-                self.input.logical,
-                self.panels.show_ui,
-                self.input.transport.is_some(),
-            ),
-            self.panels,
-        );
+        let room = self.room;
         ui.vertical_centered(|ui| {
             ui.add_space(BAR_PADDING);
             let histogram = self.icon_button(
@@ -752,7 +753,7 @@ impl Pass<'_> {
         icon::paint(
             ui.painter(),
             marks,
-            icon::square(icon::Grid::new(ui.pixels_per_point()), rect, ICON_SIDE),
+            icon::square(self.grid, rect, ICON_SIDE),
             ink,
             background,
         );

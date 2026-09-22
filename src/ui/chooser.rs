@@ -26,7 +26,6 @@ use egui::{
 
 use super::chrome::Pass;
 use super::control::{Command, Control};
-use super::icon;
 use super::style::{MENU_PADDING, MENU_RADIUS, TOGGLE_RADIUS};
 use super::{PADDING, Rect, TEXT_SIZE, fonts, panel};
 
@@ -170,7 +169,8 @@ pub fn panel(content: Rect) -> Option<Rect> {
 }
 
 /// Draws the popup, if it is open, and reads what was pressed in it.
-pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input, content: Rect) {
+pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
+    let content = pass.content;
     let Some(panel) = panel(content) else {
         return;
     };
@@ -374,7 +374,7 @@ fn row(
     } else if response.hovered() {
         painter.rect_filled(rect, TOGGLE_RADIUS, theme.button_hover);
     }
-    let grid = icon::Grid::new(ui.pixels_per_point());
+    let grid = pass.grid;
     if input.current == Some(index) {
         let mark = egui::Rect::from_min_size(
             pos2(grid.snap(rect.left()), grid.snap(rect.top() + THUMB_INSET)),

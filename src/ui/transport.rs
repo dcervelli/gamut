@@ -165,7 +165,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, transport: &Transport) {
                     ),
                 )
             });
-            let grid = icon::Grid::new(ui.pixels_per_point());
+            let grid = pass.grid;
             let theme = pass.theme;
             let painter = ui.painter();
 
