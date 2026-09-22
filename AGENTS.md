@@ -130,6 +130,10 @@ openers.rs     what else on the desktop can open the file on screen: the entries
                the user's associations, and starting one of them
 clock.rs       a moment as a date and time — UTC, or the zone the system's own
                compiled zone file says it is in
+xdg.rs         the base directory specification's answers — home, and the cache, configuration
+               and data directories — read once for everything that keeps something under them
+uri.rs         a path as a file: URI, and the percent-encoding under the three spellings the
+               tree uses — RFC 3986's for the clipboard and the trash, GLib's for the thumbnail cache
 timing.rs      startup instrumentation
 image/         the data model, nothing GPU
   mod.rs         Channels, Samples, AlphaMode, Referred (graded or measured light), DecodedImage,

@@ -39,7 +39,7 @@ use std::process::{Command, Stdio};
 use anyhow::{Context, Result, anyhow};
 
 use crate::APP_ID;
-use crate::clipboard::file_uri;
+use crate::{uri, xdg};
 
 /// The most of a desktop entry that is read. Entries are a dozen lines of
 /// text; anything past this is not one, and reading a file until it stops is
@@ -136,7 +136,7 @@ impl Opener {
                     took_file = true;
                 }
                 Some('u' | 'U') => {
-                    out.push(file_uri(path));
+                    out.push(uri::file(path));
                     took_file = true;
                 }
                 Some('c') => out.push(&self.name),
@@ -308,9 +308,12 @@ struct Candidate {
 /// is keyed by, so a file whose extension lies about it is a file no other
 /// program will recognize either. That the decoders here sniff their way past
 /// such a name is a courtesy this table cannot pass on.
-const MIME_TYPES: &[(&str, &[&str])] = &[
-    ("jpg", &["image/jpeg"]),
-    ("jpeg", &["image/jpeg"]),
+pub(crate) const MIME_TYPES: &[(&str, &[&str])] = &[
+    // `image/jpg` is no registered name, and is what a program that never
+    // looked one up writes: read here for the entries that claim it, and
+    // taken on the clipboard under it.
+    ("jpg", &["image/jpeg", "image/jpg"]),
+    ("jpeg", &["image/jpeg", "image/jpg"]),
     ("jpe", &["image/jpeg"]),
     ("jfif", &["image/jpeg"]),
     ("png", &["image/png"]),
@@ -377,64 +380,9 @@ fn mime_types(path: &Path) -> &'static [&'static str] {
 /// found in two of them should be taken from: the user's own first, then the
 /// system's.
 fn application_dirs() -> Vec<PathBuf> {
-    data_dirs()
+    xdg::data_dirs()
         .into_iter()
         .map(|dir| dir.join("applications"))
-        .collect()
-}
-
-/// `$XDG_DATA_HOME` and then `$XDG_DATA_DIRS`, each defaulted as the base
-/// directory specification says. A relative path in either is ignored, which
-/// the specification also asks for: it would otherwise be resolved against
-/// whatever directory this program happened to be started in.
-fn data_dirs() -> Vec<PathBuf> {
-    let mut dirs = Vec::new();
-    if let Some(home) = absolute_env("XDG_DATA_HOME") {
-        dirs.push(home);
-    } else if let Some(home) = home_dir() {
-        dirs.push(home.join(".local/share"));
-    }
-    match std::env::var_os("XDG_DATA_DIRS") {
-        Some(value) if !value.is_empty() => dirs.extend(split_dirs(&value)),
-        _ => dirs.extend([
-            PathBuf::from("/usr/local/share"),
-            PathBuf::from("/usr/share"),
-        ]),
-    }
-    dirs
-}
-
-/// The same for the configuration directories, which is where the user's own
-/// associations live.
-fn config_dirs() -> Vec<PathBuf> {
-    let mut dirs = Vec::new();
-    if let Some(home) = absolute_env("XDG_CONFIG_HOME") {
-        dirs.push(home);
-    } else if let Some(home) = home_dir() {
-        dirs.push(home.join(".config"));
-    }
-    match std::env::var_os("XDG_CONFIG_DIRS") {
-        Some(value) if !value.is_empty() => dirs.extend(split_dirs(&value)),
-        _ => dirs.push(PathBuf::from("/etc/xdg")),
-    }
-    dirs
-}
-
-fn absolute_env(name: &str) -> Option<PathBuf> {
-    let value = std::env::var_os(name)?;
-    let path = PathBuf::from(value);
-    path.is_absolute().then_some(path)
-}
-
-fn home_dir() -> Option<PathBuf> {
-    absolute_env("HOME")
-}
-
-/// A colon-separated search path, as the base directory specification writes
-/// one, with the relative entries dropped.
-fn split_dirs(value: &OsStr) -> Vec<PathBuf> {
-    std::env::split_paths(value)
-        .filter(|path| path.is_absolute())
         .collect()
 }
 
@@ -857,9 +805,12 @@ fn association_files() -> Vec<PathBuf> {
         files
     };
 
-    let mut files: Vec<PathBuf> = config_dirs().iter().flat_map(|dir| named(dir)).collect();
+    let mut files: Vec<PathBuf> = xdg::config_dirs()
+        .iter()
+        .flat_map(|dir| named(dir))
+        .collect();
     files.extend(
-        data_dirs()
+        xdg::data_dirs()
             .iter()
             .flat_map(|dir| named(&dir.join("applications"))),
     );
@@ -889,7 +840,10 @@ mod tests {
     #[test]
     fn the_type_is_read_off_the_extension() {
         assert_eq!(mime_types(Path::new("/a/b.PNG")), ["image/png"]);
-        assert_eq!(mime_types(Path::new("a.tar.jpeg")), ["image/jpeg"]);
+        assert_eq!(
+            mime_types(Path::new("a.tar.jpeg")),
+            ["image/jpeg", "image/jpg"]
+        );
         assert!(mime_types(Path::new("photograph")).is_empty());
         assert!(mime_types(Path::new("notes.txt")).is_empty());
         // Both spellings of the same format, so that an entry registered for

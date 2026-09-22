@@ -31,7 +31,7 @@ use std::time::SystemTime;
 
 use anyhow::{Context, Result, anyhow};
 
-use crate::clock;
+use crate::{clock, uri, xdg};
 
 /// How many names one file may try in a trash before giving up: reached only
 /// by a trash already holding that many files of the same name.
@@ -82,14 +82,7 @@ impl Trash {
     /// `$XDG_DATA_HOME`, or `~/.local/share`. `None` where neither is
     /// known, in which case there is no trash to move anything to.
     pub fn detect() -> Option<Self> {
-        let env_path = |name: &str| {
-            std::env::var_os(name)
-                .filter(|value| !value.is_empty())
-                .map(PathBuf::from)
-        };
-        let data = env_path("XDG_DATA_HOME")
-            .or_else(|| Some(env_path("HOME")?.join(".local").join("share")))?;
-        Some(Self::under(data.join("Trash")))
+        Some(Self::under(xdg::data_home()?.join("Trash")))
     }
 
     /// A trash whose home directory is `home`, for the tests.
@@ -398,16 +391,7 @@ fn split_name(name: &[u8]) -> (&[u8], &[u8]) {
 /// `path` as the `Path=` line writes it: every byte outside the unreserved
 /// set percent-encoded, the separator apart, as a URI's path is.
 fn percent_encoded(path: &Path) -> String {
-    let mut encoded = String::new();
-    for &byte in path.as_os_str().as_bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
-                encoded.push(char::from(byte));
-            }
-            _ => encoded.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    encoded
+    uri::percent_encoded(path.as_os_str().as_bytes(), uri::unreserved)
 }
 
 /// The moment `now` as the `DeletionDate=` line writes it: local time, in

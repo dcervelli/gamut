@@ -22,8 +22,10 @@ mod thumbnailer;
 mod timing;
 mod trash;
 mod ui;
+mod uri;
 mod view;
 mod watch;
+mod xdg;
 
 use std::path::Path;
 use std::process::ExitCode;

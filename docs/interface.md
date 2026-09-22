@@ -901,7 +901,7 @@ open its directory are commonly both called the same thing.
 Starting one is `Exec` split the way a shell would split it — quotes and
 backslashes, and nothing expanded afterwards, because nothing goes through a
 shell — with the field codes resolved against the file: `%f` and `%F` take the
-path, `%u` and `%U` the `file:` URI that `clipboard::file_uri` writes, and an
+path, `%u` and `%U` the `file:` URI that `uri::file` writes, and an
 entry that asked for no file at all is given it on the end. The argument is
 built as an `OsString`, so a filename that is not valid UTF-8 reaches the
 program as the bytes the file system holds. The child is put in a process

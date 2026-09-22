@@ -284,10 +284,7 @@ mod tests {
             PathBuf::from("/tmp/plain")
         );
         let odd = PathBuf::from("/tmp/caf\u{e9} 100%.png");
-        assert_eq!(
-            path_from_uri(&crate::clipboard::file_uri(&odd)).unwrap(),
-            odd
-        );
+        assert_eq!(path_from_uri(&crate::uri::file(&odd)).unwrap(), odd);
     }
 
     /// Anything that is not a local file is refused rather than guessed at.

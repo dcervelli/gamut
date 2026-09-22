@@ -22,6 +22,7 @@ use std::time::SystemTime;
 use anyhow::{Context, Result, bail};
 
 use crate::clock;
+use crate::xdg;
 
 /// How many names one second may hold. Reached only by pasting faster than
 /// the clock ticks, which the name is otherwise unique by.
@@ -35,11 +36,10 @@ const NAMES_PER_SECOND: u32 = 100;
 /// pointing the variable at a directory nobody has made is ordinary — so it
 /// is made before anything is written into it.
 pub fn directory() -> Result<PathBuf> {
-    if let Some(dir) = env_path("XDG_PICTURES_DIR") {
+    if let Some(dir) = xdg::env_path("XDG_PICTURES_DIR") {
         return Ok(dir);
     }
-    let home =
-        env_path("HOME").context("HOME is unset, so there is nowhere to keep a pasted image")?;
+    let home = xdg::home().context("HOME is unset, so there is nowhere to keep a pasted image")?;
     Ok(configured(&home).unwrap_or_else(|| home.join("Pictures")))
 }
 
@@ -98,21 +98,12 @@ fn name(stamp: &str, attempt: u32, extension: &str) -> String {
     }
 }
 
-/// A path from the environment, ignoring the variable that is set to nothing
-/// — which is how a session says it has none rather than that the answer is
-/// the root of the filesystem.
-fn env_path(name: &str) -> Option<PathBuf> {
-    std::env::var_os(name)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-}
-
 /// What the user's `user-dirs.dirs` says pictures are kept in, if it says
 /// anything this can read. Every way it can fail — no file, no key, a name
 /// the filesystem allows and UTF-8 does not — means the same thing here, and
 /// leaves the caller with the default.
 fn configured(home: &Path) -> Option<PathBuf> {
-    let config = env_path("XDG_CONFIG_HOME").unwrap_or_else(|| home.join(".config"));
+    let config = xdg::config_home().unwrap_or_else(|| home.join(".config"));
     let text = fs::read_to_string(config.join("user-dirs.dirs")).ok()?;
     assignment(&text, "XDG_PICTURES_DIR", home)
 }

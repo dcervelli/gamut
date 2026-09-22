@@ -137,7 +137,7 @@ MD5 of the file's URI, and the URI has to be spelled as GLib's
 `g_filename_to_uri` spells it, since GLib is what every other writer of the
 cache goes through: `A-Za-z0-9` and `!$&'()*+,-./:=@_~` left alone, every
 other byte percent-encoded in upper-case hex. `thumbnail::uri` is that
-spelling, checked against a run of GLib itself; `clipboard::file_uri`
+spelling, checked against a run of GLib itself; `uri::file`
 escapes more than GLib does — correctly, for a URI, and uselessly for a
 key — and must not be used here. MD5 is in the tree, eighty lines against
 RFC 1321's vectors, rather than a crate that brings five others for one

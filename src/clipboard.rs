@@ -21,7 +21,6 @@
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io::{Read as _, Write as _};
-use std::os::unix::ffi::OsStrExt as _;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -48,31 +47,10 @@ pub const URI_LIST: &str = "text/uri-list";
 /// The picture itself. Nothing text-like is offered alongside this one.
 pub const PNG: &str = "image/png";
 
-/// The `file:` URI naming `path`, which must be absolute.
-///
-/// Every byte outside RFC 3986's unreserved set is percent-encoded, the
-/// separator apart. Encoding more than strictly necessary is always correct —
-/// it decodes back to the same bytes — where guessing which sub-delimiters a
-/// given reader tolerates unescaped is not. The bytes are the path's own, so
-/// a name that is not valid UTF-8 survives the round trip.
-pub fn file_uri(path: &Path) -> String {
-    debug_assert!(path.is_absolute(), "a file URI needs an absolute path");
-    let mut uri = String::from("file://");
-    for &byte in path.as_os_str().as_bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
-                uri.push(char::from(byte));
-            }
-            _ => uri.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    uri
-}
-
 /// `path` as a whole `text/uri-list` body: one URI, and the CRLF that RFC
 /// 2483 ends every line of one with.
 pub fn uri_list(path: &Path) -> String {
-    format!("{}\r\n", file_uri(path))
+    format!("{}\r\n", crate::uri::file(path))
 }
 
 /// Puts `content` on the clipboard under `mime_type`.
@@ -252,39 +230,7 @@ pub fn receive(mime_type: &str, path: &Path) -> Result<u64> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use super::*;
-
-    #[test]
-    fn a_plain_path_needs_no_escaping() {
-        assert_eq!(
-            file_uri(Path::new("/home/me/pictures/sunset_01.png")),
-            "file:///home/me/pictures/sunset_01.png"
-        );
-    }
-
-    /// Spaces, the reserved characters and anything above ASCII, all of which
-    /// a reader would otherwise take for punctuation of the URI itself.
-    #[test]
-    fn everything_else_is_percent_encoded() {
-        assert_eq!(
-            file_uri(Path::new("/tmp/a b#c?d%e.png")),
-            "file:///tmp/a%20b%23c%3Fd%25e.png"
-        );
-        assert_eq!(
-            file_uri(Path::new("/tmp/caf\u{e9}.jpg")),
-            "file:///tmp/caf%C3%A9.jpg"
-        );
-    }
-
-    /// A name the filesystem allows and UTF-8 does not still names a file,
-    /// and still has to reach the other program.
-    #[test]
-    fn a_name_that_is_not_utf8_survives() {
-        let path = PathBuf::from(OsStr::from_bytes(b"/tmp/\xff.png"));
-        assert_eq!(file_uri(&path), "file:///tmp/%FF.png");
-    }
 
     #[test]
     fn a_uri_list_is_one_crlf_terminated_line() {
@@ -305,6 +251,24 @@ mod tests {
                 *mime,
                 mime.to_ascii_lowercase(),
                 "types are compared without case, so the table is written in one"
+            );
+        }
+    }
+
+    /// The types a paste is taken under are the desktop's names for the
+    /// same files: each is among what `openers` says the desktop calls a
+    /// file of that extension, so the two tables cannot drift apart.
+    #[test]
+    fn every_type_a_paste_is_taken_under_is_one_the_desktop_calls_it() {
+        for (mime, extension) in IMAGE_TYPES {
+            let known = crate::openers::MIME_TYPES
+                .iter()
+                .find(|(known, _)| known == extension)
+                .map(|(_, types)| *types)
+                .unwrap_or_else(|| panic!("{extension} is not in openers::MIME_TYPES"));
+            assert!(
+                known.contains(mime),
+                "{mime} is not a name for .{extension}"
             );
         }
     }

@@ -10,7 +10,7 @@
 //! if the key agrees to the byte: the name of a thumbnail is the MD5 of the
 //! file's URI, and the URI has to be spelled exactly as GLib spells it,
 //! since GLib is what every other writer of this cache goes through.
-//! [`uri`] is that spelling; `clipboard::file_uri` escapes more than GLib
+//! [`uri`] is that spelling; `crate::uri::file` escapes more than GLib
 //! does and must not be used for the key.
 //!
 //! Pure functions over paths and bytes, plus the file I/O; no threads and
@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use crate::PROGRAM;
+use crate::{PROGRAM, xdg};
 
 /// The longest side of a thumbnail in the `x-large` directory, which is the
 /// size the specification gives that directory and the size GNOME's own
@@ -78,7 +78,7 @@ impl Dirs {
     /// `~/.cache/thumbnails`. `None` where neither can be named, in which
     /// case there is no cache to read or write.
     pub fn detect() -> Option<Self> {
-        Some(Self::under(&cache_dir()?.join("thumbnails")))
+        Some(Self::under(&xdg::cache_home()?.join("thumbnails")))
     }
 
     /// Whether `path` is inside the cache. A thumbnail of a thumbnail is
@@ -87,17 +87,6 @@ impl Dirs {
     pub fn holds(&self, path: &Path) -> bool {
         path.starts_with(&self.root)
     }
-}
-
-/// `$XDG_CACHE_HOME`, or `~/.cache`. A variable set to nothing is a
-/// variable not set, as `pasted` reads its own.
-fn cache_dir() -> Option<PathBuf> {
-    let env_path = |name: &str| {
-        std::env::var_os(name)
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-    };
-    env_path("XDG_CACHE_HOME").or_else(|| Some(env_path("HOME")?.join(".cache")))
 }
 
 /// `path` as GLib's `g_filename_to_uri` writes it, which is the spelling
@@ -110,15 +99,11 @@ fn cache_dir() -> Option<PathBuf> {
 /// not valid UTF-8 keys the same file GLib would key.
 pub fn uri(path: &Path) -> String {
     debug_assert!(path.is_absolute(), "the cache is keyed by absolute paths");
-    let mut uri = String::from("file://");
-    for &byte in path.as_os_str().as_bytes() {
-        if byte.is_ascii_alphanumeric() || b"!$&'()*+,-./:=@_~".contains(&byte) {
-            uri.push(char::from(byte));
-        } else {
-            uri.push_str(&format!("%{byte:02X}"));
-        }
-    }
-    uri
+    let glib = |byte: u8| byte.is_ascii_alphanumeric() || b"!$&'()*+,-./:=@_~".contains(&byte);
+    format!(
+        "file://{}",
+        crate::uri::percent_encoded(path.as_os_str().as_bytes(), glib)
+    )
 }
 
 /// What a file is called in the cache: its URI, and the name of its
