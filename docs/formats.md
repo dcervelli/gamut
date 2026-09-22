@@ -36,10 +36,12 @@ dependency for the header pass.
 **ICC profiles** are the other form, and the one a phone JPEG uses — and the
 only form WebP and TIFF have. Only what
 this program's color model can act on is taken from a profile: the primaries,
-matched against the four it can name by comparing colorants rather than by
+matched against the five it can name by comparing colorants rather than by
 reading description text, and a transfer function only where the profile
-states a plain power law. Where a file carries both vocabularies the code
-points win.
+states a plain power law — in either of ICC's two spellings of one, the
+parametric type 0 and the one-entry `curv` that Adobe's own profiles use
+for Adobe RGB's 2.2 and ProPhoto's 1.8. Where a file carries both
+vocabularies the code points win.
 
 PNG has a third, older vocabulary, read by `decode::png::header` where a
 file carries none of the above and no `sRGB` chunk either, which the

@@ -10,7 +10,7 @@ _gamut() {
 
     case $prev in
         --transfer)   COMPREPLY=($(compgen -W 'linear srgb pq hlg gamma:' -- "$cur")); return ;;
-        --primaries)  COMPREPLY=($(compgen -W 'bt709 p3 bt2020 adobe' -- "$cur")); return ;;
+        --primaries)  COMPREPLY=($(compgen -W 'bt709 p3 bt2020 adobe prophoto' -- "$cur")); return ;;
         --colormap)   COMPREPLY=($(compgen -W 'gray viridis magma turbo' -- "$cur")); return ;;
         --output)     COMPREPLY=($(compgen -W 'sdr hdr' -- "$cur")); return ;;
         --tone-map)   COMPREPLY=($(compgen -W 'none neutral' -- "$cur")); return ;;

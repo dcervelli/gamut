@@ -82,14 +82,14 @@ space, that is believed instead; where it states it twice and the two
 disagree, the more precise statement wins.
 
 **Only part of an ICC profile is used.** The primaries are recognized if they
-are sRGB, Display P3, BT.2020 or Adobe RGB, and the tone response is taken
-only where the profile states a simple power law. A profile that describes
-some other gamut, or that describes itself with lookup tables, or that is for
-CMYK or another non-RGB space, leaves the file shown as sRGB rather than
-approximated.
+are sRGB, Display P3, BT.2020, Adobe RGB or ProPhoto RGB, and the tone
+response is taken only where the profile states a simple power law — which
+Adobe RGB's and ProPhoto's do. A profile that describes some other gamut, or
+that describes itself with lookup tables, or that is for CMYK or another
+non-RGB space, leaves the file shown as sRGB rather than approximated.
 
 **You can override the assumption.** `--transfer linear|srgb|pq|hlg|gamma:N`
-and `--primaries bt709|p3|bt2020|adobe` replace whatever the file said or was
+and `--primaries bt709|p3|bt2020|adobe|prophoto` replace whatever the file said or was
 assumed to mean, for every file opened in that run. This matters most for
 TIFF, which says nothing at all.
 
@@ -144,8 +144,8 @@ profile is read where there is no such statement, so a Display P3 PNG shows as
 Display P3. A file with neither is read by its older tags, where it has them:
 a gamma of 1.0, which is how a renderer or a game pipeline marks a PNG as
 linear light, is taken as linear, and primaries stated as chromaticities are
-matched against sRGB, Display P3, BT.2020 and Adobe RGB. Anything else means
-sRGB.
+matched against sRGB, Display P3, BT.2020, Adobe RGB and ProPhoto RGB.
+Anything else means sRGB.
 
 **The orientation is applied** where a PNG carries one, which is rare but
 happens to a photograph saved out of an editor.
@@ -233,9 +233,8 @@ Caveats:
 
 - **The ICC profile is read** where there is one, and it settles the
   question: a 16-bit export from a photo editor carries the profile it was
-  graded in, and arrives as the picture it is. Adobe RGB, Display P3 and
-  BT.2020 are recognized; a ProPhoto RGB file is shown with sRGB primaries,
-  and looks flat.
+  graded in — ProPhoto RGB or Adobe RGB, as a rule — and arrives as the
+  picture it is.
 - **Without a profile, a TIFF says nothing about color**, and the tone
   response is inferred from depth: 8-bit is taken as sRGB, anything deeper as
   linear measurement data. That is right nearly always and wrong for a 16-bit

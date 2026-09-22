@@ -8,17 +8,20 @@
 //! rather than half-applied.
 //!
 //! Primaries are recognized by matching the profile's colorants against those
-//! of the four spaces [`Primaries`] can name, rather than by reading the
+//! of the five spaces [`Primaries`] can name, rather than by reading the
 //! description text: a profile written by a phone says "Display P3" but one
 //! written by a scanner says whatever its vendor felt like, and the numbers
-//! are the same either way.
+//! are the same either way. Colorants are written adapted to the D50 of
+//! the profile connection space, whatever the space's own white, so the
+//! comparison is between like and like — and ProPhoto, whose white is D50
+//! already, is the one whose colorants are its own.
 
 use moxcms::{ColorProfile, ToneReprCurve};
 
 use super::{ColorSpace, Primaries, Transfer};
 
 /// How far apart two colorant matrices may be and still be taken as the same
-/// space. The four candidates are far more different from each other than
+/// space. The five candidates are far more different from each other than
 /// this — sRGB and Display P3, the closest pair, differ by about 0.08 in
 /// their largest entry — so the threshold only has to be loose enough for the
 /// rounding a profile picks up on the way through 16-bit fixed point.
@@ -58,6 +61,7 @@ fn primaries(profile: &ColorProfile) -> Option<Primaries> {
         (Primaries::DisplayP3, ColorProfile::new_display_p3()),
         (Primaries::Bt2020, ColorProfile::new_bt2020()),
         (Primaries::AdobeRgb, ColorProfile::new_adobe_rgb()),
+        (Primaries::ProPhoto, ColorProfile::new_pro_photo_rgb()),
     ];
 
     let (nearest, distance) = candidates
@@ -81,19 +85,22 @@ fn primaries(profile: &ColorProfile) -> Option<Primaries> {
 /// The transfer function, but only where the profile states a plain power
 /// law.
 ///
-/// ICC's parametric curve type 0 is exactly `Y = X^g`, which is what
-/// [`Transfer::Gamma`] means. Types 1 to 4 add a linear toe, and the one that
-/// matters — sRGB — is already what the caller assumes for every format that
-/// carries a profile at all, so reading it back would change nothing while
-/// risking a worse answer on the curves that only approximate it.
+/// ICC has two spellings of one. A parametric curve of type 0 is exactly
+/// `Y = X^g`, which is what [`Transfer::Gamma`] means; and a `curv` tag
+/// with a single entry is the same thing with the exponent in unsigned
+/// 8.8 fixed point, which is how Adobe's own profiles state Adobe RGB's
+/// 2.2 and ProPhoto's 1.8, and how `moxcms` writes its references. The
+/// parametric types 1 to 4 add a linear toe, and the one that matters —
+/// sRGB — is already what the caller assumes for every format that carries
+/// a profile at all, so reading it back would change nothing while risking
+/// a worse answer on the curves that only approximate it.
 fn transfer(profile: &ColorProfile) -> Option<Transfer> {
-    match profile.red_trc.as_ref()? {
-        ToneReprCurve::Parametric(values) if values.len() == 1 => {
-            let gamma = values[0];
-            (gamma.is_finite() && gamma > 0.0).then_some(Transfer::Gamma(gamma))
-        }
-        _ => None,
-    }
+    let gamma = match profile.red_trc.as_ref()? {
+        ToneReprCurve::Parametric(values) if values.len() == 1 => values[0],
+        ToneReprCurve::Lut(table) if table.len() == 1 => f32::from(table[0]) / 256.0,
+        _ => return None,
+    };
+    (gamma.is_finite() && gamma > 0.0).then_some(Transfer::Gamma(gamma))
 }
 
 #[cfg(test)]
@@ -115,10 +122,32 @@ mod tests {
             (ColorProfile::new_display_p3(), Primaries::DisplayP3),
             (ColorProfile::new_bt2020(), Primaries::Bt2020),
             (ColorProfile::new_adobe_rgb(), Primaries::AdobeRgb),
+            (ColorProfile::new_pro_photo_rgb(), Primaries::ProPhoto),
         ];
         for (profile, expected) in cases {
             assert_eq!(recognize(&profile).primaries, expected);
         }
+    }
+
+    /// The gamma the reference profiles state as a one-entry `curv` — the
+    /// spelling Adobe's own profiles use — is read, and read at its 8.8
+    /// precision: 2.2 arrives as 2.19921875, which is what the profile
+    /// says, not what its author meant.
+    #[test]
+    fn a_one_entry_curve_is_a_power_law() {
+        assert_eq!(
+            recognize(&ColorProfile::new_adobe_rgb()).transfer,
+            Transfer::Gamma(2.199_218_8)
+        );
+        assert_eq!(
+            recognize(&ColorProfile::new_pro_photo_rgb()).transfer,
+            Transfer::Gamma(1.800_781_2)
+        );
+        // sRGB's own curve is not a power law, and the assumption stands.
+        assert_eq!(
+            recognize(&ColorProfile::new_srgb()).transfer,
+            Transfer::Srgb
+        );
     }
 
     /// The distinction this whole module exists for. Display P3 is the

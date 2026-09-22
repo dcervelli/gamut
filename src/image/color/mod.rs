@@ -162,36 +162,43 @@ pub enum Primaries {
     DisplayP3,
     Bt2020,
     AdobeRgb,
+    /// ROMM RGB, the widest of these: what Lightroom and Camera Raw edit in
+    /// and export by default at 16 bits. Its white is D50, unlike the
+    /// others', so its conversion carries a chromatic adaptation.
+    ProPhoto,
 }
 
 impl Primaries {
-    /// `bt709`, `p3`, `bt2020`, or `adobe`, as the command line names them,
-    /// with the aliases people actually type.
+    /// `bt709`, `p3`, `bt2020`, `adobe` or `prophoto`, as the command line
+    /// names them, with the aliases people actually type.
     pub fn parse(value: &str) -> Option<Self> {
         Some(match value.to_ascii_lowercase().as_str() {
             "bt709" | "srgb" | "rec709" => Primaries::Bt709,
             "p3" | "displayp3" => Primaries::DisplayP3,
             "bt2020" | "rec2020" => Primaries::Bt2020,
             "adobe" | "adobergb" => Primaries::AdobeRgb,
+            "prophoto" | "prophotorgb" | "romm" => Primaries::ProPhoto,
             _ => return None,
         })
     }
 
     /// The CIE xy chromaticities of the red, green and blue primaries,
-    /// as the standards give them. The white point is D65 in all four.
+    /// as the standards give them. The white point is D65 in all but
+    /// ProPhoto, whose is D50.
     pub fn chromaticities(self) -> [(f32, f32); 3] {
         match self {
             Primaries::Bt709 => [(0.64, 0.33), (0.30, 0.60), (0.15, 0.06)],
             Primaries::DisplayP3 => [(0.680, 0.320), (0.265, 0.690), (0.150, 0.060)],
             Primaries::Bt2020 => [(0.708, 0.292), (0.170, 0.797), (0.131, 0.046)],
             Primaries::AdobeRgb => [(0.64, 0.33), (0.21, 0.71), (0.15, 0.06)],
+            Primaries::ProPhoto => [(0.7347, 0.2653), (0.1596, 0.8404), (0.0366, 0.0001)],
         }
     }
 
     /// The primaries whose chromaticities these are, or `None` where they
     /// are nobody's that can be named here. For a container that states
     /// its primaries as coordinates — PNG's `cHRM` — rather than by code or
-    /// profile. The four are far apart: the closest pair, sRGB and Display
+    /// profile. The five are far apart: the closest pair, sRGB and Display
     /// P3, differ by 0.04 in the red x, and the tolerance need only cover
     /// the rounding of a coordinate written to five places.
     pub fn from_chromaticities(
@@ -205,6 +212,7 @@ impl Primaries {
             Primaries::DisplayP3,
             Primaries::Bt2020,
             Primaries::AdobeRgb,
+            Primaries::ProPhoto,
         ]
         .into_iter()
         .find(|candidate| {
@@ -219,7 +227,9 @@ impl Primaries {
     }
 
     /// Row-major 3x3 taking these primaries to the linear BT.709 working
-    /// space, both with a D65 white point.
+    /// space, with its D65 white point. ProPhoto's white is D50, so its
+    /// matrix carries a Bradford adaptation from the one to the other, and
+    /// its white lands on white like the rest.
     pub fn to_bt709(self) -> [[f32; 3]; 3] {
         match self {
             Primaries::Bt709 => [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
@@ -237,6 +247,15 @@ impl Primaries {
                 [1.398_374_5, -0.398_374_47, 0.0],
                 [0.0, 1.0, 0.0],
                 [0.0, -0.042_930_14, 1.042_930_1],
+            ],
+            // ROMM's primaries at D50 (ISO 22028-2), through Bradford to D65,
+            // then into BT.709. Recomputable from `chromaticities` and the
+            // two white points; `prophoto_reaches_bt709_through_bradford`
+            // checks that it was.
+            Primaries::ProPhoto => [
+                [2.034_367_5, -0.727_634_5, -0.306_733_1],
+                [-0.228_826_8, 1.231_753_4, -0.002_926_6],
+                [-0.008_558_4, -0.153_268_2, 1.161_826_6],
             ],
         }
     }
@@ -280,6 +299,7 @@ impl ColorSpace {
             Primaries::DisplayP3 => "Display P3",
             Primaries::Bt2020 => "BT.2020",
             Primaries::AdobeRgb => "Adobe RGB",
+            Primaries::ProPhoto => "ProPhoto RGB",
         };
         format!("{primaries}/{transfer}")
     }
@@ -299,6 +319,7 @@ mod tests {
             Primaries::DisplayP3,
             Primaries::Bt2020,
             Primaries::AdobeRgb,
+            Primaries::ProPhoto,
         ] {
             let [red, green, blue] = primaries
                 .chromaticities()
@@ -308,11 +329,98 @@ mod tests {
                 Some(primaries)
             );
         }
-        // ProPhoto RGB, which is nobody's here.
+        // ACES AP0, which is nobody's here.
         assert_eq!(
-            Primaries::from_chromaticities((0.7347, 0.2653), (0.1596, 0.8404), (0.0366, 0.0001)),
+            Primaries::from_chromaticities((0.7347, 0.2653), (0.0, 1.0), (0.0001, -0.077)),
             None
         );
+    }
+
+    /// The ProPhoto matrix, derived again from the chromaticities and the
+    /// two white points the way the constant was: RGB to XYZ at D50, a
+    /// Bradford adaptation to D65, then XYZ to BT.709. Written out so that
+    /// the constant cannot be a transcription of the wrong thing — and so
+    /// that the D65-to-D65 matrices, which skip the middle step, are shown
+    /// to need it: without it ProPhoto's white would come out 0.96, 1.0,
+    /// 1.09.
+    #[test]
+    fn prophoto_reaches_bt709_through_bradford() {
+        type M = [[f64; 3]; 3];
+        fn mul(p: &M, q: &M) -> M {
+            let mut out = [[0.0; 3]; 3];
+            for (r, row) in out.iter_mut().enumerate() {
+                for (c, cell) in row.iter_mut().enumerate() {
+                    *cell = (0..3).map(|k| p[r][k] * q[k][c]).sum();
+                }
+            }
+            out
+        }
+        fn mulv(m: &M, v: [f64; 3]) -> [f64; 3] {
+            std::array::from_fn(|r| (0..3).map(|k| m[r][k] * v[k]).sum())
+        }
+        fn inv(m: &M) -> M {
+            let [[a, b, c], [d, e, f], [g, h, i]] = *m;
+            let det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+            [
+                [
+                    (e * i - f * h) / det,
+                    (c * h - b * i) / det,
+                    (b * f - c * e) / det,
+                ],
+                [
+                    (f * g - d * i) / det,
+                    (a * i - c * g) / det,
+                    (c * d - a * f) / det,
+                ],
+                [
+                    (d * h - e * g) / det,
+                    (b * g - a * h) / det,
+                    (a * e - b * d) / det,
+                ],
+            ]
+        }
+        fn xyz((x, y): (f64, f64)) -> [f64; 3] {
+            [x / y, 1.0, (1.0 - x - y) / y]
+        }
+        // RGB to XYZ from the primaries' chromaticities, scaled so that
+        // RGB(1, 1, 1) is the white point.
+        fn rgb_to_xyz(primaries: Primaries, white: (f64, f64)) -> M {
+            let [r, g, b] = primaries
+                .chromaticities()
+                .map(|(x, y)| xyz((x as f64, y as f64)));
+            let columns: M = std::array::from_fn(|row| [r[row], g[row], b[row]]);
+            let scale = mulv(&inv(&columns), xyz(white));
+            std::array::from_fn(|row| std::array::from_fn(|col| columns[row][col] * scale[col]))
+        }
+        const D50: (f64, f64) = (0.3457, 0.3585);
+        const D65: (f64, f64) = (0.3127, 0.3290);
+        const BRADFORD: M = [
+            [0.8951, 0.2664, -0.1614],
+            [-0.7502, 1.7135, 0.0367],
+            [0.0389, -0.0685, 1.0296],
+        ];
+        let (source, target) = (mulv(&BRADFORD, xyz(D50)), mulv(&BRADFORD, xyz(D65)));
+        let mut gain = [[0.0; 3]; 3];
+        for k in 0..3 {
+            gain[k][k] = target[k] / source[k];
+        }
+        let adaptation = mul(&inv(&BRADFORD), &mul(&gain, &BRADFORD));
+        let expected = mul(
+            &inv(&rgb_to_xyz(Primaries::Bt709, D65)),
+            &mul(&adaptation, &rgb_to_xyz(Primaries::ProPhoto, D50)),
+        );
+
+        let actual = Primaries::ProPhoto.to_bt709();
+        for r in 0..3 {
+            for c in 0..3 {
+                assert!(
+                    (actual[r][c] as f64 - expected[r][c]).abs() < 1e-5,
+                    "[{r}][{c}]: {} against {}",
+                    actual[r][c],
+                    expected[r][c]
+                );
+            }
+        }
     }
 
     /// The other way: linear BT.709 to BT.2020, which is the gamut an HDR10
@@ -447,7 +555,12 @@ mod tests {
     /// through it picks up a color cast.
     #[test]
     fn primaries_conversions_preserve_white() {
-        for primaries in [Primaries::DisplayP3, Primaries::Bt2020, Primaries::AdobeRgb] {
+        for primaries in [
+            Primaries::DisplayP3,
+            Primaries::Bt2020,
+            Primaries::AdobeRgb,
+            Primaries::ProPhoto,
+        ] {
             let matrix = primaries.to_bt709();
             for (index, row) in matrix.iter().enumerate() {
                 let sum: f32 = row.iter().sum();

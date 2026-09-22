@@ -18,6 +18,14 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   camera's own orientation, as before, so a preview that repeats the tag
   is not turned twice.
 
+- ProPhoto RGB is recognized, from a profile's colorants or a PNG's
+  chromaticities, and `--primaries prophoto` names it: a 16-bit export from
+  Lightroom, which edits in ProPhoto and writes it by default, arrives with
+  its colors rather than the flat ones sRGB primaries make of them. The
+  gamma Adobe's own profiles state — 2.2 for Adobe RGB, 1.8 for ProPhoto —
+  is read as well; before, both were read with the sRGB curve, which put
+  Adobe RGB's shadows a little wrong and ProPhoto's a lot.
+
 - A TIFF's embedded ICC profile is read, through the same reader JPEG,
   PNG, WebP and HEIF's go through, and it settles what the file means: a
   16-bit export from Lightroom or Photoshop no longer arrives as linear

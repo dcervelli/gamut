@@ -42,7 +42,7 @@ OPTIONS:
         --transfer <FN>     Override the transfer function the file is assumed
                             to use: linear, srgb, pq, hlg, or gamma:<N>
         --primaries <P>     Override the color primaries: bt709, p3, bt2020,
-                            or adobe
+                            adobe, or prophoto
         --no-gain-map       Show the SDR base image of an Ultra HDR JPEG,
                             rather than reconstructing the HDR one from the
                             gain map beside it
