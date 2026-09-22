@@ -562,7 +562,7 @@ fn row_label(widget: Control, display: &Display) -> Option<(String, bool)> {
                 ToneMap::None => "Clip",
                 ToneMap::Neutral => "Roll off",
             };
-            (label.to_string(), display.tone_map == curve)
+            (label.to_string(), display.tone_map() == curve)
         }
         _ => return None,
     })
@@ -1388,7 +1388,7 @@ fn controls(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, panel: Rect) 
     }
     for (index, map) in Colormap::ALL.into_iter().enumerate() {
         let rect = swatch_button(bars, index);
-        let chosen = current.display.colormap == map;
+        let chosen = current.display.colormap() == map;
         button(
             pass,
             ui,
@@ -1624,7 +1624,7 @@ fn rows(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, panel: Rect) {
         );
     }
 
-    slider(pass, ui, display.exposure_stops, rows.slider());
+    slider(pass, ui, display.exposure_stops(), rows.slider());
 
     // Its reading at the end of the row, in the units the rest of the
     // interface quotes it in: stops counted in quarters, as the bar and the
@@ -1633,7 +1633,7 @@ fn rows(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, panel: Rect) {
     ui.painter().text(
         pos2(grid.snap(stops.right()), stops.y + stops.height / 2.0),
         Align2::RIGHT_CENTER,
-        stops_label(display.exposure_stops),
+        stops_label(display.exposure_stops()),
         font.clone(),
         theme.text_primary.into(),
     );

@@ -2646,21 +2646,21 @@ mod tests {
                 .as_ref()
                 .is_some_and(|current| current.image.is_gray())
         );
-        assert_eq!(display(&app).tone_map, ToneMap::None);
+        assert_eq!(display(&app).tone_map(), ToneMap::None);
 
         assert_eq!(app.perform(Action::CycleColormap), Effect::Redraw);
-        assert_eq!(display(&app).colormap, Colormap::Viridis);
+        assert_eq!(display(&app).colormap(), Colormap::Viridis);
         assert_eq!(app.perform(Action::CycleToneMap), Effect::Nothing);
-        assert_eq!(display(&app).tone_map, ToneMap::None);
+        assert_eq!(display(&app).tone_map(), ToneMap::None);
         let _ = app.act(Command::Press(Control::Curve(1)));
-        assert_eq!(display(&app).tone_map, ToneMap::None);
+        assert_eq!(display(&app).tone_map(), ToneMap::None);
 
         for _ in 1..Colormap::ALL.len() {
             let _ = app.perform(Action::CycleColormap);
         }
-        assert_eq!(display(&app).colormap, Colormap::Gray);
+        assert_eq!(display(&app).colormap(), Colormap::Gray);
         assert_eq!(app.perform(Action::CycleToneMap), Effect::Redraw);
-        assert_eq!(display(&app).tone_map, ToneMap::Neutral);
+        assert_eq!(display(&app).tone_map(), ToneMap::Neutral);
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }
@@ -2687,7 +2687,7 @@ mod tests {
                 .as_ref()
                 .expect("a picture is up")
                 .display
-                .colormap,
+                .colormap(),
             Colormap::Gray
         );
         assert_eq!(app.perform(Action::CycleColormap), Effect::Nothing);
@@ -2723,7 +2723,7 @@ mod tests {
         // And a press down moves it alone, a twentieth of the window along
         // the plot, the exposure untouched.
         assert_eq!(app.perform(Action::StepWhite(-0.05)), Effect::Redraw);
-        assert_eq!(display(&app).exposure_stops, 0.0);
+        assert_eq!(display(&app).exposure_stops(), 0.0);
         let (still_black, white) = display(&app).displayed_bounds();
         assert_eq!(still_black, black);
         let encoded = crate::image::Transfer::Srgb.to_encoded(white);
@@ -2748,17 +2748,17 @@ mod tests {
         assert_eq!(app.perform(Action::StepBlack(0.05)), Effect::Redraw);
         assert_eq!(app.perform(Action::StepWhite(-0.05)), Effect::Redraw);
         assert_eq!(app.perform(Action::Exposure(0.5)), Effect::Redraw);
-        assert_eq!(display(&app).auto, AutoWindow::Manual);
+        assert_eq!(display(&app).auto(), AutoWindow::Manual);
         assert_ne!(display(&app).displayed_bounds(), (0.0, 1.0));
 
         let _ = app.act(Command::Press(Control::Window(0)));
-        assert_eq!(display(&app).auto, AutoWindow::Off);
+        assert_eq!(display(&app).auto(), AutoWindow::Off);
         assert_eq!(
-            (display(&app).window_low, display(&app).window_high),
+            (display(&app).window_low(), display(&app).window_high()),
             (0.0, 1.0)
         );
         assert_eq!(
-            display(&app).exposure_stops,
+            display(&app).exposure_stops(),
             0.5,
             "the rule, not the exposure"
         );
@@ -3176,7 +3176,7 @@ mod tests {
         // As if the picture were gray: what is kept is the point here, not
         // what a color image refuses.
         assert!(display.display.cycle_colormap(true));
-        let colormap = display.display.colormap;
+        let colormap = display.display.colormap();
 
         // Another size, so nothing carries over: b.png opens fitted and with
         // the display its own pixels ask for.
@@ -3184,8 +3184,8 @@ mod tests {
         answer(&mut app, Reload::Fresh);
         assert_eq!(app.view.fit(), Some(Fit::Whole));
         let display = &app.current.as_ref().expect("b.png is on screen").display;
-        assert_eq!(display.exposure_stops, 0.0);
-        assert_eq!(display.colormap, Colormap::Gray);
+        assert_eq!(display.exposure_stops(), 0.0);
+        assert_eq!(display.colormap(), Colormap::Gray);
 
         // And back, to everything a.png was left in.
         app.step(false);
@@ -3194,8 +3194,8 @@ mod tests {
         assert_eq!(app.view.fit(), None);
         assert_eq!(app.view.zoom(app.image_size(), VIEWPORT), zoom);
         let display = &app.current.as_ref().expect("a.png is on screen").display;
-        assert_eq!(display.exposure_stops, 2.0);
-        assert_eq!(display.colormap, colormap);
+        assert_eq!(display.exposure_stops(), 2.0);
+        assert_eq!(display.colormap(), colormap);
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }
@@ -3685,7 +3685,7 @@ mod tests {
         app.view.zoom_in(app.image_size(), VIEWPORT);
         let zoom = app.view.zoom(app.image_size(), VIEWPORT);
         if let Some(current) = app.current.as_mut() {
-            current.display.exposure_stops = 1.0;
+            current.display.set_exposure(1.0);
         }
 
         assert_eq!(app.perform(NextFrame), Effect::Nothing);
@@ -3703,7 +3703,7 @@ mod tests {
             [255, 255, 255],
             "upside down"
         );
-        assert_eq!(current.display.exposure_stops, 1.0, "the display stays");
+        assert_eq!(current.display.exposure_stops(), 1.0, "the display stays");
         assert_eq!(
             app.view.zoom(app.image_size(), VIEWPORT),
             zoom,

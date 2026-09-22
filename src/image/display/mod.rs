@@ -62,12 +62,12 @@ pub struct Display {
     /// the value mapped to 1 *before exposure*. Not the black and white
     /// points — those are [`Display::displayed_bounds`], which folds the
     /// exposure in.
-    pub window_low: f32,
-    pub window_high: f32,
-    pub auto: AutoWindow,
-    pub exposure_stops: f32,
-    pub tone_map: ToneMap,
-    pub colormap: Colormap,
+    window_low: f32,
+    window_high: f32,
+    auto: AutoWindow,
+    exposure_stops: f32,
+    tone_map: ToneMap,
+    colormap: Colormap,
 }
 
 impl Default for Display {
@@ -258,9 +258,23 @@ impl Display {
         if !(black.is_finite() && white.is_finite() && white > black) {
             return;
         }
-        self.window_low = black;
-        self.window_high = black + (white - black) * self.exposure_stops.exp2();
+        self.set_window(black, black + (white - black) * self.exposure_stops.exp2());
         self.auto = AutoWindow::Manual;
+    }
+
+    /// Puts the window's bounds where told, on the image's own scale, the
+    /// exposure and the rule left alone. What every rule's answer goes
+    /// through, and a hand-set window on its way: the one place the bounds
+    /// are written, so that the one thing asked of them — that white is
+    /// above black, or the shader divides by zero or turns the picture
+    /// inside out — is asked once. Refused, and the window left as it was,
+    /// where the two are not a window, or are not numbers.
+    pub fn set_window(&mut self, low: f32, high: f32) {
+        if !(low.is_finite() && high.is_finite() && high > low) {
+            return;
+        }
+        self.window_low = low;
+        self.window_high = high;
     }
 
     fn apply_auto(&mut self, stats: &Stats) {
@@ -270,9 +284,8 @@ impl Display {
             AutoWindow::Percentile => (stats.percentile(0.001), stats.percentile(0.999)),
             AutoWindow::Manual => return,
         };
-        self.window_low = low;
         // A degenerate window would divide by zero in the shader.
-        self.window_high = if high > low { high } else { low + 1.0 };
+        self.set_window(low, if high > low { high } else { low + 1.0 });
     }
 
     /// Re-derives the window from a fresh scan of the same image's pixels,
@@ -280,6 +293,34 @@ impl Display {
     /// set up. A hand-set window is left exactly where they put it.
     pub fn refresh_auto(&mut self, stats: &Stats) {
         self.apply_auto(stats);
+    }
+
+    /// The window's lower bound, on the image's own scale.
+    pub fn window_low(&self) -> f32 {
+        self.window_low
+    }
+
+    /// The window's upper bound, on the image's own scale — not what comes
+    /// out white, which the exposure moves: see [`Display::displayed_bounds`].
+    pub fn window_high(&self) -> f32 {
+        self.window_high
+    }
+
+    /// The rule the window is on.
+    pub fn auto(&self) -> AutoWindow {
+        self.auto
+    }
+
+    pub fn exposure_stops(&self) -> f32 {
+        self.exposure_stops
+    }
+
+    pub fn tone_map(&self) -> ToneMap {
+        self.tone_map
+    }
+
+    pub fn colormap(&self) -> Colormap {
+        self.colormap
     }
 
     pub fn cycle_auto(&mut self, stats: &Stats) {

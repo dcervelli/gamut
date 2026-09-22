@@ -131,7 +131,7 @@ pub fn displayed_on(
 /// what the display does to it — see [`displayed`].
 fn displayed_channels(image: &DecodedImage, display: &Display) -> Channels {
     let source = image.channels();
-    let gray = source.is_gray() && display.colormap == Colormap::Gray;
+    let gray = source.is_gray() && display.colormap() == Colormap::Gray;
     let alpha = source.alpha_index().is_some();
     match (gray, alpha) {
         (true, false) => Channels::Gray,
@@ -367,7 +367,7 @@ mod tests {
     #[test]
     fn false_color_makes_a_gray_image_color() {
         let mut display = plain();
-        display.colormap = Colormap::Viridis;
+        display.set_colormap(Colormap::Viridis, true);
         let raster = displayed(&image(Channels::Gray, vec![0, 255]), &display);
         assert_eq!(raster.channels, Channels::Rgb);
         let (color, _, pixels) = round_trip(&raster);
@@ -406,7 +406,7 @@ mod tests {
         let plain_byte = round_trip(&displayed(&source, &plain())).2[0];
 
         let mut brighter = plain();
-        brighter.exposure_stops = 1.0;
+        brighter.set_exposure(1.0);
         let brighter_byte = round_trip(&displayed(&source, &brighter)).2[0];
         assert!(
             brighter_byte > plain_byte,
@@ -414,8 +414,7 @@ mod tests {
         );
 
         let mut windowed = plain();
-        windowed.window_low = 0.0;
-        windowed.window_high = 0.1;
+        windowed.set_window(0.0, 0.1);
         let windowed_byte = round_trip(&displayed(&source, &windowed)).2[0];
         assert_eq!(windowed_byte, 255, "a value over the window clips to white");
     }
@@ -440,11 +439,11 @@ mod tests {
         );
 
         let mut clipped = plain();
-        clipped.tone_map = ToneMap::None;
+        clipped.set_tone_map(ToneMap::None, true);
         assert_eq!(round_trip(&displayed(&bright, &clipped)).2[0], 255);
 
         let mut rolled = plain();
-        rolled.tone_map = ToneMap::Neutral;
+        rolled.set_tone_map(ToneMap::Neutral, true);
         let rolled_byte = round_trip(&displayed(&bright, &rolled)).2[0];
         assert!(
             rolled_byte < 255,
@@ -504,8 +503,8 @@ mod tests {
         source.height = height;
 
         let mut display = plain();
-        display.exposure_stops = 0.7;
-        display.window_high = 0.8;
+        display.set_exposure(0.7);
+        display.set_window(0.0, 0.8);
 
         let mut expected = Vec::with_capacity((width * height * 4) as usize);
         for y in 0..height {
@@ -575,7 +574,7 @@ mod tests {
         source.width = width;
         source.height = height;
         let mut display = plain();
-        display.exposure_stops = 0.4;
+        display.set_exposure(0.4);
 
         let whole = displayed(&source, &display);
         let region = Region {

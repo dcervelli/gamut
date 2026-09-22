@@ -418,7 +418,7 @@ mod tests {
         assert_eq!(gray.g, gray.b);
         assert_eq!(gray.a, 255);
 
-        display.colormap = Colormap::Viridis;
+        display.set_colormap(Colormap::Viridis, true);
         let false_color = swatch_color(&display.map(&sample, Headroom::None));
         assert!(
             false_color.g > false_color.r && false_color.b > false_color.r,

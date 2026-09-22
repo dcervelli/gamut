@@ -313,15 +313,15 @@ mod tests {
         let base = Stats::scan(&image);
         assert!(base.max <= 1.0);
         let display = Display::for_image_with(&image, &base, Startup::default(), Headroom::None);
-        assert_eq!(display.auto, AutoWindow::Off);
-        assert_eq!((display.window_low, display.window_high), (0.0, 1.0));
-        assert_eq!(display.tone_map, ToneMap::None);
+        assert_eq!(display.auto(), AutoWindow::Off);
+        assert_eq!((display.window_low(), display.window_high()), (0.0, 1.0));
+        assert_eq!(display.tone_map(), ToneMap::None);
 
         let lifted = Stats::scan_with(&image, Some(&whole(&image)));
         assert!(lifted.max > 1.0, "the scan has to see the lift");
         let display = Display::for_image_with(&image, &lifted, Startup::default(), Headroom::None);
-        assert_eq!((display.window_low, display.window_high), (0.0, 1.0));
-        assert_eq!(display.tone_map, ToneMap::Neutral);
+        assert_eq!((display.window_low(), display.window_high()), (0.0, 1.0));
+        assert_eq!(display.tone_map(), ToneMap::Neutral);
     }
 
     /// The crate's own `apply_gainmap` over the same base and map, as the

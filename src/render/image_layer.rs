@@ -864,7 +864,7 @@ fn params_for(
         } else {
             shader_codes::level_alpha(image.alpha)
         },
-        colormap: shader_codes::colormap(display.colormap),
+        colormap: shader_codes::colormap(display.colormap()),
         resampler: shader_codes::resampler(placement.zoom, placement.upscale),
         // Only the image as uploaded is lifted; a coarse level was reduced
         // from lifted light.

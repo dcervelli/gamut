@@ -697,10 +697,8 @@ fn the_false_color_on_the_device_is_the_readouts() {
     layer.install(uploaded);
 
     for map in Colormap::ALL {
-        let display = Display {
-            colormap: map,
-            ..Display::default()
-        };
+        let mut display = Display::default();
+        display.set_colormap(map, true);
         let pixels = draw_layer_as(
             gpu,
             &mut layer,
@@ -867,11 +865,9 @@ fn the_tone_curve_on_the_device_is_the_readouts() {
         (ToneMap::Neutral, Headroom::Above, Colormap::Viridis, false),
     ];
     for (tone_map, headroom, colormap, gray) in cases {
-        let display = Display {
-            tone_map,
-            colormap,
-            ..Display::default()
-        };
+        let mut display = Display::default();
+        display.set_tone_map(tone_map, true);
+        display.set_colormap(colormap, true);
         let pixels = composited(
             gpu,
             &colors,

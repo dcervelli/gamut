@@ -289,19 +289,19 @@ pub(super) fn state_words(pass: &mut Pass, ui: &mut egui::Ui, current: &Current)
 /// bar rather than the panel.
 fn describe_state(current: &Current, headroom: Headroom) -> Vec<String> {
     let mut parts = Vec::new();
-    if current.display.auto != AutoWindow::Off {
-        parts.push(current.display.auto.label().to_string());
+    if current.display.auto() != AutoWindow::Off {
+        parts.push(current.display.auto().label().to_string());
     }
-    if current.display.exposure_stops != 0.0 {
+    if current.display.exposure_stops() != 0.0 {
         parts.push(format!(
             "{} EV",
-            histogram::stops_label(current.display.exposure_stops)
+            histogram::stops_label(current.display.exposure_stops())
         ));
     }
     // The false color is a reading of one channel, and the display leaves
     // it off a color image; so does the bar.
     if current.display.false_colored(current.image.is_gray()) {
-        parts.push(current.display.colormap.label().to_string());
+        parts.push(current.display.colormap().label().to_string());
     }
     if let Some(highlights) = describe_highlights(current, headroom) {
         parts.push(highlights.to_string());
@@ -337,7 +337,7 @@ fn describe_highlights(current: &Current, headroom: Headroom) -> Option<&'static
     if display.false_colored(gray) {
         return None;
     }
-    if display.tone_map != ToneMap::None {
+    if display.tone_map() != ToneMap::None {
         return Some(ROLLED_OFF);
     }
     (display.clips_white(gray, headroom) && display.exceeds_white(&current.stats))
@@ -354,8 +354,8 @@ fn window_bounds(current: &Current) -> [String; 2] {
     } else {
         1.0
     };
-    let low = current.display.window_low * scale;
-    let high = current.display.window_high * scale;
+    let low = current.display.window_low() * scale;
+    let high = current.display.window_high() * scale;
     if scale > 1.0 {
         [format!("{low:.0}"), format!("{high:.0}")]
     } else {
@@ -376,23 +376,23 @@ fn window_bounds(current: &Current) -> [String; 2] {
 pub fn explain_state(current: &Current, headroom: Headroom) -> Vec<String> {
     let display = &current.display;
     let mut said = Vec::new();
-    if display.auto != AutoWindow::Off {
+    if display.auto() != AutoWindow::Off {
         let [low, high] = window_bounds(current);
         said.push(format!(
             "{} window spans {low} to {high}.",
-            capitalized(display.auto.label())
+            capitalized(display.auto().label())
         ));
     }
-    if display.exposure_stops != 0.0 {
+    if display.exposure_stops() != 0.0 {
         said.push(format!(
             "Exposure {} EV.",
-            histogram::stops_label(display.exposure_stops)
+            histogram::stops_label(display.exposure_stops())
         ));
     }
     if display.false_colored(current.image.is_gray()) {
         said.push(format!(
             "{} false color.",
-            capitalized(display.colormap.label())
+            capitalized(display.colormap().label())
         ));
     }
     match describe_highlights(current, headroom) {
@@ -401,7 +401,7 @@ pub fn explain_state(current: &Current, headroom: Headroom) -> Vec<String> {
         Some(CLIPPED) => said.push("The image is currently clipped.".to_string()),
         Some(_) => said.push(format!(
             "The highlights are rolled off by the {} curve.",
-            display.tone_map.label()
+            display.tone_map().label()
         )),
         None => {}
     }
@@ -469,7 +469,7 @@ mod tests {
             "a photograph as it was decoded has nothing being done to it"
         );
 
-        current.display.auto = AutoWindow::MinMax;
+        current.display.set_auto(AutoWindow::MinMax, &current.stats);
         current.display.adjust_exposure(0.5);
         assert_eq!(
             describe_state(&current, Headroom::None),
@@ -478,7 +478,7 @@ mod tests {
              quarters rather than rounded to a tenth"
         );
 
-        current.display.colormap = Colormap::Viridis;
+        current.display.set_colormap(Colormap::Viridis, true);
         assert_eq!(
             describe_state(&current, Headroom::None),
             ["full", "+\u{00bd} EV", "viridis"],
@@ -492,7 +492,7 @@ mod tests {
     #[test]
     fn the_line_is_cut_by_whole_segments() {
         let mut current = photograph();
-        current.display.auto = AutoWindow::MinMax;
+        current.display.set_auto(AutoWindow::MinMax, &current.stats);
         current.display.adjust_exposure(0.5);
         let segments = describe_state(&current, Headroom::None);
 
@@ -528,9 +528,8 @@ mod tests {
             "nothing is being done, so there are no words to rest on"
         );
 
-        current.display.auto = AutoWindow::MinMax;
-        current.display.window_low = 0.012;
-        current.display.window_high = 1.0;
+        current.display.set_auto(AutoWindow::MinMax, &current.stats);
+        current.display.set_window(0.012, 1.0);
         current.display.adjust_exposure(0.25);
         assert_eq!(
             explain_state(&current, Headroom::None),
@@ -543,7 +542,7 @@ mod tests {
              where the bar has only its name"
         );
 
-        current.display.tone_map = ToneMap::Neutral;
+        current.display.set_tone_map(ToneMap::Neutral, false);
         assert_eq!(
             explain_state(&current, Headroom::None).last().unwrap(),
             "The highlights are rolled off by the neutral curve.",
@@ -575,7 +574,7 @@ mod tests {
             "an HDR surface has room for them, and nothing is being done"
         );
 
-        current.display.tone_map = ToneMap::Neutral;
+        current.display.set_tone_map(ToneMap::Neutral, false);
         for headroom in [Headroom::None, Headroom::Above] {
             assert_eq!(
                 describe_highlights(&current, headroom),
@@ -584,7 +583,7 @@ mod tests {
             );
         }
 
-        current.display.colormap = Colormap::Viridis;
+        current.display.set_colormap(Colormap::Viridis, true);
         for headroom in [Headroom::None, Headroom::Above] {
             assert_eq!(
                 describe_highlights(&current, headroom),

@@ -478,7 +478,7 @@ fn the_histogram_panel_hands_back_the_hand_on_its_band() {
         .as_mut()
         .expect("a picture is up")
         .display
-        .exposure_stops = 1.0;
+        .set_exposure(1.0);
     harness.run();
     let commands = drag(&mut harness, across(0.25), across(0.35));
     let Some(Command::Slide {
@@ -575,7 +575,7 @@ fn the_curves_are_dead_under_a_false_color() {
         .as_mut()
         .expect("a picture is up")
         .display
-        .colormap = Colormap::Viridis;
+        .set_colormap(Colormap::Viridis, true);
     harness.run();
     for index in 0..ToneMap::ALL.len() {
         assert!(dead(&harness, &format!("Curve {index}")), "curve {index}");
