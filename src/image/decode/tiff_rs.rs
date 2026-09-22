@@ -76,10 +76,7 @@ impl super::Decoder for TiffRs {
 
     fn sniff(&self, header: &[u8]) -> bool {
         // Classic TIFF is 42, BigTIFF is 43, in either byte order.
-        header.starts_with(b"II\x2a\x00")
-            || header.starts_with(b"MM\x00\x2a")
-            || header.starts_with(b"II\x2b\x00")
-            || header.starts_with(b"MM\x00\x2b")
+        crate::image::tiff::header(header).is_some()
     }
 
     fn dimensions(&self, source: &mut dyn super::ReadSeek) -> Result<Option<(u32, u32)>> {

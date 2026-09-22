@@ -24,7 +24,7 @@ use std::path::Path;
 use roxmltree::{Document, Node};
 
 use super::decode::heif;
-use super::directory;
+use super::{directory, tiff};
 
 /// How large a packet is allowed to be. A packet is a few kilobytes of text,
 /// and one carrying an edit history runs to a few hundred; a container that
@@ -50,15 +50,6 @@ const JPEG_HEADER: &[u8] = b"http://ns.adobe.com/xap/1.0/\0";
 
 /// The keyword of the PNG text chunk the packet is written under.
 const PNG_KEYWORD: &[u8] = b"XML:com.adobe.xmp";
-
-/// The four ways a TIFF announces itself: either byte order, and the
-/// original format or BigTIFF.
-const TIFF_SIGNATURES: [[u8; 4]; 4] = [
-    [0x4d, 0x4d, 0x00, 0x2a],
-    [0x49, 0x49, 0x2a, 0x00],
-    [0x4d, 0x4d, 0x00, 0x2b],
-    [0x49, 0x49, 0x2b, 0x00],
-];
 
 /// The signature the JPEG XL container opens with: a box of that length
 /// and type, holding the two bytes a bare codestream opens with.
@@ -243,10 +234,7 @@ pub fn packet(path: &Path) -> Option<Vec<u8>> {
         jxl(&mut source)
     } else if signature.get(4..8) == Some(b"ftyp") {
         heif::xmp(path)
-    } else if TIFF_SIGNATURES
-        .iter()
-        .any(|tiff| signature.starts_with(tiff))
-    {
+    } else if tiff::header(signature).is_some() {
         directory::packet(path)
     } else {
         None

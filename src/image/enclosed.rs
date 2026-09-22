@@ -34,11 +34,13 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
-/// How much of a container is read looking for its block. The blocks are
+use super::tiff::{self, Entry, Kind, Order, tag};
+
+/// How much of a container is read looking for its block: the blocks are
 /// all near the front — the `CMT` boxes inside the first 32 kB, an RAF's
 /// JPEG at byte 148, an MRW's `TTW` inside the first few kB — and the
 /// TIFF-shaped ones are read to the same prefix `exif` gives a TIFF.
-const PREFIX: usize = 8 << 20;
+const PREFIX: usize = tiff::PREFIX as usize;
 
 /// The EXIF a container carries, in the form the reader takes it.
 pub enum Block {
@@ -58,10 +60,16 @@ pub fn block(path: &Path) -> Option<Block> {
     file.seek(SeekFrom::Start(0)).ok()?;
 
     if head.starts_with(b"IIRO") || head.starts_with(b"IIRS") || head.starts_with(b"IIU\0") {
-        return Some(Block::Tiff(relabeled(&mut file, b"II\x2a\x00")?));
+        return Some(Block::Tiff(relabeled(
+            &mut file,
+            &tiff::signature(Order::Little, Kind::Classic),
+        )?));
     }
     if head.starts_with(b"MMOR") {
-        return Some(Block::Tiff(relabeled(&mut file, b"MM\x00\x2a")?));
+        return Some(Block::Tiff(relabeled(
+            &mut file,
+            &tiff::signature(Order::Big, Kind::Classic),
+        )?));
     }
     if head.starts_with(b"FUJIFILMCCD-RAW") {
         return raf(&mut file).map(Block::Jpeg);
@@ -194,9 +202,9 @@ fn combine(image: &[u8], exif: Option<&[u8]>, gps: Option<&[u8]>) -> Option<Vec<
     // The image directory: its entries, then the two pointers. The bodies
     // are appended after every directory, so where each will land is
     // worked out first.
-    let image_entries = Directory::read(image, order)?;
-    let exif_entries = exif.and_then(|body| Directory::read(body, order));
-    let gps_entries = gps.and_then(|body| Directory::read(body, order));
+    let image_entries = tiff::entries(image, order, &POINTERS)?;
+    let exif_entries = exif.and_then(|body| tiff::entries(body, order, &POINTERS));
+    let gps_entries = gps.and_then(|body| tiff::entries(body, order, &POINTERS));
     let pointers = usize::from(exif_entries.is_some()) + usize::from(gps_entries.is_some());
     let directory_size = |entries: &[Entry]| 2 + 12 * entries.len() + 4;
 
@@ -258,120 +266,11 @@ fn combine(image: &[u8], exif: Option<&[u8]>, gps: Option<&[u8]>) -> Option<Vec<
     Some(out)
 }
 
-/// A TIFF's byte order, and numbers written in it.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Order {
-    Little,
-    Big,
-}
-
-impl Order {
-    fn of(tiff: &[u8]) -> Option<Self> {
-        match tiff.get(..4)? {
-            b"II\x2a\x00" => Some(Order::Little),
-            b"MM\x00\x2a" => Some(Order::Big),
-            _ => None,
-        }
-    }
-
-    fn read_u16(self, bytes: &[u8], at: usize) -> Option<u16> {
-        let bytes: [u8; 2] = bytes.get(at..at + 2)?.try_into().ok()?;
-        Some(match self {
-            Order::Little => u16::from_le_bytes(bytes),
-            Order::Big => u16::from_be_bytes(bytes),
-        })
-    }
-
-    fn read_u32(self, bytes: &[u8], at: usize) -> Option<u32> {
-        let bytes: [u8; 4] = bytes.get(at..at + 4)?.try_into().ok()?;
-        Some(match self {
-            Order::Little => u32::from_le_bytes(bytes),
-            Order::Big => u32::from_be_bytes(bytes),
-        })
-    }
-
-    fn u16(self, value: u16) -> [u8; 2] {
-        match self {
-            Order::Little => value.to_le_bytes(),
-            Order::Big => value.to_be_bytes(),
-        }
-    }
-
-    fn u32(self, value: u32) -> [u8; 4] {
-        match self {
-            Order::Little => value.to_le_bytes(),
-            Order::Big => value.to_be_bytes(),
-        }
-    }
-}
-
-/// One directory entry, with its value either in the entry or at an offset
-/// in the box it came from.
-struct Entry {
-    tag: u16,
-    kind: u16,
-    count: u32,
-    inline: Option<[u8; 4]>,
-    offset: usize,
-}
-
 /// The tags that point at another directory. Each holds an offset into the
 /// box it came from, where there is nothing this reader wants: the Exif and
 /// GPS directories arrive as boxes of their own and are pointed at afresh,
 /// and the interoperability directory says nothing worth the trip.
-const POINTERS: [u16; 3] = [0x8769, 0x8825, 0xA005];
-
-struct Directory;
-
-impl Directory {
-    /// The entries of the one directory in `tiff`, pointers left out.
-    fn read(tiff: &[u8], order: Order) -> Option<Vec<Entry>> {
-        // A box in the other byte order would be read as nonsense; the
-        // three are written by one camera in one order, so it is a box
-        // that is not what it claims.
-        if Order::of(tiff)? != order {
-            return None;
-        }
-        let at = order.read_u32(tiff, 4)? as usize;
-        let count = order.read_u16(tiff, at)? as usize;
-        let mut entries = Vec::with_capacity(count);
-        for index in 0..count {
-            let at = at + 2 + 12 * index;
-            let tag = order.read_u16(tiff, at)?;
-            let kind = order.read_u16(tiff, at + 2)?;
-            let count = order.read_u32(tiff, at + 4)?;
-            let value: [u8; 4] = tiff.get(at + 8..at + 12)?.try_into().ok()?;
-            if POINTERS.contains(&tag) {
-                continue;
-            }
-            let size = u64::from(count) * u64::from(type_size(kind)?);
-            let (inline, offset) = if size <= 4 {
-                (Some(value), 0)
-            } else {
-                (None, order.read_u32(tiff, at + 8)? as usize)
-            };
-            entries.push(Entry {
-                tag,
-                kind,
-                count,
-                inline,
-                offset,
-            });
-        }
-        Some(entries)
-    }
-}
-
-/// The size of one component of each TIFF type.
-fn type_size(kind: u16) -> Option<u16> {
-    Some(match kind {
-        1 | 2 | 6 | 7 => 1,
-        3 | 8 => 2,
-        4 | 9 | 11 | 13 => 4,
-        5 | 10 | 12 => 8,
-        _ => return None,
-    })
-}
+const POINTERS: [u16; 3] = [tag::EXIF_IFD, tag::GPS_IFD, tag::INTEROP_IFD];
 
 fn read_at(file: &mut File, offset: u64, length: usize) -> Option<Vec<u8>> {
     file.seek(SeekFrom::Start(offset)).ok()?;

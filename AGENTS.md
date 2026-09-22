@@ -151,6 +151,9 @@ image/         the data model, nothing GPU
   xmp.rs         the XMP packet: found in each container by walking its headers, and
                  parsed into namespaced properties; which of them are shown is exif.rs's
   geo.rs         GeoTIFF's keys: where a raster's pixels are on the ground
+  tiff.rs        what every reader of a TIFF-shaped block shares: the four signatures, the
+                 prefix read of one, the byte order and its numbers, a directory's entries and
+                 the tags that point at another directory
   directory.rs   a TIFF directory the metadata reader cannot reach, rewritten
                  as a block it can: BigTIFF, or a directory past the prefix
   enclosed.rs    where a raw that is not a TIFF at the front keeps its EXIF:

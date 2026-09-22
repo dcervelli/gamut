@@ -21,6 +21,7 @@ pub mod region;
 pub mod resample;
 pub mod sequence;
 pub mod stats;
+pub mod tiff;
 pub mod xmp;
 
 pub use color::{ColorSpace, Primaries, Transfer};

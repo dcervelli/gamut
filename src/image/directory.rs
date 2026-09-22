@@ -26,6 +26,7 @@ use tiff::decoder::ifd::Value;
 use tiff::tags::Tag;
 
 use super::exif::MAX_COMPONENTS;
+use super::tiff::tag;
 
 /// How large the rewritten block may be. It holds one directory of small
 /// values — the long ones are left behind with everything else bulky — so
@@ -58,7 +59,7 @@ pub fn packet(path: &Path) -> Option<Vec<u8>> {
 /// the reader into whatever happened to be at that offset. A camera writing
 /// its exposure into a BigTIFF is not a file anyone has; a raster is, and a
 /// raster keeps everything it says in the first directory.
-const POINTERS: [u16; 3] = [330, 34665, 34853];
+const POINTERS: [u16; 3] = [tag::SUB_IFDS, tag::EXIF_IFD, tag::GPS_IFD];
 
 /// Reads `path`'s first directory and writes it back out as an ordinary TIFF
 /// block. `None` for a file that will not open, or that has nothing in it

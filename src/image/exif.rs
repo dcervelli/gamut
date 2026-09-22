@@ -26,31 +26,7 @@ use std::path::Path;
 use exif::{Context, In, Rational, Tag, Value};
 
 use super::xmp::{self, Xmp};
-use super::{directory, enclosed, geo};
-
-/// How much of a TIFF is read to find its metadata.
-///
-/// A TIFF *is* its own metadata block: there is no chunk to seek to, and the
-/// parser reads the whole of whatever it is handed. So it is handed a prefix
-/// rather than the file — a scanned map or an elevation model must not be
-/// pulled into memory whole for a date.
-///
-/// A prefix is enough because of where a directory goes. The 443 MB map this
-/// was measured against keeps its first directory at byte 8 with every value
-/// inside the first 10 kB, which is what any writer that means the file to be
-/// read out of order does; this leaves room for that, its sub-directories, a
-/// maker note and a thumbnail besides.
-const TIFF_PREFIX: u64 = 8 << 20;
-
-/// The two byte orders a TIFF announces itself in, which is how the file that
-/// takes the prefix is told apart from the ones that do not.
-const TIFF_SIGNATURES: [[u8; 4]; 2] = [[0x4d, 0x4d, 0x00, 0x2a], [0x49, 0x49, 0x2a, 0x00]];
-
-/// The same two for BigTIFF, whose version number is 43 rather than 42. This
-/// reader is an EXIF reader and EXIF is defined on the original format, so a
-/// file that says this goes through [`directory`] and comes back as a block
-/// the reader knows.
-const BIGTIFF_SIGNATURES: [[u8; 4]; 2] = [[0x4d, 0x4d, 0x00, 0x2b], [0x49, 0x49, 0x2b, 0x00]];
+use super::{directory, enclosed, geo, tiff};
 
 /// How many components a field may have before it is left out of the listing.
 /// A TIFF's strip offsets run to thousands of numbers, which is a fact about
@@ -107,7 +83,7 @@ pub struct Exif {
 impl Exif {
     /// Reads `path`'s metadata, or gives back nothing at all.
     pub fn read(path: &Path) -> Self {
-        let mut exif = Self::read_with(path, TIFF_PREFIX);
+        let mut exif = Self::read_with(path, tiff::PREFIX);
         // A raw has a second reader of its header, the library that will
         // develop it. What that made of the sensor goes in with what the
         // EXIF said, after the summaries and before the listings; and what
@@ -148,7 +124,7 @@ impl Exif {
         exif
     }
 
-    /// `prefix` is how much of a TIFF to read; see [`TIFF_PREFIX`].
+    /// `prefix` is how much of a TIFF to read; see [`tiff::PREFIX`].
     fn read_with(path: &Path, prefix: u64) -> Self {
         let block = Self::parse(path, prefix);
         // A TIFF keeps its packet in a tag of the directory just read, so it
@@ -185,8 +161,11 @@ impl Exif {
         // whole of it, which is the one thing here that must not happen.
         let mut signature = [0u8; 4];
         let read = source.read_exact(&mut signature).is_ok();
-        let tiff = read && TIFF_SIGNATURES.contains(&signature);
-        let bigtiff = read && BIGTIFF_SIGNATURES.contains(&signature);
+        let header = read.then(|| tiff::header(&signature)).flatten();
+        // EXIF is defined on the original format: a BigTIFF goes through
+        // [`directory`] and comes back as a block the reader knows.
+        let tiff = matches!(header, Some((_, tiff::Kind::Classic)));
+        let bigtiff = matches!(header, Some((_, tiff::Kind::Big)));
         source.seek(SeekFrom::Start(0)).ok()?;
 
         let mut reader = exif::Reader::new();
