@@ -26,11 +26,21 @@ struct Params {
     swizzle: u32,                // 0 gray, 1 gray+alpha, 2 rgb, 3 rgba
     alpha_mode: u32,             // 0 opaque, 1 straight, 2 premultiplied
     colormap: u32,               // 0 none, 1 viridis, 2 magma, 3 turbo
-    resampler: u32,                // 0 area, 1 antialiased nearest, 2 bicubic
+    resampler: u32,              // 0 area, 1 antialiased nearest, 2 bicubic
+    lift: u32,                   // 0 no gain map, else its channel count; 0 on a coarse level
+    _pad2: u32,
+    map_size: vec2<f32>,         // the gain map's size, in its own texels
+    base_offset: vec4<f32>,      // added to the base before the gain, per channel
+    alternate_offset: vec4<f32>, // taken from the product after
 };
 
 @group(0) @binding(0) var<uniform> params: Params;
 @group(1) @binding(0) var source: texture_2d<f32>;
+// The picture's gain map, and the table saying what each of its 256 values
+// means at the weight the surface asks for (see image::gain_map). Bound to
+// a texel of each, and never read, for a picture with no map.
+@group(2) @binding(0) var gain_map: texture_2d<f32>;
+@group(2) @binding(1) var gain_table: texture_2d<f32>;
 
 // The marks on clipped pixels, in linear light: a red and a blue that no
 // photograph is made of. Twinned by `MARKS` in render/shader_codes.rs, which
@@ -73,9 +83,49 @@ fn premultiplied(texel: vec4<f32>) -> vec4<f32> {
     }
 }
 
+// The gains the table gives one value of the map, per channel: for a
+// one-channel map the three gains of its one value; for a three-channel
+// map each channel's gain of its own value.
+fn gains(coord: vec2<i32>) -> vec3<f32> {
+    let value = textureLoad(gain_map, coord, 0);
+    let at = vec3<i32>(round(value.rgb * 255.0));
+    if params.lift == 1u {
+        return textureLoad(gain_table, vec2<i32>(at.r, 0), 0).rgb;
+    }
+    return vec3<f32>(
+        textureLoad(gain_table, vec2<i32>(at.r, 0), 0).r,
+        textureLoad(gain_table, vec2<i32>(at.g, 0), 0).g,
+        textureLoad(gain_table, vec2<i32>(at.b, 0), 0).b,
+    );
+}
+
+// The gain at texel `coord` of the image as uploaded: the map's four
+// surrounding values, each through the table, blended by the texel's
+// distance from them. The twin of `GainMap::gain_at` in image/gain_map.rs
+// and of the same function in reduce.wgsl; keep the three in step.
+fn gain(coord: vec2<i32>) -> vec3<f32> {
+    let position = vec2<f32>(coord) / params.extent * params.map_size;
+    let last = vec2<i32>(textureDimensions(gain_map)) - vec2<i32>(1);
+    let near = min(vec2<i32>(floor(position)), last);
+    let far = min(near + vec2<i32>(1), last);
+    let fraction = position - floor(position);
+    let top = mix(gains(near), gains(vec2<i32>(far.x, near.y)), fraction.x);
+    let bottom = mix(gains(vec2<i32>(near.x, far.y)), gains(far), fraction.x);
+    return mix(top, bottom, fraction.y);
+}
+
+// One texel, lifted where the picture has a gain map — before it is
+// premultiplied, filtered or converted, since the map multiplies light —
+// and premultiplied.
 fn load(coord: vec2<i32>) -> vec4<f32> {
     let limit = vec2<i32>(textureDimensions(source)) - vec2<i32>(1);
-    return premultiplied(textureLoad(source, clamp(coord, vec2<i32>(0), limit), 0));
+    let clamped = clamp(coord, vec2<i32>(0), limit);
+    var texel = textureLoad(source, clamped, 0);
+    if params.lift != 0u {
+        let lifted = (texel.rgb + params.base_offset.rgb) * gain(clamped) - params.alternate_offset.rgb;
+        texel = vec4<f32>(lifted, texel.a);
+    }
+    return premultiplied(texel);
 }
 
 // Exact area average: every source texel under the output pixel, each weighted

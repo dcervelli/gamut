@@ -15,6 +15,7 @@ pub mod display;
 pub mod enclosed;
 pub mod encode;
 pub mod exif;
+pub mod gain_map;
 pub mod geo;
 pub mod region;
 pub mod resample;
@@ -267,6 +268,11 @@ pub struct DecodedImage {
     /// -9999 and similar sentinels, which would otherwise dominate the
     /// automatic window and squash the real data into a sliver.
     pub nodata: Option<f32>,
+    /// The gain map a phone's photograph carries beside its SDR base, which
+    /// `samples` then is: how far above white each pixel went, applied by
+    /// the display at the weight the surface's room asks for. See
+    /// [`gain_map`].
+    pub gain_map: Option<gain_map::Shared>,
 }
 
 impl DecodedImage {
@@ -289,6 +295,7 @@ impl DecodedImage {
             referred: Referred::of(color.transfer),
             exposure: None,
             nodata: None,
+            gain_map: None,
         }
     }
 
@@ -303,14 +310,17 @@ impl DecodedImage {
     /// The pixel at `(x, y)`, or `None` when that is outside the image.
     ///
     /// Reads one pixel the way `render::upload` and `shaders/image.wgsl`
-    /// between them read every pixel — the transfer curve resolved, any
+    /// between them read every pixel — the transfer curve resolved, the
+    /// gain map applied at the weight `lift` was made at, any
     /// premultiplication divided back out, the primaries taken to the working
     /// space — so that what comes back is the value the display window acts
-    /// on. Alpha never gets the curve, here or there.
+    /// on. Alpha never gets the curve, here or there. `lift` is the table
+    /// the screen is drawn through, where the picture has a gain map; with
+    /// none, or with no table, the base is what is read.
     ///
     /// One pixel at a time: this is for a readout following the pointer, not
     /// for anything that walks the image.
-    pub fn sample(&self, x: u32, y: u32) -> Option<Sample> {
+    pub fn sample(&self, x: u32, y: u32, lift: Option<&gain_map::Table>) -> Option<Sample> {
         if x >= self.width || y >= self.height {
             return None;
         }
@@ -338,10 +348,19 @@ impl DecodedImage {
         }
 
         let scale = 1.0 / self.samples.full_scale();
-        let mut color = [0.0f32; 3];
-        for (slot, value) in color.iter_mut().zip(&stored[..channels.color_count()]) {
+        let mut linear = [0.0f32; 4];
+        for (slot, value) in linear.iter_mut().zip(&stored[..count]) {
             *slot = self.color.transfer.to_linear(value * scale);
         }
+        // The lift, in the base's own color space, before anything else:
+        // the map multiplies light, and the shader multiplies the texel it
+        // loaded before it filters, unpremultiplies or converts it.
+        if let (Some(table), Some(map)) = (lift, &self.gain_map) {
+            let gain = map.gain_at(table, x, y, self.width, self.height);
+            table.apply(&mut linear[..channels.color_count()], gain);
+        }
+        let mut color = [0.0f32; 3];
+        color.copy_from_slice(&linear[..3]);
         let alpha = match channels.alpha_index() {
             Some(index) => (stored[index] * scale).clamp(0.0, 1.0),
             None => 1.0,
@@ -365,6 +384,7 @@ impl DecodedImage {
         Some(Sample {
             channels,
             stored,
+            linear,
             color,
             alpha,
         })
@@ -415,6 +435,11 @@ impl DecodedImage {
 pub struct Sample {
     pub channels: Channels,
     stored: [f32; 4],
+    /// Every component decoded to linear and lifted, alpha included where
+    /// there is one, before the premultiplication is undone or the
+    /// primaries converted: what the statistics bin, so that the marker on
+    /// the histogram lands on the bar the scan counted the pixel in.
+    linear: [f32; 4],
     color: [f32; 3],
     /// Coverage as a fraction; 1.0 where the image has no alpha channel.
     pub alpha: f32,
@@ -426,6 +451,13 @@ impl Sample {
     /// ones.
     pub fn stored(&self) -> &[f32] {
         &self.stored[..self.channels.count()]
+    }
+
+    /// Every component decoded to linear, and lifted where the picture has
+    /// a gain map, in the file's own primaries with any premultiplication
+    /// still in: what [`Stats`] measured the pixel as.
+    pub fn linear(&self) -> &[f32] {
+        &self.linear[..self.channels.count()]
     }
 
     /// The color, in the linear BT.709 working space with premultiplication
@@ -519,6 +551,7 @@ mod tests {
             referred: Referred::Measured,
             exposure: None,
             nodata: None,
+            gain_map: None,
         }
     }
 
@@ -529,7 +562,7 @@ mod tests {
     #[test]
     fn a_sample_reports_the_file_s_own_numbers_and_the_decoded_ones() {
         let image = gray16(vec![0, 1000, 2000, 3000, 4000, 5000], 3, 2);
-        let sample = image.sample(1, 1).expect("inside the image");
+        let sample = image.sample(1, 1, None).expect("inside the image");
 
         assert_eq!(
             sample.stored(),
@@ -540,9 +573,9 @@ mod tests {
         assert_eq!(sample.alpha, 1.0, "an image with no alpha is opaque");
 
         // Row-major from the top, so the last pixel is the bottom right one.
-        assert_eq!(image.sample(2, 1).expect("inside").stored(), [5000.0]);
-        assert!(image.sample(3, 1).is_none());
-        assert!(image.sample(0, 2).is_none());
+        assert_eq!(image.sample(2, 1, None).expect("inside").stored(), [5000.0]);
+        assert!(image.sample(3, 1, None).is_none());
+        assert!(image.sample(0, 2, None).is_none());
     }
 
     #[test]
@@ -558,7 +591,7 @@ mod tests {
             AlphaMode::Straight,
         );
 
-        let sample = image.sample(0, 0).expect("inside the image");
+        let sample = image.sample(0, 0, None).expect("inside the image");
         assert_eq!(sample.stored(), [128.0, 128.0]);
         // The same code in both components, and only one of them curved.
         assert!(
@@ -586,15 +619,16 @@ mod tests {
             referred: Referred::Scene,
             exposure: None,
             nodata: None,
+            gain_map: None,
         };
 
-        let sample = image.sample(0, 0).expect("inside the image");
+        let sample = image.sample(0, 0, None).expect("inside the image");
         assert_eq!(sample.stored(), [0.25, 0.5, 0.75, 0.5]);
         assert_eq!(sample.color(), [0.5, 1.0, 1.5]);
 
         // A texel that has resolved to nothing is nothing, rather than a wild
         // color divided out of an alpha of zero.
-        let empty = image.sample(1, 0).expect("inside the image");
+        let empty = image.sample(1, 0, None).expect("inside the image");
         assert_eq!(empty.color(), [0.0, 0.0, 0.0]);
         assert_eq!(empty.alpha, 0.0);
     }
@@ -613,10 +647,13 @@ mod tests {
             ColorSpace::LINEAR_BT709,
             AlphaMode::Opaque,
         );
-        assert_eq!(image.sample(0, 0).expect("inside").color(), [0.0, 1.0, 0.0]);
+        assert_eq!(
+            image.sample(0, 0, None).expect("inside").color(),
+            [0.0, 1.0, 0.0]
+        );
 
         image.color.primaries = Primaries::DisplayP3;
-        let converted = image.sample(0, 0).expect("inside").color().to_vec();
+        let converted = image.sample(0, 0, None).expect("inside").color().to_vec();
         // P3 green is outside BT.709, which shows as a negative red.
         assert!(converted[0] < 0.0, "{converted:?}");
         assert!(converted[1] > 1.0, "{converted:?}");

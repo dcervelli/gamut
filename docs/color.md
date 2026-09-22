@@ -45,9 +45,11 @@ numbers, once they are linear light, are referred to — a **reference
 white**, a scene, or nothing. `DecodedImage::referred` says which, and the
 transfer function decides it unless a decoder knows better:
 
-- **Display-referred** (sRGB, gamma, PQ, HLG, a JPEG with its gain map
-  applied, a developed raw) has been graded by whoever made it. 1.0 is
-  white, and anything above it is the highlights they put there on purpose.
+- **Display-referred** (sRGB, gamma, PQ, HLG, a photograph with a gain
+  map, a developed raw) has been graded by whoever made it. 1.0 is
+  white, and anything above it is the highlights they put there on purpose
+  — or, with a gain map, the lift the display's room lets through, see
+  [formats](formats.md#gain-maps-ultra-hdr-jpeg-and-an-iphones-heic).
   The window stays at 0..1; touching it would second-guess them, and for the
   HDR curves it would move white to wherever the frame's brightest pixel
   happens to be, differently for every frame of a sequence.
@@ -162,10 +164,13 @@ what the choice is.
 What a picture opens with follows from both: none on an HDR surface, and on an
 SDR one a `neutral` roll-off where the window leaves highlights above white
 and none where it does not. That is a question about the window rather than
-about the file — `Display::exceeds_white` — so a PQ frame or a gain-mapped
-JPEG opens curved on SDR, and a float measurement raster, which is windowed to
-what it holds, opens straight; a curve on it would be a bend in the data for
-no reason. Switching the surface asks the question again (`Display::adopt`),
+about the file — `Display::exceeds_white` — so a PQ frame opens curved on
+SDR, and a float measurement raster, which is windowed to what it holds,
+opens straight; a curve on it would be a bend in the data for no reason. A
+photograph with a gain map opens straight either way: its lift is weighed
+by the surface's room, so nothing of it is above white that the surface
+cannot show, and the statistics the question is asked of are scanned
+through the lift at that weight. Switching the surface asks the question again (`Display::adopt`),
 and `t` changes the answer afterwards. The surface is settled after the first
 file is decoded — the window opens later — so `App::adopt_headroom` asks once
 more at that point too.

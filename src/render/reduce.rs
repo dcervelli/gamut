@@ -17,6 +17,7 @@ use bytemuck::{Pod, Zeroable};
 use crate::image::AlphaMode;
 
 use super::gpu::{self, Fullscreen};
+use super::image_layer::Lifted;
 use super::shader_codes;
 
 /// Size ratio between one level and the next, per axis.
@@ -30,7 +31,10 @@ struct Params {
     step: f32,
     swizzle: u32,
     alpha_mode: u32,
-    _pad: [u32; 3],
+    lift: u32,
+    map_size: [f32; 2],
+    base_offset: [f32; 4],
+    alternate_offset: [f32; 4],
 }
 
 /// What a chain is built from: the image as uploaded, plus what the shader
@@ -42,6 +46,10 @@ pub struct Source<'a> {
     pub format: wgpu::TextureFormat,
     pub swizzle: u32,
     pub alpha: AlphaMode,
+    /// The gain map the first pass lifts the image through, where it has
+    /// one, so that every level holds lifted light. The levels after the
+    /// first read light already lifted.
+    pub lift: Lifted<'a>,
 }
 
 /// One level, kept alongside its texture so that dropping the chain frees it.
@@ -62,7 +70,9 @@ pub struct Reducer {
 }
 
 impl Reducer {
-    pub fn new(device: &wgpu::Device) -> Self {
+    /// `lift_layout` is the image layer's binding for a gain map and its
+    /// table, which the first pass reads through as the draw does.
+    pub fn new(device: &wgpu::Device, lift_layout: &wgpu::BindGroupLayout) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("reduce"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/reduce.wgsl").into()),
@@ -71,8 +81,11 @@ impl Reducer {
         let params_layout =
             gpu::uniform_layout(device, "reduce params", wgpu::ShaderStages::FRAGMENT);
         let texture_layout = gpu::texture_layout(device, "reduce source", 1, true);
-        let pipeline_layout =
-            gpu::pipeline_layout(device, "reduce", &[&params_layout, &texture_layout]);
+        let pipeline_layout = gpu::pipeline_layout(
+            device,
+            "reduce",
+            &[&params_layout, &texture_layout, lift_layout],
+        );
 
         Self {
             shader,
@@ -121,6 +134,7 @@ impl Reducer {
             format,
             swizzle,
             alpha,
+            lift,
         } = source;
         let pipeline = self.pipeline(device, format);
         let mut levels: Vec<Level> = Vec::new();
@@ -154,13 +168,17 @@ impl Reducer {
                     step: STEP as f32,
                     swizzle,
                     // Only the first pass reads the image as it was uploaded;
-                    // every level it writes is premultiplied already.
+                    // every level it writes is premultiplied already, and
+                    // lifted already.
                     alpha_mode: if levels.is_empty() {
                         shader_codes::alpha(alpha)
                     } else {
                         shader_codes::level_alpha(alpha)
                     },
-                    _pad: [0; 3],
+                    lift: if levels.is_empty() { lift.code } else { 0 },
+                    map_size: lift.map_size,
+                    base_offset: lift.base_offset,
+                    alternate_offset: lift.alternate_offset,
                 }));
             params.unmap();
 
@@ -200,6 +218,7 @@ impl Reducer {
                 pass.set_pipeline(&self.pipelines[pipeline].1);
                 pass.set_bind_group(0, &params_group, &[]);
                 pass.set_bind_group(1, &texture_group, &[]);
+                pass.set_bind_group(2, lift.group, &[]);
                 pass.draw(0..4, 0..1);
             }
 

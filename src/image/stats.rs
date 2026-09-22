@@ -2,6 +2,7 @@
 //! numbers do not conveniently fill 0..1 — 12-bit sensor data stored in
 //! 16-bit containers, or HDR frames with a few very bright highlights.
 
+use super::gain_map::{GainMap, Table};
 use super::{Channels, ColorSpace, DecodedImage, Sample, Samples, Transfer};
 
 /// Bins are plenty for percentile work and cheap to keep around; the UI draws
@@ -78,12 +79,12 @@ impl Plot {
     /// part of.
     ///
     /// The twin of the luminance pass in [`Stats::scan`], and it has to be
-    /// worked out from the file's components rather than from
-    /// [`Sample::color`]: the scan bins what the transfer function alone
-    /// makes of them, where that color has also been carried into the
-    /// working space and had its premultiplication undone. On a P3 file, or
-    /// one with premultiplied alpha, a bin taken from the color would name a
-    /// bar the pixel is not in.
+    /// worked out from [`Sample::linear`] rather than from
+    /// [`Sample::color`]: the scan bins what the transfer function and the
+    /// lift alone make of the file's components, where that color has also
+    /// been carried into the working space and had its premultiplication
+    /// undone. On a P3 file, or one with premultiplied alpha, a bin taken
+    /// from the color would name a bar the pixel is not in.
     ///
     /// `None` where there is no bar to point at: an axis with no span, a
     /// value the scan would have thrown out as nodata, or one outside the
@@ -91,13 +92,8 @@ impl Plot {
     /// therefore does not cover.
     pub fn bin_of(&self, image: &DecodedImage, sample: &Sample) -> Option<usize> {
         let transfer = image.color.transfer;
-        let scale = 1.0 / image.samples.full_scale();
-        let mut linear = [0.0f32; 4];
-        for (slot, stored) in linear.iter_mut().zip(sample.stored()) {
-            *slot = transfer.to_linear(stored * scale);
-        }
         let channels = sample.channels;
-        let value = luminance(&linear[..channels.count()], channels);
+        let value = luminance(sample.linear(), channels);
         if !value.is_finite() || image.nodata.is_some_and(|sentinel| value == sentinel) {
             return None;
         }
@@ -222,15 +218,23 @@ impl Stats {
     /// band's numbers depend on nothing outside it, and the bands fold
     /// together into exactly what one thread would have counted.
     pub fn scan(image: &DecodedImage) -> Self {
+        Self::scan_with(image, None)
+    }
+
+    /// [`Stats::scan`], with the picture lifted through `lift` where it has
+    /// a gain map: what the screen shows on a surface with room above
+    /// white, which is what the histogram is to describe. With no table,
+    /// or no map, the base is what is measured.
+    pub fn scan_with(image: &DecodedImage, lift: Option<&Table>) -> Self {
         let stride = Self::stride(image);
-        Self::scan_in(image, stride, Values::bands_for(image, stride))
+        Self::scan_in(image, lift, stride, Values::bands_for(image, stride))
     }
 
     /// [`Stats::scan`] over a given number of bands, so that a test can hold
     /// a divided scan against the same one undivided.
-    fn scan_in(image: &DecodedImage, stride: usize, bands: usize) -> Self {
+    fn scan_in(image: &DecodedImage, lift: Option<&Table>, stride: usize, bands: usize) -> Self {
         let channels = image.samples.channels();
-        let values = Values::new(image, channels, stride);
+        let values = Values::new(image, lift, channels, stride);
         let transfer = image.color.transfer;
         let nodata = image.nodata;
         let is_data =
@@ -556,10 +560,19 @@ struct Values<'a> {
     /// image, or one band of it.
     pixels: std::ops::Range<usize>,
     width: usize,
+    height: usize,
+    /// The gain map and the table to lift each pixel through, where the
+    /// picture has one and the caller asked for it lifted.
+    lift: Option<(&'a GainMap, &'a Table)>,
 }
 
 impl<'a> Values<'a> {
-    fn new(image: &'a DecodedImage, channels: Channels, stride: usize) -> Self {
+    fn new(
+        image: &'a DecodedImage,
+        lift: Option<&'a Table>,
+        channels: Channels,
+        stride: usize,
+    ) -> Self {
         let width = image.width as usize;
         Self {
             samples: &image.samples,
@@ -568,6 +581,8 @@ impl<'a> Values<'a> {
             stride,
             pixels: 0..width * image.height as usize,
             width,
+            height: image.height as usize,
+            lift: lift.and_then(|table| Some((image.gain_map.as_deref()?, table))),
         }
     }
 
@@ -650,10 +665,29 @@ impl<'a> Values<'a> {
                 let lut: Vec<f32> = (0..=u8::MAX)
                     .map(|v| transfer.to_linear(v as f32 * scale))
                     .collect();
-                for chunk in data[span].chunks_exact(count).step_by(self.stride) {
+                let (width, height) = (self.width as u32, self.height as u32);
+                let colors = self.channels.color_count();
+                for (step, chunk) in data[span]
+                    .chunks_exact(count)
+                    .step_by(self.stride)
+                    .enumerate()
+                {
                     for (index, raw) in chunk.iter().enumerate() {
                         stored[index] = *raw as f32 * scale;
                         linear[index] = lut[*raw as usize];
+                    }
+                    // Lifted, the pixel is measured as the screen shows it,
+                    // and plotted where the file would have stored what it
+                    // shows: back through the curve, past the top of the
+                    // file's own range where the lift takes it.
+                    if let Some((map, table)) = self.lift {
+                        let pixel = first + step * self.stride;
+                        let (x, y) = ((pixel % self.width) as u32, (pixel / self.width) as u32);
+                        let gain = map.gain_at(table, x, y, width, height);
+                        table.apply(&mut linear[..colors], gain);
+                        for channel in 0..colors {
+                            stored[channel] = transfer.to_encoded(linear[channel]);
+                        }
                     }
                     visit(&stored[..count], &linear[..count]);
                 }
@@ -703,6 +737,7 @@ mod tests {
             referred: Referred::Scene,
             exposure: None,
             nodata: None,
+            gain_map: None,
         }
     }
 
@@ -800,6 +835,7 @@ mod tests {
             referred: Referred::Scene,
             exposure: None,
             nodata: None,
+            gain_map: None,
         };
         let key = Stats::scan(&element).key.unwrap();
         assert!((key - 0.5).abs() < 1e-6, "{key}");
@@ -820,6 +856,7 @@ mod tests {
             referred: Referred::Scene,
             exposure: None,
             nodata: None,
+            gain_map: None,
         }
     }
 
@@ -888,13 +925,14 @@ mod tests {
             referred: Referred::Display,
             exposure: None,
             nodata: None,
+            gain_map: None,
         };
 
         for stride in [1, 5] {
-            let plain = Stats::scan_in(&image, stride, 1);
+            let plain = Stats::scan_in(&image, None, stride, 1);
             assert!(plain.counted > 0);
             for bands in [2, 7, 60, 200] {
-                let divided = Stats::scan_in(&image, stride, bands);
+                let divided = Stats::scan_in(&image, None, stride, bands);
                 assert_eq!(divided.min, plain.min, "stride {stride}, {bands} bands");
                 assert_eq!(divided.max, plain.max, "stride {stride}, {bands} bands");
                 assert_eq!(divided.plot.min, plain.plot.min);
@@ -936,11 +974,12 @@ mod tests {
             referred: Referred::Display,
             exposure: None,
             nodata: None,
+            gain_map: None,
         };
         let plot = Stats::scan(&image).plot;
 
         for x in 0..image.width {
-            let sample = image.sample(x, 0).expect("inside the image");
+            let sample = image.sample(x, 0, None).expect("inside the image");
             let bin = plot.bin_of(&image, &sample).expect("on the axis");
             assert!(
                 plot.luma[bin] > 0,
@@ -978,6 +1017,7 @@ mod tests {
             referred: Referred::Scene,
             exposure: None,
             nodata: None,
+            gain_map: None,
         };
         // BT.709 luminance weights green at 0.7152.
         assert!((Stats::scan(&green).max - 0.7152).abs() < 1e-4);
@@ -996,6 +1036,7 @@ mod tests {
             referred: Referred::Scene,
             exposure: None,
             nodata: None,
+            gain_map: None,
         }
     }
 
@@ -1086,6 +1127,7 @@ mod tests {
             referred: Referred::Display,
             exposure: None,
             nodata: None,
+            gain_map: None,
         }
     }
 
@@ -1190,6 +1232,7 @@ mod tests {
             referred: Referred::Scene,
             exposure: None,
             nodata: None,
+            gain_map: None,
         };
         let stats = Stats::scan(&image);
         assert!((stats.min - 0.25).abs() < 1e-6);

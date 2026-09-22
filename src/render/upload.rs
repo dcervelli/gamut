@@ -292,7 +292,12 @@ fn expand<T: bytemuck::Zeroable + Copy + Send + Sync>(
     ))
 }
 
-fn expand_u8(data: &[u8], channels: Channels, components: usize, opaque: u8) -> Pixels<'_> {
+pub(super) fn expand_u8(
+    data: &[u8],
+    channels: Channels,
+    components: usize,
+    opaque: u8,
+) -> Pixels<'_> {
     match expand(data, channels, components, opaque) {
         Some(out) => Pixels::U8(out),
         None => Pixels::Borrowed(data),
@@ -377,6 +382,7 @@ mod tests {
             referred: Referred::of(transfer),
             exposure: None,
             nodata: None,
+            gain_map: None,
         }
     }
 
@@ -538,6 +544,7 @@ mod tests {
                     referred: Referred::of(transfer),
                     exposure: None,
                     nodata: None,
+                    gain_map: None,
                 };
                 let plan = plan(&decoded, capabilities);
                 assert_eq!(

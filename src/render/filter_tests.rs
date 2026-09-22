@@ -157,6 +157,7 @@ fn gray_u8(width: u32, height: u32, data: Vec<u8>) -> DecodedImage {
         referred: Referred::Scene,
         exposure: None,
         nodata: None,
+        gain_map: None,
     }
 }
 
@@ -377,6 +378,7 @@ fn a_transparent_texel_does_not_bleed_its_color() {
         referred: Referred::Scene,
         exposure: None,
         nodata: None,
+        gain_map: None,
     };
 
     let placement = Placement {
@@ -434,6 +436,7 @@ fn the_thumbnail_is_drawn_beside_the_view_and_builds_the_chain_it_needs() {
             }),
             mark_clipped: false,
             headroom: Headroom::None,
+            lift: 0.0,
         },
     );
 
@@ -471,4 +474,157 @@ fn the_thumbnail_is_drawn_beside_the_view_and_builds_the_chain_it_needs() {
 
     // Nothing was drawn in the corner neither of them covers.
     assert_eq!(at(&pixels, width, SIZE as usize + 1, 3), 0.0);
+}
+
+/// A picture with a gain map: 32 wide, 8 high, a ramp across, and a map
+/// half its size that asks for nothing on the left and two stops on the
+/// right, with an offset either side of the product so that the offsets
+/// are seen to be applied too.
+fn gain_mapped() -> DecodedImage {
+    use crate::image::gain_map::{GainMap, Lift};
+    use std::sync::Arc;
+
+    const WIDTH: u32 = 32;
+    const HEIGHT: u32 = 8;
+    let data: Vec<u8> = (0..WIDTH * HEIGHT)
+        .flat_map(|index| {
+            let x = index % WIDTH;
+            [(x * 8) as u8, 128, (255 - x * 8) as u8]
+        })
+        .collect();
+    let mut image = DecodedImage::new(
+        WIDTH,
+        HEIGHT,
+        Samples::U8 {
+            channels: Channels::Rgb,
+            data,
+        },
+        ColorSpace::SRGB,
+        AlphaMode::Opaque,
+    );
+    // `GainMapMetadata` is non-exhaustive, so it is built by amending the
+    // defaults rather than by naming every field.
+    let mut metadata = ultrahdr_rs::GainMapMetadata::default();
+    metadata.gain_map_max = [2.0; 3];
+    metadata.gain_map_min = [0.0; 3];
+    metadata.gamma = [1.0; 3];
+    metadata.base_offset = [0.015625; 3];
+    metadata.alternate_offset = [0.01; 3];
+    metadata.alternate_hdr_headroom = 2.0;
+    image.gain_map = Some(Arc::new(GainMap {
+        width: WIDTH / 2,
+        height: HEIGHT / 2,
+        channels: 1,
+        data: (0..WIDTH / 2 * HEIGHT / 2)
+            .map(|index| {
+                if index % (WIDTH / 2) < WIDTH / 4 {
+                    0
+                } else {
+                    255
+                }
+            })
+            .collect(),
+        lift: Lift::Iso(metadata),
+    }));
+    image
+}
+
+/// The shader lifts the picture through the same map and the same table
+/// the readout reads it through: at a weight, every texel drawn 1:1 is
+/// what `DecodedImage::sample` says it is; at no weight it is the base;
+/// and the weight is changed on the picture already on the device.
+#[test]
+fn the_lift_on_the_device_agrees_with_the_readout() {
+    let Some(gpu) = gpu::test_context() else {
+        return;
+    };
+    let image = gain_mapped();
+    let map = image.gain_map.as_ref().unwrap();
+    let target = [image.width, image.height];
+
+    let mut layer = ImageLayer::new(&gpu.device, WORKING_FORMAT);
+    let uploaded = layer
+        .uploader(&gpu.device, &gpu.queue, gpu.capabilities)
+        .run(&image)
+        .expect("the image uploads");
+    layer.install(uploaded);
+
+    for weight in [1.0f32, 0.0, 0.5] {
+        let table = map.table(weight);
+        let mut quads = Draw::plain(whole(target, &image), None);
+        quads.lift = weight;
+        let pixels = draw_layer(gpu, &mut layer, target, quads);
+        for y in 0..image.height {
+            for x in 0..image.width {
+                let expected = image.sample(x, y, Some(&table)).unwrap();
+                let got = pixels[(y * image.width + x) as usize];
+                // Relative: the device's hardware sRGB decode of the base
+                // is a few parts in a thousand from the CPU's, and the lift
+                // multiplies the difference along with the value.
+                for (channel, (got, want)) in got.iter().zip(expected.color()).enumerate() {
+                    assert!(
+                        close(*got, *want, 5e-3 * want.abs().max(1.0)),
+                        "weight {weight} at ({x}, {y}) channel {channel}: got {got}, expected {want}",
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// The coarse chain is reduced from lifted light, so a minified draw of a
+/// lifted picture is the average of the lifted texels — and it is built
+/// again when the weight changes, or the old lift would stay on screen at
+/// every zoom past the chain's first level.
+#[test]
+fn the_coarse_chain_is_reduced_from_lifted_light() {
+    let Some(gpu) = gpu::test_context() else {
+        return;
+    };
+    let image = gain_mapped();
+    let map = image.gain_map.as_ref().unwrap();
+    // Sixteen to one across: 32 wide to 2, 8 high to 1 — wide enough to
+    // force the chain.
+    let target = [2, 1];
+    let placement = Placement {
+        x: 0.0,
+        y: 0.0,
+        width: 2.0,
+        height: 1.0,
+        zoom: 1.0 / 16.0,
+        upscale: Upscale::Nearest,
+    };
+
+    let mut layer = ImageLayer::new(&gpu.device, WORKING_FORMAT);
+    let uploaded = layer
+        .uploader(&gpu.device, &gpu.queue, gpu.capabilities)
+        .run(&image)
+        .expect("the image uploads");
+    layer.install(uploaded);
+
+    for weight in [0.0f32, 1.0] {
+        let table = map.table(weight);
+        let mut quads = Draw::plain(placement, None);
+        quads.lift = weight;
+        let pixels = draw_layer(gpu, &mut layer, target, quads);
+        for block in 0..2u32 {
+            let mut total = [0.0f32; 3];
+            for y in 0..image.height {
+                for x in block * 16..block * 16 + 16 {
+                    let sample = image.sample(x, y, Some(&table)).unwrap();
+                    for (sum, value) in total.iter_mut().zip(sample.color()) {
+                        *sum += value;
+                    }
+                }
+            }
+            let got = pixels[block as usize];
+            for (channel, (got, sum)) in got.iter().zip(total).enumerate() {
+                let expected = sum / (16.0 * image.height as f32);
+                assert!(
+                    close(*got, expected, 4e-3),
+                    "weight {weight} block {block} channel {channel}: got {got}, expected {expected}"
+                );
+            }
+        }
+    }
 }

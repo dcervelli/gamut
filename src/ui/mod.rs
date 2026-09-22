@@ -126,6 +126,10 @@ pub struct Current {
     pub sequence: Sequence,
     /// Which page `image` is, where the file has pages; zero otherwise.
     pub page: usize,
+    /// The lift the picture is drawn through, where it has a gain map: the
+    /// table at the weight the surface's room asks for, which is what every
+    /// readout of a pixel reads it through too. `None` where it has none.
+    pub lift: Option<Arc<crate::image::gain_map::Table>>,
 }
 
 impl Current {

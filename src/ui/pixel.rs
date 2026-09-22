@@ -91,7 +91,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, current: &Current) {
     let Some(at) = pass.input.pointer else {
         return;
     };
-    let Some(sample) = current.image.sample(at[0], at[1]) else {
+    let Some(sample) = current.image.sample(at[0], at[1], current.lift.as_deref()) else {
         return;
     };
     let mapped = current.display.map(&sample, pass.input.headroom);
@@ -261,7 +261,7 @@ mod tests {
     }
 
     fn read(image: &DecodedImage, display: &Display, at: [u32; 2], format: PixelFormat) -> String {
-        let sample = image.sample(at[0], at[1]).expect("inside the image");
+        let sample = image.sample(at[0], at[1], None).expect("inside the image");
         value(
             image,
             &sample,
@@ -410,7 +410,7 @@ mod tests {
             ColorSpace::LINEAR_BT709,
             AlphaMode::Opaque,
         );
-        let sample = image.sample(0, 0).expect("inside the image");
+        let sample = image.sample(0, 0, None).expect("inside the image");
 
         let mut display = Display::default();
         let gray = swatch_color(&display.map(&sample, Headroom::None));

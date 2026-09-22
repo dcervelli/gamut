@@ -29,7 +29,8 @@ bright, and so is a map deeper than 8 bits. A HEIF's gain map is applied
 only to an 8-bit color base: a 10-bit HEIC is HDR in its own right and
 carries none.
 
-Reconstruction costs memory: the result is four 32-bit floats per pixel, so a
-12-megapixel photograph is a 200 MB buffer where the base image alone was 12
-MB.
+How much of a gain map's lift is shown follows the monitor's room above
+white as the compositor describes it, through the color-management
+protocol; where the surface has room but the compositor has not said how
+much, the whole lift is shown.
 

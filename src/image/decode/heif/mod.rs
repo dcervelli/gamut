@@ -23,13 +23,13 @@
 //! that `tmap` reads, and by Apple's own auxiliary image and maker note
 //! that `apple` reads — and once, Apple's way, in an older one. Either way
 //! the map is decoded through `libheif` like any other image in the file
-//! and applied by [`super::gain_map`], the same walk an Ultra HDR JPEG
-//! takes, so a phone photograph arrives as the HDR image it is.
+//! and goes with the picture as [`crate::image::gain_map`] describes, the
+//! same as an Ultra HDR JPEG's, for the display to apply.
 
 use std::fs::File;
 use std::io::{BufReader, SeekFrom};
 use std::path::Path;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use anyhow::{Context, Result, anyhow, bail};
 use libheif_rs::{
@@ -37,7 +37,7 @@ use libheif_rs::{
     SecurityLimits, StreamReader,
 };
 
-use super::gain_map::{self, Map, Table};
+use crate::image::gain_map::{GainMap, Lift};
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
 
 mod apple;
@@ -202,44 +202,32 @@ impl super::Decoder for Heif {
             pack_interleaved(&interleaved, width, height, channels)?
         };
 
-        let color = color_space(&handle);
-        if overrides.gain_map
-            && let Samples::U8 {
-                channels: Channels::Rgb,
-                data,
-            } = &samples
-            && let Some(hdr) =
-                gain_mapped(lib, &context, &handle, tone_map, data, width, height, color)?
-        {
-            return Ok(hdr);
-        }
-
-        Ok(DecodedImage::new(
+        let mut image = DecodedImage::new(
             width,
             height,
             samples,
-            color,
+            color_space(&handle),
             AlphaMode::of(channels, handle.is_premultiplied_alpha()),
-        ))
+        );
+        // The lift is the display's to apply; the map goes with the picture.
+        if overrides.gain_map && channels == Channels::Rgb && !wide {
+            image.gain_map = gain_map(lib, &context, &handle, tone_map)?;
+        }
+        Ok(image)
     }
 }
 
-/// The picture lifted by its gain map, where the file has one this reader
-/// can apply: an ISO 21496-1 tone map whose base is this picture, or
-/// Apple's auxiliary image with a maker note to say how far it lifts.
-/// `None` where it has neither, and the SDR picture stands.
-#[allow(clippy::too_many_arguments)]
-fn gain_mapped(
+/// The picture's gain map, where the file has one this reader can apply:
+/// an ISO 21496-1 tone map whose base is this picture, or Apple's auxiliary
+/// image with a maker note to say how far it lifts. `None` where it has
+/// neither, and the SDR picture stands on its own.
+fn gain_map(
     lib: &LibHeif,
     context: &HeifContext,
     handle: &ImageHandle,
     tone_map: Option<tmap::ToneMap>,
-    base: &[u8],
-    width: u32,
-    height: u32,
-    color: ColorSpace,
-) -> Result<Option<DecodedImage>> {
-    let (map_handle, table) = if let Some(tone_map) = tone_map {
+) -> Result<Option<Arc<GainMap>>> {
+    let (map_handle, lift) = if let Some(tone_map) = tone_map {
         if tone_map.base != handle.item_id() {
             return Ok(None);
         }
@@ -256,7 +244,7 @@ fn gain_mapped(
         let map_handle = context
             .image_handle(tone_map.gain_map)
             .context("opening the gain map")?;
-        (map_handle, Table::iso(&tone_map.metadata))
+        (map_handle, Lift::Iso(tone_map.metadata))
     } else {
         let Some(map_handle) = handle
             .auxiliary_images(None)
@@ -273,24 +261,20 @@ fn gain_mapped(
         else {
             return Ok(None);
         };
-        (map_handle, Table::apple(headroom))
+        (map_handle, Lift::Apple { headroom })
     };
-
-    // Four 32-bit components per pixel is what comes back below, and it
-    // is four times the base, so this is the size worth checking.
-    super::check_decoded_size(width, height, 4, 32)?;
-    let map = decode_map(lib, &map_handle)?;
-    let samples = gain_map::reconstruct(base, width, height, color.transfer, &map, &table);
-    Ok(Some(gain_map::image(
-        samples,
+    let (width, height, channels, data) = decode_map(lib, &map_handle)?;
+    Ok(Some(Arc::new(GainMap {
         width,
         height,
-        color.primaries,
-    )))
+        channels,
+        data,
+        lift,
+    })))
 }
 
 /// The gain map decoded: 8-bit, one channel or three, at its own size.
-fn decode_map(lib: &LibHeif, handle: &ImageHandle) -> Result<Map> {
+fn decode_map(lib: &LibHeif, handle: &ImageHandle) -> Result<(u32, u32, u8, Vec<u8>)> {
     let (width, height) = (handle.width(), handle.height());
     // A zero dimension is refused outright: the taps would otherwise
     // compute `width - 1` and index past the end of an empty buffer.
@@ -336,12 +320,7 @@ fn decode_map(lib: &LibHeif, handle: &ImageHandle) -> Result<Map> {
     let Samples::U8 { data, .. } = samples else {
         bail!("an 8-bit gain map decoded to something wider");
     };
-    Ok(Map {
-        width,
-        height,
-        channels: channels.count() as u8,
-        data,
-    })
+    Ok((width, height, channels.count() as u8, data))
 }
 
 /// The pixel-count ceiling, on the same reasoning as `MAX_DECODED_BYTES`:

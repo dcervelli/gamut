@@ -21,11 +21,11 @@ use winit::event::{KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::{Window, WindowId};
 
-use crate::image::DecodedImage;
 use crate::image::decode;
 use crate::image::display::{Display, Headroom, Startup};
 use crate::image::region::{Grip, Region};
 use crate::image::sequence::Sequence;
+use crate::image::{DecodedImage, Stats};
 use crate::loader::{Decoded, Loader, Opened, Ready, Reload, Request, Source};
 use crate::monitor::{Mode, Monitors};
 use crate::motion::Motion;
@@ -138,6 +138,9 @@ pub struct App {
     /// The mode of the monitor the window is on, as last read: `None` until
     /// the window has landed on one, and for good where nothing says.
     monitor: Option<Mode>,
+    /// And its room above white — its peak over its white — read with the
+    /// mode: what a gain map's lift is weighed against on an HDR surface.
+    monitor_headroom: Option<f32>,
     /// Where the view is going: the pan and zoom every key and press act
     /// on. What is on screen is [`App::shown_view`], which is this once it
     /// has arrived.
@@ -387,6 +390,7 @@ impl App {
             hdr,
             monitors,
             monitor: None,
+            monitor_headroom: None,
             view,
             motion: None,
             kept: Kept::default(),
@@ -792,9 +796,11 @@ impl App {
             .and_then(|window| window.current_monitor())
             .and_then(|monitor| monitor.name());
         let mode = name.as_deref().and_then(|name| monitors.mode(name));
-        if mode == self.monitor {
+        let headroom = name.as_deref().and_then(|name| monitors.headroom(name));
+        if mode == self.monitor && headroom == self.monitor_headroom {
             return false;
         }
+        self.monitor_headroom = headroom;
         // Worth a line, since it is what lights the switch or kills it.
         if let (Some(name), Some(mode)) = (&name, mode) {
             let mode = match mode {
@@ -817,6 +823,9 @@ impl App {
     /// surface turns out to be. A curve asked for on the command line is left
     /// alone: that is a choice rather than a default.
     fn adopt_headroom(&mut self) {
+        // The lift first, since the curve is chosen from what the lift
+        // leaves above white.
+        self.refresh_lift();
         if self.startup.tone_map.is_some() {
             return;
         }
@@ -824,6 +833,48 @@ impl App {
         if let Some(current) = &mut self.current {
             current.display.adopt(headroom, &current.stats);
         }
+    }
+
+    /// How much room above white the picture is going out to: the
+    /// monitor's peak over its white, where it has said and the surface has
+    /// the room, and none otherwise. What a gain map's lift is weighed
+    /// against.
+    fn display_headroom(&self) -> f32 {
+        if self.headroom() != Headroom::Above {
+            return 1.0;
+        }
+        self.monitor_headroom.unwrap_or(f32::INFINITY)
+    }
+
+    /// Puts the lift of a picture with a gain map where the surface's room
+    /// asks, and measures the picture again through it: the histogram and
+    /// every readout describe what is on screen, which is the base on a
+    /// monitor with no room above white and the lifted picture on one with
+    /// room. Nothing happens for a picture with no map, or a lift already
+    /// at the weight.
+    fn refresh_lift(&mut self) {
+        let headroom = self.display_headroom();
+        let Some(current) = &mut self.current else {
+            return;
+        };
+        let Some(map) = &current.image.gain_map else {
+            return;
+        };
+        let weight = map.weight(headroom);
+        if current
+            .lift
+            .as_ref()
+            .is_some_and(|table| table.weight() == weight)
+        {
+            return;
+        }
+        let table = map.table(weight);
+        // The loader measured the base, which is what no lift shows: a
+        // picture arriving on a surface with no room is not scanned twice.
+        if weight > 0.0 || current.lift.is_some() {
+            current.stats = Stats::scan_with(&current.image, Some(&table));
+        }
+        current.lift = Some(Arc::new(table));
     }
 
     /// Switches the room above white on or off. Returns whether anything
@@ -1413,7 +1464,11 @@ impl App {
             stored,
             sequence,
             page,
+            lift: None,
         });
+        // The loader measured the base; a surface with room above white
+        // shows the lift, and the numbers follow it.
+        self.refresh_lift();
         self.start_player(
             &file.path,
             sequence,
@@ -1724,6 +1779,11 @@ impl App {
             backdrop,
             headroom,
             mark_clipped: self.panels.mark_clipped,
+            lift: self
+                .current
+                .as_ref()
+                .and_then(|current| current.lift.as_ref())
+                .map_or(0.0, |table| table.weight()),
         };
         match renderer.render(scene, textures) {
             Ok(()) => self.reported_error = false,

@@ -99,6 +99,7 @@ fn picture(width: u32, height: u32) -> Current {
         stored: None,
         sequence: Sequence::Still,
         page: 0,
+        lift: None,
     }
 }
 

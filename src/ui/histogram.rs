@@ -707,7 +707,9 @@ pub fn marked(
         return Some(bin);
     }
     let at = pointer?;
-    let sample = current.image.sample(at[0], at[1])?;
+    let sample = current
+        .image
+        .sample(at[0], at[1], current.lift.as_deref())?;
     current.stats.plot.bin_of(&current.image, &sample)
 }
 
@@ -1801,6 +1803,7 @@ mod tests {
             stored: None,
             sequence: Sequence::Still,
             page: 0,
+            lift: None,
         }
     }
 

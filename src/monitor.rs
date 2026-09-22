@@ -72,9 +72,12 @@ pub struct Room {
 }
 
 /// What the compositor has said so far, shared with the listening thread.
-#[derive(Default, PartialEq, Eq)]
+#[derive(Default, PartialEq)]
 struct Table {
     modes: HashMap<String, Mode>,
+    /// The room above white each monitor has, where it has said: its peak
+    /// over its reference white.
+    headrooms: HashMap<String, f32>,
     rooms: Vec<Room>,
 }
 
@@ -93,6 +96,14 @@ impl Monitors {
     /// `None` for one it has not described.
     pub fn mode(&self, name: &str) -> Option<Mode> {
         self.table.lock().ok()?.modes.get(name).copied()
+    }
+
+    /// How much room above white the monitor called `name` has: the ratio
+    /// of its peak luminance to its reference white, as the compositor
+    /// describes it, which is what a gain map's lift is weighed against.
+    /// `None` for a monitor that has not said, and 1 for one in SDR mode.
+    pub fn headroom(&self, name: &str) -> Option<f32> {
+        self.table.lock().ok()?.headrooms.get(name).copied()
     }
 
     /// Whether the compositor can say what mode a monitor is in. Where it
@@ -188,6 +199,18 @@ fn mode_of(reading: Reading) -> Mode {
     }
 }
 
+/// The room above white a description says the monitor has: its peak over
+/// its reference white, and 1 — none — where it has said nothing, or says
+/// its peak is its white.
+fn headroom_of(reading: Reading) -> f32 {
+    match reading.luminances {
+        Some(Luminances { max, reference }) if reference > 0 && max > reference => {
+            max as f32 / reference as f32
+        }
+        _ => 1.0,
+    }
+}
+
 /// The device pixels an output's current mode covers, turned the way the
 /// compositor has the output: a mode is given as the panel scans it, and a
 /// panel stood on its side is laid out with its height along the desk.
@@ -269,6 +292,14 @@ impl Listener {
                 .outputs
                 .iter()
                 .filter_map(|output| Some((output.name.clone()?, output.mode?)))
+                .collect(),
+            headrooms: self
+                .outputs
+                .iter()
+                .filter_map(|output| {
+                    output.mode?;
+                    Some((output.name.clone()?, headroom_of(output.reading)))
+                })
                 .collect(),
             rooms: self.outputs.iter().filter_map(Output::room).collect(),
         };
@@ -525,6 +556,17 @@ mod tests {
         assert_eq!(mode_of(reading(Some(Tf::ExtLinear), 80, 80)), Mode::Sdr);
         assert_eq!(mode_of(reading(None, 1000, 203)), Mode::Hdr);
         assert_eq!(mode_of(Reading::default()), Mode::Sdr);
+    }
+
+    /// The room is the peak over the white, and a monitor that has not said
+    /// — or whose peak is its white — has none.
+    #[test]
+    fn the_room_above_white_is_the_peak_over_the_reference() {
+        use TransferFunction as Tf;
+        assert!((headroom_of(reading(Some(Tf::St2084Pq), 812, 203)) - 4.0).abs() < 1e-6);
+        assert_eq!(headroom_of(reading(Some(Tf::Srgb), 80, 80)), 1.0);
+        assert_eq!(headroom_of(reading(None, 0, 0)), 1.0);
+        assert_eq!(headroom_of(Reading::default()), 1.0);
     }
 
     /// A mode is the panel's own scan; a panel on its side is laid out the

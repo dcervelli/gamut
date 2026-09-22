@@ -8,7 +8,7 @@ The unit tests cover the transfer functions and primaries matrices, texture form
 selection (including the device-capability fallbacks), the statistics and
 window logic, the pixel readout's two halves and the colormaps behind its
 swatch, the decoder registry, the CICP translation, ICC profile recognition,
-gain map reconstruction, the view geometry, the key table, the words the
+a gain map's weight and table, the view geometry, the key table, the words the
 interface says, the reload watch's idea of when a write has finished, and
 the file chooser: its ranking over a matcher of the tests' own, the shared
 directory the rows are named relative to, the cursor's clamping, the
@@ -34,7 +34,10 @@ there is no room for them — is pure and tested on its own.
 The gain map tests build an Ultra HDR file rather than checking one in: a flat
 base image and a half-size map that leaves one half alone and asks the other
 for two stops, assembled with the same crate that reads it back, so the round
-trip is exercised without a binary fixture. A HEIF's `tmap` item is tested
+trip is exercised without a binary fixture; the one-pixel read the readout
+uses is held, over every pixel, to the crate's own reconstruction. Two of
+the GPU tests draw a picture with a map and hold the device to that read,
+texel for texel, at three weights and through the coarse chain. A HEIF's `tmap` item is tested
 the same way, over a `meta` box assembled in the test around the 62 bytes
 of metadata an iPhone wrote, since no encoder in reach writes one; the
 picture itself is not, and an iPhone's own file is what checks the whole.

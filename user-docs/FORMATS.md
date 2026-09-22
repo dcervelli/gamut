@@ -166,20 +166,22 @@ numbers shown as sRGB come out visibly flat.
 **The orientation is applied**, so a photograph taken with the camera on its
 side arrives upright, as it does in a browser or a phone's gallery.
 
-**Gain maps are applied.** A JPEG from a recent phone is two images: the
-ordinary graded photograph every viewer has always shown, and a smaller *gain
-map* recording how much brighter than white each pixel really was. Both are
-read and recombined, so the file arrives as a genuine HDR image — tone mapped
-on an ordinary display, sent out at full brightness on a monitor in HDR mode
-(see `o` in KEYS.md). The whole boost is applied rather than a share of it
-guessed for your monitor; exposure (`d`, `f`) and the tone map (`t`) are where
-you decide what to do with it. An iPhone's HEIC carries the same kind of map,
-and gets the same treatment.
+**Gain maps are applied as far as your monitor has room.** A JPEG from a
+recent phone is two images: the ordinary graded photograph every viewer has
+always shown, and a smaller *gain map* recording how much brighter than
+white each pixel really was. On a monitor in SDR mode you see the
+photograph exactly as the phone graded it, since there is no room above
+white to lift anything into; on a monitor in HDR mode (see `o` in KEYS.md)
+the highlights are lifted as far as the monitor's own headroom allows, up
+to the whole of what the phone recorded — the same rule a phone's gallery
+and a browser follow, so the picture looks the same here as there. The
+histogram, the pixel readout and a copy all describe what is on screen.
+Exposure (`d`, `f`) and the tone map (`t`) work on top, as on any picture.
+An iPhone's HEIC carries the same kind of map, and gets the same treatment.
 
-- `--no-gain-map` shows the SDR photograph instead, which is the image many
-  other viewers show and what you want when the two need comparing.
-- Reconstruction is expensive in memory: a 12-megapixel photograph becomes
-  roughly 200 MB where the photograph alone was 12 MB.
+- `--no-gain-map` leaves the map unread, which shows the SDR photograph on
+  any monitor: what many other viewers show, and what you want when the
+  two need comparing.
 - A gain map that runs the other way — where the stored image is the HDR one
   and the map describes the way down — is refused rather than applied
   backwards. The message suggests `--no-gain-map`.
@@ -325,10 +327,11 @@ Caveats:
   can fail with a codec error where another HEIF opens fine.
 - **An iPhone's HDR photograph arrives as HDR.** The file carries a gain
   map beside the photograph, in the standard form from iOS 18 on and in
-  Apple's own before, and either is read and applied as a JPEG's is — the
-  tone map, exposure and `--no-gain-map` all work the same way. A gain map
-  deeper than 8 bits, or one running the other way, is refused with a
-  message that suggests `--no-gain-map`.
+  Apple's own before, and either is read and applied as a JPEG's is — as
+  far as the monitor has room, with the tone map, exposure and
+  `--no-gain-map` all working the same way. A gain map deeper than 8 bits,
+  or one running the other way, is refused with a message that suggests
+  `--no-gain-map`.
 - A file holding several images shows the primary one.
 
 ## ICO

@@ -445,6 +445,7 @@ mod tests {
             stored: None,
             sequence: Sequence::Still,
             page: 0,
+            lift: None,
         }
     }
 

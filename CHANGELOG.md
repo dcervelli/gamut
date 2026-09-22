@@ -11,9 +11,8 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 - An iPhone's HDR photograph arrives as HDR. A HEIC carries its gain map
   beside the picture — in ISO 21496-1's standard form from iOS 18 on, and
   in Apple's own before — and either is read and applied the way an Ultra
-  HDR JPEG's is, so the highlights the phone recorded above white are shown
-  at their brightness on an HDR monitor and tone mapped on an SDR one.
-  `--no-gain-map` shows the SDR picture, as it does for a JPEG.
+  HDR JPEG's is. `--no-gain-map` leaves the map unread, as it does for a
+  JPEG.
 
 - The orientation tag is applied in every format that carries one. A
   JPEG's EXIF orientation, a TIFF's `Orientation` tag and a PNG's `eXIf`
@@ -59,6 +58,18 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   opened on that picture, unless `--size` chose the size.
 
 ### Changed
+
+- A gain map is applied as far as the monitor has room, as the standard
+  says and as a phone's gallery does, rather than the whole way and then
+  tone mapped. On a monitor in SDR mode a photograph with a gain map — an
+  Ultra HDR JPEG, an iPhone's HEIC — now shows exactly as the phone graded
+  it, where before its lifted midtones came out brighter than graded and
+  its highlights piled into the tone curve's shoulder; on a monitor in HDR
+  mode the highlights are lifted as far as the monitor's headroom allows.
+  The map goes to the GPU beside the picture and is applied there, so
+  switching the room with `o` is instant, the histogram, the readout and a
+  copy describe what is on screen, and a 24-megapixel photograph takes a
+  quarter of the memory it did.
 
 - Deleting the only file on the list takes it off the list and off the
   screen, leaving the empty window and its buttons, rather than keeping it

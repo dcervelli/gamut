@@ -25,6 +25,8 @@
 use std::num::NonZero;
 use std::sync::OnceLock;
 
+use super::gain_map::Table;
+
 use anyhow::{Context, Result};
 use png::{BitDepth, ColorType, Compression, Encoder, SrgbRenderingIntent};
 
@@ -59,12 +61,18 @@ pub struct Raster {
 ///
 /// Alpha is carried only where the file had some. An image that was opaque
 /// stays opaque rather than gaining a channel of nothing but 255.
-pub fn displayed(image: &DecodedImage, display: &Display, region: Region) -> Raster {
+pub fn displayed(
+    image: &DecodedImage,
+    display: &Display,
+    region: Region,
+    lift: Option<&Table>,
+) -> Raster {
     let stride = region.width as usize * displayed_channels(image, display).count();
     displayed_on(
         image,
         display,
         region,
+        lift,
         bands(stride, region.height as usize),
     )
 }
@@ -78,6 +86,7 @@ pub fn displayed_on(
     image: &DecodedImage,
     display: &Display,
     region: Region,
+    lift: Option<&Table>,
     bands: usize,
 ) -> Raster {
     let channels = displayed_channels(image, display);
@@ -90,14 +99,22 @@ pub fn displayed_on(
     // nothing from it; the split is over who does the work, not over what
     // the work is.
     let bands = bands.clamp(1, height.max(1));
+    let walk = Walk {
+        image,
+        display,
+        channels,
+        region,
+        lift,
+    };
     if bands == 1 {
-        fill(&mut data, region.y, image, display, channels, region);
+        fill(&mut data, region.y, &walk);
     } else {
         let rows = height.div_ceil(bands);
         std::thread::scope(|scope| {
             for (index, band) in data.chunks_mut(stride * rows).enumerate() {
                 let first = region.y + (index * rows) as u32;
-                scope.spawn(move || fill(band, first, image, display, channels, region));
+                let walk = &walk;
+                scope.spawn(move || fill(band, first, walk));
             }
         });
     }
@@ -135,16 +152,29 @@ fn bands(stride: usize, height: usize) -> usize {
         .min(height)
 }
 
-/// Writes the rows of `band`, which start at row `first` of the image and
-/// run across the columns `region` takes in.
-fn fill(
-    band: &mut [u8],
-    first: u32,
-    image: &DecodedImage,
-    display: &Display,
+/// What every band of the walk reads: the picture, how it is shown, and
+/// the part of it wanted.
+struct Walk<'a> {
+    image: &'a DecodedImage,
+    display: &'a Display,
     channels: Channels,
     region: Region,
-) {
+    /// The lift the screen is drawn through, where the picture has a gain
+    /// map — so that what is copied is what is on screen, which on a
+    /// monitor with no room above white is the base as it was graded.
+    lift: Option<&'a Table>,
+}
+
+/// Writes the rows of `band`, which start at row `first` of the image and
+/// run across the columns `region` takes in.
+fn fill(band: &mut [u8], first: u32, walk: &Walk<'_>) {
+    let Walk {
+        image,
+        display,
+        channels,
+        region,
+        lift,
+    } = *walk;
     let levels = levels();
     let count = channels.count();
     let gray = channels.is_gray();
@@ -153,7 +183,7 @@ fn fill(
         let y = first + offset as u32;
         for (column, pixel) in row.chunks_exact_mut(count).enumerate() {
             // Only `None` outside the image, which this walk never goes.
-            let Some(sample) = image.sample(region.x + column as u32, y) else {
+            let Some(sample) = image.sample(region.x + column as u32, y, lift) else {
                 continue;
             };
             // An SDR reading: a PNG stops at white, so what is copied is the
@@ -302,7 +332,12 @@ mod tests {
 
     /// The whole of `image`, walked.
     fn displayed(image: &DecodedImage, display: &Display) -> Raster {
-        super::displayed(image, display, Region::whole([image.width, image.height]))
+        super::displayed(
+            image,
+            display,
+            Region::whole([image.width, image.height]),
+            None,
+        )
     }
 
     /// `(color type, bit depth, pixel bytes)` as a PNG decoder reads them
@@ -475,7 +510,7 @@ mod tests {
         let mut expected = Vec::with_capacity((width * height * 4) as usize);
         for y in 0..height {
             for x in 0..width {
-                let mapped = display.map(&source.sample(x, y).unwrap(), Headroom::None);
+                let mapped = display.map(&source.sample(x, y, None).unwrap(), Headroom::None);
                 for value in mapped.color {
                     expected.push(quantize(value, levels()));
                 }
@@ -510,8 +545,8 @@ mod tests {
         let region = Region::whole([1, 1]);
         let source = image(Channels::Gray, vec![7]);
         assert_eq!(
-            displayed_on(&source, &plain(), region, 1).data,
-            displayed_on(&source, &plain(), region, 8).data
+            displayed_on(&source, &plain(), region, None, 1).data,
+            displayed_on(&source, &plain(), region, None, 8).data
         );
     }
 
@@ -553,7 +588,7 @@ mod tests {
             bands(region.width as usize * 3, region.height as usize) > 1,
             "the region has to be divided for the offset to be tested"
         );
-        let part = super::displayed(&source, &display, region);
+        let part = super::displayed(&source, &display, region, None);
         assert_eq!((part.width, part.height), (200, 190));
 
         let mut expected = Vec::new();

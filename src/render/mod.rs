@@ -84,6 +84,10 @@ pub struct Scene<'a> {
     /// painted in the warning colors: a toggle of the interface, and
     /// nothing to do with the file, which is why it is not in `display`.
     pub mark_clipped: bool,
+    /// How much of a gain map's lift the picture gets, from none to all of
+    /// it: the weight the surface's room above white asks for. Nothing for
+    /// a picture without a map.
+    pub lift: f32,
 }
 
 /// One pass of egui's interface, tessellated and ready to draw: the
@@ -426,6 +430,7 @@ impl Renderer {
                 thumbnail,
                 mark_clipped: scene.mark_clipped,
                 headroom: scene.headroom,
+                lift: scene.lift,
             },
             size,
             display,

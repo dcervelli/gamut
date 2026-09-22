@@ -5,6 +5,8 @@
 //! than a re-decode. Resampling is chosen the same way: which filter to run
 //! and which level of the coarse chain to read are two more fields in it.
 
+use std::sync::Arc;
+
 use anyhow::{Result, anyhow};
 use bytemuck::{Pod, Zeroable};
 
@@ -13,8 +15,9 @@ use super::placement::Placement;
 use super::reduce::{self, Level, Reducer};
 use super::shader_codes;
 use super::upload::{self, Capabilities};
+use crate::image::gain_map::GainMap;
 use crate::image::{
-    AlphaMode, DecodedImage,
+    AlphaMode, Channels, DecodedImage,
     display::{Display, Headroom},
 };
 
@@ -35,6 +38,65 @@ struct Params {
     alpha_mode: u32,
     colormap: u32,
     resampler: u32,
+    /// 0 for no lift, else the gain map's channel count; 0 on a coarse
+    /// level, which holds lifted light already.
+    lift: u32,
+    _pad2: u32,
+    map_size: [f32; 2],
+    base_offset: [f32; 4],
+    alternate_offset: [f32; 4],
+}
+
+/// A picture's gain map on the device: the map as uploaded, and the table
+/// the lift is read through at the weight the surface asks for, which is
+/// written again when the weight changes. See `image::gain_map`.
+struct Lift {
+    map: Arc<GainMap>,
+    _map_texture: wgpu::Texture,
+    lut: wgpu::Texture,
+    group: wgpu::BindGroup,
+    /// The weight the table on the device was made at.
+    weight: f32,
+    base_offset: [f32; 3],
+    alternate_offset: [f32; 3],
+}
+
+/// What a pass that reads the image as uploaded binds and is told, to lift
+/// it: the gain map and its table, or the blanks with the lift switched
+/// off.
+#[derive(Clone, Copy)]
+pub struct Lifted<'a> {
+    pub group: &'a wgpu::BindGroup,
+    /// 0 for no lift, else the map's channel count.
+    pub code: u32,
+    pub map_size: [f32; 2],
+    pub base_offset: [f32; 4],
+    pub alternate_offset: [f32; 4],
+}
+
+impl<'a> Lifted<'a> {
+    fn of(lift: Option<&'a Lift>, blank: &'a wgpu::BindGroup) -> Self {
+        match lift {
+            Some(lift) => Self {
+                group: &lift.group,
+                code: u32::from(lift.map.channels),
+                map_size: [lift.map.width as f32, lift.map.height as f32],
+                base_offset: padded(lift.base_offset),
+                alternate_offset: padded(lift.alternate_offset),
+            },
+            None => Self {
+                group: blank,
+                code: 0,
+                map_size: [1.0, 1.0],
+                base_offset: [0.0; 4],
+                alternate_offset: [0.0; 4],
+            },
+        }
+    }
+}
+
+fn padded(offset: [f32; 3]) -> [f32; 4] {
+    [offset[0], offset[1], offset[2], 0.0]
 }
 
 /// One uploaded image and the constants that describe it.
@@ -56,6 +118,8 @@ pub struct GpuImage {
     swizzle: u32,
     alpha: AlphaMode,
     primaries: [[f32; 4]; 3],
+    /// The gain map, where the picture has one.
+    lift: Option<Lift>,
     pub format: wgpu::TextureFormat,
     pub precision_note: Option<&'static str>,
 }
@@ -85,6 +149,9 @@ pub struct Draw {
     /// What decides whether white is being clipped at all, which is the
     /// display's to say — see `Display::clips_white`.
     pub headroom: Headroom,
+    /// How much of a gain map's lift the picture gets, from none to all of
+    /// it: the weight the surface's room above white asks for.
+    pub lift: f32,
 }
 
 impl Draw {
@@ -96,6 +163,7 @@ impl Draw {
             thumbnail,
             mark_clipped: false,
             headroom: Headroom::None,
+            lift: 0.0,
         }
     }
 }
@@ -103,6 +171,10 @@ impl Draw {
 pub struct ImageLayer {
     pipeline: wgpu::RenderPipeline,
     texture_layout: wgpu::BindGroupLayout,
+    lift_layout: wgpu::BindGroupLayout,
+    /// What a picture with no gain map binds in the map's place: a texel of
+    /// each, never read, since the lift is switched off with them.
+    blank_lift: wgpu::BindGroup,
     main: Slot,
     thumbnail: Slot,
     reducer: Reducer,
@@ -137,8 +209,16 @@ impl ImageLayer {
         // nearest and a bicubic. Every format `upload::plan` can produce is
         // filterable all the same, and so is every format `reduce` writes.
         let texture_layout = gpu::texture_layout(device, "image texture", 1, true);
-        let pipeline_layout =
-            gpu::pipeline_layout(device, "image layer", &[&params_layout, &texture_layout]);
+        // Loaded rather than sampled as well, so nothing here has to be
+        // filterable — which the 32-bit float table could not be on every
+        // device.
+        let lift_layout = gpu::texture_layout(device, "gain map", 2, false);
+        let blank_lift = blank_lift(device, &lift_layout);
+        let pipeline_layout = gpu::pipeline_layout(
+            device,
+            "image layer",
+            &[&params_layout, &texture_layout, &lift_layout],
+        );
         let pipeline = gpu::fullscreen_pipeline(
             device,
             Fullscreen {
@@ -154,10 +234,12 @@ impl ImageLayer {
 
         Self {
             pipeline,
+            reducer: Reducer::new(device, &lift_layout),
             texture_layout,
+            lift_layout,
+            blank_lift,
             main: Slot::new(device, &params_layout, "image params"),
             thumbnail: Slot::new(device, &params_layout, "thumbnail params"),
-            reducer: Reducer::new(device),
             image: None,
             level: 0,
             thumbnail_level: None,
@@ -182,6 +264,7 @@ impl ImageLayer {
             device: device.clone(),
             queue: queue.clone(),
             layout: self.texture_layout.clone(),
+            lift_layout: self.lift_layout.clone(),
             capabilities,
         }
     }
@@ -234,6 +317,7 @@ impl ImageLayer {
             thumbnail,
             mark_clipped,
             headroom,
+            lift: weight,
         } = draw;
         let Some(image) = &mut self.image else {
             return;
@@ -243,6 +327,18 @@ impl ImageLayer {
             mark_clipped,
             mark_clipped && display.clips_white(image.is_gray(), headroom),
         );
+
+        // A lift at another weight is another table, written over the one
+        // on the device — and the coarse chain, reduced from light lifted
+        // by the old one, goes with it, to be built again from the new.
+        if let Some(lift) = &mut image.lift
+            && lift.weight != weight
+        {
+            lift.write(queue, weight);
+            image.levels.clear();
+            image.bindings.truncate(1);
+            image.chain_built = false;
+        }
 
         let factor = shrink(view);
         // The thumbnail is shrunk far harder than the view ever is, so it is
@@ -258,6 +354,7 @@ impl ImageLayer {
                     format: image.level_format,
                     swizzle: image.swizzle,
                     alpha: image.alpha,
+                    lift: Lifted::of(image.lift.as_ref(), &self.blank_lift),
                 },
             );
             for level in &image.levels {
@@ -268,10 +365,13 @@ impl ImageLayer {
             image.chain_built = true;
         }
 
+        let lifted = Lifted::of(image.lift.as_ref(), &self.blank_lift);
         self.level = reduce::level_for(factor, image.levels.len());
         self.main.write(
             queue,
-            params_for(image, view, target, display, window, self.level, marks),
+            params_for(
+                image, view, target, display, window, self.level, marks, lifted,
+            ),
         );
 
         self.thumbnail_level =
@@ -279,7 +379,9 @@ impl ImageLayer {
         if let (Some(thumbnail), Some(level)) = (thumbnail, self.thumbnail_level) {
             self.thumbnail.write(
                 queue,
-                params_for(image, thumbnail, target, display, window, level, marks),
+                params_for(
+                    image, thumbnail, target, display, window, level, marks, lifted,
+                ),
             );
         }
     }
@@ -295,15 +397,150 @@ impl ImageLayer {
             Some((&self.main, self.level)),
             self.thumbnail_level.map(|level| (&self.thumbnail, level)),
         ];
+        let lift = image
+            .lift
+            .as_ref()
+            .map_or(&self.blank_lift, |lift| &lift.group);
         for (slot, level) in draws.into_iter().flatten() {
             let Some(binding) = image.bindings.get(level) else {
                 continue;
             };
             pass.set_bind_group(0, &slot.group, &[]);
             pass.set_bind_group(1, binding, &[]);
+            pass.set_bind_group(2, lift, &[]);
             pass.draw(0..4, 0..1);
         }
     }
+}
+
+impl Lift {
+    /// The map and its table on the device, the table at no weight until
+    /// the first draw says otherwise.
+    fn upload(upload: &Upload, map: &Arc<GainMap>) -> Result<Self> {
+        let channels = match map.channels {
+            1 => Channels::Gray,
+            _ => Channels::Rgb,
+        };
+        let components = if map.channels == 1 { 1 } else { 4 };
+        let plan = upload::Plan {
+            format: if map.channels == 1 {
+                wgpu::TextureFormat::R8Unorm
+            } else {
+                wgpu::TextureFormat::Rgba8Unorm
+            },
+            pixels: upload::expand_u8(&map.data, channels, components, u8::MAX),
+            bytes_per_row: map.width * components as u32,
+            precision_note: None,
+        };
+        let map_texture = upload.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("gain map"),
+            size: wgpu::Extent3d {
+                width: map.width,
+                height: map.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: plan.format,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        upload.fill(&map_texture, &plan, map.width, map.height)?;
+
+        let lut = upload.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("gain table"),
+            size: wgpu::Extent3d {
+                width: 256,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let group = gpu::texture_group(
+            &upload.device,
+            "gain map",
+            &upload.lift_layout,
+            &[
+                &map_texture.create_view(&wgpu::TextureViewDescriptor::default()),
+                &lut.create_view(&wgpu::TextureViewDescriptor::default()),
+            ],
+        );
+        let mut lift = Self {
+            map: Arc::clone(map),
+            _map_texture: map_texture,
+            lut,
+            group,
+            weight: 0.0,
+            base_offset: [0.0; 3],
+            alternate_offset: [0.0; 3],
+        };
+        lift.write(&upload.queue, 0.0);
+        Ok(lift)
+    }
+
+    /// Writes the table at `weight` over the one on the device.
+    fn write(&mut self, queue: &wgpu::Queue, weight: f32) {
+        let table = self.map.table(weight);
+        let texels = table.texels();
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.lut,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            bytemuck::cast_slice(&texels),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(256 * 16),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 256,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        (self.base_offset, self.alternate_offset) = table.offsets();
+        self.weight = table.weight();
+    }
+}
+
+/// A texel of map and a texel of table, for the pictures that have neither.
+fn blank_lift(device: &wgpu::Device, layout: &wgpu::BindGroupLayout) -> wgpu::BindGroup {
+    let texel = |label: &str, format: wgpu::TextureFormat| {
+        device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+            .create_view(&wgpu::TextureViewDescriptor::default())
+    };
+    gpu::texture_group(
+        device,
+        "no gain map",
+        layout,
+        &[
+            &texel("no gain map", wgpu::TextureFormat::R8Unorm),
+            &texel("no gain table", wgpu::TextureFormat::Rgba32Float),
+        ],
+    )
 }
 
 /// How much of an image `write_texture` stages at once. 64 MiB keeps the
@@ -319,6 +556,7 @@ pub struct Upload {
     device: wgpu::Device,
     queue: wgpu::Queue,
     layout: wgpu::BindGroupLayout,
+    lift_layout: wgpu::BindGroupLayout,
     capabilities: Capabilities,
 }
 
@@ -358,6 +596,10 @@ impl Upload {
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let bindings = vec![binding(&self.device, &self.layout, &view)];
+        let lift = match &image.gain_map {
+            Some(map) => Some(Lift::upload(self, map)?),
+            None => None,
+        };
 
         Ok(GpuImage {
             size: [image.width, image.height],
@@ -370,6 +612,7 @@ impl Upload {
             swizzle: shader_codes::swizzle(image.channels()),
             alpha: image.alpha,
             primaries: to_columns(image.color.primaries.to_bt709()),
+            lift,
             format: plan.format,
             precision_note: plan.precision_note,
         })
@@ -387,7 +630,13 @@ impl Upload {
     /// from the new ones, as it built the first.
     pub fn refill(&self, held: &mut GpuImage, image: &DecodedImage) -> Result<bool> {
         let plan = upload::plan(image, self.capabilities);
-        if held.size != [image.width, image.height] || held.format != plan.format {
+        // A gain map is a picture's own; a frame with one, or one written
+        // over a picture with one, is uploaded afresh.
+        if held.size != [image.width, image.height]
+            || held.format != plan.format
+            || held.lift.is_some()
+            || image.gain_map.is_some()
+        {
             return Ok(false);
         }
         self.fill(&held.texture, &plan, image.width, image.height)?;
@@ -494,6 +743,7 @@ fn shrink(placement: Placement) -> f32 {
 
 /// The constants for one quad: where it goes on the target, and how the
 /// shader is to read and resample the level it draws from.
+#[allow(clippy::too_many_arguments)]
 fn params_for(
     image: &GpuImage,
     placement: Placement,
@@ -502,6 +752,7 @@ fn params_for(
     window: (f32, f32),
     level: usize,
     marks: u32,
+    lifted: Lifted<'_>,
 ) -> Params {
     let divisor = (reduce::STEP as f32).powi(level as i32);
     let extent = [
@@ -538,6 +789,13 @@ fn params_for(
         },
         colormap: shader_codes::colormap(display.colormap),
         resampler: shader_codes::resampler(placement.zoom, placement.upscale),
+        // Only the image as uploaded is lifted; a coarse level was reduced
+        // from lifted light.
+        lift: if level == 0 { lifted.code } else { 0 },
+        _pad2: 0,
+        map_size: lifted.map_size,
+        base_offset: lifted.base_offset,
+        alternate_offset: lifted.alternate_offset,
     }
 }
 

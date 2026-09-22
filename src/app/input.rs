@@ -2267,6 +2267,7 @@ impl App {
         };
         let image = Arc::clone(&current.image);
         let display = current.display.clone();
+        let lift = current.lift.clone();
         let said = match region {
             Some(_) => "Copied region.",
             None => "Copied image.",
@@ -2287,7 +2288,7 @@ impl App {
             let (width, height) = (region.width, region.height);
 
             let walked = Instant::now();
-            let raster = encode::displayed(&image, &display, region);
+            let raster = encode::displayed(&image, &display, region, lift.as_deref());
             timing::mapped_image(width, height, walked.elapsed());
 
             let encoded = Instant::now();
@@ -2669,7 +2670,9 @@ impl App {
             return Some(ui::pixel::copied_coordinate(at));
         }
         let current = self.current.as_ref()?;
-        let sample = current.image.sample(at[0], at[1])?;
+        let sample = current
+            .image
+            .sample(at[0], at[1], current.lift.as_deref())?;
         let mapped = current.display.map(&sample, self.headroom());
         Some(ui::pixel::value(
             &current.image,

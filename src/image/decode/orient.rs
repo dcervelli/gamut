@@ -44,6 +44,7 @@ pub(super) fn apply(image: DecodedImage, orientation: Orientation) -> DecodedIma
         referred,
         exposure,
         nodata,
+        gain_map,
     } = image;
     let samples = match samples {
         Samples::U8 { channels, data } => Samples::U8 {
@@ -69,6 +70,7 @@ pub(super) fn apply(image: DecodedImage, orientation: Orientation) -> DecodedIma
         referred,
         exposure,
         nodata,
+        gain_map,
     }
 }
 

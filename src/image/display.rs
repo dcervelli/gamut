@@ -895,6 +895,7 @@ mod tests {
             referred: Referred::Measured,
             exposure: None,
             nodata: None,
+            gain_map: None,
         }
     }
 
@@ -922,6 +923,7 @@ mod tests {
             referred: Referred::of(transfer),
             exposure: None,
             nodata: None,
+            gain_map: None,
         }
     }
 
@@ -1075,10 +1077,10 @@ mod tests {
             ..Default::default()
         };
 
-        let low = display.map(&image.sample(0, 0).expect("inside"), Headroom::None);
+        let low = display.map(&image.sample(0, 0, None).expect("inside"), Headroom::None);
         assert!(low.values()[0].abs() < 1e-6);
 
-        let middle = display.map(&image.sample(1, 0).expect("inside"), Headroom::None);
+        let middle = display.map(&image.sample(1, 0, None).expect("inside"), Headroom::None);
         assert!(
             (middle.values()[0] - 1.0).abs() < 1e-3,
             "{:?}",
@@ -1103,8 +1105,9 @@ mod tests {
             referred: Referred::Scene,
             exposure: None,
             nodata: None,
+            gain_map: None,
         };
-        let sample = image.sample(0, 0).expect("inside");
+        let sample = image.sample(0, 0, None).expect("inside");
 
         let clipped = Display::default().map(&sample, Headroom::None);
         assert_eq!(clipped.values(), [4.0, 4.0, 4.0]);
@@ -1131,7 +1134,7 @@ mod tests {
     fn false_color_leaves_the_value_alone_and_changes_the_color() {
         let image = gray(vec![0, u16::MAX], Transfer::Linear);
         let mut display = Display::default();
-        let dark = image.sample(0, 0).expect("inside");
+        let dark = image.sample(0, 0, None).expect("inside");
 
         assert_eq!(
             display.map(&dark, Headroom::None).color,
@@ -1504,7 +1507,7 @@ mod tests {
         assert_eq!(display.auto, AutoWindow::Off);
         assert_eq!((display.window_low, display.window_high), (0.0, 1.0));
         let shown = display
-            .map(&scene.sample(0, 0).unwrap(), Headroom::None)
+            .map(&scene.sample(0, 0, None).unwrap(), Headroom::None)
             .values()[0];
         assert!((shown - MIDDLE_GRAY).abs() < 1e-3, "key shown at {shown}");
 
@@ -1513,7 +1516,7 @@ mod tests {
         let stats = Stats::scan(&bright);
         let brighter = Display::for_image_with(&bright, &stats, Startup::default(), Headroom::None);
         let shown = brighter
-            .map(&bright.sample(0, 0).unwrap(), Headroom::None)
+            .map(&bright.sample(0, 0, None).unwrap(), Headroom::None)
             .values()[0];
         assert!((shown - MIDDLE_GRAY).abs() < 1e-3, "key shown at {shown}");
         assert!((brighter.exposure_stops - (display.exposure_stops - 1000f32.log2())).abs() < 1e-3);

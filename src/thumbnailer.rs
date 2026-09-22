@@ -498,6 +498,7 @@ fn make(
             &small,
             &display,
             Region::whole([small.width, small.height]),
+            None,
             1,
         );
         let chunks = thumbnail::text_chunks(key, mtime, bytes, facts.size);

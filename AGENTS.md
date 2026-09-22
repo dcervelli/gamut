@@ -126,7 +126,9 @@ image/         the data model, nothing GPU
   sequence.rs    what a file holds beyond one image: Sequence (still, animation,
                  pages), Frame, and the FrameSource a decoder's frames come
                  through, each composited whole by the decoder
-  stats.rs       the scan an image gets on load: min/max, histogram, plot
+  stats.rs       the scan an image gets on load: min/max, histogram, plot; scan_with lifts a gain-mapped picture as the screen shows it
+  gain_map.rs    a gain map beside its SDR base: what its values mean (ISO 21496-1's or Apple's Lift), the
+                 weight the display's room gives it, the Table a weight makes, and gain_at, the shaders' twin
   encode.rs      the displayed image walked back out to an 8-bit sRGB PNG, for the clipboard
   resample.rs    a CPU box filter in the file's own encoding, for the thumbnails
   exif.rs        the file's own metadata, read and rendered for the info panel: the EXIF
@@ -143,9 +145,8 @@ image/         the data model, nothing GPU
                  map() and the CPU twins of the shaders' tone curves and colormaps
   decode/        Decoder trait + DECODERS registry in mod.rs; one file per format; limits.rs the size ceiling;
                  dynamic.rs the shared DynamicImage bridge; orient.rs the turn an orientation tag asks
-                 for, applied to any layout; gain_map.rs the walk that applies one, shared by JPEG and
-                 HEIF, whose heif/tmap.rs reads ISO 21496-1's item and heif/apple.rs Apple's maker
-                 note; fixture_tests.rs runs every file in test_images/
+                 for, applied to any layout; heif/tmap.rs reads ISO 21496-1's gain-map item and
+                 heif/apple.rs Apple's maker note; fixture_tests.rs runs every file in test_images/
 render/        the GPU
   mod.rs         Renderer: surface, device, the three passes; Scene is what a frame draws;
                  UiPaint is what egui drew, and the ui-layer pass hands it to egui-wgpu
@@ -213,6 +214,7 @@ still agrees with both, so renaming either is editing the constant —
 | Someone else's work brought into the tree | say where it came from beside the code that carries it, then one `[[annotations]]` entry in `REUSE.toml`; if its license is new to the tree, its text goes in `LICENSES/` named by SPDX identifier, and the PKGBUILD's `license=()` grows an entry |
 | A dependency | `Cargo.toml`, then `bin/release` rewrites `THIRD-PARTY-NOTICES`. A license `about.toml` does not accept fails generation: add it there, in priority order, and its text to `LICENSES/`, or take the dependency instead |
 | An upscale filter or tone map | the WGSL function, one arm in `render/shader_codes.rs`, one enum variant with its `label`/`parse`/`next`; a tone map's CPU twin is `ToneMap::apply`, which takes the surface's `Headroom` as the shader arm does |
+| How far a gain map lifts the picture, or what reads through the lift | `image/gain_map.rs`: `GainMap::weight` for the share of the lift a display's room gets, `GainMap::table` for what a weight makes of the map, `gain_at` for the CPU twin of the shaders' `gain` — keep the three in step. `App::display_headroom` is what the weight is fed, `App::refresh_lift` puts the table in `Current::lift` and scans the statistics through it, and `Scene::lift` carries the weight to `image_layer`, which writes the table to the device and rebuilds the coarse chain. Whatever reads a pixel takes the table: `DecodedImage::sample`, `encode::displayed`, `Stats::scan_with` |
 | What the surface can be, SDR or HDR | `render/output.rs` chooses it; `monitor.rs` says what the monitor is in; `App::surface_hdr` and `App::headroom` put the two together, `App::sync_output` acts on them, and `App::toggle_hdr` is what the bar's `HDR` button and `o` both call |
 | A new render pass | build it from `render/gpu.rs`; add its target to `Renderer::render` |
 | Something about the display window, exposure or false color | `image/display.rs` (state) and `shaders/image.wgsl` / `composite.wgsl` (effect) |

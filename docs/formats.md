@@ -71,49 +71,74 @@ applied in linear light, puts back the highlights grading compressed. Ignore
 it and the HDR half of the file is invisible with nothing to say it was ever
 there.
 
-Two containers carry one, and each reads its own metadata into
-`ultrahdr-core`'s `GainMapMetadata`, whose fields are ISO 21496-1's. The
-walk over the pixels is then one function, `decode::gain_map::reconstruct`
-— the base decoded to linear through a table, the map sampled bilinearly at
-each pixel, the product written out, in bands of rows across the thread
-pool. `ultrahdr-core` has a walk of its own, `apply_gainmap`, and it is
-what the tests check `reconstruct` against; it is not what runs because it
-decodes sRGB with a `powf` per sample on one thread, 460 ms of the 560 a
-12-megapixel phone photograph took to open against 60 for the JPEG decode.
-What comes out is linear light with 1.0 at SDR reference white, which is
-already the working space, so past the decoder a gain-mapped photograph is
-simply an HDR image: tone mapped on an SDR surface, sent out untouched on an
-HDR one.
+**The map is applied by the display, not by the decoder.** The base is the
+SDR rendition — the phone graded it for a screen with no room above white —
+and the standard applies the map by a *weight*: where the display's own
+headroom sits between the base's and the alternate's, from none of the lift
+on a monitor in SDR mode to all of it on one with as much room as the file
+asks for. `GainMap::weight` in `image/gain_map.rs` is that formula, and
+`App::display_headroom` is what it is fed: the monitor's peak over its
+white, as `monitor.rs` reads it from the compositor, on a surface with the
+room, and 1 otherwise. Applying the whole lift regardless and tone mapping
+the result, which is what this viewer did first, threw the phone's grade
+away on every SDR screen: the lifted midtones came out brighter than graded
+and the lifted highlights piled into the curve's shoulder.
 
-**JPEG.** `ultrahdr-rs` walks the container — MPF and the XMP directory
-Google writes beside it — and hands back the two JPEGs as raw bytes, so
-`image` remains the only JPEG decoder in the build. The same pass reads the
-ICC profile, because a phone JPEG is Display P3 far more often than it is
-sRGB, and P3 numbers shown as sRGB come out visibly flat.
+So a decoder hands over the base as it decoded — 8-bit, on its own curve,
+in its own primaries — with the map beside it in `DecodedImage::gain_map`,
+and the lift happens on the GPU. `render/upload.rs` puts the map up as an
+8-bit texture of its own, and `image_layer::Lift` a 256-texel table beside
+it saying what each of the map's values means at the current weight, made
+on the CPU by `GainMap::table` and written again when the weight changes.
+Both `shaders/image.wgsl` and `shaders/reduce.wgsl` lift a texel as they
+load it — the map sampled bilinearly at the texel's place in it, as the
+standard's reference does, each corner through the table — before it is
+filtered, so that every weighted sum is over lifted light, and the coarse
+chain, reduced from it, is built again when the weight moves. A
+24-megapixel photograph is four bytes a pixel on the device, plus the map,
+where a float reconstruction was sixteen; switching the room with `o` costs
+a table and the chain rather than a decode.
 
-**HEIF.** An iPhone's HEIC describes its map twice from iOS 18 on and once
-before. The standard form is an ISO 21496-1 `tmap` item — a tone-mapped
-image item referring by `dimg` to the base and the map, whose payload is the
-metadata — and `libheif` 1.23 knows nothing of it, so `heif::tmap` walks
-the boxes: `meta`, and in it `iinf`, `iref`, `iloc` and `idat`, before the
-library takes the source. Apple's own form is an auxiliary image typed
-`urn:com:apple:photo:2020:aux:hdrgainmap` and a headroom worked out from
-two numbers in the maker note by the piecewise formula Apple publishes in
-"Applying Apple HDR effect to your photos"; `heif::apple` reads the note —
-Apple's own directory inside the EXIF, offsets from its first byte — and
-`gain_map::Table::apple` is the formula's table, the map linearized through
-Rec. 709 and `1 + (headroom - 1) * gain`. The two are checked against each
-other: an iPhone 16 Pro's file states 1.7243 stops in its `tmap` and its
-maker note comes to the same. The `tmap` is taken where there is one, since
-it is what every other reader of the file will use; the map itself is the
-same image either way, decoded through `libheif` like any other in the
-file. Both routes finish in the same 60 ms over the 100 the picture takes.
+Everything that says what the screen shows reads through the same table:
+`DecodedImage::sample` takes it, for the readout and the copy, and
+`Stats::scan_with` for the histogram, which `App::refresh_lift` scans again
+whenever the weight changes. `GainMap::gain_at` is the CPU twin of the
+shaders' `gain`; `filter_tests` holds the device to it texel for texel, at
+1:1 and through the chain. On a monitor in SDR mode the weight is zero and
+every one of them is the base, so what is copied is the photograph as it
+was graded.
 
-The whole boost is applied rather than a share of it chosen for an assumed
-display. This viewer has an exposure control and a choice of tone mapping
-already, and guessing here how bright the monitor is would only take that
-choice away. `--no-gain-map` shows the SDR base image instead, which is worth
-having when the two need comparing.
+Two descriptions of a map arrive, and each reads into a `Lift`. **ISO
+21496-1** is the standard's own: the headroom of each rendition and, per
+channel, the range of the map's log2 gains, its gamma and two offsets.
+`ultrahdr-core`'s `GainMapMetadata` is that set of numbers, and its
+`GainMapLut` at a weight is the table. Ultra HDR's XMP spells it, which
+`ultrahdr-rs` reads out of the JPEG's container (MPF and the XMP directory
+Google writes beside it, the two JPEGs handed back as raw bytes so that
+`image` remains the only JPEG decoder in the build), and so does a HEIF's
+`tmap` item: a tone-mapped image item referring by `dimg` to the base and
+the map, whose payload is the metadata. `libheif` 1.23 knows nothing of it,
+so `heif::tmap` walks the boxes — `meta`, and in it `iinf`, `iref`, `iloc`
+and `idat` — before the library takes the source. **Apple's** is the older
+description in an iPhone's HEIC: an auxiliary image typed
+`urn:com:apple:photo:2020:aux:hdrgainmap`, encoded with the Rec. 709
+transfer function, and a headroom worked out from two numbers in the maker
+note by the piecewise formula Apple publishes in "Applying Apple HDR effect
+to your photos"; `heif::apple` reads the note — Apple's own directory inside
+the EXIF, offsets from its first byte — and the table is `1 + (headroom - 1)
+* gain`, the headroom scaled by the weight as the standard scales its log2
+gains. An iPhone from iOS 18 on writes both, and the two are checked against
+each other: an iPhone 16 Pro's file states 1.7243 stops in its `tmap` and
+its maker note comes to the same. The `tmap` is taken where there is one,
+since it is what every other reader of the file will use; the map itself is
+the same image either way, decoded through `libheif` like any other in the
+file.
+
+`--no-gain-map` leaves the map unread, which shows the SDR base whatever
+the surface: what many other viewers show, and worth having when the two
+need comparing. The JPEG's ICC profile is read on the same pass as its
+map, because a phone JPEG is Display P3 far more often than it is sRGB,
+and P3 numbers shown as sRGB come out visibly flat.
 
 ## Orientation
 
