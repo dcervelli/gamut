@@ -43,9 +43,9 @@ OPTIONS:
                             to use: linear, srgb, pq, hlg, or gamma:<N>
         --primaries <P>     Override the color primaries: bt709, p3, bt2020,
                             adobe, or prophoto
-        --no-gain-map       Show the SDR base image of an Ultra HDR JPEG,
-                            rather than reconstructing the HDR one from the
-                            gain map beside it
+        --no-gain-map       Show the SDR base image of an Ultra HDR JPEG or
+                            a HEIC with a gain map, rather than reconstructing
+                            the HDR one from the map beside it
         --colormap <MAP>    Start with false color on single-channel images:
                             gray, viridis, magma, or turbo
         --tone-map <MAP>    Start with none or neutral

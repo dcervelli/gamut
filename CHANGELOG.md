@@ -8,6 +8,13 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Added
 
+- An iPhone's HDR photograph arrives as HDR. A HEIC carries its gain map
+  beside the picture — in ISO 21496-1's standard form from iOS 18 on, and
+  in Apple's own before — and either is read and applied the way an Ultra
+  HDR JPEG's is, so the highlights the phone recorded above white are shown
+  at their brightness on an HDR monitor and tone mapped on an SDR one.
+  `--no-gain-map` shows the SDR picture, as it does for a JPEG.
+
 - The orientation tag is applied in every format that carries one. A
   JPEG's EXIF orientation, a TIFF's `Orientation` tag and a PNG's `eXIf`
   chunk join WebP, HEIF and JPEG XL: a photograph taken with the camera on

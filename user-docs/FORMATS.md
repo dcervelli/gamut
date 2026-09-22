@@ -11,7 +11,7 @@ pixels, and where each format will surprise you.
 | TIFF | `.tif` `.tiff` | 8 to 64-bit, integer or float | ICC profile, otherwise inferred from depth; orientation; pages |
 | WebP | `.webp` | 8-bit | ICC profile; orientation; animation |
 | JPEG XL | `.jxl` | 8 and 16-bit, or float | Color space, including HDR; ICC profile; orientation; animation |
-| HEIF | `.heic` `.heif` `.hif` `.avif` | 8, 10 and 12-bit | Color space, including HDR; ICC profile; orientation |
+| HEIF | `.heic` `.heif` `.hif` `.avif` | 8, 10 and 12-bit | Color space, including HDR; ICC profile; orientation; HDR gain map |
 | ICO | `.ico` | Whatever the chosen icon holds | ICC profile, for the larger icons; every icon in the file |
 | BMP | `.bmp` | 8-bit | Nothing — always sRGB |
 | Netpbm | `.pnm` `.pbm` `.pgm` `.ppm` `.pam` | 8 and 16-bit | Nothing — always sRGB |
@@ -173,10 +173,11 @@ read and recombined, so the file arrives as a genuine HDR image — tone mapped
 on an ordinary display, sent out at full brightness on a monitor in HDR mode
 (see `o` in KEYS.md). The whole boost is applied rather than a share of it
 guessed for your monitor; exposure (`d`, `f`) and the tone map (`t`) are where
-you decide what to do with it.
+you decide what to do with it. An iPhone's HEIC carries the same kind of map,
+and gets the same treatment.
 
-- `--no-gain-map` shows the SDR photograph instead, which is the image every
-  other viewer shows and what you want when the two need comparing.
+- `--no-gain-map` shows the SDR photograph instead, which is the image many
+  other viewers show and what you want when the two need comparing.
 - Reconstruction is expensive in memory: a 12-megapixel photograph becomes
   roughly 200 MB where the photograph alone was 12 MB.
 - A gain map that runs the other way — where the stored image is the HDR one
@@ -322,10 +323,12 @@ Caveats:
   installation's plugins — HEIC needs libde265 or ffmpeg, AVIF needs dav1d or
   aom. Both are standard on the systems above; on a stripped-down one, a file
   can fail with a codec error where another HEIF opens fine.
-- **HDR photographs from an iPhone show their SDR version.** HEIF can carry a
-  gain map alongside the image, which is how those files store the bright
-  half, and it is not read. The photograph is correct, just not the bright
-  one. A gain map in a JPEG *is* applied.
+- **An iPhone's HDR photograph arrives as HDR.** The file carries a gain
+  map beside the photograph, in the standard form from iOS 18 on and in
+  Apple's own before, and either is read and applied as a JPEG's is — the
+  tone map, exposure and `--no-gain-map` all work the same way. A gain map
+  deeper than 8 bits, or one running the other way, is refused with a
+  message that suggests `--no-gain-map`.
 - A file holding several images shows the primary one.
 
 ## ICO

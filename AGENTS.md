@@ -143,7 +143,9 @@ image/         the data model, nothing GPU
                  map() and the CPU twins of the shaders' tone curves and colormaps
   decode/        Decoder trait + DECODERS registry in mod.rs; one file per format; limits.rs the size ceiling;
                  dynamic.rs the shared DynamicImage bridge; orient.rs the turn an orientation tag asks
-                 for, applied to any layout; fixture_tests.rs runs every file in test_images/
+                 for, applied to any layout; gain_map.rs the walk that applies one, shared by JPEG and
+                 HEIF, whose heif/tmap.rs reads ISO 21496-1's item and heif/apple.rs Apple's maker
+                 note; fixture_tests.rs runs every file in test_images/
 render/        the GPU
   mod.rs         Renderer: surface, device, the three passes; Scene is what a frame draws;
                  UiPaint is what egui drew, and the ui-layer pass hands it to egui-wgpu

@@ -17,19 +17,17 @@ directory but a transparency mask is a page, so a pyramid's overviews and a
 file's thumbnail show as pages beside the picture. Everything about how an
 animation is played is in [animation.md](animation.md).
 
-Embedded ICC profiles are read for JPEG, PNG, HEIF, JPEG XL and WebP — and so
-for an ICO whose entry is a PNG — which is every format here that can carry
-one except TIFF, which can and does not. GIF has no way of carrying one.
+Embedded ICC profiles are read for every format here that can carry one —
+JPEG, PNG, TIFF, HEIF, JPEG XL and WebP, and so an ICO whose entry is a PNG.
+GIF has no way of carrying one.
 
-Gain maps are read for JPEG only. HEIF can carry one as an auxiliary image,
-which is how Apple stores HDR photographs, and that is not implemented; such a
-file shows its SDR base. The obstacle is not the arithmetic, which is the same
-code the JPEG path already runs, but the metadata: `libheif` 1.23 exposes no
-gain map API at all, so reaching it would mean either walking the ISOBMFF
-boxes for an ISO 21496-1 `tmap` item or reverse-engineering Apple's maker
-note. A gain map running the other
-way — where the stored image is the HDR one — is refused rather than applied,
-since applying it backwards would brighten what was already bright.
+Gain maps are read from a JPEG and from a HEIF; an AVIF with an ISO 21496-1
+`tmap` goes the same way, untested for want of a file. A gain map running
+the other way — where the stored image is the HDR one — is refused rather
+than applied, since applying it backwards would brighten what was already
+bright, and so is a map deeper than 8 bits. A HEIF's gain map is applied
+only to an 8-bit color base: a 10-bit HEIC is HDR in its own right and
+carries none.
 
 Reconstruction costs memory: the result is four 32-bit floats per pixel, so a
 12-megapixel photograph is a 200 MB buffer where the base image alone was 12

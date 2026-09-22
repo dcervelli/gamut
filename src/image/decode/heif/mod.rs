@@ -16,19 +16,32 @@
 //! `libheif` applies the container's own geometric transformations — `irot`,
 //! `imir`, `clap` — while decoding, so a rotated phone photograph arrives
 //! upright.
+//!
+//! An iPhone's HEIC is two pictures: the graded SDR photograph, and a gain
+//! map beside it saying how far above SDR white each pixel went. The map is
+//! described twice in a file from iOS 18 on — by an ISO 21496-1 `tmap` item
+//! that `tmap` reads, and by Apple's own auxiliary image and maker note
+//! that `apple` reads — and once, Apple's way, in an older one. Either way
+//! the map is decoded through `libheif` like any other image in the file
+//! and applied by [`super::gain_map`], the same walk an Ultra HDR JPEG
+//! takes, so a phone photograph arrives as the HDR image it is.
 
 use std::fs::File;
 use std::io::{BufReader, SeekFrom};
 use std::path::Path;
 use std::sync::OnceLock;
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use libheif_rs::{
     ColorSpace as HeifColorSpace, HeifContext, ImageHandle, LibHeif, Plane, RgbChroma,
     SecurityLimits, StreamReader,
 };
 
+use super::gain_map::{self, Map, Table};
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
+
+mod apple;
+mod tmap;
 
 /// `libheif`'s global initialization, done once.
 ///
@@ -112,12 +125,19 @@ impl super::Decoder for Heif {
     fn decode(
         &self,
         source: &mut dyn super::ReadSeek,
-        _overrides: super::Overrides,
+        overrides: super::Overrides,
     ) -> Result<DecodedImage> {
         // Before the context, so that any external codec plugins are loaded
         // by the time one is asked for.
         let lib = lib_heif();
 
+        // Looked for before the context takes the source, since the walk is
+        // over the file's own boxes rather than through the library.
+        let tone_map = if overrides.gain_map {
+            tmap::find(source)?
+        } else {
+            None
+        };
         let context = container(source)?;
         let handle = context.primary_image_handle()?;
         let (width, height) = (handle.width(), handle.height());
@@ -182,14 +202,146 @@ impl super::Decoder for Heif {
             pack_interleaved(&interleaved, width, height, channels)?
         };
 
+        let color = color_space(&handle);
+        if overrides.gain_map
+            && let Samples::U8 {
+                channels: Channels::Rgb,
+                data,
+            } = &samples
+            && let Some(hdr) =
+                gain_mapped(lib, &context, &handle, tone_map, data, width, height, color)?
+        {
+            return Ok(hdr);
+        }
+
         Ok(DecodedImage::new(
             width,
             height,
             samples,
-            color_space(&handle),
+            color,
             AlphaMode::of(channels, handle.is_premultiplied_alpha()),
         ))
     }
+}
+
+/// The picture lifted by its gain map, where the file has one this reader
+/// can apply: an ISO 21496-1 tone map whose base is this picture, or
+/// Apple's auxiliary image with a maker note to say how far it lifts.
+/// `None` where it has neither, and the SDR picture stands.
+#[allow(clippy::too_many_arguments)]
+fn gain_mapped(
+    lib: &LibHeif,
+    context: &HeifContext,
+    handle: &ImageHandle,
+    tone_map: Option<tmap::ToneMap>,
+    base: &[u8],
+    width: u32,
+    height: u32,
+    color: ColorSpace,
+) -> Result<Option<DecodedImage>> {
+    let (map_handle, table) = if let Some(tone_map) = tone_map {
+        if tone_map.base != handle.item_id() {
+            return Ok(None);
+        }
+        // v1.1 allows the stored image to be the HDR one, with the map
+        // saying how to get *down* to SDR. Nothing below implements that
+        // direction, and quietly brightening an image that is already
+        // bright would be worse than saying so.
+        if tone_map.metadata.backward_direction {
+            bail!(
+                "gain map runs the other way (the base image is the HDR one), \
+                 which this build cannot apply — try --no-gain-map"
+            );
+        }
+        let map_handle = context
+            .image_handle(tone_map.gain_map)
+            .context("opening the gain map")?;
+        (map_handle, Table::iso(&tone_map.metadata))
+    } else {
+        let Some(map_handle) = handle
+            .auxiliary_images(None)
+            .into_iter()
+            .find(|aux| aux.auxiliary_type().ok().as_deref() == Some(apple::GAIN_MAP))
+        else {
+            return Ok(None);
+        };
+        let Some(headroom) = handle
+            .all_metadata()
+            .into_iter()
+            .find(|metadata| metadata.item_type.0 == *b"Exif")
+            .and_then(|exif| apple::headroom(&exif.raw_data))
+        else {
+            return Ok(None);
+        };
+        (map_handle, Table::apple(headroom))
+    };
+
+    // Four 32-bit components per pixel is what comes back below, and it
+    // is four times the base, so this is the size worth checking.
+    super::check_decoded_size(width, height, 4, 32)?;
+    let map = decode_map(lib, &map_handle)?;
+    let samples = gain_map::reconstruct(base, width, height, color.transfer, &map, &table);
+    Ok(Some(gain_map::image(
+        samples,
+        width,
+        height,
+        color.primaries,
+    )))
+}
+
+/// The gain map decoded: 8-bit, one channel or three, at its own size.
+fn decode_map(lib: &LibHeif, handle: &ImageHandle) -> Result<Map> {
+    let (width, height) = (handle.width(), handle.height());
+    // A zero dimension is refused outright: the taps would otherwise
+    // compute `width - 1` and index past the end of an empty buffer.
+    if width == 0 || height == 0 {
+        bail!("the gain map is {width}x{height}");
+    }
+    let depth = handle.luma_bits_per_pixel();
+    if depth != 8 {
+        bail!("the gain map is {depth}-bit, which this build cannot apply — try --no-gain-map");
+    }
+    let monochrome = matches!(
+        handle.preferred_decoding_colorspace(),
+        Ok(HeifColorSpace::Monochrome)
+    );
+    let channels = if monochrome {
+        Channels::Gray
+    } else {
+        Channels::Rgb
+    };
+    super::check_decoded_size(width, height, channels.count(), 8)?;
+    let image = lib
+        .decode(handle, requested_color_space(channels, false), None)
+        .context("decoding the gain map")?;
+    if (image.width(), image.height()) != (width, height) {
+        bail!(
+            "the gain map's handle says {width}x{height} but it decoded to {}x{}",
+            image.width(),
+            image.height()
+        );
+    }
+    let planes = image.planes();
+    let samples = if monochrome {
+        let gray = planes
+            .y
+            .ok_or_else(|| anyhow!("the gain map decoded without a gray plane"))?;
+        interleave_planes(&[gray], width, height)?
+    } else {
+        let interleaved = planes
+            .interleaved
+            .ok_or_else(|| anyhow!("the gain map decoded without an interleaved plane"))?;
+        pack_interleaved(&interleaved, width, height, channels)?
+    };
+    let Samples::U8 { data, .. } = samples else {
+        bail!("an 8-bit gain map decoded to something wider");
+    };
+    Ok(Map {
+        width,
+        height,
+        channels: channels.count() as u8,
+        data,
+    })
 }
 
 /// The pixel-count ceiling, on the same reasoning as `MAX_DECODED_BYTES`:

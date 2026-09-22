@@ -19,6 +19,7 @@ pub(crate) use limits::MAX_SEQUENCE_BYTES;
 use limits::{MAX_DECODED_BYTES, MAX_TEXTURE_DIMENSION, check_decoded_size};
 
 mod dynamic;
+mod gain_map;
 // `pub` for its XMP reader, which `image::xmp` asks for the packet a HEIF
 // keeps in an item only the library's own tables lead to.
 pub mod heif;
@@ -221,10 +222,10 @@ static DECODERS: &[&dyn Decoder] = &[
 pub struct Overrides {
     pub transfer: Option<Transfer>,
     pub primaries: Option<Primaries>,
-    /// Whether to reconstruct the HDR image an Ultra HDR JPEG describes.
-    /// Clearing it shows the SDR base image every other viewer shows, which
-    /// is worth having when the two need comparing — or when a gain map is
-    /// malformed enough to refuse.
+    /// Whether to reconstruct the HDR image an Ultra HDR JPEG, or a HEIF
+    /// with a gain map, describes. Clearing it shows the SDR base image
+    /// many other viewers show, which is worth having when the two need
+    /// comparing — or when a gain map is malformed enough to refuse.
     pub gain_map: bool,
 }
 

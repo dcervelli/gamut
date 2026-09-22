@@ -34,7 +34,10 @@ there is no room for them — is pure and tested on its own.
 The gain map tests build an Ultra HDR file rather than checking one in: a flat
 base image and a half-size map that leaves one half alone and asks the other
 for two stops, assembled with the same crate that reads it back, so the round
-trip is exercised without a binary fixture.
+trip is exercised without a binary fixture. A HEIF's `tmap` item is tested
+the same way, over a `meta` box assembled in the test around the 62 bytes
+of metadata an iPhone wrote, since no encoder in reach writes one; the
+picture itself is not, and an iPhone's own file is what checks the whole.
 
 Eight of them run the real image pipeline on a real adapter — a headless
 device, no window — and check what the shader and the passes actually produce

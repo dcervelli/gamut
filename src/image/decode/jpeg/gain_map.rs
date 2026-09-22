@@ -11,23 +11,16 @@
 //! XMP directory Google writes alongside it) and hands back the two JPEGs as
 //! raw bytes, so `image` stays the only JPEG decoder in the build.
 //! `ultrahdr-core` turns the metadata into the table that says what gain
-//! each of the map's 256 values stands for. Walking the pixels is done here,
-//! in bands of rows across the thread pool: the crate's own `apply_gainmap`
-//! walks them on one thread and decodes sRGB with a `powf` per sample, which
-//! took four hundred milliseconds on a twelve-megapixel phone photograph —
-//! six times the JPEG decode itself.
-//!
-//! What comes out is linear light with 1.0 at SDR reference white, which is
-//! the working space the rest of this program already speaks: past here an
-//! Ultra HDR photograph is just an HDR image, tone mapped on an SDR surface
-//! and sent out as-is on an HDR one.
+//! each of the map's 256 values stands for. Walking the pixels is
+//! [`super::super::gain_map`]'s, shared with the HEIF that carries the same
+//! kind of map.
 
 use anyhow::{Context, Result, bail};
 
-use ultrahdr_rs::gainmap::apply::GainMapLut;
-use ultrahdr_rs::{Decoder, GainMap, GainMapMetadata};
+use ultrahdr_rs::Decoder;
 
-use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Referred, Samples, Transfer};
+use crate::image::decode::gain_map::{self, Map, Table};
+use crate::image::{ColorSpace, DecodedImage};
 
 /// A JPEG, examined for the things the `image` crate throws away: the ICC
 /// profile, and a gain map if there is one.
@@ -106,162 +99,27 @@ impl<'a> Container<'a> {
         } else {
             map.to_luma8().into_raw()
         };
-        let map = GainMap {
+        let map = Map {
             width: map_width,
             height: map_height,
             channels,
             data,
         };
 
-        // How much of the boost to apply. The whole of it: this viewer has
-        // an exposure control and a choice of tone mapping already, and
-        // deciding here how bright the monitor is would only take that choice
-        // away. On an SDR surface the tone map rolls the highlights off; on
-        // an HDR one they go out at the brightness the photographer chose.
-        // The spec's weight is where the display's headroom sits between the
-        // base's and the alternate's, so the whole boost is a weight of one.
-        let lut = GainMapLut::new(metadata, 1.0);
-        let samples = reconstruct(&base, &map, &lut, metadata);
-
-        let mut image = DecodedImage::new(
+        let samples = gain_map::reconstruct(
+            base.as_raw(),
             width,
             height,
-            Samples::F32 {
-                // Four components rather than three, so that the upload path
-                // can hand the buffer to the GPU without widening it first.
-                channels: Channels::Rgba,
-                data: samples,
-            },
-            ColorSpace {
-                transfer: Transfer::Linear,
-                primaries: color.primaries,
-            },
-            // The base is a JPEG, so there was never an alpha channel; the
-            // fourth component is padding the shader must not read.
-            AlphaMode::Opaque,
+            color.transfer,
+            &map,
+            &Table::iso(metadata),
         );
-        // The photograph was graded to sit in 0..1 and the gain map is what
-        // puts the highlights above it. Saying so keeps the startup window
-        // off the percentile stretch that linear float otherwise asks for,
-        // which would undo the grading the moment it loaded.
-        image.referred = Referred::Display;
-        Ok(Some(image))
-    }
-}
-
-/// The base image, as it decoded, multiplied through the gain map:
-/// linear light, four floats to a pixel with the fourth left at one.
-///
-/// Each pixel of the base is decoded to linear through a table, and the map
-/// — usually a quarter of the base's size in each direction — is sampled
-/// bilinearly at the pixel's position, as the specification's reference does.
-/// The rows are cut into one band per thread; a pixel depends on nothing but
-/// itself and the map, so the split changes no result.
-fn reconstruct(
-    base: &::image::RgbImage,
-    map: &GainMap,
-    lut: &GainMapLut,
-    metadata: &GainMapMetadata,
-) -> Vec<f32> {
-    let (width, height) = (base.width() as usize, base.height() as usize);
-    let pixels = width * height;
-    let srgb: [f32; 256] =
-        std::array::from_fn(|value| Transfer::Srgb.to_linear(value as f32 / 255.0));
-    let base_offset = metadata.base_offset.map(|offset| offset as f32);
-    let alternate_offset = metadata.alternate_offset.map(|offset| offset as f32);
-    let columns: Vec<Tap> = (0..width).map(|x| Tap::at(x, width, map.width)).collect();
-
-    // Zeroed rather than filled: the pages are first touched by the band
-    // that writes them, in parallel.
-    let mut out = vec![0.0f32; pixels * 4];
-    if pixels == 0 {
-        return out;
-    }
-    let bands = if pixels < PARALLEL_FROM {
-        1
-    } else {
-        rayon_core::current_num_threads().clamp(1, height)
-    };
-    let per_band = height.div_ceil(bands);
-
-    let walk = |index: usize, band: &mut [f32]| {
-        let rows = base.as_raw()[index * per_band * width * 3..]
-            .chunks_exact(width * 3)
-            .zip(band.chunks_exact_mut(width * 4));
-        for (y, (row, out)) in rows.enumerate() {
-            let row_tap = Tap::at(index * per_band + y, height, map.height);
-            let (samples, _) = row.as_chunks::<3>();
-            let (pixels, _) = out.as_chunks_mut::<4>();
-            for ((sample, out), column) in samples.iter().zip(pixels).zip(&columns) {
-                let gain = sample_gain(map, lut, column, &row_tap);
-                for channel in 0..3 {
-                    out[channel] = (srgb[sample[channel] as usize] + base_offset[channel])
-                        * gain[channel]
-                        - alternate_offset[channel];
-                }
-                out[3] = 1.0;
-            }
-        }
-    };
-    if bands == 1 {
-        walk(0, &mut out);
-    } else {
-        rayon_core::scope(|scope| {
-            for (index, band) in out.chunks_mut(per_band * width * 4).enumerate() {
-                let walk = &walk;
-                scope.spawn(move |_| walk(index, band));
-            }
-        });
-    }
-    out
-}
-
-/// Below this many pixels the reconstruction stays on one thread.
-const PARALLEL_FROM: usize = 1 << 16;
-
-/// Where a base pixel's row or column falls on the map: the two map rows
-/// (or columns) either side of it and how far it is from the first.
-struct Tap {
-    near: usize,
-    far: usize,
-    fraction: f32,
-}
-
-impl Tap {
-    fn at(at: usize, base: usize, map: u32) -> Self {
-        let position = (at as f32 / base as f32) * map as f32;
-        let last = (map - 1) as usize;
-        let near = (position.floor() as usize).min(last);
-        Self {
-            near,
-            far: (near + 1).min(last),
-            fraction: position - position.floor(),
-        }
-    }
-}
-
-/// The gain at one base pixel: the map's four surrounding values, each
-/// through the table, blended by the pixel's distance from them.
-fn sample_gain(map: &GainMap, lut: &GainMapLut, column: &Tap, row: &Tap) -> [f32; 3] {
-    let stride = map.width as usize;
-    let corner = |x: usize, y: usize| (y * stride + x) * map.channels as usize;
-    let (c00, c10, c01, c11) = (
-        corner(column.near, row.near),
-        corner(column.far, row.near),
-        corner(column.near, row.far),
-        corner(column.far, row.far),
-    );
-    let blend = |channel: usize| {
-        let gain = |corner: usize| lut.lookup(map.data[corner + channel], channel);
-        let top = gain(c00) * (1.0 - column.fraction) + gain(c10) * column.fraction;
-        let bottom = gain(c01) * (1.0 - column.fraction) + gain(c11) * column.fraction;
-        top * (1.0 - row.fraction) + bottom * row.fraction
-    };
-    if map.channels == 1 {
-        let gain = blend(0);
-        [gain, gain, gain]
-    } else {
-        [blend(0), blend(1), blend(2)]
+        Ok(Some(gain_map::image(
+            samples,
+            width,
+            height,
+            color.primaries,
+        )))
     }
 }
 
@@ -311,10 +169,11 @@ fn decode(bytes: &[u8]) -> Result<::image::DynamicImage> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::image::decode::gain_map::PARALLEL_FROM;
     use crate::image::display::{AutoWindow, Display, Headroom, Startup, ToneMap};
-    use crate::image::{Primaries, Stats};
+    use crate::image::{AlphaMode, Channels, Primaries, Referred, Samples, Stats, Transfer};
 
-    use ultrahdr_rs::{ColorGamut, encode_ultrahdr};
+    use ultrahdr_rs::{ColorGamut, GainMap, GainMapMetadata, encode_ultrahdr};
 
     /// Log2 of the boost the brightest half of the test gain map asks for.
     /// Two stops: enough to be unmistakable against JPEG's own error.
@@ -550,8 +409,19 @@ mod tests {
         metadata.alternate_offset = [0.01, 0.02, 0.03];
         metadata.alternate_hdr_headroom = STOPS;
 
-        let lut = GainMapLut::new(&metadata, 1.0);
-        let ours = reconstruct(&base, &map, &lut, &metadata);
+        let ours = gain_map::reconstruct(
+            base.as_raw(),
+            width,
+            height,
+            Transfer::Srgb,
+            &Map {
+                width: map.width,
+                height: map.height,
+                channels: map.channels,
+                data: map.data.clone(),
+            },
+            &Table::iso(&metadata),
+        );
         assert_agrees(&ours, &reference(&base, &map, &metadata));
     }
 
