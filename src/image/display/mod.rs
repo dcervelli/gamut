@@ -294,12 +294,43 @@ impl Display {
         self.apply_auto(stats);
     }
 
-    pub fn cycle_tone_map(&mut self) {
-        self.tone_map = self.tone_map.next();
+    /// Puts `curve` on the picture, unless a false color is on it — the
+    /// curve is held at a clip there, see [`Display::curve_on`], and a curve
+    /// changed under a ramp would have the picture change when the ramp came
+    /// off, from a press made long before. `gray` is whether the image has
+    /// one channel, which is what a false color is a reading of. Says
+    /// whether anything changed. The one place the refusal is made: the key
+    /// that cycles the curves and the button that names one both come here.
+    pub fn set_tone_map(&mut self, curve: ToneMap, gray: bool) -> bool {
+        if self.false_colored(gray) {
+            return false;
+        }
+        let changed = self.tone_map != curve;
+        self.tone_map = curve;
+        changed
     }
 
-    pub fn cycle_colormap(&mut self) {
-        self.colormap = self.colormap.next();
+    /// Puts `map` on the picture, unless the image is not `gray`: a false
+    /// color is a reading of one channel, and means nothing on three. Says
+    /// whether anything changed. As with [`Display::set_tone_map`], the key
+    /// and the button both come here, so they cannot drift.
+    pub fn set_colormap(&mut self, map: Colormap, gray: bool) -> bool {
+        if !gray {
+            return false;
+        }
+        let changed = self.colormap != map;
+        self.colormap = map;
+        changed
+    }
+
+    /// The next curve along, under [`Display::set_tone_map`]'s rule.
+    pub fn cycle_tone_map(&mut self, gray: bool) -> bool {
+        self.set_tone_map(self.tone_map.next(), gray)
+    }
+
+    /// The next map along, under [`Display::set_colormap`]'s rule.
+    pub fn cycle_colormap(&mut self, gray: bool) -> bool {
+        self.set_colormap(self.colormap.next(), gray)
     }
 
     pub fn adjust_exposure(&mut self, stops: f32) {
@@ -1440,5 +1471,27 @@ mod tests {
         display.put_white(f32::NAN);
         let (black, white) = display.displayed_bounds();
         assert!((black - 0.1).abs() < 1e-6 && (white - 0.25).abs() < 1e-6);
+    }
+
+    /// A false color is refused on a color image, by the key's cycle and by
+    /// the button's choice alike; and under a false color the curve is held
+    /// where it is, the key and the button refused the same way.
+    #[test]
+    fn a_ramp_reaches_only_a_gray_image_and_holds_the_curve() {
+        let mut display = Display::default();
+        assert!(!display.set_colormap(Colormap::Viridis, false));
+        assert!(!display.cycle_colormap(false));
+        assert_eq!(display.colormap, Colormap::Gray);
+        assert!(display.set_tone_map(ToneMap::Neutral, false));
+        assert!(display.cycle_tone_map(false));
+        assert_eq!(display.tone_map, ToneMap::None);
+
+        assert!(display.cycle_colormap(true));
+        assert_eq!(display.colormap, Colormap::Viridis);
+        assert!(!display.set_tone_map(ToneMap::Neutral, true));
+        assert!(!display.cycle_tone_map(true));
+        assert_eq!(display.tone_map, ToneMap::None, "held at the clip");
+        assert!(display.set_colormap(Colormap::Gray, true));
+        assert!(display.set_tone_map(ToneMap::Neutral, true));
     }
 }

@@ -1760,28 +1760,16 @@ impl App {
                         .step_white(by, transfer, current.stats.plot.max)
                 });
             }
-            // Not under a false color, which clips whatever the curve: the
-            // row of curves is dead there, and a key that changed what the
-            // dead row shows would have the picture change when the ramp
-            // came off, from a press made long before.
+            // Refused under a false color, and by the display itself, so that
+            // the key and the button beside the histogram cannot drift.
             CycleToneMap => {
-                return self.adjust(|current, _| {
-                    if current.display.false_colored(current.image.is_gray()) {
-                        return false;
-                    }
-                    current.display.cycle_tone_map();
-                    true
-                });
+                return self
+                    .adjust(|current, _| current.display.cycle_tone_map(current.image.is_gray()));
             }
             MarkClipped => return self.press(Control::Marks),
             CycleColormap => {
-                return self.adjust(|current, _| {
-                    if !current.image.is_gray() {
-                        return false;
-                    }
-                    current.display.cycle_colormap();
-                    true
-                });
+                return self
+                    .adjust(|current, _| current.display.cycle_colormap(current.image.is_gray()));
             }
             // A copy takes the selection and leaves the picture exactly as it
             // was, so the message at the foot of the window is the only sign
@@ -2592,18 +2580,13 @@ impl App {
             // time either was touched, and a button and a key that disagree
             // about one word are worse than either alone.
             Control::Reset => self.perform(ResetDisplay),
-            // A false color is a reading of one channel: the key refuses a
-            // color image, and so does the button, or the two would drift.
-            Control::Ramp(index) => {
-                if let Some(current) = self.current.as_mut()
-                    && current.image.is_gray()
-                    && let Some(map) = Colormap::ALL.get(index)
-                {
-                    current.display.colormap = *map;
-                    return Effect::Redraw;
-                }
-                Effect::Nothing
-            }
+            // The display refuses a false color on a color image, for the
+            // key and the button alike.
+            Control::Ramp(index) => self.adjust(|current, _| {
+                Colormap::ALL
+                    .get(index)
+                    .is_some_and(|map| current.display.set_colormap(*map, current.image.is_gray()))
+            }),
             // A window named outright rather than the next one along.
             Control::Window(index) => {
                 if let Some(current) = self.current.as_mut()
@@ -2614,16 +2597,14 @@ impl App {
                 }
                 Effect::Nothing
             }
-            Control::Curve(index) => {
-                if let Some(current) = self.current.as_mut()
-                    && let Some(curve) = ToneMap::ALL.get(index)
-                    && !current.display.false_colored(current.image.is_gray())
-                {
-                    current.display.tone_map = *curve;
-                    return Effect::Redraw;
-                }
-                Effect::Nothing
-            }
+            // And a curve under a false color, the same way.
+            Control::Curve(index) => self.adjust(|current, _| {
+                ToneMap::ALL.get(index).is_some_and(|curve| {
+                    current
+                        .display
+                        .set_tone_map(*curve, current.image.is_gray())
+                })
+            }),
             // A cell of the zoom menu: a zoom chosen here is a move.
             Control::ZoomTo(choice) => {
                 self.animate(|view, image, viewport| choice.apply(view, image, viewport));

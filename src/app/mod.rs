@@ -3173,7 +3173,9 @@ mod tests {
         let zoom = app.view.zoom(app.image_size(), VIEWPORT);
         let display = app.current.as_mut().expect("a.png is on screen");
         display.display.adjust_exposure(2.0);
-        display.display.cycle_colormap();
+        // As if the picture were gray: what is kept is the point here, not
+        // what a color image refuses.
+        assert!(display.display.cycle_colormap(true));
         let colormap = display.display.colormap;
 
         // Another size, so nothing carries over: b.png opens fitted and with
