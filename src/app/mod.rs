@@ -323,6 +323,10 @@ pub struct App {
     said_how_to_restore: bool,
     /// Set if the last render failed, so we report it once rather than every frame.
     reported_error: bool,
+    /// The window's size in a test, which has no window: what the frame is
+    /// laid out in when the interface is driven over the application.
+    #[cfg(test)]
+    headless: Option<[f32; 2]>,
 }
 
 impl App {
@@ -447,6 +451,8 @@ impl App {
             from_command_line: source.is_some(),
             said_how_to_restore: false,
             reported_error: false,
+            #[cfg(test)]
+            headless: None,
         };
         if let Some(source) = source {
             let request = app.files.open_first(source);
@@ -915,6 +921,10 @@ impl App {
     }
 
     fn window_size(&self) -> [f32; 2] {
+        #[cfg(test)]
+        if let Some(size) = self.headless {
+            return size;
+        }
         self.renderer
             .as_ref()
             .map(Renderer::size)
@@ -1048,6 +1058,53 @@ impl App {
             self.panels.show_ui,
             self.has_transport(),
         )
+    }
+
+    /// What this frame's interface is laid out from, in a window `logical`
+    /// pixels across at `scale` device pixels to each: everything the
+    /// application derives per frame from its window, pointer and loader.
+    /// Apart from `redraw` so that the interface can be driven over the
+    /// application with no window behind it.
+    fn frame_input(&mut self, logical: [f32; 2], scale: f32) -> FrameInput {
+        let chooser = self.chooser_open().then(|| {
+            let shown = self.current.as_ref().and_then(|_| self.files.shown_path());
+            self.chooser.input(&self.thumbs, shown)
+        });
+        let rename = self.rename_input();
+        let viewport = self.viewport();
+        FrameInput {
+            logical,
+            scale,
+            viewport,
+            pointer: self.pointer_pixel(),
+            cursor: self.logical_cursor(),
+            minimap_on_screen: self.minimap_on_screen(),
+            reading: self.reading(),
+            index: self.files.index(),
+            count: self.files.len(),
+            deleted: self.watch.missing(),
+            headroom: self.headroom(),
+            hdr_available: self.hdr_available(),
+            can_pan: self.view.can_pan(self.image_size(), viewport),
+            openers: self
+                .openers
+                .iter()
+                .map(|opener| opener.name.clone())
+                .collect(),
+            toast: self.toasts.showing().cloned(),
+            selection: self.selection,
+            handle: self.handle,
+            grabbing: self.grabbing.as_ref().map(Grabbing::grab),
+            over_region: self.over_region(),
+            box_zoom: self.pointer.space != input::Space::Up,
+            move_region: self.pointer.modifiers.shift_key(),
+            zoom_box: self.zoom_box,
+            transport: self.transport(),
+            chooser,
+            rename,
+            empty: self.is_empty(),
+            picking: self.picking,
+        }
     }
 
     /// The view as it is on screen at `now`: `view` itself once it has
@@ -1690,58 +1747,15 @@ impl App {
         for (path, thumb) in std::mem::take(&mut self.pending_thumbs) {
             self.hold_thumb(path, thumb);
         }
-        let chooser = self.chooser_open().then(|| {
-            let shown = self.current.as_ref().and_then(|_| self.files.shown_path());
-            self.chooser.input(&self.thumbs, shown)
-        });
-        let rename = self.rename_input();
 
         let scale = window.scale_factor() as f32;
         let physical = self.window_size();
         let logical = [physical[0] / scale, physical[1] / scale];
         let viewport = self.viewport();
         let placement = view.placement(self.image_size(), viewport);
-
-        let pointer = self.pointer_pixel();
-        let cursor = self.logical_cursor();
         let thumbnail = self.minimap_placement(logical, scale);
-        let minimap = self.minimap_on_screen();
-        let reading = self.reading();
         let headroom = self.headroom();
-        let hdr_available = self.hdr_available();
-        let input = FrameInput {
-            logical,
-            scale,
-            viewport,
-            pointer,
-            cursor,
-            minimap_on_screen: minimap,
-            reading,
-            index: self.files.index(),
-            count: self.files.len(),
-            deleted: self.watch.missing(),
-            headroom,
-            hdr_available,
-            can_pan: self.view.can_pan(self.image_size(), viewport),
-            openers: self
-                .openers
-                .iter()
-                .map(|opener| opener.name.clone())
-                .collect(),
-            toast: self.toasts.showing().cloned(),
-            selection: self.selection,
-            handle: self.handle,
-            grabbing: self.grabbing.as_ref().map(Grabbing::grab),
-            over_region: self.over_region(),
-            box_zoom: self.pointer.space != input::Space::Up,
-            move_region: self.pointer.modifiers.shift_key(),
-            zoom_box: self.zoom_box,
-            transport: self.transport(),
-            chooser,
-            rename,
-            empty: self.is_empty(),
-            picking: self.picking,
-        };
+        let input = self.frame_input(logical, scale);
 
         let namer = self.namer();
         let Some(gui) = self.gui.as_mut() else {
@@ -3935,5 +3949,77 @@ mod tests {
         assert!(!app.conditions().undoable);
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// The interface driven over the application itself, with no window:
+    /// laid out from `frame_input`, pressed through the accessibility tree
+    /// egui builds, and what it asked for done by `act`. One pass binds the
+    /// bold face the file's name is set in, as `ui/driven.rs` does; every
+    /// pass after that draws the interface.
+    fn driven(mut app: App) -> egui_kittest::Harness<'static, App> {
+        use egui_kittest::Harness;
+
+        app.headless = Some(WINDOW);
+        let mut ready = false;
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(WINDOW[0], WINDOW[1]))
+            .build_ui_state(
+                move |ui, app: &mut App| {
+                    if !ready {
+                        let mut fonts = egui::FontDefinitions::default();
+                        let sans = fonts.families[&egui::FontFamily::Proportional].clone();
+                        fonts
+                            .families
+                            .insert(egui::FontFamily::Name(ui::fonts::BOLD.into()), sans);
+                        ui.ctx().set_fonts(fonts);
+                        ui::style::apply(ui.ctx(), &app.theme);
+                        ready = true;
+                        return;
+                    }
+                    let input = app.frame_input(WINDOW, 1.0);
+                    let namer = app.namer();
+                    let view = app.shown_view();
+                    let commands = ui::show(
+                        ui,
+                        &input,
+                        &app.panels,
+                        app.current.as_ref(),
+                        &view,
+                        &app.theme,
+                        &namer,
+                    );
+                    for command in commands {
+                        app.act(command);
+                    }
+                },
+                app,
+            );
+        harness.run();
+        harness
+    }
+
+    /// Presses the button called `label` and runs the pass that does what
+    /// the press asked for.
+    fn click(harness: &mut egui_kittest::Harness<'static, App>, label: &str) {
+        use egui_kittest::kittest::Queryable;
+
+        harness
+            .get_by_role_and_label(egui::accesskit::Role::Button, label)
+            .click();
+        harness.run();
+    }
+
+    /// A click on the interface reaches the application: the grid button,
+    /// pressed through the frame the application itself laid out, toggles
+    /// the application's own panel, the way the key for it does.
+    #[test]
+    fn a_click_on_the_interface_reaches_the_application() {
+        let (app, _dir) = app_over("clicked", &[("a.png", 4, 3)]);
+        let mut harness = driven(app);
+        assert!(!harness.state().panels.show_grid);
+        click(&mut harness, &ui::Control::Grid.label());
+        assert!(harness.state().panels.show_grid);
+        click(&mut harness, &ui::Control::Grid.label());
+        assert!(!harness.state().panels.show_grid);
     }
 }

@@ -25,7 +25,10 @@ paste button and the step buttons are there only when they would do
 something, that each menu opens and each of its cells chooses what it says,
 and that the file chooser takes the keyboard while it is up — what is typed,
 the arrows and `Enter` come back as commands rather than reaching the window
-— and hands it back when `Esc` closes it.
+— and hands it back when `Esc` closes it. `src/app/mod.rs` drives the same
+interface over the application itself, with no window behind it — the frame
+laid out from `App::frame_input`, the click fed to `App::act` — so that a
+press is followed the whole way through to what it changes.
 Nothing about pixels: what the frame looks like is looked at, and what it
 does is tested. The geometry the panels are placed by — the four bars, the
 content area, where the histogram and the information column go and when
