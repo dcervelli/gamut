@@ -3,6 +3,7 @@
 
 use egui::pos2;
 
+use super::plot::{HISTOGRAM_LUMA, HISTOGRAM_PLANES};
 use super::*;
 
 /// The strip of buttons down the left of the panel, the handles on the
@@ -21,7 +22,6 @@ pub(super) fn controls(
     current: &Current,
     panel: Rect,
 ) -> Option<String> {
-    let theme = pass.theme;
     let panels = pass.panels;
     let scale = pass.input.scale;
     let gray = current.image.is_gray();
@@ -56,11 +56,7 @@ pub(super) fn controls(
                     Rect::new(square.min.x, square.min.y, square.width(), square.height()),
                 );
                 let at = place.free([GRID_MIDDLE, GRID_MIDDLE]);
-                painter.circle_filled(
-                    pos2(at[0], at[1]),
-                    place.units(LUMA_DISC),
-                    theme.histogram_luma,
-                );
+                painter.circle_filled(pos2(at[0], at[1]), place.units(LUMA_DISC), HISTOGRAM_LUMA);
             }
             // And the color planes are three, so they are three smaller
             // discs, in their own colors: nothing else in the window is red,
@@ -70,7 +66,7 @@ pub(super) fn controls(
                     grid,
                     Rect::new(square.min.x, square.min.y, square.width(), square.height()),
                 );
-                for (turn, plane) in theme.histogram_planes.into_iter().enumerate() {
+                for (turn, plane) in HISTOGRAM_PLANES.into_iter().enumerate() {
                     // Struck about the middle at a third of a turn each,
                     // starting at the top, so the three read as one mark
                     // rather than as a row.

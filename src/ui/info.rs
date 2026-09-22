@@ -30,9 +30,11 @@ use crate::theme::Theme;
 use super::chrome::{ICON_SIDE, Pass, measure};
 use super::control::Control;
 use super::icon;
-use super::style::TOGGLE_RADIUS;
+use super::style::{SCROLLBAR_GUTTER, SCROLLBAR_WIDTH, TOGGLE_RADIUS};
 use super::tooltip::Tip;
-use super::{Current, PADDING, PANEL_INSET, PANEL_RADIUS, PANEL_WIDTH, TEXT_SIZE};
+use super::{
+    Current, PADDING, PANEL_INSET, PANEL_RADIUS, PANEL_WIDTH, RULE_WIDTH, TEXT_SIZE, rule,
+};
 
 /// Below this the panel would show its header, two facts and a scrollbar, so
 /// it stays off instead. There is no matching minimum for the width: the
@@ -59,12 +61,6 @@ const SECTION_GAP: f32 = 11.0;
 /// a name and what it names read as one thing rather than as two.
 const LABEL_GAP: f32 = -1.0;
 
-/// The hairline drawn across the column above every section but the first,
-/// and under the header — and under the help popup's headings, which is the
-/// same kind of thing. The same width as the hairline along a panel's edge,
-/// being the same kind of thing.
-pub(super) const RULE_WIDTH: f32 = 1.0;
-
 /// The words at the top of the panel. An instruction rather than a fact about
 /// the file, so it is written small and dim: what it says is worth knowing
 /// once and not worth re-reading every time the panel is opened.
@@ -85,13 +81,6 @@ const CHIP_GAP: f32 = 5.0;
 /// toggle's, so that the two marks are drawn at one size wherever they are
 /// seen together.
 const COPY_ICON: f32 = ICON_SIDE;
-
-/// The scrollbar down the panel's inner edge, and the room kept clear for it
-/// whether or not there is anything to scroll — text that reflowed the moment
-/// the bar appeared would be text that reflowed as it was being read. The
-/// help popup's table scrolls the same way.
-pub(super) const SCROLLBAR_WIDTH: f32 = 3.0;
-pub(super) const SCROLLBAR_GUTTER: f32 = SCROLLBAR_WIDTH + 7.0;
 
 /// What the file itself says about the image, as opposed to what its pixels
 /// do: read once when the image opens, since none of it changes while the
@@ -317,18 +306,6 @@ fn copy_all(pass: &mut Pass, ui: &mut egui::Ui) {
     if response.clicked() {
         pass.press(control);
     }
-}
-
-/// A hairline across the column, on the device's grid.
-pub(super) fn rule(pass: &Pass, ui: &mut egui::Ui, width: f32) {
-    let grid = pass.grid;
-    let edge = grid.line_width(RULE_WIDTH);
-    let (rect, _) = ui.allocate_exact_size(vec2(width, edge), Sense::HOVER);
-    ui.painter().rect_filled(
-        egui::Rect::from_min_size(rect.min, vec2(width, edge)),
-        0.0,
-        pass.theme.border,
-    );
 }
 
 /// Draws the panel: the header, and under it the column of everything the

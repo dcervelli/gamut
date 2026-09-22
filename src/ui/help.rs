@@ -26,9 +26,9 @@ use egui::{
 
 use super::chrome::Pass;
 use super::control::{Command, Control};
-use super::info::{HEADER_GAP, RULE_WIDTH, SCROLLBAR_GUTTER, SCROLLBAR_WIDTH, rule};
-use super::style::{MENU_PADDING, MENU_RADIUS};
-use super::{Rect, TEXT_SIZE, fonts, info, panel};
+use super::info::HEADER_GAP;
+use super::style::{MENU_PADDING, MENU_RADIUS, POPUP_WIDTH, SCROLLBAR_GUTTER, SCROLLBAR_WIDTH};
+use super::{RULE_WIDTH, Rect, TEXT_SIZE, fonts, info, panel, rule};
 
 /// The popup's id in egui's memory: what the application opens, and what
 /// it asks whether it is open.
@@ -60,8 +60,7 @@ pub struct Condition {
     pub met: bool,
 }
 
-/// The popup at most this wide and this tall.
-const WIDTH_MAX: f32 = 720.0;
+/// The popup at most this tall; how wide is [`POPUP_WIDTH`].
 const HEIGHT_MAX: f32 = 640.0;
 /// The least the popup will open at: the width of the two panels that
 /// float over the picture, and the least height the information panel
@@ -97,14 +96,14 @@ const TITLE_GAP: f32 = 6.0;
 /// What the three columns are headed.
 const HEADINGS: [&str; 3] = ["Key", "Action", "When"];
 
-/// Where the popup goes: the middle of `content`, at most [`WIDTH_MAX`] by
+/// Where the popup goes: the middle of `content`, at most [`POPUP_WIDTH`] by
 /// [`HEIGHT_MAX`] and inside the padding everything floating over the image
 /// keeps. `None` when the window is too small for it to be read, in which
 /// case the popup stays off.
 pub fn panel(content: Rect) -> Option<Rect> {
     panel::fit(
         content,
-        [WIDTH_MAX, HEIGHT_MAX],
+        [POPUP_WIDTH, HEIGHT_MAX],
         [WIDTH_MIN, HEIGHT_MIN],
         panel::Place::Center,
     )
@@ -325,7 +324,7 @@ mod tests {
     fn the_popup_is_centered_and_capped() {
         let content = Rect::new(0.0, 30.0, 1600.0, 1000.0);
         let panel = panel(content).expect("room for the popup");
-        assert_eq!([panel.width, panel.height], [WIDTH_MAX, HEIGHT_MAX]);
+        assert_eq!([panel.width, panel.height], [POPUP_WIDTH, HEIGHT_MAX]);
         assert_eq!(panel.x + panel.width / 2.0, 800.0);
         assert_eq!(panel.y + panel.height / 2.0, 530.0);
     }
@@ -370,6 +369,6 @@ mod tests {
         let least_does = does_width(STACK_BELOW);
         assert!(least_does >= 120.0, "{least_does} for a sentence");
         assert!(stacked(table_width(WIDTH_MIN)));
-        assert!(!stacked(table_width(WIDTH_MAX)));
+        assert!(!stacked(table_width(POPUP_WIDTH)));
     }
 }

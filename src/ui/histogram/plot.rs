@@ -7,6 +7,34 @@
 use egui::{Align2, Color32, FontId, Stroke, pos2, vec2};
 
 use super::*;
+use crate::image::stats::COLOR;
+
+/// The ground the plot is drawn on. Not quite black, so that the panel's own
+/// edge is still an edge rather than a hole in it. The one surface with a
+/// job that outranks matching the desktop: a screened plot has to have a
+/// dark ground under it or its planes stop being three colors, so it is
+/// the same near-black in every theme.
+pub(super) const PLOT_BACKGROUND: Color = Color::rgb(8, 8, 10);
+/// The luminance plane, under the color ones. Neutral, and no theme's
+/// business: it is the one plane that stands for a pixel's value rather
+/// than for a channel, and a value with a hue on it would read as a fourth
+/// color.
+pub(super) const HISTOGRAM_LUMA: Color = Color::rgba(170, 170, 170, 200);
+/// The color planes: a red, a green and a blue, each taken some way back
+/// from its primary, in that order. Not the theme's own red, green and
+/// blue, which no theme chose for this: screened over one another on
+/// [`PLOT_BACKGROUND`] these still give a yellow, a cyan and a magenta
+/// where two overlap and a near white where all three do, which is the
+/// reading a channel histogram is looked at for — and is the same reading
+/// in every theme, the ground being the same in every theme. Held short of
+/// the primaries because the full ones, at a pixel to the bin, come out as
+/// a hedge of pure red, green and blue spikes that the eye cannot leave
+/// alone; these read as a plot.
+pub(super) const HISTOGRAM_PLANES: [Color; COLOR] = [
+    Color::rgb(232, 76, 70),
+    Color::rgb(92, 200, 108),
+    Color::rgb(84, 132, 236),
+];
 
 /// The planes a column of the plot is drawn from: which of them stand this
 /// high, as a set. What the color of a stretch of the column is a function of.
@@ -24,7 +52,7 @@ pub(super) struct Cover {
 /// column: the planes are the primaries on a near-black ground, so two of
 /// them give the secondary between and all three give white, which is the
 /// reading a channel histogram is looked at for.
-pub(super) fn screened(theme: &Theme, luma_ink: Color, cover: Cover) -> Color32 {
+pub(super) fn screened(luma_ink: Color, cover: Cover) -> Color32 {
     let over = |ground: [f32; 3], ink: Color| -> [f32; 3] {
         let alpha = ink.a as f32 / 255.0;
         let ink = [ink.r, ink.g, ink.b].map(|channel| channel as f32 / 255.0);
@@ -34,12 +62,12 @@ pub(super) fn screened(theme: &Theme, luma_ink: Color, cover: Cover) -> Color32 
         let ink = [ink.r, ink.g, ink.b].map(|channel| channel as f32 / 255.0);
         [0, 1, 2].map(|c| 1.0 - (1.0 - ground[c]) * (1.0 - ink[c]))
     };
-    let ground = theme.plot_background;
+    let ground = PLOT_BACKGROUND;
     let mut color = [ground.r, ground.g, ground.b].map(|channel| channel as f32 / 255.0);
     if cover.luma {
         color = over(color, luma_ink);
     }
-    for (plane, ink) in cover.planes.into_iter().zip(theme.histogram_planes) {
+    for (plane, ink) in cover.planes.into_iter().zip(HISTOGRAM_PLANES) {
         if plane {
             color = screen(color, ink);
         }
@@ -134,7 +162,7 @@ pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect, c
     painter.rect_filled(
         area(bars.inset(-PLOT_INSET, -PLOT_INSET)),
         PLOT_RADIUS,
-        theme.plot_background,
+        PLOT_BACKGROUND,
     );
 
     // Luminance always goes down first, underneath the color planes: it
@@ -166,9 +194,9 @@ pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect, c
     // Dimmed only when it is a backdrop; with the color planes off — or on
     // a gray image, which has none — it is the plot.
     let luma_ink = if color.is_empty() {
-        theme.histogram_luma
+        HISTOGRAM_LUMA
     } else {
-        theme.histogram_luma.with_alpha(HISTOGRAM_LUMA_UNDER)
+        HISTOGRAM_LUMA.with_alpha(HISTOGRAM_LUMA_UNDER)
     };
 
     // One column to a bin — the bins are a logical pixel each, which is what
@@ -199,7 +227,7 @@ pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect, c
                 painter.rect_filled(
                     egui::Rect::from_min_max(pos2(left, top), pos2(right, bottom)),
                     0.0,
-                    screened(theme, luma_ink, cover),
+                    screened(luma_ink, cover),
                 );
             }
             from = height;
@@ -271,7 +299,7 @@ pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect, c
         painter.rect_filled(
             area(text.inset(-CLIP_PAD, -CLIP_PAD)),
             CLIP_PAD,
-            theme.plot_background.with_alpha(CLIP_BACKING_ALPHA),
+            PLOT_BACKGROUND.with_alpha(CLIP_BACKING_ALPHA),
         );
         painter.text(
             pos2(text.x, text.y),
@@ -467,5 +495,52 @@ mod tests {
                 "log {log}: {heights:?}"
             );
         }
+    }
+
+    /// What the three color planes come to where they overlap, screened in
+    /// the encoded values as [`screened`] screens them, the panel's painter
+    /// having one blend and that one on encoded colors.
+    fn overlapped(planes: [Color; COLOR]) -> [f32; 3] {
+        let mut out = [0.0f32; 3];
+        for (channel, value) in out.iter_mut().enumerate() {
+            *value = 1.0
+                - planes
+                    .iter()
+                    .map(|plane| 1.0 - [plane.r, plane.g, plane.b][channel] as f32 / 255.0)
+                    .product::<f32>();
+        }
+        out
+    }
+
+    /// Each plane leads in its own channel by a wide margin, so two
+    /// overlapping give a secondary and all three give a near white — and
+    /// none of them is the primary itself, which at a pixel to the bin is
+    /// a spike the eye cannot leave alone.
+    #[test]
+    fn the_color_planes_are_one_channel_each() {
+        let white = overlapped(HISTOGRAM_PLANES);
+        assert!(white.iter().all(|channel| *channel > 0.9), "{white:?}");
+        for (channel, plane) in HISTOGRAM_PLANES.iter().enumerate() {
+            let levels = [plane.r, plane.g, plane.b];
+            for (other, level) in levels.iter().enumerate() {
+                if other == channel {
+                    assert!(*level >= 200, "{plane:?} leads in its own channel");
+                    assert!(*level < 255, "{plane:?} is short of the primary");
+                } else {
+                    assert!(*level <= 140, "{plane:?} stays out of the others");
+                }
+            }
+        }
+    }
+
+    /// The plane under them stands for a pixel's value, not for one of its
+    /// channels, so it carries no hue; and the ground they are screened on
+    /// is near black, or screening would not read.
+    #[test]
+    fn the_luminance_plane_is_neutral_and_the_ground_is_dark() {
+        let luma = HISTOGRAM_LUMA;
+        assert!(luma.r == luma.g && luma.g == luma.b, "{luma:?}");
+        let ground = PLOT_BACKGROUND;
+        assert!(ground.r.max(ground.g).max(ground.b) < 16, "{ground:?}");
     }
 }

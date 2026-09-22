@@ -12,9 +12,10 @@ use egui::{Button, RichText, Sense, Ui, Vec2, WidgetInfo, WidgetType, vec2};
 use crate::render::Upscale;
 use crate::view::{Axis, Fit, View, Viewport};
 
+use super::RULE_WIDTH;
 use super::chrome::Pass;
 use super::control::Control;
-use super::info::{HEADER_GAP, RULE_WIDTH};
+use super::info::HEADER_GAP;
 use super::pixel::PixelFormat;
 use super::style::TOGGLE_RADIUS;
 use super::tooltip::Tip;

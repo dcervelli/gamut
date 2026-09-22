@@ -19,7 +19,9 @@ use crate::theme::{Mode, Theme};
 use super::TEXT_SIZE;
 use super::chrome::{BUTTON_GAP, BUTTON_SIZE};
 
-/// The corner radius of a toggle, a cell, and everything else pressed.
+/// The corner radius of a toggle, a cell, and everything else pressed —
+/// the chrome's toggles and the histogram panel's toolbar alike, which are
+/// the same size.
 pub(super) const TOGGLE_RADIUS: f32 = 5.0;
 /// The corner radius of a popup's panel.
 pub(super) const MENU_RADIUS: f32 = 8.0;
@@ -27,6 +29,16 @@ pub(super) const MENU_RADIUS: f32 = 8.0;
 pub(super) const PANEL_RADIUS: f32 = 6.0;
 /// What a popup keeps between its edge and its cells.
 pub(super) const MENU_PADDING: f32 = 8.0;
+/// The most a popup laid out over the picture is wide: the file chooser and
+/// the help, which take the room there is up to this.
+pub(super) const POPUP_WIDTH: f32 = 720.0;
+/// The scrollbar down a scrolling panel's inner edge — the information
+/// panel's, and the help popup's table — and the room kept clear for it
+/// whether or not there is anything to scroll: text that reflowed the
+/// moment the bar appeared would be text that reflowed as it was being
+/// read.
+pub(super) const SCROLLBAR_WIDTH: f32 = 3.0;
+pub(super) const SCROLLBAR_GUTTER: f32 = SCROLLBAR_WIDTH + 7.0;
 /// The alpha the accent is washed to under a toggle that is on: enough to
 /// say so, not enough to hide the mark on it.
 pub(super) const ACTIVE_BUTTON_WASH: u8 = 64;
@@ -36,9 +48,7 @@ pub(super) const ACTIVE_BUTTON_WASH: u8 = 64;
 pub(super) const DEAD_BUTTON_INK: u8 = 90;
 /// The same, as the fraction egui fades a disabled widget by.
 const DISABLED_ALPHA: f32 = DEAD_BUTTON_INK as f32 / 255.0;
-/// The scrollbar the information panel shows: a thin bar in a gutter of its
-/// own, and a thumb never too short to take hold of.
-const SCROLLBAR_WIDTH: f32 = 3.0;
+/// The scrollbar's thumb, never too short to take hold of.
 const THUMB_MIN: f32 = 24.0;
 /// How long the pointer rests on a control before it is named, and how long
 /// after leaving one the next is named at once.

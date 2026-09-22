@@ -26,7 +26,7 @@ use egui::{
 
 use super::chrome::Pass;
 use super::control::{Command, Control};
-use super::style::{MENU_PADDING, MENU_RADIUS, TOGGLE_RADIUS};
+use super::style::{MENU_PADDING, MENU_RADIUS, POPUP_WIDTH, TOGGLE_RADIUS};
 use super::{PADDING, Rect, TEXT_SIZE, fonts, panel};
 
 /// The popup's id in egui's memory: what the application opens, and what
@@ -35,8 +35,8 @@ pub fn id() -> egui::Id {
     egui::Id::new("chooser")
 }
 
-/// The popup at most this wide, and this share of the content area tall.
-const WIDTH_MAX: f32 = 720.0;
+/// The popup this share of the content area tall; how wide at most is
+/// [`POPUP_WIDTH`].
 const HEIGHT_SHARE: f32 = 0.6;
 /// Below this width the rows could not carry a name and a thumbnail, and
 /// the popup stays off.
@@ -151,7 +151,7 @@ pub enum Step {
 }
 
 /// Where the popup goes: across the top of `content`, centered, at most
-/// [`WIDTH_MAX`] wide and [`HEIGHT_SHARE`] of the content tall. `None`
+/// [`POPUP_WIDTH`] wide and [`HEIGHT_SHARE`] of the content tall. `None`
 /// when the window has no room for the field and three rows, or is too
 /// narrow for a row to say anything, in which case the chooser stays off.
 pub fn panel(content: Rect) -> Option<Rect> {
@@ -162,7 +162,7 @@ pub fn panel(content: Rect) -> Option<Rect> {
     }
     panel::fit(
         content,
-        [WIDTH_MAX, height],
+        [POPUP_WIDTH, height],
         [WIDTH_MIN, least],
         panel::Place::TopCenter,
     )
@@ -564,7 +564,7 @@ mod tests {
     fn the_panel_is_centered_capped_and_absent_when_small() {
         let content = Rect::new(30.0, 30.0, 940.0, 640.0);
         let wide = panel(content).expect("room for it");
-        assert_eq!(wide.width, WIDTH_MAX);
+        assert_eq!(wide.width, POPUP_WIDTH);
         assert_eq!(wide.height, (HEIGHT_SHARE * 640.0).round());
         assert_eq!(wide.y, 30.0 + PADDING);
         assert!((wide.x + wide.width / 2.0 - (30.0 + 470.0)).abs() <= 0.5);

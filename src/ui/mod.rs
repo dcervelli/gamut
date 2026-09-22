@@ -101,8 +101,7 @@ const PANEL_INSET: f32 = 10.0;
 /// right of the window, whether or not either has anything else on it.
 const PANEL_WIDTH: f32 = histogram::TOOLBAR_WIDTH + BINS as f32 + 2.0 * PANEL_INSET;
 
-/// The corner radius of a floating panel.
-const PANEL_RADIUS: f32 = 6.0;
+use style::PANEL_RADIUS;
 
 /// Side of one checkerboard square, in logical pixels. Small enough to read
 /// as a texture behind the image rather than as a pattern competing with it.
@@ -644,6 +643,24 @@ fn histogram_shown(content: Rect, panels: &Panels) -> Option<Rect> {
         .show_histogram
         .then(|| histogram::panel(content))
         .flatten()
+}
+
+/// The hairline drawn across a column: above every section of the
+/// information panel but the first and under its header, and under the
+/// help popup's headings, which is the same kind of thing. The same width
+/// as the hairline along a panel's edge, being the same kind of thing.
+const RULE_WIDTH: f32 = 1.0;
+
+/// A hairline across a column, on the device's grid: what parts a panel's
+/// header from its rows, and one section from the next.
+fn rule(pass: &chrome::Pass, ui: &mut egui::Ui, width: f32) {
+    let edge = pass.grid.line_width(RULE_WIDTH);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, edge), egui::Sense::HOVER);
+    ui.painter().rect_filled(
+        egui::Rect::from_min_size(rect.min, egui::vec2(width, edge)),
+        0.0,
+        pass.theme.border,
+    );
 }
 
 /// A rectangle drawn as four edges, so that what is behind it — the

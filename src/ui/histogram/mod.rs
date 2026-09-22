@@ -26,6 +26,7 @@ use super::chrome::{BUTTON_SIZE, ICON_SIDE, Pass};
 use super::icon;
 use super::outline;
 use super::panel;
+use super::style::TOGGLE_RADIUS;
 use super::tooltip::Tip;
 use super::{
     BECOMES, Command, Control, Current, PANEL_INSET, PANEL_RADIUS, PANEL_WIDTH, TEXT_SIZE,
@@ -73,13 +74,6 @@ pub(super) const TOOLBAR_WIDTH: f32 = BUTTON_SIZE + PANEL_INSET;
 /// beside the plot leave a gap between the last of them and the one beside
 /// the band — see [`marks_button`].
 const TOOLBAR_GAP: f32 = 6.0;
-
-/// The corner a toolbar button is drawn with, and what is left around its
-/// icon. The same as the chrome's toggles, which are the same size — and the
-/// inset is taken from the side those wear their marks at rather than set
-/// beside it, so that a button in this strip and a button in the corner of
-/// the window cannot end up carrying marks of two different weights.
-const TOGGLE_RADIUS: f32 = 5.0;
 
 /// The middle of the grid a mark is described on, and the two measures the
 /// plane toggles are drawn from, in that grid's units: how far each color
