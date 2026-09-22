@@ -62,7 +62,7 @@ half = { version = "2.7.1", features = ["bytemuck"] }
 # and what a PNG entry means, are decided in `decode::ico`. `ico` implies
 # `bmp`, which `decode::image_rs` now reads in its own right; it is named here
 # anyway, so that dropping `ico` could not quietly take `.bmp` with it.
-image = { version = "0.25.10", default-features = false, features = ["bmp", "exr", "gif", "hdr", "ico", "jpeg", "png", "pnm", "tiff"] }
+image = { version = "0.25.10", default-features = false, features = ["bmp", "exr", "gif", "hdr", "ico", "jpeg", "png", "pnm"] }
 # The GIF container, read directly for the two things `image` does not say
 # about an animation: how many frames it holds, which the header does not
 # state and which is counted here without decoding a frame, and whether the
@@ -148,6 +148,12 @@ pollster = "1.0.1"
 # shape for a few kilobytes, and it refuses a document with a DTD, which is
 # where an XML parser's own trouble with untrusted input lives.
 roxmltree = "0.20"
+# TIFF, read directly rather than through `image`, whose `tiff` feature is
+# left off: `decode::tiff_rs` wants the decoder itself for the things the
+# bridge does not carry — the pages and the strips of a file read in bands,
+# the photometric and the sample format of a measurement raster, the
+# GeoTIFF keys — and `directory` reads a BigTIFF's first directory through
+# it for the metadata reader, which is defined on the original format.
 tiff = "0.11.3"
 # The container half of Ultra HDR: finds the gain map through MPF and XMP and
 # hands back raw JPEG bytes, leaving the decoding to whatever codec we already
