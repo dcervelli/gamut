@@ -38,6 +38,18 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   the file comes out of the trash and back into the list, or gets its old
   name back.
 
+### Fixed
+
+- The rounded corners of the icons — the folder, the sheet, the clipboard,
+  the hook of the question mark, the ring of the reset arrow — came out
+  gray beside their sides. Each curve was drawn as a chain of short
+  strokes, and egui feathers every stroke on its own: a feather laid over
+  ink already there dims it, so a curve that was nothing but overlaps was
+  dim all the way round. A curve is now one stroke from end to end, and at
+  a stroke a single pixel wide — a small icon on a monitor at scale 1 — its
+  points are put on the pixel grid as the straight strokes' are, since a
+  one-pixel curve left where it falls comes out at half weight.
+
 ## 0.4.0 - 2026-09-21
 
 ### Fixed

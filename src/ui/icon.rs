@@ -26,6 +26,16 @@
 //! its neighbors. So the square is sized in whole [`QUANTUM`]s of the grid
 //! first, which makes every mark on a multiple of three land on a whole
 //! device pixel, and the spacing survives the snapping.
+//!
+//! A curve gets the same care in two other forms. It is one stroke from end
+//! to end, however many straight links stand in for it, because egui
+//! feathers each stroke it is given on its own and a feather laid over ink
+//! already there dims it — a curve drawn as a chain of links was gray at
+//! every corner. And at a stroke a single device pixel wide, which is all
+//! feather and solid only along its center line, the curve's points are put
+//! on the pixel grid as a straight stroke's ends are, since a curve left
+//! where it falls runs between the pixel centers and comes out at half the
+//! weight of the sides it joins.
 
 use super::Rect;
 
@@ -65,8 +75,8 @@ pub(super) enum Mark {
     ///
     /// Angles run from the direction of increasing x and turn clockwise on
     /// screen, since that is the way the interface's y axis points; a
-    /// negative sweep turns the other way. Drawn as a chain of straight
-    /// strokes, each with the round cap that joins it to the next.
+    /// negative sweep turns the other way. Drawn as one stroke along a chain
+    /// of short straight links, with a round cap at each end.
     Arc {
         at: [f32; 2],
         radius: f32,
@@ -104,6 +114,12 @@ pub(super) enum Mark {
 /// leaves under a sixth of a pixel between the chord and the curve at the
 /// sizes a button draws, which is less than the feather either side of it.
 const ARC_STEP: f32 = 12.0;
+
+/// How far apart, in device pixels, a curve is sampled when it is being put
+/// on the pixel grid rather than drawn as it is: close enough that no pixel
+/// it passes through is skipped over, so the chain of snapped points steps
+/// from each pixel to one beside it.
+const HINT_STEP: f32 = 0.5;
 
 /// Lucide's `chart-area`: an axis with a filled plot standing on it, which is
 /// what the panel it opens draws.
@@ -857,23 +873,62 @@ impl Placer {
         )
     }
 
+    /// Whether a curve has to be put on the pixel grid to come out at the
+    /// weight of the straight strokes beside it.
+    ///
+    /// egui feathers every stroke by a device pixel either side of its
+    /// edges, and a stroke one device pixel wide is then nothing but
+    /// feather: full ink along its center line and fading to none a pixel
+    /// out. A straight stroke is placed with that line through the pixel
+    /// centers and comes out solid. A curve drawn where it falls runs
+    /// between the centers most of the way, and each pixel it crosses gets
+    /// half the ink, so the corners of a box come out gray beside its sides.
+    /// A stroke two pixels wide or more has a core the feather leaves solid,
+    /// and a curve through it reads at full weight wherever it falls.
+    fn hinted(&self) -> bool {
+        self.grid.to_device(self.stroke) <= 1.0
+    }
+
     /// The points of the chain of straight strokes that stands in for an
-    /// arc. Nothing here is snapped: a curve meets the pixel grid at every
-    /// angle, so there is no placing of it that the feather does not have to
-    /// finish; what the grid is for is the straight strokes beside it.
+    /// arc, in logical pixels.
+    ///
+    /// At a stroke wide enough to have a solid core the arc is drawn as it
+    /// is: a curve meets the pixel grid at every angle, so there is no
+    /// placing of it that the feather does not have to finish, and moving
+    /// its points about bends it. At a single-pixel stroke every point is
+    /// put on the stroke grid, the way a straight stroke's ends are, and the
+    /// chain becomes a walk from pixel to neighboring pixel — a bitmap's
+    /// circle — which is what the sides it joins are.
     fn arc(&self, at: [f32; 2], radius: f32, start: f32, sweep: f32) -> Vec<[f32; 2]> {
-        let center = self.free(at);
-        let radius = self.units(radius);
-        let steps = ((sweep.abs() / ARC_STEP).ceil() as usize).max(2);
-        (0..=steps)
-            .map(|step| {
-                let angle = (start + sweep * step as f32 / steps as f32).to_radians();
-                [
-                    center[0] + radius * angle.cos(),
-                    center[1] + radius * angle.sin(),
-                ]
-            })
-            .collect()
+        let hinted = self.hinted();
+        let steps = if hinted {
+            let length = sweep.abs().to_radians() * self.units(radius) * self.grid.scale;
+            (length / HINT_STEP).ceil() as usize
+        } else {
+            (sweep.abs() / ARC_STEP).ceil() as usize
+        }
+        .max(2);
+        // In grid units first, so that the ends land where a straight stroke
+        // given the same grid point lands: the arithmetic that places them is
+        // then the same, down to the rounding.
+        let on_grid = (0..=steps).map(|step| {
+            let angle = (start + sweep * step as f32 / steps as f32).to_radians();
+            [at[0] + radius * angle.cos(), at[1] + radius * angle.sin()]
+        });
+        let mut points: Vec<[f32; 2]> = Vec::with_capacity(steps + 1);
+        for point in on_grid {
+            let placed = if hinted {
+                self.at(point)
+            } else {
+                self.free(point)
+            };
+            // Snapping lands several samples on one pixel; a stroke from a
+            // point to itself has no direction to be drawn in.
+            if points.last() != Some(&placed) {
+                points.push(placed);
+            }
+        }
+        points
     }
 }
 
@@ -899,11 +954,28 @@ pub(super) fn paint(
     let stroke = place.stroke;
     let pen = Stroke::new(stroke, ink);
     let point = |at: [f32; 2]| pos2(at[0], at[1]);
-    // A stroke with round caps: the segment, and a dot at each end.
+    let cap = |at: Pos2| painter.circle_filled(at, stroke / 2.0, ink);
+    // A straight stroke with round caps: the segment, and a dot at each end.
     let capped = |from: Pos2, to: Pos2| {
         painter.line_segment([from, to], pen);
-        painter.circle_filled(from, stroke / 2.0, ink);
-        painter.circle_filled(to, stroke / 2.0, ink);
+        cap(from);
+        cap(to);
+    };
+    // A curve with round caps: one stroke along the whole chain of points,
+    // and a dot at each end. One stroke, not one per link: egui feathers
+    // each stroke it is given a pixel out from its edges, and where two
+    // overlap the second's feather is laid over the first's ink and dims
+    // it — the fringe is blended as premultiplied gamma, and a half-covered
+    // fringe fragment over a fully inked pixel comes out darker than either.
+    // A curve drawn as a chain of separate links is nothing but overlaps,
+    // and came out gray at every corner; drawn as one path it has one
+    // feather, along its two sides, like a straight stroke.
+    let curved = |points: &[[f32; 2]]| {
+        let points: Vec<Pos2> = points.iter().map(|at| point(*at)).collect();
+        let (first, last) = (points[0], points[points.len() - 1]);
+        painter.add(egui::Shape::line(points, pen));
+        cap(first);
+        cap(last);
     };
     let boxed = |rect: Rect| {
         egui::Rect::from_min_size(pos2(rect.x, rect.y), egui::vec2(rect.width, rect.height))
@@ -920,8 +992,28 @@ pub(super) fn paint(
                 );
             }
             Mark::Circle { at, radius } => {
-                let across = grid.snap(radius * place.unit).max(stroke);
-                painter.circle_stroke(point(place.at(*at)), across, pen);
+                // A circle is a curve like any other at a one-pixel stroke:
+                // drawn as egui draws it, only its four extremes would be on
+                // the grid, and the rest of it gray. Closed, so the last
+                // point must not repeat the first: a link of no length has
+                // no direction to be feathered in. One too small to walk
+                // round — fewer than three pixels — is egui's ring after
+                // all, at least a stroke across.
+                let mut points = if place.hinted() {
+                    place.arc(*at, *radius, 0.0, 360.0)
+                } else {
+                    Vec::new()
+                };
+                if points.len() > 1 && points.first() == points.last() {
+                    points.pop();
+                }
+                if points.len() >= 3 {
+                    let points: Vec<Pos2> = points.iter().map(|at| point(*at)).collect();
+                    painter.add(egui::Shape::closed_line(points, pen));
+                } else {
+                    let across = grid.snap(radius * place.unit).max(stroke);
+                    painter.circle_stroke(point(place.at(*at)), across, pen);
+                }
             }
             Mark::Arc {
                 at,
@@ -929,10 +1021,7 @@ pub(super) fn paint(
                 start,
                 sweep,
             } => {
-                let points = place.arc(*at, *radius, *start, *sweep);
-                for pair in points.windows(2) {
-                    capped(point(pair[0]), point(pair[1]));
-                }
+                curved(&place.arc(*at, *radius, *start, *sweep));
             }
             Mark::Dot(at) => {
                 painter.circle_filled(point(place.at(*at)), stroke / 2.0, ink);
@@ -974,20 +1063,34 @@ mod tests {
 
     /// Every icon in the table, so that a new one is held to the same
     /// promises as the rest.
-    const ICONS: [&[Mark]; 13] = [
+    const ICONS: [&[Mark]; 27] = [
         CHART_AREA,
         INFO,
         CIRCLE_QUESTION_MARK,
         SQUARE_SQUARE,
-        GRID_3X3,
-        COPY,
-        CROP,
+        SQUARE_MENU,
+        FILE_IMAGE,
+        FOLDER,
+        CLIPBOARD,
         EXPAND,
-        MAXIMIZE_2,
+        CHEVRON_LEFT,
+        CHEVRON_RIGHT,
         CHEVRONS_LEFT_RIGHT,
         CHEVRONS_UP_DOWN,
         ROTATE_CCW,
         SPLINE,
+        TRIANGLE_ALERT,
+        GRID_3X3,
+        MAXIMIZE_2,
+        CIRCLE_DOT,
+        COPY,
+        EXTERNAL_LINK,
+        CROP,
+        PLAY,
+        PAUSE,
+        STEP_BACK,
+        STEP_FORWARD,
+        X,
     ];
 
     fn device(value: f32, scale: f32) -> f32 {
@@ -1071,6 +1174,72 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// At a stroke one device pixel wide, a curve is a walk over the pixel
+    /// grid: every point of it is placed as a straight stroke's ends are,
+    /// and no two in a row are the same point, since a link of no length
+    /// has no direction to be drawn in. A closed curve has that same rule
+    /// between its last point and its first.
+    #[test]
+    fn a_thin_curve_walks_the_pixel_grid() {
+        for scale in SCALES {
+            let grid = Grid::new(scale);
+            // A square small enough for the stroke to come to one pixel.
+            let square = fit(grid, Rect::new(0.0, 0.0, 12.0, 12.0), 10.0);
+            let place = Placer::new(grid, square);
+            assert_eq!(device(place.stroke, scale).round(), 1.0, "scale {scale}");
+            assert!(place.hinted());
+            let mut checked = 0;
+            for icon in ICONS {
+                for mark in icon {
+                    let points = match mark {
+                        Mark::Arc {
+                            at,
+                            radius,
+                            start,
+                            sweep,
+                        } => place.arc(*at, *radius, *start, *sweep),
+                        Mark::Circle { at, radius } => place.arc(*at, *radius, 0.0, 360.0),
+                        _ => continue,
+                    };
+                    // A turn tighter than a pixel comes to a single point,
+                    // which is drawn as its cap alone.
+                    assert!(!points.is_empty());
+                    for point in &points {
+                        for coordinate in point {
+                            let edge = device(*coordinate, scale) - 0.5;
+                            assert!(
+                                (edge - edge.round()).abs() < 1e-3,
+                                "scale {scale}: a curve's point at {coordinate} logical pixels"
+                            );
+                        }
+                    }
+                    for pair in points.windows(2) {
+                        assert_ne!(pair[0], pair[1], "scale {scale}: a link of no length");
+                    }
+                    checked += 1;
+                }
+            }
+            assert!(checked > 0);
+        }
+    }
+
+    /// At a stroke wide enough to have a solid core, a curve is left where it
+    /// falls: its ends are the grid points it was described by, and no point
+    /// of it is moved onto the pixel grid, since that would bend it.
+    #[test]
+    fn a_thick_curve_is_left_where_it_falls() {
+        let grid = Grid::new(2.0);
+        let square = fit(grid, Rect::new(0.0, 0.0, 22.0, 22.0), 14.0);
+        let place = Placer::new(grid, square);
+        assert!(!place.hinted());
+        let points = place.arc([4.0, 18.0], 2.0, 180.0, -90.0);
+        let close =
+            |a: [f32; 2], b: [f32; 2]| (a[0] - b[0]).abs() < 1e-3 && (a[1] - b[1]).abs() < 1e-3;
+        assert!(close(points[0], place.free([2.0, 18.0])), "{:?}", points[0]);
+        assert!(close(points[points.len() - 1], place.free([4.0, 20.0])));
+        assert_eq!(points.len(), 9);
     }
 
     /// Where a stroked mark's center line falls in logical pixels, as `paint`
