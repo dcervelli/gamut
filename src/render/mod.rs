@@ -217,7 +217,7 @@ impl Renderer {
         surface.configure(&device, &config);
 
         let targets = Targets::new(&device, width, height);
-        let image_layer = ImageLayer::new(&device, WORKING_FORMAT);
+        let image_layer = ImageLayer::new(&device, &queue, WORKING_FORMAT);
         let egui = egui_wgpu::Renderer::new(
             &device,
             UI_FORMAT,

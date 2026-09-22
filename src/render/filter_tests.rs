@@ -13,7 +13,7 @@ use super::WORKING_FORMAT;
 use super::gpu;
 use super::image_layer::{Draw, ImageLayer};
 use super::{Placement, Upscale};
-use crate::image::display::{Display, Headroom};
+use crate::image::display::{Colormap, Display, Headroom};
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Referred, Samples};
 
 /// Draws `image` into a `target`-sized working-space texture and reads it
@@ -34,7 +34,7 @@ fn draw_all(
     target: [u32; 2],
     quads: Draw,
 ) -> Vec<[f32; 4]> {
-    let mut layer = ImageLayer::new(&gpu.device, WORKING_FORMAT);
+    let mut layer = ImageLayer::new(&gpu.device, &gpu.queue, WORKING_FORMAT);
     let uploaded = layer
         .uploader(&gpu.device, &gpu.queue, gpu.capabilities)
         .run(image)
@@ -50,6 +50,17 @@ fn draw_layer(
     layer: &mut ImageLayer,
     target: [u32; 2],
     quads: Draw,
+) -> Vec<[f32; 4]> {
+    draw_layer_as(gpu, layer, target, quads, &Display::default())
+}
+
+/// As [`draw_layer`], under `display` rather than the identity.
+fn draw_layer_as(
+    gpu: &gpu::TestContext,
+    layer: &mut ImageLayer,
+    target: [u32; 2],
+    quads: Draw,
+    display: &Display,
 ) -> Vec<[f32; 4]> {
     let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
         label: Some("filter test target"),
@@ -85,7 +96,7 @@ fn draw_layer(
         &mut encoder,
         quads,
         [target[0] as f32, target[1] as f32],
-        &Display::default(),
+        display,
     );
     {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -145,13 +156,32 @@ fn draw_layer(
 }
 
 fn gray_u8(width: u32, height: u32, data: Vec<u8>) -> DecodedImage {
-    DecodedImage {
+    gray(
         width,
         height,
-        samples: Samples::U8 {
+        Samples::U8 {
             channels: Channels::Gray,
             data,
         },
+    )
+}
+
+fn gray_f32(width: u32, height: u32, data: Vec<f32>) -> DecodedImage {
+    gray(
+        width,
+        height,
+        Samples::F32 {
+            channels: Channels::Gray,
+            data,
+        },
+    )
+}
+
+fn gray(width: u32, height: u32, samples: Samples) -> DecodedImage {
+    DecodedImage {
+        width,
+        height,
+        samples,
         color: ColorSpace::LINEAR_BT709,
         alpha: AlphaMode::Opaque,
         referred: Referred::Scene,
@@ -194,7 +224,7 @@ fn a_refilled_texture_draws_the_new_frame() {
     let dark = gray_u8(SIZE, SIZE, vec![0; (SIZE * SIZE) as usize]);
     let bright = gray_u8(SIZE, SIZE, vec![255; (SIZE * SIZE) as usize]);
 
-    let mut layer = ImageLayer::new(&gpu.device, WORKING_FORMAT);
+    let mut layer = ImageLayer::new(&gpu.device, &gpu.queue, WORKING_FORMAT);
     let upload = layer.uploader(&gpu.device, &gpu.queue, gpu.capabilities);
     layer.install(upload.run(&dark).expect("the image uploads"));
     // Sixteen to one builds the chain from the dark frame.
@@ -542,7 +572,7 @@ fn the_lift_on_the_device_agrees_with_the_readout() {
     let map = image.gain_map.as_ref().unwrap();
     let target = [image.width, image.height];
 
-    let mut layer = ImageLayer::new(&gpu.device, WORKING_FORMAT);
+    let mut layer = ImageLayer::new(&gpu.device, &gpu.queue, WORKING_FORMAT);
     let uploaded = layer
         .uploader(&gpu.device, &gpu.queue, gpu.capabilities)
         .run(&image)
@@ -595,7 +625,7 @@ fn the_coarse_chain_is_reduced_from_lifted_light() {
         upscale: Upscale::Nearest,
     };
 
-    let mut layer = ImageLayer::new(&gpu.device, WORKING_FORMAT);
+    let mut layer = ImageLayer::new(&gpu.device, &gpu.queue, WORKING_FORMAT);
     let uploaded = layer
         .uploader(&gpu.device, &gpu.queue, gpu.capabilities)
         .run(&image)
@@ -623,6 +653,60 @@ fn the_coarse_chain_is_reduced_from_lifted_light() {
                 assert!(
                     close(*got, expected, 4e-3),
                     "weight {weight} block {block} channel {channel}: got {got}, expected {expected}"
+                );
+            }
+        }
+    }
+}
+
+/// A false color on the device is the readout's: every ramp, drawn over a
+/// gray sweep through and past the window, is `Colormap::color` of the
+/// windowed value — including the ends, which out-of-window values take.
+/// Gray is no false color at all: the windowed value itself, unclamped,
+/// left for the compositor's curve to clip.
+#[test]
+fn the_false_color_on_the_device_is_the_readouts() {
+    let Some(gpu) = gpu::test_context() else {
+        return;
+    };
+    const WIDTH: u32 = 300;
+    let values: Vec<f32> = (0..WIDTH)
+        .map(|index| index as f32 / (WIDTH - 1) as f32 * 1.2 - 0.1)
+        .collect();
+    let image = gray_f32(WIDTH, 1, values.clone());
+    let target = [WIDTH, 1];
+
+    let mut layer = ImageLayer::new(&gpu.device, &gpu.queue, WORKING_FORMAT);
+    let uploaded = layer
+        .uploader(&gpu.device, &gpu.queue, gpu.capabilities)
+        .run(&image)
+        .expect("the image uploads");
+    layer.install(uploaded);
+
+    for map in Colormap::ALL {
+        let display = Display {
+            colormap: map,
+            ..Display::default()
+        };
+        let pixels = draw_layer_as(
+            gpu,
+            &mut layer,
+            target,
+            Draw::plain(whole(target, &image), None),
+            &display,
+        );
+        for (x, value) in values.iter().enumerate() {
+            let expected = if map == Colormap::Gray {
+                [*value; 3]
+            } else {
+                map.color(*value)
+            };
+            let got = pixels[x];
+            for (channel, (got, want)) in got.iter().zip(expected).enumerate() {
+                assert!(
+                    close(*got, want, 2e-3),
+                    "{} at {value}: channel {channel} got {got}, expected {want}",
+                    map.label()
                 );
             }
         }

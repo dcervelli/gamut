@@ -158,75 +158,24 @@ fn resample(uv: vec2<f32>) -> vec4<f32> {
     }
 }
 
-fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
-    let cutoff = step(c, vec3<f32>(0.04045));
-    let low = c / 12.92;
-    let high = pow((c + vec3<f32>(0.055)) / 1.055, vec3<f32>(2.4));
-    return mix(high, low, cutoff);
-}
+// The false-color ramps, one row per map, as `image_layer` wrote them from
+// `Colormap::color`: the readout in the bottom bar names a color from the
+// same function, so the swatch and the screen cannot disagree. Which row a
+// map is, is `shader_codes::colormap`'s to say.
+@group(3) @binding(0) var ramps: texture_2d<f32>;
 
-// Polynomial fits to the matplotlib colormaps. Approximations, but well
-// within what the eye resolves in a false-color display. They produce
-// sRGB-encoded values, so the caller linearizes.
-//
-// Viridis and magma are Matt Zucker's fits, from
-// https://www.shadertoy.com/view/WlfXRN, under CC0; `REUSE.toml` records it.
-//
-// Mirrored on the CPU by `Colormap::color` in image/display.rs, which the
-// pointer readout uses to say what color a pixel came out. Change one, change
-// the other: a swatch that disagrees with the screen is worse than no swatch.
-fn viridis(t: f32) -> vec3<f32> {
-    let c0 = vec3<f32>(0.2777273, 0.00540734, 0.33409980);
-    let c1 = vec3<f32>(0.10509304, 1.40461353, 1.38459016);
-    let c2 = vec3<f32>(-0.33086183, 0.21484756, 0.09509516);
-    let c3 = vec3<f32>(-4.63423050, -5.79910097, -19.33244096);
-    let c4 = vec3<f32>(6.22826994, 14.17993337, 56.69055260);
-    let c5 = vec3<f32>(4.77638500, -13.74514538, -65.35303263);
-    let c6 = vec3<f32>(-5.43545586, 4.64585261, 26.31241433);
-    return c0 + t * (c1 + t * (c2 + t * (c3 + t * (c4 + t * (c5 + t * c6)))));
-}
-
-fn magma(t: f32) -> vec3<f32> {
-    let c0 = vec3<f32>(-0.00213649, -0.00074966, -0.00538613);
-    let c1 = vec3<f32>(0.25166054, 0.67752324, 2.49402660);
-    let c2 = vec3<f32>(8.35371728, -3.57771951, 0.31446790);
-    let c3 = vec3<f32>(-27.66873309, 14.26473078, -13.64921319);
-    let c4 = vec3<f32>(52.17613981, -27.94360607, 12.94416944);
-    let c5 = vec3<f32>(-50.76852536, 29.04658282, 4.23415299);
-    let c6 = vec3<f32>(18.65570507, -11.48977352, -5.60196151);
-    return c0 + t * (c1 + t * (c2 + t * (c3 + t * (c4 + t * (c5 + t * c6)))));
-}
-
-// Turbo's colormap is Anton Mikhailov's and this fit to it Ruofei Du's, both
-// of Google, published under Apache-2.0; `REUSE.toml` records it.
-// https://gist.github.com/mikhailov-work/0d177465a8151eb6ede1768d51d476c7
-fn turbo(t: f32) -> vec3<f32> {
-    let red4 = vec4<f32>(0.13572138, 4.61539260, -42.66032258, 132.13108234);
-    let green4 = vec4<f32>(0.09140261, 2.19418839, 4.84296658, -14.18503333);
-    let blue4 = vec4<f32>(0.10667330, 12.64194608, -60.58204836, 110.36276771);
-    let red2 = vec2<f32>(-152.94239396, 59.28637943);
-    let green2 = vec2<f32>(4.27729857, 2.82956604);
-    let blue2 = vec2<f32>(-89.90310912, 27.34824973);
-
-    let v4 = vec4<f32>(1.0, t, t * t, t * t * t);
-    let v2 = v4.zw * v4.z;
-    return vec3<f32>(
-        dot(v4, red4) + dot(v2, red2),
-        dot(v4, green4) + dot(v2, green2),
-        dot(v4, blue4) + dot(v2, blue2),
-    );
-}
-
+// The color ramp `which` gives a windowed value, in linear light: the two
+// entries either side of it, blended by where it falls between them.
+// Out-of-window values take the end of the ramp.
 fn false_color(which: u32, t: f32) -> vec3<f32> {
-    let clamped = clamp(t, 0.0, 1.0);
-    var encoded: vec3<f32>;
-    switch which {
-        case 1u: { encoded = viridis(clamped); }
-        case 2u: { encoded = magma(clamped); }
-        case 3u: { encoded = turbo(clamped); }
-        default: { encoded = vec3<f32>(clamped); }
-    }
-    return srgb_to_linear(clamp(encoded, vec3<f32>(0.0), vec3<f32>(1.0)));
+    let last = i32(textureDimensions(ramps).x) - 1;
+    let at = clamp(t, 0.0, 1.0) * f32(last);
+    let low = i32(floor(at));
+    let high = min(low + 1, last);
+    let row = i32(which);
+    let below = textureLoad(ramps, vec2<i32>(low, row), 0).rgb;
+    let above = textureLoad(ramps, vec2<i32>(high, row), 0).rgb;
+    return mix(below, above, at - f32(low));
 }
 
 @fragment

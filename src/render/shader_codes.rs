@@ -43,7 +43,9 @@ pub fn level_alpha(alpha: AlphaMode) -> u32 {
     }
 }
 
-/// Matches `colormap` in `shaders/image.wgsl`.
+/// Which row of the ramps texture `image_layer` writes holds `map`, and
+/// what `colormap` in `shaders/image.wgsl` reads it by. Gray is 0, which the
+/// shader takes as no false color at all.
 pub fn colormap(map: Colormap) -> u32 {
     match map {
         Colormap::Gray => 0,
@@ -200,19 +202,15 @@ mod tests {
         );
     }
 
-    /// Every ramp but gray is an arm; gray is the default.
+    /// The ramps are rows of one texture, so the codes are its row indices:
+    /// every map has a row of its own, and gray's is the first, which the
+    /// shader takes as no false color.
     #[test]
-    fn the_colormaps_are_the_shaders_arms() {
-        let ramps = set(Colormap::ALL
-            .iter()
-            .filter(|map| **map != Colormap::Gray)
-            .map(|map| colormap(*map)));
-        assert_eq!(cases(IMAGE, "which"), [ramps]);
-        assert_eq!(
-            colormap(Colormap::Gray),
-            0,
-            "no false color is the default arm"
-        );
+    fn the_colormaps_are_the_ramps_rows() {
+        let rows = set(Colormap::ALL.iter().map(|map| colormap(*map)));
+        assert_eq!(rows, set(0..Colormap::ALL.len() as u32));
+        assert_eq!(colormap(Colormap::Gray), 0);
+        assert!(IMAGE.contains("params.colormap != 0u"));
     }
 
     /// The curve and the pass-through are arms; the clip is the default.

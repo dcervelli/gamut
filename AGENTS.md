@@ -142,7 +142,8 @@ image/         the data model, nothing GPU
                  an ORF or RW2 under its own magic, the JPEG in a RAF, the
                  TIFF in an MRW, the boxes of a CR3 written back out as one
   display.rs     Display: window, exposure, tone map, colormap — uniform state, never re-decodes;
-                 map() and the CPU twins of the shaders' tone curves and colormaps
+                 map(), the CPU twins of the shaders' tone curves, and the colormaps the
+                 image layer writes its ramp texture from
   decode/        Decoder trait + DECODERS registry in mod.rs; one file per format; limits.rs the size ceiling;
                  dynamic.rs the shared DynamicImage bridge; orient.rs the turn an orientation tag asks
                  for, applied to any layout; heif/tmap.rs reads ISO 21496-1's gain-map item and

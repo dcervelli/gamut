@@ -257,11 +257,10 @@ impl Colormap {
     /// space. Out-of-window values take the end of the ramp, as they do on
     /// screen.
     ///
-    /// The same fits `false_color` runs in `shaders/image.wgsl`, and the same
-    /// linearization after them — the polynomials produce sRGB-encoded
-    /// values. Two copies of a table is a thing to keep an eye on; the
-    /// alternative is a readout that names a color the screen is not
-    /// showing.
+    /// The one place the ramps are defined: `render/image_layer.rs` samples
+    /// this along each map's length into the texture `shaders/image.wgsl`
+    /// reads, so the screen shows what the readout names by construction.
+    /// The polynomials produce sRGB-encoded values, linearized after.
     pub fn color(self, value: f32) -> [f32; 3] {
         let t = value.clamp(0.0, 1.0);
         let encoded = match self {
@@ -292,8 +291,7 @@ fn ramp(coefficients: &[[f32; 3]], t: f32) -> [f32; 3] {
 // is borrowed is the fit, not the colormap, which is why the license recorded
 // in `REUSE.toml` is the fit's.
 //
-// Written out to the digit as the shader has them, so that the two tables can
-// be checked against each other by eye; f32 keeps rather fewer of them.
+// Written out to the digit as published; f32 keeps rather fewer of them.
 #[allow(clippy::excessive_precision)]
 const VIRIDIS: [[f32; 3]; 7] = [
     [0.2777273, 0.00540734, 0.33409980],
@@ -321,8 +319,8 @@ const MAGMA: [[f32; 3]; 7] = [
 /// <https://gist.github.com/mikhailov-work/0d177465a8151eb6ede1768d51d476c7>
 /// under Apache-2.0. `REUSE.toml` records it.
 ///
-/// The shader writes this one as two dot products per channel; it is the same
-/// degree-five polynomial, transposed to a triple per power.
+/// Published as two dot products per channel; this is the same degree-five
+/// polynomial, transposed to a triple per power.
 #[allow(clippy::excessive_precision)]
 const TURBO: [[f32; 3]; 6] = [
     [0.13572138, 0.09140261, 0.10667330],

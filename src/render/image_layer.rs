@@ -18,8 +18,14 @@ use super::upload::{self, Capabilities};
 use crate::image::gain_map::GainMap;
 use crate::image::{
     AlphaMode, Channels, DecodedImage,
-    display::{Display, Headroom},
+    display::{Colormap, Display, Headroom},
 };
+
+/// How many entries a false-color ramp is written to the device as. The
+/// shader interpolates between neighbors, so this is what bounds how far a
+/// value on screen can be from `Colormap::color` of the same value: a
+/// thousand steps puts it under what a 16-bit target resolves.
+const RAMP_LENGTH: u32 = 1024;
 
 /// Layout must match `struct Params` in shaders/image.wgsl.
 #[repr(C)]
@@ -175,6 +181,10 @@ pub struct ImageLayer {
     /// What a picture with no gain map binds in the map's place: a texel of
     /// each, never read, since the lift is switched off with them.
     blank_lift: wgpu::BindGroup,
+    /// The false-color ramps, one row per map, written once from
+    /// `Colormap::color` — the same values the readout names, so that the
+    /// screen and the swatch cannot disagree.
+    ramps: wgpu::BindGroup,
     main: Slot,
     thumbnail: Slot,
     reducer: Reducer,
@@ -196,7 +206,11 @@ impl GpuImage {
 }
 
 impl ImageLayer {
-    pub fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        target_format: wgpu::TextureFormat,
+    ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("image layer"),
             source: wgpu::ShaderSource::Wgsl(super::IMAGE_SHADER.into()),
@@ -214,10 +228,12 @@ impl ImageLayer {
         // device.
         let lift_layout = gpu::texture_layout(device, "gain map", 2, false);
         let blank_lift = blank_lift(device, &lift_layout);
+        let ramps_layout = gpu::texture_layout(device, "ramps", 1, false);
+        let ramps = ramps(device, queue, &ramps_layout);
         let pipeline_layout = gpu::pipeline_layout(
             device,
             "image layer",
-            &[&params_layout, &texture_layout, &lift_layout],
+            &[&params_layout, &texture_layout, &lift_layout, &ramps_layout],
         );
         let pipeline = gpu::fullscreen_pipeline(
             device,
@@ -238,6 +254,7 @@ impl ImageLayer {
             texture_layout,
             lift_layout,
             blank_lift,
+            ramps,
             main: Slot::new(device, &params_layout, "image params"),
             thumbnail: Slot::new(device, &params_layout, "thumbnail params"),
             image: None,
@@ -408,6 +425,7 @@ impl ImageLayer {
             pass.set_bind_group(0, &slot.group, &[]);
             pass.set_bind_group(1, binding, &[]);
             pass.set_bind_group(2, lift, &[]);
+            pass.set_bind_group(3, &self.ramps, &[]);
             pass.draw(0..4, 0..1);
         }
     }
@@ -510,6 +528,65 @@ impl Lift {
         (self.base_offset, self.alternate_offset) = table.offsets();
         self.weight = table.weight();
     }
+}
+
+/// Every false-color ramp on the device: `Colormap::color` sampled along
+/// its length, in linear light, one row per map at the row
+/// `shader_codes::colormap` names. The gray row is the identity, and is
+/// never read, since no false color is the shader's default arm.
+fn ramps(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layout: &wgpu::BindGroupLayout,
+) -> wgpu::BindGroup {
+    let rows = Colormap::ALL.len() as u32;
+    let mut texels = vec![[0.0f32; 4]; (RAMP_LENGTH * rows) as usize];
+    for map in Colormap::ALL {
+        let row = shader_codes::colormap(map) as usize * RAMP_LENGTH as usize;
+        for (index, texel) in texels[row..row + RAMP_LENGTH as usize]
+            .iter_mut()
+            .enumerate()
+        {
+            let [r, g, b] = map.color(index as f32 / (RAMP_LENGTH - 1) as f32);
+            *texel = [r, g, b, 1.0];
+        }
+    }
+    let size = wgpu::Extent3d {
+        width: RAMP_LENGTH,
+        height: rows,
+        depth_or_array_layers: 1,
+    };
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("ramps"),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba32Float,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        bytemuck::cast_slice(&texels),
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(RAMP_LENGTH * 16),
+            rows_per_image: Some(rows),
+        },
+        size,
+    );
+    gpu::texture_group(
+        device,
+        "ramps",
+        layout,
+        &[&texture.create_view(&wgpu::TextureViewDescriptor::default())],
+    )
 }
 
 /// A texel of map and a texel of table, for the pictures that have neither.
