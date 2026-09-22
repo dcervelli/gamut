@@ -29,57 +29,6 @@ fn vs_main(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
     return vec4<f32>(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 0.0, 1.0);
 }
 
-// Color premultiplied by alpha, in the component layout the texture stores.
-// Averaging straight alpha would drag the color of fully transparent texels
-// into its neighbors, which is what shows as haloing along a hard edge.
-fn premultiplied(texel: vec4<f32>) -> vec4<f32> {
-    if params.alpha_mode != 1u {
-        return texel;
-    }
-    switch params.swizzle {
-        case 1u: { return vec4<f32>(texel.r * texel.g, texel.g, texel.ba); }
-        case 3u: { return vec4<f32>(texel.rgb * texel.a, texel.a); }
-        default: { return texel; }
-    }
-}
-
-// The same lift as image.wgsl's, so that the first level is reduced from
-// lifted light; see `gain` there.
-fn gains(coord: vec2<i32>) -> vec3<f32> {
-    let value = textureLoad(gain_map, coord, 0);
-    let at = vec3<i32>(round(value.rgb * 255.0));
-    if params.lift == 1u {
-        return textureLoad(gain_table, vec2<i32>(at.r, 0), 0).rgb;
-    }
-    return vec3<f32>(
-        textureLoad(gain_table, vec2<i32>(at.r, 0), 0).r,
-        textureLoad(gain_table, vec2<i32>(at.g, 0), 0).g,
-        textureLoad(gain_table, vec2<i32>(at.b, 0), 0).b,
-    );
-}
-
-fn gain(coord: vec2<i32>) -> vec3<f32> {
-    let position = vec2<f32>(coord) / params.extent * params.map_size;
-    let last = vec2<i32>(textureDimensions(gain_map)) - vec2<i32>(1);
-    let near = min(vec2<i32>(floor(position)), last);
-    let far = min(near + vec2<i32>(1), last);
-    let fraction = position - floor(position);
-    let top = mix(gains(near), gains(vec2<i32>(far.x, near.y)), fraction.x);
-    let bottom = mix(gains(vec2<i32>(near.x, far.y)), gains(far), fraction.x);
-    return mix(top, bottom, fraction.y);
-}
-
-fn load(coord: vec2<i32>) -> vec4<f32> {
-    let limit = vec2<i32>(textureDimensions(source)) - vec2<i32>(1);
-    let clamped = clamp(coord, vec2<i32>(0), limit);
-    var texel = textureLoad(source, clamped, 0);
-    if params.lift != 0u {
-        let lifted = (texel.rgb + params.base_offset.rgb) * gain(clamped) - params.alternate_offset.rgb;
-        texel = vec4<f32>(lifted, texel.a);
-    }
-    return premultiplied(texel);
-}
-
 @fragment
 fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     let low = floor(position.xy) * params.step;

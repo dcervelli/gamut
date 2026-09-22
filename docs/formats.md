@@ -90,8 +90,9 @@ and the lift happens on the GPU. `render/upload.rs` puts the map up as an
 8-bit texture of its own, and `image_layer::Lift` a 256-texel table beside
 it saying what each of the map's values means at the current weight, made
 on the CPU by `GainMap::table` and written again when the weight changes.
-Both `shaders/image.wgsl` and `shaders/reduce.wgsl` lift a texel as they
-load it — the map sampled bilinearly at the texel's place in it, as the
+`shaders/texel.wgsl`, the reading of one texel that `render/mod.rs`
+prepends to both `image.wgsl` and `reduce.wgsl`, lifts a texel as it loads
+it — the map sampled bilinearly at the texel's place in it, as the
 standard's reference does, each corner through the table — before it is
 filtered, so that every weighted sum is over lifted light, and the coarse
 chain, reduced from it, is built again when the weight moves. A

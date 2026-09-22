@@ -75,7 +75,7 @@ impl Reducer {
     pub fn new(device: &wgpu::Device, lift_layout: &wgpu::BindGroupLayout) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("reduce"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/reduce.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(super::REDUCE_SHADER.into()),
         });
 
         let params_layout =

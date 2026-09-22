@@ -199,7 +199,7 @@ impl ImageLayer {
     pub fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("image layer"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/image.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(super::IMAGE_SHADER.into()),
         });
 
         let params_layout =

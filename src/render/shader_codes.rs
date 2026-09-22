@@ -112,6 +112,7 @@ mod tests {
 
     use super::*;
 
+    const TEXEL: &str = include_str!("shaders/texel.wgsl");
     const IMAGE: &str = include_str!("shaders/image.wgsl");
     const REDUCE: &str = include_str!("shaders/reduce.wgsl");
     const COMPOSITE: &str = include_str!("shaders/composite.wgsl");
@@ -156,9 +157,10 @@ mod tests {
         codes.into_iter().collect()
     }
 
-    /// Both image-reading shaders switch on the layout twice over: to
-    /// premultiply, where gray and RGB have no alpha and are left to the
-    /// default, and to expand to RGBA, where RGBA is the default.
+    /// The layout is switched on twice over: to premultiply, in the texel
+    /// reading both image shaders share, where gray and RGB have no alpha
+    /// and are left to the default; and to expand to RGBA in the image
+    /// layer, where RGBA is the default.
     #[test]
     fn the_layouts_are_the_shaders_swizzle_arms() {
         let with_alpha = set([swizzle(Channels::GrayAlpha), swizzle(Channels::Rgba)]);
@@ -167,21 +169,29 @@ mod tests {
             swizzle(Channels::GrayAlpha),
             swizzle(Channels::Rgb),
         ]);
-        assert_eq!(
-            cases(IMAGE, "params.swizzle"),
-            [with_alpha.clone(), expanded]
-        );
-        assert_eq!(cases(REDUCE, "params.swizzle"), [with_alpha]);
+        assert_eq!(cases(TEXEL, "params.swizzle"), [with_alpha]);
+        assert_eq!(cases(IMAGE, "params.swizzle"), [expanded]);
+    }
+
+    /// The texel reading is shared by being prepended, not copied: neither
+    /// shader carries a reading of its own.
+    #[test]
+    fn the_texel_reading_is_in_neither_shader() {
+        for source in [IMAGE, REDUCE] {
+            for name in ["fn premultiplied", "fn gains", "fn gain", "fn load"] {
+                assert!(!source.contains(name), "{name}");
+            }
+            assert!(source.contains("load("));
+        }
     }
 
     /// Alpha is compared rather than switched on: straight alpha is the
-    /// one mode that is multiplied through, in both shaders, and opaque the
-    /// one the image shader does not divide back out.
+    /// one mode that is multiplied through, and opaque the one the image
+    /// layer does not divide back out.
     #[test]
     fn the_alpha_modes_are_the_shaders_comparisons() {
         let straight = format!("params.alpha_mode != {}u", alpha(AlphaMode::Straight));
-        assert!(IMAGE.contains(&straight), "{straight}");
-        assert!(REDUCE.contains(&straight), "{straight}");
+        assert!(TEXEL.contains(&straight), "{straight}");
         let opaque = format!("params.alpha_mode == {}u", alpha(AlphaMode::Opaque));
         assert!(IMAGE.contains(&opaque), "{opaque}");
         assert_eq!(

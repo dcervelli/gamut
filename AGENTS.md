@@ -156,7 +156,9 @@ render/        the GPU
   image_layer.rs / reduce.rs / composite.rs   the passes
   shader_codes.rs  every Rust<->WGSL integer code, one fn per shader switch
   gpu.rs         wgpu boilerplate helpers (layouts, uniform buffers, full-screen pipelines)
-  shaders/       WGSL; each Params struct is mirrored by a #[repr(C)] struct in the .rs file that loads it
+  shaders/       WGSL; each Params struct is mirrored by a #[repr(C)] struct in the .rs file that
+                 loads it; texel.wgsl is the reading of one texel that mod.rs prepends to
+                 image.wgsl and reduce.wgsl both
 packaging/     what an Arch package is built from: PKGBUILD, the .desktop entry,
                the icon, and hand-written shell completions
 bin/           release, and pkgbuild-sha which points the PKGBUILD at a published tag

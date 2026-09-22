@@ -46,6 +46,20 @@ use image_layer::{Draw, ImageLayer};
 pub use image_layer::{GpuImage, Upload};
 use upload::Capabilities;
 
+/// The image layer's shader, and the coarse chain's: each behind the texel
+/// reading the two share, `shaders/texel.wgsl`, which is prepended rather
+/// than copied so that a lift or a premultiplication cannot differ between
+/// the draw and the levels it reads from. WGSL resolves module-scope names
+/// in any order, so the preamble may name the bindings each file declares.
+const IMAGE_SHADER: &str = concat!(
+    include_str!("shaders/texel.wgsl"),
+    include_str!("shaders/image.wgsl")
+);
+const REDUCE_SHADER: &str = concat!(
+    include_str!("shaders/texel.wgsl"),
+    include_str!("shaders/reduce.wgsl")
+);
+
 /// The working space every layer meets in: linear, BT.709 primaries, with
 /// enough range above 1.0 for HDR content to survive until tone mapping.
 const WORKING_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
