@@ -228,7 +228,11 @@ impl Referred {
     pub fn of(transfer: Transfer) -> Self {
         match transfer {
             Transfer::Linear => Referred::Measured,
-            Transfer::Srgb | Transfer::Pq | Transfer::Hlg | Transfer::Gamma(_) => Referred::Display,
+            Transfer::Srgb
+            | Transfer::Pq
+            | Transfer::Hlg
+            | Transfer::Bt709
+            | Transfer::Gamma(_) => Referred::Display,
         }
     }
 
@@ -676,6 +680,7 @@ mod tests {
             Transfer::Srgb,
             Transfer::Pq,
             Transfer::Hlg,
+            Transfer::Bt709,
             Transfer::Gamma(2.2),
         ] {
             assert_eq!(Referred::of(transfer), Referred::Display, "{transfer:?}");

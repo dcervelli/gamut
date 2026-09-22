@@ -10,7 +10,6 @@ use super::gpu::{self, Fullscreen};
 use super::output::Output;
 use super::placement::Placement;
 use super::shader_codes;
-use crate::image::display::{Headroom, ToneMap};
 
 /// The most regions the checkerboard can be cut into: the image, and the
 /// minimap's thumbnail.
@@ -125,18 +124,11 @@ impl Composite {
             headroom,
             ..
         } = *scene;
-        // False color is already display-referred: a tone curve on top of a
-        // colormap would distort the mapping the viewer is reading values
-        // off, and headroom above the top of the ramp is a color the ramp
-        // does not have — so a plain clip, whatever the surface. The same
-        // choice `Display::curve` makes for the readouts, and on the same
-        // test: the display ignores a colormap on a color image, so the
-        // compositor has to as well.
-        let tone_map = if display.false_colored(gray) {
-            shader_codes::tone_map(ToneMap::None, Headroom::None)
-        } else {
-            shader_codes::tone_map(display.tone_map, headroom)
-        };
+        // Which curve, and into what room, is the display's to say — a
+        // false color holds it at a clip — and the readouts ask it the same
+        // question, so the two cannot come to disagree.
+        let (tone_map, headroom) = display.curve_on(gray, headroom);
+        let tone_map = shader_codes::tone_map(tone_map, headroom);
 
         // A region that is not drawn stays the empty rectangle it starts as,
         // which the shader's half-open test never matches.

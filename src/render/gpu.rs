@@ -175,7 +175,8 @@ pub fn attachment(
 /// One device for the whole test run, and the capabilities of the adapter it
 /// came from. `None` where the machine has no adapter to draw with, which is
 /// how the tests that use it report success rather than failing for a reason
-/// that has nothing to do with the code.
+/// that has nothing to do with the code — unless `GAMUT_REQUIRE_GPU` is set,
+/// which is how a run on a machine that has one proves they ran.
 ///
 /// Shared rather than opened per test, and per *frame* within a test, because
 /// `wgpu::Instance::new` opens a Vulkan instance and the loader's own locking
@@ -187,7 +188,12 @@ pub(crate) fn test_context() -> Option<&'static TestContext> {
     use std::sync::OnceLock;
 
     static CONTEXT: OnceLock<Option<TestContext>> = OnceLock::new();
-    CONTEXT.get_or_init(open_test_context).as_ref()
+    let context = CONTEXT.get_or_init(open_test_context).as_ref();
+    assert!(
+        context.is_some() || std::env::var_os("GAMUT_REQUIRE_GPU").is_none(),
+        "GAMUT_REQUIRE_GPU is set and no adapter could be opened"
+    );
+    context
 }
 
 #[cfg(test)]

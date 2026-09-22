@@ -9,11 +9,13 @@
 
 use half::f16;
 
-use super::WORKING_FORMAT;
+use super::composite::{Backdrop, Composite};
 use super::gpu;
 use super::image_layer::{Draw, ImageLayer};
-use super::{Placement, Upscale};
-use crate::image::display::{Colormap, Display, Headroom};
+use super::output::{Encoding, Output};
+use super::{Color, Placement, Scene, UI_FORMAT, UiPaint, Upscale, WORKING_FORMAT};
+use crate::image::color::Transfer;
+use crate::image::display::{Colormap, Display, Headroom, ToneMap};
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Referred, Samples};
 
 /// Draws `image` into a `target`-sized working-space texture and reads it
@@ -62,6 +64,35 @@ fn draw_layer_as(
     quads: Draw,
     display: &Display,
 ) -> Vec<[f32; 4]> {
+    render_to(gpu, target, |encoder, view| {
+        layer.prepare(
+            &gpu.device,
+            &gpu.queue,
+            encoder,
+            quads,
+            [target[0] as f32, target[1] as f32],
+            display,
+        );
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("filter test"),
+            color_attachments: &[Some(gpu::attachment(
+                view,
+                wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+            ))],
+            ..Default::default()
+        });
+        layer.render(&mut pass);
+    })
+}
+
+/// Runs `frame` — whatever it records into the encoder, and the pass it
+/// opens on the view it is handed — into a `target`-sized working-space
+/// texture, and reads the result back.
+fn render_to(
+    gpu: &gpu::TestContext,
+    target: [u32; 2],
+    frame: impl FnOnce(&mut wgpu::CommandEncoder, &wgpu::TextureView),
+) -> Vec<[f32; 4]> {
     let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
         label: Some("filter test target"),
         size: wgpu::Extent3d {
@@ -90,25 +121,7 @@ fn draw_layer_as(
     let mut encoder = gpu
         .device
         .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-    layer.prepare(
-        &gpu.device,
-        &gpu.queue,
-        &mut encoder,
-        quads,
-        [target[0] as f32, target[1] as f32],
-        display,
-    );
-    {
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("filter test"),
-            color_attachments: &[Some(gpu::attachment(
-                &view,
-                wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-            ))],
-            ..Default::default()
-        });
-        layer.render(&mut pass);
-    }
+    frame(&mut encoder, &view);
     encoder.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo {
             texture: &texture,
@@ -709,6 +722,199 @@ fn the_false_color_on_the_device_is_the_readouts() {
                     map.label()
                 );
             }
+        }
+    }
+}
+
+/// A one-row texture in `format`, holding `texels` — written as the
+/// working format's halves, or as the interface target's bytes.
+fn row_texture(
+    gpu: &gpu::TestContext,
+    format: wgpu::TextureFormat,
+    bytes: &[u8],
+    width: u32,
+) -> wgpu::TextureView {
+    let size = wgpu::Extent3d {
+        width,
+        height: 1,
+        depth_or_array_layers: 1,
+    };
+    let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("composite test source"),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    gpu.queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        bytes,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(bytes.len() as u32),
+            rows_per_image: Some(1),
+        },
+        size,
+    );
+    texture.create_view(&wgpu::TextureViewDescriptor::default())
+}
+
+/// Composites a row of opaque linear `colors`, as the image layer would
+/// have left them, with nothing drawn by the interface and a black
+/// backdrop, under `display` on a surface with `headroom`, out to
+/// `encoding`; and reads the row back.
+fn composited(
+    gpu: &gpu::TestContext,
+    colors: &[[f32; 3]],
+    display: &Display,
+    gray: bool,
+    headroom: Headroom,
+    encoding: Encoding,
+) -> Vec<[f32; 4]> {
+    let width = colors.len() as u32;
+    let halves: Vec<u8> = colors
+        .iter()
+        .flat_map(|[r, g, b]| [*r, *g, *b, 1.0])
+        .flat_map(|value| f16::from_f32(value).to_le_bytes())
+        .collect();
+    let image = row_texture(gpu, WORKING_FORMAT, &halves, width);
+    let ui = row_texture(gpu, UI_FORMAT, &vec![0u8; width as usize * 4], width);
+
+    let mut composite = Composite::new(&gpu.device, WORKING_FORMAT);
+    composite.bind_targets(&gpu.device, &image, &ui);
+    let output = Output {
+        format: WORKING_FORMAT,
+        color_space: wgpu::SurfaceColorSpace::Srgb,
+        encoding,
+        label: "test",
+        is_hdr: false,
+    };
+    let paint = UiPaint {
+        primitives: Vec::new(),
+        pixels_per_point: 1.0,
+    };
+    let scene = Scene {
+        placement: Placement {
+            x: 0.0,
+            y: 0.0,
+            width: width as f32,
+            height: 1.0,
+            zoom: 1.0,
+            upscale: Upscale::Nearest,
+        },
+        thumbnail: None,
+        display,
+        ui: &paint,
+        scale: 1.0,
+        backdrop: Backdrop {
+            base: Color::rgb(0, 0, 0),
+            alternate: Color::rgb(0, 0, 0),
+            square: 8.0,
+        },
+        headroom,
+        mark_clipped: false,
+        lift: 0.0,
+    };
+    composite.prepare(&gpu.queue, &scene, gray, &output, [None, None]);
+    render_to(gpu, [width, 1], |encoder, view| {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("composite test"),
+            color_attachments: &[Some(gpu::attachment(
+                view,
+                wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+            ))],
+            ..Default::default()
+        });
+        composite.render(&mut pass);
+    })
+}
+
+/// A sweep of colors through the shadows, past white and below black, with
+/// the channels apart so that the curve's desaturation has something to do.
+fn sweep() -> Vec<[f32; 3]> {
+    (0..64)
+        .map(|index| {
+            let t = index as f32 / 63.0;
+            [t * 1.6 - 0.05, t * 1.2 - 0.1, t * 0.9]
+        })
+        .collect()
+}
+
+/// The tone curve on the device is the readout's: over a sweep past white,
+/// every curve on every surface comes out as `ToneMap::apply` says — and a
+/// false color holds the curve at a clip, whatever was asked for, as
+/// `Display::curve_on` says.
+#[test]
+fn the_tone_curve_on_the_device_is_the_readouts() {
+    let Some(gpu) = gpu::test_context() else {
+        return;
+    };
+    let colors = sweep();
+    let cases = [
+        (ToneMap::None, Headroom::None, Colormap::Gray, false),
+        (ToneMap::None, Headroom::Above, Colormap::Gray, false),
+        (ToneMap::Neutral, Headroom::None, Colormap::Gray, false),
+        (ToneMap::Neutral, Headroom::Above, Colormap::Gray, false),
+        (ToneMap::Neutral, Headroom::Above, Colormap::Viridis, true),
+        (ToneMap::Neutral, Headroom::Above, Colormap::Viridis, false),
+    ];
+    for (tone_map, headroom, colormap, gray) in cases {
+        let display = Display {
+            tone_map,
+            colormap,
+            ..Display::default()
+        };
+        let pixels = composited(
+            gpu,
+            &colors,
+            &display,
+            gray,
+            headroom,
+            Encoding::ScRgbLinear,
+        );
+        let (curve, room) = display.curve_on(gray, headroom);
+        for (color, got) in colors.iter().zip(&pixels) {
+            let expected = curve.apply(*color, room);
+            for (channel, (got, want)) in got.iter().zip(expected).enumerate() {
+                assert!(
+                    close(*got, want, 3e-3),
+                    "{tone_map:?} on {headroom:?}, {} on gray {gray}, {color:?} channel {channel}: got {got}, expected {want}",
+                    colormap.label()
+                );
+            }
+        }
+    }
+}
+
+/// An HDR10 surface takes the PQ curve the transfer functions define: over
+/// a gray sweep, which the gamut conversion leaves alone, the device
+/// encodes what `Transfer::Pq.to_encoded` does.
+#[test]
+fn the_pq_encoding_on_the_device_is_the_transfers() {
+    let Some(gpu) = gpu::test_context() else {
+        return;
+    };
+    let colors: Vec<[f32; 3]> = (0..64)
+        .map(|index| [index as f32 / 63.0 * 2.0; 3])
+        .collect();
+    let display = Display::default();
+    let pixels = composited(gpu, &colors, &display, false, Headroom::Above, Encoding::Pq);
+    for (color, got) in colors.iter().zip(&pixels) {
+        let expected = Transfer::Pq.to_encoded(color[0]);
+        for (channel, got) in got[..3].iter().enumerate() {
+            assert!(
+                close(*got, expected, 2e-3),
+                "{} channel {channel}: got {got}, expected {expected}",
+                color[0]
+            );
         }
     }
 }

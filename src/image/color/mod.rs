@@ -19,9 +19,22 @@ pub enum Transfer {
     Pq,
     /// ARIB STD-B67 hybrid log-gamma.
     Hlg,
+    /// ITU-R BT.709's opto-electronic transfer, the camera's curve on its
+    /// own without the display's 2.4 that BT.1886 puts in its place: what
+    /// an Apple gain map is encoded with. No file's pixels are.
+    Bt709,
     /// A plain power law, e.g. 2.2 for many older TIFFs.
     Gamma(f32),
 }
+
+/// SMPTE ST 2084's constants, the one place they are written: `pq_encode`
+/// in `render/shaders/composite.wgsl` is held to the curve these make by a
+/// readback test there.
+const PQ_M1: f32 = 2610.0 / 16384.0;
+const PQ_M2: f32 = 128.0 * 2523.0 / 4096.0;
+const PQ_C1: f32 = 3424.0 / 4096.0;
+const PQ_C2: f32 = 32.0 * 2413.0 / 4096.0;
+const PQ_C3: f32 = 32.0 * 2392.0 / 4096.0;
 
 impl Transfer {
     /// Decodes one encoded component to a linear one.
@@ -47,16 +60,11 @@ impl Transfer {
                 if value.is_nan() {
                     return value;
                 }
-                const M1: f32 = 2610.0 / 16384.0;
-                const M2: f32 = 128.0 * 2523.0 / 4096.0;
-                const C1: f32 = 3424.0 / 4096.0;
-                const C2: f32 = 32.0 * 2413.0 / 4096.0;
-                const C3: f32 = 32.0 * 2392.0 / 4096.0;
-                let encoded = value.max(0.0).powf(1.0 / M2);
-                let numerator = (encoded - C1).max(0.0);
-                let denominator = C2 - C3 * encoded;
+                let encoded = value.max(0.0).powf(1.0 / PQ_M2);
+                let numerator = (encoded - PQ_C1).max(0.0);
+                let denominator = PQ_C2 - PQ_C3 * encoded;
                 // 10000 nits full scale, normalized to 203 nits reference white.
-                (numerator / denominator).powf(1.0 / M1) * (10000.0 / 203.0)
+                (numerator / denominator).powf(1.0 / PQ_M1) * (10000.0 / 203.0)
             }
             Transfer::Hlg => {
                 const A: f32 = 0.17883277;
@@ -70,6 +78,13 @@ impl Transfer {
                 };
                 // Nominal 1000 nit system gamma, normalized to reference white.
                 scene * (1000.0 / 203.0)
+            }
+            Transfer::Bt709 => {
+                if value < 0.081 {
+                    value / 4.5
+                } else {
+                    ((value + 0.099) / 1.099).powf(1.0 / 0.45)
+                }
             }
             Transfer::Gamma(gamma) => {
                 if value.is_nan() {
@@ -102,13 +117,8 @@ impl Transfer {
                 }
             }
             Transfer::Pq => {
-                const M1: f32 = 2610.0 / 16384.0;
-                const M2: f32 = 128.0 * 2523.0 / 4096.0;
-                const C1: f32 = 3424.0 / 4096.0;
-                const C2: f32 = 32.0 * 2413.0 / 4096.0;
-                const C3: f32 = 32.0 * 2392.0 / 4096.0;
-                let normalized = (value * (203.0 / 10000.0)).powf(M1);
-                ((C1 + C2 * normalized) / (1.0 + C3 * normalized)).powf(M2)
+                let normalized = (value * (203.0 / 10000.0)).powf(PQ_M1);
+                ((PQ_C1 + PQ_C2 * normalized) / (1.0 + PQ_C3 * normalized)).powf(PQ_M2)
             }
             Transfer::Hlg => {
                 const A: f32 = 0.17883277;
@@ -121,6 +131,13 @@ impl Transfer {
                     A * (12.0 * scene - B).ln() + C
                 }
             }
+            Transfer::Bt709 => {
+                if value < 0.018 {
+                    4.5 * value
+                } else {
+                    1.099 * value.powf(0.45) - 0.099
+                }
+            }
             Transfer::Gamma(gamma) => value.powf(1.0 / gamma),
         }
     }
@@ -131,7 +148,8 @@ impl Transfer {
     }
 
     /// `linear`, `srgb`, `pq`, `hlg`, or `gamma:<N>`, as the command line
-    /// names them.
+    /// names them. Not `bt709`: no file's pixels are encoded with it, so it is
+    /// nothing a user would say about one.
     pub fn parse(value: &str) -> Option<Self> {
         Some(match value.to_ascii_lowercase().as_str() {
             "linear" => Transfer::Linear,
@@ -292,6 +310,7 @@ impl ColorSpace {
             Transfer::Srgb => "sRGB".to_string(),
             Transfer::Pq => "PQ".to_string(),
             Transfer::Hlg => "HLG".to_string(),
+            Transfer::Bt709 => "BT.709".to_string(),
             Transfer::Gamma(g) => format!("gamma {g:.2}"),
         };
         let primaries = match self.primaries {
@@ -481,6 +500,7 @@ mod tests {
             Transfer::Srgb,
             Transfer::Pq,
             Transfer::Hlg,
+            Transfer::Bt709,
             Transfer::Gamma(2.2),
         ];
         for transfer in transfers {

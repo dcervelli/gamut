@@ -238,9 +238,10 @@ why nothing here smooths the plot.
 ## What goes dead
 
 The row of curves is dead under a false color, and says why when rested on.
-The compositor holds the curve at a clip there — `Display::false_colored`
-is the test, and `composite.rs`, the bar's words and the pointer's readout
-all make the same one — because a ramp has no color past its end for a
+The compositor holds the curve at a clip there — `Display::curve_on` is
+where the choice is made, and `composite.rs` and the pointer's readout both
+ask it, the bar's words `Display::false_colored` — because a ramp has no
+color past its end for a
 highlight to roll off into, and a curve over the ramp would bend the very
 mapping the reading is being taken off. `Display::response` runs the curve
 the compositor runs, the buttons refuse the press and `t` does nothing, and

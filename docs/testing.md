@@ -42,10 +42,14 @@ the same way, over a `meta` box assembled in the test around the 62 bytes
 of metadata an iPhone wrote, since no encoder in reach writes one; the
 picture itself is not, and an iPhone's own file is what checks the whole.
 
-Eight of them run the real image pipeline on a real adapter — a headless
-device, no window — and check what the shader and the passes actually produce
-against arithmetic done on the CPU: that minification is the exact mean of the
-texels a pixel covers, that
+The GPU tests in `render/filter_tests.rs` run the real pipeline on a real
+adapter — a headless device, no window — and check what the shaders and the
+passes actually produce against arithmetic done on the CPU. Every place the
+CPU keeps a twin of a shader is held to the device this way: the false-color
+ramps, the tone curves on both kinds of surface and the clip a false color
+holds them at, the PQ curve an HDR10 surface takes, and the gain map's lift.
+Of the filters: that minification is the exact mean of the texels a pixel
+covers, that
 two levels of the coarse chain plus the draw's own filter come to the same
 number as averaging the source directly, that antialiased nearest is exactly
 nearest at a whole-number zoom, that Catmull-Rom passes texel centers through
@@ -53,8 +57,11 @@ untouched, that a transparent texel does not bleed its color into its
 neighbor, that the minimap's thumbnail lands beside the view as a second
 draw of the same texture — building the coarse chain the view itself had no
 use for — and that a frame written into the texture the last one occupies
-is what the next draw shows, through a chain built again from it. Where no adapter can be had they report success rather than failing
-for a reason that has nothing to do with the code.
+is what the next draw shows, through a chain built again from it. Where no
+adapter can be had they report success rather than failing for a reason that
+has nothing to do with the code; on a machine that has one, setting
+`GAMUT_REQUIRE_GPU` makes a run that could not open it fail instead, which is
+how a run proves they ran.
 
 `test_images/` holds a hundred real fixtures — see its README — covering every pixel
 layout the decoder can produce and every per-format encoding with its own code

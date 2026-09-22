@@ -30,6 +30,7 @@
 
 use std::sync::Arc;
 
+use crate::image::color::Transfer;
 use ultrahdr_rs::GainMapMetadata;
 use ultrahdr_rs::gainmap::apply::GainMapLut;
 
@@ -113,7 +114,8 @@ impl GainMap {
                 // gains, so that a weight means the same thing either way.
                 let headroom = headroom.max(1.0).powf(weight);
                 for value in 0..256 {
-                    let gain = 1.0 + (headroom - 1.0) * bt709_to_linear(value as f32 / 255.0);
+                    let gain =
+                        1.0 + (headroom - 1.0) * Transfer::Bt709.to_linear(value as f32 / 255.0);
                     for channel in 0..3 {
                         gains[channel * 256 + value] = gain;
                     }
@@ -216,16 +218,6 @@ impl Table {
 /// A gain map shared between the picture, the GPU's copy of it and the
 /// threads that read it.
 pub type Shared = Arc<GainMap>;
-
-/// The inverse of Rec. 709's opto-electronic transfer function: the curve
-/// on its own, without the display's 2.4 that BT.1886 puts in its place.
-fn bt709_to_linear(value: f32) -> f32 {
-    if value < 0.081 {
-        value / 4.5
-    } else {
-        ((value + 0.099) / 1.099).powf(1.0 / 0.45)
-    }
-}
 
 /// Where a base pixel's row or column falls on the map: the two map rows
 /// (or columns) either side of it and how far it is from the first.
@@ -348,9 +340,9 @@ mod tests {
         let table = map(Lift::Apple { headroom: 4.0 }).table(1.0);
         let middle = table.gain(128, 1);
         assert!(middle > 1.0 && middle < 2.5, "{middle}");
-        assert!((bt709_to_linear(0.5) - 0.2596).abs() < 0.001);
-        assert!((bt709_to_linear(1.0) - 1.0).abs() < 1e-5);
-        assert_eq!(bt709_to_linear(0.0), 0.0);
+        assert!((Transfer::Bt709.to_linear(0.5) - 0.2596).abs() < 0.001);
+        assert!((Transfer::Bt709.to_linear(1.0) - 1.0).abs() < 1e-5);
+        assert_eq!(Transfer::Bt709.to_linear(0.0), 0.0);
     }
 
     /// The map is sampled bilinearly at the base pixel's place in it, as

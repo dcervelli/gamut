@@ -66,9 +66,10 @@ fn neutral(color_in: vec3<f32>) -> vec3<f32> {
 }
 
 // Mirrored on the CPU by `ToneMap::apply` in image/display.rs, for the one
-// pixel the readout in the bottom bar has to describe. Which arm "no curve"
-// takes is the surface's to say — 0 on an SDR surface, 2 on one with room
-// above white — and `shader_codes::tone_map` says it.
+// pixel the readout in the bottom bar has to describe; a readback test in
+// render/filter_tests.rs holds this to it. Which arm "no curve" takes is the
+// surface's to say — 0 on an SDR surface, 2 on one with room above white —
+// and `shader_codes::tone_map` says it.
 fn tone_map(color: vec3<f32>) -> vec3<f32> {
     switch params.tone_map {
         case 1u: { return neutral(max(color, vec3<f32>(0.0))); }

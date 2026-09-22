@@ -155,8 +155,9 @@ impl ToneMap {
     /// The GPU runs this on every pixel of every frame as `tone_map` in
     /// `shaders/composite.wgsl`, with `shader_codes::tone_map` choosing the
     /// arm the way the match below does; this is the same arithmetic for the
-    /// one pixel a readout has to describe. Keep the two in step — the point
-    /// of a readout is that it agrees with the screen.
+    /// one pixel a readout has to describe. A readback test in
+    /// `render/filter_tests.rs` holds the device to this over every arm —
+    /// the point of a readout is that it agrees with the screen.
     pub fn apply(self, color: [f32; 3], headroom: Headroom) -> [f32; 3] {
         match (self, headroom) {
             // The hardware clamps on the way into an SDR surface.
@@ -758,21 +759,29 @@ impl Display {
         }
     }
 
-    /// The tone curve as the compositor runs it over a color: the chosen one
-    /// — or, over a false color, a plain clip whatever the surface.
+    /// The curve the picture goes out through, and the room it goes out
+    /// into: the chosen one on the surface as it is — or, over a false
+    /// color, a plain clip whatever the surface.
     ///
-    /// False color is already display-referred, so `composite.rs` holds the
-    /// curve at a clip over it: a tone curve on top of a colormap would
-    /// distort the mapping the viewer is reading values off, and headroom
-    /// above the top of the ramp is a color the ramp does not have. Every
-    /// readout has to make the same choice, or it stops describing the screen
-    /// it is meant to be describing.
-    fn curve(&self, gray: bool, headroom: Headroom, color: [f32; 3]) -> [f32; 3] {
+    /// False color is already display-referred: a tone curve on top of a
+    /// colormap would distort the mapping the viewer is reading values off,
+    /// and headroom above the top of the ramp is a color the ramp does not
+    /// have. The one place the choice is made: `render/composite.rs` asks
+    /// this for the arm the shader runs, and [`Display::map`] runs the same
+    /// arm on the CPU for the readouts, so neither can stop describing the
+    /// screen the other draws.
+    pub fn curve_on(&self, gray: bool, headroom: Headroom) -> (ToneMap, Headroom) {
         if self.false_colored(gray) {
-            ToneMap::None.apply(color, Headroom::None)
+            (ToneMap::None, Headroom::None)
         } else {
-            self.tone_map.apply(color, headroom)
+            (self.tone_map, headroom)
         }
+    }
+
+    /// [`Display::curve_on`] applied to one color.
+    fn curve(&self, gray: bool, headroom: Headroom, color: [f32; 3]) -> [f32; 3] {
+        let (tone_map, headroom) = self.curve_on(gray, headroom);
+        tone_map.apply(color, headroom)
     }
 
     /// `(offset, gain)` such that `(value - offset) * gain` is the displayed

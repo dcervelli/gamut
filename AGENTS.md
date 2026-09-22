@@ -299,6 +299,7 @@ author's own roadmap — read it, do not write to it.
 
 ```sh
 cargo test
+GAMUT_REQUIRE_GPU=1 cargo test render::   # the GPU tests, made to fail rather than skip
 cargo clippy --all-targets    # clean
 cargo doc --no-deps           # no warnings
 cargo run --release -- test_images/png-rgb8.png --histogram
