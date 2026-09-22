@@ -2043,7 +2043,7 @@ impl App {
         Conditions {
             region_selected: matches!(self.marking.selection, Selection::Shown(_)),
             several_files: self.files.len() > 1,
-            animation: self.playback.is_some(),
+            animation: self.animation.is_some(),
             pages: current.is_some_and(|current| {
                 matches!(
                     current.sequence,

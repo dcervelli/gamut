@@ -1,5 +1,6 @@
 //! Window lifecycle, key handling, and building each frame's interface.
 
+mod animation;
 mod chooser;
 mod edits;
 mod files;
@@ -30,7 +31,7 @@ use crate::loader::{Decoded, Loader, Opened, Ready, Reload, Request, Source};
 use crate::monitor::{Mode, Monitors};
 use crate::motion::Motion;
 use crate::openers::{self, Opener};
-use crate::player::{self, Player};
+use crate::player;
 use crate::portal::{self, Pick, Picked};
 use crate::render::{GpuImage, HdrPreference, Placement, Renderer, Scene, Upscale};
 use crate::theme::{self, Theme};
@@ -44,13 +45,13 @@ use crate::ui::{self, Current, FileFacts, FrameInput, Panels, Reading, Rect};
 use crate::view::{View, Viewport};
 use crate::watch::{self, Watch};
 
+use animation::Animation;
 use chooser::{Chooser, Thumbs};
 use edits::{Edit, Renaming};
 use files::{Announce, Files};
 use gui::Gui;
 use input::{Effect, Pointer};
 use kept::{Kept, Left, Settings};
-use playback::Playback;
 use region::Marking;
 use window::{file_label, initial_window_size, loading_title, window_title};
 
@@ -223,15 +224,12 @@ pub struct App {
     /// the thread that made it. See [`Loader::drop`] for what goes wrong when
     /// the thread is still running as the process leaves `main`.
     loader: Loader,
-    /// The thread decoding the frames of the animation on screen, and the
-    /// cache it fills. `None` for a still or a paged file. Before the
-    /// renderer for the loader's reason: it has no handle on the device,
-    /// but a thread still decoding as the process leaves `main` is a thread
-    /// to have joined.
-    player: Option<Player>,
-    /// The clock the animation on screen plays by. Beside `player`: one
-    /// without the other is never the case.
-    playback: Option<Playback>,
+    /// The animation on screen — the thread decoding its frames, its clock
+    /// and which frame is up — and `None` for a still or a paged file.
+    /// Before the renderer for the loader's reason: the thread has no
+    /// handle on the device, but one still decoding as the process leaves
+    /// `main` is a thread to have joined.
+    animation: Option<Animation>,
     /// The thread making thumbnails of every file on the list, for the
     /// chooser. Told to stop rather than joined — see its own account.
     thumbnailer: Thumbnailer,
@@ -244,16 +242,11 @@ pub struct App {
     /// Thumbnails that arrived before there was a context to make textures
     /// in, taken up at the first frame.
     pending_thumbs: Vec<(PathBuf, Thumb)>,
-    /// Which frame the texture and `current` hold. `None` for the file's
-    /// own decode, which is what a still is and what an animation opens as.
-    uploaded: Option<usize>,
     /// How a player wakes the loop: what `main` made from the loop's proxy.
     wake: player::Wake,
     /// Numbers the players, so that news from one dropped with its file is
     /// told from the one now playing.
     players: u64,
-    /// Whether the player's failure, if it failed, has been reported.
-    player_failed: bool,
     /// Whether an animation opens stopped on its first frame: `--paused`.
     open_paused: bool,
     /// The window, the renderer drawing into it and the toolkit's context
@@ -401,16 +394,13 @@ impl App {
             theme_watch,
             next_poll: Instant::now() + watch::INTERVAL,
             loader,
-            player: None,
-            playback: None,
+            animation: None,
             thumbnailer,
             chooser: Chooser::default(),
             thumbs: Thumbs::default(),
             pending_thumbs: Vec::new(),
-            uploaded: None,
             wake,
             players: 0,
-            player_failed: false,
             open_paused: paused,
             shown: None,
             pointer: Pointer::default(),
@@ -580,9 +570,7 @@ impl App {
         }
         self.keep_shown();
         self.current = None;
-        self.player = None;
-        self.playback = None;
-        self.uploaded = None;
+        self.animation = None;
         self.motion = None;
         self.watch = Watch::idle();
         self.openers.clear();
@@ -610,11 +598,8 @@ impl App {
         let (Some(current), Some(path)) = (&self.current, self.files.shown_path()) else {
             return;
         };
-        let left = match (&self.playback, current.sequence) {
-            (Some(playback), _) => Some(Left::Frame {
-                frame: playback.head(),
-                paused: !playback.playing(),
-            }),
+        let left = match (&self.animation, current.sequence) {
+            (Some(animation), _) => Some(animation.left()),
             (None, Sequence::Pages { .. }) => Some(Left::Page(current.page)),
             (None, _) => None,
         };
@@ -976,16 +961,9 @@ impl App {
     /// What the transport bar shows, for a file that has one.
     fn transport(&self) -> Option<ui::Transport> {
         let current = self.current.as_ref()?;
-        match (current.sequence, &self.playback, &self.player) {
-            (Sequence::Animation { .. }, Some(playback), Some(player)) => Some(ui::Transport {
-                index: playback.head(),
-                count: playback.count(),
-                kind: ui::transport::Kind::Animation {
-                    playing: playback.playing(),
-                    delays: player.read(|cache| cache.delays().to_vec()),
-                },
-            }),
-            (Sequence::Pages { count, .. }, _, _) => Some(ui::Transport {
+        match (current.sequence, &self.animation) {
+            (Sequence::Animation { .. }, Some(animation)) => Some(animation.transport()),
+            (Sequence::Pages { count, .. }, _) => Some(ui::Transport {
                 index: current.page,
                 count,
                 kind: ui::transport::Kind::Pages,
@@ -1576,33 +1554,22 @@ impl App {
     /// playing; every other animation opens playing from the start, unless
     /// `--paused` said otherwise.
     fn start_player(&mut self, path: &std::path::Path, sequence: Sequence, left: Option<Left>) {
-        self.player = None;
-        self.playback = None;
-        self.uploaded = None;
-        self.player_failed = false;
+        self.animation = None;
         let Sequence::Animation { count, loops } = sequence else {
             return;
         };
-        let now = Instant::now();
-        let mut playback = Playback::new(count, loops, !self.open_paused, now);
-        if let Some(Left::Frame { frame, paused }) = left {
-            playback.seek(frame);
-            if !paused {
-                playback.toggle(now);
-            }
-        }
         self.players += 1;
-        let wake = Arc::clone(&self.wake);
-        let player = Player::new(
-            self.players,
-            path.to_path_buf(),
+        self.animation = Some(Animation::start(
+            path,
             self.files.overrides(),
             count,
-            move |event| wake(event),
-        );
-        player.head(playback.head());
-        self.player = Some(player);
-        self.playback = Some(playback);
+            loops,
+            left,
+            !self.open_paused,
+            self.players,
+            Arc::clone(&self.wake),
+            Instant::now(),
+        ));
     }
 
     /// Puts the frame the clock says should be up on screen, where it is
@@ -1618,15 +1585,10 @@ impl App {
     /// changed under the eye with every frame would be a picture that
     /// pumped.
     fn show_due_frame(&mut self) {
-        let (Some(playback), Some(player)) = (&self.playback, &self.player) else {
+        let Some(animation) = &mut self.animation else {
             return;
         };
-        let head = playback.head();
-        if self.uploaded == Some(head) {
-            return;
-        }
-        player.head(head);
-        let Some(frame) = player.read(|cache| cache.frame(head)) else {
+        let Some((head, frame)) = animation.due_frame() else {
             return;
         };
         if let Some(renderer) = self.shown.as_mut().map(|shown| &mut shown.renderer) {
@@ -1643,42 +1605,29 @@ impl App {
             current.image = Arc::clone(&frame.image);
             current.stats = frame.stats.clone();
         }
-        self.uploaded = Some(head);
+        animation.shown(head);
     }
 
     /// Moves the animation's clock on to `now`. Returns whether the frame
     /// on screen is owed a change, and when the next one is due.
     fn tick_playback(&mut self, now: Instant) -> (bool, Option<Instant>) {
-        let (Some(playback), Some(player)) = (&mut self.playback, &self.player) else {
+        let Some(animation) = &mut self.animation else {
             return (false, None);
         };
-        let (delays, count, error) = player.read(|cache| {
-            (
-                cache.delays().to_vec(),
-                cache.count(),
-                cache.error().map(str::to_string),
-            )
-        });
-        playback.shrink(count);
-        let tick = playback.tick(now, &delays);
-        let mut changed = tick.changed;
-        if let Some(error) = error
-            && !self.player_failed
-        {
-            self.player_failed = true;
+        let ticked = animation.tick(now);
+        if let Some(error) = ticked.error {
             eprintln!("gamut: {}", crate::escape_controls(&error));
             self.toast("The animation could not be read to its end", Level::Error);
-            changed = true;
         }
-        (changed, tick.deadline)
+        (ticked.changed, ticked.deadline)
     }
 
     /// One frame on or back through the animation, or one page on or back
     /// through a paged file: the same key for both, since a reader stepping
     /// through what a file holds does not care which kind it is.
     pub(super) fn step_frame(&mut self, by: isize) -> Effect {
-        if let Some(playback) = &mut self.playback {
-            playback.step(by);
+        if let Some(animation) = &mut self.animation {
+            animation.step(by);
             return Effect::Redraw;
         }
         let Some(current) = &self.current else {
@@ -1696,19 +1645,19 @@ impl App {
 
     /// Plays a stopped animation, or stops a playing one.
     pub(super) fn toggle_play(&mut self) -> Effect {
-        let Some(playback) = &mut self.playback else {
+        let Some(animation) = &mut self.animation else {
             return Effect::Nothing;
         };
-        playback.toggle(Instant::now());
+        animation.toggle(Instant::now());
         Effect::Redraw
     }
 
     /// Straight to frame `frame` of the animation, stopped there.
     pub(super) fn seek(&mut self, frame: usize) -> Effect {
-        let Some(playback) = &mut self.playback else {
+        let Some(animation) = &mut self.animation else {
             return Effect::Nothing;
         };
-        playback.seek(frame);
+        animation.seek(frame);
         Effect::Redraw
     }
 
@@ -1955,9 +1904,9 @@ impl ApplicationHandler<UserEvent> for App {
             // A frame from the player of a file already stepped past is news
             // about nothing on screen.
             UserEvent::Frame(event) => Effect::redraw_if(
-                self.player
+                self.animation
                     .as_ref()
-                    .is_some_and(|player| player.generation == event.generation),
+                    .is_some_and(|animation| animation.is(event.generation)),
             ),
             // A frame only while the chooser is up: with it closed nothing
             // on screen shows a thumbnail, and the news is kept for when it
@@ -3533,7 +3482,7 @@ mod tests {
     /// Waits for the player to have every frame, which a two-frame fixture
     /// takes no time over.
     fn decoded_to_the_end(app: &App) {
-        let player = app.player.as_ref().expect("an animation has a player");
+        let player = app.animation.as_ref().expect("an animation has a player");
         let started = Instant::now();
         while !player.read(|cache| cache.complete() || cache.error().is_some()) {
             assert!(
@@ -3567,10 +3516,14 @@ mod tests {
         let mut app = open(vec![path.clone()], vec![path]);
         answer(&mut app, Reload::Fresh);
 
-        let playback = app.playback.as_ref().expect("an animation has a clock");
+        let playback = app.animation.as_ref().expect("an animation has a clock");
         assert!(playback.playing());
         assert_eq!(playback.count(), 2);
-        assert_eq!(app.uploaded, None, "the file's own decode is up first");
+        assert_eq!(
+            app.animation.as_ref().unwrap().uploaded(),
+            None,
+            "the file's own decode is up first"
+        );
         let first = shown_pixel(&app, 8, 6);
         assert_eq!(&first[..3], [255, 0, 0], "red quadrant first");
         decoded_to_the_end(&app);
@@ -3579,23 +3532,23 @@ mod tests {
         let (changed, deadline) = app.tick_playback(Instant::now() + Duration::from_millis(150));
         assert!(changed);
         assert!(deadline.is_some(), "the next frame has a time");
-        assert_eq!(app.playback.as_ref().unwrap().head(), 1);
+        assert_eq!(app.animation.as_ref().unwrap().head(), 1);
         app.show_due_frame();
-        assert_eq!(app.uploaded, Some(1));
+        assert_eq!(app.animation.as_ref().unwrap().uploaded(), Some(1));
         let second = shown_pixel(&app, 8, 6);
         assert_eq!(&second[..3], [255, 255, 255], "the pattern upside down");
 
         // A step pauses and moves; play resumes.
         assert_eq!(app.perform(NextFrame), Effect::Redraw);
-        let playback = app.playback.as_ref().unwrap();
+        let playback = app.animation.as_ref().unwrap();
         assert!(!playback.playing());
         assert_eq!(playback.head(), 0);
         assert_eq!(app.perform(PreviousFrame), Effect::Redraw);
-        assert_eq!(app.playback.as_ref().unwrap().head(), 1);
+        assert_eq!(app.animation.as_ref().unwrap().head(), 1);
         assert_eq!(app.perform(TogglePlay), Effect::Redraw);
-        assert!(app.playback.as_ref().unwrap().playing());
+        assert!(app.animation.as_ref().unwrap().playing());
         app.show_due_frame();
-        assert_eq!(app.uploaded, Some(1));
+        assert_eq!(app.animation.as_ref().unwrap().uploaded(), Some(1));
     }
 
     /// `--paused` opens an animation stopped, and a still has no clock for
@@ -3608,7 +3561,7 @@ mod tests {
         let mut app = open(vec![path.clone()], vec![path]);
         app.open_paused = true;
         answer(&mut app, Reload::Fresh);
-        let playback = app.playback.as_ref().expect("an animation has a clock");
+        let playback = app.animation.as_ref().expect("an animation has a clock");
         assert!(!playback.playing());
         assert_eq!(
             app.tick_playback(Instant::now() + Duration::from_secs(1)),
@@ -3618,7 +3571,7 @@ mod tests {
         let path = fixture("png-rgb8.png");
         let mut app = open(vec![path.clone()], vec![path]);
         answer(&mut app, Reload::Fresh);
-        assert!(app.playback.is_none() && app.player.is_none());
+        assert!(app.animation.is_none());
         assert_eq!(app.perform(TogglePlay), Effect::Nothing);
     }
 
@@ -3633,14 +3586,14 @@ mod tests {
         let mut app = open(vec![animated.clone(), stills[0].clone()], vec![]);
         answer(&mut app, Reload::Fresh);
         let _ = app.perform(NextFrame);
-        assert_eq!(app.playback.as_ref().unwrap().head(), 1);
+        assert_eq!(app.animation.as_ref().unwrap().head(), 1);
 
         app.step(true);
         answer(&mut app, Reload::Fresh);
-        assert!(app.playback.is_none(), "a still has no clock");
+        assert!(app.animation.is_none(), "a still has no clock");
         app.step(true);
         answer(&mut app, Reload::Fresh);
-        let playback = app.playback.as_ref().expect("back on the animation");
+        let playback = app.animation.as_ref().expect("back on the animation");
         assert_eq!(playback.head(), 1);
         assert!(
             !playback.playing(),
@@ -3650,7 +3603,7 @@ mod tests {
         let request = app.files.reload().expect("nothing is in flight");
         app.send(request);
         answer(&mut app, Reload::InPlace);
-        let playback = app.playback.as_ref().expect("still an animation");
+        let playback = app.animation.as_ref().expect("still an animation");
         assert_eq!(playback.head(), 0);
         assert!(playback.playing(), "read again, it starts over");
 
@@ -3672,7 +3625,7 @@ mod tests {
         let current = app.current.as_ref().unwrap();
         assert_eq!(current.page, 0);
         assert!(matches!(current.sequence, Sequence::Pages { count: 2, .. }));
-        assert!(app.playback.is_none(), "pages have no clock");
+        assert!(app.animation.is_none(), "pages have no clock");
         assert_eq!(&shown_pixel(&app, 8, 6)[..3], [255, 0, 0]);
 
         app.view.set_zoom(1.0, app.image_size(), VIEWPORT);
