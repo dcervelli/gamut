@@ -23,6 +23,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use ultrahdr_rs::GainMapMetadata;
 
 use crate::image::decode::ReadSeek;
+use crate::image::isobmff;
 
 /// What a `tmap` item says.
 #[derive(Debug, Clone)]
@@ -117,7 +118,9 @@ fn meta_box(source: &mut dyn ReadSeek) -> Result<Option<Vec<u8>>> {
         if source.read_exact(&mut header).is_err() {
             return Ok(None);
         }
-        let mut size = u64::from(u32::from_be_bytes(header[..4].try_into().unwrap()));
+        let mut size = u64::from(u32::from_be_bytes([
+            header[0], header[1], header[2], header[3],
+        ]));
         let kind = &header[4..8];
         let mut header_len = 8u64;
         if size == 1 {
@@ -184,7 +187,7 @@ impl Meta {
     fn parse(body: &[u8]) -> Option<Self> {
         let mut meta = Self::default();
         // `meta` is a full box: version and flags before the children.
-        for (kind, start, end) in boxes(body, 4, body.len()) {
+        for (kind, start, end) in isobmff::boxes(body, 4, body.len()) {
             let child = &body[start..end];
             match &kind {
                 b"iinf" => meta.items = iinf(child)?,
@@ -196,42 +199,6 @@ impl Meta {
         }
         Some(meta)
     }
-}
-
-/// The boxes between `from` and `to`: each one's type and the range of its
-/// body.
-fn boxes(bytes: &[u8], mut from: usize, to: usize) -> Vec<([u8; 4], usize, usize)> {
-    let mut out = Vec::new();
-    while from + 8 <= to {
-        let Some(head) = bytes.get(from..from + 8) else {
-            break;
-        };
-        let mut size = u32::from_be_bytes(head[..4].try_into().unwrap()) as usize;
-        let kind: [u8; 4] = head[4..8].try_into().unwrap();
-        let mut header = 8;
-        if size == 1 {
-            let Some(large) = bytes.get(from + 8..from + 16) else {
-                break;
-            };
-            let Ok(large) = usize::try_from(u64::from_be_bytes(large.try_into().unwrap())) else {
-                break;
-            };
-            size = large;
-            header = 16;
-        } else if size == 0 {
-            size = to - from;
-        }
-        if size < header {
-            break;
-        }
-        let Some(end) = from.checked_add(size) else {
-            break;
-        };
-        let end = end.min(to);
-        out.push((kind, from + header, end));
-        from = end;
-    }
-    out
 }
 
 struct Cursor<'a> {
@@ -246,22 +213,22 @@ impl Cursor<'_> {
         Some(value)
     }
     fn u16(&mut self) -> Option<u16> {
-        let value = self.bytes.get(self.at..self.at + 2)?;
+        let value = self.bytes.get(self.at..self.at + 2)?.first_chunk::<2>()?;
         self.at += 2;
-        Some(u16::from_be_bytes(value.try_into().unwrap()))
+        Some(u16::from_be_bytes(*value))
     }
     fn u32(&mut self) -> Option<u32> {
-        let value = self.bytes.get(self.at..self.at + 4)?;
+        let value = self.bytes.get(self.at..self.at + 4)?.first_chunk::<4>()?;
         self.at += 4;
-        Some(u32::from_be_bytes(value.try_into().unwrap()))
+        Some(u32::from_be_bytes(*value))
     }
     fn i32(&mut self) -> Option<i32> {
         self.u32().map(|value| value as i32)
     }
     fn u64(&mut self) -> Option<u64> {
-        let value = self.bytes.get(self.at..self.at + 8)?;
+        let value = self.bytes.get(self.at..self.at + 8)?.first_chunk::<8>()?;
         self.at += 8;
-        Some(u64::from_be_bytes(value.try_into().unwrap()))
+        Some(u64::from_be_bytes(*value))
     }
     /// A field whose width the table's header chose: 0, 4 or 8 bytes.
     fn sized(&mut self, size: u8) -> Option<u64> {
@@ -293,7 +260,7 @@ fn iinf(body: &[u8]) -> Option<Vec<(u32, [u8; 4])>> {
         cursor.u32()? as usize
     };
     let mut items = Vec::with_capacity(count.min(1024));
-    for (kind, start, end) in boxes(body, cursor.at, body.len()) {
+    for (kind, start, end) in isobmff::boxes(body, cursor.at, body.len()) {
         if &kind != b"infe" {
             continue;
         }
@@ -320,7 +287,7 @@ fn iinf(body: &[u8]) -> Option<Vec<(u32, [u8; 4])>> {
 fn iref(body: &[u8]) -> Option<References> {
     let mut references = HashMap::new();
     let version = *body.first()?;
-    for (kind, start, end) in boxes(body, 4, body.len()) {
+    for (kind, start, end) in isobmff::boxes(body, 4, body.len()) {
         let mut cursor = Cursor {
             bytes: &body[start..end],
             at: 0,

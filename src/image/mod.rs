@@ -17,6 +17,7 @@ pub mod encode;
 pub mod exif;
 pub mod gain_map;
 pub mod geo;
+pub mod isobmff;
 pub mod region;
 pub mod resample;
 pub mod sequence;

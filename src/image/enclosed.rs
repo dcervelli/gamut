@@ -34,6 +34,7 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
+use super::isobmff;
 use super::tiff::{self, Entry, Kind, Order, tag};
 
 /// How much of a container is read looking for its block: the blocks are
@@ -138,9 +139,8 @@ fn cr3(file: &mut File) -> Option<Vec<u8>> {
     let mut bytes = Vec::new();
     file.take(PREFIX as u64).read_to_end(&mut bytes).ok()?;
 
-    let boxes = Boxes(&bytes);
-    let (moov, _) = boxes.find(0, bytes.len(), b"moov")?;
-    let (uuid, uuid_end) = boxes.find(moov, bytes.len(), b"uuid")?;
+    let (moov, _) = isobmff::find(&bytes, 0, bytes.len(), b"moov")?;
+    let (uuid, uuid_end) = isobmff::find(&bytes, moov, bytes.len(), b"uuid")?;
     // Canon's uuid, the 16 bytes after the box header.
     const CANON: [u8; 16] = [
         0x85, 0xc0, 0xb6, 0x87, 0x82, 0x0f, 0x11, 0xe0, 0x81, 0x11, 0xf4, 0xce, 0x46, 0x2b, 0x6a,
@@ -150,38 +150,13 @@ fn cr3(file: &mut File) -> Option<Vec<u8>> {
         return None;
     }
     let body = |name: &[u8; 4]| {
-        let (start, end) = boxes.find(uuid + 16, uuid_end, name)?;
+        let (start, end) = isobmff::find(&bytes, uuid + 16, uuid_end, name)?;
         bytes.get(start..end)
     };
     let image = body(b"CMT1")?;
     let exif = body(b"CMT2");
     let gps = body(b"CMT4");
     combine(image, exif, gps)
-}
-
-/// The ISO base media boxes in a slice: a big-endian length counting the
-/// header, then a four-byte name.
-struct Boxes<'a>(&'a [u8]);
-
-impl Boxes<'_> {
-    /// The body of the first box named `name` between `from` and `to`, as
-    /// the range of its bytes after the header.
-    fn find(&self, mut from: usize, to: usize, name: &[u8; 4]) -> Option<(usize, usize)> {
-        while from + 8 <= to {
-            let length = u32::from_be_bytes(self.0.get(from..from + 4)?.try_into().ok()?) as usize;
-            // A length of 1 means a 64-bit length follows, and 0 means "to
-            // the end"; neither is a box the metadata is in.
-            if length < 8 {
-                return None;
-            }
-            let end = from.checked_add(length)?.min(to);
-            if self.0.get(from + 4..from + 8)? == name {
-                return Some((from + 8, end));
-            }
-            from = end;
-        }
-        None
-    }
 }
 
 /// The three directories as one TIFF. Each box is a TIFF of its own, its
@@ -382,26 +357,5 @@ mod tests {
                 .get_field(exif::Tag::ExposureTime, exif::In::PRIMARY)
                 .is_none()
         );
-    }
-
-    #[test]
-    fn boxes_are_walked_by_length_and_name() {
-        let mut bytes = Vec::new();
-        bytes.extend(16u32.to_be_bytes());
-        bytes.extend(b"ftypcrx \0\0\0\x01");
-        bytes.extend(20u32.to_be_bytes());
-        bytes.extend(b"moov");
-        bytes.extend(12u32.to_be_bytes());
-        bytes.extend(b"CMT1abcd");
-        let boxes = Boxes(&bytes);
-        let (moov, end) = boxes.find(0, bytes.len(), b"moov").unwrap();
-        assert_eq!((moov, end), (24, 36));
-        assert_eq!(boxes.find(moov, end, b"CMT1"), Some((32, 36)));
-        assert_eq!(boxes.find(0, bytes.len(), b"mdat"), None);
-        // A length shorter than a header stops the walk rather than
-        // looping on it.
-        let mut broken = bytes.clone();
-        broken[16..20].copy_from_slice(&2u32.to_be_bytes());
-        assert_eq!(Boxes(&broken).find(0, broken.len(), b"CMT1"), None);
     }
 }
