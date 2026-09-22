@@ -184,6 +184,110 @@ pub(super) const SQUARE_MENU: &[Mark] = &[
     Mark::Line([7.0, 16.0], [17.0, 16.0]),
 ];
 
+/// Lucide's `file-image`: a sheet with its corner folded and a picture on
+/// it — the mark on the button that opens image files. The sheet is
+/// written out as `clipboard` below is, sides and quarter turns, since
+/// its top edge stops where the fold begins; the picture is Lucide's sun
+/// and hill, the hill's rounded peak an arc about the center Lucide's
+/// path implies.
+pub(super) const FILE_IMAGE: &[Mark] = &[
+    // The sheet, from the fold's foot round to the fold's head.
+    Mark::Line([15.0, 2.0], [6.0, 2.0]),
+    Mark::Arc {
+        at: [6.0, 4.0],
+        radius: 2.0,
+        start: -90.0,
+        sweep: -90.0,
+    },
+    Mark::Line([4.0, 4.0], [4.0, 20.0]),
+    Mark::Arc {
+        at: [6.0, 20.0],
+        radius: 2.0,
+        start: 180.0,
+        sweep: -90.0,
+    },
+    Mark::Line([6.0, 22.0], [18.0, 22.0]),
+    Mark::Arc {
+        at: [18.0, 20.0],
+        radius: 2.0,
+        start: 90.0,
+        sweep: -90.0,
+    },
+    Mark::Line([20.0, 20.0], [20.0, 7.0]),
+    Mark::Line([20.0, 7.0], [15.0, 2.0]),
+    // The fold.
+    Mark::Line([14.0, 2.0], [14.0, 6.0]),
+    Mark::Arc {
+        at: [16.0, 6.0],
+        radius: 2.0,
+        start: 180.0,
+        sweep: -90.0,
+    },
+    Mark::Line([16.0, 8.0], [20.0, 8.0]),
+    // The picture: a sun, and a hill running off the sheet's foot.
+    Mark::Circle {
+        at: [10.0, 12.0],
+        radius: 2.0,
+    },
+    Mark::Line([20.0, 17.0], [18.704, 15.704]),
+    Mark::Arc {
+        at: [17.0, 17.41],
+        radius: 2.41,
+        start: -45.0,
+        sweep: -90.0,
+    },
+    Mark::Line([15.296, 15.704], [9.0, 22.0]),
+];
+
+/// Lucide's `folder`: the mark on the button that opens a folder of
+/// images. Written out as sides and turns like the sheet above; the tab's
+/// two shoulders are the arcs Lucide's path implies, about the centers
+/// its radius and end points fix.
+pub(super) const FOLDER: &[Mark] = &[
+    Mark::Arc {
+        at: [20.0, 18.0],
+        radius: 2.0,
+        start: 90.0,
+        sweep: -90.0,
+    },
+    Mark::Line([22.0, 18.0], [22.0, 8.0]),
+    Mark::Arc {
+        at: [20.0, 8.0],
+        radius: 2.0,
+        start: 0.0,
+        sweep: -90.0,
+    },
+    Mark::Line([20.0, 6.0], [12.1, 6.0]),
+    Mark::Arc {
+        at: [12.08, 4.0],
+        radius: 2.0,
+        start: 90.0,
+        sweep: 56.6,
+    },
+    Mark::Line([10.41, 5.1], [9.6, 3.9]),
+    Mark::Arc {
+        at: [7.93, 5.0],
+        radius: 2.0,
+        start: -33.4,
+        sweep: -56.6,
+    },
+    Mark::Line([7.93, 3.0], [4.0, 3.0]),
+    Mark::Arc {
+        at: [4.0, 5.0],
+        radius: 2.0,
+        start: -90.0,
+        sweep: -90.0,
+    },
+    Mark::Line([2.0, 5.0], [2.0, 18.0]),
+    Mark::Arc {
+        at: [4.0, 18.0],
+        radius: 2.0,
+        start: 180.0,
+        sweep: -90.0,
+    },
+    Mark::Line([4.0, 20.0], [20.0, 20.0]),
+];
+
 /// Lucide's `clipboard`: the board a pasted picture arrives on.
 ///
 /// Lucide draws the board as one path that starts beside the clip, runs all

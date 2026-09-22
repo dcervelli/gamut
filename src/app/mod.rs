@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::mpsc;
 use std::thread::JoinHandle;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use winit::application::ApplicationHandler;
 use winit::event::{KeyEvent, WindowEvent};
@@ -119,6 +119,12 @@ pub struct Options {
 /// this is what to say about it, or failed with this much to say about it.
 type CopyOutcome = Result<&'static str, String>;
 
+/// How long the window is held to the size it asked for, waiting on the
+/// compositor to answer — see [`App::size_window_to`]. A compositor that
+/// is going to answer does so within a frame or two; one that has the
+/// window tiled never does, and must not leave the window pinned.
+const SIZING_GRACE: Duration = Duration::from_secs(1);
+
 pub struct App {
     files: Files,
     current: Option<Current>,
@@ -189,6 +195,12 @@ pub struct App {
     /// arrival. A window opened at `--size` keeps the size it was asked
     /// for, that being a choice rather than a default.
     size_to_next: bool,
+    /// When the window was last held to a size, while it is: the moment
+    /// [`App::size_window_to`] pinned its least and greatest size to the
+    /// one it asked for, which is released when the compositor has
+    /// answered or after [`SIZING_GRACE`] — see there for why the size is
+    /// asked for that way.
+    sizing: Option<Instant>,
     /// The thread that reads files.
     ///
     /// Declared before the renderer on purpose: fields are dropped in the
@@ -370,6 +382,7 @@ impl App {
             header_size: size,
             asked_size,
             size_to_next: source.is_none(),
+            sizing: None,
             startup,
             hdr,
             monitors,
@@ -500,6 +513,56 @@ impl App {
             self.send(request);
         }
         self.list_changed();
+    }
+
+    /// Sizes the window to `image` as it would have opened on it: the same
+    /// reckoning as at start-up, the window's own account of the monitors
+    /// standing in for the event loop's.
+    ///
+    /// Asked for two ways, because Wayland leaves a window's size to the
+    /// compositor and a compositor answers only what it is asked in its own
+    /// terms. `request_inner_size` is the toolkit's way, which on Wayland
+    /// resizes the surface outright — and is answered at once, with no
+    /// `Resized` event to follow, so the renderer is told the new size
+    /// here. The toolkit refuses it, though, on any window whose last
+    /// configure carried a tiled state, and Hyprland puts the tiled edges
+    /// on every window it has, floating ones included. So the window's
+    /// least and greatest size are pinned to the size wanted as well: a
+    /// compositor holds a floating window inside those on the next
+    /// configure, which is a `Resized` event, and `release_size` lets go
+    /// of them then — or after [`SIZING_GRACE`], for a compositor that
+    /// answers with nothing, since a window that could not be resized by
+    /// hand afterwards would be worse than one that opened small.
+    fn size_window_to(&mut self, image: [f32; 2]) {
+        let Some(window) = self.window.clone() else {
+            return;
+        };
+        let wanted = initial_window_size(
+            window.available_monitors(),
+            self.monitors.as_ref(),
+            Some(image),
+            None,
+        );
+        let before = window.inner_size();
+        if let Some(applied) = window.request_inner_size(wanted)
+            && applied != before
+            && let Some(renderer) = &mut self.renderer
+        {
+            renderer.resize(applied.width, applied.height);
+        }
+        window.set_min_inner_size(Some(wanted));
+        window.set_max_inner_size(Some(wanted));
+        self.sizing = Some(Instant::now());
+    }
+
+    /// Lets go of the size the window was held to, if it was.
+    fn release_size(&mut self) {
+        if self.sizing.take().is_some()
+            && let Some(window) = &self.window
+        {
+            window.set_min_inner_size(None::<winit::dpi::LogicalSize<u32>>);
+            window.set_max_inner_size(None::<winit::dpi::LogicalSize<u32>>);
+        }
     }
 
     /// Takes the picture off the screen — the last file deleted — keeping
@@ -1282,17 +1345,8 @@ impl App {
         // A window that showed nothing takes the size it would have opened
         // at on this picture, as if it had; the fit follows on the frame
         // the new size brings.
-        if std::mem::take(&mut self.size_to_next)
-            && self.asked_size.is_none()
-            && let Some(window) = &self.window
-        {
-            let wanted = initial_window_size(
-                window.available_monitors(),
-                self.monitors.as_ref(),
-                Some(size),
-                None,
-            );
-            let _ = window.request_inner_size(wanted);
+        if std::mem::take(&mut self.size_to_next) && self.asked_size.is_none() {
+            self.size_window_to(size);
         }
         self.files.shown(file.index);
         self.watch = file.watch;
@@ -1741,6 +1795,10 @@ impl ApplicationHandler<UserEvent> for App {
         }
 
         let now = Instant::now();
+        // The hold on the window's size, given up unanswered.
+        if self.sizing.is_some_and(|since| now >= since + SIZING_GRACE) {
+            self.release_size();
+        }
         if now >= self.next_poll {
             self.next_poll = now + watch::INTERVAL;
             // All of them, always: each has a watch that only advances when
@@ -1781,6 +1839,7 @@ impl ApplicationHandler<UserEvent> for App {
             self.toasts.deadline(),
             self.gui.as_ref().and_then(Gui::deadline),
             next_frame,
+            self.sizing.map(|since| since + SIZING_GRACE),
         ]
         .into_iter()
         .flatten()
@@ -1982,6 +2041,10 @@ impl ApplicationHandler<UserEvent> for App {
                 if let Some(renderer) = &mut self.renderer {
                     renderer.resize(size.width, size.height);
                 }
+                // The compositor has answered the size the window asked
+                // for, or the user has taken hold of the window: either
+                // way the hold on its size is let go.
+                self.release_size();
                 Effect::Redraw
             }
             WindowEvent::ModifiersChanged(modifiers) => {

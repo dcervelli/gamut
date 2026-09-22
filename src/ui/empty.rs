@@ -2,13 +2,14 @@
 //! the window something.
 //!
 //! A program started with no path on its command line opens on this, and
-//! comes back to it when everything it was handed failed to open. Three
-//! buttons, one under the other in the middle of the area the picture
-//! would fill: the desktop's file dialog for image files, the same dialog
-//! for a folder, and a paste of the picture on the clipboard. Each wears
-//! the key that does the same thing from anywhere, printed the way the
-//! menus print theirs, and each is a press that goes through the same
-//! [`Control`] its key does, so the two cannot drift.
+//! comes back to it when everything it was handed failed to open, or the
+//! last file was deleted. Three buttons, one under the other in the middle
+//! of the area the picture would fill: the desktop's file dialog for image
+//! files, the same dialog for a folder, and a paste of the picture on the
+//! clipboard. Each wears a mark at its head, the key that does the same
+//! thing from anywhere at its foot — printed the way the menus print
+//! theirs — and each is a press that goes through the same [`Control`] its
+//! key does, so the two cannot drift.
 //!
 //! Two buttons for the dialog rather than one, because that is how every
 //! desktop's dialog is built: it picks files, or it picks a folder, and a
@@ -18,20 +19,33 @@
 //! things in the same places, where the strip's own paste button comes and
 //! goes with the clipboard; the strip's is left out while this one is up,
 //! one control being enough for one thing.
+//!
+//! Drawn by hand, as the toggles in the strips are, rather than as egui's
+//! own button: a mark wants placing on the device's grid to come out
+//! sharp, and the label and the key each want an ink of their own.
 
-use egui::{Align, Button, Layout, RichText, WidgetInfo, WidgetType, vec2};
+use egui::{Align, Layout, Sense, WidgetInfo, WidgetType, pos2, vec2};
 
-use super::chrome::Pass;
+use super::chrome::{ICON_SIDE, Pass};
 use super::control::Control;
+use super::icon::{self, Mark};
+use super::style::TOGGLE_RADIUS;
 use super::tooltip::Tip;
 use super::{PADDING, Rect};
 
 /// One of the three buttons: wide enough for the longest of their labels
-/// with its key beside it, and taller than a button in a bar, since these
-/// are the whole of what is on screen and are meant to be found.
-const BUTTON: [f32; 2] = [220.0, 34.0];
+/// with its mark before it and its key after it, and taller than a button
+/// in a bar, since these are the whole of what is on screen and are meant
+/// to be found.
+const BUTTON: [f32; 2] = [236.0, 36.0];
 /// The gap between one button and the next.
 const GAP: f32 = 10.0;
+/// The room inside a button's ends: what the mark stands in from the left
+/// and the key from the right.
+const INSET: f32 = 10.0;
+/// The room set aside for the mark, and the gap between it and the label.
+const MARK: f32 = ICON_SIDE + 2.0;
+const MARK_GAP: f32 = 10.0;
 /// The size the labels are set in: a step up from the bars' text, for
 /// the same reason the buttons are larger.
 const LABEL_SIZE: f32 = 15.0;
@@ -74,29 +88,104 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, content: Rect) {
             ui.with_layout(Layout::top_down(Align::Center), |ui| {
                 ui.spacing_mut().item_spacing = vec2(0.0, GAP);
                 let picking = pass.input.picking;
-                button(pass, ui, Control::OpenFiles, "Open files\u{2026}", !picking);
+                button(
+                    pass,
+                    ui,
+                    Control::OpenFiles,
+                    icon::FILE_IMAGE,
+                    "Open files\u{2026}",
+                    !picking,
+                );
                 button(
                     pass,
                     ui,
                     Control::OpenFolder,
+                    icon::FOLDER,
                     "Open folder\u{2026}",
                     !picking,
                 );
-                button(pass, ui, Control::Paste, "Paste", pass.panels.paste);
+                button(
+                    pass,
+                    ui,
+                    Control::Paste,
+                    icon::CLIPBOARD,
+                    "Paste",
+                    pass.panels.paste,
+                );
             });
         });
 }
 
-/// One button, with its key printed after the label where a key does the
-/// same job, and the tooltip that names it — or, dead, says why.
-fn button(pass: &mut Pass, ui: &mut egui::Ui, control: Control, label: &str, enabled: bool) {
-    let mut button = Button::new(RichText::new(label).size(LABEL_SIZE));
+/// One button: its mark at the head, its label after that, and the key
+/// that does the same job at the foot where a key does, in the ink the
+/// menus print theirs in. The tooltip names it — or, dead, says why.
+fn button(
+    pass: &mut Pass,
+    ui: &mut egui::Ui,
+    control: Control,
+    marks: &[Mark],
+    label: &str,
+    enabled: bool,
+) {
+    // A dead button senses nothing but the pointer resting on it, as a
+    // dead toggle does: the press is refused, and the label says why.
+    let sense = if enabled { Sense::CLICK } else { Sense::HOVER };
+    let (rect, response) = ui.allocate_exact_size(vec2(BUTTON[0], BUTTON[1]), sense);
+    let (background, ink) = pass.button_ink(false, &response, enabled);
+    ui.painter().rect_filled(rect, TOGGLE_RADIUS, background);
+
+    let grid = icon::Grid::new(ui.pixels_per_point());
+    let mark = egui::Rect::from_center_size(
+        pos2(rect.min.x + INSET + MARK / 2.0, rect.center().y),
+        vec2(MARK, MARK),
+    );
+    icon::paint(
+        ui.painter(),
+        marks,
+        icon::square(grid, mark, ICON_SIDE),
+        ink,
+        background,
+    );
+
+    // No ink of its own for either galley: each is drawn in an ink handed
+    // to the painter below, and a color set here would be baked in.
+    let label = ui.ctx().fonts_mut(|fonts| {
+        fonts.layout_no_wrap(
+            label.to_string(),
+            egui::FontId::proportional(LABEL_SIZE),
+            egui::Color32::PLACEHOLDER,
+        )
+    });
+    ui.painter().galley(
+        pos2(
+            mark.max.x + MARK_GAP,
+            rect.center().y - label.size().y / 2.0,
+        ),
+        label,
+        ink,
+    );
     if let Some(key) = pass.namer.shortcut(control) {
-        button = button.shortcut_text(key);
+        let font = egui::TextStyle::Button.resolve(ui.style());
+        let key = ui
+            .ctx()
+            .fonts_mut(|fonts| fonts.layout_no_wrap(key, font, egui::Color32::PLACEHOLDER));
+        // The key is the quieter of the two, as it is beside a menu item:
+        // the dim ink while the button is live, the button's own while
+        // it is dead, there being nothing quieter than that.
+        let key_ink = match enabled {
+            true => pass.theme.text_dim.into(),
+            false => ink,
+        };
+        ui.painter().galley(
+            pos2(
+                rect.max.x - INSET - key.size().x,
+                rect.center().y - key.size().y / 2.0,
+            ),
+            key,
+            key_ink,
+        );
     }
-    let response = ui
-        .add_enabled_ui(enabled, |ui| ui.add_sized(BUTTON, button))
-        .inner;
+
     // Named by the control rather than by the words on it, which trail
     // off: what the accessibility tree and the tests reach it by.
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, control.label()));

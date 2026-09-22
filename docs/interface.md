@@ -950,12 +950,28 @@ sizes the window at start-up: `App::size_to_next` is set while the window
 shows nothing and spent by the arrival in `App::apply`, which runs the
 picture's size through the same `window::initial_window_size` that
 `resumed` used — the window's own account of the monitors standing in for
-the event loop's — and asks the compositor for that size with
-`request_inner_size`. Whether it is granted is the compositor's business,
-as the opening size is; a tiling one may ignore it. A window opened at
-`--size` is not resized, that having been a choice rather than a default.
-The fit follows on its own: the view is reset for a new picture, and a
-fitted view is re-fitted against whatever viewport the next frame has.
+the event loop's — and `App::size_window_to` asks for that size. A window
+opened at `--size` is not resized, that having been a choice rather than a
+default. The fit follows on its own: the view is reset for a new picture,
+and a fitted view is re-fitted against whatever viewport the next frame
+has.
+
+The ask is made two ways, because a Wayland window's size is the
+compositor's and winit is careful about it. `request_inner_size` is the
+toolkit's way: on Wayland it resizes the surface outright and is answered
+at once, with no `Resized` event to follow, so the renderer is told the
+new size on the spot. But winit refuses the request on any window whose
+last configure carried a tiled state, and Hyprland sends the tiled edges
+to every window it has, floating ones included, so on that desk the
+request is a no-op. So the window's least and greatest size are also
+pinned to the size wanted — `set_min_inner_size` and `set_max_inner_size`,
+which reach the compositor as `xdg_toplevel` constraints it honors on its
+next configure, resizing a floating window and re-centering it as a fresh
+open would. That configure arrives as `Resized`, which lets the constraints
+go again through `App::release_size`; a compositor that answers with
+nothing — the window tiled — has them let go after `SIZING_GRACE` from
+`about_to_wait`, since a window that could not be resized by hand
+afterwards would be worse than one that stayed small.
 
 Two buttons for the dialog because that is how every desktop's dialog is
 built: it picks files or it picks a folder, never both in one, and a
