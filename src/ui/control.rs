@@ -352,3 +352,127 @@ impl Naming for Unnamed {
         Vec::new()
     }
 }
+
+#[cfg(test)]
+impl Control {
+    /// Every control, one of each kind — the ones that carry a payload by a
+    /// representative, the first cell or the first row — for the tests that
+    /// ask something of every button. Kept complete by [`Control::listed`].
+    pub const ALL: &[Control] = &[
+        Control::Previous,
+        Control::Next,
+        Control::Minimap,
+        Control::Copy,
+        Control::OpenIn,
+        Control::Opener(0),
+        Control::Play,
+        Control::StepBack,
+        Control::StepForward,
+        Control::Seek(0),
+        Control::Paste,
+        Control::Region,
+        Control::Histogram,
+        Control::Info,
+        Control::Grid,
+        Control::Zoom,
+        Control::Maximize,
+        Control::Luma,
+        Control::Planes,
+        Control::Log,
+        Control::Reset,
+        Control::Marks,
+        Control::Ramp(0),
+        Control::Window(0),
+        Control::Curve(0),
+        Control::Output,
+        Control::Help,
+        Control::PixelFormat,
+        Control::Dismiss,
+        Control::ZoomTo(ZoomChoice::Scale(1.0)),
+        Control::Format(PixelFormat::Hex),
+        Control::Copies(Copies::Name),
+        Control::Facts(Copyable::All),
+        Control::Chooser,
+        Control::Choose(0),
+        Control::FileMenu,
+        Control::Rename,
+        Control::Delete,
+        Control::RenameTo,
+        Control::CancelRename,
+        Control::OpenFiles,
+        Control::OpenFolder,
+    ];
+
+    /// Whether `control` is a kind [`Control::ALL`] lists — which is every
+    /// kind, and the compiler is what holds it to that: a variant added to
+    /// the enum is missing from the match below until it is added here, and
+    /// then to `ALL`.
+    fn listed(control: Control) -> bool {
+        match control {
+            Control::Previous
+            | Control::Next
+            | Control::Minimap
+            | Control::Copy
+            | Control::OpenIn
+            | Control::Opener(_)
+            | Control::Play
+            | Control::StepBack
+            | Control::StepForward
+            | Control::Seek(_)
+            | Control::Paste
+            | Control::Region
+            | Control::Histogram
+            | Control::Info
+            | Control::Grid
+            | Control::Zoom
+            | Control::Maximize
+            | Control::Luma
+            | Control::Planes
+            | Control::Log
+            | Control::Reset
+            | Control::Marks
+            | Control::Ramp(_)
+            | Control::Window(_)
+            | Control::Curve(_)
+            | Control::Output
+            | Control::Help
+            | Control::PixelFormat
+            | Control::Dismiss
+            | Control::ZoomTo(_)
+            | Control::Format(_)
+            | Control::Copies(_)
+            | Control::Facts(_)
+            | Control::Chooser
+            | Control::Choose(_)
+            | Control::FileMenu
+            | Control::Rename
+            | Control::Delete
+            | Control::RenameTo
+            | Control::CancelRename
+            | Control::OpenFiles
+            | Control::OpenFolder => true,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `ALL` has one of every kind of control, and no kind twice.
+    #[test]
+    fn every_kind_of_control_is_listed_once() {
+        let kinds: Vec<_> = Control::ALL
+            .iter()
+            .map(std::mem::discriminant)
+            .collect();
+        for (index, kind) in kinds.iter().enumerate() {
+            assert!(Control::listed(Control::ALL[index]));
+            assert!(
+                !kinds[..index].contains(kind),
+                "{:?} is listed twice",
+                Control::ALL[index]
+            );
+        }
+    }
+}

@@ -435,14 +435,33 @@ fn action_of(tip: Tip) -> Option<Action> {
         // that put up the same dialog.
         Tip::Control(Control::OpenFiles) => OpenFiles,
         Tip::Control(Control::OpenFolder) => OpenFolder,
+        // A swatch, a window or a curve past the end of its row is nothing.
+        Tip::Control(Control::Ramp(_) | Control::Window(_) | Control::Curve(_)) => return None,
+        // What no key reaches, and so names itself or wears its own name:
+        // the buttons that open a menu, the items that wear a program's or
+        // a file's name, the rows of the information panel, the cross on a
+        // message, the timeline, and the dialog's two buttons.
+        Tip::Control(
+            Control::Copy
+            | Control::OpenIn
+            | Control::Opener(_)
+            | Control::Seek(_)
+            | Control::Zoom
+            | Control::Dismiss
+            | Control::Facts(_)
+            | Control::Chooser
+            | Control::Choose(_)
+            | Control::FileMenu
+            | Control::RenameTo
+            | Control::CancelRename,
+        ) => return None,
         // The words at the end of the bottom bar are about four settings at
         // once, so no one key does what they do; what a press on them opens
         // is the panel that sets all four, which the tooltip says outright.
         // The band under the histogram, its handles and the exposure's
         // slider are dragged, which no key does either: the keys that step
         // the same things come under them as hints — see `App::tooltip`.
-        Tip::Control(_)
-        | Tip::Name
+        Tip::Name
         | Tip::Counter
         | Tip::State
         | Tip::Timeline
@@ -2793,31 +2812,30 @@ mod tests {
     }
 
     /// Nothing in the chrome is left unnamed: a button with no tooltip is one
-    /// the pointer rests on for nothing.
+    /// the pointer rests on for nothing. Every kind of control is asked,
+    /// less the few that wear their own words on screen — an item of the
+    /// open menu wears the program's name, a row of the chooser the file's,
+    /// a row of the information panel its fact, the dialog's buttons their
+    /// labels — and the two that are pressed through something else: the
+    /// timeline names itself as a whole, and the chooser is opened by a
+    /// press on the count, which has words of its own.
     #[test]
     fn every_chrome_button_has_something_to_say() {
-        for widget in [
-            Control::Previous,
-            Control::Next,
-            Control::Minimap,
-            Control::Copy,
-            Control::Paste,
-            Control::Region,
-            Control::Histogram,
-            Control::Info,
-            Control::Grid,
-            Control::Maximize,
-            Control::Output,
-            Control::Zoom,
-            Control::PixelFormat,
-            Control::Help,
-            Control::FileMenu,
-            Control::OpenFiles,
-            Control::OpenFolder,
-        ] {
-            assert!(
-                names(Tip::Control(widget)).is_some(),
-                "{widget:?} names itself"
+        for widget in Control::ALL {
+            let wordless = matches!(
+                widget,
+                Control::Opener(_)
+                    | Control::Choose(_)
+                    | Control::Facts(_)
+                    | Control::RenameTo
+                    | Control::CancelRename
+                    | Control::Seek(_)
+                    | Control::Chooser
+            );
+            assert_eq!(
+                names(Tip::Control(*widget)).is_some(),
+                !wordless,
+                "{widget:?}"
             );
         }
     }

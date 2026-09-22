@@ -271,88 +271,109 @@ pub fn disabled(tip: Tip, reasons: Reasons) -> Option<Refused> {
 /// across the plot they sit on, so they have a panel's width and not a
 /// window's.
 pub fn words(tip: Tip) -> Option<String> {
-    // A menu cell's are its own: what it goes to, or what it does.
-    match tip {
+    let words = match tip {
+        // A menu cell's are its own: what it goes to, or what it does.
         Tip::Control(Control::ZoomTo(choice)) => return Some(choice.describe()),
         Tip::Control(Control::Format(format)) => {
             return Some(menu::describe_format(format).to_string());
         }
+        Tip::Control(Control::Zoom) => "Zoom, fit and filter",
+        // No one key opens it — every cell of it has a key of its own —
+        // so the button says what the menu is of.
+        Tip::Control(Control::Copy) => "Copy the file or the image",
+        // The same: no key opens it, and what is on it is whatever the
+        // desktop has installed rather than anything this program binds.
+        Tip::Control(Control::OpenIn) => "Open the file in another application",
+        // And the same again for the menu of the file: every item of it
+        // has a key of its own, and the button says what the menu is of.
+        Tip::Control(Control::FileMenu) => "Copy, rename or delete the file",
+        Tip::Control(Control::Paste) => "Paste an image",
+        // The two buttons in the middle of an empty window say what
+        // the dialog is for; the key table's line is what to press.
+        Tip::Control(Control::OpenFiles) => "Choose image files to open",
+        Tip::Control(Control::OpenFolder) => "Choose a folder of images to open",
+        Tip::Control(Control::Help) => "Keyboard shortcuts",
+        // No one key does this and only this — Escape dismisses whatever
+        // is up, a menu first — so the cross names itself.
+        Tip::Control(Control::Dismiss) => "Dismiss this message",
+        // The histogram panel's, in as few words as will carry them.
+        Tip::Control(Control::Luma) => "Luminance plane",
+        Tip::Control(Control::Planes) => "Color planes",
+        Tip::Control(Control::Log) => "Logarithmic counts",
+        Tip::Control(Control::Marks) => "Mark the clipped pixels",
+        Tip::Control(Control::Reset) => "Reset the display",
+        // Named rather than merely shown: a swatch of viridis is a green
+        // rectangle that could be anything, and the map has a name people
+        // ask for it by — the same one `--colormap` takes.
+        Tip::Control(Control::Ramp(index)) => match Colormap::ALL.get(index)? {
+            Colormap::Gray => "No false color",
+            Colormap::Viridis => "Viridis",
+            Colormap::Magma => "Magma",
+            Colormap::Turbo => "Turbo",
+        },
+        // What a window button sets, said out in full: the button wears
+        // two words for it, and what those two words stand for needs
+        // saying once.
+        Tip::Control(Control::Window(index)) => match WINDOWS.get(index)?.1 {
+            AutoWindow::Off => "Show the values as they are, 0 to 1",
+            AutoWindow::MinMax => "Stretch the whole range of the image to 0 to 1",
+            AutoWindow::Percentile => "Stretch the central 99.8%, the outliers left out",
+            // Not one of the three: a hand-set window is where the
+            // window ends up, never something a button puts it on.
+            AutoWindow::Manual => return None,
+        },
+        // The band and its handles: what each is, in the words a levels
+        // tool uses. What dragging one does is the mark's own shape to
+        // say, and a key that does the same job is named under it.
+        Tip::BlackPoint => "Black point",
+        Tip::WhitePoint => "White point",
+        Tip::Window => "The window, from black to white: drag to slide it",
+        Tip::Exposure => "Exposure: drag to set it",
+        // And what becomes of the highlights under each, the curve named
+        // where there is one.
+        Tip::Control(Control::Curve(index)) => match ToneMap::ALL.get(index)? {
+            ToneMap::None => "Clip highlights at white",
+            ToneMap::Neutral => "Roll highlights off: Neutral",
+        },
+        // The timeline: no key scrubs, so it names itself.
+        Tip::Timeline => "Go to a frame",
         // No words of its own: the key table already says what each of
         // these copies takes, in a sentence, and saying it twice is saying
-        // it in two places that can drift apart.
-        Tip::Control(Control::Copies(_)) => return None,
-        // Nor these: an item of the open menu wears the name of the program
-        // it hands the file to, and there is nothing an interface that has
-        // never heard of that program could add to it.
-        Tip::Control(Control::Opener(_)) => return None,
-        _ => {}
-    }
-    Some(
-        match tip {
-            Tip::Control(Control::Zoom) => "Zoom, fit and filter",
-            // No one key opens it — every cell of it has a key of its own —
-            // so the button says what the menu is of.
-            Tip::Control(Control::Copy) => "Copy the file or the image",
-            // The same: no key opens it, and what is on it is whatever the
-            // desktop has installed rather than anything this program binds.
-            Tip::Control(Control::OpenIn) => "Open the file in another application",
-            // And the same again for the menu of the file: every item of it
-            // has a key of its own, and the button says what the menu is of.
-            Tip::Control(Control::FileMenu) => "Copy, rename or delete the file",
-            Tip::Control(Control::Paste) => "Paste an image",
-            // The two buttons in the middle of an empty window say what
-            // the dialog is for; the key table's line is what to press.
-            Tip::Control(Control::OpenFiles) => "Choose image files to open",
-            Tip::Control(Control::OpenFolder) => "Choose a folder of images to open",
-            Tip::Control(Control::Help) => "Keyboard shortcuts",
-            // No one key does this and only this — Escape dismisses whatever
-            // is up, a menu first — so the cross names itself.
-            Tip::Control(Control::Dismiss) => "Dismiss this message",
-            // The histogram panel's, in as few words as will carry them.
-            Tip::Control(Control::Luma) => "Luminance plane",
-            Tip::Control(Control::Planes) => "Color planes",
-            Tip::Control(Control::Log) => "Logarithmic counts",
-            Tip::Control(Control::Marks) => "Mark the clipped pixels",
-            Tip::Control(Control::Reset) => "Reset the display",
-            // Named rather than merely shown: a swatch of viridis is a green
-            // rectangle that could be anything, and the map has a name people
-            // ask for it by — the same one `--colormap` takes.
-            Tip::Control(Control::Ramp(index)) => match Colormap::ALL.get(index)? {
-                Colormap::Gray => "No false color",
-                Colormap::Viridis => "Viridis",
-                Colormap::Magma => "Magma",
-                Colormap::Turbo => "Turbo",
-            },
-            // What a window button sets, said out in full: the button wears
-            // two words for it, and what those two words stand for needs
-            // saying once.
-            Tip::Control(Control::Window(index)) => match WINDOWS.get(index)?.1 {
-                AutoWindow::Off => "Show the values as they are, 0 to 1",
-                AutoWindow::MinMax => "Stretch the whole range of the image to 0 to 1",
-                AutoWindow::Percentile => "Stretch the central 99.8%, the outliers left out",
-                // Not one of the three: a hand-set window is where the
-                // window ends up, never something a button puts it on.
-                AutoWindow::Manual => return None,
-            },
-            // The band and its handles: what each is, in the words a levels
-            // tool uses. What dragging one does is the mark's own shape to
-            // say, and a key that does the same job is named under it.
-            Tip::BlackPoint => "Black point",
-            Tip::WhitePoint => "White point",
-            Tip::Window => "The window, from black to white: drag to slide it",
-            Tip::Exposure => "Exposure: drag to set it",
-            // And what becomes of the highlights under each, the curve named
-            // where there is one.
-            Tip::Control(Control::Curve(index)) => match ToneMap::ALL.get(index)? {
-                ToneMap::None => "Clip highlights at white",
-                ToneMap::Neutral => "Roll highlights off: Neutral",
-            },
-            // The timeline: no key scrubs, so it names itself.
-            Tip::Timeline => "Go to a frame",
-            Tip::Control(_) | Tip::Name | Tip::Counter | Tip::State => return None,
-        }
-        .to_string(),
-    )
+        // it in two places that can drift apart. Nor has an item of the
+        // open menu, which wears the name of the program it hands the file
+        // to, and there is nothing an interface that has never heard of
+        // that program could add to it.
+        Tip::Control(Control::Copies(_) | Control::Opener(_)) => return None,
+        // Everything else is named by the key that does the same job — see
+        // `App::tooltip` — or wears its own words on screen.
+        Tip::Control(
+            Control::Previous
+            | Control::Next
+            | Control::Minimap
+            | Control::Play
+            | Control::StepBack
+            | Control::StepForward
+            | Control::Seek(_)
+            | Control::Region
+            | Control::Histogram
+            | Control::Info
+            | Control::Grid
+            | Control::Maximize
+            | Control::Output
+            | Control::PixelFormat
+            | Control::Facts(_)
+            | Control::Chooser
+            | Control::Choose(_)
+            | Control::Rename
+            | Control::Delete
+            | Control::RenameTo
+            | Control::CancelRename,
+        )
+        | Tip::Name
+        | Tip::Counter
+        | Tip::State => return None,
+    };
+    Some(words.to_string())
 }
 
 /// Draws `tooltip` into the popup egui has opened for it: the thing itself
