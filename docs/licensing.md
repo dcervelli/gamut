@@ -20,7 +20,7 @@ rather than as above:
   [Matt Zucker's](https://www.shadertoy.com/view/WlfXRN) fits to matplotlib's,
   under CC0; turbo's is
   [Google's](https://gist.github.com/mikhailov-work/0d177465a8151eb6ede1768d51d476c7)
-  fit to its own, under Apache-2.0. Both are in `src/image/display.rs`, and
+  fit to its own, under Apache-2.0. Both are in `src/image/display/colormap.rs`, and
   nowhere else: the screen reads them from a texture made from that file.
 
 Which is recorded file by file in [REUSE.toml](../REUSE.toml), in the form the

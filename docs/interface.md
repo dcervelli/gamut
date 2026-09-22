@@ -269,7 +269,7 @@ values the display window maps them to, and a swatch of the color they come
 out as. The two numbers answer different questions, which is why both are
 there: the stored one is the measurement, the mapped one is why it looks the
 way it does. Saying what the screen is showing means running the display
-transform on the CPU: `ToneMap::apply` in `image/display.rs` mirrors the
+transform on the CPU: `ToneMap::apply` in `image/display/tone_map.rs` mirrors the
 shader function of the same name, and `Colormap::color` is what
 `render/image_layer.rs` writes the shader's ramp texture from — a swatch
 that disagreed with the image beside it would be worse than none.

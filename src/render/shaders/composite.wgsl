@@ -65,7 +65,7 @@ fn neutral(color_in: vec3<f32>) -> vec3<f32> {
     return mix(color, vec3<f32>(new_peak), g);
 }
 
-// Mirrored on the CPU by `ToneMap::apply` in image/display.rs, for the one
+// Mirrored on the CPU by `ToneMap::apply` in image/display/tone_map.rs, for the one
 // pixel the readout in the bottom bar has to describe; a readback test in
 // render/filter_tests.rs holds this to it. Which arm "no curve" takes is the
 // surface's to say — 0 on an SDR surface, 2 on one with room above white —

@@ -46,7 +46,7 @@ SPDX-License-Identifier = "ISC AND (MIT OR Apache-2.0)"
 # Viridis and magma are Matt Zucker's fits to matplotlib's (CC0, and the data
 # fitted was CC0 too); turbo is Google's own fit to theirs (Apache-2.0).
 [[annotations]]
-path = ["src/image/display.rs"]
+path = ["src/image/display/colormap.rs"]
 precedence = "override"
 SPDX-FileCopyrightText = [
     "2019 Matt Zucker",

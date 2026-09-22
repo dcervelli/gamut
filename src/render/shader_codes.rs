@@ -56,7 +56,7 @@ pub fn colormap(map: Colormap) -> u32 {
 }
 
 /// Matches `tone_map` in `shaders/composite.wgsl`, and `ToneMap::apply` in
-/// `image/display.rs`, which is the same match on the CPU: no curve is a
+/// `image/display/tone_map.rs`, which is the same match on the CPU: no curve is a
 /// clip at white on an SDR surface and a pass-through on one with room above
 /// it, and the curve is itself whatever the surface.
 pub fn tone_map(map: ToneMap, headroom: Headroom) -> u32 {

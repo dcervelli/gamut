@@ -141,9 +141,10 @@ image/         the data model, nothing GPU
   enclosed.rs    where a raw that is not a TIFF at the front keeps its EXIF:
                  an ORF or RW2 under its own magic, the JPEG in a RAF, the
                  TIFF in an MRW, the boxes of a CR3 written back out as one
-  display.rs     Display: window, exposure, tone map, colormap — uniform state, never re-decodes;
-                 map(), the CPU twins of the shaders' tone curves, and the colormaps the
-                 image layer writes its ramp texture from
+  display/       Display: window, exposure, tone map, colormap — uniform state, never re-decodes;
+                 mod.rs is the state and map(), auto.rs the window rules, tone_map.rs the
+                 curves (the CPU twins of the compositor's) and Headroom, colormap.rs the
+                 ramps the image layer writes its texture from
   decode/        Decoder trait + DECODERS registry in mod.rs; one file per format; limits.rs the size ceiling;
                  dynamic.rs the shared DynamicImage bridge; orient.rs the turn an orientation tag asks
                  for, applied to any layout; heif/tmap.rs reads ISO 21496-1's gain-map item and
@@ -188,7 +189,7 @@ still agrees with both, so renaming either is editing the constant —
 | A status-bar segment | `ui/status.rs`; the pointer's pixel readout is `ui/pixel.rs` |
 | What a file is left in when you step off it, and what comes back when you step on to it | `app/kept.rs`, and the arrival in `App::apply`, which trades the outgoing file's settings for the incoming one's |
 | Whether a change to the view is a move or a cut | `App::animate` around the change, in `app/input.rs`, makes it a move; a change the hand is on — a drag, a single pixel's step, a trackpad's scroll — goes to `App::view` directly. Whatever reads what is on screen reads `App::shown_view`, not `view`; how long a move takes is `motion::DURATION`. The drag and the wheel themselves arrive from `ui::show` as `Command::Drag` and `Command::Wheel`, off the picture's own response in `Pass::picture` |
-| What a pixel reads as under the pointer | `image/mod.rs::sample` for what the file holds, `image/display.rs::map` for what the screen shows, `ui/pixel.rs::PixelFormat` for which of the two the bar writes out and how |
+| What a pixel reads as under the pointer | `image/mod.rs::sample` for what the file holds, `image/display/mod.rs::map` for what the screen shows, `ui/pixel.rs::PixelFormat` for which of the two the bar writes out and how |
 | What the window says about something that just happened | `ui/toast.rs` for how long it stays and how it is drawn, `App::toast` to raise one, and `App::poll_copies` for the copies that only know how they went once their thread is done |
 | What something is called when the pointer rests on it | a `Tip` variant in `ui/tooltip.rs` and one `pass.tooltip(response, tip, enabled)` on the widget's response; `Namer::tooltip` in `app/input.rs` composes the words, from `KEYS` by way of `action_of` wherever a key does the same job, so a tooltip and `--help` cannot disagree. Words of its own go in `ui/tooltip.rs::words`, a zoom cell's in `ZoomChoice::describe`. When it opens and where it goes are egui's, tuned in `ui/style.rs` |
 | A button's icon | `ui/icon.rs`: one `&[Mark]` on the 24-unit grid, and one `icon::paint` call where the button is drawn, in a square from `icon::square`. The caller sets aside a budget; whether the mark comes out sharp is `icon::Grid`'s business and whether its spacing stays even is `icon::fit`'s |
@@ -220,7 +221,7 @@ still agrees with both, so renaming either is editing the constant —
 | How far a gain map lifts the picture, or what reads through the lift | `image/gain_map.rs`: `GainMap::weight` for the share of the lift a display's room gets, `GainMap::table` for what a weight makes of the map, `gain_at` for the CPU twin of the shaders' `gain` — keep the three in step. `App::display_headroom` is what the weight is fed, `App::refresh_lift` puts the table in `Current::lift` and scans the statistics through it, and `Scene::lift` carries the weight to `image_layer`, which writes the table to the device and rebuilds the coarse chain. Whatever reads a pixel takes the table: `DecodedImage::sample`, `encode::displayed`, `Stats::scan_with` |
 | What the surface can be, SDR or HDR | `render/output.rs` chooses it; `monitor.rs` says what the monitor is in; `App::surface_hdr` and `App::headroom` put the two together, `App::sync_output` acts on them, and `App::toggle_hdr` is what the bar's `HDR` button and `o` both call |
 | A new render pass | build it from `render/gpu.rs`; add its target to `Renderer::render` |
-| Something about the display window, exposure or false color | `image/display.rs` (state) and `shaders/image.wgsl` / `composite.wgsl` (effect) |
+| Something about the display window, exposure or false color | `image/display/` (state) and `shaders/image.wgsl` / `composite.wgsl` (effect) |
 | What the histogram panel's rows hold, what a drag on its band does, or what its corners say | `ui/histogram.rs::Rows` for the three rows, which are every file's; `track` for the band and its handles, which ask through `Command::{BlackPoint, WhitePoint, Slide}` and land in `Display::put_black`, `Display::put_white` — each its own end of the window, the exposure left alone — and `Display::set_displayed_bounds`; the keys that step the handles are `Action::{StepBlack, StepWhite}`, landing in `Display::step_black`, `Display::step_white`, by `input::WINDOW_STEP`; `slider` for the exposure, which asks through `Command::Exposure` and lands in `Display::set_exposure`, `SLIDER_STOPS` being how far it runs; `Plot::clipped` for the shares in the plot's corners, and `Display::clips_white` for whether white counts. The marks `w` and the button beside the panel's band paint on the picture are `marks` in `shaders/image.wgsl`, `shader_codes::marks`, and `Panels::mark_clipped`, toggled in `App::press` by `Control::Marks` |
 
 ## Conventions

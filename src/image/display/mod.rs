@@ -2,173 +2,19 @@
 //! applied before display, exposure, tone mapping and false color.
 //!
 //! All of it is uniform state — changing any of it re-renders, it never
-//! re-decodes or re-uploads.
+//! re-decodes or re-uploads. [`Display`] is the state; the vocabularies it
+//! is set in — the window rules, the curves, the ramps — are each a file
+//! beside it.
+
+mod auto;
+mod colormap;
+mod tone_map;
+
+pub use auto::AutoWindow;
+pub use colormap::Colormap;
+pub use tone_map::{Headroom, ToneMap};
 
 use super::{Channels, DecodedImage, Referred, Sample, Stats, Transfer};
-
-/// How the display window is chosen.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum AutoWindow {
-    /// Take the values at face value: 0..1 is the visible range.
-    Off,
-    /// Stretch the full observed range to 0..1.
-    MinMax,
-    /// Stretch the central 99.8% of the range, ignoring outliers. Usually
-    /// what you want for sensor data with hot pixels.
-    Percentile,
-    /// Left where the user put it.
-    Manual,
-}
-
-impl AutoWindow {
-    /// `stored`, `full` or `trimmed`, as the command line names them — the
-    /// words the histogram panel's buttons and the bottom bar use. `unit`,
-    /// `minmax` and `pct`, and `off`, `min-max` and `percentile`, are taken
-    /// as well.
-    pub fn parse(value: &str) -> Option<Self> {
-        Some(match value.to_ascii_lowercase().as_str() {
-            "stored" | "unit" | "off" => AutoWindow::Off,
-            "full" | "minmax" | "min-max" => AutoWindow::MinMax,
-            "trimmed" | "pct" | "percentile" => AutoWindow::Percentile,
-            _ => return None,
-        })
-    }
-
-    /// The rule in one word, the same one the panel's button expands —
-    /// *As stored*, *Full range*, *Trimmed* — and the command line takes.
-    pub fn label(self) -> &'static str {
-        match self {
-            AutoWindow::Off => "stored",
-            AutoWindow::MinMax => "full",
-            AutoWindow::Percentile => "trimmed",
-            AutoWindow::Manual => "manual",
-        }
-    }
-
-    /// The window an image opens with, which is one rule: the image's own
-    /// [`Referred`]. Something already graded has a white of its own and 0..1
-    /// is exactly right. Scene light is in the file's own units too — a
-    /// render's, or cd/m² — and keeps them, the meter working on the
-    /// exposure instead ([`Display::for_image_with`]). Linear sensor counts
-    /// have neither a white nor a middle, and showing them unwindowed is how
-    /// you get a black rectangle.
-    ///
-    /// Held apart from [`Display::for_image_with`] because it is also what
-    /// [`Display::reset`] puts back, and what the histogram panel's row of
-    /// windows names outright: the file's own is always one of the three.
-    pub fn default_for(image: &DecodedImage) -> Self {
-        match image.referred {
-            Referred::Display | Referred::Scene => AutoWindow::Off,
-            Referred::Measured => AutoWindow::Percentile,
-        }
-    }
-
-    fn next(self) -> Self {
-        match self {
-            AutoWindow::Off => AutoWindow::MinMax,
-            AutoWindow::MinMax => AutoWindow::Percentile,
-            // Cycling out of a hand-set window returns to the automatic ones.
-            AutoWindow::Percentile | AutoWindow::Manual => AutoWindow::Off,
-        }
-    }
-}
-
-/// What to do with values that are still above 1.0 once windowed.
-///
-/// A curve is something added: it exists to fit values above white into a
-/// surface that stops there. So there is the one curve, and `None` — which
-/// is not a second curve but the absence of one, and means whatever the
-/// surface makes of the highlights on its own: an SDR surface clamps them at
-/// white, and an HDR surface shows them at the brightness they were graded
-/// to. Which of the two is [`Headroom`]'s to say, and the surface's; whether
-/// to add the curve is the viewer's.
-///
-/// One curve, because a viewer wants exactly one thing of it: the highlights
-/// brought back under white with everything else left alone. A curve that
-/// re-grades the in-range picture to make room for them — Reinhard's
-/// `c / (c + 1)` sends white to a half, and changes every pixel of an 8-bit
-/// file at 0 EV — is editing, which this panel does not do.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum ToneMap {
-    /// No curve. Clipping on an SDR surface, which is correct for measurement
-    /// work where clipping is a thing to be seen; the highlights as they are
-    /// on an HDR one, which is the whole point of asking for one.
-    None,
-    /// Khronos PBR Neutral: a shoulder that rolls the highlights off under
-    /// white, a toe that takes a small offset out of the shadows, and a
-    /// desaturation toward the peak that holds hue where a channel would
-    /// otherwise clip first. Below the shoulder a value comes out as itself.
-    Neutral,
-}
-
-impl ToneMap {
-    /// Both choices, in the order the histogram panel's row of them is drawn
-    /// in; the key toggles between them.
-    pub const ALL: [ToneMap; 2] = [ToneMap::None, ToneMap::Neutral];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            ToneMap::None => "none",
-            ToneMap::Neutral => "neutral",
-        }
-    }
-
-    pub fn parse(value: &str) -> Option<Self> {
-        Some(match value.to_ascii_lowercase().as_str() {
-            "none" => ToneMap::None,
-            "neutral" => ToneMap::Neutral,
-            _ => return None,
-        })
-    }
-
-    fn next(self) -> Self {
-        match self {
-            ToneMap::None => ToneMap::Neutral,
-            ToneMap::Neutral => ToneMap::None,
-        }
-    }
-
-    /// The curve a picture gets when nothing has asked for one: none at all
-    /// where the surface has room for the highlights, and otherwise a
-    /// roll-off where there are highlights above white to roll off — and
-    /// none, again, where there are not, since a curve on a picture that
-    /// never reaches white is a bend in it for no reason.
-    ///
-    /// `above_white` is the picture as the display has it: not what kind of
-    /// file it is, but whether anything in it comes out past white once the
-    /// window is on it. See [`Display::exceeds_white`].
-    ///
-    /// Held apart from [`Display::for_image_with`] because the surface can
-    /// change under a picture — it is settled after the first file is
-    /// decoded, and it is switched — so the answer has to be asked for again
-    /// whenever it does.
-    pub fn default_for(headroom: Headroom, above_white: bool) -> Self {
-        match (headroom, above_white) {
-            (Headroom::Above, _) | (Headroom::None, false) => ToneMap::None,
-            (Headroom::None, true) => ToneMap::Neutral,
-        }
-    }
-
-    /// The curve itself, applied to one linear color, on a surface with
-    /// `headroom`.
-    ///
-    /// The GPU runs this on every pixel of every frame as `tone_map` in
-    /// `shaders/composite.wgsl`, with `shader_codes::tone_map` choosing the
-    /// arm the way the match below does; this is the same arithmetic for the
-    /// one pixel a readout has to describe. A readback test in
-    /// `render/filter_tests.rs` holds the device to this over every arm —
-    /// the point of a readout is that it agrees with the screen.
-    pub fn apply(self, color: [f32; 3], headroom: Headroom) -> [f32; 3] {
-        match (self, headroom) {
-            // The hardware clamps on the way into an SDR surface.
-            (ToneMap::None, Headroom::None) => color.map(|c| c.clamp(0.0, 1.0)),
-            // The negatives go, as they do under every other curve here:
-            // undershoot from a bicubic lobe is not light.
-            (ToneMap::None, Headroom::Above) => color.map(|c| c.max(0.0)),
-            (ToneMap::Neutral, _) => neutral(color.map(|c| c.max(0.0))),
-        }
-    }
-}
 
 /// Whether a step from `from` to `to` is a step at all, against a window
 /// `width` wide: a press against the plot's end asks for the end, and the
@@ -176,178 +22,6 @@ impl ToneMap {
 /// move of a hair is no move. A real step is a twentieth of the window.
 fn moved(from: f32, to: f32, width: f32) -> bool {
     (to - from).abs() > 1e-4 * width.abs()
-}
-
-/// Khronos PBR Neutral, the twin of `neutral()` in `shaders/composite.wgsl`.
-fn neutral(color: [f32; 3]) -> [f32; 3] {
-    const START_COMPRESSION: f32 = 0.8 - 0.04;
-    const DESATURATION: f32 = 0.15;
-
-    let darkest = color[0].min(color[1]).min(color[2]);
-    let offset = if darkest < 0.08 {
-        darkest - 6.25 * darkest * darkest
-    } else {
-        0.04
-    };
-    let color = color.map(|c| c - offset);
-
-    let peak = color[0].max(color[1]).max(color[2]);
-    if peak < START_COMPRESSION {
-        return color;
-    }
-
-    let d = 1.0 - START_COMPRESSION;
-    let new_peak = 1.0 - d * d / (peak + d - START_COMPRESSION);
-    let color = color.map(|c| c * (new_peak / peak));
-
-    // Highlights desaturate towards the peak rather than clipping a channel
-    // at a time, which is what keeps the hue.
-    let g = 1.0 - 1.0 / (DESATURATION * (peak - new_peak) + 1.0);
-    color.map(|c| c + (new_peak - c) * g)
-}
-
-/// False color for single-channel images. Ignored for color images.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Colormap {
-    Gray,
-    Viridis,
-    Magma,
-    Turbo,
-}
-
-impl Colormap {
-    /// Every map, in the order the key cycles them — which is the order the
-    /// buttons under the histogram's ramp are laid out in, so that the two
-    /// ways of choosing one agree about what comes after what.
-    pub const ALL: [Colormap; 4] = [
-        Colormap::Gray,
-        Colormap::Viridis,
-        Colormap::Magma,
-        Colormap::Turbo,
-    ];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Colormap::Gray => "gray",
-            Colormap::Viridis => "viridis",
-            Colormap::Magma => "magma",
-            Colormap::Turbo => "turbo",
-        }
-    }
-
-    pub fn parse(value: &str) -> Option<Self> {
-        Some(match value.to_ascii_lowercase().as_str() {
-            "gray" | "grey" | "none" => Colormap::Gray,
-            "viridis" => Colormap::Viridis,
-            "magma" => Colormap::Magma,
-            "turbo" => Colormap::Turbo,
-            _ => return None,
-        })
-    }
-
-    fn next(self) -> Self {
-        match self {
-            Colormap::Gray => Colormap::Viridis,
-            Colormap::Viridis => Colormap::Magma,
-            Colormap::Magma => Colormap::Turbo,
-            Colormap::Turbo => Colormap::Gray,
-        }
-    }
-
-    /// The color this map gives to a windowed value, in the linear working
-    /// space. Out-of-window values take the end of the ramp, as they do on
-    /// screen.
-    ///
-    /// The one place the ramps are defined: `render/image_layer.rs` samples
-    /// this along each map's length into the texture `shaders/image.wgsl`
-    /// reads, so the screen shows what the readout names by construction.
-    /// The polynomials produce sRGB-encoded values, linearized after.
-    pub fn color(self, value: f32) -> [f32; 3] {
-        let t = value.clamp(0.0, 1.0);
-        let encoded = match self {
-            Colormap::Gray => [t; 3],
-            Colormap::Viridis => ramp(&VIRIDIS, t),
-            Colormap::Magma => ramp(&MAGMA, t),
-            Colormap::Turbo => ramp(&TURBO, t),
-        };
-        encoded.map(|c| Transfer::Srgb.to_linear(c.clamp(0.0, 1.0)))
-    }
-}
-
-/// A colormap as its coefficients: one RGB triple per power of the ramp
-/// position, lowest first, evaluated by Horner's method.
-fn ramp(coefficients: &[[f32; 3]], t: f32) -> [f32; 3] {
-    let mut out = [0.0; 3];
-    for triple in coefficients.iter().rev() {
-        for (slot, coefficient) in out.iter_mut().zip(triple) {
-            *slot = *slot * t + coefficient;
-        }
-    }
-    out
-}
-
-// Viridis and magma are Matt Zucker's polynomial fits to matplotlib's
-// colormaps, from https://www.shadertoy.com/view/WlfXRN, dedicated to the
-// public domain under CC0; the colormap data he fitted was CC0 as well. What
-// is borrowed is the fit, not the colormap, which is why the license recorded
-// in `REUSE.toml` is the fit's.
-//
-// Written out to the digit as published; f32 keeps rather fewer of them.
-#[allow(clippy::excessive_precision)]
-const VIRIDIS: [[f32; 3]; 7] = [
-    [0.2777273, 0.00540734, 0.33409980],
-    [0.10509304, 1.40461353, 1.38459016],
-    [-0.33086183, 0.21484756, 0.09509516],
-    [-4.63423050, -5.79910097, -19.33244096],
-    [6.22826994, 14.17993337, 56.69055260],
-    [4.77638500, -13.74514538, -65.35303263],
-    [-5.43545586, 4.64585261, 26.31241433],
-];
-
-#[allow(clippy::excessive_precision)]
-const MAGMA: [[f32; 3]; 7] = [
-    [-0.00213649, -0.00074966, -0.00538613],
-    [0.25166054, 0.67752324, 2.49402660],
-    [8.35371728, -3.57771951, 0.31446790],
-    [-27.66873309, 14.26473078, -13.64921319],
-    [52.17613981, -27.94360607, 12.94416944],
-    [-50.76852536, 29.04658282, 4.23415299],
-    [18.65570507, -11.48977352, -5.60196151],
-];
-
-/// Turbo's fit is Google's own rather than a third party's: the colormap is
-/// Anton Mikhailov's and the approximation Ruofei Du's, published together at
-/// <https://gist.github.com/mikhailov-work/0d177465a8151eb6ede1768d51d476c7>
-/// under Apache-2.0. `REUSE.toml` records it.
-///
-/// Published as two dot products per channel; this is the same degree-five
-/// polynomial, transposed to a triple per power.
-#[allow(clippy::excessive_precision)]
-const TURBO: [[f32; 3]; 6] = [
-    [0.13572138, 0.09140261, 0.10667330],
-    [4.61539260, 2.19418839, 12.64194608],
-    [-42.66032258, 4.84296658, -60.58204836],
-    [132.13108234, -14.18503333, 110.36276771],
-    [-152.94239396, 4.27729857, -89.90310912],
-    [59.28637943, 2.82956604, 27.34824973],
-];
-
-/// Whether the surface being drawn to has room above SDR white.
-///
-/// It is what decides what becomes of values over 1.0 when no curve is on,
-/// so it belongs to the output rather than to the image or to the user, and
-/// is passed to everything here that has to say what the screen shows rather
-/// than kept in [`Display`]. `render` resolves it from the surface it managed
-/// to get; this layer only has to know which of the two it is.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub enum Headroom {
-    /// An SDR surface: everything above 1.0 is clamped at white on the way in.
-    #[default]
-    None,
-    /// An HDR surface: the highlights go out at the brightness they were
-    /// graded to, and tone mapping is something the viewer asks for rather
-    /// than something the output imposes.
-    Above,
 }
 
 /// Display state requested on the command line, applied on top of whatever
@@ -1045,17 +719,6 @@ mod tests {
         );
     }
 
-    /// The key and the row of buttons offer the same maps in the same order.
-    #[test]
-    fn cycling_the_false_color_walks_the_row_of_them() {
-        let mut map = Colormap::ALL[0];
-        for expected in Colormap::ALL.into_iter().skip(1) {
-            map = map.next();
-            assert_eq!(map, expected);
-        }
-        assert_eq!(map.next(), Colormap::ALL[0], "and round again");
-    }
-
     /// A photograph with its gain map applied is linear float — the signature
     /// of sensor data, which the opening window stretches — but it was graded
     /// before the map lifted its highlights, and its decoder says so. What it
@@ -1156,71 +819,6 @@ mod tests {
             mapped.color[2] > mapped.color[1],
             "the bottom of viridis is purple"
         );
-    }
-
-    /// The fits are transcribed from `shaders/image.wgsl`, where a mistyped
-    /// coefficient would be invisible; against matplotlib's own colors they
-    /// are not. Loose, because a seven-term fit is an approximation of a
-    /// 256-entry table, but nowhere near loose enough to hide a typo.
-    #[test]
-    fn the_colormaps_land_on_the_colors_they_are_named_after() {
-        let encoded = |map: Colormap, t: f32| {
-            map.color(t)
-                .map(|channel| Transfer::Srgb.to_encoded(channel))
-        };
-        let close =
-            |got: [f32; 3], want: [f32; 3]| got.iter().zip(want).all(|(a, b)| (a - b).abs() < 0.06);
-
-        // matplotlib: viridis runs #440154 -> #21918c -> #fde725.
-        assert!(close(
-            encoded(Colormap::Viridis, 0.0),
-            [0.267, 0.005, 0.329]
-        ));
-        assert!(close(
-            encoded(Colormap::Viridis, 0.5),
-            [0.129, 0.569, 0.549]
-        ));
-        assert!(close(
-            encoded(Colormap::Viridis, 1.0),
-            [0.993, 0.906, 0.144]
-        ));
-
-        // magma runs #000004 -> #b5367a -> #fcfdbf.
-        assert!(close(encoded(Colormap::Magma, 0.0), [0.001, 0.000, 0.014]));
-        assert!(close(encoded(Colormap::Magma, 0.5), [0.716, 0.215, 0.475]));
-        assert!(close(encoded(Colormap::Magma, 1.0), [0.987, 0.991, 0.749]));
-
-        // turbo runs dark blue -> green -> dark red.
-        let middle = encoded(Colormap::Turbo, 0.5);
-        assert!(middle[1] > middle[0] && middle[1] > middle[2], "{middle:?}");
-        let top = encoded(Colormap::Turbo, 1.0);
-        assert!(top[0] > 0.4 && top[2] < 0.2, "{top:?}");
-
-        // Past either end of the window the ramp stops rather than running on
-        // into whatever the polynomial does out there.
-        assert_eq!(Colormap::Viridis.color(-3.0), Colormap::Viridis.color(0.0));
-        assert_eq!(Colormap::Viridis.color(9.0), Colormap::Viridis.color(1.0));
-    }
-
-    /// Mirrors of shader code are worth pinning to their anchors: clip is a
-    /// clamp, and the neutral curve leaves ordinary values where they are
-    /// before rolling off the top.
-    #[test]
-    fn the_tone_curves_match_what_the_compositor_does() {
-        assert_eq!(
-            ToneMap::None.apply([-1.0, 0.5, 2.0], Headroom::None),
-            [0.0, 0.5, 1.0]
-        );
-
-        let neutral = ToneMap::Neutral.apply([0.2, 0.4, 0.6], Headroom::None);
-        for (got, want) in neutral.iter().zip([0.2, 0.4, 0.6]) {
-            assert!((got - want).abs() < 0.05, "{neutral:?}");
-        }
-        // Everything above the shoulder stays inside the display's range.
-        for value in [1.0, 4.0, 100.0] {
-            let peak = ToneMap::Neutral.apply([value; 3], Headroom::None)[0];
-            assert!((0.8..=1.0).contains(&peak), "{value} -> {peak}");
-        }
     }
 
     #[test]
@@ -1409,36 +1007,6 @@ mod tests {
         );
         assert!(!display.step_white(0.05, srgb, 1.0));
         assert_eq!(display.exposure_stops, 0.0);
-    }
-
-    /// The rules are named the same way everywhere — the buttons, the bar,
-    /// the key's help and the command line — and the command line takes the
-    /// other spellings as well, so a script written to them does not break.
-    #[test]
-    fn the_window_rules_answer_to_their_old_names_too() {
-        for (word, rule) in [
-            ("stored", AutoWindow::Off),
-            ("Stored", AutoWindow::Off),
-            ("unit", AutoWindow::Off),
-            ("off", AutoWindow::Off),
-            ("full", AutoWindow::MinMax),
-            ("minmax", AutoWindow::MinMax),
-            ("min-max", AutoWindow::MinMax),
-            ("trimmed", AutoWindow::Percentile),
-            ("pct", AutoWindow::Percentile),
-            ("percentile", AutoWindow::Percentile),
-        ] {
-            assert_eq!(AutoWindow::parse(word), Some(rule), "{word}");
-        }
-        assert_eq!(AutoWindow::parse("99.8%"), None);
-        assert_eq!(AutoWindow::parse("manual"), None, "not a rule to ask for");
-        for rule in [AutoWindow::Off, AutoWindow::MinMax, AutoWindow::Percentile] {
-            assert_eq!(
-                AutoWindow::parse(rule.label()),
-                Some(rule),
-                "the label is a spelling the command line takes"
-            );
-        }
     }
 
     #[test]
@@ -1705,24 +1273,6 @@ mod tests {
         assert_eq!(display.colormap, Colormap::Gray);
     }
 
-    /// No curve means whatever the surface does: an SDR surface clamps at
-    /// white, and an HDR one passes the highlights through and clips nothing
-    /// but the light that is not there — the shader's arms 0 and 2.
-    #[test]
-    fn no_curve_is_a_clip_on_sdr_and_a_pass_through_on_hdr() {
-        let color = [-0.25, 0.5, 6.31];
-        assert_eq!(ToneMap::None.apply(color, Headroom::None), [0.0, 0.5, 1.0]);
-        assert_eq!(
-            ToneMap::None.apply(color, Headroom::Above),
-            [0.0, 0.5, 6.31]
-        );
-        // The curve is the curve whatever the surface.
-        assert_eq!(
-            ToneMap::Neutral.apply(color, Headroom::None),
-            ToneMap::Neutral.apply(color, Headroom::Above)
-        );
-    }
-
     /// And so does a readout of a value: on a surface with room above white
     /// the response runs past 1, which is what the histogram draws, and a
     /// false color is clipped there as everywhere, since the ramp has no
@@ -1890,20 +1440,5 @@ mod tests {
         display.put_white(f32::NAN);
         let (black, white) = display.displayed_bounds();
         assert!((black - 0.1).abs() < 1e-6 && (white - 0.25).abs() < 1e-6);
-    }
-
-    /// Every choice has to be reachable from every other one, or a viewer on
-    /// an HDR surface who presses `t` to see the SDR rendering has no way
-    /// back to the one the surface was asked for.
-    #[test]
-    fn cycling_the_tone_map_returns_to_where_it_started() {
-        let mut map = ToneMap::None;
-        let mut seen = vec![map];
-        for _ in 1..ToneMap::ALL.len() {
-            map = map.next();
-            assert!(!seen.contains(&map), "{map:?} came round twice");
-            seen.push(map);
-        }
-        assert_eq!(map.next(), ToneMap::None);
     }
 }
