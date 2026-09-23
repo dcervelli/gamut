@@ -581,8 +581,8 @@ closely at one place without zooming the whole view in. The glass sits up
 and to the right of the pointer, and moves to the other side where that
 would take it off the picture's area. It shows the picture as the screen
 shows it — the window, exposure, curve and false color all reach it — and
-it is there whenever the pointer is over the image, and steps aside while
-the picture is being dragged. Holding the right mouse
+it is there whenever the pointer is over the image, through a drag as
+well. Holding the right mouse
 button on the picture puts it up as well, for as long as the button is held,
 whether or not the toggle is on.
 

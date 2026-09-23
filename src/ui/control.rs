@@ -271,11 +271,13 @@ pub enum Command {
     /// pointer stops moving while the toolkit holds a button down on the
     /// picture, as it does for a drag — see [`Command::Pull`].
     Secondary(Option<[f32; 2]>),
-    /// Whether the primary button is dragging on the picture — the view,
-    /// the region or the zoom box, whichever the drag is — said on every
-    /// pass. The loupe goes down for the drag: the hand is on the picture,
-    /// and the pointer the loupe follows stands still while it is.
-    Dragging(bool),
+    /// Where the pointer is while the primary button is dragging on the
+    /// picture — the view, the region or the zoom box, whichever the drag
+    /// is — in physical pixels, and `None` while it is not. Said on every
+    /// pass, for the same reason [`Command::Secondary`] carries the
+    /// pointer: the application's own stands still while the toolkit holds
+    /// the drag, and the loupe follows the hand through it.
+    Dragging(Option<[f32; 2]>),
     /// A drag on the picture began that is the region's rather than the
     /// view's: a new region while one was being asked for, or a hold on the
     /// one on screen. `at` is where the button went down, in image pixels —

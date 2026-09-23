@@ -1222,14 +1222,13 @@ impl App {
     /// The loupe, while it is up: its toggle is on, or the secondary button
     /// is held on the picture, and the pointer is on a pixel of the picture
     /// — the same reading the bar's readout is made from, so the loupe is
-    /// up exactly when there is a pixel under the pointer to magnify. Down
-    /// for a drag on the picture: the hand is on the view or the region,
-    /// and the pointer the loupe follows stands still meanwhile, so it would
-    /// hang where the drag began, magnifying whatever slid under it. Where
+    /// up exactly when there is a pixel under the pointer to magnify. Where
     /// its circles go is the interface's to say, against the content area
-    /// and the pointer in the logical pixels it lays out in.
+    /// and the pointer in the logical pixels it lays out in. Through a drag
+    /// on the picture it follows the hand, the pass handing the pointer
+    /// over as `Command::Dragging` while winit is not.
     fn loupe(&self) -> Option<ui::loupe::Loupe> {
-        if !(self.panels.show_loupe || self.pointer.secondary) || self.pointer.dragging {
+        if !(self.panels.show_loupe || self.pointer.secondary) {
             return None;
         }
         self.pointer_pixel()?;
@@ -4436,12 +4435,15 @@ mod tests {
         app.pointer.over_image = false;
         assert_eq!(app.loupe(), None);
         app.pointer.over_image = true;
-        // Down for a drag, and back when the drag lets go.
-        assert_eq!(app.act(Command::Dragging(true)), Effect::Redraw);
-        assert_eq!(app.loupe(), None);
-        assert_eq!(app.act(Command::Dragging(true)), Effect::Nothing);
-        assert_eq!(app.act(Command::Dragging(false)), Effect::Redraw);
-        assert!(app.loupe().is_some());
+        // Through a drag it follows the pointer the pass hands over, and
+        // stays up.
+        let dragged = [middle[0] + 7.0, middle[1] - 2.0];
+        assert_eq!(app.act(Command::Dragging(Some(dragged))), Effect::Redraw);
+        assert_eq!(app.loupe().map(|loupe| loupe.eye), Some(dragged));
+        assert_eq!(app.act(Command::Dragging(Some(dragged))), Effect::Nothing);
+        assert_eq!(app.act(Command::Dragging(None)), Effect::Nothing);
+        assert_eq!(app.loupe().map(|loupe| loupe.eye), Some(dragged));
+        app.pointer.cursor = Some(middle);
         assert_eq!(app.press(ui::Control::Loupe), Effect::Redraw);
         assert_eq!(app.loupe(), None);
         // Its tooltip says the button is the other way to it.

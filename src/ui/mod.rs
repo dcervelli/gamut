@@ -456,9 +456,12 @@ impl Pass<'_> {
             .flatten()
             .map(|pos| [pos.x * scale, pos.y * scale]);
         self.commands.push(Command::Secondary(at));
-        self.commands.push(Command::Dragging(
-            response.dragged_by(egui::PointerButton::Primary),
-        ));
+        let dragging = response
+            .dragged_by(egui::PointerButton::Primary)
+            .then(|| response.interact_pointer_pos())
+            .flatten()
+            .map(|pos| [pos.x * scale, pos.y * scale]);
+        self.commands.push(Command::Dragging(dragging));
         if response.contains_pointer() {
             let wheel: Vec<Command> = ui.input(|input| {
                 input

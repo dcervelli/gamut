@@ -1581,9 +1581,6 @@ pub(super) struct Pointer {
     /// the loupe up while it is. From the last pass, as `over_image` is,
     /// since the toolkit takes the button — see `Command::Secondary`.
     pub(super) secondary: bool,
-    /// Whether the primary button is dragging on the picture, from the last
-    /// pass as well — see `Command::Dragging`. The loupe is down while it is.
-    pub(super) dragging: bool,
     /// Where `Space` is: the one key that fits on its way up.
     pub(super) space: Space,
 }
@@ -2146,9 +2143,11 @@ impl App {
                 let moved = held.is_some_and(|at| self.pointer.cursor.replace(at) != Some(at));
                 return Effect::redraw_if(was != held.is_some() || moved);
             }
-            ui::Command::Dragging(dragging) => {
+            // The pointer through a drag on the picture, which winit has
+            // stopped reporting: the loupe follows it, as the readout does.
+            ui::Command::Dragging(at) => {
                 return Effect::redraw_if(
-                    std::mem::replace(&mut self.pointer.dragging, dragging) != dragging,
+                    at.is_some_and(|at| self.pointer.cursor.replace(at) != Some(at)),
                 );
             }
             // A press owes a frame whatever it did — egui repaints the

@@ -578,11 +578,11 @@ are read into `Panels::show_loupe` and `Pointer::secondary`, and
 pixel under the pointer — the same `pointer_pixel` reading the bar's readout
 is made from, so the loupe is up exactly when there is a pixel to magnify,
 and goes when the pointer crosses onto a panel or off the picture's edge.
-It goes for a drag on the picture as well — a pan, the region's or the zoom
-box's — which `Pass::picture` reports on every pass as `Command::Dragging`
-into `Pointer::dragging`: the pointer the loupe follows stands still while
-the toolkit holds the drag, so the loupe would hang where the drag began,
-magnifying whatever slid under it.
+Through a drag on the picture — a pan, the region's or the zoom box's — it
+follows the hand: the pointer the loupe follows stands still while the
+toolkit holds the drag, so `Pass::picture` reports the pointer's place on
+every pass of one as `Command::Dragging`, and `App::act` moves the pointer
+by it, as `Command::Secondary` does for the other button.
 
 Where the circles go is `ui::loupe::place`, a pure function of the pointer
 and the content area, worked out by the application once per frame and
