@@ -23,6 +23,7 @@ use std::fs::File;
 use std::io::{Read as _, Write as _};
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use wl_clipboard_rs::copy::{MimeType, Options, Source};
@@ -144,6 +145,35 @@ const IMAGE_TYPES: &[(&str, &str)] = &[
     ("image/x-portable-anymap", "pnm"),
     ("image/vnd.radiance", "hdr"),
 ];
+
+/// Watches the clipboard for a picture this program could show, from a
+/// thread of its own, and calls `notify` with the answer each time it
+/// changes — `true` when one has arrived, `false` when it has gone. Asked
+/// every `interval` rather than waited for, since nothing tells a program
+/// that the selection has changed; on a thread rather than on the loop,
+/// since one look is a round trip to the compositor, and a compositor slow
+/// to answer must not stall the window. The thread stops once `notify`
+/// says nobody is listening, and is otherwise left to die with the process.
+pub fn watch(interval: Duration, notify: impl Fn(bool) -> bool + Send + 'static) {
+    let spawned = std::thread::Builder::new()
+        .name("gamut clipboard".into())
+        .spawn(move || {
+            let mut offered = false;
+            loop {
+                let now = matches!(offered_image(), Ok(Some(_)));
+                if now != offered {
+                    offered = now;
+                    if !notify(offered) {
+                        return;
+                    }
+                }
+                std::thread::sleep(interval);
+            }
+        });
+    if let Err(error) = spawned {
+        eprintln!("gamut: could not watch the clipboard: {error}");
+    }
+}
 
 /// A picture the clipboard is offering: the MIME type to ask for it under,
 /// and what a file holding it should be called.

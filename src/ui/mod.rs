@@ -183,10 +183,11 @@ pub struct Panels {
     /// which is whether the paste button is on screen at all: a button that
     /// did nothing when pressed would be worse than no button.
     ///
-    /// Looked at on the same cadence as the file and the palette, since
-    /// nothing tells us when a selection changes — see
-    /// `App::poll_clipboard`. It is what was true at the last look, so a
-    /// press asks the clipboard again rather than acting on it.
+    /// Looked at on the same cadence as the file and the palette, from a
+    /// thread of its own, since nothing tells us when a selection changes
+    /// — see `clipboard::watch` and `App::clipboard_changed`. It is what
+    /// was true at the last look, so a press asks the clipboard again
+    /// rather than acting on it.
     pub paste: bool,
     /// How the bottom bar writes out the value of the pixel under the
     /// pointer. Here rather than with the display's own settings because it

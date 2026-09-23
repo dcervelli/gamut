@@ -88,10 +88,11 @@ the menu, and there would never be a pixel under it to take.
 
 `Ctrl+V` has a button as well, under that one, and it is on screen only while
 the clipboard is holding a picture that can be shown — the clipboard is looked
-at on the same quarter-second cadence as the file and the palette, and not at
-all while the interface is hidden. A button that did nothing when pressed would
-be worse than no button, and one that comes and goes says what the clipboard
-holds without being asked.
+at on the same quarter-second cadence as the file and the palette, by a thread
+of its own (`clipboard::watch`) since one look is a round trip to the
+compositor, and the button goes with the bars when the interface is hidden. A
+button that did nothing when pressed would be worse than no button, and one
+that comes and goes says what the clipboard holds without being asked.
 
 `--paste` is the same paste asked for before there is a window. `main::run`
 asks the clipboard what it offers, reserves the file through `pasted::reserve`

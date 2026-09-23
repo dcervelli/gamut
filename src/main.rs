@@ -176,6 +176,10 @@ fn run() -> Result<ExitCode> {
     let picker: portal::Deliver = std::sync::Arc::new(move |picked| {
         let _ = proxy.send_event(app::UserEvent::Picked(picked));
     });
+    let proxy = event_loop.create_proxy();
+    clipboard::watch(watch::INTERVAL, move |offered| {
+        proxy.send_event(app::UserEvent::Clipboard(offered)).is_ok()
+    });
     let mut app = App::new(
         files,
         named,

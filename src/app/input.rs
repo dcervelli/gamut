@@ -1741,6 +1741,9 @@ impl App {
             // just come or gone.
             ToggleInterface => {
                 self.panels.show_ui = !self.panels.show_ui;
+                // The paste button goes with the bars, and comes back
+                // with them where the clipboard still holds a picture.
+                let _ = self.refresh_paste();
                 // A menu is part of the interface, and goes with it.
                 self.close_menus();
                 // The first time it goes, say how to get it back. With the

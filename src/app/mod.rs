@@ -69,6 +69,9 @@ pub enum UserEvent {
     /// The desktop's file dialog has come down: what was chosen in it, if
     /// anything.
     Picked(Picked),
+    /// A picture this program could show has arrived on the clipboard, or
+    /// the one there has gone — see `clipboard::watch`.
+    Clipboard(bool),
 }
 
 /// The other threads, and how each reaches the loop: made in `main` from
@@ -275,6 +278,10 @@ pub struct App {
     /// Whether that dialog is up. One at a time: the buttons that open it
     /// are drawn dead while it is, and the key does nothing.
     picking: bool,
+    /// Whether the clipboard holds a picture this program could show, as
+    /// the thread watching it last said. `Panels::paste` is this and the
+    /// interface being on screen.
+    clipboard_offers: bool,
     /// Whether the list is still the one the command line gave, with
     /// nothing opened from the window since. A command line whose every
     /// file fails to decode is a command line to answer by leaving, with a
@@ -404,6 +411,7 @@ impl App {
             renaming: None,
             picker,
             picking: false,
+            clipboard_offers: false,
             from_command_line: source.is_some(),
             said_how_to_restore: false,
             reported_error: false,
@@ -1002,10 +1010,12 @@ impl App {
     }
 
     /// Everything that is asked rather than waited for, on one cadence:
-    /// the file on screen, the directories named, the desktop's theme, the
-    /// clipboard, and the copies in flight. All of them, always: each has a
-    /// watch that only advances when it is polled. Says what the window
-    /// owes for what they found; nothing between looks.
+    /// the file on screen, the directories named, the desktop's theme, and
+    /// the copies in flight. All of them, always: each has a watch that
+    /// only advances when it is polled. Says what the window owes for what
+    /// they found; nothing between looks. The clipboard is watched by a
+    /// thread of its own — see [`App::clipboard_changed`] — since one look
+    /// at it is a round trip to the compositor.
     fn poll(&mut self, now: Instant) -> Effect {
         if now < self.next_poll {
             return Effect::Nothing;
@@ -1014,7 +1024,6 @@ impl App {
         self.poll_file()
             .also(self.poll_directories())
             .also(self.poll_theme())
-            .also(self.poll_clipboard())
             .also(self.poll_copies())
     }
 
@@ -1270,23 +1279,25 @@ impl App {
         Effect::redraw_if(relisted)
     }
 
-    /// Notices a picture arriving on the clipboard or leaving it, which is
-    /// what puts the paste button on screen and takes it off again. Says
-    /// whether the answer changed, and so whether the window owes a redraw.
-    ///
-    /// Asked rather than waited for, as everything else on this tick is:
-    /// nothing tells a program that the selection has changed, and one look
-    /// costs about as much as the handful of `stat`s beside it. Only while
-    /// the interface is on screen, since the button is the only thing that
-    /// depends on the answer — `` ` `` therefore stops the looking as well as
-    /// hiding the button.
-    fn poll_clipboard(&mut self) -> Effect {
-        let offered =
-            self.panels.show_ui && matches!(crate::clipboard::offered_image(), Ok(Some(_)));
-        if offered == self.panels.paste {
+    /// Takes in what the thread watching the clipboard said: a picture
+    /// this program could show has arrived on it, or the one there has
+    /// gone. What puts the paste button on screen and takes it off again.
+    pub(super) fn clipboard_changed(&mut self, offered: bool) -> Effect {
+        self.clipboard_offers = offered;
+        self.refresh_paste()
+    }
+
+    /// Puts the paste button where the clipboard and the interface say:
+    /// on screen while the clipboard holds a picture and the interface is
+    /// showing, since the button is the only thing that depends on the
+    /// answer and `` ` `` takes it away with the rest. Says whether that
+    /// changed, and so whether the window owes a redraw.
+    pub(super) fn refresh_paste(&mut self) -> Effect {
+        let paste = self.clipboard_offers && self.panels.show_ui;
+        if paste == self.panels.paste {
             return Effect::Nothing;
         }
-        self.panels.paste = offered;
+        self.panels.paste = paste;
         Effect::Redraw
     }
 
@@ -1911,6 +1922,7 @@ impl ApplicationHandler<UserEvent> for App {
                 }
             }
             UserEvent::Picked(picked) => self.picked(picked),
+            UserEvent::Clipboard(offered) => self.clipboard_changed(offered),
             UserEvent::Monitor => self.sync_monitor(),
             // A frame from the player of a file already stepped past is news
             // about nothing on screen.
@@ -4119,5 +4131,30 @@ mod tests {
                 "{mode:?} {path:?} {size:?} beside {shown:?}"
             );
         }
+    }
+
+    /// The paste button follows the clipboard and the interface together:
+    /// up while a picture is on the clipboard and the bars are showing,
+    /// down when either goes, and back when both are there again. Each
+    /// change owes a frame and nothing else does.
+    #[test]
+    fn the_paste_button_follows_the_clipboard_and_the_interface() {
+        use input::Action::ToggleInterface;
+
+        let (mut app, _dir) = app_over("paste", &[("a.png", 4, 3)]);
+        assert!(!app.panels.paste);
+        assert_eq!(app.clipboard_changed(true), Effect::Redraw);
+        assert!(app.panels.paste);
+        assert_eq!(app.clipboard_changed(true), Effect::Nothing);
+
+        let _ = app.perform(ToggleInterface);
+        assert!(!app.panels.paste, "hidden with the rest");
+        assert_eq!(app.clipboard_changed(false), Effect::Nothing);
+        assert_eq!(app.clipboard_changed(true), Effect::Nothing);
+        let _ = app.perform(ToggleInterface);
+        assert!(app.panels.paste, "back with the bars");
+
+        assert_eq!(app.clipboard_changed(false), Effect::Redraw);
+        assert!(!app.panels.paste);
     }
 }
