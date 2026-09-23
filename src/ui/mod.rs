@@ -10,12 +10,14 @@ pub mod chooser;
 pub mod chrome;
 pub mod control;
 pub mod empty;
+pub mod export;
 pub mod fonts;
 pub mod help;
 pub mod info;
 pub mod menu;
 pub mod minimap;
 pub mod rename;
+mod slider;
 pub mod toast;
 pub mod tooltip;
 pub mod transport;
@@ -37,10 +39,11 @@ use std::sync::Arc;
 
 use crate::image::display::{Display, Headroom};
 use crate::image::exif::Exif;
+use crate::image::orient::Turn;
 use crate::image::region::{Grip, Region};
 use crate::image::sequence::Sequence;
 use crate::image::stats::BINS;
-use crate::image::{DecodedImage, Stats};
+use crate::image::{DecodedImage, Sample, Stats};
 use egui::Sense;
 pub use transport::Transport;
 
@@ -130,11 +133,36 @@ pub struct Current {
     /// table at the weight the surface's room asks for, which is what every
     /// readout of a pixel reads it through too. `None` where it has none.
     pub lift: Option<Arc<crate::image::gain_map::Table>>,
+    /// How far the picture has been turned on screen. `image` stays as the
+    /// file holds it; everything read off `Current` other than `image`
+    /// itself is in the turned picture's coordinates — see [`Turn`].
+    pub turn: Turn,
 }
 
 impl Current {
+    /// The picture's size on screen, turned.
     pub fn size(&self) -> [f32; 2] {
-        [self.image.width as f32, self.image.height as f32]
+        let [width, height] = self.pixels();
+        [width as f32, height as f32]
+    }
+
+    /// The same in whole pixels, which is what a region and the pointer's
+    /// coordinate are measured in.
+    pub fn pixels(&self) -> [u32; 2] {
+        self.turn.size([self.image.width, self.image.height])
+    }
+
+    /// The pixel shown at `(x, y)` of the turned picture, read through the
+    /// lift as the screen shows it. `None` outside the picture.
+    pub fn sample(&self, x: u32, y: u32) -> Option<Sample> {
+        let [width, height] = self.pixels();
+        if x >= width || y >= height {
+            return None;
+        }
+        let [x, y] = self
+            .turn
+            .stored([x, y], [self.image.width, self.image.height]);
+        self.image.sample(x, y, self.lift.as_deref())
     }
 }
 
@@ -289,6 +317,8 @@ pub struct FrameInput {
     /// which is why it is a modal rather than a popup: nothing egui does
     /// on its own can close it.
     pub rename: Option<rename::Input>,
+    /// The export dialog, the same way.
+    pub export: Option<export::Input>,
     /// Whether there is nothing on screen and nothing on its way: the
     /// window opened on nothing, or everything it was handed failed. What
     /// puts the buttons for opening something in the middle of the content
@@ -356,6 +386,9 @@ pub fn show(
     // until it has.
     if let Some(rename) = &input.rename {
         rename::show(&mut pass, ui, rename);
+    }
+    if let Some(export) = &input.export {
+        export::show(&mut pass, ui, export);
     }
     pass.commands
 }

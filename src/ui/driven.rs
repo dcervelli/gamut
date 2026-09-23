@@ -100,6 +100,7 @@ fn picture(width: u32, height: u32) -> Current {
         sequence: Sequence::Still,
         page: 0,
         lift: None,
+        turn: crate::image::orient::Turn::NONE,
     }
 }
 
@@ -151,6 +152,7 @@ fn input(logical: [f32; 2], count: usize) -> FrameInput {
         transport: None,
         chooser: None,
         rename: None,
+        export: None,
         empty: false,
         picking: false,
     }
@@ -1183,7 +1185,13 @@ fn the_file_menu_offers_the_copies_the_rename_and_the_deletion() {
     let mut harness = open(WINDOW, 1, panels());
     assert!(harness.query_by_label("Copy name").is_none());
     assert_eq!(click(&mut harness, "File"), []);
-    for label in ["Copy name", "Copy path", "Rename\u{2026}", "Delete"] {
+    for label in [
+        "Copy name",
+        "Copy path",
+        "Rename\u{2026}",
+        "Delete",
+        "Export\u{2026}",
+    ] {
         assert!(
             harness
                 .query_by_role_and_label(egui::accesskit::Role::Button, label)
@@ -1291,6 +1299,109 @@ fn the_rename_dialog_takes_the_keys_and_hands_back_the_name() {
     harness.run();
     assert!(!harness.ctx.egui_wants_keyboard_input());
     assert!(harness.query_by_label("OK").is_none());
+}
+
+/// The export dialog takes the keyboard as it opens, with the stem of its
+/// name selected; hands back what the field holds and which format was
+/// pressed; says its warnings; exports on `Enter` and Export only while the
+/// name will do; and goes on `Esc`.
+#[test]
+fn the_export_dialog_takes_the_keys_and_hands_back_the_name_and_format() {
+    use super::export::{self, Format, Warning};
+    let mut harness = open(WINDOW, 1, panels());
+    let dialog = |name: &str, verdict: export::Verdict, opened: bool| {
+        Some(export::Input {
+            source: "photo.png".to_string(),
+            name: name.to_string(),
+            format: Format::Png,
+            quality: 90,
+            verdict,
+            warnings: vec![Warning::MetadataDropped],
+            opened,
+        })
+    };
+    harness.state_mut().input.export = dialog("photo-edited.png", export::Verdict::Fine, true);
+    harness.run();
+    harness.state_mut().input.export = dialog("photo-edited.png", export::Verdict::Fine, false);
+    harness.run();
+    assert!(harness.ctx.egui_wants_keyboard_input());
+    assert!(
+        harness
+            .query_by_label_contains("Metadata are not exported")
+            .is_some()
+    );
+
+    harness.state_mut().commands.clear();
+    harness.event(egui::Event::Text("x".to_string()));
+    harness.step();
+    assert!(
+        asked(&harness).contains(&Command::ExportName("x.png".to_string())),
+        "{:?}",
+        asked(&harness)
+    );
+    assert!(
+        harness.query_by_label("Export\u{2026}").is_some(),
+        "the title"
+    );
+    assert!(
+        harness.query_by_label("Warnings").is_none(),
+        "painted, not a label"
+    );
+    harness.state_mut().commands.clear();
+    harness
+        .get_by_role_and_label(egui::accesskit::Role::RadioButton, "JPG")
+        .click();
+    harness.run();
+    assert_eq!(
+        asked(&harness),
+        [Command::Press(Control::ExportAs(Format::Jpeg))]
+    );
+    assert!(
+        harness
+            .get_by_role(egui::accesskit::Role::Slider)
+            .accesskit_node()
+            .is_disabled(),
+        "the quality is JPG's alone"
+    );
+
+    let pressed = |harness: &mut Harness<'static, State>, key| {
+        harness.state_mut().commands.clear();
+        harness.key_press(key);
+        harness.step();
+        asked(harness)
+    };
+    // A name that will not do: Export is dead, and `Enter` does nothing.
+    harness.state_mut().input.export = dialog("photo.png", export::Verdict::Taken, false);
+    harness.run();
+    assert!(
+        harness
+            .get_by_label("Export")
+            .accesskit_node()
+            .is_disabled()
+    );
+    let after_enter = pressed(&mut harness, egui::Key::Enter);
+    assert!(
+        !after_enter
+            .iter()
+            .any(|command| matches!(command, Command::Press(Control::ExportTo))),
+        "{after_enter:?}"
+    );
+
+    // One that will: `Enter` and Export both export.
+    harness.state_mut().input.export = dialog("b.png", export::Verdict::Fine, false);
+    harness.run();
+    assert!(pressed(&mut harness, egui::Key::Enter).contains(&Command::Press(Control::ExportTo)));
+    assert_eq!(
+        click(&mut harness, "Export"),
+        [Command::Press(Control::ExportTo)]
+    );
+    assert!(
+        pressed(&mut harness, egui::Key::Escape).contains(&Command::Press(Control::CancelExport))
+    );
+    harness.state_mut().input.export = None;
+    harness.run();
+    harness.run();
+    assert!(!harness.ctx.egui_wants_keyboard_input());
 }
 
 /// A cursor moved by a key is scrolled into view, and the rows on screen

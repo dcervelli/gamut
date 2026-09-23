@@ -14,6 +14,8 @@
 //! application's to hold; these are the pure changes to a rectangle that
 //! either one asks for, each clamped to the image and never below one pixel.
 
+use super::orient::Turn;
+
 /// A rectangle of image pixels: `width` columns from `x`, `height` rows from
 /// `y`, both at least one.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -324,6 +326,26 @@ impl Region {
         (self.x as f32..self.right() as f32).contains(&point[0])
             && (self.y as f32..self.bottom() as f32).contains(&point[1])
     }
+
+    /// The region as it lies once the picture it is on, `shown` pixels
+    /// across and down before the turn, is turned by `turn` more: the same
+    /// pixels, marked out in the turned picture's coordinates.
+    pub fn turned(self, turn: Turn, shown: [u32; 2]) -> Self {
+        let mut region = self;
+        let mut sides = shown;
+        for _ in 0..turn.quarters() {
+            // A quarter clockwise: the left column becomes the top row, and
+            // the bottom row the left column.
+            region = Region {
+                x: sides[1] - (region.y + region.height),
+                y: region.x,
+                width: region.height,
+                height: region.width,
+            };
+            sides.swap(0, 1);
+        }
+        region
+    }
 }
 
 #[cfg(test)]
@@ -516,5 +538,40 @@ mod tests {
                 height: 60
             }
         );
+    }
+
+    /// A turn carries the region's pixels with it, and turning back puts it
+    /// where it was.
+    #[test]
+    fn a_region_turns_with_the_picture() {
+        let r = region(10, 5, 30, 20);
+        let one = Turn::NONE.clockwise();
+        assert_eq!(r.turned(one, IMAGE), region(35, 10, 20, 30));
+        assert_eq!(r.turned(one.clockwise(), IMAGE), region(60, 35, 30, 20));
+        assert_eq!(
+            r.turned(Turn::NONE.counterclockwise(), IMAGE),
+            region(5, 60, 20, 30)
+        );
+        assert_eq!(r.turned(Turn::NONE, IMAGE), r);
+
+        let turned = r.turned(one, IMAGE);
+        assert_eq!(turned.turned(Turn::NONE.counterclockwise(), [60, 100]), r);
+        let mut back = r;
+        let mut shown = IMAGE;
+        for _ in 0..4 {
+            back = back.turned(one, shown);
+            shown = [shown[1], shown[0]];
+        }
+        assert_eq!(back, r);
+
+        // Every pixel inside lands inside, every one outside stays outside:
+        // under a quarter clockwise, pixel (x, y) goes to (h - 1 - y, x).
+        for y in 0..IMAGE[1] {
+            for x in 0..IMAGE[0] {
+                let before = r.contains([x as f32 + 0.5, y as f32 + 0.5]);
+                let at = [(IMAGE[1] - 1 - y) as f32 + 0.5, x as f32 + 0.5];
+                assert_eq!(turned.contains(at), before, "({x}, {y})");
+            }
+        }
     }
 }

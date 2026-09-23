@@ -1,25 +1,36 @@
-//! The copies of the picture being prepared on threads of their own: a
-//! copy of the picture has to walk every pixel before it can say whether
-//! it worked, and the thread doing that has no business touching the
+//! The copies of the picture being prepared on threads of their own — for
+//! the clipboard, or exported to a file: a copy of the picture has to walk
+//! every pixel before it can say whether it worked, and the thread doing that has no business touching the
 //! interface. So each is given a ticket, reports through it, and the loop
 //! picks the reports up on the same cadence it looks at the file, the
 //! palette and the clipboard on.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
 
-/// What a copy prepared on a thread of its own did: took the selection, and
-/// this is what to say about it, or failed with this much to say about it.
-/// `Err` carries the one line the window shows; the whole chain has already
-/// gone to the terminal.
-pub(super) type Outcome = Result<&'static str, String>;
+/// What a copy prepared on a thread of its own did, or that it failed with
+/// this much to say about it. `Err` carries the one line the window shows;
+/// the whole chain has already gone to the terminal.
+pub(super) type Outcome = Result<Done, String>;
+
+/// What a copy that worked did.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub(super) enum Done {
+    /// Took the selection, and this is what to say about it.
+    Copied(&'static str),
+    /// Wrote the picture to a new file here, which the list takes in.
+    Exported(PathBuf),
+}
 
 /// What a thread preparing a copy holds: which copy it is, the count to
 /// tell whether it has been superseded, and the way home for its report.
 pub(super) struct Ticket {
-    asked: u64,
+    /// Which copy it is, or `None` for work aside from the copies, which
+    /// nothing supersedes — see [`Copying::spawn_aside`].
+    asked: Option<u64>,
     count: Arc<AtomicU64>,
     outcome: Sender<Outcome>,
 }
@@ -32,7 +43,8 @@ impl Ticket {
     /// should end up holding the one asked for last rather than whichever
     /// finished last.
     pub fn superseded(&self) -> bool {
-        self.count.load(Ordering::Relaxed) != self.asked
+        self.asked
+            .is_some_and(|asked| self.count.load(Ordering::Relaxed) != asked)
     }
 
     /// Says how the copy went. Nobody listening — the window gone — is
@@ -75,8 +87,22 @@ impl Copying {
     /// dropped as each new copy is asked for, so the list is what is still
     /// in flight rather than every copy the session has ever made.
     pub fn spawn(&mut self, work: impl FnOnce(Ticket) + Send + 'static) {
+        let asked = self.claim();
+        self.start(Some(asked), work);
+    }
+
+    /// Starts `work` as [`Copying::spawn`] does, but aside from the copies
+    /// to the clipboard: without being counted as one, so that it neither
+    /// supersedes a copy still being prepared nor is superseded by the next.
+    /// For a file being exported, which is never stale — an export asked for is a
+    /// file wanted, whatever is asked for after it.
+    pub fn spawn_aside(&mut self, work: impl FnOnce(Ticket) + Send + 'static) {
+        self.start(None, work);
+    }
+
+    fn start(&mut self, asked: Option<u64>, work: impl FnOnce(Ticket) + Send + 'static) {
         let ticket = Ticket {
-            asked: self.claim(),
+            asked,
             count: Arc::clone(&self.count),
             outcome: self.outcome.0.clone(),
         };
@@ -112,7 +138,7 @@ mod tests {
             if ticket.superseded() {
                 ticket.report(Err("superseded".to_string()));
             } else {
-                ticket.report(Ok("Copied."));
+                ticket.report(Ok(Done::Copied("Copied.")));
             }
         });
         assert!(copying.poll().is_empty(), "nothing reported yet");
@@ -121,9 +147,45 @@ mod tests {
         copying.join_all();
         assert_eq!(copying.poll(), [Err("superseded".to_string())]);
 
-        copying.spawn(|ticket| ticket.report(Ok("Copied.")));
+        copying.spawn(|ticket| ticket.report(Ok(Done::Copied("Copied."))));
         copying.join_all();
-        assert_eq!(copying.poll(), [Ok("Copied.")]);
+        assert_eq!(copying.poll(), [Ok(Done::Copied("Copied."))]);
         assert!(copying.poll().is_empty(), "each report is taken once");
+    }
+
+    /// An export is aside from the copies: a copy asked for after it does not
+    /// supersede it, and it does not supersede a copy still being prepared.
+    #[test]
+    fn an_export_neither_supersedes_nor_is_superseded() {
+        let mut copying = Copying::default();
+        let (copy_go, copy_wait) = mpsc::channel::<()>();
+        copying.spawn(move |ticket| {
+            copy_wait.recv().expect("told to go on");
+            ticket.report(match ticket.superseded() {
+                true => Err("copy superseded".to_string()),
+                false => Ok(Done::Copied("Copied.")),
+            });
+        });
+        let (export_go, export_wait) = mpsc::channel::<()>();
+        copying.spawn_aside(move |ticket| {
+            export_wait.recv().expect("told to go on");
+            ticket.report(match ticket.superseded() {
+                true => Err("export superseded".to_string()),
+                false => Ok(Done::Exported(PathBuf::from("a.png"))),
+            });
+        });
+        copy_go.send(()).expect("the copy is waiting");
+        let copied = loop {
+            let reports = copying.poll();
+            if !reports.is_empty() {
+                break reports;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        };
+        assert_eq!(copied, [Ok(Done::Copied("Copied."))]);
+        copying.claim();
+        export_go.send(()).expect("the export is waiting");
+        copying.join_all();
+        assert_eq!(copying.poll(), [Ok(Done::Exported(PathBuf::from("a.png")))]);
     }
 }

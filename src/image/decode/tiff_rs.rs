@@ -43,7 +43,8 @@ use anyhow::{Context, Result, anyhow, bail};
 use tiff::decoder::{Decoder, DecodingResult, DecodingSampleType, Limits};
 use tiff::tags::Tag;
 
-use super::{Positioned, orient};
+use super::Positioned;
+use crate::image::orient;
 use crate::image::sequence::Sequence;
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
 

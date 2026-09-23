@@ -20,12 +20,12 @@ use crate::image::stats::BINS;
 use crate::render::Color;
 
 use super::Rect;
-use crate::theme::Theme;
 
 use super::chrome::{BUTTON_SIZE, ICON_SIDE, Pass};
 use super::icon;
 use super::outline;
 use super::panel;
+use super::slider::{HANDLE_GRIP, HANDLE_WIDTH, Hand, handle};
 use super::style::TOGGLE_RADIUS;
 use super::tooltip::Tip;
 use super::{
@@ -143,17 +143,9 @@ const CLIP_BACKING_ALPHA: u8 = 215;
 const RAMP_HEIGHT: f32 = 10.0;
 const RAMP_GAP: f32 = 4.0;
 
-/// The two handles on the band, which are the window: how wide the mark
-/// is, how far it stands above and below the band, and how wide the room
-/// around it that takes the pointer is — wider than the mark, since a mark
-/// five pixels wide is not something a hand lands on.
-const HANDLE_WIDTH: f32 = 5.0;
+/// How far the band's two handles stand above and below it — see
+/// [`slider::handle`](super::slider::handle), which draws them.
 const HANDLE_REACH: f32 = 3.0;
-const HANDLE_GRIP: f32 = 14.0;
-/// The corner a handle is drawn with, and the hairline around it in the
-/// panel's own ground, which is what parts it from a band the same color.
-const HANDLE_RADIUS: f32 = 1.5;
-const HANDLE_RING: f32 = 1.0;
 
 /// How far the exposure's slider runs each way, in stops. Not the whole of
 /// what the exposure can be — the keys and `--exposure` go on to the
@@ -163,19 +155,6 @@ const HANDLE_RING: f32 = 1.0;
 /// step is still a few pixels wide. Past the end the handle stands hollow,
 /// as the band's do, and the number beside it says where the exposure is.
 const SLIDER_STOPS: f32 = 6.0;
-/// The slider's track: how thick the groove is, and how tall the mark at
-/// nothing stands, either side of it.
-const SLIDER_TRACK: f32 = 2.0;
-const SLIDER_TICK: f32 = 4.0;
-/// How far the groove is faded toward the panel: the dim ink, held back so
-/// that a line two pixels thick reads as a groove under the handle rather
-/// than as a rule across the row, while a button's own ground, which is
-/// what the rows below are drawn in, comes out too faint at that width to
-/// be seen at all.
-const SLIDER_GROOVE_ALPHA: u8 = 90;
-/// How tall the handle on it stands, the band's handles' width wide.
-const SLIDER_HANDLE: f32 = 12.0;
-
 /// An exposure in stops, written the way the interface counts them.
 ///
 /// The step is a quarter, so the numbers the interface actually reaches are
@@ -677,29 +656,6 @@ fn share_words(share: f32) -> Option<String> {
     })
 }
 
-/// A handle on a line — the band's two, and the exposure's — drawn as the
-/// same kind of thing, a value on a line: `mark`, already on the device's
-/// grid, in the accent every mark on the plot wears, or the primary ink
-/// while the hand is `on` it, ringed in the panel's ground so that it
-/// stays a shape against a band that has come round to the same color.
-/// Hollow where `t`, its place along the line, is out past either end, so
-/// that it can be taken hold of and brought back without claiming a
-/// boundary that is not there.
-fn handle(painter: &egui::Painter, theme: &Theme, grid: icon::Grid, mark: Rect, on: bool, t: f32) {
-    let ring = mark.inset(-HANDLE_RING, -HANDLE_RING);
-    painter.rect_filled(
-        area(ring),
-        HANDLE_RADIUS + HANDLE_RING,
-        theme.panel_background,
-    );
-    let ink: Color32 = if on { theme.text_primary } else { theme.accent }.into();
-    if (0.0..=1.0).contains(&t) {
-        painter.rect_filled(area(mark), HANDLE_RADIUS, ink);
-    } else {
-        outline(painter, grid, mark, grid.line_width(1.0), ink);
-    }
-}
-
 /// Draws the histogram in the top-right of `content`, the area the panels
 /// leave free — above the information panel, the order the two toggles that
 /// open them are stacked in.
@@ -951,6 +907,7 @@ mod tests {
             sequence: Sequence::Still,
             page: 0,
             lift: None,
+            turn: crate::image::orient::Turn::NONE,
         }
     }
 

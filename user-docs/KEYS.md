@@ -57,10 +57,11 @@ on screen, since there is then nowhere to pan to.
 | `F2` | Rename the file on screen |
 | `Del`, `⌫` (`Backspace`) | Move the file on screen to the trash, and show the next |
 | `Ctrl+Z` | Undo the last rename or deletion |
+| `Ctrl+E` | Export the picture as shown to a new JPG or PNG |
 
 A file you have already looked at comes back exactly as you left it: the same
-pan and zoom, the same window and exposure, the same tone curve and false
-color. Flipping between two images with `[` and `]` therefore compares them
+pan and zoom, the same turn, the same window and exposure, the same tone curve
+and false color. Flipping between two images with `[` and `]` therefore compares them
 rather than resetting them.
 
 A file being opened for the first time keeps the pan and zoom when it is the
@@ -133,8 +134,8 @@ put one up, and the window says so instead.
 ### Renaming and deleting
 
 The button before the file's name in the top bar opens a menu of the file
-itself: copy its name, copy its path, rename it, delete it. The keys above do
-the same without the menu.
+itself: copy its name, copy its path, rename it, delete it, export it. The
+keys above do the same without the menu.
 
 `Delete` moves the file to your desktop's trash — the same one your file
 manager shows, so it is there to restore or empty from there whether or not
@@ -168,6 +169,40 @@ exposure and the rest are put back by hand, or by `z`. An undo that cannot
 be done says why: the trash was emptied in the meantime, or something else
 now has the name. Nothing is remembered across a restart; after that the
 trash itself is the record.
+
+### Exporting
+
+`Ctrl+E` exports the picture as you see it to a new file beside the one on
+screen: turned as it is turned, cropped to the region if one is up, and with
+the window, exposure, curve and false color written into the pixels. It is
+what `Ctrl+C` copies, kept as a file. The file on screen is never changed.
+
+The dialog offers a name — the file's own with `-edited` after it — and a
+choice of PNG or JPG, starting on the format the file is already in where it
+is one of the two. Typing an extension picks its format, and picking a
+format changes the extension. The slider under JPG sets its quality, from 1
+to 100; it starts at 90. A name already in the folder is refused, and Export
+does nothing until it is changed: nothing is ever written over.
+
+Under the formats, the dialog warns of what the new file loses that the
+screen does not show:
+
+- A file with more than 8 bits a channel, or light above white, is written
+  as 8-bit SDR, as the screen shows it without HDR.
+- JPG drops transparency.
+- Only the frame or page on screen is written, not the whole animation or
+  every page. A playing animation stops while the dialog is up, so the frame
+  written is the one on screen when you opened it, and plays again once the
+  dialog goes.
+- The file's metadata, such as EXIF and XMP, is not carried over, so the
+  date taken, the camera and the location are not in the new file.
+- With a region up, only the region is written, at its size.
+
+`Enter` or Export writes the file, `Esc`, Cancel or a click outside puts the
+dialog away. The new file joins the list after the file on screen and is
+shown, upright and at its own settings, since what was done is now in its
+pixels. Stepping back finds the original as you left it. An export is not on
+the undo stack; delete the new file as you would any other.
 
 ## Playing an animation
 
@@ -324,6 +359,14 @@ that is not a paste; open it as an argument instead.
 | `o` | Turn the room above white off and on, where the monitor is in HDR mode |
 | `r` | Cycle false color: gray → viridis → magma → turbo |
 | `z` | Reset every display setting |
+| `;` | Turn the picture a quarter counterclockwise |
+| `'` | Turn the picture a quarter clockwise |
+
+A turn changes how the picture is shown, not the file: it is kept with the
+file while the window is open, like the exposure, and carries through an
+animation's frames and a file's pages. A region turns with the picture, and
+the pixel readout counts from the top left of the picture as you see it.
+`z` leaves the turn alone. To keep a turn, export the picture with `Ctrl+E`.
 
 The window is the one place the case of a key matters: `a` and `s` move
 the value that comes out black, `A` and `S` the value that comes out white.

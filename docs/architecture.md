@@ -71,7 +71,7 @@ column, the menus — is [the interface](interface.md).
 | `src/theme/` | `palette.rs` reads the desktop's palette; `mod.rs` derives the colors drawn from it |
 | `src/image/` | The data model: `Samples`, `color/` (transfer functions, primaries, ICC and CICP), stats, display state; `sequence.rs` is what a file holds beyond one image |
 | `src/image/decode/` | The decoder trait and its registry, one file per format |
-| `src/image/encode.rs` | The display pipeline run over every pixel, out to an 8-bit sRGB PNG |
+| `src/image/encode.rs` | The display pipeline run over every pixel, turned as shown, out to an 8-bit sRGB PNG or JPEG |
 | `src/image/resample.rs` | A CPU box filter in the file's own encoding, for the thumbnails |
 | `src/render/` | Upload planning, the three layers, output selection; `shader_codes.rs` is every integer the shaders switch on |
 | `src/render/reduce.rs` | The coarse chain a minifying draw reads from |

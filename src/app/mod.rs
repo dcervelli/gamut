@@ -4,6 +4,7 @@ mod animation;
 mod chooser;
 mod copying;
 mod edits;
+mod exporting;
 mod files;
 mod gui;
 pub mod input;
@@ -23,6 +24,7 @@ use winit::window::{Window, WindowId};
 
 use crate::image::decode;
 use crate::image::display::{Display, Headroom, Startup};
+use crate::image::orient::Turn;
 use crate::image::sequence::Sequence;
 use crate::image::{DecodedImage, Stats};
 use crate::loader::{Decoded, Loader, Opened, Ready, Reload, Request, Source};
@@ -45,8 +47,9 @@ use crate::watch::{self, Watch};
 
 use animation::Animation;
 use chooser::{Chooser, Thumbs};
-use copying::Copying;
+use copying::{Copying, Done};
 use edits::{Edit, Renaming};
+use exporting::Exporting;
 use files::{Announce, Files};
 use gui::Gui;
 use input::{Effect, Pointer};
@@ -272,6 +275,8 @@ pub struct App {
     edits: Vec<Edit>,
     /// The rename dialog, while it is up.
     renaming: Option<Renaming>,
+    /// The export dialog, while it is up.
+    exporting: Option<Exporting>,
     /// How the desktop's file dialog hands its answer back: what `main`
     /// made from the loop's proxy.
     picker: portal::Deliver,
@@ -413,6 +418,7 @@ impl App {
             trash: Trash::detect(),
             edits: Vec::new(),
             renaming: None,
+            exporting: None,
             picker,
             picking: false,
             clipboard_offers: false,
@@ -600,6 +606,7 @@ impl App {
                 view: self.view,
                 display: current.display.clone(),
                 left,
+                turn: current.turn,
             },
         );
     }
@@ -999,7 +1006,8 @@ impl App {
         let said = !outcomes.is_empty();
         for outcome in outcomes {
             match outcome {
-                Ok(said) => self.toast(said, Level::Message),
+                Ok(Done::Copied(said)) => self.toast(said, Level::Message),
+                Ok(Done::Exported(path)) => self.exported(path),
                 Err(error) => self.toast(error, Level::Error),
             }
         }
@@ -1063,6 +1071,7 @@ impl App {
             self.chooser.input(&self.thumbs, shown)
         });
         let rename = self.rename_input();
+        let export = self.export_input();
         let viewport = self.viewport();
         FrameInput {
             logical,
@@ -1094,6 +1103,7 @@ impl App {
             transport: self.transport(),
             chooser,
             rename,
+            export,
             empty: self.is_empty(),
             picking: self.picking,
         }
@@ -1377,7 +1387,21 @@ impl App {
             sequence,
             page,
         } = ready;
-        let size = [image.width as f32, image.height as f32];
+        // The turn the picture arrives under: the file on screen read again
+        // keeps its own, whatever it has become — a page of another size is
+        // still a page of the same file — and another file takes back the
+        // one it was left in. Decided first, since how the file stands to
+        // the picture on screen is a matter of the size it will be shown at.
+        let turn = if file.mode == Reload::Fresh {
+            self.kept
+                .left(&file.path)
+                .map_or(Turn::NONE, |left| left.turn)
+        } else {
+            self.current
+                .as_ref()
+                .map_or(Turn::NONE, |current| current.turn)
+        };
+        let size = turn.size([image.width as f32, image.height as f32]);
         let shown = self
             .current
             .as_ref()
@@ -1508,6 +1532,7 @@ impl App {
             sequence,
             page,
             lift: None,
+            turn,
         });
         // The loader measured the base; a surface with room above white
         // shows the lift, and the numbers follow it.
@@ -1519,6 +1544,33 @@ impl App {
         );
         self.set_title(&window_title(&file.path));
         true
+    }
+
+    /// Turns the picture on screen a quarter, clockwise or not. Nothing is
+    /// read, decoded or uploaded: the turn is how the texture is read, and
+    /// every other reading of the picture goes through `Current`, which is
+    /// in the turned picture's coordinates. The region turns with the
+    /// pixels it marks out, and the view with the detail at its center; the
+    /// statistics stay, since a histogram does not care which way up. A
+    /// fitted view fits the new shape on the next frame by itself.
+    pub(super) fn turn_picture(&mut self, clockwise: bool) -> Effect {
+        let Some(current) = &mut self.current else {
+            return Effect::Nothing;
+        };
+        let step = match clockwise {
+            true => Turn::NONE.clockwise(),
+            false => Turn::NONE.counterclockwise(),
+        };
+        let was = current.pixels();
+        current.turn = match clockwise {
+            true => current.turn.clockwise(),
+            false => current.turn.counterclockwise(),
+        };
+        self.marking.turned(step, was);
+        self.view.turn(clockwise);
+        // A move under way was across the picture as it lay.
+        self.motion = None;
+        Effect::Redraw
     }
 
     /// Starts decoding the frames of an animation that has just gone up,
@@ -1751,6 +1803,10 @@ impl App {
                 .as_ref()
                 .and_then(|current| current.lift.as_ref())
                 .map_or(0.0, |table| table.weight()),
+            turn: self
+                .current
+                .as_ref()
+                .map_or(Turn::NONE, |current| current.turn),
         };
         match shown.renderer.render(scene, textures) {
             Ok(()) => self.reported_error = false,
@@ -3206,6 +3262,59 @@ mod tests {
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }
 
+    /// A turn is the picture's on screen and nothing else's: the size the
+    /// window reads is the turned one, a region turns with the pixels it
+    /// marks, and the turn is kept with the file, so that a file stepped
+    /// away from and back to is still turned while another file is not.
+    #[test]
+    fn a_turn_is_kept_per_file_and_put_back() {
+        use input::Action::{TurnLeft, TurnRight};
+
+        let (mut app, dir) = app_over("turned", &[("a.png", 64, 48), ("b.png", 32, 16)]);
+        let region = Region {
+            x: 4,
+            y: 2,
+            width: 10,
+            height: 6,
+        };
+        app.marking.select(region);
+        assert_eq!(app.perform(TurnRight), Effect::Redraw);
+        assert_eq!(app.image_size(), [48.0, 64.0]);
+        let one = Turn::NONE.clockwise();
+        assert_eq!(app.current.as_ref().unwrap().turn, one);
+        assert_eq!(
+            app.marking.selection,
+            Selection::Shown(region.turned(one, [64, 48]))
+        );
+        // Read through the turn: the turned picture's top left is the
+        // stored picture's bottom left.
+        let current = app.current.as_ref().unwrap();
+        assert_eq!(
+            current.sample(0, 0).map(|sample| sample.stored().to_vec()),
+            current
+                .image
+                .sample(0, 47, None)
+                .map(|sample| sample.stored().to_vec())
+        );
+        assert!(current.sample(48, 0).is_none(), "off the turned picture");
+
+        // Another file arrives unturned.
+        app.step(true);
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.image_size(), [32.0, 16.0]);
+        assert_eq!(app.current.as_ref().unwrap().turn, Turn::NONE);
+
+        // And the first comes back turned.
+        app.step(false);
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.image_size(), [48.0, 64.0]);
+        assert_eq!(app.perform(TurnLeft), Effect::Redraw);
+        assert_eq!(app.image_size(), [64.0, 48.0]);
+        assert_eq!(app.current.as_ref().unwrap().turn, Turn::NONE);
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
     /// A file rewritten under the window is the same file being read again,
     /// not a return to it: one that comes back a different size is a new
     /// shape and is fitted afresh, rather than being put back into the view
@@ -3673,6 +3782,40 @@ mod tests {
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }
 
+    /// An animation turns like a still, and every frame after the turn is
+    /// drawn under it; a page of a paged file arrives under the turn the
+    /// file was already in.
+    #[test]
+    fn frames_and_pages_arrive_under_the_turn() {
+        use input::Action::{NextFrame, TurnRight};
+
+        let path = fixture("gif-animated.gif");
+        let mut app = open(vec![path.clone()], vec![path]);
+        answer(&mut app, Reload::Fresh);
+        let [width, height] = app.image_size();
+        let _ = app.perform(TurnRight);
+        decoded_to_the_end(&app);
+        let (changed, _) = app.tick_playback(Instant::now() + Duration::from_millis(150));
+        assert!(changed);
+        app.show_due_frame();
+        assert_eq!(app.animation.as_ref().unwrap().uploaded(), Some(1));
+        assert_eq!(
+            app.image_size(),
+            [height, width],
+            "the next frame is turned"
+        );
+
+        let paged = fixture("tiff-pages.tif");
+        let mut app = open(vec![paged.clone()], vec![paged]);
+        answer(&mut app, Reload::Fresh);
+        let [width, height] = app.image_size();
+        let _ = app.perform(TurnRight);
+        let _ = app.perform(NextFrame);
+        answer(&mut app, Reload::Page);
+        assert_eq!(app.current.as_ref().unwrap().page, 1);
+        assert_eq!(app.image_size(), [height, width], "the next page is turned");
+    }
+
     /// A paged file opens on its default page and steps through the rest,
     /// keeping the display and, at the same size, the view; a page request
     /// waits for the one in flight; and the page it was left on is the one
@@ -3901,6 +4044,134 @@ mod tests {
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }
 
+    /// The export dialog offers a name nothing has, follows the format a
+    /// typed extension names and the extension a format's button names,
+    /// refuses a name taken; and Export writes the picture as shown — turned,
+    /// through its exposure — beside the file on screen, which the list
+    /// takes in and shows.
+    #[test]
+    fn an_export_is_judged_as_typed_and_written_beside_the_source() {
+        use crate::ui::export::{Format, Verdict};
+        use input::Action::{Export, TurnRight};
+
+        let (mut app, dir) = app_over("export", &[("a.png", 8, 6)]);
+        let _ = app.perform(Export);
+        let input = app.export_input().expect("the dialog is up");
+        assert_eq!(input.name, "a-edited.png");
+        assert_eq!(input.format, Format::Png);
+        assert_eq!(input.quality, 90);
+        assert_eq!(input.verdict, Verdict::Fine);
+        assert!(input.warnings.is_empty(), "{:?}", input.warnings);
+        assert!(input.opened);
+        assert!(!app.export_input().expect("still up").opened);
+
+        let _ = app.act(ui::Command::ExportName("b.jpg".to_string()));
+        assert_eq!(app.export_input().unwrap().format, Format::Jpeg);
+        let _ = app.act(ui::Command::ExportQuality(40));
+        assert_eq!(app.export_input().unwrap().quality, 40);
+        let _ = app.act(ui::Command::Press(ui::Control::ExportAs(Format::Png)));
+        assert_eq!(app.export_input().unwrap().name, "b.png");
+        let _ = app.act(ui::Command::ExportName("a.png".to_string()));
+        assert_eq!(app.export_input().unwrap().verdict, Verdict::Taken);
+        // Export does nothing while the name will not do.
+        let _ = app.act(ui::Command::Press(ui::Control::ExportTo));
+        assert!(app.export_input().is_some(), "still up");
+        let _ = app.act(ui::Command::Press(ui::Control::CancelExport));
+        assert!(app.export_input().is_none());
+
+        // Turned, and brighter: both written into the file.
+        let _ = app.perform(TurnRight);
+        app.current.as_mut().unwrap().display.set_exposure(1.0);
+        let _ = app.perform(Export);
+        assert!(app.export_input().unwrap().warnings.is_empty());
+        let _ = app.act(ui::Command::ExportName("b.png".to_string()));
+        let _ = app.act(ui::Command::Press(ui::Control::ExportTo));
+        assert!(app.export_input().is_none());
+        app.copying.join_all();
+        let _ = app.poll_copies();
+        let written = ::image::open(dir.join("b.png")).expect("b.png was written");
+        assert_eq!((written.width(), written.height()), (6, 8), "turned");
+        assert!(
+            written.to_rgb8().get_pixel(0, 0)[0] > 128,
+            "the exposure is in the pixels"
+        );
+        assert_eq!(said(&app), "Exported b.png.");
+        assert_eq!(app.files.pending().map(|pending| pending.index), Some(1));
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.files.shown_path(), Some(dir.join("b.png").as_path()));
+        let current = app.current.as_ref().unwrap();
+        assert_eq!(current.turn, Turn::NONE, "the turn is in its pixels");
+        assert_eq!(app.image_size(), [6.0, 8.0]);
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// The export dialog stops a playing animation, so that the frame
+    /// written is the one it opened on, and sets it playing again when it
+    /// goes, by Cancel or by Export; one that was stopped stays stopped.
+    #[test]
+    fn an_export_holds_an_animation_still_while_it_is_up() {
+        use input::Action::{Export, TogglePlay};
+
+        let (dir, _) = written("export-animation", &[]);
+        let gif = dir.join("animated.gif");
+        std::fs::copy(fixture("gif-animated.gif"), &gif).expect("the directory is writable");
+        let mut app = open(vec![gif.clone()], vec![gif]);
+        answer(&mut app, Reload::Fresh);
+        let playing = |app: &App| app.animation.as_ref().unwrap().playing();
+        assert!(playing(&app));
+
+        let _ = app.perform(Export);
+        assert!(!playing(&app), "stopped while the dialog is up");
+        assert!(
+            app.export_input()
+                .unwrap()
+                .warnings
+                .contains(&crate::ui::export::Warning::OneFrame(1)),
+            "the frame on screen, counted from one"
+        );
+        let _ = app.act(ui::Command::Press(ui::Control::CancelExport));
+        assert!(playing(&app), "and playing again once it goes");
+
+        let _ = app.perform(Export);
+        assert!(!playing(&app));
+        let _ = app.act(ui::Command::Press(ui::Control::ExportTo));
+        assert!(app.export_input().is_none());
+        assert!(playing(&app), "exporting puts it away too");
+        app.copying.join_all();
+
+        let _ = app.perform(TogglePlay);
+        let _ = app.perform(Export);
+        let _ = app.act(ui::Command::Press(ui::Control::CancelExport));
+        assert!(!playing(&app), "one stopped by hand stays stopped");
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// A name judged free and taken by the time Export is pressed is not
+    /// written over: the file that arrived stays as it was, and the window
+    /// says so.
+    #[test]
+    fn an_export_does_not_replace_a_file_that_has_arrived() {
+        let (mut app, dir) = app_over("export-arrived", &[("a.png", 8, 6)]);
+        let _ = app.perform(input::Action::Export);
+        let _ = app.act(ui::Command::ExportName("b.png".to_string()));
+        std::fs::write(dir.join("b.png"), b"not ours").expect("the directory is writable");
+        let _ = app.act(ui::Command::Press(ui::Control::ExportTo));
+        app.copying.join_all();
+        let _ = app.poll_copies();
+        assert_eq!(said(&app), crate::ui::rename::TAKEN);
+        assert_eq!(std::fs::read(dir.join("b.png")).unwrap(), b"not ours");
+        let names: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(names.len(), 2, "nothing else left behind: {names:?}");
+        assert!(app.files.pending().is_none(), "nothing to show");
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
     /// The dialog judges the name as it is typed — taken, unchanged, an
     /// extension changing — and OK renames the file everywhere it is known
     /// by name; undo renames it back, and shows it if it had been left.
@@ -3997,7 +4268,7 @@ mod tests {
         );
         assert!(dir.join("a.png").exists());
         assert_eq!(app.files.shown_path(), Some(dir.join("a.png").as_path()));
-        assert!(said(&app).contains("already there"), "{}", said(&app));
+        assert_eq!(said(&app), crate::ui::rename::TAKEN);
         assert!(!app.conditions().undoable);
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");

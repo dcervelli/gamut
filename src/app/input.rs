@@ -12,6 +12,7 @@ use winit::event::ElementState;
 use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey, PhysicalKey};
 
 use super::App;
+use super::copying::Done;
 use crate::clipboard;
 use crate::image::display::{Colormap, EV_STEP, Startup, ToneMap};
 use crate::image::encode;
@@ -152,6 +153,13 @@ pub enum Action {
     /// Move the file on screen to the desktop's trash and step on to the
     /// next — see `App::delete_shown`.
     Delete,
+    /// Turn the picture on screen a quarter counterclockwise, or clockwise
+    /// — a reading of it, like the window, and not a change to the file:
+    /// see `App::turn_picture`.
+    TurnLeft,
+    TurnRight,
+    /// Open the export dialog on the picture as shown — see `app::exporting`.
+    Export,
     /// Put back the last thing done to a file on disk: the file restored
     /// from the trash, or its old name — see `app::edits`.
     Undo,
@@ -432,6 +440,9 @@ fn action_of(tip: Tip) -> Option<Action> {
         // named the same way: by the key that does the same thing.
         Tip::Control(Control::Rename) => Rename,
         Tip::Control(Control::Delete) => Delete,
+        Tip::Control(Control::TurnLeft) => TurnLeft,
+        Tip::Control(Control::TurnRight) => TurnRight,
+        Tip::Control(Control::Export) => Export,
         // The two buttons in the middle of an empty window, by the keys
         // that put up the same dialog.
         Tip::Control(Control::OpenFiles) => OpenFiles,
@@ -441,7 +452,7 @@ fn action_of(tip: Tip) -> Option<Action> {
         // What no key reaches, and so names itself or wears its own name:
         // the buttons that open a menu, the items that wear a program's or
         // a file's name, the rows of the information panel, the cross on a
-        // message, the timeline, and the dialog's two buttons.
+        // message, the timeline, and the dialogs' buttons.
         Tip::Control(
             Control::Copy
             | Control::OpenIn
@@ -454,7 +465,10 @@ fn action_of(tip: Tip) -> Option<Action> {
             | Control::Choose(_)
             | Control::FileMenu
             | Control::RenameTo
-            | Control::CancelRename,
+            | Control::CancelRename
+            | Control::ExportAs(_)
+            | Control::ExportTo
+            | Control::CancelExport,
         ) => return None,
         // The words at the end of the bottom bar are about four settings at
         // once, so no one key does what they do; what a press on them opens
@@ -1052,6 +1066,14 @@ pub const KEYS: &[Binding] = &[
         when: Some(When::Undoable),
         keys: &[(Char("z"), Undo), (Char("Z"), Undo)],
     },
+    Binding {
+        section: Section::Files,
+        mods: CTRL,
+        shown: "Ctrl+E",
+        help: "Export the picture as shown to a new JPG or PNG",
+        when: None,
+        keys: &[(Char("e"), Export), (Char("E"), Export)],
+    },
     // The region's own section: the key that puts one up, and what the
     // keys of the other sections do differently while it is. Each of those
     // is the same chord bound to the same action as its line in its own
@@ -1290,6 +1312,14 @@ pub const KEYS: &[Binding] = &[
         help: "Reset the window, exposure and tone map",
         when: None,
         keys: &[(Char("z"), ResetDisplay), (Char("Z"), ResetDisplay)],
+    },
+    Binding {
+        section: Section::Display,
+        mods: PLAIN,
+        shown: "; '",
+        help: "Turn the picture a quarter counterclockwise, clockwise",
+        when: None,
+        keys: &[(Char(";"), TurnLeft), (Char("'"), TurnRight)],
     },
     Binding {
         section: Section::Playback,
@@ -1890,6 +1920,9 @@ impl App {
             // come to mean different things.
             Rename => return self.press(Control::Rename),
             Delete => return self.press(Control::Delete),
+            TurnLeft => return self.press(Control::TurnLeft),
+            TurnRight => return self.press(Control::TurnRight),
+            Export => return self.press(Control::Export),
             Undo => return self.undo(),
             // The buttons' own presses, so that the key and the button in
             // the middle of an empty window cannot come to mean different
@@ -1962,9 +1995,9 @@ impl App {
     /// The image on screen in whole pixels, which is what a region is
     /// measured in.
     fn image_pixels(&self) -> [u32; 2] {
-        self.current.as_ref().map_or([1, 1], |current| {
-            [current.image.width, current.image.height]
-        })
+        self.current
+            .as_ref()
+            .map_or([1, 1], crate::ui::Current::pixels)
     }
 
     /// A drag on the picture has taken hold of the region — or of nothing
@@ -2144,6 +2177,8 @@ impl App {
             // The rename dialog's field: what it says now, judged for the
             // next frame to say what is wrong with it.
             ui::Command::Name(name) => self.set_rename_name(name),
+            ui::Command::ExportName(name) => self.set_export_name(name),
+            ui::Command::ExportQuality(quality) => self.set_export_quality(quality),
             ui::Command::Cursor(step) => self.chooser.step(step),
             ui::Command::Visible(rows) => {
                 for row in rows.clone() {
@@ -2249,16 +2284,17 @@ impl App {
         let image = Arc::clone(&current.image);
         let display = current.display.clone();
         let lift = current.lift.clone();
+        let turn = current.turn;
         let said = match region {
             Some(_) => "Copied region.",
             None => "Copied image.",
         };
-        let region = region.unwrap_or_else(|| Region::whole([image.width, image.height]));
+        let region = region.unwrap_or_else(|| Region::whole(current.pixels()));
         self.copying.spawn(move |ticket| {
             let (width, height) = (region.width, region.height);
 
             let walked = Instant::now();
-            let raster = encode::displayed(&image, &display, region, lift.as_deref());
+            let raster = encode::displayed(&image, &display, turn, region, lift.as_deref());
             timing::mapped_image(width, height, walked.elapsed());
 
             let encoded = Instant::now();
@@ -2276,7 +2312,7 @@ impl App {
                 return;
             }
             match clipboard::copy(&png, clipboard::PNG) {
-                Ok(()) => ticket.report(Ok(said)),
+                Ok(()) => ticket.report(Ok(Done::Copied(said))),
                 Err(error) => {
                     report(&error);
                     ticket.report(Err(briefly(&error)));
@@ -2459,6 +2495,24 @@ impl App {
             }
             Control::Delete => {
                 self.delete_shown();
+                Effect::Redraw
+            }
+            Control::TurnLeft => self.turn_picture(false),
+            Control::TurnRight => self.turn_picture(true),
+            Control::Export => {
+                self.open_export();
+                Effect::Redraw
+            }
+            Control::ExportAs(format) => {
+                self.set_export_format(format);
+                Effect::Redraw
+            }
+            Control::ExportTo => {
+                self.export_shown();
+                Effect::Redraw
+            }
+            Control::CancelExport => {
+                self.cancel_export();
                 Effect::Redraw
             }
             Control::RenameTo => {
@@ -2678,9 +2732,7 @@ impl App {
             return Some(ui::pixel::copied_coordinate(at));
         }
         let current = self.current.as_ref()?;
-        let sample = current
-            .image
-            .sample(at[0], at[1], current.lift.as_deref())?;
+        let sample = current.sample(at[0], at[1])?;
         let mapped = current.display.map(&sample, self.headroom());
         Some(ui::pixel::value(
             &current.image,
@@ -2771,6 +2823,9 @@ mod tests {
                     | Control::Facts(_)
                     | Control::RenameTo
                     | Control::CancelRename
+                    | Control::ExportAs(_)
+                    | Control::ExportTo
+                    | Control::CancelExport
                     | Control::Seek(_)
                     | Control::Chooser
             );
@@ -3404,6 +3459,9 @@ mod tests {
         );
         assert_eq!(plain("]"), Some(NextFile));
         assert_eq!(plain("F"), Some(Exposure(EV_STEP)));
+        // The turns, on the two keys at the end of the home row.
+        assert_eq!(plain(";"), Some(TurnLeft));
+        assert_eq!(plain("'"), Some(TurnRight));
         // What is done to the file: two named keys for the trash, one for
         // the dialog, and the undo under Ctrl — the plain `z` being the
         // display's reset.

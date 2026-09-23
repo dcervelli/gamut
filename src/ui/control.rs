@@ -11,6 +11,7 @@ use std::ops::Range;
 use crate::image::region::{Grip, Region};
 
 use super::chooser::Step;
+use super::export::Format;
 use super::help;
 use super::info::Copyable;
 use super::menu::{Copies, ZoomChoice};
@@ -124,6 +125,19 @@ pub enum Control {
     /// here too.
     Rename,
     Delete,
+    /// Turning the picture on screen a quarter, counterclockwise and
+    /// clockwise: what `;` and `'` press. Not drawn anywhere; a control so
+    /// that the keys go through `App::press` as every other job does.
+    TurnLeft,
+    TurnRight,
+    /// The item of the same menu that opens the export dialog, which
+    /// `Ctrl+S` comes through too; the dialog's two format buttons; and its
+    /// own two buttons, the export itself, which `Enter` also asks for, and
+    /// putting the dialog away, which `Esc` and a click outside it also do.
+    Export,
+    ExportAs(Format),
+    ExportTo,
+    CancelExport,
     /// The rename dialog's two buttons: the rename itself, which `Enter`
     /// also asks for, and putting the dialog away, which `Esc` and a click
     /// outside it also do.
@@ -184,6 +198,12 @@ impl Control {
             Control::FileMenu => "File".to_string(),
             Control::Rename => "Rename".to_string(),
             Control::Delete => "Delete".to_string(),
+            Control::TurnLeft => "Turn left".to_string(),
+            Control::TurnRight => "Turn right".to_string(),
+            Control::Export => "Export".to_string(),
+            Control::ExportAs(format) => format.label().to_string(),
+            Control::ExportTo => "Export".to_string(),
+            Control::CancelExport => "Cancel".to_string(),
             Control::RenameTo => "OK".to_string(),
             Control::CancelRename => "Cancel".to_string(),
             Control::OpenFiles => "Open files".to_string(),
@@ -264,6 +284,10 @@ pub enum Command {
     Query(String),
     /// The rename dialog's field changed: this is the name it now holds.
     Name(String),
+    /// The export dialog's field changed: this is the name it now holds.
+    ExportName(String),
+    /// The export dialog's quality slider moved: this is where it now stands.
+    ExportQuality(u8),
     /// A key moved the chooser's cursor.
     Cursor(Step),
     /// Which of the chooser's rows are on screen, said when it changes, so
@@ -397,6 +421,12 @@ impl Control {
         Control::FileMenu,
         Control::Rename,
         Control::Delete,
+        Control::TurnLeft,
+        Control::TurnRight,
+        Control::Export,
+        Control::ExportAs(Format::Png),
+        Control::ExportTo,
+        Control::CancelExport,
         Control::RenameTo,
         Control::CancelRename,
         Control::OpenFiles,
@@ -447,6 +477,12 @@ impl Control {
             | Control::FileMenu
             | Control::Rename
             | Control::Delete
+            | Control::TurnLeft
+            | Control::TurnRight
+            | Control::Export
+            | Control::ExportAs(_)
+            | Control::ExportTo
+            | Control::CancelExport
             | Control::RenameTo
             | Control::CancelRename
             | Control::OpenFiles

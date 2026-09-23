@@ -96,7 +96,7 @@ impl Animation {
         self.playback.count()
     }
 
-    #[cfg(test)]
+    /// Whether the clock is running.
     pub fn playing(&self) -> bool {
         self.playback.playing()
     }
@@ -105,6 +105,14 @@ impl Animation {
     #[cfg(test)]
     pub fn uploaded(&self) -> Option<usize> {
         self.uploaded
+    }
+
+    /// The frame whose pixels are on screen, counted from zero: the one the
+    /// texture holds, which the clock's head can be ahead of while the
+    /// player catches up. Before the first is written it is the file's own
+    /// decode, its first frame.
+    pub fn on_screen(&self) -> usize {
+        self.uploaded.unwrap_or(0)
     }
 
     /// Where the file is being left: the frame that is up, and whether it

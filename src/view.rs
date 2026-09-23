@@ -177,6 +177,18 @@ impl View {
         self.upscale = self.upscale.next();
     }
 
+    /// The picture under the view has been turned a quarter: the point that
+    /// was at the center of the window is turned with it, so that the same
+    /// detail stays there. The pan is measured from the picture's center,
+    /// which a turn leaves where it is.
+    pub fn turn(&mut self, clockwise: bool) {
+        let [x, y] = self.pan;
+        self.pan = match clockwise {
+            true => [-y, x],
+            false => [y, -x],
+        };
+    }
+
     fn fit_zoom(fit: Fit, image: [f32; 2], viewport: [f32; 2]) -> f32 {
         let sx = viewport[0] / image[0];
         let sy = viewport[1] / image[1];
@@ -1038,5 +1050,32 @@ mod tests {
         assert_eq!(view.fit(), Some(Fit::Whole));
         let placement = view.placement(IMAGE, WINDOW);
         assert!(close(placement.x, 0.0));
+    }
+
+    /// A turn keeps the detail at the center of the window there, and a
+    /// turn back puts the view where it was.
+    #[test]
+    fn a_turn_keeps_the_same_detail_at_the_center() {
+        let viewport = Viewport {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 100.0,
+        };
+        let image = [400.0, 200.0];
+        let mut view = View::new();
+        view.fit = None;
+        view.zoom = 2.0;
+        view.pan = [60.0, -30.0];
+        // The detail at the center: 60 right of the picture's center, 30 up.
+        // A quarter clockwise brings a point right of center below it and a
+        // point above center to its right.
+        view.turn(true);
+        assert_eq!(view.pan, [30.0, 60.0]);
+        let placement = view.placement([image[1], image[0]], viewport);
+        let centered = placement.image_point([50.0, 50.0]);
+        assert_eq!(centered, [image[1] / 2.0 + 30.0, image[0] / 2.0 + 60.0]);
+        view.turn(false);
+        assert_eq!(view.pan, [60.0, -30.0]);
     }
 }

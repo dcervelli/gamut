@@ -1,8 +1,9 @@
-//! The image as it is on screen, written out as a PNG.
+//! The image as it is on screen, written out as a PNG or a JPEG: for the
+//! clipboard, for the thumbnail cache, and for a file exported.
 //!
 //! The picture that travels is the one the display settings have made — the
-//! window, the exposure, the tone curve, the false color — at the image's own
-//! size rather than the window's. So this is not a screenshot: it is the
+//! window, the exposure, the tone curve, the false color, and the turn it is
+//! shown at — at the image's own size rather than the window's. So this is not a screenshot: it is the
 //! rendering pipeline run again on the CPU, over every pixel instead of the
 //! one under the pointer.
 //!
@@ -31,6 +32,7 @@ use anyhow::{Context, Result};
 use png::{BitDepth, ColorType, Compression, Encoder, SrgbRenderingIntent};
 
 use super::display::{Colormap, Display, Headroom};
+use super::orient::Turn;
 use super::{Channels, DecodedImage, Region, Transfer};
 
 /// Pixels below which the walk is not worth dividing: the threads cost more to
@@ -50,7 +52,9 @@ pub struct Raster {
 
 /// Runs the display pipeline over every pixel of `image` inside `region`:
 /// the whole of it, as [`Region::whole`] says, or the part that was
-/// selected. What comes out is the region's own size, its top-left pixel
+/// selected. `image` is as the file holds it and `region` is in the picture
+/// as `turn` shows it, which is also how the raster comes out: the turn is
+/// read through pixel by pixel, as the screen reads it. What comes out is the region's own size, its top-left pixel
 /// first, so a copy of a selection is a crop of the copy of the picture and
 /// not a different rendering of it.
 ///
@@ -64,6 +68,7 @@ pub struct Raster {
 pub fn displayed(
     image: &DecodedImage,
     display: &Display,
+    turn: Turn,
     region: Region,
     lift: Option<&Table>,
 ) -> Raster {
@@ -71,6 +76,7 @@ pub fn displayed(
     displayed_on(
         image,
         display,
+        turn,
         region,
         lift,
         bands(stride, region.height as usize),
@@ -85,6 +91,7 @@ pub fn displayed(
 pub fn displayed_on(
     image: &DecodedImage,
     display: &Display,
+    turn: Turn,
     region: Region,
     lift: Option<&Table>,
     bands: usize,
@@ -103,6 +110,7 @@ pub fn displayed_on(
         image,
         display,
         channels,
+        turn,
         region,
         lift,
     };
@@ -158,6 +166,8 @@ struct Walk<'a> {
     image: &'a DecodedImage,
     display: &'a Display,
     channels: Channels,
+    /// How the picture is turned, which `region` and the rows are in.
+    turn: Turn,
     region: Region,
     /// The lift the screen is drawn through, where the picture has a gain
     /// map — so that what is copied is what is on screen, which on a
@@ -172,9 +182,11 @@ fn fill(band: &mut [u8], first: u32, walk: &Walk<'_>) {
         image,
         display,
         channels,
+        turn,
         region,
         lift,
     } = *walk;
+    let stored = [image.width, image.height];
     let levels = levels();
     let count = channels.count();
     let gray = channels.is_gray();
@@ -182,8 +194,9 @@ fn fill(band: &mut [u8], first: u32, walk: &Walk<'_>) {
     for (offset, row) in band.chunks_exact_mut(stride).enumerate() {
         let y = first + offset as u32;
         for (column, pixel) in row.chunks_exact_mut(count).enumerate() {
+            let [x, y] = turn.stored([region.x + column as u32, y], stored);
             // Only `None` outside the image, which this walk never goes.
-            let Some(sample) = image.sample(region.x + column as u32, y, lift) else {
+            let Some(sample) = image.sample(x, y, lift) else {
                 continue;
             };
             // An SDR reading: a PNG stops at white, so what is copied is the
@@ -212,7 +225,64 @@ fn fill(band: &mut [u8], first: u32, walk: &Walk<'_>) {
 /// and it is not being kept, so the time a smaller one would cost is time the
 /// window spends not answering.
 pub fn png(raster: &Raster) -> Result<Vec<u8>> {
-    png_with_text(raster, &[])
+    png_with(raster, &[], Compression::Fast)
+}
+
+/// [`png()`] for a file that is being kept: compressed at the crate's own
+/// balance of time against size, since the file stays on disk long after
+/// the wait for it is over. `High` was not worth it — much more time for a
+/// file slightly smaller.
+pub fn png_for_file(raster: &Raster) -> Result<Vec<u8>> {
+    png_with(raster, &[], Compression::Balanced)
+}
+
+/// The quality a JPEG is exported at until the export dialog's slider says
+/// otherwise: high enough that the compression is not what a look at the
+/// picture notices.
+pub const JPEG_QUALITY: u8 = 90;
+
+/// The lowest quality the encoder takes: it reads anything under this as
+/// this, so the slider stops here rather than offering a 0 that means 1.
+pub const JPEG_QUALITY_MIN: u8 = 1;
+
+/// `raster` as the bytes of a JPEG file, at `quality` from
+/// [`JPEG_QUALITY_MIN`] to 100.
+///
+/// A JPEG holds no alpha, so a raster that carries one loses it: each
+/// pixel's color is written as it is, which for a pixel that was fully
+/// transparent is whatever color it held — black, from a premultiplied
+/// file. Gray stays gray.
+pub fn jpeg(raster: &Raster, quality: u8) -> Result<Vec<u8>> {
+    use ::image::ExtendedColorType;
+    use ::image::codecs::jpeg::JpegEncoder;
+
+    let stripped;
+    let (kind, data): (_, &[u8]) = match raster.channels {
+        Channels::Gray => (ExtendedColorType::L8, &raster.data),
+        Channels::Rgb => (ExtendedColorType::Rgb8, &raster.data),
+        Channels::GrayAlpha => {
+            stripped = without_alpha(&raster.data, 2);
+            (ExtendedColorType::L8, &stripped)
+        }
+        Channels::Rgba => {
+            stripped = without_alpha(&raster.data, 4);
+            (ExtendedColorType::Rgb8, &stripped)
+        }
+    };
+    let mut bytes = Vec::new();
+    JpegEncoder::new_with_quality(&mut bytes, quality.clamp(JPEG_QUALITY_MIN, 100))
+        .encode(data, raster.width, raster.height, kind)
+        .context("writing the JPEG")?;
+    Ok(bytes)
+}
+
+/// Packed pixels of `count` components each, with the last of each left
+/// out.
+fn without_alpha(data: &[u8], count: usize) -> Vec<u8> {
+    data.chunks_exact(count)
+        .flat_map(|pixel| &pixel[..count - 1])
+        .copied()
+        .collect()
 }
 
 /// [`png()`], with `text` written into the file as `tEXt` chunks ahead of the
@@ -220,6 +290,15 @@ pub fn png(raster: &Raster) -> Result<Vec<u8>> {
 /// it was made of. Both halves must be Latin-1, which is all a `tEXt` chunk
 /// can hold; the thumbnail cache's are ASCII.
 pub fn png_with_text(raster: &Raster, text: &[(String, String)]) -> Result<Vec<u8>> {
+    png_with(raster, text, Compression::Fast)
+}
+
+/// The PNG itself, `text` ahead of the pixels and compressed as asked.
+fn png_with(
+    raster: &Raster,
+    text: &[(String, String)],
+    compression: Compression,
+) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
     let mut encoder = Encoder::new(&mut bytes, raster.width, raster.height);
     for (keyword, text) in text {
@@ -234,7 +313,7 @@ pub fn png_with_text(raster: &Raster, text: &[(String, String)]) -> Result<Vec<u
         Channels::Rgba => ColorType::Rgba,
     });
     encoder.set_depth(BitDepth::Eight);
-    encoder.set_compression(Compression::Fast);
+    encoder.set_compression(compression);
     // Which brings `Filter::Adaptive` with it, and it is left to. Fixing the
     // filter instead is faster on some pictures — measured over 12 megapixels
     // here, Paeth alone matched Adaptive's size in three quarters of its time
@@ -335,6 +414,7 @@ mod tests {
         super::displayed(
             image,
             display,
+            Turn::NONE,
             Region::whole([image.width, image.height]),
             None,
         )
@@ -343,8 +423,12 @@ mod tests {
     /// `(color type, bit depth, pixel bytes)` as a PNG decoder reads them
     /// back, which is the only reading of the file that matters.
     fn round_trip(raster: &Raster) -> (ColorType, BitDepth, Vec<u8>) {
-        let bytes = super::png(raster).expect("a valid raster encodes");
-        let mut reader = Decoder::new(Cursor::new(&bytes)).read_info().unwrap();
+        round_trip_bytes(&super::png(raster).expect("a valid raster encodes"))
+    }
+
+    /// The same, of a PNG's bytes however it was written.
+    fn round_trip_bytes(bytes: &[u8]) -> (ColorType, BitDepth, Vec<u8>) {
+        let mut reader = Decoder::new(Cursor::new(bytes)).read_info().unwrap();
         let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
         let info = reader.next_frame(&mut pixels).unwrap();
         pixels.truncate(info.buffer_size());
@@ -544,8 +628,8 @@ mod tests {
         let region = Region::whole([1, 1]);
         let source = image(Channels::Gray, vec![7]);
         assert_eq!(
-            displayed_on(&source, &plain(), region, None, 1).data,
-            displayed_on(&source, &plain(), region, None, 8).data
+            displayed_on(&source, &plain(), Turn::NONE, region, None, 1).data,
+            displayed_on(&source, &plain(), Turn::NONE, region, None, 8).data
         );
     }
 
@@ -587,7 +671,7 @@ mod tests {
             bands(region.width as usize * 3, region.height as usize) > 1,
             "the region has to be divided for the offset to be tested"
         );
-        let part = super::displayed(&source, &display, region, None);
+        let part = super::displayed(&source, &display, Turn::NONE, region, None);
         assert_eq!((part.width, part.height), (200, 190));
 
         let mut expected = Vec::new();
@@ -597,5 +681,92 @@ mod tests {
             expected.extend_from_slice(&whole.data[from..from + region.width as usize * 3]);
         }
         assert_eq!(part.data, expected);
+    }
+
+    /// A copy of the picture turned on screen is the copy of the picture
+    /// turned on the CPU: the walk reads through the turn exactly as the
+    /// decoders apply one, region and all.
+    #[test]
+    fn a_turned_copy_is_the_turned_picture_copied() {
+        use crate::image::orient;
+        let (width, height) = (7u32, 5u32);
+        let data = (0..width * height * 3)
+            .map(|index| (index * 7 % 251) as u8)
+            .collect();
+        let mut source = image(Channels::Rgb, data);
+        source.width = width;
+        source.height = height;
+        let mut display = plain();
+        display.set_exposure(0.3);
+        let region = Region {
+            x: 1,
+            y: 2,
+            width: 3,
+            height: 4,
+        };
+        let mut turn = Turn::NONE;
+        for _ in 0..4 {
+            let turned = orient::apply(source.clone(), turn.orientation());
+            let region = match turn.is_quarter() {
+                true => region,
+                false => Region {
+                    width: 4,
+                    height: 3,
+                    ..region
+                },
+            };
+            let ours = super::displayed(&source, &display, turn, region, None);
+            let theirs = super::displayed(&turned, &display, Turn::NONE, region, None);
+            assert_eq!((ours.width, ours.height), (theirs.width, theirs.height));
+            assert_eq!(ours.data, theirs.data, "{turn:?}");
+            turn = turn.clockwise();
+        }
+    }
+
+    /// A JPEG has no alpha: a raster that carries one is written without
+    /// it, gray as gray and color as color, at the raster's size.
+    #[test]
+    fn a_jpeg_is_written_without_alpha() {
+        let rgba = Raster {
+            width: 2,
+            height: 1,
+            channels: Channels::Rgba,
+            data: vec![200, 100, 50, 255, 10, 20, 30, 0],
+        };
+        let decoded = ::image::load_from_memory(&jpeg(&rgba, JPEG_QUALITY).unwrap()).unwrap();
+        assert_eq!(decoded.color(), ::image::ColorType::Rgb8);
+        assert_eq!((decoded.width(), decoded.height()), (2, 1));
+
+        let gray = Raster {
+            width: 3,
+            height: 2,
+            channels: Channels::GrayAlpha,
+            data: vec![128, 255, 128, 0, 128, 64, 128, 255, 128, 255, 128, 255],
+        };
+        let decoded = ::image::load_from_memory(&jpeg(&gray, JPEG_QUALITY).unwrap()).unwrap();
+        assert_eq!(decoded.color(), ::image::ColorType::L8);
+        assert_eq!((decoded.width(), decoded.height()), (3, 2));
+        // Flat gray survives a JPEG within a step or two.
+        for value in decoded.into_luma8().into_raw() {
+            assert!(value.abs_diff(128) <= 2, "{value}");
+        }
+    }
+
+    /// The file's PNG and the clipboard's differ only in how hard they are
+    /// squeezed: the same pixels come back out of either.
+    #[test]
+    fn a_file_png_decodes_to_the_same_pixels_as_the_fast_one() {
+        let raster = Raster {
+            width: 16,
+            height: 4,
+            channels: Channels::Rgb,
+            data: (0..16 * 4 * 3)
+                .map(|index| (index * 5 % 256) as u8)
+                .collect(),
+        };
+        let fast = round_trip_bytes(&png(&raster).unwrap());
+        let kept = round_trip_bytes(&png_for_file(&raster).unwrap());
+        assert_eq!(fast, kept);
+        assert_eq!(kept.2, raster.data);
     }
 }

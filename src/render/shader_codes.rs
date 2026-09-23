@@ -5,10 +5,18 @@
 //! and not the other fails silently, as the wrong branch rather than an error.
 
 use crate::image::display::{Colormap, Headroom, ToneMap};
+use crate::image::orient::Turn;
 use crate::image::{AlphaMode, Channels};
 
 use super::output::Encoding;
 use super::placement::Upscale;
+
+/// Which way the texture runs across the quad: quarter turns clockwise.
+/// Matches the `switch` on `turn` in `vs_main` of `shaders/image.wgsl`,
+/// whose corners are `orient::stored`'s reading of the same turn.
+pub fn turn(turn: Turn) -> u32 {
+    turn.quarters()
+}
 
 /// How the shader should expand the sampled components to RGBA.
 /// Matches `swizzle` in `shaders/image.wgsl` and `shaders/reduce.wgsl`.

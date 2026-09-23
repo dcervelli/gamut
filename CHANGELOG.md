@@ -8,6 +8,23 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Added
 
+- `Ctrl+E` exports the picture as it is shown to a new JPG or PNG beside
+  the file on screen: turned, cropped to the region if one is up, and with
+  the window, exposure, curve and false color written into its pixels. A
+  dialog offers a name that is free, PNG or JPG with a quality slider for
+  JPG starting at 90, stops a playing animation until it goes, follows the format a typed extension names, refuses a
+  name already taken — nothing is ever written over — and warns of what the
+  new file loses that the screen does not show: depth above 8 bits, light
+  above white, transparency in a JPG, the other frames or pages, and the
+  metadata. The new file joins the list and is shown. The file menu has the
+  item too, as Export.
+
+- `;` and `'` turn the picture a quarter counterclockwise and clockwise. The
+  turn is how the picture is shown, not
+  a change to the file: it costs nothing on a large picture, carries through
+  an animation's frames and a file's pages, is kept with the file for the
+  session as the exposure is, and turns a region with it.
+
 - An iPhone's HDR photograph arrives as HDR. A HEIC carries its gain map
   beside the picture — in ISO 21496-1's standard form from iOS 18 on, and
   in Apple's own before — and either is read and applied the way an Ultra
@@ -86,6 +103,10 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   name back.
 
 ### Fixed
+
+- A gain map is turned with its picture. A JPEG with a gain map and an
+  orientation tag other than upright had its lift applied to the wrong
+  pixels on an HDR monitor, since the map was left as stored.
 
 - The rounded corners of the icons — the folder, the sheet, the clipboard,
   the hook of the question mark, the ring of the reset arrow — came out

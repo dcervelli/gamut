@@ -396,6 +396,10 @@ pub(super) fn file_items(pass: &mut Pass, ui: &mut Ui) {
                 format!("{}\u{2026}", Control::Rename.label()),
             ),
             (Control::Delete, Control::Delete.label()),
+            (
+                Control::Export,
+                format!("{}\u{2026}", Control::Export.label()),
+            ),
         ];
         for (control, label) in items {
             let mut button = Button::new(label);

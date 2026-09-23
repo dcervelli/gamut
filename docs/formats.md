@@ -144,7 +144,7 @@ and P3 numbers shown as sRGB come out visibly flat.
 ## Orientation
 
 Every format that carries an orientation tag has it applied, and the
-turn is one function, `decode::orient::apply`, whichever tag asked for it.
+turn is one function, `image::orient::apply`, whichever tag asked for it.
 HEIF and JPEG XL keep their rotation in the container and their libraries
 apply it while decoding; the other four keep EXIF's tag beside the pixels,
 and each decoder reads it its own way:
@@ -155,6 +155,12 @@ and each decoder reads it its own way:
   from it, and `ImageReader` would hand back the pixels alone. An Ultra HDR
   file's tag is the primary image's, and the reconstruction is turned the
   same way.
+
+A gain map is turned with its base, by the same function: `DecodedImage::sample`
+and the shaders both look the map up by the base's own coordinates, so a map
+left as stored under a turned base would lift the wrong pixels.
+`orient::tests::a_turned_gain_map_lifts_the_same_pixels` holds the two
+readings together.
 - TIFF from the `Orientation` tag of the directory being read, so a page
   keeps its own.
 - PNG from the `eXIf` chunk, on the same header pass that reads its color
@@ -293,7 +299,7 @@ buffer on one thread, which is a few percent of the whole.
 `libheif` applies the container's own geometric properties — `irot`, `imir`,
 `clap` — while decoding, so a rotated phone photograph arrives upright. That
 is a property of the format rather than a choice made here; the formats that
-keep the tag beside the pixels are turned by [`decode::orient`](#orientation).
+keep the tag beside the pixels are turned by [`image::orient`](#orientation).
 
 ## Camera raw
 

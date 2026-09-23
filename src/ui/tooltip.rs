@@ -219,7 +219,17 @@ pub fn disabled(tip: Tip, reasons: Reasons) -> Option<Refused> {
     if tip == Tip::Control(Control::Paste) && !clipboard {
         return said(NOTHING_TO_PASTE);
     }
-    if matches!(tip, Tip::Control(Control::Copy | Control::Region)) && nothing_open {
+    if matches!(
+        tip,
+        Tip::Control(
+            Control::Copy
+                | Control::Region
+                | Control::TurnLeft
+                | Control::TurnRight
+                | Control::Export
+        )
+    ) && nothing_open
+    {
         return said(NOTHING_OPEN);
     }
     let no_room = match tip {
@@ -286,7 +296,7 @@ pub fn words(tip: Tip) -> Option<String> {
         Tip::Control(Control::OpenIn) => "Open the file in another application",
         // And the same again for the menu of the file: every item of it
         // has a key of its own, and the button says what the menu is of.
-        Tip::Control(Control::FileMenu) => "Copy, rename or delete the file",
+        Tip::Control(Control::FileMenu) => "Copy, rename, delete or export the file",
         Tip::Control(Control::Paste) => "Paste an image",
         // The two buttons in the middle of an empty window say what
         // the dialog is for; the key table's line is what to press.
@@ -366,6 +376,12 @@ pub fn words(tip: Tip) -> Option<String> {
             | Control::Choose(_)
             | Control::Rename
             | Control::Delete
+            | Control::TurnLeft
+            | Control::TurnRight
+            | Control::Export
+            | Control::ExportAs(_)
+            | Control::ExportTo
+            | Control::CancelExport
             | Control::RenameTo
             | Control::CancelRename,
         )

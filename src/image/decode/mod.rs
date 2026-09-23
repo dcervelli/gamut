@@ -27,7 +27,6 @@ mod image_rs;
 mod jpeg;
 mod jxl;
 mod limits;
-mod orient;
 mod png;
 mod raw;
 mod tiff_rs;

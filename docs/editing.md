@@ -1,9 +1,10 @@
-# Deleting, renaming and undo
+# Deleting, renaming, undo and exporting
 
-What the program does to a file on disk, which until now was nothing: a
-file is moved to the trash, or renamed, and either is undone. The keys are
-in [the user's table](../user-docs/KEYS.md#renaming-and-deleting); this
-page is why the code is shaped as it is.
+What the program does to files on disk: a file is moved to the trash, or
+renamed, and either is undone; or the picture as shown is exported to a
+new file beside it. The keys are in [the user's
+table](../user-docs/KEYS.md#renaming-and-deleting); this page is why the
+code is shaped as it is.
 
 ## The trash is the desktop's
 
@@ -123,3 +124,47 @@ the `TextEditState` egui hands back from `TextEdit::show` — since the part
 before the extension is nearly always the part being changed, and a
 selection that took the whole name would lose the extension to the first
 key.
+
+## Exporting writes what the screen shows
+
+`Ctrl+E` writes the picture as it is on screen to a new file: turned,
+cropped to the region where one is up, and through the window, exposure,
+curve and false color. It is the copy to the clipboard written to disk
+instead — the same `encode::displayed` walk, then `encode::png_for_file`
+(the clipboard's PNG squeezed harder, since the file is kept) or
+`encode::jpeg` at the quality the dialog's slider says — so what is
+exported cannot drift from what is copied, nor either from the readout. A crop is not a state of its own: the region
+already is one, with the handles and the pixel-precise keys it needs.
+
+The dialog is `ui/export.rs`, drawn with the rename dialog's pieces and
+holding its state in `App::exporting` for the same reason. What it says
+about the file is
+`export::warnings`, a function of `export::Facts` that `App::open_export` gathers
+once as it opens and of the format chosen, so the words are tested against
+nothing but values. It warns only of what the new file loses that the
+screen does not show: that the export looks like the screen is the point of
+it, and a JPG's loss is what its quality slider is for. None of the
+warnings refuse, since each is a price the user may want to pay. Only the name refuses, by
+`export::judge`, and a name taken is refused rather than confirmed: the new
+file never replaces anything, the file on screen least of all.
+
+The write is on a copying thread, through `Copying::spawn_aside` rather than
+`spawn`: a copy to the clipboard supersedes the copy before it, since only
+the last one asked for should end up on the clipboard, but an export is
+never stale, and must not cancel a copy in flight either. It is written under a
+temporary name in the target directory and moved into place by
+`trash::rename_no_replace`, so a file that arrived under the name after the
+dialog judged it is not written over and a write cut short leaves nothing
+under the name. The thread reports `Done::Exported` with the path, and
+`App::exported` takes the file into the list by `Files::adopt`, as a paste
+is: it arrives as a new file with nothing kept, which is right, since what
+was done to the picture is in its pixels now.
+
+An export is not an edit and is not on the undo stack. It changes nothing
+that was there; the new file is deleted like any other.
+
+A playing animation is stopped while the dialog is up and set playing again
+when it goes, by `App::close_export`, which both Cancel and Export go
+through. The frame written is read when Export is pressed, so without the
+stop it would be whichever frame the clock had reached by then rather than
+the one the dialog was opened on.

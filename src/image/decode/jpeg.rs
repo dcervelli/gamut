@@ -27,7 +27,8 @@ use ::image::{DynamicImage, ImageDecoder};
 
 use crate::image::{ColorSpace, DecodedImage};
 
-use super::{MAX_DECODED_BYTES, Overrides, ReadSeek, dynamic, orient};
+use super::{MAX_DECODED_BYTES, Overrides, ReadSeek, dynamic};
+use crate::image::orient;
 
 pub struct Jpeg;
 

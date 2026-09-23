@@ -65,7 +65,7 @@ impl super::Decoder for Webp {
             .as_deref()
             .and_then(Orientation::from_exif_chunk)
             .unwrap_or(Orientation::NoTransforms);
-        Ok(Some(super::orient::size(width, height, orientation)))
+        Ok(Some(crate::image::orient::size(width, height, orientation)))
     }
 
     fn decode(
@@ -214,7 +214,7 @@ impl<R: Read + Seek> Opened<R> {
             self.color,
             AlphaMode::of(self.channels, false),
         );
-        Ok(super::orient::apply(image, self.orientation))
+        Ok(crate::image::orient::apply(image, self.orientation))
     }
 }
 

@@ -360,6 +360,42 @@ stays in the strip either way: a control that is sometimes there is a control
 that has to be found again.
 
 
+## Turning the picture
+
+A turn the user asks for is not applied to the pixels. The `DecodedImage`
+and the texture it was uploaded to stay as the file holds them — the stored
+space — and `Current::turn`, an `image::orient::Turn` of quarter turns
+clockwise, is read through at the two places a pixel is fetched: the vertex
+shader in `shaders/image.wgsl`, whose four corners read the stored corners
+the turn brought there, and `Current::sample` on the CPU, which maps through
+`Turn::stored` before `DecodedImage::sample`. Everything else is in the
+turned space: `Current::size` and `Current::pixels`, and so the view, the
+placement, the region, the pointer's coordinate and the minimap. The
+information panel keeps the file's stored size, since it describes the
+file.
+
+Re-uploading a turned copy would have been simpler to get right — every
+reader would see turned pixels without knowing — but it copies every sample
+on the main thread, column by column, for a 16-bit RGB picture of twenty-four
+megapixels well over a hundred megabytes, and the window would stop for it
+at every press. It would also have to refuse an animation, whose player
+writes each frame into the texture as stored. Read through, a turn costs a
+uniform, frames and pages arrive under it, and it is kept per file in
+`app::kept::Settings` as the display is.
+
+The discipline is that nothing reads the stored size or samples the stored
+picture on the picture's behalf except those two places.
+`render::filter_tests::a_turned_picture_draws_as_the_picture_turned`
+compares the shader's reading with `orient::apply` done on the CPU, and
+`a_turned_picture_is_averaged_along_its_own_axes` the per-axis density
+`params_for` swaps under a quarter turn; `encode::displayed`, which walks
+the picture for a copy or an export, reads through `Turn::stored` too, and
+`encode::tests::a_turned_copy_is_the_turned_picture_copied` holds it to the
+same `orient::apply`. The pan is measured from the picture's center, which a
+turn leaves where it is, so `View::turn` turns the pan with the picture and
+the detail at the middle of the window stays there; a region is turned by
+`Region::turned` with the pixels it marks out.
+
 ## The region
 
 A region is a `Region` in `src/image/region.rs`: a rectangle of whole image

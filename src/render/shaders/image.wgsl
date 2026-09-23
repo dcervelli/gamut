@@ -21,7 +21,7 @@ struct Params {
     texels_per_pixel: vec2<f32>, // source texels covered by one output pixel
     extent: vec2<f32>,           // image size, in the bound texture's texels
     marks: u32,                  // bit 1: mark pixels at or below black, bit 2: at or above white
-    _pad: u32,
+    turn: u32,                   // quarter turns clockwise the texture is read through
     primaries: mat3x3<f32>,      // source primaries -> BT.709
     swizzle: u32,                // 0 gray, 1 gray+alpha, 2 rgb, 3 rgba
     alpha_mode: u32,             // 0 opaque, 1 straight, 2 premultiplied
@@ -57,7 +57,16 @@ struct VertexOut {
 fn vs_main(@builtin(vertex_index) index: u32) -> VertexOut {
     let uv = vec2<f32>(f32(index & 1u), f32(index >> 1u));
     var out: VertexOut;
-    out.uv = uv;
+    // The quad is the turned picture; the texture is the picture as stored.
+    // Each corner of the quad reads the stored corner the turn brought there,
+    // and a quarter turn is linear in uv, so the interpolation between them
+    // is exact and nothing downstream knows the picture was turned.
+    switch params.turn {
+        case 1u: { out.uv = vec2<f32>(uv.y, 1.0 - uv.x); }
+        case 2u: { out.uv = vec2<f32>(1.0 - uv.x, 1.0 - uv.y); }
+        case 3u: { out.uv = vec2<f32>(1.0 - uv.y, uv.x); }
+        default: { out.uv = uv; }
+    }
     out.position = vec4<f32>(
         params.offset.x + uv.x * params.scale.x,
         params.offset.y - uv.y * params.scale.y,

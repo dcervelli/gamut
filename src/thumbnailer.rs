@@ -497,6 +497,7 @@ fn make(
         let raster = encode::displayed_on(
             &small,
             &display,
+            crate::image::orient::Turn::NONE,
             Region::whole([small.width, small.height]),
             None,
             1,

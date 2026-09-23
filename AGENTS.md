@@ -17,9 +17,12 @@ app/           the event loop's state and winit handlers
   gui.rs         Gui: egui's context and its winit adapter; runs a pass, merges
                  when egui wants painting again into the loop's deadline
   files.rs       Files: the file list, the read in flight, walks past broken files (pure, tested)
-  kept.rs        what each file was left in — its view, its display, and its frame or page — so stepping back to it puts it back
+  kept.rs        what each file was left in — its view, its display, its turn, and its frame or page — so stepping back to it puts it back
   edits.rs       what is done to the file on disk — moved to the trash, renamed — and the
                  stack that undoes it; the rename dialog's state while it is up
+  exporting.rs   the export dialog's state while it is up, the animation it holds still, the
+                 picture as shown written to a new file on a thread of its own, and the file
+                 taken into the list once it is
   playback.rs    the clock an animation plays by: which frame is due at a moment, and when the next is;
                  pure, told the time and the delays decoded so far
   region.rs      Marking: the region marked out on the picture as the application holds it — what it
@@ -51,7 +54,7 @@ ui/            lays each frame's interface out with egui; no wgpu or winit impor
                  every panel makes
   histogram/     the histogram panel: mod.rs its geometry, words, header and rows, plot.rs the
                  plot, track.rs the band and its handles, controls.rs the buttons, slider.rs the
-                 exposure's slider; handle() in mod.rs is the one handle the band and the slider draw
+                 exposure's slider, drawn by ui/slider.rs
   minimap.rs / grid.rs   one widget each, drawn with egui's painter
   region.rs      the region marked out on the picture: where its outline and
                  eight handles go, which handle the pointer is on, and the
@@ -70,7 +73,13 @@ ui/            lays each frame's interface out with egui; no wgpu or winit impor
   menu.rs        the popup menus' contents: the zoom menu's choices and cells, the
                  pixel-format cells, and the menus of copies and of the file with each item's key beside it
   rename.rs      the rename dialog: a modal with the name in a field, judge() saying what is
-                 wrong with what has been typed as it is typed, and OK and Cancel
+                 wrong with what has been typed as it is typed, and OK and Cancel; the
+                 field, the line under it and the buttons both dialogs are drawn with
+  slider.rs      the one slider the interface draws — the histogram's exposure, the export
+                 dialog's quality — and handle(), the one handle every slider and the band draw
+  export.rs      the export dialog: the name, JPG or PNG and JPG's quality, warnings() saying
+                 what the new file loses from the Facts the application hands over, and
+                 Export and Cancel
   tooltip.rs     the label naming what the pointer is resting on: Tip is what can
                  have one, Tooltip is what is said, disabled() why a dead control is dead;
                  when it opens and where it goes are egui's
@@ -141,14 +150,18 @@ image/         the data model, nothing GPU
   color/         Transfer, Primaries, ColorSpace; icc.rs and cicp.rs translate what files say into them
   region.rs      Region, a rectangle of the image's own pixels, and every
                  pure change to one: drawn, moved, pulled by a handle, grown,
-                 nudged
+                 nudged, turned
+  orient.rs      the turn an orientation tag asks for, applied to any layout and to the
+                 gain map beside it; Turn, the quarter turns the user asks for, which are
+                 read through rather than applied
   sequence.rs    what a file holds beyond one image: Sequence (still, animation,
                  pages), Frame, and the FrameSource a decoder's frames come
                  through, each composited whole by the decoder
   stats.rs       the scan an image gets on load: min/max, histogram, plot; scan_with lifts a gain-mapped picture as the screen shows it
   gain_map.rs    a gain map beside its SDR base: what its values mean (ISO 21496-1's or Apple's Lift), the
                  weight the display's room gives it, the Table a weight makes, and gain_at, the shaders' twin
-  encode.rs      the displayed image walked back out to an 8-bit sRGB PNG, for the clipboard
+  encode.rs      the displayed image, turned as shown, walked back out to an 8-bit sRGB PNG or
+                 JPEG, for the clipboard, the thumbnails and an exported file
   resample.rs    a CPU box filter in the file's own encoding, for the thumbnails
   exif.rs        the file's own metadata, read and rendered for the info panel: the EXIF
                  block, and the XMP packet's words merged into its About section
@@ -170,8 +183,7 @@ image/         the data model, nothing GPU
                  curves (the CPU twins of the compositor's) and Headroom, colormap.rs the
                  ramps the image layer writes its texture from
   decode/        Decoder trait + DECODERS registry in mod.rs; one file per format; limits.rs the size ceiling;
-                 dynamic.rs the shared DynamicImage bridge; orient.rs the turn an orientation tag asks
-                 for, applied to any layout; heif/tmap.rs reads ISO 21496-1's gain-map item and
+                 dynamic.rs the shared DynamicImage bridge; heif/tmap.rs reads ISO 21496-1's gain-map item and
                  heif/apple.rs Apple's maker note; fixture_tests.rs runs every file in test_images/
 render/        the GPU
   mod.rs         Renderer: surface, device, the three passes; Scene is what a frame draws;
@@ -232,7 +244,9 @@ still agrees with both, so renaming either is editing the constant —
 | A format's frames or pages | `sequence` on its `Decoder`, answered from the header, and `frames` (a `FrameSource` handing over each frame whole, at the canvas size) or `decode_page`; a fixture that is the pattern followed by the pattern upside down, and an entry in `fixture_tests.rs::SEQUENCES` |
 | How an animation is timed, cached or shown | `app/playback.rs` for when a frame is due; `player.rs` for what is decoded ahead and what is let go; `app/animation.rs` for the pair as the application holds them, `Animation::due_frame` handing over the frame that should be up and `App::show_due_frame` putting it in the texture and `Current`; the display is left alone on a frame change on purpose |
 | What the transport bar shows or does | `ui/transport.rs` for the bar and `App::transport` for what it is told; a press goes through `App::press` as `Control::{Play, StepBack, StepForward, Seek}`, and the keys through `App::step_frame` and `App::toggle_play` so the two cannot drift; `Chrome::new`'s flag is where the bar takes its height |
-| What a copy of the image contains | `image/encode.rs`, which walks the `Region` it is given; the chord that asks for it is in `app/input.rs` |
+| What a copy of the image contains | `image/encode.rs`, which walks the `Region` it is given through the `Turn` it is given; the chord that asks for it is in `app/input.rs` |
+| What turning the picture does | `image/orient.rs::Turn`, held in `Current::turn` and kept in `app/kept.rs`; `App::turn_picture` turns it, the region (`Region::turned`) and the pan (`View::turn`). The GPU reads through it in `vs_main` of `shaders/image.wgsl`, the CPU through `Current::sample`; see the convention below |
+| What an export writes, or what its dialog says | `ui/export.rs`: `warnings` from the `Facts` `App::open_export` gathers, `judge` for the name, `default_name`. The write is `App::export_shown` in `app/exporting.rs`, through `encode::{png_for_file, jpeg}` on `Copying::spawn_aside`, and `App::exported` adopts the file as a paste is |
 | The chooser: what a row shows, how the query is matched, what a key does in it | `ui/chooser.rs` for the popup and the keys it reads before its field can; `app/chooser.rs` for the ranking, the relative paths, the title beside them (`candidate`) and the cursor; a new fact for a row is a field of `thumbnailer::Facts`, read in `thumbnailer::header`; `App::press` for `Control::Chooser` and `Control::Choose`, and `App::act` for `Command::{Query, Cursor, Visible}`. Its open state is egui's, under `ui::chooser::id()`. A different matcher is a new `impl Matcher` in `fuzzy.rs` |
 | A thumbnail: what is made, where it goes, what the row gets | `thumbnailer.rs` for the stages and the queue, `thumbnail.rs` for the cache's naming, chunks and write; `image/resample.rs` for the filter; `App::hold_thumb` for the texture and `app/chooser.rs::Thumbs` for how many the screen keeps |
 | What a region does, or what a key does while one is up | `image/region.rs` for the change to the rectangle; `app/region.rs::Marking` for what the application holds about it and what a drag makes of it (`grab`, `pull`, `release`), tested with no picture; `App::perform_on_region` in `app/input.rs` for the keys a region takes; `ui/region.rs` for where it is drawn and which handle the pointer is on; `Pass::region_gestures` in `ui/mod.rs` for which drag is the region's and which the view's |
@@ -252,6 +266,13 @@ still agrees with both, so renaming either is editing the constant —
 
 - Decoders describe, they do not normalize: keep 16-bit and float data as it
   is and say what it means through `ColorSpace` and `AlphaMode`.
+- The picture is turned by reading through the turn, never by turning the
+  pixels. The `DecodedImage` and the texture are as the file holds them;
+  everything else — the size, the view, the region, the pointer's pixel —
+  is in the turned picture. Read the size through `Current::pixels` or
+  `Current::size` and a pixel through `Current::sample`, never through
+  `current.image` directly; the vertex shader and `encode::displayed` are
+  the only other places the turn is read through.
 - A sampled texel is always linear in the working space. Transfer functions
   are resolved once at upload (`render/upload.rs`), never in a shader.
 - The interface is laid out in logical pixels; the image is placed in

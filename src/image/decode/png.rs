@@ -37,7 +37,8 @@ use ::image::{AnimationDecoder, ImageFormat};
 use crate::image::sequence::{Frame, FrameSource, Loops, Sequence};
 use crate::image::{ColorSpace, DecodedImage, Primaries, Transfer};
 
-use super::{Overrides, ReadSeek, dynamic, orient};
+use super::{Overrides, ReadSeek, dynamic};
+use crate::image::orient;
 
 pub struct Png;
 

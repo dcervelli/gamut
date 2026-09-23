@@ -29,6 +29,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use anyhow::{Context, Result, anyhow};
 use winit::window::Window;
 
+use crate::image::orient::Turn;
 use crate::image::{
     DecodedImage,
     display::{Display, Headroom},
@@ -102,6 +103,9 @@ pub struct Scene<'a> {
     /// it: the weight the surface's room above white asks for. Nothing for
     /// a picture without a map.
     pub lift: f32,
+    /// How far the picture is turned on screen. `placement` is already the
+    /// turned picture's; the turn says which way the texture runs inside it.
+    pub turn: Turn,
 }
 
 /// One pass of egui's interface, tessellated and ready to draw: the
@@ -445,6 +449,7 @@ impl Renderer {
                 mark_clipped: scene.mark_clipped,
                 headroom: scene.headroom,
                 lift: scene.lift,
+                turn: scene.turn,
             },
             size,
             display,

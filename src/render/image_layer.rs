@@ -16,6 +16,7 @@ use super::reduce::{self, Level, Reducer};
 use super::shader_codes;
 use super::upload::{self, Capabilities};
 use crate::image::gain_map::GainMap;
+use crate::image::orient::Turn;
 use crate::image::{
     AlphaMode, Channels, DecodedImage,
     display::{Colormap, Display, Headroom},
@@ -37,7 +38,9 @@ struct Params {
     texels_per_pixel: [f32; 2],
     extent: [f32; 2],
     marks: u32,
-    _pad: u32,
+    /// Quarter turns clockwise the texture is read through — see
+    /// `shader_codes::turn`.
+    turn: u32,
     /// Column-major, each column padded to 16 bytes, as WGSL wants a mat3x3.
     primaries: [[f32; 4]; 3],
     swizzle: u32,
@@ -158,6 +161,8 @@ pub struct Draw {
     /// How much of a gain map's lift the picture gets, from none to all of
     /// it: the weight the surface's room above white asks for.
     pub lift: f32,
+    /// How far the picture is turned: both quads read the texture turned.
+    pub turn: Turn,
 }
 
 impl Draw {
@@ -170,6 +175,7 @@ impl Draw {
             mark_clipped: false,
             headroom: Headroom::None,
             lift: 0.0,
+            turn: Turn::NONE,
         }
     }
 }
@@ -335,6 +341,7 @@ impl ImageLayer {
             mark_clipped,
             headroom,
             lift: weight,
+            turn,
         } = draw;
         let Some(image) = &mut self.image else {
             return;
@@ -387,7 +394,7 @@ impl ImageLayer {
         self.main.write(
             queue,
             params_for(
-                image, view, target, display, window, self.level, marks, lifted,
+                image, view, target, display, window, self.level, marks, lifted, turn,
             ),
         );
 
@@ -397,7 +404,7 @@ impl ImageLayer {
             self.thumbnail.write(
                 queue,
                 params_for(
-                    image, thumbnail, target, display, window, level, marks, lifted,
+                    image, thumbnail, target, display, window, level, marks, lifted, turn,
                 ),
             );
         }
@@ -830,6 +837,7 @@ fn params_for(
     level: usize,
     marks: u32,
     lifted: Lifted<'_>,
+    turn: Turn,
 ) -> Params {
     let divisor = (reduce::STEP as f32).powi(level as i32);
     let extent = [
@@ -837,11 +845,11 @@ fn params_for(
         image.size[1] as f32 / divisor,
     ];
     // Read off the quad rather than from the zoom, so that the filters and
-    // the geometry cannot drift apart.
-    let texels_per_pixel = [
-        extent[0] / placement.width.max(1e-6),
-        extent[1] / placement.height.max(1e-6),
-    ];
+    // the geometry cannot drift apart. Each of the texture's axes against
+    // the side of the quad it runs along: a picture on its side runs its
+    // columns down the screen.
+    let [across, down] = turn.size([placement.width, placement.height]);
+    let texels_per_pixel = [extent[0] / across.max(1e-6), extent[1] / down.max(1e-6)];
 
     Params {
         offset: [
@@ -856,7 +864,7 @@ fn params_for(
         texels_per_pixel,
         extent,
         marks,
-        _pad: 0,
+        turn: shader_codes::turn(turn),
         primaries: image.primaries,
         swizzle: image.swizzle,
         alpha_mode: if level == 0 {

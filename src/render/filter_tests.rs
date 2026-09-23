@@ -16,6 +16,7 @@ use super::output::{Encoding, Output};
 use super::{Color, Placement, Scene, UI_FORMAT, UiPaint, Upscale, WORKING_FORMAT};
 use crate::image::color::Transfer;
 use crate::image::display::{Colormap, Display, Headroom, ToneMap};
+use crate::image::orient::{self, Turn};
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Referred, Samples};
 
 /// Draws `image` into a `target`-sized working-space texture and reads it
@@ -294,6 +295,64 @@ fn minification_averages_every_texel_it_covers() {
     );
 }
 
+/// A picture turned on screen is drawn as the same picture turned on the
+/// CPU and drawn untouched: the vertex shader's corners are the decoders'
+/// reading of the turn. At a whole zoom, texel for texel, and on a picture
+/// with no symmetry to hide a wrong corner behind.
+#[test]
+fn a_turned_picture_draws_as_the_picture_turned() {
+    let Some(gpu) = gpu::test_context() else {
+        return;
+    };
+    let data: Vec<u8> = (0..6).map(|value| value * 40).collect();
+    let image = gray_u8(3, 2, data);
+    let mut turn = Turn::NONE;
+    for _ in 0..4 {
+        let turned = orient::apply(image.clone(), turn.orientation());
+        let target = [turned.width, turned.height];
+        let placement = whole(target, &turned);
+        let mut quads = Draw::plain(placement, None);
+        quads.turn = turn;
+        assert_eq!(
+            draw_all(gpu, &image, target, quads),
+            draw(gpu, &turned, target, placement),
+            "{turn:?}"
+        );
+        turn = turn.clockwise();
+    }
+}
+
+/// Shrunk, the area filter reads each of the texture's axes against the
+/// side of the quad it runs along: a picture on its side, twice as long as
+/// it is wide, averages the same texels either way round.
+#[test]
+fn a_turned_picture_is_averaged_along_its_own_axes() {
+    let Some(gpu) = gpu::test_context() else {
+        return;
+    };
+    let (width, height) = (16, 8);
+    let data: Vec<u8> = (0..width * height)
+        .map(|index| ((index % width) * 13 + (index / width) * 7) as u8)
+        .collect();
+    let image = gray_u8(width, height, data);
+    let turn = Turn::NONE.clockwise();
+    let turned = orient::apply(image.clone(), turn.orientation());
+    let target = [turned.width / 2, turned.height / 2];
+    let placement = whole(target, &turned);
+    let mut quads = Draw::plain(placement, None);
+    quads.turn = turn;
+    let ours = draw_all(gpu, &image, target, quads);
+    let theirs = draw(gpu, &turned, target, placement);
+    for (index, (a, b)) in ours.iter().zip(&theirs).enumerate() {
+        assert!(
+            close(a[0], b[0], 1e-3),
+            "pixel {index}: {} against {}",
+            a[0],
+            b[0]
+        );
+    }
+}
+
 /// Two levels of the coarse chain, then the draw's own area filter, have to
 /// come to the same thing as averaging the source directly. Sixteen to one is
 /// the factor that forces the chain to be used at all.
@@ -480,6 +539,7 @@ fn the_thumbnail_is_drawn_beside_the_view_and_builds_the_chain_it_needs() {
             mark_clipped: false,
             headroom: Headroom::None,
             lift: 0.0,
+            turn: Turn::NONE,
         },
     );
 
@@ -820,6 +880,7 @@ fn composited(
         headroom,
         mark_clipped: false,
         lift: 0.0,
+        turn: Turn::NONE,
     };
     composite.prepare(&gpu.queue, &scene, gray, &output, [None, None]);
     render_to(gpu, [width, 1], |encoder, view| {

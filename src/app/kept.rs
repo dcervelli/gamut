@@ -2,7 +2,8 @@
 //!
 //! Flipping between two pictures is how they are compared, and a comparison
 //! only holds if each of them comes back as it was left: the same pan and
-//! zoom, the same window and exposure, the same tone curve and false color.
+//! zoom, the same turn, the same window and exposure, the same tone curve
+//! and false color.
 //! So whatever the file leaving the screen was set to is put away here, and
 //! the file arriving takes back whatever it left — including the file the
 //! walk has stepped past and come round to again.
@@ -26,6 +27,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::image::display::Display;
+use crate::image::orient::Turn;
 use crate::view::View;
 
 /// How one file was left.
@@ -39,6 +41,8 @@ pub(super) struct Settings {
     /// Where in the file it was left, for one that holds more than one
     /// picture.
     pub(super) left: Option<Left>,
+    /// How far it was turned on screen.
+    pub(super) turn: Turn,
 }
 
 /// Where a file of several pictures was left.

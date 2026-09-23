@@ -743,6 +743,7 @@ mod tests {
             sequence: Sequence::Still,
             page: 0,
             lift: None,
+            turn: crate::image::orient::Turn::NONE,
         }
     }
 

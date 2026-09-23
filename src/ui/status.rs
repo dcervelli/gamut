@@ -24,7 +24,10 @@ const SEPARATOR: &str = " \u{00b7} ";
 /// Least to most disposable, for [`fit_segments`] to cut.
 pub(super) fn facts(current: &Current, _measure: impl FnMut(&str) -> f32) -> [String; 3] {
     [
-        format!("{} \u{00d7} {}", current.image.width, current.image.height),
+        {
+            let [width, height] = current.pixels();
+            format!("{width} \u{00d7} {height}")
+        },
         describe_pixels(current),
         current.image.color.label(),
     ]
@@ -446,6 +449,7 @@ mod tests {
             sequence: Sequence::Still,
             page: 0,
             lift: None,
+            turn: crate::image::orient::Turn::NONE,
         }
     }
 

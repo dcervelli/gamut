@@ -98,7 +98,7 @@ impl super::Decoder for Raw {
         // match, so the preview is too — by this orientation alone, since
         // a preview that repeats the tag in an EXIF of its own, as a RAF's
         // does, would otherwise be turned twice.
-        let image = super::orient::apply(image, handle.orientation());
+        let image = crate::image::orient::apply(image, handle.orientation());
         Ok(Some(image))
     }
 

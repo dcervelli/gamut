@@ -25,7 +25,7 @@ use super::App;
 use super::input::Effect;
 use super::input::{Action, binding_for};
 use crate::trash::{self, Entry, Refused};
-use crate::ui::rename::{self, Verdict};
+use crate::ui::rename::{self, TAKEN, Verdict};
 use crate::ui::toast::Level;
 use crate::watch::Watch;
 
@@ -67,7 +67,7 @@ fn undo_key() -> String {
 }
 
 /// The last part of `path`, for a message about the file.
-fn name_of(path: &Path) -> String {
+pub(super) fn name_of(path: &Path) -> String {
     let name = path.file_name().map_or_else(
         || path.display().to_string(),
         |name| name.to_string_lossy().into_owned(),
@@ -141,7 +141,11 @@ impl App {
     /// Opens the rename dialog on the file on screen, its name in the field.
     pub(super) fn open_rename(&mut self) {
         // One thing at a time: a menu still open under a dialog would be a
-        // second thing on screen asking for a press.
+        // second thing on screen asking for a press, and so would the other
+        // dialog.
+        if self.exporting.is_some() {
+            return;
+        }
         self.close_menus();
         let Some(path) = self.files.shown_path().map(Path::to_path_buf) else {
             return;
@@ -189,10 +193,7 @@ impl App {
         match trash::rename_no_replace(&from, &to) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                self.toast(
-                    format!("A file called {} is already there.", name_of(&to)),
-                    Level::Warning,
-                );
+                self.toast(TAKEN, Level::Warning);
                 return;
             }
             Err(error) => {

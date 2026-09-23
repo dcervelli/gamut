@@ -6,6 +6,7 @@
 //! state between the two, and the gestures that move it, with no picture
 //! and no window: a drag is a hold and a pull in image pixels.
 
+use crate::image::orient::Turn;
 use crate::image::region::{Grip, Region};
 use crate::ui::{Grab, Selection};
 use crate::view::Fit;
@@ -97,6 +98,21 @@ impl Marking {
     pub fn select(&mut self, region: Region) {
         self.selection = Selection::Shown(region);
         self.framing = Framing::FIRST;
+    }
+
+    /// The picture, `shown` pixels across and down, has been turned by
+    /// `turn` more: the region follows the pixels it marked out. The handle
+    /// goes back to the middle rather than being turned with it — an edge
+    /// that was the top is the right one now, and the arrows that move it
+    /// would move it the other way — and a drag under way lets go.
+    pub fn turned(&mut self, turn: Turn, shown: [u32; 2]) {
+        if let Selection::Shown(region) = self.selection {
+            self.selection = Selection::Shown(region.turned(turn, shown));
+        }
+        self.handle = Grip::Middle;
+        self.grabbing = None;
+        self.zoom_box = None;
+        self.grip = None;
     }
 
     /// Takes the region off, and the mode with it.

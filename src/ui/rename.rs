@@ -40,7 +40,7 @@ pub fn id() -> egui::Id {
 /// at all: narrower than this the field could not show a name. Cut for
 /// a name rather than a path: it is the one thing the field holds.
 const WIDTH: f32 = 280.0;
-const WIDTH_MIN: f32 = 200.0;
+pub(super) const WIDTH_MIN: f32 = 200.0;
 /// The field, and the room under it kept for the line about the name —
 /// kept whether or not there is one, so that the dialog does not grow and
 /// shrink under the hand as the name is typed.
@@ -48,11 +48,16 @@ const FIELD_HEIGHT: f32 = 28.0;
 const MESSAGE_HEIGHT: f32 = 18.0;
 /// The gap between the field and that line, and between it and the
 /// buttons.
-const GAP: f32 = 8.0;
+pub(super) const GAP: f32 = 8.0;
 /// The field's text is inset this far from its edge, and the hairline
 /// around it.
 const FIELD_INSET: f32 = 8.0;
 const HAIRLINE: f32 = 1.0;
+/// What is said wherever a name is refused because a file already has it:
+/// in either dialog as the name is typed, and after OK where a file took
+/// the name in the moment between.
+pub const TAKEN: &str = "File already exists.";
+
 /// The two buttons at the foot, each this wide.
 const BUTTON: [f32; 2] = [60.0, 24.0];
 
@@ -121,7 +126,7 @@ impl Verdict {
             Verdict::Empty => refused("Type a name."),
             Verdict::Slash => refused("A name cannot hold a slash: the file stays where it is."),
             Verdict::NotAName => refused("That is not a name a file can have."),
-            Verdict::Taken => refused("A file of that name is already there."),
+            Verdict::Taken => refused(TAKEN),
             Verdict::Fine(Some(change)) => {
                 let dotted = |extension: &str| format!(".{extension}");
                 let words = match (&change.from, &change.to) {
@@ -192,12 +197,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
     if width < WIDTH_MIN {
         return;
     }
-    let theme = pass.theme;
-    let frame = Frame::NONE
-        .fill(theme.menu_background.into())
-        .stroke(egui::Stroke::new(help::HAIRLINE, theme.border))
-        .corner_radius(MENU_RADIUS)
-        .inner_margin(MENU_PADDING);
+    let frame = dialog_frame(pass);
     let inside = width - 2.0 * MENU_PADDING;
     let response = egui::Modal::new(id()).frame(frame).show(ui.ctx(), |ui| {
         ui.set_width(inside);
@@ -207,11 +207,29 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
         // file it is about.
         let title = format!("{} {}", Control::Rename.label(), input.current);
         menu::titled(pass, ui, &title, |pass, ui| {
-            field(pass, ui, input, inside);
+            let refused = matches!(input.verdict.message(), Some((_, Tone::Refusal)));
+            name_field(
+                pass,
+                ui,
+                NameField {
+                    id: id().with("name"),
+                    name: &input.name,
+                    refused,
+                    opened: input.opened,
+                    width: inside,
+                },
+                Command::Name,
+            );
             ui.add_space(GAP);
-            message(pass, ui, input, inside);
+            line(pass, ui, inside, input.verdict.message());
             ui.add_space(GAP);
-            buttons(pass, ui, input);
+            ok_cancel(
+                pass,
+                ui,
+                Control::RenameTo,
+                Control::CancelRename,
+                input.verdict.allows(),
+            );
         });
     });
     if response.should_close() {
@@ -234,18 +252,48 @@ fn keys(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
     }
 }
 
+/// The frame a dialog is drawn in: the menus' own, so that a dialog reads
+/// as one of the window's surfaces rather than something from elsewhere.
+pub(super) fn dialog_frame(pass: &Pass) -> Frame {
+    let theme = pass.theme;
+    Frame::NONE
+        .fill(theme.menu_background.into())
+        .stroke(egui::Stroke::new(help::HAIRLINE, theme.border))
+        .corner_radius(MENU_RADIUS)
+        .inner_margin(MENU_PADDING)
+}
+
+/// What a dialog's name field is drawn from.
+pub(super) struct NameField<'a> {
+    /// The field's id in egui's memory, where its selection is kept.
+    pub id: egui::Id,
+    pub name: &'a str,
+    /// Whether the name will not do, which outlines the field in the
+    /// warning color.
+    pub refused: bool,
+    /// Whether this is the dialog's first frame — see [`Input::opened`].
+    pub opened: bool,
+    pub width: f32,
+}
+
 /// The field, in a hand-drawn box as the chooser's is: outlined in the
 /// warning color while the name will not do, and in the hairline otherwise.
 /// On the frame the dialog opens, the stem is selected and the field takes
 /// the keyboard; and it takes the keyboard again whenever nothing has it,
 /// so that a click on the dialog's own frame does not leave the keys going
-/// to the window.
-fn field(pass: &mut Pass, ui: &mut egui::Ui, input: &Input, width: f32) {
+/// to the window. What is typed goes back as `changed` makes a command of
+/// it.
+pub(super) fn name_field(
+    pass: &mut Pass,
+    ui: &mut egui::Ui,
+    field: NameField<'_>,
+    changed: fn(String) -> Command,
+) {
     let theme = pass.theme;
-    let (rect, _) = ui.allocate_exact_size(vec2(width, FIELD_HEIGHT), Sense::HOVER);
-    let outline = match input.verdict.message() {
-        Some((_, Tone::Refusal)) => theme.warning,
-        _ => theme.border,
+    let (rect, _) = ui.allocate_exact_size(vec2(field.width, FIELD_HEIGHT), Sense::HOVER);
+    let outline = match field.refused {
+        true => theme.warning,
+        false => theme.border,
     };
     let painter = ui.painter();
     painter.rect_filled(rect, TOGGLE_RADIUS, theme.bar_background);
@@ -255,8 +303,8 @@ fn field(pass: &mut Pass, ui: &mut egui::Ui, input: &Input, width: f32) {
         egui::Stroke::new(HAIRLINE, outline),
         egui::StrokeKind::Inside,
     );
-    let field_id = id().with("name");
-    let mut text = input.name.clone();
+    let field_id = field.id;
+    let mut text = field.name.to_string();
     let edit = TextEdit::singleline(&mut text)
         .id(field_id)
         .return_key(None)
@@ -281,15 +329,15 @@ fn field(pass: &mut Pass, ui: &mut egui::Ui, input: &Input, width: f32) {
         )
         .inner;
     if output.response.changed() {
-        pass.commands.push(Command::Name(text));
+        pass.commands.push(changed(text));
     }
-    if input.opened {
+    if field.opened {
         let mut state = output.state;
         state
             .cursor
             .set_char_range(Some(egui::text::CCursorRange::two(
                 egui::text::CCursor::new(0),
-                egui::text::CCursor::new(stem_chars(&input.name)),
+                egui::text::CCursor::new(stem_chars(field.name)),
             )));
         state.store(ui.ctx(), field_id);
         output.response.request_focus();
@@ -301,10 +349,10 @@ fn field(pass: &mut Pass, ui: &mut egui::Ui, input: &Input, width: f32) {
 /// The line under the field: what is wrong with the name, in the warning
 /// ink, or what it changes, in the caution ink — and the room for one
 /// either way.
-fn message(pass: &mut Pass, ui: &mut egui::Ui, input: &Input, width: f32) {
+pub(super) fn line(pass: &mut Pass, ui: &mut egui::Ui, width: f32, said: Option<(String, Tone)>) {
     let theme = pass.theme;
     let (rect, _) = ui.allocate_exact_size(vec2(width, MESSAGE_HEIGHT), Sense::HOVER);
-    let Some((words, tone)) = input.verdict.message() else {
+    let Some((words, tone)) = said else {
         return;
     };
     let ink = match tone {
@@ -331,21 +379,27 @@ fn message(pass: &mut Pass, ui: &mut egui::Ui, input: &Input, width: f32) {
     );
 }
 
-/// Cancel and OK, at the right, OK dead while the name will not do.
-fn buttons(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
+/// Cancel and OK, at the right, OK dead while `allowed` says it would do
+/// nothing.
+pub(super) fn ok_cancel(
+    pass: &mut Pass,
+    ui: &mut egui::Ui,
+    ok: Control,
+    cancel: Control,
+    allowed: bool,
+) {
     ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
         ui.spacing_mut().item_spacing = vec2(GAP, 0.0);
-        let ok = ui.add_enabled(
-            input.verdict.allows(),
-            Button::new(RichText::new(Control::RenameTo.label())).min_size(BUTTON.into()),
+        let pressed = ui.add_enabled(
+            allowed,
+            Button::new(RichText::new(ok.label())).min_size(BUTTON.into()),
         );
-        if ok.clicked() {
-            pass.press(Control::RenameTo);
+        if pressed.clicked() {
+            pass.press(ok);
         }
-        let cancel = ui
-            .add(Button::new(RichText::new(Control::CancelRename.label())).min_size(BUTTON.into()));
-        if cancel.clicked() {
-            pass.press(Control::CancelRename);
+        let canceled = ui.add(Button::new(RichText::new(cancel.label())).min_size(BUTTON.into()));
+        if canceled.clicked() {
+            pass.press(cancel);
         }
     });
 }

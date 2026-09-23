@@ -93,13 +93,13 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
     let Some(at) = pass.input.pointer else {
         return;
     };
-    let Some(sample) = current.image.sample(at[0], at[1], current.lift.as_deref()) else {
+    let Some(sample) = current.sample(at[0], at[1]) else {
         return;
     };
     let mapped = current.display.map(&sample, pass.input.headroom);
     let ink: egui::Color32 = pass.theme.text_primary.into();
 
-    let coordinate = coordinate(at, [current.image.width, current.image.height]);
+    let coordinate = coordinate(at, current.pixels());
     ui.add(Label::new(RichText::new(coordinate).monospace().color(ink)).truncate());
 
     // A bar too short for the swatch gets the words alone, the way a panel
