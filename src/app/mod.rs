@@ -301,6 +301,10 @@ pub struct App {
     /// laid out in when the interface is driven over the application.
     #[cfg(test)]
     headless: Option<[f32; 2]>,
+    /// The name of the monitor the window is on in a test, which has no
+    /// window: what the monitor thread's table is read by.
+    #[cfg(test)]
+    headless_monitor: Option<String>,
 }
 
 impl App {
@@ -417,6 +421,8 @@ impl App {
             reported_error: false,
             #[cfg(test)]
             headless: None,
+            #[cfg(test)]
+            headless_monitor: None,
         };
         if let Some(source) = source {
             let request = app.files.open_first(source);
@@ -674,10 +680,7 @@ impl App {
     /// asks a compositor to switch a monitor over. Where nothing says what
     /// the monitor is, what was asked for is all there is to go on.
     fn surface_hdr(&self) -> bool {
-        match self.monitor {
-            Some(Mode::Hdr) => true,
-            Some(Mode::Sdr) | None => self.hdr == HdrPreference::On,
-        }
+        surface_wanted(self.monitor, self.hdr)
     }
 
     /// Whether the picture is going out with room above SDR white, which is
@@ -693,20 +696,11 @@ impl App {
             .shown
             .as_ref()
             .is_some_and(|shown| shown.renderer.output().is_hdr);
-        if surface && self.monitor != Some(Mode::Sdr) && self.hdr != HdrPreference::Off {
-            Headroom::Above
-        } else {
-            Headroom::None
-        }
+        headroom_of(surface, self.monitor, self.hdr)
     }
 
     /// Whether the switch has anything to switch, and where it has not, which
-    /// of the two reasons: an HDR color space has to be offered for the
-    /// window, and the monitor has to be in HDR mode — or nothing able to say
-    /// what it is in. Where the compositor can say and has not yet, which is
-    /// the moment before the window has landed on a monitor, the answer is
-    /// [`Hdr::NotInHdrMode`]: most monitors are SDR, and a switch that lit for
-    /// a frame and then died would be the switch having been wrong.
+    /// of the two reasons — see [`hdr_state_of`] for the rule.
     ///
     /// One answer for three readers — whether the button is drawn dead
     /// ([`App::hdr_available`]), whether it takes a press
@@ -714,19 +708,26 @@ impl App {
     /// ([`ui::tooltip::disabled`]) — so a dead switch cannot come to give a
     /// reason it is not dead for.
     fn hdr_state(&self) -> Hdr {
-        if !self
+        let offered = self
             .shown
             .as_ref()
-            .is_some_and(|shown| shown.renderer.hdr_available())
-        {
-            return Hdr::Unsupported;
+            .is_some_and(|shown| shown.renderer.hdr_available());
+        let speaks = self.monitors.as_ref().is_some_and(Monitors::speaks_modes);
+        hdr_state_of(offered, speaks, self.monitor)
+    }
+
+    /// The name the compositor knows the window's monitor by — "DP-2",
+    /// say — which is what the monitor thread's table is keyed by. `None`
+    /// before the window has landed on one.
+    fn monitor_name(&self) -> Option<String> {
+        #[cfg(test)]
+        if let Some(name) = &self.headless_monitor {
+            return Some(name.clone());
         }
-        if self.monitors.as_ref().is_some_and(Monitors::speaks_modes)
-            && self.monitor != Some(Mode::Hdr)
-        {
-            return Hdr::NotInHdrMode;
-        }
-        Hdr::Available
+        self.shown
+            .as_ref()
+            .and_then(|shown| shown.window.current_monitor())
+            .and_then(|monitor| monitor.name())
     }
 
     /// [`App::hdr_state`] read as the yes or no the button is drawn from.
@@ -768,11 +769,7 @@ impl App {
         let Some(monitors) = &self.monitors else {
             return Effect::Nothing;
         };
-        let name = self
-            .shown
-            .as_ref()
-            .and_then(|shown| shown.window.current_monitor())
-            .and_then(|monitor| monitor.name());
+        let name = self.monitor_name();
         let mode = name.as_deref().and_then(|name| monitors.mode(name));
         let headroom = name.as_deref().and_then(|name| monitors.headroom(name));
         if mode == self.monitor && headroom == self.monitor_headroom {
@@ -1789,6 +1786,51 @@ impl App {
             Effect::Nothing => {}
         }
     }
+}
+
+/// Whether the surface should be the HDR one, from what the compositor
+/// says the monitor is in and what the switch asks for. The monitor
+/// decides where the compositor says: one in HDR mode gets the HDR surface,
+/// which costs the compositor nothing and gives the picture the room, and
+/// one in SDR mode gets the SDR surface — unless `--output hdr` asked for
+/// the other regardless, which is the one route left that asks a
+/// compositor to switch a monitor over. Where nothing says what the monitor
+/// is, what was asked for is all there is to go on.
+fn surface_wanted(monitor: Option<Mode>, preference: HdrPreference) -> bool {
+    match monitor {
+        Some(Mode::Hdr) => true,
+        Some(Mode::Sdr) | None => preference == HdrPreference::On,
+    }
+}
+
+/// Whether the picture is going out with room above SDR white. It takes
+/// three things: a surface with the room, a monitor not known to be in SDR
+/// mode — a compositor maps an HDR surface down for one that is, and the
+/// room is not there however the surface was made — and the switch not
+/// having turned it off.
+fn headroom_of(surface_hdr: bool, monitor: Option<Mode>, preference: HdrPreference) -> Headroom {
+    if surface_hdr && monitor != Some(Mode::Sdr) && preference != HdrPreference::Off {
+        Headroom::Above
+    } else {
+        Headroom::None
+    }
+}
+
+/// Whether the switch has anything to switch, and where it has not, which
+/// of the two reasons: an HDR color space has to be offered for the window,
+/// and the monitor has to be in HDR mode — or nothing able to say what it
+/// is in. Where the compositor can say and has not yet, which is the moment
+/// before the window has landed on a monitor, the answer is
+/// [`Hdr::NotInHdrMode`]: most monitors are SDR, and a switch that lit for
+/// a frame and then died would be the switch having been wrong.
+fn hdr_state_of(offered: bool, speaks_modes: bool, monitor: Option<Mode>) -> Hdr {
+    if !offered {
+        return Hdr::Unsupported;
+    }
+    if speaks_modes && monitor != Some(Mode::Hdr) {
+        return Hdr::NotInHdrMode;
+    }
+    Hdr::Available
 }
 
 /// How a file arriving stands to the picture on screen, which is what
@@ -4156,5 +4198,106 @@ mod tests {
 
         assert_eq!(app.clipboard_changed(false), Effect::Redraw);
         assert!(!app.panels.paste);
+    }
+
+    /// Which surface is wanted: the monitor's own where the compositor
+    /// says, and otherwise only what `--output hdr` asked for.
+    #[test]
+    fn the_surface_follows_the_monitor_and_then_the_switch() {
+        use HdrPreference::{Follow, Off, On};
+        for preference in [Follow, Off, On] {
+            assert!(
+                surface_wanted(Some(Mode::Hdr), preference),
+                "{preference:?}"
+            );
+            assert_eq!(
+                surface_wanted(Some(Mode::Sdr), preference),
+                preference == On
+            );
+            assert_eq!(surface_wanted(None, preference), preference == On);
+        }
+    }
+
+    /// Room above white takes all three: the surface with the room, a
+    /// monitor not known to be in SDR mode, and the switch not off.
+    #[test]
+    fn headroom_takes_the_surface_the_monitor_and_the_switch_together() {
+        use HdrPreference::{Follow, Off, On};
+        for monitor in [None, Some(Mode::Sdr), Some(Mode::Hdr)] {
+            for preference in [Follow, Off, On] {
+                assert_eq!(headroom_of(false, monitor, preference), Headroom::None);
+                let expected = if monitor == Some(Mode::Sdr) || preference == Off {
+                    Headroom::None
+                } else {
+                    Headroom::Above
+                };
+                assert_eq!(
+                    headroom_of(true, monitor, preference),
+                    expected,
+                    "{monitor:?} {preference:?}"
+                );
+            }
+        }
+    }
+
+    /// The switch is dead for one of two reasons, and the reason it gives
+    /// is the one that holds: no HDR color space offered outranks the
+    /// monitor's mode, and a compositor that can say a monitor's mode and
+    /// has not is a monitor not in HDR mode.
+    #[test]
+    fn the_switch_says_why_it_is_dead() {
+        for monitor in [None, Some(Mode::Sdr), Some(Mode::Hdr)] {
+            for speaks in [false, true] {
+                assert_eq!(hdr_state_of(false, speaks, monitor), Hdr::Unsupported);
+            }
+        }
+        assert_eq!(hdr_state_of(true, false, None), Hdr::Available);
+        assert_eq!(hdr_state_of(true, false, Some(Mode::Sdr)), Hdr::Available);
+        assert_eq!(hdr_state_of(true, true, None), Hdr::NotInHdrMode);
+        assert_eq!(hdr_state_of(true, true, Some(Mode::Sdr)), Hdr::NotInHdrMode);
+        assert_eq!(hdr_state_of(true, true, Some(Mode::Hdr)), Hdr::Available);
+    }
+
+    /// The monitor's mode and room are read off the thread's table for the
+    /// monitor the window is on, kept, and re-read only when they change;
+    /// a change is a frame owed. Without a window there is no surface to
+    /// switch, so the switch stays dead whatever the monitor says, and
+    /// syncing the output changes nothing.
+    #[test]
+    fn a_monitor_change_is_noticed_once_and_kept() {
+        let (mut app, _dir) = app_over("monitor", &[("a.png", 4, 3)]);
+        let monitors = Monitors::stub(true);
+        monitors.set("HDMI-A-1", Mode::Hdr, 4.0);
+        app.monitors = Some(monitors);
+        assert_eq!(app.sync_monitor(), Effect::Nothing, "not on a monitor yet");
+        assert_eq!(app.monitor, None);
+
+        app.headless_monitor = Some("HDMI-A-1".to_string());
+        assert_eq!(app.sync_monitor(), Effect::Redraw);
+        assert_eq!(app.monitor, Some(Mode::Hdr));
+        assert_eq!(app.monitor_headroom, Some(4.0));
+        assert_eq!(app.sync_monitor(), Effect::Nothing, "nothing moved");
+        assert!(app.surface_hdr(), "the HDR surface is wanted");
+        assert_eq!(app.hdr_state(), Hdr::Unsupported, "no surface to switch");
+        assert_eq!(app.headroom(), Headroom::None);
+        assert_eq!(app.sync_output(), Effect::Nothing);
+
+        app.monitors
+            .as_ref()
+            .expect("still there")
+            .set("HDMI-A-1", Mode::Sdr, 1.0);
+        assert_eq!(app.sync_monitor(), Effect::Redraw);
+        assert_eq!(app.monitor, Some(Mode::Sdr));
+        assert_eq!(app.monitor_headroom, Some(1.0));
+        assert!(!app.surface_hdr());
+
+        app.headless_monitor = Some("DP-2".to_string());
+        assert_eq!(
+            app.sync_monitor(),
+            Effect::Redraw,
+            "a monitor nothing has described"
+        );
+        assert_eq!(app.monitor, None);
+        assert_eq!(app.monitor_headroom, None);
     }
 }

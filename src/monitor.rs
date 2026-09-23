@@ -123,6 +123,27 @@ impl Monitors {
     }
 }
 
+#[cfg(test)]
+impl Monitors {
+    /// Monitors with nothing said about them yet, under a compositor that
+    /// does or does not speak modes, for the tests that drive the
+    /// application's reading of them.
+    pub fn stub(speaks_modes: bool) -> Self {
+        Self {
+            table: Arc::new(Mutex::new(Table::default())),
+            speaks_modes,
+        }
+    }
+
+    /// What the compositor would have said about the monitor called
+    /// `name`: its mode, and its room above white.
+    pub fn set(&self, name: &str, mode: Mode, headroom: f32) {
+        let mut table = self.table.lock().expect("the table is not poisoned");
+        table.modes.insert(name.to_string(), mode);
+        table.headrooms.insert(name.to_string(), headroom);
+    }
+}
+
 /// Starts listening. `None` off Wayland, or under a compositor that speaks
 /// neither color management nor `xdg_output`: nothing then says anything
 /// about a monitor that winit does not.
