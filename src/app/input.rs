@@ -459,6 +459,7 @@ fn action_of(tip: Tip) -> Option<Action> {
             | Control::Opener(_)
             | Control::Seek(_)
             | Control::Zoom
+            | Control::Loupe
             | Control::Dismiss
             | Control::Facts(_)
             | Control::Chooser
@@ -1446,6 +1447,12 @@ impl Naming for Namer {
                 vec![names(at)?],
                 Vec::from_iter(hint(ToggleInterfaceAndPanels)),
             ),
+            // The loupe toggle: what it does, and under it the button on
+            // the mouse that holds the loupe up without it, which no key
+            // table lists.
+            Tip::Control(Control::Loupe) => {
+                (vec![names(at)?], vec![ui::tooltip::LOUPE_HELD.to_string()])
+            }
             // The exposure's slider, and under it the keys that step what
             // it sets.
             Tip::Exposure => (
@@ -1570,6 +1577,13 @@ pub(super) struct Pointer {
     /// frame after, which is one frame late only when a panel has appeared or
     /// gone under a still pointer — and that frame is being painted anyway.
     pub(super) over_image: bool,
+    /// Whether the secondary button is down on the picture, which holds
+    /// the loupe up while it is. From the last pass, as `over_image` is,
+    /// since the toolkit takes the button — see `Command::Secondary`.
+    pub(super) secondary: bool,
+    /// Whether the primary button is dragging on the picture, from the last
+    /// pass as well — see `Command::Dragging`. The loupe is down while it is.
+    pub(super) dragging: bool,
     /// Where `Space` is: the one key that fits on its way up.
     pub(super) space: Space,
 }
@@ -2124,6 +2138,19 @@ impl App {
             ui::Command::OverGrip(grip) => {
                 return Effect::redraw_if(std::mem::replace(&mut self.marking.grip, grip) != grip);
             }
+            // The secondary button on the picture, and the pointer with it
+            // while it is down: the loupe comes up on the press, follows the
+            // hand, and goes on the release — unless its toggle keeps it.
+            ui::Command::Secondary(held) => {
+                let was = std::mem::replace(&mut self.pointer.secondary, held.is_some());
+                let moved = held.is_some_and(|at| self.pointer.cursor.replace(at) != Some(at));
+                return Effect::redraw_if(was != held.is_some() || moved);
+            }
+            ui::Command::Dragging(dragging) => {
+                return Effect::redraw_if(
+                    std::mem::replace(&mut self.pointer.dragging, dragging) != dragging,
+                );
+            }
             // A press owes a frame whatever it did — egui repaints the
             // button it was on for its own reasons, and the press may have
             // changed what is under it — over and above what the press
@@ -2461,6 +2488,10 @@ impl App {
             }
             Control::Grid => {
                 self.panels.show_grid = !self.panels.show_grid;
+                Effect::Redraw
+            }
+            Control::Loupe => {
+                self.panels.show_loupe = !self.panels.show_loupe;
                 Effect::Redraw
             }
             // The keys' own actions, and which of the two by the modifier
@@ -2803,6 +2834,11 @@ mod tests {
         );
         let file = named(Control::FileMenu).expect("the button names itself");
         assert!(!file.contains('('), "{file}");
+
+        // The loupe has no key: it names itself, with no key after it, and
+        // the mouse button that holds it up is the line under its name.
+        let loupe = named(Control::Loupe).expect("the button names itself");
+        assert!(!loupe.contains('('), "{loupe}");
     }
 
     /// Nothing in the chrome is left unnamed: a button with no tooltip is one

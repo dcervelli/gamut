@@ -115,6 +115,7 @@ fn panels() -> Panels {
         mark_clipped: false,
         show_minimap: true,
         show_grid: false,
+        show_loupe: false,
         paste: false,
         pixel_format: PixelFormat::default(),
     }
@@ -133,6 +134,8 @@ fn input(logical: [f32; 2], count: usize) -> FrameInput {
         pointer: None,
         cursor: None,
         minimap_on_screen: false,
+        loupe: None,
+        secondary: false,
         reading: None,
         index: 0,
         count,
@@ -260,7 +263,15 @@ fn asked(harness: &Harness<'static, State>) -> Vec<Command> {
         .state()
         .commands
         .iter()
-        .filter(|command| !matches!(command, Command::OverImage(_) | Command::OverGrip(_)))
+        .filter(|command| {
+            !matches!(
+                command,
+                Command::OverImage(_)
+                    | Command::OverGrip(_)
+                    | Command::Secondary(_)
+                    | Command::Dragging(_)
+            )
+        })
         .cloned()
         .collect()
 }
@@ -320,6 +331,7 @@ fn a_toggle_in_the_chrome_hands_back_its_press() {
         ("Information", Control::Info),
         ("Minimap", Control::Minimap),
         ("Grid", Control::Grid),
+        ("Loupe", Control::Loupe),
         ("Maximize", Control::Maximize),
         ("Region", Control::Region),
     ] {
@@ -333,6 +345,62 @@ fn a_toggle_in_the_chrome_hands_back_its_press() {
             "{label} kept the keyboard"
         );
     }
+}
+
+/// The secondary button on the picture is said on every pass, with the
+/// pointer's place while it is down — in the physical pixels the
+/// application's pointer is kept in — and as nothing once it is up. The
+/// view is not dragged by it.
+#[test]
+fn the_secondary_button_on_the_picture_is_handed_back_while_it_is_down() {
+    let mut harness = open(WINDOW, 1, panels());
+    harness.state_mut().input.scale = 2.0;
+    let secondary = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Secondary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let said = |harness: &Harness<'static, State>| {
+        harness
+            .state()
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                Command::Secondary(at) => Some(*at),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let (from, to) = (egui::pos2(400.0, 300.0), egui::pos2(420.0, 330.0));
+
+    harness.state_mut().commands.clear();
+    harness.event(egui::Event::PointerMoved(from));
+    harness.step();
+    assert_eq!(said(&harness), [None]);
+
+    harness.state_mut().commands.clear();
+    harness.event(secondary(from, true));
+    harness.step();
+    assert_eq!(said(&harness), [Some([800.0, 600.0])]);
+
+    harness.state_mut().commands.clear();
+    harness.event(egui::Event::PointerMoved(to));
+    harness.step();
+    assert_eq!(said(&harness), [Some([840.0, 660.0])]);
+    assert!(
+        !harness
+            .state()
+            .commands
+            .iter()
+            .any(|command| matches!(command, Command::Drag(_))),
+        "the secondary button does not pan"
+    );
+
+    harness.state_mut().commands.clear();
+    harness.event(secondary(to, false));
+    harness.step();
+    assert_eq!(said(&harness), [None]);
 }
 
 /// The transport bar's buttons hand back their presses, and none keeps

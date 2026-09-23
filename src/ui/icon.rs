@@ -375,6 +375,15 @@ pub(super) const GRID_3X3: &[Mark] = &[
     Mark::Line([15.0, 3.0], [15.0, 21.0]),
 ];
 
+/// Lucide's `zoom-in`: a magnifying glass with a plus in it, for the loupe,
+/// which is one.
+pub(super) const ZOOM_IN: &[Mark] = &[
+    Mark::circle([11.0, 11.0], 8.0),
+    Mark::Line([21.0, 21.0], [16.65, 16.65]),
+    Mark::Line([11.0, 8.0], [11.0, 14.0]),
+    Mark::Line([8.0, 11.0], [14.0, 11.0]),
+];
+
 /// Lucide's `maximize-2`: two arrows reaching into opposite corners, for the
 /// press that gives the picture the whole window.
 ///

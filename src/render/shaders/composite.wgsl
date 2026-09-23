@@ -16,11 +16,15 @@ struct Params {
     // everywhere, with `alternate` taking every other square inside a region.
     base: vec4<f32>,
     alternate: vec4<f32>,
-    // Where the checkerboard shows through: the image, and the minimap's
-    // thumbnail when it is on screen. (left, top, right, bottom) in surface
-    // pixels; an empty rectangle is one that is not being drawn this frame,
-    // which the half-open test below rejects without needing a count.
-    regions: array<vec4<f32>, 2>,
+    // Where the checkerboard shows through: the image, the minimap's
+    // thumbnail when it is on screen, and the loupe's glass while it is up.
+    // (left, top, right, bottom) in surface pixels; an empty rectangle is
+    // one that is not being drawn this frame, which the half-open test below
+    // rejects without needing a count.
+    regions: array<vec4<f32>, 3>,
+    // The circle the last of them shows inside of: (x, y, radius), the
+    // magnified image running far past the glass.
+    glass: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -144,9 +148,12 @@ fn backdrop(point: vec2<f32>) -> vec3<f32> {
     if params.checker <= 0.0 {
         return params.base.rgb;
     }
-    for (var index = 0u; index < 2u; index = index + 1u) {
+    for (var index = 0u; index < 3u; index = index + 1u) {
         let region = params.regions[index];
         if all(point >= region.xy) && all(point < region.zw) {
+            if index == 2u && distance(point, params.glass.xy) > params.glass.z {
+                continue;
+            }
             let cell = vec2<i32>(floor(point / params.checker));
             if ((cell.x + cell.y) & 1) == 1 {
                 return params.alternate.rgb;

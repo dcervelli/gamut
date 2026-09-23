@@ -412,6 +412,8 @@ impl Pass<'_> {
                     ui.add_space(BAR_PADDING);
                     self.grid_toggle(ui, spacing.as_deref());
                     ui.add_space(BUTTON_GAP);
+                    self.loupe_toggle(ui);
+                    ui.add_space(BUTTON_GAP);
                     self.pixel_dot(ui);
                     ui.add_space(pixel::GAP);
                     pixel::show(self, ui);
@@ -508,6 +510,25 @@ impl Pass<'_> {
         let response = self.tooltip(response, Tip::Control(Control::Grid), true);
         if response.clicked() {
             self.press(Control::Grid);
+        }
+    }
+
+    /// The loupe toggle, beside the grid's: a way of looking at the picture
+    /// like the grid, and so in the bar that carries what is being done to
+    /// it. Lit while the loupe is on, whether the toggle switched it on or
+    /// the secondary button is holding it up: the button says what is in
+    /// force, and the loupe is in force either way.
+    fn loupe_toggle(&mut self, ui: &mut Ui) {
+        let response = self.icon_button(
+            ui,
+            icon::ZOOM_IN,
+            Control::Loupe,
+            self.panels.show_loupe || self.input.secondary,
+            true,
+            Corners::All,
+        );
+        if response.clicked() {
+            self.press(Control::Loupe);
         }
     }
 

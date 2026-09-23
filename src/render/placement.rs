@@ -90,3 +90,34 @@ impl Placement {
         [self.x + point[0] * self.zoom, self.y + point[1] * self.zoom]
     }
 }
+
+/// The loupe: the image placed again, magnified, so that the point under
+/// the pointer lands at the center of a circle, and cut to that circle.
+///
+/// A placement like any other, so that everything that applies to the image
+/// — the window, the colormap, the tone map — applies to the glass for
+/// nothing; the circle is what the image layer cuts the quad to, in physical
+/// pixels. Where the circle goes is the interface's to say — see
+/// `ui::loupe` — since it is laid out against the content area and the
+/// pointer, both of which are the interface's.
+#[derive(Clone, Copy, Debug)]
+pub struct Glass {
+    pub placement: Placement,
+    pub center: [f32; 2],
+    pub radius: f32,
+}
+
+impl Glass {
+    /// The square the circle is drawn in: what the quad covers, since the
+    /// magnified image runs far past the glass and only the circle is drawn.
+    pub fn bounds(&self) -> Placement {
+        Placement {
+            x: self.center[0] - self.radius,
+            y: self.center[1] - self.radius,
+            width: 2.0 * self.radius,
+            height: 2.0 * self.radius,
+            zoom: self.placement.zoom,
+            upscale: self.placement.upscale,
+        }
+    }
+}

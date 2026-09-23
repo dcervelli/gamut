@@ -575,6 +575,17 @@ screen pixels apart at whatever zoom the view is at. The button at the head of
 the bottom bar says which spacing is in force, in the reading beside its mark,
 so a distance on screen can be counted off in the image's own pixels.
 
+The loupe, the button beside the grid's, rings the twenty pixels around the
+pointer and shows them four times larger in a circle beside it, for looking
+closely at one place without zooming the whole view in. The glass sits up
+and to the right of the pointer, and moves to the other side where that
+would take it off the picture's area. It shows the picture as the screen
+shows it — the window, exposure, curve and false color all reach it — and
+it is there whenever the pointer is over the image, and steps aside while
+the picture is being dragged. Holding the right mouse
+button on the picture puts it up as well, for as long as the button is held,
+whether or not the toggle is on.
+
 ## Selecting a region
 
 `x`, or the button under the open button in the left strip, asks for a
@@ -644,6 +655,8 @@ region behind: it belongs to the picture it was drawn on.
 | Press the minimap | Center the view on the point pressed, as near as the image's edges allow, the moment the button goes down |
 | Drag the minimap | Move the view with the pointer, keeping the marked-out part of the map under it |
 | Click the grid button in the bottom left | Show or hide the grid |
+| Click the loupe button beside it | Show or hide the loupe, a magnified circle beside the pointer |
+| Hold the right button on the picture | Show the loupe for as long as the button is held |
 | Click the copy button | Open the menu of copies: the file, or the image |
 | Click the region button | Select a region, or take the selected one off |
 | Click the paste button | Paste the image on the clipboard, as `Ctrl+V` does |

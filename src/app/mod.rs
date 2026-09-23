@@ -412,6 +412,7 @@ impl App {
                 show_info: info,
                 show_minimap: minimap,
                 show_grid: false,
+                show_loupe: false,
                 paste: false,
                 pixel_format: ui::PixelFormat::default(),
             },
@@ -1080,6 +1081,8 @@ impl App {
             pointer: self.pointer_pixel(),
             cursor: self.logical_cursor(),
             minimap_on_screen: self.minimap_on_screen(),
+            loupe: self.loupe(),
+            secondary: self.pointer.secondary,
             reading: self.reading(),
             index: self.files.index(),
             count: self.files.len(),
@@ -1214,6 +1217,29 @@ impl App {
             && self
                 .shown_view()
                 .can_pan(self.image_size(), self.viewport())
+    }
+
+    /// The loupe, while it is up: its toggle is on, or the secondary button
+    /// is held on the picture, and the pointer is on a pixel of the picture
+    /// — the same reading the bar's readout is made from, so the loupe is
+    /// up exactly when there is a pixel under the pointer to magnify. Down
+    /// for a drag on the picture: the hand is on the view or the region,
+    /// and the pointer the loupe follows stands still meanwhile, so it would
+    /// hang where the drag began, magnifying whatever slid under it. Where
+    /// its circles go is the interface's to say, against the content area
+    /// and the pointer in the logical pixels it lays out in.
+    fn loupe(&self) -> Option<ui::loupe::Loupe> {
+        if !(self.panels.show_loupe || self.pointer.secondary) || self.pointer.dragging {
+            return None;
+        }
+        self.pointer_pixel()?;
+        let cursor = self.logical_cursor()?;
+        let content = ui::chrome::content_area(
+            self.logical_size(),
+            self.panels.show_ui,
+            self.has_transport(),
+        );
+        Some(ui::loupe::place(cursor, content))
     }
 
     /// Where the minimap's thumbnail goes, in physical pixels: the whole
@@ -1761,6 +1787,11 @@ impl App {
         let viewport = self.viewport();
         let placement = view.placement(self.image_size(), viewport);
         let thumbnail = self.minimap_placement(logical, scale);
+        // Through the same placement the frame is drawn with: the glass
+        // magnifies what the eye rings on this very frame.
+        let loupe = self
+            .loupe()
+            .map(|loupe| ui::loupe::glass(loupe, placement, scale));
         let headroom = self.headroom();
         let input = self.frame_input(logical, scale);
         let namer = self.namer();
@@ -1792,6 +1823,7 @@ impl App {
         let scene = Scene {
             placement,
             thumbnail,
+            loupe,
             display,
             ui: &painted,
             scale,
@@ -2179,8 +2211,11 @@ impl ApplicationHandler<UserEvent> for App {
             // and come back from the frame as commands.
             WindowEvent::CursorMoved { position, .. } => {
                 let was_over = self.pointer_pixel();
+                // The loupe follows the pointer itself, not the pixel under
+                // it: a move within one pixel of the picture still moves it.
+                let loupe_was = self.loupe();
                 self.pointer.cursor = Some([position.x as f32, position.y as f32]);
-                Effect::redraw_if(self.pointer_pixel() != was_over)
+                Effect::redraw_if(self.pointer_pixel() != was_over || self.loupe() != loupe_was)
             }
             WindowEvent::CursorLeft { .. } => {
                 let was_over = self.pointer_pixel().is_some();
@@ -4374,6 +4409,60 @@ mod tests {
         assert!(harness.state().panels.show_grid);
         click(&mut harness, &ui::Control::Grid.label());
         assert!(!harness.state().panels.show_grid);
+    }
+
+    /// The loupe is up while its toggle is on or the secondary button is
+    /// held on the picture, and only with a pixel under the pointer: what
+    /// the interface draws its rings from and the image layer its glass,
+    /// from the one pointer the readout reads. The button carries the
+    /// pointer with it, and lets go of the loupe unless the toggle keeps it.
+    #[test]
+    fn the_loupe_is_up_for_the_toggle_or_the_held_button_over_a_pixel() {
+        use crate::ui::{Command, Naming};
+
+        let (mut app, _dir) = app_over("loupe", &[("a.png", 64, 48)]);
+        app.headless = Some(WINDOW);
+        let middle = [WINDOW[0] / 2.0, WINDOW[1] / 2.0];
+        app.pointer.cursor = Some(middle);
+        app.pointer.over_image = true;
+        assert!(app.pointer_pixel().is_some());
+        assert_eq!(app.loupe(), None);
+
+        // The toggle: up over a pixel, and nowhere else.
+        assert_eq!(app.press(ui::Control::Loupe), Effect::Redraw);
+        let loupe = app.loupe().expect("the loupe is up");
+        assert_eq!(loupe.eye, middle);
+        assert_ne!(loupe.glass, middle);
+        app.pointer.over_image = false;
+        assert_eq!(app.loupe(), None);
+        app.pointer.over_image = true;
+        // Down for a drag, and back when the drag lets go.
+        assert_eq!(app.act(Command::Dragging(true)), Effect::Redraw);
+        assert_eq!(app.loupe(), None);
+        assert_eq!(app.act(Command::Dragging(true)), Effect::Nothing);
+        assert_eq!(app.act(Command::Dragging(false)), Effect::Redraw);
+        assert!(app.loupe().is_some());
+        assert_eq!(app.press(ui::Control::Loupe), Effect::Redraw);
+        assert_eq!(app.loupe(), None);
+        // Its tooltip says the button is the other way to it.
+        assert_eq!(
+            app.namer()
+                .tooltip(ui::Tip::Control(ui::Control::Loupe))
+                .map(|tooltip| tooltip.hints),
+            Some(vec![ui::tooltip::LOUPE_HELD.to_string()])
+        );
+
+        // The button: the loupe comes up on the press, follows the pointer
+        // the pass hands over, and goes on the release.
+        assert_eq!(app.act(Command::Secondary(Some(middle))), Effect::Redraw);
+        assert_eq!(app.loupe().map(|loupe| loupe.eye), Some(middle));
+        assert_eq!(app.act(Command::Secondary(Some(middle))), Effect::Nothing);
+        let moved = [middle[0] + 5.0, middle[1] + 3.0];
+        assert_eq!(app.act(Command::Secondary(Some(moved))), Effect::Redraw);
+        assert_eq!(app.loupe().map(|loupe| loupe.eye), Some(moved));
+        assert_eq!(app.act(Command::Secondary(None)), Effect::Redraw);
+        assert_eq!(app.loupe(), None);
+        assert_eq!(app.act(Command::Secondary(None)), Effect::Nothing);
     }
 
     /// What arrives is named by how it stands to what is up: read again at

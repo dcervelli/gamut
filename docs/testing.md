@@ -59,8 +59,10 @@ nearest at a whole-number zoom, that Catmull-Rom passes texel centers through
 untouched, that a transparent texel does not bleed its color into its
 neighbor, that the minimap's thumbnail lands beside the view as a second
 draw of the same texture — building the coarse chain the view itself had no
-use for — and that a frame written into the texture the last one occupies
-is what the next draw shows, through a chain built again from it. Where no
+use for — that the loupe's glass is the picture magnified about the point
+under the eye, cut to its circle, and replaces rather than blends with the
+view under it, and that a frame written into the texture the last one
+occupies is what the next draw shows, through a chain built again from it. Where no
 adapter can be had they report success rather than failing for a reason that
 has nothing to do with the code; on a machine that has one, setting
 `GAMUT_REQUIRE_GPU` makes a run that could not open it fail instead, which is

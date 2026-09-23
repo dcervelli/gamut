@@ -8,12 +8,13 @@ use super::Scene;
 use super::color::Color;
 use super::gpu::{self, Fullscreen};
 use super::output::Output;
-use super::placement::Placement;
+use super::placement::{Glass, Placement};
 use super::shader_codes;
 
-/// The most regions the checkerboard can be cut into: the image, and the
-/// minimap's thumbnail.
-const REGIONS: usize = 2;
+/// The most regions the checkerboard can be cut into: the image, the
+/// minimap's thumbnail, and the loupe's glass — the last of them cut to its
+/// circle as well.
+const REGIONS: usize = 3;
 
 /// Layout must match `struct Params` in shaders/composite.wgsl.
 #[repr(C)]
@@ -26,6 +27,8 @@ struct Params {
     base: [f32; 4],
     alternate: [f32; 4],
     regions: [[f32; 4]; REGIONS],
+    /// The circle the last region shows inside of, `(x, y, radius)`.
+    glass: [f32; 4],
 }
 
 /// What is behind the image: the interface's own color everywhere, turning
@@ -104,18 +107,20 @@ impl Composite {
     }
 
     /// `regions` is where the checkerboard shows: the image quads this frame
-    /// draws, and nothing at all on a frame with no image on screen. `gray`
-    /// is whether the image on screen has one channel, which is what decides
-    /// whether the false color is on it. Of the scene, this reads the
-    /// display state, the backdrop and the headroom; of the output, only how
-    /// it is encoded.
+    /// draws, and nothing at all on a frame with no image on screen; `glass`
+    /// is the loupe's, where it shows inside the circle alone, since the
+    /// magnified image runs far past it. `gray` is whether the image on
+    /// screen has one channel, which is what decides whether the false color
+    /// is on it. Of the scene, this reads the display state, the backdrop
+    /// and the headroom; of the output, only how it is encoded.
     pub fn prepare(
         &self,
         queue: &wgpu::Queue,
         scene: &Scene<'_>,
         gray: bool,
         output: &Output,
-        regions: [Option<Placement>; REGIONS],
+        regions: [Option<Placement>; REGIONS - 1],
+        glass: Option<Glass>,
     ) {
         let Scene {
             display,
@@ -141,6 +146,18 @@ impl Composite {
                 region.y + region.height,
             ];
         }
+        // The glass is the last region and only that one, since it is the
+        // one the shader cuts to a circle: in an earlier slot the magnified
+        // image's rectangle, which runs far past the glass, would checker
+        // the whole window.
+        if let Some(glass) = glass {
+            bounds[REGIONS - 1] = [
+                glass.placement.x,
+                glass.placement.y,
+                glass.placement.x + glass.placement.width,
+                glass.placement.y + glass.placement.height,
+            ];
+        }
 
         queue.write_buffer(
             &self.params,
@@ -153,6 +170,9 @@ impl Composite {
                 base: backdrop.base.to_linear(),
                 alternate: backdrop.alternate.to_linear(),
                 regions: bounds,
+                glass: glass.map_or([0.0; 4], |glass| {
+                    [glass.center[0], glass.center[1], glass.radius, 0.0]
+                }),
             }),
         );
     }

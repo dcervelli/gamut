@@ -11,7 +11,7 @@ use anyhow::{Result, anyhow};
 use bytemuck::{Pod, Zeroable};
 
 use super::gpu::{self, Fullscreen};
-use super::placement::Placement;
+use super::placement::{Glass, Placement};
 use super::reduce::{self, Level, Reducer};
 use super::shader_codes;
 use super::upload::{self, Capabilities};
@@ -54,6 +54,13 @@ struct Params {
     map_size: [f32; 2],
     base_offset: [f32; 4],
     alternate_offset: [f32; 4],
+    /// The circle the quad is cut to, `(x, y, radius)` in target pixels,
+    /// and a radius of zero for a quad that is not cut. See `Glass`.
+    clip: [f32; 4],
+    /// Where the image itself lands, `(x, y, width, height)` in target
+    /// pixels, for the cut quad: its own corners are the circle's square, so
+    /// the shader reads the image's place off this instead.
+    picture: [f32; 4],
 }
 
 /// A picture's gain map on the device: the map as uploaded, and the table
@@ -143,15 +150,17 @@ struct Slot {
     group: wgpu::BindGroup,
 }
 
-/// What one frame draws: the view, and the minimap's thumbnail when it is on
-/// screen. Passed together because they share a pass, a texture and a coarse
-/// chain, and because whether the chain is needed at all is a question about
-/// the pair of them. With them, the two things about the frame that the
-/// shader's marks on clipped pixels depend on.
+/// What one frame draws: the view, the minimap's thumbnail when it is on
+/// screen, and the loupe's glass while it is up. Passed together because
+/// they share a pass, a texture and a coarse chain, and because whether the
+/// chain is needed at all is a question about all of them. With them, the
+/// two things about the frame that the shader's marks on clipped pixels
+/// depend on.
 #[derive(Clone, Copy)]
 pub struct Draw {
     pub view: Placement,
     pub thumbnail: Option<Placement>,
+    pub loupe: Option<Glass>,
     /// Whether the pixels the window has taken to black or to white are
     /// painted in the warning colors — while the key for it is held.
     pub mark_clipped: bool,
@@ -172,6 +181,7 @@ impl Draw {
         Self {
             view,
             thumbnail,
+            loupe: None,
             mark_clipped: false,
             headroom: Headroom::None,
             lift: 0.0,
@@ -182,6 +192,11 @@ impl Draw {
 
 pub struct ImageLayer {
     pipeline: wgpu::RenderPipeline,
+    /// The same shader with no blending: what the loupe's glass is drawn
+    /// with, so that it replaces the view under it — the picture's edge,
+    /// magnified, has the backdrop past it rather than the view showing
+    /// through — where source-over could only lay itself on top.
+    replacing: wgpu::RenderPipeline,
     texture_layout: wgpu::BindGroupLayout,
     lift_layout: wgpu::BindGroupLayout,
     /// What a picture with no gain map binds in the map's place: a texel of
@@ -193,6 +208,7 @@ pub struct ImageLayer {
     ramps: wgpu::BindGroup,
     main: Slot,
     thumbnail: Slot,
+    loupe: Slot,
     reducer: Reducer,
     image: Option<GpuImage>,
     /// Which of the current image's bind groups the next draw reads, decided
@@ -201,6 +217,8 @@ pub struct ImageLayer {
     /// The same for the thumbnail, and `None` on a frame with no minimap on
     /// screen, which is what leaves its quad undrawn.
     thumbnail_level: Option<usize>,
+    /// And for the loupe's glass, `None` while the loupe is down.
+    loupe_level: Option<usize>,
 }
 
 impl GpuImage {
@@ -253,9 +271,21 @@ impl ImageLayer {
                 blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
             },
         );
+        let replacing = gpu::fullscreen_pipeline(
+            device,
+            Fullscreen {
+                label: "image layer, replacing",
+                shader: &shader,
+                layout: &pipeline_layout,
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                format: target_format,
+                blend: None,
+            },
+        );
 
         Self {
             pipeline,
+            replacing,
             reducer: Reducer::new(device, &lift_layout),
             texture_layout,
             lift_layout,
@@ -263,9 +293,11 @@ impl ImageLayer {
             ramps,
             main: Slot::new(device, &params_layout, "image params"),
             thumbnail: Slot::new(device, &params_layout, "thumbnail params"),
+            loupe: Slot::new(device, &params_layout, "loupe params"),
             image: None,
             level: 0,
             thumbnail_level: None,
+            loupe_level: None,
         }
     }
 
@@ -301,6 +333,7 @@ impl ImageLayer {
         self.image = Some(image);
         self.level = 0;
         self.thumbnail_level = None;
+        self.loupe_level = None;
     }
 
     /// Takes the image off, and its coarse chain with it: nothing is drawn
@@ -309,6 +342,7 @@ impl ImageLayer {
         self.image = None;
         self.level = 0;
         self.thumbnail_level = None;
+        self.loupe_level = None;
     }
 
     /// Writes `image`'s pixels into the texture already on screen, for the
@@ -325,7 +359,9 @@ impl ImageLayer {
     /// `draw.thumbnail`, when there is one, is the minimap's copy of the same
     /// image: a second quad, drawn from the same texture in the same pass, so
     /// that it is tone mapped and windowed exactly as the image it stands for
-    /// — and marked exactly as it is, where the marks are on.
+    /// — and marked exactly as it is, where the marks are on. `draw.loupe`,
+    /// while the loupe is up, is a third: the image magnified about the
+    /// point under the pointer, and cut to the glass.
     pub fn prepare(
         &mut self,
         device: &wgpu::Device,
@@ -338,6 +374,7 @@ impl ImageLayer {
         let Draw {
             view,
             thumbnail,
+            loupe,
             mark_clipped,
             headroom,
             lift: weight,
@@ -366,8 +403,14 @@ impl ImageLayer {
 
         let factor = shrink(view);
         // The thumbnail is shrunk far harder than the view ever is, so it is
-        // what decides whether the chain is needed at all.
-        let coarsest = thumbnail.map_or(factor, |thumbnail| factor.max(shrink(thumbnail)));
+        // what decides whether the chain is needed at all; the loupe, being
+        // the view magnified, never asks for more than the view does.
+        let coarsest = thumbnail
+            .into_iter()
+            .chain(loupe.map(|glass| glass.placement))
+            .fold(factor, |coarsest, placement| {
+                coarsest.max(shrink(placement))
+            });
         if coarsest > reduce::STEP as f32 && !image.chain_built {
             image.levels = self.reducer.build(
                 device,
@@ -391,21 +434,30 @@ impl ImageLayer {
 
         let lifted = Lifted::of(image.lift.as_ref(), &self.blank_lift);
         self.level = reduce::level_for(factor, image.levels.len());
-        self.main.write(
-            queue,
-            params_for(
-                image, view, target, display, window, self.level, marks, lifted, turn,
-            ),
-        );
+        let quad = Quad {
+            target,
+            display,
+            window,
+            marks,
+            lifted,
+            turn,
+        };
+        self.main
+            .write(queue, params_for(image, view, None, self.level, quad));
 
         self.thumbnail_level =
             thumbnail.map(|thumbnail| reduce::level_for(shrink(thumbnail), image.levels.len()));
         if let (Some(thumbnail), Some(level)) = (thumbnail, self.thumbnail_level) {
-            self.thumbnail.write(
+            self.thumbnail
+                .write(queue, params_for(image, thumbnail, None, level, quad));
+        }
+
+        self.loupe_level =
+            loupe.map(|glass| reduce::level_for(shrink(glass.placement), image.levels.len()));
+        if let (Some(glass), Some(level)) = (loupe, self.loupe_level) {
+            self.loupe.write(
                 queue,
-                params_for(
-                    image, thumbnail, target, display, window, level, marks, lifted, turn,
-                ),
+                params_for(image, glass.placement, Some(glass), level, quad),
             );
         }
     }
@@ -414,21 +466,26 @@ impl ImageLayer {
         let Some(image) = &self.image else {
             return;
         };
-        pass.set_pipeline(&self.pipeline);
         // The thumbnail goes down second: it sits over the content area, and
-        // a view zoomed in past the panels' edges is drawn under it.
+        // a view zoomed in past the panels' edges is drawn under it. The
+        // loupe's glass goes down last and over both, replacing rather than
+        // blending: what is inside the circle is the glass and nothing else.
         let draws = [
-            Some((&self.main, self.level)),
-            self.thumbnail_level.map(|level| (&self.thumbnail, level)),
+            Some((&self.main, self.level, &self.pipeline)),
+            self.thumbnail_level
+                .map(|level| (&self.thumbnail, level, &self.pipeline)),
+            self.loupe_level
+                .map(|level| (&self.loupe, level, &self.replacing)),
         ];
         let lift = image
             .lift
             .as_ref()
             .map_or(&self.blank_lift, |lift| &lift.group);
-        for (slot, level) in draws.into_iter().flatten() {
+        for (slot, level, pipeline) in draws.into_iter().flatten() {
             let Some(binding) = image.bindings.get(level) else {
                 continue;
             };
+            pass.set_pipeline(pipeline);
             pass.set_bind_group(0, &slot.group, &[]);
             pass.set_bind_group(1, binding, &[]);
             pass.set_bind_group(2, lift, &[]);
@@ -825,20 +882,39 @@ fn shrink(placement: Placement) -> f32 {
     }
 }
 
+/// What every quad of one frame shares: the target they are drawn on, and
+/// the display, marks, lift and turn they are all drawn under.
+#[derive(Clone, Copy)]
+struct Quad<'a> {
+    target: [f32; 2],
+    display: &'a Display,
+    window: (f32, f32),
+    marks: u32,
+    lifted: Lifted<'a>,
+    turn: Turn,
+}
+
 /// The constants for one quad: where it goes on the target, and how the
-/// shader is to read and resample the level it draws from.
-#[allow(clippy::too_many_arguments)]
+/// shader is to read and resample the level it draws from. `placement` is
+/// where the image lands; `glass`, for the loupe's quad, is the circle the
+/// quad is cut to, and the quad itself is then the circle's square rather
+/// than the image, which runs far past it.
 fn params_for(
     image: &GpuImage,
     placement: Placement,
-    target: [f32; 2],
-    display: &Display,
-    window: (f32, f32),
+    glass: Option<Glass>,
     level: usize,
-    marks: u32,
-    lifted: Lifted<'_>,
-    turn: Turn,
+    quad: Quad<'_>,
 ) -> Params {
+    let Quad {
+        target,
+        display,
+        window,
+        marks,
+        lifted,
+        turn,
+    } = quad;
+    let corners = glass.map_or(placement, |glass| glass.bounds());
     let divisor = (reduce::STEP as f32).powi(level as i32);
     let extent = [
         image.size[0] as f32 / divisor,
@@ -853,12 +929,12 @@ fn params_for(
 
     Params {
         offset: [
-            placement.x / target[0] * 2.0 - 1.0,
-            1.0 - placement.y / target[1] * 2.0,
+            corners.x / target[0] * 2.0 - 1.0,
+            1.0 - corners.y / target[1] * 2.0,
         ],
         scale: [
-            placement.width / target[0] * 2.0,
-            placement.height / target[1] * 2.0,
+            corners.width / target[0] * 2.0,
+            corners.height / target[1] * 2.0,
         ],
         window: [window.0, window.1],
         texels_per_pixel,
@@ -881,6 +957,10 @@ fn params_for(
         map_size: lifted.map_size,
         base_offset: lifted.base_offset,
         alternate_offset: lifted.alternate_offset,
+        clip: glass.map_or([0.0; 4], |glass| {
+            [glass.center[0], glass.center[1], glass.radius, 0.0]
+        }),
+        picture: [placement.x, placement.y, placement.width, placement.height],
     }
 }
 

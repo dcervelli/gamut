@@ -58,6 +58,11 @@ pub enum Control {
     Histogram,
     Info,
     Grid,
+    /// The toggle beside the grid's in the bottom bar: the loupe, a circle
+    /// around the pointer shown magnified beside it. Holding the secondary
+    /// button on the picture puts it up as well, while the button is held
+    /// — see [`Command::Secondary`].
+    Loupe,
     Zoom,
     /// The button at the end of the top bar that gives the picture the whole
     /// window. Not a toggle: what it hides includes the button itself, so
@@ -173,6 +178,7 @@ impl Control {
             Control::Histogram => "Histogram".to_string(),
             Control::Info => "Information".to_string(),
             Control::Grid => "Grid".to_string(),
+            Control::Loupe => "Loupe".to_string(),
             Control::Zoom => "Zoom".to_string(),
             Control::Maximize => "Maximize".to_string(),
             Control::Luma => "Luminance plane".to_string(),
@@ -258,6 +264,18 @@ pub enum Command {
     /// Whether the pointer was over the picture with nothing of the
     /// interface between, which is what the bar's pixel readout asks.
     OverImage(bool),
+    /// Whether the secondary button is down on the picture — which puts the
+    /// loupe up for as long as it is — and where the pointer is while it
+    /// is, in physical pixels. Said on every pass, like [`Command::OverImage`].
+    /// The pointer's place goes with it because the application's own
+    /// pointer stops moving while the toolkit holds a button down on the
+    /// picture, as it does for a drag — see [`Command::Pull`].
+    Secondary(Option<[f32; 2]>),
+    /// Whether the primary button is dragging on the picture — the view,
+    /// the region or the zoom box, whichever the drag is — said on every
+    /// pass. The loupe goes down for the drag: the hand is on the picture,
+    /// and the pointer the loupe follows stands still while it is.
+    Dragging(bool),
     /// A drag on the picture began that is the region's rather than the
     /// view's: a new region while one was being asked for, or a hold on the
     /// one on screen. `at` is where the button went down, in image pixels —
@@ -398,6 +416,7 @@ impl Control {
         Control::Histogram,
         Control::Info,
         Control::Grid,
+        Control::Loupe,
         Control::Zoom,
         Control::Maximize,
         Control::Luma,
@@ -454,6 +473,7 @@ impl Control {
             | Control::Histogram
             | Control::Info
             | Control::Grid
+            | Control::Loupe
             | Control::Zoom
             | Control::Maximize
             | Control::Luma

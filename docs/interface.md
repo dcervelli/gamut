@@ -295,12 +295,16 @@ is a measurement of the picture, which is what the top bar is for, and the
 button that is not one sits outside it in the corner of the window, where the
 world already looks for a control of that kind. The head of the bottom bar
 holds the other readout that is also a button — the grid toggle, which says
-whether the grid is drawn and how far apart its lines are — and after it the
-button at the head of the pixel readout. A grid laid over the picture is
-something being done to it rather than a fact about the file, so it belongs in
-the bar that carries what is being done; it is in a bar at all rather than in a
-side strip because it has a spacing to read out, and the strips are a button
-wide, which is too narrow for words. Its mark leads the bar and its reading
+whether the grid is drawn and how far apart its lines are — then the loupe
+toggle, and after it the button at the head of the pixel readout. A grid laid
+over the picture is something being done to it rather than a fact about the
+file, so it belongs in the bar that carries what is being done; it is in a bar
+at all rather than in a side strip because it has a spacing to read out, and
+the strips are a button wide, which is too narrow for words. The loupe is the
+same kind of thing as the grid — a way of looking at the picture — and sits
+beside it for that reason, lit while the loupe is on by either means: the
+button says what is in force, and the secondary button holding the loupe up
+puts it in force as surely as the toggle does. Its mark leads the bar and its reading
 follows the mark, the two being one reading rather than a label and a button
 sharing a square. The bars are inset at their ends by the same margin that centers a toggle
 across a side panel — derived from it, not merely equal to it — so the last
@@ -561,6 +565,78 @@ focus goes is released somewhere else. `Esc` part way through the drag drops
 the box before it takes anything else off: egui aborts the drag on the same
 key, and the `Release` it sends on the next pass has to find nothing to zoom
 to.
+
+## The loupe
+
+The loupe is two circles: the eye, `ui::loupe::RADIUS` logical pixels
+around the pointer, and the glass, `MAGNIFICATION` times that radius, showing
+what is inside the eye that much larger. `Control::Loupe`, the toggle beside
+the grid's in the bottom bar, keeps it up; the secondary button held on the
+picture puts it up for as long as it is held, whatever the toggle says. Both
+are read into `Panels::show_loupe` and `Pointer::secondary`, and
+`App::loupe` is the one answer to whether it is up: one of those, and a
+pixel under the pointer — the same `pointer_pixel` reading the bar's readout
+is made from, so the loupe is up exactly when there is a pixel to magnify,
+and goes when the pointer crosses onto a panel or off the picture's edge.
+It goes for a drag on the picture as well — a pan, the region's or the zoom
+box's — which `Pass::picture` reports on every pass as `Command::Dragging`
+into `Pointer::dragging`: the pointer the loupe follows stands still while
+the toolkit holds the drag, so the loupe would hang where the drag began,
+magnifying whatever slid under it.
+
+Where the circles go is `ui::loupe::place`, a pure function of the pointer
+and the content area, worked out by the application once per frame and
+handed to the interface in `FrameInput::loupe` and to the renderer as a
+`render::Glass`. The glass goes up and to the right of the eye, where the
+hand is least likely to cover it, and the other way on whichever axis that
+would run it off the content area; it is then held inside the area, which in
+a window too small to hold it beside the eye puts it over the eye rather
+than half under a panel. The interface draws only the two rings, on the
+picture's own painter as the region is drawn, so the picture under the loupe
+keeps the pointer; and the grid, which is the view's spacing rather than the
+glass's, is broken around the glass's circle — each hairline cut over the
+chord it makes of the circle, by `grid::chord` — as it is broken around the
+minimap's thumbnail.
+
+The glass itself is the image layer's: a third quad in its pass, after the
+view and the minimap's thumbnail, drawn from the same texture through the
+same shader as the view, so that the window, the false color, the tone map,
+the lift and the turn all reach it for nothing — the same reasoning as the
+[minimap](#minimap)'s thumbnail. `ui::loupe::glass` places it: the view's
+placement magnified, with the image point under the eye landing at the
+glass's center, and the circle in physical pixels. Two things are different
+about this quad. Its corners are the circle's square rather than the
+magnified image, which runs far past the glass, and the shader computes each
+fragment's place in the picture from the image's own placement
+(`Params::picture`) and cuts the square to the circle (`Params::clip`),
+feathered over the one pixel the edge crosses. And it is drawn with no
+blending, through `ImageLayer::replacing`, so that what is inside the circle
+is the glass and nothing else: past the picture's edge the glass writes
+nothing, which the compositor shows as the backdrop, where source-over
+blending would have left the view showing through under it. The compositor's
+checkerboard follows the same cut — the glass is its third region, and the
+one it tests against a circle as well as a rectangle — so transparency reads
+the same inside the loupe as outside it.
+
+The secondary button cannot be read from winit. egui-winit consumes a button
+event wherever egui wants the pointer, which over the picture's own panel is
+everywhere, and consumes the pointer's moves while egui holds a button down.
+So `Pass::picture` reads the button off the picture's response —
+`is_pointer_button_down_on` with `secondary_down`, from the press on rather
+than from the toolkit's later decision that the press became a drag — and
+says so on every pass as `Command::Secondary`, carrying the pointer's place
+in physical pixels while the button is down, for the same reason
+`Command::Pull` carries the hand's: the application's own pointer stands
+still meanwhile. `App::act` takes the button and the pointer from it, one
+frame late as `Command::OverImage` is, which is a frame the press was being
+painted for anyway. A drag with the secondary button is not a pan:
+`Pass::picture` pans on the primary button alone.
+
+The loupe follows the pointer itself, not the pixel under it. A move over
+the picture ordinarily owes a frame only when the pixel under the pointer
+changes; with the loupe up, `CursorMoved` asks `App::loupe` before and after
+and owes one whenever the answer moved, so the glass tracks the hand at
+every zoom rather than stepping from pixel to pixel at a high one.
 
 ## Layers and the pointer
 

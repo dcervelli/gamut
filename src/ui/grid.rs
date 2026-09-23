@@ -61,6 +61,20 @@ fn next_step(step: f32) -> f32 {
     }
 }
 
+/// What the grid is not drawn over: the two things on the picture that are
+/// the image layer's, drawn underneath the whole interface, so that unlike
+/// the panels they cannot cover a grid line laid across them.
+///
+/// `minimap` is the thumbnail's rectangle when the minimap is on screen. A
+/// grid belongs to the image being looked at, not to the map of where in it
+/// that is. `glass` is the loupe's circle, as center and radius, while the
+/// loupe is up: the grid's spacing is the view's, which is not the glass's.
+#[derive(Clone, Copy, Default)]
+pub(super) struct Clear {
+    pub minimap: Option<Rect>,
+    pub glass: Option<([f32; 2], f32)>,
+}
+
 /// Draws the grid over the image, at `step` image pixels between lines.
 ///
 /// Only where the image actually is, and only where the interface has left it
@@ -68,20 +82,17 @@ fn next_step(step: f32) -> f32 {
 /// also be zoomed until it runs off every edge, and the grid marks up an
 /// image rather than a window.
 ///
-/// `minimap` is the thumbnail's rectangle when the minimap is on screen. It
-/// is left clear: the thumbnail is drawn by the image layer, underneath the
-/// whole interface, so unlike the panels it cannot cover a grid line laid
-/// across it — and a grid belongs to the image being looked at, not to the
-/// map of where in it that is.
+/// `clear` is what is left clear of it — see [`Clear`].
 pub(super) fn paint(
     painter: &egui::Painter,
     placement: Placement,
     scale: f32,
     content: Rect,
-    minimap: Option<Rect>,
+    clear: Clear,
     step: f32,
     theme: &Theme,
 ) {
+    let Clear { minimap, glass } = clear;
     if !placement.zoom.is_finite() || scale <= 0.0 {
         return;
     }
@@ -109,25 +120,49 @@ pub(super) fn paint(
     let ink: egui::Color32 = theme.bar_background.into();
 
     for x in lines(image.x, spacing, image.right(), area.x, area.right()) {
-        fill_around(
-            painter,
-            Rect::new(snap(x), area.y, width, area.height),
+        let line = Rect::new(snap(x), area.y, width, area.height);
+        let holes = [
             minimap,
-            ink,
-        );
+            glass.and_then(|(center, radius)| chord(line, center, radius)),
+        ];
+        fill_around(painter, line, &holes, ink);
     }
     for y in lines(image.y, spacing, image.bottom(), area.y, area.bottom()) {
-        fill_around(
-            painter,
-            Rect::new(area.x, snap(y), area.width, width),
+        let line = Rect::new(area.x, snap(y), area.width, width);
+        let holes = [
             minimap,
-            ink,
-        );
+            glass.and_then(|(center, radius)| chord(line, center, radius)),
+        ];
+        fill_around(painter, line, &holes, ink);
     }
 }
 
-/// Fills `rect`, less whatever `hole` covers of it.
-fn fill_around(painter: &egui::Painter, rect: Rect, hole: Option<Rect>, color: egui::Color32) {
+/// Where a hairline crosses the circle of `radius` about `center`: the
+/// piece of `line` inside the circle, as a rectangle the line's own width,
+/// or `None` where the line passes it by. The line is taken along its
+/// middle, being a pixel wide; the rim drawn over the circle's edge covers
+/// what that leaves at either end of the chord.
+fn chord(line: Rect, center: [f32; 2], radius: f32) -> Option<Rect> {
+    let vertical = line.height > line.width;
+    let (along, across) = if vertical {
+        (line.x + line.width / 2.0 - center[0], center[1])
+    } else {
+        (line.y + line.height / 2.0 - center[1], center[0])
+    };
+    let half = (radius * radius - along * along).sqrt();
+    if !half.is_finite() || half <= 0.0 {
+        return None;
+    }
+    let hole = if vertical {
+        Rect::new(line.x, across - half, line.width, 2.0 * half)
+    } else {
+        Rect::new(across - half, line.y, 2.0 * half, line.height)
+    };
+    line.intersect(hole)
+}
+
+/// Fills `rect`, less whatever the `holes` cover of it.
+fn fill_around(painter: &egui::Painter, rect: Rect, holes: &[Option<Rect>], color: egui::Color32) {
     let fill = |piece: Rect| {
         painter.rect_filled(
             egui::Rect::from_min_size(
@@ -138,15 +173,27 @@ fn fill_around(painter: &egui::Painter, rect: Rect, hole: Option<Rect>, color: e
             color,
         );
     };
-    let Some(hole) = hole.and_then(|hole| rect.intersect(hole)) else {
-        fill(rect);
-        return;
-    };
-    for piece in around(rect, hole) {
-        if piece.width > 0.0 && piece.height > 0.0 {
-            fill(piece);
-        }
+    for piece in pieces(rect, holes) {
+        fill(piece);
     }
+}
+
+/// The pieces of `rect` left once every one of the `holes` is taken out
+/// of it: each hole cuts every piece the ones before it left, so the
+/// pieces never overlap and none of them touches a hole.
+fn pieces(rect: Rect, holes: &[Option<Rect>]) -> Vec<Rect> {
+    let mut left = vec![rect];
+    for hole in holes.iter().flatten() {
+        left = left
+            .into_iter()
+            .flat_map(|piece| match piece.intersect(*hole) {
+                Some(cut) => around(piece, cut).to_vec(),
+                None => vec![piece],
+            })
+            .filter(|piece| piece.width > 0.0 && piece.height > 0.0)
+            .collect();
+    }
+    left
 }
 
 /// The pieces of `rect` left over once `hole` — which is inside it — is taken
@@ -339,6 +386,59 @@ mod tests {
         // And a line clear of it is left whole.
         let line = Rect::new(300.0, 0.0, 1.0, 400.0);
         assert!(line.intersect(hole).is_none());
+    }
+
+    /// A line across the loupe's glass is broken over the chord it makes
+    /// of the circle, and a line beside the circle is left whole; with the
+    /// minimap in the way as well, both holes come out of it.
+    #[test]
+    fn a_line_across_the_glass_is_broken_around_its_chord() {
+        let center = [100.0, 100.0];
+        let radius = 50.0;
+
+        // Down the middle: the chord is the whole diameter.
+        let line = Rect::new(99.5, 0.0, 1.0, 400.0);
+        assert_eq!(
+            chord(line, center, radius),
+            Some(Rect::new(99.5, 50.0, 1.0, 100.0))
+        );
+        // Thirty across, the chord is eighty tall: a 3-4-5 triangle.
+        let line = Rect::new(129.5, 0.0, 1.0, 400.0);
+        assert_eq!(
+            chord(line, center, radius),
+            Some(Rect::new(129.5, 60.0, 1.0, 80.0))
+        );
+        // Along the other axis the same way.
+        let line = Rect::new(0.0, 59.5, 400.0, 1.0);
+        assert_eq!(
+            chord(line, center, radius),
+            Some(Rect::new(70.0, 59.5, 60.0, 1.0))
+        );
+        // Past the circle, nothing to cut.
+        assert_eq!(
+            chord(Rect::new(160.0, 0.0, 1.0, 400.0), center, radius),
+            None
+        );
+        assert_eq!(
+            chord(Rect::new(0.0, 150.0, 400.0, 1.0), center, radius),
+            None
+        );
+
+        // Both holes out of one line: the minimap's and the chord's, and
+        // what is left touches neither.
+        let line = Rect::new(99.5, 0.0, 1.0, 400.0);
+        let minimap = Rect::new(20.0, 300.0, 100.0, 80.0);
+        let holes = [Some(minimap), chord(line, center, radius)];
+        let left = pieces(line, &holes);
+        assert_eq!(
+            left,
+            vec![
+                Rect::new(99.5, 0.0, 1.0, 50.0),
+                Rect::new(99.5, 150.0, 1.0, 150.0),
+                Rect::new(99.5, 380.0, 1.0, 20.0),
+            ]
+        );
+        assert!(left.iter().all(|piece| piece.intersect(minimap).is_none()));
     }
 
     #[test]

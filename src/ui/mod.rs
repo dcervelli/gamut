@@ -14,6 +14,7 @@ pub mod export;
 pub mod fonts;
 pub mod help;
 pub mod info;
+pub mod loupe;
 pub mod menu;
 pub mod minimap;
 pub mod rename;
@@ -207,6 +208,10 @@ pub struct Panels {
     /// is not held: it follows the zoom, and is worked out afresh each frame
     /// by [`grid::step`].
     pub show_grid: bool,
+    /// Whether the loupe follows the pointer over the image. The secondary
+    /// button held on the picture puts it up as well, whatever this says;
+    /// where it is on any one frame is [`FrameInput::loupe`].
+    pub show_loupe: bool,
     /// Whether the clipboard is holding a picture this program could show,
     /// which is whether the paste button is on screen at all: a button that
     /// did nothing when pressed would be worse than no button.
@@ -244,6 +249,16 @@ pub struct FrameInput {
     /// Whether the minimap is on screen, which takes the toggle and a view
     /// with part of the image off it.
     pub minimap_on_screen: bool,
+    /// The loupe, while it is up: its toggle is on or the secondary button
+    /// is held on the picture, and the pointer is on a pixel of it. Where
+    /// its two circles go, worked out by the application from the same
+    /// pointer the pixel readout reads, so that the rings drawn here and
+    /// the glass the image layer draws cannot disagree.
+    pub loupe: Option<loupe::Loupe>,
+    /// Whether the secondary button is down on the picture, which is
+    /// holding the loupe up whatever its toggle says: the toggle is lit for
+    /// it, so that the button reads as the state it is showing.
+    pub secondary: bool,
     /// The read in progress, once it has taken long enough to be worth saying.
     /// Kept apart from the label rather than replacing it: everything else in
     /// the interface describes the image on screen, and so must that.
@@ -429,6 +444,21 @@ impl Pass<'_> {
         }
         self.commands
             .push(Command::OverImage(response.contains_pointer()));
+        // The secondary button, from the press on rather than from the
+        // toolkit's decision that the press became a drag: the loupe comes
+        // up the moment the button goes down. Where the pointer is goes
+        // with it, since the application's own pointer stands still while
+        // the toolkit holds the button.
+        let held = response.is_pointer_button_down_on()
+            && ui.input(|input| input.pointer.secondary_down());
+        let at = held
+            .then(|| response.interact_pointer_pos())
+            .flatten()
+            .map(|pos| [pos.x * scale, pos.y * scale]);
+        self.commands.push(Command::Secondary(at));
+        self.commands.push(Command::Dragging(
+            response.dragged_by(egui::PointerButton::Primary),
+        ));
         if response.contains_pointer() {
             let wheel: Vec<Command> = ui.input(|input| {
                 input
@@ -581,12 +611,21 @@ impl Pass<'_> {
                 .minimap_on_screen
                 .then(|| minimap::thumbnail(content, current.size()))
                 .flatten();
+            // Nor the loupe's glass: it is the image layer's as well, and
+            // the grid's spacing is the view's, not the glass's.
+            let glass = self
+                .input
+                .loupe
+                .map(|loupe| (loupe.glass, loupe::GLASS_RADIUS));
             grid::paint(
                 ui.painter(),
                 self.view.placement(current.size(), self.input.viewport),
                 self.input.scale,
                 content,
-                thumbnail,
+                grid::Clear {
+                    minimap: thumbnail,
+                    glass,
+                },
                 grid::step(zoom, self.input.scale),
                 self.theme,
             );
@@ -597,6 +636,8 @@ impl Pass<'_> {
         // newer of the two marks and the one under the hand.
         region::show(self, ui);
         region::show_zoom_box(self, ui);
+        // Over the region: the loupe is under the hand, and the newer mark.
+        loupe::show(self, ui);
         if self.input.minimap_on_screen {
             minimap::show(self, ui);
         }
@@ -777,6 +818,7 @@ mod tests {
             mark_clipped: false,
             show_minimap: true,
             show_grid: false,
+            show_loupe: false,
             paste: false,
             pixel_format: PixelFormat::default(),
         };

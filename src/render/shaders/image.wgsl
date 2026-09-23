@@ -32,6 +32,8 @@ struct Params {
     map_size: vec2<f32>,         // the gain map's size, in its own texels
     base_offset: vec4<f32>,      // added to the base before the gain, per channel
     alternate_offset: vec4<f32>, // taken from the product after
+    clip: vec4<f32>,             // (x, y, radius, -) of the circle the quad is cut to; radius 0 for no cut
+    picture: vec4<f32>,          // (x, y, width, height) of the image on the target, for a cut quad
 };
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -53,20 +55,27 @@ struct VertexOut {
     @location(0) uv: vec2<f32>,
 };
 
+// Where a point of the turned picture, `uv` across the quad, is in the
+// texture, which holds the picture as stored: each corner of the quad reads
+// the stored corner the turn brought there.
+fn turned(uv: vec2<f32>) -> vec2<f32> {
+    switch params.turn {
+        case 1u: { return vec2<f32>(uv.y, 1.0 - uv.x); }
+        case 2u: { return vec2<f32>(1.0 - uv.x, 1.0 - uv.y); }
+        case 3u: { return vec2<f32>(1.0 - uv.y, uv.x); }
+        default: { return uv; }
+    }
+}
+
 @vertex
 fn vs_main(@builtin(vertex_index) index: u32) -> VertexOut {
     let uv = vec2<f32>(f32(index & 1u), f32(index >> 1u));
     var out: VertexOut;
     // The quad is the turned picture; the texture is the picture as stored.
-    // Each corner of the quad reads the stored corner the turn brought there,
-    // and a quarter turn is linear in uv, so the interpolation between them
-    // is exact and nothing downstream knows the picture was turned.
-    switch params.turn {
-        case 1u: { out.uv = vec2<f32>(uv.y, 1.0 - uv.x); }
-        case 2u: { out.uv = vec2<f32>(1.0 - uv.x, 1.0 - uv.y); }
-        case 3u: { out.uv = vec2<f32>(1.0 - uv.y, uv.x); }
-        default: { out.uv = uv; }
-    }
+    // A quarter turn is linear in uv, so the interpolation between the
+    // turned corners is exact and nothing downstream knows the picture was
+    // turned.
+    out.uv = turned(uv);
     out.position = vec4<f32>(
         params.offset.x + uv.x * params.scale.x,
         params.offset.y - uv.y * params.scale.y,
@@ -189,7 +198,32 @@ fn false_color(which: u32, t: f32) -> vec3<f32> {
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-    let texel = resample(in.uv);
+    var uv = in.uv;
+    // The loupe's glass: the quad is the circle's square, cut to the circle
+    // — feathered over the one pixel its edge crosses — and the image's own
+    // place on the target says where in the picture each pixel of it reads.
+    // Past the picture's edge it writes nothing, which, the glass replacing
+    // rather than blending, is the backdrop and not the view underneath.
+    var coverage = 1.0;
+    if params.clip.z > 0.0 {
+        coverage = clamp(params.clip.z + 0.5 - distance(in.position.xy, params.clip.xy), 0.0, 1.0);
+        if coverage <= 0.0 {
+            discard;
+        }
+        let across = (in.position.xy - params.picture.xy) / params.picture.zw;
+        if any(across < vec2<f32>(0.0)) || any(across >= vec2<f32>(1.0)) {
+            return vec4<f32>(0.0);
+        }
+        uv = turned(across);
+    }
+    return shade(uv) * coverage;
+}
+
+// The color of the picture at `uv` of the texture: resampled, expanded to
+// RGBA, brought into the working space, windowed, marked and false-colored,
+// premultiplied by its coverage.
+fn shade(uv: vec2<f32>) -> vec4<f32> {
+    let texel = resample(uv);
 
     // Expand whatever we uploaded to RGBA. Gray replicates; alpha defaults
     // to opaque when the source had none.

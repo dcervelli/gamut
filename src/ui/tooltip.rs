@@ -63,6 +63,10 @@ pub struct Tooltip {
     pub hints: Vec<String>,
 }
 
+/// What the loupe toggle says under its name: the other way of putting the
+/// loupe up, which is the hand on the mouse rather than a key.
+pub const LOUPE_HELD: &str = "Or hold the right mouse button on the picture";
+
 /// What a toggle says when the content area has no room for the panel it
 /// opens, in place of the name of the panel.
 ///
@@ -347,6 +351,11 @@ pub fn words(tip: Tip) -> Option<String> {
         },
         // The timeline: no key scrubs, so it names itself.
         Tip::Timeline => "Go to a frame",
+        // The loupe: no key toggles it, so it names itself; the button that
+        // holds it up is the line under this — see `App::tooltip`.
+        Tip::Control(Control::Loupe) => {
+            "Toggle the loupe: the picture around the pointer, magnified"
+        }
         // No words of its own: the key table already says what each of
         // these copies takes, in a sentence, and saying it twice is saying
         // it in two places that can drift apart. Nor has an item of the

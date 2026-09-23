@@ -39,7 +39,7 @@ use crate::timing;
 pub use color::Color;
 pub use composite::Backdrop;
 pub use output::{HdrPreference, Output};
-pub use placement::{Placement, Upscale};
+pub use placement::{Glass, Placement, Upscale};
 
 use composite::Composite;
 use gpu::attachment;
@@ -76,14 +76,16 @@ struct Targets {
 }
 
 /// Everything one frame draws. `thumbnail`, when the minimap is on screen,
-/// is where the whole image is drawn a second time. It goes into the image
-/// layer rather than the interface's, since it is the image: the same window,
-/// tone map and colormap apply to it without any of that having to be
-/// reimplemented in sRGB.
+/// is where the whole image is drawn a second time, and `loupe`, while the
+/// loupe is up, where it is drawn a third time, magnified and cut to a
+/// circle. Both go into the image layer rather than the interface's, since
+/// they are the image: the same window, tone map and colormap apply to them
+/// without any of that having to be reimplemented in sRGB.
 #[derive(Clone, Copy)]
 pub struct Scene<'a> {
     pub placement: Placement,
     pub thumbnail: Option<Placement>,
+    pub loupe: Option<Glass>,
     pub display: &'a Display,
     /// What the interface drew this pass.
     pub ui: &'a UiPaint,
@@ -381,6 +383,7 @@ impl Renderer {
         let Scene {
             placement,
             thumbnail,
+            loupe,
             display,
             ui,
             ..
@@ -446,6 +449,7 @@ impl Renderer {
             Draw {
                 view: placement,
                 thumbnail,
+                loupe,
                 mark_clipped: scene.mark_clipped,
                 headroom: scene.headroom,
                 lift: scene.lift,
@@ -458,12 +462,12 @@ impl Renderer {
         // a checkerboard rather than as the plain backdrop. Asked of the image
         // layer rather than assumed from `placement`, since a frame drawn
         // before the first file has decoded has a placement but no image.
-        let (checkered, gray) = match self.image_layer.current() {
-            Some(image) => ([Some(placement), thumbnail], image.is_gray()),
-            None => ([None, None], false),
+        let (checkered, glass, gray) = match self.image_layer.current() {
+            Some(image) => ([Some(placement), thumbnail], loupe, image.is_gray()),
+            None => ([None, None], None, false),
         };
         self.composite
-            .prepare(&self.queue, &scene, gray, &self.output, checkered);
+            .prepare(&self.queue, &scene, gray, &self.output, checkered, glass);
 
         // egui's vertices, staged before the passes are recorded.
         let screen = egui_wgpu::ScreenDescriptor {

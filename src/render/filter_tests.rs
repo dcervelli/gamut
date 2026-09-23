@@ -536,6 +536,7 @@ fn the_thumbnail_is_drawn_beside_the_view_and_builds_the_chain_it_needs() {
                 zoom: THUMBNAIL as f32 / SIZE as f32,
                 upscale: Upscale::Nearest,
             }),
+            loupe: None,
             mark_clipped: false,
             headroom: Headroom::None,
             lift: 0.0,
@@ -577,6 +578,122 @@ fn the_thumbnail_is_drawn_beside_the_view_and_builds_the_chain_it_needs() {
 
     // Nothing was drawn in the corner neither of them covers.
     assert_eq!(at(&pixels, width, SIZE as usize + 1, 3), 0.0);
+}
+
+/// The loupe's glass is the image magnified about the point under the eye,
+/// cut to its circle, and what is inside the circle is the glass alone: past
+/// the picture's edge it is nothing, not the view that was drawn under it.
+#[test]
+fn the_loupe_is_cut_to_its_circle_and_replaces_what_is_under_it() {
+    use super::Glass;
+
+    let Some(gpu) = gpu::test_context() else {
+        return;
+    };
+    const SIZE: u32 = 16;
+    // A ramp across, so that a magnified pixel can be told from its neighbor.
+    let data: Vec<u8> = (0..SIZE * SIZE)
+        .map(|index| (index % SIZE * 16) as u8)
+        .collect();
+    let image = gray_u8(SIZE, SIZE, data.clone());
+
+    // The view at 1:1 fills the target's left half; the glass magnifies the
+    // texel at (4, 8) four times about (40, 20), with a radius of 12 — and so
+    // runs past the view's right edge into the empty half.
+    let target = [64u32, 40u32];
+    let view = Placement {
+        x: 0.0,
+        y: 0.0,
+        width: SIZE as f32,
+        height: SIZE as f32,
+        zoom: 1.0,
+        upscale: Upscale::Nearest,
+    };
+    let center = [40.0, 20.0];
+    let radius = 12.0;
+    let under = [4.5, 8.5];
+    let magnified = Placement {
+        x: center[0] - under[0] * 4.0,
+        y: center[1] - under[1] * 4.0,
+        width: SIZE as f32 * 4.0,
+        height: SIZE as f32 * 4.0,
+        zoom: 4.0,
+        upscale: Upscale::Nearest,
+    };
+    let pixels = draw_all(
+        gpu,
+        &image,
+        target,
+        Draw {
+            view,
+            thumbnail: None,
+            loupe: Some(Glass {
+                placement: magnified,
+                center,
+                radius,
+            }),
+            mark_clipped: false,
+            headroom: Headroom::None,
+            lift: 0.0,
+            turn: Turn::NONE,
+        },
+    );
+    let width = target[0] as usize;
+    let value = |x: u32| x as f32 * 16.0 / 255.0;
+
+    // The view is untouched outside the circle.
+    assert!(close(at(&pixels, width, 2, 2), value(2), 2e-3));
+    assert!(close(at(&pixels, width, 15, 12), value(15), 2e-3));
+    // Inside the circle the glass shows the texel under the eye at four
+    // times the size: the four pixels about the center are all texel 4, and
+    // four pixels along, texel 5.
+    assert!(close(at(&pixels, width, 40, 20), value(4), 2e-3));
+    assert!(close(at(&pixels, width, 39, 19), value(4), 2e-3));
+    assert!(close(at(&pixels, width, 44, 20), value(5), 2e-3));
+    assert!(close(at(&pixels, width, 36, 20), value(3), 2e-3));
+    // Outside the circle, in the empty half, nothing is drawn.
+    assert_eq!(pixels[20 * width + 60][3], 0.0);
+    assert_eq!(pixels[2 * width + 40][3], 0.0);
+    // And the circle's edge is where the radius says: a pixel well inside
+    // is whole, and one well outside is nothing.
+    assert_eq!(pixels[20 * width + 50][3], 1.0);
+    assert_eq!(pixels[20 * width + 53][3], 0.0);
+
+    // A glass over the picture's edge: magnified about the last column, the
+    // picture ends inside the circle, and past it the glass is nothing —
+    // even over the view, which the glass replaces rather than blends with.
+    let center = [12.0, 20.0];
+    let under = [15.5, 8.5];
+    let pixels = draw_all(
+        gpu,
+        &image,
+        target,
+        Draw {
+            view,
+            thumbnail: None,
+            loupe: Some(Glass {
+                placement: Placement {
+                    x: center[0] - under[0] * 4.0,
+                    y: center[1] - under[1] * 4.0,
+                    ..magnified
+                },
+                center,
+                radius,
+            }),
+            mark_clipped: false,
+            headroom: Headroom::None,
+            lift: 0.0,
+            turn: Turn::NONE,
+        },
+    );
+    // The last texel fills the two pixels left of the center and the two
+    // right of it, being magnified four times about its middle...
+    assert!(close(at(&pixels, width, 11, 20), value(15), 2e-3));
+    assert!(close(at(&pixels, width, 13, 20), value(15), 2e-3));
+    // ...and past it, still inside the circle and over where the view was
+    // drawn, there is nothing: not the view.
+    assert_eq!(pixels[20 * width + 15][3], 0.0);
+    assert_eq!(pixels[20 * width + 15][0], 0.0);
 }
 
 /// A picture with a gain map: 32 wide, 8 high, a ramp across, and a map
@@ -869,6 +986,7 @@ fn composited(
             upscale: Upscale::Nearest,
         },
         thumbnail: None,
+        loupe: None,
         display,
         ui: &paint,
         scale: 1.0,
@@ -882,7 +1000,7 @@ fn composited(
         lift: 0.0,
         turn: Turn::NONE,
     };
-    composite.prepare(&gpu.queue, &scene, gray, &output, [None, None]);
+    composite.prepare(&gpu.queue, &scene, gray, &output, [None, None], None);
     render_to(gpu, [width, 1], |encoder, view| {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("composite test"),
