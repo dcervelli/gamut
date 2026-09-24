@@ -727,15 +727,17 @@ impl App {
             self.pending_thumbs.push((path, thumb));
             return;
         };
-        let image = egui::ColorImage::from_rgba_unmultiplied(
-            [thumb.width as usize, thumb.height as usize],
-            &thumb.rgba,
-        );
-        let texture = shown.gui.ctx.load_texture(
-            path.display().to_string(),
-            image,
-            egui::TextureOptions::LINEAR,
-        );
+        let copies = thumb.copies.each_ref().map(|copy| {
+            let image = egui::ColorImage::from_rgba_unmultiplied(
+                [copy.width as usize, copy.height as usize],
+                &copy.rgba,
+            );
+            shown.gui.ctx.load_texture(
+                format!("{} ({})", path.display(), copy.width.max(copy.height)),
+                image,
+                egui::TextureOptions::LINEAR,
+            )
+        });
         // The rows on screen are seen again first, so that they are never
         // the oldest held: a frame says which rows it shows only when that
         // changes, and a list sitting still while the thread thumbnails
@@ -750,7 +752,7 @@ impl App {
                 self.thumbs.touch(shown);
             }
         }
-        self.thumbs.insert(path, texture);
+        self.thumbs.insert(path, copies);
     }
 
     /// Whether the command line asked for something and none of it ever
@@ -1039,7 +1041,7 @@ impl App {
     fn parts(&self) -> Parts {
         Parts {
             transport: self.has_transport(),
-            filmstrip: self.filmstrip_showing(),
+            filmstrip: self.filmstrip_showing().then(|| self.filmstrip.slot()),
         }
     }
 
@@ -4507,10 +4509,10 @@ mod tests {
         assert!(!app.filmstrip_showing());
         assert_eq!(app.perform(Action::ToggleFilmstrip), Effect::Redraw);
         assert!(app.filmstrip_showing());
-        assert!(app.parts().filmstrip);
+        assert_eq!(app.parts().filmstrip, Some(ui::filmstrip::SLOT_MIN));
         let narrowed = app.viewport();
-        assert_eq!(narrowed.x, whole.x + ui::filmstrip::WIDTH);
-        assert_eq!(narrowed.width, whole.width - ui::filmstrip::WIDTH);
+        assert_eq!(narrowed.x, whole.x + ui::filmstrip::width(ui::filmstrip::SLOT_MIN));
+        assert_eq!(narrowed.width, whole.width - ui::filmstrip::width(ui::filmstrip::SLOT_MIN));
 
         let mut harness = driven(app);
         assert!(harness.query_by_label("Show file 1").is_some());
@@ -4555,9 +4557,9 @@ mod tests {
         assert!(!app.panels.show_ui);
         assert!(app.filmstrip_showing());
         let viewport = app.viewport();
-        assert_eq!(viewport.x, ui::filmstrip::WIDTH);
+        assert_eq!(viewport.x, ui::filmstrip::width(ui::filmstrip::SLOT_MIN));
         assert_eq!(viewport.y, 0.0);
-        assert_eq!(viewport.width, WINDOW[0] - ui::filmstrip::WIDTH);
+        assert_eq!(viewport.width, WINDOW[0] - ui::filmstrip::width(ui::filmstrip::SLOT_MIN));
         assert_eq!(viewport.height, WINDOW[1]);
 
         let mut harness = driven(app);

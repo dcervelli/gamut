@@ -102,7 +102,7 @@ pub struct Chrome {
     /// to the window's foot: the left strip and the bottom bar start at
     /// its right edge while it is up. `None` while it is not showing.
     /// Worked out with the rest and read by nothing but the tests: the
-    /// panel is given its size by `Pass::bars` from the same constant.
+    /// panel is given its size by `Pass::file_list` from the same slot.
     #[cfg_attr(not(test), allow(dead_code, reason = "the geometry is whole"))]
     pub filmstrip: Option<Rect>,
     /// The bar of playback controls, above the bottom bar and between the
@@ -112,11 +112,12 @@ pub struct Chrome {
 
 /// The parts of the chrome that come and go, and so what its geometry is
 /// derived from besides the window size: whether the file on screen brings
-/// the transport bar with it, and whether the file list is up.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+/// the transport bar with it, and whether the file list is up and the
+/// square its thumbnails are fitted into, which its width is made from.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub struct Parts {
     pub transport: bool,
-    pub filmstrip: bool,
+    pub filmstrip: Option<f32>,
 }
 
 impl Parts {
@@ -124,7 +125,7 @@ impl Parts {
     #[cfg(test)]
     pub const NONE: Parts = Parts {
         transport: false,
-        filmstrip: false,
+        filmstrip: None,
     };
 }
 
@@ -143,11 +144,9 @@ impl Chrome {
         // takes the left edge of the window under the top bar, the whole
         // way down, and the left strip and the bottom bar start where it
         // ends.
-        let strip = if parts.filmstrip {
-            filmstrip::WIDTH.min((size[0] - 2.0 * side).max(0.0))
-        } else {
-            0.0
-        };
+        let strip = parts.filmstrip.map_or(0.0, |slot| {
+            filmstrip::width(slot).min((size[0] - 2.0 * side).max(0.0))
+        });
         // Where the picture starts: past the file list and the left strip.
         let inner = strip + side;
 
@@ -157,7 +156,7 @@ impl Chrome {
             right: Rect::new(size[0] - side, bar, side, middle),
             filmstrip: parts
                 .filmstrip
-                .then(|| Rect::new(0.0, bar, strip, (size[1] - bar).max(0.0))),
+                .map(|_| Rect::new(0.0, bar, strip, (size[1] - bar).max(0.0))),
             transport: parts.transport.then(|| {
                 Rect::new(
                     inner,
@@ -206,11 +205,9 @@ pub fn content_area(logical: [f32; 2], show_ui: bool, parts: Parts) -> Rect {
 /// window where that is less, and nothing while it is not up. Down the
 /// whole left edge of the window, there being no top bar to start under.
 pub fn bare_strip(width: f32, parts: Parts) -> f32 {
-    if parts.filmstrip {
-        filmstrip::WIDTH.min(width)
-    } else {
-        0.0
-    }
+    parts
+        .filmstrip
+        .map_or(0.0, |slot| filmstrip::width(slot).min(width))
 }
 
 /// Where the image is drawn, in physical pixels, for a window of `size`
@@ -221,7 +218,7 @@ pub fn bare_strip(width: f32, parts: Parts) -> f32 {
 /// this, which is why toggling the interface re-fits a fitted image on the
 /// very next frame.
 pub fn image_viewport(size: [f32; 2], scale: f32, show_ui: bool, parts: Parts) -> Viewport {
-    if !show_ui && !parts.filmstrip {
+    if !show_ui && parts.filmstrip.is_none() {
         return Viewport::whole(size);
     }
     let content = content_area([size[0] / scale, size[1] / scale], show_ui, parts);
@@ -250,6 +247,9 @@ pub(super) struct Pass<'a> {
     pub content: Rect,
     /// Which of the floating panels the content has room for.
     pub room: Room,
+    /// Where the file list was laid out this pass, if it is up: what its
+    /// grip is put along the edge of, once the picture is laid out under it.
+    pub file_list: Option<Area>,
     pub commands: Vec<Command>,
 }
 
@@ -293,19 +293,23 @@ impl Pass<'_> {
 
     /// The file list, where there is one: under the top bar while the
     /// panels are up, and down the whole left edge of the window on its
-    /// own while they are hidden.
+    /// own while they are hidden. Given its width from the slot the
+    /// application holds rather than resized by egui, which would leave
+    /// the picture's fit a frame behind: `filmstrip::grip` asks for a new
+    /// slot, and the next frame is laid out at it.
     pub fn file_list(&mut self, ui: &mut Ui) {
         let Some(strip) = self.input.filmstrip.clone() else {
             return;
         };
         let frame = egui::Frame::NONE.fill(self.theme.bar_background.into());
         let list = egui::Panel::left("filmstrip")
-            .exact_size(filmstrip::WIDTH)
+            .exact_size(filmstrip::width(strip.slot))
             .resizable(false)
             .show_separator_line(false)
             .frame(frame)
             .show(ui, |ui| filmstrip::show(self, ui, &strip));
         self.hairline(ui, list.response.rect, Edge::Right);
+        self.file_list = Some(list.response.rect);
     }
 
     /// The four panels, and everything on them; and the transport bar for a
@@ -957,7 +961,7 @@ mod tests {
     /// as they do without it.
     #[test]
     fn the_transport_bar_takes_a_bar_off_the_bottom() {
-        let chrome = Chrome::new(WINDOW, Parts { transport: true, filmstrip: false });
+        let chrome = Chrome::new(WINDOW, Parts { transport: true, filmstrip: None });
         let transport = chrome.transport.expect("asked for");
         assert_eq!(
             transport,
@@ -989,7 +993,7 @@ mod tests {
                 true,
                 Parts {
                     transport: true,
-                    filmstrip: false
+                    filmstrip: None
                 }
             )
             .height,
@@ -1004,13 +1008,13 @@ mod tests {
     fn the_file_list_takes_the_left_edge_under_the_top_bar() {
         let parts = Parts {
             transport: true,
-            filmstrip: true,
+            filmstrip: Some(filmstrip::SLOT_MIN),
         };
         let chrome = Chrome::new(WINDOW, parts);
         let strip = chrome.filmstrip.expect("asked for");
         assert_eq!(
             strip,
-            Rect::new(0.0, BAR_HEIGHT, filmstrip::WIDTH, 700.0 - BAR_HEIGHT)
+            Rect::new(0.0, BAR_HEIGHT, filmstrip::width(filmstrip::SLOT_MIN), 700.0 - BAR_HEIGHT)
         );
         assert_eq!(chrome.left.x, strip.right());
         assert_eq!(chrome.left.width, SIDE_WIDTH);
@@ -1023,21 +1027,39 @@ mod tests {
         assert_eq!(chrome.content().x, chrome.left.right());
         assert_eq!(
             chrome.content().width,
-            1000.0 - 2.0 * SIDE_WIDTH - filmstrip::WIDTH
+            1000.0 - 2.0 * SIDE_WIDTH - filmstrip::width(filmstrip::SLOT_MIN)
         );
         assert_eq!(
             content_area(WINDOW, true, parts).x,
-            SIDE_WIDTH + filmstrip::WIDTH
+            SIDE_WIDTH + filmstrip::width(filmstrip::SLOT_MIN)
         );
         assert_eq!(
             content_area(WINDOW, false, parts),
-            Rect::new(filmstrip::WIDTH, 0.0, 1000.0 - filmstrip::WIDTH, 700.0),
+            Rect::new(filmstrip::width(filmstrip::SLOT_MIN), 0.0, 1000.0 - filmstrip::width(filmstrip::SLOT_MIN), 700.0),
             "left up when the rest of the interface is hidden, down the whole edge"
         );
         assert_eq!(
             content_area(WINDOW, false, Parts::NONE),
             Rect::new(0.0, 0.0, 1000.0, 700.0)
         );
+    }
+
+    /// A wider slot is a wider list, and the picture is what it leaves.
+    #[test]
+    fn a_wider_slot_widens_the_file_list() {
+        let parts = |slot| Parts {
+            transport: false,
+            filmstrip: Some(slot),
+        };
+        let narrow = Chrome::new(WINDOW, parts(filmstrip::SLOT_MIN));
+        let wide = Chrome::new(WINDOW, parts(filmstrip::SLOT_MAX));
+        let grown = filmstrip::SLOT_MAX - filmstrip::SLOT_MIN;
+        assert_eq!(
+            wide.filmstrip.unwrap().width,
+            narrow.filmstrip.unwrap().width + grown
+        );
+        assert_eq!(wide.content().x, narrow.content().x + grown);
+        assert_eq!(wide.content().right(), narrow.content().right());
     }
 
     #[test]
@@ -1050,7 +1072,7 @@ mod tests {
                 size,
                 Parts {
                     transport: true,
-                    filmstrip: true,
+                    filmstrip: Some(filmstrip::SLOT_MIN),
                 },
             );
             let transport = chrome.transport.expect("asked for");

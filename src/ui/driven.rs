@@ -749,11 +749,12 @@ fn strip(count: usize, current: Option<usize>, reveal: bool) -> filmstrip::Input
         .collect();
     let mut tops = vec![0.0];
     for row in rows.iter() {
-        tops.push(tops.last().unwrap() + filmstrip::height(row));
+        tops.push(tops.last().unwrap() + filmstrip::height(row, filmstrip::SLOT_MIN));
     }
     filmstrip::Input {
         rows,
         tops: Arc::from(tops),
+        slot: filmstrip::SLOT_MIN,
         current,
         order: filmstrip::Order::default(),
         back: false,
@@ -810,6 +811,44 @@ fn the_file_list_offers_its_rows_its_menus_and_the_way_back() {
         [Command::Press(Control::SortDirection(
             filmstrip::Direction::Descending
         ))]
+    );
+}
+
+/// The file list's right edge is a grip: dragged, it asks for the slot
+/// that puts the edge under the pointer, held between the narrowest and
+/// the widest the list goes, however far past either the pointer went.
+#[test]
+fn the_file_list_is_widened_by_dragging_its_edge() {
+    let mut with_list = panels();
+    with_list.show_filmstrip = true;
+    let mut harness = open(WINDOW, 3, with_list);
+    harness.state_mut().input.filmstrip = Some(strip(3, Some(0), false));
+    harness.run();
+    // The panel's left edge is its first row's.
+    let row = harness.get_by_label("Show file 1").rect();
+    let edge = row.min.x + filmstrip::width(filmstrip::SLOT_MIN);
+    let y = row.center().y;
+    let slots = |commands: Vec<Command>| -> Vec<f32> {
+        commands
+            .into_iter()
+            .filter_map(|command| match command {
+                Command::FilmstripSlot(slot) => Some(slot),
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(
+        slots(drag(&mut harness, [edge, y], [edge + 60.0, y])),
+        [filmstrip::SLOT_MIN + 60.0]
+    );
+    assert_eq!(
+        slots(drag(&mut harness, [edge, y], [WINDOW[0], y])),
+        [filmstrip::SLOT_MAX]
+    );
+    assert_eq!(
+        slots(drag(&mut harness, [edge - 1.0, y], [0.0, y])),
+        [],
+        "already at its narrowest"
     );
 }
 

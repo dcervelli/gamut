@@ -61,6 +61,28 @@ pub use status::explain_state;
 pub use toast::Toast;
 pub use tooltip::{Tip, Tooltip};
 
+/// A file's thumbnail, in the copies the screen holds, smallest first, each
+/// half the next: what the chooser and the file list draw from, each taking
+/// the copy its slot calls for.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Thumb {
+    pub copies: [egui::load::SizedTexture; 3],
+}
+
+impl Thumb {
+    /// The copy to draw across `side` device pixels: the smallest at least
+    /// that large, which is never shrunk to less than half itself, or the
+    /// largest where none is — a small picture's copies are all its own
+    /// size, and a slot wider than the largest enlarges it.
+    pub fn for_side(&self, side: f32) -> egui::load::SizedTexture {
+        let copies = &self.copies;
+        *copies
+            .iter()
+            .find(|copy| copy.size.max_elem() >= side)
+            .unwrap_or(&copies[copies.len() - 1])
+    }
+}
+
 use chrome::Pass;
 
 const TEXT_SIZE: f32 = 13.0;
@@ -374,7 +396,7 @@ pub fn show(
 ) -> Vec<Command> {
     let parts = chrome::Parts {
         transport: input.transport.is_some(),
-        filmstrip: input.filmstrip.is_some(),
+        filmstrip: input.filmstrip.as_ref().map(|strip| strip.slot),
     };
     let content = chrome::content_area(input.logical, panels.show_ui, parts);
     let mut pass = Pass {
@@ -387,6 +409,7 @@ pub fn show(
         grid: icon::Grid::new(input.scale),
         content,
         room: room(content, panels),
+        file_list: None,
         commands: Vec::new(),
     };
     if panels.show_ui {
@@ -396,6 +419,11 @@ pub fn show(
         pass.file_list(ui);
     }
     pass.picture(ui);
+    // After the picture, which it overhangs while the panels are hidden,
+    // so that the edge is the grip's and not the picture's drag.
+    if let Some(strip) = &input.filmstrip {
+        filmstrip::grip(&mut pass, ui, strip.slot);
+    }
     match current {
         Some(current) => pass.overlays(ui, current),
         // Nothing to lay over: the buttons that would give the window
@@ -831,6 +859,31 @@ pub(super) fn capitalized(label: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The copy drawn is the smallest that covers the device pixels it is
+    /// drawn across, so none is shrunk to less than half itself; past the
+    /// largest, the largest; and a small picture, all of whose copies are
+    /// its own size, is drawn from the first.
+    #[test]
+    fn a_thumbnail_is_drawn_from_the_smallest_copy_that_covers_it() {
+        let copy = |id: u64, side: f32| egui::load::SizedTexture {
+            id: egui::TextureId::User(id),
+            size: egui::vec2(side, side / 2.0),
+        };
+        let thumb = Thumb {
+            copies: [copy(0, 128.0), copy(1, 256.0), copy(2, 512.0)],
+        };
+        assert_eq!(thumb.for_side(72.0), thumb.copies[0]);
+        assert_eq!(thumb.for_side(128.0), thumb.copies[0]);
+        assert_eq!(thumb.for_side(129.0), thumb.copies[1]);
+        assert_eq!(thumb.for_side(384.0), thumb.copies[2]);
+        assert_eq!(thumb.for_side(768.0), thumb.copies[2]);
+        let tiny = Thumb {
+            copies: [copy(0, 40.0), copy(1, 40.0), copy(2, 40.0)],
+        };
+        assert_eq!(tiny.for_side(384.0), tiny.copies[2]);
+        assert_eq!(tiny.for_side(20.0), tiny.copies[0]);
+    }
 
     /// [`PANELS_ROOM`] is a sum of the constants the two panels are laid out
     /// from, and this is what holds it to what they do with them: a content

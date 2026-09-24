@@ -11,9 +11,10 @@
 //!
 //! The panel is one of the chrome's, laid out by `Chrome` down the left
 //! edge of the window under the top bar — the left strip and the bottom
-//! bar start where it ends — and given exactly that width by `Pass::bars`,
-//! so that the picture is fitted into what it leaves before anything is
-//! drawn. Its head — the
+//! bar start where it ends — and given exactly that width by
+//! `Pass::file_list`, so that the picture is fitted into what it leaves
+//! before anything is drawn. Its right edge is a [`grip`] that asks for a
+//! wider or narrower slot, which the next frame is laid out at. Its head — the
 //! two menus and the pair that go back and forward through the files
 //! seen — stays put; the rows under it scroll, and only the rows on
 //! screen are laid out, as the chooser's are.
@@ -21,28 +22,49 @@
 use std::ops::Range;
 use std::sync::Arc;
 
-use egui::{Align, Layout, RectAlign, Sense, WidgetInfo, WidgetType, load::SizedTexture, pos2, vec2};
+use egui::{Align, Layout, RectAlign, Sense, WidgetInfo, WidgetType, pos2, vec2};
 
 use super::chrome::{BAR_HEIGHT, BAR_PADDING, BUTTON_GAP, Corners, Pass, STEP_SEAM};
 use super::control::{Command, Control};
 use super::style::{ACTIVE_BUTTON_WASH, SCROLLBAR_GUTTER, SCROLLBAR_WIDTH};
 use super::{PADDING, TEXT_SIZE, fonts, icon, menu};
 
-/// The square each thumbnail is fitted into: the thumbnail thread's own
-/// display copy, at most this on a side, drawn at its own size.
-pub const SLOT: f32 = crate::thumbnailer::DISPLAY_SIDE as f32;
+/// The square each thumbnail is fitted into, at its narrowest: the
+/// thumbnail thread's smallest display copy, drawn at its own size. The
+/// panel opens at this.
+pub const SLOT_MIN: f32 = crate::thumbnailer::DISPLAY_SIDES[0] as f32;
+/// The square at its widest.
+pub const SLOT_MAX: f32 = 384.0;
 /// The room around a slot, on every side.
 pub const INSET: f32 = 6.0;
-/// A file's row: its slot and the room around it.
-pub const ROW_HEIGHT: f32 = SLOT + 2.0 * INSET;
 /// A section's row: one line of words.
 pub const HEADER_HEIGHT: f32 = 22.0;
 /// The head of the panel, where the buttons are: a bar's height, so that
 /// it lines up with the bars.
 pub const HEAD_HEIGHT: f32 = BAR_HEIGHT;
-/// What the panel takes off the picture: a row, and the scrollbar's gutter
-/// beside it.
-pub const WIDTH: f32 = ROW_HEIGHT + SCROLLBAR_GUTTER;
+/// How far either side of the panel's right edge a drag takes hold of it.
+const GRIP: f32 = 3.0;
+
+/// A file's row, for a slot of `slot`: the slot and the room around it.
+pub fn row_height(slot: f32) -> f32 {
+    slot + 2.0 * INSET
+}
+
+/// What the panel takes off the picture, for a slot of `slot`: a row, and
+/// the scrollbar's gutter beside it.
+pub fn width(slot: f32) -> f32 {
+    row_height(slot) + SCROLLBAR_GUTTER
+}
+
+/// The slot a panel `width` wide has, held between [`SLOT_MIN`] and
+/// [`SLOT_MAX`] and put on a whole logical pixel: what a drag of the
+/// panel's edge asks for.
+pub fn slot_for(width: f32) -> f32 {
+    (width - SCROLLBAR_GUTTER - 2.0 * INSET)
+        .round()
+        .clamp(SLOT_MIN, SLOT_MAX)
+}
+
 /// The scrollbar stands this far in from the panel's edge, so that the
 /// bar and the hairline along the edge do not read as one thick rule;
 /// what is left of the gutter parts it from the rows.
@@ -219,15 +241,15 @@ pub enum Row {
         path: String,
         /// Its thumbnail, once one has arrived and while the screen still
         /// holds it.
-        thumb: Option<SizedTexture>,
+        thumb: Option<super::Thumb>,
     },
 }
 
-/// How tall a row is drawn.
-pub fn height(row: &Row) -> f32 {
+/// How tall a row is drawn, for a slot of `slot`.
+pub fn height(row: &Row, slot: f32) -> f32 {
     match row {
         Row::Header(_) => HEADER_HEIGHT,
-        Row::File { .. } => ROW_HEIGHT,
+        Row::File { .. } => row_height(slot),
     }
 }
 
@@ -241,6 +263,9 @@ pub struct Input {
     /// ends: one entry more than there are rows. What says which rows are
     /// on screen without measuring every row above them.
     pub tops: Arc<[f32]>,
+    /// The square each thumbnail is fitted into, which the tops were
+    /// worked out for; the panel is [`width`] of it.
+    pub slot: f32,
     /// Which row is the file on screen, if it is in the list.
     pub current: Option<usize>,
     /// The order in force, which the menus are lit against.
@@ -366,6 +391,31 @@ fn head(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
     ui.painter().rect_filled(line, 0.0, pass.theme.border);
 }
 
+/// The grip along the panel's right edge, a little either side of it: a
+/// drag of it asks for the slot that puts the edge under the pointer,
+/// which the application holds between [`SLOT_MIN`] and [`SLOT_MAX`].
+pub(super) fn grip(pass: &mut Pass, ui: &mut egui::Ui, slot: f32) {
+    let Some(list) = pass.file_list else {
+        return;
+    };
+    let rect = egui::Rect::from_x_y_ranges(
+        list.right() - GRIP..=list.right() + GRIP,
+        list.y_range(),
+    );
+    let response = ui.interact(rect, egui::Id::new("filmstrip grip"), Sense::DRAG);
+    if response.hovered() || response.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+    }
+    if response.dragged()
+        && let Some(pointer) = response.interact_pointer_pos()
+    {
+        let asked = slot_for(pointer.x - list.left());
+        if asked != slot {
+            pass.commands.push(Command::FilmstripSlot(asked));
+        }
+    }
+}
+
 /// The rows, virtualized: only the rows in the viewport are laid out, and
 /// which rows those are goes back as a command when it changes, so that
 /// their thumbnails can be asked for first.
@@ -457,7 +507,7 @@ fn file(
     index: usize,
     name: &str,
     path: &str,
-    thumb: Option<SizedTexture>,
+    thumb: Option<super::Thumb>,
 ) {
     let theme = pass.theme;
     let control = Control::Thumb(row);
@@ -471,13 +521,15 @@ fn file(
         painter.rect_filled(rect, 0.0, theme.button_hover);
     }
 
-    // The slot, and the picture fitted and centered in it.
+    // The slot, and the picture fitted and centered in it: the copy that
+    // covers the slot's device pixels, drawn no larger than itself.
     let slot = egui::Rect::from_min_size(
         pos2(rect.left() + INSET, rect.top() + INSET),
-        vec2(SLOT, SLOT),
+        vec2(input.slot, input.slot),
     );
     match thumb {
-        Some(texture) => {
+        Some(thumb) => {
+            let texture = thumb.for_side(input.slot * ui.ctx().pixels_per_point());
             let size = texture.size;
             let scale = (slot.width() / size.x).min(slot.height() / size.y).min(1.0);
             let fitted = vec2((size.x * scale).round(), (size.y * scale).round());
@@ -506,7 +558,7 @@ fn file(
     // the slot.
     let bright: egui::Color32 = theme.text_bright.into();
     let body = egui::FontId::proportional(TEXT_SIZE);
-    let room = (SLOT - 2.0 * LABEL_PAD).max(0.0);
+    let room = (input.slot - 2.0 * LABEL_PAD).max(0.0);
     let galley = super::chooser::lit(
         ui,
         &format!("{index}  {name}"),
@@ -544,5 +596,17 @@ mod tests {
         assert_eq!(span(&tops, 500.0, 600.0), 3..4, "past the end, the last row");
         assert_eq!(span(&[0.0], 0.0, 100.0), 0..0, "no rows at all");
         assert_eq!(span(&[], 0.0, 100.0), 0..0);
+    }
+
+    /// A panel's width comes back as the slot it was made from, and a
+    /// width past either end as that end's slot, on a whole pixel.
+    #[test]
+    fn a_width_is_the_slot_it_was_made_from_held_to_the_range() {
+        for slot in [SLOT_MIN, 200.0, SLOT_MAX] {
+            assert_eq!(slot_for(width(slot)), slot);
+        }
+        assert_eq!(slot_for(width(200.0) + 0.4), 200.0);
+        assert_eq!(slot_for(0.0), SLOT_MIN);
+        assert_eq!(slot_for(10_000.0), SLOT_MAX);
     }
 }

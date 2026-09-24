@@ -235,8 +235,15 @@ mid-write leaves nothing behind.
 
 Thumbnails on screen are egui textures, made with `Context::load_texture`
 from the delivered RGBA; `Renderer::render` already applies egui's texture
-deltas, so no GPU code knows about them. `app::chooser::Thumbs` keeps at most
-`MAX_THUMBS` of them, about 32 MiB, and lets the least recently seen go —
+deltas, so no GPU code knows about them. egui samples them bilinearly with
+no mipmaps, and a texture drawn at less than half its size skips texels
+and comes out jagged, so each thumbnail arrives as its own mip chain:
+three copies, `thumbnailer::DISPLAY_SIDES`, 128, 256 and 512 pixels a side,
+each an exact halving of the cache's 512. `ui::Thumb::for_side` draws the
+smallest copy at least as large as the device pixels it lands on — the
+popup's slot and the file list's alike — so none is ever shrunk past 2:1.
+`app::chooser::Thumbs` keeps at most `MAX_THUMBS` sets, about 125 MiB, and
+lets the least recently seen go —
 seen meaning on the popup's screen, which is what `Command::Visible` touches.
 An evicted thumbnail is asked for again when its row is next on screen, and
 comes back from the cache rather than from a decode. The

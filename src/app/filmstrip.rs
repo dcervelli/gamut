@@ -41,6 +41,9 @@ pub(super) struct Filmstrip {
     thumbs_seen: u64,
     reveal: bool,
     visible: Range<usize>,
+    /// The square each thumbnail is fitted into, which the panel's width
+    /// and every file's row are made from: where its edge was last dragged.
+    slot: f32,
 }
 
 impl Default for Filmstrip {
@@ -57,6 +60,7 @@ impl Default for Filmstrip {
             thumbs_seen: 0,
             reveal: false,
             visible: 0..0,
+            slot: filmstrip::SLOT_MIN,
         }
     }
 }
@@ -76,6 +80,24 @@ impl Filmstrip {
         self.dirty = true;
         self.stale = true;
         true
+    }
+
+    /// The square each thumbnail is fitted into.
+    pub(super) fn slot(&self) -> f32 {
+        self.slot
+    }
+
+    /// Fits the thumbnails into a square of `slot`, held between the
+    /// narrowest and the widest the list goes. The rows are laid out again
+    /// at it, and the file on screen kept in view, since what was on
+    /// screen has moved.
+    pub(super) fn set_slot(&mut self, slot: f32) {
+        let slot = slot.clamp(filmstrip::SLOT_MIN, filmstrip::SLOT_MAX);
+        if slot != self.slot {
+            self.slot = slot;
+            self.dirty = true;
+            self.reveal = true;
+        }
     }
 
     /// Notes that the list may have fallen out of its order.
@@ -172,6 +194,7 @@ impl Filmstrip {
         Input {
             rows,
             tops: Arc::clone(&self.tops),
+            slot: self.slot,
             current,
             order: self.order,
             back,
@@ -215,7 +238,7 @@ impl Filmstrip {
         let mut top = 0.0;
         tops.push(top);
         for row in &rows {
-            top += filmstrip::height(row);
+            top += filmstrip::height(row, self.slot);
             tops.push(top);
         }
         (Arc::from(rows), Arc::from(tops))
@@ -236,7 +259,7 @@ fn heading(dir: &str) -> String {
 mod tests {
     use super::*;
     use crate::thumbnailer::Facts;
-    use crate::ui::filmstrip::{Direction, HEADER_HEIGHT, ROW_HEIGHT, Sort};
+    use crate::ui::filmstrip::{Direction, HEADER_HEIGHT, SLOT_MIN, Sort, row_height};
     use std::collections::HashMap;
 
     fn paths(names: &[&str]) -> Vec<PathBuf> {
@@ -280,10 +303,8 @@ mod tests {
         let input = strip.input(&thumbs, |path| known(&facts_known, path), Some(Path::new("b/3.png")), false, true);
         assert_eq!(input.rows.len(), 3, "no headings without sections");
         assert_eq!(input.current, Some(2));
-        assert_eq!(
-            &*input.tops,
-            &[0.0, ROW_HEIGHT, 2.0 * ROW_HEIGHT, 3.0 * ROW_HEIGHT]
-        );
+        let row = row_height(SLOT_MIN);
+        assert_eq!(&*input.tops, &[0.0, row, 2.0 * row, 3.0 * row]);
         assert!(!input.back && input.forward);
         assert_eq!(strip.path_at(1), Some(Path::new("a/2.jpg")));
 
@@ -345,6 +366,30 @@ mod tests {
             .collect();
         assert_eq!(headings, ["JPEG", "PNG", "Type not yet known"]);
         assert_eq!(input.current, None);
+    }
+
+    /// The slot is held to the range the list goes, every file's row is
+    /// laid out again at it, and the file on screen is put back in view.
+    #[test]
+    fn a_new_slot_lays_the_rows_out_again() {
+        use crate::ui::filmstrip::SLOT_MAX;
+        let mut strip = Filmstrip::default();
+        let thumbs = Thumbs::default();
+        strip.relist(&paths(&["a.png", "b.png"]));
+        let nothing = HashMap::new();
+        let input = strip.input(&thumbs, |path| known(&nothing, path), None, false, false);
+        assert_eq!(input.slot, SLOT_MIN);
+
+        strip.set_slot(200.0);
+        let input = strip.input(&thumbs, |path| known(&nothing, path), None, false, false);
+        assert_eq!(input.slot, 200.0);
+        assert_eq!(&*input.tops, &[0.0, row_height(200.0), 2.0 * row_height(200.0)]);
+        assert!(input.reveal);
+
+        strip.set_slot(10_000.0);
+        assert_eq!(strip.slot(), SLOT_MAX);
+        strip.set_slot(0.0);
+        assert_eq!(strip.slot(), SLOT_MIN);
     }
 
     /// The rows on screen are asked for by their files, less the ones the

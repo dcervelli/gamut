@@ -2355,6 +2355,11 @@ impl App {
                     .wanted(rows, &self.thumbs, |path| chooser.given_up(path));
                 self.thumbnailer.prioritize(wanted);
             }
+            // The file list's edge was dragged: the picture is fitted into
+            // what the wider or narrower list leaves on the next frame.
+            ui::Command::FilmstripSlot(slot) => {
+                self.filmstrip.set_slot(slot);
+            }
         }
         Effect::Redraw
     }

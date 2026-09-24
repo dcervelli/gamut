@@ -25,7 +25,8 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   those that have, and moves into place once it is. The list opens in name
   order, whatever order the files were named in. Hiding the interface with
   `` ` `` leaves the list up without its head; `~` closes it with the
-  floating panels.
+  floating panels. Dragging its right edge widens it, the thumbnails
+  growing with it from 128 pixels across to 384.
 
 - Back and forward through the files that have been on screen: `Alt+[`
   and `Alt+]`, or `Alt+Page Up` and `Alt+Page Down`, or the pair at the

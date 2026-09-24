@@ -86,7 +86,8 @@ moved between the frame and the press.
 The panel is part of the chrome rather than a floating panel: the picture
 is fitted beside it, so its width has to be known before egui lays
 anything out. `chrome::Parts` says whether it and the transport bar are
-up, `Chrome::new` gives it `filmstrip::WIDTH` down the left edge of the
+up, and the square its thumbnails are fitted into; `Chrome::new` gives it
+`filmstrip::width` of that slot down the left edge of the
 window under the top bar, the left strip and the bottom bar starting at
 its right edge, and `ui::show` derives the same `Parts` from whether it
 was handed an `Input`, so the two cannot disagree — see
@@ -100,6 +101,21 @@ that also closes the floating panels closes the list with them. The index
 and name are laid over the thumbnail's corner on a wash of the bar's
 ground rather than beside it, which is what keeps a row a fixed height and
 the strip one thumbnail wide.
+
+The panel is widened by dragging its right edge, and the thumbnails grow
+with it: the slot runs from `SLOT_MIN` to `SLOT_MAX`, 128 to 384 logical
+pixels, the narrowest being the thumbnail thread's smallest display copy
+at its own size. The panel
+is not egui's resizable one, whose width would be egui's own state and
+known only once it had laid the panel out, leaving the picture's fit a
+frame behind. Instead `filmstrip::grip`, laid out after the picture so that
+the edge is not the picture's drag while the interface is hidden, turns
+the pointer into a slot through `slot_for` and asks for it as
+`Command::FilmstripSlot`; `app/filmstrip.rs` holds it, clamped, lays the
+rows out again at its height, and hands it back in `Input::slot` and
+`chrome::Parts`, so the next frame is fitted to it. Each row draws the
+copy that covers the slot's device pixels, as the chooser does — see
+[what the screen holds](chooser.md#what-the-screen-holds).
 
 ## The files seen
 

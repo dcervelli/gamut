@@ -85,7 +85,9 @@ left of the picture: a strip of thumbnails, one row per file in the order
 corner of each and the file on screen washed in the accent. A click on a
 row shows that file, and the strip scrolls to the file on screen as it
 changes. The strip takes its width from the picture, which is fitted into
-what is left; `Tab` again gives it back. With a single file there is no
+what is left; `Tab` again gives it back. Drag the strip's right edge to
+make it wider or narrower: the thumbnails grow with it, from 128 pixels
+across to 384. With a single file there is no
 list to show, and neither the button nor the key appears to do anything.
 
 Two menus at the head of the strip say how the list stands. The first

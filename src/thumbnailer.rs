@@ -46,9 +46,14 @@ use crate::image::{Channels, DecodedImage, Region, Stats, encode, exif, resample
 use crate::loader::guard;
 use crate::thumbnail::{self, Dirs, Key, Lookup};
 
-/// The longest side of the copy handed to the screen, which is what the
-/// chooser draws: a quarter of the cache's, and at most 64 KiB of RGBA.
-pub const DISPLAY_SIDE: u32 = 128;
+/// The longest sides of the copies handed to the screen, smallest first:
+/// the cache's own size, and each after it half the one before. The screen
+/// draws with no mipmaps of its own, and a texture drawn at less than half
+/// its size skips texels and comes out jagged, so these are the mipmaps: a
+/// thumbnail drawn at any size has a copy that is at most twice that, and
+/// from the cache's 512 each is an exact halving. At most 64 KiB, 256 KiB
+/// and 1 MiB of RGBA.
+pub const DISPLAY_SIDES: [u32; 3] = [thumbnail::SIDE / 4, thumbnail::SIDE / 2, thumbnail::SIDE];
 
 /// What a file's pixels may come to, decoded, before the thread declines to
 /// hold them: the same figure the player keeps its cache under, being the
@@ -91,9 +96,14 @@ pub struct Facts {
     pub bytes: Option<u64>,
 }
 
-/// The small copy for the screen: straight alpha, at most [`DISPLAY_SIDE`]
-/// a side.
+/// The copies for the screen, each fitted from the same pixels to one of
+/// [`DISPLAY_SIDES`], in that order.
 pub struct Thumb {
+    pub copies: [DisplayCopy; 3],
+}
+
+/// One copy for the screen: straight alpha.
+pub struct DisplayCopy {
     pub width: u32,
     pub height: u32,
     pub rgba: Vec<u8>,
@@ -653,11 +663,24 @@ fn read_png(path: &Path) -> Result<Thumb> {
     Ok(display_copy(info.width, info.height, channels, &pixels))
 }
 
-/// Eight-bit pixels of `channels`, fitted to [`DISPLAY_SIDE`] and widened
-/// to the straight RGBA the screen takes.
+/// Eight-bit pixels of `channels`, fitted to each of [`DISPLAY_SIDES`] and
+/// widened to the straight RGBA the screen takes.
 fn display_copy(width: u32, height: u32, channels: Channels, data: &[u8]) -> Thumb {
+    Thumb {
+        copies: DISPLAY_SIDES.map(|side| fitted_copy(width, height, channels, data, side)),
+    }
+}
+
+/// One of [`display_copy`]'s copies, at most `side` a side.
+fn fitted_copy(
+    width: u32,
+    height: u32,
+    channels: Channels,
+    data: &[u8],
+    side: u32,
+) -> DisplayCopy {
     let (width, height, small) =
-        resample::downscale_bytes(width, height, channels.count(), data, DISPLAY_SIDE);
+        resample::downscale_bytes(width, height, channels.count(), data, side);
     let mut rgba = Vec::with_capacity(width as usize * height as usize * 4);
     for pixel in small.chunks_exact(channels.count()) {
         match channels {
@@ -669,7 +692,7 @@ fn display_copy(width: u32, height: u32, channels: Channels, data: &[u8]) -> Thu
             Channels::Rgba => rgba.extend_from_slice(pixel),
         }
     }
-    Thumb {
+    DisplayCopy {
         width,
         height,
         rgba,
@@ -710,15 +733,16 @@ mod tests {
         let News::Thumb(thumb) = thumbnail_from(&picture, &image, Some(&dirs), &stopped) else {
             panic!("a thumbnail");
         };
-        assert_eq!((thumb.width, thumb.height), (128, 96));
-        assert_eq!(&thumb.rgba[..4], &[90, 90, 90, 255]);
+        let sizes = thumb.copies.each_ref().map(|copy| (copy.width, copy.height));
+        assert_eq!(sizes, [(128, 96), (256, 192), (512, 384)]);
+        assert_eq!(&thumb.copies[0].rgba[..4], &[90, 90, 90, 255]);
         let key = thumbnail::key(&std::path::absolute(&picture).unwrap());
         assert!(dirs.xlarge.join(&key.name).exists(), "in the cache");
 
         let News::Thumb(again) = thumbnail_from(&picture, &image, Some(&dirs), &stopped) else {
             panic!("a thumbnail, from the cache");
         };
-        assert_eq!((again.width, again.height), (128, 96));
+        assert_eq!((again.copies[0].width, again.copies[0].height), (128, 96));
 
         // Adopted, a file waits for nothing else, and is done first.
         let mut queue = Queue::default();
@@ -811,18 +835,19 @@ mod tests {
     #[test]
     fn the_display_copy_is_rgba_and_small() {
         let thumb = display_copy(2, 1, Channels::Gray, &[0, 255]);
-        assert_eq!((thumb.width, thumb.height), (2, 1));
-        assert_eq!(thumb.rgba, [0, 0, 0, 255, 255, 255, 255, 255]);
+        for copy in &thumb.copies {
+            assert_eq!((copy.width, copy.height), (2, 1), "none enlarges");
+            assert_eq!(copy.rgba, [0, 0, 0, 255, 255, 255, 255, 255]);
+        }
         let thumb = display_copy(1, 1, Channels::GrayAlpha, &[9, 3]);
-        assert_eq!(thumb.rgba, [9, 9, 9, 3]);
+        assert_eq!(thumb.copies[0].rgba, [9, 9, 9, 3]);
         let thumb = display_copy(1, 1, Channels::Rgb, &[1, 2, 3]);
-        assert_eq!(thumb.rgba, [1, 2, 3, 255]);
-        let wide = display_copy(512, 256, Channels::Rgba, &[7; 512 * 256 * 4]);
-        assert_eq!((wide.width, wide.height), (DISPLAY_SIDE, DISPLAY_SIDE / 2));
-        assert_eq!(
-            wide.rgba.len(),
-            (DISPLAY_SIDE * DISPLAY_SIDE / 2 * 4) as usize
-        );
+        assert_eq!(thumb.copies[0].rgba, [1, 2, 3, 255]);
+        let wide = display_copy(1024, 512, Channels::Rgba, &[7; 1024 * 512 * 4]);
+        for (copy, side) in wide.copies.iter().zip(DISPLAY_SIDES) {
+            assert_eq!((copy.width, copy.height), (side, side / 2));
+            assert_eq!(copy.rgba.len(), (side * side / 2 * 4) as usize);
+        }
     }
 
     /// The whole trip: a file thumbnailed into a cache directory of the
@@ -859,8 +884,8 @@ mod tests {
         ) else {
             panic!("a thumbnail");
         };
-        assert_eq!((thumb.width, thumb.height), (128, 96));
-        assert_eq!(&thumb.rgba[..4], &[200, 200, 200, 255]);
+        assert_eq!((thumb.copies[0].width, thumb.copies[0].height), (128, 96));
+        assert_eq!(&thumb.copies[0].rgba[..4], &[200, 200, 200, 255]);
 
         // In the cache, at the cache's size, with the chunks.
         let key = thumbnail::key(&std::path::absolute(&picture).unwrap());
