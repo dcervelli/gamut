@@ -23,7 +23,7 @@ use egui::{Align, Layout, RectAlign, Sense, WidgetInfo, WidgetType, load::SizedT
 
 use super::chrome::{BAR_HEIGHT, BAR_PADDING, BUTTON_GAP, Corners, Pass, STEP_SEAM};
 use super::control::{Command, Control};
-use super::style::{ACTIVE_BUTTON_WASH, SCROLLBAR_GUTTER};
+use super::style::{ACTIVE_BUTTON_WASH, SCROLLBAR_GUTTER, SCROLLBAR_WIDTH};
 use super::{PADDING, TEXT_SIZE, fonts, icon, menu};
 
 /// The square each thumbnail is fitted into: the thumbnail thread's own
@@ -41,6 +41,10 @@ pub const HEAD_HEIGHT: f32 = BAR_HEIGHT;
 /// What the panel takes off the picture: a row, and the scrollbar's gutter
 /// beside it.
 pub const WIDTH: f32 = ROW_HEIGHT + SCROLLBAR_GUTTER;
+/// The scrollbar stands this far in from the panel's edge, so that the
+/// bar and the hairline along the edge do not read as one thick rule;
+/// what is left of the gutter parts it from the rows.
+const SCROLLBAR_OUTER_MARGIN: f32 = 4.0;
 /// The label over a thumbnail's corner is inset this far from the corner
 /// of its backing, and the backing is this much of the bar's ground.
 const LABEL_PAD: f32 = 3.0;
@@ -174,6 +178,9 @@ pub enum Row {
         index: usize,
         /// Its name, with nothing of the path it sits in.
         name: String,
+        /// The whole path, for the tooltip: the name over the thumbnail is
+        /// cut to the slot.
+        path: String,
         /// Its thumbnail, once one has arrived and while the screen still
         /// holds it.
         thumb: Option<SizedTexture>,
@@ -327,6 +334,9 @@ fn head(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
 fn rows(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
     let count = input.rows.len();
     let total = input.tops.last().copied().unwrap_or(0.0);
+    ui.spacing_mut().scroll.bar_outer_margin = SCROLLBAR_OUTER_MARGIN;
+    ui.spacing_mut().scroll.bar_inner_margin =
+        SCROLLBAR_GUTTER - SCROLLBAR_WIDTH - SCROLLBAR_OUTER_MARGIN;
     let scroll = egui::ScrollArea::vertical()
         .id_salt("filmstrip rows")
         .auto_shrink(false)
@@ -347,8 +357,13 @@ fn rows(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
             for row in range.clone() {
                 match &input.rows[row] {
                     Row::Header(label) => header(pass, ui, label, row_rect(row)),
-                    Row::File { index, name, thumb } => {
-                        file(pass, ui, input, row, row_rect(row), *index, name, *thumb);
+                    Row::File {
+                        index,
+                        name,
+                        path,
+                        thumb,
+                    } => {
+                        file(pass, ui, input, row, row_rect(row), *index, name, path, *thumb);
                     }
                 }
             }
@@ -373,8 +388,10 @@ fn rows(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
 }
 
 /// A section's heading: its label, set bold in the dim ink, cut to the
-/// row. Nothing to press.
+/// row, and said in full when rested on. Nothing to press.
 fn header(pass: &mut Pass, ui: &mut egui::Ui, label: &str, rect: egui::Rect) {
+    let response = ui.interact(rect, ui.id().with(("filmstrip heading", label)), Sense::HOVER);
+    pass.caption(response, vec![label.to_string()], Vec::new());
     let dim: egui::Color32 = pass.theme.text_dim.into();
     let bold = egui::FontId::new(TEXT_SIZE, egui::FontFamily::Name(fonts::BOLD.into()));
     let room = (rect.width() - 2.0 * INSET).max(0.0);
@@ -390,7 +407,8 @@ fn header(pass: &mut Pass, ui: &mut egui::Ui, label: &str, rect: egui::Rect) {
 /// A file's row: its thumbnail in its slot, and over the slot's top-left
 /// corner its place in the list and its name. Washed in the accent when it
 /// is the file on screen, lit under the pointer, and a press on it shows
-/// the file.
+/// the file. Rested on, it says the name in full, with the whole path
+/// under it: the name over the thumbnail is cut to the slot.
 #[allow(clippy::too_many_arguments, reason = "one row, its parts by name")]
 fn file(
     pass: &mut Pass,
@@ -400,12 +418,14 @@ fn file(
     rect: egui::Rect,
     index: usize,
     name: &str,
+    path: &str,
     thumb: Option<SizedTexture>,
 ) {
     let theme = pass.theme;
     let control = Control::Thumb(row);
     let response = ui.interact(rect, ui.id().with(("filmstrip row", row)), Sense::CLICK);
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, control.label()));
+    let response = pass.caption(response, vec![name.to_string()], vec![path.to_string()]);
     let painter = ui.painter_at(rect);
     if input.current == Some(row) {
         painter.rect_filled(rect, 0.0, theme.accent.with_alpha(ACTIVE_BUTTON_WASH));

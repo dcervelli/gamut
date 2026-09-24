@@ -743,6 +743,7 @@ fn strip(count: usize, current: Option<usize>, reveal: bool) -> filmstrip::Input
         .map(|index| filmstrip::Row::File {
             index: index + 1,
             name: format!("{index:03}.png"),
+            path: format!("birds/{index:03}.png"),
             thumb: None,
         })
         .collect();

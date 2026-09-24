@@ -2313,7 +2313,17 @@ impl ApplicationHandler<UserEvent> for App {
             response.as_ref().is_some_and(|response| response.repaint)
                 && !matches!(event, WindowEvent::RedrawRequested),
         );
-        let consumed = response.is_some_and(|response| response.consumed);
+        // A key is egui's only while one of its fields has the keyboard.
+        // egui-winit says it took `Tab` whether or not one has, since egui
+        // would move its focus with it; nothing here takes the focus a
+        // press would give it, so there is nothing for `Tab` to move to,
+        // and the key stays on the table.
+        let consumed = response.is_some_and(|response| response.consumed)
+            && !(matches!(event, WindowEvent::KeyboardInput { .. })
+                && !self
+                    .shown
+                    .as_ref()
+                    .is_some_and(|shown| shown.gui.ctx.egui_wants_keyboard_input()));
         let effect = match event {
             _ if consumed && !matches!(event, WindowEvent::RedrawRequested) => Effect::Nothing,
             WindowEvent::CloseRequested => Effect::Quit,

@@ -201,6 +201,7 @@ impl Filmstrip {
                         .file_name()
                         .map(|name| name.to_string_lossy().into_owned())
                         .unwrap_or_else(|| path.display().to_string()),
+                    path: path.display().to_string(),
                     thumb: thumbs.get(path),
                 });
             }
@@ -296,17 +297,20 @@ mod tests {
                 Row::File {
                     index: 1,
                     name: "1.png".to_string(),
+                    path: "a/1.png".to_string(),
                     thumb: None
                 },
                 Row::File {
                     index: 2,
                     name: "2.jpg".to_string(),
+                    path: "a/2.jpg".to_string(),
                     thumb: None
                 },
                 Row::Header("b".to_string()),
                 Row::File {
                     index: 3,
                     name: "3.png".to_string(),
+                    path: "b/3.png".to_string(),
                     thumb: None
                 },
             ]

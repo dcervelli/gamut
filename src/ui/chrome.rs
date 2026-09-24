@@ -828,6 +828,16 @@ impl Pass<'_> {
         self.tooltip(response, Tip::Control(control), enabled)
     }
 
+    /// Hangs words the frame itself holds off `response`, laid out as a
+    /// tooltip is: `title` names the thing, and `hints` go under it. For
+    /// what the application's namer cannot know — a row of the file list
+    /// wears a file's own name, and says it in full this way.
+    pub fn caption(&self, response: Response, title: Vec<String>, hints: Vec<String>) -> Response {
+        let theme = self.theme;
+        let tooltip = super::tooltip::Tooltip { title, hints };
+        response.on_hover_ui(move |ui| super::tooltip::show(ui, &tooltip, theme))
+    }
+
     /// Hangs the tooltip for `tip` off `response`: what the thing is called,
     /// and under it the keys that do the same job — or, for a dead control,
     /// why it is dead.
