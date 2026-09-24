@@ -214,7 +214,8 @@ screen does not show:
 `Enter` or Export writes the file, `Esc`, Cancel or a click outside puts the
 dialog away. The new file joins the list after the file on screen and is
 shown, upright and at its own settings, since what was done is now in its
-pixels. Stepping back finds the original as you left it. An export is not on
+pixels. One export is written at a time: while a large one is still being
+written, the dialog opens but Export waits, and says so. Stepping back finds the original as you left it. An export is not on
 the undo stack; delete the new file as you would any other.
 
 ## Playing an animation

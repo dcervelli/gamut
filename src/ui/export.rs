@@ -9,7 +9,9 @@
 //! and false color — and the dialog says what the new file loses that the
 //! screen would not: [`warnings`] reads the [`Facts`] the application hands
 //! over as the dialog opens, one line each. None of them refuse; only the
-//! name and the size can.
+//! name and the size can — and an export still being written, since the
+//! file each writes is shown as it lands, and one at a time is the only
+//! order that makes sense of that.
 //!
 //! A modal for the reason the rename dialog is one, and drawn with its
 //! pieces — see `ui::rename`. The name is judged by [`judge`] against a
@@ -498,12 +500,19 @@ pub struct Input {
     /// Whether this is the first frame the dialog is up — see
     /// `rename::Input::opened`.
     pub opened: bool,
+    /// Whether the last export is still being written: one at a time, so
+    /// Export is dead until it lands, and the dialog says why.
+    pub busy: bool,
 }
 
-/// Whether Export does anything: the name will do, and so will the size.
+/// Whether Export does anything: the name will do, so will the size, and
+/// nothing is still being written.
 fn allowed(input: &Input) -> bool {
-    input.verdict.allows() && input.resize.allows()
+    input.verdict.allows() && input.resize.allows() && !input.busy
 }
+
+/// What the dialog says while the last export is still being written.
+pub const BUSY: &str = "Still writing the last export.";
 
 /// Draws the dialog, and reads what was pressed in it.
 pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
@@ -554,6 +563,10 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
                 heading(pass, ui, inside);
                 ui.add_space(GAP / 2.0);
                 said(pass, ui, &input.warnings, inside);
+                ui.add_space(GAP);
+            }
+            if input.busy {
+                rename::line(pass, ui, inside, Some((BUSY.to_string(), Tone::Caution)));
                 ui.add_space(GAP);
             }
             rename::ok_cancel(

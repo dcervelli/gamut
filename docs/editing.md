@@ -180,6 +180,17 @@ enlarged bicubic whatever the screen's own filter; `Warning::Bicubic` says
 so where the screen shows nearest, the one warning that is about what the
 new file gains rather than loses.
 
+One export at a time. The file each writes is taken into the list and
+shown as it lands, so a second under way would land on top of the first
+and the window would jump twice; and a large picture in a debug build
+takes long enough for a second press to be tempting. `Copying` counts the
+work aside it has started and not yet seen reported — `aside_pending`,
+counted from the start to the report's arrival at a poll rather than from
+the thread, so that the answer changes only when the loop looks — and
+while it is pending the dialog opens as ever but Export and `Enter` are
+dead, with a line saying why; `App::export_shown` refuses the press too,
+so the button and the press cannot disagree.
+
 An export is not an edit and is not on the undo stack. It changes nothing
 that was there; the new file is deleted like any other.
 

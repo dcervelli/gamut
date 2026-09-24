@@ -194,13 +194,15 @@ impl App {
 
     /// Export: puts the dialog away and writes the picture as shown, at
     /// the size asked for, on a thread of its own, if the name and the
-    /// size will do. What it did comes back through [`App::poll_copies`],
-    /// which hands a file written to [`App::exported`].
+    /// size will do and the last export has landed. What it did comes
+    /// back through [`App::poll_copies`], which hands a file written to
+    /// [`App::exported`].
     pub(super) fn export_shown(&mut self) {
         let Some(exporting) = &self.exporting else {
             return;
         };
-        if !exporting.verdict.allows() || !exporting.resize.allows() {
+        if !exporting.verdict.allows() || !exporting.resize.allows() || self.copying.aside_pending()
+        {
             return;
         }
         let (format, quality, size) = (exporting.format, exporting.quality, exporting.resize.size);
@@ -246,6 +248,7 @@ impl App {
 
     /// What the dialog is drawn from this frame, while it is up.
     pub(super) fn export_input(&mut self) -> Option<export::Input> {
+        let busy = self.copying.aside_pending();
         let exporting = self.exporting.as_mut()?;
         Some(export::Input {
             source: name_of(&exporting.source),
@@ -256,6 +259,7 @@ impl App {
             verdict: exporting.verdict.clone(),
             warnings: export::warnings(exporting.facts, exporting.format, &exporting.resize),
             opened: std::mem::take(&mut exporting.opened),
+            busy,
         })
     }
 

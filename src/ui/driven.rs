@@ -1416,6 +1416,7 @@ fn the_export_dialog_takes_the_keys_and_hands_back_the_name_and_format() {
             verdict,
             warnings: vec![Warning::MetadataDropped],
             opened,
+            busy: false,
         })
     };
     harness.state_mut().input.export = dialog("photo-edited.png", export::Verdict::Fine, true);
@@ -1515,6 +1516,23 @@ fn the_export_dialog_takes_the_keys_and_hands_back_the_name_and_format() {
         .resize
         .edit(export::Dimension::Height, "0".to_string());
     harness.state_mut().input.export = Some(refused);
+    harness.run();
+    assert!(
+        harness
+            .get_by_label("Export")
+            .accesskit_node()
+            .is_disabled()
+    );
+    assert!(
+        !pressed(&mut harness, egui::Key::Enter)
+            .iter()
+            .any(|command| matches!(command, Command::Press(Control::ExportTo)))
+    );
+
+    // So is an export still being written, and the dialog says so.
+    let mut busy = dialog("b.png", export::Verdict::Fine, false).expect("a dialog");
+    busy.busy = true;
+    harness.state_mut().input.export = Some(busy);
     harness.run();
     assert!(
         harness

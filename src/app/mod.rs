@@ -4182,8 +4182,19 @@ mod tests {
         assert_eq!(resize(&mut app).size, [16, 12]);
         let _ = app.act(ui::Command::Press(ui::Control::ExportTo));
         assert!(app.export_input().is_none());
+        // One at a time: the dialog opens again, but Export is dead until
+        // the write has landed and been looked at.
+        let _ = app.perform(Export);
+        assert!(app.export_input().unwrap().busy);
+        let _ = app.act(ui::Command::ExportName("second.png".to_string()));
+        let _ = app.act(ui::Command::Press(ui::Control::ExportTo));
+        assert!(app.export_input().is_some(), "held");
         app.copying.join_all();
+        assert!(app.export_input().unwrap().busy, "until the loop looks");
         let _ = app.poll_copies();
+        assert!(!app.export_input().unwrap().busy);
+        let _ = app.act(ui::Command::Press(ui::Control::CancelExport));
+        assert!(!dir.join("second.png").exists());
         let written = ::image::open(dir.join("big.png")).expect("big.png was written");
         assert_eq!((written.width(), written.height()), (16, 12));
         assert_eq!(said(&app), "Exported big.png.");

@@ -36,7 +36,8 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   up: a picture made smaller averages what each new pixel covers, and one
   made larger is enlarged bicubic whatever the window's own filter, which
   the dialog warns of where the window is showing nearest. The new file
-  joins the list and is shown. The file menu has the item too, as Export.
+  joins the list and is shown; one is written at a time, and Export waits
+  for the last to land. The file menu has the item too, as Export.
 
 - `;` and `'` turn the picture a quarter counterclockwise and clockwise. The
   turn is how the picture is shown, not
