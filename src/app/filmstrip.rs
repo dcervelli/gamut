@@ -60,7 +60,7 @@ impl Default for Filmstrip {
             thumbs_seen: 0,
             reveal: false,
             visible: 0..0,
-            slot: filmstrip::SLOT_MIN,
+            slot: filmstrip::SLOT_DEFAULT,
         }
     }
 }
@@ -223,6 +223,7 @@ impl Filmstrip {
             }
             for index in range {
                 let path = &self.paths[index];
+                let known = key(path);
                 rows.push(Row::File {
                     index: index + 1,
                     name: path
@@ -230,6 +231,10 @@ impl Filmstrip {
                         .map(|name| name.to_string_lossy().into_owned())
                         .unwrap_or_else(|| path.display().to_string()),
                     path: path.display().to_string(),
+                    format: known.format,
+                    size: known.size,
+                    bytes: known.bytes,
+                    modified: known.modified,
                     thumb: thumbs.get(path),
                 });
             }
@@ -259,7 +264,7 @@ fn heading(dir: &str) -> String {
 mod tests {
     use super::*;
     use crate::thumbnailer::Facts;
-    use crate::ui::filmstrip::{Direction, HEADER_HEIGHT, SLOT_MIN, Sort, row_height};
+    use crate::ui::filmstrip::{Direction, HEADER_HEIGHT, SLOT_DEFAULT, SLOT_MIN, Sort, row_height};
     use std::collections::HashMap;
 
     fn paths(names: &[&str]) -> Vec<PathBuf> {
@@ -280,6 +285,7 @@ mod tests {
             title: None,
             format,
             bytes: None,
+            modified: None,
         }
     }
 
@@ -303,7 +309,7 @@ mod tests {
         let input = strip.input(&thumbs, |path| known(&facts_known, path), Some(Path::new("b/3.png")), false, true);
         assert_eq!(input.rows.len(), 3, "no headings without sections");
         assert_eq!(input.current, Some(2));
-        let row = row_height(SLOT_MIN);
+        let row = row_height(SLOT_DEFAULT);
         assert_eq!(&*input.tops, &[0.0, row, 2.0 * row, 3.0 * row]);
         assert!(!input.back && input.forward);
         assert_eq!(strip.path_at(1), Some(Path::new("a/2.jpg")));
@@ -325,12 +331,20 @@ mod tests {
                     index: 1,
                     name: "1.png".to_string(),
                     path: "a/1.png".to_string(),
+                    format: Some("PNG"),
+                    size: None,
+                    bytes: None,
+                    modified: None,
                     thumb: None
                 },
                 Row::File {
                     index: 2,
                     name: "2.jpg".to_string(),
                     path: "a/2.jpg".to_string(),
+                    format: Some("JPEG"),
+                    size: None,
+                    bytes: None,
+                    modified: None,
                     thumb: None
                 },
                 Row::Header("b".to_string()),
@@ -338,6 +352,10 @@ mod tests {
                     index: 3,
                     name: "3.png".to_string(),
                     path: "b/3.png".to_string(),
+                    format: None,
+                    size: None,
+                    bytes: None,
+                    modified: None,
                     thumb: None
                 },
             ]
@@ -378,7 +396,7 @@ mod tests {
         strip.relist(&paths(&["a.png", "b.png"]));
         let nothing = HashMap::new();
         let input = strip.input(&thumbs, |path| known(&nothing, path), None, false, false);
-        assert_eq!(input.slot, SLOT_MIN);
+        assert_eq!(input.slot, SLOT_DEFAULT);
 
         strip.set_slot(200.0);
         let input = strip.input(&thumbs, |path| known(&nothing, path), None, false, false);

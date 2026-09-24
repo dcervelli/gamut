@@ -11,11 +11,15 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 - A file list. `Tab`, or the button at the head of the top bar, puts a
   strip of thumbnails down the left of the picture, one row per file in
   the order `]` and `[` walk, each thumbnail with the file's place in the
-  list and its name over its corner and the file on screen washed in the
-  accent; a click on a row shows that file, and the strip scrolls to the
+  list and its name above it — a long name cut in its middle, keeping its
+  extension — and the file on screen washed in the accent. Resting on a
+  row gives the folder, the type, the size in pixels and on disk, and when
+  the file was last changed; sorted by anything but name, each thumbnail
+  wears the value it is sorted by — for a path, its folder; a click on a
+  row shows that file, and the strip scrolls to the
   file on screen as it changes. Two menus at its head break the list into
   sections — none, by folder, by type — and sort each section by name,
-  path, type, size on disk, width, height or area, ascending or
+  path, type, date, size on disk, width, height or area, ascending or
   descending — the sections always ascending — and the list itself is put
   in that order, so that the
   keys, the counter and the chooser all walk it. A sort keeps the order of

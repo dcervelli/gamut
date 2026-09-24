@@ -12,6 +12,7 @@
 use std::cmp::Ordering;
 use std::ops::Range;
 use std::path::Path;
+use std::time::SystemTime;
 
 use crate::thumbnailer::Facts;
 use crate::ui::filmstrip::{Direction, Order, Section, Sort};
@@ -27,6 +28,8 @@ pub(super) struct Key<'a> {
     pub bytes: Option<u64>,
     /// Its size in pixels.
     pub size: Option<(u32, u32)>,
+    /// When it was last written.
+    pub modified: Option<SystemTime>,
 }
 
 impl<'a> Key<'a> {
@@ -38,6 +41,7 @@ impl<'a> Key<'a> {
             format: facts.and_then(|facts| facts.format),
             bytes: facts.and_then(|facts| facts.bytes),
             size: facts.and_then(|facts| facts.size),
+            modified: facts.and_then(|facts| facts.modified),
         }
     }
 
@@ -64,12 +68,13 @@ impl<'a> Key<'a> {
     }
 }
 
-/// What a key sorts by, once `sort` has picked it out: a word or a number,
-/// and either not yet known.
+/// What a key sorts by, once `sort` has picked it out: a word, a number
+/// or a moment, and any of them not yet known.
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
 enum Rank {
     Word(String),
     Number(u64),
+    Moment(SystemTime),
 }
 
 fn rank(key: &Key, sort: Sort) -> Option<Rank> {
@@ -78,6 +83,7 @@ fn rank(key: &Key, sort: Sort) -> Option<Rank> {
         Sort::Path => Rank::Word(key.path.display().to_string()),
         Sort::Type => Rank::Word(key.format?.to_string()),
         Sort::Size => Rank::Number(key.bytes?),
+        Sort::Date => Rank::Moment(key.modified?),
         Sort::Width => Rank::Number(u64::from(key.size?.0)),
         Sort::Height => Rank::Number(u64::from(key.size?.1)),
         Sort::Area => {
@@ -148,12 +154,14 @@ pub(super) fn groups<'a>(
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use std::time::Duration;
 
     struct File {
         path: PathBuf,
         format: Option<&'static str>,
         bytes: Option<u64>,
         size: Option<(u32, u32)>,
+        modified: Option<SystemTime>,
     }
 
     fn file(path: &str, format: Option<&'static str>, bytes: Option<u64>, size: Option<(u32, u32)>) -> File {
@@ -162,6 +170,7 @@ mod tests {
             format,
             bytes,
             size,
+            modified: None,
         }
     }
 
@@ -171,6 +180,7 @@ mod tests {
             format: files[index].format,
             bytes: files[index].bytes,
             size: files[index].size,
+            modified: files[index].modified,
         }
     }
 
@@ -219,17 +229,21 @@ mod tests {
     /// cannot read after that.
     #[test]
     fn each_sort_puts_its_key_ascending_and_the_unknown_last() {
-        let files = [
+        let mut files = [
             file("b/two.png", Some("PNG"), Some(300), Some((10, 40))),
             file("a/three.jpg", Some("JPEG"), None, Some((30, 10))),
             file("c/one.gif", None, Some(100), None),
             file("a/four.png", Some("PNG"), Some(200), Some((20, 20))),
         ];
+        for (file, seconds) in files.iter_mut().zip([Some(50), Some(10), None, Some(30)]) {
+            file.modified = seconds.map(|seconds| SystemTime::UNIX_EPOCH + Duration::from_secs(seconds));
+        }
         let arranged = |sort| arrange(files.len(), order(Section::None, sort), key(&files));
         assert_eq!(arranged(Sort::Name), [3, 2, 1, 0], "four, one, three, two");
         assert_eq!(arranged(Sort::Path), [3, 1, 0, 2]);
         assert_eq!(arranged(Sort::Type), [1, 0, 3, 2], "JPEG, PNG, PNG, then unknown");
         assert_eq!(arranged(Sort::Size), [2, 3, 0, 1], "100, 200, 300, then unknown");
+        assert_eq!(arranged(Sort::Date), [1, 3, 0, 2], "earliest first, then unknown");
         assert_eq!(arranged(Sort::Width), [0, 3, 1, 2]);
         assert_eq!(arranged(Sort::Height), [1, 3, 0, 2]);
         assert_eq!(arranged(Sort::Area), [1, 0, 3, 2], "300, 400, 400, then unknown");

@@ -434,19 +434,25 @@ pub(super) fn copy_items(pass: &mut Pass, ui: &mut Ui) {
 /// item trails off: it opens a dialog rather than doing anything yet.
 pub(super) fn file_items(pass: &mut Pass, ui: &mut Ui) {
     titled(pass, ui, &Control::FileMenu.label(), |pass, ui| {
-        let items = [
+        let mut items = vec![
             (Control::Copies(Copies::Name), "Copy name".to_string()),
             (Control::Copies(Copies::Path), "Copy path".to_string()),
             (
                 Control::Rename,
                 format!("{}\u{2026}", Control::Rename.label()),
             ),
+        ];
+        // Offered only where there is a list to take a file off.
+        if pass.input.count > 1 {
+            items.push((Control::Remove, Control::Remove.label()));
+        }
+        items.extend([
             (Control::Delete, Control::Delete.label()),
             (
                 Control::Export,
                 format!("{}\u{2026}", Control::Export.label()),
             ),
-        ];
+        ]);
         for (control, label) in items {
             let mut button = Button::new(label);
             if let Some(key) = pass.namer.shortcut(control) {

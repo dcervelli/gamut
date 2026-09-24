@@ -1646,6 +1646,7 @@ impl App {
                 title: exif.title().map(str::to_string),
                 format: facts.reader,
                 bytes: facts.bytes,
+                modified: facts.modified,
             },
         );
         // Made from the picture itself, decoded already, rather than read
@@ -4396,6 +4397,7 @@ mod tests {
                 title: None,
                 format: Some("PNG"),
                 bytes: None,
+                modified: None,
             }),
         };
         app.take_thumbnail(learned("a.png", 4));
@@ -4509,10 +4511,10 @@ mod tests {
         assert!(!app.filmstrip_showing());
         assert_eq!(app.perform(Action::ToggleFilmstrip), Effect::Redraw);
         assert!(app.filmstrip_showing());
-        assert_eq!(app.parts().filmstrip, Some(ui::filmstrip::SLOT_MIN));
+        assert_eq!(app.parts().filmstrip, Some(ui::filmstrip::SLOT_DEFAULT));
         let narrowed = app.viewport();
-        assert_eq!(narrowed.x, whole.x + ui::filmstrip::width(ui::filmstrip::SLOT_MIN));
-        assert_eq!(narrowed.width, whole.width - ui::filmstrip::width(ui::filmstrip::SLOT_MIN));
+        assert_eq!(narrowed.x, whole.x + ui::filmstrip::width(ui::filmstrip::SLOT_DEFAULT));
+        assert_eq!(narrowed.width, whole.width - ui::filmstrip::width(ui::filmstrip::SLOT_DEFAULT));
 
         let mut harness = driven(app);
         assert!(harness.query_by_label("Show file 1").is_some());
@@ -4557,9 +4559,9 @@ mod tests {
         assert!(!app.panels.show_ui);
         assert!(app.filmstrip_showing());
         let viewport = app.viewport();
-        assert_eq!(viewport.x, ui::filmstrip::width(ui::filmstrip::SLOT_MIN));
+        assert_eq!(viewport.x, ui::filmstrip::width(ui::filmstrip::SLOT_DEFAULT));
         assert_eq!(viewport.y, 0.0);
-        assert_eq!(viewport.width, WINDOW[0] - ui::filmstrip::width(ui::filmstrip::SLOT_MIN));
+        assert_eq!(viewport.width, WINDOW[0] - ui::filmstrip::width(ui::filmstrip::SLOT_DEFAULT));
         assert_eq!(viewport.height, WINDOW[1]);
 
         let mut harness = driven(app);

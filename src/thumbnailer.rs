@@ -35,6 +35,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
+use std::time::SystemTime;
 
 use anyhow::{Context, Result, anyhow};
 
@@ -94,6 +95,9 @@ pub struct Facts {
     pub format: Option<&'static str>,
     /// Its size on disk, or `None` where it could not be stat'ed.
     pub bytes: Option<u64>,
+    /// When it was last written, or `None` where the file system does not
+    /// say.
+    pub modified: Option<SystemTime>,
 }
 
 /// The copies for the screen, each fitted from the same pixels to one of
@@ -411,13 +415,15 @@ fn run(
 /// the container's headers — and the chooser matches on it.
 fn header(path: &Path) -> Result<Facts> {
     let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let metadata = std::fs::metadata(&absolute).ok();
     guard("reading the header", || {
         Ok(Facts {
             size: decode::probe(&absolute)?,
             sequence: decode::sequence(&absolute)?,
             title: title(&absolute),
             format: decode::reader(&absolute),
-            bytes: stat(&absolute).ok().map(|(_, bytes)| bytes),
+            bytes: metadata.as_ref().map(std::fs::Metadata::len),
+            modified: metadata.and_then(|metadata| metadata.modified().ok()),
         })
     })
 }
@@ -768,6 +774,7 @@ mod tests {
             title: None,
             format: None,
             bytes: None,
+            modified: None,
         };
         let mut queue = Queue::default();
         queue.take(Ask::Enqueue(vec![
@@ -872,6 +879,7 @@ mod tests {
                 title: None,
                 format: decode::reader(&picture),
                 bytes: Some(std::fs::metadata(&picture).unwrap().len()),
+                modified: std::fs::metadata(&picture).unwrap().modified().ok(),
             }
         );
         assert!(facts.format.is_some(), "a PNG has a decoder that claims it");

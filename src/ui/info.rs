@@ -647,15 +647,35 @@ fn holds(current: &Current) -> String {
 /// the round number is what a size is compared by, the exact one what it is
 /// checked by.
 fn format_bytes(bytes: u64) -> String {
-    const UNITS: [&str; 5] = ["kB", "MB", "GB", "TB", "PB"];
     if bytes < 1000 {
         return format!("{bytes} bytes");
     }
-    let mut value = bytes as f64 / 1000.0;
+    format!("{} ({} bytes)", round_bytes(bytes), grouped(bytes))
+}
+
+/// A file's size in the unit that reads best, and nothing more: what the
+/// file list says, where there is no room for the exact count.
+pub(super) fn round_bytes(bytes: u64) -> String {
+    rounded(bytes, "bytes", &["kB", "MB", "GB", "TB", "PB"])
+}
+
+/// A count of pixels in the unit that reads best: `2.07 MP`.
+pub(super) fn round_pixels(pixels: u64) -> String {
+    rounded(pixels, "pixels", &["kP", "MP", "GP"])
+}
+
+/// `count` to three significant figures in the largest of `units` — each a
+/// thousand times the one before, the first a thousand ones — that keeps it
+/// at one or more; under a thousand, the count itself in `ones`.
+fn rounded(count: u64, ones: &str, units: &[&str]) -> String {
+    if count < 1000 {
+        return format!("{count} {ones}");
+    }
+    let mut value = count as f64 / 1000.0;
     let mut unit = 0;
     // 999.5 rather than 1000: the rounding below would carry it to "1000 MB",
     // which is a size nobody writes.
-    while value >= 999.5 && unit + 1 < UNITS.len() {
+    while value >= 999.5 && unit + 1 < units.len() {
         value /= 1000.0;
         unit += 1;
     }
@@ -667,7 +687,7 @@ fn format_bytes(bytes: u64) -> String {
     } else {
         format!("{value:.0}")
     };
-    format!("{rounded} {} ({} bytes)", UNITS[unit], grouped(bytes))
+    format!("{rounded} {}", units[unit])
 }
 
 /// `1258291` as `1,258,291`: a byte count is read by its digits, and eight of
@@ -688,7 +708,7 @@ fn grouped(value: u64) -> String {
 /// read off this panel — or copied out of it — is bound for wherever the
 /// reader is; see [`crate::clock`], which also has the local clock a pasted
 /// picture is named from.
-fn format_time(time: SystemTime) -> String {
+pub(super) fn format_time(time: SystemTime) -> String {
     let at = clock::utc(time);
     format!(
         "{:04}-{:02}-{:02} {:02}:{:02}:{:02} UTC",

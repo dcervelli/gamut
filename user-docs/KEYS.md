@@ -81,9 +81,12 @@ taken out of it.
 
 `Tab`, or the button at the head of the top bar, puts the list down the
 left of the picture: a strip of thumbnails, one row per file in the order
-`]` and `[` walk, with the file's place in the list and its name over the
-corner of each and the file on screen washed in the accent. A click on a
-row shows that file, and the strip scrolls to the file on screen as it
+`]` and `[` walk, with the file's place in the list and its name above
+each and the file on screen washed in the accent. A name too long for
+the row loses its middle rather than its end, so that its extension and
+any number before it still show. Resting the pointer on a row gives the
+name in full, the folder it is in, the kind of file, its size in pixels
+and on disk, and when it was last changed, on this machine's clock. A click on a row shows that file, and the strip scrolls to the file on screen as it
 changes. The strip takes its width from the picture, which is fitted into
 what is left; `Tab` again gives it back. Drag the strip's right edge to
 make it wider or narrower: the thumbnails grow with it, from 128 pixels
@@ -93,14 +96,17 @@ list to show, and neither the button nor the key appears to do anything.
 Two menus at the head of the strip say how the list stands. The first
 breaks it into sections — none, one for each folder, or one for each kind
 of file — each with a heading, in ascending order. The second sorts the
-files of each section by name, by path, by kind of file, by size on disk,
-or by width, height or area in pixels, and its last two rows run the sort
-ascending or descending; the button wears which. The list itself is put in
+files of each section by name, by path, by kind of file, by when the file
+was last changed, by size on disk, or by width, height or area in pixels,
+and its last two rows run the sort ascending or descending; the button
+wears which. Sorted by anything but the name, each thumbnail wears the
+value it is sorted by across its foot — for the path, the folder, cut in
+its middle where it is long. The list itself is put in
 that order: the keys, the count in the bar and the chooser all walk what
 the strip shows. A sort keeps the order of files it cannot tell apart, so
 sorting by size and then by kind leaves each kind in size order, the way
-sorting a spreadsheet twice does. The kind of a file, its size and its
-dimensions are read from its header in the background, and a file whose
+sorting a spreadsheet twice does. The kind of a file, its size, its date
+and its dimensions are read from its header in the background, and a file whose
 header has not been read yet sorts after those that have — under a
 heading that says so, when the list is in sections by kind — and moves
 into place once it is. The list opens in name order whatever order the
@@ -181,8 +187,9 @@ put one up, and the window says so instead.
 ### Renaming and deleting
 
 The button before the file's name in the top bar opens a menu of the file
-itself: copy its name, copy its path, rename it, delete it, export it. The
-keys above do the same without the menu.
+itself: copy its name, copy its path, rename it, take it off the list
+while there is more than one file, delete it, export it. The keys above
+do the same without the menu.
 
 `Backspace` takes the file on screen off the list and shows the next, or
 the previous one from the end of the list, leaving the file exactly as it

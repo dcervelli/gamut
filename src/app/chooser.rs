@@ -730,6 +730,7 @@ mod tests {
                 format: None,
 
                 bytes: None,
+                modified: None,
             },
         ));
         chooser.take(Delivered {
@@ -745,6 +746,7 @@ mod tests {
                 format: None,
 
                 bytes: None,
+                modified: None,
             }),
         });
         let input = chooser.input(&thumbs, None);
@@ -784,6 +786,7 @@ mod tests {
             format: None,
 
             bytes: None,
+            modified: None,
         };
         chooser.take(Delivered {
             path: PathBuf::from("buteo-buteo-2.webp"),
@@ -878,6 +881,7 @@ mod tests {
                 format: None,
 
                 bytes: None,
+                modified: None,
             },
         );
         assert_eq!(chooser.wanted(0..3, &thumbs), paths(&["a.png"]));
@@ -892,6 +896,7 @@ mod tests {
             format: None,
 
             bytes: None,
+            modified: None,
         };
         assert!(chooser.learn(Path::new("b.png"), facts.clone()));
         assert!(!chooser.learn(Path::new("b.png"), facts));

@@ -744,6 +744,10 @@ fn strip(count: usize, current: Option<usize>, reveal: bool) -> filmstrip::Input
             index: index + 1,
             name: format!("{index:03}.png"),
             path: format!("birds/{index:03}.png"),
+            format: None,
+            size: None,
+            bytes: None,
+            modified: None,
             thumb: None,
         })
         .collect();
@@ -1434,6 +1438,22 @@ fn the_chooser_takes_the_keys_while_open_and_gives_them_back() {
     harness.run();
     assert!(!harness.ctx.egui_wants_keyboard_input());
     assert!(harness.query_by_label("Choose file 2").is_none());
+}
+
+/// With more than one file, the menu of the file offers taking it off the
+/// list too, with its key beside it; with one, it does not.
+#[test]
+fn the_file_menu_offers_the_removal_only_from_a_list() {
+    let mut harness = open(WINDOW, 1, panels());
+    assert_eq!(click(&mut harness, "File"), []);
+    assert!(harness.query_by_label("Remove from list").is_none());
+
+    let mut harness = open(WINDOW, 3, panels());
+    assert_eq!(click(&mut harness, "File"), []);
+    assert_eq!(
+        click(&mut harness, "Remove from list"),
+        [Command::Press(Control::Remove)]
+    );
 }
 
 /// The button before the name opens the menu of the file: its name and

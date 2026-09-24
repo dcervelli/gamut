@@ -866,10 +866,38 @@ impl Pass<'_> {
     /// tooltip is: `title` names the thing, and `hints` go under it. For
     /// what the application's namer cannot know — a row of the file list
     /// wears a file's own name, and says it in full this way.
-    pub fn caption(&self, response: Response, title: Vec<String>, hints: Vec<String>) -> Response {
+    ///
+    /// With `beside`, the words hang off that rectangle's right edge, their
+    /// top level with its top, rather than wherever egui finds room around
+    /// `response`; when they come up is still `response`'s hover.
+    pub fn caption(
+        &self,
+        response: Response,
+        beside: Option<Area>,
+        title: Vec<String>,
+        hints: Vec<String>,
+    ) -> Response {
         let theme = self.theme;
         let tooltip = super::tooltip::Tooltip { title, hints };
-        response.on_hover_ui(move |ui| super::tooltip::show(ui, &tooltip, theme))
+        let show = move |ui: &mut Ui| super::tooltip::show(ui, &tooltip, theme);
+        let Some(beside) = beside else {
+            return response.on_hover_ui(show);
+        };
+        // egui anchors a tooltip to the rectangle of the response it is
+        // made for, so it is made for a stand-in wearing `beside`; whether
+        // it is open is asked of the real one, whose rectangle is where
+        // the pointer has to be.
+        let open = response.enabled() && egui::Tooltip::should_show_tooltip(&response, true);
+        let mut anchor = response.clone();
+        anchor.rect = beside;
+        let mut tooltip = egui::Tooltip::for_widget(&anchor);
+        tooltip.popup = tooltip
+            .popup
+            .open(open)
+            .align(egui::RectAlign::RIGHT_START)
+            .align_alternatives(&[]);
+        tooltip.show(show);
+        response
     }
 
     /// Hangs the tooltip for `tip` off `response`: what the thing is called,

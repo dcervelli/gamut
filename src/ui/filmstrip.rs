@@ -21,6 +21,7 @@
 
 use std::ops::Range;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use egui::{Align, Layout, RectAlign, Sense, WidgetInfo, WidgetType, pos2, vec2};
 
@@ -30,30 +31,35 @@ use super::style::{ACTIVE_BUTTON_WASH, SCROLLBAR_GUTTER, SCROLLBAR_WIDTH};
 use super::{PADDING, TEXT_SIZE, fonts, icon, menu};
 
 /// The square each thumbnail is fitted into, at its narrowest: the
-/// thumbnail thread's smallest display copy, drawn at its own size. The
-/// panel opens at this.
+/// thumbnail thread's smallest display copy, drawn at its own size.
 pub const SLOT_MIN: f32 = crate::thumbnailer::DISPLAY_SIDES[0] as f32;
+/// The square the panel opens at: a little wider than the narrowest, so
+/// that a name has room in the title.
+pub const SLOT_DEFAULT: f32 = 148.0;
 /// The square at its widest.
 pub const SLOT_MAX: f32 = 384.0;
 /// The room around a slot, on every side.
 pub const INSET: f32 = 6.0;
 /// A section's row: one line of words.
 pub const HEADER_HEIGHT: f32 = 22.0;
+/// A file's title, over its slot: one line of words, as a section's is.
+pub const TITLE_HEIGHT: f32 = HEADER_HEIGHT;
 /// The head of the panel, where the buttons are: a bar's height, so that
 /// it lines up with the bars.
 pub const HEAD_HEIGHT: f32 = BAR_HEIGHT;
 /// How far either side of the panel's right edge a drag takes hold of it.
 const GRIP: f32 = 3.0;
 
-/// A file's row, for a slot of `slot`: the slot and the room around it.
+/// A file's row, for a slot of `slot`: its title, and under it the slot
+/// and the room around it.
 pub fn row_height(slot: f32) -> f32 {
-    slot + 2.0 * INSET
+    TITLE_HEIGHT + slot + 2.0 * INSET
 }
 
 /// What the panel takes off the picture, for a slot of `slot`: a row, and
 /// the scrollbar's gutter beside it.
 pub fn width(slot: f32) -> f32 {
-    row_height(slot) + SCROLLBAR_GUTTER
+    slot + 2.0 * INSET + SCROLLBAR_GUTTER
 }
 
 /// The slot a panel `width` wide has, held between [`SLOT_MIN`] and
@@ -69,10 +75,20 @@ pub fn slot_for(width: f32) -> f32 {
 /// bar and the hairline along the edge do not read as one thick rule;
 /// what is left of the gutter parts it from the rows.
 const SCROLLBAR_OUTER_MARGIN: f32 = 4.0;
-/// The label over a thumbnail's corner is inset this far from the corner
-/// of its backing, and the backing is this much of the bar's ground.
-const LABEL_PAD: f32 = 3.0;
-const LABEL_WASH: u8 = 200;
+/// The sorted value across a slot: its words a little smaller than the
+/// title's and inset this far inside their backing across and down, the
+/// backing's corners rounded this much and its foot this far up from the
+/// slot's, and the backing this much of the bar's ground.
+const VALUE_SIZE: f32 = TEXT_SIZE - 2.0;
+const VALUE_PAD_X: f32 = 6.0;
+const VALUE_PAD_Y: f32 = 3.0;
+const VALUE_RADIUS: f32 = 3.0;
+const VALUE_LIFT: f32 = 8.0;
+const VALUE_WASH: u8 = 235;
+/// However little room a name has, a cut in its middle keeps this many of
+/// its last characters before its extension, where a numbered run of
+/// files differs.
+const TAIL_KEPT: usize = 4;
 /// The hairline under the head, and around an empty slot.
 const HAIRLINE: f32 = 1.0;
 
@@ -126,6 +142,7 @@ pub enum Sort {
     Name,
     Path,
     Type,
+    Date,
     Size,
     Width,
     Height,
@@ -134,10 +151,11 @@ pub enum Sort {
 
 impl Sort {
     /// In the order the menu offers them.
-    pub const ALL: [Sort; 7] = [
+    pub const ALL: [Sort; 8] = [
         Sort::Name,
         Sort::Path,
         Sort::Type,
+        Sort::Date,
         Sort::Size,
         Sort::Width,
         Sort::Height,
@@ -151,6 +169,7 @@ impl Sort {
             Sort::Path => "Path",
             Sort::Type => "Type",
             Sort::Size => "Size",
+            Sort::Date => "Date",
             Sort::Width => "Width",
             Sort::Height => "Height",
             Sort::Area => "Area",
@@ -164,6 +183,7 @@ impl Sort {
             Sort::Path => "Sort by the whole path",
             Sort::Type => "Sort by kind of file",
             Sort::Size => "Sort by size on disk",
+            Sort::Date => "Sort by when the file was last changed",
             Sort::Width => "Sort by width in pixels",
             Sort::Height => "Sort by height in pixels",
             Sort::Area => "Sort by pixels in all",
@@ -239,6 +259,13 @@ pub enum Row {
         /// The whole path, for the tooltip: the name over the thumbnail is
         /// cut to the slot.
         path: String,
+        /// What kind of file it is, its size in pixels, its size on disk
+        /// and when it was last written, for the tooltip and the sorted
+        /// value, once its header has been read.
+        format: Option<&'static str>,
+        size: Option<(u32, u32)>,
+        bytes: Option<u64>,
+        modified: Option<SystemTime>,
         /// Its thumbnail, once one has arrived and while the screen still
         /// holds it.
         thumb: Option<super::Thumb>,
@@ -422,6 +449,9 @@ pub(super) fn grip(pass: &mut Pass, ui: &mut egui::Ui, slot: f32) {
 fn rows(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
     let count = input.rows.len();
     let total = input.tops.last().copied().unwrap_or(0.0);
+    // The panel's right edge, past the scrollbar: where a row's tooltip
+    // hangs, clear of the strip.
+    let edge = ui.max_rect().right();
     ui.spacing_mut().scroll.bar_outer_margin = SCROLLBAR_OUTER_MARGIN;
     ui.spacing_mut().scroll.bar_inner_margin =
         SCROLLBAR_GUTTER - SCROLLBAR_WIDTH - SCROLLBAR_OUTER_MARGIN;
@@ -449,9 +479,20 @@ fn rows(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
                         index,
                         name,
                         path,
+                        format,
+                        size,
+                        bytes,
+                        modified,
                         thumb,
                     } => {
-                        file(pass, ui, input, row, row_rect(row), *index, name, path, *thumb);
+                        let known = Known {
+                            format: *format,
+                            size: *size,
+                            bytes: *bytes,
+                            modified: *modified,
+                        };
+                        let rect = row_rect(row);
+                        file(pass, ui, input, row, rect, edge, *index, name, path, known, *thumb);
                     }
                 }
             }
@@ -479,7 +520,7 @@ fn rows(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
 /// row, and said in full when rested on. Nothing to press.
 fn header(pass: &mut Pass, ui: &mut egui::Ui, label: &str, rect: egui::Rect) {
     let response = ui.interact(rect, ui.id().with(("filmstrip heading", label)), Sense::HOVER);
-    pass.caption(response, vec![label.to_string()], Vec::new());
+    pass.caption(response, None, vec![label.to_string()], Vec::new());
     let dim: egui::Color32 = pass.theme.text_dim.into();
     let bold = egui::FontId::new(TEXT_SIZE, egui::FontFamily::Name(fonts::BOLD.into()));
     let room = (rect.width() - 2.0 * INSET).max(0.0);
@@ -492,11 +533,13 @@ fn header(pass: &mut Pass, ui: &mut egui::Ui, label: &str, rect: egui::Rect) {
     );
 }
 
-/// A file's row: its thumbnail in its slot, and over the slot's top-left
-/// corner its place in the list and its name. Washed in the accent when it
-/// is the file on screen, lit under the pointer, and a press on it shows
-/// the file. Rested on, it says the name in full, with the whole path
-/// under it: the name over the thumbnail is cut to the slot.
+/// A file's row: its title — its place in the list and its name — and
+/// under it its thumbnail in its slot, with what the list is sorted by
+/// centered over the slot's foot. Washed in the accent when it is the
+/// file on screen, its title set bold, lit under the pointer,
+/// and a press on it shows the file. Rested on, it says the name in full,
+/// with what is `known` of it under it, beside the panel's `edge` and level with the
+/// slot's top: the name in the title is cut in its middle to the row.
 #[allow(clippy::too_many_arguments, reason = "one row, its parts by name")]
 fn file(
     pass: &mut Pass,
@@ -504,27 +547,33 @@ fn file(
     input: &Input,
     row: usize,
     rect: egui::Rect,
+    edge: f32,
     index: usize,
     name: &str,
     path: &str,
+    known: Known,
     thumb: Option<super::Thumb>,
 ) {
     let theme = pass.theme;
     let control = Control::Thumb(row);
     let response = ui.interact(rect, ui.id().with(("filmstrip row", row)), Sense::CLICK);
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, control.label()));
-    let response = pass.caption(response, vec![name.to_string()], vec![path.to_string()]);
     let painter = ui.painter_at(rect);
-    if input.current == Some(row) {
+    let current = input.current == Some(row);
+    let hovered = response.hovered();
+    let title = egui::Rect::from_min_size(rect.min, vec2(rect.width(), TITLE_HEIGHT));
+    if current {
         painter.rect_filled(rect, 0.0, theme.accent.with_alpha(ACTIVE_BUTTON_WASH));
-    } else if response.hovered() {
+    } else if hovered {
         painter.rect_filled(rect, 0.0, theme.button_hover);
+    } else {
+        painter.rect_filled(title, 0.0, theme.button_idle);
     }
 
     // The slot, and the picture fitted and centered in it: the copy that
     // covers the slot's device pixels, drawn no larger than itself.
     let slot = egui::Rect::from_min_size(
-        pos2(rect.left() + INSET, rect.top() + INSET),
+        pos2(rect.left() + INSET, title.bottom() + INSET),
         vec2(input.slot, input.slot),
     );
     match thumb {
@@ -552,32 +601,237 @@ fn file(
             );
         }
     }
+    let beside = egui::Rect::from_min_max(pos2(edge, slot.top()), pos2(edge, slot.bottom()));
+    let response = pass.caption(
+        response,
+        Some(beside),
+        vec![name.to_string()],
+        known.about(path),
+    );
 
-    // The label over the corner: the index and the name, on a wash of
-    // the bar's ground so that they read over any picture, and cut to
-    // the slot.
-    let bright: egui::Color32 = theme.text_bright.into();
-    let body = egui::FontId::proportional(TEXT_SIZE);
-    let room = (input.slot - 2.0 * LABEL_PAD).max(0.0);
-    let galley = super::chooser::lit(
-        ui,
-        &format!("{index}  {name}"),
-        &[],
-        body,
-        bright,
-        bright,
-        room,
+    // What the list is sorted by, where that is not the name itself: a
+    // label centered across the foot of the slot, a little way up it, on
+    // a rounded wash of the bar's ground just wide enough for its words,
+    // so that the picture shows round it.
+    if let Some(value) = known.sorted_by(input.order.sort, path) {
+        let ink: egui::Color32 = theme.text_primary.into();
+        let font = egui::FontId::proportional(VALUE_SIZE);
+        let room = (slot.width() - 2.0 * VALUE_PAD_X).max(0.0);
+        let value = match input.order.sort {
+            // A folder keeps its last part, the one its files are in.
+            Sort::Path => {
+                let last = value.rsplit('/').next().unwrap_or_default();
+                cut_middle(ui, "", &value, last.chars().count() + 1, &font, room)
+            }
+            _ => value,
+        };
+        let galley = super::chooser::lit(ui, &value, &[], font, ink, ink, room);
+        let size = galley.size() + vec2(2.0 * VALUE_PAD_X, 2.0 * VALUE_PAD_Y);
+        // On whole logical pixels, so that the words sit as crisply as the
+        // title's do.
+        let backing = egui::Rect::from_min_size(
+            pos2(slot.center().x - size.x / 2.0, slot.bottom() - VALUE_LIFT - size.y).round(),
+            size,
+        );
+        painter.rect_filled(
+            backing,
+            VALUE_RADIUS,
+            theme.bar_background.with_alpha(VALUE_WASH),
+        );
+        painter.galley(backing.min + vec2(VALUE_PAD_X, VALUE_PAD_Y), galley, ink);
+    }
+
+    // The title: the index, and the name cut in its middle to what is
+    // left, in line with the slot under it.
+    let (ink, family): (egui::Color32, _) = if current {
+        (theme.text_bright.into(), egui::FontFamily::Name(fonts::BOLD.into()))
+    } else if hovered {
+        (theme.text_bright.into(), egui::FontFamily::Proportional)
+    } else {
+        (theme.text_primary.into(), egui::FontFamily::Proportional)
+    };
+    let font = egui::FontId::new(TEXT_SIZE, family);
+    let room = (title.width() - 2.0 * INSET).max(0.0);
+    let text = titled(ui, index, name, &font, room);
+    let galley = super::chooser::lit(ui, &text, &[], font, ink, ink, room);
+    painter.galley(
+        pos2(title.left() + INSET, title.center().y - galley.size().y / 2.0),
+        galley,
+        ink,
     );
-    let backing = egui::Rect::from_min_size(
-        slot.min,
-        galley.size() + vec2(2.0 * LABEL_PAD, 2.0 * LABEL_PAD),
-    );
-    painter.rect_filled(backing, 0.0, theme.bar_background.with_alpha(LABEL_WASH));
-    painter.galley(backing.min + vec2(LABEL_PAD, LABEL_PAD), galley, bright);
 
     if response.clicked() {
         pass.press(control);
     }
+}
+
+/// What is known of a file from its header and the file system, as far as
+/// they have been read.
+#[derive(Clone, Copy)]
+struct Known {
+    format: Option<&'static str>,
+    size: Option<(u32, u32)>,
+    bytes: Option<u64>,
+    modified: Option<SystemTime>,
+}
+
+impl Known {
+    /// What its tooltip says under its name: the folder it is in; what
+    /// kind of file it is, its size in pixels and its size on disk, a
+    /// middot between each; and when it was last written, on this
+    /// machine's clock.
+    fn about(self, path: &str) -> Vec<String> {
+        let folder = folder(path);
+        let facts: Vec<String> = self
+            .format
+            .map(str::to_string)
+            .into_iter()
+            .chain(self.size.map(dimensions))
+            .chain(self.bytes.map(super::info::round_bytes))
+            .collect();
+        let facts = (!facts.is_empty()).then(|| facts.join(" \u{b7} "));
+        folder
+            .into_iter()
+            .chain(facts)
+            .chain(self.modified.map(local_time))
+            .collect()
+    }
+
+    /// What the list is sorted by, as the row shows it, for the file at
+    /// `path`: `None` for a sort by name, which the title already says,
+    /// and for a value not known yet. A sort by path shows the folder, the
+    /// name being in the title.
+    fn sorted_by(self, sort: Sort, path: &str) -> Option<String> {
+        match sort {
+            Sort::Name => None,
+            Sort::Path => folder(path),
+            Sort::Type => self.format.map(str::to_string),
+            Sort::Date => self.modified.map(local_time),
+            Sort::Size => self.bytes.map(super::info::round_bytes),
+            Sort::Width | Sort::Height => self.size.map(dimensions),
+            Sort::Area => self
+                .size
+                .map(|(width, height)| super::info::round_pixels(u64::from(width) * u64::from(height))),
+        }
+    }
+}
+
+/// The folder a file is in, as its path names it: `None` for a path that
+/// names none.
+fn folder(path: &str) -> Option<String> {
+    std::path::Path::new(path)
+        .parent()
+        .map(|parent| parent.display().to_string())
+        .filter(|folder| !folder.is_empty())
+}
+
+/// A size in pixels, as the bar writes one.
+fn dimensions((width, height): (u32, u32)) -> String {
+    format!("{width} \u{00d7} {height}")
+}
+
+/// When a file was last written, on this machine's clock: the list is read
+/// here, beside the files, where the info panel's UTC is bound for
+/// wherever its reader is.
+fn local_time(time: SystemTime) -> String {
+    let at = crate::clock::local(time);
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}",
+        at.year, at.month, at.day, at.hour, at.minute
+    )
+}
+
+/// A file's title, `index` and `name`, with the name cut in its middle to
+/// fit `room` in `font` — `example-long-…-0.png` — keeping its extension
+/// and a few characters before it.
+fn titled(ui: &egui::Ui, index: usize, name: &str, font: &egui::FontId, room: f32) -> String {
+    let tail_min = match name.rfind('.') {
+        Some(dot) if dot > 0 => name[dot..].chars().count() + TAIL_KEPT,
+        _ => TAIL_KEPT,
+    };
+    cut_middle(ui, &format!("{index}  "), name, tail_min, font, room)
+}
+
+/// `prefix` and then `text`, with `text` cut in its middle by
+/// [`middle_cut`] to fit `room` in `font`, keeping at least its last
+/// `tail_min` characters where they fit. Text that cannot be measured a
+/// character at a time, or with no room for any of its start, is left
+/// whole, for the layout to cut at its end.
+fn cut_middle(
+    ui: &egui::Ui,
+    prefix: &str,
+    text: &str,
+    tail_min: usize,
+    font: &egui::FontId,
+    room: f32,
+) -> String {
+    let whole = format!("{prefix}{text}");
+    let widths = |text: &str| -> Vec<f32> {
+        let galley = ui.ctx().fonts_mut(|fonts| {
+            fonts.layout_no_wrap(text.to_string(), font.clone(), egui::Color32::PLACEHOLDER)
+        });
+        galley
+            .rows
+            .iter()
+            .flat_map(|row| row.glyphs.iter().map(|glyph| glyph.advance_width))
+            .collect()
+    };
+    let prefix_width: f32 = widths(prefix).iter().sum();
+    let ellipsis: f32 = widths(ELLIPSIS).iter().sum();
+    let text_widths = widths(text);
+    let chars: Vec<char> = text.chars().collect();
+    if text_widths.len() != chars.len() {
+        return whole;
+    }
+    match middle_cut(&text_widths, ellipsis, tail_min, room - prefix_width) {
+        None | Some((0, _)) => whole,
+        Some((head, tail)) => {
+            let head: String = chars[..head].iter().collect();
+            let tail: String = chars[chars.len() - tail..].iter().collect();
+            format!("{prefix}{head}{ELLIPSIS}{tail}")
+        }
+    }
+}
+
+const ELLIPSIS: &str = "…";
+
+/// How many characters of a name, `widths` wide one by one, to keep from
+/// its start and from its end, with an ellipsis `ellipsis` wide between
+/// them, to fit `room`; `None` when the whole name fits. The end is kept
+/// first: its last `tail_min` characters where they fit in what is left
+/// once the ellipsis is set, and otherwise half of it. The start takes
+/// what the end leaves, and whatever the start cannot use goes back to
+/// the end.
+pub fn middle_cut(
+    widths: &[f32],
+    ellipsis: f32,
+    tail_min: usize,
+    room: f32,
+) -> Option<(usize, usize)> {
+    if widths.iter().sum::<f32>() <= room {
+        return None;
+    }
+    let left = room - ellipsis;
+    let n = widths.len();
+    let (mut tail, mut tail_width) = (0, 0.0);
+    while tail < n {
+        let next = tail_width + widths[n - 1 - tail];
+        if next > left || (tail >= tail_min && next > left / 2.0) {
+            break;
+        }
+        tail += 1;
+        tail_width = next;
+    }
+    let (mut head, mut head_width) = (0, 0.0);
+    while head + tail < n && head_width + widths[head] + tail_width <= left {
+        head_width += widths[head];
+        head += 1;
+    }
+    while head + tail < n && head_width + tail_width + widths[n - 1 - tail] <= left {
+        tail_width += widths[n - 1 - tail];
+        tail += 1;
+    }
+    Some((head, tail))
 }
 
 #[cfg(test)]
@@ -587,6 +841,58 @@ mod tests {
     /// The rows on screen are the ones any part of which is in the
     /// viewport: the one the top edge cuts through, every one wholly in
     /// it, and the one the bottom edge cuts through.
+    /// The tooltip says what is known: the folder always, the kind and
+    /// sizes as far as the header has been read, and the date where there
+    /// is one; and the row shows the value it is sorted by, but not a name,
+    /// and of a path only the folder.
+    #[test]
+    fn a_file_says_what_is_known_of_it() {
+        let when = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_756_632_722);
+        let everything = Known {
+            format: Some("PNG"),
+            size: Some((1920, 1080)),
+            bytes: Some(1_258_291),
+            modified: Some(when),
+        };
+        let about = everything.about("a/b.png");
+        assert_eq!(about[..2], ["a", "PNG \u{b7} 1920 \u{d7} 1080 \u{b7} 1.26 MB"]);
+        assert_eq!(about[2], local_time(when));
+        let nothing = Known {
+            format: None,
+            size: None,
+            bytes: None,
+            modified: None,
+        };
+        assert_eq!(nothing.about("b.png"), Vec::<String>::new(), "no folder, nothing read");
+        let sized = Known {
+            size: Some((640, 480)),
+            ..nothing
+        };
+        assert_eq!(sized.about("a/b.png"), ["a", "640 \u{d7} 480"]);
+
+        let sorted = |known: Known, sort| known.sorted_by(sort, "photos/2024/b.png");
+        assert_eq!(sorted(everything, Sort::Name), None);
+        assert_eq!(sorted(everything, Sort::Path).as_deref(), Some("photos/2024"));
+        assert_eq!(nothing.sorted_by(Sort::Path, "b.png"), None, "no folder");
+        assert_eq!(sorted(everything, Sort::Size).as_deref(), Some("1.26 MB"));
+        assert_eq!(sorted(everything, Sort::Area).as_deref(), Some("2.07 MP"));
+        assert_eq!(sorted(everything, Sort::Width).as_deref(), Some("1920 \u{d7} 1080"));
+        assert_eq!(sorted(nothing, Sort::Date), None, "not known yet");
+    }
+
+    #[test]
+    fn a_long_name_is_cut_in_its_middle_keeping_its_end() {
+        let ten = [1.0; 10];
+        assert_eq!(middle_cut(&ten, 1.0, 4, 10.0), None, "a name that fits is whole");
+        assert_eq!(middle_cut(&ten, 1.0, 2, 7.0), Some((3, 3)), "halves, the end first");
+        assert_eq!(middle_cut(&ten, 1.0, 5, 7.0), Some((1, 5)), "the end's minimum");
+        assert_eq!(middle_cut(&ten, 1.0, 8, 7.0), Some((0, 6)), "the end, all there is room for");
+        assert_eq!(middle_cut(&ten, 1.0, 4, 0.5), Some((0, 0)), "no room at all");
+        // A wide character at the start the head cannot take goes to the end.
+        let wide = [4.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
+        assert_eq!(middle_cut(&wide, 1.0, 1, 6.0), Some((0, 5)));
+    }
+
     #[test]
     fn the_span_is_every_row_the_viewport_touches() {
         let tops = [0.0, 22.0, 162.0, 302.0, 442.0];
