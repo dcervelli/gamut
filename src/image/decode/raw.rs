@@ -65,6 +65,12 @@ impl super::Decoder for Raw {
         has_signature(header) || tiff_holds_raw(header)
     }
 
+    /// Which camera format, where the leading bytes say: the container's
+    /// own signature, or the make in a TIFF-shaped raw's first directory.
+    fn format(&self, header: &[u8]) -> &'static str {
+        raw_format(header).unwrap_or_else(|| self.name())
+    }
+
     fn dimensions(&self, source: &mut dyn super::ReadSeek) -> Result<Option<(u32, u32)>> {
         let handle = Handle::open(source)?;
         // A camera whose photosites are not square has its picture stretched
@@ -684,6 +690,64 @@ fn has_signature(header: &[u8]) -> bool {
         || at(8, b"IIII") || at(8, b"MMMM")
 }
 
+/// Every answer [`raw_format`] gives, and the decoder's own name for the
+/// rest: what a file this decoder claims may be called.
+#[cfg(test)]
+const FORMATS: &[&str] = &[
+    "camera raw", "cr2", "cr3", "crw", "orf", "rw2", "raf", "mrw", "iiq", "dng", "nef", "arw",
+    "pef", "srw", "3fr", "dcr", "erf", "mos",
+];
+
+/// Which camera format the leading bytes say a raw is — the container's own
+/// signature where it has one, then a DNG's tag, then the make written in a
+/// TIFF-shaped raw's first directory, which is how NEF, ARW, PEF and SRW
+/// tell themselves apart — or `None` where they say no more than "a raw".
+/// Named by the extension the camera writes, in the case the info panel
+/// and the file list use for every format.
+fn raw_format(header: &[u8]) -> Option<&'static str> {
+    let at = |offset: usize, magic: &[u8]| header.get(offset..offset + magic.len()) == Some(magic);
+    if at(8, b"CR\x02") {
+        return Some("cr2");
+    }
+    if at(4, b"ftyp") && at(8, b"crx ") {
+        return Some("cr3");
+    }
+    if at(6, b"HEAPCCDR") {
+        return Some("crw");
+    }
+    if at(0, b"IIRO") || at(0, b"IIRS") || at(0, b"MMOR") {
+        return Some("orf");
+    }
+    if at(0, b"IIU\0") {
+        return Some("rw2");
+    }
+    if at(0, b"FUJIFILMCCD-RAW") {
+        return Some("raf");
+    }
+    if at(0, b"\0MRM") {
+        return Some("mrw");
+    }
+    if at(8, b"IIII") || at(8, b"MMMM") {
+        return Some("iiq");
+    }
+    let directory = Directory::first(header)?;
+    if directory.has(0xC612) {
+        return Some("dng");
+    }
+    let make = directory.ascii(0x010F)?.to_ascii_uppercase();
+    Some(match make.as_str() {
+        make if make.starts_with("NIKON") => "nef",
+        make if make.starts_with("SONY") => "arw",
+        make if make.starts_with("PENTAX") || make.starts_with("RICOH") => "pef",
+        make if make.starts_with("SAMSUNG") => "srw",
+        make if make.starts_with("HASSELBLAD") => "3fr",
+        make if make.starts_with("KODAK") => "dcr",
+        make if make.starts_with("EPSON") => "erf",
+        make if make.starts_with("LEAF") || make.starts_with("MAMIYA") => "mos",
+        _ => return None,
+    })
+}
+
 /// Whether a file with TIFF's header holds a camera's raw data rather than a
 /// picture: DNG, NEF, ARW, PEF, SRW and the rest wear the same four bytes
 /// as a scan, and `decode::tiff_rs` would show a NEF's thumbnail rather than
@@ -780,11 +844,55 @@ impl<'a> Directory<'a> {
             _ => None,
         }
     }
+
+    /// An `ASCII` entry's text — inline for four bytes or fewer, and at
+    /// its offset otherwise — as far as the header reaches it. `None` for
+    /// text the header does not reach.
+    fn ascii(&self, tag: u16) -> Option<&'a str> {
+        let (_, kind, count, at) = self.entries().find(|(found, ..)| *found == tag)?;
+        if kind != 2 {
+            return None;
+        }
+        let count = count as usize;
+        let start = if count <= 4 { at } else { self.u32(at)? as usize };
+        let text = std::str::from_utf8(self.header.get(start..start + count)?).ok()?;
+        Some(text.trim_end_matches('\0').trim())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::image::decode::Decoder;
+
+    /// A raw is named for what its leading bytes say it is: the
+    /// container's signature, a DNG's tag, or the make in a TIFF-shaped
+    /// raw's directory; and "camera raw" where they say no more than that.
+    #[test]
+    fn a_raw_is_named_by_its_signature_its_tag_or_its_make() {
+        assert_eq!(raw_format(b"IIRO\x08\x00\x00\x00"), Some("orf"));
+        assert_eq!(raw_format(b"FUJIFILMCCD-RAW 0201"), Some("raf"));
+        assert_eq!(raw_format(b"II\x2a\x00\x10\x00\x00\x00CR\x02\x00"), Some("cr2"));
+        assert_eq!(raw_format(&tiff(&[(0xC612, 1)])), Some("dng"));
+        // A Make entry: ASCII, longer than four bytes, so at an offset —
+        // right after the directory and its terminating offset.
+        let mut nef = b"II\x2a\x00\x08\x00\x00\x00\x01\x00".to_vec();
+        nef.extend(0x010Fu16.to_le_bytes());
+        nef.extend(2u16.to_le_bytes());
+        nef.extend(18u32.to_le_bytes());
+        nef.extend(26u32.to_le_bytes());
+        nef.extend(0u32.to_le_bytes());
+        nef.extend(b"NIKON CORPORATION\0");
+        assert_eq!(raw_format(&nef), Some("nef"));
+        let mut other = nef.clone();
+        other.splice(26.., b"CASIO COMPUTER CO.\0".iter().copied());
+        assert_eq!(raw_format(&other), None);
+        assert_eq!(Raw.format(&other), Raw.name());
+        assert_eq!(raw_format(&tiff(&[(0x0106, 32803)])), None, "a CFA and nothing else");
+        for format in FORMATS {
+            assert!(format.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == ' '));
+        }
+    }
 
     /// A little-endian TIFF header whose first directory holds the given
     /// `SHORT` or `LONG` entries.
@@ -930,10 +1038,10 @@ mod tests {
 
         for path in paths {
             let name = path.file_name().unwrap().to_string_lossy().into_owned();
-            assert_eq!(
-                reader(&path),
-                Some("camera raw"),
-                "{name} is not recognized as a raw"
+            let format = reader(&path);
+            assert!(
+                format.is_some_and(|format| FORMATS.contains(&format)),
+                "{name} is not recognized as a raw: {format:?}"
             );
             let probed = probe(&path).unwrap_or_else(|error| panic!("{name}: {error:#}"));
             let (image, took) = load_timed(&path, Overrides::default(), None)

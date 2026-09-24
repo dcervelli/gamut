@@ -116,6 +116,15 @@ pub trait Decoder: Sync {
     /// bytes? Used to recover from a missing or misleading extension.
     fn sniff(&self, header: &[u8]) -> bool;
 
+    /// The format of the file in hand, judged by the same leading bytes:
+    /// what the information panel's line and the file list's type say.
+    /// The decoder's own name for the many that read one format; the ones
+    /// that read several say which of them this is, and their name only
+    /// where the bytes do not say.
+    fn format(&self, _header: &[u8]) -> &'static str {
+        self.name()
+    }
+
     /// `overrides` is passed in as well as applied afterwards, because one
     /// of its settings — whether to reconstruct from a gain map — changes
     /// what a decoder produces rather than how it is labeled.
@@ -486,22 +495,22 @@ pub fn probe(path: &Path) -> Result<Option<(u32, u32)>> {
     })
 }
 
-/// Which decoder owns `path`, chosen the way [`load`] chooses it: by what the
-/// leading bytes say first, and by the extension only where they say nothing.
-/// So this answers what the file turned out to *be* rather than what it is
-/// called, which is worth saying out loud for a file whose name was wrong.
-///
-/// A decoder's name, not a format's: most read one format and are named for
-/// it, but the two that read several are named for all of them. Naming the
-/// one format in hand would mean asking every decoder to report what it found
-/// as well as what it can find, which is a great deal of machinery for one
-/// line of a panel.
+/// The format of `path`, as the decoder that owns it says — chosen the way
+/// [`load`] chooses it: by what the leading bytes say first, and by the
+/// extension only where they say nothing. So this answers what the file
+/// turned out to *be* rather than what it is called, which is worth saying
+/// out loud for a file whose name was wrong. A decoder that reads several
+/// formats says which one — see [`Decoder::format`] — so that a GIF and an
+/// EXR are not one kind of file to the list that sorts by kind.
 ///
 /// `None` where nothing claims it, or where it cannot be opened at all — the
 /// panel then says nothing rather than something wrong, which is what it
 /// does with every other fact it asks the file for after the event.
 pub fn reader(path: &Path) -> Option<&'static str> {
-    Some(open(path).ok()?.1.name())
+    let (mut source, decoder) = open(path).ok()?;
+    let mut header = [0u8; HEADER];
+    let read = fill(&mut source, &mut header).ok()?;
+    Some(decoder.format(&header[..read]))
 }
 
 /// Reads as much as `buffer` holds, tolerating a file shorter than that.

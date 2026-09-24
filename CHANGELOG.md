@@ -128,6 +128,13 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   alone does. The undo key's line in the help says it undoes a removal
   as well.
 
+- The information panel's "Read by" line, and the file list's type, name
+  the format a file turned out to be rather than the decoder that read
+  it: a GIF says `gif` and an EXR `exr` where both said
+  `gif/hdr/exr/bmp/netpbm`, an AVIF says `avif` and a HEIC `heic`, and a
+  camera raw says which — `nef`, `arw`, `cr2`, `dng` and the rest — where
+  its bytes say, and `camera raw` where they do not.
+
 - A new icon: a lake at sunset, with a loupe over the sun's rim showing
   its pixels. `bin/icon` draws it from a model of the scene's light.
 - The histogram's logarithmic count axis is toggled by `y` rather than
