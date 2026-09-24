@@ -735,6 +735,20 @@ impl App {
             image,
             egui::TextureOptions::LINEAR,
         );
+        // The rows on screen are seen again first, so that they are never
+        // the oldest held: a frame says which rows it shows only when that
+        // changes, and a list sitting still while the thread thumbnails
+        // the rest of the session would otherwise let its own go.
+        if self.chooser_open() {
+            for shown in self.chooser.on_screen() {
+                self.thumbs.touch(shown);
+            }
+        }
+        if self.filmstrip_showing() {
+            for shown in self.filmstrip.on_screen() {
+                self.thumbs.touch(shown);
+            }
+        }
         self.thumbs.insert(path, texture);
     }
 

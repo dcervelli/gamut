@@ -255,6 +255,11 @@ impl Chooser {
         self.paths.get(*index).map(PathBuf::as_path)
     }
 
+    /// The files on the rows the frame last said were on screen.
+    pub fn on_screen(&self) -> impl Iterator<Item = &Path> {
+        self.visible.clone().filter_map(|row| self.path_at(row))
+    }
+
     /// The rows in `visible` that still lack a thumbnail, or the facts
     /// under it, and have not been given up on: what to ask the thread for
     /// first. `thumbs` is what the screen holds.
