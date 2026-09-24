@@ -29,8 +29,15 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   name already taken — nothing is ever written over — and warns of what the
   new file loses that the screen does not show: depth above 8 bits, light
   above white, transparency in a JPG, the other frames or pages, and the
-  metadata. The new file joins the list and is shown. The file menu has the
-  item too, as Export.
+  metadata. Three boxes under the formats — a percentage, a width and a
+  height, locked to the picture's aspect so that typing in any one fills
+  in the other two — set the size the picture is written at, from 1 to
+  32768 pixels a side, the percentage counted from the region where one is
+  up: a picture made smaller averages what each new pixel covers, and one
+  made larger is enlarged bicubic whatever the window's own filter, which
+  the dialog warns of where the window is showing nearest. The new file
+  joins the list and is shown; one is written at a time, and Export waits
+  for the last to land. The file menu has the item too, as Export.
 
 - `;` and `'` turn the picture a quarter counterclockwise and clockwise. The
   turn is how the picture is shown, not

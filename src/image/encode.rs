@@ -149,9 +149,11 @@ fn displayed_channels(image: &DecodedImage, display: &Display) -> Channels {
     }
 }
 
-/// How many ways to split the walk. One for a picture too small to be worth
-/// the threads, and never more bands than there are rows to put in them.
-fn bands(stride: usize, height: usize) -> usize {
+/// How many ways to split a walk over `height` rows of `stride` bytes. One
+/// for a picture too small to be worth the threads, and never more bands
+/// than there are rows to put in them. The export's resize divides its rows
+/// by the same count.
+pub(super) fn bands(stride: usize, height: usize) -> usize {
     if stride == 0 || height == 0 || stride * height < PARALLEL_FROM {
         return 1;
     }
@@ -347,7 +349,7 @@ fn png_with(
 /// the curve forwards only where a value lands exactly between two codes and
 /// the two ways round the tie fall on either side of it — twice in a sweep of
 /// a million, and by the one code that was a coin toss to begin with.
-fn levels() -> &'static [f32; 255] {
+pub(super) fn levels() -> &'static [f32; 255] {
     static LEVELS: OnceLock<[f32; 255]> = OnceLock::new();
     LEVELS.get_or_init(|| {
         std::array::from_fn(|index| Transfer::Srgb.to_linear((index as f32 + 0.5) / 255.0))
@@ -359,7 +361,7 @@ fn levels() -> &'static [f32; 255] {
 /// The sRGB curve is applied here and nowhere earlier: everything upstream of
 /// this works in linear light, which is the invariant `render::upload` states
 /// and the shaders rely on.
-fn quantize(linear: f32, levels: &[f32; 255]) -> u8 {
+pub(super) fn quantize(linear: f32, levels: &[f32; 255]) -> u8 {
     // How many thresholds the value has passed is the code it lands on, which
     // clamps both ends by itself: nothing under the first is 0, everything
     // over the last is 255. A NaN passes none of them and comes out 0.
@@ -369,7 +371,7 @@ fn quantize(linear: f32, levels: &[f32; 255]) -> u8 {
 /// A 0..1 fraction rounded to a byte. Coverage comes through here untouched by
 /// any curve, which is what alpha means in a PNG and on the way to the screen
 /// alike.
-fn byte(unit: f32) -> u8 {
+pub(super) fn byte(unit: f32) -> u8 {
     // A NaN clamps to NaN rather than to an end, and casts to 0 rather than
     // wrapping; it can only arise from a sample that was already NaN.
     (unit.clamp(0.0, 1.0) * 255.0 + 0.5) as u8

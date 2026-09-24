@@ -44,7 +44,7 @@ pub(super) const WIDTH_MIN: f32 = 200.0;
 /// The field, and the room under it kept for the line about the name —
 /// kept whether or not there is one, so that the dialog does not grow and
 /// shrink under the hand as the name is typed.
-const FIELD_HEIGHT: f32 = 28.0;
+pub(super) const FIELD_HEIGHT: f32 = 28.0;
 const MESSAGE_HEIGHT: f32 = 18.0;
 /// The gap between the field and that line, and between it and the
 /// buttons.
@@ -217,6 +217,8 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
                     refused,
                     opened: input.opened,
                     width: inside,
+                    suffix: None,
+                    primary: true,
                 },
                 Command::Name,
             );
@@ -274,20 +276,27 @@ pub(super) struct NameField<'a> {
     /// Whether this is the dialog's first frame — see [`Input::opened`].
     pub opened: bool,
     pub width: f32,
+    /// A word painted inside the box after what is typed, in the dim ink:
+    /// the `%` of a percentage. The text stops short of it.
+    pub suffix: Option<&'static str>,
+    /// Whether the keyboard comes back to this field whenever nothing has
+    /// it: true of the one field a dialog is about, so that a click on the
+    /// dialog's own frame does not leave the keys going to the window, and
+    /// false of a box beside it, which takes the keys by a click or `Tab`.
+    pub primary: bool,
 }
 
 /// The field, in a hand-drawn box as the chooser's is: outlined in the
-/// warning color while the name will not do, and in the hairline otherwise.
-/// On the frame the dialog opens, the stem is selected and the field takes
-/// the keyboard; and it takes the keyboard again whenever nothing has it,
-/// so that a click on the dialog's own frame does not leave the keys going
-/// to the window. What is typed goes back as `changed` makes a command of
-/// it.
+/// warning color while what it holds will not do, and in the hairline
+/// otherwise. On the frame the dialog opens, the stem is selected and the
+/// field takes the keyboard; and the primary field takes the keyboard
+/// again whenever nothing has it. What is typed goes back as `changed`
+/// makes a command of it.
 pub(super) fn name_field(
     pass: &mut Pass,
     ui: &mut egui::Ui,
     field: NameField<'_>,
-    changed: fn(String) -> Command,
+    changed: impl FnOnce(String) -> Command,
 ) {
     let theme = pass.theme;
     let (rect, _) = ui.allocate_exact_size(vec2(field.width, FIELD_HEIGHT), Sense::HOVER);
@@ -303,6 +312,20 @@ pub(super) fn name_field(
         egui::Stroke::new(HAIRLINE, outline),
         egui::StrokeKind::Inside,
     );
+    let mut inner = rect.shrink2(vec2(FIELD_INSET, 0.0));
+    if let Some(suffix) = field.suffix {
+        let galley = painter.layout_no_wrap(
+            suffix.to_string(),
+            egui::FontId::proportional(TEXT_SIZE),
+            egui::Color32::PLACEHOLDER,
+        );
+        let at = egui::pos2(
+            inner.right() - galley.size().x,
+            inner.center().y - galley.size().y / 2.0,
+        );
+        inner.set_right(at.x - FIELD_INSET / 2.0);
+        painter.galley(at, galley, theme.text_dim.into());
+    }
     let field_id = field.id;
     let mut text = field.name.to_string();
     let edit = TextEdit::singleline(&mut text)
@@ -314,20 +337,16 @@ pub(super) fn name_field(
         .desired_width(f32::INFINITY)
         .vertical_align(Align::Center)
         .margin(egui::Margin::ZERO);
-    let inner = rect.shrink2(vec2(FIELD_INSET, 0.0));
     // Laid out as `Ui::put` would lay it, filling the box with the words
     // centered in it, but through `show` so that the field's state — its
-    // selection — comes back with the response.
-    let output = ui
-        .scope_builder(
-            egui::UiBuilder::new()
-                .max_rect(inner)
-                .layout(egui::Layout::centered_and_justified(
-                    egui::Direction::TopDown,
-                )),
-            |ui| edit.show(ui),
-        )
-        .inner;
+    // selection — comes back with the response. A child rather than a
+    // scope: the box is already allocated, and a scope would allocate its
+    // inside again, which in a row of boxes puts the next one over the
+    // end of this one.
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(
+        egui::Layout::centered_and_justified(egui::Direction::TopDown),
+    ));
+    let output = edit.show(&mut child);
     if output.response.changed() {
         pass.commands.push(changed(text));
     }
@@ -341,7 +360,7 @@ pub(super) fn name_field(
             )));
         state.store(ui.ctx(), field_id);
         output.response.request_focus();
-    } else if ui.memory(|memory| memory.focused().is_none()) {
+    } else if field.primary && ui.memory(|memory| memory.focused().is_none()) {
         output.response.request_focus();
     }
 }
