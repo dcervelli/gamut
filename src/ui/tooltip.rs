@@ -340,6 +340,7 @@ pub fn words(tip: Tip) -> Option<String> {
         Tip::Control(Control::Sorting) => "Sort the list",
         Tip::Control(Control::SectionBy(section)) => section.describe(),
         Tip::Control(Control::SortBy(sort)) => sort.describe(),
+        Tip::Control(Control::SortDirection(direction)) => direction.describe(),
         // No one key does this and only this — Escape dismisses whatever
         // is up, a menu first — so the cross names itself.
         Tip::Control(Control::Dismiss) => "Dismiss this message",

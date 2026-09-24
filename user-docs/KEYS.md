@@ -92,7 +92,8 @@ Two menus at the head of the strip say how the list stands. The first
 breaks it into sections — none, one for each folder, or one for each kind
 of file — each with a heading, in ascending order. The second sorts the
 files of each section by name, by path, by kind of file, by size on disk,
-or by width, height or area in pixels, ascending. The list itself is put in
+or by width, height or area in pixels, and its last two rows run the sort
+ascending or descending; the button wears which. The list itself is put in
 that order: the keys, the count in the bar and the chooser all walk what
 the strip shows. A sort keeps the order of files it cannot tell apart, so
 sorting by size and then by kind leaves each kind in size order, the way

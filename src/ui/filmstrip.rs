@@ -155,11 +155,45 @@ impl Sort {
     }
 }
 
-/// How the list stands: its sections, and the sort within each.
+/// Which way the sort runs within a section: smallest, earliest or first
+/// name at the top, or the other way. The sections themselves stand in
+/// ascending order either way, and what is not yet known stands last
+/// either way.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Direction {
+    #[default]
+    Ascending,
+    Descending,
+}
+
+impl Direction {
+    /// In the order the menu offers them.
+    pub const ALL: [Direction; 2] = [Direction::Ascending, Direction::Descending];
+
+    /// The word the menu item wears.
+    pub fn label(self) -> &'static str {
+        match self {
+            Direction::Ascending => "Ascending",
+            Direction::Descending => "Descending",
+        }
+    }
+
+    /// What the item says when rested on.
+    pub fn describe(self) -> &'static str {
+        match self {
+            Direction::Ascending => "Smallest, earliest or first name at the top",
+            Direction::Descending => "Largest, latest or last name at the top",
+        }
+    }
+}
+
+/// How the list stands: its sections, the sort within each, and which way
+/// that sort runs.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct Order {
     pub section: Section,
     pub sort: Sort,
+    pub direction: Direction,
 }
 
 impl Order {
@@ -280,14 +314,13 @@ fn head(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
     row.add_space(BUTTON_GAP);
     let sorting = egui::Id::new("sort menu");
     let open = egui::Popup::is_id_open(&ctx, sorting);
-    let button = pass.icon_button(
-        &mut row,
-        icon::ARROW_DOWN_NARROW_WIDE,
-        Control::Sorting,
-        open,
-        true,
-        Corners::All,
-    );
+    // The button wears the way the sort runs: bars growing down the mark
+    // for ascending, shrinking for descending.
+    let mark = match input.order.direction {
+        Direction::Ascending => icon::ARROW_DOWN_NARROW_WIDE,
+        Direction::Descending => icon::ARROW_DOWN_WIDE_NARROW,
+    };
+    let button = pass.icon_button(&mut row, mark, Control::Sorting, open, true, Corners::All);
     egui::Popup::menu(&button)
         .id(sorting)
         .align(RectAlign::BOTTOM_START)

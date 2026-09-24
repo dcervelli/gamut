@@ -231,7 +231,7 @@ fn heading(dir: &str) -> String {
 mod tests {
     use super::*;
     use crate::thumbnailer::Facts;
-    use crate::ui::filmstrip::{HEADER_HEIGHT, ROW_HEIGHT, Sort};
+    use crate::ui::filmstrip::{Direction, HEADER_HEIGHT, ROW_HEIGHT, Sort};
     use std::collections::HashMap;
 
     fn paths(names: &[&str]) -> Vec<PathBuf> {
@@ -287,6 +287,7 @@ mod tests {
         assert!(strip.set_order(Order {
             section: Section::Path,
             sort: Sort::Name,
+            direction: Direction::Ascending,
         }));
         assert!(strip.take_stale());
         let input = strip.input(&thumbs, |path| known(&facts_known, path), Some(Path::new("b/3.png")), false, false);
@@ -325,6 +326,7 @@ mod tests {
         strip.set_order(Order {
             section: Section::Type,
             sort: Sort::Name,
+            direction: Direction::Ascending,
         });
         strip.relist(&paths(&["a/2.jpg", "a/1.png", "b/3.png"]));
         let input = strip.input(&thumbs, |path| known(&facts_known, path), None, false, false);

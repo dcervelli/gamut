@@ -804,6 +804,13 @@ fn the_file_list_offers_its_rows_its_menus_and_the_way_back() {
         click(&mut harness, "Area"),
         [Command::Press(Control::SortBy(filmstrip::Sort::Area))]
     );
+    assert_eq!(click(&mut harness, "Sort"), []);
+    assert_eq!(
+        click(&mut harness, "Descending"),
+        [Command::Press(Control::SortDirection(
+            filmstrip::Direction::Descending
+        ))]
+    );
 }
 
 /// The list is put at the file on screen when it is revealed — the file

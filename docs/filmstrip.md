@@ -22,7 +22,10 @@ on screen across a reorder, which it does by re-finding its path, exactly
 as `Files::relist` already did for a rebuild.
 
 The order is `ui::filmstrip::Order`: a `Section` — none, the file's
-directory, or its type — and a `Sort` within each section. `app/order.rs`
+directory, or its type — a `Sort` within each section, and the
+`Direction` the sort runs in, which turns the comparison round rather
+than the list, so that ties keep their order either way and the sections
+and the unknown stay where they were. `app/order.rs`
 turns one into a permutation, `arrange`, and says where the sections fall
 in a list already arranged, `groups`. It compares `(section, key)` with a
 `None` on either side sorting after every `Some`, so that a file whose

@@ -15,8 +15,9 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   accent; a click on a row shows that file, and the strip scrolls to the
   file on screen as it changes. Two menus at its head break the list into
   sections — none, by folder, by type — and sort each section by name,
-  path, type, size on disk, width, height or area, the sections and the
-  sorts ascending, and the list itself is put in that order, so that the
+  path, type, size on disk, width, height or area, ascending or
+  descending — the sections always ascending — and the list itself is put
+  in that order, so that the
   keys, the counter and the chooser all walk it. A sort keeps the order of
   files it cannot tell apart, so sorting by size and then by type leaves
   each type in size order, and a directory read again keeps the order it

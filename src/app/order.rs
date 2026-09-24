@@ -14,7 +14,7 @@ use std::ops::Range;
 use std::path::Path;
 
 use crate::thumbnailer::Facts;
-use crate::ui::filmstrip::{Order, Section, Sort};
+use crate::ui::filmstrip::{Direction, Order, Section, Sort};
 
 /// What one file is ordered by: its path, and what its header said, where
 /// it has been read.
@@ -87,10 +87,14 @@ fn rank(key: &Key, sort: Sort) -> Option<Rank> {
     })
 }
 
-/// `None` after every `Some`: what is not known yet goes to the end.
-fn unknown_last<T: Ord>(a: &Option<T>, b: &Option<T>) -> Ordering {
+/// `None` after every `Some`, whichever way the known ones run: what is
+/// not known yet goes to the end.
+fn unknown_last<T: Ord>(a: &Option<T>, b: &Option<T>, direction: Direction) -> Ordering {
     match (a, b) {
-        (Some(a), Some(b)) => a.cmp(b),
+        (Some(a), Some(b)) => match direction {
+            Direction::Ascending => a.cmp(b),
+            Direction::Descending => b.cmp(a),
+        },
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
         (None, None) => Ordering::Equal,
@@ -99,8 +103,10 @@ fn unknown_last<T: Ord>(a: &Option<T>, b: &Option<T>) -> Ordering {
 
 /// The places of `count` files under `order`: each entry the index, in the
 /// list as it stands, of the file that now goes there. Sections first,
-/// ascending, unknown last; then the sort within each, the same way; and
-/// files neither tells apart in the order they stand.
+/// ascending, unknown last; then the sort within each, the way the order
+/// runs, unknown last again; and files neither tells apart in the order
+/// they stand — whichever way the sort runs, since the comparison is
+/// turned round rather than the list.
 pub(super) fn arrange<'a>(count: usize, order: Order, key: impl Fn(usize) -> Key<'a>) -> Vec<usize> {
     let ranked: Vec<(Option<String>, Option<Rank>)> = (0..count)
         .map(|index| {
@@ -112,7 +118,8 @@ pub(super) fn arrange<'a>(count: usize, order: Order, key: impl Fn(usize) -> Key
     places.sort_by(|&a, &b| {
         let (section_a, rank_a) = &ranked[a];
         let (section_b, rank_b) = &ranked[b];
-        unknown_last(section_a, section_b).then_with(|| unknown_last(rank_a, rank_b))
+        unknown_last(section_a, section_b, Direction::Ascending)
+            .then_with(|| unknown_last(rank_a, rank_b, order.direction))
     });
     places
 }
@@ -168,7 +175,44 @@ mod tests {
     }
 
     fn order(section: Section, sort: Sort) -> Order {
-        Order { section, sort }
+        Order {
+            section,
+            sort,
+            direction: Direction::Ascending,
+        }
+    }
+
+    /// Descending turns the sort round and nothing else: the sections stay
+    /// ascending, what is not known stays last, and ties keep the order
+    /// they stand in rather than coming out reversed.
+    #[test]
+    fn descending_turns_the_sort_round_and_nothing_else() {
+        let files = [
+            file("b/2.png", Some("PNG"), Some(2), None),
+            file("a/9.jpg", Some("JPEG"), None, None),
+            file("a/1.png", Some("PNG"), Some(2), None),
+            file("b/1.gif", None, Some(3), None),
+        ];
+        let descending = |section, sort| Order {
+            section,
+            sort,
+            direction: Direction::Descending,
+        };
+        assert_eq!(
+            arrange(files.len(), descending(Section::None, Sort::Name), key(&files)),
+            [1, 0, 2, 3],
+            "9, 2, 1.png, 1.gif"
+        );
+        assert_eq!(
+            arrange(files.len(), descending(Section::None, Sort::Size), key(&files)),
+            [3, 0, 2, 1],
+            "3, then the two 2s as they stand, then the unknown"
+        );
+        assert_eq!(
+            arrange(files.len(), descending(Section::Path, Sort::Name), key(&files)),
+            [1, 2, 0, 3],
+            "the folders still ascending, each turned round inside"
+        );
     }
 
     /// Each sort puts what it reads in ascending order, and what it

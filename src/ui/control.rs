@@ -15,7 +15,7 @@ use super::export::{Dimension, Format};
 use super::help;
 use super::info::Copyable;
 use super::menu::{Copies, ZoomChoice};
-use super::filmstrip::{Section, Sort};
+use super::filmstrip::{Direction, Section, Sort};
 use super::pixel::PixelFormat;
 use super::tooltip::{Tip, Tooltip};
 
@@ -166,6 +166,9 @@ pub enum Control {
     SectionBy(Section),
     Sorting,
     SortBy(Sort),
+    /// The two rows at the foot of the sort menu, which run the sort one
+    /// way or the other.
+    SortDirection(Direction),
     /// The pair beside them, which go back and forward through the files
     /// that have been on screen. Dead with nothing to go to.
     Back,
@@ -242,6 +245,7 @@ impl Control {
             Control::SectionBy(section) => section.label().to_string(),
             Control::Sorting => "Sort".to_string(),
             Control::SortBy(sort) => sort.label().to_string(),
+            Control::SortDirection(direction) => direction.label().to_string(),
             Control::Back => "Back".to_string(),
             Control::Forward => "Forward".to_string(),
             Control::Thumb(row) => format!("Show file {}", row + 1),
@@ -499,6 +503,7 @@ impl Control {
         Control::SectionBy(Section::None),
         Control::Sorting,
         Control::SortBy(Sort::Name),
+        Control::SortDirection(Direction::Ascending),
         Control::Back,
         Control::Forward,
         Control::Thumb(0),
@@ -565,6 +570,7 @@ impl Control {
             | Control::SectionBy(_)
             | Control::Sorting
             | Control::SortBy(_)
+            | Control::SortDirection(_)
             | Control::Back
             | Control::Forward
             | Control::Thumb(_)

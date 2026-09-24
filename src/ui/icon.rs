@@ -523,6 +523,17 @@ pub(super) const ARROW_DOWN_NARROW_WIDE: &[Mark] = &[
     Mark::Line([11.0, 12.0], [21.0, 12.0]),
 ];
 
+/// Lucide's `arrow-down-wide-narrow`: the same arrow beside three bars
+/// shrinking, for the sort run the other way.
+pub(super) const ARROW_DOWN_WIDE_NARROW: &[Mark] = &[
+    Mark::Line([3.0, 16.0], [7.0, 20.0]),
+    Mark::Line([7.0, 20.0], [11.0, 16.0]),
+    Mark::Line([7.0, 20.0], [7.0, 4.0]),
+    Mark::Line([11.0, 4.0], [21.0, 4.0]),
+    Mark::Line([11.0, 8.0], [18.0, 8.0]),
+    Mark::Line([11.0, 12.0], [15.0, 12.0]),
+];
+
 /// Lucide's `arrow-left` and `arrow-right`: the way back through the files
 /// that have been on screen, and the way forward again. Arrows rather than
 /// the chevrons the list is stepped with, since these go somewhere
@@ -975,7 +986,7 @@ mod tests {
 
     /// Every icon in the table, so that a new one is held to the same
     /// promises as the rest.
-    const ICONS: [&[Mark]; 32] = [
+    const ICONS: [&[Mark]; 33] = [
         CHART_AREA,
         INFO,
         CIRCLE_QUESTION_MARK,
@@ -1006,6 +1017,7 @@ mod tests {
         PANEL_LEFT,
         ROWS_3,
         ARROW_DOWN_NARROW_WIDE,
+        ARROW_DOWN_WIDE_NARROW,
         ARROW_LEFT,
         ARROW_RIGHT,
     ];

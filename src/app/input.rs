@@ -491,6 +491,7 @@ fn action_of(tip: Tip) -> Option<Action> {
             | Control::SectionBy(_)
             | Control::Sorting
             | Control::SortBy(_)
+            | Control::SortDirection(_)
             | Control::Thumb(_)
             | Control::RenameTo
             | Control::CancelRename
@@ -2726,6 +2727,11 @@ impl App {
             Control::SortBy(sort) => {
                 let mut order = self.filmstrip.order();
                 order.sort = sort;
+                self.set_order(order)
+            }
+            Control::SortDirection(direction) => {
+                let mut order = self.filmstrip.order();
+                order.direction = direction;
                 self.set_order(order)
             }
             Control::Back => self.visit(true),

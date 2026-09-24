@@ -15,7 +15,7 @@ use crate::view::{Axis, Fit, View, Viewport};
 use super::RULE_WIDTH;
 use super::chrome::Pass;
 use super::control::Control;
-use super::filmstrip::{Order, Section, Sort};
+use super::filmstrip::{Direction, Order, Section, Sort};
 use super::info::HEADER_GAP;
 use super::pixel::PixelFormat;
 use super::style::TOGGLE_RADIUS;
@@ -373,17 +373,29 @@ pub(super) fn section_cells(pass: &mut Pass, ui: &mut Ui, order: Order) {
 }
 
 /// The menu of sorts beside it: one item for each thing the files of a
-/// section can be put in order of, the one in force lit.
+/// section can be put in order of, the one in force lit; and under them,
+/// set apart, the two ways the sort can run, the one in force lit.
 pub(super) fn sort_cells(pass: &mut Pass, ui: &mut Ui, order: Order) {
     titled(pass, ui, &Control::Sorting.label(), |pass, ui| {
-        for sort in Sort::ALL {
-            let control = Control::SortBy(sort);
-            let response = ui.add(Button::new(sort.label()).selected(sort == order.sort));
+        let item = |pass: &mut Pass, ui: &mut Ui, control: Control, active: bool| {
+            let response = ui.add(Button::new(control.label()).selected(active));
             let response = pass.tooltip(response, Tip::Control(control), true);
             if response.clicked() {
                 pass.press(control);
                 ui.close();
             }
+        };
+        for sort in Sort::ALL {
+            item(pass, ui, Control::SortBy(sort), sort == order.sort);
+        }
+        ui.add_space(MENU_SECTION_GAP);
+        for direction in Direction::ALL {
+            item(
+                pass,
+                ui,
+                Control::SortDirection(direction),
+                direction == order.direction,
+            );
         }
     });
 }
