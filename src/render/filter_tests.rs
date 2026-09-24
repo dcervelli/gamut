@@ -655,9 +655,14 @@ fn the_loupe_is_cut_to_its_circle_and_replaces_what_is_under_it() {
     assert_eq!(pixels[20 * width + 60][3], 0.0);
     assert_eq!(pixels[2 * width + 40][3], 0.0);
     // And the circle's edge is where the radius says: a pixel well inside
-    // is whole, and one well outside is nothing.
+    // is whole, and one well outside is nothing. Along a diagonal, where
+    // the pixel centers fall short of and past the edge: (48, 12) is 11.34
+    // from the center, in the band and whole; (49, 12) is 12.10 from it,
+    // feathered to two fifths.
     assert_eq!(pixels[20 * width + 50][3], 1.0);
     assert_eq!(pixels[20 * width + 53][3], 0.0);
+    assert_eq!(pixels[12 * width + 48][3], 1.0);
+    assert!(close(pixels[12 * width + 49][3], 0.40, 2e-2));
 
     // A glass over the picture's edge: magnified about the last column, the
     // picture ends inside the circle, and past it the glass is nothing —
@@ -694,6 +699,107 @@ fn the_loupe_is_cut_to_its_circle_and_replaces_what_is_under_it() {
     // drawn, there is nothing: not the view.
     assert_eq!(pixels[20 * width + 15][3], 0.0);
     assert_eq!(pixels[20 * width + 15][0], 0.0);
+    // The band at the circle's edge, over the view, is the glass blended
+    // over it. At (0, 20), 11.51 from the center, the glass shows texel 12
+    // — twelve and a half pixels in from the last column's middle, at four
+    // to a texel — feathered almost whole over the view's texel 0, which is
+    // black: the color is the glass's, faded by exactly its coverage.
+    let edge = pixels[20 * width];
+    assert!(edge[3] > 0.95 && edge[3] < 1.0, "{edge:?}");
+    assert!(close(edge[0], value(12) * edge[3], 2e-3), "{edge:?}");
+}
+
+/// Inside the glass but past the magnified picture's edge, the compositor
+/// shows the backdrop alone, however the glass's edge — drawn blending —
+/// left the view there.
+#[test]
+fn the_compositor_clears_the_glass_past_the_pictures_edge() {
+    use super::Glass;
+
+    let Some(gpu) = gpu::test_context() else {
+        return;
+    };
+    // A row of white, as the view would have left it, under a glass whose
+    // picture ends four pixels in.
+    let width = 16u32;
+    let colors = vec![[1.0f32, 1.0, 1.0]; width as usize];
+    let halves: Vec<u8> = colors
+        .iter()
+        .flat_map(|[r, g, b]| [*r, *g, *b, 1.0])
+        .flat_map(|value| f16::from_f32(value).to_le_bytes())
+        .collect();
+    let image = row_texture(gpu, WORKING_FORMAT, &halves, width);
+    let ui = row_texture(gpu, UI_FORMAT, &vec![0u8; width as usize * 4], width);
+    let mut composite = Composite::new(&gpu.device, WORKING_FORMAT);
+    composite.bind_targets(&gpu.device, &image, &ui);
+    let output = Output {
+        format: WORKING_FORMAT,
+        color_space: wgpu::SurfaceColorSpace::Srgb,
+        encoding: Encoding::Srgb,
+        label: "test",
+        is_hdr: false,
+    };
+    let paint = UiPaint {
+        primitives: Vec::new(),
+        pixels_per_point: 1.0,
+    };
+    let display = Display::default();
+    let placement = Placement {
+        x: 0.0,
+        y: 0.0,
+        width: 4.0,
+        height: 1.0,
+        zoom: 1.0,
+        upscale: Upscale::Nearest,
+    };
+    let glass = Glass {
+        placement,
+        center: [4.0, 0.5],
+        radius: 6.0,
+    };
+    let scene = Scene {
+        placement,
+        thumbnail: None,
+        loupe: Some(glass),
+        display: &display,
+        ui: &paint,
+        scale: 1.0,
+        backdrop: Backdrop {
+            base: Color::rgb(0, 0, 0),
+            alternate: Color::rgb(0, 0, 0),
+            square: 8.0,
+        },
+        headroom: Headroom::None,
+        mark_clipped: false,
+        lift: 0.0,
+        turn: Turn::NONE,
+    };
+    composite.prepare(
+        &gpu.queue,
+        &scene,
+        false,
+        &output,
+        [Some(placement), None],
+        Some(glass),
+    );
+    let pixels = render_to(gpu, [width, 1], |encoder, view| {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("composite test"),
+            color_attachments: &[Some(gpu::attachment(
+                view,
+                wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+            ))],
+            ..Default::default()
+        });
+        composite.render(&mut pass);
+    });
+    // Over the picture, inside the glass, the row shows; past the
+    // picture's edge but still inside the glass, the black backdrop; and
+    // past the glass, the row again.
+    assert_eq!(pixels[2][0], 1.0);
+    assert_eq!(pixels[6][0], 0.0);
+    assert_eq!(pixels[9][0], 0.0);
+    assert_eq!(pixels[12][0], 1.0);
 }
 
 /// A picture with a gain map: 32 wide, 8 high, a ramp across, and a map
@@ -1092,4 +1198,64 @@ fn the_pq_encoding_on_the_device_is_the_transfers() {
             );
         }
     }
+}
+
+/// The minimap's thumbnail is drawn over the loupe's glass where the two
+/// meet: the map stays readable in its corner, and the loupe is the thing
+/// that moves.
+#[test]
+fn the_thumbnail_is_drawn_over_the_glass() {
+    use super::Glass;
+
+    let Some(gpu) = gpu::test_context() else {
+        return;
+    };
+    const SIZE: u32 = 16;
+    // Dark on the left, bright on the right.
+    let data: Vec<u8> = (0..SIZE * SIZE)
+        .map(|index| if index % SIZE < 8 { 0 } else { 255 })
+        .collect();
+    let image = gray_u8(SIZE, SIZE, data);
+    let target = [64u32, 64u32];
+    let plain = |x: f32, y: f32| Placement {
+        x,
+        y,
+        width: SIZE as f32,
+        height: SIZE as f32,
+        zoom: 1.0,
+        upscale: Upscale::Nearest,
+    };
+    // The glass magnifies a dark texel about (20, 50), and the thumbnail
+    // sits in the bottom-left corner under half of it.
+    let center = [20.0, 50.0];
+    let magnified = Placement {
+        x: center[0] - 2.5 * 4.0,
+        y: center[1] - 8.5 * 4.0,
+        width: SIZE as f32 * 4.0,
+        height: SIZE as f32 * 4.0,
+        zoom: 4.0,
+        upscale: Upscale::Nearest,
+    };
+    let pixels = draw_all(
+        gpu,
+        &image,
+        target,
+        Draw {
+            view: plain(0.0, 0.0),
+            thumbnail: Some(plain(0.0, 48.0)),
+            loupe: Some(Glass {
+                placement: magnified,
+                center,
+                radius: 12.0,
+            }),
+            mark_clipped: false,
+            headroom: Headroom::None,
+            lift: 0.0,
+            turn: Turn::NONE,
+        },
+    );
+    // Inside both, the thumbnail's bright column shows, not the glass's
+    // dark texel; inside the glass alone, the glass.
+    assert_eq!(at(&pixels, 64, 12, 52), 1.0);
+    assert_eq!(at(&pixels, 64, 20, 44), 0.0);
 }

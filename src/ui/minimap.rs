@@ -24,6 +24,11 @@ const MINIMAP_SIZE: [f32; 2] = [168.0, 132.0];
 /// the minimap stays off rather than shrinking to a smudge.
 const MINIMAP_MIN: f32 = 48.0;
 
+/// The border's weight, in logical pixels: the weight every outline around
+/// a picture the image layer draws inside the picture has — the loupe's
+/// rings are the same — heavy enough to be found over a bright picture.
+pub(super) const INSET_STROKE: f32 = 2.0;
+
 /// Where the minimap's thumbnail goes, in physical pixels: the whole image,
 /// drawn small in the corner the interface will then mark up.
 ///
@@ -175,7 +180,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
         }
         let painter = ui.painter();
         let grid = pass.grid;
-        outline(painter, grid, rect, 1.0, theme.minimap_edge.into());
+        outline(painter, grid, rect, INSET_STROKE, theme.inset_edge.into());
 
         let placement = pass.view.placement(image, pass.input.viewport);
         let shown = pass

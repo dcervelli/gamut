@@ -116,6 +116,7 @@ fn panels() -> Panels {
         show_minimap: true,
         show_grid: false,
         show_loupe: false,
+        loupe_magnification: super::loupe::DEFAULT_MAGNIFICATION,
         paste: false,
         pixel_format: PixelFormat::default(),
     }
@@ -397,10 +398,38 @@ fn the_secondary_button_on_the_picture_is_handed_back_while_it_is_down() {
         "the secondary button does not pan"
     );
 
+    // The wheel, while the button is down, is the loupe's and not the
+    // view's; up again, it is the view's.
+    harness.state_mut().commands.clear();
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Line,
+        delta: egui::vec2(0.0, 1.0),
+        modifiers: egui::Modifiers::NONE,
+        phase: egui::TouchPhase::Move,
+    });
+    harness.step();
+    assert_eq!(asked(&harness), [Command::Magnify(1.0)]);
+
     harness.state_mut().commands.clear();
     harness.event(secondary(to, false));
     harness.step();
     assert_eq!(said(&harness), [None]);
+
+    harness.state_mut().commands.clear();
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Line,
+        delta: egui::vec2(0.0, 1.0),
+        modifiers: egui::Modifiers::NONE,
+        phase: egui::TouchPhase::Move,
+    });
+    harness.step();
+    assert_eq!(
+        asked(&harness),
+        [Command::Wheel {
+            steps: 1.0,
+            notched: true
+        }]
+    );
 }
 
 /// The transport bar's buttons hand back their presses, and none keeps

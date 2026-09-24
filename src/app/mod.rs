@@ -413,6 +413,7 @@ impl App {
                 show_minimap: minimap,
                 show_grid: false,
                 show_loupe: false,
+                loupe_magnification: ui::loupe::DEFAULT_MAGNIFICATION,
                 paste: false,
                 pixel_format: ui::PixelFormat::default(),
             },
@@ -1238,7 +1239,11 @@ impl App {
             self.panels.show_ui,
             self.has_transport(),
         );
-        Some(ui::loupe::place(cursor, content))
+        Some(ui::loupe::place(
+            cursor,
+            content,
+            self.panels.loupe_magnification,
+        ))
     }
 
     /// Where the minimap's thumbnail goes, in physical pixels: the whole
@@ -4418,6 +4423,7 @@ mod tests {
     #[test]
     fn the_loupe_is_up_for_the_toggle_or_the_held_button_over_a_pixel() {
         use crate::ui::{Command, Naming};
+        use input::Action::CycleMagnification;
 
         let (mut app, _dir) = app_over("loupe", &[("a.png", 64, 48)]);
         app.headless = Some(WINDOW);
@@ -4444,6 +4450,27 @@ mod tests {
         assert_eq!(app.act(Command::Dragging(None)), Effect::Nothing);
         assert_eq!(app.loupe().map(|loupe| loupe.eye), Some(dragged));
         app.pointer.cursor = Some(middle);
+        // The wheel with the button held steps the magnification, a notch
+        // at a time however the notches arrive, and stops at either end.
+        assert_eq!(app.panels.loupe_magnification, 4.0);
+        assert_eq!(app.act(Command::Magnify(1.0)), Effect::Redraw);
+        assert_eq!(app.panels.loupe_magnification, 8.0);
+        assert_eq!(app.act(Command::Magnify(0.5)), Effect::Nothing);
+        assert_eq!(app.act(Command::Magnify(0.5)), Effect::Redraw);
+        assert_eq!(app.panels.loupe_magnification, 16.0);
+        assert_eq!(app.act(Command::Magnify(3.0)), Effect::Nothing);
+        assert_eq!(app.panels.loupe_magnification, 16.0);
+        assert_eq!(app.act(Command::Magnify(-1.0)), Effect::Redraw);
+        assert_eq!(app.panels.loupe_magnification, 8.0);
+        // The key steps it round, the largest back to the smallest.
+        assert_eq!(app.perform(CycleMagnification), Effect::Redraw);
+        assert_eq!(app.panels.loupe_magnification, 16.0);
+        assert_eq!(app.perform(CycleMagnification), Effect::Redraw);
+        assert_eq!(app.panels.loupe_magnification, 2.0);
+        assert_eq!(app.perform(CycleMagnification), Effect::Redraw);
+        assert_eq!(app.panels.loupe_magnification, 4.0);
+        assert_eq!(app.perform(CycleMagnification), Effect::Redraw);
+        assert_eq!(app.loupe().map(|loupe| loupe.magnification), Some(8.0));
         assert_eq!(app.press(ui::Control::Loupe), Effect::Redraw);
         assert_eq!(app.loupe(), None);
         // Its tooltip says the button is the other way to it.
@@ -4451,7 +4478,10 @@ mod tests {
             app.namer()
                 .tooltip(ui::Tip::Control(ui::Control::Loupe))
                 .map(|tooltip| tooltip.hints),
-            Some(vec![ui::tooltip::LOUPE_HELD.to_string()])
+            Some(vec![
+                ui::tooltip::LOUPE_HELD.to_string(),
+                ui::tooltip::loupe_wheel("Shift+L")
+            ])
         );
 
         // The button: the loupe comes up on the press, follows the pointer

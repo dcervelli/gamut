@@ -278,6 +278,11 @@ pub enum Command {
     /// pointer: the application's own stands still while the toolkit holds
     /// the drag, and the loupe follows the hand through it.
     Dragging(Option<[f32; 2]>),
+    /// The wheel turned over the picture with the secondary button down:
+    /// the loupe's magnification, rather than the view's zoom, by this
+    /// many notches — the hand holding the loupe up is the hand that sets
+    /// it. Steps as [`Command::Wheel`] carries them.
+    Magnify(f32),
     /// A drag on the picture began that is the region's rather than the
     /// view's: a new region while one was being asked for, or a hold on the
     /// one on screen. `at` is where the button went down, in image pixels —

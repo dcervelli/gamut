@@ -474,10 +474,12 @@ where all of it is set.
 | Key | What it does |
 | --- | --- |
 | `h` | Show or hide the histogram |
-| `l` | Count the histogram's bars up its axis, or the logarithm of them |
+| `y` | Count the histogram's bars up its axis, or the logarithm of them |
 | `i` | Show or hide the file information |
 | `m` | Show or hide the minimap |
 | `g` | Show or hide the grid over the image |
+| `l` | Show or hide the loupe |
+| `Shift+L` | Cycle the loupe's magnification: 2, 4, 8 or 16 times |
 | `x` | Select a region of the image; again, or `Esc`, removes it |
 | `.` | Cycle how the pixel under the pointer is read out: hex → decimal → mapped |
 | `` ` `` | Show or hide the panels around the image |
@@ -499,7 +501,7 @@ The histogram plots each bar as its share of the fullest one, which is the
 plot a photograph wants. It is the wrong plot for measurement data, where one
 value often covers most of the image — a masked sea, the black surround of a
 scan — and that one bar flattens everything the rest of the range is doing
-into the axis. `l`, or the button for it down the left of the plot, counts the
+into the axis. `y`, or the button for it down the left of the plot, counts the
 logarithm instead: the tall bar stays at the top and the short ones rise to
 where they can be read beside it. Heights can no longer be compared with each
 other once it is on, which is the point of it being a switch. It applies to
@@ -575,16 +577,20 @@ screen pixels apart at whatever zoom the view is at. The button at the head of
 the bottom bar says which spacing is in force, in the reading beside its mark,
 so a distance on screen can be counted off in the image's own pixels.
 
-The loupe, the button beside the grid's, rings the twenty pixels around the
-pointer and shows them four times larger in a circle beside it, for looking
-closely at one place without zooming the whole view in. The glass sits up
-and to the right of the pointer, and moves to the other side where that
-would take it off the picture's area. It shows the picture as the screen
-shows it — the window, exposure, curve and false color all reach it — and
-it is there whenever the pointer is over the image, through a drag as
-well. Holding the right mouse
-button on the picture puts it up as well, for as long as the button is held,
-whether or not the toggle is on.
+The loupe, `l` or the button beside the grid's, rings the pixels around
+the pointer and shows them magnified in a circle beside it, for looking
+closely at one place without zooming the whole view in. The glass sits up and to
+the right of the pointer, and moves to the other side where that would take
+it off the picture's area. It shows the picture as the screen shows it —
+the window, exposure, curve and false color all reach it — and it is there
+whenever the pointer is over the image, through a drag as well. Holding the
+right mouse button on the picture puts it up as well, for as long as the
+button is held, whether or not the toggle is on; and the wheel, while the
+button is held, steps the magnification through 2, 4, 8 and 16 times, as
+`Shift+L` cycles it. The
+glass stays the same size, so the ring around the pointer shrinks as the
+magnification grows to what still fits in it, and the button reads out the
+magnification in force while the loupe is up.
 
 ## Selecting a region
 
@@ -657,6 +663,7 @@ region behind: it belongs to the picture it was drawn on.
 | Click the grid button in the bottom left | Show or hide the grid |
 | Click the loupe button beside it | Show or hide the loupe, a magnified circle beside the pointer |
 | Hold the right button on the picture | Show the loupe for as long as the button is held |
+| Wheel while holding the right button | Step the loupe's magnification: 2, 4, 8 or 16 times |
 | Click the copy button | Open the menu of copies: the file, or the image |
 | Click the region button | Select a region, or take the selected one off |
 | Click the paste button | Paste the image on the clipboard, as `Ctrl+V` does |

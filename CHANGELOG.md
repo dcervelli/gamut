@@ -8,14 +8,18 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Added
 
-- A loupe. The button beside the grid's in the bottom bar rings the
-  twenty pixels around the pointer and shows them four times larger in a
-  circle beside it, placed up and to the right and going the other way
-  where that would run it off the picture's area. Holding the right mouse
-  button on the picture puts it up as well, for as long as the button is
-  held. The glass is the picture itself drawn again — the window,
-  exposure, curve, false color and turn all reach it — and past the
-  picture's edge it shows the backdrop, not the view underneath.
+- A loupe. `l`, or the button beside the grid's in the bottom bar, rings
+  the pixels around the pointer and shows them magnified in a circle
+  beside it, placed up and to the right and going the other way where that
+  would run it off the picture's area. Holding the right mouse button on
+  the picture puts it up as well, for as long as the button is held, and
+  the wheel while holding it — or `Shift+L` — steps the magnification
+  through 2, 4, 8 and 16 times, the glass staying one size and the ring
+  around the pointer shrinking to what fits in it, which the button reads
+  out. The glass is
+  the picture itself drawn again — the window, exposure, curve, false
+  color and turn all reach it — and past the picture's edge it shows the
+  backdrop, not the view underneath. It follows the hand through a drag.
 
 - `Ctrl+E` exports the picture as it is shown to a new JPG or PNG beside
   the file on screen: turned, cropped to the region if one is up, and with
@@ -84,6 +88,9 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   opened on that picture, unless `--size` chose the size.
 
 ### Changed
+
+- The histogram's logarithmic count axis is toggled by `y` rather than
+  `l`, which the loupe has taken.
 
 - A gain map is applied as far as the monitor has room, as the standard
   says and as a phone's gallery does, rather than the whole way and then

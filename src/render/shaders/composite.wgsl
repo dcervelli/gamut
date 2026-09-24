@@ -114,8 +114,19 @@ fn pq_encode(relative: vec3<f32>) -> vec3<f32> {
 @fragment
 fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     let coord = vec2<i32>(position.xy);
-    let image = textureLoad(image_target, coord, 0);
+    var image = textureLoad(image_target, coord, 0);
     let ui = textureLoad(ui_target, coord, 0);
+
+    // Inside the loupe's glass but past the magnified picture's edge there
+    // is nothing of the glass, and the glass's own edge, drawn blending,
+    // leaves the view showing through there: the backdrop alone, then, as
+    // the rest of the glass past the picture's edge is.
+    if params.glass.z > 0.0 && distance(position.xy, params.glass.xy) <= params.glass.z {
+        let picture = params.regions[2];
+        if !(all(position.xy >= picture.xy) && all(position.xy < picture.zw)) {
+            image = vec4<f32>(0.0);
+        }
+    }
 
     // The backdrop is authored at display brightness, like the interface, so
     // it goes under the image rather than through the tone curve with it.

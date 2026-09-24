@@ -95,6 +95,11 @@ pub enum Action {
     ToggleInfo,
     ToggleMinimap,
     ToggleGrid,
+    /// The loupe: the toggle the button beside the grid's presses, and the
+    /// magnification stepped round the ones on offer, which the wheel
+    /// steps with the secondary button held.
+    ToggleLoupe,
+    CycleMagnification,
     /// Exposure, by this many stops.
     Exposure(f32),
     CycleAutoWindow,
@@ -396,6 +401,7 @@ fn action_of(tip: Tip) -> Option<Action> {
         Tip::Control(Control::Histogram) => ToggleHistogram,
         Tip::Control(Control::Info) => ToggleInfo,
         Tip::Control(Control::Grid) => ToggleGrid,
+        Tip::Control(Control::Loupe) => ToggleLoupe,
         // The plain press: Shift on the same button asks for the other key,
         // which the tooltip lists under this one — see `App::tooltip`.
         Tip::Control(Control::Maximize) => ToggleInterface,
@@ -459,7 +465,6 @@ fn action_of(tip: Tip) -> Option<Action> {
             | Control::Opener(_)
             | Control::Seek(_)
             | Control::Zoom
-            | Control::Loupe
             | Control::Dismiss
             | Control::Facts(_)
             | Control::Chooser
@@ -937,6 +942,22 @@ pub const KEYS: &[Binding] = &[
         when: None,
         keys: &[(Char("g"), ToggleGrid), (Char("G"), ToggleGrid)],
     },
+    Binding {
+        section: Section::Interface,
+        mods: PLAIN,
+        shown: "l",
+        help: "Toggle the loupe",
+        when: None,
+        keys: &[(Char("l"), ToggleLoupe)],
+    },
+    Binding {
+        section: Section::Interface,
+        mods: PLAIN,
+        shown: "Shift+L",
+        help: "Cycle the loupe's magnification: 2, 4, 8, 16",
+        when: None,
+        keys: &[(Char("L"), CycleMagnification)],
+    },
     // The three that work the histogram's plot, under the key that opens it.
     Binding {
         section: Section::Interface,
@@ -957,10 +978,10 @@ pub const KEYS: &[Binding] = &[
     Binding {
         section: Section::Interface,
         mods: PLAIN,
-        shown: "l",
+        shown: "y",
         help: "Toggle a logarithmic count axis on the histogram",
         when: None,
-        keys: &[(Char("l"), ToggleLogCounts), (Char("L"), ToggleLogCounts)],
+        keys: &[(Char("y"), ToggleLogCounts), (Char("Y"), ToggleLogCounts)],
     },
     // The same key as the two copies above, with nothing held: what it
     // switches is what they take away with them.
@@ -1449,10 +1470,15 @@ impl Naming for Namer {
             ),
             // The loupe toggle: what it does, and under it the button on
             // the mouse that holds the loupe up without it, which no key
-            // table lists.
-            Tip::Control(Control::Loupe) => {
-                (vec![names(at)?], vec![ui::tooltip::LOUPE_HELD.to_string()])
-            }
+            // table lists, and how the magnification is set — by the wheel
+            // with that button held, or by its own key.
+            Tip::Control(Control::Loupe) => (
+                vec![names(at)?],
+                vec![
+                    ui::tooltip::LOUPE_HELD.to_string(),
+                    ui::tooltip::loupe_wheel(binding_for(CycleMagnification)?.shown),
+                ],
+            ),
             // The exposure's slider, and under it the keys that step what
             // it sets.
             Tip::Exposure => (
@@ -1581,6 +1607,10 @@ pub(super) struct Pointer {
     /// the loupe up while it is. From the last pass, as `over_image` is,
     /// since the toolkit takes the button — see `Command::Secondary`.
     pub(super) secondary: bool,
+    /// The wheel's turning toward the loupe's next magnification, in
+    /// notches: a trackpad arrives in fractions of one, and they add up
+    /// here until there is a whole notch to answer.
+    pub(super) magnifying: f32,
     /// Where `Space` is: the one key that fits on its way up.
     pub(super) space: Space,
 }
@@ -1816,6 +1846,11 @@ impl App {
             ToggleInfo => return self.press(Control::Info),
             ToggleMinimap => return self.press(Control::Minimap),
             ToggleGrid => return self.press(Control::Grid),
+            ToggleLoupe => return self.press(Control::Loupe),
+            CycleMagnification => {
+                self.panels.loupe_magnification = ui::loupe::cycle(self.panels.loupe_magnification);
+                return Effect::Redraw;
+            }
             Exposure(stops) => {
                 return self.adjust(|current, _| {
                     current.display.adjust_exposure(stops);
@@ -2186,6 +2221,7 @@ impl App {
                 self.view.pan_by(-dx, -dy, image, viewport);
             }
             ui::Command::Wheel { steps, notched } => self.wheel(steps, notched),
+            ui::Command::Magnify(steps) => return self.magnify(steps),
             // The hand on the minimap: the view goes where it is put, as
             // it does for a drag on the picture.
             ui::Command::Center(at) => {
@@ -2224,6 +2260,27 @@ impl App {
     /// A wheel's notch is a step asked for by name, and is animated as a
     /// key's would be; a trackpad's scroll is the hand on the view, as a drag
     /// is, and goes where the fingers put it.
+    /// The wheel with the secondary button down: the loupe's magnification
+    /// stepped a notch at a time up or down [`ui::loupe::MAGNIFICATIONS`],
+    /// the way the wheel steps the zoom. A trackpad's fractions of a notch
+    /// add up until there is one. Nothing at either end, and no frame owed
+    /// for it.
+    fn magnify(&mut self, steps: f32) -> Effect {
+        if !steps.is_finite() {
+            return Effect::Nothing;
+        }
+        self.pointer.magnifying += steps;
+        let mut changed = false;
+        while self.pointer.magnifying.abs() >= 1.0 {
+            let up = self.pointer.magnifying > 0.0;
+            self.pointer.magnifying -= if up { 1.0 } else { -1.0 };
+            let was = self.panels.loupe_magnification;
+            self.panels.loupe_magnification = ui::loupe::step(was, up);
+            changed |= self.panels.loupe_magnification != was;
+        }
+        Effect::redraw_if(changed)
+    }
+
     fn wheel(&mut self, steps: f32, notched: bool) {
         // Same reasoning as `handle_key`: Ctrl+wheel and friends belong to the
         // compositor, and acting on them as well would zoom behind its back.
@@ -2834,10 +2891,10 @@ mod tests {
         let file = named(Control::FileMenu).expect("the button names itself");
         assert!(!file.contains('('), "{file}");
 
-        // The loupe has no key: it names itself, with no key after it, and
-        // the mouse button that holds it up is the line under its name.
-        let loupe = named(Control::Loupe).expect("the button names itself");
-        assert!(!loupe.contains('('), "{loupe}");
+        assert_eq!(
+            named(Control::Loupe).as_deref(),
+            Some("Toggle the loupe (l)")
+        );
     }
 
     /// Nothing in the chrome is left unnamed: a button with no tooltip is one
@@ -3139,7 +3196,7 @@ mod tests {
         assert_eq!(named(Control::Planes).as_deref(), Some("Color planes (k)"));
         assert_eq!(
             named(Control::Log).as_deref(),
-            Some("Logarithmic counts (l)")
+            Some("Logarithmic counts (y)")
         );
         assert_eq!(
             named(Control::Marks).as_deref(),

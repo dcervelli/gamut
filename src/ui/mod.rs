@@ -212,6 +212,11 @@ pub struct Panels {
     /// button held on the picture puts it up as well, whatever this says;
     /// where it is on any one frame is [`FrameInput::loupe`].
     pub show_loupe: bool,
+    /// How much larger the loupe's glass shows what its eye rings: one of
+    /// [`loupe::MAGNIFICATIONS`], which the wheel steps through while the
+    /// secondary button holds the loupe up. The glass stays one size and
+    /// the eye shrinks as this grows.
+    pub loupe_magnification: f32,
     /// Whether the clipboard is holding a picture this program could show,
     /// which is whether the paste button is on screen at all: a button that
     /// did nothing when pressed would be worse than no button.
@@ -463,23 +468,28 @@ impl Pass<'_> {
             .map(|pos| [pos.x * scale, pos.y * scale]);
         self.commands.push(Command::Dragging(dragging));
         if response.contains_pointer() {
+            // With the secondary button down the wheel is the loupe's: the
+            // hand holding it up is the hand that sets how much it shows.
             let wheel: Vec<Command> = ui.input(|input| {
                 input
                     .events
                     .iter()
                     .filter_map(|event| match event {
-                        egui::Event::MouseWheel { unit, delta, .. } => Some(match unit {
-                            egui::MouseWheelUnit::Point => Command::Wheel {
-                                steps: delta.y / WHEEL_PIXELS_PER_STEP,
-                                notched: false,
-                            },
-                            egui::MouseWheelUnit::Line | egui::MouseWheelUnit::Page => {
-                                Command::Wheel {
-                                    steps: delta.y,
-                                    notched: true,
+                        egui::Event::MouseWheel { unit, delta, .. } => {
+                            let (steps, notched) = match unit {
+                                egui::MouseWheelUnit::Point => {
+                                    (delta.y / WHEEL_PIXELS_PER_STEP, false)
                                 }
-                            }
-                        }),
+                                egui::MouseWheelUnit::Line | egui::MouseWheelUnit::Page => {
+                                    (delta.y, true)
+                                }
+                            };
+                            Some(if held {
+                                Command::Magnify(steps)
+                            } else {
+                                Command::Wheel { steps, notched }
+                            })
+                        }
                         _ => None,
                     })
                     .collect()
@@ -822,6 +832,7 @@ mod tests {
             show_minimap: true,
             show_grid: false,
             show_loupe: false,
+            loupe_magnification: loupe::DEFAULT_MAGNIFICATION,
             paste: false,
             pixel_format: PixelFormat::default(),
         };

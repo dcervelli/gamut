@@ -180,8 +180,9 @@ fn fill_around(painter: &egui::Painter, rect: Rect, holes: &[Option<Rect>], colo
 
 /// The pieces of `rect` left once every one of the `holes` is taken out
 /// of it: each hole cuts every piece the ones before it left, so the
-/// pieces never overlap and none of them touches a hole.
-fn pieces(rect: Rect, holes: &[Option<Rect>]) -> Vec<Rect> {
+/// pieces never overlap and none of them touches a hole. What the loupe
+/// clips its rings to as well, around the minimap.
+pub(super) fn pieces(rect: Rect, holes: &[Option<Rect>]) -> Vec<Rect> {
     let mut left = vec![rect];
     for hole in holes.iter().flatten() {
         left = left

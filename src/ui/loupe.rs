@@ -11,47 +11,91 @@ use egui::Stroke;
 
 use crate::render::{Glass, Placement};
 
-use super::Rect;
 use super::chrome::Pass;
+use super::{Rect, grid, minimap};
 
-/// The radius of the circle around the pointer, in logical pixels: what
-/// the glass magnifies.
-pub const RADIUS: f32 = 20.0;
+/// The radius of the glass, in logical pixels: the same at every
+/// magnification, since it is the size of the thing beside the pointer,
+/// and what changes with the magnification is how much of the picture fits
+/// in it — the eye's radius, which is [`eye_radius`].
+pub const GLASS_RADIUS: f32 = 80.0;
 
-/// How much larger the glass shows it.
-pub const MAGNIFICATION: f32 = 4.0;
+/// The magnifications on offer, in the order the wheel steps through them.
+pub const MAGNIFICATIONS: [f32; 4] = [2.0, 4.0, 8.0, 16.0];
 
-/// And so the glass's own radius: the eye's circle at that magnification,
-/// so that the glass shows exactly what the eye rings and nothing more.
-pub const GLASS_RADIUS: f32 = RADIUS * MAGNIFICATION;
+/// The one the loupe starts at.
+pub const DEFAULT_MAGNIFICATION: f32 = 4.0;
+
+/// The radius of the circle around the pointer at `magnification`: what
+/// the glass shows at that magnification, so the glass shows exactly what
+/// the eye rings and nothing more.
+pub fn eye_radius(magnification: f32) -> f32 {
+    GLASS_RADIUS / magnification
+}
+
+/// The magnification after `current`, `up` being the larger way, and
+/// `current` itself at either end: the wheel steps rather than wraps, so
+/// a notch too many does not throw the loupe to the other end.
+pub fn step(current: f32, up: bool) -> f32 {
+    let at = MAGNIFICATIONS
+        .iter()
+        .position(|&candidate| candidate >= current)
+        .unwrap_or(MAGNIFICATIONS.len() - 1);
+    let next = if up {
+        (at + 1).min(MAGNIFICATIONS.len() - 1)
+    } else {
+        at.saturating_sub(1)
+    };
+    MAGNIFICATIONS[next]
+}
+
+/// The magnification after `current` round the ones on offer, the largest
+/// followed by the smallest: what the key steps, where the wheel stops at
+/// either end.
+pub fn cycle(current: f32) -> f32 {
+    let at = MAGNIFICATIONS
+        .iter()
+        .position(|&candidate| candidate >= current)
+        .unwrap_or(MAGNIFICATIONS.len() - 1);
+    MAGNIFICATIONS[(at + 1) % MAGNIFICATIONS.len()]
+}
+
+/// The magnification as the button beside the grid's reads it out.
+pub fn label(magnification: f32) -> String {
+    format!("{magnification}\u{00d7}")
+}
 
 /// The gap between the eye's ring and the glass's, so that the two read as
 /// two things rather than as one touching itself.
 const GAP: f32 = 16.0;
 
-/// The rings' weights, in logical pixels: the eye's the weight of a
-/// hairline, the glass's the weight the region's outline has, this being
-/// the same kind of thing — part of the image, marked out.
-const EYE_STROKE: f32 = 1.0;
-const RIM_STROKE: f32 = 1.5;
+/// The rings' weight, in logical pixels, and their ink: the minimap's
+/// border's, both of them — an outline around a picture the image layer
+/// has drawn inside the picture, which is what the glass is — and not the
+/// accent, which says what is switched on.
+const STROKE: f32 = minimap::INSET_STROKE;
 
 /// Where the loupe is, in the logical pixels the interface is laid out in:
-/// the center of the eye — the pointer — and the center of the glass.
+/// the center of the eye — the pointer — and the center of the glass; and
+/// how much larger the glass shows what the eye rings, which is what the
+/// eye's radius follows.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Loupe {
     pub eye: [f32; 2],
     pub glass: [f32; 2],
+    pub magnification: f32,
 }
 
 /// Where the loupe goes for a pointer at `cursor` over a content area of
-/// `content`: the eye on the pointer, and the glass diagonally away from
-/// it — up and to the right, where the hand is least likely to be over what
-/// it shows, and the other way on whichever axis that would run it off the
-/// content area. The glass is then held inside the area, which in a window
-/// too small to hold it beside the eye puts it over the eye rather than off
-/// screen: a loupe half under a panel shows half of what it is for.
-pub fn place(cursor: [f32; 2], content: Rect) -> Loupe {
-    let reach = (RADIUS + GAP + GLASS_RADIUS) / std::f32::consts::SQRT_2;
+/// `content`, at `magnification`: the eye on the pointer, and the glass
+/// diagonally away from it — up and to the right, where the hand is least
+/// likely to be over what it shows, and the other way on whichever axis
+/// that would run it off the content area. The glass is then held inside
+/// the area, which in a window too small to hold it beside the eye puts it
+/// over the eye rather than off screen: a loupe half under a panel shows
+/// half of what it is for.
+pub fn place(cursor: [f32; 2], content: Rect, magnification: f32) -> Loupe {
+    let reach = (eye_radius(magnification) + GAP + GLASS_RADIUS) / std::f32::consts::SQRT_2;
     let fits_right = cursor[0] + reach + GLASS_RADIUS <= content.right();
     let fits_up = cursor[1] - reach - GLASS_RADIUS >= content.y;
     let dx = if fits_right { reach } else { -reach };
@@ -70,6 +114,7 @@ pub fn place(cursor: [f32; 2], content: Rect) -> Loupe {
                 content.bottom() - GLASS_RADIUS,
             ),
         ],
+        magnification,
     }
 }
 
@@ -85,18 +130,19 @@ fn within(value: f32, low: f32, high: f32) -> f32 {
 }
 
 /// The glass's draw, in physical pixels: the image placed so that the point
-/// of it under the eye lands at the glass's center, [`MAGNIFICATION`] times
-/// larger than `placement` shows it, and cut to the glass's circle.
+/// of it under the eye lands at the glass's center, the loupe's
+/// magnification times larger than `placement` shows it, and cut to the
+/// glass's circle.
 pub fn glass(loupe: Loupe, placement: Placement, scale: f32) -> Glass {
-    let zoom = placement.zoom * MAGNIFICATION;
+    let zoom = placement.zoom * loupe.magnification;
     let under = placement.image_point([loupe.eye[0] * scale, loupe.eye[1] * scale]);
     let center = [loupe.glass[0] * scale, loupe.glass[1] * scale];
     Glass {
         placement: Placement {
             x: center[0] - under[0] * zoom,
             y: center[1] - under[1] * zoom,
-            width: placement.width * MAGNIFICATION,
-            height: placement.height * MAGNIFICATION,
+            width: placement.width * loupe.magnification,
+            height: placement.height * loupe.magnification,
             zoom,
             upscale: placement.upscale,
         },
@@ -109,23 +155,40 @@ pub fn glass(loupe: Loupe, placement: Placement, scale: f32) -> Glass {
 /// has already put down: the eye's around the pointer, and the glass's rim
 /// around the magnified picture. Painted straight on the picture's painter,
 /// as the region is, so that the picture under the loupe keeps the pointer.
+///
+/// Not over the minimap: the image layer draws the thumbnail over the glass,
+/// and the rings are clipped around the thumbnail's rectangle to match, so
+/// the whole loupe goes under the map. Clipped rather than layered, since
+/// the thumbnail is the image layer's and nothing egui stacks over the rings
+/// covers it.
 pub(super) fn show(pass: &Pass, ui: &mut egui::Ui) {
     let Some(loupe) = pass.input.loupe else {
         return;
     };
-    let painter = ui.painter().with_clip_rect(pass.content.into());
+    let thumbnail = pass
+        .current
+        .filter(|_| pass.input.minimap_on_screen)
+        .and_then(|current| minimap::thumbnail(pass.content, current.size()));
     let grid = pass.grid;
-    let accent: egui::Color32 = pass.theme.accent.into();
-    painter.circle_stroke(
-        egui::pos2(loupe.eye[0], loupe.eye[1]),
-        RADIUS,
-        Stroke::new(grid.line_width(EYE_STROKE), accent),
-    );
-    painter.circle_stroke(
-        egui::pos2(loupe.glass[0], loupe.glass[1]),
-        GLASS_RADIUS,
-        Stroke::new(grid.line_width(RIM_STROKE), accent),
-    );
+    let ink: egui::Color32 = pass.theme.inset_edge.into();
+    let stroke = Stroke::new(grid.line_width(STROKE), ink);
+    // egui lays a circle's stroke outside its radius; each ring is drawn
+    // half a stroke in so that it straddles its circle, the glass's edge
+    // — the pixel the image layer feathers — running down its middle.
+    let inset = stroke.width / 2.0;
+    for piece in grid::pieces(pass.content, &[thumbnail]) {
+        let painter = ui.painter().with_clip_rect(piece.into());
+        painter.circle_stroke(
+            egui::pos2(loupe.eye[0], loupe.eye[1]),
+            eye_radius(loupe.magnification) - inset,
+            stroke,
+        );
+        painter.circle_stroke(
+            egui::pos2(loupe.glass[0], loupe.glass[1]),
+            GLASS_RADIUS - inset,
+            stroke,
+        );
+    }
 }
 
 #[cfg(test)]
@@ -139,7 +202,11 @@ mod tests {
 
     /// How far apart the two centers are, when nothing is in the way.
     fn reach() -> f32 {
-        RADIUS + GAP + GLASS_RADIUS
+        eye_radius(DEFAULT_MAGNIFICATION) + GAP + GLASS_RADIUS
+    }
+
+    fn place(cursor: [f32; 2], content: Rect) -> Loupe {
+        super::place(cursor, content, DEFAULT_MAGNIFICATION)
     }
 
     fn distance(a: [f32; 2], b: [f32; 2]) -> f32 {
@@ -204,13 +271,14 @@ mod tests {
         let loupe = Loupe {
             eye: [200.0, 150.0],
             glass: [300.0, 80.0],
+            magnification: 4.0,
         };
         let glass = glass(loupe, placement, scale);
         assert_eq!(glass.center, [600.0, 160.0]);
         assert_eq!(glass.radius, GLASS_RADIUS * scale);
-        assert_eq!(glass.placement.zoom, placement.zoom * MAGNIFICATION);
+        assert_eq!(glass.placement.zoom, placement.zoom * 4.0);
         assert_eq!(glass.placement.upscale, Upscale::Bicubic);
-        assert_eq!(glass.placement.width, placement.width * MAGNIFICATION);
+        assert_eq!(glass.placement.width, placement.width * 4.0);
 
         let under_eye = placement.image_point([400.0, 300.0]);
         let under_glass = glass.placement.image_point(glass.center);
@@ -223,5 +291,55 @@ mod tests {
             .image_point([glass.center[0] + 4.0, glass.center[1]]);
         let expected = placement.image_point([401.0, 300.0]);
         assert!((beside[0] - expected[0]).abs() < 1e-3);
+    }
+
+    /// The glass is one size at every magnification, and the eye is the
+    /// glass's radius over it: what the glass shows at the magnification.
+    /// The wheel steps from one magnification to the next and stops at the
+    /// ends; the button reads it out as a multiplier.
+    #[test]
+    fn the_magnification_sizes_the_eye_and_steps_between_the_offered_ones() {
+        assert_eq!(eye_radius(2.0), 40.0);
+        assert_eq!(eye_radius(4.0), 20.0);
+        assert_eq!(eye_radius(16.0), 5.0);
+        for magnification in MAGNIFICATIONS {
+            let loupe = super::place([500.0, 350.0], content(), magnification);
+            let glass = glass(
+                loupe,
+                Placement {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 1000.0,
+                    height: 700.0,
+                    zoom: 1.0,
+                    upscale: Upscale::Nearest,
+                },
+                1.0,
+            );
+            assert_eq!(glass.radius, GLASS_RADIUS);
+            assert_eq!(glass.placement.zoom, magnification);
+            // A pixel at the eye's rim lands at the glass's rim.
+            let rim = glass
+                .placement
+                .screen_point([loupe.eye[0] + eye_radius(magnification), loupe.eye[1]]);
+            assert!((rim[0] - (glass.center[0] + GLASS_RADIUS)).abs() < 1e-3);
+        }
+
+        assert_eq!(step(2.0, true), 4.0);
+        assert_eq!(step(4.0, true), 8.0);
+        assert_eq!(step(16.0, true), 16.0);
+        assert_eq!(step(16.0, false), 8.0);
+        assert_eq!(step(2.0, false), 2.0);
+        // A magnification between two offered lands on the next up or down.
+        assert_eq!(step(3.0, true), 8.0);
+        assert_eq!(step(3.0, false), 2.0);
+
+        assert_eq!(cycle(2.0), 4.0);
+        assert_eq!(cycle(8.0), 16.0);
+        assert_eq!(cycle(16.0), 2.0);
+        assert_eq!(cycle(3.0), 8.0);
+
+        assert_eq!(label(4.0), "4\u{00d7}");
+        assert_eq!(label(16.0), "16\u{00d7}");
     }
 }

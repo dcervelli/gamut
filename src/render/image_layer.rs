@@ -54,8 +54,9 @@ struct Params {
     map_size: [f32; 2],
     base_offset: [f32; 4],
     alternate_offset: [f32; 4],
-    /// The circle the quad is cut to, `(x, y, radius)` in target pixels,
-    /// and a radius of zero for a quad that is not cut. See `Glass`.
+    /// The circle the quad is cut to, `(x, y, radius, cut)` in target
+    /// pixels, and a radius of zero for a quad that is not cut; `cut` is
+    /// which part of the circle this quad is — see [`Cut`].
     clip: [f32; 4],
     /// Where the image itself lands, `(x, y, width, height)` in target
     /// pixels, for the cut quad: its own corners are the circle's square, so
@@ -195,7 +196,12 @@ pub struct ImageLayer {
     /// The same shader with no blending: what the loupe's glass is drawn
     /// with, so that it replaces the view under it — the picture's edge,
     /// magnified, has the backdrop past it rather than the view showing
-    /// through — where source-over could only lay itself on top.
+    /// through, and a translucent picture has the checkerboard under it
+    /// rather than the view — where source-over could only lay itself on
+    /// top. The circle's edge is the exception: a pixel it crosses has to
+    /// blend the glass over the view, or it blends it over the backdrop
+    /// and draws a hairline of the backdrop's color around the glass, so
+    /// the last pixel of the circle is a second quad drawn blending.
     replacing: wgpu::RenderPipeline,
     texture_layout: wgpu::BindGroupLayout,
     lift_layout: wgpu::BindGroupLayout,
@@ -208,7 +214,10 @@ pub struct ImageLayer {
     ramps: wgpu::BindGroup,
     main: Slot,
     thumbnail: Slot,
+    /// The loupe's glass: the disc, drawn replacing, and the band along
+    /// its edge, drawn blending.
     loupe: Slot,
+    rim: Slot,
     reducer: Reducer,
     image: Option<GpuImage>,
     /// Which of the current image's bind groups the next draw reads, decided
@@ -294,6 +303,7 @@ impl ImageLayer {
             main: Slot::new(device, &params_layout, "image params"),
             thumbnail: Slot::new(device, &params_layout, "thumbnail params"),
             loupe: Slot::new(device, &params_layout, "loupe params"),
+            rim: Slot::new(device, &params_layout, "loupe rim params"),
             image: None,
             level: 0,
             thumbnail_level: None,
@@ -455,10 +465,12 @@ impl ImageLayer {
         self.loupe_level =
             loupe.map(|glass| reduce::level_for(shrink(glass.placement), image.levels.len()));
         if let (Some(glass), Some(level)) = (loupe, self.loupe_level) {
-            self.loupe.write(
-                queue,
-                params_for(image, glass.placement, Some(glass), level, quad),
-            );
+            for (slot, cut) in [(&self.loupe, Cut::Disc), (&self.rim, Cut::Band)] {
+                slot.write(
+                    queue,
+                    params_for(image, glass.placement, Some((glass, cut)), level, quad),
+                );
+            }
         }
     }
 
@@ -466,16 +478,23 @@ impl ImageLayer {
         let Some(image) = &self.image else {
             return;
         };
-        // The thumbnail goes down second: it sits over the content area, and
-        // a view zoomed in past the panels' edges is drawn under it. The
-        // loupe's glass goes down last and over both, replacing rather than
-        // blending: what is inside the circle is the glass and nothing else.
+        // The loupe's glass goes down over the view, replacing rather than
+        // blending: what is inside the circle is the glass and nothing
+        // else. Its rim — the last pixel of the circle — goes down after
+        // it, blending, so that the circle's edge is the glass feathered
+        // over the view. The thumbnail goes down last and over all of it:
+        // it sits in its corner of the content area, and a view zoomed in
+        // past the panels' edges is drawn under it, as is a glass that
+        // wanders into the corner — the map stays readable, and the loupe
+        // is the thing that moves.
         let draws = [
             Some((&self.main, self.level, &self.pipeline)),
-            self.thumbnail_level
-                .map(|level| (&self.thumbnail, level, &self.pipeline)),
             self.loupe_level
                 .map(|level| (&self.loupe, level, &self.replacing)),
+            self.loupe_level
+                .map(|level| (&self.rim, level, &self.pipeline)),
+            self.thumbnail_level
+                .map(|level| (&self.thumbnail, level, &self.pipeline)),
         ];
         let lift = image
             .lift
@@ -894,15 +913,26 @@ struct Quad<'a> {
     turn: Turn,
 }
 
+/// Which part of the loupe's circle a quad draws. The two together are
+/// the glass; which pipeline draws each is `ImageLayer::render`'s business.
+/// Twinned by `clip.w` in `shaders/image.wgsl`.
+#[derive(Clone, Copy)]
+enum Cut {
+    /// The disc, to a pixel short of the edge: hard-cut, and replacing.
+    Disc,
+    /// The last pixel of the circle, feathered at the edge: blending.
+    Band,
+}
+
 /// The constants for one quad: where it goes on the target, and how the
 /// shader is to read and resample the level it draws from. `placement` is
-/// where the image lands; `glass`, for the loupe's quad, is the circle the
-/// quad is cut to, and the quad itself is then the circle's square rather
-/// than the image, which runs far past it.
+/// where the image lands; `glass`, for the loupe's quads, is the circle the
+/// quad is cut to and which part of it this quad is, and the quad itself is
+/// then the circle's square rather than the image, which runs far past it.
 fn params_for(
     image: &GpuImage,
     placement: Placement,
-    glass: Option<Glass>,
+    glass: Option<(Glass, Cut)>,
     level: usize,
     quad: Quad<'_>,
 ) -> Params {
@@ -914,7 +944,7 @@ fn params_for(
         lifted,
         turn,
     } = quad;
-    let corners = glass.map_or(placement, |glass| glass.bounds());
+    let corners = glass.map_or(placement, |(glass, _)| glass.bounds());
     let divisor = (reduce::STEP as f32).powi(level as i32);
     let extent = [
         image.size[0] as f32 / divisor,
@@ -957,8 +987,12 @@ fn params_for(
         map_size: lifted.map_size,
         base_offset: lifted.base_offset,
         alternate_offset: lifted.alternate_offset,
-        clip: glass.map_or([0.0; 4], |glass| {
-            [glass.center[0], glass.center[1], glass.radius, 0.0]
+        clip: glass.map_or([0.0; 4], |(glass, cut)| {
+            let cut = match cut {
+                Cut::Disc => 0.0,
+                Cut::Band => 1.0,
+            };
+            [glass.center[0], glass.center[1], glass.radius, cut]
         }),
         picture: [placement.x, placement.y, placement.width, placement.height],
     }

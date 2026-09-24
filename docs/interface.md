@@ -568,10 +568,26 @@ to.
 
 ## The loupe
 
-The loupe is two circles: the eye, `ui::loupe::RADIUS` logical pixels
-around the pointer, and the glass, `MAGNIFICATION` times that radius, showing
-what is inside the eye that much larger. `Control::Loupe`, the toggle beside
-the grid's in the bottom bar, keeps it up; the secondary button held on the
+The loupe is two circles: the glass, `ui::loupe::GLASS_RADIUS` logical
+pixels across whatever the magnification, and the eye around the pointer,
+the glass's radius over the magnification, so that the glass shows exactly
+what the eye rings. The magnification is `Panels::loupe_magnification`, one
+of `ui::loupe::MAGNIFICATIONS` — 2, 4, 8 and 16 — starting at 4. The wheel
+over the picture with the secondary button down is the loupe's rather than
+the view's: `Pass::picture` hands it back as `Command::Magnify` instead of
+`Command::Wheel`, and `App::magnify` steps the magnification a notch at a
+time, stopping at either end, with a trackpad's fractions of a notch adding
+up in `Pointer::magnifying` until there is one; `Shift+L` is
+`Action::CycleMagnification`, which goes round instead, through
+`ui::loupe::cycle`, since a key pressed again and again wants to reach every
+setting. The glass keeps its size
+because it is the thing beside the pointer, and a thing that grew and shrank
+with a setting would be a different thing to find each time; what the
+setting changes is how much of the picture fits in it, which is the eye's
+business. The button reads the magnification out beside its mark while the
+loupe is up, through the same `reading_toggle` the grid's spacing is read
+out through. `Control::Loupe`, the toggle beside
+the grid's in the bottom bar, which `l` presses too, keeps it up; the secondary button held on the
 picture puts it up for as long as it is held, whatever the toggle says. Both
 are read into `Panels::show_loupe` and `Pointer::secondary`, and
 `App::loupe` is the one answer to whether it is up: one of those, and a
@@ -591,16 +607,23 @@ handed to the interface in `FrameInput::loupe` and to the renderer as a
 hand is least likely to cover it, and the other way on whichever axis that
 would run it off the content area; it is then held inside the area, which in
 a window too small to hold it beside the eye puts it over the eye rather
-than half under a panel. The interface draws only the two rings, on the
-picture's own painter as the region is drawn, so the picture under the loupe
-keeps the pointer; and the grid, which is the view's spacing rather than the
+than half under a panel. The interface draws only the two rings, in the theme's
+`inset_edge` — the minimap's border's ink, the outline for a picture the
+image layer draws inside the picture, rather than the accent, which says
+what is switched on — on the picture's own painter as the region is drawn,
+so the picture under the loupe keeps the pointer; and the grid, which is the view's spacing rather than the
 glass's, is broken around the glass's circle — each hairline cut over the
 chord it makes of the circle, by `grid::chord` — as it is broken around the
-minimap's thumbnail.
+minimap's thumbnail. The minimap is over the whole loupe: the thumbnail is
+drawn after the glass in the image layer, and the rings are clipped around
+the thumbnail's rectangle — clipped rather than stacked under the minimap's
+area, since the thumbnail is not egui's and nothing egui puts over the rings
+would cover it. The map stays readable in its corner, and the loupe is the
+thing that moves.
 
-The glass itself is the image layer's: a third quad in its pass, after the
-view and the minimap's thumbnail, drawn from the same texture through the
-same shader as the view, so that the window, the false color, the tone map,
+The glass itself is the image layer's: a third quad in its pass, over the
+view and under the minimap's thumbnail, drawn from the same texture through
+the same shader as the view, so that the window, the false color, the tone map,
 the lift and the turn all reach it for nothing — the same reasoning as the
 [minimap](#minimap)'s thumbnail. `ui::loupe::glass` places it: the view's
 placement magnified, with the image point under the eye landing at the
@@ -608,12 +631,24 @@ glass's center, and the circle in physical pixels. Two things are different
 about this quad. Its corners are the circle's square rather than the
 magnified image, which runs far past the glass, and the shader computes each
 fragment's place in the picture from the image's own placement
-(`Params::picture`) and cuts the square to the circle (`Params::clip`),
-feathered over the one pixel the edge crosses. And it is drawn with no
-blending, through `ImageLayer::replacing`, so that what is inside the circle
-is the glass and nothing else: past the picture's edge the glass writes
-nothing, which the compositor shows as the backdrop, where source-over
-blending would have left the view showing through under it. The compositor's
+(`Params::picture`) and cuts the square to the circle (`Params::clip`). And
+it is drawn with no blending, through `ImageLayer::replacing`, so that what
+is inside the circle is the glass and nothing else: past the picture's edge
+the glass writes nothing, which the compositor shows as the backdrop, where
+source-over blending would have left the view showing through under it, and
+a translucent picture has the checkerboard under it rather than the view.
+The circle's edge is the one place replacing is wrong: a pixel the edge
+crosses, feathered, would be the glass blended over the backdrop rather than
+over the view, and on a light theme that drew a light hairline around the
+glass just inside the ring. So the glass is two quads sharing one circle
+(`image_layer::Cut`): the disc to a pixel short of the edge, hard-cut and
+replacing, and the last pixel as a band, feathered and blending, drawn after
+it. Past the picture's edge that band leaves the view showing through, so
+the compositor, which knows the circle and the picture's rectangle already
+for its checkerboard, shows the backdrop alone inside the circle and outside
+the rectangle. The rings are drawn half a stroke in from their circles,
+since egui lays a circle's stroke outside its radius, so that the feathered
+pixel runs down the middle of the ring. The compositor's
 checkerboard follows the same cut — the glass is its third region, and the
 one it tests against a circle as well as a rectangle — so transparency reads
 the same inside the loupe as outside it.

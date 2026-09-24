@@ -32,7 +32,8 @@ struct Params {
     map_size: vec2<f32>,         // the gain map's size, in its own texels
     base_offset: vec4<f32>,      // added to the base before the gain, per channel
     alternate_offset: vec4<f32>, // taken from the product after
-    clip: vec4<f32>,             // (x, y, radius, -) of the circle the quad is cut to; radius 0 for no cut
+    clip: vec4<f32>,             // (x, y, radius, cut) of the circle the quad is cut to; radius 0 for no cut,
+                                 // cut 0 for the disc a pixel short of the edge, 1 for the last pixel of it
     picture: vec4<f32>,          // (x, y, width, height) of the image on the target, for a cut quad
 };
 
@@ -199,16 +200,31 @@ fn false_color(which: u32, t: f32) -> vec3<f32> {
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     var uv = in.uv;
-    // The loupe's glass: the quad is the circle's square, cut to the circle
-    // — feathered over the one pixel its edge crosses — and the image's own
-    // place on the target says where in the picture each pixel of it reads.
-    // Past the picture's edge it writes nothing, which, the glass replacing
-    // rather than blending, is the backdrop and not the view underneath.
+    // The loupe's glass: the quad is the circle's square, cut to the circle,
+    // and the image's own place on the target says where in the picture
+    // each pixel of it reads. Two quads share the circle. The disc, to a
+    // pixel short of the edge, is drawn replacing what is under it, so past
+    // the picture's edge it writes nothing, which is the backdrop and not
+    // the view underneath. The band, the last pixel, is drawn blending and
+    // feathered over the one pixel the edge crosses, so the edge is the
+    // glass blended over the view: blended over the backdrop, as the disc
+    // would leave it, it would be a hairline of the backdrop's color.
     var coverage = 1.0;
     if params.clip.z > 0.0 {
-        coverage = clamp(params.clip.z + 0.5 - distance(in.position.xy, params.clip.xy), 0.0, 1.0);
-        if coverage <= 0.0 {
-            discard;
+        let distance = distance(in.position.xy, params.clip.xy);
+        let inner = params.clip.z - 1.0;
+        if params.clip.w == 0.0 {
+            if distance > inner {
+                discard;
+            }
+        } else {
+            if distance <= inner {
+                discard;
+            }
+            coverage = clamp(params.clip.z + 0.5 - distance, 0.0, 1.0);
+            if coverage <= 0.0 {
+                discard;
+            }
         }
         let across = (in.position.xy - params.picture.xy) / params.picture.zw;
         if any(across < vec2<f32>(0.0)) || any(across >= vec2<f32>(1.0)) {

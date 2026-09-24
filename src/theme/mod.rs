@@ -92,10 +92,12 @@ pub struct Theme {
     /// yellow that can be seen here: two levels drawn alike say less than
     /// they should, and a level drawn invisibly says nothing at all.
     pub caution: Color,
-    /// The minimap's border, and the wash over the part of the image that is
-    /// off screen. Both go over a thumbnail drawn by the image layer, so both
-    /// stay translucent.
-    pub minimap_edge: Color,
+    /// The outline around a picture the image layer draws inside the
+    /// picture — the minimap's thumbnail, the loupe's glass and the ring
+    /// around what it magnifies — and the wash over the part of the
+    /// thumbnail that is off screen. All go over something drawn by the
+    /// image layer, so all stay translucent.
+    pub inset_edge: Color,
     pub minimap_dim: Color,
 }
 
@@ -154,7 +156,7 @@ impl Theme {
         accent: Color::rgb(120, 180, 255),
         warning: Color::rgb(255, 116, 108),
         caution: Color::rgb(240, 190, 110),
-        minimap_edge: Color::rgba(255, 255, 255, 70),
+        inset_edge: Color::rgba(255, 255, 255, 120),
         minimap_dim: Color::rgba(6, 6, 10, 150),
     };
 
@@ -259,7 +261,7 @@ impl Theme {
             accent,
             warning,
             caution,
-            minimap_edge: foreground.with_alpha(Theme::FALLBACK.minimap_edge.a),
+            inset_edge: foreground.with_alpha(Theme::FALLBACK.inset_edge.a),
             minimap_dim: deep.with_alpha(Theme::FALLBACK.minimap_dim.a),
         }
     }
@@ -311,7 +313,7 @@ mod tests {
         assert_eq!(theme.accent, Color::rgb(0x7a, 0xa2, 0xf7));
         // The washes are the panel colors at the interface's own alphas.
         assert_eq!(theme.button_idle, theme.text_dim.with_alpha(20));
-        assert_eq!(theme.minimap_edge, theme.text_dim.with_alpha(70));
+        assert_eq!(theme.inset_edge, theme.text_dim.with_alpha(120));
         // The headings' band is stronger than a button's wash, being the
         // one row set apart.
         assert_eq!(theme.heading, theme.text_dim.with_alpha(48));

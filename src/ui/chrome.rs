@@ -459,40 +459,64 @@ impl Pass<'_> {
     }
 
     /// The grid toggle: the icon always, and — while the grid is on — how far
-    /// apart its lines are, written after the mark it qualifies. The mark
-    /// stays in the first button's width of the toggle, whether or not there
-    /// is a reading after it, so it is in the same place from one press to
-    /// the next; the button grows rightwards to make room for the reading.
+    /// apart its lines are, written after the mark it qualifies.
     fn grid_toggle(&mut self, ui: &mut Ui, spacing: Option<&str>) {
+        self.reading_toggle(ui, icon::GRID_3X3, Control::Grid, spacing);
+    }
+
+    /// The loupe toggle, beside the grid's: a way of looking at the picture
+    /// like the grid, and so in the bar that carries what is being done to
+    /// it. Lit while the loupe is on, whether the toggle switched it on or
+    /// the secondary button is holding it up: the button says what is in
+    /// force, and the loupe is in force either way. While it is, the
+    /// magnification is written after the mark, as the grid's spacing is.
+    fn loupe_toggle(&mut self, ui: &mut Ui) {
+        let on = self.panels.show_loupe || self.input.secondary;
+        let reading = on.then(|| super::loupe::label(self.panels.loupe_magnification));
+        self.reading_toggle(ui, icon::ZOOM_IN, Control::Loupe, reading.as_deref());
+    }
+
+    /// A toggle that is lit while it has a reading, written after the mark
+    /// it qualifies. The mark stays in the first button's width of the
+    /// toggle, whether or not there is a reading after it, so it is in the
+    /// same place from one press to the next; the button grows rightwards
+    /// to make room for the reading.
+    fn reading_toggle(
+        &mut self,
+        ui: &mut Ui,
+        marks: &[Mark],
+        control: Control,
+        reading: Option<&str>,
+    ) {
         let font = egui::TextStyle::Button.resolve(ui.style());
         // No ink of its own: the reading is drawn in the button's, which is
         // handed to the painter below. A color set here would be baked into
         // the galley and would win over that one.
-        let reading = spacing.map(|spacing| {
+        let galley = reading.map(|reading| {
             ui.ctx().fonts_mut(|fonts| {
                 fonts.layout_no_wrap(
-                    spacing.to_string(),
+                    reading.to_string(),
                     font.clone(),
                     egui::Color32::PLACEHOLDER,
                 )
             })
         });
-        let width = match &reading {
+        let width = match &galley {
             Some(galley) => BUTTON_SIZE + READING_GAP + galley.size().x + READING_PAD,
             None => BUTTON_SIZE,
         };
         let (rect, response) = ui.allocate_exact_size(vec2(width, BUTTON_SIZE), Sense::CLICK);
-        let (background, ink) = self.button_ink(spacing.is_some(), &response, true);
+        let (background, ink) = self.button_ink(reading.is_some(), &response, true);
         ui.painter().rect_filled(rect, TOGGLE_RADIUS, background);
         let mark = Area::from_min_size(rect.min, Vec2::splat(BUTTON_SIZE));
         icon::paint(
             ui.painter(),
-            icon::GRID_3X3,
+            marks,
             icon::square(self.grid, mark, ICON_SIDE),
             ink,
             background,
         );
-        if let Some(galley) = reading {
+        if let Some(galley) = galley {
             let at = pos2(
                 mark.max.x + READING_GAP,
                 rect.center().y - galley.size().y / 2.0,
@@ -500,35 +524,11 @@ impl Pass<'_> {
             ui.painter().galley(at, galley, ink);
         }
         response.widget_info(|| {
-            WidgetInfo::selected(
-                WidgetType::Button,
-                true,
-                spacing.is_some(),
-                Control::Grid.label(),
-            )
+            WidgetInfo::selected(WidgetType::Button, true, reading.is_some(), control.label())
         });
-        let response = self.tooltip(response, Tip::Control(Control::Grid), true);
+        let response = self.tooltip(response, Tip::Control(control), true);
         if response.clicked() {
-            self.press(Control::Grid);
-        }
-    }
-
-    /// The loupe toggle, beside the grid's: a way of looking at the picture
-    /// like the grid, and so in the bar that carries what is being done to
-    /// it. Lit while the loupe is on, whether the toggle switched it on or
-    /// the secondary button is holding it up: the button says what is in
-    /// force, and the loupe is in force either way.
-    fn loupe_toggle(&mut self, ui: &mut Ui) {
-        let response = self.icon_button(
-            ui,
-            icon::ZOOM_IN,
-            Control::Loupe,
-            self.panels.show_loupe || self.input.secondary,
-            true,
-            Corners::All,
-        );
-        if response.clicked() {
-            self.press(Control::Loupe);
+            self.press(control);
         }
     }
 
