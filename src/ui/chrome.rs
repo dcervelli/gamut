@@ -191,11 +191,25 @@ impl Chrome {
 ///
 /// With the panels hidden a floating panel still sits in the corner of the
 /// window rather than where the panels that are not there would have put it.
+/// The file list is the one part that stays when the panels go — its rows,
+/// not its head — so with it up the window is what it leaves to the right.
 pub fn content_area(logical: [f32; 2], show_ui: bool, parts: Parts) -> Rect {
     if show_ui {
         Chrome::new(logical, parts).content()
     } else {
-        Rect::new(0.0, 0.0, logical[0], logical[1])
+        let strip = bare_strip(logical[0], parts);
+        Rect::new(strip, 0.0, (logical[0] - strip).max(0.0), logical[1])
+    }
+}
+
+/// How wide the file list is with the panels hidden: its own width, or the
+/// window where that is less, and nothing while it is not up. Down the
+/// whole left edge of the window, there being no top bar to start under.
+pub fn bare_strip(width: f32, parts: Parts) -> f32 {
+    if parts.filmstrip {
+        filmstrip::WIDTH.min(width)
+    } else {
+        0.0
     }
 }
 
@@ -207,10 +221,10 @@ pub fn content_area(logical: [f32; 2], show_ui: bool, parts: Parts) -> Rect {
 /// this, which is why toggling the interface re-fits a fitted image on the
 /// very next frame.
 pub fn image_viewport(size: [f32; 2], scale: f32, show_ui: bool, parts: Parts) -> Viewport {
-    if !show_ui {
+    if !show_ui && !parts.filmstrip {
         return Viewport::whole(size);
     }
-    let content = Chrome::new([size[0] / scale, size[1] / scale], parts).content();
+    let content = content_area([size[0] / scale, size[1] / scale], show_ui, parts);
     Viewport::new(
         content.x * scale,
         content.y * scale,
@@ -277,6 +291,23 @@ impl Pass<'_> {
         self.commands.push(Command::Press(control));
     }
 
+    /// The file list, where there is one: under the top bar while the
+    /// panels are up, and down the whole left edge of the window on its
+    /// own while they are hidden.
+    pub fn file_list(&mut self, ui: &mut Ui) {
+        let Some(strip) = self.input.filmstrip.clone() else {
+            return;
+        };
+        let frame = egui::Frame::NONE.fill(self.theme.bar_background.into());
+        let list = egui::Panel::left("filmstrip")
+            .exact_size(filmstrip::WIDTH)
+            .resizable(false)
+            .show_separator_line(false)
+            .frame(frame)
+            .show(ui, |ui| filmstrip::show(self, ui, &strip));
+        self.hairline(ui, list.response.rect, Edge::Right);
+    }
+
     /// The four panels, and everything on them; and the transport bar for a
     /// file that has one.
     pub fn bars(&mut self, ui: &mut Ui) {
@@ -294,15 +325,7 @@ impl Pass<'_> {
         // nests it as `Chrome` lays it out: the whole left edge under the
         // top bar, with the bottom bar and the left strip starting at its
         // right edge.
-        if let Some(strip) = self.input.filmstrip.clone() {
-            let list = egui::Panel::left("filmstrip")
-                .exact_size(filmstrip::WIDTH)
-                .resizable(false)
-                .show_separator_line(false)
-                .frame(frame)
-                .show(ui, |ui| filmstrip::show(self, ui, &strip));
-            self.hairline(ui, list.response.rect, Edge::Right);
-        }
+        self.file_list(ui);
         let bottom = egui::Panel::bottom("bottom")
             .exact_size(BAR_HEIGHT)
             .resizable(false)
@@ -1008,8 +1031,12 @@ mod tests {
         );
         assert_eq!(
             content_area(WINDOW, false, parts),
-            Rect::new(0.0, 0.0, 1000.0, 700.0),
-            "hidden with the rest of the interface"
+            Rect::new(filmstrip::WIDTH, 0.0, 1000.0 - filmstrip::WIDTH, 700.0),
+            "left up when the rest of the interface is hidden, down the whole edge"
+        );
+        assert_eq!(
+            content_area(WINDOW, false, Parts::NONE),
+            Rect::new(0.0, 0.0, 1000.0, 700.0)
         );
     }
 

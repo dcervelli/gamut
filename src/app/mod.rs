@@ -650,10 +650,11 @@ impl App {
         self.thumbnailer.enqueue(self.files.paths().to_vec());
     }
 
-    /// Whether the file list is on screen: switched on, with the
-    /// interface up and a list of more than one file to show.
+    /// Whether the file list is on screen: switched on, with a list of
+    /// more than one file to show. Hiding the interface leaves it up,
+    /// without its head.
     pub(super) fn filmstrip_showing(&self) -> bool {
-        self.panels.show_ui && self.panels.show_filmstrip && self.files.len() > 1
+        self.panels.show_filmstrip && self.files.len() > 1
     }
 
     /// What is known about `path` that the list is ordered by.
@@ -4533,6 +4534,44 @@ mod tests {
         assert_eq!(app.files.len(), 1);
         assert!(!app.filmstrip_showing());
         assert!(app.panels.show_filmstrip);
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// Hiding the interface leaves the file list up without its head, the
+    /// picture beside it rather than under it; the key that closes the
+    /// floating panels with the bars closes the list too.
+    #[test]
+    fn hiding_the_interface_keeps_the_file_list_and_the_full_hide_closes_it() {
+        use crate::app::input::Action;
+        use egui_kittest::kittest::Queryable;
+        let (mut app, dir) = app_over(
+            "filmstrip-hidden",
+            &[("a.png", 8, 8), ("b.png", 8, 8), ("c.png", 8, 8)],
+        );
+        app.headless = Some(WINDOW);
+        let _ = app.perform(Action::ToggleFilmstrip);
+        let _ = app.perform(Action::ToggleInterface);
+        assert!(!app.panels.show_ui);
+        assert!(app.filmstrip_showing());
+        let viewport = app.viewport();
+        assert_eq!(viewport.x, ui::filmstrip::WIDTH);
+        assert_eq!(viewport.y, 0.0);
+        assert_eq!(viewport.width, WINDOW[0] - ui::filmstrip::WIDTH);
+        assert_eq!(viewport.height, WINDOW[1]);
+
+        let mut harness = driven(app);
+        assert!(harness.query_by_label("Show file 1").is_some());
+        assert!(harness.query_by_label("Back").is_none(), "the head goes with the bars");
+        let app = harness.state_mut();
+
+        // Back up, and down again with everything that floats.
+        let _ = app.perform(Action::ToggleInterface);
+        let _ = app.perform(Action::ToggleInterfaceAndPanels);
+        assert!(!app.panels.show_ui);
+        assert!(!app.panels.show_filmstrip);
+        assert!(!app.filmstrip_showing());
+        assert_eq!(app.viewport().width, WINDOW[0]);
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }

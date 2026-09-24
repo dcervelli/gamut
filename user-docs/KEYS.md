@@ -553,12 +553,14 @@ where all of it is set.
 | `x` | Select a region of the image; again, or `Esc`, removes it |
 | `.` | Cycle how the pixel under the pointer is read out: hex → decimal → mapped |
 | `` ` `` | Show or hide the panels around the image |
-| `~` | The same, and closes the histogram, information and minimap |
+| `~` | The same, and closes the histogram, information, minimap and file list |
 | `?`, `/` | Show the keys: every one of them, what it does and when. Again, `Esc` or a click outside closes it. The button at the foot of the right strip does the same |
 | `q`, `Esc` | Quit. `Esc` closes a popup, a message or a region, or brings the panels back |
 
 The panels are opaque and the image is fitted inside them, so hiding them
-gives a fitted image more room and it re-fits immediately.
+gives a fitted image more room and it re-fits immediately. The file list stays
+when they go, without the buttons at its head, and runs down the whole left
+edge of the window; `~` closes it with the rest.
 
 The button in the top right corner hides them too, and holding Shift as you
 press it does what `~` does. The first time they go, a message says which keys

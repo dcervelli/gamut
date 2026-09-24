@@ -274,10 +274,13 @@ pub fn span(tops: &[f32], top: f32, bottom: f32) -> Range<usize> {
 }
 
 /// Lays the panel out in `ui`, which is the whole of it: the head, and the
-/// rows under it.
+/// rows under it. The head is a bar, and goes with the bars when the
+/// interface is hidden; the rows stay.
 pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
     ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
-    head(pass, ui, input);
+    if pass.panels.show_ui {
+        head(pass, ui, input);
+    }
     rows(pass, ui, input);
 }
 

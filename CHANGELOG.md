@@ -23,7 +23,9 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   each type in size order, and a directory read again keeps the order it
   found the list in. A file whose header has not been read yet sorts after
   those that have, and moves into place once it is. The list opens in name
-  order, whatever order the files were named in.
+  order, whatever order the files were named in. Hiding the interface with
+  `` ` `` leaves the list up without its head; `~` closes it with the
+  floating panels.
 
 - Back and forward through the files that have been on screen: `Alt+[`
   and `Alt+]`, or `Alt+Page Up` and `Alt+Page Down`, or the pair at the

@@ -391,6 +391,9 @@ pub fn show(
     };
     if panels.show_ui {
         pass.bars(ui);
+    } else {
+        // The one part of the chrome that stays when the rest goes.
+        pass.file_list(ui);
     }
     pass.picture(ui);
     match current {

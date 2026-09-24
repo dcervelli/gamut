@@ -91,7 +91,12 @@ window under the top bar, the left strip and the bottom bar starting at
 its right edge, and `ui::show` derives the same `Parts` from whether it
 was handed an `Input`, so the two cannot disagree — see
 [the chrome](interface.md#the-chrome). Its head holds the two menus and the
-back and forward pair and stays put; the rows scroll under it. The index
+back and forward pair and stays put; the rows scroll under it. Hiding the
+interface takes the head with the bars and leaves the rows, down the whole
+left edge of the window: `chrome::content_area` gives the picture what the
+list leaves to its right, `Pass::file_list` draws the panel on its own, and
+`App::filmstrip_showing` does not ask whether the interface is up. The key
+that also closes the floating panels closes the list with them. The index
 and name are laid over the thumbnail's corner on a wash of the bar's
 ground rather than beside it, which is what keeps a row a fixed height and
 the strip one thumbnail wide.

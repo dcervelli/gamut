@@ -87,7 +87,8 @@ pub enum Action {
     ToggleInterface,
     /// The interface, and the panels floating over the image with it: the
     /// bars come and go as [`Action::ToggleInterface`], and the map,
-    /// histogram and information panel are closed on the way past.
+    /// histogram, information panel and file list are closed on the way
+    /// past.
     ToggleInterfaceAndPanels,
     /// Open the help popup — every key, what it does and when — and close
     /// it if it is up. The same toggle as the button at the foot of the
@@ -949,7 +950,7 @@ pub const KEYS: &[Binding] = &[
         section: Section::Interface,
         mods: PLAIN,
         shown: "~",
-        help: "Toggle the panels, closing the map, histogram and information",
+        help: "Toggle the panels, closing the map, histogram, information and file list",
         when: None,
         keys: &[(Char("~"), ToggleInterfaceAndPanels)],
     },
@@ -1910,7 +1911,8 @@ impl App {
                 }
             }
             // The three panels float over the image rather than inside the
-            // bars, so hiding the interface leaves them behind. This asks for
+            // bars, and the file list keeps its rows when the bars go, so
+            // hiding the interface leaves all four behind. This asks for
             // the picture on its own, and closes them on the way. They stay
             // closed when the bars come back: what the key put away, it is
             // not the key's business to bring out again.
@@ -1918,6 +1920,7 @@ impl App {
                 self.panels.show_minimap = false;
                 self.panels.show_histogram = false;
                 self.panels.show_info = false;
+                self.panels.show_filmstrip = false;
                 return self.perform(ToggleInterface);
             }
             ToggleHistogram => return self.press(Control::Histogram),
