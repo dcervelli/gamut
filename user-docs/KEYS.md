@@ -184,6 +184,17 @@ format changes the extension. The slider under JPG sets its quality, from 1
 to 100; it starts at 90. A name already in the folder is refused, and Export
 does nothing until it is changed: nothing is ever written over.
 
+Under the formats, three boxes set the size the picture is written at: a
+percentage, a width and a height. They say one thing between them — the
+aspect is locked — so typing in any one fills in the other two; `Tab`
+moves between them. The percentage is of the region when one is up, since
+that is what is written. A side runs from 1 to 32768 pixels, and a box
+that asks for more, or holds something that is not a number, is outlined
+and holds Export until it is put right. A picture made smaller averages
+the pixels each new one covers, as the window does below 100%; one made
+larger is enlarged bicubic whatever the window's own filter, and the
+dialog says so when the window is showing nearest.
+
 Under the formats, the dialog warns of what the new file loses that the
 screen does not show:
 
@@ -196,7 +207,9 @@ screen does not show:
   dialog goes.
 - The file's metadata, such as EXIF and XMP, is not carried over, so the
   date taken, the camera and the location are not in the new file.
-- With a region up, only the region is written, at its size.
+- With a region up, only the region is written, at its size — or at the
+  size the boxes ask for, the percentage counted from the region's.
+- A picture enlarged is enlarged bicubic, where the window shows nearest.
 
 `Enter` or Export writes the file, `Esc`, Cancel or a click outside puts the
 dialog away. The new file joins the list after the file on screen and is

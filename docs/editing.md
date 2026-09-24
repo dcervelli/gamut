@@ -160,6 +160,26 @@ under the name. The thread reports `Done::Exported` with the path, and
 is: it arrives as a new file with nothing kept, which is right, since what
 was done to the picture is in its pixels now.
 
+The size the picture is written at is three boxes — a percentage, a width
+and a height — that say one thing between them, since the aspect is
+locked: `export::Resize` holds what each says, and `Resize::edit`, reached
+by `Command::ExportSize` through `App::set_export_size`, works the size
+out from whichever box was typed in and rewrites the other two. The box
+typed in keeps its text as typed, so a `.` on its way to a decimal is not
+taken away by a rewrite, and a percentage is written back to two decimals.
+A side is a whole number of pixels from one to `export::SIDE_MAX` — 2¹⁵,
+the largest texture the program shows — and a side worked out in
+proportion is held to the same ceiling but never under a pixel; a box
+that will not do is outlined, said under the row, and holds Export, while
+the last size that would do is kept so that the warnings still speak of
+something. The percentage is of the region where one is up, since that is
+what is written. The write goes through `resample::resize` between the
+`encode::displayed` walk and the encoder — see
+[resampling.md](resampling.md) for what it does — and the picture is
+enlarged bicubic whatever the screen's own filter; `Warning::Bicubic` says
+so where the screen shows nearest, the one warning that is about what the
+new file gains rather than loses.
+
 An export is not an edit and is not on the undo stack. It changes nothing
 that was there; the new file is deleted like any other.
 

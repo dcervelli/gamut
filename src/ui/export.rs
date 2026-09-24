@@ -1,14 +1,15 @@
 //! The export dialog: a box over the window with a name for the new file, a
-//! choice of JPG or PNG, what the file will not hold, and Export and Cancel.
-//! `Ctrl+E` or the file menu opens it; `Enter` or Export writes the
-//! file, `Esc`, Cancel or a click outside puts it away.
+//! choice of JPG or PNG, the size the picture is written at, what the file
+//! will not hold, and Export and Cancel. `Ctrl+E` or the file menu opens
+//! it; `Enter` or Export writes the file, `Esc`, Cancel or a click outside
+//! puts it away.
 //!
 //! What is written is the picture as the screen shows it — turned, cropped
 //! to the region where one is up, and through the window, exposure, curve
 //! and false color — and the dialog says what the new file loses that the
 //! screen would not: [`warnings`] reads the [`Facts`] the application hands
 //! over as the dialog opens, one line each. None of them refuse; only the
-//! name can.
+//! name and the size can.
 //!
 //! A modal for the reason the rename dialog is one, and drawn with its
 //! pieces — see `ui::rename`. The name is judged by [`judge`] against a
@@ -17,6 +18,16 @@
 //! nothing but strings. The format follows an extension typed in the field,
 //! and the field's extension follows a format chosen by its button, so the
 //! two never disagree about what is written.
+//!
+//! The size is three boxes — a percentage, a width and a height — that
+//! say one thing between them, since the aspect is locked: [`Resize`]
+//! holds what each says, and typing in any one rewrites the other two.
+//! A box that does not parse, or asks for a side under one pixel or over
+//! [`SIDE_MAX`], is outlined and said under the row, and Export goes dead
+//! until it is put right; the last size that would do is kept, so the
+//! warnings still speak of something. The picture is enlarged bicubic
+//! whatever the screen's own filter, and the dialog warns where that is
+//! not what the screen shows.
 
 use std::path::Path;
 
@@ -24,11 +35,12 @@ use egui::{Key, Label, Modifiers, RichText, Sense, vec2};
 
 use super::chrome::Pass;
 use super::control::{Command, Control};
-use super::rename::{self, GAP, NameField, Tone, WIDTH_MIN};
+use super::rename::{self, FIELD_HEIGHT, GAP, NameField, Tone, WIDTH_MIN};
 use super::slider::{self, Line};
 use super::style::MENU_PADDING;
 use super::{PADDING, Rect, TEXT_SIZE, icon, menu};
 use crate::image::encode;
+use crate::render::Upscale;
 
 /// The modal's id in egui's memory.
 pub fn id() -> egui::Id {
@@ -47,9 +59,17 @@ const ROW: f32 = 20.0;
 const ICON: f32 = 14.0;
 /// The heading's rule.
 const HAIRLINE: f32 = 1.0;
-/// The slider's word, and the heading's.
+/// How wide each of the size's boxes is: room for five digits, or a
+/// percentage to two decimals and its sign.
+const BOX: f32 = 76.0;
+/// The slider's word, the size row's, and the heading's.
 const QUALITY: &str = "Quality";
+const SIZE: &str = "Size";
 const WARNINGS: &str = "Warnings";
+/// The largest side the picture is written at: `MAX_TEXTURE_DIMENSION`,
+/// the largest this program would show, and past what any encoder here
+/// is worth asking for.
+pub const SIDE_MAX: u32 = 1 << 15;
 
 /// What the file is written as.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -169,6 +189,201 @@ pub fn judge(typed: &str, exists: impl FnOnce(&str) -> bool) -> Verdict {
     Verdict::Fine
 }
 
+/// One of the three boxes the size is typed in, in the order they stand.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Dimension {
+    Percent,
+    Width,
+    Height,
+}
+
+impl Dimension {
+    pub const ALL: [Dimension; 3] = [Dimension::Percent, Dimension::Width, Dimension::Height];
+
+    /// Which of [`Resize::typed`] this box's text is.
+    fn index(self) -> usize {
+        match self {
+            Dimension::Percent => 0,
+            Dimension::Width => 1,
+            Dimension::Height => 2,
+        }
+    }
+
+    /// The box's name in egui's memory, and in the accessibility tree.
+    fn name(self) -> &'static str {
+        match self {
+            Dimension::Percent => "percent",
+            Dimension::Width => "width",
+            Dimension::Height => "height",
+        }
+    }
+}
+
+/// What is wrong with a size box.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SizeVerdict {
+    NotANumber,
+    /// A side under one pixel, or a percentage of nothing.
+    TooSmall,
+    /// A side over [`SIDE_MAX`] — the one typed, or the one it would make
+    /// of the other.
+    TooLarge,
+}
+
+impl SizeVerdict {
+    pub fn message(self) -> (String, Tone) {
+        let words = match self {
+            SizeVerdict::NotANumber => "Type a number.".to_string(),
+            SizeVerdict::TooSmall => "A side is at least 1 pixel.".to_string(),
+            SizeVerdict::TooLarge => format!("A side is at most {SIDE_MAX} pixels."),
+        };
+        (words, Tone::Refusal)
+    }
+}
+
+/// The size the picture is written at, as the three boxes hold it.
+///
+/// The aspect is locked to the source's: whichever box is typed in, the
+/// other two are worked out from it and rewritten, while the box being
+/// typed in keeps its text as typed, so that a `.` on its way to a decimal
+/// is not taken away. What is typed is read as a whole: a side is a
+/// whole number of pixels from one to [`SIDE_MAX`], a percentage any
+/// positive number, and a side that comes out under a pixel is one pixel
+/// rather than none. A box that will not do keeps its text, is named in
+/// `refused`, and leaves `size` at the last size that would.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Resize {
+    /// What the picture is — the region, where one is up — in the turned
+    /// picture: what the percentage is of.
+    pub source: [u32; 2],
+    /// What each box says, by [`Dimension::index`].
+    pub typed: [String; 3],
+    /// The size the export comes out at: the last that would do.
+    pub size: [u32; 2],
+    /// Which box will not do, and why.
+    pub refused: Option<(Dimension, SizeVerdict)>,
+}
+
+impl Resize {
+    /// The picture at its own size: 100%, and its width and height.
+    pub fn new(source: [u32; 2]) -> Self {
+        Resize {
+            source,
+            typed: [
+                percent_text(100.0),
+                source[0].to_string(),
+                source[1].to_string(),
+            ],
+            size: source,
+            refused: None,
+        }
+    }
+
+    /// `dimension`'s box now says `text`: the size follows it where it
+    /// can, and the other two boxes follow the size.
+    pub fn edit(&mut self, dimension: Dimension, text: String) {
+        self.typed[dimension.index()] = text;
+        let typed = self.typed[dimension.index()].trim();
+        let [width, height] = self.source.map(f64::from);
+        let outcome = match dimension {
+            Dimension::Percent => percent(typed)
+                .and_then(|percent| sized([width * percent / 100.0, height * percent / 100.0])),
+            Dimension::Width => {
+                side(typed).and_then(|w| sized([f64::from(w), f64::from(w) * height / width]))
+            }
+            Dimension::Height => {
+                side(typed).and_then(|h| sized([f64::from(h) * width / height, f64::from(h)]))
+            }
+        };
+        match outcome {
+            Ok(size) => {
+                self.size = size;
+                self.refused = None;
+                for other in Dimension::ALL {
+                    if other != dimension {
+                        self.typed[other.index()] = match other {
+                            Dimension::Percent => percent_text(f64::from(size[0]) / width * 100.0),
+                            Dimension::Width => size[0].to_string(),
+                            Dimension::Height => size[1].to_string(),
+                        };
+                    }
+                }
+            }
+            Err(verdict) => self.refused = Some((dimension, verdict)),
+        }
+    }
+
+    /// Whether Export does anything, as far as the size is concerned.
+    pub fn allows(&self) -> bool {
+        self.refused.is_none()
+    }
+
+    /// Whether `dimension`'s box is the one that will not do.
+    pub fn refuses(&self, dimension: Dimension) -> bool {
+        self.refused
+            .is_some_and(|(refused, _)| refused == dimension)
+    }
+
+    /// The line under the row — `None` for nothing to say.
+    pub fn message(&self) -> Option<(String, Tone)> {
+        self.refused.map(|(_, verdict)| verdict.message())
+    }
+
+    /// Whether the picture grows along either side: what is written is
+    /// then enlarged bicubic, whatever the screen does.
+    pub fn enlarges(&self) -> bool {
+        self.size[0] > self.source[0] || self.size[1] > self.source[1]
+    }
+}
+
+/// A percentage as typed, with or without its sign: any positive number.
+fn percent(typed: &str) -> Result<f64, SizeVerdict> {
+    let number = typed.strip_suffix('%').map_or(typed, str::trim_end);
+    let percent: f64 = number.parse().map_err(|_| SizeVerdict::NotANumber)?;
+    if !percent.is_finite() {
+        return Err(SizeVerdict::NotANumber);
+    }
+    if percent <= 0.0 {
+        return Err(SizeVerdict::TooSmall);
+    }
+    Ok(percent)
+}
+
+/// A side as typed: a whole number of pixels, at least one and at most
+/// [`SIDE_MAX`].
+fn side(typed: &str) -> Result<u32, SizeVerdict> {
+    let side: u64 = typed.parse().map_err(|_| SizeVerdict::NotANumber)?;
+    if side == 0 {
+        return Err(SizeVerdict::TooSmall);
+    }
+    if side > u64::from(SIDE_MAX) {
+        return Err(SizeVerdict::TooLarge);
+    }
+    Ok(side as u32)
+}
+
+/// The size a pair of sides worked out in proportion comes to: each
+/// rounded to a pixel, never under one, and refused over [`SIDE_MAX`].
+fn sized(sides: [f64; 2]) -> Result<[u32; 2], SizeVerdict> {
+    let mut size = [0; 2];
+    for (slot, side) in size.iter_mut().zip(sides) {
+        let rounded = side.round().max(1.0);
+        if rounded > f64::from(SIDE_MAX) {
+            return Err(SizeVerdict::TooLarge);
+        }
+        *slot = rounded as u32;
+    }
+    Ok(size)
+}
+
+/// A percentage as the box writes it: to two decimals, the trailing zeros
+/// and a bare point left off, so that 100 is `100` and a third is `33.33`.
+fn percent_text(percent: f64) -> String {
+    let text = format!("{percent:.2}");
+    let trimmed = text.trim_end_matches('0').trim_end_matches('.');
+    trimmed.to_string()
+}
+
 /// What the application knows about the picture being exported, gathered once
 /// as the dialog opens.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -184,6 +399,9 @@ pub struct Facts {
     pub region: Option<[u32; 2]>,
     /// The format the file on screen is in, where it is one of the two.
     pub source: Option<Format>,
+    /// How the screen enlarges the picture, which an export enlarged
+    /// bicubic may not match.
+    pub upscale: Upscale,
 }
 
 /// How many pictures the file on screen holds.
@@ -215,6 +433,8 @@ pub enum Warning {
     OnePage(usize),
     MetadataDropped,
     RegionOnly([u32; 2]),
+    /// The picture is enlarged, bicubic, while the screen shows nearest.
+    Bicubic,
 }
 
 impl Warning {
@@ -228,14 +448,15 @@ impl Warning {
             Warning::RegionOnly([width, height]) => {
                 format!("Exporting a {width} \u{00d7} {height} crop.")
             }
+            Warning::Bicubic => "Enlarged bicubic, where the screen shows nearest.".into(),
         }
     }
 }
 
-/// What the dialog says about writing a picture of `facts` as `format`,
-/// in the order it is said: what is lost from every pixel first, then
-/// what is left out.
-pub fn warnings(facts: Facts, format: Format) -> Vec<Warning> {
+/// What the dialog says about writing a picture of `facts` as `format` at
+/// the size `resize` holds, in the order it is said: what is lost from
+/// every pixel first, then what is left out, then what is made up.
+pub fn warnings(facts: Facts, format: Format, resize: &Resize) -> Vec<Warning> {
     let mut said = Vec::new();
     if facts.deeper_than_8_bit {
         said.push(Warning::Flattened);
@@ -254,6 +475,9 @@ pub fn warnings(facts: Facts, format: Format) -> Vec<Warning> {
     if let Some(size) = facts.region {
         said.push(Warning::RegionOnly(size));
     }
+    if resize.enlarges() && facts.upscale == Upscale::Nearest {
+        said.push(Warning::Bicubic);
+    }
     said
 }
 
@@ -267,11 +491,18 @@ pub struct Input {
     pub format: Format,
     /// What a JPEG is written at, from `encode::JPEG_QUALITY_MIN` to 100.
     pub quality: u8,
+    /// What the size boxes say, and what they come to.
+    pub resize: Resize,
     pub verdict: Verdict,
     pub warnings: Vec<Warning>,
     /// Whether this is the first frame the dialog is up — see
     /// `rename::Input::opened`.
     pub opened: bool,
+}
+
+/// Whether Export does anything: the name will do, and so will the size.
+fn allowed(input: &Input) -> bool {
+    input.verdict.allows() && input.resize.allows()
 }
 
 /// Draws the dialog, and reads what was pressed in it.
@@ -297,6 +528,8 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
                     refused: !input.verdict.allows(),
                     opened: input.opened,
                     width: inside,
+                    suffix: None,
+                    primary: true,
                 },
                 Command::ExportName,
             );
@@ -308,7 +541,15 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
                 ui.add_space(GAP);
             }
             formats(pass, ui, input.format, input.quality);
+            ui.add_space(GAP / 2.0);
+            rule(pass, ui, inside);
+            ui.add_space(GAP / 2.0);
+            size_row(pass, ui, &input.resize);
             ui.add_space(GAP);
+            if let Some(said) = input.resize.message() {
+                rename::line(pass, ui, inside, Some(said));
+                ui.add_space(GAP);
+            }
             if !input.warnings.is_empty() {
                 heading(pass, ui, inside);
                 ui.add_space(GAP / 2.0);
@@ -320,7 +561,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
                 ui,
                 Control::ExportTo,
                 Control::CancelExport,
-                input.verdict.allows(),
+                allowed(input),
             );
         });
     });
@@ -329,13 +570,47 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
     }
 }
 
-/// `Enter`, taken before the field can see it: the export where the name
-/// will do, nothing where it will not. `Esc` is the modal's own.
+/// `Enter`, taken before the fields can see it: the export where the name
+/// and the size will do, nothing where they will not. `Esc` is the
+/// modal's own.
 fn keys(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
     let entered = ui.input_mut(|keys| keys.consume_key(Modifiers::NONE, Key::Enter));
-    if entered && input.verdict.allows() {
+    if entered && allowed(input) {
         pass.press(Control::ExportTo);
     }
+}
+
+/// The size: its word, then the three boxes — the percentage with its
+/// sign inside, and the width and height with a times sign between —
+/// each drawn as the name's field is, outlined while it will not do.
+fn size_row(pass: &mut Pass, ui: &mut egui::Ui, resize: &Resize) {
+    ui.horizontal(|ui| {
+        // As tall as the boxes before anything is placed, so that the
+        // words are centered on them rather than on the row egui would
+        // have started with.
+        ui.set_min_height(FIELD_HEIGHT);
+        ui.spacing_mut().item_spacing = vec2(GAP, 0.0);
+        ui.add(Label::new(SIZE));
+        for dimension in Dimension::ALL {
+            if dimension == Dimension::Height {
+                ui.add(Label::new("\u{00d7}"));
+            }
+            rename::name_field(
+                pass,
+                ui,
+                NameField {
+                    id: id().with(dimension.name()),
+                    name: &resize.typed[dimension.index()],
+                    refused: resize.refuses(dimension),
+                    opened: false,
+                    width: BOX,
+                    suffix: (dimension == Dimension::Percent).then_some("%"),
+                    primary: false,
+                },
+                move |text| Command::ExportSize(dimension, text),
+            );
+        }
+    });
 }
 
 /// The two formats as radio buttons, one under the other, and under JPG
@@ -416,17 +691,29 @@ fn heading(pass: &mut Pass, ui: &mut egui::Ui, width: f32) {
     let rule_from = words.x + galley.size().x + GAP;
     ui.painter()
         .galley(words, galley, theme.text_primary.into());
-    // On the device's grid, as every rule is: a hairline that straddled two
-    // rows of pixels would come out as two gray ones.
-    let thickness = pass.grid.line_width(HAIRLINE);
-    let y = pass.grid.snap(rect.center().y - thickness / 2.0);
     if rule_from < rect.right() {
-        ui.painter().rect_filled(
-            egui::Rect::from_x_y_ranges(rule_from..=rect.right(), y..=y + thickness),
-            0.0,
-            theme.border,
-        );
+        hairline(pass, ui, rule_from..=rect.right(), rect.center().y);
     }
+}
+
+/// A rule across the dialog, between the formats and the size: as much
+/// room as a gap, with the hairline through the middle of it.
+fn rule(pass: &mut Pass, ui: &mut egui::Ui, width: f32) {
+    let (rect, _) = ui.allocate_exact_size(vec2(width, GAP), Sense::HOVER);
+    hairline(pass, ui, rect.left()..=rect.right(), rect.center().y);
+}
+
+/// A hairline from side to side of `across`, centered on `y`. On the
+/// device's grid, as every rule is: a hairline that straddled two rows
+/// of pixels would come out as two gray ones.
+fn hairline(pass: &Pass, ui: &egui::Ui, across: std::ops::RangeInclusive<f32>, y: f32) {
+    let thickness = pass.grid.line_width(HAIRLINE);
+    let top = pass.grid.snap(y - thickness / 2.0);
+    ui.painter().rect_filled(
+        egui::Rect::from_x_y_ranges(across, top..=top + thickness),
+        0.0,
+        pass.theme.border,
+    );
 }
 
 /// The warnings, one to a line and wrapped where a line is long, in the
@@ -502,10 +789,12 @@ mod tests {
             metadata: false,
             region: None,
             source: Some(Format::Png),
+            upscale: Upscale::Nearest,
         };
+        let same = Resize::new([10, 20]);
         // Nothing lost: nothing to say, whatever the format.
-        assert!(warnings(plain, Format::Png).is_empty());
-        assert!(warnings(plain, Format::Jpeg).is_empty());
+        assert!(warnings(plain, Format::Png, &same).is_empty());
+        assert!(warnings(plain, Format::Jpeg, &same).is_empty());
 
         let everything = Facts {
             deeper_than_8_bit: true,
@@ -514,32 +803,145 @@ mod tests {
             metadata: true,
             region: Some([10, 20]),
             source: None,
+            upscale: Upscale::Nearest,
         };
+        let mut bigger = Resize::new([10, 20]);
+        bigger.edit(Dimension::Percent, "200".to_string());
         assert_eq!(
-            warnings(everything, Format::Jpeg),
+            warnings(everything, Format::Jpeg, &bigger),
             [
                 Warning::Flattened,
                 Warning::AlphaDropped,
                 Warning::OneFrame(5),
                 Warning::MetadataDropped,
                 Warning::RegionOnly([10, 20]),
+                Warning::Bicubic,
             ]
         );
         // PNG keeps alpha.
-        assert!(!warnings(everything, Format::Png).contains(&Warning::AlphaDropped));
+        assert!(!warnings(everything, Format::Png, &bigger).contains(&Warning::AlphaDropped));
         let pages = Facts {
             frames: Frames::Pages { page: 2 },
             ..plain
         };
         assert_eq!(
-            warnings(pages, Format::Png),
+            warnings(pages, Format::Png, &same),
             [Warning::OnePage(3)],
             "counted from one"
         );
+        // The bicubic warning is for a picture enlarged past what the
+        // screen would show as nearest: a shrink says nothing, and a
+        // screen already bicubic has nothing to be told.
+        let mut smaller = Resize::new([10, 20]);
+        smaller.edit(Dimension::Percent, "50".to_string());
+        assert!(warnings(plain, Format::Png, &smaller).is_empty());
+        let bicubic = Facts {
+            upscale: Upscale::Bicubic,
+            ..plain
+        };
+        assert!(warnings(bicubic, Format::Png, &bigger).is_empty());
+        assert_eq!(warnings(plain, Format::Png, &bigger), [Warning::Bicubic]);
         assert_eq!(Warning::OnePage(3).words(), "Exporting page 3");
         assert_eq!(
             Warning::RegionOnly([10, 20]).words(),
             "Exporting a 10 \u{00d7} 20 crop."
+        );
+    }
+
+    /// Typing in any one box rewrites the other two in proportion, and the
+    /// box typed in keeps its text as typed.
+    #[test]
+    fn the_three_boxes_say_one_size() {
+        let mut resize = Resize::new([800, 600]);
+        assert_eq!(resize.typed, ["100", "800", "600"]);
+        assert_eq!(resize.size, [800, 600]);
+        assert!(resize.allows());
+
+        resize.edit(Dimension::Width, "400".to_string());
+        assert_eq!(resize.typed, ["50", "400", "300"]);
+        assert_eq!(resize.size, [400, 300]);
+
+        resize.edit(Dimension::Height, "150".to_string());
+        assert_eq!(resize.typed, ["25", "200", "150"]);
+
+        resize.edit(Dimension::Percent, "33.3".to_string());
+        assert_eq!(resize.typed, ["33.3", "266", "200"], "as typed");
+        assert_eq!(resize.size, [266, 200]);
+        resize.edit(Dimension::Percent, "33.".to_string());
+        assert_eq!(resize.typed[0], "33.", "on its way to a decimal");
+        assert_eq!(resize.size, [264, 198]);
+        resize.edit(Dimension::Percent, "200%".to_string());
+        assert_eq!(resize.size, [1600, 1200]);
+        assert!(resize.enlarges());
+
+        // A width that is not a whole share: the percentage is written to
+        // two decimals.
+        resize.edit(Dimension::Width, "2".to_string());
+        assert_eq!(resize.typed, ["0.25", "2", "2"]);
+        assert_eq!(percent_text(100.0), "100");
+        assert_eq!(percent_text(12.5), "12.5");
+        assert_eq!(percent_text(1.0 / 3.0 * 100.0), "33.33");
+    }
+
+    /// A box that will not do is named with why, leaves the size at the
+    /// last that would, and Export goes dead until it is put right.
+    #[test]
+    fn a_box_that_will_not_do_is_refused_and_the_size_kept() {
+        let mut resize = Resize::new([800, 600]);
+        resize.edit(Dimension::Width, "".to_string());
+        assert_eq!(
+            resize.refused,
+            Some((Dimension::Width, SizeVerdict::NotANumber))
+        );
+        assert!(resize.refuses(Dimension::Width));
+        assert!(!resize.refuses(Dimension::Height));
+        assert!(!resize.allows());
+        assert_eq!(resize.size, [800, 600], "the last size that would do");
+        assert_eq!(resize.typed, ["100", "", "600"], "the others stand");
+        assert_eq!(
+            resize.message(),
+            Some(("Type a number.".to_string(), Tone::Refusal))
+        );
+        resize.edit(Dimension::Width, "0".to_string());
+        assert_eq!(
+            resize.refused,
+            Some((Dimension::Width, SizeVerdict::TooSmall))
+        );
+        resize.edit(Dimension::Width, "32769".to_string());
+        assert_eq!(
+            resize.refused,
+            Some((Dimension::Width, SizeVerdict::TooLarge))
+        );
+        resize.edit(Dimension::Width, "32768".to_string());
+        assert_eq!(resize.size, [32768, 24576]);
+        assert!(resize.allows());
+        // The other side is held to the ceiling too.
+        resize.edit(Dimension::Height, "32768".to_string());
+        assert_eq!(
+            resize.refused,
+            Some((Dimension::Height, SizeVerdict::TooLarge))
+        );
+        assert_eq!(resize.size, [32768, 24576]);
+        for wrong in ["", "-5", "abc", "1e400", "nan"] {
+            resize.edit(Dimension::Percent, wrong.to_string());
+            assert!(!resize.allows(), "{wrong:?}");
+        }
+        resize.edit(Dimension::Percent, "0".to_string());
+        assert_eq!(
+            resize.refused,
+            Some((Dimension::Percent, SizeVerdict::TooSmall))
+        );
+        resize.edit(Dimension::Percent, "9999".to_string());
+        assert_eq!(
+            resize.refused,
+            Some((Dimension::Percent, SizeVerdict::TooLarge))
+        );
+        resize.edit(Dimension::Percent, "0.01".to_string());
+        assert_eq!(resize.size, [1, 1], "under a pixel is a pixel");
+        assert!(resize.allows());
+        assert_eq!(
+            SizeVerdict::TooLarge.message().0,
+            "A side is at most 32768 pixels."
         );
     }
 }

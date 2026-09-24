@@ -1412,6 +1412,7 @@ fn the_export_dialog_takes_the_keys_and_hands_back_the_name_and_format() {
             name: name.to_string(),
             format: Format::Png,
             quality: 90,
+            resize: export::Resize::new([800, 600]),
             verdict,
             warnings: vec![Warning::MetadataDropped],
             opened,
@@ -1461,6 +1462,30 @@ fn the_export_dialog_takes_the_keys_and_hands_back_the_name_and_format() {
         "the quality is JPG's alone"
     );
 
+    // The size boxes: the name and three more, and typing in one asks for
+    // that box's text.
+    let boxes = harness
+        .get_all_by_role(egui::accesskit::Role::TextInput)
+        .count();
+    assert_eq!(boxes, 4);
+    harness
+        .get_all_by_role(egui::accesskit::Role::TextInput)
+        .find(|node| node.value().as_deref() == Some("800"))
+        .expect("the width's box")
+        .focus();
+    harness.run();
+    harness.state_mut().commands.clear();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.event(egui::Event::Text("5".to_string()));
+    harness.step();
+    assert_eq!(
+        asked(&harness),
+        [Command::ExportSize(
+            export::Dimension::Width,
+            "5".to_string()
+        )]
+    );
+
     let pressed = |harness: &mut Harness<'static, State>, key| {
         harness.state_mut().commands.clear();
         harness.key_press(key);
@@ -1482,6 +1507,25 @@ fn the_export_dialog_takes_the_keys_and_hands_back_the_name_and_format() {
             .iter()
             .any(|command| matches!(command, Command::Press(Control::ExportTo))),
         "{after_enter:?}"
+    );
+
+    // A size that will not do is as dead as a name that will not.
+    let mut refused = dialog("b.png", export::Verdict::Fine, false).expect("a dialog");
+    refused
+        .resize
+        .edit(export::Dimension::Height, "0".to_string());
+    harness.state_mut().input.export = Some(refused);
+    harness.run();
+    assert!(
+        harness
+            .get_by_label("Export")
+            .accesskit_node()
+            .is_disabled()
+    );
+    assert!(
+        !pressed(&mut harness, egui::Key::Enter)
+            .iter()
+            .any(|command| matches!(command, Command::Press(Control::ExportTo)))
     );
 
     // One that will: `Enter` and Export both export.

@@ -19,13 +19,13 @@ use super::copying::Done;
 use super::edits::name_of;
 use super::input::{briefly, report};
 use crate::image::Samples;
-use crate::image::encode;
 use crate::image::region::Region;
 use crate::image::sequence::Sequence;
+use crate::image::{encode, resample};
 use crate::loader::Source;
 use crate::timing;
 use crate::trash;
-use crate::ui::export::{self, Facts, Format, Frames, Verdict};
+use crate::ui::export::{self, Dimension, Facts, Format, Frames, Resize, Verdict};
 use crate::ui::rename::TAKEN;
 use crate::ui::toast::Level;
 
@@ -38,6 +38,8 @@ pub(super) struct Exporting {
     format: Format,
     /// What a JPEG is written at, from `encode::JPEG_QUALITY_MIN` to 100.
     quality: u8,
+    /// The size the picture is written at, as the three boxes hold it.
+    resize: Resize,
     verdict: Verdict,
     facts: Facts,
     /// Whether an animation was playing as the dialog opened, and was
@@ -87,6 +89,7 @@ impl App {
         let image = &current.image;
         let source = path.to_path_buf();
         let name = name_of(&source);
+        let region = self.marking.selection.region();
         let facts = Facts {
             deeper_than_8_bit: !matches!(image.samples, Samples::U8 { .. })
                 || image.gain_map.is_some(),
@@ -99,12 +102,9 @@ impl App {
                 (None, _) => Frames::Still,
             },
             metadata: !current.exif.sections.is_empty(),
-            region: self
-                .marking
-                .selection
-                .region()
-                .map(|region| [region.width, region.height]),
+            region: region.map(|region| [region.width, region.height]),
             source: export::format_of(&name),
+            upscale: self.view.upscale(),
         };
         let format = facts.source.unwrap_or(Format::Png);
         let stem = Path::new(&name)
@@ -115,6 +115,7 @@ impl App {
             name: String::new(),
             format,
             quality: encode::JPEG_QUALITY,
+            resize: Resize::new(facts.region.unwrap_or_else(|| current.pixels())),
             verdict: Verdict::Empty,
             facts,
             resume: false,
@@ -183,18 +184,26 @@ impl App {
         }
     }
 
-    /// Export: puts the dialog away and writes the picture as shown, on a
-    /// thread of its own, if the name will do. What it did comes back
-    /// through [`App::poll_copies`], which hands a file written to
-    /// [`App::exported`].
+    /// One of the size boxes changed: the size follows it where it will
+    /// do, and the other two boxes follow the size.
+    pub(super) fn set_export_size(&mut self, dimension: Dimension, text: String) {
+        if let Some(exporting) = &mut self.exporting {
+            exporting.resize.edit(dimension, text);
+        }
+    }
+
+    /// Export: puts the dialog away and writes the picture as shown, at
+    /// the size asked for, on a thread of its own, if the name and the
+    /// size will do. What it did comes back through [`App::poll_copies`],
+    /// which hands a file written to [`App::exported`].
     pub(super) fn export_shown(&mut self) {
         let Some(exporting) = &self.exporting else {
             return;
         };
-        if !exporting.verdict.allows() {
+        if !exporting.verdict.allows() || !exporting.resize.allows() {
             return;
         }
-        let (format, quality) = (exporting.format, exporting.quality);
+        let (format, quality, size) = (exporting.format, exporting.quality, exporting.resize.size);
         let to = exporting.dir().join(&exporting.name);
         self.close_export();
         let Some(current) = &self.current else {
@@ -213,6 +222,7 @@ impl App {
             let walked = Instant::now();
             let raster = encode::displayed(&image, &display, turn, region, lift.as_deref());
             timing::mapped_image(region.width, region.height, walked.elapsed());
+            let raster = resample::resize(raster, size);
             let bytes = match format {
                 Format::Png => encode::png_for_file(&raster),
                 Format::Jpeg => encode::jpeg(&raster, quality),
@@ -242,8 +252,9 @@ impl App {
             name: exporting.name.clone(),
             format: exporting.format,
             quality: exporting.quality,
+            resize: exporting.resize.clone(),
             verdict: exporting.verdict.clone(),
-            warnings: export::warnings(exporting.facts, exporting.format),
+            warnings: export::warnings(exporting.facts, exporting.format, &exporting.resize),
             opened: std::mem::take(&mut exporting.opened),
         })
     }
