@@ -403,10 +403,22 @@ pub fn index_query(query: &str) -> Option<&str> {
 /// The rows a query of `:digits` fits, over a list `count` long: the file
 /// at exactly that place first, where there is one, then every file whose
 /// place has those digits in it, in the list's order — `:1` is the first
-/// file and then the tenth through the nineteenth. Nothing but digits
-/// fits nothing, and `:` alone is the whole list. No chars are lit: the
-/// digits are the row's index, which is not a run of text.
+/// file and then the tenth through the nineteenth. A `-` before the digits
+/// counts from the end instead, and the rest follow from the end too —
+/// `:-1` is the last file, then the tenth from last through the
+/// nineteenth. Nothing but digits fits nothing, and `:` alone is the whole
+/// list. No chars are lit: the digits are the row's index, which is not a
+/// run of text.
 pub fn rank_by_index(digits: &str, count: usize) -> Vec<(usize, Vec<usize>)> {
+    if let Some(digits) = digits
+        .strip_prefix('-')
+        .filter(|rest| !rest.starts_with('-'))
+    {
+        return rank_by_index(digits, count)
+            .into_iter()
+            .map(|(index, positions)| (count - 1 - index, positions))
+            .collect();
+    }
     if !digits.bytes().all(|byte| byte.is_ascii_digit()) {
         return Vec::new();
     }
@@ -555,7 +567,8 @@ mod tests {
     }
 
     /// A query beginning with `:` asks by place in the list: the exact
-    /// place first, then every place with those digits in it, in order;
+    /// place first, then every place with those digits in it, in order,
+    /// or counted from the end after a `-`;
     /// `:` alone keeps the whole list, and anything but digits after it
     /// fits nothing.
     #[test]
@@ -580,6 +593,13 @@ mod tests {
         assert_eq!(rows("").len(), 25);
         assert_eq!(rows("1x"), Vec::<usize>::new());
         assert_eq!(rows("99999999999999999999999"), Vec::<usize>::new());
+        assert_eq!(rows("-1"), vec![25, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 5]);
+        assert_eq!(rows("-25"), vec![1]);
+        assert_eq!(rows("-26"), Vec::<usize>::new());
+        assert_eq!(rows("-").len(), 25);
+        assert_eq!(rows("-").first(), Some(&25));
+        assert_eq!(rows("--1"), Vec::<usize>::new());
+        assert_eq!(rows("-1x"), Vec::<usize>::new());
         assert_eq!(index_query(":12"), Some("12"));
         assert_eq!(index_query("12"), None);
 

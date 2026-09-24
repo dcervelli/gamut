@@ -83,7 +83,8 @@ by what a cataloging program called it. The titles are read as the program
 starts, ahead of the thumbnails, so on a long list they are all known
 within a moment of opening the chooser. A query beginning with `:` asks by
 place in the list instead: `:12` puts the twelfth file first, followed by
-every file whose number has `12` in it. The arrows move through the rows
+every file whose number has `12` in it, and a `-` counts from the end, so
+`:-1` puts the last file first. The arrows move through the rows
 without opening anything; `Enter`, or a click on a row, opens that file and
 closes the chooser; `Esc`, a click outside it, or `Ctrl+P` again closes it.
 With a single file on the list there is nothing to choose, and `Ctrl+P` does

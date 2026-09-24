@@ -216,7 +216,7 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 - `Ctrl+P` opens a file chooser over the picture: type to filter the
   session's files by name — fuzzily, and by directory too when the list
   spans more than one, by the title the file's XMP gives it, or by place
-  in the list with `:12` — arrow through the rows, and `Enter` or a click
+  in the list with `:12`, or from its end with `:-1` — arrow through the rows, and `Enter` or a click
   opens one. Each row shows a thumbnail, the name, the title where there
   is one, the kind of file, its place in the list and its size. Every
   file's header and title are read before any thumbnail is made, so the

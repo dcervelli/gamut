@@ -120,7 +120,8 @@ and an empty query is the whole list in order with nothing lit. A query
 beginning with `:` does not go to the matcher at all: `rank_by_index` puts
 the file at exactly that place first and every place with those digits in
 it after, in the list's order, which is what the index column is there
-for.
+for. A `-` after the `:` is the same ranking with every place counted from
+the end, so `:-1` is the last file.
 
 ## The cache
 
