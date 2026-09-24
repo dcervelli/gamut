@@ -237,6 +237,18 @@ impl Chooser {
         was_failed
     }
 
+    /// What the header of `path` said, where it has been read: what the
+    /// file list orders by.
+    pub fn facts_of(&self, path: &Path) -> Option<&Facts> {
+        self.facts.get(path)
+    }
+
+    /// Whether the thread has given up on `path`: no thumbnail is coming
+    /// unless the file decodes on screen after all.
+    pub fn given_up(&self, path: &Path) -> bool {
+        self.failed.contains(path)
+    }
+
     /// The file at `row` of the list as the frame last saw it.
     pub fn path_at(&self, row: usize) -> Option<&Path> {
         let (index, _) = self.matches.get(row)?;
@@ -708,6 +720,10 @@ mod tests {
                     loops: crate::image::sequence::Loops::Forever,
                 },
                 title: None,
+
+                format: None,
+
+                bytes: None,
             },
         ));
         chooser.take(Delivered {
@@ -719,6 +735,10 @@ mod tests {
                     default: 0,
                 },
                 title: None,
+
+                format: None,
+
+                bytes: None,
             }),
         });
         let input = chooser.input(&thumbs, None);
@@ -754,6 +774,10 @@ mod tests {
             size: Some((887, 1200)),
             sequence: Sequence::Still,
             title: Some(title.to_string()),
+
+            format: None,
+
+            bytes: None,
         };
         chooser.take(Delivered {
             path: PathBuf::from("buteo-buteo-2.webp"),
@@ -844,6 +868,10 @@ mod tests {
                 size: Some((1, 1)),
                 sequence: Sequence::Still,
                 title: None,
+
+                format: None,
+
+                bytes: None,
             },
         );
         assert_eq!(chooser.wanted(0..3, &thumbs), paths(&["a.png"]));
@@ -854,6 +882,10 @@ mod tests {
             size: Some((1, 1)),
             sequence: Sequence::Still,
             title: None,
+
+            format: None,
+
+            bytes: None,
         };
         assert!(chooser.learn(Path::new("b.png"), facts.clone()));
         assert!(!chooser.learn(Path::new("b.png"), facts));

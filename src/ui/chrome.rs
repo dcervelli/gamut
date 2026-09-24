@@ -20,7 +20,7 @@ use super::control::{Command, Control, Naming};
 use super::icon::{self, Mark};
 use super::style::TOGGLE_RADIUS;
 use super::tooltip::Tip;
-use super::{Current, FrameInput, PADDING, Panels, Reading, Room, menu, pixel, status};
+use super::{Current, FrameInput, PADDING, Panels, Reading, Room, filmstrip, menu, pixel, status};
 use crate::image::display::Headroom;
 use crate::theme::Theme;
 use crate::view::View;
@@ -98,32 +98,62 @@ pub struct Chrome {
     pub bottom: Rect,
     pub left: Rect,
     pub right: Rect,
+    /// The file list, between the left strip and the picture, running
+    /// from the top bar to the bottom one as the strips do. `None` while
+    /// it is not showing.
+    pub filmstrip: Option<Rect>,
     /// The bar of playback controls, above the bottom bar and between the
-    /// strips, for an animation or a file of pages. `None` for a still.
+    /// strips — and to the right of the file list, where there is one —
+    /// for an animation or a file of pages. `None` for a still.
     pub transport: Option<Rect>,
 }
 
+/// The parts of the chrome that come and go, and so what its geometry is
+/// derived from besides the window size: whether the file on screen brings
+/// the transport bar with it, and whether the file list is up.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct Parts {
+    pub transport: bool,
+    pub filmstrip: bool,
+}
+
+impl Parts {
+    /// The four panels and nothing else.
+    #[cfg(test)]
+    pub const NONE: Parts = Parts {
+        transport: false,
+        filmstrip: false,
+    };
+}
+
 impl Chrome {
-    /// `size` is the window in logical pixels; `transport` is whether the
-    /// file on screen has frames or pages to step through.
-    pub fn new(size: [f32; 2], transport: bool) -> Self {
+    /// `size` is the window in logical pixels.
+    pub fn new(size: [f32; 2], parts: Parts) -> Self {
         // An equal share of the window each at the very smallest, so that a
         // window dragged down to nothing shrinks the panels rather than
         // letting the opposite pair pass through each other.
-        let bars = if transport { 3.0 } else { 2.0 };
+        let bars = if parts.transport { 3.0 } else { 2.0 };
         let bar = BAR_HEIGHT.min(size[1] / bars);
         let side = SIDE_WIDTH.min(size[0] / 2.0);
         let middle = (size[1] - 2.0 * bar).max(0.0);
+        // The file list has its own width unless the strips leave less
+        // than that between them, and then it has what they leave.
+        let strip = parts
+            .filmstrip
+            .then(|| filmstrip::WIDTH.min((size[0] - 2.0 * side).max(0.0)));
+        // Where the picture starts: past the left strip and the file list.
+        let inner = side + strip.unwrap_or(0.0);
 
         Self {
             top: Rect::new(0.0, 0.0, size[0], bar),
             left: Rect::new(0.0, bar, side, middle),
             right: Rect::new(size[0] - side, bar, side, middle),
-            transport: transport.then(|| {
+            filmstrip: strip.map(|width| Rect::new(side, bar, width, middle)),
+            transport: parts.transport.then(|| {
                 Rect::new(
-                    side,
+                    inner,
                     size[1] - 2.0 * bar,
-                    (size[0] - 2.0 * side).max(0.0),
+                    (size[0] - side - inner).max(0.0),
                     bar,
                 )
             }),
@@ -137,10 +167,13 @@ impl Chrome {
         let floor = self
             .transport
             .map_or(self.bottom.y, |transport| transport.y);
+        let left = self
+            .filmstrip
+            .map_or(self.left.right(), |filmstrip| filmstrip.right());
         Rect::new(
-            self.left.right(),
+            left,
             self.top.bottom(),
-            (self.right.x - self.left.right()).max(0.0),
+            (self.right.x - left).max(0.0),
             (floor - self.top.bottom()).max(0.0),
         )
     }
@@ -148,13 +181,13 @@ impl Chrome {
 
 /// What the interface leaves for the image, in logical pixels: the middle
 /// when the panels are showing, the whole window when they are not.
-/// `transport` is whether the file on screen brings the fifth bar with it.
+/// `parts` says which of the panels that come and go are up.
 ///
 /// With the panels hidden a floating panel still sits in the corner of the
 /// window rather than where the panels that are not there would have put it.
-pub fn content_area(logical: [f32; 2], show_ui: bool, transport: bool) -> Rect {
+pub fn content_area(logical: [f32; 2], show_ui: bool, parts: Parts) -> Rect {
     if show_ui {
-        Chrome::new(logical, transport).content()
+        Chrome::new(logical, parts).content()
     } else {
         Rect::new(0.0, 0.0, logical[0], logical[1])
     }
@@ -167,11 +200,11 @@ pub fn content_area(logical: [f32; 2], show_ui: bool, transport: bool) -> Rect {
 /// they leave in the middle; with them off it has the window. Nothing caches
 /// this, which is why toggling the interface re-fits a fitted image on the
 /// very next frame.
-pub fn image_viewport(size: [f32; 2], scale: f32, show_ui: bool, transport: bool) -> Viewport {
+pub fn image_viewport(size: [f32; 2], scale: f32, show_ui: bool, parts: Parts) -> Viewport {
     if !show_ui {
         return Viewport::whole(size);
     }
-    let content = Chrome::new([size[0] / scale, size[1] / scale], transport).content();
+    let content = Chrome::new([size[0] / scale, size[1] / scale], parts).content();
     Viewport::new(
         content.x * scale,
         content.y * scale,
@@ -265,6 +298,18 @@ impl Pass<'_> {
             .frame(frame)
             .show(ui, |ui| self.left_strip(ui));
         self.hairline(ui, left.response.rect, Edge::Right);
+        // The file list beside the left strip, before the right strip
+        // and the transport bar so that egui nests it as `Chrome` lays
+        // it out: inside the strip, and the bar to the right of it.
+        if let Some(strip) = self.input.filmstrip.clone() {
+            let list = egui::Panel::left("filmstrip")
+                .exact_size(filmstrip::WIDTH)
+                .resizable(false)
+                .show_separator_line(false)
+                .frame(frame)
+                .show(ui, |ui| filmstrip::show(self, ui, &strip));
+            self.hairline(ui, list.response.rect, Edge::Right);
+        }
         let right = egui::Panel::right("right")
             .exact_size(SIDE_WIDTH)
             .resizable(false)
@@ -830,8 +875,9 @@ mod tests {
 
     #[test]
     fn the_side_panels_are_nested_between_the_bars() {
-        let chrome = Chrome::new(WINDOW, false);
+        let chrome = Chrome::new(WINDOW, Parts::NONE);
         assert_eq!(chrome.transport, None);
+        assert_eq!(chrome.filmstrip, None);
 
         // The bars own the full width, and so the corners.
         assert_eq!(chrome.top, Rect::new(0.0, 0.0, 1000.0, BAR_HEIGHT));
@@ -854,7 +900,7 @@ mod tests {
 
     #[test]
     fn the_content_area_is_what_the_four_leave_behind() {
-        let content = Chrome::new(WINDOW, false).content();
+        let content = Chrome::new(WINDOW, Parts::NONE).content();
         assert_eq!(
             content,
             Rect::new(
@@ -871,7 +917,7 @@ mod tests {
     /// as they do without it.
     #[test]
     fn the_transport_bar_takes_a_bar_off_the_bottom() {
-        let chrome = Chrome::new(WINDOW, true);
+        let chrome = Chrome::new(WINDOW, Parts { transport: true, filmstrip: false });
         let transport = chrome.transport.expect("asked for");
         assert_eq!(
             transport,
@@ -897,8 +943,57 @@ mod tests {
             )
         );
         assert_eq!(
-            image_viewport([2000.0, 1400.0], 2.0, true, true).height,
+            image_viewport(
+                [2000.0, 1400.0],
+                2.0,
+                true,
+                Parts {
+                    transport: true,
+                    filmstrip: false
+                }
+            )
+            .height,
             1400.0 - 6.0 * BAR_HEIGHT
+        );
+    }
+
+    /// The file list is its own width taken off the left of the content
+    /// area, between the left strip and the picture; the transport bar
+    /// starts where it ends, so that the bar sits under the picture and
+    /// not under the list.
+    #[test]
+    fn the_file_list_takes_its_width_off_the_left() {
+        let parts = Parts {
+            transport: true,
+            filmstrip: true,
+        };
+        let chrome = Chrome::new(WINDOW, parts);
+        let strip = chrome.filmstrip.expect("asked for");
+        assert_eq!(
+            strip,
+            Rect::new(
+                SIDE_WIDTH,
+                BAR_HEIGHT,
+                filmstrip::WIDTH,
+                700.0 - 2.0 * BAR_HEIGHT
+            )
+        );
+        let transport = chrome.transport.expect("asked for");
+        assert_eq!(transport.x, strip.right());
+        assert_eq!(transport.right(), chrome.right.x);
+        assert_eq!(chrome.content().x, strip.right());
+        assert_eq!(
+            chrome.content().width,
+            1000.0 - 2.0 * SIDE_WIDTH - filmstrip::WIDTH
+        );
+        assert_eq!(
+            content_area(WINDOW, true, parts).x,
+            SIDE_WIDTH + filmstrip::WIDTH
+        );
+        assert_eq!(
+            content_area(WINDOW, false, parts),
+            Rect::new(0.0, 0.0, 1000.0, 700.0),
+            "hidden with the rest of the interface"
         );
     }
 
@@ -908,13 +1003,21 @@ mod tests {
         // to nothing must not produce rectangles that escape it or run
         // backwards — a negative width would be drawn as a flipped quad.
         for size in [[10.0, 10.0], [0.0, 0.0], [200.0, 20.0]] {
-            let chrome = Chrome::new(size, true);
+            let chrome = Chrome::new(
+                size,
+                Parts {
+                    transport: true,
+                    filmstrip: true,
+                },
+            );
             let transport = chrome.transport.expect("asked for");
+            let strip = chrome.filmstrip.expect("asked for");
             for panel in [
                 chrome.top,
                 chrome.bottom,
                 chrome.left,
                 chrome.right,
+                strip,
                 transport,
             ] {
                 assert!(
@@ -943,7 +1046,7 @@ mod tests {
     fn the_image_is_fitted_between_the_panels_and_re_fitted_without_them() {
         // A 2x window, to catch a conversion that only holds at scale 1.
         let physical = [2000.0, 1400.0];
-        let shown = image_viewport(physical, 2.0, true, false);
+        let shown = image_viewport(physical, 2.0, true, Parts::NONE);
         assert_eq!(
             shown,
             Viewport::new(
@@ -954,7 +1057,7 @@ mod tests {
             )
         );
 
-        let hidden = image_viewport(physical, 2.0, false, false);
+        let hidden = image_viewport(physical, 2.0, false, Parts::NONE);
         assert_eq!(hidden, Viewport::whole(physical));
 
         let view = View::new();

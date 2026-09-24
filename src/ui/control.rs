@@ -15,6 +15,7 @@ use super::export::{Dimension, Format};
 use super::help;
 use super::info::Copyable;
 use super::menu::{Copies, ZoomChoice};
+use super::filmstrip::{Section, Sort};
 use super::pixel::PixelFormat;
 use super::tooltip::{Tip, Tooltip};
 
@@ -154,6 +155,28 @@ pub enum Control {
     /// from anywhere. Dead while the dialog is up.
     OpenFiles,
     OpenFolder,
+    /// The button at the head of the top bar, before the pair that steps
+    /// through the list, which puts the file list up and takes it down —
+    /// see [`filmstrip`](super::filmstrip). `Tab` does the same. On screen
+    /// only while there is more than one file, as the pair is.
+    Filmstrip,
+    /// The two buttons at the head of that list, which open the menu of
+    /// sections and the menu of sorts, and a cell of each.
+    Sections,
+    SectionBy(Section),
+    Sorting,
+    SortBy(Sort),
+    /// The pair beside them, which go back and forward through the files
+    /// that have been on screen. Dead with nothing to go to.
+    Back,
+    Forward,
+    /// A row of the list, by its place in the rows the same frame was
+    /// drawn from: the file to show.
+    Thumb(usize),
+    /// Taking the file on screen off the list, leaving it as it is on
+    /// disk: what `Backspace` presses. Not drawn anywhere; a control so
+    /// that the key goes through `App::press` as every other job does.
+    Remove,
 }
 
 impl Control {
@@ -214,6 +237,15 @@ impl Control {
             Control::CancelRename => "Cancel".to_string(),
             Control::OpenFiles => "Open files".to_string(),
             Control::OpenFolder => "Open folder".to_string(),
+            Control::Filmstrip => "File list".to_string(),
+            Control::Sections => "Sections".to_string(),
+            Control::SectionBy(section) => section.label().to_string(),
+            Control::Sorting => "Sort".to_string(),
+            Control::SortBy(sort) => sort.label().to_string(),
+            Control::Back => "Back".to_string(),
+            Control::Forward => "Forward".to_string(),
+            Control::Thumb(row) => format!("Show file {}", row + 1),
+            Control::Remove => "Remove from list".to_string(),
         }
     }
 }
@@ -321,6 +353,8 @@ pub enum Command {
     /// Which of the chooser's rows are on screen, said when it changes, so
     /// that their thumbnails can be asked for ahead of the rest.
     Visible(Range<usize>),
+    /// The same for the file list's rows.
+    FilmstripVisible(Range<usize>),
 }
 
 /// What a region on the picture is in: nothing, waiting for the drag that
@@ -460,6 +494,15 @@ impl Control {
         Control::CancelRename,
         Control::OpenFiles,
         Control::OpenFolder,
+        Control::Filmstrip,
+        Control::Sections,
+        Control::SectionBy(Section::None),
+        Control::Sorting,
+        Control::SortBy(Sort::Name),
+        Control::Back,
+        Control::Forward,
+        Control::Thumb(0),
+        Control::Remove,
     ];
 
     /// Whether `control` is a kind [`Control::ALL`] lists — which is every
@@ -516,7 +559,16 @@ impl Control {
             | Control::RenameTo
             | Control::CancelRename
             | Control::OpenFiles
-            | Control::OpenFolder => true,
+            | Control::OpenFolder
+            | Control::Filmstrip
+            | Control::Sections
+            | Control::SectionBy(_)
+            | Control::Sorting
+            | Control::SortBy(_)
+            | Control::Back
+            | Control::Forward
+            | Control::Thumb(_)
+            | Control::Remove => true,
         }
     }
 }

@@ -83,6 +83,12 @@ pub struct Facts {
     /// What the file calls itself, from its XMP, as the info panel shows
     /// it: what the chooser matches on beside the name.
     pub title: Option<String>,
+    /// The decoder that claims the file, by name, chosen by what its bytes
+    /// say rather than by what its name does: what the file list sorts and
+    /// sections by as its type. `None` where nothing claims it.
+    pub format: Option<&'static str>,
+    /// Its size on disk, or `None` where it could not be stat'ed.
+    pub bytes: Option<u64>,
 }
 
 /// The small copy for the screen: straight alpha, at most [`DISPLAY_SIDE`]
@@ -365,6 +371,8 @@ fn header(path: &Path) -> Result<Facts> {
             size: decode::probe(&absolute)?,
             sequence: decode::sequence(&absolute)?,
             title: title(&absolute),
+            format: decode::reader(&absolute),
+            bytes: stat(&absolute).ok().map(|(_, bytes)| bytes),
         })
     })
 }
@@ -605,6 +613,8 @@ mod tests {
             size: None,
             sequence: Sequence::Still,
             title: None,
+            format: None,
+            bytes: None,
         };
         let mut queue = Queue::default();
         queue.take(Ask::Enqueue(vec![
@@ -705,8 +715,11 @@ mod tests {
                 size: Some((640, 480)),
                 sequence: Sequence::Still,
                 title: None,
+                format: decode::reader(&picture),
+                bytes: Some(std::fs::metadata(&picture).unwrap().len()),
             }
         );
+        assert!(facts.format.is_some(), "a PNG has a decoder that claims it");
         let News::Thumb(thumb) = thumbnail_one(
             &picture,
             &facts,

@@ -8,6 +8,34 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Added
 
+- A file list. `Tab`, or the button at the head of the top bar, puts a
+  strip of thumbnails down the left of the picture, one row per file in
+  the order `]` and `[` walk, each thumbnail with the file's place in the
+  list and its name over its corner and the file on screen washed in the
+  accent; a click on a row shows that file, and the strip scrolls to the
+  file on screen as it changes. Two menus at its head break the list into
+  sections — none, by folder, by type — and sort each section by name,
+  path, type, size on disk, width, height or area, the sections and the
+  sorts ascending, and the list itself is put in that order, so that the
+  keys, the counter and the chooser all walk it. A sort keeps the order of
+  files it cannot tell apart, so sorting by size and then by type leaves
+  each type in size order, and a directory read again keeps the order it
+  found the list in. A file whose header has not been read yet sorts after
+  those that have, and moves into place once it is. The list opens in name
+  order, whatever order the files were named in.
+
+- Back and forward through the files that have been on screen: `Alt+[`
+  and `Alt+]`, or `Alt+Page Up` and `Alt+Page Down`, or the pair at the
+  head of the file list, which are dead with nowhere to go. A step, a
+  pick or a paste after going back cuts off what lay ahead, as a browser's
+  history does; a file taken off the list or moved to the trash is passed
+  over rather than forgotten, and is there again once undo lists it.
+
+- `Backspace` takes the file on screen off the list without touching it
+  on disk, and shows the next. The file stays off the list for the
+  session however often its directory is read again; `Ctrl+Z` puts it
+  back where it stood, and opening it by name again does too.
+
 - A loupe. `l`, or the button beside the grid's in the bottom bar, rings
   the pixels around the pointer and shows them magnified in a circle
   beside it, placed up and to the right and going the other way where that
@@ -95,6 +123,10 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   opened on that picture, unless `--size` chose the size.
 
 ### Changed
+
+- `Backspace` no longer moves the file on screen to the trash; `Delete`
+  alone does. The undo key's line in the help says it undoes a removal
+  as well.
 
 - A new icon: a lake at sunset, with a loupe over the sun's rim showing
   its pixels. `bin/icon` draws it from a model of the scene's light.

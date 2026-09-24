@@ -11,6 +11,7 @@ pub mod chrome;
 pub mod control;
 pub mod empty;
 pub mod export;
+pub mod filmstrip;
 pub mod fonts;
 pub mod help;
 pub mod info;
@@ -183,6 +184,11 @@ pub struct Panels {
     /// Whether the four panels are on screen. They are opaque and the image
     /// is fitted inside them, so hiding them gives it the whole window.
     pub show_ui: bool,
+    /// Whether the file list is up down the left of the picture — see
+    /// [`filmstrip`]. Whether it is actually on screen also asks whether
+    /// there is a list to show: one file is no list, and the toggle for it
+    /// is not drawn.
+    pub show_filmstrip: bool,
     pub show_histogram: bool,
     pub show_info: bool,
     /// Which of the histogram's planes are drawn. Both can be off: the panel
@@ -327,6 +333,10 @@ pub struct FrameInput {
     /// The transport bar's state, for a file of frames or pages, and
     /// `None` for a still — which is what decides whether the bar is there.
     pub transport: Option<Transport>,
+    /// The file list, on every frame it is up, and `None` while it is
+    /// not — which is what decides whether the panel is there, and so
+    /// where the picture starts.
+    pub filmstrip: Option<filmstrip::Input>,
     /// The file chooser, on every frame it is open, and `None` while it is
     /// not. Whether it is open is egui's to say — see
     /// [`chooser::id`] — and this has to be handed over on every frame it
@@ -362,7 +372,11 @@ pub fn show(
     theme: &Theme,
     namer: &dyn Naming,
 ) -> Vec<Command> {
-    let content = chrome::content_area(input.logical, panels.show_ui, input.transport.is_some());
+    let parts = chrome::Parts {
+        transport: input.transport.is_some(),
+        filmstrip: input.filmstrip.is_some(),
+    };
+    let content = chrome::content_area(input.logical, panels.show_ui, parts);
     let mut pass = Pass {
         input,
         panels,
@@ -823,6 +837,7 @@ mod tests {
     fn the_panels_room_is_room_for_both() {
         let panels = Panels {
             show_ui: true,
+            show_filmstrip: false,
             show_histogram: true,
             show_info: true,
             show_luma: true,

@@ -521,8 +521,9 @@ fn row(
 }
 
 /// `text` laid out in `ink`, with the chars at `positions` in `lit`
-/// instead, truncated to `room`.
-fn lit(
+/// instead, truncated to `room`. The file list's rows are laid out with
+/// it too.
+pub(super) fn lit(
     ui: &egui::Ui,
     text: &str,
     positions: &[usize],

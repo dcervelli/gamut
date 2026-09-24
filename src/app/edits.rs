@@ -1,23 +1,25 @@
-//! What is done to the file on disk — moved to the trash, renamed — and the
-//! stack that undoes it.
+//! What is done to the file on disk — moved to the trash, renamed — or to
+//! its place on the list, and the stack that undoes it.
 //!
-//! One stack and one key for both, since the moment a reader reaches for
-//! undo is the moment they have just made a mistake, and that is no time to
-//! ask which kind. What goes on it is only what touched the disk: the view
-//! and the display are changed dozens of times a session and put back by
-//! hand or by `z`, and if they were here too, undoing a deletion would
-//! first walk back through twenty exposure steps. Last in, first out, for
-//! the session: culling a directory is `]` `Delete` `]` `Delete`, and "not
-//! that one, the one before" is two presses. Anything more — restoring out
-//! of order, or after the window has closed — is what the file manager's
-//! Trash is for, and a message about a restore that could not be done says
-//! so.
+//! One stack and one key for all of them, since the moment a reader reaches
+//! for undo is the moment they have just made a mistake, and that is no
+//! time to ask which kind. What goes on it is only what touched the disk
+//! or took a file off the list: the view and the display are changed
+//! dozens of times a session and put back by hand or by `z`, and if they
+//! were here too, undoing a deletion would first walk back through twenty
+//! exposure steps. Last in, first out, for the session: culling a
+//! directory is `]` `Delete` `]` `Delete`, and "not that one, the one
+//! before" is two presses. Anything more — restoring out of order, or after
+//! the window has closed — is what the file manager's Trash is for, and a
+//! message about a restore that could not be done says so.
 //!
 //! A deletion is a move to the desktop's own trash (see `trash.rs`), so
 //! that the file shows up beside everything else thrown away, restorable
 //! from there whether or not this window is still open. A rename is a
 //! rename, refused rather than replacing anything, and undone by the same
-//! rename the other way.
+//! rename the other way. A removal touches nothing on disk: the file is
+//! taken off the list for the session, and undo puts it back where it
+//! stood.
 
 use std::path::{Path, PathBuf};
 
@@ -29,7 +31,8 @@ use crate::ui::rename::{self, TAKEN, Verdict};
 use crate::ui::toast::Level;
 use crate::watch::Watch;
 
-/// One thing done to a file on disk, and enough to undo it.
+/// One thing done to a file on disk, or to its place on the list, and
+/// enough to undo it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Edit {
     /// A file moved to the trash: the entry it is in there, the path it
@@ -44,6 +47,13 @@ pub(super) enum Edit {
     },
     /// A file renamed, by the list's own spelling of each path.
     Renamed { from: PathBuf, to: PathBuf },
+    /// A file taken off the list, untouched on disk: where it stood, to
+    /// put it back there, and whether the list keeps it through a rebuild.
+    Removed {
+        path: PathBuf,
+        index: usize,
+        adopted: bool,
+    },
 }
 
 /// The rename dialog while it is up: which file, what the field says, and
@@ -95,6 +105,10 @@ impl App {
         let Some(listed) = self.files.shown_path().map(Path::to_path_buf) else {
             return;
         };
+        if self.files.is_hidden(&listed) {
+            self.toast("Already taken off the list.", Level::Warning);
+            return;
+        }
         if self.files.is_condemned(&listed) {
             self.toast("Already in the trash.", Level::Warning);
             return;
@@ -134,6 +148,52 @@ impl App {
         }
         self.toast(
             format!("Trashed {}. {} to undo.", name_of(&listed), undo_key()),
+            Level::Message,
+        );
+    }
+
+    /// Takes the file on screen off the list, leaving it as it is on disk,
+    /// and steps on to the next. It goes out the way a trashed file does —
+    /// staying on screen until its neighbor has arrived, or leaving the
+    /// screen empty when it was the last — and undo puts it back where it
+    /// stood. The directory being read again does not bring it back: see
+    /// `Files::hide`.
+    pub(super) fn remove_shown(&mut self) {
+        // One at a time, as a deletion is, and never the file already on
+        // its way out.
+        if !self.files.is_idle() {
+            return;
+        }
+        let Some(path) = self.files.shown_path().map(Path::to_path_buf) else {
+            return;
+        };
+        if self.files.is_hidden(&path) {
+            self.toast("Already taken off the list.", Level::Warning);
+            return;
+        }
+        if self.files.is_condemned(&path) {
+            self.toast("Already in the trash.", Level::Warning);
+            return;
+        }
+        self.edits.push(Edit::Removed {
+            index: self.files.index(),
+            adopted: self.files.is_adopted(&path),
+            path: path.clone(),
+        });
+        self.files.hide();
+        match self.files.step_away() {
+            Some(request) => self.send(request),
+            None => {
+                self.leave_picture();
+                self.files.remove_shown();
+            }
+        }
+        self.toast(
+            format!(
+                "Took {} off the list. {} to undo.",
+                name_of(&path),
+                undo_key()
+            ),
             Level::Message,
         );
     }
@@ -232,10 +292,10 @@ impl App {
         })
     }
 
-    /// Undoes the last edit: the file put back from the trash, or its old
-    /// name put back on it. Either way the file it acted on is the one on
-    /// screen afterwards, since the message about it is the only other
-    /// sign anything happened.
+    /// Undoes the last edit: the file put back from the trash, its old
+    /// name put back on it, or its place on the list given back. Whichever
+    /// it is, the file it acted on is the one on screen afterwards, since
+    /// the message about it is the only other sign anything happened.
     pub(super) fn undo(&mut self) -> Effect {
         let Some(edit) = self.edits.pop() else {
             self.toast("Nothing to undo.", Level::Warning);
@@ -282,6 +342,24 @@ impl App {
                 }
                 self.toast(
                     format!("Renamed {} back to {}.", name_of(&to), name_of(&from)),
+                    Level::Message,
+                );
+            }
+            Edit::Removed {
+                path,
+                index,
+                adopted,
+            } => {
+                if self.files.is_condemned(&path) {
+                    // Never left: it stays, and that is all.
+                    self.files.reprieve();
+                } else {
+                    let request = self.files.reinstate(path.clone(), index, adopted);
+                    self.send(request);
+                    self.list_changed();
+                }
+                self.toast(
+                    format!("Put {} back on the list.", name_of(&path)),
                     Level::Message,
                 );
             }
@@ -339,6 +417,7 @@ impl App {
             self.list_changed();
         }
         self.kept.rename(from, to);
+        self.visited.rename(from, to);
         if self.files.shown_path() == Some(to)
             && let Some(current) = self.current.as_mut()
         {

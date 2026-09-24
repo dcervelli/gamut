@@ -239,4 +239,7 @@ deltas, so no GPU code knows about them. `app::chooser::Thumbs` keeps at most
 `MAX_THUMBS` of them, about 32 MiB, and lets the least recently seen go —
 seen meaning on the popup's screen, which is what `Command::Visible` touches.
 An evicted thumbnail is asked for again when its row is next on screen, and
-comes back from the cache rather than from a decode.
+comes back from the cache rather than from a decode. The
+[file list](filmstrip.md) reads the same store, touching through
+`Command::FilmstripVisible`, and the facts the worker delivers — kept in
+`Chooser` and read through `Chooser::facts_of` — are what it sorts by.
