@@ -11,10 +11,10 @@ use std::time::{Duration, Instant};
 use crate::image::decode;
 use crate::loader::{Reload, Request, Source};
 
-/// How long a file may take to open before the bar says so. Long enough that
+/// How long a file may take to open before a toast says so. Long enough that
 /// the ordinary case — a file that opens between two frames — never flickers a
-/// word into the interface and out again.
-pub(super) const SLOW_READ: Duration = Duration::from_millis(120);
+/// message into the window and out again.
+pub(super) const SLOW_READ: Duration = Duration::from_millis(250);
 
 /// What [`Files::announce_slow_read`] found: a read to say something about now,
 /// one to look at again at a given moment, or nothing worth a word.
@@ -37,9 +37,11 @@ pub(super) struct Pending {
     /// Which page of the file, where one was asked for by number.
     pub(super) page: Option<usize>,
     pub(super) since: Instant,
-    /// Whether the bar has been told to mention it. Latched so that the wait
-    /// is announced once rather than on every frame it spans.
-    pub(super) announced: bool,
+    /// When the wait began to be mentioned, if it has. Latched so that the
+    /// wait is announced once rather than on every frame it spans, and handed
+    /// on to a read that replaces this one, so that the toast saying so stays
+    /// up through a walk rather than going and coming back with each step.
+    pub(super) announced: Option<Instant>,
 }
 
 /// A walk through the file list, carried along so that it can continue past a
@@ -405,13 +407,14 @@ impl Files {
         source: Source,
     ) -> Request {
         self.generation += 1;
+        let announced = self.pending.as_ref().and_then(|pending| pending.announced);
         self.pending = Some(Pending {
             generation: self.generation,
             index,
             step,
             page: None,
             since: Instant::now(),
-            announced: false,
+            announced,
         });
         Request {
             generation: self.generation,
@@ -562,19 +565,19 @@ impl Files {
     }
 
     /// Decides whether a read still in flight has been going long enough to
-    /// earn a word in the bar. Latches, so that a wait is announced once
+    /// earn a toast. Latches, so that a wait is announced once
     /// rather than on every frame it spans.
     pub(super) fn announce_slow_read(&mut self, now: Instant) -> Announce {
         let Some(pending) = &mut self.pending else {
             return Announce::Nothing;
         };
         let due = pending.since + SLOW_READ;
-        if now < due {
+        if now < due && pending.announced.is_none() {
             Announce::Waiting(due)
-        } else if pending.announced {
+        } else if pending.announced.is_some() {
             Announce::Nothing
         } else {
-            pending.announced = true;
+            pending.announced = Some(due);
             Announce::Now
         }
     }
@@ -934,6 +937,26 @@ mod tests {
         assert_eq!(
             files.announce_slow_read(since + SLOW_READ * 2),
             Announce::Nothing
+        );
+    }
+
+    /// A step taken while a slow read is being announced keeps the
+    /// announcement, so that the toast saying so stays up through a walk
+    /// rather than going and coming back on every file.
+    #[test]
+    fn a_step_past_an_announced_read_keeps_it_announced() {
+        let mut files = list(3);
+        files.step(true).expect("three files");
+        let since = files.pending().expect("a request is in flight").since;
+        assert_eq!(files.announce_slow_read(since + SLOW_READ), Announce::Now);
+
+        files.step(true).expect("three files");
+        let pending = files.pending().expect("the next read is in flight");
+        assert_eq!(pending.announced, Some(since + SLOW_READ));
+        assert_eq!(
+            files.announce_slow_read(pending.since),
+            Announce::Nothing,
+            "already said, so neither waited for nor said again"
         );
     }
 

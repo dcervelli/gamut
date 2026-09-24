@@ -167,15 +167,6 @@ impl Current {
     }
 }
 
-/// What the top bar says about a read that is taking its time.
-pub enum Reading {
-    /// Another file, on its way in.
-    File(String),
-    /// The file already on screen, being read again after something wrote to
-    /// it. There is no new name to show, only the fact that we are busy.
-    Again,
-}
-
 /// The interface's panels: whether each is showing, and which toggle the
 /// pointer is over.
 #[derive(Clone, Copy, Debug)]
@@ -264,10 +255,6 @@ pub struct FrameInput {
     /// holding the loupe up whatever its toggle says: the toggle is lit for
     /// it, so that the button reads as the state it is showing.
     pub secondary: bool,
-    /// The read in progress, once it has taken long enough to be worth saying.
-    /// Kept apart from the label rather than replacing it: everything else in
-    /// the interface describes the image on screen, and so must that.
-    pub reading: Option<Reading>,
     /// Which file is on screen, out of how many.
     pub index: usize,
     pub count: usize,

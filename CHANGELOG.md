@@ -97,6 +97,13 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Changed
 
+- The name of a file deleted while it is on screen is struck through in
+  red, in place of the word `DELETED` beside it.
+- A file that takes more than a quarter of a second to open says so in a
+  toast, `Loading` and its name — `Reloading` for the file on screen read
+  again — that stays up until it opens, in place of the words after the
+  name in the top bar. Stepping on while it is up keeps it up, naming the
+  file now being read.
 - A new icon: a lake at sunset, with a loupe over the sun's rim showing
   its pixels. `bin/icon` draws it from a model of the scene's light.
 - The histogram's logarithmic count axis is toggled by `y` rather than

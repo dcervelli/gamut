@@ -41,7 +41,7 @@ use crate::trash::Trash;
 use crate::ui::chrome::{content_area, image_viewport};
 use crate::ui::toast::{self, Level, Toasts};
 use crate::ui::tooltip::Hdr;
-use crate::ui::{self, Current, FileFacts, FrameInput, Panels, Reading, Rect};
+use crate::ui::{self, Current, FileFacts, FrameInput, Panels, Rect, Toast};
 use crate::view::{View, Viewport};
 use crate::watch::{self, Watch};
 
@@ -963,23 +963,32 @@ impl App {
         }
     }
 
-    /// What the top bar says about a read that is taking its time, which is
-    /// part of the name it sets: worked out here rather than in the frame
-    /// builder because the pointer is answered against that name between
-    /// frames and has to see the same words.
-    fn reading(&self) -> Option<Reading> {
-        self.files
-            .pending()
-            // With nothing on screen there is no flicker to guard against and
-            // nothing else to say, so the wait is worth naming immediately.
-            .filter(|pending| pending.announced || self.current.is_none())
-            .map(|pending| {
-                if self.current.is_some() && pending.index == self.files.index() {
-                    Reading::Again
-                } else {
-                    Reading::File(file_label(self.files.path(pending.index)))
-                }
-            })
+    /// The toast about a read that is taking its time, once it has taken
+    /// [`files::SLOW_READ`]: up for as long as the read is, whatever it is
+    /// then reading, and gone the moment the file arrives.
+    fn reading(&self) -> Option<Toast> {
+        let pending = self.files.pending()?;
+        let raised = pending.announced?;
+        let name = file_label(self.files.path(pending.index));
+        let message = if self.current.is_some() && pending.index == self.files.index() {
+            format!("Reloading {name}\u{2026}")
+        } else {
+            format!("Loading {name}\u{2026}")
+        };
+        Some(Toast::waiting(message, raised))
+    }
+
+    /// The toast a frame draws: the newer of the message about what was just
+    /// done and the one about the file still on its way in, so that a copy
+    /// taken while a file loads is said, and the wait is said again once
+    /// that message has had its time.
+    fn showing_toast(&self) -> Option<Toast> {
+        let reading = self.reading();
+        match (self.toasts.showing(), reading) {
+            (Some(message), Some(reading)) if message.raised < reading.raised => Some(reading),
+            (Some(message), _) => Some(message.clone()),
+            (None, reading) => reading,
+        }
     }
 
     /// Raises the message at the foot of the window, in place of whatever was
@@ -1084,7 +1093,6 @@ impl App {
             minimap_on_screen: self.minimap_on_screen(),
             loupe: self.loupe(),
             secondary: self.pointer.secondary,
-            reading: self.reading(),
             index: self.files.index(),
             count: self.files.len(),
             deleted: self.watch.missing(),
@@ -1096,7 +1104,7 @@ impl App {
                 .iter()
                 .map(|opener| opener.name.clone())
                 .collect(),
-            toast: self.toasts.showing().cloned(),
+            toast: self.showing_toast(),
             selection: self.marking.selection,
             handle: self.marking.handle,
             grabbing: self.marking.grabbed(),

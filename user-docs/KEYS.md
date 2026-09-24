@@ -144,8 +144,8 @@ from the end of the list. The file leaves the list once its neighbor is up.
 With only one file there is nowhere to go: the file leaves at once, and
 the window is empty — the three buttons that give it something — until
 you open something or undo, which puts the file back and shows it. A
-neighbor that will not open leaves the deleted file on screen, marked
-`DELETED` in the bar, until you undo or step away. A file on another disk
+neighbor that will not open leaves the deleted file on screen, its name
+struck through in red in the bar, until you undo or step away. A file on another disk
 or a removable drive goes to the trash on that drive; where that cannot be
 made, it is copied into your home trash instead, which takes as long as the
 copy takes.

@@ -41,10 +41,10 @@ joins the list where its name puts it, and one deleted drops out — so a
 render dropping frames into a folder is a list that grows as you watch it,
 and `]` reaches a file that did not exist when you started. The image on
 screen is the one exception: it stays on the list even after the file behind
-it is gone, since it is still what you are looking at — and the bar writes
-`DELETED` in front of its name so that you know that is what you are looking
-at. The word appears about half a second after the file goes and takes itself
-off again if the file comes back; a file named on the command line and then
+it is gone, since it is still what you are looking at — and the bar strikes
+its name through in red so that you know that is what you are looking at.
+The mark appears about half a second after the file goes and comes off again
+if the file comes back; a file named on the command line and then
 deleted is marked the same way.
 
 **A file that holds several pictures.** An animated GIF, PNG, WebP or JPEG
@@ -74,7 +74,9 @@ most viewers refuse.
 **Loading is not incremental.** The window waits for the whole file, which for
 a few hundred megabytes of compressed raster is a few seconds, and the image
 is then held whole in memory and in graphics memory. Expect a large file to
-cost somewhat more than its decoded size while it loads.
+cost somewhat more than its decoded size while it loads. A file that takes
+longer than a quarter of a second says so in a message at the foot of the
+window, `Loading` and its name, which stays up until the file opens.
 
 **An untagged file is treated as sRGB**, which is what every format here has
 always meant in the absence of anything better. Where a file states its color

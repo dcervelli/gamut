@@ -20,7 +20,7 @@ use super::control::{Command, Control, Naming};
 use super::icon::{self, Mark};
 use super::style::TOGGLE_RADIUS;
 use super::tooltip::Tip;
-use super::{Current, FrameInput, PADDING, Panels, Reading, Room, menu, pixel, status};
+use super::{Current, FrameInput, PADDING, Panels, Room, menu, pixel, status};
 use crate::image::display::Headroom;
 use crate::theme::Theme;
 use crate::view::View;
@@ -320,17 +320,7 @@ impl Pass<'_> {
         let Some(current) = self.current else {
             // Nothing has been decoded yet. The bars still go down, so that
             // the window reads as the application waiting rather than as a
-            // hole, with the file being read where the image's own name will
-            // go.
-            ui.horizontal_centered(|ui| {
-                ui.add_space(BAR_PADDING);
-                if let Some(Reading::File(name)) = &self.input.reading {
-                    ui.add(
-                        egui::Label::new(RichText::new(format!("loading {name}")).color(dim))
-                            .truncate(),
-                    );
-                }
-            });
+            // hole; the file being read is named by the toast.
             return;
         };
         let zoom = self.view.zoom(current.size(), self.input.viewport);

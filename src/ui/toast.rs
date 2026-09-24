@@ -14,6 +14,11 @@
 //! It can also be taken off: by the cross it carries, or by Escape, which
 //! dismisses whatever is up before it means anything else. The cross is a
 //! [`Control`] like any other.
+//!
+//! One kind is not about what just happened but about what is still
+//! happening: a file that is taking its time to open. That one is made by
+//! [`Toast::waiting`] from the read in flight, carries no cross and no
+//! time of its own, and is up exactly as long as the read is.
 
 use std::time::{Duration, Instant};
 
@@ -81,8 +86,30 @@ pub struct Toast {
     /// What it says.
     pub message: String,
     pub level: Level,
-    /// When it takes itself off.
-    until: Instant,
+    /// When it went up, which decides which of two is showing: the newer.
+    pub raised: Instant,
+    /// When it takes itself off, or `None` for one that is up for as long
+    /// as what it is about lasts, and carries no cross.
+    until: Option<Instant>,
+}
+
+impl Toast {
+    /// A message about something still going on — a file on its way in —
+    /// raised at `raised` and up until whoever made it stops making it.
+    pub fn waiting(message: String, raised: Instant) -> Toast {
+        Toast {
+            message,
+            level: Level::Message,
+            raised,
+            until: None,
+        }
+    }
+
+    /// Whether it can be taken off by hand: only a message about what has
+    /// happened can, one about what is happening going when that ends.
+    fn dismissable(&self) -> bool {
+        self.until.is_some()
+    }
 }
 
 /// The message showing at the foot of the window, if any.
@@ -101,7 +128,8 @@ impl Toasts {
         self.showing = Some(Toast {
             message,
             level,
-            until: now + linger,
+            raised: now,
+            until: Some(now + linger),
         });
     }
 
@@ -111,7 +139,8 @@ impl Toasts {
         if self
             .showing
             .as_ref()
-            .is_some_and(|toast| now >= toast.until)
+            .and_then(|toast| toast.until)
+            .is_some_and(|until| now >= until)
         {
             self.showing = None;
             return true;
@@ -122,7 +151,7 @@ impl Toasts {
     /// When [`Toasts::tick`] next has something to do, for the loop to sleep
     /// until. `None` when nothing is up.
     pub fn deadline(&self) -> Option<Instant> {
-        self.showing.as_ref().map(|toast| toast.until)
+        self.showing.as_ref().and_then(|toast| toast.until)
     }
 
     /// Takes the message off now: the cross was pressed, or Escape. Returns
@@ -154,7 +183,12 @@ impl Toasts {
 pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, toast: &Toast) {
     let content = pass.content;
     let theme = pass.theme;
-    let held = 2.0 * INSET[0] + GAP + CLOSE;
+    let closer = if toast.dismissable() {
+        GAP + CLOSE
+    } else {
+        0.0
+    };
+    let held = 2.0 * INSET[0] + closer;
     let room = content.width - 2.0 * LIFT - held;
     if room <= 0.0 || content.height < CLOSE + 2.0 * INSET[1] + 2.0 * LIFT {
         return;
@@ -178,12 +212,14 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, toast: &Toast) {
                 .show(ui, |ui| {
                     ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                         ui.spacing_mut().item_spacing = vec2(GAP, 0.0);
-                        ui.set_max_width(room + GAP + CLOSE);
+                        ui.set_max_width(room + closer);
                         ui.add(
                             Label::new(RichText::new(&toast.message).color(toast.level.ink(theme)))
                                 .truncate(),
                         );
-                        cross(pass, ui);
+                        if toast.dismissable() {
+                            cross(pass, ui);
+                        }
                     });
                 });
         });
@@ -249,6 +285,20 @@ mod tests {
         assert!(toasts.dismiss());
         assert!(toasts.showing().is_none());
         assert!(!toasts.dismiss());
+    }
+
+    /// A toast about a read still going is never taken off by the clock or
+    /// by hand; it goes when the application stops making it.
+    #[test]
+    fn a_waiting_toast_has_no_time_and_no_cross() {
+        let toast = Toast::waiting("Loading b.png\u{2026}".to_string(), Instant::now());
+        assert!(!toast.dismissable());
+        assert!(
+            raised("Copied file path.")
+                .showing()
+                .expect("one is up")
+                .dismissable()
+        );
     }
 
     /// A second message is about what has happened since, and replaces the

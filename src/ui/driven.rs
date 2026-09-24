@@ -137,7 +137,6 @@ fn input(logical: [f32; 2], count: usize) -> FrameInput {
         minimap_on_screen: false,
         loupe: None,
         secondary: false,
-        reading: None,
         index: 0,
         count,
         deleted: false,

@@ -11,9 +11,7 @@ use super::chrome::{BAR_PADDING, Corners, Pass, STEP_SEAM, measure};
 use super::control::Control;
 use super::style::TOGGLE_RADIUS;
 use super::tooltip::Tip;
-use super::{
-    COUNTER_GAP, Current, PADDING, Reading, TEXT_SIZE, capitalized, fonts, histogram, icon, menu,
-};
+use super::{COUNTER_GAP, Current, PADDING, TEXT_SIZE, capitalized, fonts, histogram, icon, menu};
 
 /// Between one segment of a bar and the next. A thin gap: the middot already
 /// parts them, and the bars are short of room before they are short of air.
@@ -57,9 +55,9 @@ pub(super) fn fit_segments(
 
 /// The top bar's own words, from the near end: the pair that steps through
 /// the list while there is one, the count, the button that opens the menu
-/// of the file, the word for a file that has gone, and the name — the one
-/// thing in the window set bold, and the only thing drawn in the ink the
-/// theme keeps for it.
+/// of the file, and the name — the one thing in the window set bold, and
+/// the only thing drawn in the ink the theme keeps for it, unless the file
+/// behind it has gone, when it is struck through in the warning color.
 pub(super) fn top_words(pass: &mut Pass, ui: &mut egui::Ui, current: &Current) {
     // The pair that steps through the list, at the head of the bar, with
     // the count they move through between them — one row of three, the
@@ -97,35 +95,18 @@ pub(super) fn top_words(pass: &mut Pass, ui: &mut egui::Ui, current: &Current) {
     }
     file_button(pass, ui);
     ui.add_space(COUNTER_GAP);
-    // In front of the name, on the side of the bar the name is read from, so
-    // that it is seen before the file it is about rather than after it.
-    if pass.input.deleted {
-        ui.add(Label::new(RichText::new(DELETED).color(pass.theme.warning)));
-        ui.add_space(COUNTER_GAP);
-    }
-    let name = top_label(&current.label, pass.input.reading.as_ref());
-    let response = ui.add(
-        Label::new(
-            RichText::new(name)
-                .color(pass.theme.text_bright)
-                .family(egui::FontFamily::Name(fonts::BOLD.into())),
-        )
-        .truncate(),
-    );
+    let mut text = RichText::new(&current.label).family(egui::FontFamily::Name(fonts::BOLD.into()));
+    // A file that has gone keeps its name, which is still the name of the
+    // file the pixels came from, and has it struck through: the mark is on
+    // the name rather than a word beside it, so a file that really is called
+    // `DELETED` cannot read as one that was.
+    text = if pass.input.deleted {
+        text.color(pass.theme.warning).strikethrough()
+    } else {
+        text.color(pass.theme.text_bright)
+    };
+    let response = ui.add(Label::new(text).truncate());
     pass.tooltip(response, Tip::Name, true);
-}
-
-/// The name of the image on screen, and after it whatever the loader is busy
-/// with when that has taken long enough to notice.
-///
-/// One string, clipped as one piece: where there is no room for both, the file
-/// you are actually looking at is the one worth keeping.
-pub(super) fn top_label(shown: &str, reading: Option<&Reading>) -> String {
-    match reading {
-        Some(Reading::File(next)) => format!("{shown}, loading {next}"),
-        Some(Reading::Again) => format!("{shown}, reloading"),
-        None => shown.to_string(),
-    }
 }
 
 /// The button before the name that opens the menu of the file — its name
@@ -149,13 +130,6 @@ fn file_button(pass: &mut Pass, ui: &mut egui::Ui) {
         .gap(PADDING)
         .show(|ui| menu::file_items(pass, ui));
 }
-
-/// The word that goes in front of the name when the file behind the picture
-/// is gone. Set apart in the warning color rather than folded into the name,
-/// which is still the name of the file the pixels came from: it is a fact
-/// about the file's standing in the world, not part of what it is called —
-/// and a file that really is called `DELETED` must not read as this.
-pub(super) const DELETED: &str = "DELETED";
 
 /// The count as a press: the middle piece of the row the two steps make,
 /// a button's height and ground with the words in the bar's dim ink, the
@@ -595,23 +569,6 @@ mod tests {
                 "{headroom:?}"
             );
         }
-    }
-
-    /// The bar names the image on screen first and always. A file on its way
-    /// in is mentioned after it, never in place of it: captioning one picture
-    /// with another's name is the one thing an image viewer must not do.
-    #[test]
-    fn the_bar_names_what_is_on_screen_before_what_is_coming() {
-        assert_eq!(top_label("a.png", None), "a.png");
-        assert_eq!(
-            top_label("a.png", Some(&Reading::File("b.heic".into()))),
-            "a.png, loading b.heic"
-        );
-        assert_eq!(
-            top_label("a.png", Some(&Reading::Again)),
-            "a.png, reloading",
-            "a file being re-read has no new name to show, only the wait"
-        );
     }
 
     /// Which of the list you are looking at — and nothing at all when the

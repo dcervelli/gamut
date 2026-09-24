@@ -58,7 +58,7 @@ empty window described in [the interface](interface.md#the-empty-window-and-the-
 Undo then `reinstate`s the file at the head of an empty list, where
 nothing is on screen to be moved along by it, and asks for it. Otherwise
 `App::delete_shown` trashes the file, `condemn`s it on the list, points the
-watch at it so the bar says `DELETED` at once rather than half a second on,
+watch at it so the bar strikes the name through at once rather than half a second on,
 and asks for the neighbor as a step — forward, or back from the end of the
 list, since the walk the user was making is the one to continue. The
 condemned file leaves the list in `Files::shown`, the moment a reply for
