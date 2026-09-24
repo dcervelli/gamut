@@ -89,6 +89,8 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Changed
 
+- A new icon: a lake at sunset, with a loupe over the sun's rim showing
+  its pixels. `bin/icon` draws it from a model of the scene's light.
 - The histogram's logarithmic count axis is toggled by `y` rather than
   `l`, which the loupe has taken.
 
