@@ -242,8 +242,10 @@ the toolkit. A file of frames or pages brings a fifth with it, the transport
 bar, above the bottom bar and nested between the strips as the picture is,
 so its controls sit under the picture they act on and the strips run down to
 the bottom bar either way. The [file list](filmstrip.md) is a sixth,
-between the left strip and the picture, and the transport bar starts where
-it ends so that the bar sits under the picture and not under the list. Both
+down the left edge of the window under the top bar and running to the
+window's foot, with the left strip and the bottom bar starting at its
+right edge: the list is a column of its own, and the controls that are
+about the picture sit beside the picture. Both
 are part of the same derivation, from the window size and `chrome::Parts`
 — which of the two is up — so the picture is fitted beside and above them
 on the first frame either is up rather than a frame later, and `ui::show`

@@ -9,9 +9,11 @@
 //! for the same reason `Copies` is: they are what the menus offer, and the
 //! interface cannot reach into the application for its words.
 //!
-//! The panel is one of the chrome's, laid out by `Chrome` beside the left
-//! strip and given exactly that width by `Pass::bars`, so that the picture
-//! is fitted into what it leaves before anything is drawn. Its head — the
+//! The panel is one of the chrome's, laid out by `Chrome` down the left
+//! edge of the window under the top bar — the left strip and the bottom
+//! bar start where it ends — and given exactly that width by `Pass::bars`,
+//! so that the picture is fitted into what it leaves before anything is
+//! drawn. Its head — the
 //! two menus and the pair that go back and forward through the files
 //! seen — stays put; the rows under it scroll, and only the rows on
 //! screen are laid out, as the chooser's are.

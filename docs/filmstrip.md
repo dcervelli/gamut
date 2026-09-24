@@ -83,9 +83,10 @@ moved between the frame and the press.
 The panel is part of the chrome rather than a floating panel: the picture
 is fitted beside it, so its width has to be known before egui lays
 anything out. `chrome::Parts` says whether it and the transport bar are
-up, `Chrome::new` gives it `filmstrip::WIDTH` between the left strip and
-the picture, and `ui::show` derives the same `Parts` from whether it was
-handed an `Input`, so the two cannot disagree — see
+up, `Chrome::new` gives it `filmstrip::WIDTH` down the left edge of the
+window under the top bar, the left strip and the bottom bar starting at
+its right edge, and `ui::show` derives the same `Parts` from whether it
+was handed an `Input`, so the two cannot disagree — see
 [the chrome](interface.md#the-chrome). Its head holds the two menus and the
 back and forward pair and stays put; the rows scroll under it. The index
 and name are laid over the thumbnail's corner on a wash of the bar's

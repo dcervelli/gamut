@@ -98,13 +98,15 @@ pub struct Chrome {
     pub bottom: Rect,
     pub left: Rect,
     pub right: Rect,
-    /// The file list, between the left strip and the picture, running
-    /// from the top bar to the bottom one as the strips do. `None` while
-    /// it is not showing.
+    /// The file list, down the left edge of the window from the top bar
+    /// to the window's foot: the left strip and the bottom bar start at
+    /// its right edge while it is up. `None` while it is not showing.
+    /// Worked out with the rest and read by nothing but the tests: the
+    /// panel is given its size by `Pass::bars` from the same constant.
+    #[cfg_attr(not(test), allow(dead_code, reason = "the geometry is whole"))]
     pub filmstrip: Option<Rect>,
     /// The bar of playback controls, above the bottom bar and between the
-    /// strips — and to the right of the file list, where there is one —
-    /// for an animation or a file of pages. `None` for a still.
+    /// strips, for an animation or a file of pages. `None` for a still.
     pub transport: Option<Rect>,
 }
 
@@ -137,18 +139,25 @@ impl Chrome {
         let side = SIDE_WIDTH.min(size[0] / 2.0);
         let middle = (size[1] - 2.0 * bar).max(0.0);
         // The file list has its own width unless the strips leave less
-        // than that between them, and then it has what they leave.
-        let strip = parts
-            .filmstrip
-            .then(|| filmstrip::WIDTH.min((size[0] - 2.0 * side).max(0.0)));
-        // Where the picture starts: past the left strip and the file list.
-        let inner = side + strip.unwrap_or(0.0);
+        // than that between them, and then it has what they leave. It
+        // takes the left edge of the window under the top bar, the whole
+        // way down, and the left strip and the bottom bar start where it
+        // ends.
+        let strip = if parts.filmstrip {
+            filmstrip::WIDTH.min((size[0] - 2.0 * side).max(0.0))
+        } else {
+            0.0
+        };
+        // Where the picture starts: past the file list and the left strip.
+        let inner = strip + side;
 
         Self {
             top: Rect::new(0.0, 0.0, size[0], bar),
-            left: Rect::new(0.0, bar, side, middle),
+            left: Rect::new(strip, bar, side, middle),
             right: Rect::new(size[0] - side, bar, side, middle),
-            filmstrip: strip.map(|width| Rect::new(side, bar, width, middle)),
+            filmstrip: parts
+                .filmstrip
+                .then(|| Rect::new(0.0, bar, strip, (size[1] - bar).max(0.0))),
             transport: parts.transport.then(|| {
                 Rect::new(
                     inner,
@@ -157,7 +166,7 @@ impl Chrome {
                     bar,
                 )
             }),
-            bottom: Rect::new(0.0, size[1] - bar, size[0], bar),
+            bottom: Rect::new(strip, size[1] - bar, (size[0] - strip).max(0.0), bar),
         }
     }
 
@@ -167,13 +176,10 @@ impl Chrome {
         let floor = self
             .transport
             .map_or(self.bottom.y, |transport| transport.y);
-        let left = self
-            .filmstrip
-            .map_or(self.left.right(), |filmstrip| filmstrip.right());
         Rect::new(
-            left,
+            self.left.right(),
             self.top.bottom(),
-            (self.right.x - left).max(0.0),
+            (self.right.x - self.left.right()).max(0.0),
             (floor - self.top.bottom()).max(0.0),
         )
     }
@@ -284,6 +290,19 @@ impl Pass<'_> {
             .frame(frame)
             .show(ui, |ui| self.top_bar(ui));
         self.hairline(ui, top.response.rect, Edge::Bottom);
+        // The file list before the bottom bar and the strips, so that egui
+        // nests it as `Chrome` lays it out: the whole left edge under the
+        // top bar, with the bottom bar and the left strip starting at its
+        // right edge.
+        if let Some(strip) = self.input.filmstrip.clone() {
+            let list = egui::Panel::left("filmstrip")
+                .exact_size(filmstrip::WIDTH)
+                .resizable(false)
+                .show_separator_line(false)
+                .frame(frame)
+                .show(ui, |ui| filmstrip::show(self, ui, &strip));
+            self.hairline(ui, list.response.rect, Edge::Right);
+        }
         let bottom = egui::Panel::bottom("bottom")
             .exact_size(BAR_HEIGHT)
             .resizable(false)
@@ -298,18 +317,6 @@ impl Pass<'_> {
             .frame(frame)
             .show(ui, |ui| self.left_strip(ui));
         self.hairline(ui, left.response.rect, Edge::Right);
-        // The file list beside the left strip, before the right strip
-        // and the transport bar so that egui nests it as `Chrome` lays
-        // it out: inside the strip, and the bar to the right of it.
-        if let Some(strip) = self.input.filmstrip.clone() {
-            let list = egui::Panel::left("filmstrip")
-                .exact_size(filmstrip::WIDTH)
-                .resizable(false)
-                .show_separator_line(false)
-                .frame(frame)
-                .show(ui, |ui| filmstrip::show(self, ui, &strip));
-            self.hairline(ui, list.response.rect, Edge::Right);
-        }
         let right = egui::Panel::right("right")
             .exact_size(SIDE_WIDTH)
             .resizable(false)
@@ -967,12 +974,11 @@ mod tests {
         );
     }
 
-    /// The file list is its own width taken off the left of the content
-    /// area, between the left strip and the picture; the transport bar
-    /// starts where it ends, so that the bar sits under the picture and
-    /// not under the list.
+    /// The file list is the whole left edge of the window under the top
+    /// bar, down to the window's foot; the left strip and the bottom bar
+    /// start where it ends, and the transport bar under the picture.
     #[test]
-    fn the_file_list_takes_its_width_off_the_left() {
+    fn the_file_list_takes_the_left_edge_under_the_top_bar() {
         let parts = Parts {
             transport: true,
             filmstrip: true,
@@ -981,17 +987,17 @@ mod tests {
         let strip = chrome.filmstrip.expect("asked for");
         assert_eq!(
             strip,
-            Rect::new(
-                SIDE_WIDTH,
-                BAR_HEIGHT,
-                filmstrip::WIDTH,
-                700.0 - 2.0 * BAR_HEIGHT
-            )
+            Rect::new(0.0, BAR_HEIGHT, filmstrip::WIDTH, 700.0 - BAR_HEIGHT)
         );
+        assert_eq!(chrome.left.x, strip.right());
+        assert_eq!(chrome.left.width, SIDE_WIDTH);
+        assert_eq!(chrome.bottom.x, strip.right());
+        assert_eq!(chrome.bottom.right(), 1000.0);
+        assert_eq!(chrome.top.x, 0.0, "the top bar keeps the whole width");
         let transport = chrome.transport.expect("asked for");
-        assert_eq!(transport.x, strip.right());
+        assert_eq!(transport.x, chrome.left.right());
         assert_eq!(transport.right(), chrome.right.x);
-        assert_eq!(chrome.content().x, strip.right());
+        assert_eq!(chrome.content().x, chrome.left.right());
         assert_eq!(
             chrome.content().width,
             1000.0 - 2.0 * SIDE_WIDTH - filmstrip::WIDTH
