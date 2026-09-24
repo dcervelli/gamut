@@ -1,0 +1,312 @@
+#!/usr/bin/env python3
+"""Draw the program's icon: a lake at sunset, and a loupe on the sun's rim.
+
+The scene is modeled in linear light, unbounded — a sky, a sun, a ridge and
+the water under them — and tone mapped the way a display would show it. The
+SVG is fitted to that model rather than drawn by eye: every gradient's stops
+are the scene sampled along one line, a glow laid over a base is given the
+color and opacity that land on the sampled value, and the loupe's pixels are
+the scene averaged over each one. Changing the light is changing the model
+and running this again.
+
+Positions in the scene are (u, v), 0 to 1 across and down the picture, which
+fills the tile.
+
+    bin/icon [out.svg]    default: packaging/com.dcervelli.gamut.svg
+
+Standard library only.
+"""
+
+import math
+import sys
+from pathlib import Path
+
+# ---- the scene
+
+SUN_U, SUN_V, SUN_R = 0.60, 0.625, 0.055
+WATERLINE = 0.735
+WARM = (1.0, 0.62, 0.30)
+
+# Each ray is drawn as wedges of these half-angles, in radians, stacked so its
+# middle is brightest, in a glow this opaque at the sun.
+RAY_WIDTHS = (0.12, 0.07, 0.035)
+RAY_OPACITY = 0.20
+
+# The sky from the zenith to the horizon, at 0.66.
+SKY = [
+    (0.00, (0.05, 0.08, 0.22)),
+    (0.40, (0.30, 0.22, 0.40)),
+    (0.70, (1.20, 0.55, 0.30)),
+    (0.88, (2.00, 0.95, 0.40)),
+    (1.00, (2.80, 1.50, 0.60)),
+]
+
+# The ridge's crest, smoothed between these points and roughened by two sines;
+# the sun sits in the notch at 0.61.
+RIDGE = [(0, .60), (.09, .55), (.17, .59), (.27, .48), (.37, .57), (.45, .56),
+         (.53, .63), (.61, .665), (.69, .60), (.79, .50), (.89, .57), (1, .54)]
+RIDGE_BODY = (0.05, 0.035, 0.09)
+
+
+def add(a, b, k=1):
+    return tuple(x + y * k for x, y in zip(a, b))
+
+
+def mix(a, b, t):
+    return tuple(x + (y - x) * t for x, y in zip(a, b))
+
+
+def crest(u):
+    for (a, ya), (b, yb) in zip(RIDGE, RIDGE[1:]):
+        if u <= b:
+            t = (u - a) / (b - a)
+            t = t * t * (3 - 2 * t)
+            return ya + (yb - ya) * t + 0.010 * math.sin(u * 53) + 0.004 * math.sin(u * 131 + 1)
+    return RIDGE[-1][1]
+
+
+def sky(u, v):
+    t = min(1, max(0, v / 0.66))
+    for (a, ca), (b, cb) in zip(SKY, SKY[1:]):
+        if t <= b:
+            c = mix(ca, cb, (t - a) / (b - a))
+            break
+    dx, dy = u - SUN_U, v - SUN_V
+    d = math.hypot(dx, dy)
+    if d < SUN_R:
+        return (60, 48, 34)
+    # The sun's bloom, a tight core and two wider falloffs, and faint rays
+    # above the horizon.
+    c = add(c, WARM, 4.0 * math.exp(-(d - SUN_R) / 0.035) + 1.1 * math.exp(-d / 0.16)
+            + 0.25 * math.exp(-d / 0.45))
+    a = math.atan2(dy, dx)
+    ray = (0.5 + 0.5 * math.cos(a * 11 + 0.6 * math.sin(a * 5))) ** 6
+    return add(c, WARM, 0.2 * ray * math.exp(-d / 0.30) * (1 if dy < 0.02 else 0.3))
+
+
+def ridge(u, v, rim):
+    """The ridge at a depth below its crest: haze toward the sun, and a rim of
+    light along the crest as bright as `rim`."""
+    depth = v - crest(u)
+    light = math.exp(-abs(u - SUN_U) / 0.16)
+    c = add(RIDGE_BODY, (0.30, 0.10, 0.10), 0.35 * light * math.exp(-depth / 0.08))
+    return add(c, WARM, rim * light * math.exp(-depth / 0.006))
+
+
+def scene(u, v):
+    """Above the waterline, which is all the loupe looks at."""
+    return ridge(u, v, 3.5) if v > crest(u) else sky(u, v)
+
+
+def water(u, v):
+    """The sky mirrored in the water, darkening with depth."""
+    mirrored = WATERLINE - (v - WATERLINE) * 1.15
+    c = tuple(x * 0.55 for x in sky(u, mirrored))
+    return mix(c, (0.02, 0.025, 0.06), min(1, (v - WATERLINE) * 2.2))
+
+
+def tonemap(c):
+    """Linear light to sRGB: an extended Reinhard curve on luminance, and a
+    color past white carried toward white rather than clipped."""
+    c = tuple(max(0, x) for x in c)
+    lum = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+    if lum <= 0:
+        return (0, 0, 0)
+    white = 6.0
+    c = tuple(x * (1 + lum / (white * white)) / (1 + lum) for x in c)
+    m = max(c)
+    if m > 1:
+        c = mix(tuple(x / m for x in c), (1, 1, 1), min(1, (m - 1) * 0.35))
+    return tuple(12.92 * x if x <= .0031308 else 1.055 * min(1, x) ** (1 / 2.4) - .055
+                 for x in (min(1, max(0, x)) for x in c))
+
+
+# ---- fitting the SVG to it
+
+def hexc(c):
+    return '#%02x%02x%02x' % tuple(round(255 * x) for x in c)
+
+
+def num(x):
+    return f'{x:.2f}'.rstrip('0').rstrip('.')
+
+
+def X(u):
+    return 6 + 116 * u
+
+
+def Y(v):
+    return 6 + 116 * v
+
+
+def over(base, target):
+    """The color and opacity that, laid over `base`, give `target`: the least
+    opacity whose color stays in range."""
+    a = 0.0
+    for b, t in zip(base, target):
+        if t > b + 1e-4:
+            a = max(a, (t - b) / (1 - b))
+        elif t < b - 1e-4:
+            a = max(a, (b - t) / b)
+    a = min(1, a + 0.002)
+    if a < 0.004:
+        return target, 0
+    return tuple(min(1, max(0, b + (t - b) / a)) for b, t in zip(base, target)), a
+
+
+def glow(base, sample, distances):
+    """A radial glow's stops, from the scene sampled at each distance out,
+    fading to nothing at the last."""
+    out = [(d / distances[-1], *over(base, sample(d))) for d in distances]
+    out[-1] = (1, out[-1][1], 0)
+    return out
+
+
+def stops(pairs):
+    return ''.join(f'<stop offset="{num(o)}" stop-color="{hexc(c)}"'
+                   + (f' stop-opacity="{num(a)}"' if a < 1 else '') + '/>'
+                   for o, c, a in pairs)
+
+
+def draw():
+    sx, sy, sr = X(SUN_U), Y(SUN_V), SUN_R * 116
+    top = Y(WATERLINE)
+
+    # The sky down the picture's left edge, and the sun's glow over it,
+    # fitted along the horizontal through the sun.
+    def edge(v):
+        return tonemap(sky(0.0, v))
+    sky_stops = [(v / WATERLINE, edge(min(v, 0.66)), 1)
+                 for v in [0, .1, .2, .3, .4, .5, .6, .66, WATERLINE]]
+    sun_glow = glow(edge(SUN_V), lambda d: tonemap(sky(SUN_U - max(d, SUN_R + 0.001), SUN_V)),
+                    [0, .06, .08, .10, .13, .17, .22, .28, .36, .45, .54, .62])
+
+    # The rays, at the peaks of the pattern `sky` draws them with.
+    def pattern(a):
+        return math.cos(a * 11 + 0.6 * math.sin(a * 5))
+    angles = [-math.pi * k / 2000 for k in range(2001)]
+    rays = [a for prev, a, nxt in zip(angles, angles[1:], angles[2:])
+            if pattern(a) >= pattern(prev) and pattern(a) > pattern(nxt)]
+
+    def wedge(a, half):
+        p = [(sx + 90 * math.cos(a + s * half), sy + 90 * math.sin(a + s * half)) for s in (-1, 1)]
+        return f'M{num(sx)} {num(sy)}L{num(p[0][0])} {num(p[0][1])}L{num(p[1][0])} {num(p[1][1])}Z'
+    ray_ink = hexc(tonemap(add((0.4, 0.3, 0.25), WARM, 1.5)))
+
+    # The ridge: its body, the haze toward the sun, the lit crest.
+    us = [i / 120 for i in range(121)]
+    line = ' L'.join(f'{num(X(u))} {num(Y(crest(u)))}' for u in us)
+    ridge_d = f'M{line} L{X(1)} {num(top + 1)} L{X(0)} {num(top + 1)}Z'
+    body = ridge(0.02, crest(0.02) + 0.06, 0)
+    ridge_base = tonemap(body)
+    haze = glow(ridge_base, lambda d: tonemap(ridge(SUN_U - d, crest(SUN_U - d) + 0.035, 0)),
+                [0, .05, .1, .16, .24, .34, .45])
+    rim = glow(ridge_base, lambda d: tonemap(ridge(SUN_U - d, crest(SUN_U - d) + 0.002, 3.5)),
+               [0, .08, .16, .26, .4])
+
+    # The water: the mirrored sky, the ridge's reflection, the glow under the
+    # sun, and the sun's path in a column of glints.
+    water_stops = [((v - WATERLINE) / (1 - WATERLINE), tonemap(water(0.02, v)), 1)
+                   for v in [WATERLINE, .76, .8, .85, .9, .95, 1]]
+    reflected = ' L'.join(f'{num(X(u))} {num(Y(WATERLINE + (WATERLINE - crest(u)) / 1.15))}' for u in us)
+    reflection_d = f'M{X(0)} {num(top - 0.6)} L{reflected} L{X(1)} {num(top - 0.6)}Z'
+    reflection = tonemap(tuple(x * 0.55 for x in body))
+    water_glow = glow(tonemap(water(0.0, 0.95)), lambda d: tonemap(water(SUN_U - d, 0.95)),
+                      [0, .08, .16, .26, .38, .5])
+    glints = []
+    v = WATERLINE + 0.03
+    while v < 1:
+        s = max(0, math.sin(v * 260 + 3 * math.sin(v * 37))) ** 8
+        if s > 0.5:
+            glints.append((v, (0.02 + (v - WATERLINE) * 0.22) * 116 * 2.2, s))
+        v += 0.002
+    sun_bounce = Y(WATERLINE + (WATERLINE - crest(SUN_U)) / 1.15 + 0.035)
+
+    # The loupe, up and to the left of the sun and just over its rim. It
+    # shows the sun's left edge rather than what is under its center: a
+    # cheat, so that some of its pixels are the sun.
+    r = 26
+    dist = r + 1.4 + sr - 1.8
+    cx, cy = sx + dist * math.cos(math.radians(200)), sy + dist * math.sin(math.radians(200))
+    n, span, cu, cv = 8, 0.12, 0.525, 0.605
+    cs = 2 * r / n
+    cells = []
+    for j in range(n):
+        for i in range(n):
+            x0, y0 = cx - r + i * cs, cy - r + j * cs
+            nearest = (min(max(cx, x0), x0 + cs), min(max(cy, y0), y0 + cs))
+            if math.hypot(nearest[0] - cx, nearest[1] - cy) >= r:
+                continue
+            acc = (0, 0, 0)
+            for a in range(3):
+                for b in range(3):
+                    u = cu + ((i + (a + .5) / 3) / n - .5) * span
+                    v = cv + ((j + (b + .5) / 3) / n - .5) * span
+                    acc = add(acc, scene(u, v), 1 / 9)
+            cells.append(f'      <rect x="{num(x0)}" y="{num(y0)}" width="{num(cs + .2)}" '
+                         f'height="{num(cs + .2)}" fill="{hexc(tonemap(acc))}"/>')
+    grid = 'M' + ' M'.join(f'{num(cx - r + i * cs)} {num(cy - r)}V{num(cy + r)} '
+                           f'M{num(cx - r)} {num(cy - r + i * cs)}H{num(cx + r)}' for i in range(1, n))
+
+    ray_paths = '\n'.join(f'      <path d="{wedge(a, h)}"/>' for a in rays for h in RAY_WIDTHS)
+    glint_rects = '\n'.join(f'      <rect x="{num(sx - w / 2)}" y="{num(Y(v) - 0.5)}" width="{num(w)}" '
+                            f'height="1" opacity="{num(0.2 + 0.3 * s)}"/>' for v, w, s in glints)
+    cell_rects = '\n'.join(cells)
+    wy = Y(0.95)
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <title>gamut</title>
+  <!-- Generated by bin/icon; change the scene there and run it again. -->
+  <defs>
+    <clipPath id="tile"><rect x="6" y="6" width="116" height="116" rx="26"/></clipPath>
+    <clipPath id="glass"><circle cx="{num(cx)}" cy="{num(cy)}" r="{r}"/></clipPath>
+    <linearGradient id="sky" x1="0" y1="{num(Y(0))}" x2="0" y2="{num(top)}" gradientUnits="userSpaceOnUse">{stops(sky_stops)}</linearGradient>
+    <radialGradient id="glow" cx="{num(sx)}" cy="{num(sy)}" r="{num(0.62 * 116)}" gradientUnits="userSpaceOnUse">{stops(sun_glow)}</radialGradient>
+    <radialGradient id="ray" cx="{num(sx)}" cy="{num(sy)}" r="70" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="{ray_ink}" stop-opacity="{num(RAY_OPACITY)}"/><stop offset="1" stop-color="{ray_ink}" stop-opacity="0"/></radialGradient>
+    <radialGradient id="haze" cx="{num(sx)}" cy="{num(Y(crest(SUN_U)))}" r="{num(0.45 * 116)}" gradientUnits="userSpaceOnUse">{stops(haze)}</radialGradient>
+    <radialGradient id="rim" cx="{num(sx)}" cy="{num(Y(crest(SUN_U)))}" r="{num(0.4 * 116)}" gradientUnits="userSpaceOnUse">{stops(rim)}</radialGradient>
+    <linearGradient id="water" x1="0" y1="{num(top)}" x2="0" y2="{Y(1)}" gradientUnits="userSpaceOnUse">{stops(water_stops)}</linearGradient>
+    <linearGradient id="column" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#f5a060" stop-opacity="0"/><stop offset=".5" stop-color="#ffc98a" stop-opacity=".45"/><stop offset="1" stop-color="#f5a060" stop-opacity="0"/></linearGradient>
+    <radialGradient id="bloomw"><stop offset="0" stop-color="#fff4e0"/><stop offset=".45" stop-color="#ffe0b0" stop-opacity=".8"/><stop offset="1" stop-color="#ffc080" stop-opacity="0"/></radialGradient>
+    <radialGradient id="halo" cx="{num(sx)}" cy="{num(sy)}" r="{num(sr * 2.6)}" gradientUnits="userSpaceOnUse"><stop offset=".35" stop-color="#fff4e0" stop-opacity=".9"/><stop offset="1" stop-color="#ffd9a0" stop-opacity="0"/></radialGradient>
+    <radialGradient id="wglow" cx="{num(sx)}" cy="{num(wy)}" r="{num(0.5 * 116)}" gradientTransform="translate({num(sx)} {num(wy)}) scale(1 0.55) translate({num(-sx)} {num(-wy)})" gradientUnits="userSpaceOnUse">{stops(water_glow)}</radialGradient>
+    <linearGradient id="glint" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ffd9a0" stop-opacity="0"/><stop offset=".5" stop-color="#ffe6bf"/><stop offset="1" stop-color="#ffd9a0" stop-opacity="0"/></linearGradient>
+  </defs>
+
+  <!-- The picture: a lake at sunset, filling the tile. -->
+  <g clip-path="url(#tile)">
+    <rect x="6" y="6" width="116" height="{num(top - 6)}" fill="url(#sky)"/>
+    <g fill="url(#ray)">
+{ray_paths}
+    </g>
+    <rect x="6" y="6" width="116" height="{num(top - 6)}" fill="url(#glow)"/>
+    <circle cx="{num(sx)}" cy="{num(sy)}" r="{num(sr * 2.6)}" fill="url(#halo)"/>
+    <circle cx="{num(sx)}" cy="{num(sy)}" r="{num(sr)}" fill="#fff8ea"/>
+    <path d="{ridge_d}" fill="{hexc(ridge_base)}"/>
+    <path d="{ridge_d}" fill="url(#haze)"/>
+    <path d="M{line}" fill="none" stroke="url(#rim)" stroke-width="1.2" stroke-linejoin="round"/>
+    <rect x="6" y="{num(top)}" width="116" height="{num(Y(1) - top)}" fill="url(#water)"/>
+    <path d="{reflection_d}" fill="{hexc(reflection)}"/>
+    <rect x="6" y="{num(top)}" width="116" height="{num(Y(1) - top)}" fill="url(#wglow)"/>
+    <path d="M{num(sx)} {num(top)} L{num(sx + 26)} {Y(1)} L{num(sx - 26)} {Y(1)}Z" fill="url(#column)"/>
+    <ellipse cx="{num(sx)}" cy="{num(sun_bounce)}" rx="9" ry="4.5" fill="url(#bloomw)"/>
+    <g fill="url(#glint)">
+{glint_rects}
+    </g>
+  </g>
+  <rect x="6.5" y="6.5" width="115" height="115" rx="25.5" fill="none" stroke="#fff" stroke-opacity=".12"/>
+
+  <!-- The loupe: the sun's rim, magnified into its pixels. -->
+  <circle cx="{num(cx)}" cy="{num(cy + 1.8)}" r="{num(r + 1.6)}" fill="#000" fill-opacity=".3"/>
+  <g clip-path="url(#glass)">
+{cell_rects}
+    <path d="{grid}" stroke="#000" stroke-opacity=".3" stroke-width=".6"/>
+  </g>
+  <circle cx="{num(cx)}" cy="{num(cy)}" r="{r}" fill="none" stroke="#fff" stroke-width="2.8"/>
+</svg>
+'''
+
+
+if __name__ == '__main__':
+    root = Path(__file__).resolve().parent.parent
+    out = Path(sys.argv[1]) if len(sys.argv) > 1 else root / 'packaging' / 'com.dcervelli.gamut.svg'
+    out.write_text(draw())

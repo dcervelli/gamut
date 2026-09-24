@@ -42,3 +42,39 @@ keeps them linear with no transfer function to think about and no 8-bit floor
 under premultiplied color: half floats, or 32-bit ones above a 32-bit float
 source, where the range and the low bits are the point of the file.
 
+
+## The export's resize, on the CPU
+
+An export at a size other than the picture's own is resampled by
+`resample::resize`, not by the GPU: the write is on a copying thread that
+holds no device, and it starts from the 8-bit sRGB raster
+`encode::displayed` has already walked out, the display pipeline baked in.
+It is the shaders' two filters again, in Rust, over that raster. Along an
+axis the picture shrinks each output pixel is the area average of what it
+covers, the edge source pixels weighted by their overlap; along one it
+grows it is Catmull-Rom over the four source pixels around the output
+pixel's center, clamped to the picture's edge, with `catmull_rom` copied
+from the shader so a source pixel's center comes through untouched and the
+undershoot past black is clamped as the shader clamps it. An axis that
+keeps its length is an exact identity. Nearest is not offered: a file
+enlarged by nearest is a file of blocks, and the dialog warns where the
+screen is showing nearest and the export will not.
+
+The arithmetic is in linear light on premultiplied color, as the shaders',
+so the mean of black and white is the code of half the light, not the
+middle code, and a transparent pixel does not darken the edge beside it.
+The raster is decoded through the sRGB curve, filtered, divided back out
+by its coverage and taken through `encode::quantize`, the same table the
+walk wrote it with. Doing this to the displayed raster rather than to the
+linear texels is the one place the export parts from the screen, which
+resamples before the window and the curve; the two agree exactly at the
+picture's own size, where the export bypasses the filter, and differ by
+the curve's nonlinearity across a resampled edge otherwise.
+
+The picture is never held as floats whole: a picture at the size ceiling
+is a gigapixel, and four floats a pixel of it is sixteen gigabytes. Each
+band of output rows keeps a short run of source rows, each decoded and
+resampled across once, and lets a row go once no output row below reads
+it — four rows deep for a growth, a span's worth for a shrink. The bands
+are divided between threads by the same count `encode::displayed` divides
+its walk by, and a test holds the divided resize to the plain one.

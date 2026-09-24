@@ -4145,6 +4145,88 @@ mod tests {
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }
 
+    /// The export dialog's size boxes say one size between them, follow
+    /// the region where one is up, refuse a side that will not do and hold
+    /// Export until it is put right, warn of an enlargement the screen
+    /// shows as nearest; and Export writes the picture at that size.
+    #[test]
+    fn an_export_is_written_at_the_size_asked_for() {
+        use crate::ui::export::{Dimension, Warning};
+        use input::Action::Export;
+
+        let (mut app, dir) = app_over("export-size", &[("a.png", 8, 6)]);
+        let _ = app.perform(Export);
+        let resize = |app: &mut App| app.export_input().expect("the dialog is up").resize;
+        assert_eq!(resize(&mut app).source, [8, 6]);
+        assert_eq!(resize(&mut app).typed, ["100", "8", "6"]);
+
+        let _ = app.act(ui::Command::ExportSize(
+            Dimension::Percent,
+            "50".to_string(),
+        ));
+        assert_eq!(resize(&mut app).size, [4, 3]);
+        assert!(app.export_input().unwrap().warnings.is_empty(), "a shrink");
+        let _ = app.act(ui::Command::ExportSize(Dimension::Width, "16".to_string()));
+        assert_eq!(resize(&mut app).typed, ["200", "16", "12"]);
+        assert_eq!(
+            app.export_input().unwrap().warnings,
+            [Warning::Bicubic],
+            "the screen shows nearest"
+        );
+        let _ = app.act(ui::Command::ExportSize(Dimension::Height, "0".to_string()));
+        assert!(!resize(&mut app).allows());
+        let _ = app.act(ui::Command::ExportName("big.png".to_string()));
+        let _ = app.act(ui::Command::Press(ui::Control::ExportTo));
+        assert!(app.export_input().is_some(), "held until the size will do");
+        let _ = app.act(ui::Command::ExportSize(Dimension::Height, "12".to_string()));
+        assert_eq!(resize(&mut app).size, [16, 12]);
+        let _ = app.act(ui::Command::Press(ui::Control::ExportTo));
+        assert!(app.export_input().is_none());
+        // One at a time: the dialog opens again, but Export is dead until
+        // the write has landed and been looked at.
+        let _ = app.perform(Export);
+        assert!(app.export_input().unwrap().busy);
+        let _ = app.act(ui::Command::ExportName("second.png".to_string()));
+        let _ = app.act(ui::Command::Press(ui::Control::ExportTo));
+        assert!(app.export_input().is_some(), "held");
+        app.copying.join_all();
+        assert!(app.export_input().unwrap().busy, "until the loop looks");
+        let _ = app.poll_copies();
+        assert!(!app.export_input().unwrap().busy);
+        let _ = app.act(ui::Command::Press(ui::Control::CancelExport));
+        assert!(!dir.join("second.png").exists());
+        let written = ::image::open(dir.join("big.png")).expect("big.png was written");
+        assert_eq!((written.width(), written.height()), (16, 12));
+        assert_eq!(said(&app), "Exported big.png.");
+        answer(&mut app, Reload::Fresh);
+
+        // Shrunk, and the region is what the percentage is of.
+        let _ = app.perform(input::Action::PreviousFile);
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.image_size(), [8.0, 6.0]);
+        app.marking.selection = ui::Selection::Shown(Region {
+            x: 0,
+            y: 0,
+            width: 4,
+            height: 2,
+        });
+        let _ = app.perform(Export);
+        assert_eq!(resize(&mut app).source, [4, 2]);
+        let _ = app.act(ui::Command::ExportSize(
+            Dimension::Percent,
+            "50".to_string(),
+        ));
+        assert_eq!(resize(&mut app).size, [2, 1]);
+        let _ = app.act(ui::Command::ExportName("small.png".to_string()));
+        let _ = app.act(ui::Command::Press(ui::Control::ExportTo));
+        app.copying.join_all();
+        let _ = app.poll_copies();
+        let written = ::image::open(dir.join("small.png")).expect("small.png was written");
+        assert_eq!((written.width(), written.height()), (2, 1));
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
     /// The export dialog stops a playing animation, so that the frame
     /// written is the one it opened on, and sets it playing again when it
     /// goes, by Cancel or by Export; one that was stopped stays stopped.

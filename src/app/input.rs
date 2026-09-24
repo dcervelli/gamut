@@ -2241,6 +2241,7 @@ impl App {
             ui::Command::Name(name) => self.set_rename_name(name),
             ui::Command::ExportName(name) => self.set_export_name(name),
             ui::Command::ExportQuality(quality) => self.set_export_quality(quality),
+            ui::Command::ExportSize(dimension, text) => self.set_export_size(dimension, text),
             ui::Command::Cursor(step) => self.chooser.step(step),
             ui::Command::Visible(rows) => {
                 for row in rows.clone() {

@@ -32,7 +32,8 @@ pub(super) struct Ticket {
     /// nothing supersedes — see [`Copying::spawn_aside`].
     asked: Option<u64>,
     count: Arc<AtomicU64>,
-    outcome: Sender<Outcome>,
+    /// The way home: the report, and whether it is from work aside.
+    outcome: Sender<Report>,
 }
 
 impl Ticket {
@@ -50,12 +51,16 @@ impl Ticket {
     /// Says how the copy went. Nobody listening — the window gone — is
     /// nothing to do anything about.
     pub fn report(&self, outcome: Outcome) {
-        let _ = self.outcome.send(outcome);
+        let _ = self.outcome.send((self.asked.is_none(), outcome));
     }
 }
 
+/// A report on its way home: whether it is from work aside, and what it
+/// says.
+type Report = (bool, Outcome);
+
 pub(super) struct Copying {
-    outcome: (Sender<Outcome>, Receiver<Outcome>),
+    outcome: (Sender<Report>, Receiver<Report>),
     /// The copies still being prepared, joined before the loop leaves. A
     /// copy is often followed straight away by `q`, and a thread that has
     /// not yet handed its bytes over dies with the process — the copy would
@@ -63,6 +68,12 @@ pub(super) struct Copying {
     threads: Vec<JoinHandle<()>>,
     /// Counts copies asked for, shared with the threads doing the work.
     count: Arc<AtomicU64>,
+    /// How much work aside — exports — has been started and not yet
+    /// reported at a look: what [`Copying::aside_pending`] answers from.
+    /// Counted from the start to the report's arrival rather than from
+    /// the thread, so that the answer changes only when the loop looks,
+    /// never between two reads of it.
+    aside: usize,
 }
 
 impl Default for Copying {
@@ -71,6 +82,7 @@ impl Default for Copying {
             outcome: mpsc::channel(),
             threads: Vec::new(),
             count: Arc::new(AtomicU64::new(0)),
+            aside: 0,
         }
     }
 }
@@ -97,7 +109,16 @@ impl Copying {
     /// For a file being exported, which is never stale — an export asked for is a
     /// file wanted, whatever is asked for after it.
     pub fn spawn_aside(&mut self, work: impl FnOnce(Ticket) + Send + 'static) {
+        self.aside += 1;
         self.start(None, work);
+    }
+
+    /// Whether work aside — an export — has been started and not yet
+    /// reported. One export at a time: the file each writes is taken into
+    /// the list and shown as it lands, and a second under way would land
+    /// on top of that.
+    pub fn aside_pending(&self) -> bool {
+        self.aside > 0
     }
 
     fn start(&mut self, asked: Option<u64>, work: impl FnOnce(Ticket) + Send + 'static) {
@@ -112,7 +133,16 @@ impl Copying {
 
     /// The reports that have come in since the last look.
     pub fn poll(&mut self) -> Vec<Outcome> {
-        self.outcome.1.try_iter().collect()
+        self.outcome
+            .1
+            .try_iter()
+            .map(|(aside, outcome)| {
+                if aside {
+                    self.aside -= 1;
+                }
+                outcome
+            })
+            .collect()
     }
 
     /// Waits for every copy still being prepared.
@@ -174,6 +204,7 @@ mod tests {
                 false => Ok(Done::Exported(PathBuf::from("a.png"))),
             });
         });
+        assert!(copying.aside_pending(), "the export is under way");
         copy_go.send(()).expect("the copy is waiting");
         let copied = loop {
             let reports = copying.poll();
@@ -186,6 +217,8 @@ mod tests {
         copying.claim();
         export_go.send(()).expect("the export is waiting");
         copying.join_all();
+        assert!(copying.aside_pending(), "until its report is looked at");
         assert_eq!(copying.poll(), [Ok(Done::Exported(PathBuf::from("a.png")))]);
+        assert!(!copying.aside_pending());
     }
 }

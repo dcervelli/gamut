@@ -160,6 +160,37 @@ under the name. The thread reports `Done::Exported` with the path, and
 is: it arrives as a new file with nothing kept, which is right, since what
 was done to the picture is in its pixels now.
 
+The size the picture is written at is three boxes — a percentage, a width
+and a height — that say one thing between them, since the aspect is
+locked: `export::Resize` holds what each says, and `Resize::edit`, reached
+by `Command::ExportSize` through `App::set_export_size`, works the size
+out from whichever box was typed in and rewrites the other two. The box
+typed in keeps its text as typed, so a `.` on its way to a decimal is not
+taken away by a rewrite, and a percentage is written back to two decimals.
+A side is a whole number of pixels from one to `export::SIDE_MAX` — 2¹⁵,
+the largest texture the program shows — and a side worked out in
+proportion is held to the same ceiling but never under a pixel; a box
+that will not do is outlined, said under the row, and holds Export, while
+the last size that would do is kept so that the warnings still speak of
+something. The percentage is of the region where one is up, since that is
+what is written. The write goes through `resample::resize` between the
+`encode::displayed` walk and the encoder — see
+[resampling.md](resampling.md) for what it does — and the picture is
+enlarged bicubic whatever the screen's own filter; `Warning::Bicubic` says
+so where the screen shows nearest, the one warning that is about what the
+new file gains rather than loses.
+
+One export at a time. The file each writes is taken into the list and
+shown as it lands, so a second under way would land on top of the first
+and the window would jump twice; and a large picture in a debug build
+takes long enough for a second press to be tempting. `Copying` counts the
+work aside it has started and not yet seen reported — `aside_pending`,
+counted from the start to the report's arrival at a poll rather than from
+the thread, so that the answer changes only when the loop looks — and
+while it is pending the dialog opens as ever but Export and `Enter` are
+dead, with a line saying why; `App::export_shown` refuses the press too,
+so the button and the press cannot disagree.
+
 An export is not an edit and is not on the undo stack. It changes nothing
 that was there; the new file is deleted like any other.
 

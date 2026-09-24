@@ -11,7 +11,7 @@ use std::ops::Range;
 use crate::image::region::{Grip, Region};
 
 use super::chooser::Step;
-use super::export::Format;
+use super::export::{Dimension, Format};
 use super::help;
 use super::info::Copyable;
 use super::menu::{Copies, ZoomChoice};
@@ -313,6 +313,9 @@ pub enum Command {
     ExportName(String),
     /// The export dialog's quality slider moved: this is where it now stands.
     ExportQuality(u8),
+    /// One of the export dialog's size boxes changed: which, and what it
+    /// now says.
+    ExportSize(Dimension, String),
     /// A key moved the chooser's cursor.
     Cursor(Step),
     /// Which of the chooser's rows are on screen, said when it changes, so
