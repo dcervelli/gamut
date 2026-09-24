@@ -2929,6 +2929,21 @@ mod tests {
         }
     }
 
+    /// The turn's two buttons share one line of the key table, which names
+    /// both ways round at once; each button says its own way, with its own
+    /// key after it.
+    #[test]
+    fn the_turn_buttons_each_name_their_own_way_round() {
+        assert_eq!(
+            names(Tip::Control(Control::TurnLeft)).as_deref(),
+            Some("Rotate left 90\u{b0} (;)")
+        );
+        assert_eq!(
+            names(Tip::Control(Control::TurnRight)).as_deref(),
+            Some("Rotate right 90\u{b0} (')")
+        );
+    }
+
     /// The two buttons in the middle of an empty window are named in their
     /// own words and by the keys that put up the same dialog, and the
     /// shortcut printed on each is that key: `Ctrl+O` for files, and the

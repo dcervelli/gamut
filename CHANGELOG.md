@@ -32,7 +32,8 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   metadata. The new file joins the list and is shown. The file menu has the
   item too, as Export.
 
-- `;` and `'` turn the picture a quarter counterclockwise and clockwise. The
+- `;` and `'`, or the pair of buttons before `HDR` at the right of the
+  bottom bar, turn the picture a quarter counterclockwise and clockwise. The
   turn is how the picture is shown, not
   a change to the file: it costs nothing on a large picture, carries through
   an animation's frames and a file's pages, is kept with the file for the

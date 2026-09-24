@@ -338,6 +338,49 @@ pub(super) const ROTATE_CCW: &[Mark] = &[
     Mark::Line([3.0, 8.0], [8.0, 8.0]),
 ];
 
+/// Lucide's `rotate-ccw-square`: a square with one corner opened, and an
+/// arrow coming round into the gap counterclockwise — the picture, turned
+/// that way. The pair of these is the turn's two buttons in the bottom bar.
+///
+/// The square is written out as sides and quarter turns, as `external-link`
+/// above is, because its top edge is broken where the arrow arrives: a whole
+/// rounded rectangle would draw a stroke across the arrowhead.
+pub(super) const ROTATE_CCW_SQUARE: &[Mark] = &[
+    // The arrow: down the right side from where the square's top edge would
+    // meet it, round the corner, and along under the head.
+    Mark::Line([20.0, 9.0], [20.0, 7.0]),
+    Mark::arc([18.0, 7.0], 2.0, 0.0, -90.0),
+    Mark::Line([18.0, 5.0], [12.0, 5.0]),
+    Mark::Line([15.0, 2.0], [12.0, 5.0]),
+    Mark::Line([12.0, 5.0], [15.0, 8.0]),
+    // The rest of the square, from under the arrow's shaft round to where
+    // the top edge stops short of the head.
+    Mark::Line([20.0, 13.0], [20.0, 18.0]),
+    Mark::arc([18.0, 18.0], 2.0, 0.0, 90.0),
+    Mark::Line([18.0, 20.0], [6.0, 20.0]),
+    Mark::arc([6.0, 18.0], 2.0, 90.0, 90.0),
+    Mark::Line([4.0, 18.0], [4.0, 7.0]),
+    Mark::arc([6.0, 7.0], 2.0, 180.0, 90.0),
+    Mark::Line([6.0, 5.0], [8.0, 5.0]),
+];
+
+/// Lucide's `rotate-cw-square`: [`ROTATE_CCW_SQUARE`] mirrored, the arrow
+/// coming round clockwise — the other button of the pair.
+pub(super) const ROTATE_CW_SQUARE: &[Mark] = &[
+    Mark::Line([12.0, 5.0], [6.0, 5.0]),
+    Mark::arc([6.0, 7.0], 2.0, 270.0, -90.0),
+    Mark::Line([4.0, 7.0], [4.0, 10.0]),
+    Mark::Line([9.0, 8.0], [12.0, 5.0]),
+    Mark::Line([12.0, 5.0], [9.0, 2.0]),
+    Mark::Line([4.0, 14.0], [4.0, 18.0]),
+    Mark::arc([6.0, 18.0], 2.0, 180.0, -90.0),
+    Mark::Line([6.0, 20.0], [18.0, 20.0]),
+    Mark::arc([18.0, 18.0], 2.0, 90.0, -90.0),
+    Mark::Line([20.0, 18.0], [20.0, 7.0]),
+    Mark::arc([18.0, 7.0], 2.0, 0.0, -90.0),
+    Mark::Line([18.0, 5.0], [16.0, 5.0]),
+];
+
 /// Lucide's `spline`: a curve between two of its own control points, for the
 /// switch that bends the count axis.
 pub(super) const SPLINE: &[Mark] = &[

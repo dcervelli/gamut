@@ -131,8 +131,8 @@ pub enum Control {
     Rename,
     Delete,
     /// Turning the picture on screen a quarter, counterclockwise and
-    /// clockwise: what `;` and `'` press. Not drawn anywhere; a control so
-    /// that the keys go through `App::press` as every other job does.
+    /// clockwise: the pair before the `HDR` switch in the bottom bar, which
+    /// `;` and `'` press too.
     TurnLeft,
     TurnRight,
     /// The item of the same menu that opens the export dialog, which
@@ -204,8 +204,8 @@ impl Control {
             Control::FileMenu => "File".to_string(),
             Control::Rename => "Rename".to_string(),
             Control::Delete => "Delete".to_string(),
-            Control::TurnLeft => "Turn left".to_string(),
-            Control::TurnRight => "Turn right".to_string(),
+            Control::TurnLeft => "Rotate left".to_string(),
+            Control::TurnRight => "Rotate right".to_string(),
             Control::Export => "Export".to_string(),
             Control::ExportAs(format) => format.label().to_string(),
             Control::ExportTo => "Export".to_string(),

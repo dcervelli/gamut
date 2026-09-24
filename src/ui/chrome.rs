@@ -404,7 +404,9 @@ impl Pass<'_> {
                 ui.add_space(BAR_PADDING);
                 self.output_switch(ui);
                 ui.add_space(PADDING);
-                // What is being done to the picture, up against that switch —
+                self.turn_buttons(ui);
+                ui.add_space(PADDING);
+                // What is being done to the picture, up against those —
                 // and nothing at all where nothing is being done.
                 status::state_words(self, ui, current);
 
@@ -420,6 +422,38 @@ impl Pass<'_> {
                 });
             });
         });
+    }
+
+    /// The pair that turns the picture, before the headroom switch: a
+    /// quarter counterclockwise and a quarter clockwise, set against each
+    /// other as the pair that steps through the list is, since they are the
+    /// two ways of one thing. Momentary, not lit: the turn in force is the
+    /// picture itself, on screen. Laid out from the right, so the clockwise
+    /// button goes down first and comes out on the right.
+    fn turn_buttons(&mut self, ui: &mut Ui) {
+        let right = self.icon_button(
+            ui,
+            icon::ROTATE_CW_SQUARE,
+            Control::TurnRight,
+            false,
+            true,
+            Corners::Trailing,
+        );
+        if right.clicked() {
+            self.press(Control::TurnRight);
+        }
+        ui.add_space(STEP_SEAM);
+        let left = self.icon_button(
+            ui,
+            icon::ROTATE_CCW_SQUARE,
+            Control::TurnLeft,
+            false,
+            true,
+            Corners::Leading,
+        );
+        if left.clicked() {
+            self.press(Control::TurnLeft);
+        }
     }
 
     /// The headroom switch: one word, lit while the picture is going out

@@ -362,6 +362,7 @@ that is not a paste; open it as an argument instead.
 | `;` | Turn the picture a quarter counterclockwise |
 | `'` | Turn the picture a quarter clockwise |
 
+The two buttons before `HDR` at the right of the bottom bar do the same.
 A turn changes how the picture is shown, not the file: it is kept with the
 file while the window is open, like the exposure, and carries through an
 animation's frames and a file's pages. A region turns with the picture, and
@@ -678,6 +679,7 @@ region behind: it belongs to the picture it was drawn on.
 | Drag the file information | Scroll it, as if dragging the scrollbar's handle |
 | Click the zoom percentage | Open the zoom menu: scale, fit and the magnification filter |
 | Click the dot beside the grid button | Choose how a pixel's value is read out |
+| Click a turn button, before `HDR` at the bottom right | Turn the picture a quarter counterclockwise or clockwise, as `;` and `'` do |
 
 The button at the top of the left strip opens a menu of the
 copies beside it: the file's **Name**, its **Path**, its **URI**, the

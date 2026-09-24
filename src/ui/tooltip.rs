@@ -308,6 +308,10 @@ pub fn words(tip: Tip) -> Option<String> {
         // has a key of its own, and the button says what the menu is of.
         Tip::Control(Control::FileMenu) => "Copy, rename, delete or export the file",
         Tip::Control(Control::Paste) => "Paste an image",
+        // The turn's pair: each names its own way round, where the key
+        // table's one line names both.
+        Tip::Control(Control::TurnLeft) => "Rotate left 90\u{b0}",
+        Tip::Control(Control::TurnRight) => "Rotate right 90\u{b0}",
         // The two buttons in the middle of an empty window say what
         // the dialog is for; the key table's line is what to press.
         Tip::Control(Control::OpenFiles) => "Choose image files to open",
@@ -387,8 +391,6 @@ pub fn words(tip: Tip) -> Option<String> {
             | Control::Choose(_)
             | Control::Rename
             | Control::Delete
-            | Control::TurnLeft
-            | Control::TurnRight
             | Control::Export
             | Control::ExportAs(_)
             | Control::ExportTo
