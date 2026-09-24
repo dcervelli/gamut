@@ -1602,6 +1602,9 @@ impl App {
             self.size_window_to(size);
         }
         self.files.shown(file.index);
+        // A file on its way out has left the list now, if this is its
+        // neighbor arriving: the strip reads the list again.
+        self.filmstrip.relist(self.files.paths());
         // Another file on screen: it goes on the stack of files seen,
         // and the file list scrolls to it.
         if file.mode == Reload::Fresh {
@@ -1617,6 +1620,7 @@ impl App {
         // was, and its modification time no longer matches — and for one the
         // thread had given up on, which has just decoded here.
         let facts = file_facts(&file.path);
+        let image = Arc::new(image);
         let given_up = self.chooser.learn(
             &file.path,
             Facts {
@@ -1627,8 +1631,11 @@ impl App {
                 bytes: facts.bytes,
             },
         );
+        // Made from the picture itself, decoded already, rather than read
+        // and decoded again on the thread — or refused there: its ceiling
+        // is what a background decode may hold, and this one is held.
         if file.mode == Reload::InPlace || given_up {
-            self.thumbnailer.prioritize(vec![file.path.clone()]);
+            self.thumbnailer.adopt(file.path.clone(), Arc::clone(&image));
         }
         self.facts_learned();
         // A region is of the picture it was drawn on. Stepping to another
@@ -1670,7 +1677,7 @@ impl App {
             self.openers = openers::for_file(&file.path);
         }
         self.current = Some(Current {
-            image: Arc::new(image),
+            image,
             stats,
             display,
             label: file_label(&file.path),
@@ -2305,25 +2312,33 @@ impl ApplicationHandler<UserEvent> for App {
         // Except for the redraw itself: egui answers `RedrawRequested` with
         // "repaint" too, meaning paint now, and a frame asked for on the
         // strength of that would be a frame asking for the next for ever.
+        //
+        // Except `Tab`, which is kept from egui while none of its fields has
+        // the keyboard: egui-winit reports it taken whether or not one has,
+        // and egui would move its focus with it — to a scroll area, say,
+        // which then wants every key after it. Nothing here takes the focus
+        // a press would give it, so there is nothing for `Tab` to move to,
+        // and the key is the table's.
+        let tab = matches!(
+            &event,
+            WindowEvent::KeyboardInput {
+                event: KeyEvent {
+                    logical_key: winit::keyboard::Key::Named(winit::keyboard::NamedKey::Tab),
+                    ..
+                },
+                ..
+            }
+        );
         let response = self
             .shown
             .as_mut()
+            .filter(|shown| !tab || shown.gui.ctx.egui_wants_keyboard_input())
             .map(|shown| shown.gui.on_event(&shown.window, &event));
         let repaint = Effect::redraw_if(
             response.as_ref().is_some_and(|response| response.repaint)
                 && !matches!(event, WindowEvent::RedrawRequested),
         );
-        // A key is egui's only while one of its fields has the keyboard.
-        // egui-winit says it took `Tab` whether or not one has, since egui
-        // would move its focus with it; nothing here takes the focus a
-        // press would give it, so there is nothing for `Tab` to move to,
-        // and the key stays on the table.
-        let consumed = response.is_some_and(|response| response.consumed)
-            && !(matches!(event, WindowEvent::KeyboardInput { .. })
-                && !self
-                    .shown
-                    .as_ref()
-                    .is_some_and(|shown| shown.gui.ctx.egui_wants_keyboard_input()));
+        let consumed = response.is_some_and(|response| response.consumed);
         let effect = match event {
             _ if consumed && !matches!(event, WindowEvent::RedrawRequested) => Effect::Nothing,
             WindowEvent::CloseRequested => Effect::Quit,
@@ -4220,6 +4235,14 @@ mod tests {
         assert_eq!(app.files.shown_path(), Some(dir.join("c.png").as_path()));
         assert_eq!(app.files.index(), 1);
         assert!(app.conditions().undoable);
+        let rows = |app: &mut App| {
+            let chooser = &app.chooser;
+            app.filmstrip
+                .input(&app.thumbs, |path| App::key_of(chooser, path), None, false, false)
+                .rows
+                .len()
+        };
+        assert_eq!(rows(&mut app), 2, "the strip has let it go too");
 
         // The directory read again lists it, and the list leaves it out.
         write_png(&dir, "d.png", 8, 8);
