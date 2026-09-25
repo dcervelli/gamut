@@ -30,14 +30,20 @@ use super::control::{Command, Control};
 use super::style::{ACTIVE_BUTTON_WASH, SCROLLBAR_GUTTER, SCROLLBAR_WIDTH};
 use super::{PADDING, TEXT_SIZE, fonts, icon, menu};
 
-/// The square each thumbnail is fitted into, at its narrowest: the
+/// The width each thumbnail is fitted into, at its narrowest: the
 /// thumbnail thread's smallest display copy, drawn at its own size.
 pub const SLOT_MIN: f32 = crate::thumbnailer::DISPLAY_SIDES[0] as f32;
-/// The square the panel opens at: a little wider than the narrowest, so
+/// The width the panel opens at: a little wider than the narrowest, so
 /// that a name has room in the title.
 pub const SLOT_DEFAULT: f32 = 148.0;
-/// The square at its widest.
+/// The width at its widest.
 pub const SLOT_MAX: f32 = 384.0;
+/// The shortest and the tallest a slot is, as a share of its width: a
+/// panorama is not given a sliver of a row, nor a phone's screenshot a
+/// row taller than the strip shows at once, and is fitted inside instead,
+/// with room either side.
+pub const SHAPE_MIN: f32 = 0.5;
+pub const SHAPE_MAX: f32 = 1.5;
 /// The room around a slot, on every side.
 pub const INSET: f32 = 6.0;
 /// A file's title, over its slot: one line of words.
@@ -48,13 +54,27 @@ pub const HEAD_HEIGHT: f32 = BAR_HEIGHT;
 /// How far either side of the panel's right edge a drag takes hold of it.
 const GRIP: f32 = 3.0;
 
-/// A file's row, for a slot of `slot`: its title, and under it the slot
-/// and the room around it.
-pub fn row_height(slot: f32) -> f32 {
-    TITLE_HEIGHT + slot + 2.0 * INSET
+/// How tall a slot `slot` wide is for a picture of `size`: the picture's
+/// own shape, held between [`SHAPE_MIN`] and [`SHAPE_MAX`], on a whole
+/// logical pixel. Square for a file whose header has not said, which is
+/// every file until the thumbnail thread reaches it.
+pub fn slot_height(slot: f32, size: Option<(u32, u32)>) -> f32 {
+    let shape = match size {
+        Some((width, height)) if width > 0 && height > 0 => {
+            (height as f32 / width as f32).clamp(SHAPE_MIN, SHAPE_MAX)
+        }
+        _ => 1.0,
+    };
+    (slot * shape).round()
 }
 
-/// What the panel takes off the picture, for a slot of `slot`: a row, and
+/// A file's row, for a slot `slot` wide and a picture of `size`: its
+/// title, and under it the slot and the room around it.
+pub fn row_height(slot: f32, size: Option<(u32, u32)>) -> f32 {
+    TITLE_HEIGHT + slot_height(slot, size) + 2.0 * INSET
+}
+
+/// What the panel takes off the picture, for a slot `slot` wide: a row, and
 /// the scrollbar's gutter beside it.
 pub fn width(slot: f32) -> f32 {
     slot + 2.0 * INSET + SCROLLBAR_GUTTER
@@ -229,9 +249,13 @@ pub struct Input {
     /// ends: one entry more than there are rows. What says which rows are
     /// on screen without measuring every row above them.
     pub tops: Arc<[f32]>,
-    /// The square each thumbnail is fitted into, which the tops were
+    /// The width each thumbnail is fitted into, which the tops were
     /// worked out for; the panel is [`width`] of it.
     pub slot: f32,
+    /// Counts every change to which files the list holds and in what
+    /// order, so that a frame can tell whether the rows it last drew are
+    /// the same files as these, only laid out again.
+    pub listing: u64,
     /// Which row is the file on screen, if it is in the list.
     pub current: Option<usize>,
     /// The order in force, which the menus are lit against.
@@ -265,41 +289,49 @@ pub fn span(tops: &[f32], top: f32, bottom: f32) -> Range<usize> {
 }
 
 /// Where the strip was scrolled at the end of a frame, how much of it was
-/// on screen, and the slot its rows were laid out at then: what a frame at
-/// another slot scrolls from.
-#[derive(Clone, Copy)]
+/// on screen, and the rows it was laid out in then: what a frame whose
+/// rows have other heights scrolls from.
+#[derive(Clone)]
 struct Scrolled {
-    slot: f32,
+    listing: u64,
+    tops: Arc<[f32]>,
     offset: f32,
     viewport: f32,
 }
 
-/// The offset that keeps the strip where it was when its rows go from
-/// `was` high to `now` high, `offset` down the strip with `viewport` of
-/// it on screen. The file on screen, if its row was in view, keeps its
-/// middle where it was on screen, and is then brought wholly into view if
-/// it fits; otherwise the row at the top keeps the share of it that was
-/// above the edge. Without this the offset would stay put in points while
-/// every row above it changed height, and the rows would slide under it.
-fn rescrolled(offset: f32, viewport: f32, count: usize, current: Option<usize>, was: f32, now: f32) -> f32 {
-    let seen = current.filter(|&row| {
-        let top = row as f32 * was;
-        row < count && top < offset + viewport && top + was > offset
-    });
+/// The offset that keeps the strip where it was when the same rows go from
+/// starting at `was` to starting at `now` — a new slot, or a header read
+/// that gave a row its picture's shape — `offset` down the strip with
+/// `viewport` of it on screen. The file on screen, if its row was in view,
+/// keeps its middle where it was on screen, and is then brought wholly
+/// into view if it fits; otherwise the row at the top keeps the share of
+/// it that was above the edge. Without this the offset would stay put in
+/// points while rows above it changed height, and the rows would slide
+/// under it.
+fn rescrolled(offset: f32, viewport: f32, was: &[f32], now: &[f32], current: Option<usize>) -> f32 {
+    let count = was.len().saturating_sub(1);
+    if count == 0 || now.len() != was.len() {
+        return offset;
+    }
+    let seen = current.filter(|&row| row < count && was[row] < offset + viewport && was[row + 1] > offset);
     let kept = match seen {
         Some(row) => {
-            let middle = row as f32 * was + was / 2.0 - offset;
-            let top = row as f32 * now;
-            let kept = top + now / 2.0 - middle;
-            if now <= viewport {
-                kept.clamp(top + now - viewport, top)
+            let middle = (was[row] + was[row + 1]) / 2.0 - offset;
+            let (top, bottom) = (now[row], now[row + 1]);
+            let kept = (top + bottom) / 2.0 - middle;
+            if bottom - top <= viewport {
+                kept.clamp(bottom - viewport, top)
             } else {
                 kept
             }
         }
-        None => offset / was * now,
+        None => {
+            let row = was[..count].partition_point(|&start| start <= offset).saturating_sub(1);
+            let share = (offset - was[row]) / (was[row + 1] - was[row]);
+            now[row] + share * (now[row + 1] - now[row])
+        }
     };
-    kept.clamp(0.0, (count as f32 * now - viewport).max(0.0))
+    kept.clamp(0.0, (now[count] - viewport).max(0.0))
 }
 
 /// Lays the panel out in `ui`, which is the whole of it: the head, and the
@@ -414,22 +446,26 @@ fn rows(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
     ui.spacing_mut().scroll.bar_outer_margin = SCROLLBAR_OUTER_MARGIN;
     ui.spacing_mut().scroll.bar_inner_margin =
         SCROLLBAR_GUTTER - SCROLLBAR_WIDTH - SCROLLBAR_OUTER_MARGIN;
-    // A new slot has every row a new height: the strip is put where the
-    // same rows stay on screen, from where it was scrolled at the last one.
+    // The same files with rows of new heights — a new slot, or a header
+    // read that gave a row its picture's shape — are put where the same
+    // rows stay on screen, from where the strip was scrolled at the last
+    // frame. A list of other files or in another order is left to the
+    // reveal that comes with it.
     let scrolled_id = egui::Id::new("filmstrip scrolled");
     let mut area = egui::ScrollArea::vertical()
         .id_salt("filmstrip rows")
         .auto_shrink(false);
     if let Some(was) = ui.data(|data| data.get_temp::<Scrolled>(scrolled_id))
-        && was.slot != input.slot
+        && was.listing == input.listing
+        && !Arc::ptr_eq(&was.tops, &input.tops)
+        && was.tops != input.tops
     {
         area = area.vertical_scroll_offset(rescrolled(
             was.offset,
             was.viewport,
-            count,
+            &was.tops,
+            &input.tops,
             input.current,
-            row_height(was.slot),
-            row_height(input.slot),
         ));
     }
     let scroll = area.show_viewport(ui, |ui, viewport| {
@@ -468,7 +504,8 @@ fn rows(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
         data.insert_temp(
             scrolled_id,
             Scrolled {
-                slot: input.slot,
+                listing: input.listing,
+                tops: Arc::clone(&input.tops),
                 offset: scroll.state.offset.y,
                 viewport: scroll.inner_rect.height(),
             },
@@ -519,15 +556,16 @@ fn file(pass: &mut Pass, ui: &mut egui::Ui, input: &Input, row: usize, rect: egu
         painter.rect_filled(title, 0.0, theme.button_idle);
     }
 
-    // The slot, and the picture fitted and centered in it: the copy that
-    // covers the slot's device pixels, drawn no larger than itself.
+    // The slot, the picture's shape as far as it is held to, and the
+    // picture fitted and centered in it: the copy that covers the slot's
+    // device pixels, drawn no larger than itself.
     let slot = egui::Rect::from_min_size(
         pos2(rect.left() + INSET, title.bottom() + INSET),
-        vec2(input.slot, input.slot),
+        vec2(input.slot, slot_height(input.slot, size)),
     );
     match thumb {
         Some(thumb) => {
-            let texture = thumb.for_side(input.slot * ui.ctx().pixels_per_point());
+            let texture = thumb.for_side(slot.size().max_elem() * ui.ctx().pixels_per_point());
             let size = texture.size;
             let scale = (slot.width() / size.x).min(slot.height() / size.y).min(1.0);
             let fitted = vec2((size.x * scale).round(), (size.y * scale).round());
@@ -842,26 +880,71 @@ mod tests {
         assert_eq!(middle_cut(&wide, 1.0, 1, 6.0), Some((0, 5)));
     }
 
-    /// A new row height keeps the file on screen where it was on screen,
-    /// wholly in view, and otherwise the row at the top where it was.
+    /// Where `count` rows start, and where the last ends, when row `row`
+    /// is `tall` high and the rest `height`: a strip's `tops`.
+    fn tops(count: usize, height: f32, tall: Option<(usize, f32)>) -> Vec<f32> {
+        let mut tops = vec![0.0];
+        for row in 0..count {
+            let this = match tall {
+                Some((at, tall)) if at == row => tall,
+                _ => height,
+            };
+            tops.push(tops[row] + this);
+        }
+        tops
+    }
+
+    /// Rows of new heights keep the file on screen where it was on
+    /// screen, wholly in view, and otherwise the row at the top where it
+    /// was.
     #[test]
-    fn a_new_row_height_keeps_the_strip_where_it_was() {
+    fn rows_of_new_heights_keep_the_strip_where_it_was() {
+        let at = |height| tops(100, height, None);
         // Rows of 100 in a viewport of 400, scrolled to 1000: rows 10 to
         // 13 on screen. The file on screen, row 11, has its middle 150
         // down; at rows of 200 its middle is at 2300, so 2150 puts it back.
-        assert_eq!(rescrolled(1000.0, 400.0, 100, Some(11), 100.0, 200.0), 2150.0);
+        assert_eq!(rescrolled(1000.0, 400.0, &at(100.0), &at(200.0), Some(11)), 2150.0);
         // Row 13 at the foot would run past it, and is brought up into view.
-        assert_eq!(rescrolled(1000.0, 400.0, 100, Some(13), 100.0, 200.0), 2400.0);
+        assert_eq!(rescrolled(1000.0, 400.0, &at(100.0), &at(200.0), Some(13)), 2400.0);
         // Row 10 at the top shrinking keeps its middle, which is in view.
-        assert_eq!(rescrolled(1000.0, 400.0, 100, Some(10), 100.0, 50.0), 475.0);
+        assert_eq!(rescrolled(1000.0, 400.0, &at(100.0), &at(50.0), Some(10)), 475.0);
         // A file off screen is left there: the row at the top keeps the
         // share of it above the edge, a quarter of row 10.
-        assert_eq!(rescrolled(1025.0, 400.0, 100, Some(50), 100.0, 200.0), 2050.0);
-        assert_eq!(rescrolled(1025.0, 400.0, 100, None, 100.0, 200.0), 2050.0);
+        assert_eq!(rescrolled(1025.0, 400.0, &at(100.0), &at(200.0), Some(50)), 2050.0);
+        assert_eq!(rescrolled(1025.0, 400.0, &at(100.0), &at(200.0), None), 2050.0);
         // Never past either end of the strip.
-        assert_eq!(rescrolled(0.0, 400.0, 100, Some(0), 100.0, 200.0), 0.0);
-        assert_eq!(rescrolled(9600.0, 400.0, 100, Some(99), 100.0, 50.0), 4600.0);
-        assert_eq!(rescrolled(0.0, 400.0, 2, Some(1), 100.0, 150.0), 0.0, "no room to scroll");
+        assert_eq!(rescrolled(0.0, 400.0, &at(100.0), &at(200.0), Some(0)), 0.0);
+        assert_eq!(rescrolled(9600.0, 400.0, &at(100.0), &at(50.0), Some(99)), 4600.0);
+        let two = |height| tops(2, height, None);
+        assert_eq!(rescrolled(0.0, 400.0, &two(100.0), &two(150.0), Some(1)), 0.0, "no room to scroll");
+    }
+
+    /// One row above the screen taking its picture's shape moves the
+    /// offset by what it grew, so that nothing on screen moves; and rows
+    /// that are not the same rows leave the offset alone.
+    #[test]
+    fn a_row_above_the_screen_growing_moves_nothing_on_it() {
+        let was = tops(100, 100.0, None);
+        let now = tops(100, 100.0, Some((3, 200.0)));
+        assert_eq!(rescrolled(1000.0, 400.0, &was, &now, None), 1100.0);
+        assert_eq!(rescrolled(1000.0, 400.0, &was, &now, Some(11)), 1100.0);
+        // A row below the screen growing moves nothing at all.
+        let below = tops(100, 100.0, Some((50, 200.0)));
+        assert_eq!(rescrolled(1000.0, 400.0, &was, &below, Some(11)), 1000.0);
+        assert_eq!(rescrolled(1000.0, 400.0, &was, &tops(99, 100.0, None), None), 1000.0);
+    }
+
+    /// A slot is its picture's shape, held to the range and rounded, and
+    /// square where the shape is not known.
+    #[test]
+    fn a_slot_is_its_pictures_shape_held_to_the_range() {
+        assert_eq!(slot_height(200.0, None), 200.0);
+        assert_eq!(slot_height(200.0, Some((0, 100))), 200.0, "no shape at all");
+        assert_eq!(slot_height(200.0, Some((1920, 1080))), 113.0);
+        assert_eq!(slot_height(200.0, Some((4000, 6000))), 300.0);
+        assert_eq!(slot_height(200.0, Some((10_000, 1000))), 200.0 * SHAPE_MIN, "a panorama");
+        assert_eq!(slot_height(200.0, Some((1080, 2400))), 200.0 * SHAPE_MAX, "a screenshot");
+        assert_eq!(row_height(200.0, None), TITLE_HEIGHT + 200.0 + 2.0 * INSET);
     }
 
     #[test]

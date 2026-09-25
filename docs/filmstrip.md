@@ -70,7 +70,8 @@ the sorted value — are rebuilt only when the list, a header or a thumbnail
 changed, and handed to the frame as an `Arc<[Row]>`. Beside them goes
 `tops`, where each row starts down the strip, which lets
 `ui::filmstrip::span` find the rows a viewport touches by binary search
-rather than by measuring every row above it. Only those rows are laid out, and which they are goes back as
+rather than by measuring every row above it, since the rows are not one
+height. Only those rows are laid out, and which they are goes back as
 `Command::FilmstripVisible` when it changes, which is how their
 thumbnails go to the front of the thread's queue and how `Thumbs` — the
 one store, shared with the chooser and described in
@@ -79,10 +80,35 @@ screen. A row is pressed as `Control::Thumb(row)` and resolved to its path
 and then to its place, never by index, since the list is free to have
 moved between the frame and the press.
 
+Each row's slot is the slot's width across and its picture's shape down,
+by `filmstrip::slot_height`, from the size the header read gave: the
+shape the picture reaches the screen in, since `Decoder::dimensions`
+answers orientation and all. The shape is held between `SHAPE_MIN` and
+`SHAPE_MAX`, half the width and half again, so that a panorama is not a
+sliver and a phone's screenshot not a row taller than the strip shows,
+and a file not yet read — or one whose header cannot say — is square. The
+shape comes from the header and never from the thumbnail: a thumbnail
+leaves `Thumbs` once it has been off screen long enough, and a row that
+took its shape from it would lose it again.
+
+A row's height therefore changes after the strip is drawn: when the slot
+is dragged, and when a header arrives. The scroll offset is in points, so
+left alone the rows would slide under it. `ui::filmstrip::rows` keeps the
+last frame's `tops`, offset and viewport in egui's memory as `Scrolled`,
+and when the same files arrive with other `tops` it sets the offset
+`rescrolled` works out: the file on screen, if its row was in view, keeps
+its middle where it was on the screen and is then brought wholly into
+view; otherwise the row at the top keeps the share of it above the edge.
+"The same files" is `Input::listing`, a count `Filmstrip::relist` bumps
+whenever the list's files or their order change; a new listing is not
+anchored, since row `n` is then another file, and is left to the reveal
+that a reorder or a step brings. A resize does not reveal: on every step
+of a drag it would snap the file on screen to an edge.
+
 The panel is part of the chrome rather than a floating panel: the picture
 is fitted beside it, so its width has to be known before egui lays
 anything out. `chrome::Parts` says whether it and the transport bar are
-up, and the square its thumbnails are fitted into; `Chrome::new` gives it
+up, and the width its thumbnails are fitted into; `Chrome::new` gives it
 `filmstrip::width` of that slot down the left edge of the
 window under the top bar, the left strip and the bottom bar starting at
 its right edge, and `ui::show` derives the same `Parts` from whether it
@@ -94,9 +120,8 @@ left edge of the window: `chrome::content_area` gives the picture what the
 list leaves to its right, `Pass::file_list` draws the panel on its own, and
 `App::filmstrip_showing` does not ask whether the interface is up. The key
 that also closes the floating panels closes the list with them. The index
-and name are laid over the thumbnail's corner on a wash of the bar's
-ground rather than beside it, which is what keeps a row a fixed height and
-the strip one thumbnail wide.
+and name are a title band above the slot rather than beside it, which is
+what keeps the strip one thumbnail wide.
 
 The panel is widened by dragging its right edge, and the thumbnails grow
 with it: the slot runs from `SLOT_MIN` to `SLOT_MAX`, 128 to 384 logical
@@ -108,7 +133,7 @@ frame behind. Instead `filmstrip::grip`, laid out after the picture so that
 the edge is not the picture's drag while the interface is hidden, turns
 the pointer into a slot through `slot_for` and asks for it as
 `Command::FilmstripSlot`; `app/filmstrip.rs` holds it, clamped, lays the
-rows out again at its height, and hands it back in `Input::slot` and
+rows out again at its width, and hands it back in `Input::slot` and
 `chrome::Parts`, so the next frame is fitted to it. Each row draws the
 copy that covers the slot's device pixels, as the chooser does — see
 [what the screen holds](chooser.md#what-the-screen-holds).

@@ -90,7 +90,12 @@ and on disk, and when it was last changed, on this machine's clock. A click on a
 changes. The strip takes its width from the picture, which is fitted into
 what is left; `Tab` again gives it back. Drag the strip's right edge to
 make it wider or narrower: the thumbnails grow with it, from 128 pixels
-across to 384. With a single file there is no
+across to 384. Each row takes its picture's shape — a landscape picture's
+row shorter, a portrait's taller — up to half as tall as it is wide, or
+half again as tall, beyond which a panorama or a tall screenshot is
+fitted inside with room either side. A row is square until the file has
+been looked at, which happens in the background shortly after the list
+arrives. With a single file there is no
 list to show, and neither the button nor the key appears to do anything.
 
 The menu at the head of the strip says how the list stands. It sorts the

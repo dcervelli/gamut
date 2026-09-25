@@ -113,7 +113,7 @@ pub struct Chrome {
 /// The parts of the chrome that come and go, and so what its geometry is
 /// derived from besides the window size: whether the file on screen brings
 /// the transport bar with it, and whether the file list is up and the
-/// square its thumbnails are fitted into, which its width is made from.
+/// width its thumbnails are fitted into, which the panel's width is made from.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub struct Parts {
     pub transport: bool,

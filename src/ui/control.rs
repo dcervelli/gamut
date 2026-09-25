@@ -355,8 +355,8 @@ pub enum Command {
     Visible(Range<usize>),
     /// The same for the file list's rows.
     FilmstripVisible(Range<usize>),
-    /// The file list's edge was dragged: the square its thumbnails are
-    /// fitted into, which its width is made from.
+    /// The file list's edge was dragged: the width its thumbnails are
+    /// fitted into, which the panel's width is made from.
     FilmstripSlot(f32),
 }
 

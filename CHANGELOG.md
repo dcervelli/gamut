@@ -28,7 +28,11 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   order, whatever order the files were named in. Hiding the interface with
   `` ` `` leaves the list up without its head; `~` closes it with the
   floating panels. Dragging its right edge widens it, the thumbnails
-  growing with it from 128 pixels across to 384.
+  growing with it from 128 pixels across to 384, and what is on screen
+  staying where it is. Each row is as tall as its picture's shape, from
+  half as tall as it is wide to half again as tall, and square until the
+  file's header has been read; the rows on screen stay put as the rows
+  above them take their shapes.
 
 - Back and forward through the files that have been on screen: `Alt+[`
   and `Alt+]`, or `Alt+Page Up` and `Alt+Page Down`, or the pair at the

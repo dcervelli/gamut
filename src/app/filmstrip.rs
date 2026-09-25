@@ -30,8 +30,10 @@ pub(super) struct Filmstrip {
     /// Whether the list may have fallen out of `order`: something changed
     /// that the order is made from. Taken at the next poll.
     stale: bool,
-    /// The list as it was last handed over.
+    /// The list as it was last handed over, and a count of the times it
+    /// changed: which files, or in what order.
     paths: Vec<PathBuf>,
+    listing: u64,
     /// The rows as the frame last saw them, where each row starts, and
     /// whether anything they were built from has changed since.
     rows: Option<Arc<[Row]>>,
@@ -41,7 +43,7 @@ pub(super) struct Filmstrip {
     thumbs_seen: u64,
     reveal: bool,
     visible: Range<usize>,
-    /// The square each thumbnail is fitted into, which the panel's width
+    /// The width each thumbnail is fitted into, which the panel's width
     /// and every file's row are made from: where its edge was last dragged.
     slot: f32,
 }
@@ -54,6 +56,7 @@ impl Default for Filmstrip {
             order: Order::default(),
             stale: true,
             paths: Vec::new(),
+            listing: 0,
             rows: None,
             tops: Arc::from([0.0]),
             dirty: true,
@@ -82,12 +85,12 @@ impl Filmstrip {
         true
     }
 
-    /// The square each thumbnail is fitted into.
+    /// The width each thumbnail is fitted into.
     pub(super) fn slot(&self) -> f32 {
         self.slot
     }
 
-    /// Fits the thumbnails into a square of `slot`, held between the
+    /// Fits the thumbnails into a slot `slot` wide, held between the
     /// narrowest and the widest the list goes. The rows are laid out again
     /// at it; what stays in place on screen as they grow or shrink is the
     /// panel's to say, since only it knows where the strip was scrolled.
@@ -114,11 +117,13 @@ impl Filmstrip {
     pub(super) fn relist(&mut self, paths: &[PathBuf]) {
         if self.paths != paths {
             self.paths = paths.to_vec();
+            self.listing += 1;
             self.dirty = true;
         }
     }
 
-    /// A header was read: what a row says of its file may have changed.
+    /// A header was read: what a row says of its file may have changed,
+    /// and the shape of its slot with it.
     pub(super) fn facts_changed(&mut self) {
         self.dirty = true;
     }
@@ -187,6 +192,7 @@ impl Filmstrip {
             rows,
             tops: Arc::clone(&self.tops),
             slot: self.slot,
+            listing: self.listing,
             current,
             order: self.order,
             back,
@@ -197,7 +203,8 @@ impl Filmstrip {
     }
 
     /// The rows, one for each file in the order the list stands in; and
-    /// where each row starts.
+    /// where each row starts, each as tall as its picture's shape makes its
+    /// slot.
     fn build(
         &self,
         thumbs: &Thumbs,
@@ -224,8 +231,13 @@ impl Filmstrip {
                 }
             })
             .collect();
-        let height = filmstrip::row_height(self.slot);
-        let tops: Vec<f32> = (0..=rows.len()).map(|row| row as f32 * height).collect();
+        let mut tops = Vec::with_capacity(rows.len() + 1);
+        let mut top = 0.0;
+        tops.push(top);
+        for row in &rows {
+            top += filmstrip::row_height(self.slot, row.size);
+            tops.push(top);
+        }
         (Arc::from(rows), Arc::from(tops))
     }
 }
@@ -261,7 +273,9 @@ mod tests {
 
     /// The rows are the list, one row each, in its order, each carrying
     /// what is known of its file; each row starts where the one before it
-    /// ended; and the file on screen is found by its path.
+    /// ended, as tall as its picture's shape and square where that is not
+    /// known; and the file on screen is found by its path. A new order is
+    /// a new listing.
     #[test]
     fn the_rows_follow_the_list() {
         let mut strip = Filmstrip::default();
@@ -269,7 +283,13 @@ mod tests {
         let list = paths(&["a/1.png", "a/2.jpg", "b/3.png"]);
         strip.relist(&list);
         let facts_known: HashMap<PathBuf, Facts> = [
-            (PathBuf::from("a/1.png"), facts(Some("PNG"))),
+            (
+                PathBuf::from("a/1.png"),
+                Facts {
+                    size: Some((300, 200)),
+                    ..facts(Some("PNG"))
+                },
+            ),
             (PathBuf::from("a/2.jpg"), facts(Some("JPEG"))),
         ]
         .into_iter()
@@ -292,8 +312,10 @@ mod tests {
         );
         assert_eq!(input.rows[2].format, None, "not read yet");
         assert_eq!(input.current, Some(2));
-        let row = row_height(SLOT_DEFAULT);
-        assert_eq!(&*input.tops, &[0.0, row, 2.0 * row, 3.0 * row]);
+        let (wide, square) = (row_height(SLOT_DEFAULT, Some((300, 200))), row_height(SLOT_DEFAULT, None));
+        assert!(wide < square);
+        assert_eq!(&*input.tops, &[0.0, wide, wide + square, wide + 2.0 * square]);
+        let listing = input.listing;
         assert!(!input.back && input.forward);
         assert_eq!(strip.path_at(1), Some(Path::new("a/2.jpg")));
         assert_eq!(strip.path_at(3), None, "past the end");
@@ -311,6 +333,13 @@ mod tests {
         assert_eq!(names, ["2.jpg", "1.png", "3.png"]);
         assert_eq!(input.rows[0].index, 1);
         assert_eq!(input.current, Some(2));
+        assert_ne!(input.listing, listing);
+
+        // A header read lays the rows out again, but they are the same
+        // files in the same order.
+        strip.facts_changed();
+        let again = strip.input(&thumbs, |path| known(&facts_known, path), None, false, false);
+        assert_eq!(again.listing, input.listing);
     }
 
     /// The slot is held to the range the list goes, and every file's row is
@@ -329,7 +358,7 @@ mod tests {
         strip.set_slot(200.0);
         let input = strip.input(&thumbs, |path| known(&nothing, path), None, false, false);
         assert_eq!(input.slot, 200.0);
-        assert_eq!(&*input.tops, &[0.0, row_height(200.0), 2.0 * row_height(200.0)]);
+        assert_eq!(&*input.tops, &[0.0, row_height(200.0, None), 2.0 * row_height(200.0, None)]);
         assert!(!input.reveal);
 
         strip.set_slot(10_000.0);
