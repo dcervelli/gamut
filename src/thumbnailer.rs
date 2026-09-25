@@ -90,8 +90,8 @@ pub struct Facts {
     /// it: what the chooser matches on beside the name.
     pub title: Option<String>,
     /// The decoder that claims the file, by name, chosen by what its bytes
-    /// say rather than by what its name does: what the file list sorts and
-    /// sections by as its type. `None` where nothing claims it.
+    /// say rather than by what its name does: what the file list sorts by
+    /// as its type. `None` where nothing claims it.
     pub format: Option<&'static str>,
     /// Its size on disk, or `None` where it could not be stat'ed.
     pub bytes: Option<u64>,

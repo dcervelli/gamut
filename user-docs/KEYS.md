@@ -93,10 +93,8 @@ make it wider or narrower: the thumbnails grow with it, from 128 pixels
 across to 384. With a single file there is no
 list to show, and neither the button nor the key appears to do anything.
 
-Two menus at the head of the strip say how the list stands. The first
-breaks it into sections — none, one for each folder, or one for each kind
-of file — each with a heading, in ascending order. The second sorts the
-files of each section by name, by path, by kind of file, by when the file
+The menu at the head of the strip says how the list stands. It sorts the
+files by name, by path, by kind of file, by when the file
 was last changed, by size on disk, or by width, height or area in pixels,
 and its last two rows run the sort ascending or descending; the button
 wears which. Sorted by anything but the name, each thumbnail wears the
@@ -107,8 +105,7 @@ the strip shows. A sort keeps the order of files it cannot tell apart, so
 sorting by size and then by kind leaves each kind in size order, the way
 sorting a spreadsheet twice does. The kind of a file, its size, its date
 and its dimensions are read from its header in the background, and a file whose
-header has not been read yet sorts after those that have — under a
-heading that says so, when the list is in sections by kind — and moves
+header has not been read yet sorts after those that have, and moves
 into place once it is. The list opens in name order whatever order the
 files were named in, and stays in whatever order you put it in as files
 arrive in a directory or leave it. Whatever the order does, the file on

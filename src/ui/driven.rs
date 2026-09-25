@@ -740,7 +740,7 @@ fn buttons_that_would_do_nothing_are_not_there() {
 /// `current` the row of the file on screen.
 fn strip(count: usize, current: Option<usize>, reveal: bool) -> filmstrip::Input {
     let rows: Arc<[filmstrip::Row]> = (0..count)
-        .map(|index| filmstrip::Row::File {
+        .map(|index| filmstrip::Row {
             index: index + 1,
             name: format!("{index:03}.png"),
             path: format!("birds/{index:03}.png"),
@@ -751,10 +751,8 @@ fn strip(count: usize, current: Option<usize>, reveal: bool) -> filmstrip::Input
             thumb: None,
         })
         .collect();
-    let mut tops = vec![0.0];
-    for row in rows.iter() {
-        tops.push(tops.last().unwrap() + filmstrip::height(row, filmstrip::SLOT_MIN));
-    }
+    let height = filmstrip::row_height(filmstrip::SLOT_MIN);
+    let tops: Vec<f32> = (0..=count).map(|row| row as f32 * height).collect();
     filmstrip::Input {
         rows,
         tops: Arc::from(tops),
@@ -769,7 +767,7 @@ fn strip(count: usize, current: Option<usize>, reveal: bool) -> filmstrip::Input
 }
 
 /// The file list up: it says which rows are on screen, a press on a row
-/// asks for that file, its two menus offer every section and every sort,
+/// asks for that file, its menu offers every sort,
 /// and the pair at its head are dead or alive by whether there is
 /// anywhere to go.
 #[test]
@@ -799,11 +797,6 @@ fn the_file_list_offers_its_rows_its_menus_and_the_way_back() {
         [Command::Press(Control::Forward)]
     );
 
-    assert_eq!(click(&mut harness, "Sections"), []);
-    assert_eq!(
-        click(&mut harness, "By type"),
-        [Command::Press(Control::SectionBy(filmstrip::Section::Type))]
-    );
     assert_eq!(click(&mut harness, "Sort"), []);
     assert_eq!(
         click(&mut harness, "Area"),

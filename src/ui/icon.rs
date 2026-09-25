@@ -504,16 +504,8 @@ pub(super) const PANEL_LEFT: &[Mark] = &[
     Mark::Line([9.0, 3.0], [9.0, 21.0]),
 ];
 
-/// Lucide's `rows-3`: a panel ruled into three, for the sections the file
-/// list is broken into.
-pub(super) const ROWS_3: &[Mark] = &[
-    Mark::rect([3.0, 3.0], [18.0, 18.0], 2.0),
-    Mark::Line([3.0, 9.0], [21.0, 9.0]),
-    Mark::Line([3.0, 15.0], [21.0, 15.0]),
-];
-
 /// Lucide's `arrow-down-narrow-wide`: an arrow down beside three bars
-/// growing, for the sort the file list's sections are in.
+/// growing, for the file list sorted ascending.
 pub(super) const ARROW_DOWN_NARROW_WIDE: &[Mark] = &[
     Mark::Line([3.0, 16.0], [7.0, 20.0]),
     Mark::Line([7.0, 20.0], [11.0, 16.0]),
@@ -986,7 +978,7 @@ mod tests {
 
     /// Every icon in the table, so that a new one is held to the same
     /// promises as the rest.
-    const ICONS: [&[Mark]; 33] = [
+    const ICONS: [&[Mark]; 32] = [
         CHART_AREA,
         INFO,
         CIRCLE_QUESTION_MARK,
@@ -1015,7 +1007,6 @@ mod tests {
         STEP_FORWARD,
         X,
         PANEL_LEFT,
-        ROWS_3,
         ARROW_DOWN_NARROW_WIDE,
         ARROW_DOWN_WIDE_NARROW,
         ARROW_LEFT,

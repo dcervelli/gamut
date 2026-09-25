@@ -333,12 +333,10 @@ pub fn words(tip: Tip) -> Option<String> {
         Tip::Control(Control::OpenFiles) => "Choose image files to open",
         Tip::Control(Control::OpenFolder) => "Choose a folder of images to open",
         Tip::Control(Control::Help) => "Keyboard shortcuts",
-        // The two menus at the head of the file list: no key opens
-        // either, and the button says what the menu is of. A cell of
-        // either says what it puts the list in.
-        Tip::Control(Control::Sections) => "Break the list into sections",
+        // The menu at the head of the file list: no key opens it, and the
+        // button says what the menu is of. A cell of it says what it puts
+        // the list in.
         Tip::Control(Control::Sorting) => "Sort the list",
-        Tip::Control(Control::SectionBy(section)) => section.describe(),
         Tip::Control(Control::SortBy(sort)) => sort.describe(),
         Tip::Control(Control::SortDirection(direction)) => direction.describe(),
         // No one key does this and only this — Escape dismisses whatever

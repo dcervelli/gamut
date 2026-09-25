@@ -15,7 +15,7 @@ wants [`user-docs/`](../user-docs/) instead.
 | [Animation and pages](animation.md) | The frames a decoder composites, the thread that decodes them ahead under a budget, and the clock they play by |
 | [Deleting, renaming, removing, undo and exporting](editing.md) | The desktop's trash followed by hand, why a deleted or removed file stays on the list until its neighbor is up, one undo stack for what touched the disk or the list, the rename dialog as a modal, and exporting the picture as shown |
 | [The file chooser](chooser.md) | `Ctrl+P`: a popup that fuzzy-matches the session's files, the thread that thumbnails them into the desktop's own cache, and who gets the keys while it is up |
-| [The file list](filmstrip.md) | `Tab`: the strip of thumbnails down the left, why the order it shows is the list's own and is applied between reads, sections and a stable sort, the files seen as a browser keeps them, and a file taken off the list |
+| [The file list](filmstrip.md) | `Tab`: the strip of thumbnails down the left, why the order it shows is the list's own and is applied between reads, a stable sort, the files seen as a browser keeps them, and a file taken off the list |
 | [Theme](theme.md) | Reading the desktop's palette, and the two things that resist being themed |
 | [Formats](formats.md) | Each decoder, what it can and cannot say, and how to add one |
 | [Known limits](limits.md) | What does not work yet, and why |

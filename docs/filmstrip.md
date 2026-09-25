@@ -21,16 +21,13 @@ exists. The cost is that `Files` has to keep the file on screen the file
 on screen across a reorder, which it does by re-finding its path, exactly
 as `Files::relist` already did for a rebuild.
 
-The order is `ui::filmstrip::Order`: a `Section` — none, the file's
-directory, or its type — a `Sort` within each section, and the
-`Direction` the sort runs in, which turns the comparison round rather
-than the list, so that ties keep their order either way and the sections
-and the unknown stay where they were. `app/order.rs`
-turns one into a permutation, `arrange`, and says where the sections fall
-in a list already arranged, `groups`. It compares `(section, key)` with a
-`None` on either side sorting after every `Some`, so that a file whose
-header has not been read yet — its type, its size on disk and its
-dimensions all come from `thumbnailer::Facts`, which arrive in the
+The order is `ui::filmstrip::Order`: a `Sort`, and the `Direction` it
+runs in, which turns the comparison round rather than the list, so that
+ties keep their order either way and the unknown stays last. `app/order.rs`
+turns one into a permutation, `arrange`. It compares keys with a `None`
+on either side sorting after every `Some`, so that a file whose
+header has not been read yet — its type, its date, its size on disk and
+its dimensions all come from `thumbnailer::Facts`, which arrive in the
 background — goes to the end and moves into place when its header does. The
 sort is `slice::sort_by` on indices, which is stable, and the list is
 sorted in place from wherever it stands, so files one key cannot tell
@@ -42,8 +39,8 @@ that came back in it would undo every sort on every look. Survivors keep the ord
 a newcomer goes in after the nearest file the rebuild lists before it,
 which for a list in name order is where the directory has it.
 
-The two enums live in `ui/` rather than `app/` because the menus at the
-strip's head offer them and wear their words, and `ui/` cannot import
+The two enums live in `ui/` rather than `app/` because the menu at the
+strip's head offers them and wear their words, and `ui/` cannot import
 `app/` — the same split as `Copies` and `copy_action`.
 
 ## Between reads, and once per poll
@@ -68,13 +65,12 @@ idle by construction.
 
 `app/filmstrip.rs` is the strip's state and `ui/filmstrip.rs` the panel,
 the way `app/chooser.rs` and `ui/chooser.rs` are the chooser's. The rows —
-a `Row::Header` for each section where the list is sectioned, a
-`Row::File` under it for each file — are rebuilt only when the list, a
-header or a thumbnail changed, and handed to the frame as an `Arc<[Row]>`.
-Beside them goes `tops`, where each row starts down the strip: rows are
-two heights, and a prefix sum lets `ui::filmstrip::span` find the rows a
-viewport touches by binary search rather than by measuring every row above
-it. Only those rows are laid out, and which they are goes back as
+one `Row` for each file, carrying what its header said for the tooltip and
+the sorted value — are rebuilt only when the list, a header or a thumbnail
+changed, and handed to the frame as an `Arc<[Row]>`. Beside them goes
+`tops`, where each row starts down the strip, which lets
+`ui::filmstrip::span` find the rows a viewport touches by binary search
+rather than by measuring every row above it. Only those rows are laid out, and which they are goes back as
 `Command::FilmstripVisible` when it changes, which is how their
 thumbnails go to the front of the thread's queue and how `Thumbs` — the
 one store, shared with the chooser and described in

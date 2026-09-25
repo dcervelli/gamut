@@ -21,8 +21,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::chooser::Thumbs;
-use super::order::{self, Key};
-use crate::ui::filmstrip::{self, Input, Order, Row, Section};
+use super::order::Key;
+use crate::ui::filmstrip::{self, Input, Order, Row};
 
 /// The state behind the strip.
 pub(super) struct Filmstrip {
@@ -119,7 +119,7 @@ impl Filmstrip {
         }
     }
 
-    /// A header was read: a row's section may have changed.
+    /// A header was read: what a row says of its file may have changed.
     pub(super) fn facts_changed(&mut self) {
         self.dirty = true;
     }
@@ -135,13 +135,10 @@ impl Filmstrip {
         self.reveal
     }
 
-    /// The file at `row` of the rows as the frame last saw them, if it is
-    /// a file's row.
+    /// The file at `row` of the rows as the frame last saw them.
     pub(super) fn path_at(&self, row: usize) -> Option<&Path> {
-        match self.rows.as_ref()?.get(row)? {
-            Row::File { index, .. } => self.paths.get(index - 1).map(PathBuf::as_path),
-            Row::Header(_) => None,
-        }
+        let index = self.rows.as_ref()?.get(row)?.index;
+        self.paths.get(index - 1).map(PathBuf::as_path)
     }
 
     /// The files on the rows the frame last said were on screen.
@@ -167,7 +164,7 @@ impl Filmstrip {
     }
 
     /// What the frame draws, built afresh only where something changed.
-    /// `key` is what is known about each file, for the sections; `current`
+    /// `key` is what is known about each file, for its row; `current`
     /// the file on screen, marked in the list; `back` and `forward` whether
     /// there is a file seen before it and after it to go to.
     pub(super) fn input(
@@ -186,11 +183,7 @@ impl Filmstrip {
             self.thumbs_seen = thumbs.generation;
         }
         let rows = self.rows.clone().expect("built above");
-        let current = current.and_then(|shown| {
-            let index = self.paths.iter().position(|path| path == shown)? + 1;
-            rows.iter()
-                .position(|row| matches!(row, Row::File { index: at, .. } if *at == index))
-        });
+        let current = current.and_then(|shown| self.paths.iter().position(|path| path == shown));
         Input {
             rows,
             tops: Arc::clone(&self.tops),
@@ -204,27 +197,20 @@ impl Filmstrip {
         }
     }
 
-    /// The rows: each section's heading, where the list is sectioned, and
-    /// under it a row for each of its files; and where each row starts.
+    /// The rows, one for each file in the order the list stands in; and
+    /// where each row starts.
     fn build(
         &self,
         thumbs: &Thumbs,
         key: impl for<'a> Fn(&'a Path) -> Key<'a>,
     ) -> (Arc<[Row]>, Arc<[f32]>) {
-        let mut rows = Vec::with_capacity(self.paths.len());
-        for (label, range) in order::groups(self.paths.len(), self.order.section, |index| {
-            key(&self.paths[index])
-        }) {
-            match (self.order.section, label) {
-                (Section::None, _) => {}
-                (_, Some(label)) => rows.push(Row::Header(heading(&label))),
-                (Section::Type, None) => rows.push(Row::Header("Type not yet known".to_string())),
-                (Section::Path, None) => rows.push(Row::Header(heading(""))),
-            }
-            for index in range {
-                let path = &self.paths[index];
+        let rows: Vec<Row> = self
+            .paths
+            .iter()
+            .enumerate()
+            .map(|(index, path)| {
                 let known = key(path);
-                rows.push(Row::File {
+                Row {
                     index: index + 1,
                     name: path
                         .file_name()
@@ -236,27 +222,12 @@ impl Filmstrip {
                     bytes: known.bytes,
                     modified: known.modified,
                     thumb: thumbs.get(path),
-                });
-            }
-        }
-        let mut tops = Vec::with_capacity(rows.len() + 1);
-        let mut top = 0.0;
-        tops.push(top);
-        for row in &rows {
-            top += filmstrip::height(row, self.slot);
-            tops.push(top);
-        }
+                }
+            })
+            .collect();
+        let height = filmstrip::row_height(self.slot);
+        let tops: Vec<f32> = (0..=rows.len()).map(|row| row as f32 * height).collect();
         (Arc::from(rows), Arc::from(tops))
-    }
-}
-
-/// A folder's heading: the directory as the list spells it, or the
-/// current directory's own name for a file named with no directory at all.
-fn heading(dir: &str) -> String {
-    if dir.is_empty() {
-        ".".to_string()
-    } else {
-        dir.to_string()
     }
 }
 
@@ -264,7 +235,7 @@ fn heading(dir: &str) -> String {
 mod tests {
     use super::*;
     use crate::thumbnailer::Facts;
-    use crate::ui::filmstrip::{Direction, HEADER_HEIGHT, SLOT_DEFAULT, SLOT_MIN, Sort, row_height};
+    use crate::ui::filmstrip::{Direction, SLOT_DEFAULT, SLOT_MIN, Sort, row_height};
     use std::collections::HashMap;
 
     fn paths(names: &[&str]) -> Vec<PathBuf> {
@@ -289,12 +260,11 @@ mod tests {
         }
     }
 
-    /// The rows are the list, one row each, with a heading over each
-    /// section where the list is sectioned; each row starts where the one
-    /// before it ended; and the file on screen is found by its path,
-    /// wherever the sections have put it.
+    /// The rows are the list, one row each, in its order, each carrying
+    /// what is known of its file; each row starts where the one before it
+    /// ended; and the file on screen is found by its path.
     #[test]
-    fn the_rows_follow_the_list_and_its_sections() {
+    fn the_rows_follow_the_list() {
         let mut strip = Filmstrip::default();
         let thumbs = Thumbs::default();
         let list = paths(&["a/1.png", "a/2.jpg", "b/3.png"]);
@@ -307,83 +277,41 @@ mod tests {
         .collect();
 
         let input = strip.input(&thumbs, |path| known(&facts_known, path), Some(Path::new("b/3.png")), false, true);
-        assert_eq!(input.rows.len(), 3, "no headings without sections");
+        assert_eq!(input.rows.len(), 3);
+        assert_eq!(
+            input.rows[1],
+            Row {
+                index: 2,
+                name: "2.jpg".to_string(),
+                path: "a/2.jpg".to_string(),
+                format: Some("JPEG"),
+                size: None,
+                bytes: None,
+                modified: None,
+                thumb: None,
+            }
+        );
+        assert_eq!(input.rows[2].format, None, "not read yet");
         assert_eq!(input.current, Some(2));
         let row = row_height(SLOT_DEFAULT);
         assert_eq!(&*input.tops, &[0.0, row, 2.0 * row, 3.0 * row]);
         assert!(!input.back && input.forward);
         assert_eq!(strip.path_at(1), Some(Path::new("a/2.jpg")));
+        assert_eq!(strip.path_at(3), None, "past the end");
 
-        // Sectioned by folder — the list already in that order — each
-        // folder is a heading, and the current row moves down past it.
+        // A sort that reads the headers marks the list stale; put in its
+        // order, the rows follow it.
         assert!(strip.set_order(Order {
-            section: Section::Path,
-            sort: Sort::Name,
+            sort: Sort::Type,
             direction: Direction::Ascending,
         }));
         assert!(strip.take_stale());
-        let input = strip.input(&thumbs, |path| known(&facts_known, path), Some(Path::new("b/3.png")), false, false);
-        assert_eq!(
-            &*input.rows,
-            &[
-                Row::Header("a".to_string()),
-                Row::File {
-                    index: 1,
-                    name: "1.png".to_string(),
-                    path: "a/1.png".to_string(),
-                    format: Some("PNG"),
-                    size: None,
-                    bytes: None,
-                    modified: None,
-                    thumb: None
-                },
-                Row::File {
-                    index: 2,
-                    name: "2.jpg".to_string(),
-                    path: "a/2.jpg".to_string(),
-                    format: Some("JPEG"),
-                    size: None,
-                    bytes: None,
-                    modified: None,
-                    thumb: None
-                },
-                Row::Header("b".to_string()),
-                Row::File {
-                    index: 3,
-                    name: "3.png".to_string(),
-                    path: "b/3.png".to_string(),
-                    format: None,
-                    size: None,
-                    bytes: None,
-                    modified: None,
-                    thumb: None
-                },
-            ]
-        );
-        assert_eq!(input.current, Some(4));
-        assert_eq!(input.tops[1], HEADER_HEIGHT);
-        assert_eq!(strip.path_at(0), None, "a heading is no file");
-        assert_eq!(strip.path_at(4), Some(Path::new("b/3.png")));
-
-        // Sectioned by type, with the list put in that order, the file
-        // whose type is not known yet is under a heading that says so.
-        strip.set_order(Order {
-            section: Section::Type,
-            sort: Sort::Name,
-            direction: Direction::Ascending,
-        });
         strip.relist(&paths(&["a/2.jpg", "a/1.png", "b/3.png"]));
-        let input = strip.input(&thumbs, |path| known(&facts_known, path), None, false, false);
-        let headings: Vec<&str> = input
-            .rows
-            .iter()
-            .filter_map(|row| match row {
-                Row::Header(label) => Some(label.as_str()),
-                Row::File { .. } => None,
-            })
-            .collect();
-        assert_eq!(headings, ["JPEG", "PNG", "Type not yet known"]);
-        assert_eq!(input.current, None);
+        let input = strip.input(&thumbs, |path| known(&facts_known, path), Some(Path::new("b/3.png")), false, false);
+        let names: Vec<&str> = input.rows.iter().map(|row| row.name.as_str()).collect();
+        assert_eq!(names, ["2.jpg", "1.png", "3.png"]);
+        assert_eq!(input.rows[0].index, 1);
+        assert_eq!(input.current, Some(2));
     }
 
     /// The slot is held to the range the list goes, every file's row is

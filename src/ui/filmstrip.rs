@@ -1,11 +1,11 @@
 //! The file list: a strip of thumbnails down the left of the picture, one
-//! row per file in the order the list is walked, broken into sections and
-//! sorted by what its head asks for.
+//! row per file in the order the list is walked, sorted by what its head
+//! asks for.
 //!
 //! The order is the list's own — `]` and `[` step through it, and the
 //! counter in the bar counts along it — so what the strip shows is what
-//! the application holds, not a view of it. The two choices at its head,
-//! [`Section`] and [`Sort`], are made here rather than in the application
+//! the application holds, not a view of it. The choices at its head,
+//! [`Sort`] and [`Direction`], are made here rather than in the application
 //! for the same reason `Copies` is: they are what the menus offer, and the
 //! interface cannot reach into the application for its words.
 //!
@@ -15,7 +15,7 @@
 //! `Pass::file_list`, so that the picture is fitted into what it leaves
 //! before anything is drawn. Its right edge is a [`grip`] that asks for a
 //! wider or narrower slot, which the next frame is laid out at. Its head — the
-//! two menus and the pair that go back and forward through the files
+//! menu of sorts and the pair that go back and forward through the files
 //! seen — stays put; the rows under it scroll, and only the rows on
 //! screen are laid out, as the chooser's are.
 
@@ -40,10 +40,8 @@ pub const SLOT_DEFAULT: f32 = 148.0;
 pub const SLOT_MAX: f32 = 384.0;
 /// The room around a slot, on every side.
 pub const INSET: f32 = 6.0;
-/// A section's row: one line of words.
-pub const HEADER_HEIGHT: f32 = 22.0;
-/// A file's title, over its slot: one line of words, as a section's is.
-pub const TITLE_HEIGHT: f32 = HEADER_HEIGHT;
+/// A file's title, over its slot: one line of words.
+pub const TITLE_HEIGHT: f32 = 22.0;
 /// The head of the panel, where the buttons are: a bar's height, so that
 /// it lines up with the bars.
 pub const HEAD_HEIGHT: f32 = BAR_HEIGHT;
@@ -92,48 +90,7 @@ const TAIL_KEPT: usize = 4;
 /// The hairline under the head, and around an empty slot.
 const HAIRLINE: f32 = 1.0;
 
-/// How the list is broken up before it is sorted: not at all, by the
-/// directory a file is in, or by what kind of file it is. Sections stand
-/// in ascending order of their label, and a section whose label is not
-/// yet known — a type the header has not been read for — stands last.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub enum Section {
-    #[default]
-    None,
-    Path,
-    Type,
-}
-
-impl Section {
-    /// In the order the menu offers them.
-    pub const ALL: [Section; 3] = [Section::None, Section::Path, Section::Type];
-
-    /// The word the menu item wears.
-    pub fn label(self) -> &'static str {
-        match self {
-            Section::None => "No sections",
-            Section::Path => "By folder",
-            Section::Type => "By type",
-        }
-    }
-
-    /// What the item says when rested on.
-    pub fn describe(self) -> &'static str {
-        match self {
-            Section::None => "One list, unbroken",
-            Section::Path => "A section for each folder",
-            Section::Type => "A section for each kind of file",
-        }
-    }
-
-    /// Whether the breaking needs what a file's header says, which arrives
-    /// after the list does.
-    pub fn reads_facts(self) -> bool {
-        matches!(self, Section::Type)
-    }
-}
-
-/// What the files of a section are sorted by, ascending. A file whose key
+/// What the files are sorted by. A file whose key
 /// is not yet known — a size or a type the header has not been read for —
 /// sorts after every file whose key is.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -197,10 +154,8 @@ impl Sort {
     }
 }
 
-/// Which way the sort runs within a section: smallest, earliest or first
-/// name at the top, or the other way. The sections themselves stand in
-/// ascending order either way, and what is not yet known stands last
-/// either way.
+/// Which way the sort runs: smallest, earliest or first name at the top,
+/// or the other way. What is not yet known stands last either way.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Direction {
     #[default]
@@ -229,11 +184,9 @@ impl Direction {
     }
 }
 
-/// How the list stands: its sections, the sort within each, and which way
-/// that sort runs.
+/// How the list stands: what it is sorted by, and which way that sort runs.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct Order {
-    pub section: Section,
     pub sort: Sort,
     pub direction: Direction,
 }
@@ -241,43 +194,29 @@ pub struct Order {
 impl Order {
     /// Whether the order can change as headers are read.
     pub fn reads_facts(self) -> bool {
-        self.section.reads_facts() || self.sort.reads_facts()
+        self.sort.reads_facts()
     }
 }
 
-/// One row of the strip, as the frame draws it.
+/// One file's row of the strip, as the frame draws it.
 #[derive(Clone, Debug, PartialEq)]
-pub enum Row {
-    /// A section's heading: what the files under it have in common.
-    Header(String),
-    /// A file.
-    File {
-        /// Its place in the list, counted from one, as the bar counts.
-        index: usize,
-        /// Its name, with nothing of the path it sits in.
-        name: String,
-        /// The whole path, for the tooltip: the name over the thumbnail is
-        /// cut to the slot.
-        path: String,
-        /// What kind of file it is, its size in pixels, its size on disk
-        /// and when it was last written, for the tooltip and the sorted
-        /// value, once its header has been read.
-        format: Option<&'static str>,
-        size: Option<(u32, u32)>,
-        bytes: Option<u64>,
-        modified: Option<SystemTime>,
-        /// Its thumbnail, once one has arrived and while the screen still
-        /// holds it.
-        thumb: Option<super::Thumb>,
-    },
-}
-
-/// How tall a row is drawn, for a slot of `slot`.
-pub fn height(row: &Row, slot: f32) -> f32 {
-    match row {
-        Row::Header(_) => HEADER_HEIGHT,
-        Row::File { .. } => row_height(slot),
-    }
+pub struct Row {
+    /// Its place in the list, counted from one, as the bar counts.
+    pub index: usize,
+    /// Its name, with nothing of the path it sits in.
+    pub name: String,
+    /// The whole path, for the tooltip and a sort by path.
+    pub path: String,
+    /// What kind of file it is, its size in pixels, its size on disk and
+    /// when it was last written, for the tooltip and the sorted value,
+    /// once its header has been read.
+    pub format: Option<&'static str>,
+    pub size: Option<(u32, u32)>,
+    pub bytes: Option<u64>,
+    pub modified: Option<SystemTime>,
+    /// Its thumbnail, once one has arrived and while the screen still
+    /// holds it.
+    pub thumb: Option<super::Thumb>,
 }
 
 /// What the strip is drawn from, on each frame it is up.
@@ -336,8 +275,8 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
     rows(pass, ui, input);
 }
 
-/// The head: the two menus, and the pair that go back and forward through
-/// the files seen, on one row a bar high with a hairline under it.
+/// The head: the menu of sorts, and the pair that go back and forward
+/// through the files seen, on one row a bar high with a hairline under it.
 fn head(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
     let width = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(vec2(width, HEAD_HEIGHT), Sense::HOVER);
@@ -348,28 +287,10 @@ fn head(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
     );
     row.spacing_mut().item_spacing = egui::Vec2::ZERO;
     let ctx = row.ctx().clone();
-    // The menus first: what the list is broken into, then what each
-    // piece is sorted by. Each lit while its menu is open, as the other
-    // menu buttons are, and hung below.
-    let sections = egui::Id::new("section menu");
-    let open = egui::Popup::is_id_open(&ctx, sections);
-    let button = pass.icon_button(
-        &mut row,
-        icon::ROWS_3,
-        Control::Sections,
-        open,
-        true,
-        Corners::All,
-    );
-    egui::Popup::menu(&button)
-        .id(sections)
-        .align(RectAlign::BOTTOM_START)
-        .gap(PADDING)
-        .show(|ui| menu::section_cells(pass, ui, input.order));
-    row.add_space(BUTTON_GAP);
     let sorting = egui::Id::new("sort menu");
     let open = egui::Popup::is_id_open(&ctx, sorting);
-    // The button wears the way the sort runs: bars growing down the mark
+    // The menu first, lit while it is open, as the other menu buttons are,
+    // and hung below. The button wears the way the sort runs: bars growing down the mark
     // for ascending, shrinking for descending.
     let mark = match input.order.direction {
         Direction::Ascending => icon::ARROW_DOWN_NARROW_WIDE,
@@ -473,28 +394,7 @@ fn rows(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
             };
             let range = span(&input.tops, viewport.min.y, viewport.max.y);
             for row in range.clone() {
-                match &input.rows[row] {
-                    Row::Header(label) => header(pass, ui, label, row_rect(row)),
-                    Row::File {
-                        index,
-                        name,
-                        path,
-                        format,
-                        size,
-                        bytes,
-                        modified,
-                        thumb,
-                    } => {
-                        let known = Known {
-                            format: *format,
-                            size: *size,
-                            bytes: *bytes,
-                            modified: *modified,
-                        };
-                        let rect = row_rect(row);
-                        file(pass, ui, input, row, rect, edge, *index, name, path, known, *thumb);
-                    }
-                }
+                file(pass, ui, input, row, row_rect(row), edge);
             }
             // Put there, not scrolled there: the file on screen may have
             // been stepped to from anywhere in the list, and a glide
@@ -516,44 +416,30 @@ fn rows(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
     }
 }
 
-/// A section's heading: its label, set bold in the dim ink, cut to the
-/// row, and said in full when rested on. Nothing to press.
-fn header(pass: &mut Pass, ui: &mut egui::Ui, label: &str, rect: egui::Rect) {
-    let response = ui.interact(rect, ui.id().with(("filmstrip heading", label)), Sense::HOVER);
-    pass.caption(response, None, vec![label.to_string()], Vec::new());
-    let dim: egui::Color32 = pass.theme.text_dim.into();
-    let bold = egui::FontId::new(TEXT_SIZE, egui::FontFamily::Name(fonts::BOLD.into()));
-    let room = (rect.width() - 2.0 * INSET).max(0.0);
-    let galley = super::chooser::lit(ui, label, &[], bold, dim, dim, room);
-    let painter = ui.painter_at(rect);
-    painter.galley(
-        pos2(rect.left() + INSET, rect.center().y - galley.size().y / 2.0),
-        galley,
-        dim,
-    );
-}
-
 /// A file's row: its title — its place in the list and its name — and
 /// under it its thumbnail in its slot, with what the list is sorted by
 /// centered over the slot's foot. Washed in the accent when it is the
-/// file on screen, its title set bold, lit under the pointer,
-/// and a press on it shows the file. Rested on, it says the name in full,
-/// with what is `known` of it under it, beside the panel's `edge` and level with the
+/// file on screen, its title set bold, lit under the pointer, and a press
+/// on it shows the file. Rested on, it says the name in full, with what is
+/// known of it under it, beside the panel's `edge` and level with the
 /// slot's top: the name in the title is cut in its middle to the row.
-#[allow(clippy::too_many_arguments, reason = "one row, its parts by name")]
-fn file(
-    pass: &mut Pass,
-    ui: &mut egui::Ui,
-    input: &Input,
-    row: usize,
-    rect: egui::Rect,
-    edge: f32,
-    index: usize,
-    name: &str,
-    path: &str,
-    known: Known,
-    thumb: Option<super::Thumb>,
-) {
+fn file(pass: &mut Pass, ui: &mut egui::Ui, input: &Input, row: usize, rect: egui::Rect, edge: f32) {
+    let Row {
+        index,
+        ref name,
+        ref path,
+        format,
+        size,
+        bytes,
+        modified,
+        thumb,
+    } = input.rows[row];
+    let known = Known {
+        format,
+        size,
+        bytes,
+        modified,
+    };
     let theme = pass.theme;
     let control = Control::Thumb(row);
     let response = ui.interact(rect, ui.id().with(("filmstrip row", row)), Sense::CLICK);

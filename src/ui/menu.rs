@@ -15,7 +15,7 @@ use crate::view::{Axis, Fit, View, Viewport};
 use super::RULE_WIDTH;
 use super::chrome::Pass;
 use super::control::Control;
-use super::filmstrip::{Direction, Order, Section, Sort};
+use super::filmstrip::{Direction, Order, Sort};
 use super::info::HEADER_GAP;
 use super::pixel::PixelFormat;
 use super::style::TOGGLE_RADIUS;
@@ -355,25 +355,8 @@ pub(super) fn titled(
     );
 }
 
-/// The menu of sections at the head of the file list: one item for each
-/// way of breaking the list up, the one in force lit. `order` is how the
-/// list stands.
-pub(super) fn section_cells(pass: &mut Pass, ui: &mut Ui, order: Order) {
-    titled(pass, ui, &Control::Sections.label(), |pass, ui| {
-        for section in Section::ALL {
-            let control = Control::SectionBy(section);
-            let response = ui.add(Button::new(section.label()).selected(section == order.section));
-            let response = pass.tooltip(response, Tip::Control(control), true);
-            if response.clicked() {
-                pass.press(control);
-                ui.close();
-            }
-        }
-    });
-}
-
-/// The menu of sorts beside it: one item for each thing the files of a
-/// section can be put in order of, the one in force lit; and under them,
+/// The menu of sorts at the head of the file list: one item for each
+/// thing the files can be put in order of, the one in force lit; and under them,
 /// set apart, the two ways the sort can run, the one in force lit.
 pub(super) fn sort_cells(pass: &mut Pass, ui: &mut Ui, order: Order) {
     titled(pass, ui, &Control::Sorting.label(), |pass, ui| {

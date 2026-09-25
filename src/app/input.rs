@@ -488,8 +488,6 @@ fn action_of(tip: Tip) -> Option<Action> {
             | Control::Chooser
             | Control::Choose(_)
             | Control::FileMenu
-            | Control::Sections
-            | Control::SectionBy(_)
             | Control::Sorting
             | Control::SortBy(_)
             | Control::SortDirection(_)
@@ -2718,7 +2716,6 @@ impl App {
             | Control::Copy
             | Control::OpenIn
             | Control::FileMenu
-            | Control::Sections
             | Control::Sorting => Effect::Nothing,
             // The file list: up or down, and scrolled to the file on
             // screen as it comes up.
@@ -2726,11 +2723,6 @@ impl App {
                 self.panels.show_filmstrip = !self.panels.show_filmstrip;
                 self.filmstrip.reveal();
                 Effect::Redraw
-            }
-            Control::SectionBy(section) => {
-                let mut order = self.filmstrip.order();
-                order.section = section;
-                self.set_order(order)
             }
             Control::SortBy(sort) => {
                 let mut order = self.filmstrip.order();
@@ -3092,10 +3084,10 @@ mod tests {
             named(Control::Filmstrip).as_deref(),
             Some("Show or hide the file list (Tab)")
         );
-        // The two menus at its head name themselves, no key opening
-        // either; a cell of one says what it puts the list in.
-        let sections = named(Control::Sections).expect("the button names itself");
-        assert!(!sections.contains('('), "{sections}");
+        // The menu at its head names itself, no key opening it; a cell of
+        // it says what it puts the list in.
+        let sorting = named(Control::Sorting).expect("the button names itself");
+        assert!(!sorting.contains('('), "{sorting}");
         assert_eq!(
             named(Control::SortBy(ui::filmstrip::Sort::Area)).as_deref(),
             Some("Sort by pixels in all")

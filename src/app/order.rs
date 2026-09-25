@@ -1,5 +1,5 @@
 //! The order the file list stands in: the permutation an [`Order`] makes
-//! of it, and the sections that order breaks it into.
+//! of it.
 //!
 //! Pure: told what is known about each file, it says where each goes.
 //! The sort is stable, so that files the key cannot tell apart keep the
@@ -10,12 +10,11 @@
 //! and moves into place once it is.
 
 use std::cmp::Ordering;
-use std::ops::Range;
 use std::path::Path;
 use std::time::SystemTime;
 
 use crate::thumbnailer::Facts;
-use crate::ui::filmstrip::{Direction, Order, Section, Sort};
+use crate::ui::filmstrip::{Direction, Order, Sort};
 
 /// What one file is ordered by: its path, and what its header said, where
 /// it has been read.
@@ -42,21 +41,6 @@ impl<'a> Key<'a> {
             bytes: facts.and_then(|facts| facts.bytes),
             size: facts.and_then(|facts| facts.size),
             modified: facts.and_then(|facts| facts.modified),
-        }
-    }
-
-    /// The section the file belongs to under `section`: `None` for a
-    /// section not yet known, or where the list is not sectioned.
-    fn section(&self, section: Section) -> Option<String> {
-        match section {
-            Section::None => None,
-            Section::Path => Some(
-                self.path
-                    .parent()
-                    .map(|parent| parent.display().to_string())
-                    .unwrap_or_default(),
-            ),
-            Section::Type => self.format.map(str::to_string),
         }
     }
 
@@ -108,46 +92,15 @@ fn unknown_last<T: Ord>(a: &Option<T>, b: &Option<T>, direction: Direction) -> O
 }
 
 /// The places of `count` files under `order`: each entry the index, in the
-/// list as it stands, of the file that now goes there. Sections first,
-/// ascending, unknown last; then the sort within each, the way the order
-/// runs, unknown last again; and files neither tells apart in the order
-/// they stand — whichever way the sort runs, since the comparison is
+/// list as it stands, of the file that now goes there. The sort, the way
+/// the order runs, unknown last; and files it cannot tell apart in the
+/// order they stand — whichever way the sort runs, since the comparison is
 /// turned round rather than the list.
 pub(super) fn arrange<'a>(count: usize, order: Order, key: impl Fn(usize) -> Key<'a>) -> Vec<usize> {
-    let ranked: Vec<(Option<String>, Option<Rank>)> = (0..count)
-        .map(|index| {
-            let key = key(index);
-            (key.section(order.section), rank(&key, order.sort))
-        })
-        .collect();
+    let ranked: Vec<Option<Rank>> = (0..count).map(|index| rank(&key(index), order.sort)).collect();
     let mut places: Vec<usize> = (0..count).collect();
-    places.sort_by(|&a, &b| {
-        let (section_a, rank_a) = &ranked[a];
-        let (section_b, rank_b) = &ranked[b];
-        unknown_last(section_a, section_b, Direction::Ascending)
-            .then_with(|| unknown_last(rank_a, rank_b, order.direction))
-    });
+    places.sort_by(|&a, &b| unknown_last(&ranked[a], &ranked[b], order.direction));
     places
-}
-
-/// The sections of a list already arranged by `section`: each run of
-/// files with one label, in order, with its label — `None` for the run of
-/// files whose section is not yet known, and for the whole list where it
-/// is not sectioned. The ranges cover the list without a gap.
-pub(super) fn groups<'a>(
-    count: usize,
-    section: Section,
-    key: impl Fn(usize) -> Key<'a>,
-) -> Vec<(Option<String>, Range<usize>)> {
-    let mut groups: Vec<(Option<String>, Range<usize>)> = Vec::new();
-    for index in 0..count {
-        let label = key(index).section(section);
-        match groups.last_mut() {
-            Some((last, range)) if *last == label => range.end = index + 1,
-            _ => groups.push((label, index..index + 1)),
-        }
-    }
-    groups
 }
 
 #[cfg(test)]
@@ -184,17 +137,16 @@ mod tests {
         }
     }
 
-    fn order(section: Section, sort: Sort) -> Order {
+    fn order(sort: Sort) -> Order {
         Order {
-            section,
             sort,
             direction: Direction::Ascending,
         }
     }
 
-    /// Descending turns the sort round and nothing else: the sections stay
-    /// ascending, what is not known stays last, and ties keep the order
-    /// they stand in rather than coming out reversed.
+    /// Descending turns the sort round and nothing else: what is not known
+    /// stays last, and ties keep the order they stand in rather than coming
+    /// out reversed.
     #[test]
     fn descending_turns_the_sort_round_and_nothing_else() {
         let files = [
@@ -203,25 +155,19 @@ mod tests {
             file("a/1.png", Some("PNG"), Some(2), None),
             file("b/1.gif", None, Some(3), None),
         ];
-        let descending = |section, sort| Order {
-            section,
+        let descending = |sort| Order {
             sort,
             direction: Direction::Descending,
         };
         assert_eq!(
-            arrange(files.len(), descending(Section::None, Sort::Name), key(&files)),
+            arrange(files.len(), descending(Sort::Name), key(&files)),
             [1, 0, 2, 3],
             "9, 2, 1.png, 1.gif"
         );
         assert_eq!(
-            arrange(files.len(), descending(Section::None, Sort::Size), key(&files)),
+            arrange(files.len(), descending(Sort::Size), key(&files)),
             [3, 0, 2, 1],
             "3, then the two 2s as they stand, then the unknown"
-        );
-        assert_eq!(
-            arrange(files.len(), descending(Section::Path, Sort::Name), key(&files)),
-            [1, 2, 0, 3],
-            "the folders still ascending, each turned round inside"
         );
     }
 
@@ -238,7 +184,7 @@ mod tests {
         for (file, seconds) in files.iter_mut().zip([Some(50), Some(10), None, Some(30)]) {
             file.modified = seconds.map(|seconds| SystemTime::UNIX_EPOCH + Duration::from_secs(seconds));
         }
-        let arranged = |sort| arrange(files.len(), order(Section::None, sort), key(&files));
+        let arranged = |sort| arrange(files.len(), order(sort), key(&files));
         assert_eq!(arranged(Sort::Name), [3, 2, 1, 0], "four, one, three, two");
         assert_eq!(arranged(Sort::Path), [3, 1, 0, 2]);
         assert_eq!(arranged(Sort::Type), [1, 0, 3, 2], "JPEG, PNG, PNG, then unknown");
@@ -259,53 +205,17 @@ mod tests {
             file("z.png", Some("PNG"), Some(2), None),
             file("w.jpg", Some("JPEG"), Some(4), None),
         ];
-        let by_size = arrange(files.len(), order(Section::None, Sort::Size), key(&files));
+        let by_size = arrange(files.len(), order(Sort::Size), key(&files));
         assert_eq!(by_size, [1, 2, 0, 3]);
         let sized: Vec<File> = by_size
             .iter()
             .map(|&index| file(files[index].path.to_str().unwrap(), files[index].format, files[index].bytes, None))
             .collect();
-        let by_type = arrange(sized.len(), order(Section::None, Sort::Type), key(&sized));
+        let by_type = arrange(sized.len(), order(Sort::Type), key(&sized));
         let names: Vec<&str> = by_type
             .iter()
             .map(|&index| sized[index].path.to_str().unwrap())
             .collect();
         assert_eq!(names, ["x.jpg", "w.jpg", "z.png", "y.png"], "size order within each type");
-    }
-
-    /// Sections come before the sort: the list is broken up first, each
-    /// piece sorted on its own, and the piece whose label is not known
-    /// yet comes last.
-    #[test]
-    fn sections_come_first_ascending_with_the_unknown_last() {
-        let files = [
-            file("b/2.png", Some("PNG"), None, None),
-            file("a/9.jpg", Some("JPEG"), None, None),
-            file("a/1.png", Some("PNG"), None, None),
-            file("b/1.gif", None, None, None),
-        ];
-        let by_folder = arrange(files.len(), order(Section::Path, Sort::Name), key(&files));
-        assert_eq!(by_folder, [2, 1, 3, 0], "a/1, a/9, then b/1, b/2");
-        let by_type = arrange(files.len(), order(Section::Type, Sort::Name), key(&files));
-        assert_eq!(by_type, [1, 2, 0, 3], "JPEG, then the PNGs, then the one not yet known");
-
-        let arranged: Vec<File> = by_type
-            .iter()
-            .map(|&index| file(files[index].path.to_str().unwrap(), files[index].format, None, None))
-            .collect();
-        assert_eq!(
-            groups(arranged.len(), Section::Type, key(&arranged)),
-            [
-                (Some("JPEG".to_string()), 0..1),
-                (Some("PNG".to_string()), 1..3),
-                (None, 3..4),
-            ]
-        );
-        assert_eq!(
-            groups(files.len(), Section::None, key(&files)),
-            [(None, 0..4)],
-            "one unlabeled run where the list is not sectioned"
-        );
-        assert!(groups(0, Section::Path, key(&files)).is_empty());
     }
 }

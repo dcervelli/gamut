@@ -15,7 +15,7 @@ use super::export::{Dimension, Format};
 use super::help;
 use super::info::Copyable;
 use super::menu::{Copies, ZoomChoice};
-use super::filmstrip::{Direction, Section, Sort};
+use super::filmstrip::{Direction, Sort};
 use super::pixel::PixelFormat;
 use super::tooltip::{Tip, Tooltip};
 
@@ -160,10 +160,8 @@ pub enum Control {
     /// see [`filmstrip`](super::filmstrip). `Tab` does the same. On screen
     /// only while there is more than one file, as the pair is.
     Filmstrip,
-    /// The two buttons at the head of that list, which open the menu of
-    /// sections and the menu of sorts, and a cell of each.
-    Sections,
-    SectionBy(Section),
+    /// The button at the head of that list, which opens the menu of sorts,
+    /// and a cell of it.
     Sorting,
     SortBy(Sort),
     /// The two rows at the foot of the sort menu, which run the sort one
@@ -241,8 +239,6 @@ impl Control {
             Control::OpenFiles => "Open files".to_string(),
             Control::OpenFolder => "Open folder".to_string(),
             Control::Filmstrip => "File list".to_string(),
-            Control::Sections => "Sections".to_string(),
-            Control::SectionBy(section) => section.label().to_string(),
             Control::Sorting => "Sort".to_string(),
             Control::SortBy(sort) => sort.label().to_string(),
             Control::SortDirection(direction) => direction.label().to_string(),
@@ -502,8 +498,6 @@ impl Control {
         Control::OpenFiles,
         Control::OpenFolder,
         Control::Filmstrip,
-        Control::Sections,
-        Control::SectionBy(Section::None),
         Control::Sorting,
         Control::SortBy(Sort::Name),
         Control::SortDirection(Direction::Ascending),
@@ -569,8 +563,6 @@ impl Control {
             | Control::OpenFiles
             | Control::OpenFolder
             | Control::Filmstrip
-            | Control::Sections
-            | Control::SectionBy(_)
             | Control::Sorting
             | Control::SortBy(_)
             | Control::SortDirection(_)
