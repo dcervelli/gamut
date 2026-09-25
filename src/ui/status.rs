@@ -61,6 +61,27 @@ pub(super) fn fit_segments(
 /// the only thing drawn in the ink the theme keeps for it, unless the file
 /// behind it has gone, when it is struck through in the warning color.
 pub(super) fn top_words(pass: &mut Pass, ui: &mut egui::Ui, current: &Current) {
+    list_buttons(pass, ui);
+    file_button(pass, ui);
+    ui.add_space(COUNTER_GAP);
+    let mut text = RichText::new(&current.label).family(egui::FontFamily::Name(fonts::BOLD.into()));
+    // A file that has gone keeps its name, which is still the name of the
+    // file the pixels came from, and has it struck through: the mark is on
+    // the name rather than a word beside it, so a file that really is called
+    // `DELETED` cannot read as one that was.
+    text = if pass.input.deleted {
+        text.color(pass.theme.warning).strikethrough()
+    } else {
+        text.color(pass.theme.text_bright)
+    };
+    let response = ui.add(Label::new(text).truncate());
+    pass.tooltip(response, Tip::Name, true);
+}
+
+/// The head of the top bar: the file list's toggle, and the pair that steps
+/// through the list with the count between them. About the list rather
+/// than the file on screen, so they are there before the first one is read.
+pub(super) fn list_buttons(pass: &mut Pass, ui: &mut egui::Ui) {
     // The pair that steps through the list, at the head of the bar, with
     // the count they move through between them — one row of three, the
     // count the press that opens the chooser, which is that list laid out
@@ -109,20 +130,6 @@ pub(super) fn top_words(pass: &mut Pass, ui: &mut egui::Ui, current: &Current) {
         }
         ui.add_space(COUNTER_GAP);
     }
-    file_button(pass, ui);
-    ui.add_space(COUNTER_GAP);
-    let mut text = RichText::new(&current.label).family(egui::FontFamily::Name(fonts::BOLD.into()));
-    // A file that has gone keeps its name, which is still the name of the
-    // file the pixels came from, and has it struck through: the mark is on
-    // the name rather than a word beside it, so a file that really is called
-    // `DELETED` cannot read as one that was.
-    text = if pass.input.deleted {
-        text.color(pass.theme.warning).strikethrough()
-    } else {
-        text.color(pass.theme.text_bright)
-    };
-    let response = ui.add(Label::new(text).truncate());
-    pass.tooltip(response, Tip::Name, true);
 }
 
 /// The button before the name that opens the menu of the file — its name

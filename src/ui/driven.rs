@@ -898,6 +898,48 @@ fn empty(paste: bool, picking: bool) -> Harness<'static, State> {
     harness
 }
 
+/// Before the first file is read, the top bar already holds what is about
+/// the list and the window — with a list, the file list's toggle and the
+/// pair that steps through it with the count between them; the toggle that
+/// hides the interface always — and nothing about a file.
+#[test]
+fn the_top_bar_has_its_toggles_before_the_first_picture() {
+    let mut harness = build(WINDOW, 3, panels());
+    harness.state_mut().current = None;
+    harness.run();
+    assert!(harness.query_by_label("Zoom").is_none());
+    assert!(harness.query_by_label("File").is_none());
+    assert_eq!(
+        click(&mut harness, "File list"),
+        [Command::Press(Control::Filmstrip)]
+    );
+    assert_eq!(
+        click(&mut harness, "Previous file"),
+        [Command::Press(Control::Previous)]
+    );
+    assert_eq!(
+        click(&mut harness, "Choose a file"),
+        [Command::Press(Control::Chooser)]
+    );
+    assert_eq!(
+        click(&mut harness, "Next file"),
+        [Command::Press(Control::Next)]
+    );
+    assert_eq!(
+        click(&mut harness, "Maximize"),
+        [Command::Press(Control::Maximize)]
+    );
+    drop(harness);
+
+    let mut harness = build(WINDOW, 1, panels());
+    harness.state_mut().current = None;
+    harness.run();
+    for label in ["File list", "Previous file", "Next file", "Choose a file"] {
+        assert!(harness.query_by_label(label).is_none(), "{label}");
+    }
+    assert!(harness.query_by_label("Maximize").is_some());
+}
+
 /// A window with nothing open offers the three ways of giving it
 /// something, in the middle, each handing back the press its key would;
 /// the paste is dead without a picture on the clipboard, and the two that

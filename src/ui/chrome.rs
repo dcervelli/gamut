@@ -401,7 +401,19 @@ impl Pass<'_> {
         let Some(current) = self.current else {
             // Nothing has been decoded yet. The bars still go down, so that
             // the window reads as the application waiting rather than as a
-            // hole; the file being read is named by the toast.
+            // hole; the file being read is named by the toast. What is at
+            // the bar's two ends is about the window and the list rather
+            // than the file, so it is there from the first frame.
+            ui.horizontal_centered(|ui| {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.add_space(BAR_PADDING);
+                    self.maximize_button(ui);
+                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                        ui.add_space(BAR_PADDING);
+                        status::list_buttons(self, ui);
+                    });
+                });
+            });
             return;
         };
         let zoom = self.view.zoom(current.size(), self.input.viewport);
@@ -411,17 +423,7 @@ impl Pass<'_> {
             // The end of the bar first, so that the words get what is left.
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.add_space(BAR_PADDING);
-                let maximize = self.icon_button(
-                    ui,
-                    icon::MAXIMIZE_2,
-                    Control::Maximize,
-                    false,
-                    true,
-                    Corners::All,
-                );
-                if maximize.clicked() {
-                    self.press(Control::Maximize);
-                }
+                self.maximize_button(ui);
                 ui.add_space(BUTTON_GAP);
                 self.zoom_readout(ui, zoom, fills);
                 ui.add_space(PADDING);
@@ -438,6 +440,21 @@ impl Pass<'_> {
                 });
             });
         });
+    }
+
+    /// The button that ends the top bar, hiding the interface.
+    fn maximize_button(&mut self, ui: &mut Ui) {
+        let maximize = self.icon_button(
+            ui,
+            icon::MAXIMIZE_2,
+            Control::Maximize,
+            false,
+            true,
+            Corners::All,
+        );
+        if maximize.clicked() {
+            self.press(Control::Maximize);
+        }
     }
 
     /// The zoom readout: what the view is doing now, and one press from a
