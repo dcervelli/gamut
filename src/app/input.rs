@@ -74,10 +74,21 @@ pub enum Action {
     /// keys are read by the popup — see `ui::chooser` — and the same
     /// chord closes it.
     OpenChooser,
+    /// Put the file list up down the left of the picture, or take it down
+    /// — see `ui::filmstrip`.
+    ToggleFilmstrip,
+    /// Back to the file that was on screen before this one, and forward
+    /// again — see `app::visited`.
+    Back,
+    Forward,
+    /// Take the file on screen off the list, leaving it as it is on disk,
+    /// and step on to the next — see `App::remove_shown`.
+    Remove,
     ToggleInterface,
     /// The interface, and the panels floating over the image with it: the
     /// bars come and go as [`Action::ToggleInterface`], and the map,
-    /// histogram and information panel are closed on the way past.
+    /// histogram, information panel and file list are closed on the way
+    /// past.
     ToggleInterfaceAndPanels,
     /// Open the help popup — every key, what it does and when — and close
     /// it if it is up. The same toggle as the button at the foot of the
@@ -297,6 +308,7 @@ const PLAIN: Mods = Mods::empty();
 const CTRL: Mods = Mods::CONTROL;
 const SHIFT: Mods = Mods::SHIFT;
 const CTRL_SHIFT: Mods = Mods::CONTROL.union(Mods::SHIFT);
+const ALT: Mods = Mods::ALT;
 
 /// Whether the modifiers `held` are the ones a binding asked for, for a key
 /// of this kind. Shift is the difference between the two kinds.
@@ -397,6 +409,12 @@ fn action_of(tip: Tip) -> Option<Action> {
         // the count go.
         Tip::Control(Control::Previous) => PreviousFile,
         Tip::Control(Control::Next) => NextFile,
+        // The toggle before them, the pair at the head of the list it
+        // puts up, and the key that takes a file off that list.
+        Tip::Control(Control::Filmstrip) => ToggleFilmstrip,
+        Tip::Control(Control::Back) => Back,
+        Tip::Control(Control::Forward) => Forward,
+        Tip::Control(Control::Remove) => Remove,
         Tip::Control(Control::Minimap) => ToggleMinimap,
         Tip::Control(Control::Histogram) => ToggleHistogram,
         Tip::Control(Control::Info) => ToggleInfo,
@@ -470,6 +488,10 @@ fn action_of(tip: Tip) -> Option<Action> {
             | Control::Chooser
             | Control::Choose(_)
             | Control::FileMenu
+            | Control::Sorting
+            | Control::SortBy(_)
+            | Control::SortDirection(_)
+            | Control::Thumb(_)
             | Control::RenameTo
             | Control::CancelRename
             | Control::ExportAs(_)
@@ -598,16 +620,20 @@ pub enum When {
     PictureOnClipboard,
     HdrMode,
     SingleChannel,
-    /// A rename or a deletion has been made this session and not yet
-    /// undone.
+    /// A rename, a deletion or a removal has been made this session and
+    /// not yet undone.
     Undoable,
+    /// A file was on screen before this one, and after it: what the pair
+    /// at the head of the file list go back and forward to.
+    VisitedBefore,
+    VisitedAfter,
 }
 
 impl When {
     /// Every condition, for a test to hold them all up against the
     /// application.
     #[cfg(test)]
-    pub const ALL: [When; 10] = [
+    pub const ALL: [When; 12] = [
         When::RegionSelected,
         When::NoRegion,
         When::SeveralFiles,
@@ -618,6 +644,8 @@ impl When {
         When::HdrMode,
         When::SingleChannel,
         When::Undoable,
+        When::VisitedBefore,
+        When::VisitedAfter,
     ];
 
     /// The condition in a few words, as the popup's column reads it: a
@@ -633,7 +661,9 @@ impl When {
             When::PictureOnClipboard => "a picture on the clipboard",
             When::HdrMode => "the monitor in HDR mode",
             When::SingleChannel => "a single-channel image",
-            When::Undoable => "a rename or deletion to undo",
+            When::Undoable => "an edit to undo",
+            When::VisitedBefore => "a file shown before this one",
+            When::VisitedAfter => "a file shown after this one",
         }
     }
 }
@@ -654,6 +684,9 @@ pub(super) struct Conditions {
     pub picture_on_clipboard: bool,
     pub single_channel: bool,
     pub undoable: bool,
+    /// Whether a file was on screen before this one, and after it.
+    pub visited_before: bool,
+    pub visited_after: bool,
     /// Whether the content area has room for each floating panel.
     pub room: ui::Room,
     /// Whether the surface switch has anything to switch, and why not.
@@ -680,6 +713,8 @@ impl Default for Conditions {
             picture_on_clipboard: false,
             single_channel: false,
             undoable: false,
+            visited_before: false,
+            visited_after: false,
             room: ui::Room {
                 histogram: false,
                 info: false,
@@ -697,9 +732,10 @@ impl Default for Conditions {
 impl Conditions {
     /// Nothing dead for any reason, and no key's condition met: a large
     /// window, a monitor in HDR mode, a file something else opens, a
-    /// picture up in its own colors, the dialog down and a picture on the
-    /// clipboard — which is the one condition that does hold, the paste
-    /// button being alive only then.
+    /// picture up in its own colors, the dialog down, a picture on the
+    /// clipboard and files seen either side of this one — the three
+    /// conditions that do hold, the paste button and the pair that go
+    /// back and forward being alive only then.
     #[cfg(test)]
     pub const ALIVE: Conditions = Conditions {
         region_selected: false,
@@ -710,6 +746,8 @@ impl Conditions {
         picture_on_clipboard: true,
         single_channel: false,
         undoable: false,
+        visited_before: true,
+        visited_after: true,
         room: ui::Room {
             histogram: true,
             info: true,
@@ -735,6 +773,8 @@ impl Conditions {
             When::HdrMode => self.hdr == Hdr::Available,
             When::SingleChannel => self.single_channel,
             When::Undoable => self.undoable,
+            When::VisitedBefore => self.visited_before,
+            When::VisitedAfter => self.visited_after,
         }
     }
 
@@ -749,6 +789,8 @@ impl Conditions {
             picking: self.picking,
             clipboard: self.picture_on_clipboard,
             nothing_open: self.nothing_open,
+            visited_before: self.visited_before,
+            visited_after: self.visited_after,
         }
     }
 }
@@ -906,7 +948,7 @@ pub const KEYS: &[Binding] = &[
         section: Section::Interface,
         mods: PLAIN,
         shown: "~",
-        help: "Toggle the panels, closing the map, histogram and information",
+        help: "Toggle the panels, closing the map, histogram, information and file list",
         when: None,
         keys: &[(Char("~"), ToggleInterfaceAndPanels)],
     },
@@ -1040,6 +1082,32 @@ pub const KEYS: &[Binding] = &[
         when: Some(When::SeveralFiles),
         keys: &[(Char("p"), OpenChooser), (Char("P"), OpenChooser)],
     },
+    Binding {
+        section: Section::Files,
+        mods: PLAIN,
+        shown: "Tab",
+        help: "Show or hide the file list",
+        when: Some(When::SeveralFiles),
+        keys: &[(Named(NamedKey::Tab), ToggleFilmstrip)],
+    },
+    // The keys that step through the list, held with Alt, step through
+    // the files that have been on screen instead.
+    Binding {
+        section: Section::Files,
+        mods: ALT,
+        shown: "Alt+[, Alt+Page Up",
+        help: "Back in image history",
+        when: Some(When::VisitedBefore),
+        keys: &[(Char("["), Back), (Named(NamedKey::PageUp), Back)],
+    },
+    Binding {
+        section: Section::Files,
+        mods: ALT,
+        shown: "Alt+], Alt+Page Down",
+        help: "Forward in image history",
+        when: Some(When::VisitedAfter),
+        keys: &[(Char("]"), Forward), (Named(NamedKey::PageDown), Forward)],
+    },
     // The desktop's own dialog, for files and for a folder: one case each,
     // the Ctrl that both are held with being the only modifier the table
     // sees, as with the two `C`s of the clipboard section.
@@ -1072,19 +1140,24 @@ pub const KEYS: &[Binding] = &[
     Binding {
         section: Section::Files,
         mods: PLAIN,
-        shown: "Del, \u{232b}",
+        shown: "Del",
         help: "Move the file on screen to the trash, and show the next",
         when: None,
-        keys: &[
-            (Named(NamedKey::Delete), Delete),
-            (Named(NamedKey::Backspace), Delete),
-        ],
+        keys: &[(Named(NamedKey::Delete), Delete)],
+    },
+    Binding {
+        section: Section::Files,
+        mods: PLAIN,
+        shown: "\u{232b}",
+        help: "Take the file on screen off the list, and show the next",
+        when: None,
+        keys: &[(Named(NamedKey::Backspace), Remove)],
     },
     Binding {
         section: Section::Files,
         mods: CTRL,
         shown: "Ctrl+Z",
-        help: "Undo the last rename or deletion",
+        help: "Undo the last rename, deletion or removal",
         when: Some(When::Undoable),
         keys: &[(Char("z"), Undo), (Char("Z"), Undo)],
     },
@@ -1806,6 +1879,13 @@ impl App {
             // inside the popup — which is how the key arrives while the
             // popup has the keyboard — cannot come to mean different things.
             OpenChooser => return self.press(Control::Chooser),
+            // The buttons' own presses, so that a key and the button at
+            // the head of the bar or of the list cannot come to mean
+            // different things.
+            ToggleFilmstrip => return self.press(Control::Filmstrip),
+            Back => return self.press(Control::Back),
+            Forward => return self.press(Control::Forward),
+            Remove => return self.press(Control::Remove),
             ShowHelp => return self.press(Control::Help),
             // A fitted image re-fits on the next frame: the viewport it is
             // measured against is the one the panels leave, and they have
@@ -1829,7 +1909,8 @@ impl App {
                 }
             }
             // The three panels float over the image rather than inside the
-            // bars, so hiding the interface leaves them behind. This asks for
+            // bars, and the file list keeps its rows when the bars go, so
+            // hiding the interface leaves all four behind. This asks for
             // the picture on its own, and closes them on the way. They stay
             // closed when the bars come back: what the key put away, it is
             // not the key's business to bring out again.
@@ -1837,6 +1918,7 @@ impl App {
                 self.panels.show_minimap = false;
                 self.panels.show_histogram = false;
                 self.panels.show_info = false;
+                self.panels.show_filmstrip = false;
                 return self.perform(ToggleInterface);
             }
             ToggleHistogram => return self.press(Control::Histogram),
@@ -2132,6 +2214,12 @@ impl App {
             picture_on_clipboard: self.panels.paste,
             single_channel: current.is_some_and(|current| current.image.is_gray()),
             undoable: !self.edits.is_empty(),
+            visited_before: self
+                .visited
+                .can_back(|path| self.files.position(path).is_some()),
+            visited_after: self
+                .visited
+                .can_forward(|path| self.files.position(path).is_some()),
             room: self.room(),
             hdr: self.hdr_state(),
             openable: !self.openers.is_empty(),
@@ -2252,8 +2340,63 @@ impl App {
                 let wanted = self.chooser.wanted(rows, &self.thumbs);
                 self.thumbnailer.prioritize(wanted);
             }
+            // And the file list's rows, the same way.
+            ui::Command::FilmstripVisible(rows) => {
+                for row in rows.clone() {
+                    if let Some(path) = self.filmstrip.path_at(row) {
+                        self.thumbs.touch(path);
+                    }
+                }
+                let chooser = &self.chooser;
+                let wanted = self
+                    .filmstrip
+                    .wanted(rows, &self.thumbs, |path| chooser.given_up(path));
+                self.thumbnailer.prioritize(wanted);
+            }
+            // The file list's edge was dragged: the picture is fitted into
+            // what the wider or narrower list leaves on the next frame.
+            ui::Command::FilmstripSlot(slot) => {
+                self.filmstrip.set_slot(slot);
+            }
         }
         Effect::Redraw
+    }
+
+    /// Puts the list under `order`, if that is a change: the file list's
+    /// menus press this.
+    fn set_order(&mut self, order: ui::filmstrip::Order) -> Effect {
+        if !self.filmstrip.set_order(order) {
+            return Effect::Nothing;
+        }
+        self.apply_order().also(Effect::Redraw)
+    }
+
+    /// Back to the file that was on screen before this one, or forward to
+    /// the one after: asked for as a file is when it is named outright.
+    /// Nothing to draw yet, as for a step: what is on screen stays until
+    /// the file arrives. A file that has left the list is passed over —
+    /// see `Visited`.
+    fn visit(&mut self, back: bool) -> Effect {
+        let files = &self.files;
+        let listed = |path: &Path| files.position(path).is_some();
+        let target = if back {
+            self.visited.back(listed)
+        } else {
+            self.visited.forward(listed)
+        };
+        let Some(path) = target else {
+            return Effect::Nothing;
+        };
+        if Some(path.as_path()) == self.files.shown_path() {
+            // Already there: the stack moves and nothing is read.
+            self.visited.arrived(&path);
+            return Effect::Redraw;
+        }
+        if let Some(index) = self.files.position(&path) {
+            let request = self.files.go_to(index);
+            self.send(request);
+        }
+        Effect::Nothing
     }
 
     /// Zooms about the pointer by `steps` notches of the wheel.
@@ -2566,13 +2709,51 @@ impl App {
                 self.panels.show_info = !self.panels.show_info;
                 Effect::Redraw
             }
-            // The five buttons that open a menu: the menu is egui's, and
+            // The seven buttons that open a menu: the menu is egui's, and
             // opens itself on the press, so there is nothing here to do.
             Control::Zoom
             | Control::PixelFormat
             | Control::Copy
             | Control::OpenIn
-            | Control::FileMenu => Effect::Nothing,
+            | Control::FileMenu
+            | Control::Sorting => Effect::Nothing,
+            // The file list: up or down, and scrolled to the file on
+            // screen as it comes up.
+            Control::Filmstrip => {
+                self.panels.show_filmstrip = !self.panels.show_filmstrip;
+                self.filmstrip.reveal();
+                Effect::Redraw
+            }
+            Control::SortBy(sort) => {
+                let mut order = self.filmstrip.order();
+                order.sort = sort;
+                self.set_order(order)
+            }
+            Control::SortDirection(direction) => {
+                let mut order = self.filmstrip.order();
+                order.direction = direction;
+                self.set_order(order)
+            }
+            Control::Back => self.visit(true),
+            Control::Forward => self.visit(false),
+            Control::Remove => {
+                self.remove_shown();
+                Effect::Redraw
+            }
+            // A row of the file list: the file it shows, asked for as a
+            // row of the chooser is — by its path, the list being free
+            // to have moved under the frame.
+            Control::Thumb(row) => {
+                let chosen = self.filmstrip.path_at(row).map(Path::to_path_buf);
+                if let Some(path) = chosen
+                    && Some(path.as_path()) != self.files.shown_path()
+                    && let Some(index) = self.files.position(&path)
+                {
+                    let request = self.files.go_to(index);
+                    self.send(request);
+                }
+                Effect::Redraw
+            }
             // The menu of the file's own items, and the keys that do the
             // same, so that the two cannot come to mean different things;
             // and the dialog's two buttons, which `Enter` and `Esc` reach
@@ -2887,7 +3068,29 @@ mod tests {
         );
         assert_eq!(
             named(Control::Delete).as_deref(),
-            Some("Move the file on screen to the trash, and show the next (Del, \u{232b})")
+            Some("Move the file on screen to the trash, and show the next (Del)")
+        );
+        // The key that takes a file off the list, and the pair at the head
+        // of the list by the chords that do the same.
+        assert_eq!(
+            named(Control::Remove).as_deref(),
+            Some("Take the file on screen off the list, and show the next (\u{232b})")
+        );
+        assert_eq!(
+            named(Control::Back).as_deref(),
+            Some("Back in image history (Alt+[, Alt+Page Up)")
+        );
+        assert_eq!(
+            named(Control::Filmstrip).as_deref(),
+            Some("Show or hide the file list (Tab)")
+        );
+        // The menu at its head names itself, no key opening it; a cell of
+        // it says what it puts the list in.
+        let sorting = named(Control::Sorting).expect("the button names itself");
+        assert!(!sorting.contains('('), "{sorting}");
+        assert_eq!(
+            named(Control::SortBy(ui::filmstrip::Sort::Area)).as_deref(),
+            Some("Sort by pixels in all")
         );
         let file = named(Control::FileMenu).expect("the button names itself");
         assert!(!file.contains('('), "{file}");
@@ -2921,6 +3124,7 @@ mod tests {
                     | Control::CancelExport
                     | Control::Seek(_)
                     | Control::Chooser
+                    | Control::Thumb(_)
             );
             assert_eq!(
                 names(Tip::Control(*widget)).is_some(),
@@ -3133,6 +3337,20 @@ mod tests {
                 When::Undoable,
                 Conditions {
                     undoable: true,
+                    ..none
+                },
+            ),
+            (
+                When::VisitedBefore,
+                Conditions {
+                    visited_before: true,
+                    ..none
+                },
+            ),
+            (
+                When::VisitedAfter,
+                Conditions {
+                    visited_after: true,
                     ..none
                 },
             ),
@@ -3570,16 +3788,43 @@ mod tests {
         // The turns, on the two keys at the end of the home row.
         assert_eq!(plain(";"), Some(TurnLeft));
         assert_eq!(plain("'"), Some(TurnRight));
-        // What is done to the file: two named keys for the trash, one for
-        // the dialog, and the undo under Ctrl — the plain `z` being the
-        // display's reset.
+        // What is done to the file: one named key for the trash, one that
+        // takes the file off the list, one for the dialog, and the undo
+        // under Ctrl — the plain `z` being the display's reset.
         assert_eq!(
             action_for(&Key::Named(NamedKey::Delete), ELSEWHERE, PLAIN),
             Some(Delete)
         );
         assert_eq!(
             action_for(&Key::Named(NamedKey::Backspace), ELSEWHERE, PLAIN),
-            Some(Delete)
+            Some(Remove)
+        );
+        // The file list, and the files seen, under the keys that step the
+        // list held with Alt — a character ignoring the Shift it carries,
+        // a named key held with exactly Alt.
+        assert_eq!(
+            action_for(&Key::Named(NamedKey::Tab), ELSEWHERE, PLAIN),
+            Some(ToggleFilmstrip)
+        );
+        assert_eq!(
+            action_for(&Key::Character(SmolStr::new("[")), ELSEWHERE, ALT),
+            Some(Back)
+        );
+        assert_eq!(
+            action_for(&Key::Character(SmolStr::new("]")), ELSEWHERE, ALT | SHIFT),
+            Some(Forward)
+        );
+        assert_eq!(
+            action_for(&Key::Named(NamedKey::PageUp), ELSEWHERE, ALT),
+            Some(Back)
+        );
+        assert_eq!(
+            action_for(&Key::Named(NamedKey::PageDown), ELSEWHERE, ALT),
+            Some(Forward)
+        );
+        assert_eq!(
+            action_for(&Key::Named(NamedKey::PageDown), ELSEWHERE, CTRL | ALT),
+            None
         );
         assert_eq!(
             action_for(&Key::Named(NamedKey::F2), ELSEWHERE, PLAIN),

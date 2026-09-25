@@ -540,6 +540,51 @@ pub(super) const STEP_FORWARD: &[Mark] = &[
     Mark::Line([10.0, 20.0], [10.0, 4.0]),
 ];
 
+/// Lucide's `panel-left`: a window with a panel down its left, for the
+/// file list that goes there.
+pub(super) const PANEL_LEFT: &[Mark] = &[
+    Mark::rect([3.0, 3.0], [18.0, 18.0], 2.0),
+    Mark::Line([9.0, 3.0], [9.0, 21.0]),
+];
+
+/// Lucide's `arrow-down-narrow-wide`: an arrow down beside three bars
+/// growing, for the file list sorted ascending.
+pub(super) const ARROW_DOWN_NARROW_WIDE: &[Mark] = &[
+    Mark::Line([3.0, 16.0], [7.0, 20.0]),
+    Mark::Line([7.0, 20.0], [11.0, 16.0]),
+    Mark::Line([7.0, 20.0], [7.0, 4.0]),
+    Mark::Line([11.0, 4.0], [15.0, 4.0]),
+    Mark::Line([11.0, 8.0], [18.0, 8.0]),
+    Mark::Line([11.0, 12.0], [21.0, 12.0]),
+];
+
+/// Lucide's `arrow-down-wide-narrow`: the same arrow beside three bars
+/// shrinking, for the sort run the other way.
+pub(super) const ARROW_DOWN_WIDE_NARROW: &[Mark] = &[
+    Mark::Line([3.0, 16.0], [7.0, 20.0]),
+    Mark::Line([7.0, 20.0], [11.0, 16.0]),
+    Mark::Line([7.0, 20.0], [7.0, 4.0]),
+    Mark::Line([11.0, 4.0], [21.0, 4.0]),
+    Mark::Line([11.0, 8.0], [18.0, 8.0]),
+    Mark::Line([11.0, 12.0], [15.0, 12.0]),
+];
+
+/// Lucide's `arrow-left` and `arrow-right`: the way back through the files
+/// that have been on screen, and the way forward again. Arrows rather than
+/// the chevrons the list is stepped with, since these go somewhere
+/// remembered rather than to the next thing along.
+pub(super) const ARROW_LEFT: &[Mark] = &[
+    Mark::Line([19.0, 12.0], [5.0, 12.0]),
+    Mark::Line([12.0, 19.0], [5.0, 12.0]),
+    Mark::Line([5.0, 12.0], [12.0, 5.0]),
+];
+
+pub(super) const ARROW_RIGHT: &[Mark] = &[
+    Mark::Line([5.0, 12.0], [19.0, 12.0]),
+    Mark::Line([12.0, 5.0], [19.0, 12.0]),
+    Mark::Line([19.0, 12.0], [12.0, 19.0]),
+];
+
 /// Lucide's `x`: the cross that takes a thing off the screen. Its two strokes
 /// cross at the middle of the grid and reach the same distance into each
 /// corner, so it stays square however the square it is fitted into rounds.
@@ -976,7 +1021,7 @@ mod tests {
 
     /// Every icon in the table, so that a new one is held to the same
     /// promises as the rest.
-    const ICONS: [&[Mark]; 27] = [
+    const ICONS: [&[Mark]; 32] = [
         CHART_AREA,
         INFO,
         CIRCLE_QUESTION_MARK,
@@ -1004,6 +1049,11 @@ mod tests {
         STEP_BACK,
         STEP_FORWARD,
         X,
+        PANEL_LEFT,
+        ARROW_DOWN_NARROW_WIDE,
+        ARROW_DOWN_WIDE_NARROW,
+        ARROW_LEFT,
+        ARROW_RIGHT,
     ];
 
     fn device(value: f32, scale: f32) -> f32 {

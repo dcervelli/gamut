@@ -52,11 +52,15 @@ on screen, since there is then nowhere to pan to.
 | `]`, `Page Down` | Next file |
 | `[`, `Page Up` | Previous file |
 | `Ctrl+P` | Choose a file from the list: type to filter it, arrows to move, `Enter` to open, `Esc` to close |
+| `Tab` | Show or hide the file list down the left of the picture |
+| `Alt+[`, `Alt+Page Up` | Back in image history |
+| `Alt+]`, `Alt+Page Down` | Forward in image history |
 | `Ctrl+O` | Open image files chosen in the desktop's file dialog |
 | `Ctrl+Shift+O` | Open a folder chosen in the desktop's file dialog |
 | `F2` | Rename the file on screen |
-| `Del`, `⌫` (`Backspace`) | Move the file on screen to the trash, and show the next |
-| `Ctrl+Z` | Undo the last rename or deletion |
+| `Del` | Move the file on screen to the trash, and show the next |
+| `⌫` (`Backspace`) | Take the file on screen off the list, and show the next |
+| `Ctrl+Z` | Undo the last rename, deletion or removal |
 | `Ctrl+E` | Export the picture as shown to a new JPG or PNG |
 
 A file you have already looked at comes back exactly as you left it: the same
@@ -68,9 +72,59 @@ A file being opened for the first time keeps the pan and zoom when it is the
 same size as the one on screen, so a directory of frames or exposures stays
 comparable under the same pixels. One of a different size is a different
 image, and is fitted. Files that cannot be decoded are stepped over. The list is whatever
-was named at startup, in that order; naming a directory puts the images in it
+was named at startup, in name order to begin with and in whatever order the
+file list's menus put it in after that; naming a directory puts the images in it
 on the list, and keeps it up to date as images are added to that directory or
 taken out of it.
+
+### The file list
+
+`Tab`, or the button at the head of the top bar, puts the list down the
+left of the picture: a strip of thumbnails, one row per file in the order
+`]` and `[` walk, with the file's place in the list and its name above
+each and the file on screen washed in the accent. A name too long for
+the row loses its middle rather than its end, so that its extension and
+any number before it still show. Resting the pointer on a row gives the
+name in full, the folder it is in, the kind of file, its size in pixels
+and on disk, and when it was last changed, on this machine's clock. A click on a row shows that file, and the strip scrolls to the file on screen as it
+changes. The strip takes its width from the picture, which is fitted into
+what is left; `Tab` again gives it back. Drag the strip's right edge to
+make it wider or narrower: the thumbnails grow with it, from 128 pixels
+across to 384. Each row takes its picture's shape — a landscape picture's
+row shorter, a portrait's taller — up to half as tall as it is wide, or
+half again as tall, beyond which a panorama or a tall screenshot is
+fitted inside with room either side. A row is square until the file has
+been looked at, which happens in the background shortly after the list
+arrives. With a single file there is no
+list to show, and neither the button nor the key appears to do anything.
+
+The menu at the head of the strip says how the list stands. It sorts the
+files by name, by path, by kind of file, by when the file
+was last changed, by size on disk, or by width, height or area in pixels,
+and its last two rows run the sort ascending or descending; the button
+wears which. Sorted by anything but the name, each thumbnail wears the
+value it is sorted by across its foot — for the path, the folder, cut in
+its middle where it is long. The list itself is put in
+that order: the keys, the count in the bar and the chooser all walk what
+the strip shows. A sort keeps the order of files it cannot tell apart, so
+sorting by size and then by kind leaves each kind in size order, the way
+sorting a spreadsheet twice does. The kind of a file, its size, its date
+and its dimensions are read from its header in the background, and a file whose
+header has not been read yet sorts after those that have, and moves
+into place once it is. The list opens in name order whatever order the
+files were named in, and stays in whatever order you put it in as files
+arrive in a directory or leave it. Whatever the order does, the file on
+screen stays the file on screen.
+
+Beside the menus are two buttons that go back to the file shown before
+this one and forward again, which `Alt+[` and `Alt+]`, or `Alt+Page Up`
+and `Alt+Page Down`, do from the keyboard: the files you have looked at,
+in the order you looked at them, as a browser keeps the pages. Going back
+and then somewhere new — a step, a pick from the chooser, a paste — cuts
+off what lay ahead, so forward always leads to something reached from
+here. A file that has left the list is passed over on the way back and
+is there again once undo puts it back. The buttons are dead, and the keys
+do nothing, with nowhere to go.
 
 `Ctrl+P` opens a chooser over the picture: a field to type in, and under it
 every file on the list that fits what you have typed, best fit first, each
@@ -112,9 +166,10 @@ than one because a desktop's dialog picks files or it picks a folder, never
 both at once. Cancel the dialog and nothing changes.
 
 Opening adds to the list rather than replacing it: `]` and `[` and the
-chooser walk everything named so far, in the order it was named, and a
-file already on the list is not added twice — choosing it again simply
-shows it, as you left it. The picture on screen stays until the first new
+chooser walk everything named so far, in whatever order the file list has
+put it in, and a file already on the list is not added twice — choosing it
+again simply shows it, as you left it. A file taken off the list with
+`Backspace` comes back onto it this way. The picture on screen stays until the first new
 file has arrived, as it does when stepping.
 
 Started with no path at all — `gamut` on its own, or from the desktop's
@@ -135,8 +190,19 @@ put one up, and the window says so instead.
 ### Renaming and deleting
 
 The button before the file's name in the top bar opens a menu of the file
-itself: copy its name, copy its path, rename it, delete it, export it. The
-keys above do the same without the menu.
+itself: copy its name, copy its path, rename it, take it off the list
+while there is more than one file, delete it, export it. The keys above
+do the same without the menu.
+
+`Backspace` takes the file on screen off the list and shows the next, or
+the previous one from the end of the list, leaving the file exactly as it
+is on disk: a way of culling what you are walking through without
+throwing anything away. The file stays off the list for the session,
+however often its directory is read again; `Ctrl+Z` puts it back where it
+stood and shows it, and opening it by name again — from the dialog, or
+the command line — does too. It stays on screen until its neighbor is up,
+as a deleted file does, and the last file on the list leaves at once and
+empties the window.
 
 `Delete` moves the file to your desktop's trash — the same one your file
 manager shows, so it is there to restore or empty from there whether or not
@@ -164,9 +230,10 @@ come back to.
 
 `Ctrl+Z` undoes the last of these, and then the one before, back through the
 session: a deleted file comes out of the trash and back into the list where
-it was, a renamed file gets its old name back, and either way it is the file
-on screen afterwards. Only what touched the disk is on that stack — zoom,
-exposure and the rest are put back by hand, or by `z`. An undo that cannot
+it was, a renamed file gets its old name back, a removed file goes back
+onto the list where it stood, and whichever it is, it is the file on
+screen afterwards. Only what touched the disk or the list is on that
+stack — zoom, exposure and the rest are put back by hand, or by `z`. An undo that cannot
 be done says why: the trash was emptied in the meantime, or something else
 now has the name. Nothing is remembered across a restart; after that the
 trash itself is the record.
@@ -499,12 +566,14 @@ where all of it is set.
 | `x` | Select a region of the image; again, or `Esc`, removes it |
 | `.` | Cycle how the pixel under the pointer is read out: hex → decimal → mapped |
 | `` ` `` | Show or hide the panels around the image |
-| `~` | The same, and closes the histogram, information and minimap |
+| `~` | The same, and closes the histogram, information, minimap and file list |
 | `?`, `/` | Show the keys: every one of them, what it does and when. Again, `Esc` or a click outside closes it. The button at the foot of the right strip does the same |
 | `q`, `Esc` | Quit. `Esc` closes a popup, a message or a region, or brings the panels back |
 
 The panels are opaque and the image is fitted inside them, so hiding them
-gives a fitted image more room and it re-fits immediately.
+gives a fitted image more room and it re-fits immediately. The file list stays
+when they go, without the buttons at its head, and runs down the whole left
+edge of the window; `~` closes it with the rest.
 
 The button in the top right corner hides them too, and holding Shift as you
 press it does what `~` does. The first time they go, a message says which keys

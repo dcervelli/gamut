@@ -95,9 +95,27 @@ impl super::Decoder for ImageRs {
     fn sniff(&self, header: &[u8]) -> bool {
         is_gif(header)
             || is_radiance(header)
-            || header.starts_with(b"\x76\x2f\x31\x01")
+            || is_exr(header)
             || is_bmp(header)
             || is_netpbm(header)
+    }
+
+    /// Which of the five, by the same signatures; the name of all of them
+    /// for a file claimed by its extension alone.
+    fn format(&self, header: &[u8]) -> &'static str {
+        if is_gif(header) {
+            "gif"
+        } else if is_radiance(header) {
+            "hdr"
+        } else if is_exr(header) {
+            "exr"
+        } else if is_bmp(header) {
+            "bmp"
+        } else if is_netpbm(header) {
+            "netpbm"
+        } else {
+            self.name()
+        }
     }
 
     fn dimensions(&self, source: &mut dyn ReadSeek) -> Result<Option<(u32, u32)>> {
@@ -259,6 +277,11 @@ impl FrameSource for GifFrames {
 /// wear it — `BM` opens plenty of English sentences. The DIB header size that
 /// follows the file header is what makes the guess safe: it is a small number
 /// from a known set, and four bytes of prose are not.
+/// OpenEXR's magic number.
+fn is_exr(header: &[u8]) -> bool {
+    header.starts_with(b"\x76\x2f\x31\x01")
+}
+
 fn is_bmp(header: &[u8]) -> bool {
     let Some(size) = header.get(14..18) else {
         return false;
@@ -324,6 +347,23 @@ fn is_netpbm(header: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::image::decode::Decoder;
+
+    /// The five formats are one decoder, but not one kind of file: each
+    /// fixture is named for what it is, and a file claimed by its
+    /// extension alone for the lot.
+    #[test]
+    fn each_format_is_named_for_itself() {
+        let format = |name: &str| {
+            super::super::reader(std::path::Path::new(&format!("test_images/{name}")))
+        };
+        assert_eq!(format("gif-palette.gif"), Some("gif"));
+        assert_eq!(format("hdr-rgbe.hdr"), Some("hdr"));
+        assert_eq!(format("exr-rgb.exr"), Some("exr"));
+        assert_eq!(format("bmp-rgb8.bmp"), Some("bmp"));
+        assert_eq!(format("pnm-gray8.pgm"), Some("netpbm"));
+        assert_eq!(ImageRs.format(b"not a picture at all"), ImageRs.name());
+    }
 
     /// The bytes a `BITMAPINFOHEADER` file opens with: the signature, a file
     /// size, two reserved words, the pixel offset, and the header size.

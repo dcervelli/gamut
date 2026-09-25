@@ -1,4 +1,4 @@
-# Deleting, renaming, undo and exporting
+# Deleting, renaming, removing, undo and exporting
 
 What the program does to files on disk: a file is moved to the trash, or
 renamed, and either is undone; or the picture as shown is exported to a
@@ -69,17 +69,29 @@ another file's index. A second `Delete` while the neighbor is still being
 read is refused by `is_idle`, which is what makes holding the key delete
 as fast as the files decode and never the file already on its way out.
 
+A removal — `Backspace`, `App::remove_shown` — goes out through the same
+door. `Files::hide` puts the path in a set the [file list](filmstrip.md)
+page describes and then `condemn`s it, so that everything above holds:
+the file stays on screen until its neighbor is up, the last file empties
+the window, and undo before the neighbor arrives is a `reprieve`. What
+differs is that nothing on disk moves and the watch is left alone, so the
+bar does not call the file deleted. A file already leaving refuses both a
+second removal and a deletion, each with a message that says which it is.
+
 ## One undo stack, and only for the disk
 
 `src/app/edits.rs` holds a `Vec<Edit>`: `Trashed`, with the entry, the
 path as the list spelled it, where it stood and whether a rebuild of the
-list kept it; and `Renamed`, with both spellings. One stack and one key for
-both, because the moment a reader reaches for undo is the moment they have
-just made a mistake, and that is no time to ask which kind. Only what
-touched the disk goes on it: the view and the display change dozens of
-times a session and have their own ways back — `z`, `kept.rs` — and if
-they were here too, undoing a deletion would first walk back through
-twenty exposure steps.
+list kept it; `Renamed`, with both spellings; and `Removed`, with the
+path, where it stood and whether a rebuild kept it — a removal touches
+nothing on disk, but it takes a file out of the walk, and that is as
+much a mistake to reach for undo over. One stack and one key for all
+three, because the moment a reader reaches for undo is the moment they
+have just made a mistake, and that is no time to ask which kind. Only
+what touched the disk or the list goes on it: the view and the display
+change dozens of times a session and have their own ways back — `z`,
+`kept.rs` — and if they were here too, undoing a deletion would first
+walk back through twenty exposure steps.
 
 Last in, first out, for the session, uncapped: culling a directory is `]`
 `Delete` `]` `Delete`, and "not that one, the one before" is two presses.

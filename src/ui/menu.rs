@@ -15,6 +15,7 @@ use crate::view::{Axis, Fit, View, Viewport};
 use super::RULE_WIDTH;
 use super::chrome::Pass;
 use super::control::Control;
+use super::filmstrip::{Direction, Order, Sort};
 use super::info::HEADER_GAP;
 use super::pixel::PixelFormat;
 use super::style::TOGGLE_RADIUS;
@@ -354,6 +355,34 @@ pub(super) fn titled(
     );
 }
 
+/// The menu of sorts at the head of the file list: one item for each
+/// thing the files can be put in order of, the one in force lit; and under them,
+/// set apart, the two ways the sort can run, the one in force lit.
+pub(super) fn sort_cells(pass: &mut Pass, ui: &mut Ui, order: Order) {
+    titled(pass, ui, &Control::Sorting.label(), |pass, ui| {
+        let item = |pass: &mut Pass, ui: &mut Ui, control: Control, active: bool| {
+            let response = ui.add(Button::new(control.label()).selected(active));
+            let response = pass.tooltip(response, Tip::Control(control), true);
+            if response.clicked() {
+                pass.press(control);
+                ui.close();
+            }
+        };
+        for sort in Sort::ALL {
+            item(pass, ui, Control::SortBy(sort), sort == order.sort);
+        }
+        ui.add_space(MENU_SECTION_GAP);
+        for direction in Direction::ALL {
+            item(
+                pass,
+                ui,
+                Control::SortDirection(direction),
+                direction == order.direction,
+            );
+        }
+    });
+}
+
 /// The menu of copies: one item for everything that can be taken, each
 /// wearing the name of the thing it takes and, beside it, the key that takes
 /// the same thing. Never lit: a copy is something done, and there is no
@@ -388,19 +417,25 @@ pub(super) fn copy_items(pass: &mut Pass, ui: &mut Ui) {
 /// item trails off: it opens a dialog rather than doing anything yet.
 pub(super) fn file_items(pass: &mut Pass, ui: &mut Ui) {
     titled(pass, ui, &Control::FileMenu.label(), |pass, ui| {
-        let items = [
+        let mut items = vec![
             (Control::Copies(Copies::Name), "Copy name".to_string()),
             (Control::Copies(Copies::Path), "Copy path".to_string()),
             (
                 Control::Rename,
                 format!("{}\u{2026}", Control::Rename.label()),
             ),
+        ];
+        // Offered only where there is a list to take a file off.
+        if pass.input.count > 1 {
+            items.push((Control::Remove, Control::Remove.label()));
+        }
+        items.extend([
             (Control::Delete, Control::Delete.label()),
             (
                 Control::Export,
                 format!("{}\u{2026}", Control::Export.label()),
             ),
-        ];
+        ]);
         for (control, label) in items {
             let mut button = Button::new(label);
             if let Some(key) = pass.namer.shortcut(control) {

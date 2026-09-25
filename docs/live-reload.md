@@ -6,7 +6,9 @@ A directory named on the command line stands for the images directly inside
 it, in name order — one level, and chosen by extension, since the alternative
 is opening every file in the directory to see what it is. That makes it a
 place to look rather than a list fixed at startup, which is what the rest of
-this page is about. `src/listing.rs` owns the reading.
+this page is about. `src/listing.rs` owns the reading. Name order is how a
+directory is *read*; the order the list stands in is the
+[file list's](filmstrip.md), and a rebuild keeps it.
 
 ## Watching
 

@@ -6,9 +6,12 @@ mod copying;
 mod edits;
 mod exporting;
 mod files;
+mod filmstrip;
 mod gui;
 pub mod input;
 mod kept;
+mod order;
+mod visited;
 mod playback;
 mod region;
 mod window;
@@ -35,10 +38,12 @@ use crate::player;
 use crate::portal::{self, Pick, Picked};
 use crate::render::{GpuImage, HdrPreference, Placement, Renderer, Scene, Upscale};
 use crate::theme::{self, Theme};
-use crate::thumbnailer::{Delivered, Facts, Thumb, Thumbnailer};
+use crate::thumbnailer::{Delivered, Facts, News, Thumb, Thumbnailer};
 use crate::timing;
 use crate::trash::Trash;
-use crate::ui::chrome::{content_area, image_viewport};
+use crate::ui::chrome::{Parts, content_area, image_viewport};
+use filmstrip::Filmstrip;
+use visited::Visited;
 use crate::ui::toast::{self, Level, Toasts};
 use crate::ui::tooltip::Hdr;
 use crate::ui::{self, Current, FileFacts, FrameInput, Panels, Rect, Toast};
@@ -240,6 +245,13 @@ pub struct App {
     chooser: Chooser,
     /// The thumbnails the screen holds, as egui textures.
     thumbs: Thumbs,
+    /// The file list's state: the order the list stands in, and the rows
+    /// the strip was last drawn from. Whether the strip is up is
+    /// [`Panels::show_filmstrip`].
+    filmstrip: Filmstrip,
+    /// The files that have been on screen, for going back and forward
+    /// through them.
+    visited: Visited,
     /// Thumbnails that arrived before there was a context to make textures
     /// in, taken up at the first frame.
     pending_thumbs: Vec<(PathBuf, Thumb)>,
@@ -393,6 +405,8 @@ impl App {
             thumbnailer,
             chooser: Chooser::default(),
             thumbs: Thumbs::default(),
+            filmstrip: Filmstrip::default(),
+            visited: Visited::default(),
             pending_thumbs: Vec::new(),
             wake,
             players: 0,
@@ -404,6 +418,7 @@ impl App {
             copying: Copying::default(),
             panels: Panels {
                 show_ui: true,
+                show_filmstrip: false,
                 show_histogram: histogram,
                 show_luma: true,
                 show_planes: true,
@@ -440,6 +455,7 @@ impl App {
         // file is being looked at, and the chooser then has thumbnails the
         // moment it opens.
         app.thumbnailer.enqueue(app.files.paths().to_vec());
+        app.filmstrip.relist(app.files.paths());
         app
     }
 
@@ -627,13 +643,80 @@ impl App {
     /// files new to it.
     pub(super) fn list_changed(&mut self) {
         self.chooser.relist(self.files.paths());
+        self.filmstrip.relist(self.files.paths());
+        // Whatever changed it, the list may have fallen out of its order:
+        // a rebuild comes back merged, a file put back lands where it was.
+        self.filmstrip.mark_stale();
         self.thumbnailer.enqueue(self.files.paths().to_vec());
+    }
+
+    /// Whether the file list is on screen: switched on, with a list of
+    /// more than one file to show. Hiding the interface leaves it up,
+    /// without its head.
+    pub(super) fn filmstrip_showing(&self) -> bool {
+        self.panels.show_filmstrip && self.files.len() > 1
+    }
+
+    /// What is known about `path` that the list is ordered by.
+    fn key_of<'p>(chooser: &Chooser, path: &'p Path) -> order::Key<'p> {
+        order::Key::of(path, chooser.facts_of(path))
+    }
+
+    /// Puts the list in the order the file list asks for, keeping the
+    /// file on screen the file on screen. Between reads only, as a rebuild
+    /// is — a read in flight is aimed at an index — so under one the list
+    /// is left as it is and put in order at the next chance.
+    fn apply_order(&mut self) -> Effect {
+        if !self.files.is_idle() {
+            self.filmstrip.mark_stale();
+            return Effect::Nothing;
+        }
+        let places = order::arrange(self.files.len(), self.filmstrip.order(), |index| {
+            Self::key_of(&self.chooser, self.files.path(index))
+        });
+        let moved = self.files.reorder(&places);
+        // The list itself has not changed, only its order: the two panels
+        // read it again, and the thread has nothing new to make. The strip
+        // reads it whether or not anything moved, since this is the first
+        // it hears of a list that was in order already.
+        self.filmstrip.relist(self.files.paths());
+        if !moved {
+            return Effect::Nothing;
+        }
+        self.chooser.relist(self.files.paths());
+        // The file on screen is wherever the order has put it now, and
+        // the strip follows it there.
+        self.filmstrip.reveal();
+        Effect::Redraw
+    }
+
+    /// Puts the list back in its order if it may have fallen out of it,
+    /// once per poll however many headers arrived since the last.
+    fn poll_order(&mut self) -> Effect {
+        if self.filmstrip.take_stale() {
+            self.apply_order()
+        } else {
+            Effect::Nothing
+        }
+    }
+
+    /// A header was read, by the thread or by the loader: the rows may
+    /// wear it, and the order may turn on it.
+    fn facts_learned(&mut self) {
+        self.filmstrip.facts_changed();
+        if self.filmstrip.order().reads_facts() {
+            self.filmstrip.mark_stale();
+        }
     }
 
     /// Takes in what the thumbnail thread had to say.
     fn take_thumbnail(&mut self, delivered: Delivered) {
+        let facts = matches!(delivered.news, News::Facts(_));
         if let Some((path, thumb)) = self.chooser.take(delivered) {
             self.hold_thumb(path, thumb);
+        }
+        if facts {
+            self.facts_learned();
         }
     }
 
@@ -644,16 +727,32 @@ impl App {
             self.pending_thumbs.push((path, thumb));
             return;
         };
-        let image = egui::ColorImage::from_rgba_unmultiplied(
-            [thumb.width as usize, thumb.height as usize],
-            &thumb.rgba,
-        );
-        let texture = shown.gui.ctx.load_texture(
-            path.display().to_string(),
-            image,
-            egui::TextureOptions::LINEAR,
-        );
-        self.thumbs.insert(path, texture);
+        let copies = thumb.copies.each_ref().map(|copy| {
+            let image = egui::ColorImage::from_rgba_unmultiplied(
+                [copy.width as usize, copy.height as usize],
+                &copy.rgba,
+            );
+            shown.gui.ctx.load_texture(
+                format!("{} ({})", path.display(), copy.width.max(copy.height)),
+                image,
+                egui::TextureOptions::LINEAR,
+            )
+        });
+        // The rows on screen are seen again first, so that they are never
+        // the oldest held: a frame says which rows it shows only when that
+        // changes, and a list sitting still while the thread thumbnails
+        // the rest of the session would otherwise let its own go.
+        if self.chooser_open() {
+            for shown in self.chooser.on_screen() {
+                self.thumbs.touch(shown);
+            }
+        }
+        if self.filmstrip_showing() {
+            for shown in self.filmstrip.on_screen() {
+                self.thumbs.touch(shown);
+            }
+        }
+        self.thumbs.insert(path, copies);
     }
 
     /// Whether the command line asked for something and none of it ever
@@ -934,11 +1033,16 @@ impl App {
     /// works this out for itself; it is worked out here as well for the hit
     /// tests, which have to answer between frames.
     fn content(&self) -> Rect {
-        content_area(
-            self.logical_size(),
-            self.panels.show_ui,
-            self.has_transport(),
-        )
+        content_area(self.logical_size(), self.panels.show_ui, self.parts())
+    }
+
+    /// Which of the panels that come and go are up: what the chrome's
+    /// geometry is derived from besides the window size.
+    fn parts(&self) -> Parts {
+        Parts {
+            transport: self.has_transport(),
+            filmstrip: self.filmstrip_showing().then(|| self.filmstrip.slot()),
+        }
     }
 
     /// Whether the file on screen brings the transport bar with it: an
@@ -1039,6 +1143,7 @@ impl App {
         self.next_poll = now + watch::INTERVAL;
         self.poll_file()
             .also(self.poll_directories())
+            .also(self.poll_order())
             .also(self.poll_theme())
             .also(self.poll_copies())
     }
@@ -1067,7 +1172,7 @@ impl App {
             self.window_size(),
             self.scale_factor(),
             self.panels.show_ui,
-            self.has_transport(),
+            self.parts(),
         )
     }
 
@@ -1081,6 +1186,20 @@ impl App {
             let shown = self.current.as_ref().and_then(|_| self.files.shown_path());
             self.chooser.input(&self.thumbs, shown)
         });
+        let filmstrip = if self.filmstrip_showing() {
+            let (files, chooser, visited) = (&self.files, &self.chooser, &self.visited);
+            let listed = |path: &Path| files.position(path).is_some();
+            let (back, forward) = (visited.can_back(listed), visited.can_forward(listed));
+            Some(self.filmstrip.input(
+                &self.thumbs,
+                |path| Self::key_of(chooser, path),
+                files.shown_path(),
+                back,
+                forward,
+            ))
+        } else {
+            None
+        };
         let rename = self.rename_input();
         let export = self.export_input();
         let viewport = self.viewport();
@@ -1113,6 +1232,7 @@ impl App {
             move_region: self.pointer.modifiers.shift_key(),
             zoom_box: self.marking.zoom_box(),
             transport: self.transport(),
+            filmstrip,
             chooser,
             rename,
             export,
@@ -1245,7 +1365,7 @@ impl App {
         let content = ui::chrome::content_area(
             self.logical_size(),
             self.panels.show_ui,
-            self.has_transport(),
+            self.parts(),
         );
         Some(ui::loupe::place(
             cursor,
@@ -1270,7 +1390,7 @@ impl App {
             logical,
             scale,
             self.panels.show_ui,
-            self.has_transport(),
+            self.parts(),
             image,
             self.view.upscale(),
         )
@@ -1320,6 +1440,9 @@ impl App {
         let relisted = changed && self.files.relist(crate::listing::relist(&self.named));
         if relisted {
             self.list_changed();
+            // Put in order at once, nothing being read: the rebuild came
+            // back merged rather than sorted.
+            let _ = self.apply_order();
         }
         Effect::redraw_if(relisted)
     }
@@ -1504,23 +1627,43 @@ impl App {
             self.size_window_to(size);
         }
         self.files.shown(file.index);
+        // A file on its way out has left the list now, if this is its
+        // neighbor arriving: the strip reads the list again.
+        self.filmstrip.relist(self.files.paths());
+        // Another file on screen: it goes on the stack of files seen,
+        // and the file list scrolls to it.
+        if file.mode == Reload::Fresh {
+            self.visited.arrived(&file.path);
+        }
+        if stepping {
+            self.filmstrip.reveal();
+        }
         self.watch = file.watch;
         // What this file is, for the chooser's row about it, ahead of the
         // thumbnail thread reaching it. A thumbnail is asked for again for a
         // file changed on disk — the one in the cache is of the file as it
         // was, and its modification time no longer matches — and for one the
         // thread had given up on, which has just decoded here.
+        let facts = file_facts(&file.path);
+        let image = Arc::new(image);
         let given_up = self.chooser.learn(
             &file.path,
             Facts {
                 size: Some((image.width, image.height)),
                 sequence,
                 title: exif.title().map(str::to_string),
+                format: facts.reader,
+                bytes: facts.bytes,
+                modified: facts.modified,
             },
         );
+        // Made from the picture itself, decoded already, rather than read
+        // and decoded again on the thread — or refused there: its ceiling
+        // is what a background decode may hold, and this one is held.
         if file.mode == Reload::InPlace || given_up {
-            self.thumbnailer.prioritize(vec![file.path.clone()]);
+            self.thumbnailer.adopt(file.path.clone(), Arc::clone(&image));
         }
+        self.facts_learned();
         // A region is of the picture it was drawn on. Stepping to another
         // file takes it off, and so does the file coming back a different
         // size, where the pixels it marked out are no longer the pixels.
@@ -1560,11 +1703,11 @@ impl App {
             self.openers = openers::for_file(&file.path);
         }
         self.current = Some(Current {
-            image: Arc::new(image),
+            image,
             stats,
             display,
             label: file_label(&file.path),
-            file: file_facts(&file.path),
+            file: facts,
             exif,
             stored,
             sequence,
@@ -1768,6 +1911,9 @@ impl App {
                 }
             }
         }
+        // A sort asked for under the read waited for it: now is the
+        // first chance, and sooner than the next poll.
+        let _ = self.poll_order();
         Effect::Redraw
     }
 
@@ -2078,7 +2224,7 @@ impl ApplicationHandler<UserEvent> for App {
             // opens.
             UserEvent::Thumbnail(delivered) => {
                 self.take_thumbnail(*delivered);
-                Effect::redraw_if(self.chooser_open())
+                Effect::redraw_if(self.chooser_open() || self.filmstrip_showing())
             }
         };
         self.settle(effect, event_loop);
@@ -2192,9 +2338,27 @@ impl ApplicationHandler<UserEvent> for App {
         // Except for the redraw itself: egui answers `RedrawRequested` with
         // "repaint" too, meaning paint now, and a frame asked for on the
         // strength of that would be a frame asking for the next for ever.
+        //
+        // Except `Tab`, which is kept from egui while none of its fields has
+        // the keyboard: egui-winit reports it taken whether or not one has,
+        // and egui would move its focus with it — to a scroll area, say,
+        // which then wants every key after it. Nothing here takes the focus
+        // a press would give it, so there is nothing for `Tab` to move to,
+        // and the key is the table's.
+        let tab = matches!(
+            &event,
+            WindowEvent::KeyboardInput {
+                event: KeyEvent {
+                    logical_key: winit::keyboard::Key::Named(winit::keyboard::NamedKey::Tab),
+                    ..
+                },
+                ..
+            }
+        );
         let response = self
             .shown
             .as_mut()
+            .filter(|shown| !tab || shown.gui.ctx.egui_wants_keyboard_input())
             .map(|shown| shown.gui.on_event(&shown.window, &event));
         let repaint = Effect::redraw_if(
             response.as_ref().is_some_and(|response| response.repaint)
@@ -4067,6 +4231,363 @@ mod tests {
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }
 
+    /// A removal takes the file off the list and touches nothing on disk:
+    /// the neighbor comes up, the file leaves the list, and the directory
+    /// being read again does not bring it back. Undo puts it back where it
+    /// stood and shows it.
+    #[test]
+    fn a_removed_file_leaves_the_list_and_stays_off_it_until_undo() {
+        let (mut app, dir) = opening_directory(
+            "remove-step",
+            &[("a.png", 8, 8), ("b.png", 8, 8), ("c.png", 8, 8)],
+        );
+        answer(&mut app, Reload::Fresh);
+        app.step(true);
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.files.shown_path(), Some(dir.join("b.png").as_path()));
+
+        app.remove_shown();
+        assert!(dir.join("b.png").exists(), "nothing done to it on disk");
+        assert!(!app.watch.missing(), "and the bar does not call it deleted");
+        assert_eq!(said(&app), "Took b.png off the list. Ctrl+Z to undo.");
+        assert_eq!(app.files.len(), 3, "still on the list while it is on screen");
+        assert_eq!(app.files.pending().map(|pending| pending.index), Some(2));
+        // Held down: nothing more happens until the neighbor is up.
+        app.remove_shown();
+        assert_eq!(app.edits.len(), 1);
+
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.files.len(), 2);
+        assert_eq!(app.files.shown_path(), Some(dir.join("c.png").as_path()));
+        assert_eq!(app.files.index(), 1);
+        assert!(app.conditions().undoable);
+        let rows = |app: &mut App| {
+            let chooser = &app.chooser;
+            app.filmstrip
+                .input(&app.thumbs, |path| App::key_of(chooser, path), None, false, false)
+                .rows
+                .len()
+        };
+        assert_eq!(rows(&mut app), 2, "the strip has let it go too");
+
+        // The directory read again lists it, and the list leaves it out.
+        write_png(&dir, "d.png", 8, 8);
+        assert_eq!(Effect::Nothing, app.poll_directories(), "not settled yet");
+        assert_eq!(Effect::Redraw, app.poll_directories());
+        assert_eq!(
+            app.files.paths(),
+            &[dir.join("a.png"), dir.join("c.png"), dir.join("d.png")]
+        );
+
+        assert_eq!(app.undo(), Effect::Redraw);
+        assert_eq!(said(&app), "Put b.png back on the list.");
+        assert_eq!(app.files.len(), 4);
+        assert_eq!(app.files.path(1), dir.join("b.png"), "back where it stood");
+        assert_eq!(
+            app.files.pending().map(|pending| pending.index),
+            Some(1),
+            "and shown again"
+        );
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.files.shown_path(), Some(dir.join("b.png").as_path()));
+        assert!(!app.conditions().undoable);
+        assert_eq!(Effect::Nothing, app.poll_directories());
+        assert_eq!(Effect::Nothing, app.poll_directories(), "listed again, it stays");
+        assert_eq!(app.files.len(), 4);
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// The only file removed leaves the window showing nothing, as the
+    /// only file deleted does, with the file itself untouched; undo puts
+    /// it back at the head of the list and shows it.
+    #[test]
+    fn removing_the_only_file_empties_the_window() {
+        let (mut app, dir) = app_over("remove-alone", &[("a.png", 8, 8)]);
+        app.remove_shown();
+        assert!(dir.join("a.png").exists());
+        assert!(app.is_empty());
+        assert_eq!(app.files.len(), 0);
+        assert!(app.size_to_next);
+        assert!(said(&app).starts_with("Took a.png off the list"), "{}", said(&app));
+        app.remove_shown();
+        assert_eq!(app.edits.len(), 1, "nothing to take off twice");
+
+        let _ = app.undo();
+        assert_eq!(app.files.len(), 1);
+        assert_eq!(app.files.pending().map(|pending| pending.index), Some(0));
+        answer(&mut app, Reload::Fresh);
+        assert!(app.current.is_some());
+        assert_eq!(app.files.shown_path(), Some(dir.join("a.png").as_path()));
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// A removal waits for the read in flight, as a deletion does; a file
+    /// that stays on screen because its neighbor would not decode is
+    /// refused a second removal, and a deletion, since it is already on
+    /// its way out; and undo then is a reprieve, with the file never
+    /// having left.
+    #[test]
+    fn a_removal_waits_and_a_file_on_its_way_out_is_refused_again() {
+        let (mut app, dir) = opening_directory("remove-busy", &[("a.png", 8, 8), ("b.png", 8, 8)]);
+        app.remove_shown();
+        assert!(app.edits.is_empty(), "the opening read is still in flight");
+        answer(&mut app, Reload::Fresh);
+
+        corrupt(&dir.join("b.png"));
+        app.remove_shown();
+        assert_eq!(app.edits.len(), 1);
+        answer(&mut app, Reload::Fresh);
+        assert!(app.files.is_idle(), "the walk had nowhere else to go");
+        assert_eq!(app.files.shown_path(), Some(dir.join("a.png").as_path()));
+        assert_eq!(app.files.len(), 2, "still on the list, nothing having taken the screen");
+
+        app.remove_shown();
+        assert_eq!(said(&app), "Already taken off the list.");
+        app.trash = Some(Trash::under(dir.join("Trash")));
+        app.delete_shown();
+        assert_eq!(said(&app), "Already taken off the list.");
+        assert!(dir.join("a.png").exists());
+        assert_eq!(app.edits.len(), 1);
+
+        let _ = app.undo();
+        assert_eq!(app.files.len(), 2);
+        assert!(app.files.is_idle(), "never left, so nothing to ask for");
+        assert!(!app.files.is_hidden(&dir.join("a.png")));
+        assert_eq!(Effect::Nothing, app.poll_directories());
+        assert_eq!(Effect::Nothing, app.poll_directories(), "listed as before");
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// The list is put in the order the file list asks for — by name to
+    /// begin with, whatever order it was named in — and the file on
+    /// screen stays the file on screen. A sort that reads the headers
+    /// puts a file whose header is not yet read last, and moves it into
+    /// place once it is; and one asked for under a read waits for the
+    /// read to land.
+    #[test]
+    fn the_list_is_put_in_order_between_reads_and_the_file_on_screen_stays() {
+        use crate::thumbnailer::{Delivered, Facts, News};
+        use crate::ui::filmstrip::Sort;
+        let (mut app, dir) = opening(
+            "order",
+            &[("b.png", 8, 8), ("a.png", 4, 4), ("c.png", 16, 16)],
+        );
+        assert_eq!(app.files.path(0), dir.join("b.png"), "as named");
+        answer(&mut app, Reload::Fresh);
+        let names = |app: &App| -> Vec<String> {
+            app.files
+                .paths()
+                .iter()
+                .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+                .collect()
+        };
+        assert_eq!(names(&app), ["a.png", "b.png", "c.png"], "in name order once the read landed");
+        assert_eq!(app.files.shown_path(), Some(dir.join("b.png").as_path()));
+        assert_eq!(app.files.index(), 1);
+
+        // By area: only the file on screen has been read, and the rest
+        // wait at the end in the order they stood.
+        assert_eq!(
+            app.press(ui::Control::SortBy(Sort::Area)),
+            Effect::Redraw
+        );
+        assert_eq!(names(&app), ["b.png", "a.png", "c.png"]);
+        assert_eq!(app.files.index(), 0);
+        assert!(app.filmstrip.reveals(), "the strip follows the file on screen");
+        let learned = |name: &str, side: u32| Delivered {
+            path: dir.join(name),
+            news: News::Facts(Facts {
+                size: Some((side, side)),
+                sequence: Sequence::Still,
+                title: None,
+                format: Some("PNG"),
+                bytes: None,
+                modified: None,
+            }),
+        };
+        app.take_thumbnail(learned("a.png", 4));
+        app.take_thumbnail(learned("c.png", 16));
+        assert_eq!(names(&app), ["b.png", "a.png", "c.png"], "not until the poll");
+        assert_eq!(app.poll_order(), Effect::Redraw);
+        assert_eq!(names(&app), ["a.png", "b.png", "c.png"]);
+        assert_eq!(app.files.shown_path(), Some(dir.join("b.png").as_path()));
+        assert_eq!(app.poll_order(), Effect::Nothing, "in order already");
+
+        // Under a read: the list is left alone until the read lands.
+        app.step(true);
+        assert_eq!(
+            app.press(ui::Control::SortBy(Sort::Height)),
+            Effect::Redraw
+        );
+        let _ = app.press(ui::Control::SortBy(Sort::Size));
+        assert_eq!(names(&app), ["a.png", "b.png", "c.png"]);
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.files.shown_path(), Some(dir.join("c.png").as_path()));
+        // By size on disk, which only the two files read so far have
+        // said: the smaller first, and the one not read last.
+        assert_eq!(names(&app), ["b.png", "c.png", "a.png"]);
+        assert_eq!(app.files.index(), 1);
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// Back and forward walk the files that have been on screen, in the
+    /// order they were: a step after going back cuts off what lay ahead,
+    /// and a file taken off the list is passed over.
+    #[test]
+    fn back_and_forward_walk_the_files_seen() {
+        use crate::app::input::Action;
+        let (mut app, dir) = opening_directory(
+            "visited",
+            &[("a.png", 8, 8), ("b.png", 8, 8), ("c.png", 8, 8)],
+        );
+        answer(&mut app, Reload::Fresh);
+        assert!(!app.conditions().visited_before && !app.conditions().visited_after);
+        assert_eq!(app.perform(Action::Back), Effect::Nothing);
+        assert!(app.files.is_idle(), "nowhere to go");
+
+        app.step(true);
+        answer(&mut app, Reload::Fresh);
+        app.step(true);
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.files.shown_path(), Some(dir.join("c.png").as_path()));
+        assert!(app.conditions().visited_before && !app.conditions().visited_after);
+
+        assert_eq!(app.perform(Action::Back), Effect::Nothing);
+        assert_eq!(app.files.pending().map(|pending| pending.index), Some(1));
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.files.shown_path(), Some(dir.join("b.png").as_path()));
+        assert!(app.conditions().visited_before && app.conditions().visited_after);
+        let _ = app.perform(Action::Forward);
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.files.shown_path(), Some(dir.join("c.png").as_path()));
+        let _ = app.perform(Action::Back);
+        answer(&mut app, Reload::Fresh);
+        let _ = app.perform(Action::Back);
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.files.shown_path(), Some(dir.join("a.png").as_path()));
+        assert!(!app.conditions().visited_before);
+
+        // A step from here is somewhere new: what lay ahead is cut off.
+        app.step(true);
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.files.shown_path(), Some(dir.join("b.png").as_path()));
+        assert!(!app.conditions().visited_after);
+
+        // The file taken off the list is passed over on the way back.
+        app.remove_shown();
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.files.shown_path(), Some(dir.join("c.png").as_path()));
+        let _ = app.perform(Action::Back);
+        assert_eq!(
+            app.files.pending().map(|pending| app.files.path(pending.index).to_path_buf()),
+            Some(dir.join("a.png"))
+        );
+        answer(&mut app, Reload::Fresh);
+        // Undo shows the file it puts back, which is somewhere new to
+        // have gone from here: what lay ahead is cut off, and the file
+        // put back is on the stack again.
+        let _ = app.undo();
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.files.shown_path(), Some(dir.join("b.png").as_path()));
+        assert!(app.conditions().visited_before && !app.conditions().visited_after);
+        let _ = app.perform(Action::Back);
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.files.shown_path(), Some(dir.join("a.png").as_path()));
+        assert!(app.conditions().visited_after);
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// `Tab` puts the file list up, which narrows what the picture is
+    /// fitted into; driven over the application, its rows are the list,
+    /// the row of the file on screen is marked, and a press on another
+    /// row asks for that file.
+    #[test]
+    fn the_file_list_comes_up_beside_the_picture_and_shows_what_is_pressed() {
+        use crate::app::input::Action;
+        use egui_kittest::kittest::Queryable;
+        let (mut app, dir) = app_over(
+            "filmstrip",
+            &[("a.png", 8, 8), ("b.png", 8, 8), ("c.png", 8, 8)],
+        );
+        app.headless = Some(WINDOW);
+        let whole = app.viewport();
+        assert!(!app.filmstrip_showing());
+        assert_eq!(app.perform(Action::ToggleFilmstrip), Effect::Redraw);
+        assert!(app.filmstrip_showing());
+        assert_eq!(app.parts().filmstrip, Some(ui::filmstrip::SLOT_DEFAULT));
+        let narrowed = app.viewport();
+        assert_eq!(narrowed.x, whole.x + ui::filmstrip::width(ui::filmstrip::SLOT_DEFAULT));
+        assert_eq!(narrowed.width, whole.width - ui::filmstrip::width(ui::filmstrip::SLOT_DEFAULT));
+
+        let mut harness = driven(app);
+        assert!(harness.query_by_label("Show file 1").is_some());
+        assert!(harness.query_by_label("Show file 3").is_some());
+        click(&mut harness, "Show file 3");
+        let app = harness.state_mut();
+        assert_eq!(
+            app.files.pending().map(|pending| pending.index),
+            Some(2),
+            "the third file is asked for"
+        );
+        answer(app, Reload::Fresh);
+        assert_eq!(app.files.shown_path(), Some(dir.join("c.png").as_path()));
+
+        // With one file there is no list to show, and the toggle is
+        // remembered for when there is.
+        app.remove_shown();
+        answer(app, Reload::Fresh);
+        app.remove_shown();
+        answer(app, Reload::Fresh);
+        assert_eq!(app.files.len(), 1);
+        assert!(!app.filmstrip_showing());
+        assert!(app.panels.show_filmstrip);
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// Hiding the interface leaves the file list up without its head, the
+    /// picture beside it rather than under it; the key that closes the
+    /// floating panels with the bars closes the list too.
+    #[test]
+    fn hiding_the_interface_keeps_the_file_list_and_the_full_hide_closes_it() {
+        use crate::app::input::Action;
+        use egui_kittest::kittest::Queryable;
+        let (mut app, dir) = app_over(
+            "filmstrip-hidden",
+            &[("a.png", 8, 8), ("b.png", 8, 8), ("c.png", 8, 8)],
+        );
+        app.headless = Some(WINDOW);
+        let _ = app.perform(Action::ToggleFilmstrip);
+        let _ = app.perform(Action::ToggleInterface);
+        assert!(!app.panels.show_ui);
+        assert!(app.filmstrip_showing());
+        let viewport = app.viewport();
+        assert_eq!(viewport.x, ui::filmstrip::width(ui::filmstrip::SLOT_DEFAULT));
+        assert_eq!(viewport.y, 0.0);
+        assert_eq!(viewport.width, WINDOW[0] - ui::filmstrip::width(ui::filmstrip::SLOT_DEFAULT));
+        assert_eq!(viewport.height, WINDOW[1]);
+
+        let mut harness = driven(app);
+        assert!(harness.query_by_label("Show file 1").is_some());
+        assert!(harness.query_by_label("Back").is_none(), "the head goes with the bars");
+        let app = harness.state_mut();
+
+        // Back up, and down again with everything that floats.
+        let _ = app.perform(Action::ToggleInterface);
+        let _ = app.perform(Action::ToggleInterfaceAndPanels);
+        assert!(!app.panels.show_ui);
+        assert!(!app.panels.show_filmstrip);
+        assert!(!app.filmstrip_showing());
+        assert_eq!(app.viewport().width, WINDOW[0]);
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
     /// A file that has been emptied from the trash cannot come back, and
     /// the window says so rather than failing quietly.
     #[test]
@@ -4362,15 +4883,19 @@ mod tests {
         assert!(app.conditions().undoable);
 
         // Step away, then undo: the old name is back, and so is the file.
+        // The list is in name order, so the renamed file has moved along
+        // it, and moves back once the read of it lands.
         app.step(true);
         answer(&mut app, Reload::Fresh);
         assert_eq!(app.files.shown_path(), Some(dir.join("b.png").as_path()));
+        assert_eq!(app.files.path(1), dir.join("c.jpg"), "sorted after b.png");
         let _ = app.perform(Action::Undo);
         assert!(dir.join("a.png").exists() && !dir.join("c.jpg").exists());
-        assert_eq!(app.files.path(0), dir.join("a.png"));
-        assert_eq!(app.files.pending().map(|pending| pending.index), Some(0));
+        assert_eq!(app.files.path(1), dir.join("a.png"));
+        assert_eq!(app.files.pending().map(|pending| pending.index), Some(1));
         answer(&mut app, Reload::Fresh);
         assert_eq!(app.files.shown_path(), Some(dir.join("a.png").as_path()));
+        assert_eq!(app.files.path(0), dir.join("a.png"), "and sorted back before b.png");
         assert_eq!(
             app.current.as_ref().map(|current| current.label.as_str()),
             Some("a.png")

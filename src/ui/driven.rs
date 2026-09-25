@@ -17,6 +17,7 @@ use crate::view::{View, Viewport};
 use crate::image::region::{Grip, Region, Side};
 
 use super::chooser::{self, Input, Row, Step};
+use super::filmstrip;
 use super::chrome::{BAR_HEIGHT, SIDE_WIDTH};
 use super::control::{Naming, Unnamed};
 use super::help;
@@ -107,6 +108,7 @@ fn picture(width: u32, height: u32) -> Current {
 fn panels() -> Panels {
     Panels {
         show_ui: true,
+        show_filmstrip: false,
         show_histogram: false,
         show_info: false,
         show_luma: true,
@@ -153,6 +155,7 @@ fn input(logical: [f32; 2], count: usize) -> FrameInput {
         move_region: false,
         zoom_box: None,
         transport: None,
+        filmstrip: None,
         chooser: None,
         rename: None,
         export: None,
@@ -235,6 +238,13 @@ fn build(logical: [f32; 2], count: usize, panels: Panels) -> Harness<'static, St
                     match command {
                         Command::Grab { grab, .. } => state.input.grabbing = Some(*grab),
                         Command::Release => state.input.grabbing = None,
+                        // And which of the file list's rows are on screen,
+                        // so that it is said once rather than every pass.
+                        Command::FilmstripVisible(rows) => {
+                            if let Some(strip) = &mut state.input.filmstrip {
+                                strip.visible = rows.clone();
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -697,6 +707,7 @@ fn buttons_that_would_do_nothing_are_not_there() {
     assert!(harness.query_by_label("Previous file").is_none());
     assert!(harness.query_by_label("Next file").is_none());
     assert!(harness.query_by_label("Choose a file").is_none());
+    assert!(harness.query_by_label("File list").is_none());
     drop(harness);
 
     let mut pasteable = panels();
@@ -718,6 +729,155 @@ fn buttons_that_would_do_nothing_are_not_there() {
         click(&mut harness, "Choose a file"),
         [Command::Press(Control::Chooser)]
     );
+    assert_eq!(
+        click(&mut harness, "File list"),
+        [Command::Press(Control::Filmstrip)]
+    );
+}
+
+/// The file list, as a frame is handed it: `count` files' rows, with
+/// `current` the row of the file on screen.
+fn strip(count: usize, current: Option<usize>, reveal: bool) -> filmstrip::Input {
+    let rows: Arc<[filmstrip::Row]> = (0..count)
+        .map(|index| filmstrip::Row {
+            index: index + 1,
+            name: format!("{index:03}.png"),
+            path: format!("birds/{index:03}.png"),
+            format: None,
+            size: None,
+            bytes: None,
+            modified: None,
+            thumb: None,
+        })
+        .collect();
+    let height = filmstrip::row_height(filmstrip::SLOT_MIN, None);
+    let tops: Vec<f32> = (0..=count).map(|row| row as f32 * height).collect();
+    filmstrip::Input {
+        rows,
+        tops: Arc::from(tops),
+        slot: filmstrip::SLOT_MIN,
+        listing: 0,
+        current,
+        order: filmstrip::Order::default(),
+        back: false,
+        forward: true,
+        reveal,
+        visible: 0..0,
+    }
+}
+
+/// The file list up: it says which rows are on screen, a press on a row
+/// asks for that file, its menu offers every sort,
+/// and the pair at its head are dead or alive by whether there is
+/// anywhere to go.
+#[test]
+fn the_file_list_offers_its_rows_its_menus_and_the_way_back() {
+    let mut with_list = panels();
+    with_list.show_filmstrip = true;
+    let mut harness = open(WINDOW, 3, with_list);
+    harness.state_mut().input.filmstrip = Some(strip(3, Some(0), false));
+    harness.run();
+    assert!(
+        asked(&harness).iter().any(|command| matches!(
+            command,
+            Command::FilmstripVisible(rows) if rows.start == 0 && rows.end == 3
+        )),
+        "{:?}",
+        asked(&harness)
+    );
+    assert_eq!(
+        click(&mut harness, "Show file 2"),
+        [Command::Press(Control::Thumb(1))]
+    );
+
+    assert!(harness.get_by_label("Back").accesskit_node().is_disabled());
+    assert!(!harness.get_by_label("Forward").accesskit_node().is_disabled());
+    assert_eq!(
+        click(&mut harness, "Forward"),
+        [Command::Press(Control::Forward)]
+    );
+
+    assert_eq!(click(&mut harness, "Sort"), []);
+    assert_eq!(
+        click(&mut harness, "Area"),
+        [Command::Press(Control::SortBy(filmstrip::Sort::Area))]
+    );
+    assert_eq!(click(&mut harness, "Sort"), []);
+    assert_eq!(
+        click(&mut harness, "Descending"),
+        [Command::Press(Control::SortDirection(
+            filmstrip::Direction::Descending
+        ))]
+    );
+}
+
+/// The file list's right edge is a grip: dragged, it asks for the slot
+/// that puts the edge under the pointer, held between the narrowest and
+/// the widest the list goes, however far past either the pointer went.
+#[test]
+fn the_file_list_is_widened_by_dragging_its_edge() {
+    let mut with_list = panels();
+    with_list.show_filmstrip = true;
+    let mut harness = open(WINDOW, 3, with_list);
+    harness.state_mut().input.filmstrip = Some(strip(3, Some(0), false));
+    harness.run();
+    // The panel's left edge is its first row's.
+    let row = harness.get_by_label("Show file 1").rect();
+    let edge = row.min.x + filmstrip::width(filmstrip::SLOT_MIN);
+    let y = row.center().y;
+    let slots = |commands: Vec<Command>| -> Vec<f32> {
+        commands
+            .into_iter()
+            .filter_map(|command| match command {
+                Command::FilmstripSlot(slot) => Some(slot),
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(
+        slots(drag(&mut harness, [edge, y], [edge + 60.0, y])),
+        [filmstrip::SLOT_MIN + 60.0]
+    );
+    assert_eq!(
+        slots(drag(&mut harness, [edge, y], [WINDOW[0], y])),
+        [filmstrip::SLOT_MAX]
+    );
+    assert_eq!(
+        slots(drag(&mut harness, [edge - 1.0, y], [0.0, y])),
+        [],
+        "already at its narrowest"
+    );
+}
+
+/// The list is put at the file on screen when it is revealed — the file
+/// may have been stepped to from anywhere — and only then.
+#[test]
+fn the_file_list_scrolls_to_the_file_on_screen() {
+    let mut with_list = panels();
+    with_list.show_filmstrip = true;
+    let mut harness = open(WINDOW, 200, with_list);
+    harness.state_mut().input.filmstrip = Some(strip(200, Some(150), true));
+    harness.step();
+    harness
+        .state_mut()
+        .input
+        .filmstrip
+        .as_mut()
+        .expect("set above")
+        .reveal = false;
+    harness.run_steps(30);
+    let visible = asked(&harness)
+        .into_iter()
+        .filter_map(|command| match command {
+            Command::FilmstripVisible(rows) => Some(rows),
+            _ => None,
+        })
+        .next_back()
+        .expect("the rows on screen were said");
+    assert!(visible.contains(&150), "{visible:?}");
+    assert!(!visible.contains(&0), "{visible:?}");
+    assert!(harness.query_by_label("Show file 151").is_some());
+    assert!(harness.query_by_label("Show file 1").is_none());
 }
 
 /// The interface over nothing: no list, no picture, nothing on its way.
@@ -1102,7 +1262,7 @@ fn the_minimap_asks_to_center_on_what_is_pressed() {
     harness.state_mut().input.minimap_on_screen = true;
     harness.state_mut().input.can_pan = true;
     harness.run();
-    let content = super::chrome::content_area(WINDOW, true, false);
+    let content = super::chrome::content_area(WINDOW, true, super::chrome::Parts::NONE);
     let map = super::minimap::thumbnail(content, image).expect("room for a map");
     let close = |a: [f32; 2], b: [f32; 2]| (a[0] - b[0]).abs() < 0.5 && (a[1] - b[1]).abs() < 0.5;
 
@@ -1271,6 +1431,22 @@ fn the_chooser_takes_the_keys_while_open_and_gives_them_back() {
     harness.run();
     assert!(!harness.ctx.egui_wants_keyboard_input());
     assert!(harness.query_by_label("Choose file 2").is_none());
+}
+
+/// With more than one file, the menu of the file offers taking it off the
+/// list too, with its key beside it; with one, it does not.
+#[test]
+fn the_file_menu_offers_the_removal_only_from_a_list() {
+    let mut harness = open(WINDOW, 1, panels());
+    assert_eq!(click(&mut harness, "File"), []);
+    assert!(harness.query_by_label("Remove from list").is_none());
+
+    let mut harness = open(WINDOW, 3, panels());
+    assert_eq!(click(&mut harness, "File"), []);
+    assert_eq!(
+        click(&mut harness, "Remove from list"),
+        [Command::Press(Control::Remove)]
+    );
 }
 
 /// The button before the name opens the menu of the file: its name and

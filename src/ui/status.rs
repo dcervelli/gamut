@@ -66,6 +66,20 @@ pub(super) fn top_words(pass: &mut Pass, ui: &mut egui::Ui, current: &Current) {
     // of one does nothing, and a button that did nothing when pressed would
     // be worse than no button.
     if let Some(counter) = counter(pass.input.index, pass.input.count) {
+        // Before the pair: the list they step through, laid out down the
+        // side of the window, and this the toggle that puts it there.
+        let strip = pass.icon_button(
+            ui,
+            icon::PANEL_LEFT,
+            Control::Filmstrip,
+            pass.panels.show_filmstrip,
+            true,
+            Corners::All,
+        );
+        if strip.clicked() {
+            pass.press(Control::Filmstrip);
+        }
+        ui.add_space(COUNTER_GAP);
         let previous = pass.icon_button(
             ui,
             icon::CHEVRON_LEFT,

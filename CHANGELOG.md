@@ -8,6 +8,44 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Added
 
+- A file list. `Tab`, or the button at the head of the top bar, puts a
+  strip of thumbnails down the left of the picture, one row per file in
+  the order `]` and `[` walk, each thumbnail with the file's place in the
+  list and its name above it — a long name cut in its middle, keeping its
+  extension — and the file on screen washed in the accent. Resting on a
+  row gives the folder, the type, the size in pixels and on disk, and when
+  the file was last changed; sorted by anything but name, each thumbnail
+  wears the value it is sorted by — for a path, its folder; a click on a
+  row shows that file, and the strip scrolls to the
+  file on screen as it changes. A menu at its head sorts the list by
+  name, path, type, date, size on disk, width, height or area, ascending
+  or descending, and the list itself is put in that order, so that the
+  keys, the counter and the chooser all walk it. A sort keeps the order of
+  files it cannot tell apart, so sorting by size and then by type leaves
+  each type in size order, and a directory read again keeps the order it
+  found the list in. A file whose header has not been read yet sorts after
+  those that have, and moves into place once it is. The list opens in name
+  order, whatever order the files were named in. Hiding the interface with
+  `` ` `` leaves the list up without its head; `~` closes it with the
+  floating panels. Dragging its right edge widens it, the thumbnails
+  growing with it from 128 pixels across to 384, and what is on screen
+  staying where it is. Each row is as tall as its picture's shape, from
+  half as tall as it is wide to half again as tall, and square until the
+  file's header has been read; the rows on screen stay put as the rows
+  above them take their shapes.
+
+- Back and forward through the files that have been on screen: `Alt+[`
+  and `Alt+]`, or `Alt+Page Up` and `Alt+Page Down`, or the pair at the
+  head of the file list, which are dead with nowhere to go. A step, a
+  pick or a paste after going back cuts off what lay ahead, as a browser's
+  history does; a file taken off the list or moved to the trash is passed
+  over rather than forgotten, and is there again once undo lists it.
+
+- `Backspace` takes the file on screen off the list without touching it
+  on disk, and shows the next. The file stays off the list for the
+  session however often its directory is read again; `Ctrl+Z` puts it
+  back where it stood, and opening it by name again does too.
+
 - A loupe. `l`, or the button beside the grid's in the bottom bar, rings
   the pixels around the pointer and shows them magnified in a circle
   beside it, placed up and to the right and going the other way where that
@@ -104,6 +142,18 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   again — that stays up until it opens, in place of the words after the
   name in the top bar. Stepping on while it is up keeps it up, naming the
   file now being read.
+
+- `Backspace` no longer moves the file on screen to the trash; `Delete`
+  alone does. The undo key's line in the help says it undoes a removal
+  as well.
+
+- The information panel's "Read by" line, and the file list's type, name
+  the format a file turned out to be rather than the decoder that read
+  it: a GIF says `gif` and an EXR `exr` where both said
+  `gif/hdr/exr/bmp/netpbm`, an AVIF says `avif` and a HEIC `heic`, and a
+  camera raw says which — `nef`, `arw`, `cr2`, `dng` and the rest — where
+  its bytes say, and `camera raw` where they do not.
+
 - A new icon: a lake at sunset, with a loupe over the sun's rim showing
   its pixels. `bin/icon` draws it from a model of the scene's light.
 - The histogram's logarithmic count axis is toggled by `y` rather than

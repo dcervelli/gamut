@@ -35,6 +35,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
+use std::time::SystemTime;
 
 use anyhow::{Context, Result, anyhow};
 
@@ -42,13 +43,18 @@ use crate::image::decode::{self, Overrides};
 use crate::image::display::{Display, Headroom, Startup};
 use crate::image::sequence::Sequence;
 use crate::image::xmp::{self, Xmp};
-use crate::image::{Channels, Region, Stats, encode, exif, resample};
+use crate::image::{Channels, DecodedImage, Region, Stats, encode, exif, resample};
 use crate::loader::guard;
 use crate::thumbnail::{self, Dirs, Key, Lookup};
 
-/// The longest side of the copy handed to the screen, which is what the
-/// chooser draws: a quarter of the cache's, and at most 64 KiB of RGBA.
-pub const DISPLAY_SIDE: u32 = 128;
+/// The longest sides of the copies handed to the screen, smallest first:
+/// the cache's own size, and each after it half the one before. The screen
+/// draws with no mipmaps of its own, and a texture drawn at less than half
+/// its size skips texels and comes out jagged, so these are the mipmaps: a
+/// thumbnail drawn at any size has a copy that is at most twice that, and
+/// from the cache's 512 each is an exact halving. At most 64 KiB, 256 KiB
+/// and 1 MiB of RGBA.
+pub const DISPLAY_SIDES: [u32; 3] = [thumbnail::SIDE / 4, thumbnail::SIDE / 2, thumbnail::SIDE];
 
 /// What a file's pixels may come to, decoded, before the thread declines to
 /// hold them: the same figure the player keeps its cache under, being the
@@ -83,11 +89,25 @@ pub struct Facts {
     /// What the file calls itself, from its XMP, as the info panel shows
     /// it: what the chooser matches on beside the name.
     pub title: Option<String>,
+    /// The decoder that claims the file, by name, chosen by what its bytes
+    /// say rather than by what its name does: what the file list sorts by
+    /// as its type. `None` where nothing claims it.
+    pub format: Option<&'static str>,
+    /// Its size on disk, or `None` where it could not be stat'ed.
+    pub bytes: Option<u64>,
+    /// When it was last written, or `None` where the file system does not
+    /// say.
+    pub modified: Option<SystemTime>,
 }
 
-/// The small copy for the screen: straight alpha, at most [`DISPLAY_SIDE`]
-/// a side.
+/// The copies for the screen, each fitted from the same pixels to one of
+/// [`DISPLAY_SIDES`], in that order.
 pub struct Thumb {
+    pub copies: [DisplayCopy; 3],
+}
+
+/// One copy for the screen: straight alpha.
+pub struct DisplayCopy {
     pub width: u32,
     pub height: u32,
     pub rgba: Vec<u8>,
@@ -109,6 +129,11 @@ enum Ask {
     /// whose thumbnail the screen let go of is a read of the cache and
     /// never a second decode.
     Prioritize(Vec<PathBuf>),
+    /// A file the application has decoded for the screen, with its
+    /// picture: thumbnailed from that, ahead of everything, rather than
+    /// read and decoded again here — or refused here, the ceiling being
+    /// what a background decode may hold, and this one held already.
+    Adopt(PathBuf, Arc<DecodedImage>),
 }
 
 impl Thumbnailer {
@@ -142,6 +167,12 @@ impl Thumbnailer {
 
     pub fn prioritize(&self, paths: Vec<PathBuf>) {
         self.send(Ask::Prioritize(paths));
+    }
+
+    /// The picture of `path` as the application has decoded it, for its
+    /// thumbnail to be made from.
+    pub fn adopt(&self, path: PathBuf, image: Arc<DecodedImage>) {
+        self.send(Ask::Adopt(path, image));
     }
 
     fn send(&self, ask: Ask) {
@@ -216,12 +247,17 @@ struct Queue {
     /// The files asked for now, which jump the header queue on their way
     /// to the front of the thumbnail one.
     urgent: HashSet<PathBuf>,
+    /// Pictures handed over decoded, done before anything else: the
+    /// application is showing each, and the row for it is the one on
+    /// screen.
+    adopted: VecDeque<(PathBuf, Arc<DecodedImage>)>,
 }
 
 /// What the thread does next.
 enum Stage {
     Header(PathBuf),
     Thumbnail(PathBuf, Facts),
+    Adopted(PathBuf, Arc<DecodedImage>),
 }
 
 impl Queue {
@@ -247,10 +283,21 @@ impl Queue {
                     self.headers.push_front(path);
                 }
             }
+            Ask::Adopt(path, image) => {
+                // Whatever was waiting for it here is answered by this.
+                self.headers.retain(|waiting| *waiting != path);
+                self.thumbnails.retain(|waiting| *waiting != path);
+                self.known.remove(&path);
+                self.seen.insert(path.clone());
+                self.adopted.push_back((path, image));
+            }
         }
     }
 
     fn next(&mut self) -> Option<Stage> {
+        if let Some((path, image)) = self.adopted.pop_front() {
+            return Some(Stage::Adopted(path, image));
+        }
         if let Some(path) = self.thumbnails.front()
             && self.urgent.contains(path)
         {
@@ -283,7 +330,7 @@ impl Queue {
 
     /// Whether anything is waiting to be done.
     fn is_empty(&self) -> bool {
-        self.headers.is_empty() && self.thumbnails.is_empty()
+        self.headers.is_empty() && self.thumbnails.is_empty() && self.adopted.is_empty()
     }
 }
 
@@ -349,6 +396,14 @@ fn run(
                     return;
                 }
             }
+            Stage::Adopted(path, image) => {
+                queue.done(&path);
+                let news = thumbnail_from(&path, &image, dirs.as_ref(), canceled);
+                drop(image);
+                if canceled.load(Ordering::Relaxed) || !deliver(Delivered { path, news }) {
+                    return;
+                }
+            }
         }
     }
 }
@@ -360,11 +415,15 @@ fn run(
 /// the container's headers — and the chooser matches on it.
 fn header(path: &Path) -> Result<Facts> {
     let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let metadata = std::fs::metadata(&absolute).ok();
     guard("reading the header", || {
         Ok(Facts {
             size: decode::probe(&absolute)?,
             sequence: decode::sequence(&absolute)?,
             title: title(&absolute),
+            format: decode::reader(&absolute),
+            bytes: metadata.as_ref().map(std::fs::Metadata::len),
+            modified: metadata.and_then(|metadata| metadata.modified().ok()),
         })
     })
 }
@@ -438,6 +497,89 @@ fn thumbnail_one(
     }
 }
 
+/// The thumbnail of a file the application has decoded, from the picture
+/// it decoded: from the cache where the cache has this version of the
+/// file, since reading a small PNG is cheaper than reducing a large
+/// picture, and made from the picture otherwise.
+fn thumbnail_from(
+    path: &Path,
+    image: &DecodedImage,
+    dirs: Option<&Dirs>,
+    canceled: &AtomicBool,
+) -> News {
+    let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let (mtime, bytes) = match stat(&absolute) {
+        Ok(stat) => stat,
+        Err(error) => {
+            report(path, &error);
+            return News::Failed;
+        }
+    };
+    let Some(dirs) = dirs.filter(|dirs| !dirs.holds(&absolute)) else {
+        return News::Failed;
+    };
+    let key = thumbnail::key(&absolute);
+    if let Lookup::Fresh(png) = thumbnail::lookup(dirs, &key, mtime)
+        && let Ok(thumb) = guard("reading the cached thumbnail", || read_png(&png))
+    {
+        return News::Thumb(thumb);
+    }
+    let size = Some((image.width, image.height));
+    match guard("reducing", || {
+        finish(dirs, &key, size, mtime, bytes, image, canceled)
+    }) {
+        Ok(thumb) => News::Thumb(thumb),
+        Err(error) => {
+            if !canceled.load(Ordering::Relaxed) {
+                report(path, &error);
+            }
+            News::Failed
+        }
+    }
+}
+
+/// From a decoded picture to the thumbnail in the cache and the copy for
+/// the screen: windowed and metered as the viewer would open it — a scene
+/// or a measurement shown with `Display::default` is black — from the
+/// picture itself, which is what the viewer scans: the box filter averages
+/// a hot pixel into its block and lifts a shadow's geometric mean, so a
+/// window or a meter read off the small image would not be the viewer's.
+/// The scan samples at most two million pixels whatever the picture, and
+/// allocates nothing but its bins.
+fn finish(
+    dirs: &Dirs,
+    key: &Key,
+    size: Option<(u32, u32)>,
+    mtime: u64,
+    bytes: u64,
+    image: &DecodedImage,
+    canceled: &AtomicBool,
+) -> Result<Thumb> {
+    let stats = Stats::scan(image);
+    let small = resample::downscale(image, thumbnail::SIDE);
+    if canceled.load(Ordering::Relaxed) {
+        return Err(anyhow!("stopped"));
+    }
+    let display = Display::for_image_with(&small, &stats, Startup::default(), Headroom::None);
+    let raster = encode::displayed_on(
+        &small,
+        &display,
+        crate::image::orient::Turn::NONE,
+        Region::whole([small.width, small.height]),
+        None,
+        1,
+    );
+    let chunks = thumbnail::text_chunks(key, mtime, bytes, size);
+    let png = encode::png_with_text(&raster, &chunks)?;
+    thumbnail::write(dirs, &dirs.xlarge, key, &png)?;
+    Ok(display_copy(
+        raster.width,
+        raster.height,
+        raster.channels,
+        &raster.data,
+    ))
+}
+
 /// Makes the thumbnail of `path` and puts it in the cache, or records that
 /// it could not; either way, what to say about it.
 #[allow(
@@ -480,37 +622,9 @@ fn make(
         guard("decoding", || decode::load(path, overrides))
     };
     let made = made.and_then(|image| {
-        // Windowed and metered as the viewer would open it — a scene or a
-        // measurement shown with `Display::default` is black — from the
-        // picture itself, which is what the viewer scans: the box filter
-        // averages a hot pixel into its block and lifts a shadow's
-        // geometric mean, so a window or a meter read off the small image
-        // would not be the viewer's. The scan samples at most two million
-        // pixels whatever the picture, and allocates nothing but its bins.
-        let stats = guard("scanning", || Ok(Stats::scan(&image)))?;
-        let small = resample::downscale(&image, thumbnail::SIDE);
-        drop(image);
-        if canceled.load(Ordering::Relaxed) {
-            return Err(anyhow!("stopped"));
-        }
-        let display = Display::for_image_with(&small, &stats, Startup::default(), Headroom::None);
-        let raster = encode::displayed_on(
-            &small,
-            &display,
-            crate::image::orient::Turn::NONE,
-            Region::whole([small.width, small.height]),
-            None,
-            1,
-        );
-        let chunks = thumbnail::text_chunks(key, mtime, bytes, facts.size);
-        let png = encode::png_with_text(&raster, &chunks)?;
-        thumbnail::write(dirs, &dirs.xlarge, key, &png)?;
-        Ok(display_copy(
-            raster.width,
-            raster.height,
-            raster.channels,
-            &raster.data,
-        ))
+        guard("reducing", || {
+            finish(dirs, key, facts.size, mtime, bytes, &image, canceled)
+        })
     });
     match made {
         Ok(thumb) => News::Thumb(thumb),
@@ -555,11 +669,24 @@ fn read_png(path: &Path) -> Result<Thumb> {
     Ok(display_copy(info.width, info.height, channels, &pixels))
 }
 
-/// Eight-bit pixels of `channels`, fitted to [`DISPLAY_SIDE`] and widened
-/// to the straight RGBA the screen takes.
+/// Eight-bit pixels of `channels`, fitted to each of [`DISPLAY_SIDES`] and
+/// widened to the straight RGBA the screen takes.
 fn display_copy(width: u32, height: u32, channels: Channels, data: &[u8]) -> Thumb {
+    Thumb {
+        copies: DISPLAY_SIDES.map(|side| fitted_copy(width, height, channels, data, side)),
+    }
+}
+
+/// One of [`display_copy`]'s copies, at most `side` a side.
+fn fitted_copy(
+    width: u32,
+    height: u32,
+    channels: Channels,
+    data: &[u8],
+    side: u32,
+) -> DisplayCopy {
     let (width, height, small) =
-        resample::downscale_bytes(width, height, channels.count(), data, DISPLAY_SIDE);
+        resample::downscale_bytes(width, height, channels.count(), data, side);
     let mut rgba = Vec::with_capacity(width as usize * height as usize * 4);
     for pixel in small.chunks_exact(channels.count()) {
         match channels {
@@ -571,7 +698,7 @@ fn display_copy(width: u32, height: u32, channels: Channels, data: &[u8]) -> Thu
             Channels::Rgba => rgba.extend_from_slice(pixel),
         }
     }
-    Thumb {
+    DisplayCopy {
         width,
         height,
         rgba,
@@ -594,6 +721,46 @@ fn report(path: &Path, error: &anyhow::Error) {
 mod tests {
     use super::*;
 
+    /// A picture the application has decoded is thumbnailed from itself,
+    /// into the cache and for the screen, as one decoded here would be;
+    /// and from the cache the next time, this version being in it.
+    #[test]
+    fn a_picture_already_decoded_is_thumbnailed_from_itself() {
+        let dir = std::env::temp_dir().join(format!("gamut-adopted-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let dirs = Dirs::under(&dir.join("thumbnails"));
+        let picture = dir.join("picture.png");
+        let pixels = vec![90u8; 640 * 480 * 3];
+        ::image::save_buffer(&picture, &pixels, 640, 480, ::image::ColorType::Rgb8).unwrap();
+        let image = decode::load(&picture, Overrides::default()).expect("it decodes");
+
+        let stopped = AtomicBool::new(false);
+        let News::Thumb(thumb) = thumbnail_from(&picture, &image, Some(&dirs), &stopped) else {
+            panic!("a thumbnail");
+        };
+        let sizes = thumb.copies.each_ref().map(|copy| (copy.width, copy.height));
+        assert_eq!(sizes, [(128, 96), (256, 192), (512, 384)]);
+        assert_eq!(&thumb.copies[0].rgba[..4], &[90, 90, 90, 255]);
+        let key = thumbnail::key(&std::path::absolute(&picture).unwrap());
+        assert!(dirs.xlarge.join(&key.name).exists(), "in the cache");
+
+        let News::Thumb(again) = thumbnail_from(&picture, &image, Some(&dirs), &stopped) else {
+            panic!("a thumbnail, from the cache");
+        };
+        assert_eq!((again.copies[0].width, again.copies[0].height), (128, 96));
+
+        // Adopted, a file waits for nothing else, and is done first.
+        let mut queue = Queue::default();
+        queue.take(Ask::Enqueue(vec![PathBuf::from("a"), picture.clone()]));
+        queue.take(Ask::Adopt(picture.clone(), Arc::new(image)));
+        assert!(matches!(queue.next(), Some(Stage::Adopted(path, _)) if path == picture));
+        assert!(matches!(queue.next(), Some(Stage::Header(path)) if path == Path::new("a")));
+        assert!(queue.next().is_none(), "the adopted file is not read again");
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     /// Enqueuing keeps order and drops repeats; prioritizing brings a file
     /// to the front, in the order asked, whether or not it was waiting.
     /// Every header is read before any thumbnail is made — except for a
@@ -605,6 +772,9 @@ mod tests {
             size: None,
             sequence: Sequence::Still,
             title: None,
+            format: None,
+            bytes: None,
+            modified: None,
         };
         let mut queue = Queue::default();
         queue.take(Ask::Enqueue(vec![
@@ -637,6 +807,7 @@ mod tests {
                     }
                     queue.urgent.remove(&path);
                 }
+                Stage::Adopted(..) => unreachable!("nothing was adopted"),
                 Stage::Thumbnail(path, _) => {
                     queue.done(&path);
                     stages.push(format!("thumbnail {}", path.display()));
@@ -671,18 +842,19 @@ mod tests {
     #[test]
     fn the_display_copy_is_rgba_and_small() {
         let thumb = display_copy(2, 1, Channels::Gray, &[0, 255]);
-        assert_eq!((thumb.width, thumb.height), (2, 1));
-        assert_eq!(thumb.rgba, [0, 0, 0, 255, 255, 255, 255, 255]);
+        for copy in &thumb.copies {
+            assert_eq!((copy.width, copy.height), (2, 1), "none enlarges");
+            assert_eq!(copy.rgba, [0, 0, 0, 255, 255, 255, 255, 255]);
+        }
         let thumb = display_copy(1, 1, Channels::GrayAlpha, &[9, 3]);
-        assert_eq!(thumb.rgba, [9, 9, 9, 3]);
+        assert_eq!(thumb.copies[0].rgba, [9, 9, 9, 3]);
         let thumb = display_copy(1, 1, Channels::Rgb, &[1, 2, 3]);
-        assert_eq!(thumb.rgba, [1, 2, 3, 255]);
-        let wide = display_copy(512, 256, Channels::Rgba, &[7; 512 * 256 * 4]);
-        assert_eq!((wide.width, wide.height), (DISPLAY_SIDE, DISPLAY_SIDE / 2));
-        assert_eq!(
-            wide.rgba.len(),
-            (DISPLAY_SIDE * DISPLAY_SIDE / 2 * 4) as usize
-        );
+        assert_eq!(thumb.copies[0].rgba, [1, 2, 3, 255]);
+        let wide = display_copy(1024, 512, Channels::Rgba, &[7; 1024 * 512 * 4]);
+        for (copy, side) in wide.copies.iter().zip(DISPLAY_SIDES) {
+            assert_eq!((copy.width, copy.height), (side, side / 2));
+            assert_eq!(copy.rgba.len(), (side * side / 2 * 4) as usize);
+        }
     }
 
     /// The whole trip: a file thumbnailed into a cache directory of the
@@ -705,8 +877,12 @@ mod tests {
                 size: Some((640, 480)),
                 sequence: Sequence::Still,
                 title: None,
+                format: decode::reader(&picture),
+                bytes: Some(std::fs::metadata(&picture).unwrap().len()),
+                modified: std::fs::metadata(&picture).unwrap().modified().ok(),
             }
         );
+        assert!(facts.format.is_some(), "a PNG has a decoder that claims it");
         let News::Thumb(thumb) = thumbnail_one(
             &picture,
             &facts,
@@ -716,8 +892,8 @@ mod tests {
         ) else {
             panic!("a thumbnail");
         };
-        assert_eq!((thumb.width, thumb.height), (128, 96));
-        assert_eq!(&thumb.rgba[..4], &[200, 200, 200, 255]);
+        assert_eq!((thumb.copies[0].width, thumb.copies[0].height), (128, 96));
+        assert_eq!(&thumb.copies[0].rgba[..4], &[200, 200, 200, 255]);
 
         // In the cache, at the cache's size, with the chunks.
         let key = thumbnail::key(&std::path::absolute(&picture).unwrap());

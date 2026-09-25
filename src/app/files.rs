@@ -4,7 +4,7 @@
 //! calls for and never sends one, so it needs no loader, no window and no
 //! disk, and can be driven through a whole walk in a test.
 
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -77,6 +77,11 @@ pub(super) struct Files {
     /// and the list still has to say which file that is — and leaves the
     /// list in [`Files::shown`], the moment it does. `None` otherwise.
     leaving: Option<PathBuf>,
+    /// Files taken off the list this session with nothing done to them on
+    /// disk. A directory read again would list each of them as before, and
+    /// [`Files::relist`] leaves them out; opening one by name again is what
+    /// puts it back.
+    hidden: HashSet<PathBuf>,
     overrides: decode::Overrides,
     /// Numbers the requests. Only the newest one's reply is acted on.
     generation: u64,
@@ -93,6 +98,7 @@ impl Files {
             adopted: Vec::new(),
             index,
             leaving: None,
+            hidden: HashSet::new(),
             overrides,
             generation: 0,
             pending: None,
@@ -252,6 +258,7 @@ impl Files {
             true => 0,
             false => self.index + 1,
         };
+        self.hidden.remove(&path);
         self.paths.insert(at, path.clone());
         self.adopted.push(path);
         self.request(at, Reload::Fresh, None, source)
@@ -280,6 +287,9 @@ impl Files {
         }
         let at = self.paths.len();
         let remaining = fresh.len() - 1;
+        for path in &fresh {
+            self.hidden.remove(path);
+        }
         self.paths.extend(fresh);
         Some(self.request(
             at,
@@ -307,16 +317,33 @@ impl Files {
         self.leaving = Some(self.paths[self.index].clone());
     }
 
+    /// Takes the file on screen off the list, leaving it as it is on disk.
+    /// It goes out through the door a trashed file does — it stays until
+    /// another file has the screen — and is remembered, so that the
+    /// directory being read again does not bring it back.
+    pub(super) fn hide(&mut self) {
+        self.hidden.insert(self.paths[self.index].clone());
+        self.condemn();
+    }
+
+    /// Whether `path` was taken off the list with nothing done to it on
+    /// disk — whether it has left yet or is still on screen.
+    pub(super) fn is_hidden(&self, path: &Path) -> bool {
+        self.hidden.contains(path)
+    }
+
     /// Whether the file on screen is one that has been moved to the trash
     /// and not yet left the list.
     pub(super) fn is_condemned(&self, path: &Path) -> bool {
         self.leaving.as_deref() == Some(path)
     }
 
-    /// The file that was moved to the trash is back: it stays on the list
-    /// after all.
+    /// The file that was on its way out is back: it stays on the list
+    /// after all, and a rebuild keeps it as it keeps any other.
     pub(super) fn reprieve(&mut self) {
-        self.leaving = None;
+        if let Some(leaving) = self.leaving.take() {
+            self.hidden.remove(&leaving);
+        }
     }
 
     /// The file on screen leaves the list now, with nothing to take the
@@ -346,6 +373,7 @@ impl Files {
         // it — where there is one: an empty list has nothing on screen to
         // move, and the newcomer is what the list now holds.
         let shifts = !self.paths.is_empty() && at <= self.index;
+        self.hidden.remove(&path);
         self.paths.insert(at, path.clone());
         if shifts {
             self.index += 1;
@@ -373,7 +401,10 @@ impl Files {
             }
         }
         if self.leaving.as_deref() == Some(from.as_path()) {
-            self.leaving = Some(to);
+            self.leaving = Some(to.clone());
+        }
+        if self.hidden.remove(&from) {
+            self.hidden.insert(to);
         }
     }
 
@@ -447,6 +478,16 @@ impl Files {
     /// named. Returns whether it differs from the one already held, which is
     /// what the bar's count and the file's place in it depend on.
     ///
+    /// The list keeps the order it stands in: the rebuild says what is on
+    /// it, not where. A directory is read in name order, and the list may
+    /// have been sorted some other way since — by size, by type — with the
+    /// files one sort cannot tell apart left in the order the sort before
+    /// put them, so that sorts compose. Taking the rebuild's order would
+    /// throw that away on every read. So every file the rebuild still lists
+    /// stays where it is, and a newcomer goes in after the nearest file
+    /// that comes before it in the rebuild, which for a list in name order
+    /// is exactly where the directory has it.
+    ///
     /// Two kinds of file survive a rebuild that does not mention them. The
     /// file on screen stays wherever it has gone: its pixels are up and
     /// correct, and dropping the path they came from would leave the title,
@@ -454,71 +495,85 @@ impl Files {
     /// one being shown. A file that was pasted stays because no directory
     /// named on the command line was ever going to list it — it was written
     /// where pictures are kept — and a rebuild is no reason for a picture the
-    /// user made this session to fall out of the walk.
+    /// user made this session to fall out of the walk. Each keeps its place
+    /// among its neighbors, so that `]` lands on whatever has taken its
+    /// position rather than on a file already seen; a newcomer passes one
+    /// of them by name, the order the directory itself was read in.
     ///
-    /// Each keeps its place among its neighbors, so that `]` lands on
-    /// whatever has taken its position rather than on a file already seen.
+    /// A file taken off the list this session is left out however often
+    /// the directory lists it.
     ///
     /// Between reads only: this moves the file on screen to a new index, and a
     /// request in flight is aimed at the old one.
     pub(super) fn relist(&mut self, mut paths: Vec<PathBuf>) -> bool {
         debug_assert!(self.is_idle(), "the list is rebuilt between reads");
+        paths.retain(|path| !self.hidden.contains(path));
         // Nothing to keep from an empty list: it is what the rebuild says.
         if self.paths.is_empty() {
             let changed = !paths.is_empty();
             self.paths = paths;
             return changed;
         }
-        // In the order they stand in now, so that each is placed against a
-        // list the ones before it are already back in.
-        let keep: Vec<(usize, PathBuf)> = self
+        let listed: HashSet<&Path> = paths.iter().map(PathBuf::as_path).collect();
+        let mut merged: Vec<PathBuf> = self
             .paths
             .iter()
             .enumerate()
-            .filter(|(index, path)| *index == self.index || self.adopted.contains(path))
-            .map(|(index, path)| (index, path.clone()))
+            .filter(|(index, path)| {
+                *index == self.index
+                    || self.adopted.contains(path)
+                    || listed.contains(path.as_path())
+            })
+            .map(|(_, path)| path.clone())
             .collect();
-        for (was, path) in keep {
-            if paths.contains(&path) {
+        // Where the next newcomer goes: just after the last file of the
+        // rebuild that the list already holds.
+        let mut cursor = 0;
+        for path in &paths {
+            if let Some(at) = merged.iter().position(|held| held == path) {
+                cursor = at + 1;
                 continue;
             }
-            let at = self.place_for(&path, was, &paths);
-            paths.insert(at, path);
+            while let Some(kept) = merged.get(cursor)
+                && !listed.contains(kept.as_path())
+                && kept < path
+            {
+                cursor += 1;
+            }
+            merged.insert(cursor, path.clone());
+            cursor += 1;
         }
 
         let shown = &self.paths[self.index];
-        self.index = paths
+        self.index = merged
             .iter()
             .position(|path| path == shown)
-            .expect("the file on screen was put back if the rebuild had dropped it");
-        let changed = paths != self.paths;
-        self.paths = paths;
+            .expect("the file on screen was kept whatever the rebuild dropped");
+        let changed = merged != self.paths;
+        self.paths = merged;
         changed
     }
 
-    /// Where a file the rebuild did not list goes back into it: after
-    /// everything that came before it, before everything that came after,
-    /// which is what keeps `]` and `[` going the way the user was going.
-    /// `was` is where it stood in the list as it is now.
+    /// Puts the list in the order `places` gives — each entry the index, as
+    /// the list stands, of the file that goes there — keeping the file on
+    /// screen the file on screen. Returns whether anything moved.
     ///
-    /// A path that was in the old list settles which side it is on by where it
-    /// was. One that has only just appeared has no place there to go on, and
-    /// settles it by its name — the order the directory itself was read in,
-    /// which is the order the rest of the list is in.
-    fn place_for(&self, missing: &Path, was: usize, paths: &[PathBuf]) -> usize {
-        let previously: HashMap<&Path, usize> = self
-            .paths
-            .iter()
-            .enumerate()
-            .map(|(index, path)| (path.as_path(), index))
-            .collect();
-        paths
-            .iter()
-            .take_while(|path| match previously.get(path.as_path()) {
-                Some(&index) => index < was,
-                None => path.as_path() < missing,
-            })
-            .count()
+    /// Between reads only, as [`Files::relist`] is: a request in flight is
+    /// aimed at an index.
+    pub(super) fn reorder(&mut self, places: &[usize]) -> bool {
+        debug_assert!(self.is_idle(), "the list is reordered between reads");
+        debug_assert_eq!(places.len(), self.paths.len(), "one place per file");
+        if places.iter().enumerate().all(|(place, &index)| place == index) {
+            return false;
+        }
+        let shown = self.shown_path().map(Path::to_path_buf);
+        self.paths = places.iter().map(|&index| self.paths[index].clone()).collect();
+        if let Some(shown) = shown {
+            self.index = self
+                .position(&shown)
+                .expect("every file is somewhere in a permutation of the list");
+        }
+        true
     }
 
     /// A reply has reached the screen. A file moved to the trash while it
@@ -1094,5 +1149,107 @@ mod tests {
         files.shown(2);
         assert_eq!(files.len(), 2);
         assert!(files.accept(reload.generation).is_none());
+    }
+
+    /// A file taken off the list goes out the way a trashed one does —
+    /// once its neighbor has the screen — and stays out: the directory
+    /// listing it again does not bring it back, since the user just said
+    /// they did not want it there. Opening it by name again is what does.
+    #[test]
+    fn a_hidden_file_leaves_the_list_and_stays_out_of_a_rebuild() {
+        let mut files = list(3);
+        files.shown(1);
+        files.hide();
+        assert!(files.is_hidden(Path::new("1.png")));
+        assert!(files.is_condemned(Path::new("1.png")), "on its way out like a trashed file");
+        let request = files.step_away().expect("somewhere to go");
+        files.accept(request.generation);
+        files.shown(2);
+        assert_eq!(files.paths(), &named(&["0.png", "2.png"]));
+        assert!(files.is_hidden(Path::new("1.png")), "remembered after it has left");
+
+        assert!(
+            !files.relist(named(&["0.png", "1.png", "2.png"])),
+            "a rebuild that lists the hidden file changes nothing"
+        );
+        assert_eq!(files.paths(), &named(&["0.png", "2.png"]));
+
+        let request = files.append(named(&["1.png"])).expect("something to ask for");
+        assert_eq!(request.index, 2, "opened by name, it is back, at the end");
+        assert!(!files.is_hidden(Path::new("1.png")));
+        files.accept(request.generation);
+        files.shown(2);
+        assert!(
+            !files.relist(named(&["0.png", "1.png", "2.png"])),
+            "listed again, it is kept where it went in"
+        );
+        assert_eq!(files.paths(), &named(&["0.png", "2.png", "1.png"]));
+    }
+
+    /// Undo before the neighbor arrives is a reprieve, and undo after is a
+    /// reinstatement: either way the file is no longer hidden. And a file
+    /// renamed while hidden stays hidden under its new name.
+    #[test]
+    fn a_hidden_file_put_back_is_hidden_no_longer() {
+        let mut files = list(3);
+        files.shown(1);
+        files.hide();
+        let request = files.step_away().expect("somewhere to go");
+        files.reprieve();
+        assert!(!files.is_hidden(Path::new("1.png")));
+        assert!(!files.is_condemned(Path::new("1.png")));
+        assert!(files.accept(request.generation).is_some());
+        files.shown(2);
+        assert_eq!(files.len(), 3, "reprieved, it stays");
+
+        files.hide();
+        let request = files.step_away().expect("somewhere to go");
+        files.accept(request.generation);
+        files.shown(1);
+        assert_eq!(files.paths(), &named(&["0.png", "1.png"]));
+        let request = files.reinstate(PathBuf::from("2.png"), 2, false);
+        assert_eq!(request.index, 2);
+        assert!(!files.is_hidden(Path::new("2.png")));
+
+        let mut files = list(2);
+        files.shown(0);
+        files.hide();
+        files.rename(0, PathBuf::from("renamed.png"));
+        assert!(files.is_hidden(Path::new("renamed.png")));
+        assert!(!files.is_hidden(Path::new("0.png")));
+    }
+
+    /// Put in another order, the list keeps the file on screen the file on
+    /// screen, wherever it has gone; and a rebuild keeps that order among
+    /// the files it still lists, putting a newcomer in beside the file the
+    /// directory has before it rather than starting over from name order.
+    #[test]
+    fn a_reordered_list_keeps_its_order_through_a_rebuild() {
+        let mut files = list(4);
+        files.shown(1);
+        assert!(!files.reorder(&[0, 1, 2, 3]), "nothing moved");
+        assert!(files.reorder(&[3, 1, 0, 2]));
+        assert_eq!(files.paths(), &named(&["3.png", "1.png", "0.png", "2.png"]));
+        assert_eq!(files.shown_path(), Some(Path::new("1.png")));
+        assert_eq!(files.index(), 1);
+        assert!(files.reorder(&[2, 0, 1, 3]));
+        assert_eq!(files.index(), 2, "moved along with its file");
+
+        // A rebuild in name order that lists a newcomer.
+        assert!(files.relist(named(&["0.png", "1.png", "1a.png", "2.png", "3.png"])));
+        assert_eq!(
+            files.paths(),
+            &named(&["0.png", "3.png", "1.png", "1a.png", "2.png"]),
+            "the order stands, and the newcomer follows the file listed before it"
+        );
+        assert_eq!(files.shown_path(), Some(Path::new("1.png")));
+        assert!(!files.relist(named(&["0.png", "1.png", "1a.png", "2.png", "3.png"])));
+
+        // One that lists only newcomers goes in ahead of everything, in
+        // its own order, as a name-ordered list would have them.
+        let mut files = list(1);
+        files.shown(0);
+        assert!(files.relist(named(&["a.png", "b.png"])));
+        assert_eq!(files.paths(), &named(&["0.png", "a.png", "b.png"]));
     }
 }

@@ -322,7 +322,7 @@ fn logical(size: [f64; 2]) -> LogicalSize<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::chrome::content_area;
+    use crate::ui::chrome::{Parts, content_area};
 
     /// A monitor as the event loop reports it, which is the only way a test
     /// can be handed one that says nothing.
@@ -382,7 +382,7 @@ mod tests {
     #[test]
     fn a_small_picture_still_opens_a_window_the_panels_fit_in() {
         let size = window_size(&MONITOR, Some([32.0, 24.0]), None);
-        let content = content_area([size.width as f32, size.height as f32], true, false);
+        let content = content_area([size.width as f32, size.height as f32], true, Parts::NONE);
         assert!(content.width >= ui::PANELS_ROOM[0], "{content:?}");
         assert!(content.height >= ui::PANELS_ROOM[1], "{content:?}");
 
@@ -393,7 +393,7 @@ mod tests {
         let rounded = content_area(
             [size.width as f32 - 0.5, size.height as f32 - 0.5],
             true,
-            false,
+            Parts::NONE,
         );
         assert!(rounded.width >= ui::PANELS_ROOM[0], "{rounded:?}");
         assert!(rounded.height >= ui::PANELS_ROOM[1], "{rounded:?}");

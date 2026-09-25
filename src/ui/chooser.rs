@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use egui::{
     Align, Frame, Key, LayerId, Modifiers, PopupAnchor, PopupKind, RectAlign, Sense, TextEdit,
-    WidgetInfo, WidgetType, load::SizedTexture, pos2, vec2,
+    WidgetInfo, WidgetType, pos2, vec2,
 };
 
 use super::chrome::Pass;
@@ -90,7 +90,7 @@ pub struct Row {
     pub dimensions: Option<(u32, u32)>,
     /// Its thumbnail, once one has arrived and while the screen still
     /// holds it.
-    pub thumb: Option<SizedTexture>,
+    pub thumb: Option<super::Thumb>,
     /// The chars of `dir/name` — `name` alone where `dir` is empty — the
     /// query was found at, for lighting them.
     pub positions: Vec<usize>,
@@ -412,7 +412,8 @@ fn row(
         vec2(THUMB_SLOT[0], THUMB_SLOT[1]),
     );
     match item.thumb {
-        Some(texture) => {
+        Some(thumb) => {
+            let texture = thumb.for_side(THUMB_SLOT[0] * ui.ctx().pixels_per_point());
             let size = texture.size;
             let scale = (slot.width() / size.x).min(slot.height() / size.y).min(1.0);
             let fitted = vec2((size.x * scale).round(), (size.y * scale).round());
@@ -521,8 +522,9 @@ fn row(
 }
 
 /// `text` laid out in `ink`, with the chars at `positions` in `lit`
-/// instead, truncated to `room`.
-fn lit(
+/// instead, truncated to `room`. The file list's rows are laid out with
+/// it too.
+pub(super) fn lit(
     ui: &egui::Ui,
     text: &str,
     positions: &[usize],

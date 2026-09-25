@@ -170,6 +170,11 @@ pub struct Reasons {
     /// Whether there is no picture at all, which is what makes the buttons
     /// about one dead.
     pub nothing_open: bool,
+    /// Whether a file was on screen before this one, and after it, which
+    /// is what the pair at the head of the file list goes back and forward
+    /// to.
+    pub visited_before: bool,
+    pub visited_after: bool,
 }
 
 impl Reasons {
@@ -189,8 +194,15 @@ impl Reasons {
         picking: false,
         clipboard: true,
         nothing_open: false,
+        visited_before: true,
+        visited_after: true,
     };
 }
+
+/// What the pair at the head of the file list says while there is nowhere
+/// to go.
+const NOTHING_BEFORE: &str = "No file was shown before this one.";
+const NOTHING_AFTER: &str = "No file was shown after this one.";
 
 /// Why a dead control is dead.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -221,8 +233,16 @@ pub fn disabled(tip: Tip, reasons: Reasons) -> Option<Refused> {
         picking,
         clipboard,
         nothing_open,
+        visited_before,
+        visited_after,
     } = reasons;
     let said = |said| Some(Refused { said, hint: None });
+    if tip == Tip::Control(Control::Back) && !visited_before {
+        return said(NOTHING_BEFORE);
+    }
+    if tip == Tip::Control(Control::Forward) && !visited_after {
+        return said(NOTHING_AFTER);
+    }
     if matches!(tip, Tip::Control(Control::OpenFiles | Control::OpenFolder)) && picking {
         return said(DIALOG_UP);
     }
@@ -317,6 +337,12 @@ pub fn words(tip: Tip) -> Option<String> {
         Tip::Control(Control::OpenFiles) => "Choose image files to open",
         Tip::Control(Control::OpenFolder) => "Choose a folder of images to open",
         Tip::Control(Control::Help) => "Keyboard shortcuts",
+        // The menu at the head of the file list: no key opens it, and the
+        // button says what the menu is of. A cell of it says what it puts
+        // the list in.
+        Tip::Control(Control::Sorting) => "Sort the list",
+        Tip::Control(Control::SortBy(sort)) => sort.describe(),
+        Tip::Control(Control::SortDirection(direction)) => direction.describe(),
         // No one key does this and only this — Escape dismisses whatever
         // is up, a menu first — so the cross names itself.
         Tip::Control(Control::Dismiss) => "Dismiss this message",
@@ -396,7 +422,12 @@ pub fn words(tip: Tip) -> Option<String> {
             | Control::ExportTo
             | Control::CancelExport
             | Control::RenameTo
-            | Control::CancelRename,
+            | Control::CancelRename
+            | Control::Filmstrip
+            | Control::Back
+            | Control::Forward
+            | Control::Thumb(_)
+            | Control::Remove,
         )
         | Tip::Name
         | Tip::Counter

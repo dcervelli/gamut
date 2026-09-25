@@ -29,11 +29,11 @@ use crate::image::sequence::Sequence;
 use crate::thumbnailer::{Delivered, Facts, News, Thumb};
 use crate::ui::chooser::{Input, Row, Step};
 
-/// How many thumbnails the screen keeps at once: about 32 MiB at the
-/// display copy's size, and more rows than any list is scrolled through in
-/// one sitting. Past it the least recently seen is let go, and comes back
+/// How many thumbnails the screen keeps at once: about 125 MiB at the
+/// three display copies' sizes, and several screens of the file list's
+/// rows at its narrowest. Past it the least recently seen is let go, and comes back
 /// from the cache when it is seen again.
-pub const MAX_THUMBS: usize = 512;
+pub const MAX_THUMBS: usize = 96;
 
 /// The state behind the popup.
 pub struct Chooser {
@@ -237,10 +237,27 @@ impl Chooser {
         was_failed
     }
 
+    /// What the header of `path` said, where it has been read: what the
+    /// file list orders by.
+    pub fn facts_of(&self, path: &Path) -> Option<&Facts> {
+        self.facts.get(path)
+    }
+
+    /// Whether the thread has given up on `path`: no thumbnail is coming
+    /// unless the file decodes on screen after all.
+    pub fn given_up(&self, path: &Path) -> bool {
+        self.failed.contains(path)
+    }
+
     /// The file at `row` of the list as the frame last saw it.
     pub fn path_at(&self, row: usize) -> Option<&Path> {
         let (index, _) = self.matches.get(row)?;
         self.paths.get(*index).map(PathBuf::as_path)
+    }
+
+    /// The files on the rows the frame last said were on screen.
+    pub fn on_screen(&self) -> impl Iterator<Item = &Path> {
+        self.visible.clone().filter_map(|row| self.path_at(row))
     }
 
     /// The rows in `visible` that still lack a thumbnail, or the facts
@@ -474,7 +491,8 @@ pub fn relative(path: &Path, common: &Path) -> (String, String) {
 /// The thumbnails the screen holds, least recently seen first to go.
 #[derive(Default)]
 pub struct Thumbs {
-    textures: HashMap<PathBuf, egui::TextureHandle>,
+    /// Each path's copies, smallest first.
+    textures: HashMap<PathBuf, [egui::TextureHandle; 3]>,
     /// Every path held, oldest first; a path seen again moves to the end.
     order: VecDeque<PathBuf>,
     /// Counts every change, so that rows built against one set of
@@ -483,12 +501,12 @@ pub struct Thumbs {
 }
 
 impl Thumbs {
-    /// Holds `texture` for `path`, letting the least recently seen go if
-    /// that makes one too many.
-    pub fn insert(&mut self, path: PathBuf, texture: egui::TextureHandle) {
+    /// Holds the copies of `path`'s thumbnail, smallest first, letting the
+    /// least recently seen go if that makes one too many.
+    pub fn insert(&mut self, path: PathBuf, copies: [egui::TextureHandle; 3]) {
         self.order.retain(|held| *held != path);
         self.order.push_back(path.clone());
-        self.textures.insert(path, texture);
+        self.textures.insert(path, copies);
         while self.order.len() > MAX_THUMBS {
             if let Some(oldest) = self.order.pop_front() {
                 self.textures.remove(&oldest);
@@ -505,11 +523,11 @@ impl Thumbs {
         }
     }
 
-    /// The thumbnail for `path`, as the painter draws it, if it is held.
-    pub fn get(&self, path: &Path) -> Option<egui::load::SizedTexture> {
-        self.textures
-            .get(path)
-            .map(egui::load::SizedTexture::from_handle)
+    /// `path`'s thumbnail, as the painter draws it, if it is held.
+    pub fn get(&self, path: &Path) -> Option<crate::ui::Thumb> {
+        self.textures.get(path).map(|copies| crate::ui::Thumb {
+            copies: copies.each_ref().map(egui::load::SizedTexture::from_handle),
+        })
     }
 
     #[cfg(test)]
@@ -728,6 +746,11 @@ mod tests {
                     loops: crate::image::sequence::Loops::Forever,
                 },
                 title: None,
+
+                format: None,
+
+                bytes: None,
+                modified: None,
             },
         ));
         chooser.take(Delivered {
@@ -739,6 +762,11 @@ mod tests {
                     default: 0,
                 },
                 title: None,
+
+                format: None,
+
+                bytes: None,
+                modified: None,
             }),
         });
         let input = chooser.input(&thumbs, None);
@@ -774,6 +802,11 @@ mod tests {
             size: Some((887, 1200)),
             sequence: Sequence::Still,
             title: Some(title.to_string()),
+
+            format: None,
+
+            bytes: None,
+            modified: None,
         };
         chooser.take(Delivered {
             path: PathBuf::from("buteo-buteo-2.webp"),
@@ -857,13 +890,18 @@ mod tests {
             egui::ColorImage::filled([1, 1], egui::Color32::BLACK),
             egui::TextureOptions::LINEAR,
         );
-        thumbs.insert(PathBuf::from("c.png"), texture);
+        thumbs.insert(PathBuf::from("c.png"), [texture.clone(), texture.clone(), texture]);
         chooser.learn(
             Path::new("c.png"),
             Facts {
                 size: Some((1, 1)),
                 sequence: Sequence::Still,
                 title: None,
+
+                format: None,
+
+                bytes: None,
+                modified: None,
             },
         );
         assert_eq!(chooser.wanted(0..3, &thumbs), paths(&["a.png"]));
@@ -874,6 +912,11 @@ mod tests {
             size: Some((1, 1)),
             sequence: Sequence::Still,
             title: None,
+
+            format: None,
+
+            bytes: None,
+            modified: None,
         };
         assert!(chooser.learn(Path::new("b.png"), facts.clone()));
         assert!(!chooser.learn(Path::new("b.png"), facts));
@@ -894,7 +937,7 @@ mod tests {
         };
         let mut thumbs = Thumbs::default();
         for index in 0..MAX_THUMBS {
-            thumbs.insert(PathBuf::from(format!("{index}.png")), texture("t"));
+            thumbs.insert(PathBuf::from(format!("{index}.png")), [texture("t"), texture("t"), texture("t")]);
         }
         assert_eq!(thumbs.len(), MAX_THUMBS);
         assert!(thumbs.get(Path::new("0.png")).is_some());
@@ -902,7 +945,7 @@ mod tests {
         // Seeing the oldest again spares it; the next oldest goes instead.
         thumbs.touch(Path::new("0.png"));
         let before = thumbs.generation;
-        thumbs.insert(PathBuf::from("new.png"), texture("t"));
+        thumbs.insert(PathBuf::from("new.png"), [texture("t"), texture("t"), texture("t")]);
         assert_eq!(thumbs.len(), MAX_THUMBS);
         assert!(thumbs.get(Path::new("0.png")).is_some());
         assert!(thumbs.get(Path::new("1.png")).is_none());
@@ -910,7 +953,7 @@ mod tests {
         assert_eq!(thumbs.generation, before + 1);
 
         // Held again under the same path is one entry, not two.
-        thumbs.insert(PathBuf::from("new.png"), texture("t"));
+        thumbs.insert(PathBuf::from("new.png"), [texture("t"), texture("t"), texture("t")]);
         assert_eq!(thumbs.len(), MAX_THUMBS);
     }
 }

@@ -112,6 +112,13 @@ impl super::Decoder for Heif {
         is_heif(header)
     }
 
+    /// Which of the three, by the brands the `ftyp` box names: an AVIF
+    /// names `avif` or `avis` among them, a HEIC one of HEVC's, and a
+    /// file that names neither is the container itself.
+    fn format(&self, header: &[u8]) -> &'static str {
+        brand(header).unwrap_or_else(|| self.name())
+    }
+
     fn dimensions(&self, source: &mut dyn super::ReadSeek) -> Result<Option<(u32, u32)>> {
         // The handle's size is the size after any rotation the container asks
         // for — `libheif` accounts for that itself, which is why nothing here
@@ -333,6 +340,35 @@ const MAX_PIXELS: u64 = 32768 * 32768;
 /// header did not reach the end of the brand list, which for a real HEIF is
 /// worth handing on: `decode` gives a better message than the registry's
 /// "unsupported image format" would.
+/// What the `ftyp` box's brands say the file is — its major brand and the
+/// compatible ones after it, since an AVIF's major brand may be the plain
+/// `mif1` with `avif` among the compatibles — or `None` for a box that is
+/// not there or names no brand this reads.
+fn brand(header: &[u8]) -> Option<&'static str> {
+    if header.get(4..8) != Some(b"ftyp") {
+        return None;
+    }
+    let size = u32::from_be_bytes(header.get(0..4)?.try_into().ok()?) as usize;
+    let end = size.min(header.len());
+    // The major brand at 8, the minor version at 12, the compatibles from 16.
+    let brands = std::iter::once(header.get(8..12)).chain(
+        (16..end.saturating_sub(3))
+            .step_by(4)
+            .map(|at| header.get(at..at + 4)),
+    );
+    let mut heic = false;
+    for brand in brands.flatten() {
+        match brand {
+            b"avif" | b"avis" => return Some("avif"),
+            b"heic" | b"heix" | b"hevc" | b"hevx" | b"heim" | b"heis" | b"hevm" | b"hevs" => {
+                heic = true;
+            }
+            _ => {}
+        }
+    }
+    heic.then_some("heic")
+}
+
 fn is_heif(header: &[u8]) -> bool {
     use libheif_rs::FileTypeResult::*;
     // The call reads a length prefix out of the buffer, so it needs enough of
@@ -573,6 +609,7 @@ fn code(discriminant: i32) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::image::decode::Decoder;
 
     use libheif_rs::{ColorPrimaries, TransferCharacteristics};
 
@@ -668,5 +705,38 @@ mod tests {
         assert!(!is_heif(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01"));
         // Too short to hold a brand at all.
         assert!(!is_heif(b"\x00\x00\x00\x18ftyp"));
+    }
+
+    /// Which of the three a file is, by its brands: `avif` wherever it is
+    /// named, among the compatibles as well as as the major brand; HEVC's
+    /// brands for a HEIC; the container's own name for a box naming
+    /// neither.
+    #[test]
+    fn the_brands_say_which_of_the_three_a_file_is() {
+        assert_eq!(
+            brand(b"\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic"),
+            Some("heic")
+        );
+        assert_eq!(
+            brand(b"\x00\x00\x00\x1cftypavif\x00\x00\x00\x00avifmif1miaf"),
+            Some("avif")
+        );
+        assert_eq!(
+            brand(b"\x00\x00\x00\x1cftypmif1\x00\x00\x00\x00mif1avifmiaf"),
+            Some("avif"),
+            "named among the compatibles"
+        );
+        assert_eq!(brand(b"\x00\x00\x00\x18ftypmif1\x00\x00\x00\x00mif1msf1"), None);
+        assert_eq!(brand(b"\x89PNG\r\n\x1a\n"), None);
+        let decoder = Heif;
+        assert_eq!(decoder.format(b"\x00\x00\x00\x18ftypmif1\x00\x00\x00\x00mif1msf1"), decoder.name());
+        assert_eq!(
+            super::super::reader(std::path::Path::new("test_images/avif-rgb8.avif")),
+            Some("avif")
+        );
+        assert_eq!(
+            super::super::reader(std::path::Path::new("test_images/heic-gray8.heic")),
+            Some("heic")
+        );
     }
 }
