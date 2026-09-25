@@ -20,7 +20,9 @@ use super::control::{Command, Control, Naming};
 use super::icon::{self, Mark};
 use super::style::TOGGLE_RADIUS;
 use super::tooltip::Tip;
-use super::{Current, FrameInput, PADDING, Panels, Room, filmstrip, menu, pixel, status};
+use super::{
+    Current, FrameInput, MENU_OFFSET, PADDING, Panels, Room, filmstrip, menu, pixel, status,
+};
 use crate::image::display::Headroom;
 use crate::theme::Theme;
 use crate::view::View;
@@ -452,7 +454,7 @@ impl Pass<'_> {
         egui::Popup::from_toggle_button_response(&response)
             .id(id)
             .align(egui::RectAlign::BOTTOM_END)
-            .gap(PADDING)
+            .gap(MENU_OFFSET)
             .show(|ui| menu::zoom_cells(self, ui, zoom, fills));
     }
 
@@ -653,7 +655,7 @@ impl Pass<'_> {
         egui::Popup::from_toggle_button_response(&response)
             .id(id)
             .align(egui::RectAlign::TOP_START)
-            .gap(PADDING)
+            .gap(MENU_OFFSET)
             .show(|ui| menu::pixel_cells(self, ui));
     }
 
@@ -682,7 +684,7 @@ impl Pass<'_> {
         egui::Popup::menu(&button)
             .id(id)
             .align(egui::RectAlign::RIGHT_START)
-            .gap(PADDING)
+            .gap(MENU_OFFSET)
             .show(|ui| menu::open_items(self, ui));
     }
 
@@ -716,7 +718,7 @@ impl Pass<'_> {
             egui::Popup::menu(&copy)
                 .id(id)
                 .align(egui::RectAlign::RIGHT_START)
-                .gap(PADDING)
+                .gap(MENU_OFFSET)
                 .show(|ui| menu::copy_items(self, ui));
             ui.add_space(BUTTON_GAP);
             self.open_button(ui);

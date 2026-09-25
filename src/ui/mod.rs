@@ -117,6 +117,10 @@ const COUNTER_GAP: f32 = 8.0;
 /// and the side panels share one line down each edge of the window.
 const PADDING: f32 = 12.0;
 
+/// The gap between a popup menu and the button it hangs off: half of
+/// [`PADDING`], close enough that the menu reads as the button's own.
+const MENU_OFFSET: f32 = PADDING / 2.0;
+
 /// The gap between a floating panel's edge and what is on it.
 const PANEL_INSET: f32 = 10.0;
 

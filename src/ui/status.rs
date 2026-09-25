@@ -11,7 +11,9 @@ use super::chrome::{BAR_PADDING, Corners, Pass, STEP_SEAM, measure};
 use super::control::Control;
 use super::style::TOGGLE_RADIUS;
 use super::tooltip::Tip;
-use super::{COUNTER_GAP, Current, PADDING, TEXT_SIZE, capitalized, fonts, histogram, icon, menu};
+use super::{
+    COUNTER_GAP, Current, MENU_OFFSET, TEXT_SIZE, capitalized, fonts, histogram, icon, menu,
+};
 
 /// Between one segment of a bar and the next. A thin gap: the middot already
 /// parts them, and the bars are short of room before they are short of air.
@@ -141,7 +143,7 @@ fn file_button(pass: &mut Pass, ui: &mut egui::Ui) {
     egui::Popup::menu(&button)
         .id(id)
         .align(egui::RectAlign::BOTTOM_START)
-        .gap(PADDING)
+        .gap(MENU_OFFSET)
         .show(|ui| menu::file_items(pass, ui));
 }
 

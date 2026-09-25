@@ -28,7 +28,7 @@ use egui::{Align, Layout, RectAlign, Sense, WidgetInfo, WidgetType, pos2, vec2};
 use super::chrome::{BAR_HEIGHT, BAR_PADDING, BUTTON_GAP, Corners, Pass, STEP_SEAM};
 use super::control::{Command, Control};
 use super::style::{ACTIVE_BUTTON_WASH, SCROLLBAR_GUTTER, SCROLLBAR_WIDTH};
-use super::{PADDING, TEXT_SIZE, fonts, icon, menu};
+use super::{MENU_OFFSET, TEXT_SIZE, fonts, icon, menu};
 
 /// The width each thumbnail is fitted into, at its narrowest: the
 /// thumbnail thread's smallest display copy, drawn at its own size.
@@ -377,7 +377,7 @@ fn head(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
     egui::Popup::menu(&button)
         .id(sorting)
         .align(RectAlign::BOTTOM_START)
-        .gap(PADDING)
+        .gap(MENU_OFFSET)
         .show(|ui| menu::sort_cells(pass, ui, input.order));
     row.add_space(BUTTON_GAP);
     // Then the pair, set against each other as the pair that steps
