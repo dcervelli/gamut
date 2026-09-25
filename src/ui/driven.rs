@@ -1536,8 +1536,8 @@ fn the_file_menu_offers_the_removal_only_from_a_list() {
     );
 }
 
-/// The button before the name opens the menu of the file: its name and
-/// path copied, the rename and the deletion, each asking for its own
+/// The button before the name opens the menu of the file: its name, path
+/// and URI copied, the rename and the deletion, each asking for its own
 /// control, and the menu closing on the press.
 #[test]
 fn the_file_menu_offers_the_copies_the_rename_and_the_deletion() {
@@ -1547,6 +1547,7 @@ fn the_file_menu_offers_the_copies_the_rename_and_the_deletion() {
     for label in [
         "Copy name",
         "Copy path",
+        "Copy URI",
         "Rename\u{2026}",
         "Delete",
         "Export\u{2026}",
@@ -1576,6 +1577,11 @@ fn the_file_menu_offers_the_copies_the_rename_and_the_deletion() {
     assert_eq!(
         click(&mut harness, "Copy name"),
         [Command::Press(Control::Copies(Copies::Name))]
+    );
+    assert_eq!(click(&mut harness, "File"), []);
+    assert_eq!(
+        click(&mut harness, "Copy URI"),
+        [Command::Press(Control::Copies(Copies::Uri))]
     );
 }
 

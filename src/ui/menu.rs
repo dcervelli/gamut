@@ -410,9 +410,9 @@ pub(super) fn copy_items(pass: &mut Pass, ui: &mut Ui) {
     });
 }
 
-/// The menu of the file itself, off the button before its name: its name
-/// and its path copied — the same two items the menu of copies has, since
-/// they are what is most often wanted of a file's name — and the file
+/// The menu of the file itself, off the button before its name: its name,
+/// its path and its URI copied — the same three items the menu of copies
+/// has, since they are what is most often wanted of a file's name — and the file
 /// renamed or moved to the trash, each with its key beside it. The rename
 /// item trails off: it opens a dialog rather than doing anything yet.
 pub(super) fn file_items(pass: &mut Pass, ui: &mut Ui) {
@@ -420,6 +420,7 @@ pub(super) fn file_items(pass: &mut Pass, ui: &mut Ui) {
         let mut items = vec![
             (Control::Copies(Copies::Name), "Copy name".to_string()),
             (Control::Copies(Copies::Path), "Copy path".to_string()),
+            (Control::Copies(Copies::Uri), "Copy URI".to_string()),
             (
                 Control::Rename,
                 format!("{}\u{2026}", Control::Rename.label()),

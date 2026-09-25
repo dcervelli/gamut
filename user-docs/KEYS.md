@@ -190,9 +190,9 @@ put one up, and the window says so instead.
 ### Renaming and deleting
 
 The button before the file's name in the top bar opens a menu of the file
-itself: copy its name, copy its path, rename it, take it off the list
-while there is more than one file, delete it, export it. The keys above
-do the same without the menu.
+itself: copy its name, copy its path, copy it as a `file:` URI, rename it,
+take it off the list while there is more than one file, delete it, export
+it. The keys above do the same without the menu.
 
 `Backspace` takes the file on screen off the list and shows the next, or
 the previous one from the end of the list, leaving the file exactly as it
