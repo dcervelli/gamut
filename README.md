@@ -174,19 +174,38 @@ Respects OS theme colors. Here's an example of Omarchy's Tokyo Night and Gruvbox
 
 ![Themes side by side](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/themes.gif)
 
-*Omarchy note:* Use the following window rule:
+Switching themes while gamut is open re-themes it on the spot. On Omarchy, see [Omarchy setup](#omarchy-setup).
+
+## Install
+
+gamut is packaged for Arch. The PKGBUILD builds the latest release:
+
+```sh
+git clone https://github.com/dcervelli/gamut.git
+cd gamut/packaging && makepkg -si
+```
+
+### Omarchy setup
+
+Omarchy ships `imv` as its image viewer. To use gamut in its place:
+
+**1. Window rule.** Add this to `~/.config/hypr/hyprland.lua`:
 
 ```lua
 o.window("com.dcervelli.gamut", { float = true, center = true, tag = "-default-opacity", opacity = "1 1" })
 ```
 
-This will make the window open centered and floating with a reasonable, dynamic default size. For accurate image viewing, the window should be forced fully opaque.
+gamut then opens floating and centered, at a size it works out from the image and the screen. The window is fully opaque, because Omarchy's default translucency would tint the image with whatever is behind it. Hyprland picks up the change when you save.
 
-## Install
+**2. Default viewer.** Make gamut the viewer for every image type [it reads](packaging/com.dcervelli.gamut.desktop):
 
 ```sh
-cd packaging && makepkg -si
+xdg-mime default com.dcervelli.gamut.desktop $(sed -n 's/^MimeType=//p' /usr/share/applications/com.dcervelli.gamut.desktop | tr ';' '\n' | grep '^image/')
 ```
+
+Folders still open in your file manager; `gamut <folder>` from a terminal views every image in one. The choice is written to `~/.config/mimeapps.list`, where it can be changed back.
+
+**3. Theme.** Nothing to do: gamut uses the current Omarchy theme and follows it when you switch.
 
 ## Getting Started
 
