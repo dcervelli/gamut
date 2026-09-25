@@ -89,14 +89,13 @@ impl Filmstrip {
 
     /// Fits the thumbnails into a square of `slot`, held between the
     /// narrowest and the widest the list goes. The rows are laid out again
-    /// at it, and the file on screen kept in view, since what was on
-    /// screen has moved.
+    /// at it; what stays in place on screen as they grow or shrink is the
+    /// panel's to say, since only it knows where the strip was scrolled.
     pub(super) fn set_slot(&mut self, slot: f32) {
         let slot = slot.clamp(filmstrip::SLOT_MIN, filmstrip::SLOT_MAX);
         if slot != self.slot {
             self.slot = slot;
             self.dirty = true;
-            self.reveal = true;
         }
     }
 
@@ -314,8 +313,9 @@ mod tests {
         assert_eq!(input.current, Some(2));
     }
 
-    /// The slot is held to the range the list goes, every file's row is
-    /// laid out again at it, and the file on screen is put back in view.
+    /// The slot is held to the range the list goes, and every file's row is
+    /// laid out again at it, without a reveal: a reveal on every step of
+    /// the drag would snap the strip to the file on screen.
     #[test]
     fn a_new_slot_lays_the_rows_out_again() {
         use crate::ui::filmstrip::SLOT_MAX;
@@ -330,7 +330,7 @@ mod tests {
         let input = strip.input(&thumbs, |path| known(&nothing, path), None, false, false);
         assert_eq!(input.slot, 200.0);
         assert_eq!(&*input.tops, &[0.0, row_height(200.0), 2.0 * row_height(200.0)]);
-        assert!(input.reveal);
+        assert!(!input.reveal);
 
         strip.set_slot(10_000.0);
         assert_eq!(strip.slot(), SLOT_MAX);

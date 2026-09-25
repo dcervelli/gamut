@@ -264,6 +264,44 @@ pub fn span(tops: &[f32], top: f32, bottom: f32) -> Range<usize> {
     first..last.max(first)
 }
 
+/// Where the strip was scrolled at the end of a frame, how much of it was
+/// on screen, and the slot its rows were laid out at then: what a frame at
+/// another slot scrolls from.
+#[derive(Clone, Copy)]
+struct Scrolled {
+    slot: f32,
+    offset: f32,
+    viewport: f32,
+}
+
+/// The offset that keeps the strip where it was when its rows go from
+/// `was` high to `now` high, `offset` down the strip with `viewport` of
+/// it on screen. The file on screen, if its row was in view, keeps its
+/// middle where it was on screen, and is then brought wholly into view if
+/// it fits; otherwise the row at the top keeps the share of it that was
+/// above the edge. Without this the offset would stay put in points while
+/// every row above it changed height, and the rows would slide under it.
+fn rescrolled(offset: f32, viewport: f32, count: usize, current: Option<usize>, was: f32, now: f32) -> f32 {
+    let seen = current.filter(|&row| {
+        let top = row as f32 * was;
+        row < count && top < offset + viewport && top + was > offset
+    });
+    let kept = match seen {
+        Some(row) => {
+            let middle = row as f32 * was + was / 2.0 - offset;
+            let top = row as f32 * now;
+            let kept = top + now / 2.0 - middle;
+            if now <= viewport {
+                kept.clamp(top + now - viewport, top)
+            } else {
+                kept
+            }
+        }
+        None => offset / was * now,
+    };
+    kept.clamp(0.0, (count as f32 * now - viewport).max(0.0))
+}
+
 /// Lays the panel out in `ui`, which is the whole of it: the head, and the
 /// rows under it. The head is a bar, and goes with the bars when the
 /// interface is hidden; the rows stay.
@@ -376,41 +414,66 @@ fn rows(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
     ui.spacing_mut().scroll.bar_outer_margin = SCROLLBAR_OUTER_MARGIN;
     ui.spacing_mut().scroll.bar_inner_margin =
         SCROLLBAR_GUTTER - SCROLLBAR_WIDTH - SCROLLBAR_OUTER_MARGIN;
-    let scroll = egui::ScrollArea::vertical()
+    // A new slot has every row a new height: the strip is put where the
+    // same rows stay on screen, from where it was scrolled at the last one.
+    let scrolled_id = egui::Id::new("filmstrip scrolled");
+    let mut area = egui::ScrollArea::vertical()
         .id_salt("filmstrip rows")
-        .auto_shrink(false)
-        .show_viewport(ui, |ui, viewport| {
-            ui.set_height(total.max(viewport.height()));
-            // The rows stop short of the scrollbar, which the area lays
-            // beside its content rather than over it.
-            let width = ui.max_rect().width();
-            let left = ui.max_rect().left();
-            let top = ui.max_rect().top();
-            let row_rect = |row: usize| {
-                egui::Rect::from_min_size(
-                    pos2(left, top + input.tops[row]),
-                    vec2(width, input.tops[row + 1] - input.tops[row]),
-                )
-            };
-            let range = span(&input.tops, viewport.min.y, viewport.max.y);
-            for row in range.clone() {
-                file(pass, ui, input, row, row_rect(row), edge);
-            }
-            // Put there, not scrolled there: the file on screen may have
-            // been stepped to from anywhere in the list, and a glide
-            // across the whole list is a wait.
-            if input.reveal
-                && let Some(current) = input.current
-                && current < count
-            {
-                ui.scroll_to_rect_animation(
-                    row_rect(current),
-                    None,
-                    egui::style::ScrollAnimation::none(),
-                );
-            }
-            range
-        });
+        .auto_shrink(false);
+    if let Some(was) = ui.data(|data| data.get_temp::<Scrolled>(scrolled_id))
+        && was.slot != input.slot
+    {
+        area = area.vertical_scroll_offset(rescrolled(
+            was.offset,
+            was.viewport,
+            count,
+            input.current,
+            row_height(was.slot),
+            row_height(input.slot),
+        ));
+    }
+    let scroll = area.show_viewport(ui, |ui, viewport| {
+        ui.set_height(total.max(viewport.height()));
+        // The rows stop short of the scrollbar, which the area lays
+        // beside its content rather than over it.
+        let width = ui.max_rect().width();
+        let left = ui.max_rect().left();
+        let top = ui.max_rect().top();
+        let row_rect = |row: usize| {
+            egui::Rect::from_min_size(
+                pos2(left, top + input.tops[row]),
+                vec2(width, input.tops[row + 1] - input.tops[row]),
+            )
+        };
+        let range = span(&input.tops, viewport.min.y, viewport.max.y);
+        for row in range.clone() {
+            file(pass, ui, input, row, row_rect(row), edge);
+        }
+        // Put there, not scrolled there: the file on screen may have
+        // been stepped to from anywhere in the list, and a glide
+        // across the whole list is a wait.
+        if input.reveal
+            && let Some(current) = input.current
+            && current < count
+        {
+            ui.scroll_to_rect_animation(
+                row_rect(current),
+                None,
+                egui::style::ScrollAnimation::none(),
+            );
+        }
+        range
+    });
+    ui.data_mut(|data| {
+        data.insert_temp(
+            scrolled_id,
+            Scrolled {
+                slot: input.slot,
+                offset: scroll.state.offset.y,
+                viewport: scroll.inner_rect.height(),
+            },
+        )
+    });
     if scroll.inner != input.visible {
         pass.commands.push(Command::FilmstripVisible(scroll.inner));
     }
@@ -777,6 +840,28 @@ mod tests {
         // A wide character at the start the head cannot take goes to the end.
         let wide = [4.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
         assert_eq!(middle_cut(&wide, 1.0, 1, 6.0), Some((0, 5)));
+    }
+
+    /// A new row height keeps the file on screen where it was on screen,
+    /// wholly in view, and otherwise the row at the top where it was.
+    #[test]
+    fn a_new_row_height_keeps_the_strip_where_it_was() {
+        // Rows of 100 in a viewport of 400, scrolled to 1000: rows 10 to
+        // 13 on screen. The file on screen, row 11, has its middle 150
+        // down; at rows of 200 its middle is at 2300, so 2150 puts it back.
+        assert_eq!(rescrolled(1000.0, 400.0, 100, Some(11), 100.0, 200.0), 2150.0);
+        // Row 13 at the foot would run past it, and is brought up into view.
+        assert_eq!(rescrolled(1000.0, 400.0, 100, Some(13), 100.0, 200.0), 2400.0);
+        // Row 10 at the top shrinking keeps its middle, which is in view.
+        assert_eq!(rescrolled(1000.0, 400.0, 100, Some(10), 100.0, 50.0), 475.0);
+        // A file off screen is left there: the row at the top keeps the
+        // share of it above the edge, a quarter of row 10.
+        assert_eq!(rescrolled(1025.0, 400.0, 100, Some(50), 100.0, 200.0), 2050.0);
+        assert_eq!(rescrolled(1025.0, 400.0, 100, None, 100.0, 200.0), 2050.0);
+        // Never past either end of the strip.
+        assert_eq!(rescrolled(0.0, 400.0, 100, Some(0), 100.0, 200.0), 0.0);
+        assert_eq!(rescrolled(9600.0, 400.0, 100, Some(99), 100.0, 50.0), 4600.0);
+        assert_eq!(rescrolled(0.0, 400.0, 2, Some(1), 100.0, 150.0), 0.0, "no room to scroll");
     }
 
     #[test]
