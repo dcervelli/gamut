@@ -145,9 +145,9 @@ pub(super) fn track(
     } else if on_band {
         ui.ctx().set_cursor_icon(CursorIcon::Grab);
     }
-    pass.tooltip(between, Tip::Window, true);
-    pass.tooltip(black_handle, Tip::BlackPoint, true);
-    pass.tooltip(white_handle, Tip::WhitePoint, true);
+    pass.tooltip(between, Tip::Window);
+    pass.tooltip(black_handle, Tip::BlackPoint);
+    pass.tooltip(white_handle, Tip::WhitePoint);
 
     // The handles themselves, over the band and standing up past it.
     let painter = ui.painter();

@@ -178,7 +178,7 @@ fn button(
     // Named by the control rather than by the words on it, which trail
     // off: what the accessibility tree and the tests reach it by.
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, control.label()));
-    let response = pass.tooltip(response, Tip::Control(control), enabled);
+    let response = pass.tooltip(response, Tip::Control(control));
     if response.clicked() {
         pass.press(control);
     }

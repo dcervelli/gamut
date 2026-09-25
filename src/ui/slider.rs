@@ -98,7 +98,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, line: Line<'_>, room: Rec
         ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
     }
     if let Some(tip) = line.tip {
-        pass.tooltip(response, tip, line.live);
+        pass.tooltip(response, tip);
     }
 
     // The groove, the mark at the origin, and the fill from there to the

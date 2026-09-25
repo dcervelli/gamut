@@ -75,7 +75,7 @@ pub(super) fn top_words(pass: &mut Pass, ui: &mut egui::Ui, current: &Current) {
         text.color(pass.theme.text_bright)
     };
     let response = ui.add(Label::new(text).truncate());
-    pass.tooltip(response, Tip::Name, true);
+    pass.tooltip(response, Tip::Name);
 }
 
 /// The head of the top bar: the file list's toggle, and the pair that steps
@@ -180,7 +180,7 @@ fn counter_button(pass: &mut Pass, ui: &mut egui::Ui, counter: &str) {
         .rect_filled(rect, Corners::Middle.radius(), wash);
     let at = Align2::CENTER_CENTER.anchor_size(rect.center(), galley.size());
     ui.painter().galley(pos2(at.min.x, at.min.y), galley, ink);
-    let response = pass.tooltip(response, Tip::Counter, true);
+    let response = pass.tooltip(response, Tip::Counter);
     if response.clicked() {
         pass.press(Control::Chooser);
     }
@@ -268,7 +268,7 @@ pub(super) fn state_words(pass: &mut Pass, ui: &mut egui::Ui, current: &Current)
         .fonts_mut(|fonts| fonts.layout_job(job(ink, primary)));
     let at = Align2::CENTER_CENTER.anchor_size(rect.center(), galley.size());
     ui.painter().galley(pos2(at.min.x, at.min.y), galley, ink);
-    let response = pass.tooltip(response, Tip::State, true);
+    let response = pass.tooltip(response, Tip::State);
     if response.clicked() {
         pass.press(Control::Histogram);
     }

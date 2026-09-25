@@ -234,7 +234,7 @@ pub(super) fn zoom_cells(pass: &mut Pass, ui: &mut Ui, zoom: f32, fills: Axis) {
                         ),
                     };
                     let control = Control::ZoomTo(*choice);
-                    let response = pass.tooltip(response, Tip::Control(control), true);
+                    let response = pass.tooltip(response, Tip::Control(control));
                     if response.clicked() {
                         pass.press(control);
                         ui.close();
@@ -292,7 +292,7 @@ pub(super) fn pixel_cells(pass: &mut Pass, ui: &mut Ui) {
                 Button::new(format.label()).selected(active),
             );
             let control = Control::Format(format);
-            let response = pass.tooltip(response, Tip::Control(control), true);
+            let response = pass.tooltip(response, Tip::Control(control));
             if response.clicked() {
                 pass.press(control);
                 ui.close();
@@ -362,7 +362,7 @@ pub(super) fn sort_cells(pass: &mut Pass, ui: &mut Ui, order: Order) {
     titled(pass, ui, &Control::Sorting.label(), |pass, ui| {
         let item = |pass: &mut Pass, ui: &mut Ui, control: Control, active: bool| {
             let response = ui.add(Button::new(control.label()).selected(active));
-            let response = pass.tooltip(response, Tip::Control(control), true);
+            let response = pass.tooltip(response, Tip::Control(control));
             if response.clicked() {
                 pass.press(control);
                 ui.close();
@@ -402,7 +402,7 @@ pub(super) fn copy_items(pass: &mut Pass, ui: &mut Ui) {
                 button = button.shortcut_text(key);
             }
             let response = ui.add(button);
-            let response = pass.tooltip(response, Tip::Control(control), true);
+            let response = pass.tooltip(response, Tip::Control(control));
             if response.clicked() {
                 pass.press(control);
             }
@@ -442,7 +442,7 @@ pub(super) fn file_items(pass: &mut Pass, ui: &mut Ui) {
                 button = button.shortcut_text(key);
             }
             let response = ui.add(button);
-            let response = pass.tooltip(response, Tip::Control(control), true);
+            let response = pass.tooltip(response, Tip::Control(control));
             if response.clicked() {
                 pass.press(control);
             }
@@ -476,7 +476,7 @@ pub(super) fn open_items(pass: &mut Pass, ui: &mut Ui) {
         for (index, name) in openers.iter().enumerate() {
             let control = Control::Opener(index);
             let response = ui.add(Button::new(name));
-            let response = pass.tooltip(response, Tip::Control(control), true);
+            let response = pass.tooltip(response, Tip::Control(control));
             if response.clicked() {
                 pass.press(control);
             }

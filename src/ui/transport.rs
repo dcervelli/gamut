@@ -217,7 +217,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, transport: &Transport) {
                     pass.press(Control::Seek(frame));
                 }
             }
-            pass.tooltip(response, Tip::Timeline, true);
+            pass.tooltip(response, Tip::Timeline);
         });
     });
 }

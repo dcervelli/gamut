@@ -241,7 +241,7 @@ fn cross(pass: &mut Pass, ui: &mut egui::Ui) {
     );
     response
         .widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, Control::Dismiss.label()));
-    let response = pass.tooltip(response, Tip::Control(Control::Dismiss), true);
+    let response = pass.tooltip(response, Tip::Control(Control::Dismiss));
     if response.clicked() {
         pass.press(Control::Dismiss);
     }

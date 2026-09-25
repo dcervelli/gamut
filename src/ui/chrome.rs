@@ -467,7 +467,7 @@ impl Pass<'_> {
         response.widget_info(|| {
             WidgetInfo::selected(WidgetType::Button, true, open, Control::Zoom.label())
         });
-        let response = self.tooltip(response, Tip::Control(Control::Zoom), true);
+        let response = self.tooltip(response, Tip::Control(Control::Zoom));
         egui::Popup::from_toggle_button_response(&response)
             .id(id)
             .align(egui::RectAlign::BOTTOM_END)
@@ -555,7 +555,7 @@ impl Pass<'_> {
             ui.add_sized(OUTPUT_BUTTON, Button::new("HDR").selected(on))
         });
         let response = response.inner;
-        let response = self.tooltip(response, Tip::Control(Control::Output), available);
+        let response = self.tooltip(response, Tip::Control(Control::Output));
         if response.clicked() {
             self.press(Control::Output);
         }
@@ -648,7 +648,7 @@ impl Pass<'_> {
         response.widget_info(|| {
             WidgetInfo::selected(WidgetType::Button, true, reading.is_some(), control.label())
         });
-        let response = self.tooltip(response, Tip::Control(control), true);
+        let response = self.tooltip(response, Tip::Control(control));
         if response.clicked() {
             self.press(control);
         }
@@ -902,7 +902,7 @@ impl Pass<'_> {
         );
         response
             .widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, on, control.label()));
-        self.tooltip(response, Tip::Control(control), enabled)
+        self.tooltip(response, Tip::Control(control))
     }
 
     /// Hangs words the frame itself holds off `response`, laid out as a
@@ -946,13 +946,19 @@ impl Pass<'_> {
     /// Hangs the tooltip for `tip` off `response`: what the thing is called,
     /// and under it the keys that do the same job — or, for a dead control,
     /// why it is dead.
-    pub fn tooltip(&self, response: Response, tip: Tip, enabled: bool) -> Response {
+    ///
+    /// Which of egui's two hovers it hangs off is egui's own reading of the
+    /// response, not whether the application counts the control dead: a
+    /// dead button drawn by hand is only sensing hover in a live `Ui`, and
+    /// egui opens a disabled hover's tooltip only where it disabled the
+    /// widget itself, as `add_enabled_ui` does for the surface switch.
+    pub fn tooltip(&self, response: Response, tip: Tip) -> Response {
         let Some(tooltip) = self.namer.tooltip(tip) else {
             return response;
         };
         let theme = self.theme;
         let show = move |ui: &mut Ui| super::tooltip::show(ui, &tooltip, theme);
-        if enabled {
+        if response.enabled() {
             response.on_hover_ui(show)
         } else {
             response.on_disabled_hover_ui(show)
