@@ -1505,8 +1505,11 @@ impl Naming for Namer {
             // The name in the bar is cut to the room the bar has, and is only
             // the last part of the path even when it is not. The tooltip is
             // the path in full — which is also exactly what the key beside it
-            // copies.
-            Tip::Name => (vec![self.path.clone()], Vec::from_iter(hint(CopyPath))),
+            // copies, named as the item of the menus that copies it is.
+            Tip::Name => (
+                vec![self.path.clone()],
+                Vec::from_iter(names(Tip::Control(Control::Copies(Copies::Path)))),
+            ),
             // The count says which of the list is on screen. A press on it
             // opens the chooser, said the way the state's press is, with the
             // key that opens it too; under that the keys that step through
@@ -1539,8 +1542,27 @@ impl Naming for Namer {
             // cannot discover by resting on it.
             Tip::Control(Control::Maximize) => (
                 vec![names(at)?],
-                Vec::from_iter(hint(ToggleInterfaceAndPanels)),
+                vec![format!(
+                    "{} ({})",
+                    ui::tooltip::MAXIMIZE_SHIFTED,
+                    binding_for(ToggleInterfaceAndPanels)?.shown
+                )],
             ),
+            // The copy of the picture takes the region while one is up, as
+            // the chord beside it does.
+            Tip::Control(Control::Copies(Copies::Image))
+                if self.conditions.met(When::RegionSelected) =>
+            {
+                let binding = binding_for(CopyImage)?;
+                (
+                    vec![format!(
+                        "{} ({})",
+                        ui::tooltip::COPY_REGION,
+                        shown_for(binding, CopyImage)
+                    )],
+                    Vec::new(),
+                )
+            }
             // The loupe toggle: what it does, and under it the button on
             // the mouse that holds the loupe up without it, which no key
             // table lists, and how the magnification is set — by the wheel
@@ -3041,17 +3063,17 @@ mod tests {
         );
         assert_eq!(
             named(Control::Grid).as_deref(),
-            Some("Toggle the grid over the image (g)")
+            Some("Toggle the pixel grid (g)")
         );
         assert_eq!(
             named(Control::Output).as_deref(),
-            Some("Toggle HDR output, where the monitor is in HDR mode (o)")
+            Some("Toggle HDR output, when monitor is capable (o)")
         );
         // The button in the corner is named by the plain press it makes; the
         // press with Shift is the line under it — see `App::tooltip`.
         assert_eq!(
             named(Control::Maximize).as_deref(),
-            Some("Toggle the interface panels (`)")
+            Some("Toggle the UI (`)")
         );
 
         // The one button no key reaches names itself, and has no key after
@@ -3064,17 +3086,17 @@ mod tests {
         // every item of it having a key of its own.
         assert_eq!(
             named(Control::Rename).as_deref(),
-            Some("Rename the file on screen (F2)")
+            Some("Rename the current file (F2)")
         );
         assert_eq!(
             named(Control::Delete).as_deref(),
-            Some("Move the file on screen to the trash, and show the next (Del)")
+            Some("Trash the current file (Del)")
         );
         // The key that takes a file off the list, and the pair at the head
         // of the list by the chords that do the same.
         assert_eq!(
             named(Control::Remove).as_deref(),
-            Some("Take the file on screen off the list, and show the next (\u{232b})")
+            Some("Remove the current file from the file list (\u{232b})")
         );
         assert_eq!(
             named(Control::Back).as_deref(),
@@ -3082,7 +3104,7 @@ mod tests {
         );
         assert_eq!(
             named(Control::Filmstrip).as_deref(),
-            Some("Show or hide the file list (Tab)")
+            Some("Toggle the file list (Tab)")
         );
         // The menu at its head names itself, no key opening it; a cell of
         // it says what it puts the list in.
@@ -3554,22 +3576,21 @@ mod tests {
         }
     }
 
-    /// A cell of the menu of copies has no words of its own: the key table
-    /// already describes each copy in a sentence, and the cell is named by
-    /// that sentence and by the key that runs it.
+    /// A cell of the menu of copies is named in words shorter than the key
+    /// table's sentence, and by the key that runs it.
     ///
     /// The button that opens the menu names itself, no one key opening it.
     #[test]
-    fn a_copy_cell_is_named_by_the_key_table_and_nothing_else() {
+    fn a_copy_cell_is_named_by_its_words_and_its_key() {
         let named = |copies| names(Tip::Control(Control::Copies(copies)));
 
         assert_eq!(
             named(Copies::Name).as_deref(),
-            Some("Copy the name of the file on screen, without its path (c)")
+            Some("Copy the name of the current file, without its path (c)")
         );
         assert_eq!(
             named(Copies::Path).as_deref(),
-            Some("Copy the absolute path of the file on screen (Shift+C)")
+            Some("Copy the absolute path of the current file (Shift+C)")
         );
 
         for copies in Copies::ALL {

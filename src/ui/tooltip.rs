@@ -11,9 +11,10 @@
 use crate::image::display::{AutoWindow, Colormap, ToneMap};
 use crate::theme::Theme;
 
+use super::Room;
 use super::control::Control;
 use super::histogram::WINDOWS;
-use super::{Room, menu};
+use super::menu::{self, Copies};
 
 /// Something in the interface that names itself when the pointer rests on it.
 ///
@@ -72,6 +73,14 @@ pub const LOUPE_HELD: &str = "Turn on with right mouse button (RMB) on image";
 pub fn loupe_wheel(key: &str) -> String {
     format!("Change magnification with RMB+wheel or with {key}")
 }
+
+/// What the maximize button says under its name: the press with Shift, which
+/// closes the floating panels as it hides the interface.
+pub const MAXIMIZE_SHIFTED: &str = "Hide all panels and toggle the UI";
+
+/// What the copy of the picture says while a region is up, which is what it
+/// takes then, in place of the whole picture's words in [`words`].
+pub const COPY_REGION: &str = "Copy the region as displayed";
 
 /// What a toggle says when the content area has no room for the panel it
 /// opens, in place of the name of the panel.
@@ -317,16 +326,36 @@ pub fn words(tip: Tip) -> Option<String> {
         Tip::Control(Control::Format(format)) => {
             return Some(menu::describe_format(format).to_string());
         }
-        Tip::Control(Control::Zoom) => "Zoom, fit and filter",
+        Tip::Control(Control::Zoom) => "Open zoom menu",
         // No one key opens it — every cell of it has a key of its own —
         // so the button says what the menu is of.
-        Tip::Control(Control::Copy) => "Copy the file or the image",
+        Tip::Control(Control::Copy) => "Copy the file or image",
         // The same: no key opens it, and what is on it is whatever the
         // desktop has installed rather than anything this program binds.
         Tip::Control(Control::OpenIn) => "Open the file in another application",
         // And the same again for the menu of the file: every item of it
         // has a key of its own, and the button says what the menu is of.
-        Tip::Control(Control::FileMenu) => "Copy, rename, delete or export the file",
+        Tip::Control(Control::FileMenu) => "Open file menu",
+        // The items of the menus of copies and of the file, and the
+        // toggles, in words shorter than the key table's sentence for the
+        // same key, which follows them.
+        Tip::Control(Control::Copies(copies)) => match copies {
+            Copies::Name => "Copy the name of the current file, without its path",
+            Copies::Path => "Copy the absolute path of the current file",
+            Copies::Uri => "Copy the current file as a URI",
+            // With a region up, the application says `COPY_REGION` instead.
+            Copies::Image => "Copy the image as displayed",
+            Copies::Facts => "Copy everything from the info panel",
+        },
+        Tip::Control(Control::Rename) => "Rename the current file",
+        Tip::Control(Control::Delete) => "Trash the current file",
+        Tip::Control(Control::Export) => "Export the image as displayed",
+        Tip::Control(Control::Remove) => "Remove the current file from the file list",
+        Tip::Control(Control::Filmstrip) => "Toggle the file list",
+        Tip::Control(Control::Grid) => "Toggle the pixel grid",
+        Tip::Control(Control::Region) => "Draw a region",
+        Tip::Control(Control::Output) => "Toggle HDR output, when monitor is capable",
+        Tip::Control(Control::Maximize) => "Toggle the UI",
         Tip::Control(Control::Paste) => "Paste an image",
         // The turn's pair: each names its own way round, where the key
         // table's one line names both.
@@ -387,13 +416,10 @@ pub fn words(tip: Tip) -> Option<String> {
         },
         // The timeline: no key scrubs, so it names itself.
         Tip::Timeline => "Go to a frame",
-        // No words of its own: the key table already says what each of
-        // these copies takes, in a sentence, and saying it twice is saying
-        // it in two places that can drift apart. Nor has an item of the
-        // open menu, which wears the name of the program it hands the file
-        // to, and there is nothing an interface that has never heard of
-        // that program could add to it.
-        Tip::Control(Control::Copies(_) | Control::Opener(_)) => return None,
+        // No words of its own: an item of the open menu wears the name of
+        // the program it hands the file to, and there is nothing an
+        // interface that has never heard of that program could add to it.
+        Tip::Control(Control::Opener(_)) => return None,
         // Everything else is named by the key that does the same job — see
         // `App::tooltip` — or wears its own words on screen.
         Tip::Control(
@@ -404,30 +430,21 @@ pub fn words(tip: Tip) -> Option<String> {
             | Control::StepBack
             | Control::StepForward
             | Control::Seek(_)
-            | Control::Region
             | Control::Histogram
             | Control::Info
-            | Control::Grid
             | Control::Loupe
-            | Control::Maximize
-            | Control::Output
             | Control::PixelFormat
             | Control::Facts(_)
             | Control::Chooser
             | Control::Choose(_)
-            | Control::Rename
-            | Control::Delete
-            | Control::Export
             | Control::ExportAs(_)
             | Control::ExportTo
             | Control::CancelExport
             | Control::RenameTo
             | Control::CancelRename
-            | Control::Filmstrip
             | Control::Back
             | Control::Forward
-            | Control::Thumb(_)
-            | Control::Remove,
+            | Control::Thumb(_),
         )
         | Tip::Name
         | Tip::Counter

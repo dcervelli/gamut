@@ -3294,8 +3294,25 @@ mod tests {
         let _ = app.perform(Action::ToggleRegion);
         draw(&mut app);
         assert!(app.marking.selection.region().is_some());
+        // The copy of the picture says it takes the region while one is up.
+        use crate::ui::Naming;
+        let copy_image = |app: &App| {
+            app.namer()
+                .tooltip(ui::Tip::Control(ui::Control::Copies(
+                    ui::menu::Copies::Image,
+                )))
+                .map(|tooltip| tooltip.title)
+        };
+        assert_eq!(
+            copy_image(&app),
+            Some(vec!["Copy the region as displayed (Ctrl+C)".to_string()])
+        );
         let _ = app.perform(Action::ToggleRegion);
         assert_eq!(app.marking.selection, Selection::Off);
+        assert_eq!(
+            copy_image(&app),
+            Some(vec!["Copy the image as displayed (Ctrl+C)".to_string()])
+        );
         let _ = app.perform(Action::Pan(Direction::Right, PanStep::Coarse));
         assert!(app.motion.is_some(), "a pan of the view is a move");
 
@@ -5062,6 +5079,27 @@ mod tests {
             .get_by_role_and_label(egui::accesskit::Role::Button, label)
             .click();
         harness.run();
+    }
+
+    /// The two hints read off the application rather than a key's own line:
+    /// the file name's, which is the copy of the path it stands for, and the
+    /// maximize button's, which is its press with Shift.
+    #[test]
+    fn the_name_and_the_maximize_button_hint_at_the_other_press() {
+        use crate::ui::Naming;
+
+        let (app, _dir) = app_over("hints", &[("a.png", 4, 3)]);
+        let hints = |tip| app.namer().tooltip(tip).map(|tooltip| tooltip.hints);
+        assert_eq!(
+            hints(ui::Tip::Name),
+            Some(vec![
+                "Copy the absolute path of the current file (Shift+C)".to_string()
+            ])
+        );
+        assert_eq!(
+            hints(ui::Tip::Control(ui::Control::Maximize)),
+            Some(vec!["Hide all panels and toggle the UI (~)".to_string()])
+        );
     }
 
     /// A press says what it left the window owing: a frame for a toggle,
