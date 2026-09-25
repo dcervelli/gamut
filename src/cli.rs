@@ -15,6 +15,7 @@ use crate::image::decode::Overrides;
 use crate::image::display::{AutoWindow, Colormap, Startup, ToneMap};
 use crate::image::{Primaries, Transfer};
 use crate::render::{HdrPreference, Upscale};
+use crate::settings::Config;
 
 const OPTIONS: &str = "\
 gamut — preview images
@@ -35,6 +36,9 @@ dialog from any window.
 OPTIONS:
     -h, --help              Show this help
     -V, --version           Show the version
+        --print-config      Print a configuration file, every setting at its
+                            default and commented out, to be saved as
+                            ~/.config/gamut/config and edited
         --output <SURFACE>  Start on an sdr or an hdr surface. Left alone, the
                             surface follows the monitor: HDR where the
                             compositor says it is in HDR mode. hdr asks for
@@ -56,7 +60,7 @@ OPTIONS:
                             rather than at the image's own
         --histogram         Start with the histogram showing
         --info              Start with the file information panel showing
-        --no-minimap        Start with the minimap off; it is on by default
+        --no-minimap        Start with the minimap off
         --paused            Open an animation stopped on its first frame,
                             rather than playing
         --paste             Paste the image on the clipboard, saved among your
@@ -267,9 +271,11 @@ pub fn parse_args() -> Result<Option<Args>> {
     let mut overrides = Overrides::default();
     let mut startup = Startup::default();
     let mut hdr = HdrPreference::Follow;
-    let mut histogram = false;
-    let mut info = false;
-    let mut minimap = true;
+    // The flags that say which panels are up are only half the answer: the
+    // configuration file is the other, and the flags win over it.
+    let mut histogram = None;
+    let mut info = None;
+    let mut minimap = None;
     let mut paused = false;
     let mut paste = false;
     let mut upscale = Upscale::default();
@@ -286,6 +292,10 @@ pub fn parse_args() -> Result<Option<Args>> {
                 }
                 Some("-V") | Some("--version") => {
                     println!("{PROGRAM} {}", env!("CARGO_PKG_VERSION"));
+                    return Ok(None);
+                }
+                Some("--print-config") => {
+                    print!("{}", Config::template());
                     return Ok(None);
                 }
                 // Undocumented, like `--serve-clipboard`: this is how the
@@ -378,11 +388,11 @@ pub fn parse_args() -> Result<Option<Args>> {
                     continue;
                 }
                 Some("--histogram") => {
-                    histogram = true;
+                    histogram = Some(true);
                     continue;
                 }
                 Some("--info") => {
-                    info = true;
+                    info = Some(true);
                     continue;
                 }
                 Some("--timing") => {
@@ -390,7 +400,7 @@ pub fn parse_args() -> Result<Option<Args>> {
                     continue;
                 }
                 Some("--no-minimap") => {
-                    minimap = false;
+                    minimap = Some(false);
                     continue;
                 }
                 Some("--paused") => {
@@ -433,6 +443,10 @@ pub fn parse_args() -> Result<Option<Args>> {
         }
         Err(error) => return Err(error),
     };
+    let mut config = Config::load();
+    config.show_histogram = histogram.unwrap_or(config.show_histogram);
+    config.show_info = info.unwrap_or(config.show_info);
+    config.show_minimap = minimap.unwrap_or(config.show_minimap);
     Ok(Some(Args {
         files,
         paste,
@@ -441,9 +455,7 @@ pub fn parse_args() -> Result<Option<Args>> {
             overrides,
             startup,
             hdr,
-            histogram,
-            info,
-            minimap,
+            config,
             upscale,
             size,
             paused,

@@ -37,6 +37,7 @@ use crate::openers::{self, Opener};
 use crate::player;
 use crate::portal::{self, Pick, Picked};
 use crate::render::{GpuImage, HdrPreference, Placement, Renderer, Scene, Upscale};
+use crate::settings::{Config, State, StateFile};
 use crate::theme::{self, Theme};
 use crate::thumbnailer::{Delivered, Facts, News, Thumb, Thumbnailer};
 use crate::timing;
@@ -117,9 +118,9 @@ pub struct Options {
     pub overrides: decode::Overrides,
     pub startup: Startup,
     pub hdr: HdrPreference,
-    pub histogram: bool,
-    pub info: bool,
-    pub minimap: bool,
+    /// The configuration file, with the command line's flags for the same
+    /// panels laid over it.
+    pub config: Config,
     pub upscale: Upscale,
     /// What `--size` asked the window to open at, in logical pixels.
     pub size: Option<[u32; 2]>,
@@ -249,6 +250,10 @@ pub struct App {
     /// the strip was last drawn from. Whether the strip is up is
     /// [`Panels::show_filmstrip`].
     filmstrip: Filmstrip,
+    /// Where what is kept from one run to the next is written back to when
+    /// the window closes: the file list's width and the loupe's
+    /// magnification.
+    state: StateFile,
     /// The files that have been on screen, for going back and forward
     /// through them.
     visited: Visited,
@@ -338,6 +343,7 @@ impl App {
         named: Vec<PathBuf>,
         opening: Option<Opening>,
         options: Options,
+        state: StateFile,
         threads: Threads,
     ) -> Self {
         let Threads {
@@ -351,9 +357,7 @@ impl App {
             overrides,
             startup,
             hdr,
-            histogram,
-            info,
-            minimap,
+            config,
             upscale,
             size: asked_size,
             paused,
@@ -378,6 +382,7 @@ impl App {
         let theme_watch = theme::watch();
         let mut view = View::new();
         view.set_upscale(upscale);
+        let kept_state = state.state();
         let mut app = Self {
             files: Files::new(files, index, overrides),
             current: None,
@@ -406,6 +411,7 @@ impl App {
             chooser: Chooser::default(),
             thumbs: Thumbs::default(),
             filmstrip: Filmstrip::default(),
+            state,
             visited: Visited::default(),
             pending_thumbs: Vec::new(),
             wake,
@@ -417,20 +423,20 @@ impl App {
             toasts: Toasts::default(),
             copying: Copying::default(),
             panels: Panels {
-                show_ui: true,
-                show_filmstrip: false,
-                show_histogram: histogram,
+                show_ui: config.show_ui,
+                show_filmstrip: config.show_filmstrip,
+                show_histogram: config.show_histogram,
                 show_luma: true,
                 show_planes: true,
-                log_counts: false,
+                log_counts: config.log_counts,
                 mark_clipped: false,
-                show_info: info,
-                show_minimap: minimap,
+                show_info: config.show_info,
+                show_minimap: config.show_minimap,
                 show_grid: false,
                 show_loupe: false,
-                loupe_magnification: ui::loupe::DEFAULT_MAGNIFICATION,
+                loupe_magnification: kept_state.loupe_magnification,
                 paste: false,
-                pixel_format: ui::PixelFormat::default(),
+                pixel_format: config.pixel_format,
             },
             trash: Trash::detect(),
             edits: Vec::new(),
@@ -456,6 +462,12 @@ impl App {
         // moment it opens.
         app.thumbnailer.enqueue(app.files.paths().to_vec());
         app.filmstrip.relist(app.files.paths());
+        app.filmstrip.set_slot(kept_state.filmstrip_width);
+        // Up from the start, the strip is scrolled to the first file as it
+        // is when it is switched on.
+        if app.panels.show_filmstrip {
+            app.filmstrip.reveal();
+        }
         app
     }
 
@@ -2424,6 +2436,10 @@ impl ApplicationHandler<UserEvent> for App {
     /// outlasts the window.
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         self.copying.join_all();
+        self.state.save(State {
+            filmstrip_width: self.filmstrip.slot(),
+            loupe_magnification: self.panels.loupe_magnification,
+        });
     }
 }
 
@@ -2488,6 +2504,7 @@ mod tests {
                 size: size.map(|(w, h)| [w as f32, h as f32]),
             }),
             options(),
+            StateFile::none(),
             threads(),
         )
     }
@@ -2495,7 +2512,14 @@ mod tests {
     /// The application as `gamut` alone opens it: no list, and nothing
     /// asked for.
     fn opened_on_nothing() -> App {
-        App::new(Vec::new(), Vec::new(), None, options(), threads())
+        App::new(
+            Vec::new(),
+            Vec::new(),
+            None,
+            options(),
+            StateFile::none(),
+            threads(),
+        )
     }
 
     fn options() -> Options {
@@ -2503,9 +2527,17 @@ mod tests {
             overrides: decode::Overrides::default(),
             startup: Startup::default(),
             hdr: HdrPreference::default(),
-            histogram: false,
-            info: false,
-            minimap: false,
+            // The panels as the tests were written against, rather than as
+            // the configuration's defaults have them.
+            config: Config {
+                show_ui: true,
+                show_minimap: false,
+                show_filmstrip: false,
+                show_histogram: false,
+                show_info: false,
+                pixel_format: ui::PixelFormat::Decimal,
+                log_counts: false,
+            },
             upscale: Upscale::default(),
             size: None,
             paused: false,

@@ -78,6 +78,7 @@ package() {
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
   install -Dm644 user-docs/KEYS.md "$pkgdir/usr/share/doc/$pkgname/KEYS.md"
   install -Dm644 user-docs/FORMATS.md "$pkgdir/usr/share/doc/$pkgname/FORMATS.md"
+  install -Dm644 user-docs/SETTINGS.md "$pkgdir/usr/share/doc/$pkgname/SETTINGS.md"
 
   install -Dm644 "packaging/$_appid.desktop" \
     "$pkgdir/usr/share/applications/$_appid.desktop"
@@ -89,6 +90,10 @@ package() {
   # packaged.
   "target/release/$pkgname" --print-man |
     install -Dm644 /dev/stdin "$pkgdir/usr/share/man/man1/$pkgname.1"
+  # An example configuration, every setting commented out at its default.
+  # Nothing is installed where the program reads it: that file is the user's.
+  "target/release/$pkgname" --print-config |
+    install -Dm644 /dev/stdin "$pkgdir/usr/share/doc/$pkgname/config.example"
 
   install -Dm644 "packaging/completions/$pkgname.bash" \
     "$pkgdir/usr/share/bash-completion/completions/$pkgname"

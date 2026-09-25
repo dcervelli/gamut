@@ -1,7 +1,7 @@
 //! The base directory specification's answers, read once for everything
 //! that keeps something under the user's home: where the home is, and the
-//! directories a session keeps its cache, its configuration and its data
-//! in — each from the variable named for it, and otherwise from home.
+//! directories a session keeps its cache, its configuration, its state and
+//! its data in — each from the variable named for it, and otherwise from home.
 //!
 //! A variable set to nothing is a variable not set, which is how a session
 //! says it has none rather than that the answer is the root of the
@@ -31,6 +31,11 @@ pub fn cache_home() -> Option<PathBuf> {
 /// `$XDG_CONFIG_HOME`, or `~/.config`.
 pub fn config_home() -> Option<PathBuf> {
     env_path("XDG_CONFIG_HOME").or_else(|| Some(home()?.join(".config")))
+}
+
+/// `$XDG_STATE_HOME`, or `~/.local/state`.
+pub fn state_home() -> Option<PathBuf> {
+    env_path("XDG_STATE_HOME").or_else(|| Some(home()?.join(".local/state")))
 }
 
 /// `$XDG_DATA_HOME`, or `~/.local/share`.

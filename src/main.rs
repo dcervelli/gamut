@@ -16,6 +16,7 @@ mod pasted;
 mod player;
 mod portal;
 mod render;
+mod settings;
 mod theme;
 mod thumbnail;
 mod thumbnailer;
@@ -185,6 +186,7 @@ fn run() -> Result<ExitCode> {
         named,
         opening,
         options,
+        settings::StateFile::load(),
         app::Threads {
             loader,
             wake,

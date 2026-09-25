@@ -42,11 +42,12 @@ const SEPARATOR: &str = "\u{00b7}";
 pub enum PixelFormat {
     /// The codes the file holds, run together in hexadecimal with no prefix
     /// and no spaces — `E78040` — which is how a color is written down
-    /// everywhere outside this window.
-    Hex,
-    /// Those codes as numbers, in the units the file keeps them in. The
-    /// default: it is the one of the three that says what was measured.
+    /// everywhere outside this window. The default, which the configuration
+    /// file can change.
     #[default]
+    Hex,
+    /// Those codes as numbers, in the units the file keeps them in: the one
+    /// of the three that says what was measured.
     Decimal,
     /// What the window, the exposure and the false color have made of them.
     Mapped,
@@ -65,6 +66,14 @@ impl PixelFormat {
             PixelFormat::Decimal => "Decimal",
             PixelFormat::Mapped => "Mapped",
         }
+    }
+
+    /// The format a word names, as the configuration file writes it: the
+    /// label, in any case.
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|format| format.label().eq_ignore_ascii_case(value))
     }
 
     pub fn next(self) -> Self {

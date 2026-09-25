@@ -5,6 +5,7 @@
 
 complete -c gamut -s h -l help        -d 'Show this help'
 complete -c gamut -s V -l version     -d 'Show the version'
+complete -c gamut      -l print-config -d 'Print a configuration file of every default'
 complete -c gamut      -l output      -d 'Start on an sdr or an hdr surface' -x -a 'sdr hdr'
 complete -c gamut      -l transfer    -d 'Override the transfer function' -x -a 'linear srgb pq hlg gamma:'
 complete -c gamut      -l primaries   -d 'Override the color primaries'  -x -a 'bt709 p3 bt2020 adobe prophoto'

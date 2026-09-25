@@ -370,8 +370,8 @@ look at it. Single fields and single sections can be copied from the panel
 itself; see below.
 
 `Ctrl+.` copies the value the bottom left corner is reading out, exactly as it
-is written there — so switching the readout to hex with `.` and pressing
-`Ctrl+.` puts `E78040` on the clipboard, and switching it back puts
+is written there — so with the readout in hex, as it starts, `Ctrl+.` puts
+`E78040` on the clipboard, and after switching it to decimal with `.` it puts
 `231 128 64` there instead. `Ctrl+Shift+.` copies the pixel's coordinate
 rather than its value, as `x,y` with nothing around it: `1919,1079`, ready to
 paste into a command line or a spreadsheet. Both work on the pixel the pointer
@@ -793,7 +793,8 @@ after them moves as the pointer crosses a power of ten. In a window too narrow
 for all of it, the coordinates stay.
 
 One pixel answers more than one question, so the value is written whichever of
-three ways you ask for. **Decimal** is the numbers the file holds, in its own
+three ways you ask for. It starts in hex; the `pixel_format` setting in
+[the configuration file](SETTINGS.md) starts it in another. **Decimal** is the numbers the file holds, in its own
 units — codes for an 8-bit image, counts for a 16-bit one, the value itself
 for floating point — the numbers whatever wrote the file put there. **Hex** is
 those same numbers as a color is usually written down: run together, in upper

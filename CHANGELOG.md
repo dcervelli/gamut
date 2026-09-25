@@ -133,8 +133,22 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   picture to arrive in an empty window sizes it as the window would have
   opened on that picture, unless `--size` chose the size.
 
+- A configuration file, `~/.config/gamut/config`, saying how the window
+  opens: whether the interface, the minimap, the file list, the histogram
+  and the file information are up, how the pixel under the pointer is
+  read out, and whether the histogram's counts are logarithmic. A flag
+  for the same panel wins over it; a line it cannot use is named on the
+  terminal and the rest still taken. `--print-config` prints one with
+  every setting commented out at its default, to start from; none is
+  written for you. See `user-docs/SETTINGS.md`.
+- The file list's width and the loupe's magnification are remembered from
+  one run to the next, in `~/.local/state/gamut/state`, written when the
+  window closes.
+
 ### Changed
 
+- The file list is up when the window opens, and the pixel under the
+  pointer is read out in hex. The configuration file puts either back.
 - The name of a file deleted while it is on screen is struck through in
   red, in place of the word `DELETED` beside it.
 - A file that takes more than a quarter of a second to open says so in a
