@@ -22,8 +22,21 @@ license=('MIT OR Apache-2.0' 'ISC' 'CC0-1.0' 'Apache-2.0')
 # libraw develops camera raw files; 0.21 or newer, which `build.rs` checks
 # through pkg-config. vulkan-icd-loader finds the driver wgpu draws through;
 # fontconfig is how the interface finds a sans and a mono face to set its
-# text in.
-depends=('gcc-libs' 'glibc' 'libheif' 'libraw' 'vulkan-icd-loader' 'fontconfig')
+# text in. wayland and libxkbcommon are the window and the keyboard: winit
+# loads them at run time rather than linking them, so neither namcap nor
+# find-libdeps sees them, and they are named here by hand, as are fontconfig
+# and the Vulkan loader, which are loaded the same way.
+depends=('libgcc' 'glibc' 'libheif' 'libraw' 'vulkan-icd-loader' 'fontconfig'
+         'wayland' 'libxkbcommon')
+# winit's X11 backend loads its libraries only when there is no Wayland
+# compositor to talk to. The portal is what the empty window's buttons for
+# opening files and folders put up; the picture on the command line needs
+# neither.
+optdepends=('libx11: running under X11'
+            'libxcursor: running under X11'
+            'libxi: running under X11'
+            'libxkbcommon-x11: running under X11'
+            'xdg-desktop-portal: the file dialog behind the empty window'"'"'s open buttons')
 makedepends=('cargo' 'pkgconf')
 options=('!debug')
 
@@ -33,12 +46,16 @@ sha256sums=('aba4763b7761af274158f1779ca0e6f89b511ba395dd1d428f0f48dad237aa78')
 prepare() {
   cd "$pkgname-$pkgver"
 
+  # Where rustup provides cargo, the toolchain is otherwise whatever its
+  # default happens to be; the tree carries no rust-toolchain.toml to pin it.
+  export RUSTUP_TOOLCHAIN=stable
   cargo fetch --locked --target "$CARCH-unknown-linux-gnu"
 }
 
 build() {
   cd "$pkgname-$pkgver"
 
+  export RUSTUP_TOOLCHAIN=stable
   export CARGO_TARGET_DIR=target
   cargo build --frozen --release
 }
@@ -49,6 +66,10 @@ check() {
   # The tests that want a GPU report success where no adapter can be had, so
   # this is safe in a build container. `test_images/` ships in the tarball
   # because the tests reach for it by path.
+  # --release, which the Rust package guidelines advise against, because it
+  # reuses what build() just compiled: without it every dependency is built a
+  # second time in the debug profile, and the install takes twice as long.
+  export RUSTUP_TOOLCHAIN=stable
   export CARGO_TARGET_DIR=target
   cargo test --frozen --release
 }
