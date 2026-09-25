@@ -10,7 +10,7 @@ A modern image viewer serves many audiences: photographer, data scientist, progr
 
 Some features are obviously useful to everyone: high performance, effective pan/zoom controls, copy/paste, etc. It can be difficult to decide if a feature exceeds the bar for inclusion. To do so, we consider questions like these:
 
-* Is the feature useful to a varied audience?
+* Is the feature *useful* to a varied audience?
 * Is the feature something that is conceptually simple but would otherwise require specialized software to accomplish?
 * Is the feature's mere presence going to confuse a casual user?
 * Does the feature help a user *act* on or *decide* about an image?
@@ -28,13 +28,16 @@ Please open PRs or submit issues to suggest features that you think should be in
 - [Region selection/measurement](#region-selectionmeasurement)
 - [Pixel info](#pixel-info)
 - [Pixel grid](#pixel-grid)
+- [Loupe](#loupe)
 - [Histogram](#histogram)
 - [HDR](#hdr)
 - [Color management](#color-management)
 - [Single channel false color](#single-channel-false-color)
 - [Fuzzy file navigation](#fuzzy-file-navigation)
+- [Filmstrip](#filmstrip)
 - [File comparison](#file-comparison)
 - [File/directory watch](#filedirectory-watch)
+- [Export](#export)
 - [Desktop/shell integration](#desktopshell-integration)
 - [OS themed](#os-themed)
 
@@ -94,6 +97,12 @@ Scale-dynamic pixel grid.
 
 ![Pixel grid animation](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/pixel_grid.gif)
 
+### Loupe
+
+An easily triggerable loupe for quickly examining details.
+
+![Loupe](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/loupe.gif)
+
 ### Histogram
 
 A dynamic histogram primarily for inspecting the content of the image. While you can make some adjustments to better understand the content of the image, it's not the intent of this program (as alluded to in the description above) to be a full-fledged image editor.
@@ -122,6 +131,12 @@ Grayscale, 16-bit and float single-channel images can be shown with various colo
 
 Bird images from [Fugleramme](https://github.com/arnegiacomo/fugleramme), augmented to include common name in the metadata.
 
+### Filmstrip
+
+The file list is a filmstrip-like view for navigating through your images visually. 
+
+![Filmstrip](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/file_list.gif)
+
 ### File comparison
 
 Navigating between images with the same dimensions maintains pan and zoom making detailed image comparison straightforward.
@@ -137,6 +152,12 @@ Files and directories are watched for changes, additions, or deletions.
 In this example, a simple program is zooming into a point on the Mandelbrot set and updating an image every second. gamut updates as soon as the file changes and maintains pan/zoom settings across reloads.
 
 ![Mandelbrot zoom via File Update](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/mandelbrot.gif)
+
+### Export
+
+A basic file export to lossless PNG or JPG with an option to resize.
+
+![Export](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/export.gif)
 
 ### Desktop/shell integration
 
@@ -184,7 +205,8 @@ Enough keys to get going:
 | `d`, `f` | Exposure down / up |
 | `h`, `i`, `m` | Histogram, file information, minimap |
 | `` ` `` | Hide the interface |
-| `q` | Quit |
+| `tab` | Show/hide the file list |
+| `q`, `esc` | Quit |
 
 All controls are documented in [`user-docs/KEYS.md`](user-docs/KEYS.md). CLI help is availabel via `gamut --help`.
 
