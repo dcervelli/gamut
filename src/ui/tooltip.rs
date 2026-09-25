@@ -82,6 +82,13 @@ pub const MAXIMIZE_SHIFTED: &str = "Hide all panels and toggle the UI";
 /// takes then, in place of the whole picture's words in [`words`].
 pub const COPY_REGION: &str = "Copy the region as displayed";
 
+/// What the dot at the head of the pixel readout says under its name: the
+/// key that cycles the format, and the two copies that take what it is
+/// showing away — each followed by its key, which the application adds.
+pub const PIXEL_CYCLE: &str = "Cycle pixel format: hex, decimal, mapped";
+pub const PIXEL_COPY_VALUE: &str = "Copy pixel value under pointer";
+pub const PIXEL_COPY_COORDINATE: &str = "Copy coordinate of pixel under pointer as x,y";
+
 /// What a toggle says when the content area has no room for the panel it
 /// opens, in place of the name of the panel.
 ///
@@ -148,7 +155,7 @@ pub const DIALOG_UP: &str = "The file dialog is already open.";
 /// clipboard holds nothing this program could show. The paste button in the
 /// strip is simply not there then; this one stays, so that the empty window
 /// always offers the same things, and says why one of them is dead.
-pub const NOTHING_TO_PASTE: &str = "Nothing on the clipboard that could be shown.";
+pub const NOTHING_TO_PASTE: &str = "No image on the clipboard";
 
 /// What a button about the picture says while there is no picture: the
 /// copy button, and the region button, which have nothing to take or mark.
@@ -210,8 +217,8 @@ impl Reasons {
 
 /// What the pair at the head of the file list says while there is nowhere
 /// to go.
-const NOTHING_BEFORE: &str = "No file was shown before this one.";
-const NOTHING_AFTER: &str = "No file was shown after this one.";
+const NOTHING_BEFORE: &str = "No previous file in image history";
+const NOTHING_AFTER: &str = "No forward file in image history";
 
 /// Why a dead control is dead.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -356,6 +363,13 @@ pub fn words(tip: Tip) -> Option<String> {
         Tip::Control(Control::Region) => "Draw a region",
         Tip::Control(Control::Output) => "Toggle HDR output, when monitor is capable",
         Tip::Control(Control::Maximize) => "Toggle the UI",
+        // The dot at the head of the pixel readout names the whole of what
+        // it offers; the key that cycles it is the first line under it.
+        Tip::Control(Control::PixelFormat) => "Pixel options",
+        // The transport bar's, shorter than the key table's sentences.
+        Tip::Control(Control::Play) => "Play/pause",
+        Tip::Control(Control::StepBack) => "Previous frame, or page",
+        Tip::Control(Control::StepForward) => "Next frame, or page",
         Tip::Control(Control::Paste) => "Paste an image",
         // The turn's pair: each names its own way round, where the key
         // table's one line names both.
@@ -394,9 +408,9 @@ pub fn words(tip: Tip) -> Option<String> {
         // two words for it, and what those two words stand for needs
         // saying once.
         Tip::Control(Control::Window(index)) => match WINDOWS.get(index)?.1 {
-            AutoWindow::Off => "Show the values as they are, 0 to 1",
-            AutoWindow::MinMax => "Stretch the whole range of the image to 0 to 1",
-            AutoWindow::Percentile => "Stretch the central 99.8%, the outliers left out",
+            AutoWindow::Off => "Don't stretch image values",
+            AutoWindow::MinMax => "Stretch whole range to fit 0 to 1",
+            AutoWindow::Percentile => "Stretch central 99.8% (remove outliers) to 0 to 1",
             // Not one of the three: a hand-set window is where the
             // window ends up, never something a button puts it on.
             AutoWindow::Manual => return None,
@@ -406,8 +420,8 @@ pub fn words(tip: Tip) -> Option<String> {
         // say, and a key that does the same job is named under it.
         Tip::BlackPoint => "Black point",
         Tip::WhitePoint => "White point",
-        Tip::Window => "The window, from black to white: drag to slide it",
-        Tip::Exposure => "Exposure: drag to set it",
+        Tip::Window => "Black to white, drag to slide",
+        Tip::Exposure => "Exposure",
         // And what becomes of the highlights under each, the curve named
         // where there is one.
         Tip::Control(Control::Curve(index)) => match ToneMap::ALL.get(index)? {
@@ -415,7 +429,7 @@ pub fn words(tip: Tip) -> Option<String> {
             ToneMap::Neutral => "Roll highlights off: Neutral",
         },
         // The timeline: no key scrubs, so it names itself.
-        Tip::Timeline => "Go to a frame",
+        Tip::Timeline => "Frame timeline",
         // No words of its own: an item of the open menu wears the name of
         // the program it hands the file to, and there is nothing an
         // interface that has never heard of that program could add to it.
@@ -426,14 +440,10 @@ pub fn words(tip: Tip) -> Option<String> {
             Control::Previous
             | Control::Next
             | Control::Minimap
-            | Control::Play
-            | Control::StepBack
-            | Control::StepForward
             | Control::Seek(_)
             | Control::Histogram
             | Control::Info
             | Control::Loupe
-            | Control::PixelFormat
             | Control::Facts(_)
             | Control::Chooser
             | Control::Choose(_)

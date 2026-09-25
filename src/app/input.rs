@@ -1529,12 +1529,19 @@ impl Naming for Namer {
             // The dot at the head of the pixel readout: what the key does to
             // it, and under that the two copies that take what it is showing
             // away with them — neither of which has a button anywhere.
+            // Its name alone, the key being the first line under it.
             Tip::Control(Control::PixelFormat) => (
-                vec![names(at)?],
-                [CopyPixelValue, CopyPixelCoordinate]
-                    .into_iter()
-                    .filter_map(hint)
-                    .collect(),
+                vec![ui::tooltip::words(at)?],
+                [
+                    (ui::tooltip::PIXEL_CYCLE, CyclePixelFormat),
+                    (ui::tooltip::PIXEL_COPY_VALUE, CopyPixelValue),
+                    (ui::tooltip::PIXEL_COPY_COORDINATE, CopyPixelCoordinate),
+                ]
+                .into_iter()
+                .filter_map(|(words, action)| {
+                    Some(format!("{words} ({})", binding_for(action)?.shown))
+                })
+                .collect(),
             ),
             // The button that hides the interface: what a plain press does,
             // and under it the key for the press that closes the floating
@@ -3112,7 +3119,7 @@ mod tests {
         assert!(!sorting.contains('('), "{sorting}");
         assert_eq!(
             named(Control::SortBy(ui::filmstrip::Sort::Area)).as_deref(),
-            Some("Sort by pixels in all")
+            Some("Sort by total pixels")
         );
         let file = named(Control::FileMenu).expect("the button names itself");
         assert!(!file.contains('('), "{file}");
@@ -3556,24 +3563,32 @@ mod tests {
         );
     }
 
-    /// The dot at the head of the pixel readout is named by the key that
-    /// steps it on, and the two copies that take what it is showing away are
-    /// bound as well: they have no button anywhere, so that label is the only
+    /// The dot at the head of the pixel readout names itself, and under that
+    /// the key that steps it on and the two copies that take what it is
+    /// showing away: they have no button anywhere, so that label is the only
     /// place either of them is written down.
     #[test]
     fn the_pixel_readout_names_its_key_and_the_copies_that_have_none() {
+        let namer = Namer {
+            path: String::new(),
+            index: 0,
+            count: 1,
+            show_histogram: false,
+            state: Vec::new(),
+            conditions: Conditions::ALIVE,
+        };
+        let tooltip = namer
+            .tooltip(Tip::Control(Control::PixelFormat))
+            .expect("named");
+        assert_eq!(tooltip.title, ["Pixel options"]);
         assert_eq!(
-            names(Tip::Control(Control::PixelFormat)).as_deref(),
-            Some("Cycle the pixel readout: hex, decimal, mapped (.)")
+            tooltip.hints,
+            [
+                "Cycle pixel format: hex, decimal, mapped (.)",
+                "Copy pixel value under pointer (Ctrl+.)",
+                "Copy coordinate of pixel under pointer as x,y (Ctrl+Shift+.)",
+            ]
         );
-
-        for action in [CopyPixelValue, CopyPixelCoordinate] {
-            let hint = hint(action).unwrap_or_else(|| panic!("{action:?} is bound"));
-            assert!(
-                hint.ends_with("(Ctrl+.)") || hint.ends_with("(Ctrl+Shift+.)"),
-                "{hint}"
-            );
-        }
     }
 
     /// A cell of the menu of copies is named in words shorter than the key

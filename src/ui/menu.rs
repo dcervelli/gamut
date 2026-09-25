@@ -185,9 +185,9 @@ pub fn percent(zoom: f32) -> String {
 /// that does not say which question it is for.
 pub fn describe_format(format: PixelFormat) -> &'static str {
     match format {
-        PixelFormat::Hex => "The file's codes, as a color is written",
-        PixelFormat::Decimal => "The file's own numbers",
-        PixelFormat::Mapped => "What the display makes of them",
+        PixelFormat::Hex => "Pixel value from image in hex",
+        PixelFormat::Decimal => "Pixel value from image in decimal",
+        PixelFormat::Mapped => "Pixel value sent to display",
     }
 }
 
