@@ -285,7 +285,9 @@ pub fn span(tops: &[f32], top: f32, bottom: f32) -> Range<usize> {
     }
     // The last row starting at or above `top` is the first on screen, and
     // the first starting at or below `bottom` is the last.
-    let first = tops[..count].partition_point(|&start| start <= top).saturating_sub(1);
+    let first = tops[..count]
+        .partition_point(|&start| start <= top)
+        .saturating_sub(1);
     let last = tops[..count].partition_point(|&start| start < bottom);
     first..last.max(first)
 }
@@ -315,7 +317,8 @@ fn rescrolled(offset: f32, viewport: f32, was: &[f32], now: &[f32], current: Opt
     if count == 0 || now.len() != was.len() {
         return offset;
     }
-    let seen = current.filter(|&row| row < count && was[row] < offset + viewport && was[row + 1] > offset);
+    let seen =
+        current.filter(|&row| row < count && was[row] < offset + viewport && was[row + 1] > offset);
     let kept = match seen {
         Some(row) => {
             let middle = (was[row] + was[row + 1]) / 2.0 - offset;
@@ -328,7 +331,9 @@ fn rescrolled(offset: f32, viewport: f32, was: &[f32], now: &[f32], current: Opt
             }
         }
         None => {
-            let row = was[..count].partition_point(|&start| start <= offset).saturating_sub(1);
+            let row = was[..count]
+                .partition_point(|&start| start <= offset)
+                .saturating_sub(1);
             let share = (offset - was[row]) / (was[row + 1] - was[row]);
             now[row] + share * (now[row + 1] - now[row])
         }
@@ -418,10 +423,8 @@ pub(super) fn grip(pass: &mut Pass, ui: &mut egui::Ui, slot: f32) {
     let Some(list) = pass.file_list else {
         return;
     };
-    let rect = egui::Rect::from_x_y_ranges(
-        list.right() - GRIP..=list.right() + GRIP,
-        list.y_range(),
-    );
+    let rect =
+        egui::Rect::from_x_y_ranges(list.right() - GRIP..=list.right() + GRIP, list.y_range());
     let response = ui.interact(rect, egui::Id::new("filmstrip grip"), Sense::DRAG);
     if response.hovered() || response.dragged() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
@@ -525,7 +528,14 @@ fn rows(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
 /// on it shows the file. Rested on, it says the name in full, with what is
 /// known of it under it, beside the panel's `edge` and level with the
 /// slot's top: the name in the title is cut in its middle to the row.
-fn file(pass: &mut Pass, ui: &mut egui::Ui, input: &Input, row: usize, rect: egui::Rect, edge: f32) {
+fn file(
+    pass: &mut Pass,
+    ui: &mut egui::Ui,
+    input: &Input,
+    row: usize,
+    rect: egui::Rect,
+    edge: f32,
+) {
     let Row {
         index,
         ref name,
@@ -617,7 +627,11 @@ fn file(pass: &mut Pass, ui: &mut egui::Ui, input: &Input, row: usize, rect: egu
         // On whole logical pixels, so that the words sit as crisply as the
         // title's do.
         let backing = egui::Rect::from_min_size(
-            pos2(slot.center().x - size.x / 2.0, slot.bottom() - VALUE_LIFT - size.y).round(),
+            pos2(
+                slot.center().x - size.x / 2.0,
+                slot.bottom() - VALUE_LIFT - size.y,
+            )
+            .round(),
             size,
         );
         painter.rect_filled(
@@ -631,7 +645,10 @@ fn file(pass: &mut Pass, ui: &mut egui::Ui, input: &Input, row: usize, rect: egu
     // The title: the index, and the name cut in its middle to what is
     // left, in line with the slot under it.
     let (ink, family): (egui::Color32, _) = if current {
-        (theme.text_bright.into(), egui::FontFamily::Name(fonts::BOLD.into()))
+        (
+            theme.text_bright.into(),
+            egui::FontFamily::Name(fonts::BOLD.into()),
+        )
     } else if hovered {
         (theme.text_bright.into(), egui::FontFamily::Proportional)
     } else {
@@ -642,7 +659,10 @@ fn file(pass: &mut Pass, ui: &mut egui::Ui, input: &Input, row: usize, rect: egu
     let text = titled(ui, index, name, &font, room);
     let galley = super::chooser::lit(ui, &text, &[], font, ink, ink, room);
     painter.galley(
-        pos2(title.left() + INSET, title.center().y - galley.size().y / 2.0),
+        pos2(
+            title.left() + INSET,
+            title.center().y - galley.size().y / 2.0,
+        ),
         galley,
         ink,
     );
@@ -696,9 +716,9 @@ impl Known {
             Sort::Date => self.modified.map(local_time),
             Sort::Size => self.bytes.map(super::info::round_bytes),
             Sort::Width | Sort::Height => self.size.map(dimensions),
-            Sort::Area => self
-                .size
-                .map(|(width, height)| super::info::round_pixels(u64::from(width) * u64::from(height))),
+            Sort::Area => self.size.map(|(width, height)| {
+                super::info::round_pixels(u64::from(width) * u64::from(height))
+            }),
         }
     }
 }
@@ -842,7 +862,10 @@ mod tests {
             modified: Some(when),
         };
         let about = everything.about("a/b.png");
-        assert_eq!(about[..2], ["a", "PNG \u{b7} 1920 \u{d7} 1080 \u{b7} 1.26 MB"]);
+        assert_eq!(
+            about[..2],
+            ["a", "PNG \u{b7} 1920 \u{d7} 1080 \u{b7} 1.26 MB"]
+        );
         assert_eq!(about[2], local_time(when));
         let nothing = Known {
             format: None,
@@ -850,7 +873,11 @@ mod tests {
             bytes: None,
             modified: None,
         };
-        assert_eq!(nothing.about("b.png"), Vec::<String>::new(), "no folder, nothing read");
+        assert_eq!(
+            nothing.about("b.png"),
+            Vec::<String>::new(),
+            "no folder, nothing read"
+        );
         let sized = Known {
             size: Some((640, 480)),
             ..nothing
@@ -859,22 +886,48 @@ mod tests {
 
         let sorted = |known: Known, sort| known.sorted_by(sort, "photos/2024/b.png");
         assert_eq!(sorted(everything, Sort::Name), None);
-        assert_eq!(sorted(everything, Sort::Path).as_deref(), Some("photos/2024"));
+        assert_eq!(
+            sorted(everything, Sort::Path).as_deref(),
+            Some("photos/2024")
+        );
         assert_eq!(nothing.sorted_by(Sort::Path, "b.png"), None, "no folder");
         assert_eq!(sorted(everything, Sort::Size).as_deref(), Some("1.26 MB"));
         assert_eq!(sorted(everything, Sort::Area).as_deref(), Some("2.07 MP"));
-        assert_eq!(sorted(everything, Sort::Width).as_deref(), Some("1920 \u{d7} 1080"));
+        assert_eq!(
+            sorted(everything, Sort::Width).as_deref(),
+            Some("1920 \u{d7} 1080")
+        );
         assert_eq!(sorted(nothing, Sort::Date), None, "not known yet");
     }
 
     #[test]
     fn a_long_name_is_cut_in_its_middle_keeping_its_end() {
         let ten = [1.0; 10];
-        assert_eq!(middle_cut(&ten, 1.0, 4, 10.0), None, "a name that fits is whole");
-        assert_eq!(middle_cut(&ten, 1.0, 2, 7.0), Some((3, 3)), "halves, the end first");
-        assert_eq!(middle_cut(&ten, 1.0, 5, 7.0), Some((1, 5)), "the end's minimum");
-        assert_eq!(middle_cut(&ten, 1.0, 8, 7.0), Some((0, 6)), "the end, all there is room for");
-        assert_eq!(middle_cut(&ten, 1.0, 4, 0.5), Some((0, 0)), "no room at all");
+        assert_eq!(
+            middle_cut(&ten, 1.0, 4, 10.0),
+            None,
+            "a name that fits is whole"
+        );
+        assert_eq!(
+            middle_cut(&ten, 1.0, 2, 7.0),
+            Some((3, 3)),
+            "halves, the end first"
+        );
+        assert_eq!(
+            middle_cut(&ten, 1.0, 5, 7.0),
+            Some((1, 5)),
+            "the end's minimum"
+        );
+        assert_eq!(
+            middle_cut(&ten, 1.0, 8, 7.0),
+            Some((0, 6)),
+            "the end, all there is room for"
+        );
+        assert_eq!(
+            middle_cut(&ten, 1.0, 4, 0.5),
+            Some((0, 0)),
+            "no room at all"
+        );
         // A wide character at the start the head cannot take goes to the end.
         let wide = [4.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
         assert_eq!(middle_cut(&wide, 1.0, 1, 6.0), Some((0, 5)));
@@ -903,20 +956,42 @@ mod tests {
         // Rows of 100 in a viewport of 400, scrolled to 1000: rows 10 to
         // 13 on screen. The file on screen, row 11, has its middle 150
         // down; at rows of 200 its middle is at 2300, so 2150 puts it back.
-        assert_eq!(rescrolled(1000.0, 400.0, &at(100.0), &at(200.0), Some(11)), 2150.0);
+        assert_eq!(
+            rescrolled(1000.0, 400.0, &at(100.0), &at(200.0), Some(11)),
+            2150.0
+        );
         // Row 13 at the foot would run past it, and is brought up into view.
-        assert_eq!(rescrolled(1000.0, 400.0, &at(100.0), &at(200.0), Some(13)), 2400.0);
+        assert_eq!(
+            rescrolled(1000.0, 400.0, &at(100.0), &at(200.0), Some(13)),
+            2400.0
+        );
         // Row 10 at the top shrinking keeps its middle, which is in view.
-        assert_eq!(rescrolled(1000.0, 400.0, &at(100.0), &at(50.0), Some(10)), 475.0);
+        assert_eq!(
+            rescrolled(1000.0, 400.0, &at(100.0), &at(50.0), Some(10)),
+            475.0
+        );
         // A file off screen is left there: the row at the top keeps the
         // share of it above the edge, a quarter of row 10.
-        assert_eq!(rescrolled(1025.0, 400.0, &at(100.0), &at(200.0), Some(50)), 2050.0);
-        assert_eq!(rescrolled(1025.0, 400.0, &at(100.0), &at(200.0), None), 2050.0);
+        assert_eq!(
+            rescrolled(1025.0, 400.0, &at(100.0), &at(200.0), Some(50)),
+            2050.0
+        );
+        assert_eq!(
+            rescrolled(1025.0, 400.0, &at(100.0), &at(200.0), None),
+            2050.0
+        );
         // Never past either end of the strip.
         assert_eq!(rescrolled(0.0, 400.0, &at(100.0), &at(200.0), Some(0)), 0.0);
-        assert_eq!(rescrolled(9600.0, 400.0, &at(100.0), &at(50.0), Some(99)), 4600.0);
+        assert_eq!(
+            rescrolled(9600.0, 400.0, &at(100.0), &at(50.0), Some(99)),
+            4600.0
+        );
         let two = |height| tops(2, height, None);
-        assert_eq!(rescrolled(0.0, 400.0, &two(100.0), &two(150.0), Some(1)), 0.0, "no room to scroll");
+        assert_eq!(
+            rescrolled(0.0, 400.0, &two(100.0), &two(150.0), Some(1)),
+            0.0,
+            "no room to scroll"
+        );
     }
 
     /// One row above the screen taking its picture's shape moves the
@@ -931,7 +1006,10 @@ mod tests {
         // A row below the screen growing moves nothing at all.
         let below = tops(100, 100.0, Some((50, 200.0)));
         assert_eq!(rescrolled(1000.0, 400.0, &was, &below, Some(11)), 1000.0);
-        assert_eq!(rescrolled(1000.0, 400.0, &was, &tops(99, 100.0, None), None), 1000.0);
+        assert_eq!(
+            rescrolled(1000.0, 400.0, &was, &tops(99, 100.0, None), None),
+            1000.0
+        );
     }
 
     /// A slot is its picture's shape, held to the range and rounded, and
@@ -942,18 +1020,37 @@ mod tests {
         assert_eq!(slot_height(200.0, Some((0, 100))), 200.0, "no shape at all");
         assert_eq!(slot_height(200.0, Some((1920, 1080))), 113.0);
         assert_eq!(slot_height(200.0, Some((4000, 6000))), 300.0);
-        assert_eq!(slot_height(200.0, Some((10_000, 1000))), 200.0 * SHAPE_MIN, "a panorama");
-        assert_eq!(slot_height(200.0, Some((1080, 2400))), 200.0 * SHAPE_MAX, "a screenshot");
-        assert_eq!(row_height(200.0, None), TITLE_HEIGHT + TOP_INSET + 200.0 + INSET);
+        assert_eq!(
+            slot_height(200.0, Some((10_000, 1000))),
+            200.0 * SHAPE_MIN,
+            "a panorama"
+        );
+        assert_eq!(
+            slot_height(200.0, Some((1080, 2400))),
+            200.0 * SHAPE_MAX,
+            "a screenshot"
+        );
+        assert_eq!(
+            row_height(200.0, None),
+            TITLE_HEIGHT + TOP_INSET + 200.0 + INSET
+        );
     }
 
     #[test]
     fn the_span_is_every_row_the_viewport_touches() {
         let tops = [0.0, 22.0, 162.0, 302.0, 442.0];
         assert_eq!(span(&tops, 0.0, 100.0), 0..2);
-        assert_eq!(span(&tops, 22.0, 162.0), 1..2, "edges on the boundary count once");
+        assert_eq!(
+            span(&tops, 22.0, 162.0),
+            1..2,
+            "edges on the boundary count once"
+        );
         assert_eq!(span(&tops, 30.0, 310.0), 1..4);
-        assert_eq!(span(&tops, 500.0, 600.0), 3..4, "past the end, the last row");
+        assert_eq!(
+            span(&tops, 500.0, 600.0),
+            3..4,
+            "past the end, the last row"
+        );
         assert_eq!(span(&[0.0], 0.0, 100.0), 0..0, "no rows at all");
         assert_eq!(span(&[], 0.0, 100.0), 0..0);
     }

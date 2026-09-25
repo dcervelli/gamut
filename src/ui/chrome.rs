@@ -1013,7 +1013,13 @@ mod tests {
     /// as they do without it.
     #[test]
     fn the_transport_bar_takes_a_bar_off_the_bottom() {
-        let chrome = Chrome::new(WINDOW, Parts { transport: true, filmstrip: None });
+        let chrome = Chrome::new(
+            WINDOW,
+            Parts {
+                transport: true,
+                filmstrip: None,
+            },
+        );
         let transport = chrome.transport.expect("asked for");
         assert_eq!(
             transport,
@@ -1066,7 +1072,12 @@ mod tests {
         let strip = chrome.filmstrip.expect("asked for");
         assert_eq!(
             strip,
-            Rect::new(0.0, BAR_HEIGHT, filmstrip::width(filmstrip::SLOT_MIN), 700.0 - BAR_HEIGHT)
+            Rect::new(
+                0.0,
+                BAR_HEIGHT,
+                filmstrip::width(filmstrip::SLOT_MIN),
+                700.0 - BAR_HEIGHT
+            )
         );
         assert_eq!(chrome.left.x, strip.right());
         assert_eq!(chrome.left.width, SIDE_WIDTH);
@@ -1087,7 +1098,12 @@ mod tests {
         );
         assert_eq!(
             content_area(WINDOW, false, parts),
-            Rect::new(filmstrip::width(filmstrip::SLOT_MIN), 0.0, 1000.0 - filmstrip::width(filmstrip::SLOT_MIN), 700.0),
+            Rect::new(
+                filmstrip::width(filmstrip::SLOT_MIN),
+                0.0,
+                1000.0 - filmstrip::width(filmstrip::SLOT_MIN),
+                700.0
+            ),
             "left up when the rest of the interface is hidden, down the whole edge"
         );
         assert_eq!(

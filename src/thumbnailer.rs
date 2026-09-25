@@ -678,13 +678,7 @@ fn display_copy(width: u32, height: u32, channels: Channels, data: &[u8]) -> Thu
 }
 
 /// One of [`display_copy`]'s copies, at most `side` a side.
-fn fitted_copy(
-    width: u32,
-    height: u32,
-    channels: Channels,
-    data: &[u8],
-    side: u32,
-) -> DisplayCopy {
+fn fitted_copy(width: u32, height: u32, channels: Channels, data: &[u8], side: u32) -> DisplayCopy {
     let (width, height, small) =
         resample::downscale_bytes(width, height, channels.count(), data, side);
     let mut rgba = Vec::with_capacity(width as usize * height as usize * 4);
@@ -739,7 +733,10 @@ mod tests {
         let News::Thumb(thumb) = thumbnail_from(&picture, &image, Some(&dirs), &stopped) else {
             panic!("a thumbnail");
         };
-        let sizes = thumb.copies.each_ref().map(|copy| (copy.width, copy.height));
+        let sizes = thumb
+            .copies
+            .each_ref()
+            .map(|copy| (copy.width, copy.height));
         assert_eq!(sizes, [(128, 96), (256, 192), (512, 384)]);
         assert_eq!(&thumb.copies[0].rgba[..4], &[90, 90, 90, 255]);
         let key = thumbnail::key(&std::path::absolute(&picture).unwrap());

@@ -354,9 +354,8 @@ mod tests {
     /// extension alone for the lot.
     #[test]
     fn each_format_is_named_for_itself() {
-        let format = |name: &str| {
-            super::super::reader(std::path::Path::new(&format!("test_images/{name}")))
-        };
+        let format =
+            |name: &str| super::super::reader(std::path::Path::new(&format!("test_images/{name}")));
         assert_eq!(format("gif-palette.gif"), Some("gif"));
         assert_eq!(format("hdr-rgbe.hdr"), Some("hdr"));
         assert_eq!(format("exr-rgb.exr"), Some("exr"));

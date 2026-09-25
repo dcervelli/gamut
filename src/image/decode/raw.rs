@@ -694,8 +694,24 @@ fn has_signature(header: &[u8]) -> bool {
 /// rest: what a file this decoder claims may be called.
 #[cfg(test)]
 const FORMATS: &[&str] = &[
-    "camera raw", "cr2", "cr3", "crw", "orf", "rw2", "raf", "mrw", "iiq", "dng", "nef", "arw",
-    "pef", "srw", "3fr", "dcr", "erf", "mos",
+    "camera raw",
+    "cr2",
+    "cr3",
+    "crw",
+    "orf",
+    "rw2",
+    "raf",
+    "mrw",
+    "iiq",
+    "dng",
+    "nef",
+    "arw",
+    "pef",
+    "srw",
+    "3fr",
+    "dcr",
+    "erf",
+    "mos",
 ];
 
 /// Which camera format the leading bytes say a raw is — the container's own
@@ -854,7 +870,11 @@ impl<'a> Directory<'a> {
             return None;
         }
         let count = count as usize;
-        let start = if count <= 4 { at } else { self.u32(at)? as usize };
+        let start = if count <= 4 {
+            at
+        } else {
+            self.u32(at)? as usize
+        };
         let text = std::str::from_utf8(self.header.get(start..start + count)?).ok()?;
         Some(text.trim_end_matches('\0').trim())
     }
@@ -872,7 +892,10 @@ mod tests {
     fn a_raw_is_named_by_its_signature_its_tag_or_its_make() {
         assert_eq!(raw_format(b"IIRO\x08\x00\x00\x00"), Some("orf"));
         assert_eq!(raw_format(b"FUJIFILMCCD-RAW 0201"), Some("raf"));
-        assert_eq!(raw_format(b"II\x2a\x00\x10\x00\x00\x00CR\x02\x00"), Some("cr2"));
+        assert_eq!(
+            raw_format(b"II\x2a\x00\x10\x00\x00\x00CR\x02\x00"),
+            Some("cr2")
+        );
         assert_eq!(raw_format(&tiff(&[(0xC612, 1)])), Some("dng"));
         // A Make entry: ASCII, longer than four bytes, so at an offset —
         // right after the directory and its terminating offset.
@@ -888,9 +911,17 @@ mod tests {
         other.splice(26.., b"CASIO COMPUTER CO.\0".iter().copied());
         assert_eq!(raw_format(&other), None);
         assert_eq!(Raw.format(&other), Raw.name());
-        assert_eq!(raw_format(&tiff(&[(0x0106, 32803)])), None, "a CFA and nothing else");
+        assert_eq!(
+            raw_format(&tiff(&[(0x0106, 32803)])),
+            None,
+            "a CFA and nothing else"
+        );
         for format in FORMATS {
-            assert!(format.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == ' '));
+            assert!(
+                format
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == ' ')
+            );
         }
     }
 

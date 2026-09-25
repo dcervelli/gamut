@@ -17,9 +17,9 @@ use crate::view::{View, Viewport};
 use crate::image::region::{Grip, Region, Side};
 
 use super::chooser::{self, Input, Row, Step};
-use super::filmstrip;
 use super::chrome::{BAR_HEIGHT, SIDE_WIDTH};
 use super::control::{Naming, Unnamed};
+use super::filmstrip;
 use super::help;
 use super::menu::Copies;
 use super::rename::{self, Verdict};
@@ -791,7 +791,12 @@ fn the_file_list_offers_its_rows_its_menus_and_the_way_back() {
     );
 
     assert!(harness.get_by_label("Back").accesskit_node().is_disabled());
-    assert!(!harness.get_by_label("Forward").accesskit_node().is_disabled());
+    assert!(
+        !harness
+            .get_by_label("Forward")
+            .accesskit_node()
+            .is_disabled()
+    );
     assert_eq!(
         click(&mut harness, "Forward"),
         [Command::Press(Control::Forward)]

@@ -267,7 +267,10 @@ mod tests {
         // And nothing at all when the window has no room to spare: a map
         // taking a third of a small content area would be in the way.
         assert_eq!(
-            thumbnail(Chrome::new([200.0, 160.0], Parts::NONE).content(), [800.0, 600.0]),
+            thumbnail(
+                Chrome::new([200.0, 160.0], Parts::NONE).content(),
+                [800.0, 600.0]
+            ),
             None
         );
     }

@@ -11,9 +11,9 @@ mod gui;
 pub mod input;
 mod kept;
 mod order;
-mod visited;
 mod playback;
 mod region;
+mod visited;
 mod window;
 
 use std::path::{Path, PathBuf};
@@ -42,13 +42,13 @@ use crate::thumbnailer::{Delivered, Facts, News, Thumb, Thumbnailer};
 use crate::timing;
 use crate::trash::Trash;
 use crate::ui::chrome::{Parts, content_area, image_viewport};
-use filmstrip::Filmstrip;
-use visited::Visited;
 use crate::ui::toast::{self, Level, Toasts};
 use crate::ui::tooltip::Hdr;
 use crate::ui::{self, Current, FileFacts, FrameInput, Panels, Rect, Toast};
 use crate::view::{View, Viewport};
 use crate::watch::{self, Watch};
+use filmstrip::Filmstrip;
+use visited::Visited;
 
 use animation::Animation;
 use chooser::{Chooser, Thumbs};
@@ -1362,11 +1362,8 @@ impl App {
         }
         self.pointer_pixel()?;
         let cursor = self.logical_cursor()?;
-        let content = ui::chrome::content_area(
-            self.logical_size(),
-            self.panels.show_ui,
-            self.parts(),
-        );
+        let content =
+            ui::chrome::content_area(self.logical_size(), self.panels.show_ui, self.parts());
         Some(ui::loupe::place(
             cursor,
             content,
@@ -1661,7 +1658,8 @@ impl App {
         // and decoded again on the thread — or refused there: its ceiling
         // is what a background decode may hold, and this one is held.
         if file.mode == Reload::InPlace || given_up {
-            self.thumbnailer.adopt(file.path.clone(), Arc::clone(&image));
+            self.thumbnailer
+                .adopt(file.path.clone(), Arc::clone(&image));
         }
         self.facts_learned();
         // A region is of the picture it was drawn on. Stepping to another
@@ -4250,7 +4248,11 @@ mod tests {
         assert!(dir.join("b.png").exists(), "nothing done to it on disk");
         assert!(!app.watch.missing(), "and the bar does not call it deleted");
         assert_eq!(said(&app), "Took b.png off the list. Ctrl+Z to undo.");
-        assert_eq!(app.files.len(), 3, "still on the list while it is on screen");
+        assert_eq!(
+            app.files.len(),
+            3,
+            "still on the list while it is on screen"
+        );
         assert_eq!(app.files.pending().map(|pending| pending.index), Some(2));
         // Held down: nothing more happens until the neighbor is up.
         app.remove_shown();
@@ -4264,7 +4266,13 @@ mod tests {
         let rows = |app: &mut App| {
             let chooser = &app.chooser;
             app.filmstrip
-                .input(&app.thumbs, |path| App::key_of(chooser, path), None, false, false)
+                .input(
+                    &app.thumbs,
+                    |path| App::key_of(chooser, path),
+                    None,
+                    false,
+                    false,
+                )
                 .rows
                 .len()
         };
@@ -4292,7 +4300,11 @@ mod tests {
         assert_eq!(app.files.shown_path(), Some(dir.join("b.png").as_path()));
         assert!(!app.conditions().undoable);
         assert_eq!(Effect::Nothing, app.poll_directories());
-        assert_eq!(Effect::Nothing, app.poll_directories(), "listed again, it stays");
+        assert_eq!(
+            Effect::Nothing,
+            app.poll_directories(),
+            "listed again, it stays"
+        );
         assert_eq!(app.files.len(), 4);
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
@@ -4309,7 +4321,11 @@ mod tests {
         assert!(app.is_empty());
         assert_eq!(app.files.len(), 0);
         assert!(app.size_to_next);
-        assert!(said(&app).starts_with("Took a.png off the list"), "{}", said(&app));
+        assert!(
+            said(&app).starts_with("Took a.png off the list"),
+            "{}",
+            said(&app)
+        );
         app.remove_shown();
         assert_eq!(app.edits.len(), 1, "nothing to take off twice");
 
@@ -4341,7 +4357,11 @@ mod tests {
         answer(&mut app, Reload::Fresh);
         assert!(app.files.is_idle(), "the walk had nowhere else to go");
         assert_eq!(app.files.shown_path(), Some(dir.join("a.png").as_path()));
-        assert_eq!(app.files.len(), 2, "still on the list, nothing having taken the screen");
+        assert_eq!(
+            app.files.len(),
+            2,
+            "still on the list, nothing having taken the screen"
+        );
 
         app.remove_shown();
         assert_eq!(said(&app), "Already taken off the list.");
@@ -4384,19 +4404,23 @@ mod tests {
                 .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
                 .collect()
         };
-        assert_eq!(names(&app), ["a.png", "b.png", "c.png"], "in name order once the read landed");
+        assert_eq!(
+            names(&app),
+            ["a.png", "b.png", "c.png"],
+            "in name order once the read landed"
+        );
         assert_eq!(app.files.shown_path(), Some(dir.join("b.png").as_path()));
         assert_eq!(app.files.index(), 1);
 
         // By area: only the file on screen has been read, and the rest
         // wait at the end in the order they stood.
-        assert_eq!(
-            app.press(ui::Control::SortBy(Sort::Area)),
-            Effect::Redraw
-        );
+        assert_eq!(app.press(ui::Control::SortBy(Sort::Area)), Effect::Redraw);
         assert_eq!(names(&app), ["b.png", "a.png", "c.png"]);
         assert_eq!(app.files.index(), 0);
-        assert!(app.filmstrip.reveals(), "the strip follows the file on screen");
+        assert!(
+            app.filmstrip.reveals(),
+            "the strip follows the file on screen"
+        );
         let learned = |name: &str, side: u32| Delivered {
             path: dir.join(name),
             news: News::Facts(Facts {
@@ -4410,7 +4434,11 @@ mod tests {
         };
         app.take_thumbnail(learned("a.png", 4));
         app.take_thumbnail(learned("c.png", 16));
-        assert_eq!(names(&app), ["b.png", "a.png", "c.png"], "not until the poll");
+        assert_eq!(
+            names(&app),
+            ["b.png", "a.png", "c.png"],
+            "not until the poll"
+        );
         assert_eq!(app.poll_order(), Effect::Redraw);
         assert_eq!(names(&app), ["a.png", "b.png", "c.png"]);
         assert_eq!(app.files.shown_path(), Some(dir.join("b.png").as_path()));
@@ -4418,10 +4446,7 @@ mod tests {
 
         // Under a read: the list is left alone until the read lands.
         app.step(true);
-        assert_eq!(
-            app.press(ui::Control::SortBy(Sort::Height)),
-            Effect::Redraw
-        );
+        assert_eq!(app.press(ui::Control::SortBy(Sort::Height)), Effect::Redraw);
         let _ = app.press(ui::Control::SortBy(Sort::Size));
         assert_eq!(names(&app), ["a.png", "b.png", "c.png"]);
         answer(&mut app, Reload::Fresh);
@@ -4483,7 +4508,9 @@ mod tests {
         assert_eq!(app.files.shown_path(), Some(dir.join("c.png").as_path()));
         let _ = app.perform(Action::Back);
         assert_eq!(
-            app.files.pending().map(|pending| app.files.path(pending.index).to_path_buf()),
+            app.files
+                .pending()
+                .map(|pending| app.files.path(pending.index).to_path_buf()),
             Some(dir.join("a.png"))
         );
         answer(&mut app, Reload::Fresh);
@@ -4521,8 +4548,14 @@ mod tests {
         assert!(app.filmstrip_showing());
         assert_eq!(app.parts().filmstrip, Some(ui::filmstrip::SLOT_DEFAULT));
         let narrowed = app.viewport();
-        assert_eq!(narrowed.x, whole.x + ui::filmstrip::width(ui::filmstrip::SLOT_DEFAULT));
-        assert_eq!(narrowed.width, whole.width - ui::filmstrip::width(ui::filmstrip::SLOT_DEFAULT));
+        assert_eq!(
+            narrowed.x,
+            whole.x + ui::filmstrip::width(ui::filmstrip::SLOT_DEFAULT)
+        );
+        assert_eq!(
+            narrowed.width,
+            whole.width - ui::filmstrip::width(ui::filmstrip::SLOT_DEFAULT)
+        );
 
         let mut harness = driven(app);
         assert!(harness.query_by_label("Show file 1").is_some());
@@ -4567,14 +4600,23 @@ mod tests {
         assert!(!app.panels.show_ui);
         assert!(app.filmstrip_showing());
         let viewport = app.viewport();
-        assert_eq!(viewport.x, ui::filmstrip::width(ui::filmstrip::SLOT_DEFAULT));
+        assert_eq!(
+            viewport.x,
+            ui::filmstrip::width(ui::filmstrip::SLOT_DEFAULT)
+        );
         assert_eq!(viewport.y, 0.0);
-        assert_eq!(viewport.width, WINDOW[0] - ui::filmstrip::width(ui::filmstrip::SLOT_DEFAULT));
+        assert_eq!(
+            viewport.width,
+            WINDOW[0] - ui::filmstrip::width(ui::filmstrip::SLOT_DEFAULT)
+        );
         assert_eq!(viewport.height, WINDOW[1]);
 
         let mut harness = driven(app);
         assert!(harness.query_by_label("Show file 1").is_some());
-        assert!(harness.query_by_label("Back").is_none(), "the head goes with the bars");
+        assert!(
+            harness.query_by_label("Back").is_none(),
+            "the head goes with the bars"
+        );
         let app = harness.state_mut();
 
         // Back up, and down again with everything that floats.
@@ -4895,7 +4937,11 @@ mod tests {
         assert_eq!(app.files.pending().map(|pending| pending.index), Some(1));
         answer(&mut app, Reload::Fresh);
         assert_eq!(app.files.shown_path(), Some(dir.join("a.png").as_path()));
-        assert_eq!(app.files.path(0), dir.join("a.png"), "and sorted back before b.png");
+        assert_eq!(
+            app.files.path(0),
+            dir.join("a.png"),
+            "and sorted back before b.png"
+        );
         assert_eq!(
             app.current.as_ref().map(|current| current.label.as_str()),
             Some("a.png")

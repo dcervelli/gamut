@@ -726,10 +726,16 @@ mod tests {
             Some("avif"),
             "named among the compatibles"
         );
-        assert_eq!(brand(b"\x00\x00\x00\x18ftypmif1\x00\x00\x00\x00mif1msf1"), None);
+        assert_eq!(
+            brand(b"\x00\x00\x00\x18ftypmif1\x00\x00\x00\x00mif1msf1"),
+            None
+        );
         assert_eq!(brand(b"\x89PNG\r\n\x1a\n"), None);
         let decoder = Heif;
-        assert_eq!(decoder.format(b"\x00\x00\x00\x18ftypmif1\x00\x00\x00\x00mif1msf1"), decoder.name());
+        assert_eq!(
+            decoder.format(b"\x00\x00\x00\x18ftypmif1\x00\x00\x00\x00mif1msf1"),
+            decoder.name()
+        );
         assert_eq!(
             super::super::reader(std::path::Path::new("test_images/avif-rgb8.avif")),
             Some("avif")

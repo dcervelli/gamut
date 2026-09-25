@@ -154,7 +154,10 @@ mod tests {
         assert_eq!(visited.back(all), Some(PathBuf::from("a")));
         // A pick from the chooser lands first.
         visited.arrived(Path::new("c"));
-        assert!(!visited.can_forward(all), "b was cut off by the pick, not by the back");
+        assert!(
+            !visited.can_forward(all),
+            "b was cut off by the pick, not by the back"
+        );
         assert_eq!(visited.back(all), Some(PathBuf::from("b")));
     }
 
@@ -171,7 +174,11 @@ mod tests {
         visited.arrived(Path::new("a"));
         assert_eq!(visited.forward(without_b), Some(PathBuf::from("c")));
         visited.arrived(Path::new("c"));
-        assert_eq!(visited.back(all), Some(PathBuf::from("b")), "back on the list");
+        assert_eq!(
+            visited.back(all),
+            Some(PathBuf::from("b")),
+            "back on the list"
+        );
         let only_c = |path: &Path| path == Path::new("c");
         assert!(!visited.can_back(only_c));
     }

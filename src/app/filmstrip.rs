@@ -295,7 +295,13 @@ mod tests {
         .into_iter()
         .collect();
 
-        let input = strip.input(&thumbs, |path| known(&facts_known, path), Some(Path::new("b/3.png")), false, true);
+        let input = strip.input(
+            &thumbs,
+            |path| known(&facts_known, path),
+            Some(Path::new("b/3.png")),
+            false,
+            true,
+        );
         assert_eq!(input.rows.len(), 3);
         assert_eq!(
             input.rows[1],
@@ -312,9 +318,15 @@ mod tests {
         );
         assert_eq!(input.rows[2].format, None, "not read yet");
         assert_eq!(input.current, Some(2));
-        let (wide, square) = (row_height(SLOT_DEFAULT, Some((300, 200))), row_height(SLOT_DEFAULT, None));
+        let (wide, square) = (
+            row_height(SLOT_DEFAULT, Some((300, 200))),
+            row_height(SLOT_DEFAULT, None),
+        );
         assert!(wide < square);
-        assert_eq!(&*input.tops, &[0.0, wide, wide + square, wide + 2.0 * square]);
+        assert_eq!(
+            &*input.tops,
+            &[0.0, wide, wide + square, wide + 2.0 * square]
+        );
         let listing = input.listing;
         assert!(!input.back && input.forward);
         assert_eq!(strip.path_at(1), Some(Path::new("a/2.jpg")));
@@ -328,7 +340,13 @@ mod tests {
         }));
         assert!(strip.take_stale());
         strip.relist(&paths(&["a/2.jpg", "a/1.png", "b/3.png"]));
-        let input = strip.input(&thumbs, |path| known(&facts_known, path), Some(Path::new("b/3.png")), false, false);
+        let input = strip.input(
+            &thumbs,
+            |path| known(&facts_known, path),
+            Some(Path::new("b/3.png")),
+            false,
+            false,
+        );
         let names: Vec<&str> = input.rows.iter().map(|row| row.name.as_str()).collect();
         assert_eq!(names, ["2.jpg", "1.png", "3.png"]);
         assert_eq!(input.rows[0].index, 1);
@@ -338,7 +356,13 @@ mod tests {
         // A header read lays the rows out again, but they are the same
         // files in the same order.
         strip.facts_changed();
-        let again = strip.input(&thumbs, |path| known(&facts_known, path), None, false, false);
+        let again = strip.input(
+            &thumbs,
+            |path| known(&facts_known, path),
+            None,
+            false,
+            false,
+        );
         assert_eq!(again.listing, input.listing);
     }
 
@@ -358,7 +382,10 @@ mod tests {
         strip.set_slot(200.0);
         let input = strip.input(&thumbs, |path| known(&nothing, path), None, false, false);
         assert_eq!(input.slot, 200.0);
-        assert_eq!(&*input.tops, &[0.0, row_height(200.0, None), 2.0 * row_height(200.0, None)]);
+        assert_eq!(
+            &*input.tops,
+            &[0.0, row_height(200.0, None), 2.0 * row_height(200.0, None)]
+        );
         assert!(!input.reveal);
 
         strip.set_slot(10_000.0);
@@ -381,10 +408,23 @@ mod tests {
             strip.wanted(0..3, &thumbs, |path| path == Path::new("b.png")),
             paths(&["a.png", "c.png"])
         );
-        assert_eq!(strip.input(&thumbs, |path| known(&nothing, path), None, false, false).visible, 0..3);
+        assert_eq!(
+            strip
+                .input(&thumbs, |path| known(&nothing, path), None, false, false)
+                .visible,
+            0..3
+        );
 
         strip.reveal();
-        assert!(strip.input(&thumbs, |path| known(&nothing, path), None, false, false).reveal);
-        assert!(!strip.input(&thumbs, |path| known(&nothing, path), None, false, false).reveal);
+        assert!(
+            strip
+                .input(&thumbs, |path| known(&nothing, path), None, false, false)
+                .reveal
+        );
+        assert!(
+            !strip
+                .input(&thumbs, |path| known(&nothing, path), None, false, false)
+                .reveal
+        );
     }
 }

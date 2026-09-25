@@ -890,7 +890,10 @@ mod tests {
             egui::ColorImage::filled([1, 1], egui::Color32::BLACK),
             egui::TextureOptions::LINEAR,
         );
-        thumbs.insert(PathBuf::from("c.png"), [texture.clone(), texture.clone(), texture]);
+        thumbs.insert(
+            PathBuf::from("c.png"),
+            [texture.clone(), texture.clone(), texture],
+        );
         chooser.learn(
             Path::new("c.png"),
             Facts {
@@ -937,7 +940,10 @@ mod tests {
         };
         let mut thumbs = Thumbs::default();
         for index in 0..MAX_THUMBS {
-            thumbs.insert(PathBuf::from(format!("{index}.png")), [texture("t"), texture("t"), texture("t")]);
+            thumbs.insert(
+                PathBuf::from(format!("{index}.png")),
+                [texture("t"), texture("t"), texture("t")],
+            );
         }
         assert_eq!(thumbs.len(), MAX_THUMBS);
         assert!(thumbs.get(Path::new("0.png")).is_some());
@@ -945,7 +951,10 @@ mod tests {
         // Seeing the oldest again spares it; the next oldest goes instead.
         thumbs.touch(Path::new("0.png"));
         let before = thumbs.generation;
-        thumbs.insert(PathBuf::from("new.png"), [texture("t"), texture("t"), texture("t")]);
+        thumbs.insert(
+            PathBuf::from("new.png"),
+            [texture("t"), texture("t"), texture("t")],
+        );
         assert_eq!(thumbs.len(), MAX_THUMBS);
         assert!(thumbs.get(Path::new("0.png")).is_some());
         assert!(thumbs.get(Path::new("1.png")).is_none());
@@ -953,7 +962,10 @@ mod tests {
         assert_eq!(thumbs.generation, before + 1);
 
         // Held again under the same path is one entry, not two.
-        thumbs.insert(PathBuf::from("new.png"), [texture("t"), texture("t"), texture("t")]);
+        thumbs.insert(
+            PathBuf::from("new.png"),
+            [texture("t"), texture("t"), texture("t")],
+        );
         assert_eq!(thumbs.len(), MAX_THUMBS);
     }
 }

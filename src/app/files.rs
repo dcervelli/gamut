@@ -563,11 +563,18 @@ impl Files {
     pub(super) fn reorder(&mut self, places: &[usize]) -> bool {
         debug_assert!(self.is_idle(), "the list is reordered between reads");
         debug_assert_eq!(places.len(), self.paths.len(), "one place per file");
-        if places.iter().enumerate().all(|(place, &index)| place == index) {
+        if places
+            .iter()
+            .enumerate()
+            .all(|(place, &index)| place == index)
+        {
             return false;
         }
         let shown = self.shown_path().map(Path::to_path_buf);
-        self.paths = places.iter().map(|&index| self.paths[index].clone()).collect();
+        self.paths = places
+            .iter()
+            .map(|&index| self.paths[index].clone())
+            .collect();
         if let Some(shown) = shown {
             self.index = self
                 .position(&shown)
@@ -1161,12 +1168,18 @@ mod tests {
         files.shown(1);
         files.hide();
         assert!(files.is_hidden(Path::new("1.png")));
-        assert!(files.is_condemned(Path::new("1.png")), "on its way out like a trashed file");
+        assert!(
+            files.is_condemned(Path::new("1.png")),
+            "on its way out like a trashed file"
+        );
         let request = files.step_away().expect("somewhere to go");
         files.accept(request.generation);
         files.shown(2);
         assert_eq!(files.paths(), &named(&["0.png", "2.png"]));
-        assert!(files.is_hidden(Path::new("1.png")), "remembered after it has left");
+        assert!(
+            files.is_hidden(Path::new("1.png")),
+            "remembered after it has left"
+        );
 
         assert!(
             !files.relist(named(&["0.png", "1.png", "2.png"])),
@@ -1174,7 +1187,9 @@ mod tests {
         );
         assert_eq!(files.paths(), &named(&["0.png", "2.png"]));
 
-        let request = files.append(named(&["1.png"])).expect("something to ask for");
+        let request = files
+            .append(named(&["1.png"]))
+            .expect("something to ask for");
         assert_eq!(request.index, 2, "opened by name, it is back, at the end");
         assert!(!files.is_hidden(Path::new("1.png")));
         files.accept(request.generation);

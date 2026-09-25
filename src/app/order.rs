@@ -96,8 +96,14 @@ fn unknown_last<T: Ord>(a: &Option<T>, b: &Option<T>, direction: Direction) -> O
 /// the order runs, unknown last; and files it cannot tell apart in the
 /// order they stand — whichever way the sort runs, since the comparison is
 /// turned round rather than the list.
-pub(super) fn arrange<'a>(count: usize, order: Order, key: impl Fn(usize) -> Key<'a>) -> Vec<usize> {
-    let ranked: Vec<Option<Rank>> = (0..count).map(|index| rank(&key(index), order.sort)).collect();
+pub(super) fn arrange<'a>(
+    count: usize,
+    order: Order,
+    key: impl Fn(usize) -> Key<'a>,
+) -> Vec<usize> {
+    let ranked: Vec<Option<Rank>> = (0..count)
+        .map(|index| rank(&key(index), order.sort))
+        .collect();
     let mut places: Vec<usize> = (0..count).collect();
     places.sort_by(|&a, &b| unknown_last(&ranked[a], &ranked[b], order.direction));
     places
@@ -117,7 +123,12 @@ mod tests {
         modified: Option<SystemTime>,
     }
 
-    fn file(path: &str, format: Option<&'static str>, bytes: Option<u64>, size: Option<(u32, u32)>) -> File {
+    fn file(
+        path: &str,
+        format: Option<&'static str>,
+        bytes: Option<u64>,
+        size: Option<(u32, u32)>,
+    ) -> File {
         File {
             path: PathBuf::from(path),
             format,
@@ -182,17 +193,34 @@ mod tests {
             file("a/four.png", Some("PNG"), Some(200), Some((20, 20))),
         ];
         for (file, seconds) in files.iter_mut().zip([Some(50), Some(10), None, Some(30)]) {
-            file.modified = seconds.map(|seconds| SystemTime::UNIX_EPOCH + Duration::from_secs(seconds));
+            file.modified =
+                seconds.map(|seconds| SystemTime::UNIX_EPOCH + Duration::from_secs(seconds));
         }
         let arranged = |sort| arrange(files.len(), order(sort), key(&files));
         assert_eq!(arranged(Sort::Name), [3, 2, 1, 0], "four, one, three, two");
         assert_eq!(arranged(Sort::Path), [3, 1, 0, 2]);
-        assert_eq!(arranged(Sort::Type), [1, 0, 3, 2], "JPEG, PNG, PNG, then unknown");
-        assert_eq!(arranged(Sort::Size), [2, 3, 0, 1], "100, 200, 300, then unknown");
-        assert_eq!(arranged(Sort::Date), [1, 3, 0, 2], "earliest first, then unknown");
+        assert_eq!(
+            arranged(Sort::Type),
+            [1, 0, 3, 2],
+            "JPEG, PNG, PNG, then unknown"
+        );
+        assert_eq!(
+            arranged(Sort::Size),
+            [2, 3, 0, 1],
+            "100, 200, 300, then unknown"
+        );
+        assert_eq!(
+            arranged(Sort::Date),
+            [1, 3, 0, 2],
+            "earliest first, then unknown"
+        );
         assert_eq!(arranged(Sort::Width), [0, 3, 1, 2]);
         assert_eq!(arranged(Sort::Height), [1, 3, 0, 2]);
-        assert_eq!(arranged(Sort::Area), [1, 0, 3, 2], "300, 400, 400, then unknown");
+        assert_eq!(
+            arranged(Sort::Area),
+            [1, 0, 3, 2],
+            "300, 400, 400, then unknown"
+        );
     }
 
     /// Files the key cannot tell apart keep the order they stand in, so
@@ -209,13 +237,24 @@ mod tests {
         assert_eq!(by_size, [1, 2, 0, 3]);
         let sized: Vec<File> = by_size
             .iter()
-            .map(|&index| file(files[index].path.to_str().unwrap(), files[index].format, files[index].bytes, None))
+            .map(|&index| {
+                file(
+                    files[index].path.to_str().unwrap(),
+                    files[index].format,
+                    files[index].bytes,
+                    None,
+                )
+            })
             .collect();
         let by_type = arrange(sized.len(), order(Sort::Type), key(&sized));
         let names: Vec<&str> = by_type
             .iter()
             .map(|&index| sized[index].path.to_str().unwrap())
             .collect();
-        assert_eq!(names, ["x.jpg", "w.jpg", "z.png", "y.png"], "size order within each type");
+        assert_eq!(
+            names,
+            ["x.jpg", "w.jpg", "z.png", "y.png"],
+            "size order within each type"
+        );
     }
 }

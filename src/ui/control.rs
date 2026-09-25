@@ -12,10 +12,10 @@ use crate::image::region::{Grip, Region};
 
 use super::chooser::Step;
 use super::export::{Dimension, Format};
+use super::filmstrip::{Direction, Sort};
 use super::help;
 use super::info::Copyable;
 use super::menu::{Copies, ZoomChoice};
-use super::filmstrip::{Direction, Sort};
 use super::pixel::PixelFormat;
 use super::tooltip::{Tip, Tooltip};
 
