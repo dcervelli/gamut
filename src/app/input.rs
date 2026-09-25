@@ -1096,7 +1096,7 @@ pub const KEYS: &[Binding] = &[
         section: Section::Files,
         mods: ALT,
         shown: "Alt+[, Alt+Page Up",
-        help: "Back to the file shown before this one",
+        help: "Back in image history",
         when: Some(When::VisitedBefore),
         keys: &[(Char("["), Back), (Named(NamedKey::PageUp), Back)],
     },
@@ -1104,7 +1104,7 @@ pub const KEYS: &[Binding] = &[
         section: Section::Files,
         mods: ALT,
         shown: "Alt+], Alt+Page Down",
-        help: "Forward to the file shown after this one",
+        help: "Forward in image history",
         when: Some(When::VisitedAfter),
         keys: &[(Char("]"), Forward), (Named(NamedKey::PageDown), Forward)],
     },
@@ -3078,7 +3078,7 @@ mod tests {
         );
         assert_eq!(
             named(Control::Back).as_deref(),
-            Some("Back to the file shown before this one (Alt+[, Alt+Page Up)")
+            Some("Back in image history (Alt+[, Alt+Page Up)")
         );
         assert_eq!(
             named(Control::Filmstrip).as_deref(),

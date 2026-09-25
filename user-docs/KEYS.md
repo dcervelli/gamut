@@ -53,8 +53,8 @@ on screen, since there is then nowhere to pan to.
 | `[`, `Page Up` | Previous file |
 | `Ctrl+P` | Choose a file from the list: type to filter it, arrows to move, `Enter` to open, `Esc` to close |
 | `Tab` | Show or hide the file list down the left of the picture |
-| `Alt+[`, `Alt+Page Up` | Back to the file shown before this one |
-| `Alt+]`, `Alt+Page Down` | Forward to the file shown after this one |
+| `Alt+[`, `Alt+Page Up` | Back in image history |
+| `Alt+]`, `Alt+Page Down` | Forward in image history |
 | `Ctrl+O` | Open image files chosen in the desktop's file dialog |
 | `Ctrl+Shift+O` | Open a folder chosen in the desktop's file dialog |
 | `F2` | Rename the file on screen |
