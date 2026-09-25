@@ -97,6 +97,52 @@ impl super::Decoder for Webp {
         })
     }
 
+    /// Each frame is an `ANMF` chunk whose header gives its duration in
+    /// milliseconds, so the chunks are walked end to end and every frame's
+    /// bitstream is seeked past unread. The crate reads the same field, but
+    /// only for the whole loop's length or on the way to decoding a frame.
+    fn delays(&self, source: &mut dyn super::ReadSeek) -> Result<Option<Vec<Duration>>> {
+        source.rewind()?;
+        let mut reader = BufReader::new(source);
+        let mut header = [0u8; 12];
+        reader
+            .read_exact(&mut header)
+            .context("reading the WebP container")?;
+        if !is_webp(&header) {
+            bail!("not a WebP");
+        }
+        let mut delays = Vec::new();
+        loop {
+            let mut head = [0u8; 8];
+            match reader.read_exact(&mut head) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => break,
+                Err(error) => return Err(error).context("reading the WebP chunks"),
+            }
+            let length = u32::from_le_bytes([head[4], head[5], head[6], head[7]]);
+            // Each chunk is padded to an even length.
+            let mut rest = i64::from(length) + i64::from(length & 1);
+            if &head[..4] == b"ANMF" {
+                // The frame's place and size, three bytes each, and then its
+                // duration in three more.
+                let mut frame = [0u8; 15];
+                if (length as usize) < frame.len() {
+                    bail!("an ANMF chunk of {length} bytes");
+                }
+                reader
+                    .read_exact(&mut frame)
+                    .context("reading an ANMF chunk")?;
+                rest -= frame.len() as i64;
+                let milliseconds = u32::from_le_bytes([frame[12], frame[13], frame[14], 0]);
+                delays.push(Duration::from_millis(u64::from(milliseconds)));
+            }
+            reader
+                .seek_relative(rest)
+                .context("reading the WebP chunks")?;
+        }
+        Ok(Some(delays))
+    }
+
     fn frames(
         &self,
         source: BufReader<File>,
@@ -258,6 +304,40 @@ fn is_webp(header: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::image::decode::Decoder;
+
+    /// An animated WebP's delays are read in order from its `ANMF` chunks'
+    /// headers, in milliseconds, and each frame's bitstream — odd lengths
+    /// padded — is passed over.
+    #[test]
+    fn an_animated_webp_states_each_frame_delay() {
+        let chunk = |kind: &[u8; 4], body: &[u8]| {
+            let mut chunk = kind.to_vec();
+            chunk.extend_from_slice(&(body.len() as u32).to_le_bytes());
+            chunk.extend_from_slice(body);
+            if body.len() % 2 == 1 {
+                chunk.push(0);
+            }
+            chunk
+        };
+        let frame = |milliseconds: u32| {
+            let mut body = vec![0u8; 16];
+            body[12..15].copy_from_slice(&milliseconds.to_le_bytes()[..3]);
+            body.extend(chunk(b"VP8L", &[0; 5]));
+            chunk(b"ANMF", &body)
+        };
+        let mut file = b"RIFF\0\0\0\0WEBP".to_vec();
+        file.extend(chunk(b"VP8X", &[0; 10]));
+        file.extend(chunk(b"ANIM", &[0; 6]));
+        file.extend(frame(40));
+        file.extend(frame(250));
+        file.extend(frame(70_000));
+        let stated = Webp
+            .delays(&mut std::io::Cursor::new(file))
+            .unwrap()
+            .unwrap();
+        assert_eq!(stated, [40, 250, 70_000].map(Duration::from_millis));
+    }
 
     /// The form type is what makes a RIFF file ours. A WAV is a RIFF file
     /// too, and claiming it would take it away from the "unsupported format"

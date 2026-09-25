@@ -66,6 +66,12 @@ pub struct Cache {
     /// the clock times frames the cache no longer holds by them, and the
     /// timeline is laid out in them.
     delays: Vec<Duration>,
+    /// Every frame's delay as the file's headers state it, read before the
+    /// first frame is decoded, where the format keeps them so. The timeline
+    /// is laid out in these rather than in `delays`, so that it is whole
+    /// from the start and does not shift as the frames arrive; the clock
+    /// still goes by `delays`, since it has to wait for a frame anyway.
+    stated: Option<Vec<Duration>>,
     count: usize,
     bytes: u64,
     budget: u64,
@@ -80,6 +86,7 @@ impl Cache {
         Self {
             frames: BTreeMap::new(),
             delays: Vec::new(),
+            stated: None,
             count: count.max(1),
             bytes: 0,
             budget,
@@ -94,6 +101,12 @@ impl Cache {
 
     pub fn delays(&self) -> &[Duration] {
         &self.delays
+    }
+
+    /// What the timeline is laid out in: every frame's delay where the
+    /// headers gave them, and otherwise those decoded so far.
+    pub fn timeline(&self) -> &[Duration] {
+        self.stated.as_deref().unwrap_or(&self.delays)
     }
 
     pub fn error(&self) -> Option<&str> {
@@ -234,6 +247,18 @@ impl Player {
             .spawn(move || {
                 let mut deliver = deliver;
                 let mut deliver = move || deliver(Event { generation });
+                // A file whose headers will not give the delays is played
+                // all the same, its timeline laid out from its frames.
+                if let Ok(Some(stated)) =
+                    guard("reading the frame headers", || decode::delays(&path))
+                {
+                    lock(&theirs.cache).stated = Some(
+                        stated
+                            .into_iter()
+                            .map(|delay| delay.max(MIN_DELAY))
+                            .collect(),
+                    );
+                }
                 match decode::frames(&path, overrides) {
                     Ok(source) => run(source, incoming, &theirs, &mut deliver),
                     Err(error) => {
@@ -543,6 +568,7 @@ mod tests {
             assert_eq!(cache.count(), 2);
             assert_eq!(cache.error(), None);
             assert_eq!(cache.delays(), [Duration::from_millis(100); 2]);
+            assert_eq!(cache.timeline(), cache.delays());
             let second = cache.frame(1).expect("the second frame is held");
             assert_eq!((second.image.width, second.image.height), (32, 24));
         });

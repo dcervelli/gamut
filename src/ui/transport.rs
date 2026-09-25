@@ -39,9 +39,10 @@ pub enum Kind {
     /// Frames on a clock.
     Animation {
         playing: bool,
-        /// How long each frame decoded so far is shown for, in order. The
-        /// timeline is laid out from them, and a frame not yet decoded is
-        /// given the mean of those that are.
+        /// How long each frame is shown for, in order: every frame's, where
+        /// the file's headers said, and otherwise those decoded so far. The
+        /// timeline is laid out from them, and a frame whose delay is not
+        /// known yet is given the mean of those that are.
         delays: Vec<Duration>,
     },
 }
@@ -141,7 +142,38 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, transport: &Transport) {
         let (starts, total) = timeline(delays, transport.count);
         let elapsed = starts.get(transport.index).copied().unwrap_or_default();
         let readout = format!("{counter} \u{b7} {} / {}", seconds(elapsed), seconds(total));
-        ui.add(Label::new(RichText::new(readout).color(dim)));
+        // The readout is given the width of the widest it can be at this
+        // count and length, so that the timeline beside it keeps its size
+        // and place as the digits change: in a face whose digits are not
+        // all one width, a readout that took its own width would move the
+        // track, and the handle on it, from one frame to the next.
+        let widest = format!(
+            "{} / {} \u{b7} {} / {}",
+            transport.count,
+            transport.count,
+            seconds(total),
+            seconds(total)
+        );
+        let font = egui::TextStyle::Body.resolve(ui.style());
+        let width = ui.ctx().fonts_mut(|fonts| {
+            ('0'..='9')
+                .map(|digit| {
+                    let text = widest.replace(|c: char| c.is_ascii_digit(), &digit.to_string());
+                    fonts
+                        .layout_no_wrap(text, font.clone(), egui::Color32::PLACEHOLDER)
+                        .size()
+                        .x
+                })
+                .fold(0.0, f32::max)
+        });
+        ui.allocate_ui_with_layout(
+            vec2(width, ui.available_height()),
+            Layout::left_to_right(Align::Center),
+            |ui| {
+                ui.set_min_width(width);
+                ui.add(Label::new(RichText::new(readout).color(dim)).extend());
+            },
+        );
         ui.add_space(PADDING);
 
         // The timeline has what is left, less the margin at the end of the

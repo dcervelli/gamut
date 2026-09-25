@@ -118,6 +118,28 @@ impl super::Decoder for Jxl {
         })
     }
 
+    /// Each keyframe's header gives its duration in the ticks the image
+    /// header states, and every header is read on the way through the
+    /// file, with no frame rendered.
+    fn delays(&self, source: &mut dyn super::ReadSeek) -> Result<Option<Vec<Duration>>> {
+        let mut reading = Reading::header(source)?;
+        let Some((ticks, _)) = timing(&reading.image) else {
+            return Ok(None);
+        };
+        reading.finish(source)?;
+        let image = &reading.image;
+        Ok(Some(
+            (0..image.num_loaded_keyframes())
+                .map(|index| {
+                    let stated = image
+                        .frame_header(index)
+                        .map_or(0, |header| header.duration);
+                    tick_duration(stated, ticks)
+                })
+                .collect(),
+        ))
+    }
+
     fn frames(
         &self,
         mut source: BufReader<File>,

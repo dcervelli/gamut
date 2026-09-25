@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 use std::time::Duration;
 
-use super::{Overrides, frames, load, load_page, probe, sequence, supported_extensions};
+use super::{Overrides, delays, frames, load, load_page, probe, sequence, supported_extensions};
 use crate::image::sequence::{Loops, Sequence};
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Referred, Samples};
 
@@ -2141,6 +2141,25 @@ fn an_animation_yields_its_frames_in_order() {
                 .rewind()
                 .unwrap_or_else(|error| panic!("{animated}: {error:#}"));
         }
+    }
+}
+
+/// The delays an animation's headers state are the ones its frames then
+/// arrive with, one for each frame: what the timeline is laid out in ahead
+/// of the frames is what the clock then plays by.
+#[test]
+fn an_animation_states_the_delays_its_frames_arrive_with() {
+    for (animated, _) in ANIMATIONS {
+        let path = directory().join(animated);
+        let stated = delays(&path)
+            .unwrap_or_else(|error| panic!("{animated}: {error:#}"))
+            .unwrap_or_else(|| panic!("{animated}: no delays stated"));
+        let mut source = frames(&path, Overrides::default()).unwrap();
+        let mut decoded = Vec::new();
+        while let Some(frame) = source.next().unwrap() {
+            decoded.push(frame.delay);
+        }
+        assert_eq!(stated, decoded, "{animated}");
     }
 }
 

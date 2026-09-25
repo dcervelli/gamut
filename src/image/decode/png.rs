@@ -26,7 +26,8 @@
 //! that at eight bits only, so a 16-bit animation is a still here.
 
 use std::fs::File;
-use std::io::{BufReader, Seek, SeekFrom};
+use std::io::{BufReader, Read, Seek, SeekFrom};
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 
@@ -82,6 +83,53 @@ impl super::Decoder for Png {
         })
     }
 
+    /// Each frame's delay is in the `fcTL` chunk ahead of its data, one per
+    /// frame and in order, so the chunks are walked end to end and every
+    /// other chunk's contents are seeked past unread.
+    fn delays(&self, source: &mut dyn ReadSeek) -> Result<Option<Vec<Duration>>> {
+        source.rewind()?;
+        let mut reader = BufReader::new(source);
+        let mut signature = [0u8; 8];
+        reader
+            .read_exact(&mut signature)
+            .context("reading the PNG signature")?;
+        if signature != *b"\x89PNG\r\n\x1a\n" {
+            bail!("not a PNG");
+        }
+        let mut delays = Vec::new();
+        loop {
+            let mut head = [0u8; 8];
+            reader
+                .read_exact(&mut head)
+                .context("reading the PNG chunks")?;
+            let length = u32::from_be_bytes([head[0], head[1], head[2], head[3]]);
+            // Past the contents, and the CRC after them.
+            let mut rest = i64::from(length) + 4;
+            match &head[4..8] {
+                b"IEND" => break,
+                b"fcTL" => {
+                    let mut control = [0u8; 26];
+                    if (length as usize) < control.len() {
+                        bail!("an fcTL chunk of {length} bytes");
+                    }
+                    reader
+                        .read_exact(&mut control)
+                        .context("reading an fcTL chunk")?;
+                    rest -= control.len() as i64;
+                    delays.push(apng_delay(
+                        u16::from_be_bytes([control[20], control[21]]),
+                        u16::from_be_bytes([control[22], control[23]]),
+                    ));
+                }
+                _ => {}
+            }
+            reader
+                .seek_relative(rest)
+                .context("reading the PNG chunks")?;
+        }
+        Ok(Some(delays))
+    }
+
     fn frames(
         &self,
         source: BufReader<File>,
@@ -101,6 +149,18 @@ impl super::Decoder for Png {
         frames.rewind()?;
         Ok(Box::new(frames))
     }
+}
+
+/// An `fcTL` chunk's delay, a fraction of a second, the way `image` reads
+/// it for a frame: a denominator of zero means hundredths, as the
+/// specification says, and the fraction is taken to the microsecond,
+/// rounded down.
+fn apng_delay(numerator: u16, denominator: u16) -> Duration {
+    let denominator = match denominator {
+        0 => 100,
+        stated => u64::from(stated),
+    };
+    Duration::from_micros(u64::from(numerator) * 1_000_000 / denominator)
 }
 
 /// An animated PNG's frames, composited by `image` onto the canvas.
@@ -284,6 +344,7 @@ fn transfer(gamma: f32) -> Transfer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::image::decode::Decoder;
     use crate::image::{Primaries, Transfer};
 
     /// `cICP` wins over `iCCP`, because code points name the HDR curves
@@ -319,6 +380,47 @@ mod tests {
         assert_eq!(transfer(0.5), Transfer::Gamma(2.0));
         assert_eq!(transfer(0.0), Transfer::Srgb);
         assert_eq!(transfer(f32::NAN), Transfer::Srgb);
+    }
+
+    /// An APNG's delays are read in order from its `fcTL` chunks, as a
+    /// fraction of a second whose denominator of zero means hundredths, and
+    /// everything between them is passed over.
+    #[test]
+    fn an_apng_states_each_frame_delay() {
+        let chunk = |kind: &[u8; 4], body: &[u8]| {
+            let mut chunk = (body.len() as u32).to_be_bytes().to_vec();
+            chunk.extend_from_slice(kind);
+            chunk.extend_from_slice(body);
+            chunk.extend_from_slice(&[0; 4]);
+            chunk
+        };
+        let control = |numerator: u16, denominator: u16| {
+            let mut body = [0u8; 26];
+            body[20..22].copy_from_slice(&numerator.to_be_bytes());
+            body[22..24].copy_from_slice(&denominator.to_be_bytes());
+            chunk(b"fcTL", &body)
+        };
+        let mut file = b"\x89PNG\r\n\x1a\n".to_vec();
+        file.extend(chunk(b"IHDR", &[0; 13]));
+        file.extend(control(1, 10));
+        file.extend(chunk(b"IDAT", &[0; 7]));
+        file.extend(control(3, 0));
+        file.extend(chunk(b"fdAT", &[0; 9]));
+        file.extend(control(1, 3));
+        file.extend(chunk(b"fdAT", &[0; 9]));
+        file.extend(chunk(b"IEND", &[]));
+        let stated = Png
+            .delays(&mut std::io::Cursor::new(file))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            stated,
+            [
+                Duration::from_millis(100),
+                Duration::from_millis(30),
+                Duration::from_micros(333_333),
+            ]
+        );
     }
 
     /// A still PNG has no `acTL`, and says so rather than claiming one frame.

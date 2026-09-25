@@ -131,7 +131,7 @@ impl Animation {
             count: self.playback.count(),
             kind: ui::transport::Kind::Animation {
                 playing: self.playback.playing(),
-                delays: self.player.read(|cache| cache.delays().to_vec()),
+                delays: self.player.read(|cache| cache.timeline().to_vec()),
             },
         }
     }

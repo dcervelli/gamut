@@ -56,6 +56,7 @@
 
 use std::fs::File;
 use std::io::{BufReader, Seek, SeekFrom};
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 
@@ -168,33 +169,23 @@ impl super::Decoder for ImageRs {
     /// none is decoded. Whether it loops is in the extension block browsers
     /// introduced for it, met on the same walk.
     fn sequence(&self, source: &mut dyn ReadSeek) -> Result<Sequence> {
-        let mut signature = [0u8; 6];
-        source.rewind()?;
-        if super::fill(source, &mut signature)? < signature.len() || !is_gif(&signature) {
+        let Some((delays, repeat)) = walk_gif(source)? else {
             return Ok(Sequence::Still);
-        }
-        source.rewind()?;
-        let mut options = gif::DecodeOptions::new();
-        options.skip_frame_decoding(true);
-        let mut decoder = options
-            .read_info(BufReader::new(source))
-            .context("reading the GIF header")?;
-        let mut count = 0;
-        while decoder
-            .next_frame_info()
-            .context("reading the GIF frames")?
-            .is_some()
-        {
-            count += 1;
-        }
-        Ok(if count > 1 {
+        };
+        Ok(if delays.len() > 1 {
             Sequence::Animation {
-                count,
-                loops: loops(decoder.repeat()),
+                count: delays.len(),
+                loops: loops(repeat),
             }
         } else {
             Sequence::Still
         })
+    }
+
+    /// Each frame's delay is in the graphic control block ahead of its
+    /// pixels, so the walk that counts the frames reads them too.
+    fn delays(&self, source: &mut dyn ReadSeek) -> Result<Option<Vec<Duration>>> {
+        Ok(walk_gif(source)?.map(|(delays, _)| delays))
     }
 
     fn frames(
@@ -212,6 +203,34 @@ impl super::Decoder for ImageRs {
         frames.rewind()?;
         Ok(Box::new(frames))
     }
+}
+
+/// Every frame of a GIF read past without being decoded: how long each is
+/// shown for, as the frames will say once they are decoded, and the loop
+/// extension. `None` for a file that is not a GIF.
+fn walk_gif(source: &mut dyn ReadSeek) -> Result<Option<(Vec<Duration>, gif::Repeat)>> {
+    let mut signature = [0u8; 6];
+    source.rewind()?;
+    if super::fill(source, &mut signature)? < signature.len() || !is_gif(&signature) {
+        return Ok(None);
+    }
+    source.rewind()?;
+    let mut options = gif::DecodeOptions::new();
+    options.skip_frame_decoding(true);
+    let mut decoder = options
+        .read_info(BufReader::new(source))
+        .context("reading the GIF header")?;
+    let mut delays = Vec::new();
+    while let Some(frame) = decoder
+        .next_frame_info()
+        .context("reading the GIF frames")?
+    {
+        // Hundredths of a second, as `image` reads them for a frame.
+        delays.push(gif_delay(Duration::from_millis(
+            u64::from(frame.delay) * 10,
+        )));
+    }
+    Ok(Some((delays, decoder.repeat())))
 }
 
 /// The loop extension as browsers read it. Its count is how many times to
@@ -348,6 +367,31 @@ fn is_netpbm(header: &[u8]) -> bool {
 mod tests {
     use super::*;
     use crate::image::decode::Decoder;
+
+    /// A GIF's delays are read in order from its frames' control blocks,
+    /// in hundredths, with the browsers' floor applied to the fastest.
+    #[test]
+    fn a_gif_states_each_frame_delay() {
+        let mut file = Vec::new();
+        {
+            let mut encoder =
+                gif::Encoder::new(&mut file, 1, 1, &[0, 0, 0, 255, 255, 255]).unwrap();
+            for delay in [5, 30, 1] {
+                let mut frame = gif::Frame::from_indexed_pixels(1, 1, vec![0], None);
+                frame.delay = delay;
+                encoder.write_frame(&frame).unwrap();
+            }
+        }
+        let stated = ImageRs
+            .delays(&mut std::io::Cursor::new(file))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            stated,
+            [50, 300, 100].map(Duration::from_millis),
+            "a hundredth is played as a tenth"
+        );
+    }
 
     /// The five formats are one decoder, but not one kind of file: each
     /// fixture is named for what it is, and a file claimed by its

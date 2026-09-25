@@ -169,6 +169,16 @@ pub trait Decoder: Sync {
         Ok(Sequence::Still)
     }
 
+    /// How long each frame of an animation is shown for, in order, read
+    /// from the file's own headers without a frame being decoded: what
+    /// [`Decoder::frames`] will say of each, known before it says it, so
+    /// that the timeline is laid out whole from the start rather than
+    /// firming up as the frames arrive. `None` where the format has no
+    /// such headers to read, and the frames are then the only word on it.
+    fn delays(&self, _source: &mut dyn ReadSeek) -> Result<Option<Vec<Duration>>> {
+        Ok(None)
+    }
+
     /// One picture of a file that holds several, by its place in the file.
     /// Only where [`Decoder::sequence`] said [`Sequence::Pages`]; page zero
     /// of anything else is the image itself.
@@ -430,6 +440,19 @@ pub fn sequence(path: &Path) -> Result<Sequence> {
     decoder.sequence(&mut source).with_context(|| {
         format!(
             "reading the header of {} as {}",
+            path.display(),
+            decoder.name()
+        )
+    })
+}
+
+/// How long each frame of the animation at `path` is shown for, from its
+/// headers — see [`Decoder::delays`].
+pub fn delays(path: &Path) -> Result<Option<Vec<Duration>>> {
+    let (mut source, decoder) = open(path)?;
+    decoder.delays(&mut source).with_context(|| {
+        format!(
+            "reading the frame headers of {} as {}",
             path.display(),
             decoder.name()
         )

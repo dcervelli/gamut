@@ -471,6 +471,26 @@ fn the_transport_bar_hands_back_its_presses() {
     assert_eq!(dragged.last(), Some(&Command::Press(Control::Seek(3))));
 }
 
+/// The timeline keeps its size and place from frame to frame, whatever
+/// the readout beside it says: a track that moved as the digits changed
+/// would move the handle on it with them.
+#[test]
+fn the_timeline_holds_still_as_the_readout_changes() {
+    let mut harness = animated(120);
+    let first = harness.get_by_label_contains("Timeline").rect();
+    for index in 1..120 {
+        if let Some(transport) = harness.state_mut().input.transport.as_mut() {
+            transport.index = index;
+        }
+        harness.run();
+        assert_eq!(
+            harness.get_by_label_contains("Timeline").rect(),
+            first,
+            "frame {index}"
+        );
+    }
+}
+
 /// A file of pages gets the steps and the count, and neither a play button
 /// nor a timeline: there is no clock to play by. A still gets no bar at
 /// all, and its picture the whole height between the two bars.
