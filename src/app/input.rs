@@ -1505,8 +1505,11 @@ impl Naming for Namer {
             // The name in the bar is cut to the room the bar has, and is only
             // the last part of the path even when it is not. The tooltip is
             // the path in full — which is also exactly what the key beside it
-            // copies.
-            Tip::Name => (vec![self.path.clone()], Vec::from_iter(hint(CopyPath))),
+            // copies, named as the item of the menus that copies it is.
+            Tip::Name => (
+                vec![self.path.clone()],
+                Vec::from_iter(names(Tip::Control(Control::Copies(Copies::Path)))),
+            ),
             // The count says which of the list is on screen. A press on it
             // opens the chooser, said the way the state's press is, with the
             // key that opens it too; under that the keys that step through
@@ -1526,12 +1529,19 @@ impl Naming for Namer {
             // The dot at the head of the pixel readout: what the key does to
             // it, and under that the two copies that take what it is showing
             // away with them — neither of which has a button anywhere.
+            // Its name alone, the key being the first line under it.
             Tip::Control(Control::PixelFormat) => (
-                vec![names(at)?],
-                [CopyPixelValue, CopyPixelCoordinate]
-                    .into_iter()
-                    .filter_map(hint)
-                    .collect(),
+                vec![ui::tooltip::words(at)?],
+                [
+                    (ui::tooltip::PIXEL_CYCLE, CyclePixelFormat),
+                    (ui::tooltip::PIXEL_COPY_VALUE, CopyPixelValue),
+                    (ui::tooltip::PIXEL_COPY_COORDINATE, CopyPixelCoordinate),
+                ]
+                .into_iter()
+                .filter_map(|(words, action)| {
+                    Some(format!("{words} ({})", binding_for(action)?.shown))
+                })
+                .collect(),
             ),
             // The button that hides the interface: what a plain press does,
             // and under it the key for the press that closes the floating
@@ -1539,8 +1549,27 @@ impl Naming for Namer {
             // cannot discover by resting on it.
             Tip::Control(Control::Maximize) => (
                 vec![names(at)?],
-                Vec::from_iter(hint(ToggleInterfaceAndPanels)),
+                vec![format!(
+                    "{} ({})",
+                    ui::tooltip::MAXIMIZE_SHIFTED,
+                    binding_for(ToggleInterfaceAndPanels)?.shown
+                )],
             ),
+            // The copy of the picture takes the region while one is up, as
+            // the chord beside it does.
+            Tip::Control(Control::Copies(Copies::Image))
+                if self.conditions.met(When::RegionSelected) =>
+            {
+                let binding = binding_for(CopyImage)?;
+                (
+                    vec![format!(
+                        "{} ({})",
+                        ui::tooltip::COPY_REGION,
+                        shown_for(binding, CopyImage)
+                    )],
+                    Vec::new(),
+                )
+            }
             // The loupe toggle: what it does, and under it the button on
             // the mouse that holds the loupe up without it, which no key
             // table lists, and how the magnification is set — by the wheel
@@ -1727,6 +1756,13 @@ pub(super) fn report(error: &anyhow::Error) {
 /// the chain under it.
 pub(super) fn briefly(error: &anyhow::Error) -> String {
     crate::escape_controls(&error.to_string())
+}
+
+/// What the window says when a paste finds no picture on the clipboard: the
+/// paste button's tooltip, as a sentence, whether the paste was a key or
+/// `--paste`.
+pub fn nothing_to_paste() -> String {
+    format!("{}.", ui::tooltip::NOTHING_TO_PASTE)
 }
 
 impl App {
@@ -2015,10 +2051,7 @@ impl App {
             CopyMetadata => self.copy_facts(Copyable::All),
             // Nothing to draw yet either: the picture is being written and
             // then read, and what is on screen stays until it arrives.
-            Paste => {
-                self.paste();
-                return Effect::Nothing;
-            }
+            Paste => return self.paste(),
             // The bar alone changes, but that is a frame all the same.
             CyclePixelFormat => {
                 self.panels.pixel_format = self.panels.pixel_format.next();
@@ -2591,19 +2624,29 @@ impl App {
     /// whichever program holds the selection, and that goes to the loader with
     /// the reading — which also means a paste that will not arrive, or will not
     /// decode, is reported exactly as an unreadable file is.
-    fn paste(&mut self) {
+    ///
+    /// Owes a frame only for the message that there was nothing to paste:
+    /// what was pasted arrives through the loader, which asks for its own.
+    fn paste(&mut self) -> Effect {
         let offer = match clipboard::offered_image() {
             Ok(Some(offer)) => offer,
-            // Not a failure: a key was pressed and there was nothing there.
+            // Not a failure: a key was pressed and there was nothing there,
+            // said in the words the paste button's tooltip says it in.
             Ok(None) => {
-                eprintln!("gamut: nothing on the clipboard that could be shown");
-                return;
+                self.toast(nothing_to_paste(), Level::Message);
+                return Effect::Redraw;
             }
-            Err(error) => return report(&error),
+            Err(error) => {
+                report(&error);
+                return Effect::Nothing;
+            }
         };
         let path = match pasted::reserve(offer.extension) {
             Ok(path) => path,
-            Err(error) => return report(&error),
+            Err(error) => {
+                report(&error);
+                return Effect::Nothing;
+            }
         };
         // A paste is the window's own doing: from here on nothing showing
         // is the window's to answer, not the command line's.
@@ -2611,6 +2654,7 @@ impl App {
         let request = self.files.adopt(path, Source::Clipboard(offer.mime));
         self.send(request);
         self.list_changed();
+        Effect::Nothing
     }
 
     /// Puts what the info panel says on the clipboard: as much of a table as
@@ -2815,10 +2859,7 @@ impl App {
             // last look, and the paste asks it again rather than trusting
             // that. A selection that has gone in between is answered the way
             // an empty clipboard is.
-            Control::Paste => {
-                self.paste();
-                Effect::Redraw
-            }
+            Control::Paste => self.paste().also(Effect::Redraw),
             // Asks for a region, or takes off the one asked for or drawn.
             // The key's own action goes through here too, so that the
             // button and `x` cannot come to mean different things.
@@ -3041,17 +3082,17 @@ mod tests {
         );
         assert_eq!(
             named(Control::Grid).as_deref(),
-            Some("Toggle the grid over the image (g)")
+            Some("Toggle the pixel grid (g)")
         );
         assert_eq!(
             named(Control::Output).as_deref(),
-            Some("Toggle HDR output, where the monitor is in HDR mode (o)")
+            Some("Toggle HDR output, when monitor is capable (o)")
         );
         // The button in the corner is named by the plain press it makes; the
         // press with Shift is the line under it — see `App::tooltip`.
         assert_eq!(
             named(Control::Maximize).as_deref(),
-            Some("Toggle the interface panels (`)")
+            Some("Toggle the UI (`)")
         );
 
         // The one button no key reaches names itself, and has no key after
@@ -3064,17 +3105,17 @@ mod tests {
         // every item of it having a key of its own.
         assert_eq!(
             named(Control::Rename).as_deref(),
-            Some("Rename the file on screen (F2)")
+            Some("Rename the current file (F2)")
         );
         assert_eq!(
             named(Control::Delete).as_deref(),
-            Some("Move the file on screen to the trash, and show the next (Del)")
+            Some("Trash the current file (Del)")
         );
         // The key that takes a file off the list, and the pair at the head
         // of the list by the chords that do the same.
         assert_eq!(
             named(Control::Remove).as_deref(),
-            Some("Take the file on screen off the list, and show the next (\u{232b})")
+            Some("Remove the current file from the file list (\u{232b})")
         );
         assert_eq!(
             named(Control::Back).as_deref(),
@@ -3082,7 +3123,7 @@ mod tests {
         );
         assert_eq!(
             named(Control::Filmstrip).as_deref(),
-            Some("Show or hide the file list (Tab)")
+            Some("Toggle the file list (Tab)")
         );
         // The menu at its head names itself, no key opening it; a cell of
         // it says what it puts the list in.
@@ -3090,7 +3131,7 @@ mod tests {
         assert!(!sorting.contains('('), "{sorting}");
         assert_eq!(
             named(Control::SortBy(ui::filmstrip::Sort::Area)).as_deref(),
-            Some("Sort by pixels in all")
+            Some("Sort by total pixels")
         );
         let file = named(Control::FileMenu).expect("the button names itself");
         assert!(!file.contains('('), "{file}");
@@ -3534,42 +3575,49 @@ mod tests {
         );
     }
 
-    /// The dot at the head of the pixel readout is named by the key that
-    /// steps it on, and the two copies that take what it is showing away are
-    /// bound as well: they have no button anywhere, so that label is the only
+    /// The dot at the head of the pixel readout names itself, and under that
+    /// the key that steps it on and the two copies that take what it is
+    /// showing away: they have no button anywhere, so that label is the only
     /// place either of them is written down.
     #[test]
     fn the_pixel_readout_names_its_key_and_the_copies_that_have_none() {
+        let namer = Namer {
+            path: String::new(),
+            index: 0,
+            count: 1,
+            show_histogram: false,
+            state: Vec::new(),
+            conditions: Conditions::ALIVE,
+        };
+        let tooltip = namer
+            .tooltip(Tip::Control(Control::PixelFormat))
+            .expect("named");
+        assert_eq!(tooltip.title, ["Pixel options"]);
         assert_eq!(
-            names(Tip::Control(Control::PixelFormat)).as_deref(),
-            Some("Cycle the pixel readout: hex, decimal, mapped (.)")
+            tooltip.hints,
+            [
+                "Cycle pixel format: hex, decimal, mapped (.)",
+                "Copy pixel value under pointer (Ctrl+.)",
+                "Copy coordinate of pixel under pointer as x,y (Ctrl+Shift+.)",
+            ]
         );
-
-        for action in [CopyPixelValue, CopyPixelCoordinate] {
-            let hint = hint(action).unwrap_or_else(|| panic!("{action:?} is bound"));
-            assert!(
-                hint.ends_with("(Ctrl+.)") || hint.ends_with("(Ctrl+Shift+.)"),
-                "{hint}"
-            );
-        }
     }
 
-    /// A cell of the menu of copies has no words of its own: the key table
-    /// already describes each copy in a sentence, and the cell is named by
-    /// that sentence and by the key that runs it.
+    /// A cell of the menu of copies is named in words shorter than the key
+    /// table's sentence, and by the key that runs it.
     ///
     /// The button that opens the menu names itself, no one key opening it.
     #[test]
-    fn a_copy_cell_is_named_by_the_key_table_and_nothing_else() {
+    fn a_copy_cell_is_named_by_its_words_and_its_key() {
         let named = |copies| names(Tip::Control(Control::Copies(copies)));
 
         assert_eq!(
             named(Copies::Name).as_deref(),
-            Some("Copy the name of the file on screen, without its path (c)")
+            Some("Copy the name of the current file, without its path (c)")
         );
         assert_eq!(
             named(Copies::Path).as_deref(),
-            Some("Copy the absolute path of the file on screen (Shift+C)")
+            Some("Copy the absolute path of the current file (Shift+C)")
         );
 
         for copies in Copies::ALL {

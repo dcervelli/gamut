@@ -191,13 +191,16 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   file whose neighbor will not open still stays up, marked, as before.
 
 - A menu of the file itself, off a button before its name in the top bar:
-  copy its name, copy its path, rename it, delete it. `F2` opens the rename
+  copy its name, copy its path, copy its URI, rename it, delete it. `F2` opens the rename
   dialog, which says what is wrong with the name as it is typed — taken, a
   slash — and notes an extension that changes; `Delete` or `Backspace` moves
   the file to the desktop's trash, where the file manager shows it, and
   shows the next file. `Ctrl+Z` undoes either, back through the session:
   the file comes out of the trash and back into the list, or gets its old
   name back.
+
+- `Ctrl+V` with no image on the clipboard says so in the window, where
+  before it said so only on the terminal.
 
 ### Fixed
 

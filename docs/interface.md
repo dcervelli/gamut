@@ -943,7 +943,7 @@ name would be, and a name left to wrap in a popup that opened at the width of
 the button below it comes out a letter to a line.
 
 These menus of items are the ones with a name at their head — **Copy**,
-**Open in…**, and **File**, the menu of the file's own name and path, its
+**Open in…**, and **File**, the menu of the file's own name, path and URI, its
 rename and its deletion, off the button before its name in the top bar (see
 [editing](editing.md)) — each the label of the button that opened it, so
 that the two cannot disagree — where the zoom and pixel menus name their sections in the

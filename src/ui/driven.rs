@@ -46,16 +46,28 @@ struct State {
     /// What the help popup lays out: nothing, unless a test hands it a
     /// table of its own.
     help: Vec<help::Section>,
+    /// Whether everything the pointer rests on names itself, which is off
+    /// unless a test is reading tooltips: one opening where the pointer
+    /// was left would lie over what the next press is aimed at.
+    named: bool,
     commands: Vec<Command>,
 }
 
 /// The interface with a key table to lay out and nothing else to say:
-/// [`Unnamed`] with the help popup's rows.
-struct Keyed<'a>(&'a [help::Section]);
+/// [`Unnamed`] with the help popup's rows — or, where a test asks, every
+/// tip named by its own spelling, so that which tooltip opened can be read
+/// back off the tree.
+struct Keyed<'a>(&'a [help::Section], bool);
 
 impl Naming for Keyed<'_> {
     fn tooltip(&self, tip: Tip) -> Option<Tooltip> {
-        Unnamed.tooltip(tip)
+        match self.1 {
+            true => Some(Tooltip {
+                title: vec![format!("{tip:?}")],
+                hints: Vec::new(),
+            }),
+            false => Unnamed.tooltip(tip),
+        }
     }
 
     fn shortcut(&self, control: Control) -> Option<String> {
@@ -204,6 +216,7 @@ fn build(logical: [f32; 2], count: usize, panels: Panels) -> Harness<'static, St
         current: Some(photograph()),
         view: View::new(),
         help: Vec::new(),
+        named: false,
         commands: Vec::new(),
     };
     Harness::builder()
@@ -228,7 +241,7 @@ fn build(logical: [f32; 2], count: usize, panels: Panels) -> Harness<'static, St
                     state.current.as_ref(),
                     &state.view,
                     &Theme::FALLBACK,
-                    &Keyed(&state.help),
+                    &Keyed(&state.help, state.named),
                 );
                 // The one thing the application says back to the interface
                 // about a gesture, done here as `App::act` does it: which
@@ -834,6 +847,33 @@ fn the_file_list_offers_its_rows_its_menus_and_the_way_back() {
             filmstrip::Direction::Descending
         ))]
     );
+}
+
+/// A dead control still names itself when the pointer rests on it — with
+/// why it is dead, which is what the application says there — whether it is
+/// a button drawn by hand that only senses the hover, or a widget egui itself
+/// has disabled.
+#[test]
+fn a_dead_control_still_has_a_tooltip() {
+    let mut with_list = panels();
+    with_list.show_filmstrip = true;
+    let mut harness = open(WINDOW, 3, with_list);
+    harness.state_mut().input.filmstrip = Some(strip(3, Some(0), false));
+    harness.state_mut().named = true;
+    harness.run();
+
+    for (label, tip) in [
+        ("Back", Tip::Control(Control::Back)),
+        ("HDR", Tip::Control(Control::Output)),
+        ("Forward", Tip::Control(Control::Forward)),
+    ] {
+        harness.get_by_label(label).hover();
+        harness.run();
+        let said = format!("{tip:?}");
+        assert!(harness.query_by_label(&said).is_some(), "{label}");
+    }
+    assert!(harness.get_by_label("Back").accesskit_node().is_disabled());
+    assert!(harness.get_by_label("HDR").accesskit_node().is_disabled());
 }
 
 /// The file list's right edge is a grip: dragged, it asks for the slot
@@ -1516,8 +1556,8 @@ fn the_file_menu_offers_the_removal_only_from_a_list() {
     );
 }
 
-/// The button before the name opens the menu of the file: its name and
-/// path copied, the rename and the deletion, each asking for its own
+/// The button before the name opens the menu of the file: its name, path
+/// and URI copied, the rename and the deletion, each asking for its own
 /// control, and the menu closing on the press.
 #[test]
 fn the_file_menu_offers_the_copies_the_rename_and_the_deletion() {
@@ -1527,6 +1567,7 @@ fn the_file_menu_offers_the_copies_the_rename_and_the_deletion() {
     for label in [
         "Copy name",
         "Copy path",
+        "Copy URI",
         "Rename\u{2026}",
         "Delete",
         "Export\u{2026}",
@@ -1556,6 +1597,11 @@ fn the_file_menu_offers_the_copies_the_rename_and_the_deletion() {
     assert_eq!(
         click(&mut harness, "Copy name"),
         [Command::Press(Control::Copies(Copies::Name))]
+    );
+    assert_eq!(click(&mut harness, "File"), []);
+    assert_eq!(
+        click(&mut harness, "Copy URI"),
+        [Command::Press(Control::Copies(Copies::Uri))]
     );
 }
 

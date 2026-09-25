@@ -791,7 +791,7 @@ fn button(
     ui.painter().rect_filled(area(rect), radius, background);
     response
         .widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, active, control.label()));
-    let response = pass.tooltip(response, Tip::Control(control), enabled);
+    let response = pass.tooltip(response, Tip::Control(control));
     if enabled && response.clicked() {
         pass.press(control);
     }

@@ -302,7 +302,7 @@ fn copy_all(pass: &mut Pass, ui: &mut egui::Ui) {
     chip(pass, ui, rect, Copyable::All, response.hovered());
     let control = Control::Facts(Copyable::All);
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, control.label()));
-    let response = pass.tooltip(response, Tip::Control(control), true);
+    let response = pass.tooltip(response, Tip::Control(control));
     if response.clicked() {
         pass.press(control);
     }

@@ -190,9 +190,9 @@ put one up, and the window says so instead.
 ### Renaming and deleting
 
 The button before the file's name in the top bar opens a menu of the file
-itself: copy its name, copy its path, rename it, take it off the list
-while there is more than one file, delete it, export it. The keys above
-do the same without the menu.
+itself: copy its name, copy its path, copy it as a `file:` URI, rename it,
+take it off the list while there is more than one file, delete it, export
+it. The keys above do the same without the menu.
 
 `Backspace` takes the file on screen off the list and shows the next, or
 the previous one from the end of the list, leaving the file exactly as it
@@ -421,7 +421,8 @@ open at all.
 What is pasted is whatever the image was copied as, saved as it stands:
 nothing is re-encoded, so a JPEG arrives a JPEG. `Ctrl+V` does nothing if the
 clipboard holds words rather than an image, or holds it in a format `gamut`
-cannot read — it says so on the terminal and leaves the window as it was.
+cannot read — the window says "No image on the clipboard." and stays as it
+was.
 Copying a *file* in a file manager copies its name and not its contents, and
 that is not a paste; open it as an argument instead.
 

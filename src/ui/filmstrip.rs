@@ -159,13 +159,13 @@ impl Sort {
     pub fn describe(self) -> &'static str {
         match self {
             Sort::Name => "Sort by file name",
-            Sort::Path => "Sort by the whole path",
-            Sort::Type => "Sort by kind of file",
-            Sort::Size => "Sort by size on disk",
-            Sort::Date => "Sort by when the file was last changed",
-            Sort::Width => "Sort by width in pixels",
-            Sort::Height => "Sort by height in pixels",
-            Sort::Area => "Sort by pixels in all",
+            Sort::Path => "Sort by absolute path",
+            Sort::Type => "Sort by image type",
+            Sort::Size => "Sort by file size",
+            Sort::Date => "Sort by file last modified time",
+            Sort::Width => "Sort by pixel width",
+            Sort::Height => "Sort by pixel height",
+            Sort::Area => "Sort by total pixels",
         }
     }
 
