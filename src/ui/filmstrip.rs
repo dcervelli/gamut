@@ -44,8 +44,10 @@ pub const SLOT_MAX: f32 = 384.0;
 /// with room either side.
 pub const SHAPE_MIN: f32 = 0.5;
 pub const SHAPE_MAX: f32 = 1.5;
-/// The room around a slot, on every side.
-pub const INSET: f32 = 6.0;
+/// The room either side of a slot and under it.
+pub const INSET: f32 = 8.0;
+/// The room over a slot, less than under it: the title has room of its own.
+pub const TOP_INSET: f32 = INSET / 2.0;
 /// A file's title, over its slot: one line of words.
 pub const TITLE_HEIGHT: f32 = 22.0;
 /// The head of the panel, where the buttons are: a bar's height, so that
@@ -69,9 +71,9 @@ pub fn slot_height(slot: f32, size: Option<(u32, u32)>) -> f32 {
 }
 
 /// A file's row, for a slot `slot` wide and a picture of `size`: its
-/// title, and under it the slot and the room around it.
+/// title, and under it the slot and the room below it.
 pub fn row_height(slot: f32, size: Option<(u32, u32)>) -> f32 {
-    TITLE_HEIGHT + slot_height(slot, size) + 2.0 * INSET
+    TITLE_HEIGHT + TOP_INSET + slot_height(slot, size) + INSET
 }
 
 /// What the panel takes off the picture, for a slot `slot` wide: a row, and
@@ -552,15 +554,13 @@ fn file(pass: &mut Pass, ui: &mut egui::Ui, input: &Input, row: usize, rect: egu
         painter.rect_filled(rect, 0.0, theme.accent.with_alpha(ACTIVE_BUTTON_WASH));
     } else if hovered {
         painter.rect_filled(rect, 0.0, theme.button_hover);
-    } else {
-        painter.rect_filled(title, 0.0, theme.button_idle);
     }
 
     // The slot, the picture's shape as far as it is held to, and the
     // picture fitted and centered in it: the copy that covers the slot's
     // device pixels, drawn no larger than itself.
     let slot = egui::Rect::from_min_size(
-        pos2(rect.left() + INSET, title.bottom() + INSET),
+        pos2(rect.left() + INSET, title.bottom() + TOP_INSET),
         vec2(input.slot, slot_height(input.slot, size)),
     );
     match thumb {
@@ -944,7 +944,7 @@ mod tests {
         assert_eq!(slot_height(200.0, Some((4000, 6000))), 300.0);
         assert_eq!(slot_height(200.0, Some((10_000, 1000))), 200.0 * SHAPE_MIN, "a panorama");
         assert_eq!(slot_height(200.0, Some((1080, 2400))), 200.0 * SHAPE_MAX, "a screenshot");
-        assert_eq!(row_height(200.0, None), TITLE_HEIGHT + 200.0 + 2.0 * INSET);
+        assert_eq!(row_height(200.0, None), TITLE_HEIGHT + TOP_INSET + 200.0 + INSET);
     }
 
     #[test]
