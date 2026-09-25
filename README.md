@@ -1,21 +1,22 @@
 # gamut
 
-A modern Linux image viewer optimized for getting work done, fast. Modern technology like [native GPU performance, fast decoding](#high-performance), [color management](#color-management), [HDR](#hdr), and [fuzzy file picking](#fuzzy-file-navigation) combined with [features](#features) to quickly accomplish a wide range of image related tasks in a [themed](#os-themed) [keyboard or mouse driven UI](#versatile-controls-keyboard-ui-cli).
+A modern Linux image viewer for understanding and acting on images.
 
 ![Main gamut screenshot](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/main_screenshot.jpg)
 
-## What goes in an image viewer?
+Image viewers tend toward minimalism or full-fledged editors; gamut stakes a claim in the middle. It's for when you need to *see* the image, *understand* it, and *decide* what you're going to do with it: check for sharpness, assess a render, compare similar images, pull a pixel value or coordinate, extract some metadata, copy a region to chat, delete it outright, or send it to a domain-specific editor.
 
-A modern image viewer serves many audiences: photographer, data scientist, programmer, designer, game developer, GIS analyst, and, of course, the casual user.
+An image viewer serves many audiences: photographer, data scientist, programmer, designer, game developer, GIS analyst, and, of course, the casual user. We carefully consider the tenets below in deciding if a feature clears the bar for inclusion.
 
-Some features are obviously useful to everyone: high performance, effective pan/zoom controls, copy/paste, etc. It can be difficult to decide if a feature exceeds the bar for inclusion. To do so, we consider questions like these:
+## Tenets
 
-* Is the feature *useful* to a varied audience?
-* Is the feature something that is conceptually simple but would otherwise require specialized software to accomplish?
-* Is the feature's mere presence going to confuse a casual user?
-* Does the feature help a user *act* on or *decide* about an image?
-
-Please open PRs or submit issues to suggest features that you think should be included. Also, see  [Roadmap](ROADMAP.md) for some features and improvements that we'd like to get to.
+* *Fast, always*. Every pan and zoom runs at full frame rate; decoding and analysis never block the interface. Speed is never traded for a feature.
+* *Faithful to the file*. Color management; HDR as graded; 16-bit, float, single-channel data displayed as-is. The file's actual pixel values are always a hover away.
+* *Viewer, not editor*. You can rename, trash, copy, and export, but nothing changes the file's pixels. Adjustments are for seeing the image better, and what you see is what you copy or export.
+* *Useful, not minimal*. If a feature is conceptually simple but would otherwise require specialized software, it has a place.
+* *Images come first*. The interface is sparse, and every image, primary and thumbnail, gets as much room as possible. Specialized tools stay out of sight unless asked for.
+* *Discoverable by mouse, driven by keyboard*. Every feature is accessible through the UI and keyboard. Learn the keys via tooltips and in-app help.
+* *Desktop native*. Integrates with your theme, trash, thumbnail cache, file dialogs, and other image applications.
 
 ## Features
 
@@ -43,7 +44,7 @@ Please open PRs or submit issues to suggest features that you think should be in
 
 ### High performance
 
-All rendering is done on GPU and maintains full frame rate through both user initiated and (rapidly) animated pans and zooms. Decoding and statistics generation is parallelized in background threads. Overall, the app is very snappy!
+All rendering is done on GPU and maintains full frame rate through both user initiated and (rapidly) animated pans and zooms. Decoding and statistics generation is parallelized in background threads.
 
 ### Many formats
 
@@ -105,7 +106,7 @@ An easily triggerable loupe for quickly examining details.
 
 ### Histogram
 
-A dynamic histogram primarily for inspecting the content of the image. While you can make some adjustments to better understand the content of the image, it's not the intent of this program (as alluded to in the description above) to be a full-fledged image editor.
+A dynamic histogram primarily for inspecting the content of the image. While you can make some adjustments to better understand the content of the image, gamut is a [viewer, not an editor](#tenets).
 
 ![Histogram](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/histogram.gif)
 
@@ -208,11 +209,11 @@ Enough keys to get going:
 | `tab` | Show/hide the file list |
 | `q`, `esc` | Quit |
 
-All controls are documented in [`user-docs/KEYS.md`](user-docs/KEYS.md). CLI help is availabel via `gamut --help`.
+All controls are documented in [`user-docs/KEYS.md`](user-docs/KEYS.md). CLI help is available via `gamut --help`.
 
 ## Contributing
 
-Issues and pull requests are welcome.
+Issues and pull requests are welcome. See [Roadmap](ROADMAP.md) for some features and improvements that we'd like to get to.
 
 [`docs/`](docs/) — AI generated and maintained notes on development.
 

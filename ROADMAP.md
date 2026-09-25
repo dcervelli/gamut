@@ -2,9 +2,10 @@
 
 ## New Features
 * RGBA channel toggle
-* Basic annotations
 * SVG rasterizer
 * >2^15 px images
+* Text extraction
+* Basic annotations? Not sure it should be included. If included, very basic: rectangle (filled/stroked), line, arrow, text box; nothing more.
 
 ## Improve
 * Advanced file list features
