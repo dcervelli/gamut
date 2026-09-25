@@ -198,7 +198,7 @@ fn run() -> Result<ExitCode> {
     // `--paste` on purpose, and nothing to paste: said in the window as
     // well as on the terminal, since the window is where the reader is.
     if paste && opened_on_nothing {
-        app.say("Nothing on the clipboard that could be shown.");
+        app.say(&app::input::nothing_to_paste());
     }
     event_loop.run_app(&mut app)?;
 

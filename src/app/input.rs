@@ -1758,6 +1758,13 @@ pub(super) fn briefly(error: &anyhow::Error) -> String {
     crate::escape_controls(&error.to_string())
 }
 
+/// What the window says when a paste finds no picture on the clipboard: the
+/// paste button's tooltip, as a sentence, whether the paste was a key or
+/// `--paste`.
+pub fn nothing_to_paste() -> String {
+    format!("{}.", ui::tooltip::NOTHING_TO_PASTE)
+}
+
 impl App {
     pub(super) fn handle_key(
         &mut self,
@@ -2044,10 +2051,7 @@ impl App {
             CopyMetadata => self.copy_facts(Copyable::All),
             // Nothing to draw yet either: the picture is being written and
             // then read, and what is on screen stays until it arrives.
-            Paste => {
-                self.paste();
-                return Effect::Nothing;
-            }
+            Paste => return self.paste(),
             // The bar alone changes, but that is a frame all the same.
             CyclePixelFormat => {
                 self.panels.pixel_format = self.panels.pixel_format.next();
@@ -2620,19 +2624,29 @@ impl App {
     /// whichever program holds the selection, and that goes to the loader with
     /// the reading — which also means a paste that will not arrive, or will not
     /// decode, is reported exactly as an unreadable file is.
-    fn paste(&mut self) {
+    ///
+    /// Owes a frame only for the message that there was nothing to paste:
+    /// what was pasted arrives through the loader, which asks for its own.
+    fn paste(&mut self) -> Effect {
         let offer = match clipboard::offered_image() {
             Ok(Some(offer)) => offer,
-            // Not a failure: a key was pressed and there was nothing there.
+            // Not a failure: a key was pressed and there was nothing there,
+            // said in the words the paste button's tooltip says it in.
             Ok(None) => {
-                eprintln!("gamut: nothing on the clipboard that could be shown");
-                return;
+                self.toast(nothing_to_paste(), Level::Message);
+                return Effect::Redraw;
             }
-            Err(error) => return report(&error),
+            Err(error) => {
+                report(&error);
+                return Effect::Nothing;
+            }
         };
         let path = match pasted::reserve(offer.extension) {
             Ok(path) => path,
-            Err(error) => return report(&error),
+            Err(error) => {
+                report(&error);
+                return Effect::Nothing;
+            }
         };
         // A paste is the window's own doing: from here on nothing showing
         // is the window's to answer, not the command line's.
@@ -2640,6 +2654,7 @@ impl App {
         let request = self.files.adopt(path, Source::Clipboard(offer.mime));
         self.send(request);
         self.list_changed();
+        Effect::Nothing
     }
 
     /// Puts what the info panel says on the clipboard: as much of a table as
@@ -2844,10 +2859,7 @@ impl App {
             // last look, and the paste asks it again rather than trusting
             // that. A selection that has gone in between is answered the way
             // an empty clipboard is.
-            Control::Paste => {
-                self.paste();
-                Effect::Redraw
-            }
+            Control::Paste => self.paste().also(Effect::Redraw),
             // Asks for a region, or takes off the one asked for or drawn.
             // The key's own action goes through here too, so that the
             // button and `x` cannot come to mean different things.

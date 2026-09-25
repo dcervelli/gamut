@@ -421,7 +421,8 @@ open at all.
 What is pasted is whatever the image was copied as, saved as it stands:
 nothing is re-encoded, so a JPEG arrives a JPEG. `Ctrl+V` does nothing if the
 clipboard holds words rather than an image, or holds it in a format `gamut`
-cannot read — it says so on the terminal and leaves the window as it was.
+cannot read — the window says "No image on the clipboard." and stays as it
+was.
 Copying a *file* in a file manager copies its name and not its contents, and
 that is not a paste; open it as an argument instead.
 

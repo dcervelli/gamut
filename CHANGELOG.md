@@ -199,6 +199,9 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   the file comes out of the trash and back into the list, or gets its old
   name back.
 
+- `Ctrl+V` with no image on the clipboard says so in the window, where
+  before it said so only on the terminal.
+
 ### Fixed
 
 - A gain map is turned with its picture. A JPEG with a gain map and an
