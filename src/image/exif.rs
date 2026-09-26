@@ -134,7 +134,7 @@ impl Exif {
         // directory had to be read the long way round, since the block
         // written back leaves anything this long behind.
         let xmp = match block.as_ref().and_then(embedded_packet) {
-            Some(packet) => Xmp::parse(packet).unwrap_or_default(),
+            Some(packet) => Xmp::read_with(path, Some(packet)),
             None => Xmp::read(path),
         };
         Self::assemble(block.as_ref(), &xmp)

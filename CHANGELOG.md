@@ -4,6 +4,19 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- The info panel reads an XMP sidecar beside the file: the file's name
+  with `.xmp` in place of its extension, as Adobe's programs and digiKam
+  write it, or added after it, as darktable does. A raw whose title,
+  caption and keywords a cataloging program keeps in the sidecar, the raw
+  itself never being written to, used to show none of them; it now shows
+  them all, and the file list and the chooser find the file by that title.
+  Where the file carries a packet of its own as well, the sidecar's word
+  on a field is the one shown, and the packet's other fields stand.
+
 ## 0.5.1 - 2026-09-26
 
 ### Changed

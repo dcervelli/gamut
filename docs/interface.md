@@ -782,6 +782,16 @@ it is parsed rather than searched — `roxmltree`, already in the tree under
 `fontdb`, builds a document of it, and refuses one with a DTD, which is where
 an XML parser's trouble with untrusted input lives — and comes back as
 namespaced properties: a list's every item, a set of translations' default.
+A sidecar — the picture's name with `.xmp` in place of its extension, or
+after it, since darktable spells it the second way and the specification the
+first — is read beside every file, whatever the container, and a property it
+holds is taken over the packet's: a raw has no packet a program will write
+to, so the sidecar is the only place its words are, and where a file has
+both, the sidecar is the one written last. The rest of the packet's
+properties stand, since a program that writes a sidecar writes only what it
+was told. The sidecar is read whole, up to the same ceiling a packet is
+believed to, and one that is not a packet is ignored rather than allowed to
+empty the panel.
 Which of those the panel shows is `exif.rs`'s `DESCRIBED` table, one row per
 thing said in words, naming the EXIF tag and the XMP property that say it.
 Where a file has both, the EXIF field is shown: it is the older of the two,

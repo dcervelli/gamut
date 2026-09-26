@@ -9,6 +9,14 @@
 //! directory. A file that has only a title has, as often as not, only this
 //! block — nothing in EXIF holds a title at all.
 //!
+//! A file that cannot be written to — a camera raw, or one its owner would
+//! rather not touch — keeps its packet in a sidecar instead: a file beside
+//! it holding the packet and nothing else, under the picture's own name with
+//! `.xmp` in place of its extension, as the specification spells it, or
+//! after it, as darktable does. [`sidecar`] finds one; a property it holds
+//! is taken over the embedded packet's, since the sidecar is what was
+//! written last, and the rest of the packet's properties stand.
+//!
 //! Nothing here reaches the decoders or the image. [`packet`] finds the
 //! block by walking the container's headers, reading a packet whole and
 //! seeking past everything else, and [`Xmp::parse`] takes the packet apart
@@ -19,7 +27,7 @@
 
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use roxmltree::{Document, Node};
 
@@ -77,12 +85,34 @@ pub struct Xmp {
 }
 
 impl Xmp {
-    /// Reads `path`'s packet out of whatever container the file is, or gives
-    /// back nothing at all.
+    /// Reads `path`'s packet out of whatever container the file is, and the
+    /// sidecar beside it, or gives back nothing at all.
     pub fn read(path: &Path) -> Self {
-        packet(path)
-            .and_then(|packet| Self::parse(&packet))
-            .unwrap_or_default()
+        Self::read_with(path, packet(path).as_deref())
+    }
+
+    /// The same, for a caller that has the embedded packet already — the
+    /// EXIF reader, which parsed the TIFF directory the packet sits in —
+    /// or knows the file carries none.
+    pub fn read_with(path: &Path, embedded: Option<&[u8]>) -> Self {
+        let embedded = embedded.and_then(Self::parse).unwrap_or_default();
+        match sidecar(path).and_then(|packet| Self::parse(&packet)) {
+            Some(sidecar) => sidecar.over(embedded),
+            None => embedded,
+        }
+    }
+
+    /// `self`'s properties, and whichever of `under`'s it does not have.
+    fn over(mut self, under: Self) -> Self {
+        for property in under.properties {
+            push(
+                &mut self.properties,
+                &property.namespace,
+                &property.name,
+                property.values,
+            );
+        }
+        self
     }
 
     /// The properties in `packet`, which is the RDF/XML a container hands
@@ -238,6 +268,33 @@ pub fn packet(path: &Path) -> Option<Vec<u8>> {
     } else {
         None
     }
+}
+
+/// The packet in the sidecar beside `path`, if there is one: a file of the
+/// picture's name with `.xmp` in place of its extension, or, failing that,
+/// after it. `None` where there is neither, or the one there is runs past
+/// [`MAX_PACKET`], which a file holding one packet never does.
+pub fn sidecar(path: &Path) -> Option<Vec<u8>> {
+    sidecar_names(path)
+        .into_iter()
+        .find_map(|name| File::open(name).ok())
+        .and_then(|mut file| {
+            let length = file.metadata().ok()?.len();
+            take(&mut file, length)
+        })
+}
+
+/// Where a sidecar of `path` would be, in the order they are looked for:
+/// the specification's spelling first, then darktable's. A path with no
+/// extension has the one spelling.
+fn sidecar_names(path: &Path) -> Vec<PathBuf> {
+    let mut names = vec![path.with_extension("xmp")];
+    if path.extension().is_some() {
+        let mut appended = path.as_os_str().to_owned();
+        appended.push(".xmp");
+        names.push(PathBuf::from(appended));
+    }
+    names
 }
 
 /// Reads `length` bytes, or gives up on a length nothing should be asked
@@ -571,6 +628,71 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    /// A sidecar is read where the file has no packet, in either spelling
+    /// of its name; and where the file has one too, the sidecar's word on
+    /// a property is the one taken, and the packet's other properties
+    /// stand.
+    #[test]
+    fn a_sidecar_is_read_beside_the_file() {
+        const SIDECAR: &str = r#"<x:xmpmeta xmlns:x="adobe:ns:meta/">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about=""
+    xmlns:dc="http://purl.org/dc/elements/1.1/"
+    xmlns:xmp="http://ns.adobe.com/xap/1.0/"
+    xmp:CreatorTool="darktable">
+   <dc:title>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">Buzzard, Retitled</rdf:li>
+    </rdf:Alt>
+   </dc:title>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>"#;
+        let retitled = Some(&["Buzzard, Retitled".to_string()][..]);
+
+        // A plain JPEG with no packet, and its sidecar under each name. The
+        // temporary directory outlives the test, so the sidecar an earlier
+        // run wrote is taken away before the read that expects none.
+        let plain = written("alone.jpg", b"\xff\xd8\xff\xd9");
+        for name in sidecar_names(&plain) {
+            let _ = std::fs::remove_file(name);
+        }
+        assert_eq!(Xmp::read(&plain), Xmp::default());
+        written("alone.xmp", SIDECAR.as_bytes());
+        assert_eq!(Xmp::read(&plain).property(DC, "title"), retitled);
+
+        let plain = written("appended.jpg", b"\xff\xd8\xff\xd9");
+        written("appended.jpg.xmp", SIDECAR.as_bytes());
+        assert_eq!(Xmp::read(&plain).property(DC, "title"), retitled);
+
+        // A file that carries the packet, and a sidecar retitling it.
+        let mut jpeg = b"\xff\xd8".to_vec();
+        let mut payload = JPEG_HEADER.to_vec();
+        payload.extend_from_slice(PACKET.as_bytes());
+        jpeg.extend_from_slice(b"\xff\xe1");
+        jpeg.extend_from_slice(&((payload.len() + 2) as u16).to_be_bytes());
+        jpeg.extend_from_slice(&payload);
+        jpeg.extend_from_slice(b"\xff\xda\x00\x02\xff\xd9");
+        let both = written("both.jpg", &jpeg);
+        written("both.xmp", SIDECAR.as_bytes());
+        let read = Xmp::read(&both);
+        assert_eq!(read.property(DC, "title"), retitled);
+        assert_eq!(
+            read.property(BASIC, "CreatorTool"),
+            Some(&["darktable".to_string()][..])
+        );
+        assert_eq!(read.property(DC, "subject"), parsed().property(DC, "subject"));
+        assert_eq!(
+            Xmp::read_with(&both, super::packet(&both).as_deref()),
+            read
+        );
+
+        // A sidecar that is not a packet leaves the file's own alone.
+        let own = written("rubbish.jpg", &jpeg);
+        written("rubbish.xmp", b"<not xml");
+        assert_eq!(Xmp::read(&own), parsed());
     }
 
     /// A container with no packet, one cut short, and one whose lengths do

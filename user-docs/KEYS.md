@@ -651,7 +651,10 @@ The file's own date is in UTC; the date the photograph was taken is whatever
 the camera recorded, with the offset from UTC it was set to where it recorded
 one. EXIF is read from JPEG, TIFF, PNG, WebP and HEIF files, and from a TIFF
 however large it is and wherever in the file it keeps it; XMP from those and
-from JPEG XL as well. Where it has more to say than
+from JPEG XL as well. An XMP sidecar beside a file — the file's name with
+`.xmp` in place of its extension, or added after it — is read for every
+file, raws included, and what it says wins over what the file itself says,
+the sidecar being what a cataloging program wrote last. Where it has more to say than
 fits, the wheel scrolls it — point at the panel rather than at the image, and
 the wheel moves the words instead of the zoom. Dragging the panel scrolls it
 as well, the drag holding the scrollbar's handle rather than the words: drag
