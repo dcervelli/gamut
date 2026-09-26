@@ -85,8 +85,9 @@ impl Viewport {
         [self.width, self.height]
     }
 
-    /// The point the image is centered on, and that zoom works about.
-    fn center(&self) -> [f32; 2] {
+    /// The point the image is centered on, and that a zoom works about when
+    /// the pointer is not over the picture.
+    pub fn center(&self) -> [f32; 2] {
         [self.x + self.width / 2.0, self.y + self.height / 2.0]
     }
 
@@ -143,6 +144,16 @@ pub struct View {
     /// The image-space point, relative to the image center, shown at the
     /// center of the window.
     pan: [f32; 2],
+    /// On its way somewhere — a view [`View::at`] makes, part way along a
+    /// move — and so shown where the line puts it, rather than held within
+    /// the limit a settled view is. The limit is not a straight line in
+    /// space-scale coordinates — it bends where the image stops overflowing
+    /// the viewport — so the line between two settled views can cross it:
+    /// zooming out of a fit toward a detail, the image has to overflow one
+    /// edge while still short of the other for a few frames. Held to the
+    /// limit there, the move would pin the picture against the edge and then
+    /// let it catch up, which is a bend.
+    moving: bool,
     upscale: Upscale,
 }
 
@@ -152,6 +163,7 @@ impl View {
             fit: Some(Fit::Whole),
             zoom: 1.0,
             pan: [0.0, 0.0],
+            moving: false,
             upscale: Upscale::default(),
         }
     }
@@ -224,6 +236,16 @@ impl View {
         [pan[0].clamp(-lx, lx), pan[1].clamp(-ly, ly)]
     }
 
+    /// The pan on screen: the one held, within the limit — unless the view is
+    /// on its way somewhere, when it is wherever the line has it.
+    fn shown_pan(&self, image: [f32; 2], viewport: [f32; 2], zoom: f32) -> [f32; 2] {
+        if self.moving {
+            self.pan
+        } else {
+            Self::clamp_pan(self.pan, image, viewport, zoom)
+        }
+    }
+
     /// Whether the view has anywhere to pan to. False when the whole image is
     /// on screen — at `Fit::Whole`, or for anything smaller than the viewport
     /// — which is the one state where a drag can do nothing at all.
@@ -235,7 +257,7 @@ impl View {
 
     pub fn placement(&self, image: [f32; 2], viewport: Viewport) -> Placement {
         let zoom = self.zoom(image, viewport);
-        let pan = Self::clamp_pan(self.pan, image, viewport.size(), zoom);
+        let pan = self.shown_pan(image, viewport.size(), zoom);
         let width = image[0] * zoom;
         let height = image[1] * zoom;
         let center = viewport.center();
@@ -264,31 +286,25 @@ impl View {
         }
     }
 
-    fn zoom_by(&mut self, factor: f32, image: [f32; 2], viewport: Viewport) {
-        // Materialize the current fit zoom before leaving fit mode, so zooming
-        // continues from what is on screen rather than jumping.
-        let current = self.zoom(image, viewport);
-        self.zoom = (current * factor).clamp(MIN_ZOOM, MAX_ZOOM);
-        self.fit = None;
-        self.pan = Self::clamp_pan(self.pan, image, viewport.size(), self.zoom);
+    /// One step in, about `anchor` as [`View::zoom_steps_at`] takes it.
+    pub fn zoom_in(&mut self, anchor: [f32; 2], image: [f32; 2], viewport: Viewport) {
+        self.zoom_steps_at(1.0, anchor, image, viewport);
     }
 
-    pub fn zoom_in(&mut self, image: [f32; 2], viewport: Viewport) {
-        self.zoom_by(ZOOM_STEP, image, viewport);
+    /// One step out, about `anchor` as [`View::zoom_steps_at`] takes it.
+    pub fn zoom_out(&mut self, anchor: [f32; 2], image: [f32; 2], viewport: Viewport) {
+        self.zoom_steps_at(-1.0, anchor, image, viewport);
     }
 
-    pub fn zoom_out(&mut self, image: [f32; 2], viewport: Viewport) {
-        self.zoom_by(1.0 / ZOOM_STEP, image, viewport);
-    }
-
-    /// Zooms by `steps` of the keyboard's zoom increment, keeping whatever is
-    /// under `anchor` — a point in window pixels — where it is. Fractional
-    /// steps are what a trackpad sends, so this takes a float rather than a
-    /// count of notches.
+    /// Zooms by `steps` of the zoom increment — a key's step, or a notch of
+    /// the wheel — keeping whatever is under `anchor`, a point in window
+    /// pixels, where it is. Fractional steps are what a trackpad sends, so
+    /// this takes a float rather than a count of notches. Zooming continues
+    /// from what is on screen, so the first step out of a fit is one step
+    /// from the fitted zoom rather than a jump.
     ///
-    /// The anchor cannot always be honored: an image smaller than the
-    /// viewport stays centered on that axis, and one panned to its edge stops
-    /// there. `clamp_pan` decides that, exactly as it does for a drag.
+    /// A step that reaches nothing — the zoom already at its limit — is not
+    /// a zoom, and leaves a fit in force rather than materializing it.
     pub fn zoom_steps_at(
         &mut self,
         steps: f32,
@@ -301,6 +317,29 @@ impl View {
         if after == before {
             return;
         }
+        self.set_zoom_at(after, anchor, image, viewport);
+    }
+
+    /// Zooms to `zoom`, leaving fit mode, keeping whatever is under `anchor`
+    /// — a point in window pixels — where it is: the pointer, for a zoom
+    /// asked for with it over the picture, or the viewport's center.
+    ///
+    /// Asked for the zoom the view is already at, it puts what is under the
+    /// anchor in the middle instead: a double-click at actual size on a
+    /// detail goes to the detail, rather than doing nothing.
+    ///
+    /// The anchor cannot always be honored: an image smaller than the
+    /// viewport stays centered on that axis, and one panned to its edge stops
+    /// there. `clamp_pan` decides that, exactly as it does for a drag.
+    pub fn set_zoom_at(
+        &mut self,
+        zoom: f32,
+        anchor: [f32; 2],
+        image: [f32; 2],
+        viewport: Viewport,
+    ) {
+        let before = self.zoom(image, viewport);
+        let after = zoom.clamp(MIN_ZOOM, MAX_ZOOM);
 
         // Where the anchor sits over the image, from the pan actually on
         // screen rather than the one held: they differ whenever the view is
@@ -310,23 +349,14 @@ impl View {
         let offset = [anchor[0] - center[0], anchor[1] - center[1]];
         let point = [pan[0] + offset[0] / before, pan[1] + offset[1] / before];
 
+        let pan = if after == before {
+            point
+        } else {
+            [point[0] - offset[0] / after, point[1] - offset[1] / after]
+        };
         self.zoom = after;
         self.fit = None;
-        self.pan = Self::clamp_pan(
-            [point[0] - offset[0] / after, point[1] - offset[1] / after],
-            image,
-            viewport.size(),
-            after,
-        );
-    }
-
-    /// Zooms to `zoom` about the center of the viewport, leaving fit mode.
-    /// What was in the middle stays in the middle, which is what a zoom asked
-    /// for by name — rather than at a point — means.
-    pub fn set_zoom(&mut self, zoom: f32, image: [f32; 2], viewport: Viewport) {
-        self.zoom = zoom.clamp(MIN_ZOOM, MAX_ZOOM);
-        self.fit = None;
-        self.pan = Self::clamp_pan(self.pan, image, viewport.size(), self.zoom);
+        self.pan = Self::clamp_pan(pan, image, viewport.size(), after);
     }
 
     /// Which fit the view is in, and `None` once it has been zoomed by hand.
@@ -383,11 +413,11 @@ impl View {
     /// size, and round again. Actual size is a zoom like any other, so a
     /// view zoomed by hand — to 100% or anything else — is at the same
     /// point of the round, and the next press shows the whole image.
-    pub fn cycle_fit(&mut self, image: [f32; 2], viewport: Viewport) {
+    pub fn cycle_fit(&mut self, anchor: [f32; 2], image: [f32; 2], viewport: Viewport) {
         match self.fit {
             None => self.set_fit(Fit::Whole),
             Some(Fit::Whole) => self.set_fit(Fit::Fill),
-            Some(Fit::Fill) => self.set_zoom(1.0, image, viewport),
+            Some(Fit::Fill) => self.set_zoom_at(1.0, anchor, image, viewport),
         }
     }
 
@@ -411,11 +441,12 @@ impl View {
     }
 
     /// Where the view is in space-scale coordinates. From the pan actually on
-    /// screen rather than the one held, as `zoom_steps_at` reads it: a view
-    /// against an edge is at the edge, wherever it was asked to go.
+    /// screen rather than the one held, as `set_zoom_at` reads it: a view
+    /// against an edge is at the edge, wherever it was asked to go — and a
+    /// view on its way somewhere is where the line has it.
     pub fn position(&self, image: [f32; 2], viewport: Viewport) -> Position {
         let zoom = self.zoom(image, viewport);
-        let pan = Self::clamp_pan(self.pan, image, viewport.size(), zoom);
+        let pan = self.shown_pan(image, viewport.size(), zoom);
         Position {
             u: [pan[0] * zoom, pan[1] * zoom],
             v: zoom,
@@ -424,14 +455,16 @@ impl View {
 
     /// The view at `position`: what is on screen part way through a move.
     /// Not in fit mode, whatever this view is in — a fit is a zoom the
-    /// viewport decides, and a view on its way there is at some other one.
-    /// The upscale filter comes along, being a preference rather than a
-    /// place.
+    /// viewport decides, and a view on its way there is at some other one —
+    /// and not held within the pan limit, which the line may cross on its
+    /// way from one settled view to another. The upscale filter comes
+    /// along, being a preference rather than a place.
     pub fn at(&self, position: Position) -> View {
         View {
             fit: None,
             zoom: position.v,
             pan: [position.u[0] / position.v, position.u[1] / position.v],
+            moving: true,
             upscale: self.upscale,
         }
     }
@@ -491,7 +524,7 @@ mod tests {
         // A viewport smaller than the image, so there is somewhere to pan to.
         let viewport = Viewport::whole([400.0, 300.0]);
         let mut view = View::new();
-        view.set_zoom(1.0, IMAGE, viewport);
+        view.set_zoom_at(1.0, viewport.center(), IMAGE, viewport);
         view.pan_by(100.0, 50.0, IMAGE, viewport);
 
         let placement = view.placement(IMAGE, viewport);
@@ -521,19 +554,19 @@ mod tests {
     fn fit_cycles_through_the_whole_image_a_filled_viewport_and_actual_size() {
         let mut view = View::new();
         assert_eq!(view.fit(), Some(Fit::Whole));
-        view.cycle_fit(IMAGE, WINDOW);
+        view.cycle_fit(WINDOW.center(), IMAGE, WINDOW);
         assert_eq!(view.fit(), Some(Fit::Fill));
-        view.cycle_fit(IMAGE, WINDOW);
+        view.cycle_fit(WINDOW.center(), IMAGE, WINDOW);
         assert_eq!(view.fit(), None);
         assert!(close(view.zoom(IMAGE, WINDOW), 1.0));
-        view.cycle_fit(IMAGE, WINDOW);
+        view.cycle_fit(WINDOW.center(), IMAGE, WINDOW);
         assert_eq!(view.fit(), Some(Fit::Whole));
 
         // A zoom by hand is where actual size is on the round: the whole
         // image comes next.
-        view.zoom_in(IMAGE, WINDOW);
+        view.zoom_in(WINDOW.center(), IMAGE, WINDOW);
         assert_eq!(view.fit(), None);
-        view.cycle_fit(IMAGE, WINDOW);
+        view.cycle_fit(WINDOW.center(), IMAGE, WINDOW);
         assert_eq!(view.fit(), Some(Fit::Whole));
     }
 
@@ -581,7 +614,7 @@ mod tests {
     fn the_two_fits_take_an_axis_each() {
         let mut view = View::new();
         assert!(close(view.zoom(IMAGE, WINDOW), 1200.0 / 900.0));
-        view.cycle_fit(IMAGE, WINDOW);
+        view.cycle_fit(WINDOW.center(), IMAGE, WINDOW);
         assert!(close(view.zoom(IMAGE, WINDOW), 1200.0 / 600.0));
     }
 
@@ -610,18 +643,18 @@ mod tests {
     fn zooming_continues_from_what_is_on_screen() {
         let mut view = View::new();
         let fitted = view.zoom(IMAGE, WINDOW);
-        view.zoom_in(IMAGE, WINDOW);
+        view.zoom_in(WINDOW.center(), IMAGE, WINDOW);
         assert_eq!(view.fit(), None);
         assert!(close(view.zoom(IMAGE, WINDOW), fitted * ZOOM_STEP));
 
-        view.zoom_out(IMAGE, WINDOW);
+        view.zoom_out(WINDOW.center(), IMAGE, WINDOW);
         assert!(close(view.zoom(IMAGE, WINDOW), fitted));
     }
 
     #[test]
     fn actual_size_is_one_to_one() {
         let mut view = View::new();
-        view.set_zoom(1.0, IMAGE, WINDOW);
+        view.set_zoom_at(1.0, WINDOW.center(), IMAGE, WINDOW);
         assert_eq!(view.fit(), None);
         let placement = view.placement(IMAGE, WINDOW);
         assert!(close(placement.zoom, 1.0));
@@ -633,11 +666,11 @@ mod tests {
     fn zoom_is_clamped() {
         let mut view = View::new();
         for _ in 0..200 {
-            view.zoom_in(IMAGE, WINDOW);
+            view.zoom_in(WINDOW.center(), IMAGE, WINDOW);
         }
         assert!(close(view.zoom(IMAGE, WINDOW), MAX_ZOOM));
         for _ in 0..400 {
-            view.zoom_out(IMAGE, WINDOW);
+            view.zoom_out(WINDOW.center(), IMAGE, WINDOW);
         }
         assert!(close(view.zoom(IMAGE, WINDOW), MIN_ZOOM));
     }
@@ -645,7 +678,7 @@ mod tests {
     #[test]
     fn an_image_smaller_than_the_window_stays_centered() {
         let mut view = View::new();
-        view.set_zoom(1.0, IMAGE, WINDOW);
+        view.set_zoom_at(1.0, WINDOW.center(), IMAGE, WINDOW);
         view.pan_by(500.0, 500.0, IMAGE, WINDOW);
         let placement = view.placement(IMAGE, WINDOW);
         assert!(close(placement.x, (WINDOW.width - IMAGE[0]) / 2.0));
@@ -655,7 +688,7 @@ mod tests {
     #[test]
     fn panning_stops_at_the_image_edge() {
         let mut view = View::new();
-        view.set_zoom(1.0, IMAGE, WINDOW);
+        view.set_zoom_at(1.0, WINDOW.center(), IMAGE, WINDOW);
         // 4x zoom makes the image 3600x2400, larger than the window on both axes.
         view.zoom = 4.0;
 
@@ -676,7 +709,7 @@ mod tests {
     #[test]
     fn panning_to_the_edge_goes_as_far_as_there_is() {
         let mut view = View::new();
-        view.set_zoom(1.0, IMAGE, WINDOW);
+        view.set_zoom_at(1.0, WINDOW.center(), IMAGE, WINDOW);
         // 4x zoom makes the image 3600x2400, larger than the window on both axes.
         view.zoom = 4.0;
 
@@ -700,7 +733,7 @@ mod tests {
     #[test]
     fn centering_on_a_point_goes_as_far_as_the_edge_lets_it() {
         let mut view = View::new();
-        view.set_zoom(4.0, IMAGE, WINDOW);
+        view.set_zoom_at(4.0, WINDOW.center(), IMAGE, WINDOW);
         let middle = [WINDOW.width / 2.0, WINDOW.height / 2.0];
 
         // 4x zoom makes the image 3600x2400: a point well inside lands in
@@ -754,7 +787,7 @@ mod tests {
     #[test]
     fn a_filled_viewport_still_pans_vertically() {
         let mut view = View::new();
-        view.cycle_fit(IMAGE, WINDOW);
+        view.cycle_fit(WINDOW.center(), IMAGE, WINDOW);
         assert_eq!(view.fit(), Some(Fit::Fill));
         // 900x600 filling a 1200x600 window is 1200x800: taller than the
         // window, so there is room to scroll down but not sideways.
@@ -772,7 +805,7 @@ mod tests {
     #[test]
     fn a_wheel_zoom_keeps_the_point_under_the_pointer() {
         let mut view = View::new();
-        view.set_zoom(1.0, IMAGE, WINDOW);
+        view.set_zoom_at(1.0, WINDOW.center(), IMAGE, WINDOW);
         // 4x makes the image larger than the window, so there is pan to give.
         view.zoom = 4.0;
 
@@ -788,6 +821,39 @@ mod tests {
         let before = under(&view);
         view.zoom_steps_at(1.0, anchor, IMAGE, WINDOW);
         assert!(view.zoom(IMAGE, WINDOW) > 4.0);
+        let after = under(&view);
+        assert!(close(before[0], after[0]), "{before:?} -> {after:?}");
+        assert!(close(before[1], after[1]), "{before:?} -> {after:?}");
+    }
+
+    /// A zoom asked for by name — a number, a step — keeps the point under
+    /// its anchor too, as the wheel does, however far the zoom goes at once.
+    #[test]
+    fn a_named_zoom_keeps_the_point_under_its_anchor() {
+        let mut view = View::new();
+        view.set_zoom_at(4.0, WINDOW.center(), IMAGE, WINDOW);
+
+        let anchor = [300.0, 900.0];
+        let under = |view: &View| {
+            let placement = view.placement(IMAGE, WINDOW);
+            [
+                (anchor[0] - placement.x) / placement.zoom,
+                (anchor[1] - placement.y) / placement.zoom,
+            ]
+        };
+
+        let before = under(&view);
+        view.set_zoom_at(16.0, anchor, IMAGE, WINDOW);
+        assert!(close(view.zoom(IMAGE, WINDOW), 16.0));
+        assert_eq!(view.fit(), None);
+        let after = under(&view);
+        assert!(close(before[0], after[0]), "{before:?} -> {after:?}");
+        assert!(close(before[1], after[1]), "{before:?} -> {after:?}");
+
+        // Out of a fit the same way: the point is the one the fit had there.
+        let mut view = View::new();
+        let before = under(&view);
+        view.set_zoom_at(4.0, anchor, IMAGE, WINDOW);
         let after = under(&view);
         assert!(close(before[0], after[0]), "{before:?} -> {after:?}");
         assert!(close(before[1], after[1]), "{before:?} -> {after:?}");
@@ -813,7 +879,7 @@ mod tests {
         ));
 
         let mut view = View::new();
-        view.set_zoom(1.0, IMAGE, inset);
+        view.set_zoom_at(1.0, inset.center(), IMAGE, inset);
         // 4x makes the image larger than the viewport, so there is pan to give.
         view.zoom = 4.0;
 
@@ -849,7 +915,7 @@ mod tests {
     #[test]
     fn a_wheel_zoom_takes_fractional_steps() {
         let mut view = View::new();
-        view.set_zoom(1.0, IMAGE, WINDOW);
+        view.set_zoom_at(1.0, WINDOW.center(), IMAGE, WINDOW);
         view.zoom_steps_at(0.5, [600.0, 600.0], IMAGE, WINDOW);
         assert!(close(view.zoom(IMAGE, WINDOW), ZOOM_STEP.powf(0.5)));
     }
@@ -872,7 +938,7 @@ mod tests {
         view.cycle_upscale();
         assert_eq!(view.upscale(), Upscale::Bicubic);
 
-        view.zoom_in(IMAGE, WINDOW);
+        view.zoom_in(WINDOW.center(), IMAGE, WINDOW);
         view.reset();
         assert_eq!(view.fit(), Some(Fit::Whole));
         assert_eq!(view.upscale(), Upscale::Bicubic);
@@ -888,13 +954,13 @@ mod tests {
         // An odd window against an even image is what puts the center on a
         // half pixel.
         let window = Viewport::whole([1201.0, 1201.0]);
-        view.set_zoom(1.0, IMAGE, window);
+        view.set_zoom_at(1.0, window.center(), IMAGE, window);
         let placement = view.placement(IMAGE, window);
         assert_eq!(placement.x, placement.x.round());
         assert_eq!(placement.y, placement.y.round());
 
         // Below 1:1 it is left alone.
-        view.cycle_fit(IMAGE, WINDOW);
+        view.cycle_fit(WINDOW.center(), IMAGE, WINDOW);
         let placement = view.placement([4000.0, 4000.0], window);
         assert!(placement.zoom < 1.0);
         assert!(close(placement.x, 0.0));
@@ -907,16 +973,16 @@ mod tests {
         let mut view = View::new();
         assert!(!view.can_pan(IMAGE, WINDOW));
 
-        view.set_zoom(1.0, IMAGE, WINDOW);
+        view.set_zoom_at(1.0, WINDOW.center(), IMAGE, WINDOW);
         assert!(!view.can_pan(IMAGE, WINDOW));
-        view.zoom_in(IMAGE, WINDOW);
-        view.zoom_in(IMAGE, WINDOW);
+        view.zoom_in(WINDOW.center(), IMAGE, WINDOW);
+        view.zoom_in(WINDOW.center(), IMAGE, WINDOW);
         assert!(view.can_pan(IMAGE, WINDOW));
 
         // 900x600 filling a 1200x600 window is 1200x800: taller than the
         // window, so the vertical axis has somewhere to go.
         view.reset();
-        view.cycle_fit(IMAGE, WINDOW);
+        view.cycle_fit(WINDOW.center(), IMAGE, WINDOW);
         assert!(view.can_pan(IMAGE, Viewport::whole([1200.0, 600.0])));
     }
 
@@ -932,10 +998,10 @@ mod tests {
         // somewhere to pan to.
         let image = [4000.0, 4000.0];
         let mut from = View::new();
-        from.set_zoom(0.5, image, WINDOW);
+        from.set_zoom_at(0.5, WINDOW.center(), image, WINDOW);
         from.pan_by(150.0, -100.0, image, WINDOW);
         let mut to = View::new();
-        to.set_zoom(0.9, image, WINDOW);
+        to.set_zoom_at(0.9, WINDOW.center(), image, WINDOW);
         to.pan_by(800.0, 350.0, image, WINDOW);
         let (a, b) = (from.position(image, WINDOW), to.position(image, WINDOW));
         assert!(a.v < b.v && a.u != b.u);
@@ -968,26 +1034,77 @@ mod tests {
         }
     }
 
-    /// The ends of a move are where a view can be, so the line between them
-    /// is too: the pan limit is a straight line in these coordinates, and
-    /// the clamp never has to move a point that is on its way.
+    /// The pan limit bends where the image stops overflowing the viewport,
+    /// so the line between two settled views can cross it — out of a fit
+    /// toward a detail, the image overflows one edge while still short of
+    /// the other. A view on its way is shown where the line puts it, not
+    /// held within the limit, or the move would pin the picture against the
+    /// edge and then let it catch up: every point still crosses the screen
+    /// in a straight line at a steady rate.
     #[test]
-    fn the_line_between_two_views_stays_within_the_image() {
-        let image = [4000.0, 4000.0];
-        let mut from = View::new();
-        from.set_zoom(0.5, image, WINDOW);
-        from.pan_to_edge([1.0, 1.0], image, WINDOW);
-        let mut to = View::new();
-        to.set_zoom(2.0, image, WINDOW);
-        to.pan_to_edge([-1.0, -1.0], image, WINDOW);
-        let (a, b) = (from.position(image, WINDOW), to.position(image, WINDOW));
-        for t in [0.1, 0.3, 0.5, 0.7, 0.9] {
-            let between = Position::between(a, b, t);
-            let along = from.at(between);
-            // What the clamp leaves is what was asked for.
-            let held = along.position(image, WINDOW);
-            assert!(close(held.u[0], between.u[0]) && close(held.u[1], between.u[1]));
+    fn a_view_on_its_way_is_not_held_within_the_pan_limit() {
+        // Fitted whole across, with a margin above and below; then zoomed
+        // in about a point near the bottom-left corner.
+        let from = View::new();
+        let anchor = [50.0, 950.0];
+        let mut to = from;
+        to.set_zoom_at(4.0, anchor, IMAGE, WINDOW);
+        let (a, b) = (from.position(IMAGE, WINDOW), to.position(IMAGE, WINDOW));
+        assert!(a.u == [0.0, 0.0] && b.u[1] > 0.0);
+
+        let on_screen = |t: f32, point: [f32; 2]| {
+            from.at(Position::between(a, b, t))
+                .placement(IMAGE, WINDOW)
+                .screen_point(point)
+        };
+        let crossed = (1..10).any(|step| {
+            let between = Position::between(a, b, step as f32 / 10.0);
+            let limit = View::pan_limit(IMAGE, WINDOW.size(), between.v);
+            between.u[1].abs() > limit[1] * between.v + 1e-3
+        });
+        assert!(crossed, "the line does not cross the limit");
+        for point in [[0.0, 0.0], [450.0, 300.0], [900.0, 600.0]] {
+            let (start, end) = (on_screen(0.0, point), on_screen(1.0, point));
+            for t in [0.25, 0.5, 0.75] {
+                let along = on_screen(t, point);
+                for axis in 0..2 {
+                    let expected = start[axis] + (end[axis] - start[axis]) * t;
+                    // Placement lands on whole pixels above 1:1.
+                    assert!(
+                        (along[axis] - expected).abs() <= 1.0,
+                        "{point:?} at {t}: {along:?}, expected {expected} on axis {axis}"
+                    );
+                }
+            }
         }
+    }
+
+    /// A zoom to the zoom the view is already at is a look at the anchor:
+    /// what is under it goes to the middle, as far as the edge lets it.
+    #[test]
+    fn a_zoom_to_the_zoom_in_force_centers_the_anchor() {
+        let mut view = View::new();
+        view.set_zoom_at(4.0, WINDOW.center(), IMAGE, WINDOW);
+        let anchor = [300.0, 900.0];
+        let detail = view.placement(IMAGE, WINDOW).image_point(anchor);
+
+        view.set_zoom_at(4.0, anchor, IMAGE, WINDOW);
+        assert!(close(view.zoom(IMAGE, WINDOW), 4.0));
+        let middle = view.placement(IMAGE, WINDOW).image_point(WINDOW.center());
+        assert!(
+            close(middle[0], detail[0]) && close(middle[1], detail[1]),
+            "{middle:?}"
+        );
+
+        // A detail by the corner goes as far as a drag would take it, and no
+        // further: the edge stops at the window's.
+        view.pan_to_edge([-1.0, -1.0], IMAGE, WINDOW);
+        view.set_zoom_at(4.0, [10.0, 10.0], IMAGE, WINDOW);
+        let placement = view.placement(IMAGE, WINDOW);
+        assert!(
+            close(placement.x, 0.0) && close(placement.y, 0.0),
+            "{placement:?}"
+        );
     }
 
     /// A wheel zoom keeps the point under the pointer at both ends, and so
@@ -996,7 +1113,7 @@ mod tests {
     fn a_moving_wheel_zoom_keeps_its_anchor_throughout() {
         let image = [4000.0, 4000.0];
         let mut from = View::new();
-        from.set_zoom(2.0, image, WINDOW);
+        from.set_zoom_at(2.0, WINDOW.center(), image, WINDOW);
         from.pan_by(300.0, -200.0, image, WINDOW);
         let mut to = from;
         let anchor = [900.0, 250.0];
@@ -1030,7 +1147,7 @@ mod tests {
     #[test]
     fn a_view_at_the_end_of_its_line_is_where_the_settled_view_is() {
         let mut from = View::new();
-        from.set_zoom(4.0, IMAGE, WINDOW);
+        from.set_zoom_at(4.0, WINDOW.center(), IMAGE, WINDOW);
         from.pan_by(500.0, 500.0, IMAGE, WINDOW);
         let to = View::new();
         assert_eq!(to.fit(), Some(Fit::Whole));
@@ -1044,7 +1161,7 @@ mod tests {
     #[test]
     fn reset_returns_to_the_opening_state() {
         let mut view = View::new();
-        view.zoom_in(IMAGE, WINDOW);
+        view.zoom_in(WINDOW.center(), IMAGE, WINDOW);
         view.pan_by(300.0, 300.0, IMAGE, WINDOW);
         view.reset();
         assert_eq!(view.fit(), Some(Fit::Whole));

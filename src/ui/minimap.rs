@@ -309,7 +309,7 @@ mod tests {
         // direction is on screen, and centered that is the middle of the map.
         let half = Viewport::whole([400.0, 300.0]);
         let mut view = View::new();
-        view.set_zoom(1.0, image, half);
+        view.set_zoom_at(1.0, half.center(), image, half);
         let marker = minimap_marker(rect, image, view.placement(image, half), half);
         assert!(close(marker.width, rect.width / 2.0), "{marker:?}");
         assert!(close(marker.height, rect.height / 2.0), "{marker:?}");

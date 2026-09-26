@@ -55,6 +55,22 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   staying where it is, and says **No matching files.** when none do.
 - `--help` leaves a space after a key column too long for it, where
   `Alt+], Alt+Page Down` used to run into what it does.
+- Every zoom works about the pointer while it is over the picture, as the
+  wheel always has: the number row, `+` and `-`, the zoom menu, a
+  double-click, and the actual size `Space` cycles to all keep the detail
+  under the pointer where it is. With the pointer elsewhere — over a
+  panel, or beside the picture — the middle of the window stays put, as
+  before. A zoom to the zoom already in force — a double-click at actual
+  size — moves the detail under the pointer to the middle of the window
+  instead of doing nothing.
+
+### Fixed
+
+- A move that both pans and zooms travels in a straight line all the way,
+  every point of the picture crossing the screen at a steady rate. Zooming
+  out of a fit toward a detail used to pin the picture against the edge
+  of the window for the first part of the move and let it catch up after,
+  which bent the path.
 
 ## 0.5.1 - 2026-09-26
 
