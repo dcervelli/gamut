@@ -42,6 +42,11 @@ struct Params {
 pub struct Source<'a> {
     pub view: &'a wgpu::TextureView,
     pub size: [u32; 2],
+    /// How much of the texture the picture occupies, in its texels, where
+    /// that is not the whole of it: a chain begun from a level of another
+    /// chain, whose last row and column stand for partial blocks and are
+    /// weighted as such. `None` for a texture the picture fills.
+    pub extent: Option<[f32; 2]>,
     /// What the levels themselves are stored in, from `level_format`.
     pub format: wgpu::TextureFormat,
     pub swizzle: u32,
@@ -131,11 +136,13 @@ impl Reducer {
         let Source {
             view: input,
             size,
+            extent: occupied,
             format,
             swizzle,
             alpha,
             lift,
         } = source;
+        let occupied = occupied.unwrap_or([size[0] as f32, size[1] as f32]);
         let pipeline = self.pipeline(device, format);
         let mut levels: Vec<Level> = Vec::new();
 
@@ -145,10 +152,7 @@ impl Reducer {
             // so far, which stops being a whole number as soon as the image
             // size is not a multiple of STEP. Sizes round up, so the last texel
             // of a row is a partial one and the shader weights it accordingly.
-            let extent = [
-                size[0] as f32 / divisor as f32,
-                size[1] as f32 / divisor as f32,
-            ];
+            let extent = [occupied[0] / divisor as f32, occupied[1] / divisor as f32];
             divisor *= STEP;
             let width = size[0].div_ceil(divisor).max(1);
             let height = size[1].div_ceil(divisor).max(1);

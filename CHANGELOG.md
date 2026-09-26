@@ -4,6 +4,24 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+
+- `w`, and the button beside the band under the histogram, now mark a pixel
+  any channel of which has reached white or black, where they used to wait
+  for all three: a sun whose red has burned out while its green never
+  reached white is painted red. The test is made in the file's own
+  channels, so the paint and the shares in the corners of the histogram's
+  plot count the same thing, and a vivid wide-gamut color, which the file
+  never clipped, is not marked for the room it lacks on the screen. A
+  single-channel file is marked as before. Each pixel of the file is
+  judged on its own and the marks are shrunk with the picture, so a pixel
+  of the screen standing for many of the file wears the blue or the red by
+  the share of them that are clipped: crushed shadows no longer sparkle as
+  the picture is zoomed, go missing at 100%, or vanish as the view drops
+  below it.
+
 ## 0.5.0 - 2026-09-25
 
 ### Added

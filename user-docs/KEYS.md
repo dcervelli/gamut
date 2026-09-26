@@ -438,7 +438,7 @@ that is not a paste; open it as an argument instead.
 | `S` | White point up |
 | `e` | Cycle the window rule: as stored (0–1) → full range → trimmed (the central 99.8%) |
 | `t` | Toggle the curve on the highlights: clip, or roll off |
-| `w` | Mark the clipped pixels, or stop: red where the picture has gone white, blue where it has gone black |
+| `w` | Mark the clipped pixels, or stop: red where a channel has reached white, blue where one has reached black |
 | `o` | Turn the room above white off and on, where the monitor is in HDR mode |
 | `r` | Cycle false color: gray → viridis → magma → turbo |
 | `z` | Reset every display setting |
@@ -483,15 +483,17 @@ is any, so a number there is news. Pointing at the plot names the value
 under the pointer, and what the display turns it into.
 
 `w`, or the button beside the band under the plot, paints the clipped
-pixels on the picture itself: red where every channel has gone to white,
-blue where every channel has gone to black. The marks stay on until pressed
-off again, from one file to the next, and no reset of the display touches
-them. The corners of the plot count a channel at a time — a red flower blows its red
-long before the rest — so the corner can say more than the paint shows; the
-paint is where the picture has gone flat, and the corner is where a channel
-has. Neither marks white where nothing is being clipped: on an HDR surface
-with no curve, or under a curve, the highlights are shown or rolled off
-rather than lost.
+pixels on the picture itself: red where any channel has reached white,
+blue where any has reached black. One channel is enough, because one is
+enough to lose the color: a sun whose red has burned out is painted red
+though its green never reached white, and the pink it shows is not what
+the scene held. The marks stay on until pressed off again, from one file
+to the next, and no reset of the display touches them. The paint and the
+corners of the plot count the same thing, a channel at a time, so the
+share in a corner is the share of the picture wearing the paint. Neither
+marks white where nothing is being clipped: on an HDR surface with no
+curve, or under a curve, the highlights are shown or rolled off rather
+than lost.
 
 Under the band, every file gets the exposure: a slider over six stops each
 way, its reading at the end of the row. It snaps to the quarter stops `d`

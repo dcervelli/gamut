@@ -125,6 +125,16 @@ pub struct Fullscreen<'a> {
 }
 
 pub fn fullscreen_pipeline(device: &wgpu::Device, spec: Fullscreen<'_>) -> wgpu::RenderPipeline {
+    fullscreen_pipeline_entry(device, spec, "fs_main")
+}
+
+/// As [`fullscreen_pipeline`], with the fragment entry point named: for a
+/// module that writes more than one kind of target from the same geometry.
+pub fn fullscreen_pipeline_entry(
+    device: &wgpu::Device,
+    spec: Fullscreen<'_>,
+    fragment: &str,
+) -> wgpu::RenderPipeline {
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some(spec.label),
         layout: Some(spec.layout),
@@ -143,7 +153,7 @@ pub fn fullscreen_pipeline(device: &wgpu::Device, spec: Fullscreen<'_>) -> wgpu:
         multisample: wgpu::MultisampleState::default(),
         fragment: Some(wgpu::FragmentState {
             module: spec.shader,
-            entry_point: Some("fs_main"),
+            entry_point: Some(fragment),
             compilation_options: Default::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format: spec.format,
