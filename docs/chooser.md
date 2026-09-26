@@ -13,6 +13,17 @@ in it, `src/app/chooser.rs` holds everything the popup is drawn from, and
 `src/thumbnailer.rs` is the thread that makes the thumbnails, writing them
 into the desktop's own cache through `src/thumbnail.rs`.
 
+## Its size
+
+`ui::chooser::panel` gives the popup its rectangle from the content area and
+the number of rows that fit the query. It is as tall as those rows need, up
+to a share of the content area, and when nothing fits it holds the field and
+the line saying so. Its top is the content area's, whatever the count: the
+field is where the hand is, and a popup that moved it as the list narrowed
+would move it on every key. Whether the popup is up at all is decided on the
+full height, so a window with no room for it keeps it off however short the
+list.
+
 ## A fifth popup
 
 The chooser is an egui popup like the five menus in

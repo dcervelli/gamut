@@ -24,8 +24,9 @@ use egui::{
     WidgetInfo, WidgetType, pos2, vec2,
 };
 
-use super::chrome::Pass;
+use super::chrome::{ICON_SIDE, Pass};
 use super::control::{Command, Control};
+use super::icon;
 use super::style::{MENU_PADDING, MENU_RADIUS, POPUP_WIDTH, TOGGLE_RADIUS};
 use super::{PADDING, Rect, TEXT_SIZE, fonts, panel};
 
@@ -72,6 +73,12 @@ const FIELD_INSET: f32 = 8.0;
 const HAIRLINE: f32 = 1.0;
 /// What the field says while it is empty.
 const HINT: &str = "Type to filter";
+/// What stands in the list's place when nothing fits the query, and the
+/// height of the line it stands on.
+const NOTHING: &str = "No matching files.";
+const NOTHING_HEIGHT: f32 = FIELD_HEIGHT;
+/// The space between the mark beside [`NOTHING`] and the words.
+const NOTHING_GAP: f32 = 6.0;
 
 /// One row of the list, as the frame draws it.
 #[derive(Clone, Debug, PartialEq)]
@@ -145,27 +152,42 @@ pub enum Step {
 }
 
 /// Where the popup goes: across the top of `content`, centered, at most
-/// [`POPUP_WIDTH`] wide and [`HEIGHT_SHARE`] of the content tall. `None`
-/// when the window has no room for the field and three rows, or is too
-/// narrow for a row to say anything, in which case the chooser stays off.
-pub fn panel(content: Rect) -> Option<Rect> {
+/// [`POPUP_WIDTH`] wide and [`HEIGHT_SHARE`] of the content tall, and no
+/// taller than the field and `rows` rows need — or, with none, the line
+/// saying so. Its top is the same however
+/// many rows there are, so that the field stays put under the hand as the
+/// query narrows the list. `None` when the window has no room for the field
+/// and three rows, or is too narrow for a row to say anything, in which case
+/// the chooser stays off: whether it is up is the window's say, not the
+/// query's.
+pub fn panel(content: Rect, rows: usize) -> Option<Rect> {
     let height = (HEIGHT_SHARE * content.height).round();
     let least = 2.0 * MENU_PADDING + FIELD_HEIGHT + FIELD_GAP + 3.0 * ROW_HEIGHT;
     if height > content.height - 2.0 * PADDING {
         return None;
     }
-    panel::fit(
+    let most = panel::fit(
         content,
         [POPUP_WIDTH, height],
         [WIDTH_MIN, least],
         panel::Place::TopCenter,
-    )
+    )?;
+    let list = if rows == 0 {
+        NOTHING_HEIGHT
+    } else {
+        rows as f32 * ROW_HEIGHT
+    };
+    let needed = 2.0 * MENU_PADDING + FIELD_HEIGHT + FIELD_GAP + list;
+    Some(Rect {
+        height: most.height.min(needed),
+        ..most
+    })
 }
 
 /// Draws the popup, if it is open, and reads what was pressed in it.
 pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
     let content = pass.content;
-    let Some(panel) = panel(content) else {
+    let Some(panel) = panel(content, input.rows.len()) else {
         return;
     };
     let theme = pass.theme;
@@ -196,11 +218,18 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
         ui.set_min_size(inside);
         ui.set_max_size(inside);
         ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
-        let list_height = inside.y - FIELD_HEIGHT - FIELD_GAP;
+        let list_height = (inside.y - FIELD_HEIGHT - FIELD_GAP).max(0.0);
         keys(pass, ui, input, list_height);
         field(pass, ui, input, inside.x);
         ui.add_space(FIELD_GAP);
-        rows(pass, ui, input, inside.x, list_height);
+        if input.rows.is_empty() {
+            nothing(pass, ui, inside.x);
+            if !input.visible.is_empty() {
+                pass.commands.push(Command::Visible(0..0));
+            }
+        } else {
+            rows(pass, ui, input, inside.x, list_height);
+        }
     });
 }
 
@@ -279,6 +308,40 @@ fn field(pass: &mut Pass, ui: &mut egui::Ui, input: &Input, width: f32) {
     if ui.memory(|memory| memory.focused().is_none()) {
         response.request_focus();
     }
+}
+
+/// What the list says when nothing fits the query: a magnifying glass with
+/// an alarm in it and [`NOTHING`] beside it, dim, centered on its line.
+fn nothing(pass: &mut Pass, ui: &mut egui::Ui, width: f32) {
+    let theme = pass.theme;
+    let (rect, _) = ui.allocate_exact_size(vec2(width, NOTHING_HEIGHT), Sense::HOVER);
+    let ink: egui::Color32 = theme.text_dim.into();
+    let galley = ui.ctx().fonts_mut(|fonts| {
+        fonts.layout_no_wrap(
+            NOTHING.to_owned(),
+            egui::FontId::proportional(TEXT_SIZE),
+            egui::Color32::PLACEHOLDER,
+        )
+    });
+    let held = ICON_SIDE + NOTHING_GAP + galley.size().x;
+    let x = rect.left() + ((rect.width() - held) / 2.0).round();
+    let painter = ui.painter();
+    let mark = egui::Rect::from_min_size(
+        pos2(x, rect.center().y - ICON_SIDE / 2.0),
+        vec2(ICON_SIDE, ICON_SIDE),
+    );
+    icon::paint(
+        painter,
+        icon::SEARCH_ALERT,
+        icon::square(pass.grid, mark, ICON_SIDE),
+        ink,
+        theme.menu_background.into(),
+    );
+    let at = pos2(
+        x + ICON_SIDE + NOTHING_GAP,
+        rect.center().y - galley.size().y / 2.0,
+    );
+    painter.galley(at, galley, ink);
 }
 
 /// The list, virtualized: only the rows in the viewport are laid out, and
@@ -555,16 +618,42 @@ mod tests {
     #[test]
     fn the_panel_is_centered_capped_and_absent_when_small() {
         let content = Rect::new(30.0, 30.0, 940.0, 640.0);
-        let wide = panel(content).expect("room for it");
+        let wide = panel(content, 1000).expect("room for it");
         assert_eq!(wide.width, POPUP_WIDTH);
         assert_eq!(wide.height, (HEIGHT_SHARE * 640.0).round());
         assert_eq!(wide.y, 30.0 + PADDING);
         assert!((wide.x + wide.width / 2.0 - (30.0 + 470.0)).abs() <= 0.5);
 
-        let narrow = panel(Rect::new(0.0, 0.0, 400.0, 640.0)).expect("room for it");
+        let narrow = panel(Rect::new(0.0, 0.0, 400.0, 640.0), 1000).expect("room for it");
         assert_eq!(narrow.width, 400.0 - 2.0 * PADDING);
 
-        assert_eq!(panel(Rect::new(0.0, 0.0, 200.0, 640.0)), None);
-        assert_eq!(panel(Rect::new(0.0, 0.0, 940.0, 200.0)), None);
+        assert_eq!(panel(Rect::new(0.0, 0.0, 200.0, 640.0), 1000), None);
+        assert_eq!(panel(Rect::new(0.0, 0.0, 940.0, 200.0), 1000), None);
+        // Nor does a list too short to need the room bring it back.
+        assert_eq!(panel(Rect::new(0.0, 0.0, 940.0, 200.0), 1), None);
+    }
+
+    /// A short list shrinks the popup to its rows, and an empty one to the
+    /// field and the line saying nothing fits, the top staying where it was.
+    #[test]
+    fn the_panel_shrinks_to_its_rows_from_a_fixed_top() {
+        let content = Rect::new(30.0, 30.0, 940.0, 640.0);
+        let full = panel(content, 1000).expect("room for it");
+        let two = panel(content, 2).expect("room for it");
+        let none = panel(content, 0).expect("room for it");
+        assert_eq!(
+            two.height,
+            2.0 * MENU_PADDING + FIELD_HEIGHT + FIELD_GAP + 2.0 * ROW_HEIGHT
+        );
+        assert_eq!(
+            none.height,
+            2.0 * MENU_PADDING + FIELD_HEIGHT + FIELD_GAP + NOTHING_HEIGHT
+        );
+        for shrunk in [two, none] {
+            assert_eq!(
+                (shrunk.x, shrunk.y, shrunk.width),
+                (full.x, full.y, full.width)
+            );
+        }
     }
 }

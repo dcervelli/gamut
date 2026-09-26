@@ -683,11 +683,11 @@ mod tests {
             read.property(BASIC, "CreatorTool"),
             Some(&["darktable".to_string()][..])
         );
-        assert_eq!(read.property(DC, "subject"), parsed().property(DC, "subject"));
         assert_eq!(
-            Xmp::read_with(&both, super::packet(&both).as_deref()),
-            read
+            read.property(DC, "subject"),
+            parsed().property(DC, "subject")
         );
+        assert_eq!(Xmp::read_with(&both, super::packet(&both).as_deref()), read);
 
         // A sidecar that is not a packet leaves the file's own alone.
         let own = written("rubbish.jpg", &jpeg);

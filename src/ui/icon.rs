@@ -427,6 +427,15 @@ pub(super) const ZOOM_IN: &[Mark] = &[
     Mark::Line([8.0, 11.0], [14.0, 11.0]),
 ];
 
+/// Lucide's `search-alert`: the magnifying glass with an exclamation mark
+/// in it, for the chooser's query that nothing fits.
+pub(super) const SEARCH_ALERT: &[Mark] = &[
+    Mark::circle([11.0, 11.0], 8.0),
+    Mark::Line([21.0, 21.0], [16.7, 16.7]),
+    Mark::Line([11.0, 7.0], [11.0, 11.0]),
+    Mark::Dot([11.0, 15.0]),
+];
+
 /// Lucide's `maximize-2`: two arrows reaching into opposite corners, for the
 /// press that gives the picture the whole window.
 ///

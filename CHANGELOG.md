@@ -51,6 +51,8 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   a region as they do without one.
 - The file chooser's key only opens it; `Esc` or a click outside closes it,
   as a file finder does in an editor.
+- The file chooser is as tall as the files that fit what was typed, its top
+  staying where it is, and says **No matching files.** when none do.
 - `--help` leaves a space after a key column too long for it, where
   `Alt+], Alt+Page Down` used to run into what it does.
 
