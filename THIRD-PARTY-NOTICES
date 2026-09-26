@@ -1,4 +1,4 @@
-Cargo.lock sha256: edf6be3c25c962fe5afabd8cb69d9a026da4f97711efec6352c4200a90bc6e3c
+Cargo.lock sha256: 2ad08ed71e3990d215dadfe4b9470acd20bbfd834db9a0b45f251c9f65850b6d
 
                       gamut: third-party notices
 
@@ -3506,7 +3506,7 @@ MIT License
 --------------------------------------------------------------------------
 
 Used by:
-  gamut 0.5.1
+  gamut 0.6.0
 
 MIT License
 
@@ -4090,7 +4090,7 @@ MIT License
 --------------------------------------------------------------------------
 
 Used by:
-  gamut 0.5.1
+  gamut 0.6.0
 
 MIT License
 
