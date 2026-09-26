@@ -41,6 +41,7 @@ An image viewer serves many audiences: photographer, data scientist, programmer,
 - [Export](#export)
 - [Desktop/shell integration](#desktopshell-integration)
 - [OS themed](#os-themed)
+- [Malleable](#malleable)
 
 ### High performance
 
@@ -176,6 +177,15 @@ Respects OS theme colors. Here's an example of Omarchy's Tokyo Night and Gruvbox
 
 Switching themes while gamut is open re-themes it on the spot. On Omarchy, see [Omarchy setup](#omarchy-setup).
 
+### Malleable
+
+UI defaults, keyboard shortcuts, and gestures are fully configurable in `~/.config/gamut/config`. 
+Generate a default, documented config:
+
+```sh
+gamut --print-config > ~/.config/gamut/config
+```
+
 ## Install
 
 gamut is packaged for Arch. The PKGBUILD builds the latest release:
@@ -184,6 +194,8 @@ gamut is packaged for Arch. The PKGBUILD builds the latest release:
 git clone https://github.com/dcervelli/gamut.git
 cd gamut/packaging && makepkg -si
 ```
+
+Note: it takes a few minutes to build.
 
 ### Omarchy setup
 

@@ -6,9 +6,9 @@
 * >2^15 px images. Perhaps a separate program for large rasters? Requires image pyramids and other optimizations.
 * Text extraction. Tesseract intergration that captures bounding boxes and allows visual text content extraction.
 * Basic annotations? Not sure it should be included. If included, very basic: rectangle (filled/stroked), line, arrow, text box; nothing more.
+* MacOS build
 
 ## Improve
-* Dynamic ctrl+p panel size 
 * Allow panning off screen?
 * Region fixed aspect
 * Advanced file list features
