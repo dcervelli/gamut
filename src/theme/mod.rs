@@ -78,6 +78,12 @@ pub struct Theme {
     pub text_bright: Color,
     /// What is switched on, and where the display window sits.
     pub accent: Color,
+    /// The chars of a row in the chooser that the query was found at, lit
+    /// among the text they are part of. The accent, where the theme parts it
+    /// from its text; a theme is free to make its accent its foreground, and
+    /// several do, which would light nothing — so there it is the theme's
+    /// blue instead.
+    pub hit: Color,
     /// The word that says the file behind the picture on screen is gone, and
     /// the message that says something could not be done. Its own role rather
     /// than the accent, which means the opposite: the accent is what is
@@ -154,6 +160,7 @@ impl Theme {
         // so the name is the primary taken the last step to white.
         text_bright: Color::rgb(255, 255, 255),
         accent: Color::rgb(120, 180, 255),
+        hit: Color::rgb(120, 180, 255),
         warning: Color::rgb(255, 116, 108),
         caution: Color::rgb(240, 190, 110),
         inset_edge: Color::rgba(255, 255, 255, 120),
@@ -202,6 +209,11 @@ impl Theme {
             .color("accent")
             .or_else(|| palette.color("blue"))
             .unwrap_or(bright);
+        let hit = [Some(accent), palette.color("blue")]
+            .into_iter()
+            .flatten()
+            .find(|shade| separated(*shade, foreground) && separated(*shade, bright))
+            .unwrap_or(accent);
 
         // A theme's own red, which it chose to be read against this very
         // background — it is the color its terminal writes errors in. The
@@ -259,6 +271,7 @@ impl Theme {
             text_dim: foreground,
             text_bright,
             accent,
+            hit,
             warning,
             caution,
             inset_edge: foreground.with_alpha(Theme::FALLBACK.inset_edge.a),
@@ -400,6 +413,26 @@ bright_foreground = \"#4a4a4a\"
                 theme.text_bright
             );
         }
+    }
+
+    /// What the chooser lights is the accent where that can be told from the
+    /// text it is lit among, and the theme's blue where the theme made its
+    /// accent its text.
+    #[test]
+    fn the_chooser_lights_its_hits_in_an_ink_the_text_is_not() {
+        let theme = Theme::from_palette(&palette(TOKYO));
+        assert_eq!(theme.hit, theme.accent);
+
+        const PLAIN_ACCENT: &str = "\
+background = \"#1f1f28\"
+foreground = \"#dcd7ba\"
+bright_foreground = \"#dcd7ba\"
+accent = \"#dcd7ba\"
+blue = \"#7e9cd8\"
+";
+        let plain = Theme::from_palette(&palette(PLAIN_ACCENT));
+        assert_eq!(plain.accent, Color::rgb(0xdc, 0xd7, 0xba));
+        assert_eq!(plain.hit, Color::rgb(0x7e, 0x9c, 0xd8));
     }
 
     #[test]

@@ -439,9 +439,9 @@ fn row(
 
     // Two lines of words after the thumbnail: the name in bold with the
     // directory dim after it, each with the chars the query was found at
-    // picked out in the accent; and under them the title, where the file
-    // has one, then what kind of file it is and its size, as the top bar
-    // writes them. Laid out in their own inks, and cut to the room the row
+    // picked out in the theme's `hit`; and under them the title, where the
+    // file has one, then what kind of file it is and its size, as the top
+    // bar writes them. Laid out in their own inks, and cut to the room the row
     // has.
     let right = rect.right() - ROW_PADDING;
     let bold = egui::FontId::new(TEXT_SIZE, egui::FontFamily::Name(fonts::BOLD.into()));
@@ -455,9 +455,9 @@ fn row(
     let in_name: Vec<usize> = in_name.into_iter().map(|at| at - dir_chars).collect();
     let left = slot.right() + ROW_GAP;
     let room = (right - left).max(0.0);
-    let accent: egui::Color32 = theme.accent.into();
+    let hit: egui::Color32 = theme.hit.into();
     let bright: egui::Color32 = theme.text_bright.into();
-    let name = lit(ui, &item.name, &in_name, bold, bright, accent, room);
+    let name = lit(ui, &item.name, &in_name, bold, bright, hit, room);
     let mut facts = item.kind.clone();
     if let Some((width, height)) = item.dimensions {
         if !facts.is_empty() {
@@ -471,7 +471,7 @@ fn row(
     // The facts are laid out first, at the width they want; the title takes
     // what is left, but never less than its share, and the facts are then
     // cut to what the title left them.
-    let facts_wanted = lit(ui, &facts, &[], body.clone(), dim, accent, room);
+    let facts_wanted = lit(ui, &facts, &[], body.clone(), dim, hit, room);
     let title = item.title.as_ref().map(|title| {
         let title_room = (room - facts_wanted.size().x).max(room * TITLE_SHARE);
         lit(
@@ -480,7 +480,7 @@ fn row(
             &item.title_positions,
             body.clone(),
             theme.text_primary.into(),
-            accent,
+            hit,
             title_room,
         )
     });
@@ -494,7 +494,7 @@ fn row(
             &[],
             body.clone(),
             dim,
-            accent,
+            hit,
             (room - title_width).max(0.0),
         )
     };
@@ -511,7 +511,7 @@ fn row(
         let after = left + name.size().x + ROW_GAP;
         let room = (right - after).max(0.0);
         if room > 0.0 {
-            let dir = lit(ui, &item.dir, &in_dir, body, dim, accent, room);
+            let dir = lit(ui, &item.dir, &in_dir, body, dim, hit, room);
             painter.galley(pos2(after, top), dir, dim);
         }
     }
