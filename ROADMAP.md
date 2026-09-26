@@ -1,13 +1,16 @@
 # Roadmap
 
 ## New Features
-* RGBA channel toggle
-* SVG rasterizer
-* >2^15 px images
-* Text extraction
+* RGBA channel toggle. For gamedev people.
+* SVG rasterizer. How to choose DPI correctly?
+* >2^15 px images. Perhaps a separate program for large rasters? Requires image pyramids and other optimizations.
+* Text extraction. Tesseract intergration that captures bounding boxes and allows visual text content extraction.
 * Basic annotations? Not sure it should be included. If included, very basic: rectangle (filled/stroked), line, arrow, text box; nothing more.
 
 ## Improve
+* Dynamic ctrl+p panel size 
+* Allow panning off screen?
+* Region fixed aspect
 * Advanced file list features
 * Drop down for back/forward buttons
 * Top bar crowding
