@@ -1586,7 +1586,7 @@ fn the_pixel_menu_offers_every_format() {
 /// The chooser: opened, its field takes the keyboard, and what is typed
 /// and pressed comes back as commands rather than reaching the window —
 /// the query, the cursor's moves, `Enter` on the row under the cursor, a
-/// click on a row, and `Ctrl+P` again. `Esc` closes it, and with it gone
+/// click on a row. `Esc` closes it, and with it gone
 /// the keyboard is the window's again.
 #[test]
 fn the_chooser_takes_the_keys_while_open_and_gives_them_back() {
@@ -2140,6 +2140,34 @@ fn a_click_on_the_count_leaves_the_chooser_for_the_press_to_close() {
 /// on a line of its own, and the column headings — which would then head
 /// nothing — are left out. The popup does not ask for a column less than
 /// nothing wide, which egui refuses to lay out.
+/// A line the configuration left with no key says so in its key column,
+/// in the table and stacked alike, rather than leaving it blank.
+#[test]
+fn the_help_popup_says_a_line_is_unbound() {
+    for window in [WINDOW, [PANELS_ROOM[0] + 2.0 * SIDE_WIDTH + 20.0, 700.0]] {
+        let mut harness = open(window, 1, panels());
+        harness.state_mut().help = vec![help::Section {
+            title: "Files",
+            rows: vec![
+                help::Row {
+                    key: String::new(),
+                    does: "Undo the last rename, deletion or removal",
+                    when: None,
+                },
+                help::Row {
+                    key: "Ctrl+E".to_string(),
+                    does: "Export the picture as shown to a new JPG or PNG",
+                    when: None,
+                },
+            ],
+        }];
+        egui::Popup::open_id(&harness.ctx, help::id());
+        harness.run();
+        assert_eq!(harness.query_all_by_label(help::UNBOUND).count(), 1);
+        assert!(harness.query_by_label("Ctrl+E").is_some());
+    }
+}
+
 #[test]
 fn the_help_popup_stacks_its_rows_in_a_narrow_window() {
     let mut harness = open(

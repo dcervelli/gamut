@@ -145,7 +145,7 @@ place in the list instead: `:12` puts the twelfth file first, followed by
 every file whose number has `12` in it, and a `-` counts from the end, so
 `:-1` puts the last file first. The arrows move through the rows
 without opening anything; `Enter`, or a click on a row, opens that file and
-closes the chooser; `Esc`, a click outside it, or `Ctrl+P` again closes it.
+closes the chooser; `Esc`, or a click outside it, closes it.
 With a single file on the list there is nothing to choose, and `Ctrl+P` does
 nothing. While it is open, keys go into the field rather than to the picture. The
 file on screen is marked in the list, and the cursor starts on it, so

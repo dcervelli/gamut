@@ -2387,12 +2387,11 @@ impl ApplicationHandler<UserEvent> for App {
             }
         );
         //
-        // And the key bound to the chooser, which is kept from egui while
-        // the chooser is up — its field has the keyboard then, and would
-        // take the key as typing — so that the key table closes it as it
-        // opened it; and while no field has the keyboard, so that the press
-        // that opens it is not waiting in egui's input to be typed into the
-        // field it has just focused.
+        // And the key bound to the chooser, while no field has the keyboard:
+        // it goes to the key table alone, so that the press that opens the
+        // chooser is not waiting in egui's input to be typed into the field
+        // it has just focused. Once the chooser is up its field has the
+        // keyboard, and the key is typing like any other.
         let chooser_key = match &event {
             WindowEvent::KeyboardInput {
                 event:
@@ -2411,13 +2410,12 @@ impl ApplicationHandler<UserEvent> for App {
             }
             _ => false,
         };
-        let chooser_open = self.chooser_open();
         let response = self
             .shown
             .as_mut()
             .filter(|shown| {
                 let wants = shown.gui.ctx.egui_wants_keyboard_input();
-                (!tab || wants) && !(chooser_key && (chooser_open || !wants))
+                (!tab || wants) && !(chooser_key && !wants)
             })
             .map(|shown| shown.gui.on_event(&shown.window, &event));
         let repaint = Effect::redraw_if(

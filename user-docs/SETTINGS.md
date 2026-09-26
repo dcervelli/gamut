@@ -50,7 +50,8 @@ keys.files.export = ctrl+shift+e
 keys.files.chooser =
 ```
 
-The last line binds `files.chooser` to nothing, so no key opens the chooser.
+The last line binds `files.chooser` to nothing, so no key opens the chooser,
+and the help popup (`?`) marks its line **unbound**.
 
 A key is written as the modifiers held with it, each followed by `+`, and
 then the key itself. The modifiers are `ctrl` (or `control`), `alt`,
@@ -88,8 +89,8 @@ nothing moving it left.
 Some keys are not in the table and cannot be rebound: `Esc` inside a popup
 or dialog, `Enter` in the rename and export dialogs, and the arrows, `Page
 Up`, `Page Down`, `Home`, `End` and `Enter` in the file chooser while you
-type in it. The chooser's own key closes it as it opens it, so bound to a
-plain letter it cannot also be typed there. A long list of keys on one name
+type in it. The chooser's key only opens it; `Esc` closes it, and while it
+is open its key types into it like any other. A long list of keys on one name
 may wrap in the help popup.
 
 ### Gestures

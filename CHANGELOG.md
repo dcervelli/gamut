@@ -15,7 +15,8 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   terminal says so where an earlier line had set it. The help popup, the
   tooltips, the shortcuts in the menus, and the messages about undo and
   about bringing the interface back all name the keys as they are bound.
-  `--help` and the manual page show the defaults.
+  `--help` and the manual page show the defaults. A line left with no key
+  says so in the help popup, with a warning mark and **unbound**.
 - Every mouse gesture on the picture and the minimap can be given something
   else to do: `gesture.image.middle.drag = pan`, `gesture.image.middle.hold
   = loupe`, `gesture.image.ctrl+wheel = exposure`,
@@ -39,6 +40,8 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 - With a region selected, the arrows move it only while the region's names
   hold them, which they do by default; bound elsewhere, the arrows pan under
   a region as they do without one.
+- The file chooser's key only opens it; `Esc` or a click outside closes it,
+  as a file finder does in an editor.
 - `--help` leaves a space after a key column too long for it, where
   `Alt+], Alt+Page Down` used to run into what it does.
 

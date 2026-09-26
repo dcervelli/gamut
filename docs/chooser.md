@@ -4,7 +4,7 @@
 under it every file of the session that fits what was typed, each row with a
 thumbnail, the name, the title where the file carries one, what kind of file
 it is, its place in the list and its size. `Enter` or a click opens the row
-under the cursor; `Esc`, a click outside, or `Ctrl+P` again closes it. What
+under the cursor; `Esc` or a click outside closes it. What
 a user does with it is in [`user-docs/KEYS.md`](../user-docs/KEYS.md); this
 page is how it is built, and why it is built that way.
 
@@ -49,15 +49,11 @@ added, with `InputState::consume_key`, and come back as commands: `Enter` as
 arrows, `Page Up`, `Page Down`, `Home` and `End` as `Command::Cursor(Step)`.
 `Esc` is left alone: egui's popup closes itself on it.
 
-The key that opens the chooser is the exception, since it is rebindable and
-must close the chooser as it opened it. `App::window_event` keeps a press
-the key table reads as `OpenChooser` from egui while the chooser is open, so
-that it reaches `handle_key`, and `App::press(Control::Chooser)` toggles the
-popup shut; and while no field has the keyboard, so that the press that
-opens the chooser is not left in egui's input to be typed into the field it
-has just focused. The key and the press on the count are the same control,
-so the two cannot drift — see
-[keys and gestures](keymap.md#the-choosers-key).
+The key that opens the chooser only opens it, as a file finder's does in an
+editor; `Esc` is how it closes, and while it is up the key is typing like
+any other. `App::window_event` keeps the press that opens it from egui, so
+that it is not left in egui's input to be typed into the field the popup
+has just focused — see [keys and gestures](keymap.md#the-choosers-key).
 
 The field asks for focus whenever nothing has it: on the first frame, and
 again after a click on the popup's own frame takes it away. When the popup

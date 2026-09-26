@@ -1808,10 +1808,15 @@ impl App {
                 self.step(false);
                 return Effect::Nothing;
             }
-            // The button's own press, so that the key and a press from
-            // inside the popup — which is how the key arrives while the
-            // popup has the keyboard — cannot come to mean different things.
-            OpenChooser => return self.press(Control::Chooser),
+            // The count's own press, so that the key and the press cannot
+            // come to mean different things — except that the key only
+            // opens: `Esc` closes the chooser, as a file finder's does.
+            OpenChooser => {
+                if self.chooser_open() {
+                    return Effect::Nothing;
+                }
+                return self.press(Control::Chooser);
+            }
             // The buttons' own presses, so that a key and the button at
             // the head of the bar or of the list cannot come to mean
             // different things.

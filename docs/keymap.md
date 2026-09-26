@@ -100,14 +100,15 @@ fit; any key bound to `zoom.fit` works this way.
 
 ### The chooser's key
 
-While the chooser's field has the keyboard, egui marks every key consumed
-and the window never sees it. The key bound to `files.chooser` has to close
-the chooser as it opens it, and reading `Ctrl+P` inside the pass would bind
-it there for good. So `App::window_event` keeps a press whose action is
-`OpenChooser` from egui while the chooser is open (and while no field has
-the keyboard, so the press that opens it is not waiting in egui's input to
-be typed into the field it focuses), and the press reaches `handle_key` like
-any other. See [the chooser](chooser.md#who-gets-the-keys).
+The key bound to `files.chooser` opens the chooser and nothing more: `Esc`
+closes it, as a file finder's does in an editor. While the chooser's field
+has the keyboard, egui marks every key consumed and the window never sees
+it, so the key is typing there like any other — a chooser bound to a plain
+letter can still have that letter typed into it. What the window does do is
+keep the press that opens it from egui while no field has the keyboard, so
+that it is not waiting in egui's input to be typed into the field the popup
+has just focused; and `perform` answers `OpenChooser` with nothing if the
+chooser is already up. See [the chooser](chooser.md#who-gets-the-keys).
 
 ### Words that name keys
 

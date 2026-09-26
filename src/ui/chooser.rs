@@ -206,9 +206,8 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
 
 /// The keys the chooser answers, taken out of the input before the field
 /// can see them. `Esc` is not among them: closing the popup on it is
-/// egui's, and the field leaves it alone. Nor is the key that opens and
-/// closes it, which the window keeps from egui altogether while the popup
-/// is up, so that it reaches the key table — see `App::window_event`.
+/// egui's, and the field leaves it alone. The key that opens the chooser
+/// is typing like any other while it is up: `Esc` is how it closes.
 fn keys(pass: &mut Pass, ui: &mut egui::Ui, input: &Input, list_height: f32) {
     let page = (list_height / ROW_HEIGHT).floor().max(1.0) as usize;
     let pressed = ui.input_mut(|keys| {
