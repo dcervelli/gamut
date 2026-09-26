@@ -8,6 +8,7 @@
 
 use std::ops::Range;
 
+use crate::gestures::Button;
 use crate::image::region::{Grip, Region};
 
 use super::chooser::Step;
@@ -60,9 +61,9 @@ pub enum Control {
     Info,
     Grid,
     /// The toggle beside the grid's in the bottom bar: the loupe, a circle
-    /// around the pointer shown magnified beside it. Holding the secondary
-    /// button on the picture puts it up as well, while the button is held
-    /// — see [`Command::Secondary`].
+    /// around the pointer shown magnified beside it. Holding a button on the
+    /// picture whose hold slot is the loupe puts it up as well, while the
+    /// button is held — see [`Command::Held`].
     Loupe,
     Zoom,
     /// The button at the end of the top bar that gives the picture the whole
@@ -265,12 +266,15 @@ pub enum Command {
     /// The picture was dragged this far, in physical pixels: the hand is on
     /// the view, and it goes exactly where it is put.
     Drag([f32; 2]),
-    /// The wheel turned over the picture. A wheel's notch is a step asked
-    /// for by name and is animated as a key's would be; a trackpad's scroll
-    /// is the hand on the view, and goes where the fingers put it.
+    /// The wheel turned over the picture, by `delta` notches across and
+    /// down — a trackpad's scroll in fractions of one — with `held` the
+    /// button down on the picture, if any: what it steps is the slot's to
+    /// say, which the application reads. A wheel's notch is a step asked
+    /// for by name; a trackpad's scroll is the hand on the view.
     Wheel {
-        steps: f32,
+        delta: [f32; 2],
         notched: bool,
+        held: Option<Button>,
     },
     /// The hand is on one of the histogram band's handles: the value, on
     /// the image's own linear scale, that is to come out black, or white.
@@ -296,25 +300,29 @@ pub enum Command {
     /// Whether the pointer was over the picture with nothing of the
     /// interface between, which is what the bar's pixel readout asks.
     OverImage(bool),
-    /// Whether the secondary button is down on the picture — which puts the
-    /// loupe up for as long as it is — and where the pointer is while it
-    /// is, in physical pixels. Said on every pass, like [`Command::OverImage`].
-    /// The pointer's place goes with it because the application's own
-    /// pointer stops moving while the toolkit holds a button down on the
-    /// picture, as it does for a drag — see [`Command::Pull`].
-    Secondary(Option<[f32; 2]>),
-    /// Where the pointer is while the primary button is dragging on the
-    /// picture — the view, the region or the zoom box, whichever the drag
-    /// is — in physical pixels, and `None` while it is not. Said on every
-    /// pass, for the same reason [`Command::Secondary`] carries the
-    /// pointer: the application's own stands still while the toolkit holds
-    /// the drag, and the loupe follows the hand through it.
+    /// Which button other than the primary is down on the picture — which
+    /// puts the loupe up for as long as it is, where its hold slot says so —
+    /// and where the pointer is while it is, in physical pixels. Said on
+    /// every pass, like [`Command::OverImage`]. The pointer's place goes
+    /// with it because the application's own pointer stops moving while the
+    /// toolkit holds a button down on the picture, as it does for a drag —
+    /// see [`Command::Pull`].
+    Held {
+        button: Option<Button>,
+        at: Option<[f32; 2]>,
+    },
+    /// A button was clicked on the picture: pressed and let go where it was
+    /// pressed. What it does is its click slot's — a key's name — which the
+    /// application reads. Not said for a click on a region's handle, which
+    /// is [`Command::Handle`], nor for a button whose hold does something.
+    Click(Button),
+    /// Where the pointer is while a button is dragging on the picture — the
+    /// view, the region or the zoom box, whichever the drag is — in physical
+    /// pixels, and `None` while none is. Said on every pass, for the same
+    /// reason [`Command::Held`] carries the pointer: the application's own
+    /// stands still while the toolkit holds the drag, and the loupe follows
+    /// the hand through it.
     Dragging(Option<[f32; 2]>),
-    /// The wheel turned over the picture with the secondary button down:
-    /// the loupe's magnification, rather than the view's zoom, by this
-    /// many notches — the hand holding the loupe up is the hand that sets
-    /// it. Steps as [`Command::Wheel`] carries them.
-    Magnify(f32),
     /// A drag on the picture began that is the region's rather than the
     /// view's: a new region while one was being asked for, or a hold on the
     /// one on screen. `at` is where the button went down, in image pixels —
@@ -396,8 +404,8 @@ pub enum Grab {
     New,
     /// A handle of the region on screen, or the whole of it.
     Handle(Grip),
-    /// Drawing a box to zoom to, from the press outward: the drag `Space`
-    /// is held for.
+    /// Drawing a box to zoom to, from the press outward: the drag the fit
+    /// key is held for, or a drag whose slot says `zoom-box`.
     Zoom,
 }
 

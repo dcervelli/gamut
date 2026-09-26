@@ -10,6 +10,7 @@ mod filmstrip;
 mod gui;
 pub mod input;
 mod kept;
+pub mod keymap;
 mod order;
 mod playback;
 mod region;
@@ -17,6 +18,7 @@ mod visited;
 mod window;
 
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -25,6 +27,7 @@ use winit::event::{KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::{Window, WindowId};
 
+use crate::gestures::{Gestures, Surface};
 use crate::image::decode;
 use crate::image::display::{Display, Headroom, Startup};
 use crate::image::orient::Turn;
@@ -317,6 +320,11 @@ pub struct App {
     /// asked for. Here rather than in [`Panels`] because it is what has
     /// happened, not what is on screen.
     said_how_to_restore: bool,
+    /// What each key's name is bound to, and what each gesture does: the
+    /// defaults, with the configuration file laid over them. Shared with
+    /// the words each frame is named with — see [`input::Namer`].
+    keys: Rc<keymap::Keymap>,
+    gestures: Rc<Gestures>,
     /// Set if the last render failed, so we report it once rather than every frame.
     reported_error: bool,
     /// The window's size in a test, which has no window: what the frame is
@@ -447,6 +455,8 @@ impl App {
             clipboard_offers: false,
             from_command_line: source.is_some(),
             said_how_to_restore: false,
+            keys: Rc::new(config.keys),
+            gestures: Rc::new(config.gestures),
             reported_error: false,
             #[cfg(test)]
             headless: None,
@@ -1223,7 +1233,7 @@ impl App {
             cursor: self.logical_cursor(),
             minimap_on_screen: self.minimap_on_screen(),
             loupe: self.loupe(),
-            secondary: self.pointer.secondary,
+            loupe_held: self.loupe_held(),
             index: self.files.index(),
             count: self.files.len(),
             deleted: self.watch.missing(),
@@ -1240,8 +1250,9 @@ impl App {
             handle: self.marking.handle,
             grabbing: self.marking.grabbed(),
             over_region: self.marking.over(),
-            box_zoom: self.pointer.space != input::Space::Up,
-            move_region: self.pointer.modifiers.shift_key(),
+            box_zoom: self.pointer.fit_key.is_some(),
+            modifiers: self.pointer.modifiers,
+            gestures: Rc::clone(&self.gestures),
             zoom_box: self.marking.zoom_box(),
             transport: self.transport(),
             filmstrip,
@@ -1360,7 +1371,17 @@ impl App {
                 .can_pan(self.image_size(), self.viewport())
     }
 
-    /// The loupe, while it is up: its toggle is on, or the secondary button
+    /// Whether a button is held on the picture whose hold slot is the loupe,
+    /// with what is held on the keyboard now.
+    fn loupe_held(&self) -> bool {
+        self.pointer.held.is_some_and(|button| {
+            self.gestures
+                .hold(Surface::Image, self.pointer.modifiers, button)
+                .is_some()
+        })
+    }
+
+    /// The loupe, while it is up: its toggle is on, or a button holding it
     /// is held on the picture, and the pointer is on a pixel of the picture
     /// — the same reading the bar's readout is made from, so the loupe is
     /// up exactly when there is a pixel under the pointer to magnify. Where
@@ -1369,7 +1390,7 @@ impl App {
     /// on the picture it follows the hand, the pass handing the pointer
     /// over as `Command::Dragging` while winit is not.
     fn loupe(&self) -> Option<ui::loupe::Loupe> {
-        if !(self.panels.show_loupe || self.pointer.secondary) {
+        if !(self.panels.show_loupe || self.loupe_held()) {
             return None;
         }
         self.pointer_pixel()?;
@@ -2365,10 +2386,39 @@ impl ApplicationHandler<UserEvent> for App {
                 ..
             }
         );
+        //
+        // And the key bound to the chooser, which is kept from egui while
+        // the chooser is up — its field has the keyboard then, and would
+        // take the key as typing — so that the key table closes it as it
+        // opened it; and while no field has the keyboard, so that the press
+        // that opens it is not waiting in egui's input to be typed into the
+        // field it has just focused.
+        let chooser_key = match &event {
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        logical_key,
+                        physical_key,
+                        state: winit::event::ElementState::Pressed,
+                        ..
+                    },
+                ..
+            } => {
+                let region = matches!(self.marking.selection, ui::Selection::Shown(_));
+                self.keys
+                    .action_for(logical_key, *physical_key, self.pointer.modifiers, region)
+                    == Some(input::Action::OpenChooser)
+            }
+            _ => false,
+        };
+        let chooser_open = self.chooser_open();
         let response = self
             .shown
             .as_mut()
-            .filter(|shown| !tab || shown.gui.ctx.egui_wants_keyboard_input())
+            .filter(|shown| {
+                let wants = shown.gui.ctx.egui_wants_keyboard_input();
+                (!tab || wants) && !(chooser_key && (chooser_open || !wants))
+            })
             .map(|shown| shown.gui.on_event(&shown.window, &event));
         let repaint = Effect::redraw_if(
             response.as_ref().is_some_and(|response| response.repaint)
@@ -2537,6 +2587,8 @@ mod tests {
                 show_info: false,
                 pixel_format: ui::PixelFormat::Decimal,
                 log_counts: false,
+                keys: keymap::Keymap::default(),
+                gestures: Gestures::default(),
             },
             upscale: Upscale::default(),
             size: None,
@@ -3109,6 +3161,8 @@ mod tests {
         use crate::image::region::{Grip, Side};
         use input::{Action, Direction, Effect, PanStep};
         use ui::{Command, Grab};
+        use winit::event::ElementState::Pressed;
+        use winit::keyboard::{Key, KeyCode, NamedKey, PhysicalKey};
 
         let (mut app, dir) = app_over("region", &[("a.png", 64, 48), ("b.png", 64, 48)]);
         assert_eq!(app.marking.selection, Selection::Off);
@@ -3146,7 +3200,9 @@ mod tests {
         assert_eq!(app.marking.handle, Grip::Middle);
         let (image, viewport) = (app.image_size(), app.viewport());
         let view = app.view.position(image, viewport);
-        let _ = app.perform(Action::Pan(Direction::Right, PanStep::Coarse));
+        let right = Key::Named(NamedKey::ArrowRight);
+        let at = PhysicalKey::Code(KeyCode::ArrowRight);
+        assert_eq!(app.handle_key(&right, at, Pressed), Effect::Redraw);
         assert_eq!(
             app.marking.selection,
             Selection::Shown(Region { x: 11, ..region })
@@ -3159,7 +3215,7 @@ mod tests {
         let _ = app.act(Command::Handle(Grip::Edge(Side::Right)));
         app.marking.grip = Some(Grip::Corner(Side::Left, Side::Top));
         assert_eq!(app.marking.handle, Grip::Edge(Side::Right));
-        let _ = app.perform(Action::Pan(Direction::Right, PanStep::Coarse));
+        let _ = app.perform(Action::MoveRegion(Direction::Right));
         assert_eq!(
             app.marking.selection,
             Selection::Shown(Region {
@@ -3169,7 +3225,7 @@ mod tests {
             })
         );
         // An arrow along that edge moves the whole region instead.
-        let _ = app.perform(Action::Pan(Direction::Down, PanStep::Coarse));
+        let _ = app.perform(Action::MoveRegion(Direction::Down));
         assert_eq!(
             app.marking.selection,
             Selection::Shown(Region {
@@ -3202,7 +3258,7 @@ mod tests {
         });
         let _ = app.act(Command::Release);
         assert_eq!(app.marking.handle, Grip::Middle);
-        let _ = app.perform(Action::Pan(Direction::Up, PanStep::Coarse));
+        let _ = app.perform(Action::MoveRegion(Direction::Up));
         assert_eq!(
             app.marking.selection,
             Selection::Shown(Region {
@@ -3213,7 +3269,7 @@ mod tests {
             })
         );
         // Grown back for the steps below, which read from here.
-        let _ = app.perform(Action::Pan(Direction::Down, PanStep::Coarse));
+        let _ = app.perform(Action::MoveRegion(Direction::Down));
 
         // Shift with an arrow is not the region's: it pans the picture by
         // a pixel under it, as it does with no region up.
@@ -3231,7 +3287,7 @@ mod tests {
         assert_ne!(app.view.position(image, viewport), view);
 
         // Ctrl grows it that way.
-        let _ = app.perform(Action::Pan(Direction::Up, PanStep::Edge));
+        let _ = app.perform(Action::GrowRegion(Direction::Up));
         assert_eq!(
             app.marking.selection,
             Selection::Shown(Region {
@@ -3276,7 +3332,7 @@ mod tests {
         // A change to the region starts the cycle over at the region.
         let _ = app.perform(Action::CycleFit);
         assert_eq!(app.marking.framing, Framing::Region(Fit::Fill));
-        let _ = app.perform(Action::Pan(Direction::Left, PanStep::Coarse));
+        let _ = app.perform(Action::MoveRegion(Direction::Left));
         assert_eq!(app.marking.framing, Framing::Region(Fit::Whole));
 
         // Escape takes it off after the message, and before quitting.
@@ -3315,6 +3371,17 @@ mod tests {
         );
         let _ = app.perform(Action::Pan(Direction::Right, PanStep::Coarse));
         assert!(app.motion.is_some(), "a pan of the view is a move");
+        // Without a region the region's own keys do nothing, and the arrow
+        // is the view's again.
+        app.motion = None;
+        assert_eq!(
+            app.perform(Action::MoveRegion(Direction::Right)),
+            Effect::Nothing
+        );
+        let left = Key::Named(NamedKey::ArrowLeft);
+        let back = PhysicalKey::Code(KeyCode::ArrowLeft);
+        assert_eq!(app.handle_key(&left, back, Pressed), Effect::Redraw);
+        assert!(app.motion.is_some(), "the arrow pans");
 
         // And a region is of the picture it was drawn on: stepping to
         // another file leaves it behind.
@@ -3335,7 +3402,7 @@ mod tests {
     /// nothing at all.
     #[test]
     fn space_fits_on_its_way_up_unless_a_box_was_drawn_under_it() {
-        use input::{Action, Effect, Space};
+        use input::{Action, Effect, FitKey};
         use ui::{Command, Grab};
         use winit::event::ElementState::{Pressed, Released};
         use winit::keyboard::{Key, KeyCode, NamedKey, PhysicalKey};
@@ -3351,12 +3418,24 @@ mod tests {
         assert_eq!(app.handle_key(&space, at, Pressed), Effect::Redraw);
         assert_eq!(app.view.fit(), Some(Fit::Whole));
         assert!(app.motion.is_none());
-        assert_eq!(app.pointer.space, Space::Held { drawn: false });
+        assert_eq!(
+            app.pointer.fit_key,
+            Some(FitKey {
+                key: at,
+                drawn: false
+            })
+        );
         assert_eq!(app.handle_key(&space, at, Pressed), Effect::Nothing);
-        assert_eq!(app.pointer.space, Space::Held { drawn: false });
+        assert_eq!(
+            app.pointer.fit_key,
+            Some(FitKey {
+                key: at,
+                drawn: false
+            })
+        );
         assert_eq!(app.handle_key(&space, at, Released), Effect::Redraw);
         assert_eq!(app.view.fit(), Some(Fit::Fill));
-        assert_eq!(app.pointer.space, Space::Up);
+        assert_eq!(app.pointer.fit_key, None);
 
         // Held with a box dragged out under it: the box is not a region,
         // the view goes to it as a move when the drag lets go, and letting
@@ -3367,7 +3446,13 @@ mod tests {
             grab: Grab::Zoom,
             at: [10.2, 5.5],
         });
-        assert_eq!(app.pointer.space, Space::Held { drawn: true });
+        assert_eq!(
+            app.pointer.fit_key,
+            Some(FitKey {
+                key: at,
+                drawn: true
+            })
+        );
         let _ = app.act(Command::Pull([20.9, 15.1]));
         assert_eq!(
             app.marking.zoom_box(),
@@ -3397,7 +3482,7 @@ mod tests {
         );
         assert_eq!(app.handle_key(&space, at, Released), Effect::Redraw);
         assert_eq!(app.view.fit(), None);
-        assert_eq!(app.pointer.space, Space::Up);
+        assert_eq!(app.pointer.fit_key, None);
 
         // Escape drops a box part way through: the toolkit takes the drag
         // off the hand on the same key, and the release that follows finds
@@ -3420,12 +3505,20 @@ mod tests {
         assert_eq!(app.handle_key(&space, at, Released), Effect::Redraw);
         assert_eq!(app.view.position(image, viewport), before);
 
+        // Another key's release is not the fit key's, whatever it says.
+        let _ = app.handle_key(&space, at, Pressed);
+        let other = PhysicalKey::Code(KeyCode::KeyA);
+        assert_eq!(app.handle_key(&space, other, Released), Effect::Nothing);
+        assert!(app.pointer.fit_key.is_some());
+        assert_eq!(app.handle_key(&space, at, Released), Effect::Redraw);
+        app.motion = None;
+
         // The window losing the keyboard lets go of the key: its release
         // is going somewhere else.
         let _ = app.handle_key(&space, at, Pressed);
-        assert_ne!(app.pointer.space, Space::Up);
+        assert!(app.pointer.fit_key.is_some());
         app.keys_lost();
-        assert_eq!(app.pointer.space, Space::Up);
+        assert_eq!(app.pointer.fit_key, None);
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }
@@ -4157,23 +4250,19 @@ mod tests {
     /// the reader to the wrong key at the worst moment.
     #[test]
     fn the_messages_name_the_key_that_undoes() {
-        use crate::app::input::{Action, KEYS, KeyName};
-        let binding = KEYS
-            .iter()
-            .find(|binding| {
-                binding
-                    .keys
-                    .iter()
-                    .any(|(_, action)| *action == Action::Undo)
-            })
-            .expect("undo is bound");
-        assert_eq!(binding.shown, "Ctrl+Z");
-        assert!(binding.mods.control_key());
-        assert!(
-            binding
-                .keys
-                .iter()
-                .any(|(key, _)| *key == KeyName::Char("z")),
+        use crate::app::input::Action;
+        use crate::app::keymap::Keymap;
+        let keys = Keymap::default();
+        assert_eq!(keys.spelled("files.undo"), "Ctrl+Z");
+        assert_eq!(keys.action_named("files.undo"), Some(Action::Undo));
+        assert_eq!(
+            keys.action_for(
+                &winit::keyboard::Key::Character("z".into()),
+                winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyZ),
+                winit::keyboard::ModifiersState::CONTROL,
+                false
+            ),
+            Some(Action::Undo),
             "the plain letter under Ctrl"
         );
     }
@@ -5146,15 +5235,22 @@ mod tests {
         assert!(!harness.state().panels.show_grid);
     }
 
-    /// The loupe is up while its toggle is on or the secondary button is
-    /// held on the picture, and only with a pixel under the pointer: what
+    /// The loupe is up while its toggle is on or a button whose hold slot is
+    /// the loupe — the right, by default — is held on the picture, and only with a pixel under the pointer: what
     /// the interface draws its rings from and the image layer its glass,
     /// from the one pointer the readout reads. The button carries the
     /// pointer with it, and lets go of the loupe unless the toggle keeps it.
     #[test]
     fn the_loupe_is_up_for_the_toggle_or_the_held_button_over_a_pixel() {
+        use crate::gestures::Button;
         use crate::ui::{Command, Naming};
         use input::Action::CycleMagnification;
+        let magnify = |steps| Command::Wheel {
+            delta: [0.0, steps],
+            notched: true,
+            held: Some(Button::Right),
+        };
+        let held = |button, at| Command::Held { button, at };
 
         let (mut app, _dir) = app_over("loupe", &[("a.png", 64, 48)]);
         app.headless = Some(WINDOW);
@@ -5184,14 +5280,14 @@ mod tests {
         // The wheel with the button held steps the magnification, a notch
         // at a time however the notches arrive, and stops at either end.
         assert_eq!(app.panels.loupe_magnification, 4.0);
-        assert_eq!(app.act(Command::Magnify(1.0)), Effect::Redraw);
+        assert_eq!(app.act(magnify(1.0)), Effect::Redraw);
         assert_eq!(app.panels.loupe_magnification, 8.0);
-        assert_eq!(app.act(Command::Magnify(0.5)), Effect::Nothing);
-        assert_eq!(app.act(Command::Magnify(0.5)), Effect::Redraw);
+        assert_eq!(app.act(magnify(0.5)), Effect::Nothing);
+        assert_eq!(app.act(magnify(0.5)), Effect::Redraw);
         assert_eq!(app.panels.loupe_magnification, 16.0);
-        assert_eq!(app.act(Command::Magnify(3.0)), Effect::Nothing);
+        assert_eq!(app.act(magnify(3.0)), Effect::Nothing);
         assert_eq!(app.panels.loupe_magnification, 16.0);
-        assert_eq!(app.act(Command::Magnify(-1.0)), Effect::Redraw);
+        assert_eq!(app.act(magnify(-1.0)), Effect::Redraw);
         assert_eq!(app.panels.loupe_magnification, 8.0);
         // The key steps it round, the largest back to the smallest.
         assert_eq!(app.perform(CycleMagnification), Effect::Redraw);
@@ -5210,22 +5306,141 @@ mod tests {
                 .tooltip(ui::Tip::Control(ui::Control::Loupe))
                 .map(|tooltip| tooltip.hints),
             Some(vec![
-                ui::tooltip::LOUPE_HELD.to_string(),
-                ui::tooltip::loupe_wheel("Shift+L")
+                ui::tooltip::loupe_held("Right button held"),
+                ui::tooltip::loupe_wheel(Some("Right+Wheel"), Some("Shift+L")).unwrap()
             ])
         );
 
         // The button: the loupe comes up on the press, follows the pointer
         // the pass hands over, and goes on the release.
-        assert_eq!(app.act(Command::Secondary(Some(middle))), Effect::Redraw);
+        assert_eq!(
+            app.act(held(Some(Button::Right), Some(middle))),
+            Effect::Redraw
+        );
         assert_eq!(app.loupe().map(|loupe| loupe.eye), Some(middle));
-        assert_eq!(app.act(Command::Secondary(Some(middle))), Effect::Nothing);
+        assert_eq!(
+            app.act(held(Some(Button::Right), Some(middle))),
+            Effect::Nothing
+        );
         let moved = [middle[0] + 5.0, middle[1] + 3.0];
-        assert_eq!(app.act(Command::Secondary(Some(moved))), Effect::Redraw);
+        assert_eq!(
+            app.act(held(Some(Button::Right), Some(moved))),
+            Effect::Redraw
+        );
         assert_eq!(app.loupe().map(|loupe| loupe.eye), Some(moved));
-        assert_eq!(app.act(Command::Secondary(None)), Effect::Redraw);
+        assert_eq!(app.act(held(None, None)), Effect::Redraw);
         assert_eq!(app.loupe(), None);
-        assert_eq!(app.act(Command::Secondary(None)), Effect::Nothing);
+        assert_eq!(app.act(held(None, None)), Effect::Nothing);
+
+        // The middle button holds nothing by default, and the loupe stays
+        // down under it; given the loupe in the configuration, it holds it
+        // up as the right does.
+        assert_eq!(
+            app.act(held(Some(Button::Middle), Some(middle))),
+            Effect::Redraw
+        );
+        assert_eq!(app.loupe(), None);
+        let _ = app.act(held(None, None));
+        let mut gestures = Gestures::default();
+        gestures.set(
+            crate::gestures::Slot::read("image.middle.hold").unwrap(),
+            crate::gestures::Behavior::Hold(crate::gestures::HoldAction::Loupe),
+        );
+        app.gestures = Rc::new(gestures);
+        let _ = app.act(held(Some(Button::Middle), Some(middle)));
+        assert_eq!(app.loupe().map(|loupe| loupe.eye), Some(middle));
+        let _ = app.act(held(None, None));
+        assert_eq!(app.loupe(), None);
+    }
+
+    /// The configuration's gestures, each as the application answers it: a
+    /// wheel with no slot does nothing, as Ctrl with the wheel does by
+    /// default; a stepper adds a trackpad's fractions up to whole notches;
+    /// the wheel set to pan pans by both of its deltas; and the side
+    /// button's click is the key it names.
+    #[test]
+    fn the_wheel_and_the_clicks_do_what_their_slots_say() {
+        use crate::gestures::{Behavior, Button, Slot, WheelAction};
+        use crate::ui::Command;
+        use input::Action;
+
+        let (mut app, dir) = app_over("gestures", &[("a.png", 64, 48), ("b.png", 64, 48)]);
+        app.headless = Some(WINDOW);
+        let wheel = |x, y, notched| Command::Wheel {
+            delta: [x, y],
+            notched,
+            held: None,
+        };
+
+        // Ctrl with the wheel has no slot, and does nothing.
+        let (image, viewport) = (app.image_size(), app.viewport());
+        let before = app.view.position(image, viewport);
+        app.pointer.modifiers = winit::keyboard::ModifiersState::CONTROL;
+        assert_eq!(app.act(wheel(0.0, 1.0, true)), Effect::Nothing);
+        assert_eq!(app.view.position(image, viewport), before);
+        assert!(app.motion.is_none());
+
+        // Given the exposure, it steps a quarter stop a whole notch at a
+        // time, a trackpad's fractions added up until there is one.
+        let mut gestures = Gestures::default();
+        gestures.set(
+            Slot::read("image.ctrl+wheel").unwrap(),
+            Behavior::Wheel(WheelAction::Exposure),
+        );
+        gestures.set(
+            Slot::read("image.wheel").unwrap(),
+            Behavior::Wheel(WheelAction::Pan),
+        );
+        app.gestures = Rc::new(gestures);
+        let stops = |app: &App| {
+            app.current
+                .as_ref()
+                .map(|current| current.display.exposure_stops())
+        };
+        let start = stops(&app);
+        assert_eq!(app.act(wheel(0.0, 1.0, true)), Effect::Redraw);
+        let one = stops(&app);
+        assert_ne!(one, start);
+        assert_eq!(app.act(wheel(0.0, 0.4, false)), Effect::Nothing);
+        assert_eq!(app.act(wheel(0.0, 0.4, false)), Effect::Nothing);
+        assert_eq!(stops(&app), one);
+        assert_eq!(app.act(wheel(0.0, 0.4, false)), Effect::Redraw);
+        assert_ne!(stops(&app), one);
+        // Down steps it back, from the fifth of a notch left over.
+        assert_eq!(app.act(wheel(0.0, -1.0, true)), Effect::Nothing);
+        assert_eq!(app.act(wheel(0.0, -1.2, true)), Effect::Redraw);
+        assert_eq!(stops(&app), start);
+
+        // The wheel alone pans, by both of its deltas: the picture follows
+        // the wheel as it follows a drag.
+        app.pointer.modifiers = winit::keyboard::ModifiersState::empty();
+        let _ = app.perform(Action::ZoomTo(16.0));
+        app.motion = None;
+        let (image, viewport) = (app.image_size(), app.viewport());
+        let mut dragged = app.view;
+        let by = ui::WHEEL_PIXELS_PER_STEP * app.scale_factor();
+        dragged.pan_by(-by, by, image, viewport);
+        assert_ne!(
+            dragged.position(image, viewport),
+            app.view.position(image, viewport)
+        );
+        assert_eq!(app.act(wheel(1.0, -1.0, false)), Effect::Redraw);
+        assert_eq!(
+            app.view.position(image, viewport),
+            dragged.position(image, viewport)
+        );
+
+        // The side button goes back to the file shown before, as its key
+        // does; a click with no slot does nothing.
+        let _ = app.perform(Action::NextFile);
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.files.index(), 1);
+        assert_eq!(app.act(Command::Click(Button::Middle)), Effect::Nothing);
+        let _ = app.act(Command::Click(Button::Back));
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.files.index(), 0);
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
     }
 
     /// What arrives is named by how it stands to what is up: read again at

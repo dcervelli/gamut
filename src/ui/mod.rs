@@ -37,8 +37,10 @@ pub mod style;
 #[cfg(test)]
 mod driven;
 
+use std::rc::Rc;
 use std::sync::Arc;
 
+use crate::gestures::{Button, DragAction, Gestures, Mods, Surface};
 use crate::image::display::{Display, Headroom};
 use crate::image::exif::Exif;
 use crate::image::orient::Turn;
@@ -90,7 +92,23 @@ const TEXT_SIZE: f32 = 13.0;
 /// Trackpad pixels that add up to one notch of the wheel. Wheels report whole
 /// lines and need no conversion; a trackpad reports the scroll it would have
 /// done, and this is what turns that into the same zoom increment.
-const WHEEL_PIXELS_PER_STEP: f32 = 50.0;
+pub const WHEEL_PIXELS_PER_STEP: f32 = 50.0;
+
+/// The buttons besides the primary that are reported held on the picture,
+/// in the order one is chosen where several are down. The primary is a
+/// drag's, and is never a button the wheel is turned with.
+const HELD: [Button; 4] = [Button::Right, Button::Middle, Button::Back, Button::Forward];
+
+/// egui's name for a button of the mouse.
+pub(crate) fn pointer_button(button: Button) -> egui::PointerButton {
+    match button {
+        Button::Left => egui::PointerButton::Primary,
+        Button::Middle => egui::PointerButton::Middle,
+        Button::Right => egui::PointerButton::Secondary,
+        Button::Back => egui::PointerButton::Extra1,
+        Button::Forward => egui::PointerButton::Extra2,
+    }
+}
 
 /// What stands between a value and what the display makes of it, in every
 /// readout that shows one turning into the other.
@@ -277,16 +295,16 @@ pub struct FrameInput {
     /// Whether the minimap is on screen, which takes the toggle and a view
     /// with part of the image off it.
     pub minimap_on_screen: bool,
-    /// The loupe, while it is up: its toggle is on or the secondary button
+    /// The loupe, while it is up: its toggle is on or a button holding it
     /// is held on the picture, and the pointer is on a pixel of it. Where
     /// its two circles go, worked out by the application from the same
     /// pointer the pixel readout reads, so that the rings drawn here and
     /// the glass the image layer draws cannot disagree.
     pub loupe: Option<loupe::Loupe>,
-    /// Whether the secondary button is down on the picture, which is
-    /// holding the loupe up whatever its toggle says: the toggle is lit for
-    /// it, so that the button reads as the state it is showing.
-    pub secondary: bool,
+    /// Whether a button is down on the picture whose hold is the loupe,
+    /// which is holding it up whatever its toggle says: the toggle is lit
+    /// for it, so that the button reads as the state it is showing.
+    pub loupe_held: bool,
     /// Which file is on screen, out of how many.
     pub index: usize,
     pub count: usize,
@@ -334,12 +352,14 @@ pub struct FrameInput {
     /// pointer over a panel covering the region does not count, which is
     /// the same reading [`FrameInput::pointer`] is made from.
     pub over_region: bool,
-    /// Whether a drag on the picture draws a box to zoom to — `Space` is
-    /// held — rather than panning or taking hold of the region.
+    /// Whether a drag of the primary button on the picture draws a box to
+    /// zoom to — the fit key is held — rather than doing what its slot says.
     pub box_zoom: bool,
-    /// Whether a drag from inside the region moves it — `Shift` is held —
-    /// rather than panning the picture under it.
-    pub move_region: bool,
+    /// What is held on the keyboard, which is half of which gesture a
+    /// button or the wheel is making.
+    pub modifiers: Mods,
+    /// What each gesture on the picture and the minimap does.
+    pub gestures: Rc<Gestures>,
     /// The box being dragged out to zoom to, while a drag is drawing one:
     /// painted over the picture, and gone when the drag lets go.
     pub zoom_box: Option<Region>,
@@ -451,14 +471,15 @@ pub fn show(
 
 impl Pass<'_> {
     /// The picture: what the panels leave in the middle, which is where a
-    /// drag pans and the wheel zooms. Laid out as the one thing under
-    /// everything that floats, so that a panel over it takes the pointer
-    /// from it — egui's layers are what the pointer is routed by.
+    /// drag pans and the wheel zooms — or whatever else their slots say.
+    /// Laid out as the one thing under everything that floats, so that a
+    /// panel over it takes the pointer from it — egui's layers are what the
+    /// pointer is routed by.
     ///
     /// The hand is on the view: a drag goes exactly where it is put, and is
-    /// handed back as far as it went. A wheel's notch is a step asked for by
-    /// name, and a trackpad's scroll is the hand again; which of the two it
-    /// was goes with the steps, and the application decides what to animate.
+    /// handed back as far as it went. The wheel is handed back as the
+    /// notches it turned, with whether they were a wheel's or a trackpad's,
+    /// and the application decides what they step and what to animate.
     fn picture(&mut self, ui: &mut egui::Ui) {
         let response = egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
@@ -467,10 +488,17 @@ impl Pass<'_> {
             })
             .inner;
         let scale = self.input.scale;
+        let physical = |pos: egui::Pos2| [pos.x * scale, pos.y * scale];
         // The region's share of the gestures first, and the zoom box's: a
         // drag that is either's is not the view's.
-        let grabbed = self.region_gestures(ui, &response);
-        if grabbed.is_none() && response.dragged_by(egui::PointerButton::Primary) {
+        let (grabbed, clicked_handle) = self.region_gestures(ui, &response);
+        let dragging = Button::ALL
+            .into_iter()
+            .find(|button| response.dragged_by(pointer_button(*button)));
+        if grabbed.is_none()
+            && let Some(button) = dragging
+            && self.drag_action(button) == Some(DragAction::Pan)
+        {
             let delta = response.drag_delta();
             if delta != egui::Vec2::ZERO {
                 self.commands
@@ -485,45 +513,61 @@ impl Pass<'_> {
         }
         self.commands
             .push(Command::OverImage(response.contains_pointer()));
-        // The secondary button, from the press on rather than from the
-        // toolkit's decision that the press became a drag: the loupe comes
-        // up the moment the button goes down. Where the pointer is goes
-        // with it, since the application's own pointer stands still while
-        // the toolkit holds the button.
-        let held = response.is_pointer_button_down_on()
-            && ui.input(|input| input.pointer.secondary_down());
-        let at = held
-            .then(|| response.interact_pointer_pos())
-            .flatten()
-            .map(|pos| [pos.x * scale, pos.y * scale]);
-        self.commands.push(Command::Secondary(at));
-        let dragging = response
-            .dragged_by(egui::PointerButton::Primary)
-            .then(|| response.interact_pointer_pos())
-            .flatten()
-            .map(|pos| [pos.x * scale, pos.y * scale]);
+        // A button other than the primary, from the press on rather than
+        // from the toolkit's decision that the press became a drag: a loupe
+        // held up by it comes up the moment the button goes down. Where the
+        // pointer is goes with it, since the application's own pointer
+        // stands still while the toolkit holds the button.
+        let held = response
+            .is_pointer_button_down_on()
+            .then(|| {
+                HELD.into_iter().find(|button| {
+                    ui.input(|input| input.pointer.button_down(pointer_button(*button)))
+                })
+            })
+            .flatten();
+        let at = held.and(response.interact_pointer_pos()).map(physical);
+        self.commands.push(Command::Held { button: held, at });
+        let dragging = dragging.and(response.interact_pointer_pos()).map(physical);
         self.commands.push(Command::Dragging(dragging));
+        // A click, where its slot runs a key and the button's hold does
+        // nothing — a press held up the loupe, and letting go is not also a
+        // click — and, for the primary, where it was not on one of the
+        // region's handles.
+        let mods = self.input.modifiers;
+        let gestures = &self.input.gestures;
+        for button in Button::ALL {
+            if response.clicked_by(pointer_button(button))
+                && !(button == Button::Left && clicked_handle)
+                && gestures.click(Surface::Image, mods, button).is_some()
+                && gestures.hold(Surface::Image, mods, button).is_none()
+            {
+                self.commands.push(Command::Click(button));
+            }
+        }
         if response.contains_pointer() {
-            // With the secondary button down the wheel is the loupe's: the
-            // hand holding it up is the hand that sets how much it shows.
             let wheel: Vec<Command> = ui.input(|input| {
                 input
                     .events
                     .iter()
                     .filter_map(|event| match event {
                         egui::Event::MouseWheel { unit, delta, .. } => {
-                            let (steps, notched) = match unit {
-                                egui::MouseWheelUnit::Point => {
-                                    (delta.y / WHEEL_PIXELS_PER_STEP, false)
-                                }
+                            let (delta, notched) = match unit {
+                                egui::MouseWheelUnit::Point => (
+                                    [
+                                        delta.x / WHEEL_PIXELS_PER_STEP,
+                                        delta.y / WHEEL_PIXELS_PER_STEP,
+                                    ],
+                                    false,
+                                ),
                                 egui::MouseWheelUnit::Line | egui::MouseWheelUnit::Page => {
-                                    (delta.y, true)
+                                    ([delta.x, delta.y], true)
                                 }
                             };
-                            Some(if held {
-                                Command::Magnify(steps)
-                            } else {
-                                Command::Wheel { steps, notched }
+                            Some(Command::Wheel {
+                                delta,
+                                notched,
+                                held,
                             })
                         }
                         _ => None,
@@ -534,32 +578,53 @@ impl Pass<'_> {
         }
     }
 
-    /// The region's reading of the picture's response, and the hold a drag
-    /// has on it, if any: `Some` while the drag is the region's — or the
-    /// zoom box's — in which case the view does not pan.
+    /// What a drag of `button` does on the picture, held with what is held
+    /// now: its slot's behavior, except that moving the region is only
+    /// done from inside one — [`Pass::region_gestures`] takes hold there —
+    /// and anywhere else the drag is what the button does held with
+    /// nothing.
+    fn drag_action(&self, button: Button) -> Option<DragAction> {
+        let gestures = &self.input.gestures;
+        match gestures.drag(Surface::Image, self.input.modifiers, button) {
+            Some(DragAction::MoveRegion) => gestures
+                .drag(Surface::Image, Mods::empty(), button)
+                .filter(|action| *action != DragAction::MoveRegion),
+            other => other,
+        }
+    }
+
+    /// The region's reading of the picture's response: the hold a drag has
+    /// on it, if any — `Some` while the drag is the region's, or the zoom
+    /// box's, in which case the view does not pan — and whether a click
+    /// landed on one of its handles.
     ///
     /// A drag is decided where the button went down — `press_origin`, not
     /// the pointer's position on the frame the toolkit called it a drag,
-    /// which is already some points away. With `Space` held it draws a box
-    /// to zoom to, whatever the selection: the key is held for exactly
-    /// that, and a region under the press does not take it. Otherwise what
-    /// it is depends on the selection: with one asked for, any drag draws a
-    /// new region; with one on screen, a drag from a handle takes hold of
-    /// that, and a drag from inside it takes hold of the whole only with
-    /// `Shift` held — anywhere else, and inside without the key, it is the
-    /// view's, as it always was, so the picture stays navigable under a
-    /// region that covers it. The hand's place goes back in image pixels
-    /// each frame, through the same placement the bar's readout uses, since
-    /// the application's own pointer stands still while the toolkit holds a
-    /// drag. A click on a handle — a press that never became a drag — makes
-    /// it the current one, as a drag on it does. Which handle the pointer
-    /// rests on is said every pass a region is up, for the words the region
-    /// wears while it is.
-    fn region_gestures(&mut self, ui: &egui::Ui, response: &egui::Response) -> Option<Grab> {
+    /// which is already some points away. The primary button first answers
+    /// to what is fixed: with the fit key held it draws a box to zoom to,
+    /// whatever the selection, the key being held for exactly that; with a
+    /// region asked for it draws a new one; from a handle of the region on
+    /// screen it takes hold of that. Then, for any button, its slot: a
+    /// `move-region` drag from inside the region takes hold of the whole of
+    /// it, and a `zoom-box` drag draws a box. Anything else is the view's,
+    /// so the picture stays navigable under a region that covers it. The
+    /// hand's place goes back in image pixels each frame, through the same
+    /// placement the bar's readout uses, since the application's own
+    /// pointer stands still while the toolkit holds a drag. A click on a
+    /// handle — a press that never became a drag — makes it the current
+    /// one, as a drag on it does. Which handle the pointer rests on is said
+    /// every pass a region is up, for the words the region wears while it
+    /// is.
+    fn region_gestures(
+        &mut self,
+        ui: &egui::Ui,
+        response: &egui::Response,
+    ) -> (Option<Grab>, bool) {
         let scale = self.input.scale;
-        let placement = self
-            .view
-            .placement(self.current?.size(), self.input.viewport);
+        let Some(current) = self.current else {
+            return (None, false);
+        };
+        let placement = self.view.placement(current.size(), self.input.viewport);
         let image_point = |pos: egui::Pos2| placement.image_point([pos.x * scale, pos.y * scale]);
         let grid = self.grid;
         let handles = self.input.selection.region().map(|region| {
@@ -571,21 +636,38 @@ impl Pass<'_> {
                 .as_ref()
                 .and_then(|(rect, handles)| region::grip_at(*rect, handles, [pos.x, pos.y]))
         };
-        // The inside is a hold only while the key says so; a handle always is.
-        let holds = |grip: Grip| grip != Grip::Inside || self.input.move_region;
+        let mods = self.input.modifiers;
+        let gestures = &self.input.gestures;
+        let slot = |button| gestures.drag(Surface::Image, mods, button);
+        // The inside is a hold only while the primary's slot says so; a
+        // handle always is.
+        let holds =
+            |grip: Grip| grip != Grip::Inside || slot(Button::Left) == Some(DragAction::MoveRegion);
 
         let mut grabbed = self.input.grabbing;
-        if response.drag_started_by(egui::PointerButton::Primary)
+        let started = Button::ALL
+            .into_iter()
+            .find(|button| response.drag_started_by(pointer_button(*button)));
+        if let Some(button) = started
             && let Some(origin) = ui.input(|input| input.pointer.press_origin())
         {
-            let grab = match self.input.selection {
+            let primary = button == Button::Left;
+            let fixed = match self.input.selection {
+                _ if !primary => None,
                 _ if self.input.box_zoom => Some(Grab::Zoom),
                 Selection::Armed => Some(Grab::New),
                 Selection::Shown(_) => grip_under(origin)
-                    .filter(|grip| holds(*grip))
+                    .filter(|grip| *grip != Grip::Inside)
                     .map(Grab::Handle),
                 Selection::Off => None,
             };
+            let grab = fixed.or_else(|| match slot(button) {
+                Some(DragAction::MoveRegion) => grip_under(origin)
+                    .filter(|grip| *grip == Grip::Inside)
+                    .map(Grab::Handle),
+                Some(DragAction::ZoomBox) => Some(Grab::Zoom),
+                Some(DragAction::Pan) | None => None,
+            });
             if let Some(grab) = grab {
                 self.commands.push(Command::Grab {
                     grab,
@@ -596,15 +678,17 @@ impl Pass<'_> {
         }
         // The click's own place: `press_origin` is gone by the time the
         // button is up, and a click has by definition not moved far from it.
+        let mut clicked_handle = false;
         if response.clicked_by(egui::PointerButton::Primary)
             && let Some(pos) = response.interact_pointer_pos()
             && let Some(grip) = grip_under(pos)
             && grip != Grip::Inside
         {
             self.commands.push(Command::Handle(grip));
+            clicked_handle = true;
         }
         if let Some(grab) = grabbed {
-            if response.dragged_by(egui::PointerButton::Primary)
+            if response.dragged()
                 && let Some(pos) = response.interact_pointer_pos()
             {
                 self.commands.push(Command::Pull(image_point(pos)));
@@ -638,7 +722,7 @@ impl Pass<'_> {
                 ui.ctx().set_cursor_icon(region::cursor(Grab::New));
             }
         }
-        grabbed
+        (grabbed, clicked_handle)
     }
 
     /// What floats over the picture, in the order it is stacked: the grid

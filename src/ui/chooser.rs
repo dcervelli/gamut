@@ -119,12 +119,6 @@ pub struct Input {
     /// Whether the session spans more than one directory, which is when a
     /// row says which one it is in.
     pub several_dirs: bool,
-    /// Whether this is the first frame the popup is up. The chord that
-    /// opened it went to the window's key table and to egui alike — egui
-    /// is handed every key, and only refuses the window the ones its
-    /// widgets want — so on this frame it is still in egui's input, and
-    /// reading it here would close what it had just opened.
-    pub opened: bool,
     /// Whether the cursor was moved by a key since the last frame, in which
     /// case the list scrolls to keep it in view. Not on every frame: a
     /// list that scrolled to the cursor while the wheel was moving it away
@@ -212,16 +206,13 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
 
 /// The keys the chooser answers, taken out of the input before the field
 /// can see them. `Esc` is not among them: closing the popup on it is
-/// egui's, and the field leaves it alone. `Ctrl+P` is consumed on the
-/// opening frame too, so that it does not reach the field as text, but is
-/// not acted on — see [`Input::opened`].
+/// egui's, and the field leaves it alone. Nor is the key that opens and
+/// closes it, which the window keeps from egui altogether while the popup
+/// is up, so that it reaches the key table — see `App::window_event`.
 fn keys(pass: &mut Pass, ui: &mut egui::Ui, input: &Input, list_height: f32) {
     let page = (list_height / ROW_HEIGHT).floor().max(1.0) as usize;
     let pressed = ui.input_mut(|keys| {
         let mut pressed = Vec::new();
-        if keys.consume_key(Modifiers::COMMAND, Key::P) && !input.opened {
-            pressed.push(Command::Press(Control::Chooser));
-        }
         if keys.consume_key(Modifiers::NONE, Key::Enter) && !input.rows.is_empty() {
             pressed.push(Command::Press(Control::Choose(input.cursor)));
         }

@@ -589,11 +589,11 @@ impl Pass<'_> {
     /// The loupe toggle, beside the grid's: a way of looking at the picture
     /// like the grid, and so in the bar that carries what is being done to
     /// it. Lit while the loupe is on, whether the toggle switched it on or
-    /// the secondary button is holding it up: the button says what is in
+    /// a button held on the picture is holding it up: the button says what is in
     /// force, and the loupe is in force either way. While it is, the
     /// magnification is written after the mark, as the grid's spacing is.
     fn loupe_toggle(&mut self, ui: &mut Ui) {
-        let on = self.panels.show_loupe || self.input.secondary;
+        let on = self.panels.show_loupe || self.input.loupe_held;
         let reading = on.then(|| super::loupe::label(self.panels.loupe_magnification));
         self.reading_toggle(ui, icon::ZOOM_IN, Control::Loupe, reading.as_deref());
     }

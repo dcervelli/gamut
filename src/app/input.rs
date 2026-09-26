@@ -1,10 +1,13 @@
 //! What the keyboard and the pointer do.
 //!
-//! Keys go through one table, [`KEYS`], which is also what `--help` prints:
-//! a binding added here is documented by the same edit. Each key names an
-//! [`Action`], and [`App::perform`] is the one place an action happens.
+//! Keys go through one table, [`ROWS`], which is also what `--help` prints:
+//! a binding added here is documented by the same edit. Each key has a
+//! dotted name the configuration file can rebind — see [`super::keymap`] —
+//! and runs an [`Action`], and [`App::perform`] is the one place an action
+//! happens. The mouse goes through [`crate::gestures`] the same way.
 
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -13,7 +16,9 @@ use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey, PhysicalKey};
 
 use super::App;
 use super::copying::Done;
+use super::keymap::{Bound, Chord, KeyName, Keymap, Keys, Row};
 use crate::clipboard;
+use crate::gestures::{self, Button, Gestures, Surface, WheelAction};
 use crate::image::display::{Colormap, EV_STEP, Startup, ToneMap};
 use crate::image::encode;
 use crate::image::region::{Region, Side};
@@ -41,10 +46,21 @@ const PAN_STEP: f32 = 64.0;
 /// room for, so that the first frame's rows are all on their way.
 const FIRST_ROWS: usize = 32;
 
-/// What the window says the first time the interface is hidden. Both keys,
-/// since the one that put it away is not the one a reader who pressed the
-/// button knows about.
-const RESTORE: &str = "Press ` or Esc to restore UI";
+/// What the window says the first time the interface is hidden: the keys
+/// bound to bring it back, both of them, since the one that put it away is
+/// not the one a reader who pressed the button knows about. A half nothing
+/// is bound to is left out; with neither, nothing is said.
+pub(super) fn restore_message(keys: &Keymap) -> Option<String> {
+    let bound: Vec<String> = ["interface.toggle", "interface.dismiss"]
+        .into_iter()
+        .map(|name| keys.spelled(name))
+        .filter(|spelled| !spelled.is_empty())
+        .collect();
+    match bound.is_empty() {
+        true => None,
+        false => Some(format!("Press {} to restore UI", bound.join(" or "))),
+    }
+}
 
 /// Something a key asks for.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -60,10 +76,14 @@ pub enum Action {
     /// Go to this zoom, 1.0 being one image pixel to one screen pixel.
     ZoomTo(f32),
     Pan(Direction, PanStep),
+    /// Move the region's current handle a pixel that way — the whole of it,
+    /// while that is the middle. Nothing without a region, as for the two
+    /// below: there is nothing else on screen that they change.
+    MoveRegion(Direction),
+    /// Push a region's near side out a pixel that way.
+    GrowRegion(Direction),
     /// Pull a region's far side in a pixel that way — Left brings the
-    /// right edge in — which is the opposite number of `Ctrl` with an
-    /// arrow pushing the near side out. Nothing without a region: there is
-    /// nothing else on screen that shrinks.
+    /// right edge in — which is the opposite number of growing it.
     ShrinkRegion(Direction),
     CycleFit,
     CycleUpscale,
@@ -155,8 +175,8 @@ pub enum Action {
     CopyPixelCoordinate,
     /// Ask for a region of the picture — the next drag on it draws one —
     /// or, with one asked for or drawn, take it off. While a region is on
-    /// screen the arrows move it, `Space` fits it, and the copy of the
-    /// picture is a copy of it: see `App::perform_on_region`.
+    /// screen the fit frames it and the copy of the picture is a copy of
+    /// it: see `App::perform_on_region`.
     ToggleRegion,
     /// Play a stopped animation, or stop a playing one.
     TogglePlay,
@@ -248,59 +268,7 @@ impl PanStep {
     }
 }
 
-/// A key as `winit` reports it: the character it produced, the name of one
-/// that produces none, or — where the character would depend on the layout —
-/// the place on the keyboard it was pressed.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum KeyName {
-    Char(&'static str),
-    Named(NamedKey),
-    /// Matched by position rather than by what it types. For the number row,
-    /// whose shifted characters are whatever the layout puts there: `@` is
-    /// Shift+`2` on one keyboard and `"` on another, and the zoom that hangs
-    /// off `2` should be under `2` on both.
-    Position(KeyCode),
-}
-
-impl KeyName {
-    /// How this key is written for people, where one key of a line has to be
-    /// named on its own — the four zooms of the number row are one line of
-    /// `--help` and four cells of the zoom menu.
-    ///
-    /// `None` for a key nothing has yet had to name singly, which leaves
-    /// [`Binding::shown`] to answer for the whole line. Only the number row
-    /// is bound by position, and the character keys say what they are.
-    fn spelled(self) -> Option<&'static str> {
-        match self {
-            Char(character) => Some(character),
-            Named(_) => None,
-            Position(code) => Some(match code {
-                KeyCode::Digit0 => "0",
-                KeyCode::Digit1 => "1",
-                KeyCode::Digit2 => "2",
-                KeyCode::Digit3 => "3",
-                KeyCode::Digit4 => "4",
-                KeyCode::Digit5 => "5",
-                KeyCode::Digit6 => "6",
-                KeyCode::Digit7 => "7",
-                KeyCode::Digit8 => "8",
-                KeyCode::Digit9 => "9",
-                _ => return None,
-            }),
-        }
-    }
-}
-
-/// What a binding is held with, over and above whatever Shift a character
-/// key already implies.
-///
-/// Ctrl, Alt and Super must be held exactly as written: a chord this table
-/// does not bind belongs to the window manager, and acting on `Super+0` as
-/// well would move the view behind its back.
-///
-/// Shift is a modifier for a named key and not for a character one — see
-/// [`satisfies`]. What the user presses is spelled out in [`Binding::shown`]
-/// either way.
+/// What a chord is held with.
 pub type Mods = ModifiersState;
 
 /// Held with nothing, or with nothing but the Shift a character carries.
@@ -310,76 +278,23 @@ const SHIFT: Mods = Mods::SHIFT;
 const CTRL_SHIFT: Mods = Mods::CONTROL.union(Mods::SHIFT);
 const ALT: Mods = Mods::ALT;
 
-/// Whether the modifiers `held` are the ones a binding asked for, for a key
-/// of this kind. Shift is the difference between the two kinds.
+/// What to press for `action`: the chords of the name that runs it, and
+/// `None` where nothing is bound to it.
 ///
-/// A character has already had Shift applied — the table says `a` and `A`,
-/// not `a` and Shift+`a` — so asking for it again would be asking twice, and
-/// asking for it where the character is a capital would refuse the same
-/// capital typed under Caps Lock. It is therefore ignored there.
-///
-/// A named key, or one bound by position, is the same key whether or not
-/// Shift is held, so there Shift is a modifier like any other: it is what
-/// tells `Shift+Left` from `Left`, and `Shift+2` from `2`.
-fn satisfies(required: Mods, held: Mods, key: KeyName) -> bool {
+/// The name's own chords rather than the whole line's: the number row is
+/// one line, `2, 3, 4, 5` for four zooms, and the cell of the zoom menu that
+/// goes to one of them is named by the key that reaches it.
+fn key_of(keys: &Keymap, action: Action) -> Option<String> {
+    let (_, name) = keys.bound_for(action)?;
+    Some(keys.spelled(name)).filter(|spelled| !spelled.is_empty())
+}
+
+/// `words`, and the key after it in brackets where there is one.
+fn with_key(words: &str, key: Option<String>) -> String {
     match key {
-        Char(_) => held.difference(Mods::SHIFT) == required,
-        Named(_) | Position(_) => held == required,
+        Some(key) => format!("{words} ({key})"),
+        None => words.to_string(),
     }
-}
-
-/// The line of the key table that performs `action`: what to press for it,
-/// and what `--help` says it does.
-///
-/// The first such line that is not a region's own. An action bound on more
-/// than one line is either a different action on each — the arrows and
-/// their modified forms — or one that does one thing plainly and another
-/// with a region up, written on a line under each condition; the plain one
-/// answers, since what asks is a button that does the plain thing, and
-/// what it does with a region is the region's line to say.
-pub(super) fn binding_for(action: Action) -> Option<&'static Binding> {
-    let binds = |binding: &&'static Binding| binding.keys.iter().any(|(_, bound)| *bound == action);
-    KEYS.iter()
-        .find(|binding| binds(binding) && binding.when != Some(When::RegionSelected))
-        .or_else(|| KEYS.iter().find(binds))
-}
-
-/// What to press for `action`, as the key table writes it.
-///
-/// The whole key column of the line that binds it — a line that binds two
-/// keys to one action offers both — except where the line binds several keys
-/// to several different things and only one of them does this. The number
-/// row is one such line, `2, 3, 4, 5` for four zooms, and the cell of the
-/// zoom menu that goes to one of them is named by the key that reaches it
-/// rather than by all four. Where that key cannot be spelled on its own the
-/// column answers, as it does everywhere else.
-fn shown_for(binding: &Binding, action: Action) -> String {
-    let mut doing = binding.keys.iter().filter(|(_, bound)| *bound == action);
-    match (doing.next(), doing.next()) {
-        (Some((key, _)), None) if binding.keys.len() > 1 => match key.spelled() {
-            Some(key) => format!("{}{key}", held(binding.mods)),
-            None => binding.shown.to_string(),
-        },
-        _ => binding.shown.to_string(),
-    }
-}
-
-/// What is held down with a key, written as [`Binding::shown`] writes it:
-/// `Ctrl+Shift+`, and nothing at all for a key held with nothing.
-fn held(mods: Mods) -> String {
-    let mut prefix = String::new();
-    for (modifier, name) in [
-        (Mods::CONTROL, "Ctrl"),
-        (Mods::ALT, "Alt"),
-        (Mods::SUPER, "Super"),
-        (Mods::SHIFT, "Shift"),
-    ] {
-        if mods.contains(modifier) {
-            prefix.push_str(name);
-            prefix.push('+');
-        }
-    }
-    prefix
 }
 
 /// How far one press of the keys moves an end of the display window, as a
@@ -388,13 +303,16 @@ fn held(mods: Mods) -> String {
 /// the keys' alone.
 const WINDOW_STEP: f32 = 0.05;
 
-/// One line of a tooltip: what a key does, and what to press for it.
+/// One line of a tooltip: what a key does, and what to press for it — the
+/// whole line's keys, a hint being about the line. `None` where nothing is
+/// bound on it, a hint being what to press.
 ///
 /// The key table's own words, so that a tooltip and `--help` cannot come to
 /// disagree about a binding — there is nowhere for them to disagree.
-fn hint(action: Action) -> Option<String> {
-    let binding = binding_for(action)?;
-    Some(format!("{} ({})", binding.help, binding.shown))
+fn hint(keys: &Keymap, action: Action) -> Option<String> {
+    let row = keys.row_for(action)?;
+    let column = keys.column(row);
+    (!column.is_empty()).then(|| format!("{} ({column})", row.help))
 }
 
 /// The action a thing in the interface stands for, which is what names it.
@@ -533,15 +451,13 @@ fn copy_action(what: Copies) -> Action {
 /// What names `tip` on the first line of its tooltip: its own words where the
 /// interface has some for it, and otherwise the description of the key that
 /// does the same job — with that key after it either way.
-fn names(tip: Tip) -> Option<String> {
-    let pressed = action_of(tip).and_then(|action| {
-        let binding = binding_for(action)?;
-        Some((binding.help, shown_for(binding, action)))
-    });
+fn names(keys: &Keymap, tip: Tip) -> Option<String> {
+    let pressed =
+        action_of(tip).and_then(|action| Some((keys.row_for(action)?.help, key_of(keys, action))));
     match (ui::tooltip::words(tip), pressed) {
-        (Some(words), Some((_, key))) => Some(format!("{words} ({key})")),
+        (Some(words), Some((_, key))) => Some(with_key(&words, key)),
         (Some(words), None) => Some(words),
-        (None, Some((help, key))) => Some(format!("{help} ({key})")),
+        (None, Some((help, key))) => Some(with_key(help, key)),
         (None, None) => None,
     }
 }
@@ -587,32 +503,15 @@ impl Section {
     }
 }
 
-/// One line of `--help`, and the keys that do it. A line may bind several
-/// keys to several actions (`d, f`), and a line may bind none (`Wheel`).
-pub struct Binding {
-    pub section: Section,
-    /// What is held down with the keys below.
-    pub mods: Mods,
-    /// The key column, as written for people: `q, Esc`, `Arrows`.
-    pub shown: &'static str,
-    pub help: &'static str,
-    /// When the key does anything at all, for the help popup's third
-    /// column, and `None` for a key that always does. A key that does one
-    /// thing plainly and another with a region up is two lines, one under
-    /// each condition, binding the same keys to the same action: what the
-    /// action does is decided when it is performed, and each line says only
-    /// what it does then.
-    pub when: Option<When>,
-    pub keys: &'static [(KeyName, Action)],
-}
-
 /// The condition on which a key does anything at all: the one thing about
 /// the moment that decides it, so that the popup can say whether it holds
 /// right now as well as what it is.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum When {
+    /// The one condition that is also a context: a region's names are
+    /// tried before the plain ones while it holds — see
+    /// [`When::context`].
     RegionSelected,
-    NoRegion,
     SeveralFiles,
     Animation,
     AnimationOrPages,
@@ -633,9 +532,8 @@ impl When {
     /// Every condition, for a test to hold them all up against the
     /// application.
     #[cfg(test)]
-    pub const ALL: [When; 12] = [
+    pub const ALL: [When; 11] = [
         When::RegionSelected,
-        When::NoRegion,
         When::SeveralFiles,
         When::Animation,
         When::AnimationOrPages,
@@ -653,7 +551,6 @@ impl When {
     pub fn describe(self) -> &'static str {
         match self {
             When::RegionSelected => "a region selected",
-            When::NoRegion => "no region selected",
             When::SeveralFiles => "more than one file",
             When::Animation => "an animation",
             When::AnimationOrPages => "an animation or a paged file",
@@ -664,6 +561,16 @@ impl When {
             When::Undoable => "an edit to undo",
             When::VisitedBefore => "a file shown before this one",
             When::VisitedAfter => "a file shown after this one",
+        }
+    }
+
+    /// The context a line under this condition binds its names in, where
+    /// it is one. Only the region's is: what the other conditions decide is
+    /// whether a key does anything, not which key it is.
+    pub fn context(self) -> Option<super::keymap::Context> {
+        match self {
+            When::RegionSelected => Some(super::keymap::Context::Region),
+            _ => None,
         }
     }
 }
@@ -764,7 +671,6 @@ impl Conditions {
     pub fn met(&self, when: When) -> bool {
         match when {
             When::RegionSelected => self.region_selected,
-            When::NoRegion => !self.region_selected,
             When::SeveralFiles => self.several_files,
             When::Animation => self.animation,
             When::AnimationOrPages => self.animation || self.pages,
@@ -800,672 +706,623 @@ use Direction::{Down, Left, Right, Up};
 use KeyName::{Char, Named, Position};
 use PanStep::{Coarse, Edge, Fine};
 
-/// Every key, in the order `--help` lists them.
+/// A character typed with `mods` held besides the Shift it carries.
+const fn typed(mods: Mods, character: char) -> Chord {
+    Chord::new(mods, Char(character))
+}
+
+/// A character typed with nothing else held.
+const fn key(character: char) -> Chord {
+    typed(PLAIN, character)
+}
+
+const fn named(mods: Mods, key: NamedKey) -> Chord {
+    Chord::new(mods, Named(key))
+}
+
+/// A key of the number row, by its place.
+const fn digit(mods: Mods, code: KeyCode) -> Chord {
+    Chord::new(mods, Position(code))
+}
+
+/// Four names, one for each arrow held with `$mods`: `$prefix.left` and so
+/// on, running the action `$action` makes of each direction.
+macro_rules! arrows {
+    ($prefix:literal, $mods:expr, $action:path $(, $step:expr)?) => {
+        &[
+            Bound {
+                name: concat!($prefix, ".left"),
+                action: $action(Left $(, $step)?),
+                defaults: &[named($mods, NamedKey::ArrowLeft)],
+            },
+            Bound {
+                name: concat!($prefix, ".right"),
+                action: $action(Right $(, $step)?),
+                defaults: &[named($mods, NamedKey::ArrowRight)],
+            },
+            Bound {
+                name: concat!($prefix, ".up"),
+                action: $action(Up $(, $step)?),
+                defaults: &[named($mods, NamedKey::ArrowUp)],
+            },
+            Bound {
+                name: concat!($prefix, ".down"),
+                action: $action(Down $(, $step)?),
+                defaults: &[named($mods, NamedKey::ArrowDown)],
+            },
+        ]
+    };
+}
+
+/// One name on a line of its own.
+macro_rules! one {
+    ($name:literal, $action:expr, [$($chord:expr),* $(,)?]) => {
+        Keys::Bound(&[Bound {
+            name: $name,
+            action: $action,
+            defaults: &[$($chord),*],
+        }])
+    };
+}
+
+/// Every line of the key table, in the order `--help` lists them, with the
+/// names on each and the chords each answers to by default.
 ///
-/// Letter keys are bound in both cases wherever the capital is not itself a
-/// binding, so that Caps Lock does not turn the keyboard off. The four that
-/// mean two different things — `a`/`A`, `s`/`S`, `c`/`C` — are the exception,
-/// and are bound one case at a time.
-pub const KEYS: &[Binding] = &[
+/// A letter is bound in one case: a capital nothing binds answers as its
+/// lower case, so Caps Lock does not turn the keyboard off — see
+/// [`Keymap::action_for`]. Where a capital is bound it is its own key: `A`
+/// is the white point where `a` is the black.
+pub static ROWS: &[Row] = &[
     // The number row is bound by position, not by what it types: the zooms
     // below 100% are the ones above it with Shift held, and which character
     // that is depends on the layout.
-    Binding {
+    Row {
         section: Section::Zoom,
-        mods: PLAIN,
-        shown: "1, 0",
+        when: None,
         help: "Actual size (100%)",
-        when: None,
-        keys: &[
-            (Position(KeyCode::Digit1), ZoomTo(1.0)),
-            (Position(KeyCode::Digit0), ZoomTo(1.0)),
-        ],
+        keys: one!(
+            "zoom.100",
+            ZoomTo(1.0),
+            [digit(PLAIN, KeyCode::Digit1), digit(PLAIN, KeyCode::Digit0)]
+        ),
     },
-    Binding {
+    Row {
         section: Section::Zoom,
-        mods: PLAIN,
-        shown: "2, 3, 4, 5",
+        when: None,
         help: "200%, 400%, 800%, 1600%",
-        when: None,
-        keys: &[
-            (Position(KeyCode::Digit2), ZoomTo(2.0)),
-            (Position(KeyCode::Digit3), ZoomTo(4.0)),
-            (Position(KeyCode::Digit4), ZoomTo(8.0)),
-            (Position(KeyCode::Digit5), ZoomTo(16.0)),
-        ],
+        keys: Keys::Bound(&[
+            Bound {
+                name: "zoom.200",
+                action: ZoomTo(2.0),
+                defaults: &[digit(PLAIN, KeyCode::Digit2)],
+            },
+            Bound {
+                name: "zoom.400",
+                action: ZoomTo(4.0),
+                defaults: &[digit(PLAIN, KeyCode::Digit3)],
+            },
+            Bound {
+                name: "zoom.800",
+                action: ZoomTo(8.0),
+                defaults: &[digit(PLAIN, KeyCode::Digit4)],
+            },
+            Bound {
+                name: "zoom.1600",
+                action: ZoomTo(16.0),
+                defaults: &[digit(PLAIN, KeyCode::Digit5)],
+            },
+        ]),
     },
-    Binding {
+    Row {
         section: Section::Zoom,
-        mods: SHIFT,
-        shown: "Shift+2, 3, 4",
+        when: None,
         help: "50%, 25%, 10%",
-        when: None,
-        keys: &[
-            (Position(KeyCode::Digit2), ZoomTo(0.5)),
-            (Position(KeyCode::Digit3), ZoomTo(0.25)),
-            (Position(KeyCode::Digit4), ZoomTo(0.1)),
-        ],
+        keys: Keys::Bound(&[
+            Bound {
+                name: "zoom.50",
+                action: ZoomTo(0.5),
+                defaults: &[digit(SHIFT, KeyCode::Digit2)],
+            },
+            Bound {
+                name: "zoom.25",
+                action: ZoomTo(0.25),
+                defaults: &[digit(SHIFT, KeyCode::Digit3)],
+            },
+            Bound {
+                name: "zoom.10",
+                action: ZoomTo(0.1),
+                defaults: &[digit(SHIFT, KeyCode::Digit4)],
+            },
+        ]),
     },
-    Binding {
+    Row {
         section: Section::Zoom,
-        mods: PLAIN,
-        shown: "+, =",
+        when: None,
         help: "Zoom in",
-        when: None,
-        keys: &[(Char("+"), ZoomIn), (Char("="), ZoomIn)],
+        keys: one!("zoom.in", ZoomIn, [key('+'), key('=')]),
     },
-    Binding {
+    Row {
         section: Section::Zoom,
-        mods: PLAIN,
-        shown: "-, _",
+        when: None,
         help: "Zoom out",
-        when: None,
-        keys: &[(Char("-"), ZoomOut), (Char("_"), ZoomOut)],
+        keys: one!("zoom.out", ZoomOut, [key('-'), key('_')]),
     },
-    Binding {
+    // Answered on the way up — see `App::handle_key` — since held, a drag
+    // zooms to a box, which the next line says.
+    Row {
         section: Section::Zoom,
-        mods: PLAIN,
-        shown: "Wheel",
-        help: "Zoom about the pointer",
         when: None,
-        keys: &[],
-    },
-    Binding {
-        section: Section::Zoom,
-        mods: PLAIN,
-        shown: "Space",
         help: "Fit the whole image, fill the window, then actual size, in turn",
-        when: Some(When::NoRegion),
-        keys: &[(Named(NamedKey::Space), CycleFit)],
+        keys: one!("zoom.fit", CycleFit, [named(PLAIN, NamedKey::Space)]),
     },
-    Binding {
+    Row {
         section: Section::Zoom,
-        mods: PLAIN,
-        shown: "Space+Drag",
+        when: None,
         help: "Zoom to the box dragged out",
-        when: None,
-        keys: &[],
+        keys: Keys::Gesture("zoom.fit"),
     },
-    Binding {
+    Row {
         section: Section::Zoom,
-        mods: PLAIN,
-        shown: "p",
+        when: None,
         help: "Cycle the filter used above 100%: nearest, bicubic",
-        when: None,
-        keys: &[(Char("p"), CycleUpscale), (Char("P"), CycleUpscale)],
+        keys: one!("zoom.filter", CycleUpscale, [key('p')]),
     },
-    Binding {
+    Row {
         section: Section::Zoom,
-        mods: PLAIN,
-        shown: "Arrows",
+        when: None,
         help: "Pan by 64 pixels",
-        when: Some(When::NoRegion),
-        keys: &[
-            (Named(NamedKey::ArrowLeft), Pan(Left, Coarse)),
-            (Named(NamedKey::ArrowRight), Pan(Right, Coarse)),
-            (Named(NamedKey::ArrowUp), Pan(Up, Coarse)),
-            (Named(NamedKey::ArrowDown), Pan(Down, Coarse)),
-        ],
+        keys: Keys::Bound(arrows!("pan", PLAIN, Pan, Coarse)),
     },
-    // Shift belongs to the modifiers here, where it does not for a character:
-    // an arrow is the same key whichever way it is held, so this is the one
-    // place the table has to ask for it.
-    Binding {
+    // Shift belongs to the chord here, where it does not for a character:
+    // an arrow is the same key whichever way it is held.
+    Row {
         section: Section::Zoom,
-        mods: SHIFT,
-        shown: "Shift+Arrows",
+        when: None,
         help: "Pan by one pixel",
-        when: None,
-        keys: &[
-            (Named(NamedKey::ArrowLeft), Pan(Left, Fine)),
-            (Named(NamedKey::ArrowRight), Pan(Right, Fine)),
-            (Named(NamedKey::ArrowUp), Pan(Up, Fine)),
-            (Named(NamedKey::ArrowDown), Pan(Down, Fine)),
-        ],
+        keys: Keys::Bound(arrows!("pan.pixel", SHIFT, Pan, Fine)),
     },
-    Binding {
+    Row {
         section: Section::Zoom,
-        mods: CTRL,
-        shown: "Ctrl+Arrows",
+        when: None,
         help: "Pan to the far side of the image",
-        when: Some(When::NoRegion),
-        keys: &[
-            (Named(NamedKey::ArrowLeft), Pan(Left, Edge)),
-            (Named(NamedKey::ArrowRight), Pan(Right, Edge)),
-            (Named(NamedKey::ArrowUp), Pan(Up, Edge)),
-            (Named(NamedKey::ArrowDown), Pan(Down, Edge)),
-        ],
+        keys: Keys::Bound(arrows!("pan.edge", CTRL, Pan, Edge)),
     },
-    Binding {
+    Row {
         section: Section::Interface,
-        mods: PLAIN,
-        shown: "`",
+        when: None,
         help: "Toggle the interface panels",
-        when: None,
-        keys: &[(Char("`"), ToggleInterface)],
+        keys: one!("interface.toggle", ToggleInterface, [key('`')]),
     },
-    Binding {
+    Row {
         section: Section::Interface,
-        mods: PLAIN,
-        shown: "~",
+        when: None,
         help: "Toggle the panels, closing the map, histogram, information and file list",
-        when: None,
-        keys: &[(Char("~"), ToggleInterfaceAndPanels)],
+        keys: one!(
+            "interface.toggle-panels",
+            ToggleInterfaceAndPanels,
+            [key('~')]
+        ),
     },
-    Binding {
+    Row {
         section: Section::Interface,
-        mods: PLAIN,
-        shown: "m",
+        when: None,
         help: "Toggle the minimap",
-        when: None,
-        keys: &[(Char("m"), ToggleMinimap), (Char("M"), ToggleMinimap)],
+        keys: one!("interface.minimap", ToggleMinimap, [key('m')]),
     },
-    Binding {
+    Row {
         section: Section::Interface,
-        mods: PLAIN,
-        shown: "h",
+        when: None,
         help: "Toggle the histogram",
-        when: None,
-        keys: &[(Char("h"), ToggleHistogram), (Char("H"), ToggleHistogram)],
+        keys: one!("interface.histogram", ToggleHistogram, [key('h')]),
     },
-    Binding {
+    Row {
         section: Section::Interface,
-        mods: PLAIN,
-        shown: "i",
+        when: None,
         help: "Toggle the file information panel",
-        when: None,
-        keys: &[(Char("i"), ToggleInfo), (Char("I"), ToggleInfo)],
+        keys: one!("interface.info", ToggleInfo, [key('i')]),
     },
-    Binding {
+    Row {
         section: Section::Interface,
-        mods: PLAIN,
-        shown: "g",
+        when: None,
         help: "Toggle the grid over the image",
-        when: None,
-        keys: &[(Char("g"), ToggleGrid), (Char("G"), ToggleGrid)],
+        keys: one!("interface.grid", ToggleGrid, [key('g')]),
     },
-    Binding {
+    Row {
         section: Section::Interface,
-        mods: PLAIN,
-        shown: "l",
+        when: None,
         help: "Toggle the loupe",
-        when: None,
-        keys: &[(Char("l"), ToggleLoupe)],
+        keys: one!("interface.loupe", ToggleLoupe, [key('l')]),
     },
-    Binding {
+    Row {
         section: Section::Interface,
-        mods: PLAIN,
-        shown: "Shift+L",
-        help: "Cycle the loupe's magnification: 2, 4, 8, 16",
         when: None,
-        keys: &[(Char("L"), CycleMagnification)],
+        help: "Cycle the loupe's magnification: 2, 4, 8, 16",
+        keys: one!(
+            "interface.loupe-magnification",
+            CycleMagnification,
+            [key('L')]
+        ),
     },
     // The three that work the histogram's plot, under the key that opens it.
-    Binding {
+    Row {
         section: Section::Interface,
-        mods: PLAIN,
-        shown: "j",
+        when: None,
         help: "Toggle the luminance plane on the histogram",
-        when: None,
-        keys: &[(Char("j"), ToggleLuma), (Char("J"), ToggleLuma)],
+        keys: one!("interface.luma", ToggleLuma, [key('j')]),
     },
-    Binding {
+    Row {
         section: Section::Interface,
-        mods: PLAIN,
-        shown: "k",
+        when: None,
         help: "Toggle the color planes on the histogram",
-        when: None,
-        keys: &[(Char("k"), TogglePlanes), (Char("K"), TogglePlanes)],
+        keys: one!("interface.planes", TogglePlanes, [key('k')]),
     },
-    Binding {
+    Row {
         section: Section::Interface,
-        mods: PLAIN,
-        shown: "y",
+        when: None,
         help: "Toggle a logarithmic count axis on the histogram",
-        when: None,
-        keys: &[(Char("y"), ToggleLogCounts), (Char("Y"), ToggleLogCounts)],
+        keys: one!("interface.log-counts", ToggleLogCounts, [key('y')]),
     },
-    // The same key as the two copies above, with nothing held: what it
+    // The same key as the two pixel copies, with nothing held: what it
     // switches is what they take away with them.
-    Binding {
+    Row {
         section: Section::Interface,
-        mods: PLAIN,
-        shown: ".",
+        when: None,
         help: "Cycle the pixel readout: hex, decimal, mapped",
-        when: None,
-        keys: &[(Char("."), CyclePixelFormat)],
+        keys: one!("interface.pixel-format", CyclePixelFormat, [key('.')]),
     },
-    Binding {
+    Row {
         section: Section::Interface,
-        mods: PLAIN,
-        shown: "?, /",
+        when: None,
         help: "Show the keys",
-        when: None,
-        keys: &[(Char("?"), ShowHelp), (Char("/"), ShowHelp)],
+        keys: one!("interface.help", ShowHelp, [key('?'), key('/')]),
     },
-    Binding {
+    Row {
         section: Section::Interface,
-        mods: PLAIN,
-        shown: "q, Esc",
-        help: "Quit; Esc closes a popup, message or region, or shows the interface",
         when: None,
-        keys: &[
-            (Char("q"), Quit),
-            (Char("Q"), Quit),
-            (Named(NamedKey::Escape), Dismiss),
-        ],
+        help: "Quit",
+        keys: one!("interface.quit", Quit, [key('q')]),
     },
-    Binding {
+    Row {
+        section: Section::Interface,
+        when: None,
+        help: "Close a popup, message or region, or show the interface; else quit",
+        keys: one!(
+            "interface.dismiss",
+            Dismiss,
+            [named(PLAIN, NamedKey::Escape)]
+        ),
+    },
+    Row {
         section: Section::Files,
-        mods: PLAIN,
-        shown: "], Page Down",
+        when: Some(When::SeveralFiles),
         help: "Next file",
-        when: Some(When::SeveralFiles),
-        keys: &[(Char("]"), NextFile), (Named(NamedKey::PageDown), NextFile)],
+        keys: one!(
+            "files.next",
+            NextFile,
+            [key(']'), named(PLAIN, NamedKey::PageDown)]
+        ),
     },
-    Binding {
+    Row {
         section: Section::Files,
-        mods: PLAIN,
-        shown: "[, Page Up",
+        when: Some(When::SeveralFiles),
         help: "Previous file",
-        when: Some(When::SeveralFiles),
-        keys: &[
-            (Char("["), PreviousFile),
-            (Named(NamedKey::PageUp), PreviousFile),
-        ],
+        keys: one!(
+            "files.previous",
+            PreviousFile,
+            [key('['), named(PLAIN, NamedKey::PageUp)]
+        ),
     },
-    Binding {
+    Row {
         section: Section::Files,
-        mods: CTRL,
-        shown: "Ctrl+P",
+        when: Some(When::SeveralFiles),
         help: "Choose a file from the list",
-        when: Some(When::SeveralFiles),
-        keys: &[(Char("p"), OpenChooser), (Char("P"), OpenChooser)],
+        keys: one!("files.chooser", OpenChooser, [typed(CTRL, 'p')]),
     },
-    Binding {
+    Row {
         section: Section::Files,
-        mods: PLAIN,
-        shown: "Tab",
-        help: "Show or hide the file list",
         when: Some(When::SeveralFiles),
-        keys: &[(Named(NamedKey::Tab), ToggleFilmstrip)],
+        help: "Show or hide the file list",
+        keys: one!("files.list", ToggleFilmstrip, [named(PLAIN, NamedKey::Tab)]),
     },
     // The keys that step through the list, held with Alt, step through
     // the files that have been on screen instead.
-    Binding {
+    Row {
         section: Section::Files,
-        mods: ALT,
-        shown: "Alt+[, Alt+Page Up",
-        help: "Back in image history",
         when: Some(When::VisitedBefore),
-        keys: &[(Char("["), Back), (Named(NamedKey::PageUp), Back)],
+        help: "Back in image history",
+        keys: one!(
+            "files.back",
+            Back,
+            [typed(ALT, '['), named(ALT, NamedKey::PageUp)]
+        ),
     },
-    Binding {
+    Row {
         section: Section::Files,
-        mods: ALT,
-        shown: "Alt+], Alt+Page Down",
-        help: "Forward in image history",
         when: Some(When::VisitedAfter),
-        keys: &[(Char("]"), Forward), (Named(NamedKey::PageDown), Forward)],
+        help: "Forward in image history",
+        keys: one!(
+            "files.forward",
+            Forward,
+            [typed(ALT, ']'), named(ALT, NamedKey::PageDown)]
+        ),
     },
-    // The desktop's own dialog, for files and for a folder: one case each,
-    // the Ctrl that both are held with being the only modifier the table
-    // sees, as with the two `C`s of the clipboard section.
-    Binding {
+    // The desktop's own dialog, for files and for a folder: the capital
+    // carries the Shift that parts the two.
+    Row {
         section: Section::Files,
-        mods: CTRL,
-        shown: "Ctrl+O",
+        when: None,
         help: "Open image files chosen in the desktop's file dialog",
-        when: None,
-        keys: &[(Char("o"), OpenFiles)],
+        keys: one!("files.open", OpenFiles, [typed(CTRL, 'o')]),
     },
-    Binding {
+    Row {
         section: Section::Files,
-        mods: CTRL,
-        shown: "Ctrl+Shift+O",
-        help: "Open a folder chosen in the desktop's file dialog",
         when: None,
-        keys: &[(Char("O"), OpenFolder)],
+        help: "Open a folder chosen in the desktop's file dialog",
+        keys: one!("files.open-folder", OpenFolder, [typed(CTRL, 'O')]),
     },
     // What is done to the file itself, under the keys that walk the list:
-    // the two that change the disk, and the one that changes it back.
-    Binding {
+    // the two that change the disk, the one that changes the list, and the
+    // one that changes them back.
+    Row {
         section: Section::Files,
-        mods: PLAIN,
-        shown: "F2",
+        when: None,
         help: "Rename the file on screen",
-        when: None,
-        keys: &[(Named(NamedKey::F2), Rename)],
+        keys: one!("files.rename", Rename, [named(PLAIN, NamedKey::F2)]),
     },
-    Binding {
+    Row {
         section: Section::Files,
-        mods: PLAIN,
-        shown: "Del",
+        when: None,
         help: "Move the file on screen to the trash, and show the next",
-        when: None,
-        keys: &[(Named(NamedKey::Delete), Delete)],
+        keys: one!("files.delete", Delete, [named(PLAIN, NamedKey::Delete)]),
     },
-    Binding {
+    Row {
         section: Section::Files,
-        mods: PLAIN,
-        shown: "\u{232b}",
+        when: None,
         help: "Take the file on screen off the list, and show the next",
-        when: None,
-        keys: &[(Named(NamedKey::Backspace), Remove)],
+        keys: one!("files.remove", Remove, [named(PLAIN, NamedKey::Backspace)]),
     },
-    Binding {
+    Row {
         section: Section::Files,
-        mods: CTRL,
-        shown: "Ctrl+Z",
-        help: "Undo the last rename, deletion or removal",
         when: Some(When::Undoable),
-        keys: &[(Char("z"), Undo), (Char("Z"), Undo)],
+        help: "Undo the last rename, deletion or removal",
+        keys: one!("files.undo", Undo, [typed(CTRL, 'z')]),
     },
-    Binding {
+    Row {
         section: Section::Files,
-        mods: CTRL,
-        shown: "Ctrl+E",
+        when: None,
         help: "Export the picture as shown to a new JPG or PNG",
+        keys: one!("files.export", Export, [typed(CTRL, 'e')]),
+    },
+    // The region's own section: the key that puts one up, what the fit
+    // does while it is, and the names that are tried before the plain ones
+    // while it is — by default on the same arrows, which then move the
+    // region rather than the picture.
+    Row {
+        section: Section::Region,
         when: None,
-        keys: &[(Char("e"), Export), (Char("E"), Export)],
+        help: "Select a region to draw with a drag and adjust by its handles, or remove it",
+        keys: one!("region.select", ToggleRegion, [key('x')]),
     },
-    // The region's own section: the key that puts one up, and what the
-    // keys of the other sections do differently while it is. Each of those
-    // is the same chord bound to the same action as its line in its own
-    // section — which is the one doubling
-    // `no_chord_is_bound_twice_to_different_actions` allows — so the table
-    // dispatches once and describes twice.
-    Binding {
+    Row {
         section: Section::Region,
-        mods: PLAIN,
-        shown: "x",
-        help: "Select a region: drag to draw it, with handles to adjust",
-        when: Some(When::NoRegion),
-        keys: &[(Char("x"), ToggleRegion), (Char("X"), ToggleRegion)],
-    },
-    Binding {
-        section: Section::Region,
-        mods: PLAIN,
-        shown: "x, Esc",
-        help: "Remove the region",
         when: Some(When::RegionSelected),
-        keys: &[
-            (Char("x"), ToggleRegion),
-            (Char("X"), ToggleRegion),
-            (Named(NamedKey::Escape), Dismiss),
-        ],
-    },
-    Binding {
-        section: Section::Region,
-        mods: PLAIN,
-        shown: "Space",
         help: "Fit the region, fill the window with it, then the whole image, in turn",
-        when: Some(When::RegionSelected),
-        keys: &[(Named(NamedKey::Space), CycleFit)],
+        keys: Keys::Also("zoom.fit"),
     },
-    Binding {
+    Row {
         section: Section::Region,
-        mods: PLAIN,
-        shown: "Arrows",
-        help: "Move the region, or the handle under the pointer, a pixel",
         when: Some(When::RegionSelected),
-        keys: &[
-            (Named(NamedKey::ArrowLeft), Pan(Left, Coarse)),
-            (Named(NamedKey::ArrowRight), Pan(Right, Coarse)),
-            (Named(NamedKey::ArrowUp), Pan(Up, Coarse)),
-            (Named(NamedKey::ArrowDown), Pan(Down, Coarse)),
-        ],
+        help: "Move the region, or its current handle, a pixel",
+        keys: Keys::Bound(arrows!("region.move", PLAIN, MoveRegion)),
     },
-    Binding {
+    Row {
         section: Section::Region,
-        mods: CTRL,
-        shown: "Ctrl+Arrows",
+        when: Some(When::RegionSelected),
         help: "Grow the region that way a pixel",
-        when: Some(When::RegionSelected),
-        keys: &[
-            (Named(NamedKey::ArrowLeft), Pan(Left, Edge)),
-            (Named(NamedKey::ArrowRight), Pan(Right, Edge)),
-            (Named(NamedKey::ArrowUp), Pan(Up, Edge)),
-            (Named(NamedKey::ArrowDown), Pan(Down, Edge)),
-        ],
+        keys: Keys::Bound(arrows!("region.grow", CTRL, GrowRegion)),
     },
-    Binding {
+    Row {
         section: Section::Region,
-        mods: CTRL_SHIFT,
-        shown: "Ctrl+Shift+Arrows",
-        help: "Shrink the region that way a pixel, pulling its far side in",
         when: Some(When::RegionSelected),
-        keys: &[
-            (Named(NamedKey::ArrowLeft), ShrinkRegion(Left)),
-            (Named(NamedKey::ArrowRight), ShrinkRegion(Right)),
-            (Named(NamedKey::ArrowUp), ShrinkRegion(Up)),
-            (Named(NamedKey::ArrowDown), ShrinkRegion(Down)),
-        ],
+        help: "Shrink the region that way a pixel, pulling its far side in",
+        keys: Keys::Bound(arrows!("region.shrink", CTRL_SHIFT, ShrinkRegion)),
     },
-    Binding {
+    Row {
         section: Section::Clipboard,
-        mods: PLAIN,
-        shown: "c",
+        when: None,
         help: "Copy the name of the file on screen, without its path",
-        when: None,
-        keys: &[(Char("c"), CopyName)],
+        keys: one!("clipboard.name", CopyName, [key('c')]),
     },
-    // The next two are both the capital, so both are typed with Shift held;
-    // only the Ctrl that parts one from the other is a modifier as far as the
-    // table is concerned. `shown` says what the fingers do.
-    Binding {
+    Row {
         section: Section::Clipboard,
-        mods: PLAIN,
-        shown: "Shift+C",
+        when: None,
         help: "Copy the absolute path of the file on screen",
-        when: None,
-        keys: &[(Char("C"), CopyPath)],
+        keys: one!("clipboard.path", CopyPath, [key('C')]),
     },
-    Binding {
+    Row {
         section: Section::Clipboard,
-        mods: CTRL,
-        shown: "Ctrl+Shift+C",
+        when: None,
         help: "Copy the file on screen as a URI another program can open",
-        when: None,
-        keys: &[(Char("C"), CopyUri)],
+        keys: one!("clipboard.uri", CopyUri, [typed(CTRL, 'C')]),
     },
-    Binding {
+    Row {
         section: Section::Clipboard,
-        mods: CTRL,
-        shown: "Ctrl+C",
+        when: None,
         help: "Copy the image as displayed",
-        when: Some(When::NoRegion),
-        keys: &[(Char("c"), CopyImage)],
+        keys: one!("clipboard.image", CopyImage, [typed(CTRL, 'c')]),
     },
     // The region's copy stays beside the image's, rather than in the
     // region's own section: it is a copy first, and where the two lines
     // are read together they say what one chord does either way.
-    Binding {
+    Row {
         section: Section::Clipboard,
-        mods: CTRL,
-        shown: "Ctrl+C",
-        help: "Copy the region as displayed",
         when: Some(When::RegionSelected),
-        keys: &[(Char("c"), CopyImage)],
+        help: "Copy the region as displayed",
+        keys: Keys::Also("clipboard.image"),
     },
-    Binding {
+    Row {
         section: Section::Clipboard,
-        mods: CTRL,
-        shown: "Ctrl+I",
+        when: None,
         help: "Copy everything the info panel says about the file",
-        when: None,
-        keys: &[(Char("i"), CopyMetadata), (Char("I"), CopyMetadata)],
+        keys: one!("clipboard.info", CopyMetadata, [typed(CTRL, 'i')]),
     },
-    // The full stop and the greater-than are one key on most keyboards, and
-    // as with the two `C`s above only the Ctrl that is held either way is a
-    // modifier as far as the table is concerned. `shown` says what the
-    // fingers do.
-    Binding {
+    // The full stop and the greater-than are one key on most keyboards:
+    // the second is the first with Shift, which the character carries.
+    Row {
         section: Section::Clipboard,
-        mods: CTRL,
-        shown: "Ctrl+.",
+        when: Some(When::PointerOnPicture),
         help: "Copy the value of the pixel under the pointer, as read out",
-        when: Some(When::PointerOnPicture),
-        keys: &[(Char("."), CopyPixelValue)],
+        keys: one!("clipboard.pixel", CopyPixelValue, [typed(CTRL, '.')]),
     },
-    Binding {
+    Row {
         section: Section::Clipboard,
-        mods: CTRL,
-        shown: "Ctrl+Shift+.",
+        when: Some(When::PointerOnPicture),
         help: "Copy the coordinate of the pixel under the pointer, as x,y",
-        when: Some(When::PointerOnPicture),
-        keys: &[(Char(">"), CopyPixelCoordinate)],
+        keys: one!(
+            "clipboard.coordinate",
+            CopyPixelCoordinate,
+            [typed(CTRL, '>')]
+        ),
     },
-    Binding {
+    Row {
         section: Section::Clipboard,
-        mods: CTRL,
-        shown: "Ctrl+V",
-        help: "Paste an image, saved among your pictures and shown",
         when: Some(When::PictureOnClipboard),
-        keys: &[(Char("v"), Paste), (Char("V"), Paste)],
+        help: "Paste an image, saved among your pictures and shown",
+        keys: one!("clipboard.paste", Paste, [typed(CTRL, 'v')]),
     },
-    Binding {
+    Row {
         section: Section::Display,
-        mods: PLAIN,
-        shown: "d, f",
+        when: None,
         help: "Exposure down / up, a quarter stop",
-        when: None,
-        keys: &[
-            (Char("d"), Exposure(-EV_STEP)),
-            (Char("D"), Exposure(-EV_STEP)),
-            (Char("f"), Exposure(EV_STEP)),
-            (Char("F"), Exposure(EV_STEP)),
-        ],
+        keys: Keys::Bound(&[
+            Bound {
+                name: "display.exposure.down",
+                action: Exposure(-EV_STEP),
+                defaults: &[key('d')],
+            },
+            Bound {
+                name: "display.exposure.up",
+                action: Exposure(EV_STEP),
+                defaults: &[key('f')],
+            },
+        ]),
     },
-    // One case each: the capitals are the other handle, below.
-    Binding {
+    // The capitals of these two are the other handle, below.
+    Row {
         section: Section::Display,
-        mods: PLAIN,
-        shown: "a, s",
+        when: None,
         help: "Black point down / up",
-        when: None,
-        keys: &[
-            (Char("a"), StepBlack(-WINDOW_STEP)),
-            (Char("s"), StepBlack(WINDOW_STEP)),
-        ],
+        keys: Keys::Bound(&[
+            Bound {
+                name: "display.black.down",
+                action: StepBlack(-WINDOW_STEP),
+                defaults: &[key('a')],
+            },
+            Bound {
+                name: "display.black.up",
+                action: StepBlack(WINDOW_STEP),
+                defaults: &[key('s')],
+            },
+        ]),
     },
-    Binding {
+    Row {
         section: Section::Display,
-        mods: PLAIN,
-        shown: "A, S",
+        when: None,
         help: "White point down / up",
-        when: None,
-        keys: &[
-            (Char("A"), StepWhite(-WINDOW_STEP)),
-            (Char("S"), StepWhite(WINDOW_STEP)),
-        ],
+        keys: Keys::Bound(&[
+            Bound {
+                name: "display.white.down",
+                action: StepWhite(-WINDOW_STEP),
+                defaults: &[key('A')],
+            },
+            Bound {
+                name: "display.white.up",
+                action: StepWhite(WINDOW_STEP),
+                defaults: &[key('S')],
+            },
+        ]),
     },
-    Binding {
+    Row {
         section: Section::Display,
-        mods: PLAIN,
-        shown: "e",
+        when: None,
         help: "Cycle the window rule: stored, full, trimmed",
-        when: None,
-        keys: &[(Char("e"), CycleAutoWindow), (Char("E"), CycleAutoWindow)],
+        keys: one!("display.window", CycleAutoWindow, [key('e')]),
     },
-    Binding {
+    Row {
         section: Section::Display,
-        mods: PLAIN,
-        shown: "t",
+        when: None,
         help: "Toggle the curve on the highlights: clip, or roll off",
-        when: None,
-        keys: &[(Char("t"), CycleToneMap), (Char("T"), CycleToneMap)],
+        keys: one!("display.tone-map", CycleToneMap, [key('t')]),
     },
-    Binding {
+    Row {
         section: Section::Display,
-        mods: PLAIN,
-        shown: "w",
+        when: None,
         help: "Toggle the marks on the clipped pixels: red at white, blue at black",
-        when: None,
-        keys: &[(Char("w"), MarkClipped), (Char("W"), MarkClipped)],
+        keys: one!("display.marks", MarkClipped, [key('w')]),
     },
-    Binding {
+    Row {
         section: Section::Display,
-        mods: PLAIN,
-        shown: "o",
-        help: "Toggle HDR output, where the monitor is in HDR mode",
         when: Some(When::HdrMode),
-        keys: &[(Char("o"), ToggleHdr), (Char("O"), ToggleHdr)],
+        help: "Toggle HDR output, where the monitor is in HDR mode",
+        keys: one!("display.hdr", ToggleHdr, [key('o')]),
     },
-    Binding {
+    Row {
         section: Section::Display,
-        mods: PLAIN,
-        shown: "r",
-        help: "Cycle false color for single-channel images",
         when: Some(When::SingleChannel),
-        keys: &[(Char("r"), CycleColormap), (Char("R"), CycleColormap)],
+        help: "Cycle false color for single-channel images",
+        keys: one!("display.colormap", CycleColormap, [key('r')]),
     },
-    Binding {
+    Row {
         section: Section::Display,
-        mods: PLAIN,
-        shown: "z",
+        when: None,
         help: "Reset the window, exposure and tone map",
-        when: None,
-        keys: &[(Char("z"), ResetDisplay), (Char("Z"), ResetDisplay)],
+        keys: one!("display.reset", ResetDisplay, [key('z')]),
     },
-    Binding {
+    Row {
         section: Section::Display,
-        mods: PLAIN,
-        shown: "; '",
-        help: "Turn the picture a quarter counterclockwise, clockwise",
         when: None,
-        keys: &[(Char(";"), TurnLeft), (Char("'"), TurnRight)],
+        help: "Turn the picture a quarter counterclockwise, clockwise",
+        keys: Keys::Bound(&[
+            Bound {
+                name: "display.turn.left",
+                action: TurnLeft,
+                defaults: &[key(';')],
+            },
+            Bound {
+                name: "display.turn.right",
+                action: TurnRight,
+                defaults: &[key('\'')],
+            },
+        ]),
     },
-    Binding {
+    Row {
         section: Section::Playback,
-        mods: PLAIN,
-        shown: "Enter",
-        help: "Play or pause an animation",
         when: Some(When::Animation),
-        keys: &[(Named(NamedKey::Enter), TogglePlay)],
+        help: "Play or pause an animation",
+        keys: one!("playback.play", TogglePlay, [named(PLAIN, NamedKey::Enter)]),
     },
-    Binding {
+    Row {
         section: Section::Playback,
-        mods: PLAIN,
-        shown: "n",
+        when: Some(When::AnimationOrPages),
         help: "Next frame of an animation, or page of a file that holds several",
-        when: Some(When::AnimationOrPages),
-        keys: &[(Char("n"), NextFrame)],
+        keys: one!("playback.next", NextFrame, [key('n')]),
     },
-    Binding {
+    Row {
         section: Section::Playback,
-        mods: PLAIN,
-        shown: "N",
-        help: "Previous frame, or page",
         when: Some(When::AnimationOrPages),
-        keys: &[(Char("N"), PreviousFrame)],
+        help: "Previous frame, or page",
+        keys: one!("playback.previous", PreviousFrame, [key('N')]),
     },
 ];
-
-/// What `key`, pressed at `position` and held with `mods`, asks for. The
-/// place on the keyboard comes along with the character because a handful of
-/// bindings are made against it — see [`KeyName::Position`].
-pub fn action_for(key: &Key, position: PhysicalKey, mods: Mods) -> Option<Action> {
-    KEYS.iter()
-        .flat_map(|binding| binding.keys.iter().map(|entry| (binding.mods, entry)))
-        .find(|(required, (name, _))| {
-            satisfies(*required, mods, *name)
-                && match (name, key) {
-                    (Char(text), Key::Character(typed)) => typed.as_str() == *text,
-                    (Named(name), Key::Named(pressed)) => name == pressed,
-                    (Position(code), _) => position == PhysicalKey::Code(*code),
-                    _ => false,
-                }
-        })
-        .map(|(_, (_, action))| *action)
-}
 
 /// The words the application has for the interface, gathered before a
 /// frame: enough to compose any tooltip the pointer might rest for, without
 /// the interface reaching back into the application to ask.
 ///
 /// A handful of values rather than the application itself, since the frame
-/// is drawn from the application's state while this is read.
+/// is drawn from the application's state while this is read. The keys and
+/// the gestures are handles on the application's own, shared rather than
+/// borrowed: the frame is drawn with the application borrowed mutably.
 pub(super) struct Namer {
     /// The absolute path of the file on screen, for the tooltip on its name.
     path: String,
@@ -1480,6 +1337,9 @@ pub(super) struct Namer {
     /// What holds this frame: which keys' conditions, and what makes a
     /// control dead, for the tooltip that then says why instead of what.
     conditions: Conditions,
+    /// What each key is bound to, and each gesture.
+    keys: Rc<Keymap>,
+    gestures: Rc<Gestures>,
 }
 
 impl Naming for Namer {
@@ -1491,6 +1351,7 @@ impl Naming for Namer {
     /// tooltip and `--help` cannot disagree about a binding — see [`names`]
     /// and [`hint`].
     fn tooltip(&self, at: Tip) -> Option<ui::Tooltip> {
+        let keys = &*self.keys;
         // A control that is drawn dead — a toggle the window has no room for,
         // the surface switch on a monitor with no room above white — refuses
         // the press, so the label says why rather than naming the thing and
@@ -1508,21 +1369,26 @@ impl Naming for Namer {
             // copies, named as the item of the menus that copies it is.
             Tip::Name => (
                 vec![self.path.clone()],
-                Vec::from_iter(names(Tip::Control(Control::Copies(Copies::Path)))),
+                Vec::from_iter(names(keys, Tip::Control(Control::Copies(Copies::Path)))),
             ),
             // The count says which of the list is on screen. A press on it
             // opens the chooser, said the way the state's press is, with the
             // key that opens it too; under that the keys that step through
             // the list without opening anything.
             Tip::Counter => {
-                let chooser = binding_for(OpenChooser).map(|binding| {
-                    format!("Click to choose a file from the list ({})", binding.shown)
-                });
+                let chooser = with_key(
+                    "Click to choose a file from the list",
+                    key_of(keys, OpenChooser),
+                );
                 (
                     vec![format!("File {} of {}", self.index + 1, self.count)],
-                    chooser
+                    [chooser]
                         .into_iter()
-                        .chain([NextFile, PreviousFile].into_iter().filter_map(hint))
+                        .chain(
+                            [NextFile, PreviousFile]
+                                .into_iter()
+                                .filter_map(|action| hint(keys, action)),
+                        )
                         .collect(),
                 )
             }
@@ -1538,9 +1404,7 @@ impl Naming for Namer {
                     (ui::tooltip::PIXEL_COPY_COORDINATE, CopyPixelCoordinate),
                 ]
                 .into_iter()
-                .filter_map(|(words, action)| {
-                    Some(format!("{words} ({})", binding_for(action)?.shown))
-                })
+                .filter_map(|(words, action)| Some(format!("{words} ({})", key_of(keys, action)?)))
                 .collect(),
             ),
             // The button that hides the interface: what a plain press does,
@@ -1548,11 +1412,10 @@ impl Naming for Namer {
             // panels with it — the one thing on the button the pointer
             // cannot discover by resting on it.
             Tip::Control(Control::Maximize) => (
-                vec![names(at)?],
-                vec![format!(
-                    "{} ({})",
+                vec![names(keys, at)?],
+                vec![with_key(
                     ui::tooltip::MAXIMIZE_SHIFTED,
-                    binding_for(ToggleInterfaceAndPanels)?.shown
+                    key_of(keys, ToggleInterfaceAndPanels),
                 )],
             ),
             // The copy of the picture takes the region while one is up, as
@@ -1560,13 +1423,8 @@ impl Naming for Namer {
             Tip::Control(Control::Copies(Copies::Image))
                 if self.conditions.met(When::RegionSelected) =>
             {
-                let binding = binding_for(CopyImage)?;
                 (
-                    vec![format!(
-                        "{} ({})",
-                        ui::tooltip::COPY_REGION,
-                        shown_for(binding, CopyImage)
-                    )],
+                    vec![with_key(ui::tooltip::COPY_REGION, key_of(keys, CopyImage))],
                     Vec::new(),
                 )
             }
@@ -1574,29 +1432,36 @@ impl Naming for Namer {
             // the mouse that holds the loupe up without it, which no key
             // table lists, and how the magnification is set — by the wheel
             // with that button held, or by its own key.
-            Tip::Control(Control::Loupe) => (
-                vec![names(at)?],
-                vec![
-                    ui::tooltip::LOUPE_HELD.to_string(),
-                    ui::tooltip::loupe_wheel(binding_for(CycleMagnification)?.shown),
-                ],
-            ),
+            Tip::Control(Control::Loupe) => {
+                let held = self
+                    .gestures
+                    .held_for_loupe()
+                    .map(|slot| ui::tooltip::loupe_held(&slot));
+                let wheel = ui::tooltip::loupe_wheel(
+                    self.gestures.wheel_for_magnification().as_deref(),
+                    key_of(keys, CycleMagnification).as_deref(),
+                );
+                (
+                    vec![names(keys, at)?],
+                    held.into_iter().chain(wheel).collect(),
+                )
+            }
             // The exposure's slider, and under it the keys that step what
             // it sets.
             Tip::Exposure => (
-                vec![names(at)?],
-                [Exposure(-EV_STEP)].into_iter().filter_map(hint).collect(),
+                vec![names(keys, at)?],
+                Vec::from_iter(hint(keys, Exposure(-EV_STEP))),
             ),
             // The two handles: what each is, and under it the pair of keys
             // that step it. The band between them slides the window, which
             // no key does, so it names itself and nothing more.
             Tip::BlackPoint => (
-                vec![names(at)?],
-                Vec::from_iter(hint(StepBlack(-WINDOW_STEP))),
+                vec![names(keys, at)?],
+                Vec::from_iter(hint(keys, StepBlack(-WINDOW_STEP))),
             ),
             Tip::WhitePoint => (
-                vec![names(at)?],
-                Vec::from_iter(hint(StepWhite(-WINDOW_STEP))),
+                vec![names(keys, at)?],
+                Vec::from_iter(hint(keys, StepWhite(-WINDOW_STEP))),
             ),
             // The words at the end of the bottom bar: what the bar says in
             // the room it has, said out in full — a line for each of the
@@ -1608,7 +1473,6 @@ impl Naming for Namer {
                 if self.state.is_empty() {
                     return None;
                 }
-                let binding = binding_for(ToggleHistogram)?;
                 // What the press is for while the panel is closed; what it
                 // actually does while the panel is open, the press being the
                 // toggle the key is.
@@ -1618,49 +1482,85 @@ impl Naming for Namer {
                 };
                 (
                     self.state.clone(),
-                    vec![format!("Click to {does} the histogram ({})", binding.shown)],
+                    vec![with_key(
+                        &format!("Click to {does} the histogram"),
+                        key_of(keys, ToggleHistogram),
+                    )],
                 )
             }
-            _ => (vec![names(at)?], Vec::new()),
+            _ => (vec![names(keys, at)?], Vec::new()),
         };
         Some(ui::Tooltip { title, hints })
     }
 
     fn shortcut(&self, control: Control) -> Option<String> {
-        let action = action_of(Tip::Control(control))?;
-        let binding = binding_for(action)?;
-        Some(shown_for(binding, action))
+        key_of(&self.keys, action_of(Tip::Control(control))?)
     }
 
     fn help(&self) -> Vec<ui::help::Section> {
-        help_sections(&self.conditions)
+        help_sections(&self.keys, &self.gestures, &self.conditions)
     }
 }
 
 /// The key table as the help popup lays it out: one section per heading,
 /// in `--help`'s order, and in each one row per line of the table, the key
-/// column spelled as the tooltips spell it, and each condition marked with
-/// whether it holds under `conditions`.
+/// column spelled from the chords in force, and each condition marked with
+/// whether it holds under `conditions`; then the mouse, one row for each
+/// gesture that does anything.
 ///
 /// Free of the `Namer` on purpose: nothing else about the frame changes
 /// what the keys are, and a test can read the whole of it without one.
-pub(super) fn help_sections(conditions: &Conditions) -> Vec<ui::help::Section> {
+pub(super) fn help_sections(
+    keys: &Keymap,
+    gestures: &Gestures,
+    conditions: &Conditions,
+) -> Vec<ui::help::Section> {
     Section::ALL
         .into_iter()
         .map(|section| ui::help::Section {
             title: section.title(),
-            rows: KEYS
+            rows: keys
+                .rows()
                 .iter()
-                .filter(|binding| binding.section == section)
-                .map(|binding| ui::help::Row {
-                    key: binding.shown.to_string(),
-                    does: binding.help,
-                    when: binding.when.map(|when| ui::help::Condition {
+                .filter(|row| row.section == section)
+                .map(|row| ui::help::Row {
+                    key: keys.column(row),
+                    does: row.help,
+                    when: row.when.map(|when| ui::help::Condition {
                         words: when.describe(),
                         met: conditions.met(when),
                     }),
                 })
                 .collect(),
+        })
+        .chain([ui::help::Section {
+            title: MOUSE,
+            rows: mouse_rows(keys, gestures)
+                .into_iter()
+                .map(|(key, does)| ui::help::Row {
+                    key,
+                    does,
+                    when: None,
+                })
+                .collect(),
+        }])
+        .collect()
+}
+
+/// The heading the mouse's gestures are listed under.
+pub const MOUSE: &str = "Mouse";
+
+/// Every gesture that does anything, as it is spelled and what it does: a
+/// click by the words of the key it runs.
+pub fn mouse_rows(keys: &Keymap, gestures: &Gestures) -> Vec<(String, &'static str)> {
+    gestures
+        .rows()
+        .filter_map(|(spelled, behavior)| {
+            let does = match behavior {
+                gestures::Behavior::Click(name) => keys.help_of(name)?,
+                other => other.describe()?,
+            };
+            Some((spelled, does))
         })
         .collect()
 }
@@ -1705,43 +1605,37 @@ pub(super) struct Pointer {
     /// frame after, which is one frame late only when a panel has appeared or
     /// gone under a still pointer — and that frame is being painted anyway.
     pub(super) over_image: bool,
-    /// Whether the secondary button is down on the picture, which holds
-    /// the loupe up while it is. From the last pass, as `over_image` is,
-    /// since the toolkit takes the button — see `Command::Secondary`.
-    pub(super) secondary: bool,
+    /// Which button other than the primary is down on the picture, which
+    /// holds the loupe up while it is, where its hold slot says so. From the
+    /// last pass, as `over_image` is, since the toolkit takes the button —
+    /// see `Command::Held`.
+    pub(super) held: Option<Button>,
     /// The wheel's turning toward the loupe's next magnification, in
     /// notches: a trackpad arrives in fractions of one, and they add up
     /// here until there is a whole notch to answer.
     pub(super) magnifying: f32,
-    /// Where `Space` is: the one key that fits on its way up.
-    pub(super) space: Space,
+    /// The same for whichever other stepper the wheel was last turning,
+    /// with which one it was: turning a different one starts over.
+    pub(super) notches: Option<(WheelAction, f32)>,
+    /// The key that fits, while it is held: the one key answered on its
+    /// way up.
+    pub(super) fit_key: Option<FitKey>,
 }
 
-/// Where `Space` is. Held, a drag on the picture draws a box to zoom to,
-/// which is why the key fits nothing on its way down — the view would move
-/// under the hand about to draw — and fits on its way up instead, unless a
-/// box was drawn while it was down. The key's repeats are the same press
-/// still going, and are not answered.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub(super) enum Space {
-    #[default]
-    Up,
-    Held {
-        /// Whether a box has been drawn while it was down, which is what
-        /// letting go of it asks before it fits anything.
-        drawn: bool,
-    },
-}
-
-impl Pointer {
-    /// Whether a wheel event belongs to the window manager rather than to us:
-    /// Ctrl with the wheel is a compositor gesture, and zooming on it as well
-    /// would move the view behind the user's back. Keys answer the same
-    /// question through [`satisfies`], which lets a chord this table does
-    /// bind through.
-    fn chorded(&self) -> bool {
-        self.modifiers.control_key() || self.modifiers.alt_key() || self.modifiers.super_key()
-    }
+/// The key bound to the fit, held. Held, a drag on the picture draws a box
+/// to zoom to, which is why the key fits nothing on its way down — the view
+/// would move under the hand about to draw — and fits on its way up instead,
+/// unless a box was drawn while it was down. The key's repeats are the same
+/// press still going, and are not answered.
+///
+/// Kept by the place on the keyboard it was pressed at, since that is what
+/// its release is sure to say again, whatever is held with it by then.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) struct FitKey {
+    pub(super) key: PhysicalKey,
+    /// Whether a box has been drawn while it was down, which is what
+    /// letting go of it asks before it fits anything.
+    pub(super) drawn: bool,
 }
 
 /// Says on the terminal that something could not be done, with the whole
@@ -1772,50 +1666,53 @@ impl App {
         position: PhysicalKey,
         state: ElementState,
     ) -> Effect {
-        // Space is answered on its way up — see `Space` — and its release
-        // is read whatever is held with it by then, so that a chord pressed
-        // while it was down cannot leave it held for good.
-        if *key == Key::Named(NamedKey::Space) && state == ElementState::Released {
-            return self.release_space();
-        }
+        // The fit key is answered on its way up — see `FitKey` — and its
+        // release is read whatever is held with it by then, so that a chord
+        // pressed while it was down cannot leave it held for good.
         if state == ElementState::Released {
-            return Effect::Nothing;
+            return match self.pointer.fit_key {
+                Some(held) if held.key == position => self.release_fit_key(),
+                _ => Effect::Nothing,
+            };
         }
-        match action_for(key, position, self.pointer.modifiers) {
-            Some(CycleFit) => self.hold_space(),
+        let region_selected = matches!(self.marking.selection, Selection::Shown(_));
+        match self
+            .keys
+            .action_for(key, position, self.pointer.modifiers, region_selected)
+        {
+            Some(CycleFit) => self.hold_fit_key(position),
             Some(action) => self.perform(action),
             None => Effect::Nothing,
         }
     }
 
-    /// `Space` went down. Nothing moves, but the pointer over the picture
-    /// changes to say what a drag would now do, which takes a frame. A
-    /// repeat of a key already held is the same press still going, and
+    /// The fit key went down. Nothing moves, but the pointer over the
+    /// picture changes to say what a drag would now do, which takes a frame.
+    /// A repeat of a key already held is the same press still going, and
     /// changes nothing.
-    fn hold_space(&mut self) -> Effect {
-        if self.pointer.space != Space::Up {
+    fn hold_fit_key(&mut self, key: PhysicalKey) -> Effect {
+        if self.pointer.fit_key.is_some() {
             return Effect::Nothing;
         }
-        self.pointer.space = Space::Held { drawn: false };
+        self.pointer.fit_key = Some(FitKey { key, drawn: false });
         Effect::Redraw
     }
 
-    /// `Space` came up: the fit it asked for, unless a box was drawn while
-    /// it was down — in which case the zoom was the box's, the key is
+    /// The fit key came up: the fit it asked for, unless a box was drawn
+    /// while it was down — in which case the zoom was the box's, the key is
     /// spent, and only the pointer has to change back.
-    fn release_space(&mut self) -> Effect {
-        let space = std::mem::take(&mut self.pointer.space);
-        match space {
-            Space::Held { drawn: false } => self.perform(CycleFit),
-            Space::Held { drawn: true } => Effect::Redraw,
-            Space::Up => Effect::Nothing,
+    fn release_fit_key(&mut self) -> Effect {
+        match self.pointer.fit_key.take() {
+            Some(FitKey { drawn: false, .. }) => self.perform(CycleFit),
+            Some(FitKey { drawn: true, .. }) => Effect::Redraw,
+            None => Effect::Nothing,
         }
     }
 
     /// The window lost the keyboard: whatever was held is not held here
     /// any more, and its release will go elsewhere.
     pub(super) fn keys_lost(&mut self) {
-        self.pointer.space = Space::Up;
+        self.pointer.fit_key = None;
     }
 
     /// Does what a key asked for.
@@ -1939,9 +1836,12 @@ impl App {
                 // anywhere looks broken rather than tidy. Once only: after
                 // that the reader knows, and a message every time would be
                 // in the way of the thing they asked to see.
-                if !self.panels.show_ui && !self.said_how_to_restore {
+                if !self.panels.show_ui
+                    && !self.said_how_to_restore
+                    && let Some(message) = restore_message(&self.keys)
+                {
                     self.said_how_to_restore = true;
-                    self.toast(RESTORE, Level::Message);
+                    self.toast(message, Level::Message);
                 }
             }
             // The three panels float over the image rather than inside the
@@ -2072,8 +1972,9 @@ impl App {
             }
             ToggleHdr => return self.press(Control::Output),
             ToggleRegion => return self.press(Control::Region),
-            // Only a region shrinks, and there is none: see `perform_on_region`.
-            ShrinkRegion(_) => return Effect::Nothing,
+            // Only a region moves, grows and shrinks, and there is none: see
+            // `perform_on_region`.
+            MoveRegion(_) | GrowRegion(_) | ShrinkRegion(_) => return Effect::Nothing,
             TogglePlay => return self.toggle_play(),
             NextFrame => return self.step_frame(1),
             PreviousFrame => return self.step_frame(-1),
@@ -2095,18 +1996,19 @@ impl App {
     }
 
     /// What `action` does to `region`, the region on screen, where it does
-    /// something to it: the arrows move its current handle a pixel — the
-    /// whole of it, while that is the middle — with Ctrl grow it, with
-    /// Ctrl and Shift shrink it, `Space` frames it and then the picture,
-    /// and the copy of the picture copies it. `None` for every other
-    /// action, which is the picture's as it always was.
+    /// something to it: the region's own three move its current handle a
+    /// pixel — the whole of it, while that is the middle — grow it and
+    /// shrink it; the fit frames it and then the picture; and the copy of
+    /// the picture copies it. `None` for every other action, which is the
+    /// picture's as it always was: the arrows pan under a region unless the
+    /// region's names hold them, which by default they do.
     ///
     /// Nothing here is animated: a region moves by a pixel at a time, and a
     /// pixel has nothing to animate.
     fn perform_on_region(&mut self, region: Region, action: Action) -> Option<Effect> {
         let image = self.image_pixels();
         Some(match action {
-            Pan(direction, Edge) => {
+            GrowRegion(direction) => {
                 self.marking
                     .select(region.grown(direction.side(), 1, image));
                 Effect::Redraw
@@ -2119,10 +2021,7 @@ impl App {
                     .select(region.shrunk(direction.side().opposite(), 1));
                 Effect::Redraw
             }
-            // The fine pan is left to the picture: a region moves by the
-            // pixel already, and the picture under it still wants moving by
-            // one.
-            Pan(direction, Coarse) => {
+            MoveRegion(direction) => {
                 let step = direction.step();
                 // The middle moves the whole region, and so does a handle
                 // that has no edge to move the way the arrow points — an
@@ -2163,11 +2062,11 @@ impl App {
 
     /// A drag on the picture has taken hold of the region — or of nothing
     /// yet, to draw one, or to draw a box to zoom to — at `at`, in image
-    /// pixels. The box is what the held key was for, and the key is spent
-    /// on it: letting go of it afterwards fits nothing.
+    /// pixels. A box drawn with the fit key held is what the key was held
+    /// for, and the key is spent on it: letting go afterwards fits nothing.
     fn grab(&mut self, grab: Grab, at: [f32; 2]) {
         if grab == Grab::Zoom
-            && let Space::Held { drawn } = &mut self.pointer.space
+            && let Some(FitKey { drawn, .. }) = &mut self.pointer.fit_key
         {
             *drawn = true;
         }
@@ -2224,6 +2123,8 @@ impl App {
                 .map(|current| ui::explain_state(current, self.headroom()))
                 .unwrap_or_default(),
             conditions: self.conditions(),
+            keys: Rc::clone(&self.keys),
+            gestures: Rc::clone(&self.gestures),
         }
     }
 
@@ -2291,14 +2192,17 @@ impl App {
             ui::Command::OverGrip(grip) => {
                 return Effect::redraw_if(std::mem::replace(&mut self.marking.grip, grip) != grip);
             }
-            // The secondary button on the picture, and the pointer with it
-            // while it is down: the loupe comes up on the press, follows the
-            // hand, and goes on the release — unless its toggle keeps it.
-            ui::Command::Secondary(held) => {
-                let was = std::mem::replace(&mut self.pointer.secondary, held.is_some());
-                let moved = held.is_some_and(|at| self.pointer.cursor.replace(at) != Some(at));
-                return Effect::redraw_if(was != held.is_some() || moved);
+            // A button other than the primary held on the picture, and the
+            // pointer with it while it is down: where its hold slot is the
+            // loupe, the loupe comes up on the press, follows the hand, and
+            // goes on the release — unless its toggle keeps it.
+            ui::Command::Held { button, at } => {
+                let was = std::mem::replace(&mut self.pointer.held, button);
+                let moved = at.is_some_and(|at| self.pointer.cursor.replace(at) != Some(at));
+                return Effect::redraw_if(was != button || moved);
             }
+            // A click of a button on the picture: the key its slot names.
+            ui::Command::Click(button) => return self.click(button),
             // The pointer through a drag on the picture, which winit has
             // stopped reporting: the loupe follows it, as the readout does.
             ui::Command::Dragging(at) => {
@@ -2341,8 +2245,11 @@ impl App {
                 let (image, viewport) = (self.image_size(), self.viewport());
                 self.view.pan_by(-dx, -dy, image, viewport);
             }
-            ui::Command::Wheel { steps, notched } => self.wheel(steps, notched),
-            ui::Command::Magnify(steps) => return self.magnify(steps),
+            ui::Command::Wheel {
+                delta,
+                notched,
+                held,
+            } => return self.wheel(delta, notched, held),
             // The hand on the minimap: the view goes where it is put, as
             // it does for a drag on the picture.
             ui::Command::Center(at) => {
@@ -2432,43 +2339,40 @@ impl App {
         Effect::Nothing
     }
 
-    /// Zooms about the pointer by `steps` notches of the wheel.
+    /// The wheel turned over the picture, by `delta` notches across and
+    /// down, with `held` down on it: whatever its slot steps.
     ///
-    /// A wheel's notch is a step asked for by name, and is animated as a
-    /// key's would be; a trackpad's scroll is the hand on the view, as a drag
-    /// is, and goes where the fingers put it.
-    /// The wheel with the secondary button down: the loupe's magnification
-    /// stepped a notch at a time up or down [`ui::loupe::MAGNIFICATIONS`],
-    /// the way the wheel steps the zoom. A trackpad's fractions of a notch
-    /// add up until there is one. Nothing at either end, and no frame owed
-    /// for it.
-    fn magnify(&mut self, steps: f32) -> Effect {
-        if !steps.is_finite() {
+    /// A wheel's notch is a step asked for by name, and a zoom or a pan on
+    /// it is animated as a key's would be; a trackpad's scroll is the hand
+    /// on the view, as a drag is, and goes where the fingers put it. A wheel
+    /// turned with a chord no slot names does nothing: Ctrl with the wheel
+    /// is a compositor's gesture unless the configuration says otherwise.
+    fn wheel(&mut self, delta: [f32; 2], notched: bool, held: Option<Button>) -> Effect {
+        let Some(action) = self
+            .gestures
+            .wheel(Surface::Image, self.pointer.modifiers, held)
+        else {
+            return Effect::Nothing;
+        };
+        if !delta.iter().all(|each| each.is_finite()) {
             return Effect::Nothing;
         }
-        self.pointer.magnifying += steps;
-        let mut changed = false;
-        while self.pointer.magnifying.abs() >= 1.0 {
-            let up = self.pointer.magnifying > 0.0;
-            self.pointer.magnifying -= if up { 1.0 } else { -1.0 };
-            let was = self.panels.loupe_magnification;
-            self.panels.loupe_magnification = ui::loupe::step(was, up);
-            changed |= self.panels.loupe_magnification != was;
+        let steps = delta[1];
+        match action {
+            WheelAction::Zoom => self.zoom_wheel(steps, notched),
+            WheelAction::LoupeMagnification => self.magnify(steps),
+            WheelAction::Pan => self.pan_wheel(delta, notched),
+            stepper => self.step_wheel(stepper, steps),
         }
-        Effect::redraw_if(changed)
     }
 
-    fn wheel(&mut self, steps: f32, notched: bool) {
-        // Same reasoning as `handle_key`: Ctrl+wheel and friends belong to the
-        // compositor, and acting on them as well would zoom behind its back.
-        if self.pointer.chorded() {
-            return;
-        }
+    /// Zooms about the pointer by `steps` notches of the wheel.
+    fn zoom_wheel(&mut self, steps: f32, notched: bool) -> Effect {
         // A trackpad emits a long tail of all but motionless events at the end
         // of a gesture, which would leave the view drifting after the finger
         // has stopped.
-        if !steps.is_finite() || steps.abs() < 1e-3 {
-            return;
+        if steps.abs() < 1e-3 {
+            return Effect::Nothing;
         }
         let viewport = self.viewport();
         let anchor = self.pointer.cursor.unwrap_or([
@@ -2482,6 +2386,88 @@ impl App {
         } else {
             self.view
                 .zoom_steps_at(steps, anchor, self.image_size(), viewport);
+        }
+        Effect::Redraw
+    }
+
+    /// Pans by `delta` notches, each as far as a trackpad scrolls for one,
+    /// the picture following the wheel as it follows a drag.
+    fn pan_wheel(&mut self, delta: [f32; 2], notched: bool) -> Effect {
+        if delta.iter().all(|each| each.abs() < 1e-3) {
+            return Effect::Nothing;
+        }
+        let by = ui::WHEEL_PIXELS_PER_STEP * self.scale_factor();
+        let [dx, dy] = [delta[0] * by, delta[1] * by];
+        if notched {
+            self.animate(|view, image, viewport| view.pan_by(-dx, -dy, image, viewport));
+        } else {
+            let (image, viewport) = (self.image_size(), self.viewport());
+            self.view.pan_by(-dx, -dy, image, viewport);
+        }
+        Effect::Redraw
+    }
+
+    /// The wheel on the loupe's magnification: a notch at a time up or down
+    /// [`ui::loupe::MAGNIFICATIONS`], the way the wheel steps the zoom. A
+    /// trackpad's fractions of a notch add up until there is one. Nothing at
+    /// either end, and no frame owed for it.
+    fn magnify(&mut self, steps: f32) -> Effect {
+        self.pointer.magnifying += steps;
+        let mut changed = false;
+        while self.pointer.magnifying.abs() >= 1.0 {
+            let up = self.pointer.magnifying > 0.0;
+            self.pointer.magnifying -= if up { 1.0 } else { -1.0 };
+            let was = self.panels.loupe_magnification;
+            self.panels.loupe_magnification = ui::loupe::step(was, up);
+            changed |= self.panels.loupe_magnification != was;
+        }
+        Effect::redraw_if(changed)
+    }
+
+    /// The wheel on one of the things a key steps: the key's own action,
+    /// once for each whole notch. A trackpad's fractions add up until there
+    /// is one, and the count starts over when the wheel turns to stepping
+    /// something else. Up is more exposure, a higher black or white point,
+    /// and the file or frame before.
+    fn step_wheel(&mut self, stepper: WheelAction, steps: f32) -> Effect {
+        let mut turned = match self.pointer.notches {
+            Some((was, turned)) if was == stepper => turned,
+            _ => 0.0,
+        } + steps;
+        let mut effect = Effect::Nothing;
+        while turned.abs() >= 1.0 {
+            let up = turned > 0.0;
+            turned -= if up { 1.0 } else { -1.0 };
+            let sign = if up { 1.0 } else { -1.0 };
+            let action = match stepper {
+                WheelAction::Exposure => Exposure(sign * EV_STEP),
+                WheelAction::BlackPoint => StepBlack(sign * WINDOW_STEP),
+                WheelAction::WhitePoint => StepWhite(sign * WINDOW_STEP),
+                WheelAction::Files if up => PreviousFile,
+                WheelAction::Files => NextFile,
+                WheelAction::Frames if up => PreviousFrame,
+                WheelAction::Frames => NextFrame,
+                WheelAction::Zoom | WheelAction::LoupeMagnification | WheelAction::Pan => {
+                    unreachable!("{stepper:?} is not a stepper")
+                }
+            };
+            effect = effect.also(self.perform(action));
+        }
+        self.pointer.notches = Some((stepper, turned));
+        effect
+    }
+
+    /// A button clicked on the picture: the action of the key its slot
+    /// names, as though the key had been pressed. A slot naming no key, or
+    /// no slot at all, is nothing.
+    fn click(&mut self, button: Button) -> Effect {
+        let action = self
+            .gestures
+            .click(Surface::Image, self.pointer.modifiers, button)
+            .and_then(|name| self.keys.action_named(name));
+        match action {
+            Some(action) => self.perform(action),
+            None => Effect::Nothing,
         }
     }
 
@@ -3057,6 +3043,25 @@ impl App {
 mod tests {
     use super::*;
 
+    /// The free readings of the table, over the default keys.
+    fn names(tip: Tip) -> Option<String> {
+        super::names(&Keymap::default(), tip)
+    }
+
+    fn hint(action: Action) -> Option<String> {
+        super::hint(&Keymap::default(), action)
+    }
+
+    /// What a key asks for with no region selected, at the default keys.
+    fn action_for(key: &Key, position: PhysicalKey, mods: Mods) -> Option<Action> {
+        Keymap::default().action_for(key, position, mods, false)
+    }
+
+    /// The same with a region selected.
+    fn with_region(key: &Key, position: PhysicalKey, mods: Mods) -> Option<Action> {
+        Keymap::default().action_for(key, position, mods, true)
+    }
+
     /// Every button in the chrome is named by the key that does the same job,
     /// in that key's own words: there is one table, so a tooltip and `--help`
     /// have nowhere to disagree about a binding.
@@ -3210,6 +3215,8 @@ mod tests {
             count: 0,
             show_histogram: false,
             state: Vec::new(),
+            keys: Rc::new(Keymap::default()),
+            gestures: Rc::new(Gestures::default()),
             conditions: Conditions::ALIVE,
         };
         assert_eq!(
@@ -3242,6 +3249,8 @@ mod tests {
             count: 0,
             show_histogram: false,
             state: Vec::new(),
+            keys: Rc::new(Keymap::default()),
+            gestures: Rc::new(Gestures::default()),
             conditions: Conditions {
                 picking: true,
                 ..Conditions::ALIVE
@@ -3265,41 +3274,53 @@ mod tests {
 
     /// The help popup lays out the whole table and nothing else: every line
     /// once, under the heading `--help` puts it under, in the order the
-    /// table keeps. A condition is a phrase, not a sentence: no capital at
-    /// the front, no full stop at the end, and short enough for its column.
+    /// table keeps, and then the mouse. A condition is a phrase, not a
+    /// sentence: no capital at the front, no full stop at the end, and short
+    /// enough for its column.
     #[test]
     fn the_help_popup_shows_every_line_of_the_table_once() {
-        let sections = help_sections(&Conditions::default());
-        assert_eq!(sections.len(), Section::ALL.len());
-        let rows: Vec<&ui::help::Row> = sections
+        let keys = Keymap::default();
+        let gestures = Gestures::default();
+        let sections = help_sections(&keys, &gestures, &Conditions::default());
+        assert_eq!(sections.len(), Section::ALL.len() + 1);
+        let rows: Vec<&ui::help::Row> = sections[..Section::ALL.len()]
             .iter()
             .flat_map(|section| section.rows.iter())
             .collect();
-        assert_eq!(rows.len(), KEYS.len());
-        for (row, binding) in rows.iter().zip(KEYS) {
-            assert_eq!(row.key, binding.shown);
-            assert_eq!(row.does, binding.help);
+        assert_eq!(rows.len(), ROWS.len());
+        for (row, line) in rows.iter().zip(ROWS) {
+            assert_eq!(row.key, keys.column(line));
+            assert_eq!(row.does, line.help);
             assert_eq!(
                 row.when.map(|when| when.words),
-                binding.when.map(When::describe)
+                line.when.map(When::describe)
             );
-            // Nothing holds but the absence of a region, so every other
-            // condition is marked unmet.
-            assert_eq!(
-                row.when.map(|when| when.met),
-                binding.when.map(|when| when == When::NoRegion)
-            );
+            // Nothing holds, so every condition is marked unmet.
+            assert_eq!(row.when.map(|when| when.met), line.when.map(|_| false));
         }
         for (section, listed) in Section::ALL.into_iter().zip(&sections) {
             assert_eq!(listed.title, section.title());
             assert!(!listed.rows.is_empty(), "{:?} has keys", section);
-            assert!(
-                KEYS.iter()
-                    .filter(|binding| binding.section == section)
-                    .count()
-                    == listed.rows.len()
-            );
+            assert!(ROWS.iter().filter(|row| row.section == section).count() == listed.rows.len());
         }
+        // The mouse last, one row for each gesture that does something, the
+        // side buttons named by the keys they run.
+        let mouse = sections.last().expect("the mouse's section");
+        assert_eq!(mouse.title, MOUSE);
+        let row = |key: &str| {
+            mouse
+                .rows
+                .iter()
+                .find(|row| row.key == key)
+                .map(|row| row.does)
+        };
+        assert_eq!(row("Drag"), Some("Pan, the image following the pointer"));
+        assert_eq!(row("Back"), Some("Back in image history"));
+        assert_eq!(
+            row("Minimap: Drag"),
+            Some("Center the view on the point under the pointer")
+        );
+        assert_eq!(mouse.rows.len(), 9);
         for when in When::ALL {
             let words = when.describe();
             assert!(
@@ -3310,6 +3331,32 @@ mod tests {
         }
     }
 
+    /// A line spelled from keys the configuration moved says what is bound
+    /// now, and a line whose keys are all unbound says nothing in its key
+    /// column rather than naming a key that does something else.
+    #[test]
+    fn the_help_popup_says_what_is_bound() {
+        let mut keys = Keymap::default();
+        let chord = |token| super::super::keymap::Chord::read(token).unwrap();
+        keys.bind("files.undo", vec![chord("ctrl+e")]).unwrap();
+        let sections = help_sections(&keys, &Gestures::default(), &Conditions::default());
+        let key = |does: &str| {
+            sections
+                .iter()
+                .flat_map(|section| &section.rows)
+                .find(|row| row.does == does)
+                .map(|row| row.key.clone())
+        };
+        assert_eq!(
+            key("Undo the last rename, deletion or removal").as_deref(),
+            Some("Ctrl+E")
+        );
+        assert_eq!(
+            key("Export the picture as shown to a new JPG or PNG").as_deref(),
+            Some("")
+        );
+    }
+
     /// Each condition is answered from its own reading, and one reading
     /// answers only the conditions that ask it — an animation is one where
     /// a page is not, and a paged file is enough for the keys that step
@@ -3318,11 +3365,7 @@ mod tests {
     fn each_condition_is_met_by_its_own_reading() {
         let none = Conditions::default();
         for when in When::ALL {
-            assert_eq!(
-                none.met(when),
-                when == When::NoRegion,
-                "{when:?} with nothing to hold it"
-            );
+            assert!(!none.met(when), "{when:?} with nothing to hold it");
         }
         let readings = [
             (
@@ -3398,9 +3441,8 @@ mod tests {
         ];
         for (held, conditions) in readings {
             for when in When::ALL {
-                let expected = when == held
-                    || (when == When::AnimationOrPages && held == When::Animation)
-                    || (when == When::NoRegion && held != When::RegionSelected);
+                let expected =
+                    when == held || (when == When::AnimationOrPages && held == When::Animation);
                 assert_eq!(
                     conditions.met(when),
                     expected,
@@ -3417,18 +3459,29 @@ mod tests {
     }
 
     /// The message raised when the interface goes names keys that really do
-    /// bring it back: the table's own word for the one that hid it, and the
+    /// bring it back: the table's own words for the one that hid it, and the
     /// Escape that takes things off. A message naming a key that did nothing
-    /// would leave the reader with a window they could not get out of.
+    /// would leave the reader with a window they could not get out of, so a
+    /// half nothing is bound to is left out, and with neither nothing is
+    /// said.
     #[test]
     fn the_message_about_a_hidden_interface_names_keys_that_restore_it() {
-        let binding = binding_for(ToggleInterface).expect("`` ` `` is bound");
-        assert!(RESTORE.contains(binding.shown), "{RESTORE}");
+        let mut keys = Keymap::default();
+        assert_eq!(
+            restore_message(&keys).as_deref(),
+            Some("Press ` or Esc to restore UI")
+        );
         assert_eq!(
             action_for(&Key::Named(NamedKey::Escape), ELSEWHERE, PLAIN),
             Some(Dismiss)
         );
-        assert!(RESTORE.contains("Esc"), "{RESTORE}");
+        keys.bind("interface.dismiss", Vec::new()).unwrap();
+        assert_eq!(
+            restore_message(&keys).as_deref(),
+            Some("Press ` to restore UI")
+        );
+        keys.bind("interface.toggle", Vec::new()).unwrap();
+        assert_eq!(restore_message(&keys), None);
     }
 
     /// A cell of the zoom menu is named in its own words — the key steps
@@ -3553,6 +3606,8 @@ mod tests {
             count: 1,
             show_histogram: true,
             state: Vec::new(),
+            keys: Rc::new(Keymap::default()),
+            gestures: Rc::new(Gestures::default()),
             conditions: Conditions {
                 openable: false,
                 ..Conditions::ALIVE
@@ -3566,7 +3621,7 @@ mod tests {
         );
         assert_eq!(
             tooltip(Tip::WhitePoint).hints,
-            ["White point down / up (A, S)"]
+            ["White point down / up (Shift+A, Shift+S)"]
         );
         // And the exposure's slider names the keys that step it.
         assert_eq!(
@@ -3587,6 +3642,8 @@ mod tests {
             count: 1,
             show_histogram: false,
             state: Vec::new(),
+            keys: Rc::new(Keymap::default()),
+            gestures: Rc::new(Gestures::default()),
             conditions: Conditions::ALIVE,
         };
         let tooltip = namer
@@ -3598,7 +3655,7 @@ mod tests {
             [
                 "Cycle pixel format: hex, decimal, mapped (.)",
                 "Copy pixel value under pointer (Ctrl+.)",
-                "Copy coordinate of pixel under pointer as x,y (Ctrl+Shift+.)",
+                "Copy coordinate of pixel under pointer as x,y (Ctrl+>)",
             ]
         );
     }
@@ -3634,6 +3691,8 @@ mod tests {
             count: 1,
             show_histogram: false,
             state: Vec::new(),
+            keys: Rc::new(Keymap::default()),
+            gestures: Rc::new(Gestures::default()),
             conditions: Conditions::ALIVE,
         };
         assert_eq!(
@@ -3659,7 +3718,10 @@ mod tests {
         let mut actions = Vec::new();
         for what in Copies::ALL {
             let action = copy_action(what);
-            assert!(binding_for(action).is_some(), "{what:?} is bound");
+            assert!(
+                Keymap::default().row_for(action).is_some(),
+                "{what:?} is bound"
+            );
             assert!(!actions.contains(&action), "{what:?} twice");
             actions.push(action);
         }
@@ -3718,6 +3780,8 @@ mod tests {
             count: 12,
             show_histogram: false,
             state: Vec::new(),
+            keys: Rc::new(Keymap::default()),
+            gestures: Rc::new(Gestures::default()),
             conditions: Conditions::ALIVE,
         };
         let tooltip = namer
@@ -3734,79 +3798,74 @@ mod tests {
         );
     }
 
-    /// A chord bound twice to different things would do whichever came
-    /// first in the table, silently. The same key under different modifiers
-    /// is a different chord; and the same chord on two lines is allowed only
-    /// where both bind it to the same action and at most one of them holds
-    /// always — a key with one line for what it does plainly and one for
-    /// what it does with a region up — since then the table dispatches the
-    /// same whichever line is found first, and the lines do not both claim
-    /// the same moment.
+    /// A chord bound twice in one context would do whichever came first,
+    /// silently. The same key under different modifiers is a different
+    /// chord; the same chord under a region's name and a plain one is two
+    /// contexts, the region's tried first.
     #[test]
     fn no_chord_is_bound_twice_to_different_actions() {
-        let mut seen: Vec<((Mods, KeyName), Action, Option<When>)> = Vec::new();
-        for binding in KEYS {
-            for (name, action) in binding.keys {
-                let chord = (binding.mods, *name);
-                if let Some((_, first, when)) = seen.iter().find(|(bound, ..)| *bound == chord) {
-                    assert_eq!(
-                        first, action,
-                        "{name:?} with {:?} is bound to two different things",
-                        binding.mods
-                    );
-                    assert!(
-                        when.is_some() || binding.when.is_some(),
-                        "{name:?} with {:?} is on two lines that both hold always",
-                        binding.mods
-                    );
-                    continue;
+        let mut seen: Vec<(Chord, Option<super::super::keymap::Context>, &str)> = Vec::new();
+        for row in ROWS {
+            let Keys::Bound(binds) = row.keys else {
+                continue;
+            };
+            let context = row.when.and_then(When::context);
+            for bound in binds {
+                for chord in bound.defaults {
+                    if let Some((.., first)) = seen
+                        .iter()
+                        .find(|(each, held, _)| each == chord && *held == context)
+                    {
+                        panic!("{chord:?} is both {first} and {}", bound.name);
+                    }
+                    seen.push((*chord, context, bound.name));
                 }
-                seen.push((chord, *action, binding.when));
             }
         }
     }
 
-    /// A key on two lines, one for what it does plainly and one for what it
-    /// does with a region up, is named by the plain line: what asks is a
-    /// button that does the plain thing.
+    /// A key described on a region's line as well as its own is named by
+    /// its own: what asks is a button that does the plain thing, and a
+    /// line that only describes never answers.
     #[test]
     fn a_key_with_a_region_line_is_named_by_its_plain_line() {
+        let keys = Keymap::default();
         assert_eq!(
-            binding_for(CopyImage).map(|binding| binding.help),
+            keys.row_for(CopyImage).map(|row| row.help),
             Some("Copy the image as displayed")
         );
         assert_eq!(
-            binding_for(CycleFit).map(|binding| binding.section),
+            keys.row_for(CycleFit).map(|row| row.section),
             Some(Section::Zoom)
         );
-        assert_eq!(
-            binding_for(ToggleRegion).map(|binding| binding.when),
-            Some(Some(When::NoRegion))
-        );
+        assert_eq!(keys.row_for(ToggleRegion).map(|row| row.when), Some(None));
         // A key only a region answers is still found.
         assert_eq!(
-            binding_for(ShrinkRegion(Left)).map(|binding| binding.section),
+            keys.row_for(ShrinkRegion(Left)).map(|row| row.section),
             Some(Section::Region)
         );
     }
 
-    /// Shift belongs to the character, not to the modifiers: a binding on a
-    /// character that asked for it as well would never match, since
-    /// `satisfies` takes it out of what is held before comparing. Only a key
+    /// Shift belongs to the character, not to the chord: a chord on a
+    /// character that asked for it as well would never match, since the
+    /// lookup takes it out of what is held before comparing. Only a key
     /// Shift does not change — one bound by name or by position — may ask
     /// for it.
     #[test]
     fn only_layout_free_keys_are_bound_with_shift() {
-        for binding in KEYS {
-            if !binding.mods.shift_key() {
+        for row in ROWS {
+            let Keys::Bound(binds) = row.keys else {
                 continue;
-            }
-            for (name, _) in binding.keys {
-                assert!(
-                    matches!(name, Named(_) | Position(_)),
-                    "`{}` asks for Shift on {name:?}; say it with the character instead",
-                    binding.shown
-                );
+            };
+            for bound in binds {
+                for chord in bound.defaults {
+                    assert!(
+                        !chord.mods.shift_key() || !matches!(chord.key, KeyName::Char(_)),
+                        "{} asks for Shift on {:?}; say it with the character instead",
+                        bound.name,
+                        chord.key
+                    );
+                }
             }
         }
     }
@@ -3903,7 +3962,9 @@ mod tests {
 
     /// The three pan distances are one key held three ways, and a named key
     /// takes Shift as a modifier: the plain binding must not answer for the
-    /// shifted press as well.
+    /// shifted press as well. With a region selected the region's names
+    /// hold the same arrows, and are tried first; the fine pan has no
+    /// region name on its chord, and pans under a region as without one.
     #[test]
     fn the_arrows_pan_by_what_is_held_with_them() {
         let left = Key::Named(NamedKey::ArrowLeft);
@@ -3911,8 +3972,14 @@ mod tests {
         assert_eq!(held(PLAIN), Some(Pan(Left, Coarse)));
         assert_eq!(held(SHIFT), Some(Pan(Left, Fine)));
         assert_eq!(held(CTRL), Some(Pan(Left, Edge)));
-        assert_eq!(held(CTRL | SHIFT), Some(ShrinkRegion(Left)));
+        assert_eq!(held(CTRL | SHIFT), None);
         assert_eq!(held(CTRL | SHIFT | Mods::ALT), None);
+        let region = |mods| with_region(&left, ELSEWHERE, mods);
+        assert_eq!(region(PLAIN), Some(MoveRegion(Left)));
+        assert_eq!(region(SHIFT), Some(Pan(Left, Fine)));
+        assert_eq!(region(CTRL), Some(GrowRegion(Left)));
+        assert_eq!(region(CTRL | SHIFT), Some(ShrinkRegion(Left)));
+        assert_eq!(region(CTRL | SHIFT | Mods::ALT), None);
         // Escape is not bound with Shift, and so does not answer to it.
         assert_eq!(
             action_for(&Key::Named(NamedKey::Escape), ELSEWHERE, SHIFT),

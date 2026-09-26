@@ -1,7 +1,9 @@
 //! The command line: what was asked for, and `--help`.
 //!
-//! The key sections of the help text are rendered from [`KEYS`], so a binding
-//! is documented by the same edit that adds it.
+//! The key sections of the help text are rendered from [`ROWS`], so a binding
+//! is documented by the same edit that adds it, and the mouse's from the
+//! default [`Gestures`]. Both at their defaults: what a configuration file
+//! rebinds is the window's help popup's to say.
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -10,7 +12,9 @@ use anyhow::{Result, bail};
 
 use crate::PROGRAM;
 use crate::app::Options;
-use crate::app::input::{KEYS, Section};
+use crate::app::input::{MOUSE, ROWS, Section, mouse_rows};
+use crate::app::keymap::Keymap;
+use crate::gestures::Gestures;
 use crate::image::decode::Overrides;
 use crate::image::display::{AutoWindow, Colormap, Startup, ToneMap};
 use crate::image::{Primaries, Transfer};
@@ -83,13 +87,44 @@ fn heading(section: Section) -> String {
     format!("{title} KEYS")
 }
 
-/// The whole of `--help`: the options, then every key under its heading.
+/// Every line of the key table under its heading, at the default chords,
+/// and then the mouse's gestures under theirs: the key column and what it
+/// does, as `--help` and the manual page both list them.
+fn listed() -> Vec<(String, Vec<(String, &'static str)>)> {
+    let keys = Keymap::default();
+    Section::ALL
+        .into_iter()
+        .map(|section| {
+            let lines = ROWS
+                .iter()
+                .filter(|row| row.section == section)
+                .map(|row| (keys.column(row), row.help))
+                .collect();
+            (heading(section), lines)
+        })
+        .chain([(
+            MOUSE.to_uppercase(),
+            mouse_rows(&keys, &Gestures::default()),
+        )])
+        .collect()
+}
+
+/// One line of `--help`'s key sections: the key column, and what it does
+/// where the column ends — or a space after it, for a key column too long
+/// to end there.
+fn key_line(key: &str, help: &str) -> String {
+    let gap = 19usize.saturating_sub(key.chars().count()).max(1);
+    format!("    {key}{:gap$}{help}", "")
+}
+
+/// The whole of `--help`: the options, then every key under its heading,
+/// then the mouse.
 pub fn usage() -> String {
     let mut text = OPTIONS.to_string();
-    for section in Section::ALL {
-        let _ = writeln!(text, "\n{}:", heading(section));
-        for binding in KEYS.iter().filter(|binding| binding.section == section) {
-            let _ = writeln!(text, "    {:<19}{}", binding.shown, binding.help);
+    for (heading, lines) in listed() {
+        let _ = writeln!(text, "\n{heading}:");
+        for (key, help) in lines {
+            let _ = writeln!(text, "{}", key_line(&key, help));
         }
     }
     text
@@ -146,7 +181,7 @@ fn option_entries() -> Vec<(String, String)> {
 
 /// The manual page, in roff.
 ///
-/// Rendered from `OPTIONS` and [`KEYS`] rather than written out beside them,
+/// Rendered from `OPTIONS` and [`ROWS`] rather than written out beside them,
 /// for the reason `--help` is: there is one list of options and one list of
 /// keys, and a second copy would be a second thing to keep in step. `--help`
 /// and `gamut(1)` therefore cannot disagree.
@@ -199,15 +234,10 @@ pub fn man() -> String {
         let _ = writeln!(text, ".TP\n.B {}\n{}", roff(&flags), roff(&description));
     }
 
-    for section in Section::ALL {
-        let _ = writeln!(text, ".SH {}", heading(section));
-        for binding in KEYS.iter().filter(|binding| binding.section == section) {
-            let _ = writeln!(
-                text,
-                ".TP\n.B {}\n{}",
-                roff(binding.shown),
-                roff(binding.help)
-            );
+    for (heading, lines) in listed() {
+        let _ = writeln!(text, ".SH {heading}");
+        for (key, help) in lines {
+            let _ = writeln!(text, ".TP\n.B {}\n{}", roff(&key), roff(help));
         }
     }
 
@@ -492,19 +522,27 @@ mod tests {
     use crate::APP_ID;
 
     /// Every key is in the help text, and nothing in the help text is a key
-    /// that does not exist: the two come from one table.
+    /// that does not exist: the two come from one table. The mouse's
+    /// gestures come after, under a heading of their own.
     #[test]
     fn the_help_text_lists_every_binding_once() {
         let text = usage();
-        for binding in KEYS {
-            let line = format!("    {:<19}{}", binding.shown, binding.help);
+        let keys = Keymap::default();
+        for row in ROWS {
+            let line = key_line(&keys.column(row), row.help);
             assert_eq!(
                 text.matches(&line).count(),
                 1,
-                "{:?} should appear exactly once",
-                binding.shown
+                "{line:?} should appear exactly once"
             );
         }
+        let mouse = mouse_rows(&keys, &Gestures::default());
+        assert!(!mouse.is_empty());
+        for (gesture, does) in &mouse {
+            let line = key_line(gesture, does);
+            assert!(text.contains(&line), "{line:?} should appear");
+        }
+        assert!(text.contains("\nMOUSE:\n    Drag"), "{text}");
         for section in Section::ALL {
             let heading = heading(section);
             assert!(
@@ -557,13 +595,14 @@ mod tests {
                 "the description of {flags:?} should reach the manual page"
             );
         }
-        for binding in KEYS {
+        for row in ROWS {
             assert!(
-                page.contains(&roff(binding.help)),
+                page.contains(&roff(row.help)),
                 "{:?} should reach the manual page",
-                binding.shown
+                row.help
             );
         }
+        assert!(page.contains(".SH MOUSE\n"), "the gestures reach it too");
         assert!(
             page.starts_with(".TH "),
             "a manual page opens with its title"

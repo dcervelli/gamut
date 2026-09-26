@@ -25,7 +25,6 @@ use std::path::{Path, PathBuf};
 
 use super::App;
 use super::input::Effect;
-use super::input::{Action, binding_for};
 use crate::trash::{self, Entry, Refused};
 use crate::ui::rename::{self, TAKEN, Verdict};
 use crate::ui::toast::Level;
@@ -70,10 +69,14 @@ pub(super) struct Renaming {
     opened: bool,
 }
 
-/// What to press to undo, for the messages that say so: the key table's own
-/// word, so that a message cannot name a key that does something else.
-fn undo_key() -> String {
-    binding_for(Action::Undo).map_or_else(String::new, |binding| binding.shown.to_string())
+/// What the messages that say how to undo say about it: the chords bound to
+/// undo, as the key table spells them, so that a message cannot name a key
+/// that does something else — and nothing where none is bound.
+fn to_undo(keys: &super::keymap::Keymap) -> String {
+    match keys.spelled("files.undo") {
+        key if key.is_empty() => String::new(),
+        key => format!(" {key} to undo."),
+    }
 }
 
 /// The last part of `path`, for a message about the file.
@@ -148,7 +151,7 @@ impl App {
             }
         }
         self.toast(
-            format!("Trashed {}. {} to undo.", name_of(&listed), undo_key()),
+            format!("Trashed {}.{}", name_of(&listed), to_undo(&self.keys)),
             Level::Message,
         );
     }
@@ -192,9 +195,9 @@ impl App {
         }
         self.toast(
             format!(
-                "Took {} off the list. {} to undo.",
+                "Took {} off the list.{}",
                 name_of(&path),
-                undo_key()
+                to_undo(&self.keys)
             ),
             Level::Message,
         );
@@ -271,7 +274,7 @@ impl App {
         }
         self.renamed(&from, &to);
         self.toast(
-            format!("Renamed {}. {} to undo.", name_of(&from), undo_key()),
+            format!("Renamed {}.{}", name_of(&from), to_undo(&self.keys)),
             Level::Message,
         );
         self.edits.push(Edit::Renamed { from, to });

@@ -437,9 +437,10 @@ then the pointer is off the press — so `Pass::region_gestures` reads
 `press_origin` and tests that against the handles. With a region asked for,
 any drag draws one; with a region on screen, a drag from a handle pulls it —
 or moves the whole of it, from the handle at its middle — and a drag from
-inside it moves it only with `Shift` held, `FrameInput::move_region`. A drag
-from anywhere else, and from inside without the key, is the view's, as it
-always was: a region is drawn to be looked at, and one that covers the window
+inside it moves it only where the drag's slot is `move-region`, which is
+`Shift` with the left button by default. A drag from anywhere else, and from
+inside without the key, is what the button's plain slot says — the view's,
+by default, as it always was (see [keys and gestures](keymap.md#gestures)): a region is drawn to be looked at, and one that covers the window
 would otherwise pin the view under it. Which the pointer is about to do is in
 the cursor — the four-way arrow on the middle handle, and inside only while
 the key is down — and egui repaints on a modifier change, so the cursor
@@ -546,8 +547,10 @@ the histogram's planes toggle already holds in the j/k/l run.
 
 ## The zoom box
 
-Holding `Space` and dragging a box on the picture zooms to the box: a drag
-started while the key is down is `Grab::Zoom`, whatever the selection, and
+Holding `Space` — whatever key `zoom.fit` is bound to — and dragging a box
+on the picture zooms to the box: a drag of the primary button started while
+the key is down is `Grab::Zoom`, whatever the selection, as is any drag
+whose slot is `zoom-box`, and
 goes through the same `Grab`, `Pull` and `Release` commands as a drag on the
 region does. The box in progress is `App::zoom_box`, a `Region` made by
 `Region::from_corners` exactly as a new region is, but held apart from the
@@ -560,13 +563,14 @@ for by name is made.
 The key is answered on its way up, not down. Down would fit the picture
 before the drag began, and the hand about to draw a box would find the
 picture moving under it; so a press only records that the key is held
-(`Pointer::space`, an `input::Space`), a drag begun while it is held marks it
+(`Pointer::fit_key`, an `input::FitKey` holding the physical key it was
+pressed on), a drag begun while it is held marks it
 as spent, and the release fits only if nothing was drawn. A tap costs the
 fit the length of the tap, which is not noticed. The key's repeats arrive as
 presses while it is already held, and are not answered: a held key that
 toggled the fit as fast as the keyboard repeated would be no use held. The
-release is read by the key itself rather than through the table, so that a
-chord pressed while `Space` is down cannot leave it held for good, and
+release is read by the physical key rather than through the table, so that
+a chord pressed while the key is down cannot leave it held for good, and
 `WindowEvent::Focused(false)` lets go of it too, since a key held as the
 focus goes is released somewhere else. `Esc` part way through the drag drops
 the box before it takes anything else off: egui aborts the drag on the same
@@ -581,9 +585,8 @@ the glass's radius over the magnification, so that the glass shows exactly
 what the eye rings. The magnification is `Panels::loupe_magnification`, one
 of `ui::loupe::MAGNIFICATIONS` — 2, 4, 8 and 16 — starting at 4. The wheel
 over the picture with the secondary button down is the loupe's rather than
-the view's: `Pass::picture` hands it back as `Command::Magnify` instead of
-`Command::Wheel`, and `App::magnify` steps the magnification a notch at a
-time, stopping at either end, with a trackpad's fractions of a notch adding
+the view's — its default slot, `gesture.image.right+wheel` — so `App::wheel`
+hands it to `App::magnify`, which steps the magnification a notch at a time, stopping at either end, with a trackpad's fractions of a notch adding
 up in `Pointer::magnifying` until there is one; `Shift+L` is
 `Action::CycleMagnification`, which goes round instead, through
 `ui::loupe::cycle`, since a key pressed again and again wants to reach every
@@ -594,9 +597,9 @@ setting changes is how much of the picture fits in it, which is the eye's
 business. The button reads the magnification out beside its mark while the
 loupe is up, through the same `reading_toggle` the grid's spacing is read
 out through. `Control::Loupe`, the toggle beside
-the grid's in the bottom bar, which `l` presses too, keeps it up; the secondary button held on the
-picture puts it up for as long as it is held, whatever the toggle says. Both
-are read into `Panels::show_loupe` and `Pointer::secondary`, and
+the grid's in the bottom bar, which `l` presses too, keeps it up; a button held on the picture whose hold slot is the loupe — the
+secondary, by default — puts it up for as long as it is held, whatever the
+toggle says. Both are read into `Panels::show_loupe` and `Pointer::held`, and
 `App::loupe` is the one answer to whether it is up: one of those, and a
 pixel under the pointer — the same `pointer_pixel` reading the bar's readout
 is made from, so the loupe is up exactly when there is a pixel to magnify,
@@ -605,7 +608,7 @@ Through a drag on the picture — a pan, the region's or the zoom box's — it
 follows the hand: the pointer the loupe follows stands still while the
 toolkit holds the drag, so `Pass::picture` reports the pointer's place on
 every pass of one as `Command::Dragging`, and `App::act` moves the pointer
-by it, as `Command::Secondary` does for the other button.
+by it, as `Command::Held` does for the other buttons.
 
 Where the circles go is `ui::loupe::place`, a pure function of the pointer
 and the content area, worked out by the application once per frame and
@@ -660,19 +663,19 @@ checkerboard follows the same cut — the glass is its third region, and the
 one it tests against a circle as well as a rectangle — so transparency reads
 the same inside the loupe as outside it.
 
-The secondary button cannot be read from winit. egui-winit consumes a button
+The buttons besides the primary cannot be read from winit. egui-winit consumes a button
 event wherever egui wants the pointer, which over the picture's own panel is
 everywhere, and consumes the pointer's moves while egui holds a button down.
 So `Pass::picture` reads the button off the picture's response —
-`is_pointer_button_down_on` with `secondary_down`, from the press on rather
+`is_pointer_button_down_on` with `button_down`, from the press on rather
 than from the toolkit's later decision that the press became a drag — and
-says so on every pass as `Command::Secondary`, carrying the pointer's place
+says which on every pass as `Command::Held`, carrying the pointer's place
 in physical pixels while the button is down, for the same reason
 `Command::Pull` carries the hand's: the application's own pointer stands
 still meanwhile. `App::act` takes the button and the pointer from it, one
 frame late as `Command::OverImage` is, which is a frame the press was being
-painted for anyway. A drag with the secondary button is not a pan:
-`Pass::picture` pans on the primary button alone.
+painted for anyway. A drag with a button is a pan only where
+its drag slot says `pan`, which by default is the primary's alone.
 
 The loupe follows the pointer itself, not the pixel under it. A move over
 the picture ordinarily owes a frame only when the pixel under the pointer
@@ -962,21 +965,24 @@ anchored at the top of it, and opened by `App::press` on `Control::Help`
 exactly as the chooser is, so `?`, `/` and the button at the foot of the
 right strip all go through the same arm. What it lays out is the key table
 itself, handed over as `Naming::help` — one `help::Section` per
-`input::Section`, one `help::Row` per `Binding` — so that the popup, `--help`
-and the manual page cannot list different keys; `cli.rs` derives its
-headings from the same `Section::title`. The third column is `Binding::when`,
+`input::Section`, one `help::Row` per `keymap::Row`, its key column spelled
+from the chords in force, and then the mouse's gestures — so that the popup,
+`--help` and the manual page cannot list different keys; `cli.rs` derives
+its headings from the same `Section::title`. The third column is
+`Row::when`,
 the condition on which a key does anything, kept apart from `help` because
 `--help` has no column for it and a sentence that carried both would be
-twice as long. A key that does one thing plainly and another with a region
-up — `Space`, the arrows, `Ctrl+C`, `x` — is two lines for the same reason,
-one under `When::NoRegion` and one under `When::RegionSelected`, each
-binding the same chord to the same action — the region's line in the
-region's own section, except `Ctrl+C`'s, which is a copy first and stays
-beside the image's: the table dispatches once, since `perform` decides what the
-action does from the selection, and describes twice.
-`no_chord_is_bound_twice_to_different_actions` allows exactly that doubling
-and no other, and `binding_for` names a doubled key by its plain line, since
-what asks is a button that does the plain thing. `When` is one variant per
+twice as long. A key whose action does
+something else with a region up — `Space`, `Ctrl+C` — is two lines for the
+same reason: its own, and a `Keys::Also` line under `When::RegionSelected`
+describing the same name's chords, in the region's own section except for
+`Ctrl+C`'s, which is a copy first and stays beside the image's. The table
+dispatches once, since `perform` decides what the action does from the
+selection, and describes twice; `Keymap::row_for` never answers with a line
+that only describes, since what asks is a button that does the plain thing.
+The arrows are different: with a region up they run other actions under
+names of their own, in the region's context — see
+[keys and gestures](keymap.md#contexts). `When` is one variant per
 condition rather than the words themselves, so that the popup can say
 whether it holds as well as what it is: `App::conditions` reads each off the same state the key's own
 arm of `perform` reads, `Namer` carries the answers into the frame as

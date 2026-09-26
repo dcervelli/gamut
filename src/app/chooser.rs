@@ -60,9 +60,6 @@ pub struct Chooser {
     dirty: bool,
     /// Which thumbnails the rows were built against.
     thumbs_seen: u64,
-    /// Set by [`Chooser::open`] and taken by the first [`Chooser::input`]
-    /// after it — see [`Input::opened`].
-    opened: bool,
     reveal: bool,
     visible: Range<usize>,
 }
@@ -90,7 +87,6 @@ impl Chooser {
             rows: None,
             dirty: true,
             thumbs_seen: 0,
-            opened: false,
             reveal: false,
             visible: 0..0,
         }
@@ -107,7 +103,6 @@ impl Chooser {
             .iter()
             .position(|(index, _)| *index == shown)
             .unwrap_or(0);
-        self.opened = true;
         self.reveal = true;
     }
 
@@ -297,7 +292,6 @@ impl Chooser {
             current,
             several_dirs: self.several_dirs,
             count: self.paths.len(),
-            opened: std::mem::take(&mut self.opened),
             reveal: std::mem::take(&mut self.reveal),
             visible: self.visible.clone(),
         }
@@ -731,11 +725,9 @@ mod tests {
         assert_eq!(input.current, Some(2));
         assert_eq!(input.cursor, 2);
         assert!(input.reveal);
-        assert!(input.opened);
         assert!(!input.several_dirs);
         let again = chooser.input(&thumbs, None);
         assert!(!again.reveal, "revealed once");
-        assert!(!again.opened, "opened once");
 
         assert!(!chooser.learn(
             Path::new("clip.gif"),

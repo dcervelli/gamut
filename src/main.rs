@@ -6,6 +6,7 @@ mod clipboard;
 mod clock;
 mod dbus;
 mod fuzzy;
+mod gestures;
 mod image;
 mod listing;
 mod loader;
