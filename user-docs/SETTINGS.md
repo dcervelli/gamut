@@ -108,8 +108,8 @@ gesture.image.back.click = none
 
 The surface is `image` or `minimap`. What is done is a button, held with any
 modifiers, and how it is used: `left`, `middle`, `right`, `back` or
-`forward`, then `.drag`, `.hold` or `.click` — `shift+left.drag`,
-`middle.click`. Or it is the wheel, turned with modifiers or with a button
+`forward`, then `.drag`, `.hold`, `.click` or `.double-click` —
+`shift+left.drag`, `middle.click`, `left.double-click`. Or it is the wheel, turned with modifiers or with a button
 other than the left held down: `wheel`, `ctrl+wheel`, `right+wheel`,
 `ctrl+middle+wheel`. The left button cannot be a hold, being a drag.
 
@@ -120,14 +120,15 @@ What each takes:
 | A drag | `pan`, `zoom-box`, `move-region`, or `none` |
 | A hold | `loupe`, or `none` |
 | The wheel | `zoom`, `loupe-magnification`, `exposure`, `black-point`, `white-point`, `files`, `frames`, `pan`, or `none` |
-| A click | the name of a key, which the click then does — `files.back`, `interface.grid` — or `none` |
+| A click or a double-click | the name of a key, which it then does — `files.back`, `interface.grid`, `zoom.100` — or `none` |
 | A drag or a click on the minimap | `center`, or `none` |
 
 Each step of the wheel is a notch, and a trackpad's scroll adds up to a
 notch before anything moves, except for `zoom` and `pan`, which follow a
 trackpad smoothly; `pan` follows it both ways. Turning the wheel up raises
 the exposure or the point it steps, and goes to the previous file or frame.
-`move-region` moves a selected region when the drag starts inside it, and
+The first click of a double-click is a click as well, and does whatever
+that button's click does. `move-region` moves a selected region when the drag starts inside it, and
 elsewhere does whatever the same button does with nothing held.
 
 A gesture is matched exactly: a slot for `left.drag` says nothing about

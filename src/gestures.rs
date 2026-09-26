@@ -133,16 +133,20 @@ pub enum Kind {
     Hold,
     /// Pressed and let go where it was pressed.
     Click,
+    /// Clicked twice in quick succession. The first of the two is a click
+    /// as well, and does what the button's click does.
+    DoubleClick,
 }
 
 impl Kind {
-    const ALL: [Kind; 3] = [Kind::Drag, Kind::Hold, Kind::Click];
+    const ALL: [Kind; 4] = [Kind::Drag, Kind::Hold, Kind::Click, Kind::DoubleClick];
 
     fn token(self) -> &'static str {
         match self {
             Kind::Drag => "drag",
             Kind::Hold => "hold",
             Kind::Click => "click",
+            Kind::DoubleClick => "double-click",
         }
     }
 }
@@ -283,6 +287,18 @@ impl Slot {
                     other => format!("{} click", other.spelled()),
                 }
             ),
+            Input::Button {
+                mods,
+                button,
+                kind: Kind::DoubleClick,
+            } => format!(
+                "{}{}",
+                modifiers_spelled(mods),
+                match button {
+                    Button::Left => "Double-click".to_string(),
+                    other => format!("{} double-click", other.spelled()),
+                }
+            ),
             Input::Wheel { mods, held } => format!(
                 "{}{}Wheel",
                 modifiers_spelled(mods),
@@ -405,7 +421,7 @@ impl Behavior {
         let found = match (slot.surface, slot.kind()) {
             (Surface::Minimap, _) => (lower == "center").then_some(Behavior::Center),
             (Surface::Image, None) if lower == WHEEL_PAN => Some(Behavior::Wheel(WheelAction::Pan)),
-            (Surface::Image, Some(Kind::Click)) => {
+            (Surface::Image, Some(Kind::Click | Kind::DoubleClick)) => {
                 return match word.contains('.') {
                     true => Ok(Behavior::Click(word.to_string())),
                     false => Err(format!(
@@ -491,7 +507,7 @@ fn slot_kind_word(slot: &Slot) -> &'static str {
 fn words_for(slot: &Slot) -> Vec<&'static str> {
     let mut words: Vec<&'static str> = match (slot.surface, slot.kind()) {
         (Surface::Minimap, _) => vec!["center"],
-        (Surface::Image, Some(Kind::Click)) => vec!["a key's name"],
+        (Surface::Image, Some(Kind::Click | Kind::DoubleClick)) => vec!["a key's name"],
         (Surface::Image, kind) => {
             let mut words: Vec<&'static str> = WORDS
                 .iter()
@@ -570,6 +586,10 @@ impl Default for Gestures {
                     Behavior::Wheel(WheelAction::LoupeMagnification),
                 ),
                 (
+                    image(Button::Left, Kind::DoubleClick),
+                    Behavior::Click("zoom.100".to_string()),
+                ),
+                (
                     image(Button::Back, Kind::Click),
                     Behavior::Click("files.back".to_string()),
                 ),
@@ -641,9 +661,10 @@ impl Gestures {
         }
     }
 
-    /// The key a click of `button` with `mods` on `surface` runs, by name.
-    pub fn click(&self, surface: Surface, mods: Mods, button: Button) -> Option<&str> {
-        match self.button(surface, mods, button, Kind::Click)? {
+    /// The key a click — or, where `kind` is [`Kind::DoubleClick`], a
+    /// double click — of `button` with `mods` on `surface` runs, by name.
+    pub fn click(&self, surface: Surface, mods: Mods, button: Button, kind: Kind) -> Option<&str> {
+        match self.button(surface, mods, button, kind)? {
             Behavior::Click(name) => Some(name),
             _ => None,
         }
@@ -692,15 +713,16 @@ impl Gestures {
     pub fn template(&self) -> String {
         let mut text = String::from(
             "\n# Gestures: each gesture.<surface>.<input> takes one behavior.\n\
-             # A surface is image or minimap. An input is [mods+]<button>.<drag|hold|click>,\n\
-             # the button left, middle, right, back or forward, or [mods+][button+]wheel\n\
-             # for the wheel turned with a button held. Modifiers as for keys.\n\
-             # A drag takes pan, zoom-box, move-region or none; a hold loupe or none;\n\
-             # the wheel zoom, loupe-magnification, exposure, black-point, white-point,\n\
-             # files, frames, pan or none; a click a key's name or none. On the\n\
-             # minimap, a drag or a click takes center or none. Whatever the slot, a\n\
-             # drag started with a region asked for draws it, one from a handle pulls\n\
-             # it, and one with zoom.fit's key held zooms to a box.\n",
+             # A surface is image or minimap. An input is [mods+]<button>.<kind>, the kind\n\
+             # drag, hold, click or double-click and the button left, middle, right, back\n\
+             # or forward; or [mods+][button+]wheel for the wheel turned with a button\n\
+             # held. Modifiers as for keys. A drag takes pan, zoom-box, move-region or\n\
+             # none; a hold loupe or none; the wheel zoom, loupe-magnification,\n\
+             # exposure, black-point, white-point, files, frames, pan or none; a click\n\
+             # or a double-click a key's name or none. On the minimap, a drag or a\n\
+             # click takes center or none. Whatever the slot, a drag started with a\n\
+             # region asked for draws it, one from a handle pulls it, and one with\n\
+             # zoom.fit's key held zooms to a box.\n",
         );
         for (slot, behavior) in &self.slots {
             let _ = writeln!(text, "# gesture.{} = {}", slot.token(), behavior.word());
@@ -725,6 +747,7 @@ mod tests {
                 "image.ctrl+middle+wheel",
                 "image.shift+left.drag",
                 "image.back.click",
+                "image.ctrl+middle.double-click",
                 "image.alt+super+right.hold",
             ]
             .map(str::to_string),
@@ -754,6 +777,7 @@ mod tests {
         assert!(Slot::read("image.hyper+left.drag").is_err());
         assert!(Slot::read("minimap.wheel").is_err());
         assert!(Slot::read("minimap.left.hold").is_err());
+        assert!(Slot::read("minimap.left.double-click").is_err());
     }
 
     #[test]
@@ -768,6 +792,11 @@ mod tests {
         assert_eq!(spelled("image.ctrl+wheel"), "Ctrl+Wheel");
         assert_eq!(spelled("image.back.click"), "Back");
         assert_eq!(spelled("image.middle.click"), "Middle click");
+        assert_eq!(spelled("image.left.double-click"), "Double-click");
+        assert_eq!(
+            spelled("image.shift+right.double-click"),
+            "Shift+Right double-click"
+        );
         assert_eq!(spelled("minimap.left.drag"), "Minimap: Drag");
     }
 
@@ -855,8 +884,21 @@ mod tests {
             Some(WheelAction::LoupeMagnification)
         );
         assert_eq!(
-            gestures.click(Surface::Image, Mods::empty(), Button::Back),
+            gestures.click(Surface::Image, Mods::empty(), Button::Back, Kind::Click),
             Some("files.back")
+        );
+        assert_eq!(
+            gestures.click(
+                Surface::Image,
+                Mods::empty(),
+                Button::Left,
+                Kind::DoubleClick
+            ),
+            Some("zoom.100")
+        );
+        assert_eq!(
+            gestures.click(Surface::Image, Mods::empty(), Button::Left, Kind::Click),
+            None
         );
         assert!(gestures.center(Mods::empty(), Button::Left, Kind::Drag));
         assert!(!gestures.center(Mods::empty(), Button::Middle, Kind::Drag));

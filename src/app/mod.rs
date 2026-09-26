@@ -5358,7 +5358,7 @@ mod tests {
     /// button's click is the key it names.
     #[test]
     fn the_wheel_and_the_clicks_do_what_their_slots_say() {
-        use crate::gestures::{Behavior, Button, Slot, WheelAction};
+        use crate::gestures::{Behavior, Button, Kind, Slot, WheelAction};
         use crate::ui::Command;
         use input::Action;
 
@@ -5433,10 +5433,24 @@ mod tests {
         let _ = app.perform(Action::NextFile);
         answer(&mut app, Reload::Fresh);
         assert_eq!(app.files.index(), 1);
-        assert_eq!(app.act(Command::Click(Button::Middle)), Effect::Nothing);
-        let _ = app.act(Command::Click(Button::Back));
+        assert_eq!(
+            app.act(Command::Click(Button::Middle, Kind::Click)),
+            Effect::Nothing
+        );
+        let _ = app.act(Command::Click(Button::Back, Kind::Click));
         answer(&mut app, Reload::Fresh);
         assert_eq!(app.files.index(), 0);
+
+        // A double click of the primary is actual size, as `1` is.
+        let _ = app.perform(Action::CycleFit);
+        app.motion = None;
+        let (image, viewport) = (app.image_size(), app.viewport());
+        assert_ne!(app.view.zoom(image, viewport), 1.0);
+        assert_eq!(
+            app.act(Command::Click(Button::Left, Kind::DoubleClick)),
+            Effect::Redraw
+        );
+        assert_eq!(app.view.zoom(image, viewport), 1.0);
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }

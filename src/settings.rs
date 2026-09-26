@@ -518,7 +518,7 @@ mod tests {
             .filter(|line| line.starts_with("gesture."))
             .count();
         assert_eq!(keys, 90, "{uncommented}");
-        assert_eq!(gestures, 9, "{uncommented}");
+        assert_eq!(gestures, 10, "{uncommented}");
         assert_eq!(
             uncommented.lines().count(),
             SETTINGS.len() + keys + gestures,
@@ -562,7 +562,7 @@ mod tests {
     /// problems.
     #[test]
     fn a_gesture_line_sets_its_slot() {
-        use crate::gestures::{Button, HoldAction, Mods, Surface};
+        use crate::gestures::{Button, HoldAction, Kind, Mods, Surface};
         let (config, problems) = Config::parse(
             "gesture.image.middle.hold = loupe\n\
              gesture.image.wheel = none\n\
@@ -584,7 +584,7 @@ mod tests {
         assert_eq!(
             config
                 .gestures
-                .click(Surface::Image, Mods::empty(), Button::Middle),
+                .click(Surface::Image, Mods::empty(), Button::Middle, Kind::Click),
             Some("interface.grid")
         );
         let lines: Vec<usize> = problems.iter().map(|(line, _)| *line).collect();

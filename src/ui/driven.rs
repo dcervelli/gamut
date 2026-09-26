@@ -1432,17 +1432,17 @@ fn a_middle_drag_pans_only_where_its_slot_says_so() {
 /// slot names nothing is not handed back at all.
 #[test]
 fn a_click_is_handed_back_where_its_slot_names_a_key() {
-    use crate::gestures::{Behavior, Button, Gestures, Slot};
+    use crate::gestures::{Behavior, Button, Gestures, Kind, Slot};
     let mut harness = open(WINDOW, 1, panels());
     let at = [400.0, 300.0];
     let click = |harness: &mut Harness<'static, State>, button| drag_with(harness, button, at, at);
     assert_eq!(
         click(&mut harness, egui::PointerButton::Extra1),
-        [Command::Click(Button::Back)]
+        [Command::Click(Button::Back, Kind::Click)]
     );
     assert_eq!(
         click(&mut harness, egui::PointerButton::Extra2),
-        [Command::Click(Button::Forward)]
+        [Command::Click(Button::Forward, Kind::Click)]
     );
     assert_eq!(click(&mut harness, egui::PointerButton::Middle), []);
     // The secondary holds the loupe up, so letting go of it is no click.
@@ -1457,8 +1457,59 @@ fn a_click_is_handed_back_where_its_slot_names_a_key() {
     harness.run();
     assert_eq!(
         click(&mut harness, egui::PointerButton::Middle),
-        [Command::Click(Button::Middle)]
+        [Command::Click(Button::Middle, Kind::Click)]
     );
+}
+
+/// A double click of the primary on the picture is handed back as one —
+/// its first click being nothing, the primary's click having no slot — and
+/// a double click on one of the region's handles is the handle's.
+#[test]
+fn a_double_click_is_handed_back_where_its_slot_names_a_key() {
+    use crate::gestures::{Button, Kind};
+    let mut harness = open(WINDOW, 1, panels());
+    // A step of the harness is a quarter of a second, and a double click
+    // is two clicks inside three tenths of one: the clock is set by hand,
+    // a twentieth of a second on for each press and release.
+    let twice = |harness: &mut Harness<'static, State>, at: [f32; 2]| {
+        let pos = egui::pos2(at[0], at[1]);
+        harness.event(egui::Event::PointerMoved(pos));
+        harness.step();
+        let mut time = harness.ctx.input(|input| input.time);
+        let mut commands = Vec::new();
+        for _ in 0..2 {
+            harness.state_mut().commands.clear();
+            for pressed in [true, false] {
+                time += 0.05;
+                harness.input_mut().time = Some(time);
+                harness.event(egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                });
+                harness.step();
+            }
+            commands.extend(asked(harness));
+        }
+        commands
+    };
+    assert_eq!(
+        twice(&mut harness, [400.0, 300.0]),
+        [Command::Click(Button::Left, Kind::DoubleClick)]
+    );
+
+    let region = Region {
+        x: 1,
+        y: 1,
+        width: 1,
+        height: 1,
+    };
+    harness.state_mut().input.selection = Selection::Shown(region);
+    harness.run();
+    let right = screen_point(&harness, [2.0, 1.5]);
+    let handle = Command::Handle(Grip::Edge(Side::Right));
+    assert_eq!(twice(&mut harness, right), [handle.clone(), handle]);
 }
 
 /// The minimap centers for the button its slot names and for no other.

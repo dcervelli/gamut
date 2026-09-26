@@ -40,7 +40,7 @@ mod driven;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use crate::gestures::{Button, DragAction, Gestures, Mods, Surface};
+use crate::gestures::{Button, DragAction, Gestures, Kind, Mods, Surface};
 use crate::image::display::{Display, Headroom};
 use crate::image::exif::Exif;
 use crate::image::orient::Turn;
@@ -530,19 +530,25 @@ impl Pass<'_> {
         self.commands.push(Command::Held { button: held, at });
         let dragging = dragging.and(response.interact_pointer_pos()).map(physical);
         self.commands.push(Command::Dragging(dragging));
-        // A click, where its slot runs a key and the button's hold does
-        // nothing — a press held up the loupe, and letting go is not also a
-        // click — and, for the primary, where it was not on one of the
-        // region's handles.
+        // A click, and a double click, where its slot runs a key and the
+        // button's hold does nothing — a press held up the loupe, and
+        // letting go is not also a click — and, for the primary, where it
+        // was not on one of the region's handles.
         let mods = self.input.modifiers;
         let gestures = &self.input.gestures;
         for button in Button::ALL {
-            if response.clicked_by(pointer_button(button))
-                && !(button == Button::Left && clicked_handle)
-                && gestures.click(Surface::Image, mods, button).is_some()
-                && gestures.hold(Surface::Image, mods, button).is_none()
-            {
-                self.commands.push(Command::Click(button));
+            let pointer = pointer_button(button);
+            for (kind, happened) in [
+                (Kind::Click, response.clicked_by(pointer)),
+                (Kind::DoubleClick, response.double_clicked_by(pointer)),
+            ] {
+                if happened
+                    && !(button == Button::Left && clicked_handle)
+                    && gestures.click(Surface::Image, mods, button, kind).is_some()
+                    && gestures.hold(Surface::Image, mods, button).is_none()
+                {
+                    self.commands.push(Command::Click(button, kind));
+                }
             }
         }
         if response.contains_pointer() {

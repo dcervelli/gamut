@@ -747,6 +747,7 @@ region behind: it belongs to the picture it was drawn on.
 | Drag | Pan, with the image following the pointer; with a region selected, draw it, or pull one of its handles — the one at its center moves the whole of it | `gesture.image.left.drag` |
 | `Shift`+Drag | Inside the region, move the whole of it | `gesture.image.shift+left.drag` |
 | Click a region handle | Make it the current handle, the one the arrows move | |
+| Double-click | Actual size, as `1` does | `gesture.image.left.double-click` |
 | `Space`+Drag | Zoom to the box dragged out, wherever the drag begins | |
 | Wheel | Zoom about the pointer | `gesture.image.wheel` |
 | Trackpad scroll | The same, by fractions of a notch | `gesture.image.wheel` |

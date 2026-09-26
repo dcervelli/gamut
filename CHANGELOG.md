@@ -24,6 +24,7 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   black or white point, the files or the frames, a notch at a time with a
   trackpad's scroll adding up to one, or pan, both ways on a trackpad; a
   click of any button can do what a key does.
+- A double-click on the picture goes to actual size, as `1` does.
 - The back and forward buttons on the side of a mouse go back and forward
   through the files that have been on screen, as `Alt+[` and `Alt+]` do.
 - `--print-config` lists every key's name and every gesture at its default,

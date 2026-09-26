@@ -8,7 +8,7 @@
 
 use std::ops::Range;
 
-use crate::gestures::Button;
+use crate::gestures::{Button, Kind};
 use crate::image::region::{Grip, Region};
 
 use super::chooser::Step;
@@ -311,11 +311,14 @@ pub enum Command {
         button: Option<Button>,
         at: Option<[f32; 2]>,
     },
-    /// A button was clicked on the picture: pressed and let go where it was
-    /// pressed. What it does is its click slot's — a key's name — which the
-    /// application reads. Not said for a click on a region's handle, which
-    /// is [`Command::Handle`], nor for a button whose hold does something.
-    Click(Button),
+    /// A button was clicked on the picture — pressed and let go where it
+    /// was pressed — or, with [`Kind::DoubleClick`], clicked a second time
+    /// in quick succession. What it does is its slot's, a key's name, which
+    /// the application reads. Not said for a click on a region's handle,
+    /// which is [`Command::Handle`], nor for a button whose hold does
+    /// something. The second click of a double is a click too, and is said
+    /// as one before the double is.
+    Click(Button, Kind),
     /// Where the pointer is while a button is dragging on the picture — the
     /// view, the region or the zoom box, whichever the drag is — in physical
     /// pixels, and `None` while none is. Said on every pass, for the same

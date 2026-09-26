@@ -131,7 +131,11 @@ and a button held. `Slot::read` and `Slot::token` are the file's spelling;
 `Behavior::read` accepts only the words the slot's kind takes and names them
 when it refuses one. A click's behavior is a key's name rather than a
 vocabulary of its own: a click is a press, and would only mirror the keys'.
-`Config::parse` checks the name against the keymap.
+`Config::parse` checks the name against the keymap. A double click is a
+kind of its own rather than a click counted twice, so that a button can
+do one thing on a click and another on a double; its first click is
+still a click, egui reporting it as one before it knows a second is
+coming, which is why nothing is bound to the primary's click by default.
 
 Lookups are exact: `Gestures::drag(surface, mods, button)` finds the slot
 with exactly those modifiers, so `ctrl+left.drag` does nothing unless it has

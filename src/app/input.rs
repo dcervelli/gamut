@@ -2207,7 +2207,7 @@ impl App {
                 return Effect::redraw_if(was != button || moved);
             }
             // A click of a button on the picture: the key its slot names.
-            ui::Command::Click(button) => return self.click(button),
+            ui::Command::Click(button, kind) => return self.click(button, kind),
             // The pointer through a drag on the picture, which winit has
             // stopped reporting: the loupe follows it, as the readout does.
             ui::Command::Dragging(at) => {
@@ -2462,13 +2462,13 @@ impl App {
         effect
     }
 
-    /// A button clicked on the picture: the action of the key its slot
-    /// names, as though the key had been pressed. A slot naming no key, or
-    /// no slot at all, is nothing.
-    fn click(&mut self, button: Button) -> Effect {
+    /// A button clicked or double-clicked on the picture: the action of the
+    /// key its slot names, as though the key had been pressed. A slot naming
+    /// no key, or no slot at all, is nothing.
+    fn click(&mut self, button: Button, kind: gestures::Kind) -> Effect {
         let action = self
             .gestures
-            .click(Surface::Image, self.pointer.modifiers, button)
+            .click(Surface::Image, self.pointer.modifiers, button, kind)
             .and_then(|name| self.keys.action_named(name));
         match action {
             Some(action) => self.perform(action),
@@ -3325,7 +3325,8 @@ mod tests {
             row("Minimap: Drag"),
             Some("Center the view on the point under the pointer")
         );
-        assert_eq!(mouse.rows.len(), 9);
+        assert_eq!(mouse.rows.len(), 10);
+        assert_eq!(row("Double-click"), Some("Actual size (100%)"));
         for when in When::ALL {
             let words = when.describe();
             assert!(
