@@ -139,9 +139,11 @@ impl ZoomChoice {
         }
     }
 
-    pub fn apply(self, view: &mut View, image: [f32; 2], viewport: Viewport) {
+    /// Does what the cell says to `view`; a scale is zoomed to about
+    /// `anchor`, in window pixels, as [`View::set_zoom_at`] takes it.
+    pub fn apply(self, view: &mut View, anchor: [f32; 2], image: [f32; 2], viewport: Viewport) {
         match self {
-            ZoomChoice::Scale(scale) => view.set_zoom(scale, image, viewport),
+            ZoomChoice::Scale(scale) => view.set_zoom_at(scale, anchor, image, viewport),
             ZoomChoice::Fit(fit) => view.set_fit(fit),
             ZoomChoice::Filter(filter) => view.set_upscale(filter),
         }
@@ -512,7 +514,7 @@ mod tests {
 
         for choice in ZOOM_CHOICES {
             let mut view = View::new();
-            choice.apply(&mut view, image, viewport);
+            choice.apply(&mut view, viewport.center(), image, viewport);
             let (fit, zoom, upscale) = (view.fit(), view.zoom(image, viewport), view.upscale());
             assert!(choice.active(fit, zoom, upscale), "{choice:?}");
 

@@ -1598,7 +1598,8 @@ impl Effect {
 #[derive(Default)]
 pub(super) struct Pointer {
     pub(super) modifiers: ModifiersState,
-    /// Physical window pixels, and the point a wheel zoom works about.
+    /// Physical window pixels, and the point a zoom works about while it is
+    /// over the picture — see `App::zoom_anchor`.
     pub(super) cursor: Option<[f32; 2]>,
     /// Whether it was over the picture with nothing of the interface between
     /// on the last pass, which is what the bar's pixel readout asks. Read the
@@ -1774,10 +1775,19 @@ impl App {
                 }
                 return Effect::Quit;
             }
-            ZoomIn => self.animate(|view, image, viewport| view.zoom_in(image, viewport)),
-            ZoomOut => self.animate(|view, image, viewport| view.zoom_out(image, viewport)),
+            ZoomIn => {
+                let anchor = self.zoom_anchor();
+                self.animate(|view, image, viewport| view.zoom_in(anchor, image, viewport));
+            }
+            ZoomOut => {
+                let anchor = self.zoom_anchor();
+                self.animate(|view, image, viewport| view.zoom_out(anchor, image, viewport));
+            }
             ZoomTo(scale) => {
-                self.animate(|view, image, viewport| view.set_zoom(scale, image, viewport));
+                let anchor = self.zoom_anchor();
+                self.animate(|view, image, viewport| {
+                    view.set_zoom_at(scale, anchor, image, viewport);
+                });
             }
             Pan(direction, step) => {
                 let sign = direction.sign();
@@ -1796,7 +1806,10 @@ impl App {
                     }),
                 }
             }
-            CycleFit => self.animate(|view, image, viewport| view.cycle_fit(image, viewport)),
+            CycleFit => {
+                let anchor = self.zoom_anchor();
+                self.animate(|view, image, viewport| view.cycle_fit(anchor, image, viewport));
+            }
             CycleUpscale => self.view.cycle_upscale(),
             // Nothing to draw yet: the file is only being asked for, and what
             // is on screen stays until it arrives.
@@ -2039,12 +2052,13 @@ impl App {
             }
             CycleFit => {
                 let framing = self.marking.framing;
+                let anchor = self.zoom_anchor();
                 self.animate(|view, image, viewport| match framing {
                     Framing::Region(fit) => {
                         view.fit_region(fit, region.as_f32(), image, viewport);
                     }
                     Framing::Picture(fit) => view.set_fit(fit),
-                    Framing::Actual => view.set_zoom(1.0, image, viewport),
+                    Framing::Actual => view.set_zoom_at(1.0, anchor, image, viewport),
                 });
                 self.marking.framing = framing.next();
                 Effect::Redraw
@@ -2371,7 +2385,8 @@ impl App {
         }
     }
 
-    /// Zooms about the pointer by `steps` notches of the wheel.
+    /// Zooms by `steps` notches of the wheel, about the pointer as every zoom
+    /// is — see `App::zoom_anchor`.
     fn zoom_wheel(&mut self, steps: f32, notched: bool) -> Effect {
         // A trackpad emits a long tail of all but motionless events at the end
         // of a gesture, which would leave the view drifting after the finger
@@ -2380,10 +2395,7 @@ impl App {
             return Effect::Nothing;
         }
         let viewport = self.viewport();
-        let anchor = self.pointer.cursor.unwrap_or([
-            viewport.x + viewport.width / 2.0,
-            viewport.y + viewport.height / 2.0,
-        ]);
+        let anchor = self.zoom_anchor();
         if notched {
             self.animate(|view, image, viewport| {
                 view.zoom_steps_at(steps, anchor, image, viewport);
@@ -2920,7 +2932,8 @@ impl App {
             }),
             // A cell of the zoom menu: a zoom chosen here is a move.
             Control::ZoomTo(choice) => {
-                self.animate(|view, image, viewport| choice.apply(view, image, viewport));
+                let anchor = self.zoom_anchor();
+                self.animate(|view, image, viewport| choice.apply(view, anchor, image, viewport));
                 Effect::Redraw
             }
             Control::Format(format) => {

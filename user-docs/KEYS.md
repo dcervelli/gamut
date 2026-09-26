@@ -36,6 +36,14 @@ either one works out to is the image's shape against the window's. `Space`
 runs through them and then actual size, and starts over at the whole image
 from any zoom you chose by hand, actual size included.
 
+Every zoom works about the pointer while it is over the picture: the detail
+under the pointer stays where it is, whether the zoom came from a key, the
+zoom menu, a double-click or the wheel. With the pointer elsewhere — over a
+panel, or beside the picture — the middle of the window stays put instead.
+The two fits center the picture whatever the pointer is over. A zoom to the
+zoom you are already at moves the detail under the pointer to the middle of
+the window instead: a double-click at actual size goes to what was clicked.
+
 Zooming leaves fit mode; panning does not, so `Space` and then Down scrolls
 through a tall image filling the window.
 

@@ -159,8 +159,35 @@ rather than in pan and zoom separately. Interpolate those separately and a
 zoom that also pans swings the image out to one side and back, the zoom
 carrying the target away faster than the pan brings it in. Along the
 space-scale line every point of the image crosses the screen in a straight
-line at a steady rate, and whatever a wheel zoom is anchored on stays put from
-the first frame to the last. Apart from the copying chords and `Ctrl` with an
+line at a steady rate, and whatever a zoom is anchored on stays put from the
+first frame to the last. The views along the line are not held within the
+pan limit as a settled view is: the limit is `max(linear, 0)` in these
+coordinates, bending where the image stops overflowing the viewport, so the
+line from a fit to a zoom on a detail crosses it — for a few frames the
+image overflows one edge while still short of the other. `View::at` marks
+the view it makes as moving, and `placement` shows it where the line puts it;
+clamped, the move would pin the picture against the edge and then let it
+catch up, which is a bend. Only the ends are clamped, and the end is what
+the move lands on.
+
+Every zoom has an anchor, a window point that stays over the same detail
+through it: `View::set_zoom_at` is the one zoom, and the steps, the number
+row, the zoom menu, the double-click, the wheel and the actual size `Space`
+cycles to all go through it. `App::zoom_anchor` chooses the point: the
+pointer while it is over the picture — `pointer_pixel` says so, on the same
+reading the bar's readout uses, so a pointer over a panel or in the margin
+beside the picture does not count — and the viewport's center otherwise. A
+zoom asked for from the keyboard with the pointer resting on a detail is a
+zoom into that detail, which is what the hand on the mouse was saying; from
+the zoom menu the pointer is on the menu, and the middle of the window is
+what stays. Asked for the zoom the view is already at, `set_zoom_at` puts
+the detail under the anchor in the middle instead — a double-click at actual
+size goes to the detail rather than doing nothing — as a move, being asked
+for by name. The anchor cannot always be honored: an axis the image does not
+overflow stays centered, and a view against an edge stops there, by the same
+`clamp_pan` a drag is held by. The two fits have no anchor — a fit with the
+view left off to one side would show a corner of the image it had just been
+asked to fit — so `set_fit` centers. Apart from the copying chords and `Ctrl` with an
 arrow, keys held with Ctrl, Alt or Super are ignored, so window-manager chords
 such as `Super+0` do not disturb the view.
 

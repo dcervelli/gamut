@@ -1354,6 +1354,19 @@ impl App {
         Some([point[0] as u32, point[1] as u32])
     }
 
+    /// The point every zoom — a key, a cell of the zoom menu, a double-click,
+    /// a notch of the wheel — works about, in window pixels: the pointer
+    /// while it is over the picture, so that what is under it stays under
+    /// it, and the middle of the viewport otherwise. Over a panel, a menu or
+    /// the margin beside the picture, the pointer is not pointing at anything
+    /// a zoom could keep.
+    pub(super) fn zoom_anchor(&self) -> [f32; 2] {
+        match (self.pointer_pixel(), self.pointer.cursor) {
+            (Some(_), Some(cursor)) => cursor,
+            _ => self.viewport().center(),
+        }
+    }
+
     /// Whether the minimap is on screen, which takes the toggle and a view
     /// that has something to point out. A view holding the whole image is
     /// already its own map, so the widget would be a second copy of what the
@@ -2916,7 +2929,8 @@ mod tests {
 
         let (mut app, dir) = app_over("motion", &[("a.png", 64, 48)]);
         let (image, viewport) = (app.image_size(), app.viewport());
-        app.view.set_zoom(4.0, image, viewport);
+        app.view
+            .set_zoom_at(4.0, viewport.center(), image, viewport);
         let before = app.view.position(image, viewport);
 
         let _ = app.perform(Action::Pan(Direction::Right, PanStep::Coarse));
@@ -3521,14 +3535,68 @@ mod tests {
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }
 
+    /// A zoom asked for by name works about the pointer while it is over the
+    /// picture — the detail under it stays under it — and about the middle
+    /// of the viewport when it is not: over a panel, or off the picture.
+    #[test]
+    fn a_named_zoom_works_about_the_pointer_over_the_picture() {
+        use input::Action::{ZoomIn, ZoomTo};
+        let (mut app, _dir) = app_over("anchor", &[("a.png", 400, 300)]);
+        app.headless = Some(WINDOW);
+        let (image, viewport) = (app.image_size(), app.viewport());
+        let under = |app: &App, at: [f32; 2]| app.view.placement(image, viewport).image_point(at);
+        let close =
+            |a: [f32; 2], b: [f32; 2]| (a[0] - b[0]).abs() < 0.2 && (a[1] - b[1]).abs() < 0.2;
+
+        // Over the picture: the pixel under the pointer is the anchor.
+        let at = [300.0, 200.0];
+        app.pointer.cursor = Some(at);
+        app.pointer.over_image = true;
+        assert!(app.pointer_pixel().is_some());
+        let before = under(&app, at);
+        let _ = app.perform(ZoomTo(8.0));
+        assert_eq!(app.view.fit(), None);
+        assert_eq!(app.view.zoom(image, viewport), 8.0);
+        let after = under(&app, at);
+        assert!(close(before, after), "{before:?} -> {after:?}");
+        let _ = app.perform(ZoomIn);
+        let stepped = under(&app, at);
+        assert!(close(before, stepped), "{before:?} -> {stepped:?}");
+
+        // Under a panel, the same pointer is not over the picture, and the
+        // middle of the viewport is what stays put.
+        app.pointer.over_image = false;
+        let middle = viewport.center();
+        let before = under(&app, middle);
+        let _ = app.perform(ZoomTo(16.0));
+        let after = under(&app, middle);
+        assert!(close(before, after), "{before:?} -> {after:?}");
+
+        // Asked for the zoom it is at — a double-click at actual size — the
+        // detail under the pointer goes to the middle, as a move. At a zoom
+        // the picture overflows the viewport at, so that it has room to.
+        app.pointer.over_image = true;
+        app.view.reset();
+        app.view.set_zoom_at(4.0, middle, image, viewport);
+        app.motion = None;
+        let detail = under(&app, at);
+        let _ = app.perform(ZoomTo(4.0));
+        assert_eq!(app.view.zoom(image, viewport), 4.0);
+        let centered = under(&app, middle);
+        assert!(close(detail, centered), "{detail:?} -> {centered:?}");
+        assert!(app.motion.is_some());
+    }
+
     /// Stepping between frames of the same size is a comparison — the same
     /// detail has to stay under the same pixels, or there is nothing to
     /// compare.
     #[test]
     fn stepping_to_an_image_of_the_same_size_keeps_the_view() {
         let (mut app, dir) = app_over("same", &[("a.png", 64, 48), ("b.png", 64, 48)]);
-        app.view.set_zoom(1.0, app.image_size(), VIEWPORT);
-        app.view.zoom_in(app.image_size(), VIEWPORT);
+        app.view
+            .set_zoom_at(1.0, VIEWPORT.center(), app.image_size(), VIEWPORT);
+        app.view
+            .zoom_in(VIEWPORT.center(), app.image_size(), VIEWPORT);
         let zoom = app.view.zoom(app.image_size(), VIEWPORT);
 
         app.step(true);
@@ -3554,12 +3622,14 @@ mod tests {
         // b.png is left at 4x, so it has a view of its own to be put back.
         app.step(true);
         answer(&mut app, Reload::Fresh);
-        app.view.set_zoom(4.0, app.image_size(), VIEWPORT);
+        app.view
+            .set_zoom_at(4.0, VIEWPORT.center(), app.image_size(), VIEWPORT);
 
         // Back to a.png, and on to somewhere else in it.
         app.step(false);
         answer(&mut app, Reload::Fresh);
-        app.view.set_zoom(2.0, app.image_size(), VIEWPORT);
+        app.view
+            .set_zoom_at(2.0, VIEWPORT.center(), app.image_size(), VIEWPORT);
         let zoom = app.view.zoom(app.image_size(), VIEWPORT);
 
         // And on to b.png again: at a.png's zoom, not the 4x it was left in.
@@ -3580,7 +3650,8 @@ mod tests {
         use crate::image::display::Colormap;
 
         let (mut app, dir) = app_over("kept", &[("a.png", 64, 48), ("b.png", 32, 16)]);
-        app.view.set_zoom(4.0, app.image_size(), VIEWPORT);
+        app.view
+            .set_zoom_at(4.0, VIEWPORT.center(), app.image_size(), VIEWPORT);
         let zoom = app.view.zoom(app.image_size(), VIEWPORT);
         let display = app.current.as_mut().expect("a.png is on screen");
         display.display.adjust_exposure(2.0);
@@ -3671,7 +3742,8 @@ mod tests {
     #[test]
     fn a_reload_is_not_a_return() {
         let (mut app, dir) = app_over("reloaded", &[("a.png", 64, 48)]);
-        app.view.set_zoom(4.0, app.image_size(), VIEWPORT);
+        app.view
+            .set_zoom_at(4.0, VIEWPORT.center(), app.image_size(), VIEWPORT);
         assert_eq!(app.view.fit(), None);
 
         write_png(&dir, "a.png", 32, 16);
@@ -3982,8 +4054,10 @@ mod tests {
     #[test]
     fn stepping_to_an_image_of_another_size_fits_it() {
         let (mut app, dir) = app_over("other", &[("a.png", 64, 48), ("b.png", 32, 32)]);
-        app.view.set_zoom(1.0, app.image_size(), VIEWPORT);
-        app.view.zoom_in(app.image_size(), VIEWPORT);
+        app.view
+            .set_zoom_at(1.0, VIEWPORT.center(), app.image_size(), VIEWPORT);
+        app.view
+            .zoom_in(VIEWPORT.center(), app.image_size(), VIEWPORT);
 
         app.step(true);
         answer(&mut app, Reload::Fresh);
@@ -4183,8 +4257,10 @@ mod tests {
         assert!(app.animation.is_none(), "pages have no clock");
         assert_eq!(&shown_pixel(&app, 8, 6)[..3], [255, 0, 0]);
 
-        app.view.set_zoom(1.0, app.image_size(), VIEWPORT);
-        app.view.zoom_in(app.image_size(), VIEWPORT);
+        app.view
+            .set_zoom_at(1.0, VIEWPORT.center(), app.image_size(), VIEWPORT);
+        app.view
+            .zoom_in(VIEWPORT.center(), app.image_size(), VIEWPORT);
         let zoom = app.view.zoom(app.image_size(), VIEWPORT);
         if let Some(current) = app.current.as_mut() {
             current.display.set_exposure(1.0);
