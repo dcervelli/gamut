@@ -13,7 +13,8 @@ use super::Rect;
 use crate::view::Viewport;
 
 use super::chrome::{Parts, Pass, content_area};
-use super::{Command, PADDING, outline, panel};
+use super::{Command, PADDING, outline, panel, pointer_button};
+use crate::gestures::{Button, Kind};
 
 /// The largest the minimap's thumbnail may be. It keeps the image's own
 /// shape inside this, so a panorama gets a wide short one and a portrait a
@@ -143,12 +144,13 @@ fn minimap_marker(rect: Rect, image: [f32; 2], placement: Placement, viewport: V
 ///
 /// The thumbnail is opaque to the pointer: what lands on it belongs to it
 /// rather than to the picture it is covering, so it is laid out as an area
-/// of its own. The hand on it asks for the place under it to be put in the
-/// middle of the window, from the frame the button goes down until it comes
-/// up again — a press moves the view at once, and holding on and moving
-/// keeps the marker under the hand. Handed back as [`Command::Center`],
-/// since the map is a way of saying where to look and the view is the
-/// application's to move.
+/// of its own. A button whose drag slot centers asks for the place under it
+/// to be put in the middle of the window, from the frame the button goes
+/// down until it comes up again — a press moves the view at once, and
+/// holding on and moving keeps the marker under the hand; one whose click
+/// slot centers asks for it once, on the click. Handed back as
+/// [`Command::Center`], since the map is a way of saying where to look and
+/// the view is the application's to move.
 pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
     let Some(current) = pass.current else {
         return;
@@ -171,12 +173,26 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
         // From the press on, not from the toolkit's decision that the
         // press became a drag: the view goes where the hand is the
         // moment it lands.
-        let held =
-            response.is_pointer_button_down_on() && ui.input(|input| input.pointer.primary_down());
-        if let Some(pos) = response.interact_pointer_pos().filter(|_| held) {
+        let mods = pass.input.modifiers;
+        let gestures = &pass.input.gestures;
+        let held = response.is_pointer_button_down_on()
+            && Button::ALL.into_iter().any(|button| {
+                ui.input(|input| input.pointer.button_down(pointer_button(button)))
+                    && gestures.center(mods, button, Kind::Drag)
+            });
+        // A click centers once, where the same button's press has not
+        // already been centering all along.
+        let clicked = Button::ALL.into_iter().any(|button| {
+            response.clicked_by(pointer_button(button))
+                && gestures.center(mods, button, Kind::Click)
+                && !gestures.center(mods, button, Kind::Drag)
+        });
+        if let Some(pos) = response.interact_pointer_pos().filter(|_| held || clicked) {
             pass.commands
                 .push(Command::Center(image_point(rect, image, [pos.x, pos.y])));
-            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+            if held {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+            }
         }
         let painter = ui.painter();
         let grid = pass.grid;

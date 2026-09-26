@@ -1,24 +1,29 @@
 # Keys and mouse
 
-Every control `gamut` has. Letter keys work in either case except `a`,
-`s` and `c`, where the two cases do different things.
+Every control `gamut` has, at its default. Each key has a name — the last
+column — that the [configuration file](SETTINGS.md#keys) can bind to other
+keys, and each mouse gesture can be given something else to do there too;
+the help popup (`?`) always shows what is bound now. A capital letter that
+nothing is bound to does what its lower case does, so Caps Lock changes
+nothing except where the two cases do different things: `a` and `A`, `s`
+and `S`, `c` and `C`, `l` and `L`, `n` and `N`.
 
 ## Zoom and position
 
-| Key | What it does |
-| --- | --- |
-| `1`, `0` | Actual size, one image pixel per screen pixel |
-| `2`, `3`, `4`, `5` | 200%, 400%, 800%, 1600% |
-| `Shift`+`2`, `3`, `4` | 50%, 25%, 10% |
-| `+`, `=` | Zoom in one step, a factor of 1.25 |
-| `-`, `_` | Zoom out one step |
-| `Space` | Cycle through the whole image, the window filled, and actual size. With a region selected, fit the region, fill the window with it, then the image's three, in turn |
-| `Space`+Drag | Zoom to the box you drag out |
-| `p` | Cycle the filter used above 100%: nearest → bicubic |
-| Arrows | Pan by 64 pixels; with a region selected, move it — or its current handle — one pixel |
-| `Shift`+Arrows | Pan by one pixel |
-| `Ctrl`+Arrows | Pan to the far side of the image; with a region selected, grow it that way one pixel |
-| `Ctrl`+`Shift`+Arrows | With a region selected, shrink it that way one pixel, pulling its far side in |
+| Key | What it does | Name |
+| --- | --- | --- |
+| `1`, `0` | Actual size, one image pixel per screen pixel | `zoom.100` |
+| `2`, `3`, `4`, `5` | 200%, 400%, 800%, 1600% | `zoom.200`, `zoom.400`, `zoom.800`, `zoom.1600` |
+| `Shift`+`2`, `3`, `4` | 50%, 25%, 10% | `zoom.50`, `zoom.25`, `zoom.10` |
+| `+`, `=` | Zoom in one step, a factor of 1.25 | `zoom.in` |
+| `-`, `_` | Zoom out one step | `zoom.out` |
+| `Space` | Cycle through the whole image, the window filled, and actual size. With a region selected, fit the region, fill the window with it, then the image's three, in turn | `zoom.fit` |
+| `Space`+Drag | Zoom to the box you drag out | `zoom.fit`, held |
+| `p` | Cycle the filter used above 100%: nearest → bicubic | `zoom.filter` |
+| Arrows | Pan by 64 pixels; with a region selected, move it — or its current handle — one pixel | `pan.left` … `pan.down`; `region.move.left` … `region.move.down` |
+| `Shift`+Arrows | Pan by one pixel | `pan.pixel.left` … `pan.pixel.down` |
+| `Ctrl`+Arrows | Pan to the far side of the image; with a region selected, grow it that way one pixel | `pan.edge.left` … `pan.edge.down`; `region.grow.left` … `region.grow.down` |
+| `Ctrl`+`Shift`+Arrows | With a region selected, shrink it that way one pixel, pulling its far side in | `region.shrink.left` … `region.shrink.down` |
 
 Zoom runs from 2% to 6400%. The zooms below 100% are the ones above it with
 `Shift` held, so each zoom is under the number it hangs off. The number row is
@@ -47,21 +52,21 @@ on screen, since there is then nowhere to pan to.
 
 ## Moving through the files
 
-| Key | What it does |
-| --- | --- |
-| `]`, `Page Down` | Next file |
-| `[`, `Page Up` | Previous file |
-| `Ctrl+P` | Choose a file from the list: type to filter it, arrows to move, `Enter` to open, `Esc` to close |
-| `Tab` | Show or hide the file list down the left of the picture |
-| `Alt+[`, `Alt+Page Up` | Back in image history |
-| `Alt+]`, `Alt+Page Down` | Forward in image history |
-| `Ctrl+O` | Open image files chosen in the desktop's file dialog |
-| `Ctrl+Shift+O` | Open a folder chosen in the desktop's file dialog |
-| `F2` | Rename the file on screen |
-| `Del` | Move the file on screen to the trash, and show the next |
-| `⌫` (`Backspace`) | Take the file on screen off the list, and show the next |
-| `Ctrl+Z` | Undo the last rename, deletion or removal |
-| `Ctrl+E` | Export the picture as shown to a new JPG or PNG |
+| Key | What it does | Name |
+| --- | --- | --- |
+| `]`, `Page Down` | Next file | `files.next` |
+| `[`, `Page Up` | Previous file | `files.previous` |
+| `Ctrl+P` | Choose a file from the list: type to filter it, arrows to move, `Enter` to open, `Esc` to close | `files.chooser` |
+| `Tab` | Show or hide the file list down the left of the picture | `files.list` |
+| `Alt+[`, `Alt+Page Up` | Back in image history | `files.back` |
+| `Alt+]`, `Alt+Page Down` | Forward in image history | `files.forward` |
+| `Ctrl+O` | Open image files chosen in the desktop's file dialog | `files.open` |
+| `Ctrl+Shift+O` | Open a folder chosen in the desktop's file dialog | `files.open-folder` |
+| `F2` | Rename the file on screen | `files.rename` |
+| `Del` | Move the file on screen to the trash, and show the next | `files.delete` |
+| `⌫` (`Backspace`) | Take the file on screen off the list, and show the next | `files.remove` |
+| `Ctrl+Z` | Undo the last rename, deletion or removal | `files.undo` |
+| `Ctrl+E` | Export the picture as shown to a new JPG or PNG | `files.export` |
 
 A file you have already looked at comes back exactly as you left it: the same
 pan and zoom, the same turn, the same window and exposure, the same tone curve
@@ -140,7 +145,7 @@ place in the list instead: `:12` puts the twelfth file first, followed by
 every file whose number has `12` in it, and a `-` counts from the end, so
 `:-1` puts the last file first. The arrows move through the rows
 without opening anything; `Enter`, or a click on a row, opens that file and
-closes the chooser; `Esc`, a click outside it, or `Ctrl+P` again closes it.
+closes the chooser; `Esc`, or a click outside it, closes it.
 With a single file on the list there is nothing to choose, and `Ctrl+P` does
 nothing. While it is open, keys go into the field rather than to the picture. The
 file on screen is marked in the list, and the cursor starts on it, so
@@ -288,11 +293,11 @@ the undo stack; delete the new file as you would any other.
 
 ## Playing an animation
 
-| Key | What it does |
-| --- | --- |
-| `Enter` | Play or pause an animation |
-| `n` | Next frame of an animation, or page of a file that holds several pictures |
-| `N` | Previous frame, or page |
+| Key | What it does | Name |
+| --- | --- | --- |
+| `Enter` | Play or pause an animation | `playback.play` |
+| `n` | Next frame of an animation, or page of a file that holds several pictures | `playback.next` |
+| `Shift+N` | Previous frame, or page | `playback.previous` |
 
 An animated file plays as it opens, at the speed the file says, and loops as
 many times as it says; `--paused` opens it stopped on the first frame. A
@@ -311,16 +316,16 @@ playing, when you step off it and back.
 
 ## Copying and pasting
 
-| Key | What it does |
-| --- | --- |
-| `c` | Copy the name of the file on screen, without its path |
-| `Shift+C` | Copy the absolute path of the file on screen |
-| `Ctrl+Shift+C` | Copy the file on screen as a URI |
-| `Ctrl+C` | Copy the image itself, as you are seeing it — or the region, while one is selected |
-| `Ctrl+I` | Copy everything the file information says about the file |
-| `Ctrl+.` | Copy the value of the pixel under the pointer |
-| `Ctrl+Shift+.` | Copy the coordinate of the pixel under the pointer |
-| `Ctrl+V` | Paste an image, saved among your pictures and shown |
+| Key | What it does | Name |
+| --- | --- | --- |
+| `c` | Copy the name of the file on screen, without its path | `clipboard.name` |
+| `Shift+C` | Copy the absolute path of the file on screen | `clipboard.path` |
+| `Ctrl+Shift+C` | Copy the file on screen as a URI | `clipboard.uri` |
+| `Ctrl+C` | Copy the image itself, as you are seeing it — or the region, while one is selected | `clipboard.image` |
+| `Ctrl+I` | Copy everything the file information says about the file | `clipboard.info` |
+| `Ctrl+.` | Copy the value of the pixel under the pointer | `clipboard.pixel` |
+| `Ctrl+>` (`Ctrl+Shift+.`) | Copy the coordinate of the pixel under the pointer | `clipboard.coordinate` |
+| `Ctrl+V` | Paste an image, saved among your pictures and shown | `clipboard.paste` |
 
 Every copy says so: a short message appears at the foot of the window naming
 what was taken, and goes on its own after a couple of seconds. Copying changes
@@ -428,22 +433,22 @@ that is not a paste; open it as an argument instead.
 
 ## The display
 
-| Key | What it does |
-| --- | --- |
-| `d` | Exposure down a quarter stop |
-| `f` | Exposure up a quarter stop |
-| `a` | Black point down |
-| `s` | Black point up |
-| `A` | White point down |
-| `S` | White point up |
-| `e` | Cycle the window rule: as stored (0–1) → full range → trimmed (the central 99.8%) |
-| `t` | Toggle the curve on the highlights: clip, or roll off |
-| `w` | Mark the clipped pixels, or stop: red where a channel has reached white, blue where one has reached black |
-| `o` | Turn the room above white off and on, where the monitor is in HDR mode |
-| `r` | Cycle false color: gray → viridis → magma → turbo |
-| `z` | Reset every display setting |
-| `;` | Turn the picture a quarter counterclockwise |
-| `'` | Turn the picture a quarter clockwise |
+| Key | What it does | Name |
+| --- | --- | --- |
+| `d` | Exposure down a quarter stop | `display.exposure.down` |
+| `f` | Exposure up a quarter stop | `display.exposure.up` |
+| `a` | Black point down | `display.black.down` |
+| `s` | Black point up | `display.black.up` |
+| `Shift+A` | White point down | `display.white.down` |
+| `Shift+S` | White point up | `display.white.up` |
+| `e` | Cycle the window rule: as stored (0–1) → full range → trimmed (the central 99.8%) | `display.window` |
+| `t` | Toggle the curve on the highlights: clip, or roll off | `display.tone-map` |
+| `w` | Mark the clipped pixels, or stop: red where a channel has reached white, blue where one has reached black | `display.marks` |
+| `o` | Turn the room above white off and on, where the monitor is in HDR mode | `display.hdr` |
+| `r` | Cycle false color: gray → viridis → magma → turbo | `display.colormap` |
+| `z` | Reset every display setting | `display.reset` |
+| `;` | Turn the picture a quarter counterclockwise | `display.turn.left` |
+| `'` | Turn the picture a quarter clockwise | `display.turn.right` |
 
 The two buttons before `HDR` at the right of the bottom bar do the same.
 A turn changes how the picture is shown, not the file: it is kept with the
@@ -557,21 +562,21 @@ where all of it is set.
 
 ## The interface
 
-| Key | What it does |
-| --- | --- |
-| `h` | Show or hide the histogram |
-| `y` | Count the histogram's bars up its axis, or the logarithm of them |
-| `i` | Show or hide the file information |
-| `m` | Show or hide the minimap |
-| `g` | Show or hide the grid over the image |
-| `l` | Show or hide the loupe |
-| `Shift+L` | Cycle the loupe's magnification: 2, 4, 8 or 16 times |
-| `x` | Select a region of the image; again, or `Esc`, removes it |
-| `.` | Cycle how the pixel under the pointer is read out: hex → decimal → mapped |
-| `` ` `` | Show or hide the panels around the image |
-| `~` | The same, and closes the histogram, information, minimap and file list |
-| `?`, `/` | Show the keys: every one of them, what it does and when. Again, `Esc` or a click outside closes it. The button at the foot of the right strip does the same |
-| `q`, `Esc` | Quit. `Esc` closes a popup, a message or a region, or brings the panels back |
+| Key | What it does | Name |
+| --- | --- | --- |
+| `h` | Show or hide the histogram | `interface.histogram` |
+| `y` | Count the histogram's bars up its axis, or the logarithm of them | `interface.log-counts` |
+| `i` | Show or hide the file information | `interface.info` |
+| `m` | Show or hide the minimap | `interface.minimap` |
+| `g` | Show or hide the grid over the image | `interface.grid` |
+| `l` | Show or hide the loupe | `interface.loupe` |
+| `Shift+L` | Cycle the loupe's magnification: 2, 4, 8 or 16 times | `interface.loupe-magnification` |
+| `x` | Select a region of the image; again, or `Esc`, removes it | `region.select` |
+| `.` | Cycle how the pixel under the pointer is read out: hex → decimal → mapped | `interface.pixel-format` |
+| `` ` `` | Show or hide the panels around the image | `interface.toggle` |
+| `~` | The same, and closes the histogram, information, minimap and file list | `interface.toggle-panels` |
+| `?`, `/` | Show the keys: every one of them, what it does and when. Again, `Esc` or a click outside closes it. The button at the foot of the right strip does the same | `interface.help` |
+| `q`, `Esc` | Quit. `Esc` closes a popup, a message or a region, or brings the panels back | `interface.quit`, `interface.dismiss` |
 
 The panels are opaque and the image is fitted inside them, so hiding them
 gives a fitted image more room and it re-fits immediately. The file list stays
@@ -740,36 +745,38 @@ region behind: it belongs to the picture it was drawn on.
 
 ## The mouse
 
-| Action | What it does |
-| --- | --- |
-| Drag | Pan, with the image following the pointer; with a region selected, draw it, or pull one of its handles — the one at its center moves the whole of it |
-| `Shift`+Drag | Inside the region, move the whole of it |
-| Click a region handle | Make it the current handle, the one the arrows move |
-| `Space`+Drag | Zoom to the box dragged out, wherever the drag begins |
-| Wheel | Zoom about the pointer |
-| Trackpad scroll | The same, by fractions of a notch |
-| Click a panel button | Show or hide the histogram, the file information, or the minimap |
-| Press the minimap | Center the view on the point pressed, as near as the image's edges allow, the moment the button goes down |
-| Drag the minimap | Move the view with the pointer, keeping the marked-out part of the map under it |
-| Click the grid button in the bottom left | Show or hide the grid |
-| Click the loupe button beside it | Show or hide the loupe, a magnified circle beside the pointer |
-| Hold the right button on the picture | Show the loupe for as long as the button is held |
-| Wheel while holding the right button | Step the loupe's magnification: 2, 4, 8 or 16 times |
-| Click the copy button | Open the menu of copies: the file, or the image |
-| Click the region button | Select a region, or take the selected one off |
-| Click the paste button | Paste the image on the clipboard, as `Ctrl+V` does |
-| Click **Open files…** or **Open folder…** in an empty window | Put up the desktop's file dialog, as `Ctrl+O` and `Ctrl+Shift+O` do |
-| Click the play, back or forward button under an animation | Play or pause it, or step a frame, as `Enter`, `N` and `n` do |
-| Click or drag along the timeline | Go to the frame under the pointer, and stop there |
-| Click a histogram button | Set the window on one of its rules, choose the tone curve, or mark the clipped pixels on the picture |
-| Drag a handle on the histogram's band | Set the black point or the white point: the value that comes out black, or white |
-| Drag the band between the handles | Slide the window along the axis without changing its width |
-| Click or drag the exposure's slider | Set the exposure to the quarter stop under the pointer |
-| Wheel over the file information | Scroll it |
-| Drag the file information | Scroll it, as if dragging the scrollbar's handle |
-| Click the zoom percentage | Open the zoom menu: scale, fit and the magnification filter |
-| Click the dot beside the grid button | Choose how a pixel's value is read out |
-| Click a turn button, before `HDR` at the bottom right | Turn the picture a quarter counterclockwise or clockwise, as `;` and `'` do |
+| Action | What it does | Slot |
+| --- | --- | --- |
+| Drag | Pan, with the image following the pointer; with a region selected, draw it, or pull one of its handles — the one at its center moves the whole of it | `gesture.image.left.drag` |
+| `Shift`+Drag | Inside the region, move the whole of it | `gesture.image.shift+left.drag` |
+| Click a region handle | Make it the current handle, the one the arrows move | |
+| Double-click | Actual size, as `1` does | `gesture.image.left.double-click` |
+| `Space`+Drag | Zoom to the box dragged out, wherever the drag begins | |
+| Wheel | Zoom about the pointer | `gesture.image.wheel` |
+| Trackpad scroll | The same, by fractions of a notch | `gesture.image.wheel` |
+| Click a panel button | Show or hide the histogram, the file information, or the minimap | |
+| Press the minimap | Center the view on the point pressed, as near as the image's edges allow, the moment the button goes down | `gesture.minimap.left.drag` |
+| Drag the minimap | Move the view with the pointer, keeping the marked-out part of the map under it | `gesture.minimap.left.drag` |
+| Click the grid button in the bottom left | Show or hide the grid | |
+| Click the loupe button beside it | Show or hide the loupe, a magnified circle beside the pointer | |
+| Hold the right button on the picture | Show the loupe for as long as the button is held | `gesture.image.right.hold` |
+| Wheel while holding the right button | Step the loupe's magnification: 2, 4, 8 or 16 times | `gesture.image.right+wheel` |
+| The back and forward buttons on the side of the mouse | Back and forward in image history, as `Alt+[` and `Alt+]` do | `gesture.image.back.click`, `gesture.image.forward.click` |
+| Click the copy button | Open the menu of copies: the file, or the image | |
+| Click the region button | Select a region, or take the selected one off | |
+| Click the paste button | Paste the image on the clipboard, as `Ctrl+V` does | |
+| Click **Open files…** or **Open folder…** in an empty window | Put up the desktop's file dialog, as `Ctrl+O` and `Ctrl+Shift+O` do | |
+| Click the play, back or forward button under an animation | Play or pause it, or step a frame, as `Enter`, `N` and `n` do | |
+| Click or drag along the timeline | Go to the frame under the pointer, and stop there | |
+| Click a histogram button | Set the window on one of its rules, choose the tone curve, or mark the clipped pixels on the picture | |
+| Drag a handle on the histogram's band | Set the black point or the white point: the value that comes out black, or white | |
+| Drag the band between the handles | Slide the window along the axis without changing its width | |
+| Click or drag the exposure's slider | Set the exposure to the quarter stop under the pointer | |
+| Wheel over the file information | Scroll it | |
+| Drag the file information | Scroll it, as if dragging the scrollbar's handle | |
+| Click the zoom percentage | Open the zoom menu: scale, fit and the magnification filter | |
+| Click the dot beside the grid button | Choose how a pixel's value is read out | |
+| Click a turn button, before `HDR` at the bottom right | Turn the picture a quarter counterclockwise or clockwise, as `;` and `'` do | |
 
 The button at the top of the left strip opens a menu of the
 copies beside it: the file's **Name**, its **Path**, its **URI**, the
@@ -815,6 +822,16 @@ window, the exposure and the tone curve have made of the numbers, where 0 and
 menu of them; whichever is in force is lit. It applies to whichever image is
 on screen and stays as you set it.
 
+The slot in the last column is the name of that gesture in the
+[configuration file](SETTINGS.md#gestures), which can give it something else
+to do, and give the middle button, the side buttons, and the wheel with a
+modifier or another button held, things to do that they do not do by
+default. What is fixed, whatever the file says: a drag begun while a region
+is asked for draws it, one from a region's handle pulls the handle, one
+with `Space` — or whatever `zoom.fit` is bound to — held draws a box to
+zoom to, and a click on a handle
+makes it the current one.
+
 The pointer keeps its grab until the button comes up, so a drag that leaves
 the window goes on working. The cursor becomes a closed hand only when there
 is somewhere to drag to.
@@ -844,7 +861,8 @@ use when the window floats, and may lay the window out its own way regardless.
 
 ## Keys that are deliberately ignored
 
-Apart from the copying chords, `Ctrl+P`, `Ctrl+O` and `Ctrl` with an arrow, anything held with
-`Ctrl`, `Alt` or a `Super`/`Command` key does nothing here, and neither does
-`Ctrl` with the wheel. Those combinations belong to the window manager, and a
-chord such as `Super+0` would otherwise move the view behind its back.
+Apart from the chords in the tables above, anything held with `Ctrl`, `Alt`
+or a `Super`/`Command` key does nothing here unless the configuration file
+binds it, and neither does the wheel with one of them held. Those
+combinations belong to the window manager, and a chord such as `Super+0`
+would otherwise move the view behind its back.

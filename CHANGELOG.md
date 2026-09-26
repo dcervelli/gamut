@@ -16,6 +16,43 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   them all, and the file list and the chooser find the file by that title.
   Where the file carries a packet of its own as well, the sidecar's word
   on a field is the one shown, and the packet's other fields stand.
+- Every key can be rebound in the configuration file. Each has a dotted
+  name — `zoom.in`, `files.undo`, `region.move.left` — and a line such as
+  `keys.files.undo = ctrl+z` binds it to the keys after it, or to none. A
+  key bound to one name is taken from whichever name had it, and the
+  terminal says so where an earlier line had set it. The help popup, the
+  tooltips, the shortcuts in the menus, and the messages about undo and
+  about bringing the interface back all name the keys as they are bound.
+  `--help` and the manual page show the defaults. A line left with no key
+  says so in the help popup, with a warning mark and **unbound**.
+- Every mouse gesture on the picture and the minimap can be given something
+  else to do: `gesture.image.middle.drag = pan`, `gesture.image.middle.hold
+  = loupe`, `gesture.image.ctrl+wheel = exposure`,
+  `gesture.image.left.drag = zoom-box`. The wheel can step the exposure, the
+  black or white point, the files or the frames, a notch at a time with a
+  trackpad's scroll adding up to one, or pan, both ways on a trackpad; a
+  click of any button can do what a key does.
+- A double-click on the picture goes to actual size, as `1` does.
+- The back and forward buttons on the side of a mouse go back and forward
+  through the files that have been on screen, as `Alt+[` and `Alt+]` do.
+- `--print-config` lists every key's name and every gesture at its default,
+  and `--help` and the help popup gain a section for the mouse.
+
+### Changed
+
+- Some keys are written differently, as the configuration file writes
+  them: the coordinate copy is `Ctrl+>` rather than `Ctrl+Shift+.`, the
+  white point is `Shift+A` and `Shift+S` rather than `A` and `S`, and the
+  previous frame is `Shift+N` rather than `N`. The keys are the same.
+- `q` and `Esc` are two lines of the help, and the region's line no longer
+  lists `Esc`; `x` is one line, which selects a region or removes it.
+- With a region selected, the arrows move it only while the region's names
+  hold them, which they do by default; bound elsewhere, the arrows pan under
+  a region as they do without one.
+- The file chooser's key only opens it; `Esc` or a click outside closes it,
+  as a file finder does in an editor.
+- `--help` leaves a space after a key column too long for it, where
+  `Alt+], Alt+Page Down` used to run into what it does.
 
 ## 0.5.1 - 2026-09-26
 

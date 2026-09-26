@@ -28,7 +28,7 @@ use super::chrome::Pass;
 use super::control::{Command, Control};
 use super::info::HEADER_GAP;
 use super::style::{MENU_PADDING, MENU_RADIUS, POPUP_WIDTH, SCROLLBAR_GUTTER, SCROLLBAR_WIDTH};
-use super::{RULE_WIDTH, Rect, TEXT_SIZE, fonts, info, panel, rule};
+use super::{RULE_WIDTH, Rect, TEXT_SIZE, fonts, icon, info, panel, rule};
 
 /// The popup's id in egui's memory: what the application opens, and what
 /// it asks whether it is open.
@@ -47,6 +47,9 @@ pub struct Section {
 /// they do anything — `None` for a key that always does.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Row {
+    /// The keys, as the tooltips spell them; empty where the configuration
+    /// left the line's names bound to none, which the popup says outright
+    /// — see [`UNBOUND`].
     pub key: String,
     pub does: &'static str,
     pub when: Option<Condition>,
@@ -95,6 +98,11 @@ const SECTION_GAP: f32 = 14.0;
 const TITLE_GAP: f32 = 6.0;
 /// What the three columns are headed.
 const HEADINGS: [&str; 3] = ["Key", "Action", "When"];
+/// What the key column says, after the warning mark, for a line nothing is
+/// bound to: a blank would read as a line that needs no key.
+pub const UNBOUND: &str = "unbound";
+/// The gap between the warning mark and that word.
+const MARK_GAP: f32 = 4.0;
 
 /// Where the popup goes: the middle of `content`, at most [`POPUP_WIDTH`] by
 /// [`HEIGHT_MAX`] and inside the padding everything floating over the image
@@ -276,7 +284,7 @@ fn table(pass: &Pass, ui: &mut egui::Ui, sections: &[Section], width: f32) {
             } else {
                 theme.text_dim
             };
-            let key = RichText::new(&row.key).monospace().color(ink);
+            let key = (!row.key.is_empty()).then(|| RichText::new(&row.key).monospace().color(ink));
             let does = RichText::new(row.does).color(ink);
             let when = row.when.map(|when| {
                 RichText::new(when.words).color(if when.met {
@@ -286,7 +294,7 @@ fn table(pass: &Pass, ui: &mut egui::Ui, sections: &[Section], width: f32) {
                 })
             });
             if stacked {
-                cell(ui, width, key);
+                key_cell(pass, ui, width, key);
                 cell(ui, width, does);
                 if let Some(when) = when {
                     cell(ui, width, when);
@@ -294,13 +302,48 @@ fn table(pass: &Pass, ui: &mut egui::Ui, sections: &[Section], width: f32) {
                 ui.add_space(STACK_GAP);
             } else {
                 ui.horizontal_top(|ui| {
-                    cell(ui, KEY_WIDTH, key);
+                    key_cell(pass, ui, KEY_WIDTH, key);
                     cell(ui, does_width, does);
                     cell(ui, WHEN_WIDTH, when.unwrap_or_else(|| RichText::new("")));
                 });
             }
         }
     }
+}
+
+/// The key column of a row: its keys, or — where `key` is `None`, nothing
+/// being bound — the warning mark and [`UNBOUND`] in the caution ink, which
+/// every row wears alike whether or not its condition holds: a line with no
+/// key is wrong in the configuration, not in the moment.
+fn key_cell(pass: &Pass, ui: &mut egui::Ui, width: f32, key: Option<RichText>) {
+    let Some(key) = key else {
+        let theme = pass.theme;
+        ui.scope(|ui| {
+            ui.set_min_width(width);
+            ui.set_max_width(width);
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = MARK_GAP;
+                let font = egui::FontId::monospace(TEXT_SIZE);
+                let side = ui.ctx().fonts_mut(|fonts| fonts.row_height(&font));
+                let (rect, _) = ui.allocate_exact_size(vec2(side, side), egui::Sense::HOVER);
+                icon::paint(
+                    ui.painter(),
+                    icon::TRIANGLE_ALERT,
+                    icon::square(pass.grid, rect, side),
+                    theme.caution.into(),
+                    theme.menu_background.into(),
+                );
+                ui.add(Label::new(
+                    RichText::new(UNBOUND)
+                        .monospace()
+                        .size(TEXT_SIZE)
+                        .color(theme.caution),
+                ));
+            });
+        });
+        return;
+    };
+    cell(ui, width, key);
 }
 
 /// One cell of a row: `text` wrapped in a column `width` wide, so that the

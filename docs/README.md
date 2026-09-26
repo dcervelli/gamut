@@ -8,6 +8,7 @@ wants [`user-docs/`](../user-docs/) instead.
 | --- | --- |
 | [Architecture](architecture.md) | The three rendering layers, how egui fits under the compositor, and where each file's job is |
 | [The interface](interface.md) | Why the controls are shaped as they are: the chrome, a turn read through rather than applied, the layers the pointer is routed by, the information panel, menus |
+| [Keys and gestures](keymap.md) | The dotted names the configuration rebinds, why keys and gestures point opposite ways, Shift as part of a character, the region as the one context, and the fixed precedence of a drag on the picture |
 | [Color management](color.md) | The one invariant, the working space, display-referred, scene light and measurements, and what happens above white |
 | [The histogram panel](histogram.md) | What the panel is for, why its rows are every file's, the band as a levels track, and what is written in the plot's corners |
 | [Resampling](resampling.md) | The filters, and the coarse chain that makes minification affordable |

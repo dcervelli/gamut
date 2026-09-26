@@ -150,7 +150,7 @@ fn input(logical: [f32; 2], count: usize) -> FrameInput {
         cursor: None,
         minimap_on_screen: false,
         loupe: None,
-        secondary: false,
+        loupe_held: false,
         index: 0,
         count,
         deleted: false,
@@ -164,7 +164,8 @@ fn input(logical: [f32; 2], count: usize) -> FrameInput {
         grabbing: None,
         over_region: false,
         box_zoom: false,
-        move_region: false,
+        modifiers: crate::gestures::Mods::empty(),
+        gestures: std::rc::Rc::new(crate::gestures::Gestures::default()),
         zoom_box: None,
         transport: None,
         filmstrip: None,
@@ -291,7 +292,7 @@ fn asked(harness: &Harness<'static, State>) -> Vec<Command> {
                 command,
                 Command::OverImage(_)
                     | Command::OverGrip(_)
-                    | Command::Secondary(_)
+                    | Command::Held { .. }
                     | Command::Dragging(_)
             )
         })
@@ -302,12 +303,22 @@ fn asked(harness: &Harness<'static, State>) -> Vec<Command> {
 /// Presses the primary button at `from`, moves to `to`, and lets go there,
 /// a pass to each, and returns what the interface asked for.
 fn drag(harness: &mut Harness<'static, State>, from: [f32; 2], to: [f32; 2]) -> Vec<Command> {
+    drag_with(harness, egui::PointerButton::Primary, from, to)
+}
+
+/// The same with another button; from a point to itself, a click of it.
+fn drag_with(
+    harness: &mut Harness<'static, State>,
+    pressed: egui::PointerButton,
+    from: [f32; 2],
+    to: [f32; 2],
+) -> Vec<Command> {
     harness.state_mut().commands.clear();
     let (from, to) = (egui::pos2(from[0], from[1]), egui::pos2(to[0], to[1]));
-    let button = |pos, pressed| egui::Event::PointerButton {
+    let button = |pos, down| egui::Event::PointerButton {
         pos,
-        button: egui::PointerButton::Primary,
-        pressed,
+        button: pressed,
+        pressed: down,
         modifiers: egui::Modifiers::NONE,
     };
     harness.event(egui::Event::PointerMoved(from));
@@ -370,10 +381,11 @@ fn a_toggle_in_the_chrome_hands_back_its_press() {
     }
 }
 
-/// The secondary button on the picture is said on every pass, with the
+/// The button held down on the picture is said on every pass, with the
 /// pointer's place while it is down — in the physical pixels the
 /// application's pointer is kept in — and as nothing once it is up. The
-/// view is not dragged by it.
+/// view is not dragged by the secondary, which drags nothing by default,
+/// and the wheel turned while it is down says it is.
 #[test]
 fn the_secondary_button_on_the_picture_is_handed_back_while_it_is_down() {
     let mut harness = open(WINDOW, 1, panels());
@@ -390,7 +402,10 @@ fn the_secondary_button_on_the_picture_is_handed_back_while_it_is_down() {
             .commands
             .iter()
             .filter_map(|command| match command {
-                Command::Secondary(at) => Some(*at),
+                Command::Held { button, at } => {
+                    assert_eq!(button.is_some(), at.is_some());
+                    Some(*at)
+                }
                 _ => None,
             })
             .collect::<Vec<_>>()
@@ -420,8 +435,8 @@ fn the_secondary_button_on_the_picture_is_handed_back_while_it_is_down() {
         "the secondary button does not pan"
     );
 
-    // The wheel, while the button is down, is the loupe's and not the
-    // view's; up again, it is the view's.
+    // The wheel, while the button is down, says so; up again, it says
+    // nothing is.
     harness.state_mut().commands.clear();
     harness.event(egui::Event::MouseWheel {
         unit: egui::MouseWheelUnit::Line,
@@ -430,7 +445,14 @@ fn the_secondary_button_on_the_picture_is_handed_back_while_it_is_down() {
         phase: egui::TouchPhase::Move,
     });
     harness.step();
-    assert_eq!(asked(&harness), [Command::Magnify(1.0)]);
+    assert_eq!(
+        asked(&harness),
+        [Command::Wheel {
+            delta: [0.0, 1.0],
+            notched: true,
+            held: Some(crate::gestures::Button::Right),
+        }]
+    );
 
     harness.state_mut().commands.clear();
     harness.event(secondary(to, false));
@@ -448,8 +470,9 @@ fn the_secondary_button_on_the_picture_is_handed_back_while_it_is_down() {
     assert_eq!(
         asked(&harness),
         [Command::Wheel {
-            steps: 1.0,
-            notched: true
+            delta: [0.0, 1.0],
+            notched: true,
+            held: None,
         }]
     );
 }
@@ -1250,7 +1273,7 @@ fn a_region_on_screen_is_moved_with_shift_or_by_its_middle() {
                 .iter()
                 .any(|command| matches!(command, Command::Drag(_)))
     };
-    harness.state_mut().input.move_region = true;
+    harness.state_mut().input.modifiers = crate::gestures::Mods::SHIFT;
     harness.run();
     let commands = drag(&mut harness, inside, to);
     assert!(held(&commands, Grip::Inside), "{commands:?}");
@@ -1261,7 +1284,7 @@ fn a_region_on_screen_is_moved_with_shift_or_by_its_middle() {
     let commands = drag(&mut harness, outside, [90.0, 130.0]);
     assert!(panned(&commands), "{commands:?}");
 
-    harness.state_mut().input.move_region = false;
+    harness.state_mut().input.modifiers = crate::gestures::Mods::empty();
     harness.run();
     let middle = screen_point(&harness, [1.5, 1.5]);
     let commands = drag(&mut harness, middle, to);
@@ -1357,6 +1380,182 @@ fn a_drag_with_space_held_draws_a_box_to_zoom_to() {
     );
 }
 
+/// A drag of a button other than the primary pans only where its slot
+/// says so: the middle button drags nothing by default, and pans once the
+/// configuration gives it that.
+#[test]
+fn a_middle_drag_pans_only_where_its_slot_says_so() {
+    use crate::gestures::{Behavior, DragAction, Gestures, Slot};
+    let mut harness = open(WINDOW, 1, panels());
+    let (from, to) = ([400.0, 300.0], [430.0, 340.0]);
+    let middle = egui::PointerButton::Middle;
+    assert_eq!(drag_with(&mut harness, middle, from, to), []);
+
+    let mut gestures = Gestures::default();
+    gestures.set(
+        Slot::read("image.middle.drag").unwrap(),
+        Behavior::Drag(DragAction::Pan),
+    );
+    harness.state_mut().input.gestures = std::rc::Rc::new(gestures);
+    harness.run();
+    let commands = drag_with(&mut harness, middle, from, to);
+    assert!(
+        !commands.is_empty()
+            && commands
+                .iter()
+                .all(|command| matches!(command, Command::Drag(_))),
+        "{commands:?}"
+    );
+    // And the primary, given a box to draw, draws it rather than panning.
+    let mut gestures = Gestures::default();
+    gestures.set(
+        Slot::read("image.left.drag").unwrap(),
+        Behavior::Drag(DragAction::ZoomBox),
+    );
+    harness.state_mut().input.gestures = std::rc::Rc::new(gestures);
+    harness.run();
+    let commands = drag(&mut harness, from, to);
+    assert!(
+        matches!(
+            commands.first(),
+            Some(Command::Grab {
+                grab: Grab::Zoom,
+                ..
+            })
+        ),
+        "{commands:?}"
+    );
+}
+
+/// A click of a button whose click slot names a key is handed back as a
+/// click of that button — the side button's by default — and one whose
+/// slot names nothing is not handed back at all.
+#[test]
+fn a_click_is_handed_back_where_its_slot_names_a_key() {
+    use crate::gestures::{Behavior, Button, Gestures, Kind, Slot};
+    let mut harness = open(WINDOW, 1, panels());
+    let at = [400.0, 300.0];
+    let click = |harness: &mut Harness<'static, State>, button| drag_with(harness, button, at, at);
+    assert_eq!(
+        click(&mut harness, egui::PointerButton::Extra1),
+        [Command::Click(Button::Back, Kind::Click)]
+    );
+    assert_eq!(
+        click(&mut harness, egui::PointerButton::Extra2),
+        [Command::Click(Button::Forward, Kind::Click)]
+    );
+    assert_eq!(click(&mut harness, egui::PointerButton::Middle), []);
+    // The secondary holds the loupe up, so letting go of it is no click.
+    assert_eq!(click(&mut harness, egui::PointerButton::Secondary), []);
+
+    let mut gestures = Gestures::default();
+    gestures.set(
+        Slot::read("image.middle.click").unwrap(),
+        Behavior::Click("interface.grid".to_string()),
+    );
+    harness.state_mut().input.gestures = std::rc::Rc::new(gestures);
+    harness.run();
+    assert_eq!(
+        click(&mut harness, egui::PointerButton::Middle),
+        [Command::Click(Button::Middle, Kind::Click)]
+    );
+}
+
+/// A double click of the primary on the picture is handed back as one —
+/// its first click being nothing, the primary's click having no slot — and
+/// a double click on one of the region's handles is the handle's.
+#[test]
+fn a_double_click_is_handed_back_where_its_slot_names_a_key() {
+    use crate::gestures::{Button, Kind};
+    let mut harness = open(WINDOW, 1, panels());
+    // A step of the harness is a quarter of a second, and a double click
+    // is two clicks inside three tenths of one: the clock is set by hand,
+    // a twentieth of a second on for each press and release.
+    let twice = |harness: &mut Harness<'static, State>, at: [f32; 2]| {
+        let pos = egui::pos2(at[0], at[1]);
+        harness.event(egui::Event::PointerMoved(pos));
+        harness.step();
+        let mut time = harness.ctx.input(|input| input.time);
+        let mut commands = Vec::new();
+        for _ in 0..2 {
+            harness.state_mut().commands.clear();
+            for pressed in [true, false] {
+                time += 0.05;
+                harness.input_mut().time = Some(time);
+                harness.event(egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                });
+                harness.step();
+            }
+            commands.extend(asked(harness));
+        }
+        commands
+    };
+    assert_eq!(
+        twice(&mut harness, [400.0, 300.0]),
+        [Command::Click(Button::Left, Kind::DoubleClick)]
+    );
+
+    let region = Region {
+        x: 1,
+        y: 1,
+        width: 1,
+        height: 1,
+    };
+    harness.state_mut().input.selection = Selection::Shown(region);
+    harness.run();
+    let right = screen_point(&harness, [2.0, 1.5]);
+    let handle = Command::Handle(Grip::Edge(Side::Right));
+    assert_eq!(twice(&mut harness, right), [handle.clone(), handle]);
+}
+
+/// The minimap centers for the button its slot names and for no other.
+#[test]
+fn the_minimap_centers_for_the_button_its_slot_names() {
+    use crate::gestures::{Behavior, Gestures, Slot};
+    let mut harness = open(WINDOW, 1, panels());
+    let image = [400.0, 300.0];
+    harness.state_mut().current = Some(picture(400, 300));
+    harness.state_mut().input.minimap_on_screen = true;
+    harness.run();
+    let content = super::chrome::content_area(WINDOW, true, super::chrome::Parts::NONE);
+    let map = super::minimap::thumbnail(content, image).expect("room for a map");
+    let at = [map.x + map.width / 2.0, map.y + map.height / 2.0];
+    let centers = |commands: &[Command]| {
+        commands
+            .iter()
+            .any(|command| matches!(command, Command::Center(_)))
+    };
+    let middle = egui::PointerButton::Middle;
+    assert!(centers(&drag_with(
+        &mut harness,
+        egui::PointerButton::Primary,
+        at,
+        at
+    )));
+    assert!(!centers(&drag_with(&mut harness, middle, at, at)));
+
+    let mut gestures = Gestures::default();
+    gestures.set(Slot::read("minimap.left.drag").unwrap(), Behavior::None);
+    gestures.set(Slot::read("minimap.middle.drag").unwrap(), Behavior::Center);
+    harness.state_mut().input.gestures = std::rc::Rc::new(gestures);
+    harness.run();
+    assert!(centers(&drag_with(&mut harness, middle, at, at)));
+    // The left button still centers on a click, its drag gone.
+    let to = [at[0] + 10.0, at[1]];
+    let commands = drag_with(&mut harness, egui::PointerButton::Primary, at, to);
+    assert!(!centers(&commands), "{commands:?}");
+    assert!(centers(&drag_with(
+        &mut harness,
+        egui::PointerButton::Primary,
+        at,
+        at
+    )));
+}
+
 /// The hand on the minimap asks for the place under it to be put in the
 /// middle of the window: on the frame the button goes down, before the
 /// toolkit has decided whether it is a click or a drag, and on every frame
@@ -1438,7 +1637,7 @@ fn the_pixel_menu_offers_every_format() {
 /// The chooser: opened, its field takes the keyboard, and what is typed
 /// and pressed comes back as commands rather than reaching the window —
 /// the query, the cursor's moves, `Enter` on the row under the cursor, a
-/// click on a row, and `Ctrl+P` again. `Esc` closes it, and with it gone
+/// click on a row. `Esc` closes it, and with it gone
 /// the keyboard is the window's again.
 #[test]
 fn the_chooser_takes_the_keys_while_open_and_gives_them_back() {
@@ -1468,27 +1667,11 @@ fn the_chooser_takes_the_keys_while_open_and_gives_them_back() {
         current: Some(0),
         count: 3,
         several_dirs: false,
-        opened: true,
         reveal: true,
         visible: 0..0,
     });
-    // The chord that opened it is still in egui's input on the first
-    // frame, and must not be read as the chord that closes it.
-    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::P);
     harness.run();
     assert!(egui::Popup::is_id_open(&harness.ctx, chooser::id()));
-    assert!(
-        !asked(&harness).contains(&Command::Press(Control::Chooser)),
-        "{:?}",
-        asked(&harness)
-    );
-    harness
-        .state_mut()
-        .input
-        .chooser
-        .as_mut()
-        .expect("set above")
-        .opened = false;
     harness.run();
     assert!(harness.ctx.egui_wants_keyboard_input());
     // The rows on screen were said, so their thumbnails can be asked for.
@@ -1522,13 +1705,8 @@ fn the_chooser_takes_the_keys_while_open_and_gives_them_back() {
     assert!(pressed(&mut harness, egui::Key::Enter).contains(&Command::Press(Control::Choose(0))));
     assert!(click(&mut harness, "Choose file 2").contains(&Command::Press(Control::Choose(1))));
 
-    harness.state_mut().commands.clear();
-    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::P);
-    harness.step();
-    assert!(asked(&harness).contains(&Command::Press(Control::Chooser)));
-    // Still up: closing it is the application's, on that press.
-    assert!(egui::Popup::is_id_open(&harness.ctx, chooser::id()));
-
+    // The key that closes it is kept from egui by the window, and reaches
+    // the key table instead: nothing here reads it.
     // Escape is egui's own, and closes the popup; the application then
     // stops handing the chooser in, and the field goes with it.
     harness.key_press(egui::Key::Escape);
@@ -1878,7 +2056,6 @@ fn the_chooser_scrolls_a_moved_cursor_into_view() {
         current: None,
         count: 200,
         several_dirs: false,
-        opened: false,
         reveal: true,
         visible: 0..0,
     });
@@ -1996,7 +2173,6 @@ fn a_click_on_the_count_leaves_the_chooser_for_the_press_to_close() {
         current: Some(0),
         count: 3,
         several_dirs: false,
-        opened: false,
         reveal: false,
         visible: 0..0,
     });
@@ -2015,6 +2191,34 @@ fn a_click_on_the_count_leaves_the_chooser_for_the_press_to_close() {
 /// on a line of its own, and the column headings — which would then head
 /// nothing — are left out. The popup does not ask for a column less than
 /// nothing wide, which egui refuses to lay out.
+/// A line the configuration left with no key says so in its key column,
+/// in the table and stacked alike, rather than leaving it blank.
+#[test]
+fn the_help_popup_says_a_line_is_unbound() {
+    for window in [WINDOW, [PANELS_ROOM[0] + 2.0 * SIDE_WIDTH + 20.0, 700.0]] {
+        let mut harness = open(window, 1, panels());
+        harness.state_mut().help = vec![help::Section {
+            title: "Files",
+            rows: vec![
+                help::Row {
+                    key: String::new(),
+                    does: "Undo the last rename, deletion or removal",
+                    when: None,
+                },
+                help::Row {
+                    key: "Ctrl+E".to_string(),
+                    does: "Export the picture as shown to a new JPG or PNG",
+                    when: None,
+                },
+            ],
+        }];
+        egui::Popup::open_id(&harness.ctx, help::id());
+        harness.run();
+        assert_eq!(harness.query_all_by_label(help::UNBOUND).count(), 1);
+        assert!(harness.query_by_label("Ctrl+E").is_some());
+    }
+}
+
 #[test]
 fn the_help_popup_stacks_its_rows_in_a_narrow_window() {
     let mut harness = open(

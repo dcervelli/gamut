@@ -66,12 +66,20 @@ pub struct Tooltip {
 
 /// What the loupe toggle says under its name: the other way of putting the
 /// loupe up, which is the hand on the mouse rather than a key.
-pub const LOUPE_HELD: &str = "Turn on with right mouse button (RMB) on image";
+pub fn loupe_held(gesture: &str) -> String {
+    format!("Turn on with {gesture} on image")
+}
 
-/// And under that, how the magnification is set: the wheel while that
-/// button is held, or `key`, as the key table writes it.
-pub fn loupe_wheel(key: &str) -> String {
-    format!("Change magnification with RMB+wheel or with {key}")
+/// And under that, how the magnification is set: the `wheel` a gesture
+/// steps it with, or `key`, as the key table writes it — whichever of the
+/// two is bound to anything.
+pub fn loupe_wheel(wheel: Option<&str>, key: Option<&str>) -> Option<String> {
+    let ways = match (wheel, key) {
+        (Some(wheel), Some(key)) => format!("{wheel} or with {key}"),
+        (Some(way), None) | (None, Some(way)) => way.to_string(),
+        (None, None) => return None,
+    };
+    Some(format!("Change magnification with {ways}"))
 }
 
 /// What the maximize button says under its name: the press with Shift, which
