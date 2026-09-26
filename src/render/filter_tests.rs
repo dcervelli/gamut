@@ -13,8 +13,9 @@ use super::composite::{Backdrop, Composite};
 use super::gpu;
 use super::image_layer::{Draw, ImageLayer};
 use super::output::{Encoding, Output};
+use super::shader_codes;
 use super::{Color, Placement, Scene, UI_FORMAT, UiPaint, Upscale, WORKING_FORMAT};
-use crate::image::color::Transfer;
+use crate::image::color::{Primaries, Transfer};
 use crate::image::display::{Colormap, Display, Headroom, ToneMap};
 use crate::image::orient::{self, Turn};
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Referred, Samples};
@@ -1005,6 +1006,210 @@ fn the_false_color_on_the_device_is_the_readouts() {
             }
         }
     }
+}
+
+/// A one-row picture of linear float color in `primaries`, one pixel per
+/// entry of `pixels`, as a raw or a wide-gamut file arrives.
+fn rgb_f32_row(pixels: &[[f32; 3]], primaries: Primaries) -> DecodedImage {
+    DecodedImage {
+        width: pixels.len() as u32,
+        height: 1,
+        samples: Samples::F32 {
+            channels: Channels::Rgb,
+            data: pixels.iter().flatten().copied().collect(),
+        },
+        color: ColorSpace {
+            transfer: Transfer::Linear,
+            primaries,
+        },
+        alpha: AlphaMode::Opaque,
+        referred: Referred::Display,
+        exposure: None,
+        nodata: None,
+        gain_map: None,
+    }
+}
+
+/// The marks on clipped pixels paint a pixel any channel of which the window
+/// has taken to white or to black, in the file's own channels: a sun whose
+/// red has gone while its green has not is marked, and a vivid Rec. 2020
+/// red, whose BT.709 green is negative and red above one, is not — the
+/// file never clipped it. Off, nothing is painted; under a curve, white is
+/// not being clipped and only black is marked.
+///
+/// Every color is one texel with different neighbors, drawn at 1:1 and
+/// magnified through the bicubic filter, and each is marked or not by its
+/// own value: the mark is the texel's under the pixel, not the filter's
+/// blend, which lands a hair off the bound.
+#[test]
+fn the_marks_paint_a_pixel_any_channel_of_which_has_reached_an_end() {
+    let Some(gpu) = gpu::test_context() else {
+        return;
+    };
+    let colors: [[f32; 3]; 5] = [
+        [1.0, 0.3, 0.3],
+        [0.5, 0.0, 0.5],
+        [0.95, 0.05, 0.05],
+        [0.5, 0.5, 0.5],
+        [1.0, 1.0, 1.0],
+    ];
+    let image = rgb_f32_row(&colors, Primaries::Bt2020);
+    let mut layer = ImageLayer::new(&gpu.device, &gpu.queue, WORKING_FORMAT);
+    let uploaded = layer
+        .uploader(&gpu.device, &gpu.queue, gpu.capabilities)
+        .run(&image)
+        .expect("the image uploads");
+    layer.install(uploaded);
+
+    // What each color is on screen with nothing marked: the file's color
+    // carried into the working space.
+    let matrix = Primaries::Bt2020.to_bt709();
+    let plain: Vec<[f32; 3]> = colors
+        .iter()
+        .map(|color| matrix.map(|row| row.iter().zip(color).map(|(m, c)| m * c).sum()))
+        .collect();
+    let [white, black] = shader_codes::MARKS;
+
+    // Each texel drawn `zoom` pixels wide, and the middle pixel of each read
+    // back: at 1:1 the pixel itself, magnified the pixel over the texel's
+    // center, which bicubic passes through.
+    let mut draw = |zoom: u32, upscale: Upscale, mark_clipped: bool, display: &Display| {
+        let target = [colors.len() as u32 * zoom, 1];
+        let pixels = draw_layer_as(
+            gpu,
+            &mut layer,
+            target,
+            Draw {
+                mark_clipped,
+                ..Draw::plain(
+                    Placement {
+                        upscale,
+                        ..whole(target, &image)
+                    },
+                    None,
+                )
+            },
+            display,
+        );
+        (0..colors.len())
+            .map(|index| pixels[index * zoom as usize + zoom as usize / 2])
+            .collect::<Vec<_>>()
+    };
+    let check = |got: &[[f32; 4]], want: &[[f32; 3]], case: &str| {
+        for (index, (got, want)) in got.iter().zip(want).enumerate() {
+            for (channel, (got, want)) in got.iter().zip(want).enumerate() {
+                assert!(
+                    close(*got, *want, 2e-3),
+                    "{case}, color {index} channel {channel}: got {got}, expected {want}"
+                );
+            }
+        }
+    };
+
+    for (zoom, upscale) in [(1, Upscale::Nearest), (3, Upscale::Bicubic)] {
+        let case = format!("{}x {upscale:?}", zoom);
+
+        let marked = draw(zoom, upscale, true, &Display::default());
+        check(
+            &marked,
+            &[white, black, plain[2], plain[3], white],
+            &format!("{case} marked"),
+        );
+
+        let unmarked = draw(zoom, upscale, false, &Display::default());
+        check(&unmarked, &plain, &format!("{case} unmarked"));
+
+        // A curve rolls the highlights off rather than clipping them, so
+        // white is not marked; the shadows still are.
+        let mut curved = Display::default();
+        curved.set_tone_map(ToneMap::Neutral, false);
+        let curved = draw(zoom, upscale, true, &curved);
+        check(
+            &curved,
+            &[plain[0], black, plain[2], plain[3], plain[4]],
+            &format!("{case} curved"),
+        );
+    }
+}
+
+/// Below 1:1 a pixel is many texels, and it wears the marks by the share of
+/// them that are at an end — as the picture would come out if every texel
+/// were painted first and the picture then shrunk — read from the marks'
+/// own coarse chain: a run of crushed texels stays whole blue, a run of
+/// plain ones stays plain, and a pixel half over each is half blue over the
+/// pixel's own average of the two, where a test on that average would have
+/// found no end under it at all.
+/// Eight texels to the pixel, so the draw reads the chain's first level and
+/// averages two of its texels, both paths exercised. Then the black point
+/// is raised to the plain gray, and the marks follow the window: the plain
+/// runs are crushed now, and marked so on the next draw.
+#[test]
+fn the_marks_below_one_to_one_are_the_share_of_the_texels_at_an_end() {
+    let Some(gpu) = gpu::test_context() else {
+        return;
+    };
+    const PER_PIXEL: usize = 8;
+    let crushed = [0.5, 0.0, 0.5];
+    let plain = [0.5, 0.5, 0.5];
+    let blown = [1.0, 0.3, 0.3];
+    let runs: [[[f32; 3]; PER_PIXEL]; 5] = [
+        [crushed; PER_PIXEL],
+        [plain; PER_PIXEL],
+        [
+            crushed, crushed, crushed, crushed, plain, plain, plain, plain,
+        ],
+        [blown; PER_PIXEL],
+        [plain; PER_PIXEL],
+    ];
+    let pixels: Vec<[f32; 3]> = runs.iter().flatten().copied().collect();
+    let image = rgb_f32_row(&pixels, Primaries::Bt2020);
+    let target = [runs.len() as u32, 1];
+
+    let matrix = Primaries::Bt2020.to_bt709();
+    let shown = |color: [f32; 3]| -> [f32; 3] {
+        matrix.map(|row| row.iter().zip(color).map(|(m, c)| m * c).sum())
+    };
+    let [white, black] = shader_codes::MARKS;
+    let half: [f32; 3] = std::array::from_fn(|i| {
+        let average = 0.5 * shown(crushed)[i] + 0.5 * shown(plain)[i];
+        0.5 * average + 0.5 * black[i]
+    });
+    let want = [black, shown(plain), half, white, shown(plain)];
+
+    let mut layer = ImageLayer::new(&gpu.device, &gpu.queue, WORKING_FORMAT);
+    let uploaded = layer
+        .uploader(&gpu.device, &gpu.queue, gpu.capabilities)
+        .run(&image)
+        .expect("the image uploads");
+    layer.install(uploaded);
+    let quads = Draw {
+        mark_clipped: true,
+        ..Draw::plain(whole(target, &image), None)
+    };
+    let check = |got: &[[f32; 4]], want: &[[f32; 3]; 5], case: &str| {
+        for (x, (got, want)) in got.iter().zip(want).enumerate() {
+            for (channel, (got, want)) in got.iter().zip(want).enumerate() {
+                assert!(
+                    close(*got, *want, 3e-3),
+                    "{case}, pixel {x} channel {channel}: got {got}, expected {want}"
+                );
+            }
+        }
+    };
+
+    let got = draw_layer_as(gpu, &mut layer, target, quads, &Display::default());
+    check(&got, &want, "as stored");
+
+    // Black at the plain gray: every plain texel is at the window's foot,
+    // and the blown run's red is still at its head.
+    let mut raised = Display::default();
+    raised.set_window(0.5, 1.0);
+    let got = draw_layer_as(gpu, &mut layer, target, quads, &raised);
+    check(
+        &got,
+        &[black, black, black, white, black],
+        "black point raised",
+    );
 }
 
 /// A one-row texture in `format`, holding `texels` — written as the

@@ -170,7 +170,7 @@ the bins are wider than a code and the share is to the nearest bin.
 
 `w`, or the button beside the band at the foot of the strip down the left
 of the panel, paints the clipped pixels on the picture: `MARK_WHITE` and `MARK_BLACK` in
-`shaders/image.wgsl`, where every channel of the windowed value is at or
+`shaders/image.wgsl`, where any channel of the windowed value is at or
 past the bound, painted in place of the pixel and before the false color,
 whose ramp does not end in white and black. The whole test lives in the
 image shader because that is the one place the windowed value exists per
@@ -198,11 +198,76 @@ clipping warning wears.
 
 Which ends are marked follows `Display::clips_white`, the same rule the
 corner and the bottom bar's **clipped** use: white is only marked where the
-surface is actually clipping it. The paint marks a pixel where *every*
-channel has gone, and the corners count a channel at a time; the two
-therefore disagree on a red flower, and are meant to — the corner is the
-histogram's own reading, plane by plane, and the paint is where the picture
-has gone flat.
+surface is actually clipping it.
+
+One channel at an end is enough to mark a pixel, as it is enough for the
+corner to count it. A channel that has reached the bound has lost what it
+held, and the color left over is not the file's: a raw's white balance
+lifts its red well above its green, so a sun's red burns out while its green
+is still climbing and the disc comes out pink, and on a warm sunrise the
+green may never reach white at all — a test that waited for every channel
+painted nothing on a picture whose sun was plainly gone. The paint and the
+corner then answer the same question, the corner as a share and the paint
+as a place, and a number in the corner is the share of the picture wearing
+the paint. The comparisons are exact, as the corner's are.
+
+The test is made in the file's own channels — `native` in `shade`, the
+color windowed before `params.primaries` carries it into BT.709 — because
+that is where the band's two ends are, and where the corner counts. A vivid
+Rec. 2020 or P3 color has a negative BT.709 channel, and one above white, that
+the file never clipped: tested after the matrix, a raw's saturated red would
+wear the blue of a crushed shadow. What becomes of such a color on an SDR
+surface is the compositor's clip to BT.709, a gamut matter
+[color management](color.md) owns, not a pixel the window took to an end.
+The matrix keeps white, so windowing before it and after it are the same
+transform of the same color, and nothing else in the shader moves.
+
+The mark is a texel's, not a blend's, and it is kept as one. `judge` in the
+image shader is the verdict on one texel of the picture as uploaded, under
+the window in force — through the same `load` and `expanded` the draw reads
+by, so on lifted, straight color — and everything the marks show is that
+verdict, averaged over exactly the texels the picture is averaged over.
+Magnifying, a pixel lies inside one texel and takes its verdict outright.
+Minifying at the picture's own level, up to the chain's step, `marks_over`
+judges the texels under the pixel live, over `area`'s footprint. Farther
+out the draw reads a coarse level of the picture, whose texels are averages
+that no longer say which of their texels were at an end, so the marks have
+a coarse chain of their own (`image_layer::Marks`): `fs_marks` writes its
+first level from the picture, each texel the shares of the `STEP` by `STEP`
+block under it, and the reducer makes the rest from that as it makes the
+picture's chain from the picture, in `Rg8Unorm`, white in one channel and
+black in the other. Every coarse level of the picture is bound beside the
+marks at the same level, and `shade` wears the paint by the share it reads.
+A run of crushed texels stays whole blue at every zoom, a scattered shadow
+thins into its neighbors as the crushed pixels thin among them, and nothing
+changes at 1:1.
+
+Nothing is stored per texel of the picture — the chain begins at a
+sixteenth of it, about a bit a texel — and nothing is stored at all while
+the marks are off or nothing coarse is drawn, so a black point dragged at
+1:1 costs the marks nothing, and dragged on a fitted view costs one pass
+over the picture and the chain from it, the same as the picture's own chain
+costs on every frame of an animation. `MarksKey` is what the chain was
+written under, the window transform and the lift's weight, and
+`ImageLayer::prepare` writes it again when that changes, drops it when the
+texels change or it is not wanted, and rebinds every level either way. The
+pass reads the picture through a bind group of the chain's own
+(`Marks::reading`): the picture's level-1 group names the marks' first level
+beside it, and a texture cannot be a pass's target and its input at once.
+
+Two things this is instead of. Judging the resampled color would have found
+an end only under a pixel every texel of which is at it: a scattered shadow
+vanished the moment the view dropped below 1:1, and at exactly 1:1 came and
+went with the rounding, since where a pixel's center falls in the texture is
+arithmetic on its coordinate that is not exact at the far end of a large
+picture, and `antialiased_nearest` there blends a thousandth of the neighbor
+in — shadows that sparkled as the picture was zoomed and went missing at
+100%. And reading the marks off the picture's own texels under a far-out
+pixel would have cost every texel under it, which is what the chain exists
+to avoid. The paint is laid over the pixel's own color, the average of every
+texel under it, marked ones included, so a pixel partly marked is a hair off
+what painting every texel first and shrinking would give; one wholly marked,
+or not at all, is exactly that.
 
 ## What is drawn only when it says something
 

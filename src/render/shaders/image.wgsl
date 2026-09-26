@@ -28,7 +28,7 @@ struct Params {
     colormap: u32,               // 0 none, 1 viridis, 2 magma, 3 turbo
     resampler: u32,              // 0 area, 1 antialiased nearest, 2 bicubic
     lift: u32,                   // 0 no gain map, else its channel count; 0 on a coarse level
-    _pad2: u32,
+    level: u32,                  // which level of the coarse chain `source` is; 0 is the picture itself
     map_size: vec2<f32>,         // the gain map's size, in its own texels
     base_offset: vec4<f32>,      // added to the base before the gain, per channel
     alternate_offset: vec4<f32>, // taken from the product after
@@ -39,6 +39,14 @@ struct Params {
 
 @group(0) @binding(0) var<uniform> params: Params;
 @group(1) @binding(0) var source: texture_2d<f32>;
+// The marks on the picture's texels at the coarse level `source` is: the
+// share of the picture's texels under each of its texels that `judge` puts
+// at white, in the first channel, and at black, in the second — `fs_marks`
+// writes the first level from the picture, and the coarse chain reduces the
+// rest from it as it reduces the picture. A texel of zeros, never read,
+// beside the picture itself, whose marks are judged live, and while the
+// marks are off.
+@group(1) @binding(1) var clipped: texture_2d<f32>;
 // The picture's gain map, and the table saying what each of its 256 values
 // means at the weight the surface asks for (see image::gain_map). Bound to
 // a texel of each, and never read, for a picture with no map.
@@ -235,14 +243,15 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     return shade(uv) * coverage;
 }
 
-// The color of the picture at `uv` of the texture: resampled, expanded to
-// RGBA, brought into the working space, windowed, marked and false-colored,
-// premultiplied by its coverage.
-fn shade(uv: vec2<f32>) -> vec4<f32> {
-    let texel = resample(uv);
-
-    // Expand whatever we uploaded to RGBA. Gray replicates; alpha defaults
-    // to opaque when the source had none.
+// A resampled texel expanded to a straight color and its coverage, as
+// `.rgb` and `.a`. Gray replicates; alpha defaults to opaque when the
+// source had none.
+//
+// Undoes the premultiplication `resample` worked in, so that windowing and
+// the primaries matrix act on the actual color rather than a faded one.
+// Bicubic's negative lobes can undershoot, so a texel that has resolved to
+// near-nothing is taken as nothing rather than divided into a wild color.
+fn expanded(texel: vec4<f32>) -> vec4<f32> {
     var color: vec3<f32>;
     var alpha: f32;
     switch params.swizzle {
@@ -251,11 +260,6 @@ fn shade(uv: vec2<f32>) -> vec4<f32> {
         case 2u: { color = texel.rgb; alpha = 1.0; }
         default: { color = texel.rgb; alpha = texel.a; }
     }
-
-    // Undo the premultiplication `resample` worked in, so that windowing and
-    // the primaries matrix act on the actual color rather than a faded one.
-    // Bicubic's negative lobes can undershoot, so a texel that has resolved to
-    // near-nothing is taken as nothing rather than divided into a wild color.
     if params.alpha_mode == 0u {
         alpha = 1.0;
     } else {
@@ -267,6 +271,16 @@ fn shade(uv: vec2<f32>) -> vec4<f32> {
             alpha = 0.0;
         }
     }
+    return vec4<f32>(color, alpha);
+}
+
+// The color of the picture at `uv` of the texture: resampled, expanded to
+// RGBA, brought into the working space, windowed, marked and false-colored,
+// premultiplied by its coverage.
+fn shade(uv: vec2<f32>) -> vec4<f32> {
+    let shown = expanded(resample(uv));
+    var color = shown.rgb;
+    let alpha = shown.a;
 
     let is_gray = params.swizzle < 2u;
     if !is_gray {
@@ -277,22 +291,6 @@ fn shade(uv: vec2<f32>) -> vec4<f32> {
     // window/level a measurement image needs.
     let windowed = (color - vec3<f32>(params.window.x)) * params.window.y;
 
-    // While the key for it is held, a pixel the window has taken to white
-    // or to black in every channel — where the picture has gone flat, and
-    // whatever was there is gone — is painted in a color that is not in any
-    // picture, in place of itself: red for the highlights, blue for the
-    // shadows, which is what every editor's warning looks like. Before the
-    // false color, since a ramp's ends are not white and black, and read
-    // in linear light, the same units the corners of the histogram count
-    // in. Which ends are marked is `shader_codes::marks`' to say: white is
-    // only marked where the surface is actually clipping it.
-    if (params.marks & 2u) != 0u && all(windowed >= vec3<f32>(1.0)) {
-        return vec4<f32>(MARK_WHITE * alpha, alpha);
-    }
-    if (params.marks & 1u) != 0u && all(windowed <= vec3<f32>(0.0)) {
-        return vec4<f32>(MARK_BLACK * alpha, alpha);
-    }
-
     var result: vec3<f32>;
     if is_gray && params.colormap != 0u {
         result = false_color(params.colormap, windowed.r);
@@ -300,6 +298,124 @@ fn shade(uv: vec2<f32>) -> vec4<f32> {
         result = windowed;
     }
 
+    // While the key for it is held, the pixels the window has taken to
+    // white or to black — as `fs_marks` judged each texel — are painted in
+    // a color that is not in any picture, in place of themselves: red for
+    // the highlights, blue for the shadows, which is what every editor's
+    // warning looks like. Over the false color, since a ramp's ends are not
+    // white and black. Which ends are painted is `shader_codes::marks`' to
+    // say: white is only painted where the surface is actually clipping it.
+    //
+    // Painted by the share of the pixel that is marked: whole at and above
+    // 1:1, where a pixel is one texel, and below it the blue of a scattered
+    // shadow thins as the crushed pixels thin among their neighbors, with
+    // nothing to jump at 1:1. Laid over the pixel's own color, which is the
+    // average of every texel under it, the marked ones included — the
+    // coarse chain averages the picture whole — so a pixel partly marked is
+    // a hair off what painting every texel first and shrinking would give;
+    // one wholly marked, or not at all, is exactly that.
+    if params.marks != 0u {
+        let gate = vec2<f32>(f32((params.marks & 2u) != 0u), f32((params.marks & 1u) != 0u));
+        let share = mark_share(uv) * gate;
+        result = result * (1.0 - share.x - share.y) + MARK_WHITE * share.x + MARK_BLACK * share.y;
+    }
+
     // The target blends with premultiplied alpha.
     return vec4<f32>(result * alpha, alpha);
+}
+
+// Whether the window in force has taken any channel of the texel at `coord`
+// of the picture as uploaded to white (`.x`) or to black (`.y`) — one or the
+// other, white first — where the picture has lost what that channel held,
+// and the color left is not the file's. Read through the same `load` and
+// `expanded` the draw reads by, so the verdict is on the lifted, straight
+// color the draw shows; a texel with no coverage marks nothing, there being
+// nothing of it on screen to have lost anything.
+//
+// Judged in the file's own channels, before the primaries matrix, which is
+// where the histogram's corners count the same share: the band's two ends
+// are on the file's axis, and a wide-gamut color's negative BT.709 channel
+// is a gamut matter the compositor's clip settles, not a shadow the window
+// took to black. The comparisons are exact, as the corners' are.
+fn judge(coord: vec2<i32>) -> vec2<f32> {
+    let own = expanded(load(coord));
+    if own.a <= 0.0 {
+        return vec2<f32>(0.0);
+    }
+    let native = (own.rgb - vec3<f32>(params.window.x)) * params.window.y;
+    if any(native >= vec3<f32>(1.0)) {
+        return vec2<f32>(1.0, 0.0);
+    }
+    if any(native <= vec3<f32>(0.0)) {
+        return vec2<f32>(0.0, 1.0);
+    }
+    return vec2<f32>(0.0);
+}
+
+// The marks over the block of `source` from `low` to `high`, in its texels,
+// each texel weighted by how much of it the block covers: judged live at
+// the picture's own level, read off `clipped` at a coarse one. The twin of
+// `area`'s footprint, and of `reduce.wgsl`'s block, so the marks and the
+// picture are averaged over exactly the same texels.
+fn marks_over(low: vec2<f32>, high: vec2<f32>) -> vec2<f32> {
+    let first = vec2<i32>(floor(low));
+    let last = vec2<i32>(ceil(high)) - vec2<i32>(1);
+    let limit = vec2<i32>(textureDimensions(source)) - vec2<i32>(1);
+
+    var sum = vec2<f32>(0.0);
+    var total = 0.0;
+    for (var y = first.y; y <= last.y; y = y + 1) {
+        let wy = min(high.y, f32(y + 1)) - max(low.y, f32(y));
+        if wy <= 0.0 {
+            continue;
+        }
+        for (var x = first.x; x <= last.x; x = x + 1) {
+            let wx = min(high.x, f32(x + 1)) - max(low.x, f32(x));
+            if wx <= 0.0 {
+                continue;
+            }
+            let weight = wx * wy;
+            let coord = clamp(vec2<i32>(x, y), vec2<i32>(0), limit);
+            var mark: vec2<f32>;
+            if params.level == 0u {
+                mark = judge(coord);
+            } else {
+                mark = textureLoad(clipped, coord, 0).rg;
+            }
+            sum = sum + mark * weight;
+            total = total + weight;
+        }
+    }
+    return sum / max(total, 1e-8);
+}
+
+// The share of the pixel at `uv` that is marked at white (`.x`) and at black
+// (`.y`). Magnifying, a pixel lies inside one texel of the picture, and it
+// is that texel's verdict, read outright — not a blend's: the filters land
+// a hair off a texel's own value, since where a pixel's center falls in the
+// texture is arithmetic on its coordinate that is not exact at the far end
+// of a large picture, and a mark decided from the blend would come and go
+// with the rounding. Minifying, the exact area average of the marks under
+// the pixel, over the same footprint of the same level as `area` reads the
+// picture by.
+fn mark_share(uv: vec2<f32>) -> vec2<f32> {
+    let center = uv * params.extent;
+    if params.resampler != 0u {
+        let limit = vec2<i32>(textureDimensions(source)) - vec2<i32>(1);
+        return judge(clamp(vec2<i32>(floor(center)), vec2<i32>(0), limit));
+    }
+    let half = min(params.texels_per_pixel, vec2<f32>(64.0)) * 0.5;
+    return marks_over(center - half, center + half);
+}
+
+// Writes the first level of the marks' coarse chain from the picture as
+// uploaded: each texel of the target is the shares of the block of
+// `texels_per_pixel` texels of the picture under it — the chain's step, both
+// ways — the last row and column over what is actually there, as
+// `reduce.wgsl` weighs its edge.
+@fragment
+fn fs_marks(in: VertexOut) -> @location(0) vec4<f32> {
+    let low = floor(in.position.xy) * params.texels_per_pixel;
+    let high = min(low + params.texels_per_pixel, params.extent);
+    return vec4<f32>(marks_over(low, high), 0.0, 1.0);
 }

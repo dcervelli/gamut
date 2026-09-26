@@ -51,6 +51,12 @@ passes actually produce against arithmetic done on the CPU. Every place the
 CPU keeps a twin of a shader is held to the device this way: the false-color
 ramps, the tone curves on both kinds of surface and the clip a false color
 holds them at, the PQ curve an HDR10 surface takes, and the gain map's lift.
+The marks on clipped pixels are held to the rule the [histogram
+page](histogram.md) states — any channel at an end, in the file's own
+channels — over a Rec. 2020 row whose vivid red is not marked though its
+BT.709 green is negative, at 1:1 and magnified; and below 1:1, through the
+marks' own coarse chain, to the share of the texels under a pixel that are
+at an end.
 Of the filters: that minification is the exact mean of the texels a pixel
 covers, that
 two levels of the coarse chain plus the draw's own filter come to the same

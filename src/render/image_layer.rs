@@ -11,7 +11,7 @@ use anyhow::{Result, anyhow};
 use bytemuck::{Pod, Zeroable};
 
 use super::gpu::{self, Fullscreen};
-use super::placement::{Glass, Placement};
+use super::placement::{Glass, Placement, Upscale};
 use super::reduce::{self, Level, Reducer};
 use super::shader_codes;
 use super::upload::{self, Capabilities};
@@ -50,7 +50,10 @@ struct Params {
     /// 0 for no lift, else the gain map's channel count; 0 on a coarse
     /// level, which holds lifted light already.
     lift: u32,
-    _pad2: u32,
+    /// Which level of the coarse chain `source` is: 0 for the picture as
+    /// uploaded, whose marks are judged live, else the level whose marks
+    /// are bound beside it.
+    level: u32,
     map_size: [f32; 2],
     base_offset: [f32; 4],
     alternate_offset: [f32; 4],
@@ -116,6 +119,97 @@ fn padded(offset: [f32; 3]) -> [f32; 4] {
     [offset[0], offset[1], offset[2], 0.0]
 }
 
+/// What the marks' coarse chain is stored in: a byte each for the share of
+/// a level's texel at white and at black.
+const MARKS_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rg8Unorm;
+
+/// The coarse chain of the marks on the picture's texels, while the marks
+/// are on and a coarse level is being drawn. Each texel of its first level
+/// is the share of the `STEP` by `STEP` block of the picture under it that
+/// `judge` in `shaders/image.wgsl` puts at white, and at black, under the
+/// window in force; `fs_marks` writes that level outright from the picture,
+/// and the reducer makes the rest from it as it makes the picture's chain
+/// from the picture. Every coarse level of the picture is bound beside the
+/// marks at the same level, so that a minified draw reads the share of the
+/// texels under a pixel that are at each end, where a test of their average
+/// would find an end only under a pixel every texel of which is at it, and
+/// a scattered shadow would vanish the moment the view dropped below 1:1.
+///
+/// There is no level 0: at the picture's own level the shader judges the
+/// texels under a pixel live, from the picture, so nothing is stored per
+/// texel of the picture, and the chain is a sixteenth of the marks it stands
+/// for — about a bit a texel. The marks are the window's and the lift's, so
+/// the chain is written again when either changes, and dropped with the
+/// picture's chain when its texels change. It is dropped altogether while
+/// the marks are off, or nothing coarse is drawn, so a picture whose marks
+/// are never asked for pays nothing for them.
+struct Marks {
+    _first_texture: wgpu::Texture,
+    /// The chain's first level, the picture's level 1.
+    first: wgpu::TextureView,
+    /// The levels after it, reduced from the first.
+    rest: Vec<Level>,
+    /// The picture as uploaded, bound beside the blank, for `fs_marks` to
+    /// read it through: its own bind group, since the pass writes the chain
+    /// and cannot also have the picture's level-1 group, which names it.
+    reading: wgpu::BindGroup,
+    /// What the marks were written under.
+    key: MarksKey,
+}
+
+/// What the marks on the texels depend on: the window as the shader applies
+/// it, exposure included, and the weight of the gain map's lift.
+#[derive(Clone, Copy, PartialEq)]
+struct MarksKey {
+    window: (f32, f32),
+    weight: f32,
+}
+
+impl Marks {
+    /// The first level's texture for a picture of `size`, unwritten, and the
+    /// binding the pass writes it from.
+    fn new(
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        picture: &wgpu::TextureView,
+        blank_marks: &wgpu::TextureView,
+        size: [u32; 2],
+        key: MarksKey,
+    ) -> Self {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("marks"),
+            size: wgpu::Extent3d {
+                width: size[0].div_ceil(reduce::STEP).max(1),
+                height: size[1].div_ceil(reduce::STEP).max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: MARKS_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let first = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        Self {
+            _first_texture: texture,
+            first,
+            rest: Vec::new(),
+            reading: binding(device, layout, picture, blank_marks),
+            key,
+        }
+    }
+
+    /// The marks at coarse level `level` of the picture, 1 being the first.
+    fn at(&self, level: usize) -> Option<&wgpu::TextureView> {
+        match level {
+            0 => None,
+            1 => Some(&self.first),
+            _ => self.rest.get(level - 2).map(|level| &level.view),
+        }
+    }
+}
+
 /// One uploaded image and the constants that describe it.
 pub struct GpuImage {
     size: [u32; 2],
@@ -124,10 +218,14 @@ pub struct GpuImage {
     texture: wgpu::Texture,
     view: wgpu::TextureView,
     /// Bind groups indexed by level: 0 is the image as uploaded, the rest are
-    /// the coarse chain. Empty past the first until a view zooms out far
-    /// enough to want it, since most never do.
+    /// the coarse chain, each beside the marks at the same level — or the
+    /// blank texel, while the marks are off. Empty past the first until a
+    /// view zooms out far enough to want it, since most never do.
     bindings: Vec<wgpu::BindGroup>,
     levels: Vec<Level>,
+    /// The marks' coarse chain, while the marks are on and a coarse level
+    /// is drawn.
+    marks: Option<Marks>,
     /// Set once the chain has been built, which is not the same as its being
     /// non-empty: an image only a few texels across has no levels to make.
     chain_built: bool,
@@ -203,11 +301,18 @@ pub struct ImageLayer {
     /// and draws a hairline of the backdrop's color around the glass, so
     /// the last pixel of the circle is a second quad drawn blending.
     replacing: wgpu::RenderPipeline,
+    /// The same shader's `fs_marks`, writing the first level of the marks'
+    /// chain from the picture.
+    marking: wgpu::RenderPipeline,
     texture_layout: wgpu::BindGroupLayout,
     lift_layout: wgpu::BindGroupLayout,
     /// What a picture with no gain map binds in the map's place: a texel of
     /// each, never read, since the lift is switched off with them.
     blank_lift: wgpu::BindGroup,
+    /// What is bound in the marks' place where there are none: beside the
+    /// picture as uploaded, whose marks are judged live, and beside every
+    /// level while the marks are off. A texel of zeros, never read.
+    blank_marks: wgpu::TextureView,
     /// The false-color ramps, one row per map, written once from
     /// `Colormap::color` — the same values the readout names, so that the
     /// screen and the swatch cannot disagree.
@@ -218,6 +323,9 @@ pub struct ImageLayer {
     /// its edge, drawn blending.
     loupe: Slot,
     rim: Slot,
+    /// The constants the marks are written under: the picture whole, a
+    /// block of `STEP` by `STEP` texels to the pixel, at the window in force.
+    marks_slot: Slot,
     reducer: Reducer,
     image: Option<GpuImage>,
     /// Which of the current image's bind groups the next draw reads, decided
@@ -255,7 +363,10 @@ impl ImageLayer {
         // is what lets one pipeline serve an area filter, an antialiased
         // nearest and a bicubic. Every format `upload::plan` can produce is
         // filterable all the same, and so is every format `reduce` writes.
-        let texture_layout = gpu::texture_layout(device, "image texture", 1, true);
+        // The picture at the level the draw reads, and the marks on it at
+        // the same level.
+        let texture_layout = gpu::texture_layout(device, "image texture", 2, true);
+        let blank_marks = blank_marks(device);
         // Loaded rather than sampled as well, so nothing here has to be
         // filterable — which the 32-bit float table could not be on every
         // device.
@@ -291,19 +402,34 @@ impl ImageLayer {
                 blend: None,
             },
         );
+        let marking = gpu::fullscreen_pipeline_entry(
+            device,
+            Fullscreen {
+                label: "image layer, marks",
+                shader: &shader,
+                layout: &pipeline_layout,
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                format: MARKS_FORMAT,
+                blend: None,
+            },
+            "fs_marks",
+        );
 
         Self {
             pipeline,
             replacing,
+            marking,
             reducer: Reducer::new(device, &lift_layout),
             texture_layout,
             lift_layout,
             blank_lift,
+            blank_marks,
             ramps,
             main: Slot::new(device, &params_layout, "image params"),
             thumbnail: Slot::new(device, &params_layout, "thumbnail params"),
             loupe: Slot::new(device, &params_layout, "loupe params"),
             rim: Slot::new(device, &params_layout, "loupe rim params"),
+            marks_slot: Slot::new(device, &params_layout, "marks params"),
             image: None,
             level: 0,
             thumbnail_level: None,
@@ -330,6 +456,7 @@ impl ImageLayer {
             queue: queue.clone(),
             layout: self.texture_layout.clone(),
             lift_layout: self.lift_layout.clone(),
+            blank_marks: self.blank_marks.clone(),
             capabilities,
         }
     }
@@ -401,7 +528,8 @@ impl ImageLayer {
 
         // A lift at another weight is another table, written over the one
         // on the device — and the coarse chain, reduced from light lifted
-        // by the old one, goes with it, to be built again from the new.
+        // by the old one, goes with it, to be built again from the new, as
+        // do the marks, which were judged on the old light.
         if let Some(lift) = &mut image.lift
             && lift.weight != weight
         {
@@ -409,6 +537,7 @@ impl ImageLayer {
             image.levels.clear();
             image.bindings.truncate(1);
             image.chain_built = false;
+            image.marks = None;
         }
 
         let factor = shrink(view);
@@ -421,25 +550,57 @@ impl ImageLayer {
             .fold(factor, |coarsest, placement| {
                 coarsest.max(shrink(placement))
             });
-        if coarsest > reduce::STEP as f32 && !image.chain_built {
+        let coarse = coarsest > reduce::STEP as f32;
+
+        // The marks' chain, where the marks are on and a coarse level is
+        // drawn: written under this frame's window and lift unless it already
+        // is, and let go otherwise. Every level's bind group names the marks
+        // at that level, so a change to the chain is a change to the
+        // bindings.
+        let wanted = (mark_clipped && coarse).then_some(MarksKey {
+            window,
+            weight: image.lift.as_ref().map_or(0.0, |lift| lift.weight),
+        });
+        if image.marks.as_ref().map(|marks| marks.key) != wanted {
+            match wanted {
+                Some(key) => write_marks(
+                    device,
+                    queue,
+                    encoder,
+                    Marking {
+                        pipeline: &self.marking,
+                        slot: &self.marks_slot,
+                        reducer: &mut self.reducer,
+                        layout: &self.texture_layout,
+                        blank_lift: &self.blank_lift,
+                        blank_marks: &self.blank_marks,
+                        ramps: &self.ramps,
+                    },
+                    image,
+                    display,
+                    key,
+                ),
+                None => image.marks = None,
+            }
+            rebind(device, &self.texture_layout, &self.blank_marks, image);
+        }
+
+        if coarse && !image.chain_built {
             image.levels = self.reducer.build(
                 device,
                 encoder,
                 reduce::Source {
                     view: &image.view,
                     size: image.size,
+                    extent: None,
                     format: image.level_format,
                     swizzle: image.swizzle,
                     alpha: image.alpha,
                     lift: Lifted::of(image.lift.as_ref(), &self.blank_lift),
                 },
             );
-            for level in &image.levels {
-                image
-                    .bindings
-                    .push(binding(device, &self.texture_layout, &level.view));
-            }
             image.chain_built = true;
+            rebind(device, &self.texture_layout, &self.blank_marks, image);
         }
 
         let lifted = Lifted::of(image.lift.as_ref(), &self.blank_lift);
@@ -672,6 +833,27 @@ fn ramps(
     )
 }
 
+/// A texel of marks, for the frames the marks are off: zeros, as the device
+/// leaves a fresh texture, and never read.
+fn blank_marks(device: &wgpu::Device) -> wgpu::TextureView {
+    device
+        .create_texture(&wgpu::TextureDescriptor {
+            label: Some("no marks"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: MARKS_FORMAT,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        })
+        .create_view(&wgpu::TextureViewDescriptor::default())
+}
+
 /// A texel of map and a texel of table, for the pictures that have neither.
 fn blank_lift(device: &wgpu::Device, layout: &wgpu::BindGroupLayout) -> wgpu::BindGroup {
     let texel = |label: &str, format: wgpu::TextureFormat| {
@@ -717,6 +899,7 @@ pub struct Upload {
     queue: wgpu::Queue,
     layout: wgpu::BindGroupLayout,
     lift_layout: wgpu::BindGroupLayout,
+    blank_marks: wgpu::TextureView,
     capabilities: Capabilities,
 }
 
@@ -755,7 +938,12 @@ impl Upload {
         self.fill(&texture, &plan, image.width, image.height)?;
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let bindings = vec![binding(&self.device, &self.layout, &view)];
+        let bindings = vec![binding(
+            &self.device,
+            &self.layout,
+            &view,
+            &self.blank_marks,
+        )];
         let lift = match &image.gain_map {
             Some(map) => Some(Lift::upload(self, map)?),
             None => None,
@@ -767,6 +955,7 @@ impl Upload {
             view,
             bindings,
             levels: Vec::new(),
+            marks: None,
             chain_built: false,
             level_format: reduce::level_format(plan.format),
             swizzle: shader_codes::swizzle(image.channels()),
@@ -803,6 +992,10 @@ impl Upload {
         held.levels.clear();
         held.bindings.truncate(1);
         held.chain_built = false;
+        // Judged on the old frame's texels. The binding kept still names the
+        // old marks, and is not read for them until `prepare` has written
+        // new ones and bound those.
+        held.marks = None;
         held.swizzle = shader_codes::swizzle(image.channels());
         held.alpha = image.alpha;
         held.primaries = to_columns(image.color.primaries.to_bt709());
@@ -983,7 +1176,7 @@ fn params_for(
         // Only the image as uploaded is lifted; a coarse level was reduced
         // from lifted light.
         lift: if level == 0 { lifted.code } else { 0 },
-        _pad2: 0,
+        level: level as u32,
         map_size: lifted.map_size,
         base_offset: lifted.base_offset,
         alternate_offset: lifted.alternate_offset,
@@ -998,12 +1191,144 @@ fn params_for(
     }
 }
 
+/// The picture at one level, beside the marks on it at the same level.
 fn binding(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
     view: &wgpu::TextureView,
+    marks: &wgpu::TextureView,
 ) -> wgpu::BindGroup {
-    gpu::texture_group(device, "image texture", layout, &[view])
+    gpu::texture_group(device, "image texture", layout, &[view, marks])
+}
+
+/// Every level's bind group made again: the picture at that level beside
+/// the marks at it, or beside the blank texel — at level 0 always, whose
+/// marks are judged live, and at every level while the marks are off. Done
+/// whenever either chain changes, since a bind group names both.
+fn rebind(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    blank_marks: &wgpu::TextureView,
+    image: &mut GpuImage,
+) {
+    let marks = image.marks.as_ref();
+    let picture = std::iter::once(&image.view).chain(image.levels.iter().map(|level| &level.view));
+    image.bindings = picture
+        .enumerate()
+        .map(|(level, view)| {
+            let mark = marks
+                .and_then(|marks| marks.at(level))
+                .unwrap_or(blank_marks);
+            binding(device, layout, view, mark)
+        })
+        .collect();
+}
+
+/// What writing the marks takes from the layer, so that it can be done
+/// while the picture is borrowed from it.
+struct Marking<'a> {
+    pipeline: &'a wgpu::RenderPipeline,
+    slot: &'a Slot,
+    reducer: &'a mut Reducer,
+    layout: &'a wgpu::BindGroupLayout,
+    blank_lift: &'a wgpu::BindGroup,
+    blank_marks: &'a wgpu::TextureView,
+    ramps: &'a wgpu::BindGroup,
+}
+
+/// Writes the marks' chain for `image` under `key`: the first level through
+/// `fs_marks`, which judges every texel of the picture as uploaded and
+/// writes each block's shares — a `STEP` by `STEP` block to the pixel, so
+/// `texels_per_pixel` is the block, and a target the size of the picture
+/// over `STEP` so the quad fills the level's texture whatever it rounds to —
+/// and the rest reduced from it as the picture's chain is from the picture:
+/// three straight channels, the third empty, no lift, the marks being judged
+/// on lifted light already, and the first level's own extent, so that its
+/// last row and column weigh what they stand for.
+fn write_marks(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    encoder: &mut wgpu::CommandEncoder,
+    marking: Marking<'_>,
+    image: &mut GpuImage,
+    display: &Display,
+    key: MarksKey,
+) {
+    let size = image.size;
+    let step = reduce::STEP as f32;
+    let target = [size[0] as f32 / step, size[1] as f32 / step];
+    let lifted = Lifted::of(image.lift.as_ref(), marking.blank_lift);
+    marking.slot.write(
+        queue,
+        params_for(
+            image,
+            Placement {
+                x: 0.0,
+                y: 0.0,
+                width: target[0],
+                height: target[1],
+                zoom: 1.0,
+                upscale: Upscale::Nearest,
+            },
+            None,
+            0,
+            Quad {
+                target,
+                display,
+                window: key.window,
+                marks: 0,
+                lifted,
+                turn: Turn::NONE,
+            },
+        ),
+    );
+
+    if image.marks.is_none() {
+        image.marks = Some(Marks::new(
+            device,
+            marking.layout,
+            &image.view,
+            marking.blank_marks,
+            size,
+            key,
+        ));
+    }
+    let Some(marks) = &mut image.marks else {
+        return;
+    };
+    {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("marks"),
+            color_attachments: &[Some(gpu::attachment(
+                &marks.first,
+                wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+            ))],
+            ..Default::default()
+        });
+        pass.set_pipeline(marking.pipeline);
+        pass.set_bind_group(0, &marking.slot.group, &[]);
+        pass.set_bind_group(1, &marks.reading, &[]);
+        pass.set_bind_group(2, lifted.group, &[]);
+        pass.set_bind_group(3, marking.ramps, &[]);
+        pass.draw(0..4, 0..1);
+    }
+    marks.rest = marking.reducer.build(
+        device,
+        encoder,
+        reduce::Source {
+            view: &marks.first,
+            size: [
+                size[0].div_ceil(reduce::STEP).max(1),
+                size[1].div_ceil(reduce::STEP).max(1),
+            ],
+            extent: Some(target),
+            format: MARKS_FORMAT,
+            swizzle: shader_codes::swizzle(Channels::Rgb),
+            alpha: AlphaMode::Opaque,
+            lift: Lifted::of(None, marking.blank_lift),
+        },
+    );
+    marks.key = key;
 }
 
 /// WGSL matrices are column-major with 16-byte column stride, while
