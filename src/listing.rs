@@ -18,13 +18,18 @@ use anyhow::{Context, Result, bail};
 /// The extension decides here, since the alternative is opening every file in
 /// the directory to look at its leading bytes. A file named on the command
 /// line is still read for what it holds rather than what it is called.
-fn images_in(dir: &Path) -> Result<Vec<PathBuf>> {
+///
+/// Each image is `dir` joined to its name, so that the empty path — the
+/// folder of a file named without one — lists as bare names, which is how
+/// that file itself was named.
+pub fn images_in(dir: &Path) -> Result<Vec<PathBuf>> {
     let extensions = crate::image::decode::supported_extensions();
     let mut found = Vec::new();
-    let entries = std::fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))?;
+    let entries = std::fs::read_dir(opened(dir))
+        .with_context(|| format!("reading {}", opened(dir).display()))?;
     for entry in entries {
-        let entry = entry.with_context(|| format!("reading {}", dir.display()))?;
-        let candidate = entry.path();
+        let entry = entry.with_context(|| format!("reading {}", opened(dir).display()))?;
+        let candidate = dir.join(entry.file_name());
         let extension = candidate
             .extension()
             .and_then(|e| e.to_str())
@@ -33,12 +38,47 @@ fn images_in(dir: &Path) -> Result<Vec<PathBuf>> {
         // The extension is checked first because it costs nothing; the
         // directory test that follows it is for the rare directory named
         // like an image.
-        if extensions.contains(&extension.as_str()) && !candidate.is_dir() {
+        if extensions.contains(&extension.as_str()) && !is_directory(&entry, &candidate) {
             found.push(candidate);
         }
     }
     found.sort();
     Ok(found)
+}
+
+/// Whether the entry `candidate` names is a directory, asked of the listing
+/// itself where it says: most file systems hand the kind of each entry
+/// over with its name, where a `stat` of each would be a round trip apiece
+/// on a network share. A link, and an entry whose kind the listing left
+/// out, are followed with a `stat`, a link to a directory being a
+/// directory here as it is to `is_dir`.
+fn is_directory(entry: &std::fs::DirEntry, candidate: &Path) -> bool {
+    match entry.file_type() {
+        Ok(kind) if !kind.is_symlink() => kind.is_dir(),
+        _ => opened(candidate).is_dir(),
+    }
+}
+
+/// The folder `file` is in, as its name has it: empty for a bare name,
+/// which [`images_in`] reads as the current directory.
+pub fn folder_of(file: &Path) -> PathBuf {
+    file.parent().map(Path::to_path_buf).unwrap_or_default()
+}
+
+/// Whether `path` is a directory to list: the empty path is the current
+/// one.
+pub fn is_folder(path: &Path) -> bool {
+    path.as_os_str().is_empty() || path.is_dir()
+}
+
+/// The path a directory is opened and shown by: `.` for the empty path,
+/// which would otherwise show as nothing at all.
+pub fn opened(dir: &Path) -> &Path {
+    if dir.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        dir
+    }
 }
 
 /// Replaces every directory named on the command line with the images
@@ -90,7 +130,7 @@ pub fn expand(named: Vec<PathBuf>) -> Result<Vec<PathBuf>> {
 pub fn relist(named: &[PathBuf]) -> Vec<PathBuf> {
     let mut files = Vec::new();
     for path in named {
-        if path.is_dir() {
+        if is_folder(path) {
             files.append(&mut images_in(path).unwrap_or_default());
         } else {
             files.push(path.clone());
@@ -135,6 +175,23 @@ mod tests {
             !files.contains(&fixtures().join("unsupported.tga")),
             "a format we cannot read is not worth stepping through"
         );
+    }
+
+    /// A directory named like an image is not an image, whether it is one
+    /// outright or a link to one; a link to an image is.
+    #[test]
+    fn a_directory_named_like_an_image_is_left_out() {
+        let dir = std::env::temp_dir().join(format!("gamut-listing-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("album.jpg")).unwrap();
+        std::fs::write(dir.join("a.png"), b"").unwrap();
+        std::os::unix::fs::symlink(dir.join("album.jpg"), dir.join("linked.jpg")).unwrap();
+        std::os::unix::fs::symlink(dir.join("a.png"), dir.join("b.png")).unwrap();
+        assert_eq!(
+            images_in(&dir).unwrap(),
+            [dir.join("a.png"), dir.join("b.png")]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Whatever is not a directory is passed through untouched, extension and

@@ -14,7 +14,16 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   as it opens, as well as on the terminal: the first such line, and how many
   more there are. A key's line in the help now names a click that runs it
   as well as its keys.
-
+- A single file opened by itself steps on through the other images in its
+  folder, as a file manager's viewer does. The folder is read the first time
+  `]`, `[`, `Ctrl+P` or `Tab` asks for more than the one file, and the step
+  lands on the file that comes next in the file list's order; a slow read is
+  said in the window with a count. `--alone`, or `browse_folder = false` in
+  the configuration file, keeps the list to the file. `]` and `[` with nowhere
+  to go now say so rather than doing nothing.
+- The empty window left when the last file is deleted or taken off the list
+  offers **Open all in** the folder that file came from, while that folder
+  still holds images.
 - A georeferenced raster can read out where the pixel under the pointer is
   on the ground: in the file's own projected coordinates and units, or as
   latitude and longitude on WGS 84, in decimal degrees or in degrees,
@@ -33,6 +42,12 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   window; a double-click in and a double-click out is a quick look at the
   pixels. Its default is now `zoom.100.toggle`, and `1` still goes to actual
   size and nothing else.
+- The desktop's file dialog starts in the folder of the picture on screen,
+  or of the last one shown.
+- A message in the window saying something failed begins with a capital,
+  as the others do.
+- The file list's sort and its direction are remembered between runs, in the
+  state file beside the list's width and the loupe's magnification.
 - The EPSG code a GeoTIFF names is now looked up, to find its latitude and
   longitude, where before it was only quoted. The table of codes it is looked
   up in is linked into the binary.

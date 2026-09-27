@@ -16,6 +16,7 @@ use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey, PhysicalKey};
 
 use super::App;
 use super::copying::Done;
+use super::folder::Then;
 use super::keymap::{Bound, Chord, KeyName, Keymap, Keys, Row};
 use crate::clipboard;
 use crate::gestures::{self, Button, Gestures, Surface, WheelAction};
@@ -407,7 +408,8 @@ fn action_of(tip: Tip) -> Option<Action> {
         // What no key reaches, and so names itself or wears its own name:
         // the buttons that open a menu, the items that wear a program's or
         // a file's name, the rows of the information panel, the cross on a
-        // message, the timeline, and the dialogs' buttons.
+        // message, the timeline, the dialogs' buttons, and the empty
+        // window's offer of the last folder.
         Tip::Control(
             Control::Copy
             | Control::OpenIn
@@ -427,7 +429,8 @@ fn action_of(tip: Tip) -> Option<Action> {
             | Control::CancelRename
             | Control::ExportAs(_)
             | Control::ExportTo
-            | Control::CancelExport,
+            | Control::CancelExport
+            | Control::OpenLastFolder,
         ) => return None,
         // The words at the end of the bottom bar are about four settings at
         // once, so no one key does what they do; what a press on them opens
@@ -1051,7 +1054,7 @@ pub static ROWS: &[Row] = &[
     },
     Row {
         section: Section::Files,
-        when: Some(When::SeveralFiles),
+        when: None,
         help: "Next file",
         keys: one!(
             "files.next",
@@ -1061,7 +1064,7 @@ pub static ROWS: &[Row] = &[
     },
     Row {
         section: Section::Files,
-        when: Some(When::SeveralFiles),
+        when: None,
         help: "Previous file",
         keys: one!(
             "files.previous",
@@ -1746,9 +1749,11 @@ pub(super) fn report(error: &anyhow::Error) {
 }
 
 /// The one line about it that goes in the window: the failure itself, without
-/// the chain under it.
+/// the chain under it, begun with a capital as every message in the window
+/// is. An error is written in lowercase to read as a link in the terminal's
+/// chain, which is not how it reads on its own.
 pub(super) fn briefly(error: &anyhow::Error) -> String {
-    crate::escape_controls(&error.to_string())
+    ui::capitalized(&crate::escape_controls(&error.to_string()))
 }
 
 /// What the window says when a paste finds no picture on the clipboard: the
@@ -1917,14 +1922,8 @@ impl App {
             CycleUpscale => self.view.cycle_upscale(),
             // Nothing to draw yet: the file is only being asked for, and what
             // is on screen stays until it arrives.
-            NextFile => {
-                self.step(true);
-                return Effect::Nothing;
-            }
-            PreviousFile => {
-                self.step(false);
-                return Effect::Nothing;
-            }
+            NextFile => return self.step(true),
+            PreviousFile => return self.step(false),
             // The count's own press, so that the key and the press cannot
             // come to mean different things — except that the key only
             // opens: `Esc` closes the chooser, as a file finder's does.
@@ -2274,7 +2273,7 @@ impl App {
         let georeference = current.and_then(|current| current.exif.georeference.as_ref());
         Conditions {
             region_selected: matches!(self.marking.selection, Selection::Shown(_)),
-            several_files: self.files.len() > 1,
+            several_files: self.files.len() > 1 || self.folder.unread(),
             animation: self.animation.is_some(),
             pages: current.is_some_and(|current| {
                 matches!(
@@ -2836,14 +2835,8 @@ impl App {
             // come to mean different things. Nothing is drawn differently
             // yet: the file is only being asked for, and what is on screen
             // stays until it arrives.
-            Control::Previous => {
-                self.step(false);
-                Effect::Nothing
-            }
-            Control::Next => {
-                self.step(true);
-                Effect::Nothing
-            }
+            Control::Previous => self.step(false),
+            Control::Next => self.step(true),
             Control::Minimap => {
                 self.panels.show_minimap = !self.panels.show_minimap;
                 Effect::Redraw
@@ -2888,7 +2881,12 @@ impl App {
             | Control::Sorting => Effect::Nothing,
             // The file list: up or down, and scrolled to the file on
             // screen as it comes up.
+            // With one file, the folder beside it, where there is one to
+            // read: the list comes up once it is in.
             Control::Filmstrip => {
+                if self.files.len() < 2 && self.read_folder(Then::Filmstrip) {
+                    return Effect::Nothing;
+                }
                 self.panels.show_filmstrip = !self.panels.show_filmstrip;
                 self.filmstrip.reveal();
                 Effect::Redraw
@@ -2972,6 +2970,14 @@ impl App {
             Control::OpenFolder => {
                 self.pick(Pick::Folder);
                 Effect::Nothing
+            }
+            // The folder the last picture came from, opened as if it had
+            // been chosen in the dialog.
+            Control::OpenLastFolder => {
+                if let Some(folder) = self.offered_folder.clone() {
+                    self.open_named(vec![folder]);
+                }
+                Effect::Redraw
             }
             // An item of the open menu, by its place in the list the same
             // frame was drawn from.
@@ -3095,14 +3101,25 @@ impl App {
             // stands with the cursor on the file on screen, and the first
             // rows' thumbnails are asked for ahead of the rest.
             Control::Chooser => {
+                let Some(open) = self
+                    .shown
+                    .as_ref()
+                    .map(|shown| egui::Popup::is_id_open(&shown.gui.ctx, ui::chooser::id()))
+                else {
+                    return Effect::Nothing;
+                };
+                // Nothing to choose from a list of one: the folder beside
+                // it, where there is one to read, and the chooser once it
+                // is in; the key does nothing otherwise, as the count it
+                // stands beside is not shown.
+                if !open && self.files.len() < 2 && self.read_folder(Then::Chooser) {
+                    return Effect::Nothing;
+                }
                 let Some(shown) = &self.shown else {
                     return Effect::Nothing;
                 };
                 let ctx = &shown.gui.ctx;
-                let open = egui::Popup::is_id_open(ctx, ui::chooser::id());
                 egui::Popup::close_all(ctx);
-                // Nothing to choose from a list of one: the key does
-                // nothing, as the count it stands beside is not shown.
                 if !open && self.files.len() > 1 {
                     egui::Popup::open_id(ctx, ui::chooser::id());
                     self.chooser.open(self.files.paths(), self.files.index());

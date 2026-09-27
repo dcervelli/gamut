@@ -24,6 +24,12 @@ app/           the event loop's state and winit handlers
                  off it, and the order it is put in (pure, tested)
   order.rs       the permutation an Order makes of the list — stable, the unknown last — and the
                  sections it breaks it into (pure, tested)
+  arranging.rs   a list about to be opened — the command line's under an order that needs more
+                 than names, or what the dialog chose — read for the order on a thread of its own,
+                 and its first file in that order asked for once it is in
+  folder.rs      the folder beside a single file named alone: unread until a step, the chooser or
+                 the file list asks for more, then read on a thread of its own with what the order
+                 in force needs of each image, and taken into the list between reads
   visited.rs     Visited: the files that have been on screen, and going back and forward through
                  them as a browser does (pure, tested)
   filmstrip.rs   Filmstrip: the file list's state — the order in force, whether the list has fallen
@@ -341,6 +347,14 @@ still agrees with both, so renaming either is editing the constant —
   handler, is the one place a frame is asked for, and two effects fold
   with `Effect::also`. A helper that changes what is on screen returns an
   `Effect` too, so that the caller cannot forget the frame it owes.
+- Every string the window shows is the author's to vet: a toast, a button's
+  label or accessible name, a tooltip, a menu item, a line of the help
+  popup, a dialog's words. A change that adds or alters one lists each of
+  them, old and new, in a table in its summary, each row numbered so it can
+  be referred to, and none of them is final until the author has approved
+  it. What is read outside the window — `--help`, the man page, the
+  completions, the configuration and state files, the terminal, the docs —
+  is not in the table.
 - Docs: three directories, three audiences — see **Docs ownership** below.
 - American spelling throughout — code, comments, docs, and every word a user
   reads: `color`, `gray`, `center`, `normalize`, `license`, `behavior`,

@@ -183,6 +183,13 @@ impl Files {
         )
     }
 
+    /// Makes `index` the file the opening request asks for, before anything
+    /// has been asked: the list having been put in order under it.
+    pub(super) fn start_at(&mut self, index: usize) {
+        debug_assert!(self.is_idle(), "nothing asked for yet");
+        self.index = index;
+    }
+
     /// Moves to the next or previous file. `None` when there is nowhere to go.
     ///
     /// From wherever the last request was aimed rather than from what is on

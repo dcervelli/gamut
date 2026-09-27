@@ -97,12 +97,23 @@ fn run() -> Result<ExitCode> {
     };
 
     let cli::Args {
-        mut files,
+        files,
         named,
         paste,
         complaint,
         options,
     } = args;
+
+    // In the order the list was last left in, before the first of them is
+    // chosen, where that order needs only the names: the first file shown
+    // is the first in it. An order that needs more is read for once the
+    // window is open, and the first file chosen then — see `app::arranging`.
+    let state = settings::StateFile::load();
+    let order = state.state().order;
+    let mut files = match order.reads_facts() {
+        true => files,
+        false => app::arranged(files, order, &Default::default()),
+    };
 
     // Only the header, which is cheap for every format we read. A bad path or
     // an unsupported format is still a plain command-line error rather than a
@@ -180,6 +191,14 @@ fn run() -> Result<ExitCode> {
         let _ = proxy.send_event(app::UserEvent::Picked(picked));
     });
     let proxy = event_loop.create_proxy();
+    let folder: app::folder::Deliver = std::sync::Arc::new(move |listed| {
+        let _ = proxy.send_event(app::UserEvent::Folder(listed));
+    });
+    let proxy = event_loop.create_proxy();
+    let arranged: app::arranging::Deliver = std::sync::Arc::new(move |arranged| {
+        let _ = proxy.send_event(app::UserEvent::Arranged(arranged));
+    });
+    let proxy = event_loop.create_proxy();
     clipboard::watch(watch::INTERVAL, move |offered| {
         proxy.send_event(app::UserEvent::Clipboard(offered)).is_ok()
     });
@@ -188,13 +207,15 @@ fn run() -> Result<ExitCode> {
         named,
         opening,
         options,
-        settings::StateFile::load(),
+        state,
         app::Threads {
             loader,
             wake,
             monitors,
             thumbnailer,
             picker,
+            folder,
+            arranged,
         },
     );
     // `--paste` on purpose, and nothing to paste: said in the window as

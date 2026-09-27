@@ -33,8 +33,10 @@ settings are:
 | `coordinate_format` | `pixel` | Where the pixel under the pointer is read out as, in a georeferenced file: `pixel`, `projected` or `geographic`. A file that cannot give the one chosen shows the pixel |
 | `geographic_format` | `decimal` | How a latitude and longitude are written: `decimal` or `dms` |
 | `log_counts` | `false` | The histogram's bars as tall as the logarithm of their counts |
+| `browse_folder` | `true` | A single file opened by itself steps on through the other images in its folder |
 
-`--histogram`, `--info` and `--no-minimap` override the file for that one run.
+`--histogram`, `--info`, `--no-minimap` and `--alone` override the file for
+that one run.
 If a line has a misspelled name or a value `gamut` does not recognize, it
 names the line on the terminal and uses the rest of the file. The window
 says so too as it opens, naming the first such line and how many more there
@@ -149,6 +151,7 @@ to zoom to, and a click on a handle makes it the current one.
 
 `~/.local/state/gamut/state` (under `$XDG_STATE_HOME` if you set it) is where
 `gamut` remembers settings you change by hand: how wide you dragged the file
-list and how far the loupe magnifies. It is written when the window closes
-and read when the next window opens. You never need to edit it, and deleting
-it resets both to their defaults.
+list, what the list is sorted by and which way, and how far the loupe
+magnifies. It is written when the window closes and read when the next window
+opens. You never need to edit it, and deleting it resets them all to their
+defaults.

@@ -175,6 +175,7 @@ fn input(logical: [f32; 2], count: usize) -> FrameInput {
         rename: None,
         export: None,
         empty: false,
+        folder: None,
         picking: false,
     }
 }
@@ -1066,6 +1067,22 @@ fn an_empty_window_offers_to_be_given_something() {
     assert_eq!(
         click(&mut harness, "Paste"),
         [Command::Press(Control::Paste)]
+    );
+    drop(harness);
+
+    // Come back to after a picture, the folder it came from is offered
+    // above the rest, and handed back as its own press.
+    let mut harness = empty(false, false);
+    assert!(harness.query_by_label("Open last folder").is_none());
+    harness.state_mut().input.folder = Some("Holiday".to_string());
+    harness.run();
+    assert_eq!(
+        click(&mut harness, "Open last folder"),
+        [Command::Press(Control::OpenLastFolder)]
+    );
+    assert_eq!(
+        click(&mut harness, "Open files"),
+        [Command::Press(Control::OpenFiles)]
     );
     drop(harness);
 

@@ -94,6 +94,16 @@ file list's menus put it in after that; naming a directory puts the images in it
 on the list, and keeps it up to date as images are added to that directory or
 taken out of it.
 
+A single file opened by itself, as a file manager opens one, steps on
+through the other images in its folder. The folder is not read until you
+ask for more than the one file — `]` or `[`, `Ctrl+P` or `Tab` — so until
+then the window shows just the picture, and the first step lands on the
+file that comes next in the order the list is sorted by. A large folder, or
+one on a network share, may take a moment to read; the window says so while
+it does. `--alone` on the command line, or `browse_folder = false` in the
+configuration file, keeps the list to the one file. With nothing else to
+step to, `]` and `[` say so.
+
 ### The file list
 
 `Tab`, or the button at the head of the top bar, puts the list down the
@@ -113,7 +123,8 @@ half again as tall, beyond which a panorama or a tall screenshot is
 fitted inside with room either side. A row is square until the file has
 been looked at, which happens in the background shortly after the list
 arrives. With a single file there is no
-list to show, and neither the button nor the key appears to do anything.
+list to show: `Tab` reads its folder if it has not been read and puts the
+list up once it is in, and otherwise does nothing you can see.
 
 The menu at the head of the strip says how the list stands. It sorts the
 files by name, by path, by kind of file, by when the file
@@ -128,9 +139,12 @@ sorting by size and then by kind leaves each kind in size order, the way
 sorting a spreadsheet twice does. The kind of a file, its size, its date
 and its dimensions are read from its header in the background, and a file whose
 header has not been read yet sorts after those that have, and moves
-into place once it is. The list opens in name order whatever order the
-files were named in, and stays in whatever order you put it in as files
-arrive in a directory or leave it. Whatever the order does, the file on
+into place once it is. The list opens in the order you last put it in,
+or in name order the first time, whatever order the files were named in,
+and the first file shown is the first in that order. Sorted by anything
+but name or path, a long list is read for its order before its first file
+opens, and the window says so while it is. The list stays in that order
+as files arrive in a directory or leave it. Whatever the order does, the file on
 screen stays the file on screen.
 
 Beside the menus are two buttons that go back to the file shown before
@@ -158,8 +172,9 @@ every file whose number has `12` in it, and a `-` counts from the end, so
 `:-1` puts the last file first. The arrows move through the rows
 without opening anything; `Enter`, or a click on a row, opens that file and
 closes the chooser; `Esc`, or a click outside it, closes it.
-With a single file on the list there is nothing to choose, and `Ctrl+P` does
-nothing. While it is open, keys go into the field rather than to the picture. The
+With a single file on the list there is nothing to choose: `Ctrl+P` reads
+its folder if it has not been read and opens once it is in, and otherwise
+does nothing. While it is open, keys go into the field rather than to the picture. The
 file on screen is marked in the list, and the cursor starts on it, so
 `Down` and `Enter` is the next file.
 
@@ -176,11 +191,12 @@ whose thumbnail has not yet been made shows an empty slot until it has.
 formats this program reads, with an **All files** filter for a file named
 without its extension. Choose one file or several: what you choose joins
 the end of the list, exactly as if it had been named on the command line
-after everything else, and the first of it is shown. `Ctrl+Shift+O` puts up the same dialog for a
+after everything else, and the first of it in the list's order is shown. `Ctrl+Shift+O` puts up the same dialog for a
 folder, which stands for the images inside it as a directory on the command
 line does — kept up to date as images arrive in it or leave. Two keys rather
 than one because a desktop's dialog picks files or it picks a folder, never
-both at once. Cancel the dialog and nothing changes.
+both at once. Cancel the dialog and nothing changes. The dialog starts in
+the folder of the picture on screen, or of the last one shown.
 
 Opening adds to the list rather than replacing it: `]` and `[` and the
 chooser walk everything named so far, in whatever order the file list has
@@ -196,8 +212,11 @@ until there is one. The first picture to arrive in an empty window sizes
 it as the window would have opened on that picture, unless `--size` chose
 the size. The window comes back to those buttons when nothing it was
 handed could be opened, and says why at its foot, and when the last file
-on the list is deleted. While the dialog is up, the keys and the buttons
-that put it up do nothing more.
+on the list is deleted or taken off it. Then, while the folder the last
+picture came from still holds images, a fourth button above the others,
+**Open all in** and the folder's name, opens every image in it, as
+choosing that folder in the dialog would. While the dialog is up, the keys
+and the buttons that put it up do nothing more.
 
 The dialog is the desktop's, asked for through its portal, so it looks and
 behaves as the dialog of every other program on your desk does. A desktop
@@ -783,6 +802,7 @@ region behind: it belongs to the picture it was drawn on.
 | Click the region button | Select a region, or take the selected one off | |
 | Click the paste button | Paste the image on the clipboard, as `Ctrl+V` does | |
 | Click **Open files…** or **Open folder…** in an empty window | Put up the desktop's file dialog, as `Ctrl+O` and `Ctrl+Shift+O` do | |
+| Click **Open all in** a folder in an empty window | Open every image in the folder the last picture came from | |
 | Click the play, back or forward button under an animation | Play or pause it, or step a frame, as `Enter`, `N` and `n` do | |
 | Click or drag along the timeline | Go to the frame under the pointer, and stop there | |
 | Click a histogram button | Set the window on one of its rules, choose the tone curve, or mark the clipped pixels on the picture | |

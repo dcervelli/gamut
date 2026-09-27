@@ -394,6 +394,9 @@ pub struct FrameInput {
     /// area — see [`empty`]. Not merely `current` being `None`, which is
     /// also the moment before the first file arrives.
     pub empty: bool,
+    /// The folder the last picture came from, by name, while the empty
+    /// window offers to open every image in it.
+    pub folder: Option<String>,
     /// Whether the desktop's file dialog is up, which draws the buttons that
     /// put it up dead.
     pub picking: bool,
@@ -935,7 +938,7 @@ pub fn backdrop(theme: &Theme) -> Backdrop {
 /// `label` with its first letter capitalized: the labels are written as they
 /// are read in the middle of a line, and a button wears a name, a sentence
 /// starts with one.
-pub(super) fn capitalized(label: &str) -> String {
+pub(crate) fn capitalized(label: &str) -> String {
     let mut letters = label.chars();
     match letters.next() {
         Some(first) => first.to_uppercase().chain(letters).collect(),

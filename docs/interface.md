@@ -1174,6 +1174,18 @@ state when everything it was handed fails to open, with the message about
 the failure under the buttons, where a picture would have had it under the
 panels.
 
+A window emptied by the last file leaving the list offers a fourth button
+above the three, `Control::OpenLastFolder`: every image in the folder that
+file came from. `App::last_folder` is the folder of the last picture to
+arrive, made whole in `App::apply` so that it means the same after the
+working directory has stopped mattering; `App::leave_picture` reads that
+folder once, and keeps it in `App::offered_folder` only while it still
+holds images, since the folder a list was culled from is often the one
+that has just been emptied — reading it on every empty frame instead would
+put a directory listing on the frame's path. The press is `App::open_named`
+with the folder, exactly what choosing it in the dialog does. The dialog
+itself starts in `last_folder`, passed to the portal as `current_folder`.
+
 Nothing about the empty window is a mode. The keys stay on the one table;
 the buttons about the picture in the strips — the copies and the region —
 are drawn dead with `NOTHING_OPEN` for their reason, and the toggles that

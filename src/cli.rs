@@ -65,6 +65,9 @@ OPTIONS:
         --histogram         Start with the histogram showing
         --info              Start with the file information panel showing
         --no-minimap        Start with the minimap off
+        --alone             Step only through the files named, even when that
+                            is a single file, rather than on through the
+                            other images in its folder
         --paused            Open an animation stopped on its first frame,
                             rather than playing
         --paste             Paste the image on the clipboard, saved among your
@@ -308,6 +311,7 @@ pub fn parse_args() -> Result<Option<Args>> {
     let mut info = None;
     let mut minimap = None;
     let mut paused = false;
+    let mut alone = false;
     let mut paste = false;
     let mut upscale = Upscale::default();
     let mut size = None;
@@ -438,6 +442,10 @@ pub fn parse_args() -> Result<Option<Args>> {
                     paused = true;
                     continue;
                 }
+                Some("--alone") => {
+                    alone = true;
+                    continue;
+                }
                 Some("--paste") => {
                     paste = true;
                     continue;
@@ -478,6 +486,7 @@ pub fn parse_args() -> Result<Option<Args>> {
     config.show_histogram = histogram.unwrap_or(config.show_histogram);
     config.show_info = info.unwrap_or(config.show_info);
     config.show_minimap = minimap.unwrap_or(config.show_minimap);
+    config.browse_folder &= !alone;
     Ok(Some(Args {
         files,
         paste,
