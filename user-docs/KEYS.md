@@ -188,7 +188,8 @@ after everything else, and the first of it is shown. `Ctrl+Shift+O` puts up the 
 folder, which stands for the images inside it as a directory on the command
 line does — kept up to date as images arrive in it or leave. Two keys rather
 than one because a desktop's dialog picks files or it picks a folder, never
-both at once. Cancel the dialog and nothing changes.
+both at once. Cancel the dialog and nothing changes. The dialog starts in
+the folder of the picture on screen, or of the last one shown.
 
 Opening adds to the list rather than replacing it: `]` and `[` and the
 chooser walk everything named so far, in whatever order the file list has
@@ -204,8 +205,11 @@ until there is one. The first picture to arrive in an empty window sizes
 it as the window would have opened on that picture, unless `--size` chose
 the size. The window comes back to those buttons when nothing it was
 handed could be opened, and says why at its foot, and when the last file
-on the list is deleted. While the dialog is up, the keys and the buttons
-that put it up do nothing more.
+on the list is deleted or taken off it. Then, while the folder the last
+picture came from still holds images, a fourth button above the others,
+**Open all in** and the folder's name, opens every image in it, as
+choosing that folder in the dialog would. While the dialog is up, the keys
+and the buttons that put it up do nothing more.
 
 The dialog is the desktop's, asked for through its portal, so it looks and
 behaves as the dialog of every other program on your desk does. A desktop
@@ -791,6 +795,7 @@ region behind: it belongs to the picture it was drawn on.
 | Click the region button | Select a region, or take the selected one off | |
 | Click the paste button | Paste the image on the clipboard, as `Ctrl+V` does | |
 | Click **Open files…** or **Open folder…** in an empty window | Put up the desktop's file dialog, as `Ctrl+O` and `Ctrl+Shift+O` do | |
+| Click **Open all in** a folder in an empty window | Open every image in the folder the last picture came from | |
 | Click the play, back or forward button under an animation | Play or pause it, or step a frame, as `Enter`, `N` and `n` do | |
 | Click or drag along the timeline | Go to the frame under the pointer, and stop there | |
 | Click a histogram button | Set the window on one of its rules, choose the tone curve, or mark the clipped pixels on the picture | |

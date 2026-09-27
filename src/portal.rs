@@ -16,7 +16,7 @@
 
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -70,7 +70,10 @@ static REQUESTS: AtomicU64 = AtomicU64::new(0);
 /// takes an exported handle from the compositor that the window toolkit
 /// does not hand out, and a dialog with no parent is one the compositor
 /// places itself.
-pub fn choose(pick: Pick) -> Result<Option<Vec<PathBuf>>> {
+///
+/// `folder` is where the dialog starts, where there is somewhere to start:
+/// the folder of the picture on screen, or of the last one shown.
+pub fn choose(pick: Pick, folder: Option<&Path>) -> Result<Option<Vec<PathBuf>>> {
     let mut bus = Connection::session()?;
     let token = format!(
         "{}_{}_{}",
@@ -107,6 +110,18 @@ pub fn choose(pick: Pick) -> Result<Option<Vec<PathBuf>>> {
         }
         Pick::Folder => options.push(("directory", Value::Bool(true))),
     }
+    // A byte string the portal wants with its terminating zero, the path
+    // being bytes rather than text.
+    if let Some(folder) = folder {
+        let bytes = folder.as_os_str().as_encoded_bytes().iter().copied();
+        options.push((
+            "current_folder",
+            Value::Array {
+                element: "y".to_string(),
+                items: bytes.chain([0]).map(Value::Byte).collect(),
+            },
+        ));
+    }
     let reply = bus
         .call(
             PORTAL_NAME,
@@ -139,12 +154,12 @@ pub fn choose(pick: Pick) -> Result<Option<Vec<PathBuf>>> {
 /// As [`choose`], on a thread of its own, the answer handed to `deliver`
 /// when it comes. Not joined: a dialog left up is up for as long as the
 /// user leaves it, and the window has nothing to wait on it for.
-pub fn choose_on_thread(pick: Pick, deliver: Deliver) {
+pub fn choose_on_thread(pick: Pick, folder: Option<PathBuf>, deliver: Deliver) {
     std::thread::Builder::new()
         .name("file dialog".into())
         .spawn(move || {
             deliver(Picked {
-                outcome: choose(pick),
+                outcome: choose(pick, folder.as_deref()),
             });
         })
         .expect("a thread can be spawned");

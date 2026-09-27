@@ -11,6 +11,11 @@
 //! theirs — and each is a press that goes through the same [`Control`] its
 //! key does, so the two cannot drift.
 //!
+//! Come back to after a picture, a fourth goes above them: every image in
+//! the folder that picture came from, named on the button, while that
+//! folder still holds any. It is the likeliest thing wanted next, and the
+//! only one of the four with nothing to choose.
+//!
 //! Two buttons for the dialog rather than one, because that is how every
 //! desktop's dialog is built: it picks files, or it picks a folder, and a
 //! program that wanted both would have to put up two. The paste button
@@ -50,21 +55,25 @@ const MARK_GAP: f32 = 10.0;
 /// the same reason the buttons are larger.
 const LABEL_SIZE: f32 = 15.0;
 
-/// The height the column takes, for deciding whether there is room for it.
-const COLUMN_HEIGHT: f32 = 3.0 * BUTTON[1] + 2.0 * GAP;
+/// The height a column of `buttons` takes, for deciding whether there is
+/// room for it.
+fn column_height(buttons: usize) -> f32 {
+    buttons as f32 * BUTTON[1] + (buttons - 1) as f32 * GAP
+}
 
-/// Where the column goes: centered on `content`, or `None` where the area
-/// is too small to hold it — a window dragged down to nothing, where the
-/// keys still work and the buttons would only be cut off.
-pub fn panel(content: Rect) -> Option<Rect> {
-    let size = [BUTTON[0], COLUMN_HEIGHT];
+/// Where a column of `buttons` goes: centered on `content`, or `None` where
+/// the area is too small to hold it — a window dragged down to nothing,
+/// where the keys still work and the buttons would only be cut off.
+pub fn panel(content: Rect, buttons: usize) -> Option<Rect> {
+    let size = [BUTTON[0], column_height(buttons)];
     panel::fit(content, size, size, panel::Place::Center)
 }
 
 /// Draws the three buttons, and reads what was pressed.
 pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
     let content = pass.content;
-    let Some(panel) = panel(content) else {
+    let folder = pass.input.folder.clone();
+    let Some(panel) = panel(content, 3 + usize::from(folder.is_some())) else {
         return;
     };
     let area = egui::Rect::from_min_size(
@@ -77,6 +86,16 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
         ui.with_layout(Layout::top_down(Align::Center), |ui| {
             ui.spacing_mut().item_spacing = vec2(0.0, GAP);
             let picking = pass.input.picking;
+            if let Some(folder) = folder {
+                button(
+                    pass,
+                    ui,
+                    Control::OpenLastFolder,
+                    icon::FOLDER,
+                    &format!("Open all in {folder}"),
+                    !picking,
+                );
+            }
             button(
                 pass,
                 ui,
@@ -138,13 +157,25 @@ fn button(
 
     // No ink of its own for either galley: each is drawn in an ink handed
     // to the painter below, and a color set here would be baked in.
-    let label = ui.ctx().fonts_mut(|fonts| {
-        fonts.layout_no_wrap(
-            label.to_string(),
+    let key = pass.namer.shortcut(control).map(|key| {
+        let font = egui::TextStyle::Button.resolve(ui.style());
+        ui.ctx()
+            .fonts_mut(|fonts| fonts.layout_no_wrap(key, font, egui::Color32::PLACEHOLDER))
+    });
+    // The label is cut short where it would run into the key, or past the
+    // button's end, as a folder's name can.
+    let end = key
+        .as_ref()
+        .map_or(rect.max.x - INSET, |key| rect.max.x - INSET - key.size().x - MARK_GAP);
+    let mut job = egui::text::LayoutJob::single_section(
+        label.to_string(),
+        egui::TextFormat::simple(
             egui::FontId::proportional(LABEL_SIZE),
             egui::Color32::PLACEHOLDER,
-        )
-    });
+        ),
+    );
+    job.wrap = egui::text::TextWrapping::truncate_at_width(end - (mark.max.x + MARK_GAP));
+    let label = ui.ctx().fonts_mut(|fonts| fonts.layout_job(job));
     ui.painter().galley(
         pos2(
             mark.max.x + MARK_GAP,
@@ -153,11 +184,7 @@ fn button(
         label,
         ink,
     );
-    if let Some(key) = pass.namer.shortcut(control) {
-        let font = egui::TextStyle::Button.resolve(ui.style());
-        let key = ui
-            .ctx()
-            .fonts_mut(|fonts| fonts.layout_no_wrap(key, font, egui::Color32::PLACEHOLDER));
+    if let Some(key) = key {
         // The key is the quieter of the two, as it is beside a menu item:
         // the dim ink while the button is live, the button's own while
         // it is dead, there being nothing quieter than that.
@@ -194,21 +221,21 @@ mod tests {
     #[test]
     fn the_column_is_centered_or_absent() {
         let content = Rect::new(30.0, 30.0, 940.0, 640.0);
-        let panel = panel(content).expect("room for it");
+        let panel = panel(content, 3).expect("room for it");
         assert_eq!(panel.width, BUTTON[0]);
-        assert_eq!(panel.height, COLUMN_HEIGHT);
+        assert_eq!(panel.height, column_height(3));
         assert!((panel.x + panel.width / 2.0 - (content.x + content.width / 2.0)).abs() < 0.01);
         assert!((panel.y + panel.height / 2.0 - (content.y + content.height / 2.0)).abs() < 0.01);
 
         assert!(panel_fits(
             BUTTON[0] + 2.0 * PADDING,
-            COLUMN_HEIGHT + 2.0 * PADDING
+            column_height(3) + 2.0 * PADDING
         ));
         assert!(!panel_fits(BUTTON[0] + 2.0 * PADDING - 1.0, 1000.0));
-        assert!(!panel_fits(1000.0, COLUMN_HEIGHT + 2.0 * PADDING - 1.0));
+        assert!(!panel_fits(1000.0, column_height(3) + 2.0 * PADDING - 1.0));
     }
 
     fn panel_fits(width: f32, height: f32) -> bool {
-        panel(Rect::new(0.0, 0.0, width, height)).is_some()
+        panel(Rect::new(0.0, 0.0, width, height), 3).is_some()
     }
 }

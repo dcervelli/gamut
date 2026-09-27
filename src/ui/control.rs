@@ -162,6 +162,10 @@ pub enum Control {
     /// from anywhere. Dead while the dialog is up.
     OpenFiles,
     OpenFolder,
+    /// The button at the top of an empty window that opens every image in
+    /// the folder the last picture came from, on screen while that folder
+    /// still holds some. No key: it is only ever offered there.
+    OpenLastFolder,
     /// The button at the head of the top bar, before the pair that steps
     /// through the list, which puts the file list up and takes it down —
     /// see [`filmstrip`](super::filmstrip). `Tab` does the same. On screen
@@ -247,6 +251,7 @@ impl Control {
             Control::CancelRename => "Cancel".to_string(),
             Control::OpenFiles => "Open files".to_string(),
             Control::OpenFolder => "Open folder".to_string(),
+            Control::OpenLastFolder => "Open last folder".to_string(),
             Control::Filmstrip => "File list".to_string(),
             Control::Sorting => "Sort".to_string(),
             Control::SortBy(sort) => sort.label().to_string(),
@@ -518,6 +523,7 @@ impl Control {
         Control::CancelRename,
         Control::OpenFiles,
         Control::OpenFolder,
+        Control::OpenLastFolder,
         Control::Filmstrip,
         Control::Sorting,
         Control::SortBy(Sort::Name),
@@ -585,6 +591,7 @@ impl Control {
             | Control::CancelRename
             | Control::OpenFiles
             | Control::OpenFolder
+            | Control::OpenLastFolder
             | Control::Filmstrip
             | Control::Sorting
             | Control::SortBy(_)

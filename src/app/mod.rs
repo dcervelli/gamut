@@ -214,6 +214,11 @@ pub struct App {
     listed: Option<folder::Listed>,
     folder_delivered: folder::Deliver,
     glimpsed: HashMap<PathBuf, folder::Glimpse>,
+    /// The folder the last picture shown came from, whole, which the
+    /// desktop's file dialog starts in; and that folder while the empty
+    /// window offers to open it, which it does where it still holds images.
+    last_folder: Option<PathBuf>,
+    offered_folder: Option<PathBuf>,
     /// The colors everything is drawn in, and the palette file they came
     /// from, watched on the same cadence as the image: Omarchy rewrites it
     /// wholesale when the desktop's theme changes, and the window should
@@ -443,6 +448,8 @@ impl App {
             listed: None,
             folder_delivered,
             glimpsed: HashMap::new(),
+            last_folder: None,
+            offered_folder: None,
             theme: Theme::detect(),
             theme_watch,
             next_poll: Instant::now() + watch::INTERVAL,
@@ -525,7 +532,8 @@ impl App {
         }
         self.picking = true;
         self.close_menus();
-        portal::choose_on_thread(pick, Arc::clone(&self.picker));
+        let folder = self.last_folder.clone().filter(|folder| folder.is_dir());
+        portal::choose_on_thread(pick, folder, Arc::clone(&self.picker));
     }
 
     /// Takes in what the dialog answered. A frame is owed either way: the
@@ -641,6 +649,11 @@ impl App {
         if self.current.is_none() {
             return;
         }
+        // Read once, here, rather than on every frame the window is empty:
+        // the folder the files just left is often empty itself.
+        self.offered_folder = self.last_folder.clone().filter(|folder| {
+            crate::listing::images_in(folder).is_ok_and(|images| !images.is_empty())
+        });
         self.keep_shown();
         self.current = None;
         self.animation = None;
@@ -1306,6 +1319,11 @@ impl App {
             rename,
             export,
             empty: self.is_empty(),
+            folder: self
+                .offered_folder
+                .as_deref()
+                .filter(|_| self.is_empty())
+                .map(folder::name),
             picking: self.picking,
         }
     }
@@ -1648,6 +1666,10 @@ impl App {
             sequence,
             page,
         } = ready;
+        self.last_folder = std::path::absolute(&file.path)
+            .ok()
+            .and_then(|path| path.parent().map(Path::to_path_buf))
+            .or(self.last_folder.take());
         // The turn the picture arrives under: the file on screen read again
         // keeps its own, whatever it has become — a page of another size is
         // still a page of the same file — and another file takes back the
@@ -2888,6 +2910,45 @@ mod tests {
         assert!(app.panels.show_filmstrip);
         assert!(app.filmstrip_showing());
         assert!(app.files.is_idle(), "the list, and no step");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The last picture's folder outlasts it: the empty window it leaves
+    /// offers the folder while it still holds images, and pressing the
+    /// offer opens them.
+    #[test]
+    fn the_empty_window_offers_the_last_folder() {
+        let (mut app, dir, _) = alone_in(
+            "folder-last",
+            &[("a.png", 8, 8), ("b.png", 8, 8)],
+            0,
+        );
+        let whole = std::path::absolute(&dir).unwrap();
+        assert_eq!(app.last_folder.as_deref(), Some(whole.as_path()));
+
+        // The file taken off the list, the window empty, the other image
+        // still in the folder.
+        let _ = app.act(ui::Command::Press(ui::Control::Remove));
+        assert!(app.is_empty());
+        assert_eq!(app.offered_folder.as_deref(), Some(whole.as_path()));
+        assert_eq!(
+            app.frame_input([800.0, 600.0], 1.0).folder.as_deref(),
+            Some(folder::name(&dir).as_str())
+        );
+
+        let _ = app.act(ui::Command::Press(ui::Control::OpenLastFolder));
+        assert_eq!(app.files.len(), 2);
+        assert!(app.files.pending().is_some(), "the first of them asked for");
+
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // A folder emptied along with the list is not offered.
+        let (mut app, dir, paths) = alone_in("folder-emptied", &[("a.png", 8, 8)], 0);
+        std::fs::remove_file(&paths[0]).unwrap();
+        let _ = app.act(ui::Command::Press(ui::Control::Remove));
+        assert!(app.is_empty());
+        assert!(app.last_folder.is_some());
+        assert!(app.offered_folder.is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

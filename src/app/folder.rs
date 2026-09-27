@@ -275,7 +275,7 @@ impl App {
         let _ = self.apply_order();
         if self.files.len() < 2 {
             self.toast(
-                format!("No other images in {}", folder_name(&dir)),
+                format!("No other images in {}", name(&dir)),
                 Level::Message,
             );
             return Effect::Redraw;
@@ -308,7 +308,7 @@ impl App {
         if Instant::now() < raised {
             return None;
         }
-        let name = folder_name(dir);
+        let name = name(dir);
         let message = match progress.counted() {
             Some((done, total)) => format!("Reading {name}\u{2026} {done} of {total}"),
             None => format!("Reading {name}\u{2026}"),
@@ -339,7 +339,7 @@ impl App {
 
 /// What a folder is called in a message: its own name, found through the
 /// working directory where it was named as `.` or not at all.
-fn folder_name(dir: &Path) -> String {
+pub(super) fn name(dir: &Path) -> String {
     let opened = crate::listing::opened(dir);
     std::path::absolute(opened)
         .ok()

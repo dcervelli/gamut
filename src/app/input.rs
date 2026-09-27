@@ -405,7 +405,8 @@ fn action_of(tip: Tip) -> Option<Action> {
         // What no key reaches, and so names itself or wears its own name:
         // the buttons that open a menu, the items that wear a program's or
         // a file's name, the rows of the information panel, the cross on a
-        // message, the timeline, and the dialogs' buttons.
+        // message, the timeline, the dialogs' buttons, and the empty
+        // window's offer of the last folder.
         Tip::Control(
             Control::Copy
             | Control::OpenIn
@@ -425,7 +426,8 @@ fn action_of(tip: Tip) -> Option<Action> {
             | Control::CancelRename
             | Control::ExportAs(_)
             | Control::ExportTo
-            | Control::CancelExport,
+            | Control::CancelExport
+            | Control::OpenLastFolder,
         ) => return None,
         // The words at the end of the bottom bar are about four settings at
         // once, so no one key does what they do; what a press on them opens
@@ -2928,6 +2930,14 @@ impl App {
             Control::OpenFolder => {
                 self.pick(Pick::Folder);
                 Effect::Nothing
+            }
+            // The folder the last picture came from, opened as if it had
+            // been chosen in the dialog.
+            Control::OpenLastFolder => {
+                if let Some(folder) = self.offered_folder.clone() {
+                    self.open_named(vec![folder]);
+                }
+                Effect::Redraw
             }
             // An item of the open menu, by its place in the list the same
             // frame was drawn from.

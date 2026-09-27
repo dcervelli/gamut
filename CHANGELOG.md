@@ -15,6 +15,9 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   said in the window with a count. `--alone`, or `browse_folder = false` in
   the configuration file, keeps the list to the file. `]` and `[` with nowhere
   to go now say so rather than doing nothing.
+- The empty window left when the last file is deleted or taken off the list
+  offers **Open all in** the folder that file came from, while that folder
+  still holds images.
 
 - A georeferenced raster can read out where the pixel under the pointer is
   on the ground: in the file's own projected coordinates and units, or as
@@ -29,6 +32,8 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Changed
 
+- The desktop's file dialog starts in the folder of the picture on screen,
+  or of the last one shown.
 - The file list's sort and its direction are remembered between runs, in the
   state file beside the list's width and the loupe's magnification.
 - The EPSG code a GeoTIFF names is now looked up, to find its latitude and

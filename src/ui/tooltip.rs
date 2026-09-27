@@ -271,7 +271,11 @@ pub fn disabled(tip: Tip, reasons: Reasons) -> Option<Refused> {
     if tip == Tip::Control(Control::Forward) && !visited_after {
         return said(NOTHING_AFTER);
     }
-    if matches!(tip, Tip::Control(Control::OpenFiles | Control::OpenFolder)) && picking {
+    if matches!(
+        tip,
+        Tip::Control(Control::OpenFiles | Control::OpenFolder | Control::OpenLastFolder)
+    ) && picking
+    {
         return said(DIALOG_UP);
     }
     if tip == Tip::Control(Control::Paste) && !clipboard {
@@ -393,6 +397,9 @@ pub fn words(tip: Tip) -> Option<String> {
         // the dialog is for; the key table's line is what to press.
         Tip::Control(Control::OpenFiles) => "Choose image files to open",
         Tip::Control(Control::OpenFolder) => "Choose a folder of images to open",
+        Tip::Control(Control::OpenLastFolder) => {
+            "Open every image in the folder the last picture came from"
+        }
         Tip::Control(Control::Help) => "Keyboard shortcuts",
         // The menu at the head of the file list: no key opens it, and the
         // button says what the menu is of. A cell of it says what it puts
