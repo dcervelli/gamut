@@ -428,11 +428,19 @@ impl Pass<'_> {
                 self.zoom_readout(ui, zoom, fills);
                 ui.add_space(PADDING);
 
-                let facts = status::facts(current, |text| measure(ui, text));
-                let room = (ui.max_rect().width() / 2.0 - BAR_PADDING * 2.0).max(1.0);
+                // The facts get what the near end of the bar leaves with
+                // the name written in full, and go segment by segment as
+                // that runs out — the size last, and then nothing, so that
+                // a narrow window has the name in it and not a description
+                // of a picture it does not say the name of.
+                let facts = status::facts(current);
+                let head = status::head_width(self, ui, current);
+                let room = (ui.available_width() - PADDING - head).max(0.0);
                 let facts = status::fit_segments(|text| measure(ui, text), &facts, room);
-                ui.add(egui::Label::new(RichText::new(facts).color(dim)).truncate());
-                ui.add_space(PADDING);
+                if !facts.is_empty() {
+                    ui.add(egui::Label::new(RichText::new(facts).color(dim)).truncate());
+                    ui.add_space(PADDING);
+                }
 
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                     ui.add_space(BAR_PADDING);

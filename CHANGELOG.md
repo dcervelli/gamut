@@ -46,6 +46,11 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   or of the last one shown.
 - A message in the window saying something failed begins with a capital,
   as the others do.
+- The top bar gives the file's name its room before the size, pixels and
+  color space at its far end, which go one by one as the window narrows
+  and are gone altogether before the name is cut short. Before, the facts
+  kept half the bar whatever the name needed, and a narrow window showed
+  the facts of a file it had no room to name.
 - The file list's sort and its direction are remembered between runs, in the
   state file beside the list's width and the loupe's magnification.
 - The EPSG code a GeoTIFF names is now looked up, to find its latitude and

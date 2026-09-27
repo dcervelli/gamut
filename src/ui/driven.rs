@@ -1026,6 +1026,36 @@ fn the_top_bar_has_its_toggles_before_the_first_picture() {
     assert!(harness.query_by_label("Maximize").is_some());
 }
 
+/// The facts at the far end of the top bar yield to the name: a wide window
+/// has all of them, and a window too narrow for the name beside them has
+/// the name and none of them.
+#[test]
+fn the_top_bar_drops_the_facts_before_the_name() {
+    let harness = open(WINDOW, 3, panels());
+    assert!(harness.query_by_label("photo.png").is_some());
+    assert!(
+        harness.query_by_label_contains("\u{00d7}").is_some(),
+        "a wide window has room for the size"
+    );
+    assert!(
+        harness.query_by_label_contains("sRGB").is_some(),
+        "and for the color space"
+    );
+    drop(harness);
+
+    let harness = open([300.0, 300.0], 3, panels());
+    assert!(
+        harness.query_by_label("photo.png").is_some(),
+        "the name is still there"
+    );
+    assert!(
+        harness.query_by_label_contains("\u{00d7}").is_none(),
+        "the facts are not"
+    );
+    assert!(harness.query_by_label("Zoom").is_some());
+    assert!(harness.query_by_label("Maximize").is_some());
+}
+
 /// A window with nothing open offers the three ways of giving it
 /// something, in the middle, each handing back the press its key would;
 /// the paste is dead without a picture on the clipboard, and the two that
