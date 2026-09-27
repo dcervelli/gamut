@@ -87,12 +87,23 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
             ui.spacing_mut().item_spacing = vec2(0.0, GAP);
             let picking = pass.input.picking;
             if let Some(folder) = folder {
+                // The folder's name cut in its middle where it is long, as
+                // a name in the file list is: a folder named for a run of
+                // days or shoots differs at its end.
+                let label = super::filmstrip::cut_middle(
+                    ui,
+                    "Open all in ",
+                    &folder,
+                    super::filmstrip::TAIL_KEPT,
+                    &egui::FontId::proportional(LABEL_SIZE),
+                    BUTTON[0] - 2.0 * INSET - MARK - MARK_GAP,
+                );
                 button(
                     pass,
                     ui,
                     Control::OpenLastFolder,
                     icon::FOLDER,
-                    &format!("Open all in {folder}"),
+                    &label,
                     !picking,
                 );
             }
@@ -162,11 +173,11 @@ fn button(
         ui.ctx()
             .fonts_mut(|fonts| fonts.layout_no_wrap(key, font, egui::Color32::PLACEHOLDER))
     });
-    // The label is cut short where it would run into the key, or past the
-    // button's end, as a folder's name can.
-    let end = key
-        .as_ref()
-        .map_or(rect.max.x - INSET, |key| rect.max.x - INSET - key.size().x - MARK_GAP);
+    // The label is cut short at its end where it would still run into the
+    // key, or past the button's end.
+    let end = key.as_ref().map_or(rect.max.x - INSET, |key| {
+        rect.max.x - INSET - key.size().x - MARK_GAP
+    });
     let mut job = egui::text::LayoutJob::single_section(
         label.to_string(),
         egui::TextFormat::simple(

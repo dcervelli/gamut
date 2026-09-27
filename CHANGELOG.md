@@ -34,6 +34,8 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 - The desktop's file dialog starts in the folder of the picture on screen,
   or of the last one shown.
+- A message in the window saying something failed begins with a capital,
+  as the others do.
 - The file list's sort and its direction are remembered between runs, in the
   state file beside the list's width and the loupe's magnification.
 - The EPSG code a GeoTIFF names is now looked up, to find its latitude and

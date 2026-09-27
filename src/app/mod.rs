@@ -2811,12 +2811,19 @@ mod tests {
         assert!(app.conditions().several_files, "the keys are live");
 
         let _ = app.step(true);
-        assert!(app.files.is_idle(), "nothing asked for until the folder is in");
+        assert!(
+            app.files.is_idle(),
+            "nothing asked for until the folder is in"
+        );
         read_beside(&mut app, &paths[1]);
         assert_eq!(app.files.paths(), paths.as_slice());
         let pending = app.files.pending().expect("the next file is asked for");
         assert_eq!(app.files.path(pending.index), paths[2]);
-        assert_eq!(app.named, std::slice::from_ref(&dir), "the folder is what is named now");
+        assert_eq!(
+            app.named,
+            std::slice::from_ref(&dir),
+            "the folder is what is named now"
+        );
         assert!(matches!(app.folder, Folder::Closed));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -2875,11 +2882,7 @@ mod tests {
     /// the list being rebuilt between reads only.
     #[test]
     fn a_folder_read_waits_for_the_file_in_flight() {
-        let (mut app, dir, paths) = alone_in(
-            "folder-wait",
-            &[("a.png", 8, 8), ("b.png", 8, 8)],
-            0,
-        );
+        let (mut app, dir, paths) = alone_in("folder-wait", &[("a.png", 8, 8), ("b.png", 8, 8)], 0);
         let _ = app.step(true);
         let reload = app.files.reload().expect("nothing in flight");
         app.send(reload);
@@ -2898,11 +2901,7 @@ mod tests {
     /// the list up once it is in, whatever the toggle stood at.
     #[test]
     fn the_file_list_reads_the_folder_and_comes_up() {
-        let (mut app, dir, paths) = alone_in(
-            "folder-list",
-            &[("a.png", 8, 8), ("b.png", 8, 8)],
-            0,
-        );
+        let (mut app, dir, paths) = alone_in("folder-list", &[("a.png", 8, 8), ("b.png", 8, 8)], 0);
         assert!(!app.panels.show_filmstrip);
         let _ = app.act(ui::Command::Press(ui::Control::Filmstrip));
         assert!(!app.panels.show_filmstrip, "not until the folder is in");
@@ -2918,11 +2917,7 @@ mod tests {
     /// offer opens them.
     #[test]
     fn the_empty_window_offers_the_last_folder() {
-        let (mut app, dir, _) = alone_in(
-            "folder-last",
-            &[("a.png", 8, 8), ("b.png", 8, 8)],
-            0,
-        );
+        let (mut app, dir, _) = alone_in("folder-last", &[("a.png", 8, 8), ("b.png", 8, 8)], 0);
         let whole = std::path::absolute(&dir).unwrap();
         assert_eq!(app.last_folder.as_deref(), Some(whole.as_path()));
 

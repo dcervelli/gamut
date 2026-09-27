@@ -108,7 +108,7 @@ const VALUE_WASH: u8 = 235;
 /// However little room a name has, a cut in its middle keeps this many of
 /// its last characters before its extension, where a numbered run of
 /// files differs.
-const TAIL_KEPT: usize = 4;
+pub(super) const TAIL_KEPT: usize = 4;
 /// The hairline under the head, and around an empty slot.
 const HAIRLINE: f32 = 1.0;
 
@@ -234,7 +234,9 @@ impl Direction {
 
     /// The direction [`Direction::word`] names.
     pub fn read(word: &str) -> Option<Direction> {
-        Direction::ALL.into_iter().find(|direction| direction.word() == word)
+        Direction::ALL
+            .into_iter()
+            .find(|direction| direction.word() == word)
     }
 }
 
@@ -796,7 +798,7 @@ fn titled(ui: &egui::Ui, index: usize, name: &str, font: &egui::FontId, room: f3
 /// `tail_min` characters where they fit. Text that cannot be measured a
 /// character at a time, or with no room for any of its start, is left
 /// whole, for the layout to cut at its end.
-fn cut_middle(
+pub(super) fn cut_middle(
     ui: &egui::Ui,
     prefix: &str,
     text: &str,

@@ -18,11 +18,11 @@ use std::time::{Instant, SystemTime};
 use anyhow::Result;
 
 use super::App;
+use super::files::SLOW_READ;
 use super::input::{self, Effect};
 use crate::image::decode;
-use crate::ui::filmstrip::Sort;
-use super::files::SLOW_READ;
 use crate::ui::Control;
+use crate::ui::filmstrip::Sort;
 use crate::ui::toast::{Level, Toast};
 use crate::watch::Watch;
 
@@ -239,9 +239,11 @@ impl App {
         }
         let images = match images {
             Ok(images) => images,
+            // The why is on the terminal; the window names the folder,
+            // which the error's outermost line only does in passing.
             Err(error) => {
                 input::report(&error);
-                self.toast(input::briefly(&error), Level::Warning);
+                self.toast(format!("Could not read {}", name(&dir)), Level::Warning);
                 return Effect::Redraw;
             }
         };
@@ -274,10 +276,7 @@ impl App {
         }
         let _ = self.apply_order();
         if self.files.len() < 2 {
-            self.toast(
-                format!("No other images in {}", name(&dir)),
-                Level::Message,
-            );
+            self.toast(format!("No other images in {}", name(&dir)), Level::Message);
             return Effect::Redraw;
         }
         match then {
@@ -332,8 +331,9 @@ impl App {
             &self.folder,
             Folder::Reading { progress, .. } if progress.counted().is_some()
         );
-        self.settle_folder()
-            .also(Effect::redraw_if(counting && self.reading_folder().is_some()))
+        self.settle_folder().also(Effect::redraw_if(
+            counting && self.reading_folder().is_some(),
+        ))
     }
 }
 
@@ -343,7 +343,10 @@ pub(super) fn name(dir: &Path) -> String {
     let opened = crate::listing::opened(dir);
     std::path::absolute(opened)
         .ok()
-        .and_then(|path| path.file_name().map(|name| name.to_string_lossy().into_owned()))
+        .and_then(|path| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
         .unwrap_or_else(|| opened.display().to_string())
 }
 
@@ -374,7 +377,10 @@ mod tests {
             listed.images.unwrap(),
             [dir.join("a.jpg"), dir.join("b.png"), dir.join("c.png")]
         );
-        assert!(listed.glimpses.is_empty(), "a sort by name needs nothing more");
+        assert!(
+            listed.glimpses.is_empty(),
+            "a sort by name needs nothing more"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -403,7 +409,10 @@ mod tests {
     /// back as bare names, so that the file named is found among them.
     #[test]
     fn a_bare_name_lists_as_bare_names() {
-        assert_eq!(crate::listing::folder_of(Path::new("a.png")), PathBuf::new());
+        assert_eq!(
+            crate::listing::folder_of(Path::new("a.png")),
+            PathBuf::new()
+        );
         let listed = read(Path::new("Cargo.toml"), Sort::Name, &Progress::default());
         assert_eq!(listed.dir, PathBuf::new());
         assert!(

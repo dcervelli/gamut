@@ -15,8 +15,8 @@ use winit::event::ElementState;
 use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey, PhysicalKey};
 
 use super::App;
-use super::folder::Then;
 use super::copying::Done;
+use super::folder::Then;
 use super::keymap::{Bound, Chord, KeyName, Keymap, Keys, Row};
 use crate::clipboard;
 use crate::gestures::{self, Button, Gestures, Surface, WheelAction};
@@ -1717,9 +1717,11 @@ pub(super) fn report(error: &anyhow::Error) {
 }
 
 /// The one line about it that goes in the window: the failure itself, without
-/// the chain under it.
+/// the chain under it, begun with a capital as every message in the window
+/// is. An error is written in lowercase to read as a link in the terminal's
+/// chain, which is not how it reads on its own.
 pub(super) fn briefly(error: &anyhow::Error) -> String {
-    crate::escape_controls(&error.to_string())
+    ui::capitalized(&crate::escape_controls(&error.to_string()))
 }
 
 /// What the window says when a paste finds no picture on the clipboard: the
@@ -3061,9 +3063,11 @@ impl App {
             // stands with the cursor on the file on screen, and the first
             // rows' thumbnails are asked for ahead of the rest.
             Control::Chooser => {
-                let Some(open) = self.shown.as_ref().map(|shown| {
-                    egui::Popup::is_id_open(&shown.gui.ctx, ui::chooser::id())
-                }) else {
+                let Some(open) = self
+                    .shown
+                    .as_ref()
+                    .map(|shown| egui::Popup::is_id_open(&shown.gui.ctx, ui::chooser::id()))
+                else {
                     return Effect::Nothing;
                 };
                 // Nothing to choose from a list of one: the folder beside

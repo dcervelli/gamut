@@ -938,7 +938,7 @@ pub fn backdrop(theme: &Theme) -> Backdrop {
 /// `label` with its first letter capitalized: the labels are written as they
 /// are read in the middle of a line, and a button wears a name, a sentence
 /// starts with one.
-pub(super) fn capitalized(label: &str) -> String {
+pub(crate) fn capitalized(label: &str) -> String {
     let mut letters = label.chars();
     match letters.next() {
         Some(first) => first.to_uppercase().chain(letters).collect(),
