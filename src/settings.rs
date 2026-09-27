@@ -7,7 +7,8 @@
 //! toggle pressed in the window leaves it alone. The state,
 //! `$XDG_STATE_HOME/gamut/state`, is the program's: what was left where it
 //! was set by hand — the file list's width where it was dragged, the
-//! loupe's magnification where the wheel left it — written when the window
+//! loupe's magnification where the wheel left it, the order its menu put
+//! the list in — written when the window
 //! closes, and nothing lost when it is deleted.
 //!
 //! Both are lines of `name = value`, with `#` starting a comment. The
@@ -324,6 +325,8 @@ pub struct State {
     pub filmstrip_width: f32,
     /// One of [`loupe::MAGNIFICATIONS`].
     pub loupe_magnification: f32,
+    /// What the file list was last sorted by, and which way.
+    pub order: filmstrip::Order,
 }
 
 impl Default for State {
@@ -331,6 +334,7 @@ impl Default for State {
         Self {
             filmstrip_width: filmstrip::SLOT_DEFAULT,
             loupe_magnification: loupe::DEFAULT_MAGNIFICATION,
+            order: filmstrip::Order::default(),
         }
     }
 }
@@ -345,17 +349,31 @@ impl State {
             let Some((name, value)) = line else {
                 continue;
             };
-            let Ok(number) = value.parse::<f32>() else {
-                continue;
-            };
+            let number = value.parse::<f32>().ok();
             match name {
-                "filmstrip_width"
-                    if (filmstrip::SLOT_MIN..=filmstrip::SLOT_MAX).contains(&number) =>
-                {
-                    state.filmstrip_width = number;
+                "filmstrip_width" => {
+                    if let Some(number) = number
+                        && (filmstrip::SLOT_MIN..=filmstrip::SLOT_MAX).contains(&number)
+                    {
+                        state.filmstrip_width = number;
+                    }
                 }
-                "loupe_magnification" if loupe::MAGNIFICATIONS.contains(&number) => {
-                    state.loupe_magnification = number;
+                "loupe_magnification" => {
+                    if let Some(number) = number
+                        && loupe::MAGNIFICATIONS.contains(&number)
+                    {
+                        state.loupe_magnification = number;
+                    }
+                }
+                "sort" => {
+                    if let Some(sort) = filmstrip::Sort::read(value) {
+                        state.order.sort = sort;
+                    }
+                }
+                "sort_direction" => {
+                    if let Some(direction) = filmstrip::Direction::read(value) {
+                        state.order.direction = direction;
+                    }
                 }
                 _ => {}
             }
@@ -368,8 +386,13 @@ impl State {
             "# Kept by {PROGRAM} between runs, and written when its window closes.\n\
              # Deleting this file starts it afresh.\n\
              filmstrip_width = {}\n\
-             loupe_magnification = {}\n",
-            self.filmstrip_width, self.loupe_magnification,
+             loupe_magnification = {}\n\
+             sort = {}\n\
+             sort_direction = {}\n",
+            self.filmstrip_width,
+            self.loupe_magnification,
+            self.order.sort.word(),
+            self.order.direction.word(),
         )
     }
 }
@@ -658,8 +681,25 @@ mod tests {
         let state = State {
             filmstrip_width: 212.0,
             loupe_magnification: 8.0,
+            order: filmstrip::Order {
+                sort: filmstrip::Sort::Date,
+                direction: filmstrip::Direction::Descending,
+            },
         };
         assert_eq!(State::parse(&state.render()), state);
+    }
+
+    #[test]
+    fn every_order_reads_back() {
+        for sort in filmstrip::Sort::ALL {
+            for direction in filmstrip::Direction::ALL {
+                let state = State {
+                    order: filmstrip::Order { sort, direction },
+                    ..State::default()
+                };
+                assert_eq!(State::parse(&state.render()), state);
+            }
+        }
     }
 
     #[test]
@@ -667,6 +707,8 @@ mod tests {
         let state = State::parse(
             "filmstrip_width = 100000\n\
              loupe_magnification = 3\n\
+             sort = shoe size\n\
+             sort_direction = sideways\n\
              garbage\n",
         );
         assert_eq!(state, State::default());

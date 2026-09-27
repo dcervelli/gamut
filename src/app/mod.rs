@@ -475,6 +475,7 @@ impl App {
         app.thumbnailer.enqueue(app.files.paths().to_vec());
         app.filmstrip.relist(app.files.paths());
         app.filmstrip.set_slot(kept_state.filmstrip_width);
+        app.filmstrip.set_order(kept_state.order);
         // Up from the start, the strip is scrolled to the first file as it
         // is when it is switched on.
         if app.panels.show_filmstrip {
@@ -2502,6 +2503,7 @@ impl ApplicationHandler<UserEvent> for App {
         self.state.save(State {
             filmstrip_width: self.filmstrip.slot(),
             loupe_magnification: self.panels.loupe_magnification,
+            order: self.filmstrip.order(),
         });
     }
 }

@@ -124,9 +124,9 @@ sorting by size and then by kind leaves each kind in size order, the way
 sorting a spreadsheet twice does. The kind of a file, its size, its date
 and its dimensions are read from its header in the background, and a file whose
 header has not been read yet sorts after those that have, and moves
-into place once it is. The list opens in name order whatever order the
-files were named in, and stays in whatever order you put it in as files
-arrive in a directory or leave it. Whatever the order does, the file on
+into place once it is. The list opens in the order you last put it in,
+or in name order the first time, whatever order the files were named in,
+and stays in that order as files arrive in a directory or leave it. Whatever the order does, the file on
 screen stays the file on screen.
 
 Beside the menus are two buttons that go back to the file shown before

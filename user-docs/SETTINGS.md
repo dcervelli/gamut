@@ -147,6 +147,7 @@ to zoom to, and a click on a handle makes it the current one.
 
 `~/.local/state/gamut/state` (under `$XDG_STATE_HOME` if you set it) is where
 `gamut` remembers settings you change by hand: how wide you dragged the file
-list and how far the loupe magnifies. It is written when the window closes
-and read when the next window opens. You never need to edit it, and deleting
-it resets both to their defaults.
+list, what the list is sorted by and which way, and how far the loupe
+magnifies. It is written when the window closes and read when the next window
+opens. You never need to edit it, and deleting it resets them all to their
+defaults.

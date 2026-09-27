@@ -169,6 +169,25 @@ impl Sort {
         }
     }
 
+    /// The word the state file keeps it under.
+    pub fn word(self) -> &'static str {
+        match self {
+            Sort::Name => "name",
+            Sort::Path => "path",
+            Sort::Type => "type",
+            Sort::Size => "size",
+            Sort::Date => "date",
+            Sort::Width => "width",
+            Sort::Height => "height",
+            Sort::Area => "area",
+        }
+    }
+
+    /// The sort [`Sort::word`] names.
+    pub fn read(word: &str) -> Option<Sort> {
+        Sort::ALL.into_iter().find(|sort| sort.word() == word)
+    }
+
     /// Whether the sort needs what a file's header says, which arrives
     /// after the list does.
     pub fn reads_facts(self) -> bool {
@@ -203,6 +222,19 @@ impl Direction {
             Direction::Ascending => "Smallest, earliest or first name at the top",
             Direction::Descending => "Largest, latest or last name at the top",
         }
+    }
+
+    /// The word the state file keeps it under.
+    pub fn word(self) -> &'static str {
+        match self {
+            Direction::Ascending => "ascending",
+            Direction::Descending => "descending",
+        }
+    }
+
+    /// The direction [`Direction::word`] names.
+    pub fn read(word: &str) -> Option<Direction> {
+        Direction::ALL.into_iter().find(|direction| direction.word() == word)
     }
 }
 
