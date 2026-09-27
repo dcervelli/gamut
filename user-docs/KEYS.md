@@ -137,7 +137,10 @@ and its dimensions are read from its header in the background, and a file whose
 header has not been read yet sorts after those that have, and moves
 into place once it is. The list opens in the order you last put it in,
 or in name order the first time, whatever order the files were named in,
-and stays in that order as files arrive in a directory or leave it. Whatever the order does, the file on
+and the first file shown is the first in that order. Sorted by anything
+but name or path, a long list is read for its order before its first file
+opens, and the window says so while it is. The list stays in that order
+as files arrive in a directory or leave it. Whatever the order does, the file on
 screen stays the file on screen.
 
 Beside the menus are two buttons that go back to the file shown before
@@ -184,7 +187,7 @@ whose thumbnail has not yet been made shows an empty slot until it has.
 formats this program reads, with an **All files** filter for a file named
 without its extension. Choose one file or several: what you choose joins
 the end of the list, exactly as if it had been named on the command line
-after everything else, and the first of it is shown. `Ctrl+Shift+O` puts up the same dialog for a
+after everything else, and the first of it in the list's order is shown. `Ctrl+Shift+O` puts up the same dialog for a
 folder, which stands for the images inside it as a directory on the command
 line does — kept up to date as images arrive in it or leave. Two keys rather
 than one because a desktop's dialog picks files or it picks a folder, never

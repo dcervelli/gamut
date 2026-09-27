@@ -39,6 +39,26 @@ that came back in it would undo every sort on every look. Survivors keep the ord
 a newcomer goes in after the nearest file the rebuild lists before it,
 which for a list in name order is where the directory has it.
 
+The order is remembered between runs in `State`, and a list about to be
+opened is put in it before the first of it is chosen, so that the first
+file shown is the first in the order the list was last left in. Applied
+after that file had arrived instead, the list would be sorted round
+whichever file came first by name, landing the user in the middle of it.
+An order of names needs nothing read, and `main` puts the command line's
+list in it with `app::arranged` ahead of `cli::first_readable`. Any other
+order needs something of every file — a `stat` for a date or a size, the
+leading bytes for a type, the header for the dimensions — and a folder of
+large raws is too much to read before the window opens, so `App::new`
+hands the list to `app/arranging.rs` instead of asking for its first file:
+the window opens on nothing, neither empty nor loading, the read runs on
+a thread of its own, and `Arrive::Open` asks for the first file in the
+order once it is in, the window sized by that file rather than by the
+header that opened it. Files chosen in the desktop's dialog go the same
+way, as `Arrive::Append`, from `App::open_named`. What was read is kept
+in `App::glimpsed` for `App::key_of` to fall back on, so the list does not
+reshuffle as the thumbnail thread's headers arrive. A slow read is said
+in the toast a slow file gets, with a count.
+
 The two enums live in `ui/` rather than `app/` because the menu at the
 strip's head offers them and wear their words, and `ui/` cannot import
 `app/` — the same split as `Copies` and `copy_action`.

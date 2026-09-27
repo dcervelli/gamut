@@ -438,6 +438,16 @@ impl StateFile {
         }
     }
 
+    /// No file, and `state` as if one had been read: for a test that wants
+    /// the program to start from something other than the defaults.
+    #[cfg(test)]
+    pub fn holding(state: State) -> Self {
+        Self {
+            path: None,
+            loaded: state,
+        }
+    }
+
     pub fn state(&self) -> State {
         self.loaded
     }

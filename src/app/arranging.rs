@@ -1,0 +1,225 @@
+//! A list about to be opened, put in the order the file list was left in
+//! before the first of it is shown: the command line's, when the order
+//! needs more than the names, and whatever the desktop's file dialog
+//! chose.
+//!
+//! The first file shown is the first in that order, rather than the first
+//! by name with the list sorted round it once it has arrived. What the
+//! order needs of each file is read on a thread of its own, as the folder
+//! beside a single file is ([`super::folder`]) — a `stat` for a date or a
+//! size, the leading bytes for a type, the header for the dimensions — so
+//! that a folder of large raws holds nothing up while it is read. An order
+//! that needs only the names is put in place at once.
+
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Instant;
+
+use super::App;
+use super::files::SLOW_READ;
+use super::folder::{self, Glimpse, Progress};
+use super::input::Effect;
+use crate::image::decode;
+use crate::loader::Source;
+use crate::ui::filmstrip::Sort;
+use crate::ui::toast::Toast;
+
+/// What an arranged list is for once it is in order.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Arrive {
+    /// The command line's list, already on the list: its first file opened.
+    Open,
+    /// Files chosen in the window, not on the list yet: added to its end,
+    /// the first of them in the order opened.
+    Append,
+}
+
+/// A list being put in order on its thread.
+#[derive(Debug)]
+pub(super) struct Arranging {
+    job: u64,
+    arrive: Arrive,
+    sort: Sort,
+    since: Instant,
+    progress: Arc<Progress>,
+}
+
+/// A list read for its order: which job it answers, the files as they
+/// were handed over, and what was read of each.
+pub struct Arranged {
+    job: u64,
+    paths: Vec<PathBuf>,
+    glimpses: Vec<(PathBuf, Glimpse)>,
+}
+
+/// How an arranged list reaches the event loop.
+pub type Deliver = Arc<dyn Fn(Arranged) + Send + Sync>;
+
+/// Reads what `sort` needs of each of `paths`, on a thread of its own, and
+/// hands it to `deliver`.
+fn read_on_thread(job: u64, paths: Vec<PathBuf>, sort: Sort, deliver: Deliver) -> Arc<Progress> {
+    let progress = Arc::new(Progress::default());
+    let counting = Arc::clone(&progress);
+    let spawned = std::thread::Builder::new()
+        .name("arranging".into())
+        .spawn(move || {
+            let glimpses = folder::glimpse_all(&paths, sort, &counting);
+            deliver(Arranged {
+                job,
+                paths,
+                glimpses,
+            });
+        });
+    if let Err(error) = spawned {
+        eprintln!("{}: putting the list in order: {error}", crate::PROGRAM);
+    }
+    progress
+}
+
+/// The read [`read_on_thread`] makes, made here and now: a test has no
+/// event loop for the thread to reach.
+#[cfg(test)]
+pub(super) fn read_now(job: u64, paths: Vec<PathBuf>, sort: Sort) -> Arranged {
+    let glimpses = folder::glimpse_all(&paths, sort, &Progress::default());
+    Arranged {
+        job,
+        paths,
+        glimpses,
+    }
+}
+
+impl App {
+    /// Puts `paths` in the list's order and then does what `arrive` says
+    /// with them: at once for an order of names, and once they have been
+    /// read for any other.
+    pub(super) fn arrange(&mut self, paths: Vec<PathBuf>, arrive: Arrive) {
+        let sort = self.filmstrip.order().sort;
+        if !sort.reads_facts() || paths.len() < 2 {
+            self.arrived(arrive, paths);
+            return;
+        }
+        self.jobs += 1;
+        let progress = read_on_thread(self.jobs, paths, sort, Arc::clone(&self.arranged_delivered));
+        self.arranging.push(Arranging {
+            job: self.jobs,
+            arrive,
+            sort,
+            since: Instant::now(),
+            progress,
+        });
+    }
+
+    /// Takes in a list read for its order, which is acted on at the first
+    /// chance.
+    pub(super) fn arranged_read(&mut self, arranged: Arranged) -> Effect {
+        self.arranged.push(arranged);
+        self.settle_arranged()
+    }
+
+    /// Acts on every list read for its order. Between reads only, as any
+    /// change to the list is: a read in flight is aimed at an index.
+    pub(super) fn settle_arranged(&mut self) -> Effect {
+        if self.arranged.is_empty() || !self.files.is_idle() {
+            return Effect::Nothing;
+        }
+        for Arranged {
+            job,
+            paths,
+            glimpses,
+        } in std::mem::take(&mut self.arranged)
+        {
+            let Some(at) = self.arranging.iter().position(|each| each.job == job) else {
+                continue;
+            };
+            let arrive = self.arranging.remove(at).arrive;
+            self.glimpsed.extend(glimpses);
+            self.arrived(arrive, paths);
+        }
+        Effect::Redraw
+    }
+
+    /// `paths` in the list's order, as far as what is known of each can
+    /// put them, and then opened or added as `arrive` says.
+    fn arrived(&mut self, arrive: Arrive, paths: Vec<PathBuf>) {
+        match arrive {
+            Arrive::Open => {
+                // The list is these files already, the one named first
+                // standing ready to be asked for: put in order, and the
+                // first in it asked for instead.
+                let _ = self.apply_order();
+                self.files.start_at(0);
+                // With the window still to open, it opens at this file's
+                // size rather than the one whose header was read to make
+                // sure of the command line: the glimpse where the order
+                // read it, and the header otherwise.
+                if self.shown.is_none() {
+                    let first = self.files.path(0);
+                    self.header_size = self
+                        .glimpsed
+                        .get(first)
+                        .and_then(|glimpse| glimpse.size)
+                        .or_else(|| {
+                            crate::loader::guard("reading the header", || decode::probe(first))
+                                .ok()
+                                .flatten()
+                        })
+                        .map(|(width, height)| [width as f32, height as f32]);
+                }
+                let request = self.files.open_first(Source::Disk);
+                self.send(request);
+            }
+            Arrive::Append => {
+                let paths = super::arranged(paths, self.filmstrip.order(), &self.glimpsed);
+                if let Some(request) = self.files.append(paths) {
+                    self.send(request);
+                }
+                self.list_changed();
+            }
+        }
+    }
+
+    /// When the window stops waiting for the command line's list to be put
+    /// in order, while it is being: the moment the wait would be said.
+    pub(super) fn window_due(&self) -> Option<Instant> {
+        self.arranging
+            .iter()
+            .find(|each| each.arrive == Arrive::Open)
+            .map(|each| each.since + SLOW_READ)
+    }
+
+    /// Whether a list is being put in order before any of it is shown.
+    pub(super) fn arranging_to_open(&self) -> bool {
+        self.arranging
+            .iter()
+            .any(|each| each.arrive == Arrive::Open)
+    }
+
+    /// The toast about a list being put in order, once it has taken as long
+    /// as a file does before its wait is said.
+    pub(super) fn arranging_toast(&self) -> Option<Toast> {
+        let arranging = self.arranging.first()?;
+        let raised = arranging.since + SLOW_READ;
+        if Instant::now() < raised {
+            return None;
+        }
+        let by = arranging.sort.label().to_lowercase();
+        let message = match arranging.progress.counted() {
+            Some((done, total)) => format!("Sorting by {by}\u{2026} {done} of {total}"),
+            None => format!("Sorting by {by}\u{2026}"),
+        };
+        Some(Toast::waiting(message, raised))
+    }
+
+    /// When the toast about a list being put in order goes up, while that
+    /// is still to come.
+    pub(super) fn arranging_due(&self, now: Instant) -> Option<Instant> {
+        let due = self.arranging.first()?.since + SLOW_READ;
+        (due > now).then_some(due)
+    }
+
+    /// A frame while the toast about a list being put in order is up: the
+    /// count in it moves on between one look and the next.
+    pub(super) fn arranging_counts(&self) -> bool {
+        self.arranging_toast().is_some()
+    }
+}

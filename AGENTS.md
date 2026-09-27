@@ -24,6 +24,9 @@ app/           the event loop's state and winit handlers
                  off it, and the order it is put in (pure, tested)
   order.rs       the permutation an Order makes of the list — stable, the unknown last — and the
                  sections it breaks it into (pure, tested)
+  arranging.rs   a list about to be opened — the command line's under an order that needs more
+                 than names, or what the dialog chose — read for the order on a thread of its own,
+                 and its first file in that order asked for once it is in
   folder.rs      the folder beside a single file named alone: unread until a step, the chooser or
                  the file list asks for more, then read on a thread of its own with what the order
                  in force needs of each image, and taken into the list between reads

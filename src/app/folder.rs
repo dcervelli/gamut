@@ -85,7 +85,7 @@ impl Progress {
 /// thumbnail thread: only what the order in force asked for, the rest
 /// `None`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(super) struct Glimpse {
+pub struct Glimpse {
     pub format: Option<&'static str>,
     pub bytes: Option<u64>,
     pub size: Option<(u32, u32)>,
@@ -101,6 +101,9 @@ pub struct Listed {
     pub(super) images: Result<Vec<PathBuf>>,
     pub(super) glimpses: Vec<(PathBuf, Glimpse)>,
 }
+
+/// What was glimpsed of each file, by its path.
+pub type Glimpses = std::collections::HashMap<PathBuf, Glimpse>;
 
 /// How a finished read reaches the event loop.
 pub type Deliver = Arc<dyn Fn(Listed) + Send + Sync>;
@@ -124,22 +127,37 @@ pub(super) fn read_on_thread(file: PathBuf, sort: Sort, deliver: Deliver) -> Arc
 pub(super) fn read(file: &Path, sort: Sort, progress: &Progress) -> Listed {
     let dir = crate::listing::folder_of(file);
     let images = crate::listing::images_in(&dir);
-    let mut glimpses = Vec::new();
-    if let Ok(images) = &images
-        && sort.reads_facts()
-    {
-        progress.total.store(images.len(), Ordering::Relaxed);
-        for path in images {
-            glimpses.push((path.clone(), glimpse(path, sort)));
-            progress.done.fetch_add(1, Ordering::Relaxed);
-        }
-    }
+    let glimpses = match &images {
+        Ok(images) => glimpse_all(images, sort, progress),
+        Err(_) => Vec::new(),
+    };
     Listed {
         file: file.to_path_buf(),
         dir,
         images,
         glimpses,
     }
+}
+
+/// What `sort` needs of each of `paths`, counted into `progress` as it
+/// goes; nothing at all for a sort by name.
+pub(super) fn glimpse_all(
+    paths: &[PathBuf],
+    sort: Sort,
+    progress: &Progress,
+) -> Vec<(PathBuf, Glimpse)> {
+    if !sort.reads_facts() {
+        return Vec::new();
+    }
+    progress.total.store(paths.len(), Ordering::Relaxed);
+    paths
+        .iter()
+        .map(|path| {
+            let glimpse = glimpse(path, sort);
+            progress.done.fetch_add(1, Ordering::Relaxed);
+            (path.clone(), glimpse)
+        })
+        .collect()
 }
 
 /// What `sort` needs of `path`, and nothing more: the file system's word
