@@ -168,10 +168,18 @@ pub enum Action {
     /// Step the bottom bar's readout through the ways of writing a pixel's
     /// value: hexadecimal, decimal, mapped.
     CyclePixelFormat,
+    /// Step the same readout's coordinate through the ways a georeferenced
+    /// file can say where a pixel is — pixel, projected, geographic — past
+    /// any this file cannot answer.
+    CycleCoordinates,
+    /// Switch a latitude and longitude between decimal degrees and degrees,
+    /// minutes and seconds.
+    CycleGeographicFormat,
     /// Put the value of the pixel under the pointer on the clipboard, written
     /// exactly as the bar is writing it.
     CopyPixelValue,
-    /// Put that pixel's coordinate on the clipboard, as `x,y`.
+    /// Put that pixel's coordinate on the clipboard, as the bar writes it
+    /// without the padding: `x,y` for a pixel.
     CopyPixelCoordinate,
     /// Ask for a region of the picture — the next drag on it draws one —
     /// or, with one asked for or drawn, take it off. While a region is on
@@ -374,6 +382,8 @@ fn action_of(tip: Tip) -> Option<Action> {
         Tip::Control(Control::ZoomTo(ZoomChoice::Fit(_))) => CycleFit,
         Tip::Control(Control::ZoomTo(ZoomChoice::Filter(_))) => CycleUpscale,
         Tip::Control(Control::Format(_)) => CyclePixelFormat,
+        Tip::Control(Control::Coordinates(_)) => CycleCoordinates,
+        Tip::Control(Control::Geographic(_)) => CycleGeographicFormat,
         // The one menu whose items are things done rather than states to be
         // in: the key does exactly what the item does, and its line of the
         // table is what names both.
@@ -526,13 +536,17 @@ pub enum When {
     /// at the head of the file list go back and forward to.
     VisitedBefore,
     VisitedAfter,
+    /// The file on screen says where its pixels are on the ground.
+    Georeferenced,
+    /// And can say it in latitude and longitude.
+    Geographic,
 }
 
 impl When {
     /// Every condition, for a test to hold them all up against the
     /// application.
     #[cfg(test)]
-    pub const ALL: [When; 11] = [
+    pub const ALL: [When; 13] = [
         When::RegionSelected,
         When::SeveralFiles,
         When::Animation,
@@ -544,6 +558,8 @@ impl When {
         When::Undoable,
         When::VisitedBefore,
         When::VisitedAfter,
+        When::Georeferenced,
+        When::Geographic,
     ];
 
     /// The condition in a few words, as the popup's column reads it: a
@@ -561,6 +577,8 @@ impl When {
             When::Undoable => "an edit to undo",
             When::VisitedBefore => "a file shown before this one",
             When::VisitedAfter => "a file shown after this one",
+            When::Georeferenced => "a georeferenced file",
+            When::Geographic => "a file placed in lat/long",
         }
     }
 
@@ -594,6 +612,10 @@ pub(super) struct Conditions {
     /// Whether a file was on screen before this one, and after it.
     pub visited_before: bool,
     pub visited_after: bool,
+    /// Whether the file on screen offers a coordinate other than the
+    /// pixel's, and whether one of them is a latitude.
+    pub georeferenced: bool,
+    pub geographic: bool,
     /// Whether the content area has room for each floating panel.
     pub room: ui::Room,
     /// Whether the surface switch has anything to switch, and why not.
@@ -622,6 +644,8 @@ impl Default for Conditions {
             undoable: false,
             visited_before: false,
             visited_after: false,
+            georeferenced: false,
+            geographic: false,
             room: ui::Room {
                 histogram: false,
                 info: false,
@@ -655,6 +679,8 @@ impl Conditions {
         undoable: false,
         visited_before: true,
         visited_after: true,
+        georeferenced: false,
+        geographic: false,
         room: ui::Room {
             histogram: true,
             info: true,
@@ -681,6 +707,8 @@ impl Conditions {
             When::Undoable => self.undoable,
             When::VisitedBefore => self.visited_before,
             When::VisitedAfter => self.visited_after,
+            When::Georeferenced => self.georeferenced,
+            When::Geographic => self.geographic,
         }
     }
 
@@ -970,6 +998,24 @@ pub static ROWS: &[Row] = &[
         help: "Cycle the pixel readout: hex, decimal, mapped",
         keys: one!("interface.pixel-format", CyclePixelFormat, [key('.')]),
     },
+    // The key beside it, and that key with Shift: where the pixel is,
+    // rather than what is in it.
+    Row {
+        section: Section::Interface,
+        when: Some(When::Georeferenced),
+        help: "Cycle the coordinate readout: pixel, projected, geographic",
+        keys: one!("interface.coordinate-format", CycleCoordinates, [key(',')]),
+    },
+    Row {
+        section: Section::Interface,
+        when: Some(When::Geographic),
+        help: "Switch latitude and longitude between decimal and DMS",
+        keys: one!(
+            "interface.geographic-format",
+            CycleGeographicFormat,
+            [key('<')]
+        ),
+    },
     Row {
         section: Section::Interface,
         when: None,
@@ -1177,7 +1223,7 @@ pub static ROWS: &[Row] = &[
     Row {
         section: Section::Clipboard,
         when: Some(When::PointerOnPicture),
-        help: "Copy the coordinate of the pixel under the pointer, as x,y",
+        help: "Copy the coordinate of the pixel under the pointer, as read out",
         keys: one!(
             "clipboard.coordinate",
             CopyPixelCoordinate,
@@ -1395,16 +1441,36 @@ impl Naming for Namer {
             // The dot at the head of the pixel readout: what the key does to
             // it, and under that the two copies that take what it is showing
             // away with them — neither of which has a button anywhere.
-            // Its name alone, the key being the first line under it.
+            // Its name alone, the key being the first line under it. The
+            // coordinate's keys only for a file they do something in, read
+            // from the conditions the help popup dims those keys by, as the
+            // menu shows their rows only then.
             Tip::Control(Control::PixelFormat) => (
                 vec![ui::tooltip::words(at)?],
                 [
-                    (ui::tooltip::PIXEL_CYCLE, CyclePixelFormat),
-                    (ui::tooltip::PIXEL_COPY_VALUE, CopyPixelValue),
-                    (ui::tooltip::PIXEL_COPY_COORDINATE, CopyPixelCoordinate),
+                    (ui::tooltip::PIXEL_CYCLE, CyclePixelFormat, true),
+                    (
+                        ui::tooltip::PIXEL_COORDINATE_CYCLE,
+                        CycleCoordinates,
+                        self.conditions.georeferenced,
+                    ),
+                    (
+                        ui::tooltip::PIXEL_GEOGRAPHIC_CYCLE,
+                        CycleGeographicFormat,
+                        self.conditions.geographic,
+                    ),
+                    (ui::tooltip::PIXEL_COPY_VALUE, CopyPixelValue, true),
+                    (
+                        ui::tooltip::PIXEL_COPY_COORDINATE,
+                        CopyPixelCoordinate,
+                        true,
+                    ),
                 ]
                 .into_iter()
-                .filter_map(|(words, action)| Some(format!("{words} ({})", key_of(keys, action)?)))
+                .filter(|(_, _, offered)| *offered)
+                .filter_map(|(words, action, _)| {
+                    Some(format!("{words} ({})", key_of(keys, action)?))
+                })
                 .collect(),
             ),
             // The button that hides the interface: what a plain press does,
@@ -1974,6 +2040,20 @@ impl App {
             CyclePixelFormat => {
                 self.panels.pixel_format = self.panels.pixel_format.next();
             }
+            // Past the formats this file cannot answer, from the one the bar
+            // is showing rather than the one last chosen: a key that stepped
+            // from a choice the bar is not showing would look as though it
+            // skipped one.
+            CycleCoordinates => {
+                let georeference = self
+                    .current
+                    .as_ref()
+                    .and_then(|current| current.exif.georeference.as_ref());
+                self.panels.coordinate_format = self.panels.coordinate_format.next(georeference);
+            }
+            CycleGeographicFormat => {
+                self.panels.geographic_format = self.panels.geographic_format.next();
+            }
             // As the copies above, with the one case a pixel copy has and the
             // others do not: the pointer nowhere near a pixel, which is worth
             // saying because the key looks as though it did nothing.
@@ -2153,6 +2233,7 @@ impl App {
     /// help popup's dimming, the tooltips' refusals and [`App::refuses`].
     pub(super) fn conditions(&self) -> Conditions {
         let current = self.current.as_ref();
+        let georeference = current.and_then(|current| current.exif.georeference.as_ref());
         Conditions {
             region_selected: matches!(self.marking.selection, Selection::Shown(_)),
             several_files: self.files.len() > 1,
@@ -2173,6 +2254,9 @@ impl App {
             visited_after: self
                 .visited
                 .can_forward(|path| self.files.position(path).is_some()),
+            georeferenced: georeference
+                .is_some_and(|geo| geo.offers_projected() || geo.offers_geographic()),
+            geographic: georeference.is_some_and(|geo| geo.offers_geographic()),
             room: self.room(),
             hdr: self.hdr_state(),
             openable: !self.openers.is_empty(),
@@ -2940,6 +3024,14 @@ impl App {
                 self.panels.pixel_format = format;
                 Effect::Redraw
             }
+            Control::Coordinates(format) => {
+                self.panels.coordinate_format = format;
+                Effect::Redraw
+            }
+            Control::Geographic(format) => {
+                self.panels.geographic_format = format;
+                Effect::Redraw
+            }
             // An item of the menu of copies runs the key's action, as the
             // reset and the paste buttons do: what it asks for is done rather
             // than set.
@@ -3042,10 +3134,16 @@ impl App {
     /// What such a copy says, or `None` when the pointer is not on a pixel.
     fn pixel_text(&self, coordinate: bool) -> Option<String> {
         let at = self.pointer_pixel()?;
-        if coordinate {
-            return Some(ui::pixel::copied_coordinate(at));
-        }
         let current = self.current.as_ref()?;
+        if coordinate {
+            return Some(ui::pixel::place(
+                current,
+                at,
+                self.panels.coordinate_format,
+                self.panels.geographic_format,
+                false,
+            ));
+        }
         let sample = current.sample(at[0], at[1])?;
         let mapped = current.display.map(&sample, self.headroom());
         Some(ui::pixel::value(
@@ -3457,6 +3555,20 @@ mod tests {
                     ..none
                 },
             ),
+            (
+                When::Georeferenced,
+                Conditions {
+                    georeferenced: true,
+                    ..none
+                },
+            ),
+            (
+                When::Geographic,
+                Conditions {
+                    geographic: true,
+                    ..none
+                },
+            ),
         ];
         for (held, conditions) in readings {
             for when in When::ALL {
@@ -3674,7 +3786,31 @@ mod tests {
             [
                 "Cycle pixel format: hex, decimal, mapped (.)",
                 "Copy pixel value under pointer (Ctrl+.)",
-                "Copy coordinate of pixel under pointer as x,y (Ctrl+>)",
+                "Copy coordinate of pixel under pointer (Ctrl+>)",
+            ]
+        );
+
+        // A map brings the coordinate's key, and one that can be a latitude
+        // the key that writes it, each after the format's own.
+        let map = Namer {
+            conditions: Conditions {
+                georeferenced: true,
+                geographic: true,
+                ..Conditions::ALIVE
+            },
+            ..namer
+        };
+        let tooltip = map
+            .tooltip(Tip::Control(Control::PixelFormat))
+            .expect("named");
+        assert_eq!(
+            tooltip.hints,
+            [
+                "Cycle pixel format: hex, decimal, mapped (.)",
+                "Cycle coordinate: pixel, projected, geographic (,)",
+                "Switch latitude and longitude: decimal, DMS (<)",
+                "Copy pixel value under pointer (Ctrl+.)",
+                "Copy coordinate of pixel under pointer (Ctrl+>)",
             ]
         );
     }

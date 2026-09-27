@@ -16,9 +16,11 @@
 use egui::{Label, RichText, Sense, StrokeKind, vec2};
 
 use crate::image::display::Mapped;
+use crate::image::geo::Georeference;
 use crate::image::{DecodedImage, Sample, Samples};
 use crate::render::Color;
 
+use super::Current;
 use super::chrome::{Pass, measure};
 
 /// Side of the color swatch, in logical pixels: the height of a line of
@@ -85,6 +87,123 @@ impl PixelFormat {
     }
 }
 
+/// How the pointer's place is written: which pixel of the raster it is, or
+/// where that pixel is on the ground.
+///
+/// The two ground readings are offered only for a file that places its
+/// pixels — a GeoTIFF — and each only where the file can answer it; wherever
+/// it cannot, the readout is the pixel's, whatever was chosen, so that the
+/// choice outlives a file with nothing to say about it and applies again at
+/// the next map.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum CoordinateFormat {
+    /// Column and row, from the top left. The default, and every image's.
+    #[default]
+    Pixel,
+    /// The file's own coordinates: easting and northing on its projection,
+    /// in its units.
+    Projected,
+    /// Latitude and longitude on WGS 84.
+    Geographic,
+}
+
+impl CoordinateFormat {
+    /// Every format, in the order the menu offers them and the key steps
+    /// through them.
+    pub const ALL: [CoordinateFormat; 3] = [
+        CoordinateFormat::Pixel,
+        CoordinateFormat::Projected,
+        CoordinateFormat::Geographic,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            CoordinateFormat::Pixel => "Pixel",
+            CoordinateFormat::Projected => "Projected",
+            CoordinateFormat::Geographic => "Geographic",
+        }
+    }
+
+    /// The format a word names, as the configuration file writes it: the
+    /// label, in any case.
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|format| format.label().eq_ignore_ascii_case(value))
+    }
+
+    /// Whether `georeference` can answer this format. The pixel is always
+    /// there to be read.
+    pub fn offered(self, georeference: Option<&Georeference>) -> bool {
+        match (self, georeference) {
+            (CoordinateFormat::Pixel, _) => true,
+            (_, None) => false,
+            (CoordinateFormat::Projected, Some(geo)) => geo.offers_projected(),
+            (CoordinateFormat::Geographic, Some(geo)) => geo.offers_geographic(),
+        }
+    }
+
+    /// What the readout actually shows for a file: this, where the file can
+    /// answer it, and the pixel where it cannot.
+    pub fn shown(self, georeference: Option<&Georeference>) -> Self {
+        if self.offered(georeference) {
+            self
+        } else {
+            CoordinateFormat::Pixel
+        }
+    }
+
+    /// The format after the one shown, among those the file offers: what the
+    /// key steps to. A file that offers only the pixel stays on it.
+    pub fn next(self, georeference: Option<&Georeference>) -> Self {
+        let shown = self.shown(georeference);
+        let at = Self::ALL
+            .iter()
+            .position(|format| *format == shown)
+            .unwrap_or(0);
+        (1..=Self::ALL.len())
+            .map(|step| Self::ALL[(at + step) % Self::ALL.len()])
+            .find(|format| format.offered(georeference))
+            .unwrap_or(CoordinateFormat::Pixel)
+    }
+}
+
+/// How a latitude and a longitude are written, where they are shown.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum GeographicFormat {
+    /// Signed degrees with a decimal fraction, latitude first —
+    /// `46.95108, 7.43864` — which is what a map pasted into takes.
+    #[default]
+    Decimal,
+    /// Degrees, minutes and seconds with the hemisphere —
+    /// `46°57'03.89"N 7°26'19.07"E` — which is how a chart is marked.
+    Dms,
+}
+
+impl GeographicFormat {
+    pub const ALL: [GeographicFormat; 2] = [GeographicFormat::Decimal, GeographicFormat::Dms];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            GeographicFormat::Decimal => "Decimal",
+            GeographicFormat::Dms => "DMS",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|format| format.label().eq_ignore_ascii_case(value))
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            GeographicFormat::Decimal => GeographicFormat::Dms,
+            GeographicFormat::Dms => GeographicFormat::Decimal,
+        }
+    }
+}
+
 /// Draws the readout for the pixel the pointer is over, if it is over one, in
 /// what is left of the bottom bar between the dot that chooses the format and
 /// the state text at the other end.
@@ -108,7 +227,13 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
     let mapped = current.display.map(&sample, pass.input.headroom);
     let ink: egui::Color32 = pass.theme.text_primary.into();
 
-    let coordinate = coordinate(at, current.pixels());
+    let coordinate = place(
+        current,
+        at,
+        pass.panels.coordinate_format,
+        pass.panels.geographic_format,
+        true,
+    );
     ui.add(Label::new(RichText::new(coordinate).monospace().color(ink)).truncate());
 
     // A bar too short for the swatch gets the words alone, the way a panel
@@ -169,6 +294,151 @@ fn coordinate(at: [u32; 2], size: [u32; 2]) -> String {
 /// a note — where both would have to be taken back off.
 pub fn copied_coordinate(at: [u32; 2]) -> String {
     format!("{},{}", at[0], at[1])
+}
+
+/// Where the pointer is, in `format` where the file can say and as the pixel
+/// where it cannot: set for the bar when `padded`, and for a copy when not.
+///
+/// `at` is in the picture as it is turned on screen; the file's placement is
+/// of the raster as it is stored, which is what is read through here.
+pub fn place(
+    current: &Current,
+    at: [u32; 2],
+    format: CoordinateFormat,
+    geographic: GeographicFormat,
+    padded: bool,
+) -> String {
+    let pixel = || match padded {
+        true => coordinate(at, current.pixels()),
+        false => copied_coordinate(at),
+    };
+    let georeference = current.exif.georeference.as_ref();
+    let Some(geo) = georeference.filter(|_| format.shown(georeference) != CoordinateFormat::Pixel)
+    else {
+        return pixel();
+    };
+    let size = [current.image.width, current.image.height];
+    let stored = current.turn.stored(at, size);
+    match format {
+        CoordinateFormat::Projected => projected(geo, stored, size, padded),
+        CoordinateFormat::Geographic => match geo.latitude_longitude(stored) {
+            Some(point) => latitude_longitude(point, geographic, padded),
+            None => pixel(),
+        },
+        CoordinateFormat::Pixel => pixel(),
+    }
+}
+
+/// The file's own coordinates at the middle of the stored pixel `at`, with
+/// as many places as a pixel of its size is worth and the unit after them.
+///
+/// Padded, each is as wide as the widest the raster's corners come to, for
+/// the reason the pixel's coordinate is: so that what follows it holds still.
+fn projected(geo: &Georeference, at: [u32; 2], size: [u32; 2], padded: bool) -> String {
+    let places = places_for(geo.step(), 0, 6);
+    let write = |value: f64| format!("{value:.places$}");
+    let [x, y] = geo.model(at).map(write);
+    let unit = geo
+        .unit()
+        .map(|unit| format!(" {unit}"))
+        .unwrap_or_default();
+    if !padded {
+        return format!("{x},{y}");
+    }
+    let [right, bottom] = [size[0].saturating_sub(1), size[1].saturating_sub(1)];
+    let corners =
+        [[0, 0], [right, 0], [0, bottom], [right, bottom]].map(|corner| geo.model(corner));
+    let widest = |axis: usize| {
+        corners
+            .iter()
+            .map(|corner| write(corner[axis]).len())
+            .max()
+            .unwrap_or(0)
+    };
+    format!("({x:>w$}, {y:>h$}){unit}", w = widest(0), h = widest(1))
+}
+
+/// How many places after the point a coordinate is worth when one pixel
+/// covers `step` of its units: enough to tell one pixel from the next and no
+/// more, between `least` and `most`.
+fn places_for(step: f64, least: usize, most: usize) -> usize {
+    if !(step.is_finite() && step > 0.0) {
+        return most;
+    }
+    (-step.log10()).ceil().clamp(least as f64, most as f64) as usize
+}
+
+/// Places after the point of a decimal degree: six, about a tenth of a
+/// meter, which is what a map pasted into takes and gives back.
+const DEGREE_PLACES: usize = 6;
+
+/// Places after the point of the seconds: two, about a third of a meter,
+/// which is how a chart or a GPS writes them.
+const SECOND_PLACES: usize = 2;
+
+/// A latitude and a longitude, in degrees, written in `format`, each to a
+/// fixed number of places whatever the size of a pixel, so that a pasted or
+/// compared coordinate always reads the same way.
+///
+/// Padded, a latitude is written as wide as the widest one is and a
+/// longitude likewise, so that the readout holds still across the equator
+/// and the meridian.
+fn latitude_longitude(
+    [latitude, longitude]: [f64; 2],
+    format: GeographicFormat,
+    padded: bool,
+) -> String {
+    match format {
+        GeographicFormat::Decimal => {
+            let places = DEGREE_PLACES;
+            let (lat, lon) = (
+                format!("{latitude:.places$}"),
+                format!("{longitude:.places$}"),
+            );
+            if !padded {
+                return format!("{lat},{lon}");
+            }
+            // "-90." and "-180." ahead of the places.
+            let (w, h) = (places + 4, places + 5);
+            format!("{lat:>w$}, {lon:>h$}")
+        }
+        GeographicFormat::Dms => {
+            let places = SECOND_PLACES;
+            let (lat, lon) = (
+                dms(latitude, ['N', 'S'], places),
+                dms(longitude, ['E', 'W'], places),
+            );
+            if !padded {
+                return format!("{lat} {lon}");
+            }
+            // As wide as the largest angle the hemisphere reaches.
+            let (w, h) = (
+                dms(-90.0, ['N', 'S'], places).chars().count(),
+                dms(-180.0, ['E', 'W'], places).chars().count(),
+            );
+            format!("{lat:>w$} {lon:>h$}")
+        }
+    }
+}
+
+/// One angle as degrees, minutes and seconds, the seconds to `places`, and
+/// the hemisphere after them. Minutes and seconds are two digits each, as a
+/// chart writes them; the rounding is done once on the whole angle, so that
+/// 59.995 seconds carries into the minute rather than reading as 60.
+fn dms(angle: f64, hemispheres: [char; 2], places: usize) -> String {
+    let hemisphere = if angle < 0.0 {
+        hemispheres[1]
+    } else {
+        hemispheres[0]
+    };
+    let scale = 10f64.powi(places as i32);
+    let total = (angle.abs() * 3600.0 * scale).round() as u64;
+    let unit = 3600 * scale as u64;
+    let (degrees, rest) = (total / unit, total % unit);
+    let (minutes, rest) = (rest / (60 * scale as u64), rest % (60 * scale as u64));
+    let seconds = rest as f64 / scale;
+    let width = if places == 0 { 2 } else { places + 3 };
+    format!("{degrees}\u{00b0}{minutes:02}'{seconds:0width$.places$}\"{hemisphere}")
 }
 
 /// What is there, in `format`. Also what a copy of the value contains, so
@@ -392,6 +662,102 @@ mod tests {
         assert_eq!(copied_coordinate([0, 0]), "0,0");
         // Padded on screen, bare in a copy, for the same pixel.
         assert_eq!(coordinate([7, 9], [1920, 1080]), "(0007, 0009)");
+    }
+
+    /// A georeference offering what `placed` offers: projected where the
+    /// model is (1), geographic too where the code is one the table holds.
+    fn georeference(model: u16, system: u16) -> Georeference {
+        use crate::image::geo::Tags;
+        let key = if model == 2 { 2048 } else { 3072 };
+        Georeference::read(&Tags {
+            directory: vec![1, 1, 0, 2, 1024, 0, 1, model, key, 0, 1, system],
+            scale: vec![1.0, 1.0, 0.0],
+            tiepoint: vec![0.0, 0.0, 0.0, 500_000.0, 4_500_000.0, 0.0],
+            ..Tags::default()
+        })
+        .expect("placed")
+    }
+
+    /// The key steps through what the file offers, from what the bar is
+    /// showing, and a choice the file cannot answer is shown as the pixel
+    /// without being forgotten.
+    #[test]
+    fn the_coordinates_step_through_what_the_file_offers() {
+        use CoordinateFormat::*;
+        let both = georeference(1, 32618);
+        let projected = georeference(1, 32767);
+        let geographic = georeference(2, 4326);
+
+        assert_eq!(Pixel.next(Some(&both)), Projected);
+        assert_eq!(Projected.next(Some(&both)), Geographic);
+        assert_eq!(Geographic.next(Some(&both)), Pixel);
+
+        assert_eq!(Projected.next(Some(&projected)), Pixel);
+        assert_eq!(Pixel.next(Some(&geographic)), Geographic);
+        // Shown as the pixel, so the next is the first thing after it.
+        assert_eq!(Geographic.shown(Some(&projected)), Pixel);
+        assert_eq!(Geographic.next(Some(&projected)), Projected);
+
+        for format in CoordinateFormat::ALL {
+            assert_eq!(format.shown(None), Pixel);
+            assert_eq!(format.next(None), Pixel);
+        }
+    }
+
+    /// A latitude is written to six decimal places or to hundredths of a
+    /// second, whatever the pixel, and the seconds round as a whole,
+    /// carrying into the minute.
+    #[test]
+    fn a_latitude_is_written_to_fixed_places() {
+        let bern = [46.951_082_77, 7.438_632_42];
+        assert_eq!(
+            latitude_longitude(bern, GeographicFormat::Decimal, false),
+            "46.951083,7.438632"
+        );
+        assert_eq!(
+            latitude_longitude(bern, GeographicFormat::Decimal, true),
+            " 46.951083,    7.438632"
+        );
+        assert_eq!(
+            latitude_longitude(bern, GeographicFormat::Dms, false),
+            "46\u{00b0}57'03.90\"N 7\u{00b0}26'19.08\"E"
+        );
+        assert_eq!(dms(-0.999_999_9, ['N', 'S'], 2), "1\u{00b0}00'00.00\"S");
+        assert_eq!(dms(-73.5, ['E', 'W'], 0), "73\u{00b0}30'00\"W");
+
+        // Padded, a latitude and a longitude are as wide at the equator as
+        // at the poles, so that nothing after them moves.
+        let wide = latitude_longitude([-89.5, -179.5], GeographicFormat::Dms, true);
+        let narrow = latitude_longitude([0.5, 0.5], GeographicFormat::Dms, true);
+        assert_eq!(wide.chars().count(), narrow.chars().count());
+        let wide = latitude_longitude([-89.5, -179.5], GeographicFormat::Decimal, true);
+        let narrow = latitude_longitude([0.5, 0.5], GeographicFormat::Decimal, true);
+        assert_eq!(wide.len(), narrow.len());
+    }
+
+    /// The file's own coordinates keep as many places as a pixel is worth,
+    /// wear the file's unit, and are as wide as the raster's widest corner.
+    #[test]
+    fn projected_coordinates_are_written_in_the_file_s_units() {
+        use crate::image::geo::Tags;
+        let geo = Georeference::read(&Tags {
+            // Projected, in meters.
+            directory: vec![1, 1, 0, 2, 1024, 0, 1, 1, 3076, 0, 1, 9001],
+            scale: vec![0.5, 0.5, 0.0],
+            tiepoint: vec![0.0, 0.0, 0.0, 995.0, 2000.0, 0.0],
+            ..Tags::default()
+        })
+        .expect("placed");
+        assert_eq!(projected(&geo, [0, 0], [100, 100], false), "995.2,1999.8");
+        // The far column reaches 1044.8, a digit more than the first.
+        assert_eq!(
+            projected(&geo, [0, 0], [100, 100], true),
+            "( 995.2, 1999.8) m"
+        );
+        assert_eq!(
+            projected(&geo, [99, 99], [100, 100], true),
+            "(1044.8, 1950.2) m"
+        );
     }
 
     /// The coordinate is as wide at (0, 0) as it is at the far corner, so

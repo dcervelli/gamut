@@ -26,8 +26,8 @@ use super::rename::{self, Verdict};
 use super::tooltip::{Tip, Tooltip};
 use super::transport::{Kind, Transport};
 use super::{
-    Command, Control, Current, FileFacts, FrameInput, Grab, PANELS_ROOM, Panels, PixelFormat,
-    Selection,
+    Command, Control, CoordinateFormat, Current, FileFacts, FrameInput, GeographicFormat, Grab,
+    PANELS_ROOM, Panels, PixelFormat, Selection,
 };
 
 /// A window with room for everything.
@@ -133,6 +133,8 @@ fn panels() -> Panels {
         loupe_magnification: super::loupe::DEFAULT_MAGNIFICATION,
         paste: false,
         pixel_format: PixelFormat::default(),
+        coordinate_format: CoordinateFormat::default(),
+        geographic_format: GeographicFormat::default(),
     }
 }
 
@@ -1631,6 +1633,46 @@ fn the_pixel_menu_offers_every_format() {
     assert_eq!(
         click(&mut harness, "Hex"),
         [Command::Press(Control::Format(PixelFormat::Hex))]
+    );
+}
+
+/// Only a georeferenced file brings the rows of coordinates to that menu,
+/// and only the coordinates it can give: a raster in a system the table
+/// holds offers all three and the two ways of writing a latitude.
+#[test]
+fn the_pixel_menu_offers_coordinates_only_for_a_map() {
+    let mut harness = open(WINDOW, 1, panels());
+    assert_eq!(click(&mut harness, "Pixel format"), []);
+    assert!(harness.query_by_label("Projected").is_none());
+    assert!(harness.query_by_label("DMS").is_none());
+
+    let mut harness = build(WINDOW, 1, panels());
+    let placed = crate::image::geo::Tags {
+        // Projected, on UTM zone 18N.
+        directory: vec![1, 1, 0, 2, 1024, 0, 1, 1, 3072, 0, 1, 32618],
+        scale: vec![1.0, 1.0, 0.0],
+        tiepoint: vec![0.0, 0.0, 0.0, 583_000.0, 4_507_000.0, 0.0],
+        ..Default::default()
+    };
+    harness
+        .state_mut()
+        .current
+        .as_mut()
+        .expect("a picture")
+        .exif
+        .georeference = crate::image::geo::Georeference::read(&placed);
+    harness.run();
+    assert_eq!(click(&mut harness, "Pixel format"), []);
+    assert_eq!(
+        click(&mut harness, "Geographic"),
+        [Command::Press(Control::Coordinates(
+            CoordinateFormat::Geographic
+        ))]
+    );
+    assert_eq!(click(&mut harness, "Pixel format"), []);
+    assert_eq!(
+        click(&mut harness, "DMS"),
+        [Command::Press(Control::Geographic(GeographicFormat::Dms))]
     );
 }
 

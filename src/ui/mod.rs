@@ -57,7 +57,7 @@ use crate::view::{View, Viewport};
 
 pub use control::{Command, Control, Grab, Naming, Selection};
 pub use info::FileFacts;
-pub use pixel::PixelFormat;
+pub use pixel::{CoordinateFormat, GeographicFormat, PixelFormat};
 pub use rect::Rect;
 pub use status::explain_state;
 pub use toast::Toast;
@@ -273,6 +273,12 @@ pub struct Panels {
     /// is about the reading and not about the rendering: nothing on screen
     /// changes with it but the words in the bar.
     pub pixel_format: PixelFormat,
+    /// How it writes out where that pixel is, for a file that says where its
+    /// pixels are on the ground; every other file's is the pixel's, whatever
+    /// this says — see [`CoordinateFormat::shown`].
+    pub coordinate_format: CoordinateFormat,
+    /// And how a latitude and a longitude are written, where they are.
+    pub geographic_format: GeographicFormat,
 }
 
 /// What this frame looks like, beyond the image and the panels: the values
@@ -987,6 +993,8 @@ mod tests {
             loupe_magnification: loupe::DEFAULT_MAGNIFICATION,
             paste: false,
             pixel_format: PixelFormat::default(),
+            coordinate_format: CoordinateFormat::default(),
+            geographic_format: GeographicFormat::default(),
         };
         let area = |width, height| room(Rect::new(0.0, 0.0, width, height), &panels);
 

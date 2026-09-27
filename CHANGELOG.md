@@ -4,6 +4,27 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- A georeferenced raster can read out where the pixel under the pointer is
+  on the ground: in the file's own projected coordinates and units, or as
+  latitude and longitude on WGS 84, in decimal degrees or in degrees,
+  minutes and seconds. The pixel readout's menu grows a **Coordinate** row
+  and a **Latitude and longitude** row for such a file, and only for one;
+  `,` cycles the coordinate and `<` switches the latitude's form. A file
+  that cannot answer the choice — one with no named coordinate system, say
+  — reads out the pixel, and the choice stands for the next map. The
+  `coordinate_format` and `geographic_format` settings choose where they
+  start, and `Ctrl+Shift+.` copies the coordinate as it is read out.
+
+### Changed
+
+- The EPSG code a GeoTIFF names is now looked up, to find its latitude and
+  longitude, where before it was only quoted. The table of codes it is looked
+  up in is linked into the binary.
+
 ## 0.6.0 - 2026-09-27
 
 ### Added

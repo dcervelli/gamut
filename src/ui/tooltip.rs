@@ -95,7 +95,11 @@ pub const COPY_REGION: &str = "Copy the region as displayed";
 /// showing away — each followed by its key, which the application adds.
 pub const PIXEL_CYCLE: &str = "Cycle pixel format: hex, decimal, mapped";
 pub const PIXEL_COPY_VALUE: &str = "Copy pixel value under pointer";
-pub const PIXEL_COPY_COORDINATE: &str = "Copy coordinate of pixel under pointer as x,y";
+pub const PIXEL_COPY_COORDINATE: &str = "Copy coordinate of pixel under pointer";
+/// And, for a georeferenced file only, the two keys that change how the
+/// coordinate is written — the second only where it can be a latitude.
+pub const PIXEL_COORDINATE_CYCLE: &str = "Cycle coordinate: pixel, projected, geographic";
+pub const PIXEL_GEOGRAPHIC_CYCLE: &str = "Switch latitude and longitude: decimal, DMS";
 
 /// What a toggle says when the content area has no room for the panel it
 /// opens, in place of the name of the panel.
@@ -341,6 +345,8 @@ pub fn words(tip: Tip) -> Option<String> {
         Tip::Control(Control::Format(format)) => {
             return Some(menu::describe_format(format).to_string());
         }
+        Tip::Control(Control::Coordinates(format)) => menu::describe_coordinates(format),
+        Tip::Control(Control::Geographic(format)) => menu::describe_geographic(format),
         Tip::Control(Control::Zoom) => "Open zoom menu",
         // No one key opens it — every cell of it has a key of its own —
         // so the button says what the menu is of.

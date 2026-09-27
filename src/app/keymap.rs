@@ -886,7 +886,7 @@ mod tests {
             };
             assert!(words.contains(&first), "{name} under {:?}", row.section);
         }
-        assert_eq!(names.len(), 90);
+        assert_eq!(names.len(), 92);
         for row in keymap.rows() {
             if let Keys::Also(name) | Keys::Gesture(name) = row.keys {
                 assert!(names.contains(&name), "{name} is described but not bound");

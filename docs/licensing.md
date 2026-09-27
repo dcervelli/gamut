@@ -59,5 +59,13 @@ verified rather than trusted:
 cargo about generate --frozen packaging/about.hbs | diff - <(tail -n +3 THIRD-PARTY-NOTICES)
 ```
 
+One crate carries data rather than code: `crs-definitions`, which
+`proj4rs` links in to say what an EPSG code a GeoTIFF names stands for, and
+which the pixel readout's latitude is worked out through. The table is
+compiled from the EPSG Dataset by way of the crs-csv project and published
+under CC0, which `about.toml` accepts; the dataset itself is IOGP's, under
+terms of use of its own that allow it to be used and passed on. Its notice is
+in `THIRD-PARTY-NOTICES` with the rest.
+
 Between the three, `LICENSES/` ends up holding every license anything in the
 distribution is under, and `reuse lint` reports none of them unused.

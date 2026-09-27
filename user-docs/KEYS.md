@@ -387,7 +387,10 @@ is written there — so with the readout in hex, as it starts, `Ctrl+.` puts
 `E78040` on the clipboard, and after switching it to decimal with `.` it puts
 `231 128 64` there instead. `Ctrl+Shift+.` copies the pixel's coordinate
 rather than its value, as `x,y` with nothing around it: `1919,1079`, ready to
-paste into a command line or a spreadsheet. Both work on the pixel the pointer
+paste into a command line or a spreadsheet. In a georeferenced file whose
+readout is showing where the pixel is on the ground, it copies that instead,
+in the same form: `2600000,1200000`, or `46.951083,7.438632` for a latitude and
+longitude, which a map's search box takes as it is. Both work on the pixel the pointer
 is over at the moment you press them, and say so on the terminal when the
 pointer is not over one.
 
@@ -581,6 +584,8 @@ where all of it is set.
 | `Shift+L` | Cycle the loupe's magnification: 2, 4, 8 or 16 times | `interface.loupe-magnification` |
 | `x` | Select a region of the image; again, or `Esc`, removes it | `region.select` |
 | `.` | Cycle how the pixel under the pointer is read out: hex → decimal → mapped | `interface.pixel-format` |
+| `,` | In a georeferenced file, cycle where the pixel is read out as: pixel → projected → geographic | `interface.coordinate-format` |
+| `<` (`Shift+,`) | Switch a latitude and longitude between decimal degrees and degrees, minutes and seconds | `interface.geographic-format` |
 | `` ` `` | Show or hide the panels around the image | `interface.toggle` |
 | `~` | The same, and closes the histogram, information, minimap and file list | `interface.toggle-panels` |
 | `?`, `/` | Show the keys: every one of them, what it does and when. Again, `Esc` or a click outside closes it. The button at the foot of the right strip does the same | `interface.help` |
@@ -829,6 +834,34 @@ window, the exposure and the tone curve have made of the numbers, where 0 and
 `.` steps through the three, and the dot at the head of the readout opens a
 menu of them; whichever is in force is lit. It applies to whichever image is
 on screen and stays as you set it.
+
+A georeferenced raster — a scanned map, an elevation model, a satellite scene —
+can say where the pixel is on the ground as well as where it is in the image,
+and for one of those the same menu has two more rows. **Coordinate** chooses
+between **Pixel**, the column and row as for any image; **Projected**, the
+file's own coordinates — an easting and northing in its coordinate system and
+its units, `(2600000, 1200000) m`; and **Geographic**, latitude then longitude
+on WGS 84, the system a GPS and a web map use. **Latitude and longitude**
+chooses how those are written: **Decimal**, signed degrees,
+`46.951083, 7.438632`, or **DMS**, degrees, minutes and seconds with the
+hemisphere, `46°57'03.90"N 7°26'19.08"E`. Decimal degrees always have six
+places and seconds always two, and either is the middle of the pixel under the
+pointer. Projected coordinates are written to about as many places as one
+pixel is worth.
+`,` steps through the coordinates and `<` switches between the two ways of
+writing a latitude.
+
+A file offers only what it can answer. One in latitude and longitude already
+has no projected coordinates to give; one whose coordinate system is spelled
+out in parameters rather than named, or is named by a code `gamut` does not
+know, keeps its own coordinates and offers no latitude. The conversion to
+latitude and longitude is good to a meter or two, not to survey accuracy: it
+shifts between datums by a fixed offset rather than by the grids a surveyor's
+software uses. For every other image the rows are not in the menu at all, and
+wherever a file cannot answer what you chose, the readout shows the pixel —
+the choice stays, and applies again to the next map you open. The
+`coordinate_format` and `geographic_format` settings in
+[the configuration file](SETTINGS.md) choose where they start.
 
 The slot in the last column is the name of that gesture in the
 [configuration file](SETTINGS.md#gestures), which can give it something else

@@ -141,6 +141,13 @@ moxcms = "0.8.1"
 # in the tree as `image`'s own decoder, so this costs no new dependency.
 png = "0.18.1"
 pollster = "1.0.1"
+# Where a georeferenced raster's pixel is in latitude and longitude, for the
+# pointer's readout: the projection maths of PROJ.4, in Rust, and the table
+# of EPSG codes its `crs-definitions` feature brings (CC0, from crs-csv) to
+# say what a code a GeoTIFF names stands for. Its default feature is one
+# projection the codes that matter do not use, whose geodesic crate would be
+# a second dependency for nothing — see `image/geo.rs`.
+proj4rs = { version = "0.2", default-features = false, features = ["crs-definitions"] }
 # The XMP packet, for the info panel: the title, the caption and the
 # keywords, which are written in RDF/XML and so need an XML parser. This one
 # is already in the tree under `fontdb`, so it costs no new crate; it builds

@@ -78,6 +78,10 @@ pub struct Exif {
     /// what took the picture, where it was taken, where its pixels are on the
     /// ground, what was written about it, then everything left over.
     pub sections: Vec<Section>,
+    /// Where the raster's pixels are on the ground, for the pointer's
+    /// readout: the same tags the `Georeference` section is written from,
+    /// kept as numbers. `None` for everything that is not a map.
+    pub georeference: Option<geo::Georeference>,
 }
 
 impl Exif {
@@ -229,10 +233,14 @@ impl Exif {
                 })
                 .into_iter()
                 .collect();
-            return Self { sections };
+            return Self {
+                sections,
+                georeference: None,
+            };
         };
 
-        let geo = geo::describe(&geo_tags(exif));
+        let tags = geo_tags(exif);
+        let geo = geo::describe(&tags);
         // Whatever a group below has already said is not said again: the
         // listing is what is left in the file, not a second copy of the top
         // of the panel. The georeference speaks for its tags only when it
@@ -286,7 +294,10 @@ impl Exif {
         .filter(|(_, entries)| !entries.is_empty())
         .map(|(name, entries)| Section { name, entries })
         .collect();
-        Self { sections }
+        Self {
+            sections,
+            georeference: geo::Georeference::read(&tags),
+        }
     }
 }
 

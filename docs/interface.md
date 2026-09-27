@@ -877,10 +877,41 @@ not fit on a line this wide, and a coordinate broken across two lines is a
 coordinate misread. The tiepoint is walked back to the
 corner where it is not already there, the matrix form is read where a file has
 that instead, and a raster whose axes are turned off the model's is given its
-corner and told plainly that there is no rectangle to quote. Nothing consults
-a coordinate-system register: EPSG:2056 is quoted as EPSG:2056, beside
-whatever the file calls it, because turning that into a datum and a projection
-means shipping the register that defines them.
+corner and told plainly that there is no rectangle to quote. The panel
+consults no coordinate-system register: EPSG:2056 is quoted as EPSG:2056,
+beside whatever the file calls it.
+
+The pointer's readout does consult one, because a latitude cannot be had
+without it. `geo::Georeference` is built from the same tags beside the panel's
+rows and carried on `Exif::georeference`: the tiepoint and scale, or the
+matrix, as one affine map from raster to model — so a turned raster, which
+the panel declines to give an extent, still places every pixel — and, where
+the file names its system by an EPSG code, a `proj4rs::Proj` for that code and
+one for WGS 84 to lift a model coordinate between them. The code is resolved
+through the table `proj4rs`'s `crs-definitions` feature carries, which is a
+proj4 string per code; its WKT half and the crate's default `aeqd` projection
+are left off, the first being text this never reads and the second a
+geodesic crate for a projection no GeoTIFF names by code. What the table
+buys is breadth — every UTM zone, every state plane, every national grid, in
+a few megabytes of strings — and what it costs is precision: a proj4 string
+shifts datums by at most seven Helmert parameters, not by the NTv2 grids
+PROJ proper would load, which is a meter or two where a grid would be
+centimeters. For a readout under a pointer that is a pixel or less on
+anything but a survey-grade orthophoto; a register that needed PROJ, sqlite
+and a grid directory installed was not worth that difference.
+
+Each pixel is read at its middle, which is half a pixel in from the tiepoint
+where the file says its coordinates are corners and on it where they are
+centers, and through `Turn::stored`, since the placement is of the raster as
+stored and the pointer is in the picture as turned. A file whose system is
+user-defined, or named by a code the table lacks, or whose code has an inverse
+the crate does not implement, has no lift and offers only its own
+coordinates; one in latitude and longitude already offers only those, read
+straight or lifted from its own datum. `CoordinateFormat::offered` is the one
+reading of that — the menu's rows, the key's step and the `When::Georeferenced`
+and `When::Geographic` conditions all ask it — and `CoordinateFormat::shown`
+is what makes the pixel the fallback without forgetting the choice, which is
+held in `Panels` like the pixel format beside it.
 
 Two kinds of raster need one more step to be read at all, and both take the
 same one. A BigTIFF — the same tags and types with eight-byte offsets, which

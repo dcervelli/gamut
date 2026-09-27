@@ -17,7 +17,7 @@ use super::chrome::Pass;
 use super::control::Control;
 use super::filmstrip::{Direction, Order, Sort};
 use super::info::HEADER_GAP;
-use super::pixel::PixelFormat;
+use super::pixel::{CoordinateFormat, GeographicFormat, PixelFormat};
 use super::style::TOGGLE_RADIUS;
 use super::tooltip::Tip;
 use super::{TEXT_SIZE, fonts, help, icon};
@@ -193,6 +193,23 @@ pub fn describe_format(format: PixelFormat) -> &'static str {
     }
 }
 
+/// What each coordinate format says of a pixel, for its cell's tooltip.
+pub fn describe_coordinates(format: CoordinateFormat) -> &'static str {
+    match format {
+        CoordinateFormat::Pixel => "Column and row of the pixel",
+        CoordinateFormat::Projected => "Coordinates in the file's own system",
+        CoordinateFormat::Geographic => "Latitude and longitude on WGS 84",
+    }
+}
+
+/// How each way of writing a latitude looks, for its cell's tooltip.
+pub fn describe_geographic(format: GeographicFormat) -> &'static str {
+    match format {
+        GeographicFormat::Decimal => "Decimal degrees",
+        GeographicFormat::Dms => "Degrees, minutes and seconds",
+    }
+}
+
 /// A section's name, in the accent the information panel sets its own
 /// headings in: a heading is the one thing on a panel that is picked out, and
 /// the two panels should not disagree about how that is done.
@@ -282,18 +299,64 @@ fn fit_cell(pass: &mut Pass, ui: &mut Ui, fit: Fit, fills: Axis, active: bool) -
 /// The pixel-format menu: the three formats abreast, in cells cut for
 /// words, under the one heading that says what the menu is of — it hangs
 /// from a dot rather than from a word.
+///
+/// A file that says where its pixels are on the ground brings two rows more:
+/// the coordinates it can give, and — where one of them is a latitude — the
+/// two ways of writing one. Every other file brings neither, so a menu that
+/// nearly everyone opens for the value alone is never longer for it. The
+/// lit coordinate is the one the bar is showing, which is the pixel's where
+/// the file cannot answer what was chosen.
 pub(super) fn pixel_cells(pass: &mut Pass, ui: &mut Ui) {
     ui.spacing_mut().item_spacing = Vec2::ZERO;
     heading(pass, ui, "Pixel value", true);
+    let chosen = pass.panels.pixel_format;
+    cell_row(
+        pass,
+        ui,
+        PixelFormat::ALL.map(|format| (Control::Format(format), format == chosen)),
+    );
+
+    let georeference = pass
+        .current
+        .and_then(|current| current.exif.georeference.as_ref());
+    let offered: Vec<CoordinateFormat> = CoordinateFormat::ALL
+        .into_iter()
+        .filter(|format| format.offered(georeference))
+        .collect();
+    if offered.len() < 2 {
+        return;
+    }
+    heading(pass, ui, "Coordinate", false);
+    let shown = pass.panels.coordinate_format.shown(georeference);
+    cell_row(
+        pass,
+        ui,
+        offered
+            .iter()
+            .map(|format| (Control::Coordinates(*format), *format == shown)),
+    );
+    if !offered.contains(&CoordinateFormat::Geographic) {
+        return;
+    }
+    heading(pass, ui, "Latitude and longitude", false);
+    let chosen = pass.panels.geographic_format;
+    cell_row(
+        pass,
+        ui,
+        GeographicFormat::ALL.map(|format| (Control::Geographic(format), format == chosen)),
+    );
+}
+
+/// One row of word cells of the pixel menu, each lit where it is `active`,
+/// each closing the menu on the press it sends.
+fn cell_row(pass: &mut Pass, ui: &mut Ui, cells: impl IntoIterator<Item = (Control, bool)>) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing = vec2(MENU_GAP, 0.0);
-        for format in PixelFormat::ALL {
-            let active = format == pass.panels.pixel_format;
+        for (control, active) in cells {
             let response = ui.add_sized(
                 [MENU_WORD_CELL, MENU_CELL[1]],
-                Button::new(format.label()).selected(active),
+                Button::new(control.label()).selected(active),
             );
-            let control = Control::Format(format);
             let response = pass.tooltip(response, Tip::Control(control));
             if response.clicked() {
                 pass.press(control);

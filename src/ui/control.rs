@@ -17,7 +17,7 @@ use super::filmstrip::{Direction, Sort};
 use super::help;
 use super::info::Copyable;
 use super::menu::{Copies, ZoomChoice};
-use super::pixel::PixelFormat;
+use super::pixel::{CoordinateFormat, GeographicFormat, PixelFormat};
 use super::tooltip::{Tip, Tooltip};
 
 /// Something in the interface that can be pressed: a toggle in a side
@@ -111,6 +111,12 @@ pub enum Control {
     ZoomTo(ZoomChoice),
     /// A cell of the pixel-format menu.
     Format(PixelFormat),
+    /// A cell of the same menu's row of coordinates, which is on it only
+    /// for a georeferenced file.
+    Coordinates(CoordinateFormat),
+    /// A cell of its row of ways to write a latitude, on it only for a file
+    /// that can give one.
+    Geographic(GeographicFormat),
     /// An item of the menu of copies.
     Copies(Copies),
     /// A row of the information panel, or the button above the column that
@@ -220,6 +226,8 @@ impl Control {
             Control::Dismiss => "Dismiss".to_string(),
             Control::ZoomTo(choice) => choice.label(),
             Control::Format(format) => format.label().to_string(),
+            Control::Coordinates(format) => format.label().to_string(),
+            Control::Geographic(format) => format.label().to_string(),
             Control::Copies(copies) => copies.label().to_string(),
             Control::Facts(Copyable::All) => "Copy All".to_string(),
             Control::Facts(Copyable::Section(index)) => format!("Copy section {index}"),
@@ -491,6 +499,8 @@ impl Control {
         Control::Dismiss,
         Control::ZoomTo(ZoomChoice::Scale(1.0)),
         Control::Format(PixelFormat::Hex),
+        Control::Coordinates(CoordinateFormat::Pixel),
+        Control::Geographic(GeographicFormat::Decimal),
         Control::Copies(Copies::Name),
         Control::Facts(Copyable::All),
         Control::Chooser,
@@ -556,6 +566,8 @@ impl Control {
             | Control::Dismiss
             | Control::ZoomTo(_)
             | Control::Format(_)
+            | Control::Coordinates(_)
+            | Control::Geographic(_)
             | Control::Copies(_)
             | Control::Facts(_)
             | Control::Chooser

@@ -30,6 +30,8 @@ settings are:
 | `show_histogram` | `false` | The histogram panel |
 | `show_info` | `false` | The file information panel |
 | `pixel_format` | `hex` | How the pixel under the pointer is read out: `hex`, `decimal` or `mapped` |
+| `coordinate_format` | `pixel` | Where the pixel under the pointer is read out as, in a georeferenced file: `pixel`, `projected` or `geographic`. A file that cannot give the one chosen shows the pixel |
+| `geographic_format` | `decimal` | How a latitude and longitude are written: `decimal` or `dms` |
 | `log_counts` | `false` | The histogram's bars as tall as the logarithm of their counts |
 
 `--histogram`, `--info` and `--no-minimap` override the file for that one run.

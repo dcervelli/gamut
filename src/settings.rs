@@ -28,7 +28,7 @@ use anyhow::{Context, Result};
 
 use crate::app::keymap::{Chord, Keymap};
 use crate::gestures::{Behavior, Gestures, Slot};
-use crate::ui::PixelFormat;
+use crate::ui::{CoordinateFormat, GeographicFormat, PixelFormat};
 use crate::ui::{filmstrip, loupe};
 use crate::{PROGRAM, shown_path, xdg};
 
@@ -43,6 +43,8 @@ pub struct Config {
     pub show_histogram: bool,
     pub show_info: bool,
     pub pixel_format: PixelFormat,
+    pub coordinate_format: CoordinateFormat,
+    pub geographic_format: GeographicFormat,
     pub log_counts: bool,
     pub keys: Keymap,
     pub gestures: Gestures,
@@ -57,6 +59,8 @@ impl Default for Config {
             show_histogram: false,
             show_info: false,
             pixel_format: PixelFormat::Hex,
+            coordinate_format: CoordinateFormat::Pixel,
+            geographic_format: GeographicFormat::Decimal,
             log_counts: false,
             keys: Keymap::default(),
             gestures: Gestures::default(),
@@ -67,7 +71,7 @@ impl Default for Config {
 /// Every setting the configuration file takes, in the order the template
 /// lists them, with the words it wears there. [`Config::value`] writes each
 /// one's value, and [`Config::parse`] reads it back.
-const SETTINGS: [(&str, &str); 7] = [
+const SETTINGS: [(&str, &str); 9] = [
     ("show_ui", "The panels around the picture."),
     (
         "show_minimap",
@@ -82,6 +86,14 @@ const SETTINGS: [(&str, &str); 7] = [
     (
         "pixel_format",
         "How the pixel under the pointer is read out: hex, decimal, or mapped.",
+    ),
+    (
+        "coordinate_format",
+        "Where the pointer is in a georeferenced file: pixel, projected, or geographic.",
+    ),
+    (
+        "geographic_format",
+        "How a latitude and longitude are written: decimal, or dms.",
     ),
     (
         "log_counts",
@@ -128,6 +140,8 @@ impl Config {
             "show_histogram" => self.show_histogram.to_string(),
             "show_info" => self.show_info.to_string(),
             "pixel_format" => self.pixel_format.label().to_ascii_lowercase(),
+            "coordinate_format" => self.coordinate_format.label().to_ascii_lowercase(),
+            "geographic_format" => self.geographic_format.label().to_ascii_lowercase(),
             "log_counts" => self.log_counts.to_string(),
             _ => unreachable!("`{name}` is not in SETTINGS"),
         }
@@ -193,6 +207,28 @@ impl Config {
                         None => problems.push((
                             number,
                             format!("unknown pixel_format `{value}`: hex, decimal, or mapped"),
+                        )),
+                    }
+                    None
+                }
+                "coordinate_format" => {
+                    match CoordinateFormat::parse(value) {
+                        Some(format) => config.coordinate_format = format,
+                        None => problems.push((
+                            number,
+                            format!(
+                                "unknown coordinate_format `{value}`: pixel, projected, or geographic"
+                            ),
+                        )),
+                    }
+                    None
+                }
+                "geographic_format" => {
+                    match GeographicFormat::parse(value) {
+                        Some(format) => config.geographic_format = format,
+                        None => problems.push((
+                            number,
+                            format!("unknown geographic_format `{value}`: decimal or dms"),
                         )),
                     }
                     None
@@ -517,7 +553,7 @@ mod tests {
             .lines()
             .filter(|line| line.starts_with("gesture."))
             .count();
-        assert_eq!(keys, 90, "{uncommented}");
+        assert_eq!(keys, 92, "{uncommented}");
         assert_eq!(gestures, 10, "{uncommented}");
         assert_eq!(
             uncommented.lines().count(),
@@ -604,6 +640,8 @@ mod tests {
             show_histogram: !defaults.show_histogram,
             show_info: !defaults.show_info,
             pixel_format: defaults.pixel_format.next(),
+            coordinate_format: CoordinateFormat::Geographic,
+            geographic_format: defaults.geographic_format.next(),
             log_counts: !defaults.log_counts,
             keys: defaults.keys.clone(),
             gestures: defaults.gestures.clone(),

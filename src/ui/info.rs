@@ -790,6 +790,7 @@ mod tests {
                         .collect(),
                 },
             ],
+            georeference: None,
         }
     }
 
