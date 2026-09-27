@@ -435,10 +435,20 @@ impl Pass<'_> {
 
                 // The facts are the picture's on screen, which is not the
                 // file the name has moved on to: none until that one is in.
-                if self.input.arriving.is_none() {
-                    let facts = status::facts(current, |text| measure(ui, text));
-                    let room = (ui.max_rect().width() / 2.0 - BAR_PADDING * 2.0).max(1.0);
-                    let facts = status::fit_segments(|text| measure(ui, text), &facts, room);
+                // Otherwise they get what the near end of the bar leaves with
+                // the name written in full, and go segment by segment as
+                // that runs out — the size last, and then nothing, so that
+                // a narrow window has the name in it and not a description
+                // of a picture it does not say the name of.
+                let facts = if self.input.arriving.is_none() {
+                    let facts = status::facts(current);
+                    let head = status::head_width(self, ui, current);
+                    let room = (ui.available_width() - PADDING - head).max(0.0);
+                    status::fit_segments(|text| measure(ui, text), &facts, room)
+                } else {
+                    String::new()
+                };
+                if !facts.is_empty() {
                     ui.add(egui::Label::new(RichText::new(facts).color(dim)).truncate());
                     ui.add_space(PADDING);
                 }

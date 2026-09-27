@@ -304,7 +304,12 @@ long as the file is on screen. The name is the only thing in the window set
 bold, and the only thing drawn in the ink the theme keeps for it; the count in
 front of it is set like the facts at the other end of the bar, since it is one
 of them. Picking out two things picks out neither, and what a reader wants
-from that bar at a glance is the name. The bottom bar carries what changes: what is
+from that bar at a glance is the name. The facts are also what yields: they
+are given what the near end of the bar leaves with the name written in full
+(`status::head_width`), cut by whole segments from the color space back to
+the size (`status::fit_segments`), and left out altogether when even the size
+has no room, so a narrow window names the file rather than describing one it
+cannot name. The bottom bar carries what changes: what is
 under the pointer, and what the view is doing to the image, the last of which
 says nothing at all while nothing is being done. The pointer's end of it is a readout of one pixel —
 where it is, the components the file holds there in the file's own units, the
