@@ -38,12 +38,25 @@ pub fn images_in(dir: &Path) -> Result<Vec<PathBuf>> {
         // The extension is checked first because it costs nothing; the
         // directory test that follows it is for the rare directory named
         // like an image.
-        if extensions.contains(&extension.as_str()) && !candidate.is_dir() {
+        if extensions.contains(&extension.as_str()) && !is_directory(&entry, &candidate) {
             found.push(candidate);
         }
     }
     found.sort();
     Ok(found)
+}
+
+/// Whether the entry `candidate` names is a directory, asked of the listing
+/// itself where it says: most file systems hand the kind of each entry
+/// over with its name, where a `stat` of each would be a round trip apiece
+/// on a network share. A link, and an entry whose kind the listing left
+/// out, are followed with a `stat`, a link to a directory being a
+/// directory here as it is to `is_dir`.
+fn is_directory(entry: &std::fs::DirEntry, candidate: &Path) -> bool {
+    match entry.file_type() {
+        Ok(kind) if !kind.is_symlink() => kind.is_dir(),
+        _ => opened(candidate).is_dir(),
+    }
 }
 
 /// The folder `file` is in, as its name has it: empty for a bare name,
@@ -162,6 +175,23 @@ mod tests {
             !files.contains(&fixtures().join("unsupported.tga")),
             "a format we cannot read is not worth stepping through"
         );
+    }
+
+    /// A directory named like an image is not an image, whether it is one
+    /// outright or a link to one; a link to an image is.
+    #[test]
+    fn a_directory_named_like_an_image_is_left_out() {
+        let dir = std::env::temp_dir().join(format!("gamut-listing-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("album.jpg")).unwrap();
+        std::fs::write(dir.join("a.png"), b"").unwrap();
+        std::os::unix::fs::symlink(dir.join("album.jpg"), dir.join("linked.jpg")).unwrap();
+        std::os::unix::fs::symlink(dir.join("a.png"), dir.join("b.png")).unwrap();
+        assert_eq!(
+            images_in(&dir).unwrap(),
+            [dir.join("a.png"), dir.join("b.png")]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Whatever is not a directory is passed through untouched, extension and
