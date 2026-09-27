@@ -344,6 +344,14 @@ still agrees with both, so renaming either is editing the constant —
   handler, is the one place a frame is asked for, and two effects fold
   with `Effect::also`. A helper that changes what is on screen returns an
   `Effect` too, so that the caller cannot forget the frame it owes.
+- Every string the window shows is the author's to vet: a toast, a button's
+  label or accessible name, a tooltip, a menu item, a line of the help
+  popup, a dialog's words. A change that adds or alters one lists each of
+  them, old and new, in a table in its summary, each row numbered so it can
+  be referred to, and none of them is final until the author has approved
+  it. What is read outside the window — `--help`, the man page, the
+  completions, the configuration and state files, the terminal, the docs —
+  is not in the table.
 - Docs: three directories, three audiences — see **Docs ownership** below.
 - American spelling throughout — code, comments, docs, and every word a user
   reads: `color`, `gray`, `center`, `normalize`, `license`, `behavior`,
