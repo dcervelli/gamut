@@ -12,7 +12,7 @@ use anyhow::{Result, bail};
 
 use crate::PROGRAM;
 use crate::app::Options;
-use crate::app::input::{MOUSE, ROWS, Section, mouse_rows};
+use crate::app::input::{MOUSE, ROWS, Section, key_column, mouse_rows};
 use crate::app::keymap::Keymap;
 use crate::gestures::Gestures;
 use crate::image::decode::Overrides;
@@ -92,20 +92,18 @@ fn heading(section: Section) -> String {
 /// does, as `--help` and the manual page both list them.
 fn listed() -> Vec<(String, Vec<(String, &'static str)>)> {
     let keys = Keymap::default();
+    let gestures = Gestures::default();
     Section::ALL
         .into_iter()
         .map(|section| {
             let lines = ROWS
                 .iter()
                 .filter(|row| row.section == section)
-                .map(|row| (keys.column(row), row.help))
+                .map(|row| (key_column(&keys, &gestures, row), row.help))
                 .collect();
             (heading(section), lines)
         })
-        .chain([(
-            MOUSE.to_uppercase(),
-            mouse_rows(&keys, &Gestures::default()),
-        )])
+        .chain([(MOUSE.to_uppercase(), mouse_rows(&keys, &gestures))])
         .collect()
 }
 
@@ -292,6 +290,9 @@ pub struct Args {
     /// replaced by the images inside it. Kept so that the list can be built
     /// again, in the same order, when one of those directories changes.
     pub named: Vec<PathBuf>,
+    /// What the window says about the configuration file, if some of it
+    /// could not be used; the terminal has already been told.
+    pub complaint: Option<String>,
     pub options: Options,
 }
 
@@ -473,7 +474,7 @@ pub fn parse_args() -> Result<Option<Args>> {
         }
         Err(error) => return Err(error),
     };
-    let mut config = Config::load();
+    let (mut config, complaint) = Config::load();
     config.show_histogram = histogram.unwrap_or(config.show_histogram);
     config.show_info = info.unwrap_or(config.show_info);
     config.show_minimap = minimap.unwrap_or(config.show_minimap);
@@ -481,6 +482,7 @@ pub fn parse_args() -> Result<Option<Args>> {
         files,
         paste,
         named,
+        complaint,
         options: Options {
             overrides,
             startup,
@@ -528,10 +530,12 @@ mod tests {
     fn the_help_text_lists_every_binding_once() {
         let text = usage();
         let keys = Keymap::default();
+        // Once among the keys: a line a click runs is under the mouse too.
+        let (key_sections, _) = text.split_once("\nMOUSE:\n").expect("a mouse section");
         for row in ROWS {
-            let line = key_line(&keys.column(row), row.help);
+            let line = key_line(&key_column(&keys, &Gestures::default(), row), row.help);
             assert_eq!(
-                text.matches(&line).count(),
+                key_sections.matches(&line).count(),
                 1,
                 "{line:?} should appear exactly once"
             );

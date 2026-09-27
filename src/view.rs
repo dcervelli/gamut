@@ -421,6 +421,24 @@ impl View {
         }
     }
 
+    /// `zoom` about `anchor`, or the whole image from a view already at it:
+    /// a quick look at the pixels and straight back out again. At `zoom` is
+    /// at it by hand — a fit that happens to come out at the same scale is
+    /// still a fit, and goes to `zoom` like any other.
+    pub fn toggle_zoom(
+        &mut self,
+        zoom: f32,
+        anchor: [f32; 2],
+        image: [f32; 2],
+        viewport: Viewport,
+    ) {
+        if self.fit.is_none() && self.zoom == zoom.clamp(MIN_ZOOM, MAX_ZOOM) {
+            self.set_fit(Fit::Whole);
+        } else {
+            self.set_zoom_at(zoom, anchor, image, viewport);
+        }
+    }
+
     /// Fits `region` — `[x, y, width, height]` in image pixels — to the
     /// viewport as `fit` says, and centers it. Not a fit the view keeps: a
     /// fit is a zoom the viewport decides for the whole image, and this is
@@ -568,6 +586,24 @@ mod tests {
         assert_eq!(view.fit(), None);
         view.cycle_fit(WINDOW.center(), IMAGE, WINDOW);
         assert_eq!(view.fit(), Some(Fit::Whole));
+    }
+
+    /// A toggle goes to its zoom from anywhere else — a fit, or another zoom
+    /// — and from its zoom back to the whole image.
+    #[test]
+    fn a_toggle_goes_to_its_zoom_and_back_to_the_whole_image() {
+        let mut view = View::new();
+        view.cycle_fit(WINDOW.center(), IMAGE, WINDOW);
+        assert_eq!(view.fit(), Some(Fit::Fill));
+        view.toggle_zoom(1.0, WINDOW.center(), IMAGE, WINDOW);
+        assert_eq!(view.fit(), None);
+        assert!(close(view.zoom(IMAGE, WINDOW), 1.0));
+        view.toggle_zoom(1.0, WINDOW.center(), IMAGE, WINDOW);
+        assert_eq!(view.fit(), Some(Fit::Whole));
+
+        view.set_zoom_at(4.0, WINDOW.center(), IMAGE, WINDOW);
+        view.toggle_zoom(1.0, WINDOW.center(), IMAGE, WINDOW);
+        assert!(close(view.zoom(IMAGE, WINDOW), 1.0));
     }
 
     /// A region fitted is a zoom of its own: the region spans the window the

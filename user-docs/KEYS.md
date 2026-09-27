@@ -13,6 +13,7 @@ and `S`, `c` and `C`, `l` and `L`, `n` and `N`.
 | Key | What it does | Name |
 | --- | --- | --- |
 | `1`, `0` | Actual size, one image pixel per screen pixel | `zoom.100` |
+| Double-click | Actual size, or back to the whole image from actual size | `zoom.100.toggle` |
 | `2`, `3`, `4`, `5` | 200%, 400%, 800%, 1600% | `zoom.200`, `zoom.400`, `zoom.800`, `zoom.1600` |
 | `Shift`+`2`, `3`, `4` | 50%, 25%, 10% | `zoom.50`, `zoom.25`, `zoom.10` |
 | `+`, `=` | Zoom in one step, a factor of 1.25 | `zoom.in` |
@@ -42,7 +43,10 @@ zoom menu, a double-click or the wheel. With the pointer elsewhere — over a
 panel, or beside the picture — the middle of the window stays put instead.
 The two fits center the picture whatever the pointer is over. A zoom to the
 zoom you are already at moves the detail under the pointer to the middle of
-the window instead: a double-click at actual size goes to what was clicked.
+the window instead: `1` at actual size goes to what the pointer is on. A
+double-click at actual size shows the whole image again, so a double-click
+in and a double-click out is a quick look at the pixels. `zoom.100.toggle`
+has no key by default; bind one to it to do the same from the keyboard.
 
 Zooming leaves fit mode; panning does not, so `Space` and then Down scrolls
 through a tall image filling the window.
@@ -763,7 +767,7 @@ region behind: it belongs to the picture it was drawn on.
 | Drag | Pan, with the image following the pointer; with a region selected, draw it, or pull one of its handles — the one at its center moves the whole of it | `gesture.image.left.drag` |
 | `Shift`+Drag | Inside the region, move the whole of it | `gesture.image.shift+left.drag` |
 | Click a region handle | Make it the current handle, the one the arrows move | |
-| Double-click | Actual size, as `1` does | `gesture.image.left.double-click` |
+| Double-click | Actual size, and from actual size back to the whole image | `gesture.image.left.double-click` |
 | `Space`+Drag | Zoom to the box dragged out, wherever the drag begins | |
 | Wheel | Zoom about the pointer | `gesture.image.wheel` |
 | Trackpad scroll | The same, by fractions of a notch | `gesture.image.wheel` |

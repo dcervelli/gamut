@@ -36,7 +36,9 @@ settings are:
 
 `--histogram`, `--info` and `--no-minimap` override the file for that one run.
 If a line has a misspelled name or a value `gamut` does not recognize, it
-names the line on the terminal and uses the rest of the file.
+names the line on the terminal and uses the rest of the file. The window
+says so too as it opens, naming the first such line and how many more there
+are.
 
 ### Keys
 

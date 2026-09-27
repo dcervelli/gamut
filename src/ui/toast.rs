@@ -40,6 +40,12 @@ use super::{PADDING, PANEL_RADIUS, icon};
 /// thing is done.
 pub const LINGER: Duration = Duration::from_millis(2600);
 
+/// How long a message raised as the window opens stays up: that is not
+/// something the reader just did, so their eyes are not on the window yet,
+/// and what it says — a line of the configuration skipped — is longer than
+/// a word about a copy.
+pub const LINGER_AT_OPENING: Duration = Duration::from_secs(8);
+
 /// The room around what a toast says.
 const INSET: [f32; 2] = [12.0, 8.0];
 

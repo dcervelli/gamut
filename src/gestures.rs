@@ -587,7 +587,7 @@ impl Default for Gestures {
                 ),
                 (
                     image(Button::Left, Kind::DoubleClick),
-                    Behavior::Click("zoom.100".to_string()),
+                    Behavior::Click("zoom.100.toggle".to_string()),
                 ),
                 (
                     image(Button::Back, Kind::Click),
@@ -894,7 +894,7 @@ mod tests {
                 Button::Left,
                 Kind::DoubleClick
             ),
-            Some("zoom.100")
+            Some("zoom.100.toggle")
         );
         assert_eq!(
             gestures.click(Surface::Image, Mods::empty(), Button::Left, Kind::Click),

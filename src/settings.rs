@@ -17,7 +17,7 @@
 //! written out on their behalf would hold them to today's default after it
 //! changed. [`Config::template`] is what `--print-config` prints instead —
 //! every setting at its default, commented out. A line the configuration cannot use is said on
-//! the terminal and skipped, the rest still taken; the state file is ours,
+//! the terminal and in the window, and skipped, the rest still taken; the state file is ours,
 //! so a line in it that does not read is only dropped.
 
 use std::fs;
@@ -147,26 +147,28 @@ impl Config {
         }
     }
 
-    /// The configuration file, read, with what it could not use said on the
-    /// terminal. No file, or no directory to look for one in, is every
-    /// default.
-    pub fn load() -> Self {
+    /// The configuration file, read, and a word for the window about what
+    /// it could not use, each thing of which is said on the terminal too.
+    /// No file, or no directory to look for one in, is every default, and
+    /// nothing to say.
+    pub fn load() -> (Self, Option<String>) {
         let Some(path) = config_path() else {
-            return Self::default();
+            return (Self::default(), None);
         };
         let text = match fs::read_to_string(&path) {
             Ok(text) => text,
-            Err(error) if error.kind() == ErrorKind::NotFound => return Self::default(),
+            Err(error) if error.kind() == ErrorKind::NotFound => return (Self::default(), None),
             Err(error) => {
                 eprintln!("{PROGRAM}: reading {}: {error}", shown_path(&path));
-                return Self::default();
+                let said = format!("The configuration could not be read: {error}");
+                return (Self::default(), Some(said));
             }
         };
         let (config, problems) = Self::parse(&text);
-        for (line, problem) in problems {
+        for (line, problem) in &problems {
             eprintln!("{PROGRAM}: {} line {line}: {problem}", shown_path(&path));
         }
-        config
+        (config, complaint(&problems))
     }
 
     /// `text` as a configuration, and each line it could not use, by
@@ -426,6 +428,19 @@ impl StateFile {
     }
 }
 
+/// What the window says about the lines of the configuration it could not
+/// use: the first of them, and how many more, the terminal having the whole
+/// of each. Without the file's path, which the reader knows and the foot of
+/// the window has no room for. `None` when every line was used.
+fn complaint(problems: &[(usize, String)]) -> Option<String> {
+    let ((line, problem), rest) = problems.split_first()?;
+    let problem = crate::escape_controls(problem);
+    Some(match rest.len() {
+        0 => format!("Configuration line {line}: {problem}"),
+        more => format!("Configuration line {line}: {problem} (and {more} more)"),
+    })
+}
+
 fn config_path() -> Option<PathBuf> {
     Some(xdg::config_home()?.join(PROGRAM).join("config"))
 }
@@ -532,6 +547,26 @@ mod tests {
         assert_eq!(lines, [1, 2, 3, 4]);
     }
 
+    /// The window is told the first line the configuration could not use,
+    /// and how many more there were.
+    #[test]
+    fn the_window_is_told_the_first_problem_and_how_many_more() {
+        let (_, problems) = Config::parse(
+            "show_info = true\n\
+             keys.zoom.fit = space Double-click\n\
+             show_grid = true\n",
+        );
+        assert_eq!(
+            complaint(&problems).as_deref(),
+            Some("Configuration line 2: unknown key `Double-click` (and 1 more)")
+        );
+        assert_eq!(
+            complaint(&problems[..1]).as_deref(),
+            Some("Configuration line 2: unknown key `Double-click`")
+        );
+        assert_eq!(complaint(&[]), None);
+    }
+
     /// The template, as printed, sets nothing; with every line uncommented
     /// it sets every default, and says nothing is wrong with it.
     #[test]
@@ -541,7 +576,9 @@ mod tests {
         let uncommented: String = template
             .lines()
             .map(|line| line.strip_prefix("# ").unwrap_or(line))
-            .filter(|line| line.contains(" = "))
+            // A name with no chord by default is written with nothing after
+            // its `=`.
+            .filter(|line| line.contains(" = ") || line.ends_with(" ="))
             .map(|line| format!("{line}\n"))
             .collect();
         // Every setting, every key's name and every gesture's slot.
@@ -553,7 +590,7 @@ mod tests {
             .lines()
             .filter(|line| line.starts_with("gesture."))
             .count();
-        assert_eq!(keys, 92, "{uncommented}");
+        assert_eq!(keys, 93, "{uncommented}");
         assert_eq!(gestures, 10, "{uncommented}");
         assert_eq!(
             uncommented.lines().count(),

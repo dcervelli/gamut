@@ -181,9 +181,15 @@ zoom asked for from the keyboard with the pointer resting on a detail is a
 zoom into that detail, which is what the hand on the mouse was saying; from
 the zoom menu the pointer is on the menu, and the middle of the window is
 what stays. Asked for the zoom the view is already at, `set_zoom_at` puts
-the detail under the anchor in the middle instead — a double-click at actual
-size goes to the detail rather than doing nothing — as a move, being asked
-for by name. The anchor cannot always be honored: an axis the image does not
+the detail under the anchor in the middle instead — `1` at actual size goes
+to the detail rather than doing nothing — as a move, being asked for by
+name. The double-click is not that: its default is `zoom.100.toggle`, whose
+`View::toggle_zoom` goes to actual size about the anchor from anywhere but
+actual size itself, and from there to the whole image, so that in and out
+again is two double-clicks on the same spot. Actual size is judged by the
+view held rather than the view shown, so a second double-click during the
+move the first began still goes back out, and by a zoom set by hand, so a
+fit that comes out at 100% still goes in. The anchor cannot always be honored: an axis the image does not
 overflow stays centered, and a view against an edge stops there, by the same
 `clamp_pan` a drag is held by. The two fits have no anchor — a fit with the
 view left off to one side would show a corner of the image it had just been

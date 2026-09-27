@@ -100,6 +100,7 @@ fn run() -> Result<ExitCode> {
         mut files,
         named,
         paste,
+        complaint,
         options,
     } = args;
 
@@ -200,6 +201,12 @@ fn run() -> Result<ExitCode> {
     // well as on the terminal, since the window is where the reader is.
     if paste && opened_on_nothing {
         app.say(&app::input::nothing_to_paste());
+    }
+    // Said last, so that it is the one up: a configuration that did not
+    // take is why the window is not as it was asked to be, and whoever
+    // started it from a launcher has no terminal to read.
+    if let Some(complaint) = complaint {
+        app.say(&complaint);
     }
     event_loop.run_app(&mut app)?;
 

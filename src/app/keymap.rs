@@ -550,7 +550,8 @@ impl Keymap {
                         .iter()
                         .map(Chord::token)
                         .collect();
-                    let _ = writeln!(text, "# keys.{} = {}", bound.name, tokens.join(" "));
+                    let line = format!("# keys.{} = {}", bound.name, tokens.join(" "));
+                    let _ = writeln!(text, "{}", line.trim_end());
                     for describing in self.rows.iter() {
                         match describing.keys {
                             Keys::Also(name) if name == bound.name => {
@@ -886,7 +887,7 @@ mod tests {
             };
             assert!(words.contains(&first), "{name} under {:?}", row.section);
         }
-        assert_eq!(names.len(), 92);
+        assert_eq!(names.len(), 93);
         for row in keymap.rows() {
             if let Keys::Also(name) | Keys::Gesture(name) = row.keys {
                 assert!(names.contains(&name), "{name} is described but not bound");

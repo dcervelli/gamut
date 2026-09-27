@@ -1130,7 +1130,12 @@ impl App {
     /// Raises a warning before the window opens: what the command line asked
     /// for and could not have, said where the reader will be looking.
     pub fn say(&mut self, message: &str) {
-        self.toast(message, Level::Warning);
+        self.toasts.show(
+            Instant::now(),
+            message.to_string(),
+            Level::Warning,
+            toast::LINGER_AT_OPENING,
+        );
     }
 
     /// Says what the copies prepared on their own threads did. Returns

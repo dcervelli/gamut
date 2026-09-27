@@ -75,6 +75,9 @@ pub enum Action {
     ZoomOut,
     /// Go to this zoom, 1.0 being one image pixel to one screen pixel.
     ZoomTo(f32),
+    /// Go to this zoom, or from it back to the whole image — see
+    /// [`View::toggle_zoom`](crate::view::View::toggle_zoom).
+    ToggleZoom(f32),
     Pan(Direction, PanStep),
     /// Move the region's current handle a pixel that way — the whole of it,
     /// while that is the middle. Nothing without a region, as for the two
@@ -813,6 +816,14 @@ pub static ROWS: &[Row] = &[
             ZoomTo(1.0),
             [digit(PLAIN, KeyCode::Digit1), digit(PLAIN, KeyCode::Digit0)]
         ),
+    },
+    // No key of its own: it is the double-click's, and the name is there to
+    // bind one to.
+    Row {
+        section: Section::Zoom,
+        when: None,
+        help: "Toggle between 100% and fit whole image",
+        keys: one!("zoom.100.toggle", ToggleZoom(1.0), []),
     },
     Row {
         section: Section::Zoom,
@@ -1590,7 +1601,7 @@ pub(super) fn help_sections(
                 .iter()
                 .filter(|row| row.section == section)
                 .map(|row| ui::help::Row {
-                    key: keys.column(row),
+                    key: key_column(keys, gestures, row),
                     does: row.help,
                     when: row.when.map(|when| ui::help::Condition {
                         words: when.describe(),
@@ -1611,6 +1622,27 @@ pub(super) fn help_sections(
                 .collect(),
         }])
         .collect()
+}
+
+/// The key column of `row` as the help lists it: its chords, and then each
+/// click that runs one of its names — a line bound to no key but the
+/// double-click's says so, rather than looking as though nothing reaches it.
+pub fn key_column(keys: &Keymap, gestures: &Gestures, row: &Row) -> String {
+    let mut column = keys.column(row);
+    let Keys::Bound(binds) = row.keys else {
+        return column;
+    };
+    for (spelled, behavior) in gestures.rows() {
+        if let gestures::Behavior::Click(name) = behavior
+            && binds.iter().any(|bound| bound.name == name)
+        {
+            if !column.is_empty() {
+                column.push_str(", ");
+            }
+            column.push_str(&spelled);
+        }
+    }
+    column
 }
 
 /// The heading the mouse's gestures are listed under.
@@ -1853,6 +1885,12 @@ impl App {
                 let anchor = self.zoom_anchor();
                 self.animate(|view, image, viewport| {
                     view.set_zoom_at(scale, anchor, image, viewport);
+                });
+            }
+            ToggleZoom(scale) => {
+                let anchor = self.zoom_anchor();
+                self.animate(|view, image, viewport| {
+                    view.toggle_zoom(scale, anchor, image, viewport);
                 });
             }
             Pan(direction, step) => {
@@ -3405,7 +3443,7 @@ mod tests {
             .collect();
         assert_eq!(rows.len(), ROWS.len());
         for (row, line) in rows.iter().zip(ROWS) {
-            assert_eq!(row.key, keys.column(line));
+            assert_eq!(row.key, key_column(&keys, &gestures, line));
             assert_eq!(row.does, line.help);
             assert_eq!(
                 row.when.map(|when| when.words),
@@ -3437,7 +3475,10 @@ mod tests {
             Some("Center the view on the point under the pointer")
         );
         assert_eq!(mouse.rows.len(), 10);
-        assert_eq!(row("Double-click"), Some("Actual size (100%)"));
+        assert_eq!(
+            row("Double-click"),
+            Some("Toggle between 100% and fit whole image")
+        );
         for when in When::ALL {
             let words = when.describe();
             assert!(
@@ -3471,6 +3512,11 @@ mod tests {
         assert_eq!(
             key("Export the picture as shown to a new JPG or PNG").as_deref(),
             Some("")
+        );
+        // A line no key reaches but a click does is keyed by the click.
+        assert_eq!(
+            key("Toggle between 100% and fit whole image").as_deref(),
+            Some("Double-click")
         );
     }
 

@@ -8,6 +8,13 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Added
 
+- `zoom.100.toggle` goes to actual size, and from actual size back to the
+  whole image. It has no key by default.
+- A configuration file with lines `gamut` cannot use is said in the window
+  as it opens, as well as on the terminal: the first such line, and how many
+  more there are. A key's line in the help now names a click that runs it
+  as well as its keys.
+
 - A georeferenced raster can read out where the pixel under the pointer is
   on the ground: in the file's own projected coordinates and units, or as
   latitude and longitude on WGS 84, in decimal degrees or in degrees,
@@ -21,6 +28,11 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Changed
 
+- A double-click on the picture at actual size goes back to the whole image,
+  where before it moved the detail under the pointer to the middle of the
+  window; a double-click in and a double-click out is a quick look at the
+  pixels. Its default is now `zoom.100.toggle`, and `1` still goes to actual
+  size and nothing else.
 - The EPSG code a GeoTIFF names is now looked up, to find its latitude and
   longitude, where before it was only quoted. The table of codes it is looked
   up in is linked into the binary.
