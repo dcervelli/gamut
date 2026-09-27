@@ -23,6 +23,7 @@ _gamut() {
     '--histogram[Start with the histogram showing]' \
     '--info[Start with the file information panel showing]' \
     '--no-minimap[Start with the minimap off]' \
+    '--alone[Step through only the files named, not the rest of the folder]' \
     '--paused[Open an animation stopped on its first frame]' \
     '--paste[Paste the image on the clipboard and show it first]' \
     '--timing[Print decode and startup timings to stderr]' \

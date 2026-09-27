@@ -47,6 +47,9 @@ pub struct Config {
     pub coordinate_format: CoordinateFormat,
     pub geographic_format: GeographicFormat,
     pub log_counts: bool,
+    /// Whether a single file named on the command line steps on through
+    /// the other images in its folder.
+    pub browse_folder: bool,
     pub keys: Keymap,
     pub gestures: Gestures,
 }
@@ -63,6 +66,7 @@ impl Default for Config {
             coordinate_format: CoordinateFormat::Pixel,
             geographic_format: GeographicFormat::Decimal,
             log_counts: false,
+            browse_folder: true,
             keys: Keymap::default(),
             gestures: Gestures::default(),
         }
@@ -72,7 +76,7 @@ impl Default for Config {
 /// Every setting the configuration file takes, in the order the template
 /// lists them, with the words it wears there. [`Config::value`] writes each
 /// one's value, and [`Config::parse`] reads it back.
-const SETTINGS: [(&str, &str); 9] = [
+const SETTINGS: [(&str, &str); 10] = [
     ("show_ui", "The panels around the picture."),
     (
         "show_minimap",
@@ -100,6 +104,10 @@ const SETTINGS: [(&str, &str); 9] = [
         "log_counts",
         "The histogram's bars as tall as the logarithm of their counts.",
     ),
+    (
+        "browse_folder",
+        "A single file opened alone steps on through the other images in its folder.",
+    ),
 ];
 
 impl Config {
@@ -112,8 +120,8 @@ impl Config {
         let mut text = format!(
             "# {PROGRAM}'s configuration: how the window opens, and what the keys and\n\
              # the mouse do. Each setting is shown at its default, commented out;\n\
-             # take the # off a line to change it. --histogram, --info and\n\
-             # --no-minimap win over what is set here.\n"
+             # take the # off a line to change it. --histogram, --info,\n\
+             # --no-minimap and --alone win over what is set here.\n"
         );
         let config = Self::default();
         for (name, words) in SETTINGS {
@@ -144,6 +152,7 @@ impl Config {
             "coordinate_format" => self.coordinate_format.label().to_ascii_lowercase(),
             "geographic_format" => self.geographic_format.label().to_ascii_lowercase(),
             "log_counts" => self.log_counts.to_string(),
+            "browse_folder" => self.browse_folder.to_string(),
             _ => unreachable!("`{name}` is not in SETTINGS"),
         }
     }
@@ -202,6 +211,7 @@ impl Config {
                 "show_histogram" => Some(&mut config.show_histogram),
                 "show_info" => Some(&mut config.show_info),
                 "log_counts" => Some(&mut config.log_counts),
+                "browse_folder" => Some(&mut config.browse_folder),
                 "pixel_format" => {
                     match PixelFormat::parse(value) {
                         Some(format) => config.pixel_format = format,
@@ -666,6 +676,7 @@ mod tests {
             coordinate_format: CoordinateFormat::Geographic,
             geographic_format: defaults.geographic_format.next(),
             log_counts: !defaults.log_counts,
+            browse_folder: !defaults.browse_folder,
             keys: defaults.keys.clone(),
             gestures: defaults.gestures.clone(),
         };

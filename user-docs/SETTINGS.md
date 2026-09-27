@@ -33,8 +33,10 @@ settings are:
 | `coordinate_format` | `pixel` | Where the pixel under the pointer is read out as, in a georeferenced file: `pixel`, `projected` or `geographic`. A file that cannot give the one chosen shows the pixel |
 | `geographic_format` | `decimal` | How a latitude and longitude are written: `decimal` or `dms` |
 | `log_counts` | `false` | The histogram's bars as tall as the logarithm of their counts |
+| `browse_folder` | `true` | A single file opened by itself steps on through the other images in its folder |
 
-`--histogram`, `--info` and `--no-minimap` override the file for that one run.
+`--histogram`, `--info`, `--no-minimap` and `--alone` override the file for
+that one run.
 If a line has a misspelled name or a value `gamut` does not recognize, it
 names the line on the terminal and uses the rest of the file.
 

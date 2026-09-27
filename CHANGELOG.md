@@ -8,6 +8,14 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Added
 
+- A single file opened by itself steps on through the other images in its
+  folder, as a file manager's viewer does. The folder is read the first time
+  `]`, `[`, `Ctrl+P` or `Tab` asks for more than the one file, and the step
+  lands on the file that comes next in the file list's order; a slow read is
+  said in the window with a count. `--alone`, or `browse_folder = false` in
+  the configuration file, keeps the list to the file. `]` and `[` with nowhere
+  to go now say so rather than doing nothing.
+
 - A georeferenced raster can read out where the pixel under the pointer is
   on the ground: in the file's own projected coordinates and units, or as
   latitude and longitude on WGS 84, in decimal degrees or in degrees,

@@ -18,13 +18,18 @@ use anyhow::{Context, Result, bail};
 /// The extension decides here, since the alternative is opening every file in
 /// the directory to look at its leading bytes. A file named on the command
 /// line is still read for what it holds rather than what it is called.
-fn images_in(dir: &Path) -> Result<Vec<PathBuf>> {
+///
+/// Each image is `dir` joined to its name, so that the empty path — the
+/// folder of a file named without one — lists as bare names, which is how
+/// that file itself was named.
+pub fn images_in(dir: &Path) -> Result<Vec<PathBuf>> {
     let extensions = crate::image::decode::supported_extensions();
     let mut found = Vec::new();
-    let entries = std::fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))?;
+    let entries = std::fs::read_dir(opened(dir))
+        .with_context(|| format!("reading {}", opened(dir).display()))?;
     for entry in entries {
-        let entry = entry.with_context(|| format!("reading {}", dir.display()))?;
-        let candidate = entry.path();
+        let entry = entry.with_context(|| format!("reading {}", opened(dir).display()))?;
+        let candidate = dir.join(entry.file_name());
         let extension = candidate
             .extension()
             .and_then(|e| e.to_str())
@@ -39,6 +44,28 @@ fn images_in(dir: &Path) -> Result<Vec<PathBuf>> {
     }
     found.sort();
     Ok(found)
+}
+
+/// The folder `file` is in, as its name has it: empty for a bare name,
+/// which [`images_in`] reads as the current directory.
+pub fn folder_of(file: &Path) -> PathBuf {
+    file.parent().map(Path::to_path_buf).unwrap_or_default()
+}
+
+/// Whether `path` is a directory to list: the empty path is the current
+/// one.
+pub fn is_folder(path: &Path) -> bool {
+    path.as_os_str().is_empty() || path.is_dir()
+}
+
+/// The path a directory is opened and shown by: `.` for the empty path,
+/// which would otherwise show as nothing at all.
+pub fn opened(dir: &Path) -> &Path {
+    if dir.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        dir
+    }
 }
 
 /// Replaces every directory named on the command line with the images
@@ -90,7 +117,7 @@ pub fn expand(named: Vec<PathBuf>) -> Result<Vec<PathBuf>> {
 pub fn relist(named: &[PathBuf]) -> Vec<PathBuf> {
     let mut files = Vec::new();
     for path in named {
-        if path.is_dir() {
+        if is_folder(path) {
             files.append(&mut images_in(path).unwrap_or_default());
         } else {
             files.push(path.clone());

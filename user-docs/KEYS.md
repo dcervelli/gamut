@@ -90,6 +90,16 @@ file list's menus put it in after that; naming a directory puts the images in it
 on the list, and keeps it up to date as images are added to that directory or
 taken out of it.
 
+A single file opened by itself, as a file manager opens one, steps on
+through the other images in its folder. The folder is not read until you
+ask for more than the one file — `]` or `[`, `Ctrl+P` or `Tab` — so until
+then the window shows just the picture, and the first step lands on the
+file that comes next in the order the list is sorted by. A large folder, or
+one on a network share, may take a moment to read; the window says so while
+it does. `--alone` on the command line, or `browse_folder = false` in the
+configuration file, keeps the list to the one file. With nothing else to
+step to, `]` and `[` say so.
+
 ### The file list
 
 `Tab`, or the button at the head of the top bar, puts the list down the
@@ -109,7 +119,8 @@ half again as tall, beyond which a panorama or a tall screenshot is
 fitted inside with room either side. A row is square until the file has
 been looked at, which happens in the background shortly after the list
 arrives. With a single file there is no
-list to show, and neither the button nor the key appears to do anything.
+list to show: `Tab` reads its folder if it has not been read and puts the
+list up once it is in, and otherwise does nothing you can see.
 
 The menu at the head of the strip says how the list stands. It sorts the
 files by name, by path, by kind of file, by when the file
@@ -154,8 +165,9 @@ every file whose number has `12` in it, and a `-` counts from the end, so
 `:-1` puts the last file first. The arrows move through the rows
 without opening anything; `Enter`, or a click on a row, opens that file and
 closes the chooser; `Esc`, or a click outside it, closes it.
-With a single file on the list there is nothing to choose, and `Ctrl+P` does
-nothing. While it is open, keys go into the field rather than to the picture. The
+With a single file on the list there is nothing to choose: `Ctrl+P` reads
+its folder if it has not been read and opens once it is in, and otherwise
+does nothing. While it is open, keys go into the field rather than to the picture. The
 file on screen is marked in the list, and the cursor starts on it, so
 `Down` and `Enter` is the next file.
 

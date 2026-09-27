@@ -69,8 +69,8 @@ reports where an earlier line of the file had set them.
 The only context is the region's (`keymap::Context::Region`), and it comes
 from a line's `When`: `When::context` maps `RegionSelected` to it and every
 other condition to nothing. The other conditions decide whether a key does
-anything, not which key it is — `files.next` with one file does nothing, and
-there is nothing else it should mean — so they only dim the help popup's
+anything, not which key it is — `files.chooser` with one file does nothing,
+and there is nothing else it should mean — so they only dim the help popup's
 rows. The region is different: with one up the arrows could mean the region
 or the view, and the user may want either. So dispatch tries the names of
 each context that holds, in `keymap::ORDER`, before the plain names. By

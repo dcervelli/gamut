@@ -15,6 +15,7 @@ use winit::event::ElementState;
 use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey, PhysicalKey};
 
 use super::App;
+use super::folder::Then;
 use super::copying::Done;
 use super::keymap::{Bound, Chord, KeyName, Keymap, Keys, Row};
 use crate::clipboard;
@@ -1040,7 +1041,7 @@ pub static ROWS: &[Row] = &[
     },
     Row {
         section: Section::Files,
-        when: Some(When::SeveralFiles),
+        when: None,
         help: "Next file",
         keys: one!(
             "files.next",
@@ -1050,7 +1051,7 @@ pub static ROWS: &[Row] = &[
     },
     Row {
         section: Section::Files,
-        when: Some(When::SeveralFiles),
+        when: None,
         help: "Previous file",
         keys: one!(
             "files.previous",
@@ -1879,14 +1880,8 @@ impl App {
             CycleUpscale => self.view.cycle_upscale(),
             // Nothing to draw yet: the file is only being asked for, and what
             // is on screen stays until it arrives.
-            NextFile => {
-                self.step(true);
-                return Effect::Nothing;
-            }
-            PreviousFile => {
-                self.step(false);
-                return Effect::Nothing;
-            }
+            NextFile => return self.step(true),
+            PreviousFile => return self.step(false),
             // The count's own press, so that the key and the press cannot
             // come to mean different things — except that the key only
             // opens: `Esc` closes the chooser, as a file finder's does.
@@ -2236,7 +2231,7 @@ impl App {
         let georeference = current.and_then(|current| current.exif.georeference.as_ref());
         Conditions {
             region_selected: matches!(self.marking.selection, Selection::Shown(_)),
-            several_files: self.files.len() > 1,
+            several_files: self.files.len() > 1 || self.folder.unread(),
             animation: self.animation.is_some(),
             pages: current.is_some_and(|current| {
                 matches!(
@@ -2798,14 +2793,8 @@ impl App {
             // come to mean different things. Nothing is drawn differently
             // yet: the file is only being asked for, and what is on screen
             // stays until it arrives.
-            Control::Previous => {
-                self.step(false);
-                Effect::Nothing
-            }
-            Control::Next => {
-                self.step(true);
-                Effect::Nothing
-            }
+            Control::Previous => self.step(false),
+            Control::Next => self.step(true),
             Control::Minimap => {
                 self.panels.show_minimap = !self.panels.show_minimap;
                 Effect::Redraw
@@ -2850,7 +2839,12 @@ impl App {
             | Control::Sorting => Effect::Nothing,
             // The file list: up or down, and scrolled to the file on
             // screen as it comes up.
+            // With one file, the folder beside it, where there is one to
+            // read: the list comes up once it is in.
             Control::Filmstrip => {
+                if self.files.len() < 2 && self.read_folder(Then::Filmstrip) {
+                    return Effect::Nothing;
+                }
                 self.panels.show_filmstrip = !self.panels.show_filmstrip;
                 self.filmstrip.reveal();
                 Effect::Redraw
@@ -3057,14 +3051,23 @@ impl App {
             // stands with the cursor on the file on screen, and the first
             // rows' thumbnails are asked for ahead of the rest.
             Control::Chooser => {
+                let Some(open) = self.shown.as_ref().map(|shown| {
+                    egui::Popup::is_id_open(&shown.gui.ctx, ui::chooser::id())
+                }) else {
+                    return Effect::Nothing;
+                };
+                // Nothing to choose from a list of one: the folder beside
+                // it, where there is one to read, and the chooser once it
+                // is in; the key does nothing otherwise, as the count it
+                // stands beside is not shown.
+                if !open && self.files.len() < 2 && self.read_folder(Then::Chooser) {
+                    return Effect::Nothing;
+                }
                 let Some(shown) = &self.shown else {
                     return Effect::Nothing;
                 };
                 let ctx = &shown.gui.ctx;
-                let open = egui::Popup::is_id_open(ctx, ui::chooser::id());
                 egui::Popup::close_all(ctx);
-                // Nothing to choose from a list of one: the key does
-                // nothing, as the count it stands beside is not shown.
                 if !open && self.files.len() > 1 {
                     egui::Popup::open_id(ctx, ui::chooser::id());
                     self.chooser.open(self.files.paths(), self.files.index());

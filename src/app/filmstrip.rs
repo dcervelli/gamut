@@ -257,7 +257,7 @@ mod tests {
     /// than a closure, which cannot say that the key borrows the path
     /// and nothing else.
     fn known<'a>(known: &HashMap<PathBuf, Facts>, path: &'a Path) -> Key<'a> {
-        Key::of(path, known.get(path))
+        Key::of(path, known.get(path), None)
     }
 
     fn facts(format: Option<&'static str>) -> Facts {

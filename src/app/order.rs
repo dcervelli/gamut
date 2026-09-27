@@ -13,6 +13,7 @@ use std::cmp::Ordering;
 use std::path::Path;
 use std::time::SystemTime;
 
+use super::folder::Glimpse;
 use crate::thumbnailer::Facts;
 use crate::ui::filmstrip::{Direction, Order, Sort};
 
@@ -33,14 +34,24 @@ pub(super) struct Key<'a> {
 
 impl<'a> Key<'a> {
     /// What is known about `path`: its header's facts, where they have
-    /// been read.
-    pub(super) fn of(path: &'a Path, facts: Option<&Facts>) -> Self {
-        Key {
-            path,
-            format: facts.and_then(|facts| facts.format),
-            bytes: facts.and_then(|facts| facts.bytes),
-            size: facts.and_then(|facts| facts.size),
-            modified: facts.and_then(|facts| facts.modified),
+    /// been read, and what a folder read glimpsed of it where they have
+    /// not.
+    pub(super) fn of(path: &'a Path, facts: Option<&Facts>, glimpse: Option<&Glimpse>) -> Self {
+        match facts {
+            Some(facts) => Key {
+                path,
+                format: facts.format,
+                bytes: facts.bytes,
+                size: facts.size,
+                modified: facts.modified,
+            },
+            None => Key {
+                path,
+                format: glimpse.and_then(|glimpse| glimpse.format),
+                bytes: glimpse.and_then(|glimpse| glimpse.bytes),
+                size: glimpse.and_then(|glimpse| glimpse.size),
+                modified: glimpse.and_then(|glimpse| glimpse.modified),
+            },
         }
     }
 

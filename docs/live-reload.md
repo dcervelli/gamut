@@ -10,6 +10,36 @@ this page is about. `src/listing.rs` owns the reading. Name order is how a
 directory is *read*; the order the list stands in is the
 [file list's](filmstrip.md), and a rebuild keeps it.
 
+## The folder beside a single file
+
+One file named alone — nothing else on the command line, no `--paste`, and
+`browse_folder` left on — stands for itself until something asks for more:
+a step, the chooser or the file list. That is when its folder is read,
+not at startup, so that a file opened from a file manager comes up as one
+picture with none of the list's panels around it, and the file list, which
+is on by default, does not appear beside it a moment later and refit the
+picture. `app/folder.rs` owns it: `Folder::Unread` from `App::new`,
+`App::read_folder` from `App::step` and the chooser's and the list's
+presses, and `App::settle_folder` when the read comes back.
+
+The read runs on a thread of its own, since a folder can be large or on a
+network mount, and it reads what the order in force needs of every image
+alongside the names — a `stat` for a date or a size, the leading bytes for
+a type, the header for the dimensions — as a `Glimpse` that `App::key_of`
+falls back on until the thumbnail thread has read the header. The
+thumbnail thread is not the one to ask: it reads everything about a file at
+once, at low priority, and a step has to wait for the whole folder to land
+on the file that really comes next. The wait is said as a file's is, in the
+toast that goes up after `files::SLOW_READ`, with a count once there is one.
+
+The folder then takes the file's place in `App::named`, so it is watched
+and rebuilt like a directory named outright. A bare name's folder is the
+empty path, which `listing::images_in` reads as the current directory and
+lists as bare names, so the file is found among them under the spelling it
+was named by; a file the folder does not list — read for what it holds
+rather than what its extension says — stays named beside it. Like any
+rebuild, it waits for a read in flight to finish.
+
 ## Watching
 
 The file on screen is watched, and a write to it by anything else — a render

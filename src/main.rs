@@ -179,6 +179,10 @@ fn run() -> Result<ExitCode> {
         let _ = proxy.send_event(app::UserEvent::Picked(picked));
     });
     let proxy = event_loop.create_proxy();
+    let folder: app::folder::Deliver = std::sync::Arc::new(move |listed| {
+        let _ = proxy.send_event(app::UserEvent::Folder(listed));
+    });
+    let proxy = event_loop.create_proxy();
     clipboard::watch(watch::INTERVAL, move |offered| {
         proxy.send_event(app::UserEvent::Clipboard(offered)).is_ok()
     });
@@ -194,6 +198,7 @@ fn run() -> Result<ExitCode> {
             monitors,
             thumbnailer,
             picker,
+            folder,
         },
     );
     // `--paste` on purpose, and nothing to paste: said in the window as

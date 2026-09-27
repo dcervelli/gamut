@@ -7,6 +7,7 @@ mod edits;
 mod exporting;
 mod files;
 mod filmstrip;
+pub mod folder;
 mod gui;
 pub mod input;
 mod kept;
@@ -17,6 +18,7 @@ mod region;
 mod visited;
 mod window;
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -52,6 +54,7 @@ use crate::ui::{self, Current, FileFacts, FrameInput, Panels, Rect, Toast};
 use crate::view::{View, Viewport};
 use crate::watch::{self, Watch};
 use filmstrip::Filmstrip;
+use folder::{Folder, Then};
 use visited::Visited;
 
 use animation::Animation;
@@ -84,6 +87,9 @@ pub enum UserEvent {
     /// A picture this program could show has arrived on the clipboard, or
     /// the one there has gone — see `clipboard::watch`.
     Clipboard(bool),
+    /// The folder beside a single file has been read — see
+    /// [`folder`].
+    Folder(folder::Listed),
 }
 
 /// The other threads, and how each reaches the loop: made in `main` from
@@ -97,6 +103,8 @@ pub struct Threads {
     pub thumbnailer: Thumbnailer,
     /// How the desktop's file dialog hands its answer back.
     pub picker: portal::Deliver,
+    /// How the folder beside a single file comes back once it is read.
+    pub folder: folder::Deliver,
 }
 
 /// The file the command line asked for first, for the window to open on:
@@ -196,6 +204,16 @@ pub struct App {
     /// was a file.
     named: Vec<PathBuf>,
     directories: Vec<Watch>,
+    /// The folder beside a single file named alone: unread until a step,
+    /// the chooser or the file list asks for more than the one file, then
+    /// read on its thread — see [`folder`]. A read that comes back under a
+    /// read of a file waits in `listed` until the list can be rebuilt; what
+    /// it learned of each image for the order is kept in `glimpsed` until
+    /// the thumbnail thread has read that image's header.
+    folder: Folder,
+    listed: Option<folder::Listed>,
+    folder_delivered: folder::Deliver,
+    glimpsed: HashMap<PathBuf, folder::Glimpse>,
     /// The colors everything is drawn in, and the palette file they came
     /// from, watched on the same cadence as the image: Omarchy rewrites it
     /// wholesale when the desktop's theme changes, and the window should
@@ -360,6 +378,7 @@ impl App {
             monitors,
             thumbnailer,
             picker,
+            folder: folder_delivered,
         } = threads;
         let Options {
             overrides,
@@ -387,6 +406,16 @@ impl App {
             .filter(|path| path.is_dir())
             .map(|path| Watch::new(path))
             .collect();
+        // One file named, and nothing else: its folder is there to step on
+        // through, once it is asked for.
+        let folder = match (named.as_slice(), &source) {
+            ([file], Some(Source::Disk))
+                if config.browse_folder && files.len() == 1 && !file.is_dir() =>
+            {
+                Folder::Unread { file: file.clone() }
+            }
+            _ => Folder::Closed,
+        };
         let theme_watch = theme::watch();
         let mut view = View::new();
         view.set_upscale(upscale);
@@ -410,6 +439,10 @@ impl App {
             openers: Vec::new(),
             named,
             directories,
+            folder,
+            listed: None,
+            folder_delivered,
+            glimpsed: HashMap::new(),
             theme: Theme::detect(),
             theme_watch,
             next_poll: Instant::now() + watch::INTERVAL,
@@ -682,9 +715,14 @@ impl App {
         self.panels.show_filmstrip && self.files.len() > 1
     }
 
-    /// What is known about `path` that the list is ordered by.
-    fn key_of<'p>(chooser: &Chooser, path: &'p Path) -> order::Key<'p> {
-        order::Key::of(path, chooser.facts_of(path))
+    /// What is known about `path` that the list is ordered by: what its
+    /// header said, or failing that what a folder read glimpsed of it.
+    fn key_of<'p>(
+        chooser: &Chooser,
+        glimpsed: &HashMap<PathBuf, folder::Glimpse>,
+        path: &'p Path,
+    ) -> order::Key<'p> {
+        order::Key::of(path, chooser.facts_of(path), glimpsed.get(path))
     }
 
     /// Puts the list in the order the file list asks for, keeping the
@@ -697,7 +735,7 @@ impl App {
             return Effect::Nothing;
         }
         let places = order::arrange(self.files.len(), self.filmstrip.order(), |index| {
-            Self::key_of(&self.chooser, self.files.path(index))
+            Self::key_of(&self.chooser, &self.glimpsed, self.files.path(index))
         });
         let moved = self.files.reorder(&places);
         // The list itself has not changed, only its order: the two panels
@@ -1094,9 +1132,12 @@ impl App {
 
     /// The toast about a read that is taking its time, once it has taken
     /// [`files::SLOW_READ`]: up for as long as the read is, whatever it is
-    /// then reading, and gone the moment the file arrives.
+    /// then reading, and gone the moment the file arrives. A folder being
+    /// read beside a single file is said the same way.
     fn reading(&self) -> Option<Toast> {
-        let pending = self.files.pending()?;
+        let Some(pending) = self.files.pending() else {
+            return self.reading_folder();
+        };
         let raised = pending.announced?;
         let name = file_label(self.files.path(pending.index));
         let message = if self.current.is_some() && pending.index == self.files.index() {
@@ -1168,6 +1209,7 @@ impl App {
         self.next_poll = now + watch::INTERVAL;
         self.poll_file()
             .also(self.poll_directories())
+            .also(self.poll_folder())
             .also(self.poll_order())
             .also(self.poll_theme())
             .also(self.poll_copies())
@@ -1213,11 +1255,12 @@ impl App {
         });
         let filmstrip = if self.filmstrip_showing() {
             let (files, chooser, visited) = (&self.files, &self.chooser, &self.visited);
+            let glimpsed = &self.glimpsed;
             let listed = |path: &Path| files.position(path).is_some();
             let (back, forward) = (visited.can_back(listed), visited.can_forward(listed));
             Some(self.filmstrip.input(
                 &self.thumbs,
-                |path| Self::key_of(chooser, path),
+                |path| Self::key_of(chooser, glimpsed, path),
                 files.shown_path(),
                 back,
                 forward,
@@ -1576,11 +1619,22 @@ impl App {
         }
     }
 
-    /// Moves to the next or previous file.
-    fn step(&mut self, forward: bool) {
+    /// Moves to the next or previous file. With no other file on the list,
+    /// reads the folder beside a single file to step into, where there is
+    /// one, and says there is nowhere to go where there is not. Nothing to
+    /// draw for a step: what is on screen stays until the file arrives.
+    pub(super) fn step(&mut self, forward: bool) -> Effect {
+        if self.files.len() < 2 {
+            if self.files.len() == 0 || self.read_folder(Then::Step(forward)) {
+                return Effect::Nothing;
+            }
+            self.toast("No other files to step to", Level::Message);
+            return Effect::Redraw;
+        }
         if let Some(request) = self.files.step(forward) {
             self.send(request);
         }
+        Effect::Nothing
     }
 
     /// Puts a finished read on screen. Returns `false` if the upload failed,
@@ -1958,9 +2012,11 @@ impl App {
                 }
             }
         }
-        // A sort asked for under the read waited for it: now is the
-        // first chance, and sooner than the next poll.
+        // A sort asked for under the read waited for it, and so did a
+        // folder read: now is the first chance, and sooner than the next
+        // poll.
         let _ = self.poll_order();
+        let _ = self.settle_folder();
         Effect::Redraw
     }
 
@@ -2223,6 +2279,7 @@ impl ApplicationHandler<UserEvent> for App {
             self.shown.as_ref().and_then(|shown| shown.gui.deadline()),
             next_frame,
             self.sizing.map(|since| since + SIZING_GRACE),
+            self.folder_due(now),
         ]
         .into_iter()
         .flatten()
@@ -2257,6 +2314,7 @@ impl ApplicationHandler<UserEvent> for App {
                 }
             }
             UserEvent::Picked(picked) => self.picked(picked),
+            UserEvent::Folder(listed) => self.folder_read(listed),
             UserEvent::Clipboard(offered) => self.clipboard_changed(offered),
             UserEvent::Monitor => self.sync_monitor(),
             // A frame from the player of a file already stepped past is news
@@ -2604,6 +2662,7 @@ mod tests {
                 coordinate_format: ui::CoordinateFormat::Pixel,
                 geographic_format: ui::GeographicFormat::Decimal,
                 log_counts: false,
+                browse_folder: true,
                 keys: keymap::Keymap::default(),
                 gestures: Gestures::default(),
             },
@@ -2622,6 +2681,7 @@ mod tests {
             monitors: None,
             thumbnailer: Thumbnailer::detached(),
             picker: Arc::new(|_| {}),
+            folder: Arc::new(|_| {}),
         }
     }
 
@@ -2693,6 +2753,154 @@ mod tests {
             },
             outcome,
         });
+    }
+
+    /// One file named alone, answered: the folder beside it unread.
+    fn alone_in(name: &str, files: &[(&str, u32, u32)], at: usize) -> (App, PathBuf, Vec<PathBuf>) {
+        let (dir, paths) = written(name, files);
+        let mut app = open(vec![paths[at].clone()], vec![paths[at].clone()]);
+        answer(&mut app, Reload::Fresh);
+        (app, dir, paths)
+    }
+
+    /// The folder read that the application has just started, read here
+    /// instead: its thread delivers to nothing in a test.
+    fn read_beside(app: &mut App, file: &Path) {
+        assert!(
+            matches!(app.folder, Folder::Reading { .. }),
+            "the folder is being read"
+        );
+        let listed = folder::read(file, app.filmstrip.order().sort, &Default::default());
+        let _ = app.folder_read(listed);
+    }
+
+    /// A single file named alone is one file until a step asks for more;
+    /// then its folder is read, takes its place among the names, and the
+    /// step lands on the file after it.
+    #[test]
+    fn a_single_file_steps_on_into_its_folder() {
+        let (mut app, dir, paths) = alone_in(
+            "folder-step",
+            &[("a.png", 8, 8), ("b.png", 8, 8), ("c.png", 8, 8)],
+            1,
+        );
+        assert_eq!(app.files.len(), 1);
+        assert!(app.folder.unread());
+        assert!(app.conditions().several_files, "the keys are live");
+
+        let _ = app.step(true);
+        assert!(app.files.is_idle(), "nothing asked for until the folder is in");
+        read_beside(&mut app, &paths[1]);
+        assert_eq!(app.files.paths(), paths.as_slice());
+        let pending = app.files.pending().expect("the next file is asked for");
+        assert_eq!(app.files.path(pending.index), paths[2]);
+        assert_eq!(app.named, std::slice::from_ref(&dir), "the folder is what is named now");
+        assert!(matches!(app.folder, Folder::Closed));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Under a sort that needs more than the names, the read glimpses what
+    /// it needs of every file, and the step lands on the file that really
+    /// comes next in that order.
+    #[test]
+    fn a_folder_read_steps_in_the_order_in_force() {
+        let (mut app, dir, paths) = alone_in(
+            "folder-order",
+            &[("a.png", 4, 4), ("b.png", 256, 256), ("c.png", 64, 64)],
+            2,
+        );
+        let bytes = |path: &PathBuf| std::fs::metadata(path).unwrap().len();
+        assert!(
+            bytes(&paths[0]) < bytes(&paths[2]) && bytes(&paths[2]) < bytes(&paths[1]),
+            "the sizes run a, c, b, or this is not the case being tested"
+        );
+        app.filmstrip.set_order(ui::filmstrip::Order {
+            sort: ui::filmstrip::Sort::Size,
+            direction: ui::filmstrip::Direction::Ascending,
+        });
+
+        let _ = app.step(true);
+        read_beside(&mut app, &paths[2]);
+        let pending = app.files.pending().expect("the next file is asked for");
+        assert_eq!(
+            app.files.path(pending.index),
+            paths[1],
+            "after c by size is b, where by name it would be a"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A folder holding nothing but the file says so, and the file stays
+    /// the only one; a step after that has nothing to read.
+    #[test]
+    fn a_folder_of_one_says_so() {
+        let (mut app, dir, paths) = alone_in("folder-one", &[("only.png", 8, 8)], 0);
+        let _ = app.step(false);
+        read_beside(&mut app, &paths[0]);
+        assert_eq!(app.files.len(), 1);
+        assert!(app.files.is_idle());
+        let said = app.showing_toast().expect("a message").message;
+        assert!(said.starts_with("No other images in "), "{said}");
+
+        let _ = app.step(true);
+        assert!(matches!(app.folder, Folder::Closed), "read once only");
+        let said = app.showing_toast().expect("a message").message;
+        assert_eq!(said, "No other files to step to");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A folder read that arrives under a read of a file waits for it,
+    /// the list being rebuilt between reads only.
+    #[test]
+    fn a_folder_read_waits_for_the_file_in_flight() {
+        let (mut app, dir, paths) = alone_in(
+            "folder-wait",
+            &[("a.png", 8, 8), ("b.png", 8, 8)],
+            0,
+        );
+        let _ = app.step(true);
+        let reload = app.files.reload().expect("nothing in flight");
+        app.send(reload);
+        read_beside(&mut app, &paths[0]);
+        assert_eq!(app.files.len(), 1, "not under a read");
+        assert!(app.listed.is_some());
+
+        answer(&mut app, Reload::InPlace);
+        assert_eq!(app.files.len(), 2);
+        let pending = app.files.pending().expect("the step it was read for");
+        assert_eq!(app.files.path(pending.index), paths[1]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The file list's toggle with one file reads the folder, and puts
+    /// the list up once it is in, whatever the toggle stood at.
+    #[test]
+    fn the_file_list_reads_the_folder_and_comes_up() {
+        let (mut app, dir, paths) = alone_in(
+            "folder-list",
+            &[("a.png", 8, 8), ("b.png", 8, 8)],
+            0,
+        );
+        assert!(!app.panels.show_filmstrip);
+        let _ = app.act(ui::Command::Press(ui::Control::Filmstrip));
+        assert!(!app.panels.show_filmstrip, "not until the folder is in");
+        read_beside(&mut app, &paths[0]);
+        assert!(app.panels.show_filmstrip);
+        assert!(app.filmstrip_showing());
+        assert!(app.files.is_idle(), "the list, and no step");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Only one file named alone has a folder to step into: a directory,
+    /// or several files, are the list.
+    #[test]
+    fn only_a_file_named_alone_has_a_folder() {
+        let (app, dir) = opening_directory("folder-dir", &[("a.png", 8, 8)]);
+        assert!(matches!(app.folder, Folder::Closed));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (app, dir) = opening("folder-two", &[("a.png", 8, 8), ("b.png", 8, 8)]);
+        assert!(matches!(app.folder, Folder::Closed));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A row of the chooser asks for the file it names, wherever the list
@@ -3406,7 +3614,7 @@ mod tests {
         app.motion = None;
         let _ = app.perform(Action::ToggleRegion);
         draw(&mut app);
-        app.step(true);
+        let _ = app.step(true);
         answer(&mut app, Reload::Fresh);
         assert_eq!(app.files.index(), 1);
         assert_eq!(app.marking.selection, Selection::Off);
@@ -3605,7 +3813,7 @@ mod tests {
             .zoom_in(VIEWPORT.center(), app.image_size(), VIEWPORT);
         let zoom = app.view.zoom(app.image_size(), VIEWPORT);
 
-        app.step(true);
+        let _ = app.step(true);
         // Nothing has moved yet: the file has only been asked for.
         assert_eq!(app.files.index(), 0);
 
@@ -3626,20 +3834,20 @@ mod tests {
         let (mut app, dir) = app_over("compared", &[("a.png", 64, 48), ("b.png", 64, 48)]);
 
         // b.png is left at 4x, so it has a view of its own to be put back.
-        app.step(true);
+        let _ = app.step(true);
         answer(&mut app, Reload::Fresh);
         app.view
             .set_zoom_at(4.0, VIEWPORT.center(), app.image_size(), VIEWPORT);
 
         // Back to a.png, and on to somewhere else in it.
-        app.step(false);
+        let _ = app.step(false);
         answer(&mut app, Reload::Fresh);
         app.view
             .set_zoom_at(2.0, VIEWPORT.center(), app.image_size(), VIEWPORT);
         let zoom = app.view.zoom(app.image_size(), VIEWPORT);
 
         // And on to b.png again: at a.png's zoom, not the 4x it was left in.
-        app.step(true);
+        let _ = app.step(true);
         answer(&mut app, Reload::Fresh);
         assert_eq!(app.files.shown_path(), Some(dir.join("b.png").as_path()));
         assert_eq!(app.view.fit(), None);
@@ -3668,7 +3876,7 @@ mod tests {
 
         // Another size, so nothing carries over: b.png opens fitted and with
         // the display its own pixels ask for.
-        app.step(true);
+        let _ = app.step(true);
         answer(&mut app, Reload::Fresh);
         assert_eq!(app.view.fit(), Some(Fit::Whole));
         let display = &app.current.as_ref().expect("b.png is on screen").display;
@@ -3676,7 +3884,7 @@ mod tests {
         assert_eq!(display.colormap(), Colormap::Gray);
 
         // And back, to everything a.png was left in.
-        app.step(false);
+        let _ = app.step(false);
         answer(&mut app, Reload::Fresh);
         assert_eq!(app.files.shown_path(), Some(dir.join("a.png").as_path()));
         assert_eq!(app.view.fit(), None);
@@ -3725,13 +3933,13 @@ mod tests {
         assert!(current.sample(48, 0).is_none(), "off the turned picture");
 
         // Another file arrives unturned.
-        app.step(true);
+        let _ = app.step(true);
         answer(&mut app, Reload::Fresh);
         assert_eq!(app.image_size(), [32.0, 16.0]);
         assert_eq!(app.current.as_ref().unwrap().turn, Turn::NONE);
 
         // And the first comes back turned.
-        app.step(false);
+        let _ = app.step(false);
         answer(&mut app, Reload::Fresh);
         assert_eq!(app.image_size(), [48.0, 64.0]);
         assert_eq!(app.perform(TurnLeft), Effect::Redraw);
@@ -3845,7 +4053,7 @@ mod tests {
         assert_eq!(Effect::Nothing, app.poll_directories());
         assert_eq!(app.files.len(), 2);
         assert_eq!(app.files.shown_path(), Some(dir.join("a.png").as_path()));
-        app.step(true);
+        let _ = app.step(true);
         assert_eq!(
             app.files.pending().map(|pending| pending.index),
             Some(1),
@@ -3864,7 +4072,7 @@ mod tests {
         answer(&mut app, Reload::Fresh);
 
         write_png(&dir, "c.png", 8, 8);
-        app.step(true);
+        let _ = app.step(true);
         assert!(!app.files.is_idle());
         for _ in 0..4 {
             assert_eq!(
@@ -3897,13 +4105,13 @@ mod tests {
             &[("a.png", 64, 48), ("b.png", 32, 32), ("c.png", 16, 16)],
         );
 
-        app.step(true);
+        let _ = app.step(true);
         let overtaken = app
             .files
             .pending()
             .expect("a request is in flight")
             .generation;
-        app.step(true);
+        let _ = app.step(true);
         assert_eq!(app.files.pending().map(|pending| pending.index), Some(2));
 
         // The first file arrives late, after the user has moved past it.
@@ -4015,7 +4223,7 @@ mod tests {
         );
         std::fs::write(app.files.path(1), b"not a png at all").expect("the file is writable");
 
-        app.step(true);
+        let _ = app.step(true);
         answer(&mut app, Reload::Fresh);
         assert_eq!(app.files.index(), 0, "the broken file cannot be shown");
         assert_eq!(
@@ -4043,7 +4251,7 @@ mod tests {
                 .expect("the file is writable");
         }
 
-        app.step(true);
+        let _ = app.step(true);
         for _ in 0..app.files.len() {
             if app.files.is_idle() {
                 break;
@@ -4065,7 +4273,7 @@ mod tests {
         app.view
             .zoom_in(VIEWPORT.center(), app.image_size(), VIEWPORT);
 
-        app.step(true);
+        let _ = app.step(true);
         answer(&mut app, Reload::Fresh);
         assert_eq!(app.files.index(), 1);
         assert_eq!(app.view.fit(), Some(Fit::Whole));
@@ -4189,10 +4397,10 @@ mod tests {
         let _ = app.perform(NextFrame);
         assert_eq!(app.animation.as_ref().unwrap().head(), 1);
 
-        app.step(true);
+        let _ = app.step(true);
         answer(&mut app, Reload::Fresh);
         assert!(app.animation.is_none(), "a still has no clock");
-        app.step(true);
+        let _ = app.step(true);
         answer(&mut app, Reload::Fresh);
         let playback = app.animation.as_ref().expect("back on the animation");
         assert_eq!(playback.head(), 1);
@@ -4303,9 +4511,9 @@ mod tests {
         assert_eq!(app.current.as_ref().unwrap().page, 1);
 
         // Away and back: the page it was left on.
-        app.step(true);
+        let _ = app.step(true);
         answer(&mut app, Reload::Fresh);
-        app.step(true);
+        let _ = app.step(true);
         assert_eq!(
             app.files.pending().and_then(|pending| pending.page),
             Some(1)
@@ -4458,7 +4666,7 @@ mod tests {
             &[("a.png", 8, 8), ("b.png", 8, 8), ("c.png", 8, 8)],
         );
         answer(&mut app, Reload::Fresh);
-        app.step(true);
+        let _ = app.step(true);
         answer(&mut app, Reload::Fresh);
         assert_eq!(app.files.shown_path(), Some(dir.join("b.png").as_path()));
 
@@ -4486,7 +4694,7 @@ mod tests {
             app.filmstrip
                 .input(
                     &app.thumbs,
-                    |path| App::key_of(chooser, path),
+                    |path| App::key_of(chooser, &HashMap::new(), path),
                     None,
                     false,
                     false,
@@ -4663,7 +4871,7 @@ mod tests {
         assert_eq!(app.poll_order(), Effect::Nothing, "in order already");
 
         // Under a read: the list is left alone until the read lands.
-        app.step(true);
+        let _ = app.step(true);
         assert_eq!(app.press(ui::Control::SortBy(Sort::Height)), Effect::Redraw);
         let _ = app.press(ui::Control::SortBy(Sort::Size));
         assert_eq!(names(&app), ["a.png", "b.png", "c.png"]);
@@ -4692,9 +4900,9 @@ mod tests {
         assert_eq!(app.perform(Action::Back), Effect::Nothing);
         assert!(app.files.is_idle(), "nowhere to go");
 
-        app.step(true);
+        let _ = app.step(true);
         answer(&mut app, Reload::Fresh);
-        app.step(true);
+        let _ = app.step(true);
         answer(&mut app, Reload::Fresh);
         assert_eq!(app.files.shown_path(), Some(dir.join("c.png").as_path()));
         assert!(app.conditions().visited_before && !app.conditions().visited_after);
@@ -4715,7 +4923,7 @@ mod tests {
         assert!(!app.conditions().visited_before);
 
         // A step from here is somewhere new: what lay ahead is cut off.
-        app.step(true);
+        let _ = app.step(true);
         answer(&mut app, Reload::Fresh);
         assert_eq!(app.files.shown_path(), Some(dir.join("b.png").as_path()));
         assert!(!app.conditions().visited_after);
@@ -5145,7 +5353,7 @@ mod tests {
         // Step away, then undo: the old name is back, and so is the file.
         // The list is in name order, so the renamed file has moved along
         // it, and moves back once the read of it lands.
-        app.step(true);
+        let _ = app.step(true);
         answer(&mut app, Reload::Fresh);
         assert_eq!(app.files.shown_path(), Some(dir.join("b.png").as_path()));
         assert_eq!(app.files.path(1), dir.join("c.jpg"), "sorted after b.png");

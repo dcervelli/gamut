@@ -24,6 +24,9 @@ app/           the event loop's state and winit handlers
                  off it, and the order it is put in (pure, tested)
   order.rs       the permutation an Order makes of the list — stable, the unknown last — and the
                  sections it breaks it into (pure, tested)
+  folder.rs      the folder beside a single file named alone: unread until a step, the chooser or
+                 the file list asks for more, then read on a thread of its own with what the order
+                 in force needs of each image, and taken into the list between reads
   visited.rs     Visited: the files that have been on screen, and going back and forward through
                  them as a browser does (pure, tested)
   filmstrip.rs   Filmstrip: the file list's state — the order in force, whether the list has fallen
