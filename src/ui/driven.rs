@@ -177,6 +177,8 @@ fn input(logical: [f32; 2], count: usize) -> FrameInput {
         empty: false,
         folder: None,
         picking: false,
+        standin: None,
+        waiting: false,
     }
 }
 
@@ -701,6 +703,40 @@ fn the_histogram_panel_hands_back_the_hand_on_its_band() {
 /// The curves are dead under a false color, which clips at the top of its
 /// ramp whatever curve is chosen, and refuse the press; the ramps beside
 /// them stay live, and the gray one brings the curves back.
+/// While another file is on its way in, the panels about the picture keep
+/// their place and their size and say nothing of the picture leaving: none
+/// of the histogram's rows, and nothing on the information panel to copy.
+/// The place is the one worked out for the panel, from the first pass: what
+/// takes the pointer is where the panel is drawn.
+#[test]
+fn the_panels_wait_for_the_file_coming_in() {
+    let mut both = panels();
+    both.show_histogram = true;
+    both.show_info = true;
+    let mut harness = open(WINDOW, 2, both);
+    let content = super::chrome::content_area(WINDOW, true, super::chrome::Parts::NONE);
+    let placed = super::histogram::panel(content).expect("the window has room for it");
+    let full = harness.get_by_label("Histogram panel").rect();
+    assert_eq!(
+        full,
+        egui::Rect::from_min_size(
+            egui::pos2(placed.x, placed.y),
+            egui::vec2(placed.width, placed.height)
+        )
+    );
+    assert!(harness.query_by_label("Window 0").is_some());
+    assert!(harness.query_by_label("Copy All").is_some());
+
+    harness.state_mut().input.waiting = true;
+    // A few passes rather than a run: the spinner asks for a pass on every
+    // pass, and would never let a run settle.
+    harness.run_steps(3);
+    assert_eq!(harness.get_by_label("Histogram panel").rect(), full);
+    assert!(harness.query_by_label("Window 0").is_none());
+    assert!(harness.query_by_label("Curve 0").is_none());
+    assert!(harness.query_by_label("Copy All").is_none());
+}
+
 #[test]
 fn the_curves_are_dead_under_a_false_color() {
     use crate::image::display::Colormap;

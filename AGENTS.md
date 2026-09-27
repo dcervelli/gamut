@@ -72,8 +72,9 @@ ui/            lays each frame's interface out with egui; no wgpu or winit impor
                  them, each with its capitals centered in egui's rows
   rect.rs        Rect, the logical-pixel rectangle the panels are placed by
   panel.rs       where a thing floating over the picture goes — fit(), the one placement every
-                 panel is fitted by, refused rather than shrunk — and area(), the one opening
-                 every panel makes
+                 panel is fitted by, refused rather than shrunk — area(), the one opening
+                 every panel makes, and waiting(), a panel's place held with a spinner while
+                 another file is read
   histogram/     the histogram panel: mod.rs its geometry, words, header and rows, plot.rs the
                  plot, track.rs the band and its handles, controls.rs the buttons, slider.rs the
                  exposure's slider, drawn by ui/slider.rs
@@ -104,6 +105,8 @@ ui/            lays each frame's interface out with egui; no wgpu or winit impor
   export.rs      the export dialog: the name, JPG or PNG and JPG's quality, warnings() saying
                  what the new file loses from the Facts the application hands over, and
                  Export and Cancel
+  standin.rs     the thumbnail painted in the picture's place while a slow read of
+                 another file is said, where App::standin says the picture will land
   tooltip.rs     the label naming what the pointer is resting on: Tip is what can
                  have one, Tooltip is what is said, disabled() why a dead control is dead;
                  when it opens and where it goes are egui's

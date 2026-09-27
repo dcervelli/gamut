@@ -2,7 +2,9 @@
 //! in: the one placement every panel is fitted by, and the one opening
 //! every panel makes.
 
+use super::style::PANEL_RADIUS;
 use super::{PADDING, Rect};
+use crate::theme::Theme;
 
 /// Where on the content a panel stands.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -56,7 +58,51 @@ pub fn area(name: &'static str, panel: Rect, order: egui::Order) -> egui::Area {
     egui::Area::new(egui::Id::new(name))
         .order(order)
         .fixed_pos(egui::pos2(panel.x, panel.y))
+        // Kept on screen by `fit` already. egui's own keeping measures the
+        // area by what it held the pass before, which on the first pass is
+        // the whole of the room to its right, and walks a panel drawn at
+        // its place left of it — what is painted at the panel's rectangle,
+        // what is allocated some way off — over several passes.
+        .constrain(false)
         .interactable(true)
+}
+
+/// How far across the spinner a waiting panel shows is.
+const SPINNER_SIDE: f32 = 16.0;
+
+/// A panel about a file still on its way in: its background where the panel
+/// stands and at the size it has, so that nothing moves when the file
+/// arrives, and a spinner in the middle of it in place of what it will say.
+/// Nothing on it can be pressed — whatever it held acted on the picture
+/// being stepped away from — but it still takes the pointer from the
+/// picture under it, as the panel will. `name` is what the panel is called
+/// to a screen reader when it is full, where it is called anything.
+pub fn waiting(
+    ctx: &egui::Context,
+    id: &'static str,
+    name: Option<&'static str>,
+    panel: Rect,
+    theme: &Theme,
+) {
+    let rect = egui::Rect::from_min_size(
+        egui::pos2(panel.x, panel.y),
+        egui::vec2(panel.width, panel.height),
+    );
+    area(id, panel, egui::Order::Middle).show(ctx, |ui| {
+        let (_, body) = ui.allocate_exact_size(rect.size(), egui::Sense::CLICK | egui::Sense::DRAG);
+        if let Some(name) = name {
+            body.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, name));
+        }
+        ui.painter()
+            .rect_filled(rect, PANEL_RADIUS, theme.panel_background);
+        let spinner = egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(SPINNER_SIDE));
+        ui.put(
+            spinner,
+            egui::Spinner::new()
+                .size(SPINNER_SIDE)
+                .color(theme.text_dim),
+        );
+    });
 }
 
 #[cfg(test)]

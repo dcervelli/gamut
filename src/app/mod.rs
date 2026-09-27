@@ -1214,6 +1214,46 @@ impl App {
         Some(Toast::waiting(message, raised))
     }
 
+    /// The file on its way in to replace the picture on screen, once its
+    /// read has taken long enough to be announced: what the stand-in is of,
+    /// and what the panels about the picture wait for. Not the file on
+    /// screen read again, which stays up and stays described as it is.
+    fn replacing(&self) -> Option<&Path> {
+        let pending = self.files.pending()?;
+        pending.announced?;
+        let path = self.files.path(pending.index);
+        let shown = self.current.is_some() && self.files.shown_path() == Some(path);
+        (!shown).then_some(path)
+    }
+
+    /// The thumbnail standing in for the file on its way in, once its read
+    /// has taken long enough to be announced: enlarged to where the picture
+    /// will land, and turned as it will be, in place of the picture it is
+    /// replacing. Only for another file, whose size its header has said and
+    /// whose thumbnail is held; the file on screen read again stays up as it
+    /// is, being a better picture of itself than any thumbnail.
+    fn standin(&self) -> Option<ui::Standin> {
+        let path = self.replacing()?;
+        let (width, height) = self.chooser.facts_of(path)?.size?;
+        let thumb = self.thumbs.get(path)?;
+        // Where the picture will land, decided as its arrival will decide it.
+        let kept = self.kept.left(path);
+        let turn = kept.map_or(Turn::NONE, |left| left.turn);
+        let size = turn.size([width as f32, height as f32]);
+        let shown = self
+            .current
+            .as_ref()
+            .zip(self.files.shown_path())
+            .map(|(current, path)| (path, current.size()));
+        let (arrival, _) = arrival(Reload::Fresh, path, size, shown);
+        let view = arriving_view(arrival, kept, self.view);
+        Some(ui::Standin {
+            thumb,
+            placement: view.placement(size, self.viewport()),
+            turn,
+        })
+    }
+
     /// The toast a frame draws: the newer of the message about what was just
     /// done and the one about the file still on its way in, so that a copy
     /// taken while a file loads is said, and the wait is said again once
@@ -1344,14 +1384,18 @@ impl App {
         let rename = self.rename_input();
         let export = self.export_input();
         let viewport = self.viewport();
+        // What reads the picture on screen reads nothing while a thumbnail
+        // of another file stands over it.
+        let standin = self.standin();
+        let picture = standin.is_none();
         FrameInput {
             logical,
             scale,
             viewport,
-            pointer: self.pointer_pixel(),
+            pointer: self.pointer_pixel().filter(|_| picture),
             cursor: self.logical_cursor(),
-            minimap_on_screen: self.minimap_on_screen(),
-            loupe: self.loupe(),
+            minimap_on_screen: self.minimap_on_screen() && picture,
+            loupe: self.loupe().filter(|_| picture),
             loupe_held: self.loupe_held(),
             index: self.files.index(),
             count: self.files.len(),
@@ -1385,6 +1429,8 @@ impl App {
                 .filter(|_| self.is_empty())
                 .map(folder::name),
             picking: self.picking,
+            standin,
+            waiting: self.replacing().is_some(),
         }
     }
 
@@ -1962,28 +2008,7 @@ impl App {
         if stepping || matches!(arrival, Arrival::Reshaped | Arrival::Anew) {
             self.marking.clear();
         }
-        match (arrival, &kept) {
-            // The same picture, or one of the same size as the one it is
-            // arriving beside — which is almost always part of a set to be
-            // compared: frames of a sequence, or one exposure against
-            // another, where the point is that the same detail stays under
-            // the same pixels. So the pan and zoom carry over from the
-            // picture leaving the screen, ahead of anything this file was
-            // left in itself: what the comparison is being made at is where
-            // the eye already is, not where this file happened to be the
-            // last time it was looked at.
-            (Arrival::Reread | Arrival::Beside, _) => {}
-            // Back to a file of another size that has been here before:
-            // exactly where it was left. The magnification filter is not part
-            // of a view — it is a standing preference — so it stays as it is.
-            (Arrival::Anew, Some(settings)) => {
-                let upscale = self.view.upscale();
-                self.view = settings.view;
-                self.view.set_upscale(upscale);
-            }
-            // A new shape, seen for the first time, so it is fitted afresh.
-            (Arrival::Anew, None) | (Arrival::Reshaped, _) => self.view.reset(),
-        }
+        self.view = arriving_view(arrival, kept.as_ref(), self.view);
         if arrival != Arrival::Reread {
             // A move under way was about the picture that has just left, and
             // there is nothing for it to carry the eye across any more.
@@ -2247,6 +2272,12 @@ impl App {
             .map(|loupe| ui::loupe::glass(loupe, placement, scale));
         let headroom = self.headroom();
         let input = self.frame_input(logical, scale);
+        // A thumbnail standing in for the file on its way in takes the
+        // picture it is replacing off the image layer, the minimap and the
+        // glass with it.
+        let picture = input.standin.is_none();
+        let thumbnail = thumbnail.filter(|_| picture);
+        let loupe = loupe.filter(|_| picture);
         let namer = self.namer();
         let backdrop = ui::backdrop(&self.theme);
 
@@ -2292,6 +2323,7 @@ impl App {
                 .current
                 .as_ref()
                 .map_or(Turn::NONE, |current| current.turn),
+            picture,
         };
         match shown.renderer.render(scene, textures) {
             Ok(()) => self.reported_error = false,
@@ -2414,6 +2446,39 @@ fn arrival(
         (false, false) => Arrival::Anew,
     };
     (arrival, stepping)
+}
+
+/// The view a file arriving as `arrival` is shown with, from `view`, the one
+/// on screen, and `kept`, what the file was left in if it has been here.
+/// Shared by the arrival itself and by the thumbnail that stands in for the
+/// file while it is read, so that the stand-in lands where the picture will.
+fn arriving_view(arrival: Arrival, kept: Option<&Settings>, view: View) -> View {
+    match (arrival, kept) {
+        // The same picture, or one of the same size as the one it is
+        // arriving beside — which is almost always part of a set to be
+        // compared: frames of a sequence, or one exposure against
+        // another, where the point is that the same detail stays under
+        // the same pixels. So the pan and zoom carry over from the
+        // picture leaving the screen, ahead of anything this file was
+        // left in itself: what the comparison is being made at is where
+        // the eye already is, not where this file happened to be the
+        // last time it was looked at.
+        (Arrival::Reread | Arrival::Beside, _) => view,
+        // Back to a file of another size that has been here before:
+        // exactly where it was left. The magnification filter is not part
+        // of a view — it is a standing preference — so it stays as it is.
+        (Arrival::Anew, Some(settings)) => {
+            let mut left = settings.view;
+            left.set_upscale(view.upscale());
+            left
+        }
+        // A new shape, seen for the first time, so it is fitted afresh.
+        (Arrival::Anew, None) | (Arrival::Reshaped, _) => {
+            let mut fitted = view;
+            fitted.reset();
+            fitted
+        }
+    }
 }
 
 /// Uploads `image` on this thread, and reports the time the way the loader
@@ -4435,6 +4500,96 @@ mod tests {
         }
         assert!(app.files.is_idle(), "the walk has to stop asking");
         assert!(app.showed_nothing());
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// Holds a thumbnail for `path` of `size`, and what its header says, as
+    /// the thumbnail thread would have by the time a step reaches it.
+    fn thumbnailed(app: &mut App, path: &Path, size: (u32, u32)) {
+        let _ = app.chooser.learn(
+            path,
+            Facts {
+                size: Some(size),
+                sequence: Sequence::Still,
+                title: None,
+                format: None,
+                bytes: None,
+                modified: None,
+            },
+        );
+        let ctx = egui::Context::default();
+        let copies = crate::thumbnailer::DISPLAY_SIDES.map(|side| {
+            ctx.load_texture(
+                "thumbnail",
+                egui::ColorImage::filled([side as usize; 2], egui::Color32::GRAY),
+                egui::TextureOptions::LINEAR,
+            )
+        });
+        app.thumbs.insert(path.to_path_buf(), copies);
+    }
+
+    /// Where `app`'s picture is on screen: what a stand-in has to have
+    /// landed on.
+    fn landed(app: &App) -> [f32; 4] {
+        let placement = app.view.placement(app.image_size(), app.viewport());
+        [placement.x, placement.y, placement.width, placement.height]
+    }
+
+    /// A read slow enough to be said puts the file's thumbnail up in the
+    /// picture's place — not before it is said, and not for a file whose
+    /// thumbnail is not held — exactly where the picture then lands: fitted
+    /// afresh for a file new to the screen, and put back as it was left,
+    /// turn and all, for one coming back. The panels about the picture wait
+    /// for the same read, thumbnail or none.
+    #[test]
+    fn a_slow_read_stands_the_thumbnail_where_the_picture_lands_and_the_panels_wait() {
+        let (mut app, dir) = app_over("standin", &[("a.png", 64, 48), ("b.png", 32, 16)]);
+        app.headless = Some(WINDOW);
+        let (a, b) = (app.files.path(0).to_path_buf(), app.files.path(1).to_path_buf());
+        let said = |app: &mut App| {
+            let since = app.files.pending().expect("a read is in flight").since;
+            let _ = app.files.announce_slow_read(since + files::SLOW_READ);
+        };
+
+        // Left zoomed in and turned, to be put back that way.
+        let (image, viewport) = (app.image_size(), app.viewport());
+        app.view.zoom_in([400.0, 300.0], image, viewport);
+        let _ = app.turn_picture(true);
+        let left_a = landed(&app);
+
+        let _ = app.step(true);
+        assert!(app.standin().is_none(), "the wait has not been said");
+        assert!(!app.frame_input([1000.0, 700.0], 1.0).waiting);
+        said(&mut app);
+        assert!(app.standin().is_none(), "no thumbnail is held");
+        // The panels wait whether or not there is a thumbnail to show.
+        assert!(app.frame_input([1000.0, 700.0], 1.0).waiting);
+        thumbnailed(&mut app, &b, (32, 16));
+        let standin = app.standin().expect("the wait is said and the thumbnail held");
+        assert_eq!(standin.turn, Turn::NONE);
+        let stood = standin.placement;
+        assert!(app.frame_input([1000.0, 700.0], 1.0).standin.is_some());
+        answer(&mut app, Reload::Fresh);
+        assert!(app.standin().is_none(), "the picture itself is up");
+        assert!(!app.frame_input([1000.0, 700.0], 1.0).waiting);
+        assert_eq!(landed(&app), [stood.x, stood.y, stood.width, stood.height]);
+
+        let _ = app.step(false);
+        said(&mut app);
+        thumbnailed(&mut app, &a, (64, 48));
+        let standin = app.standin().expect("the wait is said and the thumbnail held");
+        assert_eq!(standin.turn, Turn::NONE.clockwise());
+        let stood = standin.placement;
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(landed(&app), [stood.x, stood.y, stood.width, stood.height]);
+        assert_eq!(landed(&app), left_a);
+
+        // The file on screen read again stays up as it is.
+        let _ = app.files.reload();
+        said(&mut app);
+        assert!(app.standin().is_none());
+        assert!(!app.frame_input([1000.0, 700.0], 1.0).waiting);
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }

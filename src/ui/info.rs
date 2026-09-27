@@ -319,6 +319,10 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
         return;
     };
     let theme = pass.theme;
+    if pass.input.waiting {
+        super::panel::waiting(ui.ctx(), "info", None, panel, theme);
+        return;
+    }
     let area = egui::Rect::from_min_size(pos2(panel.x, panel.y), vec2(panel.width, panel.height));
     super::panel::area("info", panel, egui::Order::Middle).show(ui.ctx(), |ui| {
         egui::Frame::NONE

@@ -675,6 +675,10 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
         return;
     };
     let theme = pass.theme;
+    if pass.input.waiting {
+        panel::waiting(ui.ctx(), "histogram", Some("Histogram panel"), panel, theme);
+        return;
+    }
     panel::area("histogram", panel, egui::Order::Middle).show(ui.ctx(), |ui| {
         let (_, body) = ui.allocate_exact_size(area(panel).size(), Sense::CLICK | Sense::DRAG);
         body.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "Histogram panel"));

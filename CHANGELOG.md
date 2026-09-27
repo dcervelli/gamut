@@ -8,6 +8,11 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Added
 
+- A file that is slow to open shows its thumbnail, enlarged to where the
+  picture will be, while it loads — as soon as the wait is said, and where
+  the thumbnail has already been made. The histogram and information panels
+  stop describing the picture being left and show a spinner in its place
+  until the file is in.
 - `zoom.100.toggle` goes to actual size, and from actual size back to the
   whole image. It has no key by default.
 - A configuration file with lines `gamut` cannot use is said in the window
@@ -51,6 +56,13 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 - The EPSG code a GeoTIFF names is now looked up, to find its latitude and
   longitude, where before it was only quoted. The table of codes it is looked
   up in is linked into the binary.
+
+### Fixed
+
+- A panel floating over the picture could take the pointer from a place
+  left of where it is drawn: the right of the histogram panel let a click or
+  a drag through to the picture, and the picture beside its left edge would
+  not take one.
 
 ## 0.6.0 - 2026-09-27
 

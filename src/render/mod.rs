@@ -108,6 +108,10 @@ pub struct Scene<'a> {
     /// How far the picture is turned on screen. `placement` is already the
     /// turned picture's; the turn says which way the texture runs inside it.
     pub turn: Turn,
+    /// Whether the image layer draws the picture at all. Not while the
+    /// interface stands a thumbnail of the file on its way in over it: the
+    /// picture installed is the one being stepped away from.
+    pub picture: bool,
 }
 
 /// One pass of egui's interface, tessellated and ready to draw: the
@@ -442,27 +446,30 @@ impl Renderer {
 
         // A view that has just zoomed out past what the coarse chain covers
         // builds the rest of it here.
-        self.image_layer.prepare(
-            &self.device,
-            &self.queue,
-            &mut encoder,
-            Draw {
-                view: placement,
-                thumbnail,
-                loupe,
-                mark_clipped: scene.mark_clipped,
-                headroom: scene.headroom,
-                lift: scene.lift,
-                turn: scene.turn,
-            },
-            size,
-            display,
-        );
+        if scene.picture {
+            self.image_layer.prepare(
+                &self.device,
+                &self.queue,
+                &mut encoder,
+                Draw {
+                    view: placement,
+                    thumbnail,
+                    loupe,
+                    mark_clipped: scene.mark_clipped,
+                    headroom: scene.headroom,
+                    lift: scene.lift,
+                    turn: scene.turn,
+                },
+                size,
+                display,
+            );
+        }
         // Where an image quad lands, and so where transparency has to read as
         // a checkerboard rather than as the plain backdrop. Asked of the image
         // layer rather than assumed from `placement`, since a frame drawn
         // before the first file has decoded has a placement but no image.
-        let (checkered, glass, gray) = match self.image_layer.current() {
+        let drawn = self.image_layer.current().filter(|_| scene.picture);
+        let (checkered, glass, gray) = match drawn {
             Some(image) => ([Some(placement), thumbnail], loupe, image.is_gray()),
             None => ([None, None], None, false),
         };
@@ -494,7 +501,9 @@ impl Renderer {
                 ))],
                 ..Default::default()
             });
-            self.image_layer.render(&mut pass);
+            if scene.picture {
+                self.image_layer.render(&mut pass);
+            }
         }
         {
             let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

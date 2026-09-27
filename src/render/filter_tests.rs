@@ -774,6 +774,7 @@ fn the_compositor_clears_the_glass_past_the_pictures_edge() {
         mark_clipped: false,
         lift: 0.0,
         turn: Turn::NONE,
+        picture: true,
     };
     composite.prepare(
         &gpu.queue,
@@ -1310,6 +1311,7 @@ fn composited(
         mark_clipped: false,
         lift: 0.0,
         turn: Turn::NONE,
+        picture: true,
     };
     composite.prepare(&gpu.queue, &scene, gray, &output, [None, None], None);
     render_to(gpu, [width, 1], |encoder, view| {

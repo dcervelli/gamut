@@ -20,6 +20,7 @@ pub mod menu;
 pub mod minimap;
 pub mod rename;
 mod slider;
+pub mod standin;
 pub mod toast;
 pub mod tooltip;
 pub mod transport;
@@ -59,6 +60,7 @@ pub use control::{Command, Control, Grab, Naming, Selection};
 pub use info::FileFacts;
 pub use pixel::{CoordinateFormat, GeographicFormat, PixelFormat};
 pub use rect::Rect;
+pub use standin::Standin;
 pub use status::explain_state;
 pub use toast::Toast;
 pub use tooltip::{Tip, Tooltip};
@@ -400,6 +402,16 @@ pub struct FrameInput {
     /// Whether the desktop's file dialog is up, which draws the buttons that
     /// put it up dead.
     pub picking: bool,
+    /// The thumbnail standing in for the picture while another file is
+    /// read, once the read has been slow enough to say so; `None` the rest
+    /// of the time, which is nearly all of it. What is drawn over the
+    /// picture — the grid, the region, the loupe's rings — is drawn over
+    /// the picture it marks, and stays off while this is up.
+    pub standin: Option<Standin>,
+    /// Whether another file's read has been slow enough to say so: the
+    /// panels about the file on screen stop saying it, since it is on its
+    /// way out, and wait for the file coming in.
+    pub waiting: bool,
 }
 
 /// One pass of the interface: the chrome and everything on it, laid out in
@@ -493,6 +505,9 @@ impl Pass<'_> {
         let response = egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ui, |ui| {
+                if let Some(standin) = &self.input.standin {
+                    standin::paint(ui.painter(), standin, self.input.scale);
+                }
                 ui.allocate_rect(ui.max_rect(), Sense::CLICK | Sense::DRAG)
             })
             .inner;
@@ -753,7 +768,10 @@ impl Pass<'_> {
         // would be harder to read over a grid as well. The minimap's
         // thumbnail is not one of them — the image layer draws it, below the
         // whole interface — so the grid is told to leave its rectangle alone.
-        if self.panels.show_grid {
+        // What marks up the picture marks up the one it was drawn for, which
+        // a stand-in for another file is not.
+        let picture = self.input.standin.is_none();
+        if self.panels.show_grid && picture {
             let thumbnail = self
                 .input
                 .minimap_on_screen
@@ -782,8 +800,10 @@ impl Pass<'_> {
         // and a panel over the picture is over the region too. The box
         // being dragged out to zoom to goes over the region, being the
         // newer of the two marks and the one under the hand.
-        region::show(self, ui);
-        region::show_zoom_box(self, ui);
+        if picture {
+            region::show(self, ui);
+            region::show_zoom_box(self, ui);
+        }
         // Over the region: the loupe is under the hand, and the newer mark.
         loupe::show(self, ui);
         if self.input.minimap_on_screen {
