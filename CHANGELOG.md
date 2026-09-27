@@ -9,10 +9,13 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 ### Added
 
 - A file that is slow to open shows its thumbnail, enlarged to where the
-  picture will be, while it loads — as soon as the wait is said, and where
-  the thumbnail has already been made. The histogram and information panels
-  stop describing the picture being left and show a spinner in its place
-  until the file is in.
+  picture will be, while it loads, where the thumbnail has already been
+  made; the thumbnails of the files either side of the one on screen are
+  made ahead of the rest so that there is one. The histogram and information
+  panels stop describing the picture being left and show a spinner in its
+  place until the file is in. A file of a kind the last of which was slow is
+  treated as slow from the key, so a folder of large files flips through
+  thumbnails without a pause before each.
 - `zoom.100.toggle` goes to actual size, and from actual size back to the
   whole image. It has no key by default.
 - A configuration file with lines `gamut` cannot use is said in the window
@@ -42,6 +45,14 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Changed
 
+- A step moves the count, the file list's highlight, and the name in the bar
+  and the window's title at once, rather than when the file has loaded;
+  they go back if it cannot be read. Until it has loaded, the copies,
+  rename, remove, delete, export and **Open in** are unavailable, since the
+  file named is not yet the one open.
+- A file, a folder or a sort taking its time is said after 150 ms rather
+  than 250 ms, and a window opening on a list still being sorted waits that
+  long for it before opening at the empty window's size.
 - A double-click on the picture at actual size goes back to the whole image,
   where before it moved the detail under the pointer to the middle of the
   window; a double-click in and a double-click out is a quick look at the

@@ -271,7 +271,7 @@ impl App {
         self.toast(format!("Exported {}.", name_of(&path)), Level::Message);
         self.from_command_line = false;
         let request = self.files.adopt(path, Source::Disk);
-        self.send(request);
+        let _ = self.send(request);
         self.list_changed();
     }
 }

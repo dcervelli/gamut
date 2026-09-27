@@ -74,9 +74,13 @@ most viewers refuse.
 **Loading is not incremental.** The window waits for the whole file, which for
 a few hundred megabytes of compressed raster is a few seconds, and the image
 is then held whole in memory and in graphics memory. Expect a large file to
-cost somewhat more than its decoded size while it loads. A file that takes
-longer than a quarter of a second says so in a message at the foot of the
-window, `Loading` and its name, which stays up until the file opens.
+cost somewhat more than its decoded size while it loads. The name in the bar
+changes the moment you step; the picture changes when the file has loaded.
+A file that takes longer than 150 milliseconds — or that is expected to,
+the last file of its kind having taken that long — says `Loading` and its
+name at the foot of the window until it opens, and shows its thumbnail,
+enlarged, in the picture's place meanwhile, where the thumbnail has been
+made.
 
 **An untagged file is treated as sRGB**, which is what every format here has
 always meant in the absence of anything better. Where a file states its color

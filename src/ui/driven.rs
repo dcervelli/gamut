@@ -155,6 +155,7 @@ fn input(logical: [f32; 2], count: usize) -> FrameInput {
         loupe_held: false,
         index: 0,
         count,
+        arriving: None,
         deleted: false,
         headroom: Headroom::None,
         hdr_available: false,

@@ -313,9 +313,14 @@ pub struct FrameInput {
     /// which is holding it up whatever its toggle says: the toggle is lit
     /// for it, so that the button reads as the state it is showing.
     pub loupe_held: bool,
-    /// Which file is on screen, out of how many.
+    /// Which file was last asked for — on screen, or on its way in — out of
+    /// how many.
     pub index: usize,
     pub count: usize,
+    /// The name of the file on its way in to replace the picture, from the
+    /// moment it is asked for, which the bar names in place of the file on
+    /// screen: the name is where the key has gone, not what the pixels are.
+    pub arriving: Option<String>,
     /// Whether the file the picture came from is no longer there. The picture
     /// stays up — its pixels are as good as they ever were, and there is
     /// nothing to put in its place — so the bar is where this is said.

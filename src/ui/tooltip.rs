@@ -173,6 +173,11 @@ pub const NOTHING_TO_PASTE: &str = "No image on the clipboard";
 /// copy button, and the region button, which have nothing to take or mark.
 pub const NOTHING_OPEN: &str = "Nothing is open.";
 
+/// What a control acting on the file says while another file is on its way
+/// in: the bar names that one already, and the file on screen is the one a
+/// press would act on.
+pub const STILL_OPENING: &str = "Not until the file named is open.";
+
 /// Everything that could make a control dead this frame, read off the
 /// application before the frame. One struct rather than a parameter each,
 /// since every reason is asked about every tip and the list has grown.
@@ -198,6 +203,9 @@ pub struct Reasons {
     /// Whether there is no picture at all, which is what makes the buttons
     /// about one dead.
     pub nothing_open: bool,
+    /// Whether another file is on its way in to replace the picture, which
+    /// is what makes the controls acting on the file dead.
+    pub arriving: bool,
     /// Whether a file was on screen before this one, and after it, which
     /// is what the pair at the head of the file list goes back and forward
     /// to.
@@ -222,6 +230,7 @@ impl Reasons {
         picking: false,
         clipboard: true,
         nothing_open: false,
+        arriving: false,
         visited_before: true,
         visited_after: true,
     };
@@ -261,6 +270,7 @@ pub fn disabled(tip: Tip, reasons: Reasons) -> Option<Refused> {
         picking,
         clipboard,
         nothing_open,
+        arriving,
         visited_before,
         visited_after,
     } = reasons;
@@ -293,6 +303,22 @@ pub fn disabled(tip: Tip, reasons: Reasons) -> Option<Refused> {
     ) && nothing_open
     {
         return said(NOTHING_OPEN);
+    }
+    if matches!(
+        tip,
+        Tip::Control(
+            Control::Copy
+                | Control::Copies(_)
+                | Control::Facts(_)
+                | Control::Rename
+                | Control::Remove
+                | Control::Delete
+                | Control::Export
+                | Control::OpenIn
+        )
+    ) && arriving
+    {
+        return said(STILL_OPENING);
     }
     let no_room = match tip {
         Tip::Control(Control::Histogram) => !room.histogram,
@@ -765,6 +791,38 @@ mod tests {
             disabled(Tip::Control(Control::OpenFiles), empty_clipboard),
             None
         );
+
+        // What acts on the file waits while another is on its way in; what
+        // acts on the view or the list does not.
+        let arriving = Reasons {
+            arriving: true,
+            ..Reasons::NONE
+        };
+        for button in [
+            Control::Copy,
+            Control::Copies(Copies::Path),
+            Control::Rename,
+            Control::Remove,
+            Control::Delete,
+            Control::Export,
+            Control::OpenIn,
+        ] {
+            assert_eq!(
+                disabled(Tip::Control(button), arriving),
+                Some(Refused {
+                    said: STILL_OPENING,
+                    hint: None,
+                })
+            );
+        }
+        for button in [
+            Control::Next,
+            Control::Previous,
+            Control::Histogram,
+            Control::Grid,
+        ] {
+            assert_eq!(disabled(Tip::Control(button), arriving), None);
+        }
 
         let nothing_open = Reasons {
             nothing_open: true,

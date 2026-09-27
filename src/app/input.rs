@@ -634,6 +634,10 @@ pub(super) struct Conditions {
     pub picking: bool,
     /// Whether there is no picture at all.
     pub nothing_open: bool,
+    /// Whether another file is on its way in to replace the picture on
+    /// screen, which the bar names already: what acts on the file waits
+    /// until the file named is the one on screen.
+    pub arriving: bool,
 }
 
 impl Default for Conditions {
@@ -662,6 +666,7 @@ impl Default for Conditions {
             false_colored: false,
             picking: false,
             nothing_open: true,
+            arriving: false,
         }
     }
 }
@@ -697,6 +702,7 @@ impl Conditions {
         false_colored: false,
         picking: false,
         nothing_open: false,
+        arriving: false,
     };
 
     /// Whether `when` holds.
@@ -729,6 +735,7 @@ impl Conditions {
             picking: self.picking,
             clipboard: self.picture_on_clipboard,
             nothing_open: self.nothing_open,
+            arriving: self.arriving,
             visited_before: self.visited_before,
             visited_after: self.visited_after,
         }
@@ -2246,11 +2253,15 @@ impl App {
     /// the application keeps them.
     pub(super) fn namer(&self) -> Namer {
         Namer {
-            path: self
-                .shown_path()
-                .map(|path| path.display().to_string())
-                .unwrap_or_default(),
-            index: self.files.index(),
+            // The file the bar names, which is the one last asked for.
+            path: match self.arriving() {
+                Some(path) => path.display().to_string(),
+                None => self
+                    .shown_path()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_default(),
+            },
+            index: self.files.target(),
             count: self.files.len(),
             show_histogram: self.panels.show_histogram,
             state: self
@@ -2301,6 +2312,7 @@ impl App {
                 .is_some_and(|current| current.display.false_colored(current.image.is_gray())),
             picking: self.picking,
             nothing_open: current.is_none(),
+            arriving: self.arriving().is_some(),
         }
     }
 
@@ -2472,11 +2484,13 @@ impl App {
             self.visited.arrived(&path);
             return Effect::Redraw;
         }
-        if let Some(index) = self.files.position(&path) {
-            let request = self.files.go_to(index);
-            self.send(request);
+        match self.files.position(&path) {
+            Some(index) => {
+                let request = self.files.go_to(index);
+                self.send(request)
+            }
+            None => Effect::Nothing,
         }
-        Effect::Nothing
     }
 
     /// The wheel turned over the picture, by `delta` notches across and
@@ -2776,9 +2790,9 @@ impl App {
         // is the window's to answer, not the command line's.
         self.from_command_line = false;
         let request = self.files.adopt(path, Source::Clipboard(offer.mime));
-        self.send(request);
+        let sent = self.send(request);
         self.list_changed();
-        Effect::Nothing
+        sent
     }
 
     /// Puts what the info panel says on the clipboard: as much of a table as
@@ -2917,7 +2931,7 @@ impl App {
                     && let Some(index) = self.files.position(&path)
                 {
                     let request = self.files.go_to(index);
-                    self.send(request);
+                    let _ = self.send(request);
                 }
                 Effect::Redraw
             }
@@ -3157,7 +3171,7 @@ impl App {
                     && let Some(index) = self.files.position(&path)
                 {
                     let request = self.files.go_to(index);
-                    self.send(request);
+                    let _ = self.send(request);
                 }
                 Effect::Redraw
             }

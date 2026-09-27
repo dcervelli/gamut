@@ -165,13 +165,14 @@ impl App {
                         })
                         .map(|(width, height)| [width as f32, height as f32]);
                 }
+                // `settle_arranged` owes the frame, for this and the list.
                 let request = self.files.open_first(Source::Disk);
-                self.send(request);
+                let _ = self.send(request);
             }
             Arrive::Append => {
                 let paths = super::arranged(paths, self.filmstrip.order(), &self.glimpsed);
                 if let Some(request) = self.files.append(paths) {
-                    self.send(request);
+                    let _ = self.send(request);
                 }
                 self.list_changed();
             }

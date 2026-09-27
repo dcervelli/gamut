@@ -323,6 +323,11 @@ pub struct App {
     /// Thumbnails that arrived before there was a context to make textures
     /// in, taken up at the first frame.
     pending_thumbs: Vec<(PathBuf, Thumb)>,
+    /// How long the last file of each format took to arrive, in seconds
+    /// per pixel, by the name of the decoder that read it: what a read is
+    /// judged slow from before it has started — see
+    /// [`App::predicted_slow`].
+    read_rates: HashMap<&'static str, f64>,
     /// How a player wakes the loop: what `main` made from the loop's proxy.
     wake: player::Wake,
     /// Numbers the players, so that news from one dropped with its file is
@@ -504,6 +509,7 @@ impl App {
             filmstrip: Filmstrip::default(),
             state,
             visited: Visited::default(),
+            read_rates: HashMap::new(),
             pending_thumbs: Vec::new(),
             wake,
             players: 0,
@@ -560,8 +566,9 @@ impl App {
                 app.arrange(app.files.paths().to_vec(), arranging::Arrive::Open);
             }
             Some(source) => {
+                // Before the window: its first frame is asked for when it opens.
                 let request = app.files.open_first(source);
-                app.send(request);
+                let _ = app.send(request);
             }
             None => {}
         }
@@ -1219,8 +1226,16 @@ impl App {
     /// and what the panels about the picture wait for. Not the file on
     /// screen read again, which stays up and stays described as it is.
     fn replacing(&self) -> Option<&Path> {
+        self.files.pending()?.announced?;
+        self.arriving()
+    }
+
+    /// The file on its way in to replace the picture on screen, from the
+    /// moment it is asked for: what the list's readouts name already, while
+    /// what is on screen is still the file before it — so what acts on "the
+    /// file" waits, rather than acting on one the bar no longer names.
+    pub(super) fn arriving(&self) -> Option<&Path> {
         let pending = self.files.pending()?;
-        pending.announced?;
         let path = self.files.path(pending.index);
         let shown = self.current.is_some() && self.files.shown_path() == Some(path);
         (!shown).then_some(path)
@@ -1363,8 +1378,8 @@ impl App {
     /// application with no window behind it.
     fn frame_input(&mut self, logical: [f32; 2], scale: f32) -> FrameInput {
         let chooser = self.chooser_open().then(|| {
-            let shown = self.current.as_ref().and_then(|_| self.files.shown_path());
-            self.chooser.input(&self.thumbs, shown)
+            let target = self.current.as_ref().and_then(|_| self.files.target_path());
+            self.chooser.input(&self.thumbs, target)
         });
         let filmstrip = if self.filmstrip_showing() {
             let (files, chooser, visited) = (&self.files, &self.chooser, &self.visited);
@@ -1374,7 +1389,7 @@ impl App {
             Some(self.filmstrip.input(
                 &self.thumbs,
                 |path| Self::key_of(chooser, glimpsed, path),
-                files.shown_path(),
+                files.target_path(),
                 back,
                 forward,
             ))
@@ -1397,8 +1412,9 @@ impl App {
             minimap_on_screen: self.minimap_on_screen() && picture,
             loupe: self.loupe().filter(|_| picture),
             loupe_held: self.loupe_held(),
-            index: self.files.index(),
+            index: self.files.target(),
             count: self.files.len(),
+            arriving: self.arriving().map(file_label),
             deleted: self.watch.missing(),
             headroom: self.headroom(),
             hdr_available: self.hdr_available(),
@@ -1627,7 +1643,8 @@ impl App {
         if self.watch.poll()
             && let Some(request) = self.files.reload()
         {
-            self.send(request);
+            // The file on screen, read again: nothing moves until it is in.
+            let _ = self.send(request);
         }
         Effect::redraw_if(self.watch.missing() != was_missing)
     }
@@ -1804,12 +1821,13 @@ impl App {
         self.settle(Effect::Redraw, event_loop);
     }
 
-    /// What the window is called: the image on screen, the file being read
-    /// while there is nothing on screen to name, or the program's own name
-    /// while there is nothing at all.
+    /// What the window is called: the file last asked for — on screen, or
+    /// on its way in to replace the picture that is — the file being read
+    /// while there is nothing on screen, or the program's own name while
+    /// there is nothing at all.
     fn title(&self) -> String {
         match (&self.current, self.files.pending()) {
-            (Some(_), _) => match self.files.shown_path() {
+            (Some(_), _) => match self.files.target_path() {
                 Some(path) => window_title(path),
                 None => crate::PROGRAM.to_string(),
             },
@@ -1826,12 +1844,15 @@ impl App {
 
     /// Sends a request to the loader.
     ///
-    /// Nothing changes on screen here. The image already up stays where it is,
-    /// still pannable and zoomable, until the reply arrives at
-    /// [`App::user_event`] — which is the whole point of the exercise, and the
-    /// reason everything the interface says about the image goes on describing
-    /// the one being shown rather than the one being fetched.
-    fn send(&mut self, mut request: Request) {
+    /// The picture already up stays where it is, still pannable and
+    /// zoomable, until the reply arrives at [`App::user_event`], and so does
+    /// everything that describes it — the panels, the readouts. What moves
+    /// at once is what says where in the list the key has gone: the count,
+    /// the file list's highlight, the name in the bar and the title. Hence
+    /// the frame owed, for a request that goes somewhere else.
+    fn send(&mut self, mut request: Request) -> Effect {
+        let elsewhere = request.mode == Reload::Fresh
+            && (self.current.is_none() || self.files.shown_path() != Some(request.path.as_path()));
         // A paged file comes back to the page it was left on, which has to
         // be asked for with the file: the page is what is decoded.
         if request.page.is_none()
@@ -1841,21 +1862,49 @@ impl App {
             request.page = Some(page);
             self.files.asked_for_page(page);
         }
+        // Slow from the start where the last file of its kind was, so that a
+        // walk through a folder of large files puts each one's thumbnail up
+        // on the key rather than a beat after it.
+        if elsewhere && self.predicted_slow(&request.path) {
+            self.files.announce_now(Instant::now());
+        }
         self.loader.request(request);
-        // With nothing on screen the title is the only thing naming the file,
-        // so it follows the request rather than the pixels — including when a
-        // walk moves on past one that would not decode.
-        if self.current.is_none()
-            && let Some(shown) = &self.shown
-        {
+        if !elsewhere {
+            return Effect::Nothing;
+        }
+        self.filmstrip.reveal();
+        self.refresh_title();
+        Effect::Redraw
+    }
+
+    /// Puts [`App::title`] on the window, which names the file last asked
+    /// for: called whenever that changes other than by a file arriving.
+    fn refresh_title(&self) {
+        if let Some(shown) = &self.shown {
             shown.window.set_title(&self.title());
         }
     }
 
+    /// Whether the read of `path` will be slow, going by the last file of its
+    /// kind: its time over its pixels, times this one's pixels. Only what
+    /// the thumbnail thread has read of the file's header to go on, and
+    /// `false` where it has not read it yet.
+    fn predicted_slow(&self, path: &Path) -> bool {
+        let Some(facts) = self.chooser.facts_of(path) else {
+            return false;
+        };
+        let (Some(format), Some((width, height))) = (facts.format, facts.size) else {
+            return false;
+        };
+        self.read_rates.get(format).is_some_and(|per_pixel| {
+            per_pixel * f64::from(width) * f64::from(height) >= files::SLOW_READ.as_secs_f64()
+        })
+    }
+
     /// Moves to the next or previous file. With no other file on the list,
     /// reads the folder beside a single file to step into, where there is
-    /// one, and says there is nowhere to go where there is not. Nothing to
-    /// draw for a step: what is on screen stays until the file arrives.
+    /// one, and says there is nowhere to go where there is not. The picture
+    /// stays until the file arrives; the list's readouts move at once.
     pub(super) fn step(&mut self, forward: bool) -> Effect {
         if self.files.len() < 2 {
             if self.files.len() == 0 || self.read_folder(Then::Step(forward)) {
@@ -1864,10 +1913,10 @@ impl App {
             self.toast("No other files to step to", Level::Message);
             return Effect::Redraw;
         }
-        if let Some(request) = self.files.step(forward) {
-            self.send(request);
+        match self.files.step(forward) {
+            Some(request) => self.send(request),
+            None => Effect::Nothing,
         }
-        Effect::Nothing
     }
 
     /// Puts a finished read on screen. Returns `false` if the upload failed,
@@ -2165,7 +2214,8 @@ impl App {
         };
         let page = (current.page as isize + by).rem_euclid(count as isize) as usize;
         if let Some(request) = self.files.page(page) {
-            self.send(request);
+            // Another page of the file on screen: nothing moves until it is.
+            let _ = self.send(request);
         }
         Effect::Nothing
     }
@@ -2206,7 +2256,10 @@ impl App {
         // was the decode or the upload that would not have it.
         let failed = match decoded.outcome {
             Ok(ready) => match self.apply(decoded.file, ready) {
-                true => None,
+                true => {
+                    self.arrived_in(pending.since.elapsed());
+                    None
+                }
                 false => Some(format!("Could not show {name}.")),
             },
             Err(error) => {
@@ -2216,7 +2269,10 @@ impl App {
         };
         if let Some(said) = failed {
             match self.files.failed(index, pending.step) {
-                Some(request) => self.send(request),
+                // A frame is owed below, whatever this asks for.
+                Some(request) => {
+                    let _ = self.send(request);
+                }
                 // The walk is over, or this was no walk, and the failure is
                 // the last word: worth saying in the window where there is
                 // a window left to say it in — with nothing on screen and
@@ -2228,6 +2284,9 @@ impl App {
                 }
             }
         }
+        // The name goes back to the file on screen where the read failed
+        // and nothing else was asked for.
+        self.refresh_title();
         // A sort asked for under the read waited for it, and so did a
         // folder read: now is the first chance, and sooner than the next
         // poll.
@@ -2235,6 +2294,34 @@ impl App {
         let _ = self.settle_folder();
         let _ = self.settle_arranged();
         Effect::Redraw
+    }
+
+    /// The file on screen has just arrived, `took` after it was asked for:
+    /// how long its kind takes is noted for the next of them, and the
+    /// thumbnails of the files either side are asked for ahead of the rest,
+    /// so that a step either way has one to stand in while it is read.
+    /// Asked for only where the screen does not hold them already; a
+    /// thumbnail in the cache is a quick read, one that is not is made on
+    /// the thumbnail thread, which yields to the loader's.
+    fn arrived_in(&mut self, took: std::time::Duration) {
+        if let Some(current) = &self.current
+            && let Some(format) = current.file.reader
+        {
+            let pixels = f64::from(current.image.width) * f64::from(current.image.height);
+            if pixels > 0.0 {
+                self.read_rates.insert(format, took.as_secs_f64() / pixels);
+            }
+        }
+        let wanted: Vec<PathBuf> = self
+            .files
+            .neighbors()
+            .into_iter()
+            .filter(|path| self.thumbs.get(path).is_none() && !self.chooser.given_up(path))
+            .map(Path::to_path_buf)
+            .collect();
+        if !wanted.is_empty() {
+            self.thumbnailer.prioritize(wanted);
+        }
     }
 
     /// Draws one frame, and does what the interface on it asked for. Says
@@ -3046,7 +3133,7 @@ mod tests {
         let (mut app, dir, paths) = alone_in("folder-wait", &[("a.png", 8, 8), ("b.png", 8, 8)], 0);
         let _ = app.step(true);
         let reload = app.files.reload().expect("nothing in flight");
-        app.send(reload);
+        let _ = app.send(reload);
         read_beside(&mut app, &paths[0]);
         assert_eq!(app.files.len(), 1, "not under a read");
         assert!(app.listed.is_some());
@@ -4269,7 +4356,7 @@ mod tests {
 
         write_png(&dir, "a.png", 32, 16);
         let request = app.files.reload().expect("nothing else is being read");
-        app.send(request);
+        let _ = app.send(request);
         answer(&mut app, Reload::InPlace);
 
         assert_eq!(app.image_size(), [32.0, 16.0]);
@@ -4546,7 +4633,10 @@ mod tests {
     fn a_slow_read_stands_the_thumbnail_where_the_picture_lands_and_the_panels_wait() {
         let (mut app, dir) = app_over("standin", &[("a.png", 64, 48), ("b.png", 32, 16)]);
         app.headless = Some(WINDOW);
-        let (a, b) = (app.files.path(0).to_path_buf(), app.files.path(1).to_path_buf());
+        let (a, b) = (
+            app.files.path(0).to_path_buf(),
+            app.files.path(1).to_path_buf(),
+        );
         let said = |app: &mut App| {
             let since = app.files.pending().expect("a read is in flight").since;
             let _ = app.files.announce_slow_read(since + files::SLOW_READ);
@@ -4563,11 +4653,18 @@ mod tests {
         assert!(!app.frame_input([1000.0, 700.0], 1.0).waiting);
         said(&mut app);
         assert!(app.standin().is_none(), "no thumbnail is held");
+        assert!(app.reading().is_some());
         // The panels wait whether or not there is a thumbnail to show.
         assert!(app.frame_input([1000.0, 700.0], 1.0).waiting);
         thumbnailed(&mut app, &b, (32, 16));
-        let standin = app.standin().expect("the wait is said and the thumbnail held");
+        let standin = app
+            .standin()
+            .expect("the wait is said and the thumbnail held");
         assert_eq!(standin.turn, Turn::NONE);
+        assert!(
+            app.reading().is_some(),
+            "the toast says it too: a blurred picture unexplained reads as a fault"
+        );
         let stood = standin.placement;
         assert!(app.frame_input([1000.0, 700.0], 1.0).standin.is_some());
         answer(&mut app, Reload::Fresh);
@@ -4578,7 +4675,9 @@ mod tests {
         let _ = app.step(false);
         said(&mut app);
         thumbnailed(&mut app, &a, (64, 48));
-        let standin = app.standin().expect("the wait is said and the thumbnail held");
+        let standin = app
+            .standin()
+            .expect("the wait is said and the thumbnail held");
         assert_eq!(standin.turn, Turn::NONE.clockwise());
         let stood = standin.placement;
         answer(&mut app, Reload::Fresh);
@@ -4590,6 +4689,114 @@ mod tests {
         said(&mut app);
         assert!(app.standin().is_none());
         assert!(!app.frame_input([1000.0, 700.0], 1.0).waiting);
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// A step moves what says where in the list the key has gone — the
+    /// count, the name in the bar and the title, the file list's highlight —
+    /// at once, while the picture stays; what acts on the file waits, the
+    /// file named not being the one on screen. A read of a file chosen
+    /// outright that fails puts all of it back on the file still up.
+    #[test]
+    fn the_list_readouts_follow_the_key_and_go_back_when_a_read_fails() {
+        use ui::Naming;
+
+        let (mut app, dir) = app_over("target", &[("a.png", 8, 8), ("b.png", 8, 8)]);
+        let input = |app: &mut App| app.frame_input([1000.0, 700.0], 1.0);
+        assert_eq!(input(&mut app).arriving, None);
+
+        assert_eq!(app.step(true), Effect::Redraw);
+        let stepped = input(&mut app);
+        assert_eq!(stepped.index, 1);
+        assert_eq!(stepped.arriving.as_deref(), Some("b.png"));
+        assert!(app.filmstrip.reveals());
+        assert_eq!(app.title(), "b.png — gamut");
+        assert_eq!(
+            app.namer().tooltip(ui::Tip::Name).map(|tip| tip.title),
+            Some(vec![dir.join("b.png").display().to_string()])
+        );
+        assert_eq!(app.files.shown_path(), Some(dir.join("a.png").as_path()));
+        assert!(app.conditions().arriving);
+        assert_eq!(app.press(ui::Control::Delete), Effect::Nothing);
+        assert!(
+            dir.join("a.png").exists(),
+            "the file on screen is not the one named"
+        );
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(input(&mut app).arriving, None);
+        assert!(!app.conditions().arriving);
+        assert_eq!(app.title(), "b.png — gamut");
+
+        // Chosen outright rather than walked to: a failure has nowhere to
+        // go on to, and everything goes back to the file on screen.
+        corrupt(&dir.join("a.png"));
+        let request = app.files.go_to(0);
+        assert_eq!(app.send(request), Effect::Redraw);
+        assert_eq!(app.title(), "a.png — gamut");
+        answer(&mut app, Reload::Fresh);
+        let failed = input(&mut app);
+        assert_eq!((failed.index, failed.arriving), (1, None));
+        assert_eq!(app.title(), "b.png — gamut");
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// The last file of a kind that took its time says the next of its kind
+    /// will: the wait is said from the key, not a beat after it — scaled by
+    /// the pixels, and only for a file whose header has been read.
+    #[test]
+    fn a_kind_that_was_slow_is_said_to_be_slow_at_once() {
+        let (mut app, dir) = app_over(
+            "predicted",
+            &[("a.png", 8, 8), ("b.png", 8, 8), ("c.png", 8, 8)],
+        );
+        let format = app
+            .current
+            .as_ref()
+            .and_then(|current| current.file.reader)
+            .expect("the file on screen was read by something");
+        assert!(app.read_rates.contains_key(format), "noted as it arrived");
+        let said = |app: &App| app.files.pending().and_then(|pending| pending.announced);
+
+        // A rate that makes an 8 by 8 picture take a second.
+        app.read_rates.insert(format, 1.0 / 64.0);
+        let _ = app.step(true);
+        assert!(said(&app).is_none(), "nothing known of the file's header");
+        answer(&mut app, Reload::Fresh);
+
+        app.read_rates.insert(format, 1.0 / 64.0);
+        let c = dir.join("c.png");
+        let _ = app.chooser.learn(
+            &c,
+            Facts {
+                size: Some((8, 8)),
+                sequence: Sequence::Still,
+                title: None,
+                format: Some(format),
+                bytes: None,
+                modified: None,
+            },
+        );
+        let _ = app.step(true);
+        assert!(said(&app).is_some());
+        answer(&mut app, Reload::Fresh);
+
+        // Fast at this size: a millionth of the rate.
+        app.read_rates.insert(format, 1.0 / 64.0 / 1e6);
+        let _ = app.step(true);
+        let _ = app.chooser.learn(
+            &dir.join("a.png"),
+            Facts {
+                size: Some((8, 8)),
+                sequence: Sequence::Still,
+                title: None,
+                format: Some(format),
+                bytes: None,
+                modified: None,
+            },
+        );
+        assert!(said(&app).is_none());
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }
@@ -4807,7 +5014,7 @@ mod tests {
         );
 
         let request = app.files.reload().expect("nothing is in flight");
-        app.send(request);
+        let _ = app.send(request);
         answer(&mut app, Reload::InPlace);
         let playback = app.animation.as_ref().expect("still an animation");
         assert_eq!(playback.head(), 0);
@@ -4981,8 +5188,9 @@ mod tests {
             Some(1),
             "the next file is asked for"
         );
-        // Held down: nothing more happens until the neighbor is up.
-        assert_eq!(app.perform(Action::Delete), Effect::Redraw);
+        // Held down: refused until the neighbor is up, the bar naming it
+        // and the file on screen not being it.
+        assert_eq!(app.perform(Action::Delete), Effect::Nothing);
         assert!(dir.join("b.png").exists());
 
         answer(&mut app, Reload::Fresh);
@@ -5304,7 +5512,7 @@ mod tests {
         assert_eq!(app.files.shown_path(), Some(dir.join("c.png").as_path()));
         assert!(app.conditions().visited_before && !app.conditions().visited_after);
 
-        assert_eq!(app.perform(Action::Back), Effect::Nothing);
+        assert_eq!(app.perform(Action::Back), Effect::Redraw);
         assert_eq!(app.files.pending().map(|pending| pending.index), Some(1));
         answer(&mut app, Reload::Fresh);
         assert_eq!(app.files.shown_path(), Some(dir.join("b.png").as_path()));
@@ -5877,8 +6085,9 @@ mod tests {
     }
 
     /// A press says what it left the window owing: a frame for a toggle,
-    /// nothing for a step — the picture stays until the file arrives — and
-    /// nothing for a panel the window has no room for, which is refused.
+    /// and for a step — the picture stays until the file arrives, but the
+    /// count, the highlight and the name move — and nothing for a panel the
+    /// window has no room for, which is refused.
     /// The refusal and the tooltip that says why are one reading: the
     /// button is drawn dead, says there is no room, and does nothing, all
     /// from the same answer.
@@ -5888,7 +6097,7 @@ mod tests {
 
         let (mut app, _dir) = app_over("owed", &[("a.png", 4, 3), ("b.png", 4, 3)]);
         assert_eq!(app.press(ui::Control::Grid), Effect::Redraw);
-        assert_eq!(app.press(ui::Control::Next), Effect::Nothing);
+        assert_eq!(app.press(ui::Control::Next), Effect::Redraw);
         // A window a pixel across has no room for the histogram.
         let histogram = ui::Tip::Control(ui::Control::Histogram);
         assert_eq!(app.press(ui::Control::Histogram), Effect::Nothing);

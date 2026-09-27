@@ -440,15 +440,58 @@ turn leaves where it is, so `View::turn` turns the pan with the picture and
 the detail at the middle of the window stays there; a region is turned by
 `Region::turned` with the pixels it marks out.
 
-## A thumbnail standing in
+## Stepping to another file
 
-A step leaves the picture before it on screen until the next file has
-decoded, and once the read has taken `files::SLOW_READ` the toast says so.
-From that same moment, where the thumbnail thread has already said the
-file's size (`Chooser::facts_of`) and its thumbnail is among the textures the
-screen holds (`Thumbs::get`), `App::standin` puts the thumbnail up in the
-picture's place: a `ui::Standin`, painted by `ui/standin.rs` in the
-picture's own panel, under everything that floats.
+A step changes two kinds of thing, at two different moments. What says
+where in the list the key has gone moves at once: the count, the file
+list's highlight and its scroll, the name in the bar and the window's
+title. They read `Files::target` — the file being read, or the file on
+screen where nothing is — and `App::send` owes the frame that shows them.
+What describes the picture moves with the picture: the pixels, the
+histogram and information panels, the readouts, the region, the transport
+bar. A read that fails hands the target back to the file on screen, so
+the readouts go back by themselves, and `App::deliver` puts the title back
+with them. `app::tests::the_list_readouts_follow_the_key_and_go_back_when_a_read_fails`
+holds both halves.
+
+Between the two moments the bar names one file and the screen shows
+another, so what acts on "the file" — the copies, rename, remove, delete,
+export, opening it elsewhere — is dead while `App::arriving` says a file is
+on its way in (`Reasons::arriving`, `tooltip::STILL_OPENING`). Acting on the
+file on screen would act on one the bar no longer names; acting on the one
+named would act on a file that is not open yet.
+
+Most reads land within a few frames, and nothing else happens. One that
+takes `files::SLOW_READ` is announced, and the picture leaves the screen:
+the thumbnail stands in for it where it can, and the panels wait. That is
+also one moment rather than two — a panel describing a picture that is no
+longer shown would be wrong — and it is not the key's moment, because a
+thumbnail enlarged for a frame or two before a quick file arrives is a
+blurred flash, and two pictures of one size flipped to compare them would
+flash through a blurred third.
+
+The exception is a read known to be slow before it starts. `App::read_rates`
+keeps, for each decoder, how long the last file it read took to arrive over
+its pixels; `App::predicted_slow` scales that by the pixels the file's
+header says it has (`Chooser::facts_of`), and a read expected to take
+`SLOW_READ` is announced as it is sent (`Files::announce_now`). A folder of
+large raws flips straight to thumbnails; a folder of small PNGs never shows
+one; a large file among small ones of its kind is judged by its own size.
+A walk carries the announcement on from each read it replaces, so a held
+key keeps the thumbnails up however fast it goes.
+
+### The thumbnail
+
+Where the thumbnail thread has already said the file's size and its
+thumbnail is among the textures the screen holds (`Thumbs::get`),
+`App::standin` puts the thumbnail up in the picture's place: a
+`ui::Standin`, painted by `ui/standin.rs` in the picture's own panel, under
+everything that floats. The toast saying the file is loading goes up with
+it: a blurred picture with nothing to say why reads as a fault in the
+viewer rather than a file on its way. So that there is a thumbnail, `App::arrived_in`
+asks the thumbnail thread for the files either side of each file that
+arrives, ahead of the rest of the session, where the screen does not hold
+them already.
 
 It lands where the picture will. `arriving_view` in `app/mod.rs` is the one
 reading of what view a file arrives with — the view on screen for a file of
@@ -460,27 +503,27 @@ holds the two to each other. The thumbnail is of the picture as the file
 holds it, like the texture, and is read through the turn at its corners
 as the vertex shader reads the texture.
 
-It waits for the toast's clock rather than going up at once because most
-reads finish well inside it, and a thumbnail enlarged for a frame or two
-before the picture is a flicker. It is the interface's to draw, in the
-thumbnail's own sRGB, rather than the image layer's: it is a stand-in, and
-the window, tone curve and false color the picture will be shown under do
-not apply to it. While it is up, `Scene::picture` keeps the image layer from
-drawing the picture being stepped away from, and what reads or marks up the
-picture on screen — the pointer's pixel, the grid, the region, the loupe,
-the minimap — stays off, since what it would read or mark is not what is
-shown. The file on screen read again gets no stand-in: the picture already
-up is a better picture of it than any thumbnail.
+It is the interface's to draw, in the thumbnail's own sRGB, rather than the
+image layer's: it is a stand-in, and the window, tone curve and false color
+the picture will be shown under do not apply to it. While it is up,
+`Scene::picture` keeps the image layer from drawing the picture being
+stepped away from, and what reads or marks up the picture on screen — the
+pointer's pixel, the grid, the region, the loupe, the minimap — stays off,
+since what it would read or mark is not what is shown. The file on screen
+read again gets no stand-in: the picture already up is a better picture of
+it than any thumbnail.
 
-The histogram and information panels wait on the same read, thumbnail or
-none (`App::replacing`, handed over as `FrameInput::waiting`): each keeps its
-place and size and shows `panel::waiting`, its background and a spinner,
-until the file arrives. What they said was about the picture leaving, and
-their controls act on it; a panel that emptied or shrank instead would move
-the one under it, only for both to move back a moment later. The spinner
-asks egui for a pass on every pass, which `Gui` folds into the loop's
-deadline, so the window redraws continuously for as long as the wait lasts
-and not after.
+### The panels
+
+The histogram and information panels wait on the same announcement,
+thumbnail or none (`App::replacing`, handed over as `FrameInput::waiting`):
+each keeps its place and size and shows `panel::waiting`, its background and
+a spinner, until the file arrives. What they said was about the picture
+leaving, and their controls act on it; a panel that emptied or shrank
+instead would move the one under it, only for both to move back a moment
+later. The spinner asks egui for a pass on every pass, which `Gui` folds
+into the loop's deadline, so the window redraws continuously for as long as
+the wait lasts and not after.
 
 ## The region
 

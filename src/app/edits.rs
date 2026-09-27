@@ -140,7 +140,7 @@ impl App {
                 // The bar says the file has gone at once, rather than half
                 // a second on when the watch would notice.
                 self.watch = Watch::new(&listed);
-                self.send(request);
+                let _ = self.send(request);
             }
             // The picture first, kept under its path while the list still
             // names it; then the list.
@@ -186,7 +186,10 @@ impl App {
         });
         self.files.hide();
         match self.files.step_away() {
-            Some(request) => self.send(request),
+            // The toast below owes the frame.
+            Some(request) => {
+                let _ = self.send(request);
+            }
             None => {
                 self.leave_picture();
                 self.files.remove_shown();
@@ -343,7 +346,7 @@ impl App {
                     && at != self.files.index()
                 {
                     let request = self.files.go_to(at);
-                    self.send(request);
+                    let _ = self.send(request);
                 }
                 self.toast(
                     format!("Renamed {} back to {}.", name_of(&to), name_of(&from)),
@@ -360,7 +363,7 @@ impl App {
                     self.files.reprieve();
                 } else {
                     let request = self.files.reinstate(path.clone(), index, adopted);
-                    self.send(request);
+                    let _ = self.send(request);
                     self.list_changed();
                 }
                 self.toast(
@@ -407,7 +410,7 @@ impl App {
             self.watch = Watch::new(&listed);
         } else {
             let request = self.files.reinstate(listed.clone(), index, adopted);
-            self.send(request);
+            let _ = self.send(request);
             self.list_changed();
         }
         self.toast(format!("Put {} back.", name_of(&listed)), Level::Message);

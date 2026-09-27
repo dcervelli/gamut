@@ -64,12 +64,16 @@ pub(super) fn top_words(pass: &mut Pass, ui: &mut egui::Ui, current: &Current) {
     list_buttons(pass, ui);
     file_button(pass, ui);
     ui.add_space(COUNTER_GAP);
-    let mut text = RichText::new(&current.label).family(egui::FontFamily::Name(fonts::BOLD.into()));
+    // The file on its way in, where there is one: the name follows the key.
+    let arriving = pass.input.arriving.as_deref();
+    let name = arriving.unwrap_or(&current.label);
+    let mut text = RichText::new(name).family(egui::FontFamily::Name(fonts::BOLD.into()));
     // A file that has gone keeps its name, which is still the name of the
     // file the pixels came from, and has it struck through: the mark is on
     // the name rather than a word beside it, so a file that really is called
-    // `DELETED` cannot read as one that was.
-    text = if pass.input.deleted {
+    // `DELETED` cannot read as one that was. Not the name of another file
+    // on its way in, which has not gone anywhere.
+    text = if pass.input.deleted && arriving.is_none() {
         text.color(pass.theme.warning).strikethrough()
     } else {
         text.color(pass.theme.text_bright)

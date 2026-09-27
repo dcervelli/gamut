@@ -11,10 +11,11 @@ use std::time::{Duration, Instant};
 use crate::image::decode;
 use crate::loader::{Reload, Request, Source};
 
-/// How long a file may take to open before a toast says so. Long enough that
-/// the ordinary case — a file that opens between two frames — never flickers a
-/// message into the window and out again.
-pub(super) const SLOW_READ: Duration = Duration::from_millis(250);
+/// How long a file may take to open before the window says so — the toast,
+/// the thumbnail standing in for it, the panels waiting for it. Long enough
+/// that the ordinary case — a file that opens within a few frames — never
+/// flickers any of that into the window and out again.
+pub(super) const SLOW_READ: Duration = Duration::from_millis(150);
 
 /// What [`Files::announce_slow_read`] found: a read to say something about now,
 /// one to look at again at a given moment, or nothing worth a word.
@@ -122,6 +123,22 @@ impl Files {
     /// anything is — and `None` on an empty list.
     pub(super) fn shown_path(&self) -> Option<&Path> {
         self.paths.get(self.index).map(PathBuf::as_path)
+    }
+
+    /// The file last asked for: the one being read, or the one on screen
+    /// where nothing is. What the list's own readouts follow — the count,
+    /// the file list's highlight, the name — so that they move with the key
+    /// rather than waiting on the decode, and go back to the file on screen
+    /// by themselves when a read fails.
+    pub(super) fn target(&self) -> usize {
+        self.pending
+            .as_ref()
+            .map_or(self.index, |pending| pending.index)
+    }
+
+    /// The path of [`Files::target`], and `None` on an empty list.
+    pub(super) fn target_path(&self) -> Option<&Path> {
+        self.paths.get(self.target()).map(PathBuf::as_path)
     }
 
     /// The whole list, in the order it is walked.
@@ -624,12 +641,32 @@ impl Files {
         ))
     }
 
+    /// The files either side of the one on screen, the next first: where a
+    /// step goes from here. None on a list of one, and one on a list of two.
+    pub(super) fn neighbors(&self) -> Vec<&Path> {
+        if self.paths.len() < 2 {
+            return Vec::new();
+        }
+        let mut near = vec![self.neighbor(self.index, true)];
+        near.push(self.neighbor(self.index, false));
+        near.dedup();
+        near.into_iter().map(|index| self.path(index)).collect()
+    }
+
     fn neighbor(&self, index: usize, forward: bool) -> usize {
         let count = self.paths.len();
         if forward {
             (index + 1) % count
         } else {
             (index + count - 1) % count
+        }
+    }
+
+    /// Says the read in flight is slow from the start, without waiting
+    /// [`SLOW_READ`] to find out: the last file of its kind was.
+    pub(super) fn announce_now(&mut self, now: Instant) {
+        if let Some(pending) = &mut self.pending {
+            pending.announced.get_or_insert(now);
         }
     }
 
@@ -676,6 +713,53 @@ mod tests {
         assert!(!files.is_idle(), "the newer request is still owed a reply");
         assert_eq!(files.accept(second.generation).map(|p| p.index), Some(2));
         assert!(files.is_idle());
+    }
+
+    /// The target is the file last asked for, and the file on screen again
+    /// once the read is answered or given up; a read said to be slow from
+    /// the start is said at once and only once.
+    #[test]
+    fn the_target_is_the_file_last_asked_for() {
+        let mut files = list(3);
+        files.shown(0);
+        assert_eq!(files.target(), 0);
+        let request = files.step(true).expect("three files to step through");
+        assert_eq!(files.target(), 1);
+        assert_eq!(files.target_path(), Some(Path::new("1.png")));
+        let now = Instant::now();
+        files.announce_now(now);
+        files.announce_now(now + SLOW_READ);
+        assert_eq!(
+            files.pending().and_then(|pending| pending.announced),
+            Some(now)
+        );
+        assert_eq!(files.announce_slow_read(now + SLOW_READ), Announce::Nothing);
+        let answered = files
+            .accept(request.generation)
+            .expect("the read in flight");
+        assert!(
+            files.failed(answered.index, None).is_none(),
+            "no walk to go on with"
+        );
+        assert_eq!(files.target(), 0);
+    }
+
+    /// The files a step goes to from the one on screen, the next first.
+    #[test]
+    fn the_neighbors_are_where_a_step_goes() {
+        let names = |files: &Files| -> Vec<String> {
+            files
+                .neighbors()
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect()
+        };
+        assert!(names(&list(1)).is_empty());
+        assert_eq!(names(&list(2)), ["1.png"]);
+        let mut files = list(3);
+        assert_eq!(names(&files), ["1.png", "2.png"]);
+        files.shown(2);
+        assert_eq!(names(&files), ["0.png", "1.png"]);
     }
 
     #[test]
