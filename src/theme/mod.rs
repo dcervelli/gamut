@@ -10,7 +10,7 @@
 //! On a Mac the answer is AppKit's instead: its semantic colors, resolved
 //! under the appearance in force — light or dark, raised contrast or not,
 //! and the accent color the user chose — read by `macos.rs` into a
-//! [`System`], which [`Theme::from_system`] derives the same roles from.
+//! `System`, which `Theme::from_system` derives the same roles from.
 //! The appearance is asked again on every poll, so switching it reaches an
 //! open window as a new Omarchy theme does.
 //!
