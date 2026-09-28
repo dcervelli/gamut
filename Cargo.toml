@@ -42,11 +42,6 @@ egui-wgpu = { version = "0.36.2", default-features = false }
 # would bring a second clipboard library beside `wl-clipboard-rs`, and
 # `links` a browser launcher: both off, the two backends on.
 egui-winit = { version = "0.36.2", default-features = false, features = ["wayland", "x11"] }
-# Asks fontconfig which faces the desktop is set in, so that the interface
-# is set in the same ones — see `ui/fonts.rs`. The library is opened at run
-# time rather than linked, so the build needs no headers and a desktop
-# without it still gets a window; `fontdb` below is what answers then.
-fontconfig = { version = "0.11", features = ["dlopen"] }
 # The fallback: reads the font directories itself and resolves the generic
 # families from fontconfig's aliases alone, which is a rougher answer than
 # the library's but needs nothing installed.
@@ -168,6 +163,14 @@ tiff = "0.11.3"
 ultrahdr-rs = "0.3.5"
 wgpu = "30.0.1"
 winit = "0.30.13"
+# What only a Linux desktop has to be spoken to through: its compositor, its
+# clipboard, and fontconfig.
+[target.'cfg(target_os = "linux")'.dependencies]
+# Asks fontconfig which faces the desktop is set in, so that the interface
+# is set in the same ones — see `ui/fonts/fontconfig.rs`. The library is opened at run
+# time rather than linked, so the build needs no headers and a desktop
+# without it still gets a window; `fontdb` below is what answers then.
+fontconfig = { version = "0.11", features = ["dlopen"] }
 # The compositor's word on which monitors are in HDR mode, read through the
 # color-management protocol on a connection of our own. A driver offers an
 # HDR color space for a window on any monitor; only the compositor knows
@@ -182,6 +185,16 @@ wayland-protocols = { version = "0.32.13", features = ["client", "staging", "uns
 # This speaks that protocol directly rather than shelling out to `wl-copy`,
 # which would be a runtime dependency on a package the user may not have.
 wl-clipboard-rs = "0.9.3"
+
+# And what a Mac is spoken to through: its own frameworks, by their
+# Objective-C interfaces. The same family of bindings wgpu already links for
+# Metal, each framework's classes a feature, so only those named are built.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.4"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSBundle", "NSData", "NSDictionary", "NSEnumerator", "NSError", "NSFileManager", "NSGeometry", "NSObject", "NSString", "NSURL", "NSValue"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "NSApplication", "NSFont", "NSFontDescriptor", "NSGraphics", "NSOpenPanel", "NSPanel", "NSPasteboard", "NSPasteboardItem", "NSResponder", "NSRunningApplication", "NSSavePanel", "NSScreen", "NSView", "NSWindow", "NSWorkspace", "objc2-core-foundation", "objc2-uniform-type-identifiers"] }
+objc2-uniform-type-identifiers = { version = "0.3.2", default-features = false, features = ["std", "UTType"] }
+block2 = "0.6.2"
 
 [build-dependencies]
 # Finds the system LibRaw for `decode::raw`, and refuses one older than the

@@ -11,11 +11,12 @@
 //!
 //! The table is keyed by what [`key_of`] makes of winit's handle for the
 //! same monitor, so that the application never has to know what a platform
-//! calls one. `wayland.rs` is the one platform that answers.
+//! calls one. `wayland.rs` answers on Linux, `macos.rs` on a Mac.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
+#[cfg(target_os = "linux")]
 use winit::monitor::MonitorHandle;
 
 #[cfg(target_os = "linux")]
@@ -23,8 +24,14 @@ mod wayland;
 #[cfg(target_os = "linux")]
 pub use wayland::watch;
 
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(target_os = "macos")]
+pub use macos::{key_of, watch};
+
 /// The key the table knows `monitor` by: the name the compositor gives it
 /// on Wayland — "DP-2", say — which is also the name winit gives its handle.
+#[cfg(target_os = "linux")]
 pub fn key_of(monitor: &MonitorHandle) -> Option<String> {
     monitor.name()
 }
@@ -66,13 +73,17 @@ pub struct Monitors {
     /// Whether the compositor speaks color management at all. Where it does
     /// not, no monitor will ever have a mode, and the absence means nothing.
     pub(super) speaks_modes: bool,
+    /// Whether the table is read afresh each time it is asked, as on a Mac,
+    /// rather than kept current by a thread.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub(super) live: bool,
 }
 
 impl Monitors {
     /// The mode of the monitor [`key_of`] calls `name`, or `None` for one
     /// that has not been described.
     pub fn mode(&self, name: &str) -> Option<Mode> {
-        self.table.lock().ok()?.modes.get(name).copied()
+        self.read()?.modes.get(name).copied()
     }
 
     /// How much room above white the monitor called `name` has: the ratio
@@ -80,7 +91,7 @@ impl Monitors {
     /// describes it, which is what a gain map's lift is weighed against.
     /// `None` for a monitor that has not said, and 1 for one in SDR mode.
     pub fn headroom(&self, name: &str) -> Option<f32> {
-        self.table.lock().ok()?.headrooms.get(name).copied()
+        self.read()?.headrooms.get(name).copied()
     }
 
     /// Whether the compositor can say what mode a monitor is in. Where it
@@ -93,10 +104,16 @@ impl Monitors {
     /// The room of every monitor that has said both its mode and its logical
     /// size. Empty under a compositor without `xdg_output`.
     pub fn rooms(&self) -> Vec<Room> {
-        self.table
-            .lock()
+        self.read()
             .map(|table| table.rooms.clone())
             .unwrap_or_default()
+    }
+
+    /// The table as it stands, read again first where it is read live.
+    fn read(&self) -> Option<MutexGuard<'_, Table>> {
+        #[cfg(target_os = "macos")]
+        macos::refresh(self);
+        self.table.lock().ok()
     }
 }
 
@@ -109,6 +126,7 @@ impl Monitors {
         Self {
             table: Arc::new(Mutex::new(Table::default())),
             speaks_modes,
+            live: false,
         }
     }
 

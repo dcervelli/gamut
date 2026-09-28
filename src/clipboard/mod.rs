@@ -3,7 +3,7 @@
 //! What is copied and what a paste is taken as are the same everywhere, and
 //! are here: the types, the table of pictures a paste may be, and the thread
 //! that watches for one. How the clipboard is spoken to is the platform's —
-//! `wayland.rs` on Linux.
+//! `wayland.rs` on Linux, `macos.rs` on a Mac.
 //!
 //! Reading always belongs to somebody else, who is asked for the selection
 //! under one of the types they said they could produce. How long that takes
@@ -17,6 +17,11 @@ use std::time::Duration;
 mod wayland;
 #[cfg(target_os = "linux")]
 pub use wayland::{SERVE_ARGUMENT, copy, offered_image, receive, serve};
+
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(target_os = "macos")]
+pub use macos::{copy, offered_image, receive};
 
 /// Words. On Wayland, offering this brings `text/plain;charset=utf-8`,
 /// `STRING`, `UTF8_STRING` and `TEXT` with it, so that a reader gets the
@@ -45,6 +50,7 @@ pub fn uri_list(path: &Path) -> String {
 /// makes the list short: a type offered under a name we could not open again
 /// is a type there is no point asking for. Nothing text-like belongs here
 /// either — a copied filename is words about a picture, not a picture.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(super) const IMAGE_TYPES: &[(&str, &str)] = &[
     ("image/png", "png"),
     ("image/jpeg", "jpg"),

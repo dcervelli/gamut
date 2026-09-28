@@ -77,8 +77,18 @@ impl Dirs {
     /// The user's own cache: `$XDG_CACHE_HOME/thumbnails`, or
     /// `~/.cache/thumbnails`. `None` where neither can be named, in which
     /// case there is no cache to read or write.
+    ///
+    /// A Mac has no cache shared between programs that anyone else writes
+    /// this way, so there it is this program's own, in the directory named
+    /// by its identifier under `~/Library/Caches`, laid out the same.
     pub fn detect() -> Option<Self> {
-        Some(Self::under(&xdg::cache_home()?.join("thumbnails")))
+        let cache = xdg::cache_home()?;
+        let root = if cfg!(target_os = "macos") {
+            cache.join(crate::APP_ID).join("thumbnails")
+        } else {
+            cache.join("thumbnails")
+        };
+        Some(Self::under(&root))
     }
 
     /// Whether `path` is inside the cache. A thumbnail of a thumbnail is

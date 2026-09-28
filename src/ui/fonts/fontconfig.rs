@@ -59,5 +59,9 @@ fn resolve(fc: &Fontconfig, want: Want) -> Option<Face> {
     }
     let bytes = std::fs::read(found.filename().ok()?).ok()?;
     let index = found.face_index().unwrap_or(0).try_into().ok()?;
-    Some(Face { bytes, index })
+    Some(Face {
+        bytes,
+        index,
+        coords: Vec::new(),
+    })
 }

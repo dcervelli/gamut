@@ -29,7 +29,9 @@ use anyhow::{Context, Result, anyhow};
 
 use super::Refused;
 use crate::no_replace::rename_no_replace;
-use crate::{clock, uri, xdg};
+#[cfg(target_os = "linux")]
+use crate::xdg;
+use crate::{clock, uri};
 
 /// How many names one file may try in a trash before giving up: reached only
 /// by a trash already holding that many files of the same name.
@@ -57,6 +59,7 @@ impl Trash {
     /// The user's home trash, where the specification puts it: under
     /// `$XDG_DATA_HOME`, or `~/.local/share`. `None` where neither is
     /// known, in which case there is no trash to move anything to.
+    #[cfg(target_os = "linux")]
     pub fn detect() -> Option<Self> {
         Some(Self::under(xdg::data_home()?.join("Trash")))
     }

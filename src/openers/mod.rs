@@ -1,11 +1,17 @@
 //! What else on the desktop can open the file on screen, and starting one of
 //! them: the list the menu under the open button offers. Where the answer is
-//! kept is the platform's — `linux.rs` reads the freedesktop desktop entries.
+//! kept is the platform's — `linux.rs` reads the freedesktop desktop entries,
+//! and `macos.rs` asks Launch Services.
 
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
 pub use linux::{Opener, for_file, open};
+
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(target_os = "macos")]
+pub use macos::{Opener, for_file, open};
 
 /// The longest name an item of the menu may wear, in characters.
 ///

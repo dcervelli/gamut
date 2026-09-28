@@ -203,11 +203,13 @@ impl Drop for Thumbnailer {
 }
 
 /// Lowers the calling thread's priority, CPU and I/O both, as far as an
-/// unprivileged process can: nice 10, and the best-effort I/O class at its
-/// lowest level. Both are per-thread on Linux, which is what makes this
-/// worth doing here rather than for the process. Best effort: a kernel
-/// that refuses leaves the thread where it was, and the thumbnails still
-/// come.
+/// unprivileged process can. Best effort: a kernel that refuses leaves the
+/// thread where it was, and the thumbnails still come.
+///
+/// On Linux, nice 10 and the best-effort I/O class at its lowest level, both
+/// of which are per-thread there, which is what makes this worth doing here
+/// rather than for the process.
+#[cfg(target_os = "linux")]
 fn lower_priority() {
     const NICE: libc::c_int = 10;
     const IOPRIO_WHO_PROCESS: libc::c_int = 1;
@@ -224,6 +226,18 @@ fn lower_priority() {
             0,
             (IOPRIO_CLASS_BE << IOPRIO_CLASS_SHIFT) | LOWEST_LEVEL,
         );
+    }
+}
+
+/// On macOS, the thread's background band, which lowers its CPU priority
+/// and throttles its disk reads together. `PRIO_PROCESS` is not used here as
+/// it is on Linux: on Darwin it is the whole process, the window included.
+#[cfg(target_os = "macos")]
+fn lower_priority() {
+    // SAFETY: one system call with constant arguments, acting on the calling
+    // thread — `0` names it — and reading no memory.
+    unsafe {
+        libc::setpriority(libc::PRIO_DARWIN_THREAD, 0, libc::PRIO_DARWIN_BG);
     }
 }
 

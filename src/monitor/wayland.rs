@@ -86,6 +86,7 @@ pub fn watch(notify: impl Fn() + Send + 'static) -> Option<Monitors> {
     Some(Monitors {
         table,
         speaks_modes,
+        live: false,
     })
 }
 

@@ -3,6 +3,9 @@
 //! that open the file asks by these names, a paste is taken under them, and
 //! the desktop entry claims them.
 
+// On a Mac nothing but the tests asks: Launch Services knows the types itself.
+#![cfg_attr(not(target_os = "linux"), allow(dead_code))]
+
 use std::ffi::OsStr;
 use std::path::Path;
 

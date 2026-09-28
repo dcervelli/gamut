@@ -6,10 +6,10 @@ use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::monitor::MonitorHandle;
 use winit::window::WindowAttributes;
 
+use crate::PROGRAM;
 use crate::monitor::{Monitors, Room};
 use crate::ui;
 use crate::ui::chrome::{BAR_HEIGHT, SIDE_WIDTH};
-use crate::{APP_ID, PROGRAM};
 
 /// Fraction of a monitor's room a freshly opened window may occupy.
 const MAX_WINDOW_FRACTION: f64 = 0.66;
@@ -90,8 +90,10 @@ pub(super) fn loading_title(path: &Path) -> String {
 /// can match — needs the application's name as well. Wayland calls it the
 /// `app_id` and X11 the class half of `WM_CLASS`; winit spells both `with_name`
 /// on a per-backend extension trait, so both are set and whichever backend is
-/// in use reads its own. The name is [`APP_ID`], the reverse-DNS one the
-/// desktop entry is filed under, not the word the binary is called by.
+/// in use reads its own. The name is [`APP_ID`](crate::APP_ID), the
+/// reverse-DNS one the desktop entry is filed under, not the word the binary
+/// is called by. A Mac takes it from an application bundle instead, so there
+/// this sets nothing.
 ///
 /// The instance name is left empty: it exists to tell several windows of one
 /// application apart, and there is only ever the one here.
@@ -106,6 +108,8 @@ pub(super) fn with_app_id(attributes: WindowAttributes) -> WindowAttributes {
     {
         use winit::platform::wayland::WindowAttributesExtWayland;
         use winit::platform::x11::WindowAttributesExtX11;
+
+        use crate::APP_ID;
 
         let attributes = WindowAttributesExtWayland::with_name(attributes, APP_ID, "");
         WindowAttributesExtX11::with_name(attributes, APP_ID, "")

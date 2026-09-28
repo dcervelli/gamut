@@ -3,7 +3,7 @@
 //! is shipped with the binary.
 //!
 //! Which face that is, is the desktop's to say, and it is asked directly —
-//! on Linux, fontconfig; see `fontconfig.rs`. Where there is nobody to ask,
+//! on Linux, fontconfig; see `fontconfig.rs`; on a Mac, AppKit; see `macos.rs`. Where there is nobody to ask,
 //! fontdb reads the font directories itself and answers as best it can.
 //!
 //! egui takes fonts as bytes, so each face is read whole once at startup and
@@ -18,6 +18,7 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
+use egui::epaint::text::VariationCoords;
 use egui::{FontData, FontDefinitions, FontFamily, FontTweak};
 use skrifa::instance::{LocationRef, Size};
 use skrifa::{FontRef, MetadataProvider};
@@ -26,6 +27,11 @@ use skrifa::{FontRef, MetadataProvider};
 mod fontconfig;
 #[cfg(target_os = "linux")]
 use self::fontconfig::Desktop;
+
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(target_os = "macos")]
+use self::macos::Desktop;
 
 /// The bold sans, for the one thing in the window set bold: the file's
 /// name. egui's own families are the proportional and the monospace face,
@@ -95,12 +101,16 @@ pub(super) enum Want {
 pub(super) struct Face {
     pub(super) bytes: Vec<u8>,
     pub(super) index: u32,
+    /// Where a variable face is to be set on its axes — its weight — and
+    /// nothing for a face that is the weight it is.
+    pub(super) coords: Vec<([u8; 4], f32)>,
 }
 
 impl From<Face> for FontData {
     fn from(face: Face) -> Self {
         let tweak = FontTweak {
             y_offset_factor: centering(&face.bytes, face.index),
+            coords: VariationCoords::new(face.coords),
             ..Default::default()
         };
         FontData {
@@ -158,6 +168,7 @@ fn listed(db: &fontdb::Database, want: Want) -> Option<Face> {
     db.with_face_data(id, |bytes, index| Face {
         bytes: bytes.to_vec(),
         index,
+        coords: Vec::new(),
     })
 }
 

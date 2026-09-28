@@ -13,23 +13,12 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 /// Renames `from` to `to`, refusing with `AlreadyExists` if anything is at
-/// `to` — atomically, through `renameat2`, where the filesystem can, and by
-/// looking first where it cannot. What a rename of the file on screen goes
-/// through as well, for the same refusal.
+/// `to` — atomically, through the kernel, where the filesystem can, and by
+/// looking first where it cannot.
 pub fn rename_no_replace(from: &Path, to: &Path) -> io::Result<()> {
     let c = |path: &Path| CString::new(path.as_os_str().as_bytes()).map_err(io::Error::other);
     let (from_c, to_c) = (c(from)?, c(to)?);
-    // SAFETY: two valid NUL-terminated paths, and flags the kernel defines.
-    let result = unsafe {
-        libc::renameat2(
-            libc::AT_FDCWD,
-            from_c.as_ptr(),
-            libc::AT_FDCWD,
-            to_c.as_ptr(),
-            libc::RENAME_NOREPLACE,
-        )
-    };
-    if result == 0 {
+    if exclusive_rename(&from_c, &to_c) == 0 {
         return Ok(());
     }
     let error = io::Error::last_os_error();
@@ -43,6 +32,28 @@ pub fn rename_no_replace(from: &Path, to: &Path) -> io::Result<()> {
         }
         _ => Err(error),
     }
+}
+
+/// Linux's refusing rename: `renameat2` with `RENAME_NOREPLACE`.
+#[cfg(target_os = "linux")]
+fn exclusive_rename(from: &CString, to: &CString) -> libc::c_int {
+    // SAFETY: two valid NUL-terminated paths, and flags the kernel defines.
+    unsafe {
+        libc::renameat2(
+            libc::AT_FDCWD,
+            from.as_ptr(),
+            libc::AT_FDCWD,
+            to.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    }
+}
+
+/// Darwin's: `renamex_np` with `RENAME_EXCL`, which APFS and HFS+ both keep.
+#[cfg(target_os = "macos")]
+fn exclusive_rename(from: &CString, to: &CString) -> libc::c_int {
+    // SAFETY: two valid NUL-terminated paths, and a flag the kernel defines.
+    unsafe { libc::renamex_np(from.as_ptr(), to.as_ptr(), libc::RENAME_EXCL) }
 }
 
 #[cfg(test)]

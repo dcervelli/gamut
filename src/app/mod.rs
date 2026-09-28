@@ -1045,8 +1045,11 @@ impl App {
         }
         let before = self.headroom();
         self.monitor_headroom = headroom;
-        // Worth a line, since it is what lights the switch or kills it.
-        if let (Some(name), Some(mode)) = (&name, mode) {
+        // Worth a line, since it is what lights the switch or kills it; the
+        // room above white alone can move by the moment on a Mac, and is not.
+        if let (Some(name), Some(mode)) = (&name, mode)
+            && Some(mode) != self.monitor
+        {
             let mode = match mode {
                 Mode::Hdr => "HDR",
                 Mode::Sdr => "SDR",

@@ -1,6 +1,7 @@
 //! The desktop's own file dialog: [`choose_on_thread`] puts it up and hands
 //! the answer back through the event loop. How it is asked for is the
-//! platform's — `freedesktop.rs` on Linux, through the portal.
+//! platform's — `freedesktop.rs` on Linux, through the portal, and
+//! `macos.rs` on a Mac.
 //!
 //! A dialog picks files or it picks a folder, never both in one — every
 //! desktop's dialog is built that way — so [`Pick`] says which is being asked
@@ -15,6 +16,11 @@ use anyhow::Result;
 mod freedesktop;
 #[cfg(target_os = "linux")]
 pub use freedesktop::choose_on_thread;
+
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(target_os = "macos")]
+pub use macos::choose_on_thread;
 
 /// What the dialog is to pick.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

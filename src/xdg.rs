@@ -3,13 +3,20 @@
 //! directories a session keeps its cache, its configuration, its state and
 //! its data in — each from the variable named for it, and otherwise from home.
 //!
+//! On macOS the variables are honored where they are set, and otherwise the
+//! cache and the state go where a Mac keeps them, under `~/Library`. The
+//! configuration stays in `~/.config`, where someone who edits a file by
+//! hand from a terminal will look for it on either system.
+//!
 //! A variable set to nothing is a variable not set, which is how a session
 //! says it has none rather than that the answer is the root of the
 //! filesystem; and a relative path is ignored, as the specification asks,
 //! since it would otherwise be resolved against whatever directory this
 //! program happened to be started in.
 
-use std::ffi::{OsStr, OsString};
+#[cfg(target_os = "linux")]
+use std::ffi::OsStr;
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 /// The absolute path in the environment variable `name`, or `None` where
@@ -23,9 +30,14 @@ pub fn home() -> Option<PathBuf> {
     env_path("HOME")
 }
 
-/// `$XDG_CACHE_HOME`, or `~/.cache`.
+/// `$XDG_CACHE_HOME`, or `~/.cache` — `~/Library/Caches` on macOS.
 pub fn cache_home() -> Option<PathBuf> {
-    env_path("XDG_CACHE_HOME").or_else(|| Some(home()?.join(".cache")))
+    let fallback = if cfg!(target_os = "macos") {
+        "Library/Caches"
+    } else {
+        ".cache"
+    };
+    env_path("XDG_CACHE_HOME").or_else(|| Some(home()?.join(fallback)))
 }
 
 /// `$XDG_CONFIG_HOME`, or `~/.config`.
@@ -33,18 +45,26 @@ pub fn config_home() -> Option<PathBuf> {
     env_path("XDG_CONFIG_HOME").or_else(|| Some(home()?.join(".config")))
 }
 
-/// `$XDG_STATE_HOME`, or `~/.local/state`.
+/// `$XDG_STATE_HOME`, or `~/.local/state` — `~/Library/Application Support`
+/// on macOS.
 pub fn state_home() -> Option<PathBuf> {
-    env_path("XDG_STATE_HOME").or_else(|| Some(home()?.join(".local/state")))
+    let fallback = if cfg!(target_os = "macos") {
+        "Library/Application Support"
+    } else {
+        ".local/state"
+    };
+    env_path("XDG_STATE_HOME").or_else(|| Some(home()?.join(fallback)))
 }
 
 /// `$XDG_DATA_HOME`, or `~/.local/share`.
+#[cfg(target_os = "linux")]
 pub fn data_home() -> Option<PathBuf> {
     env_path("XDG_DATA_HOME").or_else(|| Some(home()?.join(".local/share")))
 }
 
 /// The configuration directories in the order a name found in two of them
 /// is taken from: the user's own, then `$XDG_CONFIG_DIRS` or `/etc/xdg`.
+#[cfg(target_os = "linux")]
 pub fn config_dirs() -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = config_home().into_iter().collect();
     match std::env::var_os("XDG_CONFIG_DIRS") {
@@ -56,6 +76,7 @@ pub fn config_dirs() -> Vec<PathBuf> {
 
 /// The data directories, the same way: the user's own, then
 /// `$XDG_DATA_DIRS` or `/usr/local/share` and `/usr/share`.
+#[cfg(target_os = "linux")]
 pub fn data_dirs() -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = data_home().into_iter().collect();
     match std::env::var_os("XDG_DATA_DIRS") {
@@ -79,6 +100,7 @@ fn absolute(value: OsString) -> Option<PathBuf> {
 
 /// A colon-separated search path, as the specification writes one, with
 /// the relative entries dropped.
+#[cfg(target_os = "linux")]
 fn split_dirs(value: &OsStr) -> Vec<PathBuf> {
     std::env::split_paths(value)
         .filter(|path| path.is_absolute())
@@ -103,6 +125,7 @@ mod tests {
 
     /// A search path is split at the colons, and the relative entries in
     /// it are dropped rather than resolved against the working directory.
+    #[cfg(target_os = "linux")]
     #[test]
     fn a_search_path_keeps_its_absolute_entries_in_order() {
         assert_eq!(
