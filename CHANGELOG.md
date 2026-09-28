@@ -13,9 +13,9 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   made; the thumbnails of the files either side of the one on screen are
   made ahead of the rest so that there is one. The histogram and information
   panels stop describing the picture being left and show a spinner in its
-  place until the file is in. A file of a kind the last of which was slow is
-  treated as slow from the key, so a folder of large files flips through
-  thumbnails without a pause before each.
+  place until the file is in. A file of a kind the last of
+  which was slow is treated as slow from the key, so a folder of large files
+  flips through thumbnails without a pause before each.
 - A camera raw can be shown as the JPEG the camera wrote into it, with the
   camera's own curve and color, in place of the picture developed from the
   sensor. `v`, or the **Camera RAW** button that appears at the bottom right
@@ -56,8 +56,12 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 - A step moves the count, the file list's highlight, and the name in the bar
   and the window's title at once, rather than when the file has loaded;
   they go back if it cannot be read. Until it has loaded, the copies,
-  rename, remove, delete, export and **Open in** are unavailable, since the
-  file named is not yet the one open.
+  rename, remove, delete, export, **Open in**, the rotate buttons and the
+  frame and page controls are unavailable, since the file named is not yet
+  the one open. The size and format at the right of the top bar, the words
+  such as **clipped** at the right of the bottom bar and the **Camera RAW**
+  button go at once, and the frame and page bar becomes the new file's,
+  rather than describing the previous file under the new name.
 - A file, a folder or a sort taking its time is said after 150 ms rather
   than 250 ms, and a window opening on a list still being sorted waits that
   long for it before opening at the empty window's size.

@@ -433,11 +433,15 @@ impl Pass<'_> {
                 self.zoom_readout(ui, zoom, fills);
                 ui.add_space(PADDING);
 
-                let facts = status::facts(current, |text| measure(ui, text));
-                let room = (ui.max_rect().width() / 2.0 - BAR_PADDING * 2.0).max(1.0);
-                let facts = status::fit_segments(|text| measure(ui, text), &facts, room);
-                ui.add(egui::Label::new(RichText::new(facts).color(dim)).truncate());
-                ui.add_space(PADDING);
+                // The facts are the picture's on screen, which is not the
+                // file the name has moved on to: none until that one is in.
+                if self.input.arriving.is_none() {
+                    let facts = status::facts(current, |text| measure(ui, text));
+                    let room = (ui.max_rect().width() / 2.0 - BAR_PADDING * 2.0).max(1.0);
+                    let facts = status::fit_segments(|text| measure(ui, text), &facts, room);
+                    ui.add(egui::Label::new(RichText::new(facts).color(dim)).truncate());
+                    ui.add_space(PADDING);
+                }
 
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                     ui.add_space(BAR_PADDING);
@@ -526,13 +530,16 @@ impl Pass<'_> {
     /// two ways of one thing. Momentary, not lit: the turn in force is the
     /// picture itself, on screen. Laid out from the right, so the clockwise
     /// button goes down first and comes out on the right.
+    /// Dead while another file is on its way in: a turn is kept with the
+    /// file it was made to, which would be the one the bar no longer names.
     fn turn_buttons(&mut self, ui: &mut Ui) {
+        let alive = self.input.arriving.is_none();
         let right = self.icon_button(
             ui,
             icon::ROTATE_CW_SQUARE,
             Control::TurnRight,
             false,
-            true,
+            alive,
             Corners::Trailing,
         );
         if right.clicked() {
@@ -544,7 +551,7 @@ impl Pass<'_> {
             icon::ROTATE_CCW_SQUARE,
             Control::TurnLeft,
             false,
-            true,
+            alive,
             Corners::Leading,
         );
         if left.clicked() {
@@ -576,7 +583,9 @@ impl Pass<'_> {
     /// the file is not. As wide as the wider of its two words, so that the
     /// turn pair does not move when it is pressed. Says whether it was drawn.
     fn camera_switch(&mut self, ui: &mut Ui, current: &Current) -> bool {
-        if !matches!(current.camera_jpeg, CameraJpeg::Present(_)) {
+        // Nor while another file is on its way in: whether there is a JPEG
+        // to switch to is the outgoing file's answer, not the arriving one's.
+        if !matches!(current.camera_jpeg, CameraJpeg::Present(_)) || self.input.arriving.is_some() {
             return false;
         }
         let words = match current.rendering {

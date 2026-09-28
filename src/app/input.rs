@@ -2164,9 +2164,9 @@ impl App {
             // Only a region moves, grows and shrinks, and there is none: see
             // `perform_on_region`.
             MoveRegion(_) | GrowRegion(_) | ShrinkRegion(_) => return Effect::Nothing,
-            TogglePlay => return self.toggle_play(),
-            NextFrame => return self.step_frame(1),
-            PreviousFrame => return self.step_frame(-1),
+            TogglePlay => return self.press(Control::Play),
+            NextFrame => return self.press(Control::StepForward),
+            PreviousFrame => return self.press(Control::StepBack),
             // The menu's own items, so that the key and the item cannot
             // come to mean different things.
             Rename => return self.press(Control::Rename),

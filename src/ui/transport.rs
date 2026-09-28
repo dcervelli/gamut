@@ -101,12 +101,15 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, transport: &Transport) {
     ui.horizontal_centered(|ui| {
         ui.add_space(BAR_PADDING);
         let animation = matches!(transport.kind, Kind::Animation { .. });
+        // While a file is on its way in the bar is that file's, from its
+        // header, and there is nothing yet to step or play.
+        let alive = pass.input.arriving.is_none();
         let back = pass.icon_button(
             ui,
             icon::STEP_BACK,
             Control::StepBack,
             false,
-            true,
+            alive,
             Corners::Leading,
         );
         if back.clicked() {
@@ -115,7 +118,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, transport: &Transport) {
         ui.add_space(STEP_SEAM);
         if let Kind::Animation { playing, .. } = &transport.kind {
             let marks = if *playing { icon::PAUSE } else { icon::PLAY };
-            let play = pass.icon_button(ui, marks, Control::Play, *playing, true, Corners::Middle);
+            let play = pass.icon_button(ui, marks, Control::Play, *playing, alive, Corners::Middle);
             if play.clicked() {
                 pass.press(Control::Play);
             }
@@ -126,7 +129,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, transport: &Transport) {
             icon::STEP_FORWARD,
             Control::StepForward,
             false,
-            true,
+            alive,
             Corners::Trailing,
         );
         if forward.clicked() {
@@ -240,7 +243,8 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, transport: &Transport) {
             // pointer, from the press and for as long as it is held, so a
             // press lands at once and a drag scrubs; once per frame it lands
             // on, since the same frame asked for twice is one ask.
-            if (response.is_pointer_button_down_on() || response.dragged())
+            if alive
+                && (response.is_pointer_button_down_on() || response.dragged())
                 && let Some(pointer) = response.interact_pointer_pos()
             {
                 let fraction = (pointer.x - rect.min.x) / rect.width().max(1.0);

@@ -219,10 +219,18 @@ const STATE_PAD: f32 = 6.0;
 /// nothing is being done. Cut by whole segments to half the bar, as the top
 /// bar's facts are.
 ///
+/// Nothing, too, while another file is on its way in: the settings and the
+/// verdict are the outgoing picture's, and the one arriving has its own.
+///
 /// Pressed as well as pointed at: a press on them opens the panel that sets
 /// what they are reading out, and a button's wash comes up under them while
 /// the pointer is on them. Nothing at rest — the line is a reading first.
 pub(super) fn state_words(pass: &mut Pass, ui: &mut egui::Ui, current: &Current) {
+    // What is being done to the picture on screen, which is not the file
+    // the name has moved on to: nothing is said until that one is in.
+    if pass.input.arriving.is_some() {
+        return;
+    }
     let segments = describe_state(current, pass.input.headroom);
     if segments.is_empty() {
         return;

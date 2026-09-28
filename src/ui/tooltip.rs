@@ -189,7 +189,7 @@ pub const NOTHING_OPEN: &str = "Nothing is open.";
 /// What a control acting on the file says while another file is on its way
 /// in: the bar names that one already, and the file on screen is the one a
 /// press would act on.
-pub const STILL_OPENING: &str = "Not until the file named is open.";
+pub const STILL_OPENING: &str = "Waiting for file.";
 
 /// Everything that could make a control dead this frame, read off the
 /// application before the frame. One struct rather than a parameter each,
@@ -336,6 +336,12 @@ pub fn disabled(tip: Tip, reasons: Reasons) -> Option<Refused> {
                 | Control::Delete
                 | Control::Export
                 | Control::OpenIn
+                | Control::TurnLeft
+                | Control::TurnRight
+                | Control::Play
+                | Control::StepBack
+                | Control::StepForward
+                | Control::Seek(_)
         )
     ) && arriving
     {
@@ -830,6 +836,12 @@ mod tests {
             Control::Delete,
             Control::Export,
             Control::OpenIn,
+            Control::TurnLeft,
+            Control::TurnRight,
+            Control::Play,
+            Control::StepBack,
+            Control::StepForward,
+            Control::Seek(0),
         ] {
             assert_eq!(
                 disabled(Tip::Control(button), arriving),

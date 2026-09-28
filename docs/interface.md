@@ -447,17 +447,28 @@ where in the list the key has gone moves at once: the count, the file
 list's highlight and its scroll, the name in the bar and the window's
 title. They read `Files::target` — the file being read, or the file on
 screen where nothing is — and `App::send` owes the frame that shows them.
-What describes the picture moves with the picture: the pixels, the
-histogram and information panels, the readouts, the region, the transport
-bar. A read that fails hands the target back to the file on screen, so
+What reads the picture on screen moves with the picture: the pixels, the
+pointer's readout, the zoom, the region, the loupe, the minimap. What
+describes the file goes at the key, since it would sit beside a name that
+is no longer its own: the size, pixels and color space at the top bar's
+end, the words at the bottom bar's end saying what is being done to the
+picture, and the camera's switch. The transport bar becomes the arriving
+file's at the key, from the frames or pages its header said
+(`App::arriving_transport`), at the frame or page it will open on, with
+the room it takes: the picture on screen gives up or takes back a bar's
+height for the moment it is still up, rather than the bar describing a
+file the name has left. A file whose header is not read yet has no bar
+until it arrives. A read that fails hands the target back to the file on screen, so
 the readouts go back by themselves, and `App::deliver` puts the title back
 with them. `app::tests::the_list_readouts_follow_the_key_and_go_back_when_a_read_fails`
 holds both halves.
 
 Between the two moments the bar names one file and the screen shows
 another, so what acts on "the file" — the copies, rename, remove, delete,
-export, opening it elsewhere — is dead while `App::arriving` says a file is
-on its way in (`Reasons::arriving`, `tooltip::STILL_OPENING`). Acting on the
+export, opening it elsewhere, the turn — is dead while `App::arriving` says a file is
+on its way in (`Reasons::arriving`, `tooltip::STILL_OPENING`), and so are the arriving
+file's own transport bar's steps, play and timeline, there being nothing of
+it decoded to move through. Acting on the
 file on screen would act on one the bar no longer names; acting on the one
 named would act on a file that is not open yet.
 

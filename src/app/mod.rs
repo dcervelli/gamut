@@ -1217,16 +1217,25 @@ impl App {
         }
     }
 
-    /// Whether the file on screen brings the transport bar with it: an
-    /// animation, or a file of pages.
+    /// Whether the file the bar names brings the transport bar with it: an
+    /// animation, or a file of pages. From the key for a file on its way in,
+    /// as its header said, so that the bar is the one it will arrive with.
     fn has_transport(&self) -> bool {
-        self.current
-            .as_ref()
-            .is_some_and(|current| current.sequence != Sequence::Still)
+        match self.arriving() {
+            Some(path) => self.arriving_transport(path).is_some(),
+            None => self
+                .current
+                .as_ref()
+                .is_some_and(|current| current.sequence != Sequence::Still),
+        }
     }
 
-    /// What the transport bar shows, for a file that has one.
+    /// What the transport bar shows, for a file that has one: the file on
+    /// its way in from the key, and the file on screen otherwise.
     fn transport(&self) -> Option<ui::Transport> {
+        if let Some(path) = self.arriving() {
+            return self.arriving_transport(path);
+        }
         let current = self.current.as_ref()?;
         match (current.sequence, &self.animation) {
             (Sequence::Animation { .. }, Some(animation)) => Some(animation.transport()),
@@ -1236,6 +1245,45 @@ impl App {
                 kind: ui::transport::Kind::Pages,
             }),
             _ => None,
+        }
+    }
+
+    /// The transport bar the file at `path` will arrive with, from what its
+    /// header said and where it was left: at the frame or page it was left
+    /// on, playing unless it was left stopped, and otherwise at the start,
+    /// playing, or at the page the file itself opens on. No timeline yet —
+    /// no frame of it has been decoded — so the track is laid out evenly.
+    /// `None` for a still, and for a file whose header has not been read.
+    fn arriving_transport(&self, path: &Path) -> Option<ui::Transport> {
+        let sequence = self.chooser.facts_of(path)?.sequence;
+        let left = self.kept.left(path).and_then(|settings| settings.left);
+        match sequence {
+            Sequence::Still => None,
+            Sequence::Animation { count, .. } => {
+                let (index, playing) = match left {
+                    Some(Left::Frame { frame, paused }) => (frame, !paused),
+                    _ => (0, true),
+                };
+                Some(ui::Transport {
+                    index: index.min(count.saturating_sub(1)),
+                    count,
+                    kind: ui::transport::Kind::Animation {
+                        playing,
+                        delays: Vec::new(),
+                    },
+                })
+            }
+            Sequence::Pages { count, default } => {
+                let index = match left {
+                    Some(Left::Page(page)) => page,
+                    _ => default,
+                };
+                Some(ui::Transport {
+                    index: index.min(count.saturating_sub(1)),
+                    count,
+                    kind: ui::transport::Kind::Pages,
+                })
+            }
         }
     }
 
@@ -4837,6 +4885,12 @@ mod tests {
             dir.join("a.png").exists(),
             "the file on screen is not the one named"
         );
+        assert_eq!(app.perform(input::Action::TurnRight), Effect::Nothing);
+        assert_eq!(
+            app.current.as_ref().map(|current| current.turn),
+            Some(Turn::NONE),
+            "nor is it the one a turn would be kept with"
+        );
         answer(&mut app, Reload::Fresh);
         assert_eq!(input(&mut app).arriving, None);
         assert!(!app.conditions().arriving);
@@ -4852,6 +4906,51 @@ mod tests {
         let failed = input(&mut app);
         assert_eq!((failed.index, failed.arriving), (1, None));
         assert_eq!(app.title(), "b.png — gamut");
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// The transport bar is the file the bar names from the key: a file of
+    /// pages on its way in brings its own, at the page it opens on, and the
+    /// room for it with it, before a pixel of it is read, with nothing on
+    /// it that moves. A file whose header has not been read has none until
+    /// it arrives.
+    #[test]
+    fn the_transport_bar_is_the_arriving_files_from_the_key() {
+        let (mut app, dir) = app_over("transport", &[("a.png", 8, 8), ("b.png", 8, 8)]);
+        app.headless = Some(WINDOW);
+        let b = app.files.path(1).to_path_buf();
+        let input = |app: &mut App| app.frame_input([1000.0, 700.0], 1.0);
+        assert!(input(&mut app).transport.is_none());
+
+        let _ = app.step(true);
+        assert!(input(&mut app).transport.is_none(), "b's header is unread");
+        let bare = app.content();
+        let _ = app.chooser.learn(
+            &b,
+            Facts {
+                size: Some((8, 8)),
+                sequence: Sequence::Pages {
+                    count: 3,
+                    default: 1,
+                },
+                title: None,
+                format: None,
+                bytes: None,
+                modified: None,
+            },
+        );
+        assert_eq!(
+            input(&mut app).transport,
+            Some(ui::Transport {
+                index: 1,
+                count: 3,
+                kind: ui::transport::Kind::Pages,
+            })
+        );
+        assert!(app.parts().transport, "the bar takes its room at the key");
+        assert!(app.content().height < bare.height);
+        assert_eq!(app.press(ui::Control::StepForward), Effect::Nothing);
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }
@@ -6755,7 +6854,11 @@ mod tests {
     fn the_room_follows_the_monitor_and_the_switch_and_the_curve_stays() {
         use crate::image::display::ToneMap;
         fn curve(app: &App) -> ToneMap {
-            app.current.as_ref().expect("a picture is up").display.tone_map()
+            app.current
+                .as_ref()
+                .expect("a picture is up")
+                .display
+                .tone_map()
         }
         let (mut app, _dir) = app_over("headroom", &[("a.png", 4, 3)]);
         // A picture pushed above white — the fixture is mid gray, three
