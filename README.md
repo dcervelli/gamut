@@ -1,6 +1,6 @@
 # gamut
 
-A modern Linux image viewer for understanding and acting on images.
+A modern image viewer for understanding and acting on images.
 
 ![Main gamut screenshot](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/main_screenshot.jpg)
 
@@ -18,30 +18,117 @@ An image viewer serves many audiences: photographer, data scientist, programmer,
 * *Discoverable by mouse, driven by keyboard*. Every feature is accessible through the UI and keyboard. Learn the keys via tooltips and in-app help.
 * *Desktop native*. Integrates with your theme, trash, thumbnail cache, file dialogs, and other image applications.
 
-## Features
+## Table of Contents
 
-- [High performance](#high-performance)
-- [Many formats](#many-formats)
-- [Animated/multi-image formats](#animatedmulti-image-formats)
-- [Versatile controls (Keyboard, UI, CLI)](#versatile-controls-keyboard-ui-cli)
-- [Metadata extraction](#metadata-extraction)
-- [Copy/paste image](#copypaste-image)
-- [Region selection/measurement](#region-selectionmeasurement)
-- [Pixel info](#pixel-info)
-- [Pixel grid](#pixel-grid)
-- [Loupe](#loupe)
-- [Histogram](#histogram)
-- [HDR](#hdr)
-- [Color management](#color-management)
-- [Single channel false color](#single-channel-false-color)
-- [Fuzzy file navigation](#fuzzy-file-navigation)
-- [Filmstrip](#filmstrip)
-- [File comparison](#file-comparison)
-- [File/directory watch](#filedirectory-watch)
-- [Export](#export)
-- [Desktop/shell integration](#desktopshell-integration)
-- [OS themed](#os-themed)
-- [Malleable](#malleable)
+- [Tenets](#tenets)
+- [Install](#install)
+  - [Linux](#linux)
+    - [Omarchy setup](#omarchy-setup)
+  - [macOS](#macos)
+- [Getting Started](#getting-started)
+- [Features](#features)
+  - [High performance](#high-performance)
+  - [Many formats](#many-formats)
+  - [Animated/multi-image formats](#animatedmulti-image-formats)
+  - [Versatile controls (Keyboard, UI, CLI)](#versatile-controls-keyboard-ui-cli)
+  - [Metadata extraction](#metadata-extraction)
+  - [Copy/paste image](#copypaste-image)
+  - [Region selection/measurement](#region-selectionmeasurement)
+  - [Pixel info](#pixel-info)
+  - [Pixel grid](#pixel-grid)
+  - [Loupe](#loupe)
+  - [Histogram](#histogram)
+  - [HDR](#hdr)
+  - [Color management](#color-management)
+  - [Single channel false color](#single-channel-false-color)
+  - [Fuzzy file navigation](#fuzzy-file-navigation)
+  - [Filmstrip](#filmstrip)
+  - [File comparison](#file-comparison)
+  - [File/directory watch](#filedirectory-watch)
+  - [Export](#export)
+  - [Desktop/shell integration](#desktopshell-integration)
+  - [OS themed](#os-themed)
+  - [Malleable](#malleable)
+- [Contributing](#contributing)
+- [License](#license)
+
+## Install
+
+### Linux
+
+gamut is packaged for Arch. The PKGBUILD builds the latest release:
+
+```sh
+git clone https://github.com/dcervelli/gamut.git
+cd gamut/packaging && makepkg -si
+```
+
+Note: it takes a few minutes to build.
+
+#### Omarchy setup
+
+Omarchy ships `imv` as its image viewer. To use gamut in its place:
+
+**1. Window rule.** Add this to `~/.config/hypr/hyprland.lua`:
+
+```lua
+o.window("com.dcervelli.gamut", { float = true, center = true, tag = "-default-opacity", opacity = "1 1" })
+```
+
+gamut then opens floating and centered, at a size it works out from the image and the screen. The window is fully opaque, because Omarchy's default translucency would tint the image with whatever is behind it. Hyprland picks up the change when you save.
+
+**2. Default viewer.** Make gamut the viewer for every image type [it reads](packaging/com.dcervelli.gamut.desktop):
+
+```sh
+xdg-mime default com.dcervelli.gamut.desktop $(sed -n 's/^MimeType=//p' /usr/share/applications/com.dcervelli.gamut.desktop | tr ';' '\n' | grep '^image/')
+```
+
+Folders still open in your file manager; `gamut <folder>` from a terminal views every image in one. The choice is written to `~/.config/mimeapps.list`, where it can be changed back.
+
+**3. Theme.** Nothing to do: gamut uses the current Omarchy theme and follows it when you switch.
+
+### macOS
+
+gamut is packaged for Homebrew. The formula builds the latest release:
+
+```sh
+brew install dcervelli/gamut/gamut
+```
+
+Note: it takes a few minutes to build.
+
+This installs the `gamut` command and `Gamut.app`. To launch it from Finder or Spotlight, link the app into `/Applications`:
+
+```sh
+ln -sf "$(brew --prefix gamut)/Gamut.app" /Applications/Gamut.app
+```
+
+Once gamut has been opened, Finder offers it under "Open With" for every image type it reads.
+
+## Getting Started
+
+Just pass filenames or directories to `gamut`:
+```
+gamut file1.jpg pictures file2.png
+```
+Directories are scanned non-recursively.
+
+Enough keys to get going:
+
+| Key (Linux) | Key (macOS) | Action |
+| --- | --- | --- |
+| `]`, `[` or `PgDn`, `PgUp` | `]`, `[` or `Fn↓`, `Fn↑` | Next / previous file |
+| Space | Space | Cycle fit → fill → 100% |
+| `1` | `1`, `0` or `⌘0` | Actual size; wheel to zoom, drag to pan |
+| `d`, `f` | `d`, `f` | Exposure down / up |
+| `h`, `i`, `m` | `h`, `i`, `m` | Histogram, file information, minimap |
+| `` ` `` | `` ` `` | Hide the interface |
+| `tab` | `tab` | Show/hide the file list |
+| `q`, `esc` | `q`, `esc` or `⌘Q`, `⌘W` | Quit |
+
+All controls are documented in [`user-docs/KEYS.md`](user-docs/KEYS.md). CLI help is available via `gamut --help`.
+
+## Features
 
 ### High performance
 
@@ -113,7 +200,7 @@ A dynamic histogram primarily for inspecting the content of the image. While you
 
 ### HDR
 
-When available on the monitor (`--output hdr` attempts to force the display into HDR), HDR sources are shown at their graded brightness.
+When available on the monitor (on Linux, `--output hdr` attempts to force the display into HDR), HDR sources are shown at their graded brightness.
 
 ### Color management
 
@@ -163,7 +250,7 @@ A basic file export to lossless PNG or JPG with an option to resize.
 
 ### Desktop/shell integration
 
-* [Registers as a handler](packaging/com.dcervelli.gamut.desktop) for all formats it reads as well as directories;
+* Registers as a handler for all formats it reads: through its [desktop entry](packaging/com.dcervelli.gamut.desktop) on Linux, where it also opens directories, and under Finder's "Open With" on macOS;
 * man page;
 * bash, fish, and zsh completions;
 * "Open in…" menu:
@@ -185,62 +272,6 @@ Generate a default, documented config:
 ```sh
 gamut --print-config > ~/.config/gamut/config
 ```
-
-## Install
-
-gamut is packaged for Arch. The PKGBUILD builds the latest release:
-
-```sh
-git clone https://github.com/dcervelli/gamut.git
-cd gamut/packaging && makepkg -si
-```
-
-Note: it takes a few minutes to build.
-
-### Omarchy setup
-
-Omarchy ships `imv` as its image viewer. To use gamut in its place:
-
-**1. Window rule.** Add this to `~/.config/hypr/hyprland.lua`:
-
-```lua
-o.window("com.dcervelli.gamut", { float = true, center = true, tag = "-default-opacity", opacity = "1 1" })
-```
-
-gamut then opens floating and centered, at a size it works out from the image and the screen. The window is fully opaque, because Omarchy's default translucency would tint the image with whatever is behind it. Hyprland picks up the change when you save.
-
-**2. Default viewer.** Make gamut the viewer for every image type [it reads](packaging/com.dcervelli.gamut.desktop):
-
-```sh
-xdg-mime default com.dcervelli.gamut.desktop $(sed -n 's/^MimeType=//p' /usr/share/applications/com.dcervelli.gamut.desktop | tr ';' '\n' | grep '^image/')
-```
-
-Folders still open in your file manager; `gamut <folder>` from a terminal views every image in one. The choice is written to `~/.config/mimeapps.list`, where it can be changed back.
-
-**3. Theme.** Nothing to do: gamut uses the current Omarchy theme and follows it when you switch.
-
-## Getting Started
-
-Just pass filenames or directories to `gamut`:
-```
-gamut file1.jpg pictures file2.png
-```
-Directories are scanned non-recursively.
-
-Enough keys to get going:
-
-| Key | |
-| --- | --- |
-| `]`, `[` or `PgDn`, `PgUp` | Next / previous file |
-| Space | Cycle fit → fill → 100% |
-| `1` | Actual size; wheel to zoom, drag to pan |
-| `d`, `f` | Exposure down / up |
-| `h`, `i`, `m` | Histogram, file information, minimap |
-| `` ` `` | Hide the interface |
-| `tab` | Show/hide the file list |
-| `q`, `esc` | Quit |
-
-All controls are documented in [`user-docs/KEYS.md`](user-docs/KEYS.md). CLI help is available via `gamut --help`.
 
 ## Contributing
 

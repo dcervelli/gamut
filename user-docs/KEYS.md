@@ -11,46 +11,47 @@ and `S`, `c` and `C`, `l` and `L`, `n` and `N`.
 ## On macOS
 
 The tables below give each key as it is on Linux. On a Mac, the keys that
-Linux holds with `Ctrl` or `Alt` are held with `Cmd` instead, and a few of
+Linux holds with `Ctrl` or `Alt` are held with `⌘` instead, and a few of
 the shortcuts every Mac program shares are added. Everything not listed here
-is the same on both.
+is the same on both. Keys are written as a Mac's menus write them: `⌘`
+Command, `⌥` Option, `⇧` Shift and `⌃` Control, run together onto the key.
 
 | Key on a Mac | What it does | Name |
 | --- | --- | --- |
-| `1`, `0`, `Cmd`+`0` | Actual size | `zoom.100` |
-| `+`, `=`, `Cmd`+`+`, `Cmd`+`=` | Zoom in one step | `zoom.in` |
-| `-`, `_`, `Cmd`+`-` | Zoom out one step | `zoom.out` |
-| `Cmd`+Arrows | Pan to the far side of the image; with a region selected, grow it that way one pixel | `pan.edge.left` … `pan.edge.down`; `region.grow.left` … `region.grow.down` |
-| `Shift`+`Cmd`+Arrows | With a region selected, shrink it that way one pixel | `region.shrink.left` … `region.shrink.down` |
-| `?`, `/`, `Cmd`+`?` | Show the keys | `interface.help` |
-| `q`, `Cmd`+`Q`, `Cmd`+`W` | Quit | `interface.quit` |
-| `Cmd`+`P` | Choose a file from the list | `files.chooser` |
-| `Cmd`+`[`, `Cmd`+`]` | Back and forward in image history | `files.back`, `files.forward` |
-| `Cmd`+`O`, `Shift`+`Cmd`+`O` | Open image files, or a folder, chosen in the file dialog | `files.open`, `files.open-folder` |
-| `Cmd`+`⌫`, `⌦` | Move the file on screen to the Trash | `files.delete` |
-| `Cmd`+`Z` | Undo | `files.undo` |
-| `Cmd`+`E` | Export the picture as shown | `files.export` |
-| `Cmd`+`C` | Copy the image, or the region, as displayed | `clipboard.image` |
-| `Shift`+`C`, `Option`+`Cmd`+`C` | Copy the file's path | `clipboard.path` |
-| `Shift`+`Cmd`+`C` | Copy the file as a URI | `clipboard.uri` |
-| `Cmd`+`I` | Copy everything the info panel says | `clipboard.info` |
-| `Cmd`+`.`, `Cmd`+`>` | Copy the pixel's value, or its coordinate | `clipboard.pixel`, `clipboard.coordinate` |
-| `Cmd`+`V` | Paste an image | `clipboard.paste` |
+| `1`, `0`, `⌘0` | Actual size | `zoom.100` |
+| `+`, `=`, `⌘+`, `⌘=` | Zoom in one step | `zoom.in` |
+| `-`, `_`, `⌘-` | Zoom out one step | `zoom.out` |
+| `⌘`-Arrows | Pan to the far side of the image; with a region selected, grow it that way one pixel | `pan.edge.left` … `pan.edge.down`; `region.grow.left` … `region.grow.down` |
+| `⇧⌘`-Arrows | With a region selected, shrink it that way one pixel | `region.shrink.left` … `region.shrink.down` |
+| `?`, `/`, `⌘?` | Show the keys | `interface.help` |
+| `q`, `⌘Q`, `⌘W` | Quit | `interface.quit` |
+| `⌘P` | Choose a file from the list | `files.chooser` |
+| `⌘[`, `⌘]` | Back and forward in image history | `files.back`, `files.forward` |
+| `⌘O`, `⇧⌘O` | Open image files, or a folder, chosen in the file dialog | `files.open`, `files.open-folder` |
+| `⌘⌫`, `⌦` | Move the file on screen to the Trash | `files.delete` |
+| `⌘Z` | Undo | `files.undo` |
+| `⌘E` | Export the picture as shown | `files.export` |
+| `⌘C` | Copy the image, or the region, as displayed | `clipboard.image` |
+| `⇧C`, `⌥⌘C` | Copy the file's path | `clipboard.path` |
+| `⇧⌘C` | Copy the file as a URI | `clipboard.uri` |
+| `⌘I` | Copy everything the info panel says | `clipboard.info` |
+| `⌘.`, `⌘>` | Copy the pixel's value, or its coordinate | `clipboard.pixel`, `clipboard.coordinate` |
+| `⌘V` | Paste an image | `clipboard.paste` |
 
 `⌫` is the Delete key, which takes the file off the list as it does on Linux,
-and `⌦` is the forward delete key: `Fn`+Delete on a laptop's keyboard. `F2`
-renames on a Mac too, which on a laptop is `Fn`+`F2` unless the function keys
+and `⌦` is the forward delete key: Fn-Delete on a laptop's keyboard. `F2`
+renames on a Mac too, which on a laptop is Fn-`F2` unless the function keys
 are set to act as function keys. `Return` plays an animation, as `Enter` does
 on Linux.
 
 The mouse differs as well. Two fingers on a trackpad, or the wheel of a
 mouse, pan the picture, as they do in every Mac program that shows one; a
-pinch zooms about the pointer, and so does the wheel with `Cmd` held. The
+pinch zooms about the pointer, and so does the wheel with `⌘` held. The
 right button's hold is the loupe, as on Linux: a two-finger click, or
-`Ctrl`+click, where there is no right button.
+`⌃`-click, where there is no right button.
 
-The help popup (`?`) and `gamut --help` show the Mac's keys, spelled as a
-Mac spells them: `Cmd`, `Option`, `⌦`, `Return`.
+The help popup (`?`) and `gamut --help` show the Mac's keys spelled the same
+way: `⇧⌘O`, `⌘`-Arrows, `⌦`, `Return`.
 
 ## Zoom and position
 
@@ -1002,6 +1003,6 @@ Apart from the chords in the tables above, anything held with `Ctrl`, `Alt`
 or a `Super` key does nothing here unless the configuration file binds it,
 and neither does the wheel with one of them held. Those combinations belong
 to the window manager, and a chord such as `Super+0` would otherwise move the
-view behind its back. On a Mac the same holds for `Ctrl`, `Option` and `Cmd`
-beyond the chords above: `Ctrl` with the arrows is Mission Control's, and
-`Cmd`+`H` and `Cmd`+`Tab` are the system's.
+view behind its back. On a Mac the same holds for `⌃`, `⌥` and `⌘`
+beyond the chords above: `⌃` with the arrows is Mission Control's, and
+`⌘H` and `⌘Tab` are the system's.
