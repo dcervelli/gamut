@@ -23,6 +23,7 @@ use super::tooltip::Tip;
 use super::{
     Current, FrameInput, MENU_OFFSET, PADDING, Panels, Room, filmstrip, menu, pixel, status,
 };
+use crate::image::decode::{CameraJpeg, Rendering};
 use crate::image::display::Headroom;
 use crate::theme::Theme;
 use crate::view::View;
@@ -72,6 +73,10 @@ const READING_PAD: f32 = 6.0;
 /// The surface switch at the right of the bottom bar: the one word it wears,
 /// with the room a button's label keeps around itself.
 const OUTPUT_BUTTON: [f32; 2] = [42.0, 22.0];
+/// What the camera's switch wears, by the picture on screen: the developed
+/// one, or the camera's JPEG.
+pub(super) const CAMERA_RAW: &str = "Camera RAW";
+pub(super) const CAMERA_JPEG: &str = "Camera JPEG";
 
 /// Width of the hairline along a panel's inner edge, in logical pixels. What
 /// it is drawn in is the theme's `border`.
@@ -492,6 +497,9 @@ impl Pass<'_> {
                 ui.add_space(BAR_PADDING);
                 self.output_switch(ui);
                 ui.add_space(PADDING);
+                if self.camera_switch(ui, current) {
+                    ui.add_space(PADDING);
+                }
                 self.turn_buttons(ui);
                 ui.add_space(PADDING);
                 // What is being done to the picture, up against those —
@@ -559,6 +567,44 @@ impl Pass<'_> {
         if response.clicked() {
             self.press(Control::Output);
         }
+    }
+
+    /// The switch between a raw's developed picture and the camera's JPEG of
+    /// it, labeled with the one on screen. Left out, unlike the headroom
+    /// switch, where the file carries no JPEG — which is every file but a
+    /// raw: a dead button on every PNG would be a button about something
+    /// the file is not. As wide as the wider of its two words, so that the
+    /// turn pair does not move when it is pressed. Says whether it was drawn.
+    fn camera_switch(&mut self, ui: &mut Ui, current: &Current) -> bool {
+        if !matches!(current.camera_jpeg, CameraJpeg::Present(_)) {
+            return false;
+        }
+        let words = match current.rendering {
+            Rendering::Developed => CAMERA_RAW,
+            Rendering::CameraJpeg => CAMERA_JPEG,
+        };
+        let font = egui::TextStyle::Button.resolve(ui.style());
+        let widest = ui.ctx().fonts_mut(|fonts| {
+            [CAMERA_RAW, CAMERA_JPEG]
+                .map(|words| {
+                    fonts
+                        .layout_no_wrap(words.to_string(), font.clone(), egui::Color32::PLACEHOLDER)
+                        .size()
+                        .x
+                })
+                .into_iter()
+                .fold(0.0, f32::max)
+        });
+        let size = vec2(
+            (widest + 2.0 * ui.spacing().button_padding.x).ceil(),
+            OUTPUT_BUTTON[1],
+        );
+        let response = ui.add_sized(size, Button::new(words));
+        let response = self.tooltip(response, Tip::Control(Control::CameraJpeg));
+        if response.clicked() {
+            self.press(Control::CameraJpeg);
+        }
+        true
     }
 
     /// The button that opens the keys: lit while the popup is up, since the

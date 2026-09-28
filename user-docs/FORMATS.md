@@ -417,6 +417,15 @@ darker than the camera's own JPEG of it — that JPEG has a curve applied,
 and this has not. Exposure (`f` and `d`) and the tone map (`t`) are the
 controls; the window opens at 0–1 because the file has a white.
 
+The camera's JPEG is in the file too, and `v`, or the **Camera RAW** button
+at the bottom right, shows it in place of the developed picture: the frame
+as the camera rendered it, to look at or export as it is. Canon, Nikon,
+Pentax, Samsung and most DNG files carry one the full size of the frame;
+Sony, Fujifilm and Panasonic carry one of about two megapixels, and the
+older and medium-format backs one smaller still. The choice holds for every
+raw after it and is remembered between runs; see
+[the display keys](KEYS.md#the-display).
+
 Every make that the desktop's raw converters read is read here: Canon,
 Nikon, Sony, Fujifilm (X-Trans included), Olympus, Panasonic, Leica,
 Pentax, Samsung, Hasselblad, Phase One, and the older Kodak, Minolta,

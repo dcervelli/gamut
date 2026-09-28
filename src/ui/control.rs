@@ -97,6 +97,11 @@ pub enum Control {
     /// The switch at the end of the bottom bar between the SDR and the HDR
     /// surface.
     Output,
+    /// The switch in the bottom bar, before the turn pair, between a raw's
+    /// developed picture and the camera's JPEG of it: labeled with the one
+    /// on screen, and drawn only for a raw that carries a JPEG. `v` does the
+    /// same.
+    CameraJpeg,
     /// The button at the foot of the right strip, which opens the help
     /// popup — every key, what it does and when — and closes it while it
     /// is up. `?` and `/` do the same.
@@ -225,6 +230,9 @@ impl Control {
             Control::Window(index) => format!("Window {index}"),
             Control::Curve(index) => format!("Curve {index}"),
             Control::Output => "HDR".to_string(),
+            // The control's name, which stays put; what is drawn on it is
+            // which picture is up — see `Pass::camera_switch`.
+            Control::CameraJpeg => "Camera JPEG".to_string(),
             Control::Help => "Help".to_string(),
             Control::PixelFormat => "Pixel format".to_string(),
             Control::Dismiss => "Dismiss".to_string(),
@@ -499,6 +507,7 @@ impl Control {
         Control::Window(0),
         Control::Curve(0),
         Control::Output,
+        Control::CameraJpeg,
         Control::Help,
         Control::PixelFormat,
         Control::Dismiss,
@@ -567,6 +576,7 @@ impl Control {
             | Control::Window(_)
             | Control::Curve(_)
             | Control::Output
+            | Control::CameraJpeg
             | Control::Help
             | Control::PixelFormat
             | Control::Dismiss

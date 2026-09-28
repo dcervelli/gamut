@@ -24,7 +24,10 @@
 //! held, since the JPEG is stored as the sensor saw it and the orientation
 //! beside it, and otherwise as the camera rendered it — its curve, its
 //! balance. A likeness of the picture for a thumbnail, found in a few
-//! milliseconds where developing the frame takes hundreds.
+//! milliseconds where developing the frame takes hundreds; and, when the
+//! viewer asks for the camera's rendering rather than ours, the picture
+//! itself. [`super::Decoder::camera_jpeg`] says whether there is one and
+//! how large, from the JPEG's header, so that the window can offer it.
 //!
 //! The file is read whole and handed over as one buffer. LibRaw reads by
 //! seeking about a stream, and a buffer is the one form of stream its C
@@ -106,6 +109,26 @@ impl super::Decoder for Raw {
         // does, would otherwise be turned twice.
         let image = crate::image::orient::apply(image, handle.orientation());
         Ok(Some(image))
+    }
+
+    fn camera_jpeg(&self, source: &mut dyn super::ReadSeek) -> Result<super::CameraJpeg> {
+        let handle = Handle::open(source)?;
+        if !handle.unpack_thumbnail()? {
+            return Ok(super::CameraJpeg::Missing);
+        }
+        // Copied out but not decoded: the JPEG's header says its size, and
+        // a bitmap's is in the library's own header.
+        let thumbnail = handle.make_thumbnail()?;
+        let (width, height) = match thumbnail.kind() {
+            ffi::IMAGE_JPEG => super::jpeg::stored_size(thumbnail.bytes())?,
+            ffi::IMAGE_BITMAP => {
+                let header = thumbnail.header();
+                (u32::from(header.width), u32::from(header.height))
+            }
+            other => bail!("LibRaw handed back a preview of kind {other}"),
+        };
+        let (width, height) = crate::image::orient::size(width, height, handle.orientation());
+        Ok(super::CameraJpeg::Present([width, height]))
     }
 
     fn decode(
@@ -453,6 +476,13 @@ impl Handle {
             ffi::libraw_set_gamma(self.data, 0, 1.0);
             ffi::libraw_set_gamma(self.data, 1, 1.0);
             ffi::libraw_set_no_auto_bright(self.data, 1);
+            // White is the level the file states, never the brightest pixel
+            // in this frame. LibRaw's default lowers it to that pixel where
+            // it is within about 0.4 EV of the stated one, so a frame with no
+            // highlight near clipping would come out brighter than the same
+            // scene with one: a normalization of each frame to itself, which
+            // is the brightening this development promises not to do.
+            ffi::libraw_set_adjust_maximum_thr(self.data, 0.0);
 
             // The white balance the camera recorded, where it recorded one.
             // The C interface has no switch for "use the camera's", so the
@@ -1018,6 +1048,46 @@ mod tests {
         assert!(find("Matrix to sRGB").is_some());
     }
 
+    /// A frame whose brightest photosite is short of the stated white level
+    /// develops with that photosite short of white, rather than stretched
+    /// up to it: the fixture's counts turned down to nine tenths of white
+    /// come out at nine tenths, where LibRaw's default would make them one.
+    #[test]
+    fn white_is_the_stated_level_not_the_brightest_pixel() {
+        const WHITE: u16 = 4095;
+        const DIM: u16 = 3686;
+        let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("test_images")
+            .join("dng-cfa.dng");
+        let mut bytes = std::fs::read(fixture).unwrap();
+        // The counts are the file's last 32 × 24 sixteen-bit words.
+        let start = bytes.len() - 32 * 24 * 2;
+        for word in bytes[start..].as_chunks_mut::<2>().0 {
+            if u16::from_le_bytes(*word) == WHITE {
+                *word = DIM.to_le_bytes();
+            }
+        }
+        let path = std::env::temp_dir().join(format!("gamut-raw-dim-{}.dng", std::process::id()));
+        std::fs::write(&path, &bytes).unwrap();
+        let image = crate::image::decode::load(&path, super::super::Overrides::default());
+        std::fs::remove_file(&path).unwrap();
+        let image = image.unwrap();
+        let Samples::U16 { data, .. } = &image.samples else {
+            panic!("a raw develops to sixteen bits");
+        };
+        // The middle of the white quadrant, away from the edges where the
+        // demosaic overshoots.
+        let at = (18 * image.width as usize + 24) * 3;
+        let expected = f32::from(DIM) / f32::from(WHITE);
+        for sample in &data[at..at + 3] {
+            let value = f32::from(*sample) / 65535.0;
+            assert!(
+                (value - expected).abs() < 0.01,
+                "the white quadrant comes out at {value}, not {expected}"
+            );
+        }
+    }
+
     #[test]
     fn a_filter_cell_is_spelled_from_the_bit_pattern() {
         let mut params: ffi::Params = unsafe { std::mem::zeroed() };
@@ -1093,6 +1163,13 @@ mod tests {
                 .unwrap_or_else(|error| panic!("{name}: {error:#}"))
                 .unwrap_or_else(|| panic!("{name} carries no preview"));
             let preview_took = started.elapsed();
+            // Said from the JPEG's header, it is the size the JPEG decodes to.
+            assert_eq!(
+                crate::image::decode::camera_jpeg(&path)
+                    .unwrap_or_else(|error| panic!("{name}: {error:#}")),
+                crate::image::decode::CameraJpeg::Present([small.width, small.height]),
+                "{name}"
+            );
             let landscape = |width: u32, height: u32| width >= height;
             assert_eq!(
                 landscape(small.width, small.height),

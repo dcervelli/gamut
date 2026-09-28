@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::image::decode;
+use crate::image::decode::Rendering;
 use crate::loader::{Reload, Request, Source};
 
 /// How long a file may take to open before the window says so — the toast,
@@ -262,6 +263,18 @@ impl Files {
         Some(request)
     }
 
+    /// Asks for the file on screen again in its other rendering — which one
+    /// is `App::send`'s to fill in. `None` while a read is in flight, as for
+    /// a reload: that read may be a step, which this would otherwise cancel.
+    /// The reply to it says which rendering it was asked for, and
+    /// `App::deliver` asks again if the preference has moved since.
+    pub(super) fn rerender(&mut self) -> Option<Request> {
+        if self.pending.is_some() || self.paths.is_empty() {
+            return None;
+        }
+        Some(self.request(self.index, Reload::Rendering, None, Source::Disk))
+    }
+
     /// Takes in a file that did not exist when the list was made — a picture
     /// pasted from the clipboard, whose bytes the loader fetches on its way
     /// to reading it — and asks for it.
@@ -479,6 +492,9 @@ impl Files {
             mode,
             source,
             page: None,
+            // Filled in by `App::send` from the viewer's preference, as the
+            // page is from where the file was left.
+            rendering: Rendering::Developed,
         }
     }
 

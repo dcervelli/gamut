@@ -193,6 +193,7 @@ unsafe extern "C" {
     pub fn libraw_set_output_bps(data: *mut Data, value: c_int);
     pub fn libraw_set_gamma(data: *mut Data, index: c_int, value: c_float);
     pub fn libraw_set_no_auto_bright(data: *mut Data, value: c_int);
+    pub fn libraw_set_adjust_maximum_thr(data: *mut Data, value: c_float);
     pub fn libraw_set_user_mul(data: *mut Data, index: c_int, value: c_float);
 
     pub fn libraw_get_iwidth(data: *mut Data) -> c_int;

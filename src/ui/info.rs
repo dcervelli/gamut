@@ -21,6 +21,7 @@ use egui::{
 
 use crate::clock;
 use crate::image::AlphaMode;
+use crate::image::decode::Rendering;
 use crate::image::sequence::{Loops, Sequence};
 use crate::render::Color;
 
@@ -578,6 +579,15 @@ fn file_facts(current: &Current) -> Vec<(&'static str, String)> {
 fn image_facts(current: &Current) -> Vec<(&'static str, String)> {
     let image = &current.image;
     vec![
+        // Which of a raw's two pictures the rest of these are about, where
+        // it is the camera's rather than the one developed here.
+        (
+            "Rendering",
+            match current.rendering {
+                Rendering::Developed => String::new(),
+                Rendering::CameraJpeg => "camera JPEG".to_string(),
+            },
+        ),
         (
             "Resolution",
             format!("{} \u{00d7} {}", image.width, image.height),
@@ -768,6 +778,8 @@ mod tests {
             page: 0,
             lift: None,
             turn: crate::image::orient::Turn::NONE,
+            rendering: crate::image::decode::Rendering::Developed,
+            camera_jpeg: crate::image::decode::CameraJpeg::Unavailable,
         }
     }
 

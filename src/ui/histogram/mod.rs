@@ -912,6 +912,8 @@ mod tests {
             page: 0,
             lift: None,
             turn: crate::image::orient::Turn::NONE,
+            rendering: crate::image::decode::Rendering::Developed,
+            camera_jpeg: crate::image::decode::CameraJpeg::Unavailable,
         }
     }
 

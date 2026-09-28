@@ -214,6 +214,14 @@ pub trait Decoder: Sync {
         Ok(None)
     }
 
+    /// Whether the file carries the camera's own JPEG of itself, and how
+    /// large it is once turned the way the picture is — answered without
+    /// the JPEG being decoded, so that the window can offer it before it is
+    /// asked for. [`CameraJpeg::Unavailable`] for every format but a raw.
+    fn camera_jpeg(&self, _source: &mut dyn ReadSeek) -> Result<CameraJpeg> {
+        Ok(CameraJpeg::Unavailable)
+    }
+
     /// The frames of an animation, from the first. Only where
     /// [`Decoder::sequence`] said [`Sequence::Animation`]. The source is
     /// taken whole rather than borrowed, since the frames outlive the call
@@ -249,6 +257,41 @@ static DECODERS: &[&dyn Decoder] = &[
     &jpeg::Jpeg,
     &image_rs::ImageRs,
 ];
+
+/// Which of a raw's two pictures is read: the one this program develops
+/// from the sensor's counts, or the one the camera rendered and wrote
+/// beside them — see [`Decoder::preview`]. Every other format has one
+/// picture, and reads it whichever is asked for.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Rendering {
+    #[default]
+    Developed,
+    CameraJpeg,
+}
+
+impl Rendering {
+    /// The other one.
+    pub fn toggled(self) -> Self {
+        match self {
+            Rendering::Developed => Rendering::CameraJpeg,
+            Rendering::CameraJpeg => Rendering::Developed,
+        }
+    }
+}
+
+/// Whether a file carries the camera's JPEG of itself. See
+/// [`Decoder::camera_jpeg`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum CameraJpeg {
+    /// The format has no such thing: anything but a raw.
+    #[default]
+    Unavailable,
+    /// A raw that carries none, or one the library cannot copy out.
+    Missing,
+    /// A raw that carries one, this size across and down once turned the
+    /// way the developed picture is.
+    Present([u32; 2]),
+}
 
 /// Overrides for files whose headers cannot say what they mean. A 16-bit TIFF
 /// is the usual case: the same container holds both a scanned photograph and a
@@ -417,6 +460,41 @@ pub fn preview(path: &Path, overrides: Overrides) -> Result<Option<DecodedImage>
         )
     })?;
     image.map(|image| overrides.finish(image, path)).transpose()
+}
+
+/// [`preview`], saying as well how long the decoder took, as
+/// [`load_timed`] does: the loader's read of the camera's JPEG in place of
+/// the developed picture.
+pub fn preview_timed(
+    path: &Path,
+    overrides: Overrides,
+) -> Result<Option<(DecodedImage, Duration)>> {
+    let (mut source, decoder) = open(path)?;
+    let started = Instant::now();
+    let image = decoder.preview(&mut source, overrides).with_context(|| {
+        format!(
+            "reading the camera's JPEG in {} as {}",
+            path.display(),
+            decoder.name()
+        )
+    })?;
+    let decoding = started.elapsed();
+    image
+        .map(|image| Ok((overrides.finish(image, path)?, decoding)))
+        .transpose()
+}
+
+/// Whether `path` carries the camera's JPEG of itself. See
+/// [`Decoder::camera_jpeg`].
+pub fn camera_jpeg(path: &Path) -> Result<CameraJpeg> {
+    let (mut source, decoder) = open(path)?;
+    decoder.camera_jpeg(&mut source).with_context(|| {
+        format!(
+            "looking for the camera's JPEG in {} as {}",
+            path.display(),
+            decoder.name()
+        )
+    })
 }
 
 /// What the decoder of `path` read out of its header, for the information

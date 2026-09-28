@@ -23,7 +23,7 @@ use std::time::Instant;
 use anyhow::{Result, anyhow};
 
 use crate::clipboard;
-use crate::image::decode::{self, Overrides};
+use crate::image::decode::{self, CameraJpeg, Overrides, Rendering};
 use crate::image::exif::Exif;
 use crate::image::sequence::Sequence;
 use crate::image::{DecodedImage, Stats};
@@ -44,6 +44,12 @@ pub enum Reload {
     /// entry of an ICO, a directory of a TIFF. What they set up stays, as
     /// for a file changed on disk.
     Page,
+    /// The file already on screen, its other picture: the camera's JPEG of
+    /// a raw in place of the developed frame, or back. The two are the same
+    /// scene rendered twice, so where the viewer is looking stays; how the
+    /// picture is displayed starts over, since an exposure set for linear
+    /// sensor counts means nothing to a JPEG.
+    Rendering,
 }
 
 /// Where a read's bytes come from.
@@ -74,6 +80,9 @@ pub struct Request {
     /// Which of the file's pictures, where it holds several. `None` is the
     /// one the decoder shows first.
     pub page: Option<usize>,
+    /// Which of a raw's two pictures. A file with only one reads it
+    /// whichever is asked for, and so does a raw with no JPEG in it.
+    pub rendering: Rendering,
 }
 
 /// A finished read, whether or not it produced an image.
@@ -88,6 +97,10 @@ pub struct Opened {
     pub index: usize,
     pub path: PathBuf,
     pub mode: Reload,
+    /// Which rendering was asked for, whichever was read: what the event
+    /// loop compares with the preference, which may have moved while the
+    /// file was being read.
+    pub rendering: Rendering,
     /// Taken immediately before the file was read rather than after: a write
     /// that lands while we are decoding then shows up as another change,
     /// instead of being recorded as the version we are holding.
@@ -111,6 +124,11 @@ pub struct Ready {
     pub sequence: Sequence,
     /// Which page `image` is, where the file has pages; zero otherwise.
     pub page: usize,
+    /// Which picture `image` is: the camera's JPEG only where one was asked
+    /// for and the file carries one.
+    pub rendering: Rendering,
+    /// Whether the file carries the camera's JPEG, whichever was read.
+    pub camera_jpeg: CameraJpeg,
 }
 
 /// The handle the event loop keeps. Dropping it stops the thread and waits
@@ -253,6 +271,57 @@ fn absorb(command: Command, queued: &mut Option<Request>, upload: &mut Option<Up
     }
 }
 
+/// The picture of `path` a read hands over, with how long the decoder took,
+/// which picture it turned out to be, and whether the file carries the
+/// camera's JPEG. The camera's JPEG where it was asked for and is there to
+/// be read; otherwise the developed picture, which is what a raw with no
+/// JPEG in it shows rather than failing — a step onto one is not a step
+/// onto a broken file. Each stage behind its own panic guard, as in
+/// [`read`]'s.
+pub(crate) fn decode_rendering(
+    path: &Path,
+    overrides: Overrides,
+    page: Option<usize>,
+    rendering: Rendering,
+) -> Result<(DecodedImage, std::time::Duration, Rendering, CameraJpeg)> {
+    let camera = match (rendering, page) {
+        // A JPEG that will not decode falls back the same way: the
+        // developed picture is still there to be shown.
+        (Rendering::CameraJpeg, None) => guard("reading the camera's JPEG", || {
+            decode::preview_timed(path, overrides)
+        })
+        .unwrap_or_else(|error| {
+            eprintln!(
+                "{}: {}",
+                crate::PROGRAM,
+                crate::escape_controls(&format!("{error:#}"))
+            );
+            None
+        }),
+        _ => None,
+    };
+    let (image, decoding, rendering) = match camera {
+        Some((image, decoding)) => (image, decoding, Rendering::CameraJpeg),
+        None => {
+            let (image, decoding) =
+                guard("decoding", || decode::load_timed(path, overrides, page))?;
+            (image, decoding, Rendering::Developed)
+        }
+    };
+    // What the window offers is known from the read itself where the JPEG
+    // was it; otherwise asked of the header. A JPEG the library cannot copy
+    // out, or one that will not say its size, is a file with none, not a
+    // failed read.
+    let camera_jpeg = match rendering {
+        Rendering::CameraJpeg => CameraJpeg::Present([image.width, image.height]),
+        Rendering::Developed => guard("looking for the camera's JPEG", || {
+            decode::camera_jpeg(path)
+        })
+        .unwrap_or(CameraJpeg::Unavailable),
+    };
+    Ok((image, decoding, rendering, camera_jpeg))
+}
+
 /// Runs one fallible stage, turning a panic into an error rather than letting
 /// it unwind the loader thread. A panic elsewhere is a bug and still aborts;
 /// this is only for the decoders, which must survive a hostile file.
@@ -286,6 +355,7 @@ fn read(request: Request, upload: Option<&Upload>, canceled: &AtomicBool) -> Opt
         mode,
         source,
         page,
+        rendering,
     } = request;
 
     // A paste has to be fetched before there is a file to read at all. The
@@ -312,51 +382,67 @@ fn read(request: Request, upload: Option<&Upload>, canceled: &AtomicBool) -> Opt
             (None, Sequence::Pages { default, .. }) => default,
             (None, _) => 0,
         };
-        let (image, decoding) = guard("decoding", || decode::load_timed(&path, overrides, page))?;
-        Ok((image, decoding, sequence, shown))
+        let (image, decoding, rendering, camera_jpeg) =
+            decode_rendering(&path, overrides, page, rendering)?;
+        Ok((image, decoding, sequence, shown, rendering, camera_jpeg))
     });
     if canceled.load(Ordering::Relaxed) {
         return None;
     }
 
-    let scanned = decoded.and_then(|(image, decoding, sequence, page)| {
-        let stats = guard("scanning", || Ok(Stats::scan(&image)))?;
-        // A file with no metadata, or with metadata that will not parse, is
-        // not a failure: the panel simply has less to say about it.
-        let exif = guard("reading the metadata", || Ok(Exif::read(&path)))?;
-        Ok((image, decoding, stats, exif, sequence, page))
-    });
+    let scanned = decoded.and_then(
+        |(image, decoding, sequence, page, rendering, camera_jpeg)| {
+            let stats = guard("scanning", || Ok(Stats::scan(&image)))?;
+            // A file with no metadata, or with metadata that will not parse, is
+            // not a failure: the panel simply has less to say about it.
+            let exif = guard("reading the metadata", || Ok(Exif::read(&path)))?;
+            Ok((
+                image,
+                decoding,
+                stats,
+                exif,
+                sequence,
+                page,
+                rendering,
+                camera_jpeg,
+            ))
+        },
+    );
     if canceled.load(Ordering::Relaxed) {
         return None;
     }
 
-    let outcome = scanned.and_then(|(image, decoding, stats, exif, sequence, page)| {
-        // Measured once the pixels are ready to hand over, so that the time
-        // reported is everything this thread did to them — the header, the
-        // decode, the scan, the metadata — with the decoder's own share
-        // picked out of it. The upload has a line of its own: a file read
-        // before the renderer existed is uploaded by the event loop instead,
-        // and a decode line that took the upload in only sometimes would
-        // read as a slower decode.
-        timing::decoded(&path, started.elapsed(), decoding);
-        let gpu = match upload {
-            Some(upload) => {
-                let began = Instant::now();
-                let gpu = guard("uploading to the GPU", || upload.run(&image))?;
-                timing::uploaded(&path, began.elapsed());
-                Some(gpu)
-            }
-            None => None,
-        };
-        Ok(Ready {
-            image,
-            stats,
-            exif,
-            gpu,
-            sequence,
-            page,
-        })
-    });
+    let outcome = scanned.and_then(
+        |(image, decoding, stats, exif, sequence, page, rendering, camera_jpeg)| {
+            // Measured once the pixels are ready to hand over, so that the time
+            // reported is everything this thread did to them — the header, the
+            // decode, the scan, the metadata — with the decoder's own share
+            // picked out of it. The upload has a line of its own: a file read
+            // before the renderer existed is uploaded by the event loop instead,
+            // and a decode line that took the upload in only sometimes would
+            // read as a slower decode.
+            timing::decoded(&path, started.elapsed(), decoding);
+            let gpu = match upload {
+                Some(upload) => {
+                    let began = Instant::now();
+                    let gpu = guard("uploading to the GPU", || upload.run(&image))?;
+                    timing::uploaded(&path, began.elapsed());
+                    Some(gpu)
+                }
+                None => None,
+            };
+            Ok(Ready {
+                image,
+                stats,
+                exif,
+                gpu,
+                sequence,
+                page,
+                rendering,
+                camera_jpeg,
+            })
+        },
+    );
 
     Some(Decoded {
         generation,
@@ -364,6 +450,7 @@ fn read(request: Request, upload: Option<&Upload>, canceled: &AtomicBool) -> Opt
             index,
             path,
             mode,
+            rendering,
             watch,
         },
         outcome,
