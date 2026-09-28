@@ -339,6 +339,9 @@ pub struct State {
     pub loupe_magnification: f32,
     /// What the file list was last sorted by, and which way.
     pub order: filmstrip::Order,
+    /// Whether a raw opens as the camera's JPEG of it rather than as the
+    /// picture developed from its sensor counts.
+    pub camera_jpeg: bool,
 }
 
 impl Default for State {
@@ -347,6 +350,7 @@ impl Default for State {
             filmstrip_width: filmstrip::SLOT_DEFAULT,
             loupe_magnification: loupe::DEFAULT_MAGNIFICATION,
             order: filmstrip::Order::default(),
+            camera_jpeg: false,
         }
     }
 }
@@ -387,6 +391,11 @@ impl State {
                         state.order.direction = direction;
                     }
                 }
+                "camera_jpeg" => match value {
+                    "true" => state.camera_jpeg = true,
+                    "false" => state.camera_jpeg = false,
+                    _ => {}
+                },
                 _ => {}
             }
         }
@@ -400,11 +409,13 @@ impl State {
              filmstrip_width = {}\n\
              loupe_magnification = {}\n\
              sort = {}\n\
-             sort_direction = {}\n",
+             sort_direction = {}\n\
+             camera_jpeg = {}\n",
             self.filmstrip_width,
             self.loupe_magnification,
             self.order.sort.word(),
             self.order.direction.word(),
+            self.camera_jpeg,
         )
     }
 }
@@ -633,7 +644,7 @@ mod tests {
             .lines()
             .filter(|line| line.starts_with("gesture."))
             .count();
-        assert_eq!(keys, 93, "{uncommented}");
+        assert_eq!(keys, 94, "{uncommented}");
         assert_eq!(gestures, 10, "{uncommented}");
         assert_eq!(
             uncommented.lines().count(),
@@ -743,6 +754,7 @@ mod tests {
                 sort: filmstrip::Sort::Date,
                 direction: filmstrip::Direction::Descending,
             },
+            camera_jpeg: true,
         };
         assert_eq!(State::parse(&state.render()), state);
     }
@@ -767,6 +779,7 @@ mod tests {
              loupe_magnification = 3\n\
              sort = shoe size\n\
              sort_direction = sideways\n\
+             camera_jpeg = maybe\n\
              garbage\n",
         );
         assert_eq!(state, State::default());

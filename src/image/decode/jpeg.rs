@@ -106,6 +106,13 @@ pub(super) fn decode_stored(bytes: &[u8], overrides: Overrides) -> Result<Decode
     stored(open(bytes)?, bytes, overrides)
 }
 
+/// The size `bytes` states in its header, as stored: no orientation read,
+/// since the raw a camera JPEG sits in says how it is turned, as
+/// [`decode_stored`]'s caller does.
+pub(super) fn stored_size(bytes: &[u8]) -> Result<(u32, u32)> {
+    Ok(open(bytes)?.dimensions())
+}
+
 /// The crate's decoder over the bytes, with the headers read and the size
 /// ceiling set.
 fn open(bytes: &[u8]) -> Result<JpegDecoder<Cursor<&[u8]>>> {

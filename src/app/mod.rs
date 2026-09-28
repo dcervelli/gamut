@@ -31,7 +31,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::{Window, WindowId};
 
 use crate::gestures::{Gestures, Surface};
-use crate::image::decode;
+use crate::image::decode::{self, CameraJpeg, Rendering};
 use crate::image::display::{Display, Headroom, Startup};
 use crate::image::orient::Turn;
 use crate::image::sequence::Sequence;
@@ -187,6 +187,10 @@ pub struct App {
     /// the switch since. Read against the monitor's mode in
     /// [`App::surface_hdr`] and [`App::headroom`].
     hdr: HdrPreference,
+    /// Which of a raw's two pictures is asked for: the developed frame, or
+    /// the camera's JPEG. One preference for every raw, kept between runs;
+    /// a raw with no JPEG in it shows its developed picture whatever it is.
+    rendering: Rendering,
     /// The compositor's word on the monitors, where it gives one.
     monitors: Option<Monitors>,
     /// The mode of the monitor the window is on, as last read: `None` until
@@ -472,6 +476,10 @@ impl App {
             sizing: None,
             startup,
             hdr,
+            rendering: match kept_state.camera_jpeg {
+                true => Rendering::CameraJpeg,
+                false => Rendering::Developed,
+            },
             monitors,
             monitor: None,
             monitor_headroom: None,
@@ -749,6 +757,7 @@ impl App {
                 display: current.display.clone(),
                 left,
                 turn: current.turn,
+                rendering: current.rendering,
             },
         );
     }
@@ -1114,6 +1123,35 @@ impl App {
             HdrPreference::On
         };
         self.sync_output()
+    }
+
+    /// Switches every raw between its developed picture and the camera's
+    /// JPEG of it, and reads the one on screen again in the other. Nothing to
+    /// draw yet: the picture stays until the other arrives, as on a step. A
+    /// read already in flight is left to finish — it may be a step — and
+    /// [`App::follow_rendering`] asks again once it lands.
+    pub(super) fn toggle_camera_jpeg(&mut self) -> Effect {
+        self.rendering = self.rendering.toggled();
+        if let Some(request) = self.files.rerender() {
+            self.send(request);
+        }
+        Effect::Nothing
+    }
+
+    /// A read asked for `asked` has landed. Where the preference has moved
+    /// since and the picture on screen has another rendering to move to, it
+    /// is read again in the one asked for now.
+    fn follow_rendering(&mut self, asked: Rendering) {
+        let offered = self
+            .current
+            .as_ref()
+            .is_some_and(|current| matches!(current.camera_jpeg, CameraJpeg::Present(_)));
+        if asked != self.rendering
+            && offered
+            && let Some(request) = self.files.rerender()
+        {
+            self.send(request);
+        }
     }
 
     fn image_size(&self) -> [f32; 2] {
@@ -1795,6 +1833,7 @@ impl App {
             request.page = Some(page);
             self.files.asked_for_page(page);
         }
+        request.rendering = self.rendering;
         self.loader.request(request);
         // With nothing on screen the title is the only thing naming the file,
         // so it follows the request rather than the pixels — including when a
@@ -1834,6 +1873,8 @@ impl App {
             gpu,
             sequence,
             page,
+            rendering,
+            camera_jpeg,
         } = ready;
         self.last_folder = std::path::absolute(&file.path)
             .ok()
@@ -1860,6 +1901,7 @@ impl App {
             .zip(self.files.shown_path())
             .map(|(current, path)| (path, current.size()));
         let (arrival, stepping) = arrival(file.mode, &file.path, size, shown);
+        let shown_size = shown.map(|(_, size)| size);
         // The picture being stepped away from, kept as it stands so that
         // stepping back to it finds it as it was left.
         if stepping {
@@ -1871,9 +1913,16 @@ impl App {
         // lands. Its window is re-derived where it was automatic,
         // the file being free to have changed on disk since; one set by hand
         // is left exactly where it was put.
+        // A file left in its other rendering is not put back in what it was
+        // left in: an exposure set on the camera's JPEG means nothing to
+        // linear sensor counts, and the other way about.
         let kept = match arrival {
-            Arrival::Beside | Arrival::Anew => self.kept.left(&file.path).cloned(),
-            Arrival::Reread | Arrival::Reshaped => None,
+            Arrival::Beside | Arrival::Anew => self
+                .kept
+                .left(&file.path)
+                .filter(|left| left.rendering == rendering)
+                .cloned(),
+            Arrival::Reread | Arrival::Reshaped | Arrival::Rerendered => None,
         };
         let refreshed = |display: &Display| {
             let mut display = display.clone();
@@ -1937,10 +1986,20 @@ impl App {
         // thread had given up on, which has just decoded here.
         let facts = file_facts(&file.path);
         let image = Arc::new(image);
+        // The file's own size, which is the developed picture's: the
+        // camera's JPEG may be a fraction of it, and the file list orders by
+        // and shows what the file is.
+        let learned_size = match rendering {
+            Rendering::Developed => Some((image.width, image.height)),
+            Rendering::CameraJpeg => self
+                .chooser
+                .facts_of(&file.path)
+                .and_then(|facts| facts.size),
+        };
         let given_up = self.chooser.learn(
             &file.path,
             Facts {
-                size: Some((image.width, image.height)),
+                size: learned_size,
                 sequence,
                 title: exif.title().map(str::to_string),
                 format: facts.reader,
@@ -1959,7 +2018,13 @@ impl App {
         // A region is of the picture it was drawn on. Stepping to another
         // file takes it off, and so does the file coming back a different
         // size, where the pixels it marked out are no longer the pixels.
-        if stepping || matches!(arrival, Arrival::Reshaped | Arrival::Anew) {
+        // Another rendering of the picture is other pixels, whatever its size.
+        if stepping
+            || matches!(
+                arrival,
+                Arrival::Reshaped | Arrival::Anew | Arrival::Rerendered
+            )
+        {
             self.marking.clear();
         }
         match (arrival, &kept) {
@@ -1983,6 +2048,13 @@ impl App {
             }
             // A new shape, seen for the first time, so it is fitted afresh.
             (Arrival::Anew, None) | (Arrival::Reshaped, _) => self.view.reset(),
+            // The same scene rendered again: the detail under the center of
+            // the window stays there, at the size it was on screen.
+            (Arrival::Rerendered, _) => {
+                if let Some(from) = shown_size {
+                    self.view.rescale(from, size);
+                }
+            }
         }
         if arrival != Arrival::Reread {
             // A move under way was about the picture that has just left, and
@@ -2006,7 +2078,18 @@ impl App {
             page,
             lift: None,
             turn,
+            rendering,
+            camera_jpeg,
         });
+        // The camera's JPEG was asked for and the file has none: said, since
+        // the button that would say it is not drawn for such a file. Not for
+        // a file rewritten on disk, which said it when it arrived.
+        if self.rendering == Rendering::CameraJpeg
+            && camera_jpeg == CameraJpeg::Missing
+            && matches!(file.mode, Reload::Fresh | Reload::Rendering)
+        {
+            self.toast(NO_CAMERA_JPEG_SHOWN, Level::Message);
+        }
         // The loader measured the base; a surface with room above white
         // shows the lift, and the numbers follow it.
         self.refresh_lift();
@@ -2176,6 +2259,7 @@ impl App {
         };
 
         let index = decoded.file.index;
+        let asked = decoded.file.rendering;
         let name = file_label(&decoded.file.path);
         // A file that will not go on screen is a file to step over, whether it
         // was the decode or the upload that would not have it.
@@ -2189,7 +2273,7 @@ impl App {
                 Some(format!("Could not read {name}: {}", input::briefly(&error)))
             }
         };
-        if let Some(said) = failed {
+        if let Some(said) = failed.clone() {
             match self.files.failed(index, pending.step) {
                 Some(request) => self.send(request),
                 // The walk is over, or this was no walk, and the failure is
@@ -2206,6 +2290,11 @@ impl App {
         // A sort asked for under the read waited for it, and so did a
         // folder read: now is the first chance, and sooner than the next
         // poll.
+        // The rendering was switched while this was being read, and the
+        // switch could not interrupt the read: asked for now.
+        if failed.is_none() {
+            self.follow_rendering(asked);
+        }
         let _ = self.poll_order();
         let _ = self.settle_folder();
         let _ = self.settle_arranged();
@@ -2374,6 +2463,9 @@ fn hdr_state_of(offered: bool, speaks_modes: bool, monitor: Option<Mode>) -> Hdr
     Hdr::Available
 }
 
+/// Said when a raw arrives with the camera's JPEG asked for and none in it.
+const NO_CAMERA_JPEG_SHOWN: &str = "No camera JPEG in this file; showing the developed picture.";
+
 /// How a file arriving stands to the picture on screen, which is what
 /// decides what carries over to it and what starts afresh.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -2391,6 +2483,9 @@ enum Arrival {
     /// Another file of another size, or a file into an empty window: put
     /// back as it was left, or fitted afresh.
     Anew,
+    /// The file on screen in its other rendering: the view is rescaled so the
+    /// same detail stays where it was, the display starts over.
+    Rerendered,
 }
 
 /// How a file `size` pixels across, read in `mode`, stands to the picture
@@ -2408,6 +2503,7 @@ fn arrival(
     let same_file = mode != Reload::Fresh;
     let stepping = shown.is_some_and(|(shown, _)| shown != path);
     let arrival = match (same_file, same_size) {
+        _ if mode == Reload::Rendering => Arrival::Rerendered,
         (true, true) => Arrival::Reread,
         (true, false) => Arrival::Reshaped,
         (false, true) => Arrival::Beside,
@@ -2679,6 +2775,7 @@ impl ApplicationHandler<UserEvent> for App {
             filmstrip_width: self.filmstrip.slot(),
             loupe_magnification: self.panels.loupe_magnification,
             order: self.filmstrip.order(),
+            camera_jpeg: self.rendering == Rendering::CameraJpeg,
         });
     }
 }
@@ -2852,14 +2949,20 @@ mod tests {
             (None, Sequence::Pages { default, .. }) => default,
             (None, _) => 0,
         };
-        let decoded = decode::load_timed(&path, app.files.overrides(), asked);
-        let outcome = decoded.map(|(image, _)| Ready {
+        // Asked for in the rendering the application prefers, as `App::send`
+        // fills every request in with.
+        let asked_rendering = app.rendering;
+        let decoded =
+            crate::loader::decode_rendering(&path, app.files.overrides(), asked, asked_rendering);
+        let outcome = decoded.map(|(image, _, rendering, camera_jpeg)| Ready {
             stats: Stats::scan(&image),
             exif: exif::Exif::read(&path),
             image,
             gpu: None,
             sequence,
             page,
+            rendering,
+            camera_jpeg,
         });
         let _ = app.deliver(Decoded {
             generation,
@@ -2867,6 +2970,7 @@ mod tests {
                 index,
                 path,
                 mode,
+                rendering: asked_rendering,
                 watch,
             },
             outcome,
@@ -4366,6 +4470,7 @@ mod tests {
                 watch: Watch::new(&path),
                 path,
                 mode: Reload::Fresh,
+                rendering: Rendering::Developed,
             },
             outcome: Ok(Ready {
                 stats: Stats::scan(&image),
@@ -4374,6 +4479,8 @@ mod tests {
                 gpu: None,
                 sequence: Sequence::Still,
                 page: 0,
+                rendering: Rendering::Developed,
+                camera_jpeg: CameraJpeg::Unavailable,
             }),
         });
         assert_eq!(
@@ -4521,6 +4628,70 @@ mod tests {
         assert_eq!(app.view.fit(), Some(Fit::Whole));
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// A raw with no camera JPEG in it, asked for as the camera's JPEG,
+    /// shows its developed picture rather than failing, says so, and offers
+    /// no switch: the key is refused and the preference stays as it was.
+    #[test]
+    fn a_raw_without_a_camera_jpeg_falls_back_to_the_developed_picture() {
+        let path = fixture("dng-cfa.dng");
+        let mut app = open(vec![path.clone()], vec![path]);
+        app.rendering = Rendering::CameraJpeg;
+        answer(&mut app, Reload::Fresh);
+        let current = app.current.as_ref().expect("the developed picture is up");
+        assert_eq!(current.rendering, Rendering::Developed);
+        assert_eq!(current.camera_jpeg, CameraJpeg::Missing);
+        assert_eq!(app.files.index(), 0);
+        assert_eq!(
+            app.toasts.showing().map(|toast| toast.message.as_str()),
+            Some(NO_CAMERA_JPEG_SHOWN)
+        );
+        assert!(!app.conditions().camera_jpeg);
+        assert!(matches!(
+            app.press(crate::ui::Control::CameraJpeg),
+            Effect::Nothing
+        ));
+        assert_eq!(app.rendering, Rendering::CameraJpeg);
+        assert!(app.files.is_idle(), "nothing asked for");
+    }
+
+    /// A file with nothing but the one picture is read the same whichever
+    /// is asked for, and says nothing about it.
+    #[test]
+    fn a_file_that_is_not_a_raw_ignores_the_rendering() {
+        let path = fixture("png-rgb8.png");
+        let mut app = open(vec![path.clone()], vec![path]);
+        app.rendering = Rendering::CameraJpeg;
+        answer(&mut app, Reload::Fresh);
+        let current = app.current.as_ref().expect("the picture is up");
+        assert_eq!(current.rendering, Rendering::Developed);
+        assert_eq!(current.camera_jpeg, CameraJpeg::Unavailable);
+        assert!(app.toasts.showing().is_none());
+        assert!(!app.conditions().camera_jpeg);
+    }
+
+    /// The preference is read from the state file as the window opens.
+    #[test]
+    fn the_rendering_comes_back_from_the_state_file() {
+        let path = fixture("png-rgb8.png");
+        let size = decode::probe(&path).expect("a fixture");
+        let app = App::new(
+            vec![path.clone()],
+            vec![path],
+            Some(Opening {
+                index: 0,
+                source: Source::Disk,
+                size: size.map(|(w, h)| [w as f32, h as f32]),
+            }),
+            options(),
+            StateFile::holding(State {
+                camera_jpeg: true,
+                ..State::default()
+            }),
+            threads(),
+        );
+        assert_eq!(app.rendering, Rendering::CameraJpeg);
     }
 
     /// A fixture from `test_images/`, opened on its own.
@@ -5998,6 +6169,23 @@ mod tests {
         let small = [4.0, 3.0];
         let large = [8.0, 6.0];
         let cases = [
+            // The other rendering is its own arrival at any size.
+            (
+                Reload::Rendering,
+                a,
+                large,
+                Some((a, small)),
+                Arrival::Rerendered,
+                false,
+            ),
+            (
+                Reload::Rendering,
+                a,
+                small,
+                Some((a, small)),
+                Arrival::Rerendered,
+                false,
+            ),
             (
                 Reload::InPlace,
                 a,

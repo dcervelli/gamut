@@ -201,6 +201,23 @@ impl View {
         };
     }
 
+    /// The picture under the view has been swapped for another rendering of
+    /// the same scene, `to` pixels across and down where it was `from`: a
+    /// raw's developed frame for the camera's JPEG of it, which may be the
+    /// same size give or take a margin or a quarter of it. The detail at the
+    /// center of the window stays there, and the picture stays the size it
+    /// was on screen, so the swap is made in place and the two can be
+    /// compared by flicking between them. A fitted view is fitted again,
+    /// which comes to the same thing.
+    pub fn rescale(&mut self, from: [f32; 2], to: [f32; 2]) {
+        if from.iter().chain(&to).any(|side| *side <= 0.0) {
+            return;
+        }
+        let ratio = [to[0] / from[0], to[1] / from[1]];
+        self.pan = [self.pan[0] * ratio[0], self.pan[1] * ratio[1]];
+        self.zoom = (self.zoom / ratio[0]).clamp(MIN_ZOOM, MAX_ZOOM);
+    }
+
     fn fit_zoom(fit: Fit, image: [f32; 2], viewport: [f32; 2]) -> f32 {
         let sx = viewport[0] / image[0];
         let sy = viewport[1] / image[1];
@@ -1230,5 +1247,34 @@ mod tests {
         assert_eq!(centered, [image[1] / 2.0 + 30.0, image[0] / 2.0 + 60.0]);
         view.turn(false);
         assert_eq!(view.pan, [60.0, -30.0]);
+    }
+
+    /// Another rendering of the picture a quarter the size keeps the same
+    /// detail at the center of the window, at the same size on screen.
+    #[test]
+    fn a_rescale_keeps_the_same_detail_at_the_same_size() {
+        let viewport = Viewport {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 100.0,
+        };
+        let large = [4000.0, 2000.0];
+        let small = [1000.0, 500.0];
+        let mut view = View::new();
+        view.fit = None;
+        view.zoom = 1.0;
+        view.pan = [600.0, -300.0];
+        let before = view.placement(large, viewport);
+        view.rescale(large, small);
+        assert_eq!(view.pan, [150.0, -75.0]);
+        assert_eq!(view.zoom, 4.0);
+        let after = view.placement(small, viewport);
+        let centered = after.image_point([50.0, 50.0]);
+        assert_eq!(centered, [small[0] / 2.0 + 150.0, small[1] / 2.0 - 75.0]);
+        assert!((after.width - before.width).abs() < 1e-3);
+        view.rescale(small, large);
+        assert_eq!(view.pan, [600.0, -300.0]);
+        assert_eq!(view.zoom, 1.0);
     }
 }

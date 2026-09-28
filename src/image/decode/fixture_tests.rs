@@ -1729,6 +1729,15 @@ fn every_fixture_answers_for_its_preview() {
         let preview = crate::image::decode::preview(&path, Overrides::default())
             .unwrap_or_else(|error| panic!("{}: {error:#}", fixture.file));
         assert!(preview.is_none(), "{} carries a preview", fixture.file);
+        // Only a raw can carry the camera's JPEG, and the one raw here, a
+        // DNG written by a program rather than a camera, carries none.
+        let camera = crate::image::decode::camera_jpeg(&path)
+            .unwrap_or_else(|error| panic!("{}: {error:#}", fixture.file));
+        let expected = match fixture.file.ends_with(".dng") {
+            true => crate::image::decode::CameraJpeg::Missing,
+            false => crate::image::decode::CameraJpeg::Unavailable,
+        };
+        assert_eq!(camera, expected, "{}", fixture.file);
     }
 }
 

@@ -26,6 +26,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use crate::image::decode::Rendering;
 use crate::image::display::Display;
 use crate::image::orient::Turn;
 use crate::view::View;
@@ -43,6 +44,9 @@ pub(super) struct Settings {
     pub(super) left: Option<Left>,
     /// How far it was turned on screen.
     pub(super) turn: Turn,
+    /// Which of a raw's pictures it was left showing. What it was left in is
+    /// only put back onto the same one.
+    pub(super) rendering: Rendering,
 }
 
 /// Where a file of several pictures was left.

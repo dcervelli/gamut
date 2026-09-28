@@ -17,7 +17,7 @@ use crate::view::{View, Viewport};
 use crate::image::region::{Grip, Region, Side};
 
 use super::chooser::{self, Input, Row, Step};
-use super::chrome::{BAR_HEIGHT, SIDE_WIDTH};
+use super::chrome::{self, BAR_HEIGHT, SIDE_WIDTH};
 use super::control::{Naming, Unnamed};
 use super::filmstrip;
 use super::help;
@@ -114,6 +114,8 @@ fn picture(width: u32, height: u32) -> Current {
         page: 0,
         lift: None,
         turn: crate::image::orient::Turn::NONE,
+        rendering: crate::image::decode::Rendering::Developed,
+        camera_jpeg: crate::image::decode::CameraJpeg::Unavailable,
     }
 }
 
@@ -1128,6 +1130,36 @@ fn the_surface_switch_is_dead_without_an_hdr_output() {
     assert_eq!(
         click(&mut harness, "HDR"),
         [Command::Press(Control::Output)]
+    );
+}
+
+/// The camera's switch is drawn only for a file that carries the camera's
+/// JPEG, wears the name of the picture on screen, and asks for the other.
+#[test]
+fn the_camera_switch_is_there_only_for_a_file_with_a_camera_jpeg() {
+    use crate::image::decode::{CameraJpeg, Rendering};
+
+    let harness = open(WINDOW, 1, panels());
+    assert!(harness.query_by_label(chrome::CAMERA_RAW).is_none());
+    assert!(harness.query_by_label(chrome::CAMERA_JPEG).is_none());
+
+    let mut harness = open(WINDOW, 1, panels());
+    let current = harness.state_mut().current.as_mut().expect("a picture");
+    current.camera_jpeg = CameraJpeg::Present([6000, 4000]);
+    harness.run();
+    assert!(harness.query_by_label(chrome::CAMERA_JPEG).is_none());
+    assert_eq!(
+        click(&mut harness, chrome::CAMERA_RAW),
+        [Command::Press(Control::CameraJpeg)]
+    );
+
+    let current = harness.state_mut().current.as_mut().expect("a picture");
+    current.rendering = Rendering::CameraJpeg;
+    harness.run();
+    assert!(harness.query_by_label(chrome::CAMERA_RAW).is_none());
+    assert_eq!(
+        click(&mut harness, chrome::CAMERA_JPEG),
+        [Command::Press(Control::CameraJpeg)]
     );
 }
 

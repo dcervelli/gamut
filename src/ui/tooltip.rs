@@ -142,6 +142,19 @@ pub const NO_HDR_OUTPUT: &str = "HDR disabled because no HDR output is available
 pub const FALSE_COLOR_CLIPS: &str =
     "A false color clips at the top of its ramp, whatever the curve.";
 
+/// What the camera's switch says, for the key, on a file with no camera JPEG
+/// in it. The switch itself is not drawn on such a file, so this is only
+/// ever the reason a press of `v` is refused.
+pub const NO_CAMERA_JPEG: &str = "This file carries no camera JPEG.";
+
+/// What the camera's switch says: which of a raw's two pictures is up, and
+/// under it the other, which a press switches to. The size is left out; the
+/// top bar says it.
+pub const SHOWING_DEVELOPED: &str = "Showing developed picture";
+pub const SHOWING_CAMERA_JPEG: &str = "Showing camera's JPEG";
+pub const SWITCH_TO_CAMERA_JPEG: &str = "Switch to camera's JPEG";
+pub const SWITCH_TO_DEVELOPED: &str = "Switch to developed picture";
+
 /// Whether the surface switch has anything to switch, and where it has not,
 /// which of the two reasons — worked out by `App::hdr_state`, since both
 /// halves of the answer are the application's: what the driver offers for
@@ -203,6 +216,9 @@ pub struct Reasons {
     /// to.
     pub visited_before: bool,
     pub visited_after: bool,
+    /// Whether the file on screen is a raw with the camera's JPEG in it,
+    /// which is what the switch between the two needs.
+    pub camera_jpeg: bool,
 }
 
 impl Reasons {
@@ -224,6 +240,7 @@ impl Reasons {
         nothing_open: false,
         visited_before: true,
         visited_after: true,
+        camera_jpeg: true,
     };
 }
 
@@ -263,6 +280,7 @@ pub fn disabled(tip: Tip, reasons: Reasons) -> Option<Refused> {
         nothing_open,
         visited_before,
         visited_after,
+        camera_jpeg,
     } = reasons;
     let said = |said| Some(Refused { said, hint: None });
     if tip == Tip::Control(Control::Back) && !visited_before {
@@ -277,6 +295,9 @@ pub fn disabled(tip: Tip, reasons: Reasons) -> Option<Refused> {
     ) && picking
     {
         return said(DIALOG_UP);
+    }
+    if tip == Tip::Control(Control::CameraJpeg) && !camera_jpeg {
+        return said(NO_CAMERA_JPEG);
     }
     if tip == Tip::Control(Control::Paste) && !clipboard {
         return said(NOTHING_TO_PASTE);
@@ -473,7 +494,10 @@ pub fn words(tip: Tip) -> Option<String> {
             | Control::CancelRename
             | Control::Back
             | Control::Forward
-            | Control::Thumb(_),
+            | Control::Thumb(_)
+            // Said from which picture is up, which only the application
+            // knows — see `Namer::tooltip`.
+            | Control::CameraJpeg,
         )
         | Tip::Name
         | Tip::Counter

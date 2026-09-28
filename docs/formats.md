@@ -336,11 +336,25 @@ What LibRaw is asked for is the least developed picture it can make. AHD
 demosaic, dcraw's default and what every other developer is compared to;
 the camera's own white balance, handed back as the user's multipliers
 because the C interface has no switch for "use the camera's" and the
-arithmetic is the same; no auto-brightening; gamma 1 with a toe slope of 1,
+arithmetic is the same; no auto-brightening; white at the level the file
+states, with `adjust_maximum_thr` at zero, since LibRaw's default lowers it to
+the frame's brightest pixel whenever that pixel is within about 0.4 EV of the
+stated level, which brightens a frame with no highlight near clipping and not
+the same scene with one; gamma 1 with a toe slope of 1,
 which is dcraw's `-g 1 1`; sixteen bits; and Rec. 2020 as the output space,
 the widest this program names, so that a saturated flower the sensor
 recorded clips less than it would in sRGB. The result is linear light with
-1.0 at the sensor's saturation point. That is a photograph with a white, so
+1.0 at the sensor's saturation point.
+
+The file's `linear_max`, which LibRaw reads for several makers, is not used
+as the white, though for Canon it is the level the maker calls the end of
+the sensor's linear range. Across the sampled cameras it means different
+things: Canon's counts run past it to a pile at the fourteen-bit ceiling; a
+Sony's pile up near 16372 where its figure says 15360, so taking it as white
+would clip a hundred thousand photosites that hold detail; and a reduced-size
+CR2 reports the full sensor's figure against a frame scaled to 32767. Nor
+does the C interface reach `user_sat` or `linear_max` without transcribing
+structs whose layout moves between versions. That is a photograph with a white, so
 the decoder marks it display-referred: the window opens at 0..1 rather than
 being stretched to whatever the frame holds, and an underexposed frame
 arrives dark, as it was shot. `--transfer` and `--primaries` relabel it like
@@ -396,6 +410,25 @@ most are the full frame. A thumbnail of a raw therefore looks like the
 camera's JPEG — its curve, its balance — rather than the flat linear
 picture the viewer opens; for finding a file that is the better likeness.
 `dynamic::reorient` is the turn.
+
+The same JPEG is also a picture in its own right: the viewer can show it in
+place of the developed frame (see [interface](interface.md#the-cameras-jpeg)),
+and for that the window has to know, before anything is pressed, whether a
+raw carries one. `Decoder::camera_jpeg` answers
+`CameraJpeg::{Unavailable, Missing, Present}` from the same two LibRaw calls,
+without decoding it; `Present` carries the size from the JPEG's own header
+(`jpeg::stored_size`), which costs nothing more once the bytes are out and
+lets the sample test hold the header to the decoded JPEG. It cannot be
+answered any cheaper: `libraw_thumbnail_t` sits past the version-sized color
+block, which the hand-written `ffi` does not transcribe, and has no
+accessor. So every read of a raw that shows the developed frame
+opens the file a second time — a copy of tens of megabytes and of the JPEG's
+few, a few milliseconds beside the develop's hundreds — which is accepted
+rather than threading a second answer out of `decode`. A read of the JPEG
+knows its size from the pixels and asks nothing more. The three states are
+kept apart because the window says different things about each: nothing for
+a file that is not a raw, and, for a raw with none while the JPEG is asked
+for, that the developed picture is standing in.
 
 **The metadata.** The panel reads a raw's EXIF where a TIFF-shaped one
 keeps it, at the front, and most formats are TIFF-shaped. Five are not, and

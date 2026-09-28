@@ -41,6 +41,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::gestures::{Button, DragAction, Gestures, Kind, Mods, Surface};
+use crate::image::decode::{CameraJpeg, Rendering};
 use crate::image::display::{Display, Headroom};
 use crate::image::exif::Exif;
 use crate::image::orient::Turn;
@@ -183,6 +184,11 @@ pub struct Current {
     /// file holds it; everything read off `Current` other than `image`
     /// itself is in the turned picture's coordinates — see [`Turn`].
     pub turn: Turn,
+    /// Which of a raw's two pictures `image` is.
+    pub rendering: Rendering,
+    /// Whether the file carries the camera's JPEG, whichever is shown: what
+    /// decides whether the bottom bar offers the switch between them.
+    pub camera_jpeg: CameraJpeg,
 }
 
 impl Current {

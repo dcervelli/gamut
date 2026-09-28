@@ -440,6 +440,55 @@ turn leaves where it is, so `View::turn` turns the pan with the picture and
 the detail at the middle of the window stays there; a region is turned by
 `Region::turned` with the pixels it marks out.
 
+## The camera's JPEG
+
+A raw holds two pictures, the frame developed from the sensor's counts and
+the JPEG the camera rendered from them, and `image::decode::Rendering` names
+which one a read asks for. It is one preference for every raw, `App::rendering`,
+kept between runs in `settings::State::camera_jpeg`, rather than something of
+each file's: what is being asked is how raws are to be looked at, and a
+preference that held per file would have the same key mean different things
+from one file to the next.
+
+`App::send` fills every request's `rendering` from the preference, whatever
+the reason for the read, and `loader::decode_rendering` makes the choice: the
+camera's JPEG through `decode::preview_timed` where it was asked for and the
+file has one, the developed frame through `decode::load_timed` otherwise.
+A raw without a JPEG, or with one that will not decode, is read as developed
+and the read succeeds, so a step onto one is not a step onto a broken file.
+`Ready` carries back what was read and `CameraJpeg`, whether the file has one,
+and both land on `Current`, which is what the bottom bar's switch
+(`Pass::camera_switch`), the tooltip (`Namer::tooltip`, from `Namer::camera`)
+and `Conditions::camera_jpeg` read. When the JPEG was asked for and the file
+has none, `App::apply` says so in a toast.
+
+The switch is left out, not drawn dead, on a file with no JPEG. The headroom
+switch beside it is always drawn, because the surface is a question about
+every picture; this one is about a kind of file most pictures are not, and a
+dead button on every PNG would be a button about something the file is not.
+The key still needs a reason to be refused, so `ui::tooltip::disabled` has
+one, `NO_CAMERA_JPEG`, which only a press of `v` ever reaches.
+
+A press flips the preference and asks for the file on screen again as
+`Reload::Rendering`, which `arrival` names `Arrival::Rerendered` at any size:
+the view is carried across by `View::rescale`, which scales the pan and the
+zoom by the ratio of the two sizes so the same detail stays under the center
+of the window at the same size on screen, whether the JPEG is the frame's
+size or a quarter of it. The display starts over from
+`Display::for_image_with`, since an exposure set on linear sensor counts
+means nothing to an 8-bit JPEG, and `kept::Settings::rendering` stops a file
+left in one rendering from having what it was left in put back onto the
+other. The region is cleared: the JPEG is other pixels, and scaling a
+rectangle onto a smaller picture could only be approximate. The file list
+keeps the file's own size, so `App::apply` learns the chooser's `Facts` from
+the developed size and not the JPEG's.
+
+`Files::rerender` refuses while a read is in flight, as a reload does,
+because that read may be a step and a request would cancel it. The reply
+carries the rendering it was asked for on `Opened::rendering`, and
+`App::follow_rendering` asks again once it lands if the preference has moved
+in the meantime.
+
 ## The region
 
 A region is a `Region` in `src/image/region.rs`: a rectangle of whole image

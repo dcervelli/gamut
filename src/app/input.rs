@@ -20,6 +20,7 @@ use super::folder::Then;
 use super::keymap::{Bound, Chord, KeyName, Keymap, Keys, Row};
 use crate::clipboard;
 use crate::gestures::{self, Button, Gestures, Surface, WheelAction};
+use crate::image::decode::{CameraJpeg, Rendering};
 use crate::image::display::{Colormap, EV_STEP, Startup, ToneMap};
 use crate::image::encode;
 use crate::image::region::{Region, Side};
@@ -153,6 +154,9 @@ pub enum Action {
     /// Between the SDR and the HDR surface, where the driver offers the
     /// choice.
     ToggleHdr,
+    /// Between a raw's developed picture and the camera's JPEG of it, for
+    /// every raw from then on.
+    ToggleCameraJpeg,
     /// Put the name of the file on screen on the clipboard, with nothing of
     /// the directory it sits in.
     CopyName,
@@ -354,6 +358,7 @@ fn action_of(tip: Tip) -> Option<Action> {
         // which the tooltip lists under this one — see `App::tooltip`.
         Tip::Control(Control::Maximize) => ToggleInterface,
         Tip::Control(Control::Output) => ToggleHdr,
+        Tip::Control(Control::CameraJpeg) => ToggleCameraJpeg,
         Tip::Control(Control::Paste) => Action::Paste,
         Tip::Control(Control::Region) => ToggleRegion,
         Tip::Control(Control::Help) => ShowHelp,
@@ -534,6 +539,8 @@ pub enum When {
     PointerOnPicture,
     PictureOnClipboard,
     HdrMode,
+    /// The file on screen is a raw with the camera's JPEG in it.
+    CameraJpeg,
     SingleChannel,
     /// A rename, a deletion or a removal has been made this session and
     /// not yet undone.
@@ -552,7 +559,7 @@ impl When {
     /// Every condition, for a test to hold them all up against the
     /// application.
     #[cfg(test)]
-    pub const ALL: [When; 13] = [
+    pub const ALL: [When; 14] = [
         When::RegionSelected,
         When::SeveralFiles,
         When::Animation,
@@ -560,6 +567,7 @@ impl When {
         When::PointerOnPicture,
         When::PictureOnClipboard,
         When::HdrMode,
+        When::CameraJpeg,
         When::SingleChannel,
         When::Undoable,
         When::VisitedBefore,
@@ -579,6 +587,7 @@ impl When {
             When::PointerOnPicture => "the pointer on the picture",
             When::PictureOnClipboard => "a picture on the clipboard",
             When::HdrMode => "the monitor in HDR mode",
+            When::CameraJpeg => "a raw with a camera JPEG",
             When::SingleChannel => "a single-channel image",
             When::Undoable => "an edit to undo",
             When::VisitedBefore => "a file shown before this one",
@@ -626,6 +635,9 @@ pub(super) struct Conditions {
     pub room: ui::Room,
     /// Whether the surface switch has anything to switch, and why not.
     pub hdr: Hdr,
+    /// Whether the file on screen is a raw with the camera's JPEG in it,
+    /// which is what the switch between the two needs.
+    pub camera_jpeg: bool,
     /// Whether anything out there offers to open the file on screen.
     pub openable: bool,
     /// Whether a false color is on the picture.
@@ -658,6 +670,7 @@ impl Default for Conditions {
                 help: false,
             },
             hdr: Hdr::Unsupported,
+            camera_jpeg: false,
             openable: false,
             false_colored: false,
             picking: false,
@@ -670,9 +683,10 @@ impl Conditions {
     /// Nothing dead for any reason, and no key's condition met: a large
     /// window, a monitor in HDR mode, a file something else opens, a
     /// picture up in its own colors, the dialog down, a picture on the
-    /// clipboard and files seen either side of this one — the three
-    /// conditions that do hold, the paste button and the pair that go
-    /// back and forward being alive only then.
+    /// clipboard, files seen either side of this one and a raw with the
+    /// camera's JPEG in it — the four conditions that do hold, the paste
+    /// button, the pair that go back and forward and the camera's switch
+    /// being alive only then.
     #[cfg(test)]
     pub const ALIVE: Conditions = Conditions {
         region_selected: false,
@@ -693,6 +707,7 @@ impl Conditions {
             help: true,
         },
         hdr: Hdr::Available,
+        camera_jpeg: true,
         openable: true,
         false_colored: false,
         picking: false,
@@ -709,6 +724,7 @@ impl Conditions {
             When::PointerOnPicture => self.pointer_on_picture,
             When::PictureOnClipboard => self.picture_on_clipboard,
             When::HdrMode => self.hdr == Hdr::Available,
+            When::CameraJpeg => self.camera_jpeg,
             When::SingleChannel => self.single_channel,
             When::Undoable => self.undoable,
             When::VisitedBefore => self.visited_before,
@@ -731,6 +747,7 @@ impl Conditions {
             nothing_open: self.nothing_open,
             visited_before: self.visited_before,
             visited_after: self.visited_after,
+            camera_jpeg: self.camera_jpeg,
         }
     }
 }
@@ -1328,6 +1345,12 @@ pub static ROWS: &[Row] = &[
     },
     Row {
         section: Section::Display,
+        when: Some(When::CameraJpeg),
+        help: "Toggle between the developed picture and the camera's JPEG",
+        keys: one!("display.camera-jpeg", ToggleCameraJpeg, [key('v')]),
+    },
+    Row {
+        section: Section::Display,
         when: Some(When::SingleChannel),
         help: "Cycle false color for single-channel images",
         keys: one!("display.colormap", CycleColormap, [key('r')]),
@@ -1400,6 +1423,9 @@ pub(super) struct Namer {
     /// What each key is bound to, and each gesture.
     keys: Rc<Keymap>,
     gestures: Rc<Gestures>,
+    /// Which of a raw's pictures is on screen, where the file carries the
+    /// camera's JPEG: what the camera's switch says.
+    camera: Option<Rendering>,
 }
 
 impl Naming for Namer {
@@ -1487,6 +1513,29 @@ impl Naming for Namer {
                 })
                 .collect(),
             ),
+            // The camera's switch: the picture that is up, and under it the
+            // one a press switches to, with the key. Named by the key's row
+            // where nothing is known of the file, as in the tests that ask it
+            // of every button.
+            Tip::Control(Control::CameraJpeg) => match self.camera {
+                Some(rendering) => {
+                    let (showing, other) = match rendering {
+                        Rendering::Developed => (
+                            ui::tooltip::SHOWING_DEVELOPED,
+                            ui::tooltip::SWITCH_TO_CAMERA_JPEG,
+                        ),
+                        Rendering::CameraJpeg => (
+                            ui::tooltip::SHOWING_CAMERA_JPEG,
+                            ui::tooltip::SWITCH_TO_DEVELOPED,
+                        ),
+                    };
+                    (
+                        vec![showing.to_string()],
+                        vec![with_key(other, key_of(keys, ToggleCameraJpeg))],
+                    )
+                }
+                None => (vec![names(keys, at)?], Vec::new()),
+            },
             // The button that hides the interface: what a plain press does,
             // and under it the key for the press that closes the floating
             // panels with it — the one thing on the button the pointer
@@ -2106,6 +2155,7 @@ impl App {
                 });
             }
             ToggleHdr => return self.press(Control::Output),
+            ToggleCameraJpeg => return self.press(Control::CameraJpeg),
             ToggleRegion => return self.press(Control::Region),
             // Only a region moves, grows and shrinks, and there is none: see
             // `perform_on_region`.
@@ -2261,6 +2311,13 @@ impl App {
             conditions: self.conditions(),
             keys: Rc::clone(&self.keys),
             gestures: Rc::clone(&self.gestures),
+            camera: self
+                .current
+                .as_ref()
+                .and_then(|current| match current.camera_jpeg {
+                    CameraJpeg::Present(_) => Some(current.rendering),
+                    CameraJpeg::Missing | CameraJpeg::Unavailable => None,
+                }),
         }
     }
 
@@ -2296,6 +2353,8 @@ impl App {
             geographic: georeference.is_some_and(|geo| geo.offers_geographic()),
             room: self.room(),
             hdr: self.hdr_state(),
+            camera_jpeg: current
+                .is_some_and(|current| matches!(current.camera_jpeg, CameraJpeg::Present(_))),
             openable: !self.openers.is_empty(),
             false_colored: current
                 .is_some_and(|current| current.display.false_colored(current.image.is_gray())),
@@ -3087,6 +3146,7 @@ impl App {
             // As with the reset: the key's action, so that the button and the
             // key cannot come to mean different things.
             Control::Output => self.toggle_hdr(),
+            Control::CameraJpeg => self.toggle_camera_jpeg(),
             // The cross on the message at the foot of the window. The frame
             // after re-tests the pointer, which is what takes the highlight
             // off a button that is no longer there.
@@ -3233,6 +3293,51 @@ mod tests {
         Keymap::default().action_for(key, position, mods, true)
     }
 
+    /// The camera's switch says which picture is up, and under it the one a
+    /// press switches to; and on a file with no JPEG, where the switch is not
+    /// drawn, the key is refused with the reason.
+    #[test]
+    fn the_camera_switch_says_what_a_press_brings_up() {
+        let namer = |camera, conditions| Namer {
+            path: String::new(),
+            index: 0,
+            count: 0,
+            show_histogram: false,
+            state: Vec::new(),
+            keys: Rc::new(Keymap::default()),
+            gestures: Rc::new(Gestures::default()),
+            camera,
+            conditions,
+        };
+        let lines = |namer: Namer| {
+            namer
+                .tooltip(Tip::Control(Control::CameraJpeg))
+                .map(|tooltip| [tooltip.title, tooltip.hints].concat())
+        };
+        assert_eq!(
+            lines(namer(Some(Rendering::Developed), Conditions::ALIVE)),
+            Some(vec![
+                "Showing developed picture".to_string(),
+                "Switch to camera's JPEG (v)".to_string(),
+            ])
+        );
+        assert_eq!(
+            lines(namer(Some(Rendering::CameraJpeg), Conditions::ALIVE)),
+            Some(vec![
+                "Showing camera's JPEG".to_string(),
+                "Switch to developed picture (v)".to_string(),
+            ])
+        );
+        let without = Conditions {
+            camera_jpeg: false,
+            ..Conditions::ALIVE
+        };
+        assert_eq!(
+            lines(namer(None, without)),
+            Some(vec![ui::tooltip::NO_CAMERA_JPEG.to_string()])
+        );
+    }
+
     /// Every button in the chrome is named by the key that does the same job,
     /// in that key's own words: there is one table, so a tooltip and `--help`
     /// have nowhere to disagree about a binding.
@@ -3263,6 +3368,12 @@ mod tests {
         assert_eq!(
             named(Control::Output).as_deref(),
             Some("Toggle HDR output, when monitor is capable (o)")
+        );
+        // With nothing known of the file, the camera's switch is named by its
+        // key's row; with a raw on screen, by what a press brings up.
+        assert_eq!(
+            named(Control::CameraJpeg).as_deref(),
+            Some("Toggle between the developed picture and the camera's JPEG (v)")
         );
         // The button in the corner is named by the plain press it makes; the
         // press with Shift is the line under it — see `App::tooltip`.
@@ -3388,6 +3499,7 @@ mod tests {
             state: Vec::new(),
             keys: Rc::new(Keymap::default()),
             gestures: Rc::new(Gestures::default()),
+            camera: None,
             conditions: Conditions::ALIVE,
         };
         assert_eq!(
@@ -3412,6 +3524,12 @@ mod tests {
         assert_eq!(key("o", CTRL), Some(OpenFiles));
         assert_eq!(key("O", CTRL_SHIFT), Some(OpenFolder));
         assert_eq!(key("o", PLAIN), Some(ToggleHdr));
+        let v = action_for(
+            &Key::Character("v".into()),
+            PhysicalKey::Code(KeyCode::KeyV),
+            PLAIN,
+        );
+        assert_eq!(v, Some(ToggleCameraJpeg));
 
         // Dead while the dialog is up, and the label says so instead.
         let picking = Namer {
@@ -3422,6 +3540,7 @@ mod tests {
             state: Vec::new(),
             keys: Rc::new(Keymap::default()),
             gestures: Rc::new(Gestures::default()),
+            camera: None,
             conditions: Conditions {
                 picking: true,
                 ..Conditions::ALIVE
@@ -3587,6 +3706,13 @@ mod tests {
                 When::HdrMode,
                 Conditions {
                     hdr: Hdr::Available,
+                    ..none
+                },
+            ),
+            (
+                When::CameraJpeg,
+                Conditions {
+                    camera_jpeg: true,
                     ..none
                 },
             ),
@@ -3802,6 +3928,7 @@ mod tests {
             state: Vec::new(),
             keys: Rc::new(Keymap::default()),
             gestures: Rc::new(Gestures::default()),
+            camera: None,
             conditions: Conditions {
                 openable: false,
                 ..Conditions::ALIVE
@@ -3838,6 +3965,7 @@ mod tests {
             state: Vec::new(),
             keys: Rc::new(Keymap::default()),
             gestures: Rc::new(Gestures::default()),
+            camera: None,
             conditions: Conditions::ALIVE,
         };
         let tooltip = namer
@@ -3911,6 +4039,7 @@ mod tests {
             state: Vec::new(),
             keys: Rc::new(Keymap::default()),
             gestures: Rc::new(Gestures::default()),
+            camera: None,
             conditions: Conditions::ALIVE,
         };
         assert_eq!(
@@ -4000,6 +4129,7 @@ mod tests {
             state: Vec::new(),
             keys: Rc::new(Keymap::default()),
             gestures: Rc::new(Gestures::default()),
+            camera: None,
             conditions: Conditions::ALIVE,
         };
         let tooltip = namer

@@ -8,6 +8,14 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Added
 
+- A camera raw can be shown as the JPEG the camera wrote into it, with the
+  camera's own curve and color, in place of the picture developed from the
+  sensor. `v`, or the **Camera RAW** button that appears at the bottom right
+  for a raw that carries a JPEG, switches between the two; the view stays
+  where it was, so the two can be compared, and `Ctrl+E` exports whichever
+  is up. The choice holds for every raw after it and is remembered between
+  runs in the state file. A raw with no JPEG in it shows its developed
+  picture and says so.
 - `zoom.100.toggle` goes to actual size, and from actual size back to the
   whole image. It has no key by default.
 - A configuration file with lines `gamut` cannot use is said in the window
@@ -37,6 +45,10 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Changed
 
+- A raw's white is always the level the file states. A frame whose brightest
+  pixel came within about half a stop of it used to be brightened to put that
+  pixel at white, so the same scene opened brighter or darker depending on
+  whether anything in it was near clipping.
 - A double-click on the picture at actual size goes back to the whole image,
   where before it moved the detail under the pointer to the middle of the
   window; a double-click in and a double-click out is a quick look at the

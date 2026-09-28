@@ -479,17 +479,36 @@ that is not a paste; open it as an argument instead.
 | `t` | Toggle the curve on the highlights: clip, or roll off | `display.tone-map` |
 | `w` | Mark the clipped pixels, or stop: red where a channel has reached white, blue where one has reached black | `display.marks` |
 | `o` | Turn the room above white off and on, where the monitor is in HDR mode | `display.hdr` |
+| `v` | Show a raw as the camera's JPEG of it, or as the picture developed from the sensor | `display.camera-jpeg` |
 | `r` | Cycle false color: gray → viridis → magma → turbo | `display.colormap` |
 | `z` | Reset every display setting | `display.reset` |
 | `;` | Turn the picture a quarter counterclockwise | `display.turn.left` |
 | `'` | Turn the picture a quarter clockwise | `display.turn.right` |
 
-The two buttons before `HDR` at the right of the bottom bar do the same.
+The two turn buttons near the right of the bottom bar do the same.
 A turn changes how the picture is shown, not the file: it is kept with the
 file while the window is open, like the exposure, and carries through an
 animation's frames and a file's pages. A region turns with the picture, and
 the pixel readout counts from the top left of the picture as you see it.
 `z` leaves the turn alone. To keep a turn, export the picture with `Ctrl+E`.
+
+A camera raw file holds two pictures: the one `gamut` develops from what
+the sensor counted, and the JPEG the camera rendered and wrote into the file
+beside it, with the camera's own curve, color and adjustments. While a raw
+that carries a JPEG is on screen, a button between the turn buttons and
+`HDR` names the picture you are looking at, **Camera RAW** or
+**Camera JPEG**, and a click on it or `v` shows the other one. The choice
+holds for every raw you open after it, and for the next time `gamut` starts.
+Where you were looking stays where it was, at the same size, so the two can
+be compared by flicking between them. The display settings start over, since
+an exposure set for the developed picture means nothing to the JPEG. Export
+with `Ctrl+E` writes whichever picture is up, which is the quick way to a
+file that looks as the camera showed it.
+
+Some cameras write a JPEG the full size of the frame; others write a smaller
+one, around two megapixels, and the top bar says how large the picture on
+screen is. A raw with no JPEG in it has no button, and shows its developed
+picture while the camera's JPEG is chosen, saying so as it opens.
 
 The window is the one place the case of a key matters: `a` and `s` move
 the value that comes out black, `A` and `S` the value that comes out white.
@@ -585,7 +604,7 @@ histogram's row of curves goes dim, `t` does nothing, and both come back
 with the gray ramp.
 
 Everything on this page shows up in one line at the right of the bottom bar,
-in front of the `HDR` button: the window by name, the exposure in the quarter
+in front of the buttons there: the window by name, the exposure in the quarter
 stops it is stepped in (`+¼ EV`), the false color, and what is becoming of
 the highlights. Only what is in force is named, so an image you have not
 touched leaves that end of the bar empty, and anything the window is too
@@ -813,7 +832,8 @@ region behind: it belongs to the picture it was drawn on.
 | Drag the file information | Scroll it, as if dragging the scrollbar's handle | |
 | Click the zoom percentage | Open the zoom menu: scale, fit and the magnification filter | |
 | Click the dot beside the grid button | Choose how a pixel's value is read out | |
-| Click a turn button, before `HDR` at the bottom right | Turn the picture a quarter counterclockwise or clockwise, as `;` and `'` do | |
+| Click a turn button, near the bottom right | Turn the picture a quarter counterclockwise or clockwise, as `;` and `'` do | |
+| Click **Camera RAW** or **Camera JPEG**, before `HDR` at the bottom right | Show a raw as the camera's JPEG of it, or as the developed picture, as `v` does | |
 
 The button at the top of the left strip opens a menu of the
 copies beside it: the file's **Name**, its **Path**, its **URI**, the
