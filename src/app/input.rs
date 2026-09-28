@@ -2104,11 +2104,8 @@ impl App {
             CopyPixelValue => self.copy_pixel(false),
             CopyPixelCoordinate => self.copy_pixel(true),
             ResetDisplay => {
-                let headroom = self.headroom();
-                return self.adjust(move |current, _| {
-                    current
-                        .display
-                        .reset(&current.stats, &current.image, headroom);
+                return self.adjust(|current, _| {
+                    current.display.reset(&current.stats, &current.image);
                     true
                 });
             }

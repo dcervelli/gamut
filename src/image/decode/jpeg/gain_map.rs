@@ -168,7 +168,7 @@ fn decode(bytes: &[u8]) -> Result<::image::DynamicImage> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::image::display::{AutoWindow, Display, Headroom, Startup, ToneMap};
+    use crate::image::display::{AutoWindow, Display, Startup, ToneMap};
     use crate::image::gain_map::Table;
     use crate::image::{Primaries, Referred, Stats, Transfer};
 
@@ -301,27 +301,28 @@ mod tests {
     }
 
     /// On a monitor with no room above white the picture is the base, and
-    /// nothing in it is past white: no curve is wanted and the window is
-    /// the base's. On one with the room the statistics see the lift, and a
-    /// curve is wanted only where the surface would clip it — which the
-    /// weight that follows the room keeps from happening, but the curve's
-    /// default has to answer for whatever the statistics say.
+    /// nothing in it is past white; the window is the base's. On one with
+    /// the room the statistics see the lift, and the display reports what
+    /// of it is past white — which the weight that follows the room keeps
+    /// the surface from clipping. No curve comes on by itself either way.
     #[test]
-    fn the_window_is_the_bases_and_the_curve_follows_what_is_lifted() {
+    fn the_window_is_the_bases_and_the_statistics_see_what_is_lifted() {
         let image = opened();
 
         let base = Stats::scan(&image);
         assert!(base.max <= 1.0);
-        let display = Display::for_image_with(&image, &base, Startup::default(), Headroom::None);
+        let display = Display::for_image_with(&image, &base, Startup::default());
         assert_eq!(display.auto(), AutoWindow::Off);
         assert_eq!((display.window_low(), display.window_high()), (0.0, 1.0));
         assert_eq!(display.tone_map(), ToneMap::None);
+        assert!(!display.exceeds_white(&base));
 
         let lifted = Stats::scan_with(&image, Some(&whole(&image)));
         assert!(lifted.max > 1.0, "the scan has to see the lift");
-        let display = Display::for_image_with(&image, &lifted, Startup::default(), Headroom::None);
+        let display = Display::for_image_with(&image, &lifted, Startup::default());
         assert_eq!((display.window_low(), display.window_high()), (0.0, 1.0));
-        assert_eq!(display.tone_map(), ToneMap::Neutral);
+        assert_eq!(display.tone_map(), ToneMap::None);
+        assert!(display.exceeds_white(&lifted));
     }
 
     /// The crate's own `apply_gainmap` over the same base and map, as the

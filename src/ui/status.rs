@@ -435,7 +435,7 @@ mod tests {
         );
         let stats = Stats::scan(&image);
         Current {
-            display: Display::for_image_with(&image, &stats, Startup::default(), Headroom::None),
+            display: Display::for_image_with(&image, &stats, Startup::default()),
             image: std::sync::Arc::new(image),
             stats,
             label: "a.png".into(),

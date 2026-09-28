@@ -400,6 +400,11 @@ pub struct App {
     /// window: what the monitor thread's table is read by.
     #[cfg(test)]
     headless_monitor: Option<String>,
+    /// Whether the surface a test has no window for is to count as the HDR
+    /// one, for what the headroom and the curve make of the monitor and
+    /// the switch.
+    #[cfg(test)]
+    headless_surface_hdr: bool,
 }
 
 impl App {
@@ -553,6 +558,8 @@ impl App {
             headless: None,
             #[cfg(test)]
             headless_monitor: None,
+            #[cfg(test)]
+            headless_surface_hdr: false,
         };
         app.filmstrip.set_slot(kept_state.filmstrip_width);
         app.filmstrip.set_order(kept_state.order);
@@ -928,18 +935,21 @@ impl App {
     }
 
     /// Whether the picture is going out with room above SDR white, which is
-    /// half of what a tone map defaults from and half of what every readout
-    /// of a value says. It takes three things: a surface with the room, a
-    /// monitor not known to be in SDR mode — a compositor maps an HDR surface
-    /// down for one that is, and the room is not there however the surface
-    /// was made — and the switch not having turned it off. Before there is a
-    /// window the answer is the SDR one, and [`App::adopt_headroom`] asks
-    /// again whenever any of the three moves.
+    /// what the gain map's lift is weighed against and half of what every
+    /// readout of a value says. It takes three things: a surface with the
+    /// room, a monitor not known to be in SDR mode — a compositor maps an
+    /// HDR surface down for one that is, and the room is not there however
+    /// the surface was made — and the switch not having turned it off.
+    /// Before there is a window the answer is the SDR one, and
+    /// [`App::refresh_lift`] weighs the lift again whenever any of the three
+    /// moves.
     fn headroom(&self) -> Headroom {
         let surface = self
             .shown
             .as_ref()
             .is_some_and(|shown| shown.renderer.output().is_hdr);
+        #[cfg(test)]
+        let surface = surface || self.headless_surface_hdr;
         headroom_of(surface, self.monitor, self.hdr)
     }
 
@@ -979,15 +989,21 @@ impl App {
         self.hdr_state() == Hdr::Available
     }
 
-    /// Puts the surface where [`App::surface_hdr`] says and the curve where
-    /// the headroom that leaves says, and says whether the picture changed.
-    /// Called whenever an input to either moves: the window landing on a
-    /// monitor, the monitor changing mode, the switch being pressed. Which
-    /// surface it is goes to stderr when it changes, the way the choice at
-    /// start-up does, since the bar has room for one word and the surface's
-    /// name is several.
-    fn sync_output(&mut self) -> Effect {
-        let before = self.headroom();
+    /// Puts the surface where [`App::surface_hdr`] says and the gain map's
+    /// lift at the weight the headroom that leaves gives it, and says whether
+    /// the picture changed. Called whenever an input to either moves: the
+    /// window landing on a monitor, the monitor changing mode, the switch
+    /// being pressed. Which surface it is goes to stderr when it changes, the
+    /// way the choice at start-up does, since the bar has room for one word
+    /// and the surface's name is several.
+    ///
+    /// `before` is the headroom as it stood before whatever moved, read by
+    /// the caller ahead of its change: the monitor's mode and the switch
+    /// each move the headroom without moving the surface — under `--output
+    /// hdr` the surface is HDR whatever the monitor is in, and the switch
+    /// leaves the surface where it is on purpose — and a reading taken here,
+    /// after the change, would find nothing to weigh the lift again for.
+    fn sync_output(&mut self, before: Headroom) -> Effect {
         let wanted = self.surface_hdr();
         let mut changed = false;
         if let Some(shown) = &mut self.shown
@@ -998,7 +1014,7 @@ impl App {
             changed = true;
         }
         if self.headroom() != before {
-            self.adopt_headroom();
+            self.refresh_lift();
             changed = true;
         }
         Effect::redraw_if(changed)
@@ -1019,6 +1035,7 @@ impl App {
         if mode == self.monitor && headroom == self.monitor_headroom {
             return Effect::Nothing;
         }
+        let before = self.headroom();
         self.monitor_headroom = headroom;
         // Worth a line, since it is what lights the switch or kills it.
         if let (Some(name), Some(mode)) = (&name, mode) {
@@ -1030,28 +1047,7 @@ impl App {
         }
         self.monitor = mode;
         // The switch changed whatever the picture did.
-        self.sync_output().also(Effect::Redraw)
-    }
-
-    /// Re-derives the tone map for whatever is on screen, for the moment the
-    /// output is settled and its headroom is known at last, and for every
-    /// switch of it after.
-    ///
-    /// The file named on the command line is decoded before the window opens,
-    /// so its display state is worked out against an SDR surface whatever the
-    /// surface turns out to be. A curve asked for on the command line is left
-    /// alone: that is a choice rather than a default.
-    fn adopt_headroom(&mut self) {
-        // The lift first, since the curve is chosen from what the lift
-        // leaves above white.
-        self.refresh_lift();
-        if self.startup.tone_map.is_some() {
-            return;
-        }
-        let headroom = self.headroom();
-        if let Some(current) = &mut self.current {
-            current.display.adopt(headroom, &current.stats);
-        }
+        self.sync_output(before).also(Effect::Redraw)
     }
 
     /// How much room above white the picture is going out to: the
@@ -1115,12 +1111,13 @@ impl App {
     /// opens: the switch chooses the curve the room wants for what is on
     /// screen, and `t` changes it afterwards.
     pub(super) fn toggle_hdr(&mut self) -> Effect {
-        self.hdr = if self.headroom() == Headroom::Above {
+        let before = self.headroom();
+        self.hdr = if before == Headroom::Above {
             HdrPreference::Off
         } else {
             HdrPreference::On
         };
-        self.sync_output()
+        self.sync_output(before)
     }
 
     fn image_size(&self) -> [f32; 2] {
@@ -1810,11 +1807,11 @@ impl App {
             gui,
             window,
         });
-        // The surface exists at last, so whatever was decoded before the
-        // window opened can find out what it is being drawn onto. Which
-        // monitor it is on is not known until it has been shown, and the
-        // surface follows it from `about_to_wait`.
-        self.adopt_headroom();
+        // The surface exists at last, so a gain map decoded before the
+        // window opened can be weighed against the room it is drawn into.
+        // Which monitor it is on is not known until it has been shown, and
+        // the surface follows it from `about_to_wait`.
+        self.refresh_lift();
         // A first frame, asked for outright. With a file on the way its
         // arrival asks for one; a window opened on nothing has nothing
         // coming, and its buttons are owed a frame all the same.
@@ -1982,7 +1979,7 @@ impl App {
             // new pixels.
             (Arrival::Reread, Some(current), _) => refreshed(&current.display),
             (_, _, Some(settings)) => refreshed(&settings.display),
-            _ => Display::for_image_with(&image, &stats, self.startup, self.headroom()),
+            _ => Display::for_image_with(&image, &stats, self.startup),
         };
 
         let mut stored = None;
@@ -6526,7 +6523,7 @@ mod tests {
         assert!(app.surface_hdr(), "the HDR surface is wanted");
         assert_eq!(app.hdr_state(), Hdr::Unsupported, "no surface to switch");
         assert_eq!(app.headroom(), Headroom::None);
-        assert_eq!(app.sync_output(), Effect::Nothing);
+        assert_eq!(app.sync_output(app.headroom()), Effect::Nothing);
 
         app.monitors
             .as_ref()
@@ -6545,5 +6542,63 @@ mod tests {
         );
         assert_eq!(app.monitor, None);
         assert_eq!(app.monitor_headroom, None);
+    }
+
+    /// Under `--output hdr` the surface is the HDR one from the start and
+    /// never moves, so the monitor's mode is all that moves the headroom:
+    /// read as SDR once the surface is up, the room is gone; read as HDR,
+    /// it is back. The switch moves it the same way, with the surface left
+    /// where it is. Each is a change the surface takes no part in, which is
+    /// why the headroom is read before the change rather than by
+    /// `sync_output` after it, and each is a frame owed. The curve is not
+    /// theirs to touch: a file opens with none, and one chosen stays chosen
+    /// through every one of them.
+    #[test]
+    fn the_room_follows_the_monitor_and_the_switch_and_the_curve_stays() {
+        use crate::image::display::ToneMap;
+        fn curve(app: &App) -> ToneMap {
+            app.current.as_ref().expect("a picture is up").display.tone_map()
+        }
+        let (mut app, _dir) = app_over("headroom", &[("a.png", 4, 3)]);
+        // A picture pushed above white — the fixture is mid gray, three
+        // stops up — so that a curve would have something to be for.
+        app.current.as_mut().unwrap().display.set_exposure(3.0);
+        app.hdr = HdrPreference::On;
+        app.headless_surface_hdr = true;
+        app.monitors = Some(Monitors::stub(true));
+        let set = |app: &App, mode, headroom| {
+            app.monitors
+                .as_ref()
+                .expect("still there")
+                .set("HDMI-A-1", mode, headroom);
+        };
+
+        // The surface is up and the monitor not yet read: room by default.
+        app.refresh_lift();
+        assert_eq!(app.headroom(), Headroom::Above);
+        assert_eq!(curve(&app), ToneMap::None);
+
+        // Then read as SDR, which the compositor maps the surface down for.
+        set(&app, Mode::Sdr, 1.0);
+        app.headless_monitor = Some("HDMI-A-1".to_string());
+        assert_eq!(app.sync_monitor(), Effect::Redraw);
+        assert_eq!(app.headroom(), Headroom::None);
+        assert_eq!(curve(&app), ToneMap::None, "clipped, and said so");
+
+        // A curve chosen, and then the monitor switched into HDR mode —
+        // full screen, say — and the switch pressed twice: the room moves
+        // every time, and the choice stays.
+        let _ = app.perform(input::Action::CycleToneMap);
+        assert_eq!(curve(&app), ToneMap::Neutral);
+        set(&app, Mode::Hdr, 4.0);
+        assert_eq!(app.sync_monitor(), Effect::Redraw);
+        assert_eq!(app.headroom(), Headroom::Above);
+        assert_eq!(curve(&app), ToneMap::Neutral, "chosen");
+        assert_eq!(app.toggle_hdr(), Effect::Redraw);
+        assert_eq!(app.headroom(), Headroom::None);
+        assert_eq!(curve(&app), ToneMap::Neutral, "the switch off");
+        assert_eq!(app.toggle_hdr(), Effect::Redraw);
+        assert_eq!(app.headroom(), Headroom::Above);
+        assert_eq!(curve(&app), ToneMap::Neutral, "the switch on");
     }
 }

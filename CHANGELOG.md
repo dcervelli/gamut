@@ -70,13 +70,22 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 - A wide-gamut file — Display P3, Adobe RGB, BT.2020, a raw — is measured
   where the screen has it rather than in its own channels. A color sRGB
   cannot hold stands past white on the histogram, or below black, the
-  corners count it, `w` paints it, and the file opens with the neutral
-  curve rolling it off on an SDR surface as a PQ frame does; on an HDR
-  surface it is shown and nothing is marked. The bottom bar's **clipped**
-  says so for such a file, where before it was clipped in silence. A file
-  in sRGB is measured exactly as before.
+  corners count it, and `w` paints it; on an HDR surface it is shown and
+  nothing is marked. The bottom bar's **clipped** says so for such a file,
+  where before it was clipped in silence. A file in sRGB is measured
+  exactly as before.
 - The histogram of a 16-bit or float picture with a gain map is scanned
   through the lift, as an 8-bit one's already was.
+- A file opens with its highlights clipped on an SDR surface. Before, a
+  file with anything above white — a PQ or HLG frame, a metered scene —
+  opened with the neutral curve rolling them off, and the curve was chosen
+  again whenever the room changed. The curve is now only ever chosen by
+  `t`, the panel's row or `--tone-map`, stays as chosen when the room
+  changes, and the bottom bar's **clipped** says when there is something
+  for it to do. A curve that came on by itself changed the whole picture,
+  its toe darkening every shadow, for highlights a hair past white — and,
+  with wide-gamut files now measured where the screen has them, would have
+  come on for most phone photographs.
 
 ### Fixed
 
@@ -86,6 +95,9 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   They now go out as they are on an scRGB surface, and on an HDR10 surface
   the color is taken to BT.2020, which holds P3 and Adobe RGB whole, before
   anything is clipped.
+- With `--output hdr` on a monitor in SDR mode, and on a press of the `HDR`
+  button or `o`, a change to the room that left the surface where it was
+  went unnoticed, so a gain map's lift stayed weighed for the room before.
 
 - A panel floating over the picture could take the pointer from a place
   left of where it is drawn: the right of the histogram panel let a click or

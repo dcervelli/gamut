@@ -10,7 +10,9 @@
 /// surface makes of the highlights on its own: an SDR surface clamps them at
 /// white, and an HDR surface shows them at the brightness they were graded
 /// to. Which of the two is [`Headroom`]'s to say, and the surface's; whether
-/// to add the curve is the viewer's.
+/// to add the curve is the viewer's, and only the viewer's: every picture
+/// opens with `None`, and a curve comes on by `t`, the panel's row or
+/// `--tone-map`, never by itself. See [`super::Display`] for why.
 ///
 /// One curve, because a viewer wants exactly one thing of it: the highlights
 /// brought back under white with everything else left alone. A curve that
@@ -54,27 +56,6 @@ impl ToneMap {
         match self {
             ToneMap::None => ToneMap::Neutral,
             ToneMap::Neutral => ToneMap::None,
-        }
-    }
-
-    /// The curve a picture gets when nothing has asked for one: none at all
-    /// where the surface has room for the highlights, and otherwise a
-    /// roll-off where there are highlights above white to roll off — and
-    /// none, again, where there are not, since a curve on a picture that
-    /// never reaches white is a bend in it for no reason.
-    ///
-    /// `above_white` is the picture as the display has it: not what kind of
-    /// file it is, but whether anything in it comes out past white once the
-    /// window is on it. See [`super::Display::exceeds_white`].
-    ///
-    /// Held apart from [`super::Display::for_image_with`] because the surface can
-    /// change under a picture — it is settled after the first file is
-    /// decoded, and it is switched — so the answer has to be asked for again
-    /// whenever it does.
-    pub fn default_for(headroom: Headroom, above_white: bool) -> Self {
-        match (headroom, above_white) {
-            (Headroom::Above, _) | (Headroom::None, false) => ToneMap::None,
-            (Headroom::None, true) => ToneMap::Neutral,
         }
     }
 

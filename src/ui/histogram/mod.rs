@@ -876,7 +876,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::image::display::{Headroom, Startup};
+    use crate::image::display::Startup;
     use crate::image::exif::Exif;
     use crate::image::sequence::Sequence;
     use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples, Stats};
@@ -896,7 +896,7 @@ mod tests {
     fn shown(image: DecodedImage) -> Current {
         let stats = Stats::scan(&image);
         Current {
-            display: Display::for_image_with(&image, &stats, Startup::default(), Headroom::None),
+            display: Display::for_image_with(&image, &stats, Startup::default()),
             image: Arc::new(image),
             stats,
             label: "file".into(),

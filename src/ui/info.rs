@@ -726,7 +726,7 @@ mod tests {
     use crate::ui::histogram;
     use std::time::Duration;
 
-    use crate::image::display::{Display, Headroom, Startup};
+    use crate::image::display::{Display, Startup};
     use crate::image::exif::{Entry, Exif, Section};
     use crate::image::sequence::Sequence;
     use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples, Stats};
@@ -752,7 +752,7 @@ mod tests {
         );
         let stats = Stats::scan(&image);
         Current {
-            display: Display::for_image_with(&image, &stats, Startup::default(), Headroom::None),
+            display: Display::for_image_with(&image, &stats, Startup::default()),
             image: std::sync::Arc::new(image),
             stats,
             label: "kingfisher.png".into(),

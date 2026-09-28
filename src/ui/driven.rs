@@ -98,7 +98,7 @@ fn picture(width: u32, height: u32) -> Current {
     );
     let stats = Stats::scan(&image);
     Current {
-        display: Display::for_image_with(&image, &stats, Startup::default(), Headroom::None),
+        display: Display::for_image_with(&image, &stats, Startup::default()),
         image: Arc::new(image),
         stats,
         label: "photo.png".into(),
@@ -755,7 +755,7 @@ fn the_curves_are_dead_under_a_false_color() {
     );
     let stats = Stats::scan(&image);
     let mut current = photograph();
-    current.display = Display::for_image_with(&image, &stats, Startup::default(), Headroom::None);
+    current.display = Display::for_image_with(&image, &stats, Startup::default());
     current.image = Arc::new(image);
     current.stats = stats;
 
