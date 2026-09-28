@@ -7,7 +7,7 @@
 class Gamut < Formula
   desc "GPU image viewer with color management for photographs, measurements and HDR"
   homepage "https://github.com/dcervelli/gamut"
-  url "https://github.com/dcervelli/gamut/archive/refs/tags/v0.7.0.tar.gz"
+  url "https://github.com/dcervelli/gamut/archive/refs/tags/v0.8.0.tar.gz"
   sha256 "ebf8187e86868a9d4e6e4cb35ef1304296aab5f0032836e509b327a74640c904"
   license any_of: ["MIT", "Apache-2.0"]
 
