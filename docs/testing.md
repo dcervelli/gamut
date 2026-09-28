@@ -118,6 +118,6 @@ test, in both byte orders; `talks_to_the_live_session_bus`, ignored unless
 asked for, then authenticates to the real bus, says `Hello`, calls
 `ListNames`, and checks that an unknown method comes back as the named
 error it should. The dialog itself is not driven by a test, since it would
-put a window on whoever's desk ran it; `portal.rs` tests what goes into the
+put a window on whoever's desk ran it; `portal/freedesktop.rs` tests what goes into the
 call and what is made of the answer.
 

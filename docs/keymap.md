@@ -119,7 +119,10 @@ popup, the messages about undo and about the hidden interface — reads the
 rather than borrows: the namer is built as a value while the frame is drawn
 with the application borrowed mutably, and an `Rc` clone is a pointer copy.
 `--help` and the manual page are rendered from `Keymap::default()`: they
-describe the program, not one user's file.
+describe the program, not one user's file. The tests read `Keymap::table()` and
+`Gestures::table()` instead: the chords and slots the tables themselves give,
+which `default()` is today, so that a test naming a chord says the same thing
+on whatever machine runs it.
 
 ## Gestures
 

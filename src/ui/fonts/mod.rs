@@ -2,12 +2,9 @@
 //! so that the window wears what the rest of the desktop is wearing. Nothing
 //! is shipped with the binary.
 //!
-//! Which face that is, is fontconfig's to say, and it is asked directly: its
-//! library resolves `sans-serif` the way every other program on the desktop
-//! has it resolved, through the whole of its configuration — the desktop's
-//! own rules included, which on Omarchy are what name the face. Where there
-//! is no fontconfig library to ask, fontdb reads the same font directories
-//! itself and answers as best it can from the aliases alone.
+//! Which face that is, is the desktop's to say, and it is asked directly —
+//! on Linux, fontconfig; see `fontconfig.rs`. Where there is nobody to ask,
+//! fontdb reads the font directories itself and answers as best it can.
 //!
 //! egui takes fonts as bytes, so each face is read whole once at startup and
 //! handed over; a face is a few hundred kilobytes, and the same bytes serve
@@ -22,12 +19,13 @@ use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 use egui::{FontData, FontDefinitions, FontFamily, FontTweak};
-use fontconfig::{
-    FC_FAMILY, FC_PROPORTIONAL, FC_SPACING, FC_WEIGHT, FC_WEIGHT_DEMIBOLD, FC_WEIGHT_NORMAL,
-    Fontconfig, Pattern,
-};
 use skrifa::instance::{LocationRef, Size};
 use skrifa::{FontRef, MetadataProvider};
+
+#[cfg(target_os = "linux")]
+mod fontconfig;
+#[cfg(target_os = "linux")]
+use self::fontconfig::Desktop;
 
 /// The bold sans, for the one thing in the window set bold: the file's
 /// name. egui's own families are the proportional and the monospace face,
@@ -86,7 +84,7 @@ pub fn system() -> Result<FontDefinitions> {
 
 /// One of the three faces the interface is set in.
 #[derive(Clone, Copy)]
-enum Want {
+pub(super) enum Want {
     Sans,
     SansBold,
     Mono,
@@ -94,9 +92,9 @@ enum Want {
 
 /// A face as it came off the disk: the bytes of the file holding it, and
 /// which face in the file it is.
-struct Face {
-    bytes: Vec<u8>,
-    index: u32,
+pub(super) struct Face {
+    pub(super) bytes: Vec<u8>,
+    pub(super) index: u32,
 }
 
 impl From<Face> for FontData {
@@ -113,27 +111,25 @@ impl From<Face> for FontData {
     }
 }
 
-/// Where a face is asked for: fontconfig first, and fontdb's own reading of
-/// the font directories only where fontconfig's library cannot be loaded.
-/// The fallback scans every installed face, so it is not opened unless it
-/// is needed.
+/// Where a face is asked for: the desktop first, and fontdb's own reading of
+/// the font directories only where the desktop has no answer. The fallback
+/// scans every installed face, so it is not opened unless it is needed.
 struct Finder {
-    fontconfig: Option<Fontconfig>,
+    desktop: Desktop,
     fontdb: Option<fontdb::Database>,
 }
 
 impl Finder {
     fn new() -> Self {
         Self {
-            fontconfig: Fontconfig::new(),
+            desktop: Desktop::new(),
             fontdb: None,
         }
     }
 
     fn find(&mut self, want: Want) -> Option<Face> {
-        self.fontconfig
-            .as_ref()
-            .and_then(|fc| desktop(fc, want))
+        self.desktop
+            .find(want)
             .or_else(|| listed(self.fontdb(), want))
     }
 
@@ -146,42 +142,8 @@ impl Finder {
     }
 }
 
-/// The face fontconfig resolves `want` to, as `fc-match` would print it.
-///
-/// fontconfig always answers with its nearest face, so the answer is checked
-/// against the question: a bold that came back regular, or a monospace that
-/// came back proportional, is no answer, and the family falls back to the
-/// sans as if the desktop had named nothing.
-fn desktop(fc: &Fontconfig, want: Want) -> Option<Face> {
-    let (family, weight) = match want {
-        Want::Sans => (c"sans-serif", FC_WEIGHT_NORMAL),
-        Want::SansBold => (c"sans-serif", FC_WEIGHT_DEMIBOLD),
-        Want::Mono => (c"monospace", FC_WEIGHT_NORMAL),
-    };
-    let mut pattern = Pattern::new(fc).ok()?;
-    pattern.add_string(FC_FAMILY, family).ok()?;
-    pattern.add_integer(FC_WEIGHT, weight).ok()?;
-    let found = pattern.font_match().ok()?;
-    match want {
-        Want::Sans => {}
-        Want::SansBold => {
-            if found.weight().ok()? < FC_WEIGHT_DEMIBOLD {
-                return None;
-            }
-        }
-        Want::Mono => {
-            if found.get_int(FC_SPACING).ok()? == FC_PROPORTIONAL {
-                return None;
-            }
-        }
-    }
-    let bytes = std::fs::read(found.filename().ok()?).ok()?;
-    let index = found.face_index().unwrap_or(0).try_into().ok()?;
-    Some(Face { bytes, index })
-}
-
 /// The face fontdb's own reading of the font directories names for `want`,
-/// where there is no fontconfig to ask.
+/// where the desktop has no answer.
 fn listed(db: &fontdb::Database, want: Want) -> Option<Face> {
     let (family, weight) = match want {
         Want::Sans => (fontdb::Family::SansSerif, fontdb::Weight::NORMAL),

@@ -68,8 +68,9 @@ ui/            lays each frame's interface out with egui; no wgpu or winit impor
                  icon_button(), button_ink() and tooltip(); content_area(), image_viewport() —
                  pure geometry, worked out before egui lays anything out
   style.rs       Theme's roles as egui's Style and Visuals; Color into Color32
-  fonts.rs       the desktop's sans, bold and monospace faces, as fontconfig resolves
-                 them, each with its capitals centered in egui's rows
+  fonts/         the desktop's sans, bold and monospace faces, each with its capitals
+                 centered in egui's rows: mod.rs the set egui is given and fontdb's
+                 fallback, fontconfig.rs what the Linux desktop names
   rect.rs        Rect, the logical-pixel rectangle the panels are placed by
   panel.rs       where a thing floating over the picture goes — fit(), the one placement every
                  panel is fitted by, refused rather than shrunk — area(), the one opening
@@ -151,31 +152,40 @@ thumbnail.rs   the freedesktop thumbnail cache: the GLib-spelled URI a file is k
 fuzzy.rs       the chooser's matcher behind a trait with skim's own signature; the
                one file that names the fuzzy-matcher crate
 gestures.rs    the mouse's slots — a surface, a button or the wheel, with modifiers — each
-               holding one Behavior; Gestures::default, the lookups the pass and App make,
-               template(); and the modifier words the keymap shares (pure, tested)
+               holding one Behavior; Gestures::table (the tests' defaults) and ::default
+               (what is in force), the lookups the pass and App make, template(); and the
+               modifier words the keymap shares (pure, tested)
 watch.rs       polling a file — or a directory — for a settled change
-trash.rs       the desktop's trash, by the freedesktop specification: put() moves a file
-               into it and says which Entry it became, restore() moves that entry back
-monitor.rs     what the compositor says each monitor is, SDR or HDR and how large in logical pixels, over a Wayland connection of its own
-clipboard.rs   putting text or a file: URI on the clipboard, in a process that outlives
-               the window; and reading a pasted picture off it
+no_replace.rs  rename_no_replace(): a rename that refuses rather than replace what is at
+               the new name — for a rename, an export's write and the trash alike
+trash/         the desktop's trash: mod.rs Refused; freedesktop.rs the Linux trash by the
+               specification — put() moves a file into it and says which Entry it became,
+               restore() moves that entry back
+monitor/       what each monitor is, SDR or HDR and how large in logical pixels: mod.rs
+               Monitors, the table the platform fills, and key_of(), what it is keyed by;
+               wayland.rs the compositor's answer, over a Wayland connection of its own
+clipboard/     putting text or a file: URI on the clipboard, and reading a pasted picture
+               off it: mod.rs the types, IMAGE_TYPES and the thread that watches for a
+               picture; wayland.rs the selection, held by a process that outlives the window
 pasted.rs      where a pasted picture is written and what it is called: the
                XDG pictures directory, and a name nothing else holds
-portal.rs      the desktop's file dialog, through the file chooser portal: Pick says
-               files or a folder, choose() blocks for the answer, choose_on_thread()
-               hands it back through the event loop
+portal/        the desktop's file dialog: mod.rs Pick, which says files or a folder, and
+               Picked; freedesktop.rs the file chooser portal, choose() blocking for the
+               answer and choose_on_thread() handing it back through the event loop
 dbus.rs        the session bus, spoken directly: Value marshaled and unmarshaled by
                signature, and a blocking Connection that calls a method and waits for
                a signal — enough for the portal and nothing more
-openers.rs     what else on the desktop can open the file on screen: the entries
-               that claim its MIME type, found through the desktop's own index and
-               the user's associations, and starting one of them
+openers/       what else on the desktop can open the file on screen, and starting one of
+               them: mod.rs MAX_NAME; linux.rs the desktop entries that claim its MIME type,
+               found through the desktop's own index and the user's associations
+media.rs       MIME_TYPES: what the desktop calls each extension the decoders read
 clock.rs       a moment as a date and time — UTC, or the zone the system's own
                compiled zone file says it is in
 xdg.rs         the base directory specification's answers — home, and the cache, configuration
                and data directories — read once for everything that keeps something under them
-uri.rs         a path as a file: URI, and the percent-encoding under the three spellings the
-               tree uses — RFC 3986's for the clipboard and the trash, GLib's for the thumbnail cache
+uri.rs         a path as a file: URI and back, and the percent-encoding under the three spellings
+               the tree uses — RFC 3986's for the clipboard and the trash, GLib's for the
+               thumbnail cache
 timing.rs      startup instrumentation
 image/         the data model, nothing GPU
   mod.rs         Channels, Samples, AlphaMode, Referred (graded or measured light), DecodedImage,
@@ -273,11 +283,11 @@ still agrees with both, so renaming either is editing the constant —
 | Which of a raw's two pictures is shown — the developed frame or the camera's JPEG | `image/decode/mod.rs`'s `Rendering` and `CameraJpeg`, answered by `Decoder::preview` and `Decoder::camera_jpeg` in `decode/raw.rs`; `loader::decode_rendering` for which is read; `App::rendering` for the preference, kept in `settings::State::camera_jpeg`, `App::toggle_camera_jpeg` and `App::follow_rendering` for the switch, and `Arrival::Rerendered` with `View::rescale` for what carries across; `Pass::camera_switch` for the button, drawn only while `Current::camera_jpeg` is `Present` |
 | A thumbnail's source | `Decoder::preview` for a format that carries a smaller picture of itself, which the thumbnailer asks for before it decodes anything; `thumbnail::SIDE` is the size it has to reach to be used |
 | A popup menu | a function in `ui/menu.rs` that lays its cells out, each pushing `Command::Press` of a typed `Control` — `ZoomTo`, `Format`, `Copies`, or `Opener`, which is a place in a list the application built rather than a choice named in the source — and an `egui::Popup` hung off its button in `ui/chrome.rs`, aligned below, above or beside it with `RectAlign`. The popup opens, closes and takes the pointer by itself; `App::close_menus` is how a key closes one. An item that does something rather than setting something is performed in `App::press`, as the menu of copies is, and prints its key beside it from `Naming::shortcut` |
-| What else can open the file on screen, or what happens when one is chosen | `openers.rs`: `MIME_TYPES` says what the desktop calls a file this program reads, `read_entry` which entries are offered and which are left out, and `open` how one is started. The list is read once per file in `App::apply`; the button is `Pass::open_button`, the menu `ui/menu.rs::open_items`, and the press `App::open_in` |
+| What else can open the file on screen, or what happens when one is chosen | `openers/linux.rs`: `media.rs::MIME_TYPES` says what the desktop calls a file this program reads, `read_entry` which entries are offered and which are left out, and `open` how one is started. The list is read once per file in `App::apply`; the button is `Pass::open_button`, the menu `ui/menu.rs::open_items`, and the press `App::open_in` |
 | A CLI flag | `cli.rs`, and the `Options` / `Startup` / `Overrides` field it sets; a flag for something the configuration file also sets writes into `Options::config` after the file is read |
 | A mouse gesture | `gestures.rs`: a behavior is a `WORDS` entry and a variant, with its arm in `Pass::picture` / `Pass::region_gestures` (drags, clicks, holds) or `App::wheel` (the wheel); a default is a line of `Gestures::default`. What the primary button does from a region's handle, with a region asked for, or with the fit key held is fixed ahead of any slot, in `Pass::region_gestures` |
 | What the configuration file sets, or what is remembered between runs | `settings.rs`: a `Config` field for what the user chooses ahead of time — its default in `Config::default`, its name and words in `SETTINGS`, `Config::value` and `Config::parse` — the tests hold the three and `--print-config`'s template to each other; a `keys.` line is `Keymap::bind` and a `gesture.` line `Gestures::set`, both read in `Config::parse` — where it lands in `App::new`, and `user-docs/SETTINGS.md`; a `State` field for what was left where it was set by hand — `State::parse` and `State::render`, read in `App::new` and gathered in `App::exiting`. The tests build `App` from `StateFile::none()` and a `Config` of their own, so neither file is ever touched by them |
-| What the empty window offers, or what the file dialog asks for | `ui/empty.rs` for the buttons and where they go; `portal.rs::choose` for the dialog's title, filters and options, `Pick` for which kind; `App::pick` puts it up and `App::picked` takes the answer, `App::open_named` opens what was chosen as a command line naming it beside the rest would — `listing::expand`, then `Files::append`, the newcomers at the end of the list and the first of them asked for as a walk. `App::is_empty` is what puts the buttons up, `App::leave_picture` is how the last deleted picture comes down into it, and `App::size_to_next` is what has the next picture size the window; `App::from_command_line` is whether nothing showing means leaving |
+| What the empty window offers, or what the file dialog asks for | `ui/empty.rs` for the buttons and where they go; `portal/freedesktop.rs::choose` for the dialog's filters and options, `Pick::title` for its title, `Pick` for which kind; `App::pick` puts it up and `App::picked` takes the answer, `App::open_named` opens what was chosen as a command line naming it beside the rest would — `listing::expand`, then `Files::append`, the newcomers at the end of the list and the first of them asked for as a walk. `App::is_empty` is what puts the buttons up, `App::leave_picture` is how the last deleted picture comes down into it, and `App::size_to_next` is what has the next picture size the window; `App::from_command_line` is whether nothing showing means leaving |
 | Another call to the desktop over D-Bus | `dbus.rs`: `Connection::call` for a method, `add_match` and `wait_signal` for a signal, `Value::dict` for an `a{sv}` of options; a new basic type is an arm of `Value` and of the writer and reader alike |
 | A picture in the README or `user-docs/` | not kept here: the pictures, and the scripts that take them, one per picture, are in the `gamut-scripting` repository beside this one, in its `screenshots/`, and the README links to them there by absolute URL. Run the picture's script again after the interface changes rather than retouching the picture, and push it in that repository |
 | What a path on the command line stands for | `listing.rs`; `App::poll_directories` notices a named directory changing and `app/files.rs::relist` takes the new list in |
@@ -293,14 +303,14 @@ still agrees with both, so renaming either is editing the constant —
 | The chooser: what a row shows, how the query is matched, what a key does in it | `ui/chooser.rs` for the popup and the keys it reads before its field can; `app/chooser.rs` for the ranking, the relative paths, the title beside them (`candidate`) and the cursor; a new fact for a row is a field of `thumbnailer::Facts`, read in `thumbnailer::header`, which the file list orders by too, through `Chooser::facts_of`; `App::press` for `Control::Chooser` and `Control::Choose`, and `App::act` for `Command::{Query, Cursor, Visible}`. Its open state is egui's, under `ui::chooser::id()`. A different matcher is a new `impl Matcher` in `fuzzy.rs` |
 | A thumbnail: what is made, where it goes, what the row gets | `thumbnailer.rs` for the stages and the queue, `thumbnail.rs` for the cache's naming, chunks and write; `image/resample.rs` for the filter; `App::hold_thumb` for the texture and `app/chooser.rs::Thumbs` for how many the screen keeps |
 | What a region does, or what a key does while one is up | `image/region.rs` for the change to the rectangle; `app/region.rs::Marking` for what the application holds about it and what a drag makes of it (`grab`, `pull`, `release`), tested with no picture; `App::perform_on_region` in `app/input.rs` for the keys a region takes; `ui/region.rs` for where it is drawn and which handle the pointer is on; `Pass::region_gestures` in `ui/mod.rs` for which drag is the region's and which the view's |
-| What deleting, renaming or removing a file does, or what undo puts back | `app/edits.rs`: `App::delete_shown` moves the file to the trash through `trash::put` and steps away, `App::rename_shown` renames through `trash::rename_no_replace`, `App::remove_shown` takes the file off the list through `Files::hide` and steps away, and each pushes an `Edit` that `App::undo` pops. The list's side is `app/files.rs`: a trashed or removed file is `condemn`ed and leaves in `shown` — or, the last on the list, in `remove_shown` at once — comes back by `reinstate`, and a renamed one is `rename`d in place; a removed one is remembered in `hidden`, which `relist` leaves out and `append` and `adopt` take a file back out of. The dialog is `ui/rename.rs` — its words, and `judge` for what is wrong with a name — with `App::set_rename_name` asking the directory whether the name is taken. The menu is `menu::file_items`, hung off `status::file_button` |
-| What a paste accepts, or where it is written | `clipboard.rs::IMAGE_TYPES` for the MIME types and the extensions they are saved under, `pasted.rs` for the directory and the name; `App::paste` starts it and `app/files.rs::adopt` puts it in the list. Whether the button for it is on screen is `Panels::paste`, which `App::refresh_paste` sets from what `clipboard::watch`'s thread last said and whether the interface is showing |
+| What deleting, renaming or removing a file does, or what undo puts back | `app/edits.rs`: `App::delete_shown` moves the file to the trash through `trash::put` and steps away, `App::rename_shown` renames through `no_replace::rename_no_replace`, `App::remove_shown` takes the file off the list through `Files::hide` and steps away, and each pushes an `Edit` that `App::undo` pops. The list's side is `app/files.rs`: a trashed or removed file is `condemn`ed and leaves in `shown` — or, the last on the list, in `remove_shown` at once — comes back by `reinstate`, and a renamed one is `rename`d in place; a removed one is remembered in `hidden`, which `relist` leaves out and `append` and `adopt` take a file back out of. The dialog is `ui/rename.rs` — its words, and `judge` for what is wrong with a name — with `App::set_rename_name` asking the directory whether the name is taken. The menu is `menu::file_items`, hung off `status::file_button` |
+| What a paste accepts, or where it is written | `clipboard/mod.rs::IMAGE_TYPES` for the MIME types and the extensions they are saved under, `pasted.rs` for the directory and the name; `App::paste` starts it and `app/files.rs::adopt` puts it in the list. Whether the button for it is on screen is `Panels::paste`, which `App::refresh_paste` sets from what `clipboard::watch`'s thread last said and whether the interface is showing |
 | A color-space source (a new tag a format carries) | `image/color/` |
 | Someone else's work brought into the tree | say where it came from beside the code that carries it, then one `[[annotations]]` entry in `REUSE.toml`; if its license is new to the tree, its text goes in `LICENSES/` named by SPDX identifier, and the PKGBUILD's `license=()` grows an entry |
 | A dependency | `Cargo.toml`, then `bin/release` rewrites `THIRD-PARTY-NOTICES`. A license `about.toml` does not accept fails generation: add it there, in priority order, and its text to `LICENSES/`, or take the dependency instead |
 | An upscale filter or tone map | the WGSL function, one arm in `render/shader_codes.rs`, one enum variant with its `label`/`parse`/`next`; a tone map's CPU twin is `ToneMap::apply`, which takes the surface's `Headroom` as the shader arm does |
 | How far a gain map lifts the picture, or what reads through the lift | `image/gain_map.rs`: `GainMap::weight` for the share of the lift a display's room gets, `GainMap::table` for what a weight makes of the map, `gain_at` for the CPU twin of the shaders' `gain` — keep the three in step. `App::display_headroom` is what the weight is fed, `App::refresh_lift` puts the table in `Current::lift` and scans the statistics through it, and `Scene::lift` carries the weight to `image_layer`, which writes the table to the device and rebuilds the coarse chain. Whatever reads a pixel takes the table: `DecodedImage::sample`, `encode::displayed`, `Stats::scan_with` |
-| What the surface can be, SDR or HDR | `render/output.rs` chooses it; `monitor.rs` says what the monitor is in; `App::surface_hdr` and `App::headroom` put the two together, `App::sync_output` acts on them, and `App::toggle_hdr` is what the bar's `HDR` button and `o` both call |
+| What the surface can be, SDR or HDR | `render/output.rs` chooses it; `monitor/` says what the monitor is in; `App::surface_hdr` and `App::headroom` put the two together, `App::sync_output` acts on them, and `App::toggle_hdr` is what the bar's `HDR` button and `o` both call |
 | A new render pass | build it from `render/gpu.rs`; add its target to `Renderer::render` |
 | Something about the display window, exposure or false color | `image/display/` (state) and `shaders/image.wgsl` / `composite.wgsl` (effect) |
 | What the histogram panel's rows hold, what a drag on its band does, or what its corners say | `ui/histogram/mod.rs::Rows` for the three rows, which are every file's; `ui/histogram/track.rs` for the band and its handles, which ask through `Command::{BlackPoint, WhitePoint, Slide}` and land in `Display::put_black`, `Display::put_white` — each its own end of the window, the exposure left alone — and `Display::set_displayed_bounds`; the keys that step the handles are `Action::{StepBlack, StepWhite}`, landing in `Display::step_black`, `Display::step_white`, by `input::WINDOW_STEP`; `ui/histogram/slider.rs` for the exposure, which asks through `Command::Exposure` and lands in `Display::set_exposure`, `SLIDER_STOPS` being how far it runs; `Plot::clipped` for the shares in the plot's corners, and `Display::clips_white` for whether white counts. The marks `w` and the button beside the panel's band paint on the picture are `fs_marks` in `shaders/image.wgsl`, which judges each texel, `image_layer::Marks`, the coarse chain of those verdicts that a minified draw reads the share of a pixel from, `shader_codes::marks`, and `Panels::mark_clipped`, toggled in `App::press` by `Control::Marks` |

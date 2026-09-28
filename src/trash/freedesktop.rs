@@ -1,14 +1,10 @@
-//! The desktop's trash: moving a file into it, and moving one back out.
-//!
-//! The freedesktop.org Trash specification, followed by hand rather than
-//! through a crate for the same reason the thumbnail cache is: it is a
-//! directory layout and a small text file, and what this program needs of
-//! it — put one file in, take that same file out — is a page of code that
-//! would otherwise arrive with a date library under it. What matters is that
-//! it is the *desktop's* trash. A file moved here shows up in the file
-//! manager's Trash beside everything else the user has thrown away, can be
-//! restored or emptied from there, and is under a retention policy this
-//! program does not have to invent.
+//! The desktop's trash on Linux: the freedesktop.org Trash specification,
+//! followed by hand rather than through a crate for the same reason the
+//! thumbnail cache is: it is a directory layout and a small text file, and
+//! what this program needs of it — put one file in, take that same file out
+//! — is a page of code that would otherwise arrive with a date library under
+//! it. What matters is that it is the *desktop's* trash, under a retention
+//! policy this program does not have to invent.
 //!
 //! The layout: a trash directory holds `files/`, where the things thrown
 //! away go under a name unique within it, and `info/`, where each has a
@@ -31,6 +27,8 @@ use std::time::SystemTime;
 
 use anyhow::{Context, Result, anyhow};
 
+use super::Refused;
+use crate::no_replace::rename_no_replace;
 use crate::{clock, uri, xdg};
 
 /// How many names one file may try in a trash before giving up: reached only
@@ -53,28 +51,6 @@ pub struct Entry {
     pub info: PathBuf,
     /// Where it came from, absolute: where a restore puts it back.
     pub original: PathBuf,
-}
-
-/// Why a restore did not happen.
-#[derive(Debug)]
-pub enum Refused {
-    /// The trash no longer holds the file: it was emptied, or restored
-    /// from elsewhere.
-    Gone,
-    /// Something else now stands where the file came from, and a restore
-    /// does not overwrite.
-    Taken,
-    Failed(anyhow::Error),
-}
-
-impl std::fmt::Display for Refused {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Refused::Gone => write!(f, "the trash no longer holds it"),
-            Refused::Taken => write!(f, "something else is there now"),
-            Refused::Failed(error) => write!(f, "{error:#}"),
-        }
-    }
 }
 
 impl Trash {
@@ -270,40 +246,6 @@ pub fn restore(entry: &Entry) -> Result<(), Refused> {
         Err(error) => Err(Refused::Failed(
             anyhow!(error).context(format!("removing {}", entry.info.display())),
         )),
-    }
-}
-
-/// Renames `from` to `to`, refusing with `AlreadyExists` if anything is at
-/// `to` — atomically, through `renameat2`, where the filesystem can, and by
-/// looking first where it cannot. What a rename of the file on screen goes
-/// through as well, for the same refusal.
-pub(crate) fn rename_no_replace(from: &Path, to: &Path) -> io::Result<()> {
-    use std::ffi::CString;
-    let c = |path: &Path| CString::new(path.as_os_str().as_bytes()).map_err(io::Error::other);
-    let (from_c, to_c) = (c(from)?, c(to)?);
-    // SAFETY: two valid NUL-terminated paths, and flags the kernel defines.
-    let result = unsafe {
-        libc::renameat2(
-            libc::AT_FDCWD,
-            from_c.as_ptr(),
-            libc::AT_FDCWD,
-            to_c.as_ptr(),
-            libc::RENAME_NOREPLACE,
-        )
-    };
-    if result == 0 {
-        return Ok(());
-    }
-    let error = io::Error::last_os_error();
-    match error.raw_os_error() {
-        // A filesystem that does not know the flag: check, then rename.
-        Some(libc::EINVAL | libc::ENOSYS | libc::ENOTSUP) => {
-            if fs::symlink_metadata(to).is_ok() {
-                return Err(io::Error::from(ErrorKind::AlreadyExists));
-            }
-            fs::rename(from, to)
-        }
-        _ => Err(error),
     }
 }
 

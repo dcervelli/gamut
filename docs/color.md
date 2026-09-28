@@ -114,7 +114,7 @@ Which surface the window gets follows the monitor. A driver reports an HDR
 color space whether or not the monitor in front of you is HDR — wgpu's
 `display_hdr_info` comes back empty everywhere but Windows and macOS — but on
 Wayland the compositor knows, and says: every output carries an image
-description under the color-management protocol, and `monitor.rs` reads
+description under the color-management protocol, and `monitor/wayland.rs` reads
 them on a connection of its own and listens for changes (the same connection
 reads each monitor's room for the opening window — see
 [interface](interface.md)). A monitor in HDR

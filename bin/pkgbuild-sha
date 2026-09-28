@@ -11,6 +11,16 @@ set -eu
 
 [ $# -eq 1 ] || { echo "usage: bin/pkgbuild-sha vX.Y.Z" >&2; exit 2; }
 
+# A SHA-256 as hex, from `sha256sum` where it is installed and `shasum`,
+# which is what macOS ships, where it is not.
+sha256() {
+    if command -v sha256sum >/dev/null; then
+        sha256sum "$1" | cut -d' ' -f1
+    else
+        shasum -a 256 "$1" | cut -d' ' -f1
+    fi
+}
+
 cd "$(dirname "$0")/.."
 
 TAG=$1
@@ -19,7 +29,7 @@ NAME=$(sed -n 's/^name = "\(.*\)"$/\1/p' Cargo.toml | head -1)
 URL=$(sed -n 's/^url="\(.*\)"$/\1/p' packaging/PKGBUILD | head -1)
 TARBALL="$URL/archive/refs/tags/$TAG.tar.gz"
 
-for tool in curl sha256sum tar awk; do
+for tool in curl tar awk; do
     command -v "$tool" >/dev/null || { echo "$tool is not installed" >&2; exit 1; }
 done
 
@@ -40,7 +50,7 @@ tar tzf "$TMP/src.tar.gz" | head -1 | grep -q "^$NAME-$VERSION/" || {
     exit 1
 }
 
-SHA=$(sha256sum "$TMP/src.tar.gz" | cut -d' ' -f1)
+SHA=$(sha256 "$TMP/src.tar.gz")
 echo "sha256 $SHA"
 
 # Only the first sha256sums entry belongs to the tarball.

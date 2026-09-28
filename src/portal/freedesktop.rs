@@ -1,4 +1,4 @@
-//! The desktop's own file dialog, through the file chooser portal.
+//! The desktop's own file dialog on Linux, through the file chooser portal.
 //!
 //! A program on Wayland has no dialog of its own to put up: the desktop's
 //! is the one the user knows, with their bookmarks and their recent places
@@ -9,56 +9,20 @@
 //! on the thread it is called on, blocking; [`choose_on_thread`] is the
 //! form the window uses, which hands the answer back through the event
 //! loop.
-//!
-//! The portal picks files or it picks a folder, never both in one dialog
-//! — every desktop's dialog is built that way — so [`Pick`] says which is
-//! being asked for and the window offers the two as two buttons.
 
-use std::ffi::OsString;
-use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result, bail};
 
+use super::{Deliver, Pick, Picked};
 use crate::dbus::{Connection, Value};
+use crate::uri;
 
 const PORTAL_NAME: &str = "org.freedesktop.portal.Desktop";
 const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
 const FILE_CHOOSER: &str = "org.freedesktop.portal.FileChooser";
 const REQUEST: &str = "org.freedesktop.portal.Request";
-
-/// What the dialog is to pick.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Pick {
-    /// One or more image files, the dialog's list narrowed to the formats
-    /// this program reads.
-    Files,
-    /// A folder, to stand for the images inside it as a directory on the
-    /// command line does.
-    Folder,
-}
-
-impl Pick {
-    /// The dialog's title.
-    fn title(self) -> &'static str {
-        match self {
-            Pick::Files => "Open images",
-            Pick::Folder => "Open a folder of images",
-        }
-    }
-}
-
-/// What came of a dialog: what the user chose, or `None` for a dialog
-/// dismissed without choosing.
-pub struct Picked {
-    pub outcome: Result<Option<Vec<PathBuf>>>,
-}
-
-/// How a dialog's answer reaches the window: what `main` made from the
-/// event loop's proxy.
-pub type Deliver = Arc<dyn Fn(Picked) + Send + Sync>;
 
 /// Numbers the requests, so that each has a handle token of its own.
 static REQUESTS: AtomicU64 = AtomicU64::new(0);
@@ -189,7 +153,7 @@ fn read_response(body: &[Value]) -> Result<Option<Vec<PathBuf>>> {
         .map(|uri| {
             uri.as_str()
                 .context("a URI that was not a string")
-                .and_then(path_from_uri)
+                .and_then(uri::path_from_uri)
         })
         .collect::<Result<Vec<PathBuf>>>()?;
     if paths.is_empty() {
@@ -232,84 +196,9 @@ fn pattern(glob: &str) -> Value {
     Value::Struct(vec![Value::U32(0), Value::Str(glob.to_string())])
 }
 
-/// The local path a `file:` URI names, its percent-escapes undone into the
-/// bytes of the path itself. Refused for any other scheme, or for a file
-/// on another host, neither of which is a file this program could read.
-pub fn path_from_uri(uri: &str) -> Result<PathBuf> {
-    let rest = uri
-        .strip_prefix("file:")
-        .with_context(|| format!("{uri} is not a file URI"))?;
-    let path = match rest.strip_prefix("//") {
-        Some(authority) => {
-            let slash = authority
-                .find('/')
-                .with_context(|| format!("{uri} names no path"))?;
-            let (host, path) = authority.split_at(slash);
-            if !host.is_empty() && host != "localhost" {
-                bail!("{uri} is on another host");
-            }
-            path
-        }
-        None => rest,
-    };
-    let bytes = path.as_bytes();
-    let mut decoded = Vec::with_capacity(bytes.len());
-    let mut at = 0;
-    while at < bytes.len() {
-        let escaped = (bytes[at] == b'%' && at + 2 < bytes.len())
-            .then(|| std::str::from_utf8(&bytes[at + 1..at + 3]).ok())
-            .flatten()
-            .and_then(|hex| u8::from_str_radix(hex, 16).ok());
-        match escaped {
-            Some(byte) => {
-                decoded.push(byte);
-                at += 3;
-            }
-            None => {
-                decoded.push(bytes[at]);
-                at += 1;
-            }
-        }
-    }
-    if decoded.first() != Some(&b'/') {
-        bail!("{uri} is not an absolute path");
-    }
-    Ok(PathBuf::from(OsString::from_vec(decoded)))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The URI the portal hands back is the path with its awkward bytes
-    /// escaped — a space, a non-ASCII letter — and comes back as the path.
-    /// The round trip through the clipboard's encoder is exact.
-    #[test]
-    fn a_file_uri_becomes_its_path() {
-        assert_eq!(
-            path_from_uri("file:///home/me/a%20b.png").unwrap(),
-            PathBuf::from("/home/me/a b.png")
-        );
-        assert_eq!(
-            path_from_uri("file://localhost/tmp/x.jpg").unwrap(),
-            PathBuf::from("/tmp/x.jpg")
-        );
-        assert_eq!(
-            path_from_uri("file:/tmp/plain").unwrap(),
-            PathBuf::from("/tmp/plain")
-        );
-        let odd = PathBuf::from("/tmp/caf\u{e9} 100%.png");
-        assert_eq!(path_from_uri(&crate::uri::file(&odd)).unwrap(), odd);
-    }
-
-    /// Anything that is not a local file is refused rather than guessed at.
-    #[test]
-    fn other_uris_are_refused() {
-        assert!(path_from_uri("https://example.com/a.png").is_err());
-        assert!(path_from_uri("file://elsewhere/a.png").is_err());
-        assert!(path_from_uri("file://").is_err());
-        assert!(path_from_uri("file:relative.png").is_err());
-    }
 
     /// The response's code decides: chosen, dismissed, or failed.
     #[test]

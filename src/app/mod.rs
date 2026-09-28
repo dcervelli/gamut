@@ -37,7 +37,7 @@ use crate::image::orient::Turn;
 use crate::image::sequence::Sequence;
 use crate::image::{DecodedImage, Stats};
 use crate::loader::{Decoded, Loader, Opened, Ready, Reload, Request, Source};
-use crate::monitor::{Mode, Monitors};
+use crate::monitor::{self, Mode, Monitors};
 use crate::motion::Motion;
 use crate::openers::{self, Opener};
 use crate::player;
@@ -979,9 +979,8 @@ impl App {
         hdr_state_of(offered, speaks, self.monitor)
     }
 
-    /// The name the compositor knows the window's monitor by — "DP-2",
-    /// say — which is what the monitor thread's table is keyed by. `None`
-    /// before the window has landed on one.
+    /// The key the monitor thread's table knows the window's monitor by —
+    /// see [`monitor::key_of`]. `None` before the window has landed on one.
     fn monitor_name(&self) -> Option<String> {
         #[cfg(test)]
         if let Some(name) = &self.headless_monitor {
@@ -990,7 +989,7 @@ impl App {
         self.shown
             .as_ref()
             .and_then(|shown| shown.window.current_monitor())
-            .and_then(|monitor| monitor.name())
+            .and_then(|monitor| monitor::key_of(&monitor))
     }
 
     /// [`App::hdr_state`] read as the yes or no the button is drawn from.
@@ -2887,19 +2886,13 @@ impl ApplicationHandler<UserEvent> for App {
         // it has just focused. Once the chooser is up its field has the
         // keyboard, and the key is typing like any other.
         let chooser_key = match &event {
-            WindowEvent::KeyboardInput {
-                event:
-                    KeyEvent {
-                        logical_key,
-                        physical_key,
-                        state: winit::event::ElementState::Pressed,
-                        ..
-                    },
-                ..
-            } => {
+            WindowEvent::KeyboardInput { event: key, .. }
+                if key.state == winit::event::ElementState::Pressed =>
+            {
                 let region = matches!(self.marking.selection, ui::Selection::Shown(_));
+                let logical = input::logical_key(key, self.pointer.modifiers);
                 self.keys
-                    .action_for(logical_key, *physical_key, self.pointer.modifiers, region)
+                    .action_for(&logical, key.physical_key, self.pointer.modifiers, region)
                     == Some(input::Action::OpenChooser)
             }
             _ => false,
@@ -2951,16 +2944,10 @@ impl ApplicationHandler<UserEvent> for App {
                 Effect::redraw_if(was_over)
             }
             WindowEvent::ScaleFactorChanged { .. } => Effect::Redraw,
-            WindowEvent::KeyboardInput {
-                event:
-                    KeyEvent {
-                        logical_key,
-                        physical_key,
-                        state,
-                        ..
-                    },
-                ..
-            } => self.handle_key(&logical_key, physical_key, state),
+            WindowEvent::KeyboardInput { event, .. } => {
+                let key = input::logical_key(&event, self.pointer.modifiers);
+                self.handle_key(&key, event.physical_key, event.state)
+            }
             // A key held as the focus goes is released somewhere else.
             WindowEvent::Focused(false) => {
                 self.keys_lost();
@@ -3084,8 +3071,8 @@ mod tests {
                 geographic_format: ui::GeographicFormat::Decimal,
                 log_counts: false,
                 browse_folder: true,
-                keys: keymap::Keymap::default(),
-                gestures: Gestures::default(),
+                keys: keymap::Keymap::table(),
+                gestures: Gestures::table(),
             },
             upscale: Upscale::default(),
             size: None,
@@ -5421,7 +5408,7 @@ mod tests {
     fn the_messages_name_the_key_that_undoes() {
         use crate::app::input::Action;
         use crate::app::keymap::Keymap;
-        let keys = Keymap::default();
+        let keys = Keymap::table();
         assert_eq!(keys.spelled("files.undo"), "Ctrl+Z");
         assert_eq!(keys.action_named("files.undo"), Some(Action::Undo));
         assert_eq!(
@@ -6512,7 +6499,7 @@ mod tests {
         );
         assert_eq!(app.loupe(), None);
         let _ = app.act(held(None, None));
-        let mut gestures = Gestures::default();
+        let mut gestures = Gestures::table();
         gestures.set(
             crate::gestures::Slot::read("image.middle.hold").unwrap(),
             crate::gestures::Behavior::Hold(crate::gestures::HoldAction::Loupe),
@@ -6553,7 +6540,7 @@ mod tests {
 
         // Given the exposure, it steps a quarter stop a whole notch at a
         // time, a trackpad's fractions added up until there is one.
-        let mut gestures = Gestures::default();
+        let mut gestures = Gestures::table();
         gestures.set(
             Slot::read("image.ctrl+wheel").unwrap(),
             Behavior::Wheel(WheelAction::Exposure),

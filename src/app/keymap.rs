@@ -322,13 +322,22 @@ pub struct Keymap {
     chords: Vec<Vec<Chord>>,
 }
 
+/// The chords in force before the configuration file is read: the table's
+/// own. What `--help`, the man page and `--print-config` describe.
 impl Default for Keymap {
     fn default() -> Self {
-        Self::new(super::input::ROWS)
+        Self::table()
     }
 }
 
 impl Keymap {
+    /// Every name of the key table at the chords the table itself gives it,
+    /// the same on every platform. What the tests that name a chord read, so
+    /// that they say the same thing wherever they run.
+    pub fn table() -> Self {
+        Self::new(super::input::ROWS)
+    }
+
     /// Every name of `rows` at its defaults.
     pub fn new(rows: &'static [Row]) -> Self {
         let chords = rows
@@ -840,7 +849,7 @@ mod tests {
     /// characters asks for Shift, which the character carries.
     #[test]
     fn the_table_binds_each_chord_once_in_each_context() {
-        let keymap = Keymap::default();
+        let keymap = Keymap::table();
         let mut seen: Vec<(Chord, Option<Context>, &str)> = Vec::new();
         for (row, bound) in keymap.binds() {
             for chord in bound.defaults {
@@ -863,7 +872,7 @@ mod tests {
     /// name the table binds.
     #[test]
     fn every_name_is_unique_dotted_and_in_its_section() {
-        let keymap = Keymap::default();
+        let keymap = Keymap::table();
         let mut names = Vec::new();
         for (row, bound) in keymap.binds() {
             let name = bound.name;

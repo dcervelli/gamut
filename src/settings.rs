@@ -672,7 +672,7 @@ mod tests {
         );
         assert_eq!(config.keys.spelled("files.undo"), "");
         assert_eq!(config.keys.spelled("interface.grid"), "Ctrl+E");
-        assert_eq!(config.keys.spelled("files.export"), "");
+        assert!(!config.keys.spelled("files.export").contains("Ctrl+E"));
         assert_eq!(config.keys.spelled("region.move.left"), "h");
         assert_eq!(config.keys.spelled("interface.dismiss"), "");
         assert_eq!(config.keys.spelled("files.rename"), "F2");

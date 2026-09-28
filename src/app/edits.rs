@@ -13,7 +13,7 @@
 //! the window has closed — is what the file manager's Trash is for, and a
 //! message about a restore that could not be done says so.
 //!
-//! A deletion is a move to the desktop's own trash (see `trash.rs`), so
+//! A deletion is a move to the desktop's own trash (see `trash/`), so
 //! that the file shows up beside everything else thrown away, restorable
 //! from there whether or not this window is still open. A rename is a
 //! rename, refused rather than replacing anything, and undone by the same
@@ -25,6 +25,7 @@ use std::path::{Path, PathBuf};
 
 use super::App;
 use super::input::Effect;
+use crate::no_replace::rename_no_replace;
 use crate::trash::{self, Entry, Refused};
 use crate::ui::rename::{self, TAKEN, Verdict};
 use crate::ui::toast::Level;
@@ -258,7 +259,7 @@ impl App {
         }
         let from = renaming.path;
         let to = from.with_file_name(&renaming.name);
-        match trash::rename_no_replace(&from, &to) {
+        match rename_no_replace(&from, &to) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
                 self.toast(TAKEN, Level::Warning);
@@ -317,7 +318,7 @@ impl App {
                 adopted,
             } => self.untrash(&entry, listed, index, adopted),
             Edit::Renamed { from, to } => {
-                match trash::rename_no_replace(&to, &from) {
+                match rename_no_replace(&to, &from) {
                     Ok(()) => {}
                     Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
                         self.toast(

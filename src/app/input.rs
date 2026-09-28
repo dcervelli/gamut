@@ -11,7 +11,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
-use winit::event::ElementState;
+use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey, PhysicalKey};
 
 use super::App;
@@ -1819,6 +1819,15 @@ pub fn nothing_to_paste() -> String {
     format!("{}.", ui::tooltip::NOTHING_TO_PASTE)
 }
 
+/// The key a press is looked up in the key table by: what winit calls the
+/// logical key, the character the layout types with Shift folded in. The
+/// one reading of a key event the table's dispatch takes, so that whatever
+/// a platform needs of it is done here once, for the chooser's check and the
+/// press alike.
+pub(super) fn logical_key(event: &KeyEvent, _mods: ModifiersState) -> Key {
+    event.logical_key.clone()
+}
+
 impl App {
     pub(super) fn handle_key(
         &mut self,
@@ -3287,21 +3296,21 @@ mod tests {
 
     /// The free readings of the table, over the default keys.
     fn names(tip: Tip) -> Option<String> {
-        super::names(&Keymap::default(), tip)
+        super::names(&Keymap::table(), tip)
     }
 
     fn hint(action: Action) -> Option<String> {
-        super::hint(&Keymap::default(), action)
+        super::hint(&Keymap::table(), action)
     }
 
     /// What a key asks for with no region selected, at the default keys.
     fn action_for(key: &Key, position: PhysicalKey, mods: Mods) -> Option<Action> {
-        Keymap::default().action_for(key, position, mods, false)
+        Keymap::table().action_for(key, position, mods, false)
     }
 
     /// The same with a region selected.
     fn with_region(key: &Key, position: PhysicalKey, mods: Mods) -> Option<Action> {
-        Keymap::default().action_for(key, position, mods, true)
+        Keymap::table().action_for(key, position, mods, true)
     }
 
     /// The camera's switch says which picture is up, and under it the one a
@@ -3315,8 +3324,8 @@ mod tests {
             count: 0,
             show_histogram: false,
             state: Vec::new(),
-            keys: Rc::new(Keymap::default()),
-            gestures: Rc::new(Gestures::default()),
+            keys: Rc::new(Keymap::table()),
+            gestures: Rc::new(Gestures::table()),
             camera,
             conditions,
         };
@@ -3508,8 +3517,8 @@ mod tests {
             count: 0,
             show_histogram: false,
             state: Vec::new(),
-            keys: Rc::new(Keymap::default()),
-            gestures: Rc::new(Gestures::default()),
+            keys: Rc::new(Keymap::table()),
+            gestures: Rc::new(Gestures::table()),
             camera: None,
             conditions: Conditions::ALIVE,
         };
@@ -3549,8 +3558,8 @@ mod tests {
             count: 0,
             show_histogram: false,
             state: Vec::new(),
-            keys: Rc::new(Keymap::default()),
-            gestures: Rc::new(Gestures::default()),
+            keys: Rc::new(Keymap::table()),
+            gestures: Rc::new(Gestures::table()),
             camera: None,
             conditions: Conditions {
                 picking: true,
@@ -3580,8 +3589,8 @@ mod tests {
     /// enough for its column.
     #[test]
     fn the_help_popup_shows_every_line_of_the_table_once() {
-        let keys = Keymap::default();
-        let gestures = Gestures::default();
+        let keys = Keymap::table();
+        let gestures = Gestures::table();
         let sections = help_sections(&keys, &gestures, &Conditions::default());
         assert_eq!(sections.len(), Section::ALL.len() + 1);
         let rows: Vec<&ui::help::Row> = sections[..Section::ALL.len()]
@@ -3641,10 +3650,10 @@ mod tests {
     /// column rather than naming a key that does something else.
     #[test]
     fn the_help_popup_says_what_is_bound() {
-        let mut keys = Keymap::default();
+        let mut keys = Keymap::table();
         let chord = |token| super::super::keymap::Chord::read(token).unwrap();
         keys.bind("files.undo", vec![chord("ctrl+e")]).unwrap();
-        let sections = help_sections(&keys, &Gestures::default(), &Conditions::default());
+        let sections = help_sections(&keys, &Gestures::table(), &Conditions::default());
         let key = |does: &str| {
             sections
                 .iter()
@@ -3797,7 +3806,7 @@ mod tests {
     /// said.
     #[test]
     fn the_message_about_a_hidden_interface_names_keys_that_restore_it() {
-        let mut keys = Keymap::default();
+        let mut keys = Keymap::table();
         assert_eq!(
             restore_message(&keys).as_deref(),
             Some("Press ` or Esc to restore UI")
@@ -3937,8 +3946,8 @@ mod tests {
             count: 1,
             show_histogram: true,
             state: Vec::new(),
-            keys: Rc::new(Keymap::default()),
-            gestures: Rc::new(Gestures::default()),
+            keys: Rc::new(Keymap::table()),
+            gestures: Rc::new(Gestures::table()),
             camera: None,
             conditions: Conditions {
                 openable: false,
@@ -3974,8 +3983,8 @@ mod tests {
             count: 1,
             show_histogram: false,
             state: Vec::new(),
-            keys: Rc::new(Keymap::default()),
-            gestures: Rc::new(Gestures::default()),
+            keys: Rc::new(Keymap::table()),
+            gestures: Rc::new(Gestures::table()),
             camera: None,
             conditions: Conditions::ALIVE,
         };
@@ -4048,8 +4057,8 @@ mod tests {
             count: 1,
             show_histogram: false,
             state: Vec::new(),
-            keys: Rc::new(Keymap::default()),
-            gestures: Rc::new(Gestures::default()),
+            keys: Rc::new(Keymap::table()),
+            gestures: Rc::new(Gestures::table()),
             camera: None,
             conditions: Conditions::ALIVE,
         };
@@ -4077,7 +4086,7 @@ mod tests {
         for what in Copies::ALL {
             let action = copy_action(what);
             assert!(
-                Keymap::default().row_for(action).is_some(),
+                Keymap::table().row_for(action).is_some(),
                 "{what:?} is bound"
             );
             assert!(!actions.contains(&action), "{what:?} twice");
@@ -4138,8 +4147,8 @@ mod tests {
             count: 12,
             show_histogram: false,
             state: Vec::new(),
-            keys: Rc::new(Keymap::default()),
-            gestures: Rc::new(Gestures::default()),
+            keys: Rc::new(Keymap::table()),
+            gestures: Rc::new(Gestures::table()),
             camera: None,
             conditions: Conditions::ALIVE,
         };
@@ -4188,7 +4197,7 @@ mod tests {
     /// line that only describes never answers.
     #[test]
     fn a_key_with_a_region_line_is_named_by_its_plain_line() {
-        let keys = Keymap::default();
+        let keys = Keymap::table();
         assert_eq!(
             keys.row_for(CopyImage).map(|row| row.help),
             Some("Copy the image as displayed")

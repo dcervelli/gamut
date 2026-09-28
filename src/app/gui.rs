@@ -24,6 +24,10 @@ pub(super) struct Gui {
 impl Gui {
     pub fn new(window: &Arc<Window>, theme: &Theme, max_texture_side: u32) -> Result<Self> {
         let ctx = egui::Context::default();
+        // egui scales its whole interface on Ctrl (Cmd on a Mac) with `+`,
+        // `=`, `-` or `0` by default. The interface is sized to the device's
+        // grid, and those chords are the key table's to give out.
+        ctx.options_mut(|options| options.zoom_with_keyboard = false);
         ctx.set_fonts(ui::fonts::system()?);
         ui::style::apply(&ctx, theme);
         // A repaint asked for from outside a frame wakes the loop the way

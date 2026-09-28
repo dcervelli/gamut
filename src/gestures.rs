@@ -542,8 +542,19 @@ const fn image(button: Button, kind: Kind) -> Slot {
     }
 }
 
+/// The slots in force before the configuration file is read: the table's
+/// own. What `--help`, the man page and `--print-config` describe.
 impl Default for Gestures {
     fn default() -> Self {
+        Self::table()
+    }
+}
+
+impl Gestures {
+    /// Every slot at the behavior the table itself gives it, the same on
+    /// every platform. What the tests that name a gesture read, so that they
+    /// say the same thing wherever they run.
+    pub fn table() -> Self {
         let wheel = |held| Slot {
             surface: Surface::Image,
             input: Input::Wheel {
@@ -737,7 +748,7 @@ mod tests {
 
     #[test]
     fn a_slot_reads_back_what_it_writes() {
-        let mut names: Vec<String> = Gestures::default()
+        let mut names: Vec<String> = Gestures::table()
             .slots
             .iter()
             .map(|(slot, _)| slot.token())
@@ -839,7 +850,7 @@ mod tests {
 
     #[test]
     fn set_replaces_what_a_slot_held() {
-        let mut gestures = Gestures::default();
+        let mut gestures = Gestures::table();
         let count = gestures.slots.len();
         let slot = Slot::read("image.left.drag").unwrap();
         gestures.set(slot, Behavior::Drag(DragAction::ZoomBox));
@@ -861,7 +872,7 @@ mod tests {
 
     #[test]
     fn the_lookups_are_exact() {
-        let gestures = Gestures::default();
+        let gestures = Gestures::table();
         assert_eq!(
             gestures.drag(Surface::Image, Mods::empty(), Button::Left),
             Some(DragAction::Pan)

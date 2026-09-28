@@ -25,7 +25,7 @@ plot, a swatch — reads its inks from `Theme` directly rather than back out of
 egui's style, so the two cannot come to disagree about a color. A change of
 palette is put on egui's context the same tick it is read.
 
-The faces follow the same rule, in `src/ui/fonts.rs`: the interface is set in
+The faces follow the same rule, in `src/ui/fonts/`: the interface is set in
 whatever the desktop calls `sans-serif` and `monospace`, with the bold sans
 for the one bold thing in the window, and ships no font of its own. Which
 face that is, is asked of fontconfig's own library — the answer `fc-match`

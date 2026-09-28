@@ -23,8 +23,8 @@ use crate::image::region::Region;
 use crate::image::sequence::Sequence;
 use crate::image::{encode, resample};
 use crate::loader::Source;
+use crate::no_replace::rename_no_replace;
 use crate::timing;
-use crate::trash;
 use crate::ui::export::{self, Dimension, Facts, Format, Frames, Resize, Verdict};
 use crate::ui::rename::TAKEN;
 use crate::ui::toast::Level;
@@ -293,7 +293,7 @@ fn write_new(to: &Path, bytes: &[u8]) -> anyhow::Result<()> {
             file.sync_all()
         })
         .with_context(|| format!("writing {}", crate::shown_path(&temporary)));
-    let placed = written.and_then(|()| match trash::rename_no_replace(&temporary, to) {
+    let placed = written.and_then(|()| match rename_no_replace(&temporary, to) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
             Err(anyhow::anyhow!(TAKEN))

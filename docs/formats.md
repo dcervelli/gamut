@@ -78,7 +78,7 @@ headroom sits between the base's and the alternate's, from none of the lift
 on a monitor in SDR mode to all of it on one with as much room as the file
 asks for. `GainMap::weight` in `image/gain_map.rs` is that formula, and
 `App::display_headroom` is what it is fed: the monitor's peak over its
-white, as `monitor.rs` reads it from the compositor, on a surface with the
+white, as `monitor/` reads it from the compositor, on a surface with the
 room, and 1 otherwise. Applying the whole lift regardless and tone mapping
 the result, which is what this viewer did first, threw the phone's grade
 away on every SDR screen: the lifted midtones came out brighter than graded

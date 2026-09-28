@@ -31,7 +31,7 @@ running 1.6 says 2 there, and the true fractional scale reaches a window only
 through `wp_fractional_scale_v1`, once it has a surface — after its size was
 asked for. Sized from the integer, an 800-pixel picture on such a monitor is
 taken as 400 logical pixels, which the compositor maps at 1.6 to 640 device
-pixels: a window that opens at 80%. So `monitor.rs`, which already holds a
+pixels: a window that opens at 80%. So `monitor/wayland.rs`, which already holds a
 connection of its own for each monitor's mode ([color](color.md)), also reads
 each output's `xdg_output` logical size, and `Monitor::measured` in
 `app::window` takes the room from that and the scale from its ratio to the
@@ -1249,7 +1249,7 @@ image without anything having to notice that it should.
 
 The button under the copy button hands the file on screen to something else,
 and the menu it opens is read out of the desktop's own database rather than
-guessed at: `src/openers.rs`. Every installed program ships a desktop entry
+guessed at: `src/openers/linux.rs`. Every installed program ships a desktop entry
 naming the MIME types it opens, `update-desktop-database` indexes those into a
 `mimeinfo.cache` beside them, and the user's `mimeapps.list` says which is the
 default and what associations they have added or removed by hand. Those three
@@ -1258,7 +1258,7 @@ With" shows, because there is nowhere else it lives. Nothing is shelled out
 to: `xdg-open` knows only the default and could not fill a menu, and `gio`
 would be a runtime dependency on a package the user may not have.
 
-Which file is which type is decided by the extension — `MIME_TYPES`, one entry
+Which file is which type is decided by the extension — `media.rs::MIME_TYPES`, one entry
 per extension the decoders read, listing every name the format is registered
 under so that a viewer claiming `image/x-bmp` and one claiming `image/bmp` are
 both found. That the decoders here sniff their way past a misleading name is a
@@ -1380,7 +1380,7 @@ The dialog is the desktop's, asked for through `xdg-desktop-portal`'s
 `FileChooser` — the one dialog a Wayland program can put up that looks like
 the rest of the desk and carries the user's bookmarks. The ask is one
 method, `OpenFile`, and the answer is a `Response` signal on a request
-object, which arrives whenever the user has chosen. `src/portal.rs` makes
+object, which arrives whenever the user has chosen. `src/portal/freedesktop.rs` makes
 the call: the filter is one glob per extension the decoders read, in each
 case, since a portal's globs match by their letters; the request's handle
 is named ahead of the call with `handle_token` and subscribed to before it,

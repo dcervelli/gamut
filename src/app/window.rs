@@ -127,7 +127,7 @@ pub(super) fn with_app_id(attributes: WindowAttributes) -> WindowAttributes {
 ///
 /// What the monitors are is the only thing here that has to be asked of
 /// anyone; what is done with the answer is [`window_size`], which is testable.
-/// The compositor's own account is taken where `monitor.rs` has one, since it
+/// The compositor's own account is taken where `monitor/` has one, since it
 /// carries the scale each monitor is really running; `available` — the
 /// event loop's account before there is a window, the window's own after —
 /// is the fallback. Every monitor is collected, not just one:
@@ -164,7 +164,7 @@ struct Monitor {
 }
 
 impl Monitor {
-    /// From what the compositor said over `monitor.rs`'s connection: the
+    /// From what the compositor said over `monitor/wayland.rs`'s connection: the
     /// output's mode and the logical size it is laid out at. The scale is
     /// their ratio, and so the fractional one the compositor is really
     /// running — 1.6 where the `wl_output` alone would have said 2.

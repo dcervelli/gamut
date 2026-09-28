@@ -170,7 +170,7 @@ fn input(logical: [f32; 2], count: usize) -> FrameInput {
         over_region: false,
         box_zoom: false,
         modifiers: crate::gestures::Mods::empty(),
-        gestures: std::rc::Rc::new(crate::gestures::Gestures::default()),
+        gestures: std::rc::Rc::new(crate::gestures::Gestures::table()),
         zoom_box: None,
         transport: None,
         filmstrip: None,
@@ -1479,7 +1479,7 @@ fn a_middle_drag_pans_only_where_its_slot_says_so() {
     let middle = egui::PointerButton::Middle;
     assert_eq!(drag_with(&mut harness, middle, from, to), []);
 
-    let mut gestures = Gestures::default();
+    let mut gestures = Gestures::table();
     gestures.set(
         Slot::read("image.middle.drag").unwrap(),
         Behavior::Drag(DragAction::Pan),
@@ -1495,7 +1495,7 @@ fn a_middle_drag_pans_only_where_its_slot_says_so() {
         "{commands:?}"
     );
     // And the primary, given a box to draw, draws it rather than panning.
-    let mut gestures = Gestures::default();
+    let mut gestures = Gestures::table();
     gestures.set(
         Slot::read("image.left.drag").unwrap(),
         Behavior::Drag(DragAction::ZoomBox),
@@ -1536,7 +1536,7 @@ fn a_click_is_handed_back_where_its_slot_names_a_key() {
     // The secondary holds the loupe up, so letting go of it is no click.
     assert_eq!(click(&mut harness, egui::PointerButton::Secondary), []);
 
-    let mut gestures = Gestures::default();
+    let mut gestures = Gestures::table();
     gestures.set(
         Slot::read("image.middle.click").unwrap(),
         Behavior::Click("interface.grid".to_string()),
@@ -1626,7 +1626,7 @@ fn the_minimap_centers_for_the_button_its_slot_names() {
     )));
     assert!(!centers(&drag_with(&mut harness, middle, at, at)));
 
-    let mut gestures = Gestures::default();
+    let mut gestures = Gestures::table();
     gestures.set(Slot::read("minimap.left.drag").unwrap(), Behavior::None);
     gestures.set(Slot::read("minimap.middle.drag").unwrap(), Behavior::Center);
     harness.state_mut().input.gestures = std::rc::Rc::new(gestures);

@@ -8,7 +8,7 @@ code is shaped as it is.
 
 ## The trash is the desktop's
 
-`src/trash.rs` follows the freedesktop.org Trash specification by hand: a
+`src/trash/freedesktop.rs` follows the freedesktop.org Trash specification by hand: a
 `files/` directory and an `info/` directory under `$XDG_DATA_HOME/Trash`,
 each thrown-away file under a name unique within the trash and a
 `<name>.trashinfo` beside it giving the original path, percent-encoded as a
@@ -127,7 +127,7 @@ it is a name at all, a slash meaning a move and the dialog not moving;
 then the directory. The extension changing is a `Fine` with a word beside
 it rather than a refusal, set in the caution color where a refusal is set
 in the warning color, and the field's outline follows the same split. The
-rename itself goes through `trash::rename_no_replace` all the same: what
+rename itself goes through `no_replace::rename_no_replace` all the same: what
 the dialog said was true when it was typed, and a file can have arrived
 since.
 
@@ -165,7 +165,7 @@ The write is on a copying thread, through `Copying::spawn_aside` rather than
 the last one asked for should end up on the clipboard, but an export is
 never stale, and must not cancel a copy in flight either. It is written under a
 temporary name in the target directory and moved into place by
-`trash::rename_no_replace`, so a file that arrived under the name after the
+`no_replace::rename_no_replace`, so a file that arrived under the name after the
 dialog judged it is not written over and a write cut short leaves nothing
 under the name. The thread reports `Done::Exported` with the path, and
 `App::exported` takes the file into the list by `Files::adopt`, as a paste

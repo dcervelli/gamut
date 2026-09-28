@@ -1,5 +1,4 @@
-//! What else on the desktop can open the file on screen, and starting one of
-//! them.
+//! What else can open the file on screen, on a freedesktop desktop.
 //!
 //! The desktop already keeps this answer. Every installed program ships a
 //! desktop entry naming the MIME types it will open, `update-desktop-database`
@@ -30,7 +29,7 @@
 //!   decorate.
 
 use std::collections::HashSet;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::fs::File;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
@@ -38,8 +37,9 @@ use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, anyhow};
 
+use super::shortened;
 use crate::APP_ID;
-use crate::{uri, xdg};
+use crate::{media, uri, xdg};
 
 /// The most of a desktop entry that is read. Entries are a dozen lines of
 /// text; anything past this is not one, and reading a file until it stops is
@@ -49,14 +49,6 @@ const MAX_ENTRY_BYTES: u64 = 64 * 1024;
 /// And the most of an index. `mimeinfo.cache` holds a line per MIME type the
 /// system knows, which runs to tens of kilobytes on a full desktop.
 const MAX_INDEX_BYTES: u64 = 4 * 1024 * 1024;
-
-/// The longest name an item of the menu may wear, in characters.
-///
-/// A program's name is two or three words and nothing here needs to bound it
-/// for its own sake. What does is the menu: its items are as wide as the
-/// longest name on them — see `ui::menu::open_items` — so a name that ran on
-/// would be a popup wider than the window it opened in.
-pub const MAX_NAME: usize = 48;
 
 /// How deep the walk of an applications directory goes when there is no index
 /// to read instead. The specification nests entries a level or two — a
@@ -163,7 +155,7 @@ impl Opener {
 /// program installed — which is what draws the button dead rather than
 /// listing nothing.
 pub fn for_file(path: &Path) -> Vec<Opener> {
-    let types = mime_types(path);
+    let types = media::mime_types(path);
     if types.is_empty() {
         return Vec::new();
     }
@@ -292,88 +284,6 @@ pub fn open(opener: &Opener, path: &Path) -> Result<()> {
 struct Candidate {
     id: String,
     claimed: bool,
-}
-
-/// What the desktop calls the files this program opens: one entry per
-/// extension the decoders read, with every name the same format is known
-/// under.
-///
-/// Several names because a desktop entry lists whichever the program that
-/// wrote it thought of, and a viewer registered for `image/x-bmp` opens the
-/// same file as one registered for `image/bmp`. Matching any of them finds
-/// both, which is what the aliases in `shared-mime-info` mean in the first
-/// place.
-///
-/// The file's name and not its bytes: this is what the *desktop's* database
-/// is keyed by, so a file whose extension lies about it is a file no other
-/// program will recognize either. That the decoders here sniff their way past
-/// such a name is a courtesy this table cannot pass on.
-pub(crate) const MIME_TYPES: &[(&str, &[&str])] = &[
-    // `image/jpg` is no registered name, and is what a program that never
-    // looked one up writes: read here for the entries that claim it, and
-    // taken on the clipboard under it.
-    ("jpg", &["image/jpeg", "image/jpg"]),
-    ("jpeg", &["image/jpeg", "image/jpg"]),
-    ("jpe", &["image/jpeg"]),
-    ("jfif", &["image/jpeg"]),
-    ("png", &["image/png"]),
-    ("gif", &["image/gif"]),
-    ("webp", &["image/webp"]),
-    ("jxl", &["image/jxl"]),
-    ("tif", &["image/tiff"]),
-    ("tiff", &["image/tiff"]),
-    ("bmp", &["image/bmp", "image/x-bmp", "image/x-ms-bmp"]),
-    ("ico", &["image/vnd.microsoft.icon", "image/x-icon"]),
-    ("heic", &["image/heic", "image/heif"]),
-    ("heif", &["image/heif", "image/heic"]),
-    ("hif", &["image/heif", "image/heic"]),
-    ("avif", &["image/avif"]),
-    ("exr", &["image/x-exr"]),
-    ("hdr", &["image/vnd.radiance", "image/x-hdr"]),
-    ("pnm", &["image/x-portable-anymap"]),
-    ("pbm", &["image/x-portable-bitmap"]),
-    ("pgm", &["image/x-portable-graymap"]),
-    ("ppm", &["image/x-portable-pixmap"]),
-    ("pam", &["image/x-portable-arbitrarymap"]),
-    // The camera raw formats, each under the name shared-mime-info gives
-    // it. Every one is also a subclass of `image/x-dcraw` there, which is
-    // what a raw developer's desktop entry usually claims instead.
-    ("dng", &["image/x-adobe-dng", "image/x-dcraw"]),
-    ("nef", &["image/x-nikon-nef", "image/x-dcraw"]),
-    ("nrw", &["image/x-nikon-nrw", "image/x-dcraw"]),
-    ("cr2", &["image/x-canon-cr2", "image/x-dcraw"]),
-    ("cr3", &["image/x-canon-cr3", "image/x-dcraw"]),
-    ("crw", &["image/x-canon-crw", "image/x-dcraw"]),
-    ("arw", &["image/x-sony-arw", "image/x-dcraw"]),
-    ("srf", &["image/x-sony-srf", "image/x-dcraw"]),
-    ("sr2", &["image/x-sony-sr2", "image/x-dcraw"]),
-    ("raf", &["image/x-fuji-raf", "image/x-dcraw"]),
-    ("orf", &["image/x-olympus-orf", "image/x-dcraw"]),
-    ("rw2", &["image/x-panasonic-rw2", "image/x-dcraw"]),
-    ("rwl", &["image/x-panasonic-rw2", "image/x-dcraw"]),
-    ("pef", &["image/x-pentax-pef", "image/x-dcraw"]),
-    ("srw", &["image/x-samsung-srw", "image/x-dcraw"]),
-    ("3fr", &["image/x-hasselblad-3fr", "image/x-dcraw"]),
-    ("fff", &["image/x-hasselblad-fff", "image/x-dcraw"]),
-    ("iiq", &["image/x-phaseone-iiq", "image/x-dcraw"]),
-    ("mef", &["image/x-mamiya-mef", "image/x-dcraw"]),
-    ("mos", &["image/x-leaf-mos", "image/x-dcraw"]),
-    ("erf", &["image/x-epson-erf", "image/x-dcraw"]),
-    ("dcr", &["image/x-kodak-dcr", "image/x-dcraw"]),
-    ("kdc", &["image/x-kodak-kdc", "image/x-dcraw"]),
-    ("mrw", &["image/x-minolta-mrw", "image/x-dcraw"]),
-];
-
-/// What the desktop would call `path`, judged by its extension alone.
-fn mime_types(path: &Path) -> &'static [&'static str] {
-    let Some(extension) = path.extension().and_then(OsStr::to_str) else {
-        return &[];
-    };
-    let extension = extension.to_ascii_lowercase();
-    MIME_TYPES
-        .iter()
-        .find(|(known, _)| *known == extension)
-        .map_or(&[], |(_, types)| *types)
 }
 
 /// The directories desktop entries are installed in, in the order a name
@@ -554,14 +464,6 @@ fn read_entry(candidate: &Candidate, dirs: &[PathBuf], types: &[&str]) -> Option
         words,
         entry: path,
     })
-}
-
-/// `name` cut to [`MAX_NAME`], with the ellipsis that says it was cut.
-fn shortened(name: &str) -> String {
-    match name.char_indices().nth(MAX_NAME) {
-        Some((end, _)) => format!("{}\u{2026}", &name[..end]),
-        None => name.to_string(),
-    }
 }
 
 /// Whether `program` is there to be run: a path as it stands, and a bare name
@@ -819,38 +721,9 @@ fn association_files() -> Vec<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsStr;
+
     use super::*;
-
-    /// Every file this program opens has a name the desktop knows it by, or
-    /// the button could never offer anything for it. A format added to the
-    /// decoders and not to the table would be one this menu was silently
-    /// empty for.
-    #[test]
-    fn every_extension_the_decoders_read_has_a_mime_type() {
-        for extension in crate::image::decode::supported_extensions() {
-            assert!(
-                !mime_types(Path::new(&format!("photograph.{extension}"))).is_empty(),
-                ".{extension} has no MIME type"
-            );
-        }
-    }
-
-    /// And it is the extension that is read, whatever case it is written in
-    /// and whatever else is in the name.
-    #[test]
-    fn the_type_is_read_off_the_extension() {
-        assert_eq!(mime_types(Path::new("/a/b.PNG")), ["image/png"]);
-        assert_eq!(
-            mime_types(Path::new("a.tar.jpeg")),
-            ["image/jpeg", "image/jpg"]
-        );
-        assert!(mime_types(Path::new("photograph")).is_empty());
-        assert!(mime_types(Path::new("notes.txt")).is_empty());
-        // Both spellings of the same format, so that an entry registered for
-        // either is found.
-        assert!(mime_types(Path::new("icon.ico")).contains(&"image/x-icon"));
-        assert!(mime_types(Path::new("icon.ico")).contains(&"image/vnd.microsoft.icon"));
-    }
 
     fn entry(exec: &str) -> Opener {
         Opener {
@@ -1030,24 +903,6 @@ Exec=editor --new
         assert_eq!(list("a;b"), ["a", "b"]);
         assert!(list("").is_empty());
         assert!(list(";").is_empty());
-    }
-
-    /// A name is cut to a length a menu can wear, and said to have been cut.
-    /// Nothing ordinary is touched.
-    #[test]
-    fn a_name_too_long_for_a_menu_is_cut() {
-        assert_eq!(
-            shortened("GNU Image Manipulation Program"),
-            "GNU Image Manipulation Program"
-        );
-        let long = "N".repeat(MAX_NAME + 10);
-        let cut = shortened(&long);
-        assert_eq!(cut.chars().count(), MAX_NAME + 1);
-        assert!(cut.ends_with('\u{2026}'));
-        // Cut by characters and not by bytes: a name in another script comes
-        // back as text rather than as a panic on a split character.
-        let wide = "\u{753b}".repeat(MAX_NAME + 2);
-        assert_eq!(shortened(&wide).chars().count(), MAX_NAME + 1);
     }
 
     #[test]
