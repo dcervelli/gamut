@@ -4,6 +4,12 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.8.2 - 2026-09-29
+
+### Fixed
+
+- Update homebrew script to properly associate files with gamut.
+
 ## 0.8.1 - 2026-09-29
 
 ### Fixed
