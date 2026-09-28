@@ -2,8 +2,8 @@
 #
 # It names the same released tarball as the PKGBUILD, so the two carry the
 # same checksum; `bin/release` sets the version in both and
-# `bin/pkgbuild-sha` the checksum. A tap is a repository of its own, so this
-# file is copied into it after each release rather than read from here.
+# `bin/pkgbuild-sha` the checksum, and then copies this file into the tap,
+# dcervelli/homebrew-gamut, which is what Homebrew reads. Edit it here.
 class Gamut < Formula
   desc "GPU image viewer with color management for photographs, measurements and HDR"
   homepage "https://github.com/dcervelli/gamut"

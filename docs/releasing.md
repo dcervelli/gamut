@@ -118,17 +118,24 @@ tarball, so the same checksum goes into its `sha256`.
 
 ## The tap
 
-Homebrew finds a formula in a tap, which is a repository of its own named
-`homebrew-<tap>`, so the formula is kept here beside the PKGBUILD, where
-the release scripts and the tests reach it, and copied into the tap once it
-points at the release:
+Homebrew reads a formula from a tap, a repository of its own that
+`brew install dcervelli/gamut/gamut` finds by name: `dcervelli/gamut` is
+short for `github.com/dcervelli/homebrew-gamut`. The formula is edited here,
+beside the PKGBUILD, where the release scripts and the tests reach it, and
+the tap holds a copy. `bin/pkgbuild-sha` makes the copy, into
+`../homebrew-gamut` or wherever `GAMUT_TAP` names, once the formula points at
+the release; it is committed and pushed from there:
 
 ```sh
-cp packaging/gamut.rb ../homebrew-gamut/Formula/gamut.rb
+cd ../homebrew-gamut
+git commit -am "gamut X.Y.Z"
+git push
 ```
 
-A user then installs it with `brew install dcervelli/gamut/gamut`. The copy
-in the tap is the one Homebrew reads; the one here is where it is edited.
+The copy replaces the tap's file whole, so a bottle block the tap's
+`brew pr-pull` workflow added for the previous version goes with it, as it
+should: a bottle is for one version. The tap's README says how bottles are
+built and published.
 
 ## What guards it
 

@@ -135,5 +135,6 @@ git tag "$TAG"
 echo
 echo "Committed and tagged $TAG. To publish it:"
 echo "    git push && git push origin $TAG"
-echo "Then, once the release exists, update the PKGBUILD's and the formula's checksum:"
+echo "Then, once the release exists, update the PKGBUILD's and the formula's checksum,"
+echo "which copies the formula into the tap too:"
 echo "    bin/pkgbuild-sha $TAG"
