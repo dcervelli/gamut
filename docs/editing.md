@@ -8,6 +8,8 @@ code is shaped as it is.
 
 ## The trash is the desktop's
 
+On a Mac the trash is Finder's, through `NSFileManager`; see
+[macOS](macos.md#what-differs-and-why). On Linux,
 `src/trash/freedesktop.rs` follows the freedesktop.org Trash specification by hand: a
 `files/` directory and an `info/` directory under `$XDG_DATA_HOME/Trash`,
 each thrown-away file under a name unique within the trash and a

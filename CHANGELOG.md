@@ -4,6 +4,34 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- `gamut` builds and runs on macOS from source, with Homebrew's `libheif`
+  and `libraw`. The file dialog, the clipboard, the Trash, the menu of other
+  programs that open the file, the display's HDR room and the interface's
+  faces are the Mac's own: the standard open dialog, the pasteboard, Finder's
+  Trash, the applications Finder offers, the display's extended dynamic
+  range, and San Francisco. The state file is kept in
+  `~/Library/Application Support/gamut` and the thumbnails in
+  `~/Library/Caches/com.dcervelli.gamut`; the configuration file stays in
+  `~/.config/gamut`.
+- On a Mac the keys held with `Ctrl` or `Alt` are held with `Cmd`, and the
+  shortcuts every Mac program shares are there: `Cmd+0`, `Cmd+=` and `Cmd+-`
+  zoom, `Cmd+Q` and `Cmd+W` quit, `Cmd+Backspace` moves the file to the
+  Trash, `Cmd+[` and `Cmd+]` go back and forward. Two fingers on a trackpad
+  pan, and a pinch or `Cmd` with the wheel zooms. Keys are spelled as a Mac
+  spells them.
+- A pinch on a trackpad is a gesture the configuration file can give a
+  behavior, `gesture.image.pinch`, on either system.
+- The configuration file reads `cmd`, `command`, `option` and `opt` as
+  modifiers, beside `super` and `alt`, so one file serves both systems.
+
+### Fixed
+
+- `Ctrl` with `+`, `=`, `-` or `0` no longer scales the whole interface.
+
 ## 0.7.0 - 2026-09-28
 
 ### Added

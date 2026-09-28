@@ -325,7 +325,7 @@ the file are applied, so a photograph taken sideways arrives upright.
 Caveats:
 
 - **This format needs support installed on the system.** HEIF decoding uses
-  the system HEIF library, version 1.20 or newer, and `gamut` will not
+  the system HEIF library, version 1.23 or newer, and `gamut` will not
   start without it: `libheif-dev` on Debian and Ubuntu, `libheif` on Arch,
   `brew install libheif` on macOS. Which *codecs* work then depends on that
   installation's plugins — HEIC needs libde265 or ffmpeg, AVIF needs dav1d or

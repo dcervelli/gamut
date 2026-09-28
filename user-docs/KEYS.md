@@ -8,6 +8,50 @@ nothing is bound to does what its lower case does, so Caps Lock changes
 nothing except where the two cases do different things: `a` and `A`, `s`
 and `S`, `c` and `C`, `l` and `L`, `n` and `N`.
 
+## On macOS
+
+The tables below give each key as it is on Linux. On a Mac, the keys that
+Linux holds with `Ctrl` or `Alt` are held with `Cmd` instead, and a few of
+the shortcuts every Mac program shares are added. Everything not listed here
+is the same on both.
+
+| Key on a Mac | What it does | Name |
+| --- | --- | --- |
+| `1`, `0`, `Cmd`+`0` | Actual size | `zoom.100` |
+| `+`, `=`, `Cmd`+`+`, `Cmd`+`=` | Zoom in one step | `zoom.in` |
+| `-`, `_`, `Cmd`+`-` | Zoom out one step | `zoom.out` |
+| `Cmd`+Arrows | Pan to the far side of the image; with a region selected, grow it that way one pixel | `pan.edge.left` … `pan.edge.down`; `region.grow.left` … `region.grow.down` |
+| `Shift`+`Cmd`+Arrows | With a region selected, shrink it that way one pixel | `region.shrink.left` … `region.shrink.down` |
+| `?`, `/`, `Cmd`+`?` | Show the keys | `interface.help` |
+| `q`, `Cmd`+`Q`, `Cmd`+`W` | Quit | `interface.quit` |
+| `Cmd`+`P` | Choose a file from the list | `files.chooser` |
+| `Cmd`+`[`, `Cmd`+`]` | Back and forward in image history | `files.back`, `files.forward` |
+| `Cmd`+`O`, `Shift`+`Cmd`+`O` | Open image files, or a folder, chosen in the file dialog | `files.open`, `files.open-folder` |
+| `Cmd`+`⌫`, `⌦` | Move the file on screen to the Trash | `files.delete` |
+| `Cmd`+`Z` | Undo | `files.undo` |
+| `Cmd`+`E` | Export the picture as shown | `files.export` |
+| `Cmd`+`C` | Copy the image, or the region, as displayed | `clipboard.image` |
+| `Shift`+`C`, `Option`+`Cmd`+`C` | Copy the file's path | `clipboard.path` |
+| `Shift`+`Cmd`+`C` | Copy the file as a URI | `clipboard.uri` |
+| `Cmd`+`I` | Copy everything the info panel says | `clipboard.info` |
+| `Cmd`+`.`, `Cmd`+`>` | Copy the pixel's value, or its coordinate | `clipboard.pixel`, `clipboard.coordinate` |
+| `Cmd`+`V` | Paste an image | `clipboard.paste` |
+
+`⌫` is the Delete key, which takes the file off the list as it does on Linux,
+and `⌦` is the forward delete key: `Fn`+Delete on a laptop's keyboard. `F2`
+renames on a Mac too, which on a laptop is `Fn`+`F2` unless the function keys
+are set to act as function keys. `Return` plays an animation, as `Enter` does
+on Linux.
+
+The mouse differs as well. Two fingers on a trackpad, or the wheel of a
+mouse, pan the picture, as they do in every Mac program that shows one; a
+pinch zooms about the pointer, and so does the wheel with `Cmd` held. The
+right button's hold is the loupe, as on Linux: a two-finger click, or
+`Ctrl`+click, where there is no right button.
+
+The help popup (`?`) and `gamut --help` show the Mac's keys, spelled as a
+Mac spells them: `Cmd`, `Option`, `⌦`, `Return`.
+
 ## Zoom and position
 
 | Key | What it does | Name |
@@ -183,7 +227,9 @@ your file manager keeps them: one it has already made is shown without
 decoding the file, and one made here is one it will show. They are made in
 the background from the moment the program starts, at low priority, so a
 long list fills in over time rather than holding anything up, and a file
-whose thumbnail has not yet been made shows an empty slot until it has.
+whose thumbnail has not yet been made shows an empty slot until it has. A
+Mac has no cache that file managers share, so there they are `gamut`'s own,
+under `~/Library/Caches/com.dcervelli.gamut/thumbnails`.
 
 ### Opening something else
 
@@ -221,7 +267,8 @@ and the buttons that put it up do nothing more.
 The dialog is the desktop's, asked for through its portal, so it looks and
 behaves as the dialog of every other program on your desk does. A desktop
 without one — no `xdg-desktop-portal` and a backend for it running — cannot
-put one up, and the window says so instead.
+put one up, and the window says so instead. On a Mac it is the standard open
+dialog.
 
 ### Renaming and deleting
 
@@ -251,7 +298,10 @@ neighbor that will not open leaves the deleted file on screen, its name
 struck through in red in the bar, until you undo or step away. A file on another disk
 or a removable drive goes to the trash on that drive; where that cannot be
 made, it is copied into your home trash instead, which takes as long as the
-copy takes.
+copy takes. On a Mac the file goes to Finder's Trash. A file restored there
+with Put Back is no longer one undo can bring back, and if `gamut` is not
+allowed to look inside the Trash, undo says so and names Put Back instead:
+a program started from Terminal may need Full Disk Access for that.
 
 `F2` opens a dialog with the name in a field, the part before the extension
 selected so that typing replaces it and keeps the extension. What is wrong
@@ -588,7 +638,7 @@ when there is none, the surface is SDR and highlights are being thrown away
 silence. The
 `HDR` button at the end of the bar is the switch for that room, lit while the
 image is going out with it. On Wayland the compositor says which monitors
-are in HDR mode, and gamut follows: the window gets an HDR surface on a
+are in HDR mode, and on a Mac the display does; gamut follows: the window gets an HDR surface on a
 monitor in HDR mode and an SDR one otherwise, and never asks the compositor
 to switch a monitor over — a request some compositors answer by blanking
 every display. On a monitor in HDR mode the button turns the room off and on
@@ -949,7 +999,9 @@ use when the window floats, and may lay the window out its own way regardless.
 ## Keys that are deliberately ignored
 
 Apart from the chords in the tables above, anything held with `Ctrl`, `Alt`
-or a `Super`/`Command` key does nothing here unless the configuration file
-binds it, and neither does the wheel with one of them held. Those
-combinations belong to the window manager, and a chord such as `Super+0`
-would otherwise move the view behind its back.
+or a `Super` key does nothing here unless the configuration file binds it,
+and neither does the wheel with one of them held. Those combinations belong
+to the window manager, and a chord such as `Super+0` would otherwise move the
+view behind its back. On a Mac the same holds for `Ctrl`, `Option` and `Cmd`
+beyond the chords above: `Ctrl` with the arrows is Mission Control's, and
+`Cmd`+`H` and `Cmd`+`Tab` are the system's.

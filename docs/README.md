@@ -18,6 +18,7 @@ wants [`user-docs/`](../user-docs/) instead.
 | [The file chooser](chooser.md) | `Ctrl+P`: a popup that fuzzy-matches the session's files, the thread that thumbnails them into the desktop's own cache, and who gets the keys while it is up |
 | [The file list](filmstrip.md) | `Tab`: the strip of thumbnails down the left, why the order it shows is the list's own and is applied between reads, a stable sort, the files seen as a browser keeps them, and a file taken off the list |
 | [Theme](theme.md) | Reading the desktop's palette, and the two things that resist being themed |
+| [macOS](macos.md) | Where the platform is split off, the Cocoa half of each desktop service, and what the main thread asks of it |
 | [Formats](formats.md) | Each decoder, what it can and cannot say, and how to add one |
 | [Known limits](limits.md) | What does not work yet, and why |
 | [Tests](testing.md) | What is covered, including the eight that run on a real adapter and the interface driven headless |

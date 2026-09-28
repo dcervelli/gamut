@@ -41,6 +41,11 @@ its nearest: a bold that came back regular, or a monospace that came back
 proportional, is treated as no answer, and that family falls back to the
 sans.
 
+On a Mac the faces are AppKit's: the system font, its bold and the system
+monospace. San Francisco is one variable file, so each face is handed to egui
+with the weight to set on its axis; see [macOS](macos.md#what-differs-and-why).
+There is no palette to read there, and the neutral dark set is used.
+
 Each face is handed to egui with one number worked out from its own
 metrics. egui makes a row as tall as ascent, descent and line gap together,
 puts the baseline the ascent down from the top, and centers that box in a

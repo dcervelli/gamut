@@ -6,7 +6,7 @@ own, and neither has to exist.
 ## The configuration file
 
 `~/.config/gamut/config` (under `$XDG_CONFIG_HOME` if you set it) says how the
-window opens every time. `gamut` only reads it: toggling a panel in the window
+window opens every time. It is in the same place on a Mac. `gamut` only reads it: toggling a panel in the window
 lasts until the window closes and does not change the file.
 
 Each line is `name = value`, and `#` starts a comment. Anything left out keeps
@@ -61,7 +61,9 @@ and the help popup (`?`) marks its line **unbound**.
 
 A key is written as the modifiers held with it, each followed by `+`, and
 then the key itself. The modifiers are `ctrl` (or `control`), `alt`,
-`shift` and `super`. The key is one of:
+`shift` and `super`. On a Mac, `cmd` (or `command`) is the Command key and
+`option` (or `opt`) the Option key; each is read on either system as the
+same key as `super` and `alt`, so one file serves both. The key is one of:
 
 - a character, written as your keyboard types it: `>` rather than
   `shift+.`, and `L` for `Shift` with `l`. `shift+l` means the same as `L`;
@@ -117,7 +119,8 @@ modifiers, and how it is used: `left`, `middle`, `right`, `back` or
 `forward`, then `.drag`, `.hold`, `.click` or `.double-click` —
 `shift+left.drag`, `middle.click`, `left.double-click`. Or it is the wheel, turned with modifiers or with a button
 other than the left held down: `wheel`, `ctrl+wheel`, `right+wheel`,
-`ctrl+middle+wheel`. The left button cannot be a hold, being a drag.
+`ctrl+middle+wheel`. Or it is a pinch on a trackpad, with modifiers: `pinch`,
+`cmd+pinch`. The left button cannot be a hold, being a drag.
 
 What each takes:
 
@@ -125,7 +128,7 @@ What each takes:
 | --- | --- |
 | A drag | `pan`, `zoom-box`, `move-region`, or `none` |
 | A hold | `loupe`, or `none` |
-| The wheel | `zoom`, `loupe-magnification`, `exposure`, `black-point`, `white-point`, `files`, `frames`, `pan`, or `none` |
+| The wheel, or a pinch | `zoom`, `loupe-magnification`, `exposure`, `black-point`, `white-point`, `files`, `frames`, `pan`, or `none` |
 | A click or a double-click | the name of a key, which it then does — `files.back`, `interface.grid`, `zoom.100` — or `none` |
 | A drag or a click on the minimap | `center`, or `none` |
 
@@ -137,10 +140,15 @@ The first click of a double-click is a click as well, and does whatever
 that button's click does. `move-region` moves a selected region when the drag starts inside it, and
 elsewhere does whatever the same button does with nothing held.
 
+A pinch outward is the wheel turned up. On a Mac the defaults differ in three
+slots: `gesture.image.wheel` is `pan`, `gesture.image.cmd+wheel` is `zoom`,
+and `gesture.image.pinch` is `zoom`.
+
 A gesture is matched exactly: a slot for `left.drag` says nothing about
 `ctrl+left.drag`, which does nothing unless it has a slot of its own. A
 wheel with `Ctrl`, `Alt` or `Super` held does nothing by default, as those
-belong to the window manager.
+belong to the window manager; on a Mac, only `Cmd` with the wheel does
+something by default.
 
 Some of what the left button does on the picture comes before its slot and
 cannot be changed: a drag begun while a region is asked for draws it, one
@@ -149,7 +157,8 @@ to zoom to, and a click on a handle makes it the current one.
 
 ## The state file
 
-`~/.local/state/gamut/state` (under `$XDG_STATE_HOME` if you set it) is where
+`~/.local/state/gamut/state` (under `$XDG_STATE_HOME` if you set it), or
+`~/Library/Application Support/gamut/state` on a Mac, is where
 `gamut` remembers settings you change by hand: how wide you dragged the file
 list, what the list is sorted by and which way, how far the loupe
 magnifies, and whether a raw opens as the camera's JPEG. It is written when the window closes and read when the next window

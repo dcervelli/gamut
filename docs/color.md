@@ -143,6 +143,13 @@ switch moves the surface itself, as the only lever there is —
 `Monitors::speaks_modes` is how `App::hdr_state` tells that case from a
 monitor that has simply not been described yet.
 
+On a Mac, `NSScreen` says the same: a display whose potential headroom is
+above one is in HDR mode, and its current headroom is what the gain map is
+weighed against. wgpu's Metal surface offers the scRGB pair and sets the
+layer's extended-range flag and color space itself. Asking for the room never
+switches a Mac's display into another mode, so following the monitor is
+cheap there rather than necessary; see [macOS](macos.md#what-differs-and-why).
+
 **The tone map** is a curve *added* to fit values above white into a surface
 that stops there: `neutral`, or `none` — which is not a second curve but the
 absence of one, and means whatever the surface does on its own: a clip at

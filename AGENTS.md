@@ -50,10 +50,13 @@ app/           the event loop's state and winit handlers
   copying.rs     Copying: the copies of the picture being prepared on threads of their own,
                  each with the Ticket it reports through and tells whether it was superseded by
   input.rs       Action, ROWS (the key table: each line's names, actions and default chords),
-                 Effect; perform() is where every key's action happens; act() is where every
-                 Command from the interface happens, and wheel() and click() what a gesture's
-                 slot asks for; Namer composes tooltips from the keymap in force
-  keymap.rs      Chord (read and spelled), Row, Keymap: the chords each name answers to, bind()
+                 MAC_DEFAULTS (the names whose chords a Mac changes), Effect; perform() is
+                 where every key's action happens; act() is where every Command from the
+                 interface happens, and wheel(), pinch() and click() what a gesture's slot
+                 asks for; logical_key() the one reading of a key event; Namer composes
+                 tooltips from the keymap in force
+  keymap.rs      Chord (read and spelled), Row, Keymap: the chords each name answers to —
+                 table() the table's own, mac() a Mac's, default() the platform's — bind()
                  with one holder per context, action_for() — the region's names first while
                  one is selected — and template() (pure, tested)
   window.rs      opening size, titles
@@ -70,7 +73,8 @@ ui/            lays each frame's interface out with egui; no wgpu or winit impor
   style.rs       Theme's roles as egui's Style and Visuals; Color into Color32
   fonts/         the desktop's sans, bold and monospace faces, each with its capitals
                  centered in egui's rows: mod.rs the set egui is given and fontdb's
-                 fallback, fontconfig.rs what the Linux desktop names
+                 fallback, fontconfig.rs what the Linux desktop names, macos.rs AppKit's
+                 system faces, set on a variable face's weight axis
   rect.rs        Rect, the logical-pixel rectangle the panels are placed by
   panel.rs       where a thing floating over the picture goes — fit(), the one placement every
                  panel is fitted by, refused rather than shrunk — area(), the one opening
@@ -151,38 +155,44 @@ thumbnail.rs   the freedesktop thumbnail cache: the GLib-spelled URI a file is k
                by, MD5, the chunks a thumbnail carries, and the temporary-then-rename write
 fuzzy.rs       the chooser's matcher behind a trait with skim's own signature; the
                one file that names the fuzzy-matcher crate
-gestures.rs    the mouse's slots — a surface, a button or the wheel, with modifiers — each
-               holding one Behavior; Gestures::table (the tests' defaults) and ::default
-               (what is in force), the lookups the pass and App make, template(); and the
-               modifier words the keymap shares (pure, tested)
+gestures.rs    the mouse's slots — a surface, a button, the wheel or a pinch, with modifiers —
+               each holding one Behavior; Gestures::table (the table's own), ::mac (a
+               Mac's) and ::default (the platform's), the lookups the pass and App make,
+               template(); and the modifier words the keymap shares, spelled per platform
+               (pure, tested)
 watch.rs       polling a file — or a directory — for a settled change
 no_replace.rs  rename_no_replace(): a rename that refuses rather than replace what is at
                the new name — for a rename, an export's write and the trash alike
 trash/         the desktop's trash: mod.rs Refused; freedesktop.rs the Linux trash by the
                specification — put() moves a file into it and says which Entry it became,
-               restore() moves that entry back
+               restore() moves that entry back — and the tests' on both; macos.rs Finder's
 monitor/       what each monitor is, SDR or HDR and how large in logical pixels: mod.rs
                Monitors, the table the platform fills, and key_of(), what it is keyed by;
-               wayland.rs the compositor's answer, over a Wayland connection of its own
+               wayland.rs the compositor's answer, over a Wayland connection of its own;
+               macos.rs NSScreen's, read on the main thread each time it is asked
 clipboard/     putting text or a file: URI on the clipboard, and reading a pasted picture
                off it: mod.rs the types, IMAGE_TYPES and the thread that watches for a
-               picture; wayland.rs the selection, held by a process that outlives the window
+               picture; wayland.rs the selection, held by a process that outlives the window;
+               macos.rs the general pasteboard
 pasted.rs      where a pasted picture is written and what it is called: the
                XDG pictures directory, and a name nothing else holds
 portal/        the desktop's file dialog: mod.rs Pick, which says files or a folder, and
                Picked; freedesktop.rs the file chooser portal, choose() blocking for the
-               answer and choose_on_thread() handing it back through the event loop
-dbus.rs        the session bus, spoken directly: Value marshaled and unmarshaled by
+               answer and choose_on_thread() handing it back through the event loop;
+               macos.rs NSOpenPanel, run modally on the main thread
+dbus.rs        (Linux) the session bus, spoken directly: Value marshaled and unmarshaled by
                signature, and a blocking Connection that calls a method and waits for
                a signal — enough for the portal and nothing more
 openers/       what else on the desktop can open the file on screen, and starting one of
                them: mod.rs MAX_NAME; linux.rs the desktop entries that claim its MIME type,
-               found through the desktop's own index and the user's associations
+               found through the desktop's own index and the user's associations;
+               macos.rs Launch Services' applications, through NSWorkspace
 media.rs       MIME_TYPES: what the desktop calls each extension the decoders read
 clock.rs       a moment as a date and time — UTC, or the zone the system's own
                compiled zone file says it is in
 xdg.rs         the base directory specification's answers — home, and the cache, configuration
-               and data directories — read once for everything that keeps something under them
+               and data directories — read once for everything that keeps something under
+               them; on a Mac the cache and the state fall back to ~/Library
 uri.rs         a path as a file: URI and back, and the percent-encoding under the three spellings
                the tree uses — RFC 3986's for the clipboard and the trash, GLib's for the
                thumbnail cache
@@ -266,7 +276,7 @@ still agrees with both, so renaming either is editing the constant —
 
 | Change | Edit |
 | --- | --- |
-| A key binding | `app/input.rs`: a `Bound` — its dotted name, prefixed by its section's word, its `Action` and its default `Chord`s — on a `ROWS` line with a `when` if it only does anything under some condition, and one `perform` arm; a line that only describes what another name's chords do under a condition is `Keys::Also`. `--help`, the man page, the help popup and `--print-config` follow, and the name goes in `user-docs/KEYS.md`'s name column. A character's chord never carries Shift: `L`, not Shift+`l`. A new context — a condition under which a line's names are tried before the plain ones, as the region's are — is a `keymap::Context` variant appended to `ORDER` and a `When` that `When::context` maps to it. A condition new to the table is a `When` variant, its words in `When::describe`, a field of `Conditions` and its reading in `App::conditions`, from the same state the `perform` arm reads. `Conditions` is also what makes a control dead — `Conditions::reasons` is the tooltips' reading of it, and `App::refuses` the press's — so a button drawn dead, its label and its press cannot disagree |
+| A key binding | `app/input.rs`: a `Bound` — its dotted name, prefixed by its section's word, its `Action` and its default `Chord`s — on a `ROWS` line with a `when` if it only does anything under some condition, and one `perform` arm; a line that only describes what another name's chords do under a condition is `Keys::Also`. Where a Mac's chord should differ — anything held with Ctrl, or a Mac's own menu shortcut — the name gets an entry in `MAC_DEFAULTS` as well, which `Keymap::mac` binds over the table, and a line in `user-docs/KEYS.md`'s macOS table. `--help`, the man page, the help popup and `--print-config` follow, and the name goes in `user-docs/KEYS.md`'s name column. A character's chord never carries Shift: `L`, not Shift+`l`. A new context — a condition under which a line's names are tried before the plain ones, as the region's are — is a `keymap::Context` variant appended to `ORDER` and a `When` that `When::context` maps to it. A condition new to the table is a `When` variant, its words in `When::describe`, a field of `Conditions` and its reading in `App::conditions`, from the same state the `perform` arm reads. `Conditions` is also what makes a control dead — `Conditions::reasons` is the tooltips' reading of it, and `App::refuses` the press's — so a button drawn dead, its label and its press cannot disagree |
 | A button | a `Control` variant in `ui/control.rs` with its `label`, the widget where it is drawn — `Pass::icon_button` for a square toggle — pushing `Command::Press` on a click, and an arm of `App::press`. Keys that do the same job go through `press` too, so the two cannot drift apart. What it says when rested on is an arm of `ui/tooltip.rs::words` or of `input::action_of`, both exhaustive, so a nameless button does not compile; and one of it goes in `Control::ALL` for the tests that ask something of every button |
 | A status-bar segment | `ui/status.rs`; the pointer's pixel readout is `ui/pixel.rs` |
 | What the loupe magnifies, or where it goes | `ui/loupe.rs`: `GLASS_RADIUS` and `MAGNIFICATIONS` for the circles, `place` for where the glass sits, `glass` for the draw, `step` for what the wheel does through `Command::Magnify` and `App::magnify`, `cycle` for what `Shift+L` does; `App::loupe` for when it is up, from the toggle or `Pointer::secondary`, which `Command::Secondary` sets from the picture's response in `Pass::picture`; the cut and the replacing draw are `image_layer`'s loupe slot and `shaders/image.wgsl`'s `clip` |
@@ -285,7 +295,7 @@ still agrees with both, so renaming either is editing the constant —
 | A popup menu | a function in `ui/menu.rs` that lays its cells out, each pushing `Command::Press` of a typed `Control` — `ZoomTo`, `Format`, `Copies`, or `Opener`, which is a place in a list the application built rather than a choice named in the source — and an `egui::Popup` hung off its button in `ui/chrome.rs`, aligned below, above or beside it with `RectAlign`. The popup opens, closes and takes the pointer by itself; `App::close_menus` is how a key closes one. An item that does something rather than setting something is performed in `App::press`, as the menu of copies is, and prints its key beside it from `Naming::shortcut` |
 | What else can open the file on screen, or what happens when one is chosen | `openers/linux.rs`: `media.rs::MIME_TYPES` says what the desktop calls a file this program reads, `read_entry` which entries are offered and which are left out, and `open` how one is started. The list is read once per file in `App::apply`; the button is `Pass::open_button`, the menu `ui/menu.rs::open_items`, and the press `App::open_in` |
 | A CLI flag | `cli.rs`, and the `Options` / `Startup` / `Overrides` field it sets; a flag for something the configuration file also sets writes into `Options::config` after the file is read |
-| A mouse gesture | `gestures.rs`: a behavior is a `WORDS` entry and a variant, with its arm in `Pass::picture` / `Pass::region_gestures` (drags, clicks, holds) or `App::wheel` (the wheel); a default is a line of `Gestures::default`. What the primary button does from a region's handle, with a region asked for, or with the fit key held is fixed ahead of any slot, in `Pass::region_gestures` |
+| A mouse gesture | `gestures.rs`: a behavior is a `WORDS` entry and a variant, with its arm in `Pass::picture` / `Pass::region_gestures` (drags, clicks, holds) or `App::wheel` (the wheel) and `App::pinch` (a pinch); a default is a line of `Gestures::table`, and of `Gestures::mac` where a Mac's differs. What the primary button does from a region's handle, with a region asked for, or with the fit key held is fixed ahead of any slot, in `Pass::region_gestures` |
 | What the configuration file sets, or what is remembered between runs | `settings.rs`: a `Config` field for what the user chooses ahead of time — its default in `Config::default`, its name and words in `SETTINGS`, `Config::value` and `Config::parse` — the tests hold the three and `--print-config`'s template to each other; a `keys.` line is `Keymap::bind` and a `gesture.` line `Gestures::set`, both read in `Config::parse` — where it lands in `App::new`, and `user-docs/SETTINGS.md`; a `State` field for what was left where it was set by hand — `State::parse` and `State::render`, read in `App::new` and gathered in `App::exiting`. The tests build `App` from `StateFile::none()` and a `Config` of their own, so neither file is ever touched by them |
 | What the empty window offers, or what the file dialog asks for | `ui/empty.rs` for the buttons and where they go; `portal/freedesktop.rs::choose` for the dialog's filters and options, `Pick::title` for its title, `Pick` for which kind; `App::pick` puts it up and `App::picked` takes the answer, `App::open_named` opens what was chosen as a command line naming it beside the rest would — `listing::expand`, then `Files::append`, the newcomers at the end of the list and the first of them asked for as a walk. `App::is_empty` is what puts the buttons up, `App::leave_picture` is how the last deleted picture comes down into it, and `App::size_to_next` is what has the next picture size the window; `App::from_command_line` is whether nothing showing means leaving |
 | Another call to the desktop over D-Bus | `dbus.rs`: `Connection::call` for a method, `add_match` and `wait_signal` for a signal, `Value::dict` for an `a{sv}` of options; a new basic type is an arm of `Value` and of the writer and reader alike |
@@ -307,6 +317,7 @@ still agrees with both, so renaming either is editing the constant —
 | What a paste accepts, or where it is written | `clipboard/mod.rs::IMAGE_TYPES` for the MIME types and the extensions they are saved under, `pasted.rs` for the directory and the name; `App::paste` starts it and `app/files.rs::adopt` puts it in the list. Whether the button for it is on screen is `Panels::paste`, which `App::refresh_paste` sets from what `clipboard::watch`'s thread last said and whether the interface is showing |
 | A color-space source (a new tag a format carries) | `image/color/` |
 | Someone else's work brought into the tree | say where it came from beside the code that carries it, then one `[[annotations]]` entry in `REUSE.toml`; if its license is new to the tree, its text goes in `LICENSES/` named by SPDX identifier, and the PKGBUILD's `license=()` grows an entry |
+| Something a Mac does differently from Linux | the module's `macos.rs` beside its Linux file, re-exported under the same names from its `mod.rs` — `clipboard/`, `portal/`, `trash/`, `openers/`, `monitor/`, `ui/fonts/` — or a `cfg!` in the one place that differs; a crate only one platform needs goes under its `[target.'cfg(target_os = …)'.dependencies]`, and an AppKit or Foundation class is a feature of `objc2-app-kit` or `objc2-foundation` there. `docs/macos.md` says what each Mac half is and why |
 | A dependency | `Cargo.toml`, then `bin/release` rewrites `THIRD-PARTY-NOTICES`. A license `about.toml` does not accept fails generation: add it there, in priority order, and its text to `LICENSES/`, or take the dependency instead |
 | An upscale filter or tone map | the WGSL function, one arm in `render/shader_codes.rs`, one enum variant with its `label`/`parse`/`next`; a tone map's CPU twin is `ToneMap::apply`, which takes the surface's `Headroom` as the shader arm does |
 | How far a gain map lifts the picture, or what reads through the lift | `image/gain_map.rs`: `GainMap::weight` for the share of the lift a display's room gets, `GainMap::table` for what a weight makes of the map, `gain_at` for the CPU twin of the shaders' `gain` — keep the three in step. `App::display_headroom` is what the weight is fed, `App::refresh_lift` puts the table in `Current::lift` and scans the statistics through it, and `Scene::lift` carries the weight to `image_layer`, which writes the table to the device and rebuilds the coarse chain. Whatever reads a pixel takes the table: `DecodedImage::sample`, `encode::displayed`, `Stats::scan_with` |
@@ -411,6 +422,8 @@ author's own roadmap — read it, do not write to it.
 cargo test
 GAMUT_REQUIRE_GPU=1 cargo test render::   # the GPU tests, made to fail rather than skip
 cargo clippy --all-targets    # clean
+# on a Mac, the Linux build type-checked too, and the other way round in CI:
+PKG_CONFIG_ALLOW_CROSS=1 cargo clippy --all-targets --target x86_64-unknown-linux-gnu
 cargo doc --no-deps           # no warnings
 cargo run --release -- test_images/png-rgb8.png --histogram
 cargo audit                   # no advisories against the pinned dependency versions

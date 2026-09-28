@@ -121,8 +121,37 @@ with the application borrowed mutably, and an `Rc` clone is a pointer copy.
 `--help` and the manual page are rendered from `Keymap::default()`: they
 describe the program, not one user's file. The tests read `Keymap::table()` and
 `Gestures::table()` instead: the chords and slots the tables themselves give,
-which `default()` is today, so that a test naming a chord says the same thing
-on whatever machine runs it.
+which `default()` is everywhere but a Mac, so that a test naming a chord says
+the same thing on whatever machine runs it.
+
+### On a Mac
+
+A Mac holds its shortcuts with Command, and Ctrl with the arrows belongs to
+Mission Control, so the table's Ctrl chords would be both foreign and taken.
+Rather than a second table, `input::MAC_DEFAULTS` lists the names whose chords
+differ, and `Keymap::mac` binds each over the table through `Keymap::bind`,
+exactly as the configuration file would. A name not listed keeps the table's
+chords, so a new line of the table reaches a Mac without anyone having to
+remember it. `Keymap::mac` is built on every platform, and its tests hold it
+to the table's rules there: every name it sets is a name of the table, no
+chord has two holders in a context, no character carries Shift, nothing is
+held with Ctrl.
+
+Winit calls Command `SUPER` and Option `ALT`, so nothing about a chord changes
+but its spelling: `gestures::MODIFIERS` is per platform, in Apple's order —
+Ctrl, Option, Shift, Cmd — and `MODIFIER_WORDS` reads every platform's words
+everywhere, so a file written on one reads on the other. `Chord::spell` writes
+the forward Delete key as `⌦` and Enter as `Return`, as a Mac's keycaps do.
+
+Option types characters of its own on a Mac — Option with `[` is `“` — so
+winit's logical key under Option is not the key a chord names.
+`input::logical_key` reads such a press through
+`KeyEventExtModifierSupplement::key_without_modifiers` instead. Linux keeps
+the logical key, since a layout that types with AltGr means what it types.
+
+egui zooms its whole interface on Command with `+`, `-` or `0`, which are
+the Mac's zoom chords here, so `Gui::new` turns that off; on Linux it was
+Ctrl's, and nothing wanted it there either.
 
 ## Gestures
 
@@ -168,5 +197,13 @@ action once per whole notch, adding a trackpad's fractions up in
 slot is `center` centers from the press on, and one whose only slot is a
 click centers on the click.
 
+A pinch is an input of its own, `[mods+]pinch`, and takes the wheel's words:
+egui hands it over as a factor, which the pass turns into steps of the zoom
+(`view::ZOOM_STEP`), a pinch out being the wheel turned up. `App::pinch`
+performs it as a trackpad's scroll by as many notches, the hand on the view.
+`Gestures::mac` pans with two fingers, as every Mac program that shows a
+picture does, and zooms with a pinch or with Command and the wheel.
+
 A new behavior is a word in `WORDS` and a variant, and its arm in the pass
-or in `App::wheel`; a new default is a line of `Gestures::default`.
+or in `App::wheel`; a new default is a line of `Gestures::table`, or of
+`Gestures::mac` where a Mac should differ.

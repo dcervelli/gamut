@@ -135,7 +135,8 @@ the end, so `:-1` is the last file.
 
 Thumbnails go into the freedesktop thumbnail cache — `~/.cache/thumbnails`,
 or `$XDG_CACHE_HOME/thumbnails` — in the `x-large` directory at 512 pixels a
-side, which is what GNOME's own files there are. The cache is the desktop's
+side, which is what GNOME's own files there are. On a Mac it is this
+program's own, laid out the same — see [macOS](macos.md#what-differs-and-why). The cache is the desktop's
 rather than this program's on purpose: a thumbnail made here is one the file
 manager finds, and one the file manager made is one this program finds
 without decoding anything, which for a directory that has ever been opened
@@ -182,7 +183,9 @@ chance a JPEG XL thumbnailed here before the loader decoded one would have
 left every JPEG XL the loader decoded afterwards — and every statistics
 scan, which `Stats::scan` divides by rows over the same pool — running at
 nice 10, the opposite of what lowering the priority was for. `top -H` shows
-the pool as `gamut rayon N` at nice 0 and the thumbnailer at nice 10.
+the pool as `gamut rayon N` at nice 0 and the thumbnailer at nice 10. On a
+Mac the thumbnailer's thread goes into Darwin's background band instead,
+which does both at once; see [macOS](macos.md#what-differs-and-why).
 
 Two passes over the session, not one. `thumbnailer::header` reads every
 file's header first — the size, whether the file holds frames or pages, and

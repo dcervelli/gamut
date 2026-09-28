@@ -36,7 +36,13 @@ accepted = [
 ignore-build-dependencies = true
 ignore-dev-dependencies = true
 
-# The two targets the PKGBUILD builds for. Without this the graph is resolved
-# for every platform at once and the file would carry notices for crates that
-# never reach an Arch user — Windows and macOS backends, mostly.
-targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
+# The targets the program is built for: the two the PKGBUILD builds, and the
+# two a Mac is. Without this the graph is resolved for every platform at once
+# and the file would carry notices for crates that never reach anyone —
+# Windows backends, mostly.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+]

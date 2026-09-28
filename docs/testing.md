@@ -72,7 +72,16 @@ occupies is what the next draw shows, through a chain built again from it. Where
 adapter can be had they report success rather than failing for a reason that
 has nothing to do with the code; on a machine that has one, setting
 `GAMUT_REQUIRE_GPU` makes a run that could not open it fail instead, which is
-how a run proves they ran.
+how a run proves they ran. On a Mac they run on Metal.
+
+The suite runs on Linux and on a Mac alike. The tests that name a chord or a
+gesture read `Keymap::table()` and `Gestures::table()`, the same on both;
+`Keymap::mac()` and `Gestures::mac()` are built and tested on both too, so a
+Linux run checks the Mac's defaults. What is tested of each platform's own
+desktop half runs only there: the portal, the freedesktop openers and D-Bus
+on Linux, the pasteboard's table of types and the headroom's steps on a Mac.
+The freedesktop trash is tested on both, since the tests' trash is one on
+both.
 
 `test_images/` holds a hundred real fixtures — see its README — covering every pixel
 layout the decoder can produce and every per-format encoding with its own code
@@ -118,6 +127,6 @@ test, in both byte orders; `talks_to_the_live_session_bus`, ignored unless
 asked for, then authenticates to the real bus, says `Hello`, calls
 `ListNames`, and checks that an unknown method comes back as the named
 error it should. The dialog itself is not driven by a test, since it would
-put a window on whoever's desk ran it; `portal/freedesktop.rs` tests what goes into the
-call and what is made of the answer.
+put a window on whoever's desk ran it; `portal/freedesktop.rs` tests what goes
+into the call and what is made of the answer.
 

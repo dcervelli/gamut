@@ -87,3 +87,28 @@ jobs:
           # namcap on the PKGBUILD alone: a static read, so it needs neither a
           # released tarball nor a build.
           namcap packaging/PKGBUILD
+
+  # The same code on a Mac: the Cocoa half of each desktop service, the Mac's
+  # keys and gestures, and Metal for the GPU tests where the runner has one.
+  # The Arch job above keeps the checks that are about the package and the
+  # tree rather than the platform.
+  macos:
+    name: macOS
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the libraries it links
+        run: brew install libheif libraw pkgconf
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test
+
+      - name: Documentation
+        run: cargo doc --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
