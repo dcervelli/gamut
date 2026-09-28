@@ -13,7 +13,6 @@
 * Region fixed aspect
 * Advanced file list features
 * Drop down for back/forward buttons
-* Top bar crowding
 * Another security pass
 * Histogram documentation
 * Copy region handle
@@ -26,7 +25,6 @@
 * Chrome separators
 * Error toasts
 * Settings
-  * Geospatial format
   * Date time format
   * Changable background
 * Color scale: alpha mask

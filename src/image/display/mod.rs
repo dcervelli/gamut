@@ -674,15 +674,14 @@ mod tests {
         let display = Display::for_image_with(
             &photographic,
             &Stats::scan(&photographic),
-            Startup::default());
+            Startup::default(),
+        );
         assert_eq!(display.auto, AutoWindow::Off);
         assert_eq!((display.window_low, display.window_high), (0.0, 1.0));
 
         let measurement = gray(vec![0, 1000, 4095], Transfer::Linear);
-        let display = Display::for_image_with(
-            &measurement,
-            &Stats::scan(&measurement),
-            Startup::default());
+        let display =
+            Display::for_image_with(&measurement, &Stats::scan(&measurement), Startup::default());
         assert_eq!(display.auto, AutoWindow::Percentile);
         assert!(
             display.window_high < 0.1,
@@ -711,7 +710,10 @@ mod tests {
                 "{transfer:?}"
             );
             assert_eq!(display.tone_map, ToneMap::None, "no curve by itself");
-            assert!(display.exceeds_white(&stats), "{transfer:?} says so instead");
+            assert!(
+                display.exceeds_white(&stats),
+                "{transfer:?} says so instead"
+            );
         }
     }
 
@@ -743,8 +745,16 @@ mod tests {
         };
         let p3 = red(Primaries::DisplayP3);
         let stats = Stats::scan(&p3);
-        assert!(stats.max < 0.3, "luminance never reaches white: {}", stats.max);
-        assert!(stats.peak > 1.2, "the red channel is past it: {}", stats.peak);
+        assert!(
+            stats.max < 0.3,
+            "luminance never reaches white: {}",
+            stats.max
+        );
+        assert!(
+            stats.peak > 1.2,
+            "the red channel is past it: {}",
+            stats.peak
+        );
         let display = opened(&p3);
         assert!(display.exceeds_white(&stats));
         assert_eq!(display.tone_map, ToneMap::None);
@@ -1106,8 +1116,7 @@ mod tests {
     fn cycling_out_of_a_hand_set_window_returns_to_automatic() {
         let image = gray(vec![0, 1000, 4095], Transfer::Linear);
         let stats = Stats::scan(&image);
-        let mut display =
-            Display::for_image_with(&image, &stats, Startup::default());
+        let mut display = Display::for_image_with(&image, &stats, Startup::default());
 
         display.step_black(0.05, Transfer::Linear, 0.0);
         assert_eq!(display.auto, AutoWindow::Manual);
@@ -1198,7 +1207,8 @@ mod tests {
             Startup {
                 exposure_stops: Some(1.0),
                 ..Startup::default()
-            });
+            },
+        );
         assert_eq!(asked.exposure_stops, 1.0);
 
         // And a reset puts the meter's reading back, not zero.
@@ -1215,7 +1225,8 @@ mod tests {
             Startup {
                 auto: Some(AutoWindow::Percentile),
                 ..Startup::default()
-            });
+            },
+        );
         assert_eq!(windowed.auto, AutoWindow::Percentile);
         assert_eq!(windowed.exposure_stops, 0.0);
     }
@@ -1228,16 +1239,10 @@ mod tests {
         assert_eq!(opened(&dark).exposure_stops, 0.0);
 
         let faint = scene_gray(vec![1e-9; 4]);
-        assert_eq!(
-            opened(&faint).exposure_stops,
-            EXPOSURE_LIMIT
-        );
+        assert_eq!(opened(&faint).exposure_stops, EXPOSURE_LIMIT);
 
         let blinding = scene_gray(vec![1e9; 4]);
-        assert_eq!(
-            opened(&blinding).exposure_stops,
-            -EXPOSURE_LIMIT
-        );
+        assert_eq!(opened(&blinding).exposure_stops, -EXPOSURE_LIMIT);
     }
 
     /// A curve chosen is kept: nothing about the surface or the window
@@ -1308,7 +1313,8 @@ mod tests {
             Startup {
                 exposure_stops: Some(2.0),
                 ..Startup::default()
-            });
+            },
+        );
         assert_eq!(display.tone_map, ToneMap::None);
         assert_eq!(display.exposure_stops, 2.0);
     }
@@ -1336,8 +1342,7 @@ mod tests {
             ColorSpace::LINEAR_BT709,
             AlphaMode::Opaque,
         );
-        let display =
-            Display::for_image_with(&color, &Stats::scan(&color), startup);
+        let display = Display::for_image_with(&color, &Stats::scan(&color), startup);
         assert_eq!(display.colormap, Colormap::Gray);
     }
 

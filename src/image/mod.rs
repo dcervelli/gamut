@@ -371,8 +371,10 @@ impl DecodedImage {
         // converted color as it would have out of the file's, and `linear`
         // is what the statistics binned.
         if !channels.is_gray() {
-            let converted =
-                to_working_space(self.color.primaries.to_bt709(), [linear[0], linear[1], linear[2]]);
+            let converted = to_working_space(
+                self.color.primaries.to_bt709(),
+                [linear[0], linear[1], linear[2]],
+            );
             linear[..3].copy_from_slice(&converted);
         }
         let mut color = [0.0f32; 3];
