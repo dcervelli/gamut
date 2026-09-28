@@ -6,7 +6,7 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ## Unreleased
 
-### Added
+### 0.8.0 - 2026-09-29
 
 - `gamut` builds and runs on macOS from source, with Homebrew's `libheif`
   and `libraw`. The file dialog, the clipboard, the Trash, the menu of other
