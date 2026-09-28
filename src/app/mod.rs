@@ -258,6 +258,9 @@ pub struct App {
     /// it learned of each image for the order is kept in `glimpsed` until
     /// the thumbnail thread has read that image's header.
     folder: Folder,
+    /// Whether a single file opened alone has its folder to step into:
+    /// the setting, unless the command line said to open it alone.
+    browse_folder: bool,
     listed: Option<folder::Listed>,
     folder_delivered: folder::Deliver,
     glimpsed: HashMap<PathBuf, folder::Glimpse>,
@@ -529,6 +532,7 @@ impl App {
             named,
             directories,
             folder,
+            browse_folder: config.browse_folder,
             listed: None,
             folder_delivered,
             glimpsed: HashMap::new(),
@@ -2884,7 +2888,7 @@ impl ApplicationHandler<UserEvent> for App {
             UserEvent::Folder(listed) => self.folder_read(listed),
             UserEvent::Arranged(arranged) => self.arranged_read(arranged),
             UserEvent::Opened(paths) => {
-                self.open_named(paths);
+                self.open_sent(paths);
                 // The files the program was launched to open, which the
                 // window waited for.
                 if self.shown.is_none() {
@@ -3647,6 +3651,33 @@ mod tests {
         assert!(!app.size_to_next, "spent on the arrival");
         assert_eq!(app.sized_for, None);
 
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
+    }
+
+    /// One file Finder sends to an empty window steps on into its folder,
+    /// as one named alone on the command line does; several are the list.
+    #[test]
+    fn a_single_file_sent_steps_on_into_its_folder() {
+        let (dir, paths) = written(
+            "sent-alone",
+            &[("a.png", 8, 8), ("b.png", 8, 8), ("c.png", 8, 8)],
+        );
+        let mut app = opened_on_nothing();
+        app.open_sent(vec![paths[1].clone()]);
+        answer(&mut app, Reload::Fresh);
+        assert_eq!(app.files.len(), 1);
+        assert!(app.folder.unread());
+        assert!(app.conditions().several_files, "the keys are live");
+
+        let _ = app.step(true);
+        read_beside(&mut app, &paths[1]);
+        assert_eq!(app.files.paths(), paths.as_slice());
+        let pending = app.files.pending().expect("the next file is asked for");
+        assert_eq!(app.files.path(pending.index), paths[2]);
+
+        let mut app = opened_on_nothing();
+        app.open_sent(paths[..2].to_vec());
+        assert!(matches!(app.folder, Folder::Closed));
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }
 

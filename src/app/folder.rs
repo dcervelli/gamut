@@ -192,6 +192,27 @@ fn glimpse(path: &Path, sort: Sort) -> Glimpse {
 }
 
 impl App {
+    /// Opens what the desktop's file manager sent, as [`App::open_named`]
+    /// does what the dialog chose; but one file sent to a window with
+    /// nothing on its list has its folder beside it to step on through, as
+    /// one named alone on the command line does.
+    pub(super) fn open_sent(&mut self, named: Vec<PathBuf>) {
+        let alone = match named.as_slice() {
+            [file] if self.browse_folder && self.files.len() == 0 && !file.is_dir() => {
+                Some(file.clone())
+            }
+            _ => None,
+        };
+        self.open_named(named);
+        // Named only once it opened: a file that could not be listed
+        // leaves the window as it was.
+        if let Some(file) = alone
+            && self.named.contains(&file)
+        {
+            self.folder = Folder::Unread { file };
+        }
+    }
+
     /// Reads the folder beside the one file, if there is one still to read,
     /// to do `then` once it is in; a second ask while it is being read
     /// changes what it is read for. Says whether it is being read, which
