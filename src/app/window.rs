@@ -2,12 +2,12 @@
 
 use std::path::Path;
 
-use winit::dpi::{LogicalSize, PhysicalSize};
+use winit::dpi::{LogicalPosition, LogicalSize, PhysicalSize};
 use winit::monitor::MonitorHandle;
-use winit::window::WindowAttributes;
+use winit::window::{Window, WindowAttributes};
 
 use crate::PROGRAM;
-use crate::monitor::{Monitors, Room};
+use crate::monitor::{self, Monitors, Room};
 use crate::ui;
 use crate::ui::chrome::{BAR_HEIGHT, SIDE_WIDTH};
 
@@ -350,6 +350,53 @@ fn window_size(
     logical(chosen)
 }
 
+/// Where `window` goes once it is `size` inside its frame: the middle of
+/// what its monitor leaves for windows — clear of a Mac's menu bar and Dock
+/// — rather than where AppKit puts a new window, well above the middle.
+/// Read before the window is resized, and given it after, since a Mac
+/// places a window by its top-left corner and resizes it about another.
+/// `None` where the platform does not say where a window is, as Wayland
+/// does not, which leaves the window where the compositor puts it.
+pub(super) fn centered_on(window: &Window, size: LogicalSize<u32>) -> Option<LogicalPosition<f64>> {
+    let scale = window.scale_factor();
+    let origin: LogicalPosition<f64> = window.outer_position().ok()?.to_logical(scale);
+    let outer: LogicalSize<f64> = window.outer_size().to_logical(scale);
+    let inner: LogicalSize<f64> = window.inner_size().to_logical(scale);
+    let frame = [
+        f64::from(size.width) + outer.width - inner.width,
+        f64::from(size.height) + outer.height - inner.height,
+    ];
+    let area = window.current_monitor().map(|monitor| {
+        let scale = monitor.scale_factor();
+        let at: LogicalPosition<f64> = monitor.position().to_logical(scale);
+        let room: LogicalSize<f64> = monitor.size().to_logical(scale);
+        let [top, right, bottom, left] = monitor::reserved(&monitor);
+        Area {
+            origin: [at.x + left, at.y + top],
+            size: [room.width - left - right, room.height - top - bottom],
+        }
+    });
+    let [x, y] = centered([origin.x, origin.y], [outer.width, outer.height], frame, area);
+    ((x, y) != (origin.x, origin.y)).then(|| LogicalPosition::new(x, y))
+}
+
+/// Where windows may go on a monitor, in logical pixels.
+#[derive(Clone, Copy, PartialEq, Debug)]
+struct Area {
+    origin: [f64; 2],
+    size: [f64; 2],
+}
+
+/// Where a frame `new` in size goes: the middle of `area`, or its start on
+/// an axis it is too large for. With no area to go by, its center stays
+/// where the frame at `origin`, `old` in size, had it.
+fn centered(origin: [f64; 2], old: [f64; 2], new: [f64; 2], area: Option<Area>) -> [f64; 2] {
+    std::array::from_fn(|axis| match area {
+        Some(area) => area.origin[axis] + ((area.size[axis] - new[axis]) / 2.0).max(0.0),
+        None => origin[axis] + (old[axis] - new[axis]) / 2.0,
+    })
+}
+
 /// A size settled on, rounded to the whole logical pixels a window is asked
 /// for in and held at the floor the rounding could otherwise drop it below.
 fn logical(size: [f64; 2]) -> LogicalSize<u32> {
@@ -390,6 +437,32 @@ mod tests {
         room: [2560.0, 1440.0],
         scale: 1.0,
     }];
+
+    /// A window goes in the middle of the room left for windows — below a
+    /// Mac's menu bar, say — wherever it was before.
+    #[test]
+    fn a_window_is_centered_in_the_room_left_for_it() {
+        let area = Area {
+            origin: [0.0, 25.0],
+            size: [2000.0, 975.0],
+        };
+        let at = centered([100.0, 30.0], [600.0, 400.0], [1000.0, 775.0], Some(area));
+        assert_eq!(at, [500.0, 125.0]);
+    }
+
+    /// One too large for the room starts at its start; with no room to go
+    /// by, its center stays where it was.
+    #[test]
+    fn a_window_without_room_to_center_in() {
+        let area = Area {
+            origin: [0.0, 25.0],
+            size: [2000.0, 975.0],
+        };
+        let at = centered([500.0, 300.0], [600.0, 400.0], [2400.0, 1200.0], Some(area));
+        assert_eq!(at, [0.0, 25.0]);
+        let at = centered([700.0, 300.0], [600.0, 400.0], [1000.0, 600.0], None);
+        assert_eq!(at, [500.0, 200.0]);
+    }
 
     /// A size asked for is given as it was asked for, in logical pixels: the
     /// chrome is not added to it, and the monitors do not shrink it.

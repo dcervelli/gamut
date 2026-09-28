@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use objc2::MainThreadMarker;
 use objc2::rc::autoreleasepool;
 use objc2_app_kit::NSScreen;
-use objc2_foundation::{NSNumber, NSString};
+use objc2_foundation::{NSNumber, NSRect, NSString};
 use winit::monitor::MonitorHandle;
 use winit::platform::macos::MonitorHandleExtMacOS as _;
 
@@ -24,6 +24,36 @@ use super::{Mode, Monitors, Room, Table};
 /// name, two identical displays do not share.
 pub fn key_of(monitor: &MonitorHandle) -> Option<String> {
     Some(monitor.native_id().to_string())
+}
+
+/// What the menu bar and the Dock keep of `monitor`, in points from each
+/// edge — top, right, bottom, left: the difference between the screen's
+/// frame and its visible frame. Nothing off the main thread, or for a
+/// monitor no screen answers to.
+pub fn reserved(monitor: &MonitorHandle) -> [f64; 4] {
+    let Some(main) = MainThreadMarker::new() else {
+        return [0.0; 4];
+    };
+    let key = key_of(monitor);
+    autoreleasepool(|_| {
+        let Some(screen) = NSScreen::screens(main)
+            .iter()
+            .find(|screen| identifier(screen) == key)
+        else {
+            return [0.0; 4];
+        };
+        let frame = screen.frame();
+        let visible = screen.visibleFrame();
+        let top = |rect: NSRect| rect.origin.y + rect.size.height;
+        let right = |rect: NSRect| rect.origin.x + rect.size.width;
+        [
+            top(frame) - top(visible),
+            right(frame) - right(visible),
+            visible.origin.y - frame.origin.y,
+            visible.origin.x - frame.origin.x,
+        ]
+        .map(|inset| inset.max(0.0))
+    })
 }
 
 /// The table as the displays have it now. `None` off the main thread, where

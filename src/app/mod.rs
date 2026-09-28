@@ -288,6 +288,11 @@ pub struct App {
     /// arrival. A window opened at `--size` keeps the size it was asked
     /// for, that being a choice rather than a default.
     size_to_next: bool,
+    /// The size the window was given ahead of the picture that spends
+    /// `size_to_next`, from its header: the arrival sizes the window again
+    /// only where the picture turns out another size — turned by its
+    /// orientation, or a file that would not read walked past.
+    sized_for: Option<[f32; 2]>,
     /// When the window was last held to a size, while it is: the moment
     /// [`App::size_window_to`] pinned its least and greatest size to the
     /// one it asked for, which is released when the compositor has
@@ -488,6 +493,7 @@ impl App {
             header_size: size,
             asked_size,
             size_to_next: source.is_none(),
+            sized_for: None,
             sizing: None,
             startup,
             hdr,
@@ -669,7 +675,8 @@ impl App {
 
     /// Sizes the window to `image` as it would have opened on it: the same
     /// reckoning as at start-up, the window's own account of the monitors
-    /// standing in for the event loop's.
+    /// standing in for the event loop's, and put in the middle of the
+    /// monitor as it is at start-up — see [`window::centered_on`].
     ///
     /// Asked for two ways, because Wayland leaves a window's size to the
     /// compositor and a compositor answers only what it is asked in its own
@@ -696,11 +703,15 @@ impl App {
             Some(image),
             None,
         );
+        let moved = window::centered_on(window, wanted);
         let before = window.inner_size();
         if let Some(applied) = window.request_inner_size(wanted)
             && applied != before
         {
             shown.renderer.resize(applied.width, applied.height);
+        }
+        if let Some(at) = moved {
+            window.set_outer_position(at);
         }
         window.set_min_inner_size(Some(wanted));
         window.set_max_inner_size(Some(wanted));
@@ -743,6 +754,7 @@ impl App {
         self.marking.clear();
         self.from_command_line = false;
         self.size_to_next = true;
+        self.sized_for = None;
         let title = self.title();
         if let Some(shown) = &mut self.shown {
             shown.renderer.clear_image();
@@ -1829,6 +1841,7 @@ impl App {
         if self.arranging_to_open() {
             self.header_size = None;
             self.size_to_next = true;
+            self.sized_for = None;
         }
         let size = initial_window_size(
             event_loop.available_monitors(),
@@ -1850,6 +1863,10 @@ impl App {
                 return;
             }
         };
+        // In the middle of the monitor, before a frame of it is drawn.
+        if let Some(at) = window::centered_on(&window, size) {
+            window.set_outer_position(at);
+        }
         timing::window_open();
         window::show_icon();
 
@@ -2124,9 +2141,13 @@ impl App {
         }
 
         // A window that showed nothing takes the size it would have opened
-        // at on this picture, as if it had; the fit follows on the frame
-        // the new size brings.
-        if std::mem::take(&mut self.size_to_next) && self.asked_size.is_none() {
+        // at on this picture, as if it had — unless it was given it already,
+        // from the header; the fit follows on the frame the new size brings.
+        let sized_for = self.sized_for.take();
+        if std::mem::take(&mut self.size_to_next)
+            && self.asked_size.is_none()
+            && sized_for != Some(size)
+        {
             self.size_window_to(size);
         }
         self.files.shown(file.index);
@@ -3592,7 +3613,10 @@ mod tests {
 
         app.open_named(paths.clone());
         assert_eq!(app.opening_size(), Some([640.0, 320.0]));
-        assert!(!app.size_to_next, "opened at its size already");
+        assert_eq!(app.sized_for, Some([640.0, 320.0]), "opened at its size already");
+        answer(&mut app, Reload::Fresh);
+        assert!(!app.size_to_next, "spent on the arrival");
+        assert_eq!(app.sized_for, None);
 
         std::fs::remove_dir_all(dir).expect("we just wrote it");
     }

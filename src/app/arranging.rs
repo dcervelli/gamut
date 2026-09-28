@@ -164,17 +164,19 @@ impl App {
         }
     }
 
-    /// With the window still to open, has it open at `first`'s size: the
-    /// glimpse where the order read it, and the header otherwise — rather
-    /// than the size of the file whose header was read to make sure of the
-    /// command line, or the empty window's for files Finder sent. Opened at
-    /// the picture's size, the window is not sized again when it arrives;
-    /// opened at no size, it is.
+    /// Sizes the window for `first`, the file about to be asked for, while
+    /// nothing is on screen: from the glimpse where the order read it, and
+    /// the header otherwise, which is read in no time beside the picture. A
+    /// window still to open opens at it — rather than at the size of the
+    /// file whose header was read to make sure of the command line, or at
+    /// the empty window's for files Finder sent — and an empty window is
+    /// sized to it at once rather than once the picture arrives, which
+    /// sizes it again only if it turns out another size.
     fn open_at(&mut self, first: &Path) {
-        if self.shown.is_some() {
+        if self.current.is_some() || (self.shown.is_some() && !self.size_to_next) {
             return;
         }
-        self.header_size = self
+        let size = self
             .glimpsed
             .get(first)
             .and_then(|glimpse| glimpse.size)
@@ -184,7 +186,20 @@ impl App {
                     .flatten()
             })
             .map(|(width, height)| [width as f32, height as f32]);
-        self.size_to_next = self.header_size.is_none();
+        match self.shown {
+            None => {
+                self.header_size = size;
+                self.size_to_next = true;
+            }
+            Some(_) => {
+                if let Some(size) = size
+                    && self.asked_size.is_none()
+                {
+                    self.size_window_to(size);
+                }
+            }
+        }
+        self.sized_for = size;
     }
 
     /// When the window stops waiting for the list it opens on to be put in

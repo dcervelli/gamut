@@ -27,13 +27,21 @@ pub use wayland::watch;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "macos")]
-pub use macos::{key_of, watch};
+pub use macos::{key_of, reserved, watch};
 
 /// The key the table knows `monitor` by: the name the compositor gives it
 /// on Wayland — "DP-2", say — which is also the name winit gives its handle.
 #[cfg(target_os = "linux")]
 pub fn key_of(monitor: &MonitorHandle) -> Option<String> {
     monitor.name()
+}
+
+/// What the desktop keeps of `monitor` for itself, in logical pixels from
+/// each edge — top, right, bottom, left — that a window is not moved over.
+/// Nothing on Linux, where the compositor places a window itself.
+#[cfg(target_os = "linux")]
+pub fn reserved(_monitor: &MonitorHandle) -> [f64; 4] {
+    [0.0; 4]
 }
 
 /// Which mode a monitor is in.
