@@ -218,9 +218,11 @@ fn run() -> Result<ExitCode> {
         let _ = proxy.send_event(app::UserEvent::Arranged(arranged));
     });
     // Files Finder opens arrive after the program has started, as an Apple
-    // Event rather than as arguments.
+    // Event rather than as arguments; and Finder finds the program through
+    // the bundle it registers.
     #[cfg(target_os = "macos")]
     {
+        finder::register();
         let proxy = event_loop.create_proxy();
         finder::listen(Box::new(move |paths| {
             let _ = proxy.send_event(app::UserEvent::Opened(paths));
