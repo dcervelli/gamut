@@ -103,7 +103,7 @@ This installs the `gamut` command and `Gamut.app`. To launch it from Finder or S
 ln -sf "$(brew --prefix gamut)/Gamut.app" /Applications/Gamut.app
 ```
 
-Once gamut has been opened, Finder offers it under "Open With" for every image type it reads.
+Finder offers it under "Open With" for every image type it reads.
 
 ## Getting Started
 

@@ -47,11 +47,19 @@ class Gamut < Formula
     fish_completion.install "packaging/completions/gamut.fish"
   end
 
+  # Launch Services knows a bundle by the path it was registered at, and an
+  # upgrade moves the bundle to a new keg and deletes the old one, so the
+  # new bundle is registered here — otherwise "Open With" keeps naming the
+  # deleted one, and choosing it does nothing.
+  def post_install
+    system "/System/Library/Frameworks/CoreServices.framework/Frameworks/" \
+           "LaunchServices.framework/Support/lsregister", "-f", prefix/"Gamut.app"
+  end
+
   def caveats
     <<~EOS
       Gamut.app is in #{opt_prefix}. To have it in /Applications:
         ln -sf #{opt_prefix}/Gamut.app /Applications/Gamut.app
-      Finder offers it under "Open With" once it has been opened once.
     EOS
   end
 
