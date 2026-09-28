@@ -9,6 +9,7 @@ use anyhow::{Context, Result};
 use objc2::rc::autoreleasepool;
 use objc2_app_kit::{NSWorkspace, NSWorkspaceOpenConfiguration};
 use objc2_foundation::{NSArray, NSBundle, NSFileManager, NSString, NSURL};
+use objc2_uniform_type_identifiers::UTType;
 
 use super::shortened;
 use crate::APP_ID;
@@ -85,6 +86,29 @@ pub fn open(opener: &Opener, path: &Path) -> Result<()> {
                 &NSWorkspaceOpenConfiguration::configuration(),
                 None,
             );
+        Ok(())
+    })
+}
+
+/// Opens the text file at `path` in the application that opens plain text:
+/// the one Finder would, had the file an extension that said it was text.
+/// Asked by type rather than of the file, whose name has no extension.
+pub fn edit(path: &Path) -> Result<()> {
+    autoreleasepool(|_| {
+        let file = NSURL::from_file_path(path)
+            .with_context(|| format!("naming {}", crate::shown_path(path)))?;
+        let text = UTType::typeWithIdentifier(&NSString::from_str("public.plain-text"))
+            .context("no type for plain text")?;
+        let workspace = NSWorkspace::sharedWorkspace();
+        let editor = workspace
+            .URLForApplicationToOpenContentType(&text)
+            .context("no application opens plain text")?;
+        workspace.openURLs_withApplicationAtURL_configuration_completionHandler(
+            &NSArray::from_retained_slice(&[file]),
+            &editor,
+            &NSWorkspaceOpenConfiguration::configuration(),
+            None,
+        );
         Ok(())
     })
 }

@@ -222,6 +222,10 @@ pub enum Action {
     /// The same dialog for a folder, which stands for the images inside
     /// it as a directory on the command line does.
     OpenFolder,
+    /// Open the configuration file in the desktop's text editor, writing
+    /// it first from the template `--print-config` prints where there is
+    /// none — see `settings::edit`. A Mac's `⌘,`; Linux binds nothing to it.
+    OpenSettings,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -321,7 +325,7 @@ fn with_key(words: &str, key: Option<String>) -> String {
 /// fraction of the window's width. The hand on the histogram's band moves
 /// it by no step at all — the handles go where they are put — so this is
 /// the keys' alone.
-const WINDOW_STEP: f32 = 0.05;
+pub(super) const WINDOW_STEP: f32 = 0.05;
 
 /// One line of a tooltip: what a key does, and what to press for it — the
 /// whole line's keys, a hint being about the line. `None` where nothing is
@@ -341,7 +345,7 @@ fn hint(keys: &Keymap, action: Action) -> Option<String> {
 /// and a key never drift apart — so a button is named by what its key does.
 /// `None` for the things no key reaches, which name themselves instead: see
 /// [`ui::tooltip::words`].
-fn action_of(tip: Tip) -> Option<Action> {
+pub(super) fn action_of(tip: Tip) -> Option<Action> {
     Some(match tip {
         // The pair at the head of the top bar, which go where the keys beside
         // the count go.
@@ -1058,6 +1062,14 @@ pub static ROWS: &[Row] = &[
             [key('<')]
         ),
     },
+    // A Mac's Settings item: nothing on Linux, where the file is where
+    // `--print-config` says and the editor is whoever the user runs.
+    Row {
+        section: Section::Interface,
+        when: None,
+        help: "Open the configuration file in a text editor",
+        keys: one!("interface.settings", OpenSettings, []),
+    },
     Row {
         section: Section::Interface,
         when: None,
@@ -1414,8 +1426,9 @@ pub static ROWS: &[Row] = &[
 /// and Command is what every Mac program's shortcuts are held with; the
 /// menu shortcuts a Mac user already knows — `Cmd+0`, `Cmd+Z`,
 /// `Cmd+Backspace` to throw a file away, `Cmd+Q` and `Cmd+W`; and `Cmd+[`
-/// and `Cmd+]` for back and forward, as a browser has them. A name not here
-/// keeps the table's chords.
+/// and `Cmd+]` for back and forward, as a browser has them; `Cmd+,` for the
+/// settings, and Preview's `Cmd+L` and `Cmd+R` to turn the picture. A name
+/// not here keeps the table's chords.
 ///
 /// Applied over the table by [`Keymap::mac`](super::keymap::Keymap::mac),
 /// which binds each name here in turn as the configuration file would.
@@ -1455,6 +1468,7 @@ pub static MAC_DEFAULTS: &[(&str, &[Chord])] = &[
         &[named(CMD_SHIFT, NamedKey::ArrowDown)],
     ),
     ("interface.help", &[key('?'), key('/'), typed(CMD, '?')]),
+    ("interface.settings", &[typed(CMD, ',')]),
     // One window: closing it is quitting.
     (
         "interface.quit",
@@ -1475,6 +1489,9 @@ pub static MAC_DEFAULTS: &[(&str, &[Chord])] = &[
     ),
     ("files.undo", &[typed(CMD, 'z')]),
     ("files.export", &[typed(CMD, 'e')]),
+    // Preview's.
+    ("display.turn.left", &[key(';'), typed(CMD, 'l')]),
+    ("display.turn.right", &[key('\''), typed(CMD, 'r')]),
     ("clipboard.path", &[key('C'), typed(CMD_OPTION, 'c')]),
     ("clipboard.uri", &[typed(CMD, 'C')]),
     ("clipboard.image", &[typed(CMD, 'c')]),
@@ -2279,6 +2296,14 @@ impl App {
             // things.
             OpenFiles => return self.press(Control::OpenFiles),
             OpenFolder => return self.press(Control::OpenFolder),
+            // Nothing changes in the window: the editor opens beside it,
+            // and what is written there is read at the next start.
+            OpenSettings => {
+                if let Err(error) = crate::settings::edit() {
+                    report(&error);
+                    self.toast(briefly(&error), Level::Error);
+                }
+            }
         }
         Effect::Redraw
     }

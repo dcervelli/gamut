@@ -192,7 +192,7 @@ wl-clipboard-rs = "0.9.3"
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6.4"
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSAppleEventDescriptor", "NSAppleEventManager", "NSArray", "NSBundle", "NSData", "NSDictionary", "NSEnumerator", "NSError", "NSFileManager", "NSGeometry", "NSNotification", "NSObject", "NSString", "NSURL", "NSValue"] }
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "NSAppearance", "NSApplication", "NSColor", "NSColorSpace", "NSFont", "NSFontDescriptor", "NSGraphics", "NSImage", "NSOpenPanel", "NSPanel", "NSPasteboard", "NSPasteboardItem", "NSResponder", "NSRunningApplication", "NSSavePanel", "NSScreen", "NSView", "NSWindow", "NSWorkspace", "objc2-core-foundation", "objc2-uniform-type-identifiers"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "NSAppearance", "NSApplication", "NSCell", "NSColor", "NSColorSpace", "NSFont", "NSFontDescriptor", "NSGraphics", "NSEvent", "NSImage", "NSMenu", "NSMenuItem", "NSOpenPanel", "NSPanel", "NSPasteboard", "NSPasteboardItem", "NSResponder", "NSRunningApplication", "NSSavePanel", "NSScreen", "NSView", "NSWindow", "NSWorkspace", "objc2-core-foundation", "objc2-uniform-type-identifiers"] }
 objc2-uniform-type-identifiers = { version = "0.3.2", default-features = false, features = ["std", "UTType"] }
 block2 = "0.6.2"
 

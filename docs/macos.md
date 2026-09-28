@@ -28,7 +28,9 @@ Everything else is one file with, at most, a `cfg!` inside it: `no_replace.rs`
 fallbacks, `thumbnail::Dirs::detect`, `input::logical_key`, and the keymap's
 and gestures' `Default`. The application under `app/` does not know which
 platform it is on, except for the one line in `main.rs` that answers
-`--serve-clipboard` on Linux.
+`--serve-clipboard` on Linux, and what only a Mac has at all — the files
+Finder sends (`finder.rs`) and the menu bar (`menubar.rs`, with what it holds
+in `app/menubar.rs`) — which are compiled on a Mac alone.
 
 The Cocoa bindings are the `objc2` family, which wgpu already links for Metal,
 each framework's classes behind a feature so only those named in `Cargo.toml`
@@ -166,15 +168,71 @@ slots that differ. Both are built on every platform, and their tests run
 wherever the suite does; `Default` is the Mac's only on macOS. The reasons,
 and the Option key's reading, are in [keys and gestures](keymap.md#on-a-mac).
 
+## The menu bar
+
+The bar is the program's own: `main` turns winit's default off, and
+`App::install_menubar` puts `app/menubar.rs`'s up on the first `resumed`,
+which winit calls just after AppKit has finished launching. The split is the
+platform one: `menubar.rs` builds AppKit's menus from a tree of titles, key
+equivalents and numbered tags and knows nothing of the program, and
+`app/menubar.rs` says what the tree is and what each tag does, as an `Action`
+through `App::perform` or a `Control` through `App::press` — the same
+dispatch a key and a button go through, so an item cannot come to mean
+something else. An item is dead exactly when its button is, and its key's
+line of the help popup dimmed: `App::alive` reads `Conditions` through
+`tooltip::disabled` and the key's `When`, as the other two do.
+
+**AppKit asks, and the application cannot answer then.** A menu is validated
+as it opens, inside AppKit's tracking loop, while no handler of the
+application's is running. So each handler publishes a `Snapshot` as it
+settles — every item enabled or not, checked or not, and retitled where its
+title changes ("Undo Rename", "Copy Region", "Pause", "Next Page") — and the
+menus read the last one. The Open With submenu is rebuilt from the
+snapshot's list each time it opens. An item holding a submenu is given an
+action of its own, `open:`, which is never sent: AppKit enables an item that
+only opens a submenu whatever the validator says, and one with an action is
+validated like any other.
+
+**Keys go to the key table, never to the menu.** AppKit looks for a key
+equivalent among the menus before the window sees the key, whenever `⌘` is
+held or the key is one AppKit reads as a function key — the F keys, the
+arrows, Page Up and Down, Home and End, forward Delete — even with nothing
+held; and a matching item takes the key even when it is disabled. A plain
+character, Tab, Return, Space, Esc or Backspace never reaches the menu, so an
+item shows `h` without ever acting on it. Left to act, the menu would decide
+by chord what only the key table can: `⌘`-Left is a pan to the edge or a
+region grown by a pixel depending on whether a region is selected, and
+forward Delete in the rename dialog's field is a character deleted, not a
+file thrown away. So an item a key reached hands the event to the key
+window's view — `Target::forward_key` — which is winit's, and winit reads it
+as though the menu had not been there; and the validator says every item is
+enabled while the event being answered is a key going down, so a dead one
+does not swallow its key. Every key equivalent shown is one the keymap in
+force binds (`app/menubar.rs::shortcut`, which prefers the `⌘` chord a Mac's
+menus would show), so a key handed on is always one the table answers.
+AppKit's own items — Hide, Minimize, and those AppKit adds itself — keep
+their own targets, and a name the configuration binds to `⌘H` loses it to
+Hide.
+
+This was found with a test program on winit and the same `objc2` crates,
+posting key events through `NSApp` and then pressing real keys; it is not
+in AppKit's documentation, which describes key equivalents as the
+Command-key path.
+
+AppKit adds to the bar by the menus' names: Enter Full Screen to View,
+Dictation, Emoji & Symbols, AutoFill and Writing Tools to Edit, the window
+tiling items to Window. The tabbing items it would add are turned off with
+`NSWindow::setAllowsAutomaticWindowTabbing`, the program having one window.
+Quit and Close Window are `Action::Quit`, so leaving from the menu reaches
+`App::exiting` as a key does; the Dock's Quit reaches it through winit's
+`applicationWillTerminate:`.
+
 ## Not yet
 
 - A binary run outside the bundle, as `cargo run` does, has no bundle to
   take an icon from, so the Dock's icon is set by the running program too,
   from `packaging/`'s SVG, which AppKit reads itself (`window::show_icon`).
-- The executable is `gamut`, which winit's menu takes the program's name
-  from, so its items read "Hide gamut" and "Quit gamut" beside the bundle's
-  "Gamut" at the head of the menu.
+- A binary run outside the bundle has no bundle name, so the head of the
+  application menu reads `gamut`, the process's name; its items say "Gamut",
+  which `app/menubar.rs` capitalizes from `PROGRAM`.
 - The trackpad's smart zoom, a double tap, is not read.
-- The menu bar is winit's default: the application menu with Hide and Quit.
-  Its Quit reaches `App::exiting` through winit's `applicationWillTerminate:`,
-  so the state is written as on any other quit.

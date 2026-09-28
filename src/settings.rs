@@ -17,7 +17,9 @@
 //! file is every default, and none is ever written for the user: a line
 //! written out on their behalf would hold them to today's default after it
 //! changed. [`Config::template`] is what `--print-config` prints instead —
-//! every setting at its default, commented out. A line the configuration cannot use is said on
+//! every setting at its default, commented out — and what [`edit`] writes
+//! where it is asked to open a file that is not there, which holds nobody
+//! to anything for the same reason. A line the configuration cannot use is said on
 //! the terminal and in the window, and skipped, the rest still taken; the state file is ours,
 //! so a line in it that does not read is only dropped.
 
@@ -495,6 +497,31 @@ fn complaint(problems: &[(usize, String)]) -> Option<String> {
     })
 }
 
+/// Opens the configuration file in the desktop's text editor, writing the
+/// template to it first where there is no file: the Mac's Settings item.
+/// What is changed there is read at the next start.
+pub fn edit() -> Result<()> {
+    let path = config_path().context("no configuration directory: HOME is unset")?;
+    if let Some(directory) = path.parent() {
+        fs::create_dir_all(directory)
+            .with_context(|| format!("creating {}", shown_path(directory)))?;
+    }
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+    {
+        Ok(mut file) => file
+            .write_all(Config::template().as_bytes())
+            .with_context(|| format!("writing {}", shown_path(&path)))?,
+        Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
+        Err(error) => {
+            return Err(error).with_context(|| format!("creating {}", shown_path(&path)));
+        }
+    }
+    crate::openers::edit(&path)
+}
+
 fn config_path() -> Option<PathBuf> {
     Some(xdg::config_home()?.join(PROGRAM).join("config"))
 }
@@ -645,7 +672,7 @@ mod tests {
             .lines()
             .filter(|line| line.starts_with("gesture."))
             .count();
-        assert_eq!(keys, 94, "{uncommented}");
+        assert_eq!(keys, 95, "{uncommented}");
         // A Mac's two more: the wheel with Command, and the pinch.
         let slots = if cfg!(target_os = "macos") { 12 } else { 10 };
         assert_eq!(gestures, slots, "{uncommented}");

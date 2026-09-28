@@ -279,6 +279,24 @@ pub fn open(opener: &Opener, path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Opens the text file at `path` in whatever the desktop opens it with,
+/// through `xdg-open`, which asks the desktop's own associations.
+pub fn edit(path: &Path) -> Result<()> {
+    use std::os::unix::process::CommandExt as _;
+
+    let mut child = Command::new("xdg-open")
+        .arg(path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .process_group(0)
+        .spawn()
+        .context("starting xdg-open")?;
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
 /// A desktop file id on its way to being read, and whether the entry behind
 /// it still has to prove it claims the type.
 struct Candidate {

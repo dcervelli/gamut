@@ -13,6 +13,8 @@ mod gui;
 pub mod input;
 mod kept;
 pub mod keymap;
+#[cfg(target_os = "macos")]
+mod menubar;
 mod order;
 mod playback;
 mod region;
@@ -99,6 +101,10 @@ pub enum UserEvent {
     /// files arrive on the command line.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Opened(Vec<PathBuf>),
+    /// Something was chosen in the Mac's menu bar with the pointer — see
+    /// `menubar`.
+    #[cfg(target_os = "macos")]
+    Menu(crate::menubar::Chosen),
 }
 
 /// The other threads, and how each reaches the loop: made in `main` from
@@ -230,6 +236,13 @@ pub struct App {
     /// close to the moment as anything short of watching the whole desktop
     /// for changes could get.
     openers: Vec<Opener>,
+    /// The Mac's menu bar, once the application has finished launching and
+    /// it is installed; and until then, how a choice made in it will reach
+    /// the loop — see [`menubar`].
+    #[cfg(target_os = "macos")]
+    menubar: Option<menubar::MenuBar>,
+    #[cfg(target_os = "macos")]
+    menu_deliver: Option<crate::menubar::Deliver>,
     /// The paths as the command line gave them, and a watch on each directory
     /// among them. A directory is a place to look rather than a fixed list:
     /// images appearing in it or disappearing from it while the window is open
@@ -509,6 +522,10 @@ impl App {
             kept: Kept::default(),
             watch,
             openers: Vec::new(),
+            #[cfg(target_os = "macos")]
+            menubar: None,
+            #[cfg(target_os = "macos")]
+            menu_deliver: None,
             named,
             directories,
             folder,
@@ -2616,6 +2633,10 @@ impl App {
             Effect::Quit => event_loop.exit(),
             Effect::Nothing => {}
         }
+        // What the menus show as they next open, now that the handler has
+        // changed what it was going to.
+        #[cfg(target_os = "macos")]
+        self.publish_menu();
     }
 }
 
@@ -2871,6 +2892,8 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 Effect::Redraw
             }
+            #[cfg(target_os = "macos")]
+            UserEvent::Menu(chosen) => self.chose(chosen),
             UserEvent::Clipboard(offered) => self.clipboard_changed(offered),
             UserEvent::Monitor => self.sync_monitor(),
             // A frame from the player of a file already stepped past is news
@@ -2892,6 +2915,8 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        #[cfg(target_os = "macos")]
+        self.install_menubar();
         if self.shown.is_some() {
             return;
         }
@@ -3613,7 +3638,11 @@ mod tests {
 
         app.open_named(paths.clone());
         assert_eq!(app.opening_size(), Some([640.0, 320.0]));
-        assert_eq!(app.sized_for, Some([640.0, 320.0]), "opened at its size already");
+        assert_eq!(
+            app.sized_for,
+            Some([640.0, 320.0]),
+            "opened at its size already"
+        );
         answer(&mut app, Reload::Fresh);
         assert!(!app.size_to_next, "spent on the arrival");
         assert_eq!(app.sized_for, None);

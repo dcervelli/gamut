@@ -14,6 +14,8 @@ mod image;
 mod listing;
 mod loader;
 mod media;
+#[cfg(target_os = "macos")]
+mod menubar;
 mod monitor;
 mod motion;
 mod no_replace;
@@ -174,7 +176,15 @@ fn run() -> Result<ExitCode> {
     // With a user event: it is how the loader hands finished images back and
     // how the monitor watch says a monitor has changed, and how either wakes
     // a loop that is otherwise asleep between one file check and the next.
-    let event_loop = EventLoop::<app::UserEvent>::with_user_event().build()?;
+    let mut builder = EventLoop::<app::UserEvent>::with_user_event();
+    // The menu bar is the program's own, put up once the application has
+    // finished launching — see `menubar` — rather than winit's.
+    #[cfg(target_os = "macos")]
+    {
+        use winit::platform::macos::EventLoopBuilderExtMacOS as _;
+        builder.with_default_menu(false);
+    }
+    let event_loop = builder.build()?;
     event_loop.set_control_flow(ControlFlow::Wait);
     let proxy = event_loop.create_proxy();
     let loader = Loader::new(move |decoded| {
@@ -240,6 +250,13 @@ fn run() -> Result<ExitCode> {
     // well as on the terminal, since the window is where the reader is.
     if paste && opened_on_nothing {
         app.say(&app::input::nothing_to_paste());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let proxy = event_loop.create_proxy();
+        app.deliver_menu(Box::new(move |chosen| {
+            let _ = proxy.send_event(app::UserEvent::Menu(chosen));
+        }));
     }
     // Said last, so that it is the one up: a configuration that did not
     // take is why the window is not as it was asked to be, and whoever

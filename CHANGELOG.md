@@ -40,6 +40,13 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   the Dock and Launchpad and its name at the head of the menu bar. Finder
   offers it under "Open With" for every format it reads. The Homebrew formula
   installs it, and `gamut` on the command line starts it.
+- On a Mac, a menu bar of the program's own: File, Edit, View, Image, Go,
+  Window and Help, holding what the buttons and keys do, each item with its
+  key beside it and grayed out where it would do nothing. Settings (`Cmd+,`)
+  opens the configuration file in the text editor, writing it first with
+  every setting commented out if there is none; on Linux the same is the
+  key name `interface.settings`, bound to nothing. `Cmd+L` and `Cmd+R` turn
+  the picture, as in Preview.
 
 ### Changed
 

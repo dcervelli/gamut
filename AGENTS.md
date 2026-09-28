@@ -60,6 +60,9 @@ app/           the event loop's state and winit handlers
                  with one holder per context, action_for() — the region's names first while
                  one is selected — and template() (pure, tested)
   window.rs      opening size, titles
+  menubar.rs     (macOS) what the menu bar holds — each item an Action or a Control, the
+                 key the keymap binds to the same job — and App::publish_menu, the snapshot
+                 of which items are alive, checked or retitled that each handler leaves
 ui/            lays each frame's interface out with egui; no wgpu or winit imports
   mod.rs         Current, Panels, FrameInput, show() — the whole interface, handing back Commands —
                  the picture's own drag and wheel, room(), backdrop()
@@ -192,6 +195,10 @@ openers/       what else on the desktop can open the file on screen, and startin
 media.rs       MIME_TYPES: what the desktop calls each extension the decoders read
 clock.rs       a moment as a date and time — UTC, or the zone the system's own
                compiled zone file says it is in
+menubar.rs     (macOS) the menu bar in AppKit, built from a tree of titles, key equivalents
+               and tags: a choice made with the pointer handed back as UserEvent::Menu, a
+               key that reached an item handed on to winit's view, the snapshot read as a
+               menu opens
 finder.rs      (macOS) the files Launch Services asks the program to open — a double
                click in Finder, "Open With", the Dock — answered as the Apple Event
                they arrive in and handed to the loop as UserEvent::Opened
@@ -301,6 +308,7 @@ still agrees with both, so renaming either is editing the constant —
 | A thumbnail's source | `Decoder::preview` for a format that carries a smaller picture of itself, which the thumbnailer asks for before it decodes anything; `thumbnail::SIDE` is the size it has to reach to be used |
 | A popup menu | a function in `ui/menu.rs` that lays its cells out, each pushing `Command::Press` of a typed `Control` — `ZoomTo`, `Format`, `Copies`, or `Opener`, which is a place in a list the application built rather than a choice named in the source — and an `egui::Popup` hung off its button in `ui/chrome.rs`, aligned below, above or beside it with `RectAlign`. The popup opens, closes and takes the pointer by itself; `App::close_menus` is how a key closes one. An item that does something rather than setting something is performed in `App::press`, as the menu of copies is, and prints its key beside it from `Naming::shortcut` |
 | What else can open the file on screen, or what happens when one is chosen | `openers/linux.rs`: `media.rs::MIME_TYPES` says what the desktop calls a file this program reads, `read_entry` which entries are offered and which are left out, and `open` how one is started. The list is read once per file in `App::apply`; the button is `Pass::open_button`, the menu `ui/menu.rs::open_items`, and the press `App::open_in` |
+| The Mac's menu bar: what is in it, what an item is called or shows | `app/menubar.rs`: `menus` and its three helpers lay the bar out, each item a `Builder::action` (an `Action`, its key shown), `Builder::button` (a `Control`, showing the key `input::action_of` names for the button) or `Builder::control` (a `Control` with the key given, or none); `App::alive`, `App::checked` and `App::retitled` for how it is shown now. Its key is always the keymap's — never a chord of its own — since the menu hands every key it catches on to the key table; see `docs/macos.md`. `menubar.rs` only when AppKit's side needs something new: a `Node`, a `Standard` item |
 | A CLI flag | `cli.rs`, and the `Options` / `Startup` / `Overrides` field it sets; a flag for something the configuration file also sets writes into `Options::config` after the file is read |
 | A mouse gesture | `gestures.rs`: a behavior is a `WORDS` entry and a variant, with its arm in `Pass::picture` / `Pass::region_gestures` (drags, clicks, holds) or `App::wheel` (the wheel) and `App::pinch` (a pinch); a default is a line of `Gestures::table`, and of `Gestures::mac` where a Mac's differs. What the primary button does from a region's handle, with a region asked for, or with the fit key held is fixed ahead of any slot, in `Pass::region_gestures` |
 | What the configuration file sets, or what is remembered between runs | `settings.rs`: a `Config` field for what the user chooses ahead of time — its default in `Config::default`, its name and words in `SETTINGS`, `Config::value` and `Config::parse` — the tests hold the three and `--print-config`'s template to each other; a `keys.` line is `Keymap::bind` and a `gesture.` line `Gestures::set`, both read in `Config::parse` — where it lands in `App::new`, and `user-docs/SETTINGS.md`; a `State` field for what was left where it was set by hand — `State::parse` and `State::render`, read in `App::new` and gathered in `App::exiting`. The tests build `App` from `StateFile::none()` and a `Config` of their own, so neither file is ever touched by them |

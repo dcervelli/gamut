@@ -24,6 +24,7 @@ Command, `⌥` Option, `⇧` Shift and `⌃` Control, run together onto the key.
 | `⌘`-Arrows | Pan to the far side of the image; with a region selected, grow it that way one pixel | `pan.edge.left` … `pan.edge.down`; `region.grow.left` … `region.grow.down` |
 | `⇧⌘`-Arrows | With a region selected, shrink it that way one pixel | `region.shrink.left` … `region.shrink.down` |
 | `?`, `/`, `⌘?` | Show the keys | `interface.help` |
+| `⌘,` | Open the configuration file in your text editor | `interface.settings` |
 | `q`, `⌘Q`, `⌘W` | Quit | `interface.quit` |
 | `⌘P` | Choose a file from the list | `files.chooser` |
 | `⌘[`, `⌘]` | Back and forward in image history | `files.back`, `files.forward` |
@@ -31,6 +32,8 @@ Command, `⌥` Option, `⇧` Shift and `⌃` Control, run together onto the key.
 | `⌘⌫`, `⌦` | Move the file on screen to the Trash | `files.delete` |
 | `⌘Z` | Undo | `files.undo` |
 | `⌘E` | Export the picture as shown | `files.export` |
+| `;`, `⌘L` | Turn the picture a quarter counterclockwise | `display.turn.left` |
+| `'`, `⌘R` | Turn the picture a quarter clockwise | `display.turn.right` |
 | `⌘C` | Copy the image, or the region, as displayed | `clipboard.image` |
 | `⇧C`, `⌥⌘C` | Copy the file's path | `clipboard.path` |
 | `⇧⌘C` | Copy the file as a URI | `clipboard.uri` |
@@ -52,6 +55,13 @@ right button's hold is the loupe, as on Linux: a two-finger click, or
 
 The help popup (`?`) and `gamut --help` show the Mac's keys spelled the same
 way: `⇧⌘O`, `⌘`-Arrows, `⌦`, `Return`.
+
+The menu bar holds what the buttons and keys do, with each item's key beside
+it — the key bound now, so one changed in the configuration file shows there.
+An item is grayed out where it would do nothing. Settings (`⌘,`) opens the
+configuration file in your text editor, first writing it with every setting
+commented out at its default if there is none; a change takes effect the next
+time `gamut` starts.
 
 ## Zoom and position
 
@@ -684,6 +694,7 @@ where all of it is set.
 | `` ` `` | Show or hide the panels around the image | `interface.toggle` |
 | `~` | The same, and closes the histogram, information, minimap and file list | `interface.toggle-panels` |
 | `?`, `/` | Show the keys: every one of them, what it does and when. Again, `Esc` or a click outside closes it. The button at the foot of the right strip does the same | `interface.help` |
+| (none) | Open the configuration file in the desktop's text editor, writing it first if there is none | `interface.settings` |
 | `q`, `Esc` | Quit. `Esc` closes a popup, a message or a region, or brings the panels back | `interface.quit`, `interface.dismiss` |
 
 The panels are opaque and the image is fitted inside them, so hiding them
