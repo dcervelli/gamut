@@ -293,6 +293,10 @@ const CTRL: Mods = Mods::CONTROL;
 const SHIFT: Mods = Mods::SHIFT;
 const CTRL_SHIFT: Mods = Mods::CONTROL.union(Mods::SHIFT);
 const ALT: Mods = Mods::ALT;
+/// The Command key, which winit calls Super.
+const CMD: Mods = Mods::SUPER;
+const CMD_SHIFT: Mods = Mods::SUPER.union(Mods::SHIFT);
+const CMD_OPTION: Mods = Mods::SUPER.union(Mods::ALT);
 
 /// What to press for `action`: the chords of the name that runs it, and
 /// `None` where nothing is bound to it.
@@ -1405,6 +1409,81 @@ pub static ROWS: &[Row] = &[
     },
 ];
 
+/// The names whose chords differ on a Mac, and what they are there: Command
+/// where the table has Ctrl, since Ctrl with the arrows is Mission Control's
+/// and Command is what every Mac program's shortcuts are held with; the
+/// menu shortcuts a Mac user already knows — `Cmd+0`, `Cmd+Z`,
+/// `Cmd+Backspace` to throw a file away, `Cmd+Q` and `Cmd+W`; and `Cmd+[`
+/// and `Cmd+]` for back and forward, as a browser has them. A name not here
+/// keeps the table's chords.
+///
+/// Applied over the table by [`Keymap::mac`](super::keymap::Keymap::mac),
+/// which binds each name here in turn as the configuration file would.
+pub static MAC_DEFAULTS: &[(&str, &[Chord])] = &[
+    (
+        "zoom.100",
+        &[
+            digit(PLAIN, KeyCode::Digit1),
+            digit(PLAIN, KeyCode::Digit0),
+            digit(CMD, KeyCode::Digit0),
+        ],
+    ),
+    (
+        "zoom.in",
+        &[key('+'), key('='), typed(CMD, '+'), typed(CMD, '=')],
+    ),
+    ("zoom.out", &[key('-'), key('_'), typed(CMD, '-')]),
+    ("pan.edge.left", &[named(CMD, NamedKey::ArrowLeft)]),
+    ("pan.edge.right", &[named(CMD, NamedKey::ArrowRight)]),
+    ("pan.edge.up", &[named(CMD, NamedKey::ArrowUp)]),
+    ("pan.edge.down", &[named(CMD, NamedKey::ArrowDown)]),
+    ("region.grow.left", &[named(CMD, NamedKey::ArrowLeft)]),
+    ("region.grow.right", &[named(CMD, NamedKey::ArrowRight)]),
+    ("region.grow.up", &[named(CMD, NamedKey::ArrowUp)]),
+    ("region.grow.down", &[named(CMD, NamedKey::ArrowDown)]),
+    (
+        "region.shrink.left",
+        &[named(CMD_SHIFT, NamedKey::ArrowLeft)],
+    ),
+    (
+        "region.shrink.right",
+        &[named(CMD_SHIFT, NamedKey::ArrowRight)],
+    ),
+    ("region.shrink.up", &[named(CMD_SHIFT, NamedKey::ArrowUp)]),
+    (
+        "region.shrink.down",
+        &[named(CMD_SHIFT, NamedKey::ArrowDown)],
+    ),
+    ("interface.help", &[key('?'), key('/'), typed(CMD, '?')]),
+    // One window: closing it is quitting.
+    (
+        "interface.quit",
+        &[key('q'), typed(CMD, 'q'), typed(CMD, 'w')],
+    ),
+    ("files.chooser", &[typed(CMD, 'p')]),
+    ("files.back", &[typed(CMD, '[')]),
+    ("files.forward", &[typed(CMD, ']')]),
+    ("files.open", &[typed(CMD, 'o')]),
+    ("files.open-folder", &[typed(CMD, 'O')]),
+    // Finder's Move to Trash, and the forward Delete key besides.
+    (
+        "files.delete",
+        &[
+            named(CMD, NamedKey::Backspace),
+            named(PLAIN, NamedKey::Delete),
+        ],
+    ),
+    ("files.undo", &[typed(CMD, 'z')]),
+    ("files.export", &[typed(CMD, 'e')]),
+    ("clipboard.path", &[key('C'), typed(CMD_OPTION, 'c')]),
+    ("clipboard.uri", &[typed(CMD, 'C')]),
+    ("clipboard.image", &[typed(CMD, 'c')]),
+    ("clipboard.info", &[typed(CMD, 'i')]),
+    ("clipboard.pixel", &[typed(CMD, '.')]),
+    ("clipboard.coordinate", &[typed(CMD, '>')]),
+    ("clipboard.paste", &[typed(CMD, 'v')]),
+];
+
 /// The words the application has for the interface, gathered before a
 /// frame: enough to compose any tooltip the pointer might rest for, without
 /// the interface reaching back into the application to ask.
@@ -1824,7 +1903,18 @@ pub fn nothing_to_paste() -> String {
 /// one reading of a key event the table's dispatch takes, so that whatever
 /// a platform needs of it is done here once, for the chooser's check and the
 /// press alike.
-pub(super) fn logical_key(event: &KeyEvent, _mods: ModifiersState) -> Key {
+///
+/// On a Mac, Option types characters of its own — Option with `[` is `“` —
+/// so a chord held with Option is read by the key without it, which is the
+/// key a chord such as `Cmd+Option+C` names. Linux leaves Alt alone, and a
+/// layout that types with AltGr keeps what it types.
+pub(super) fn logical_key(event: &KeyEvent, mods: ModifiersState) -> Key {
+    #[cfg(target_os = "macos")]
+    if mods.alt_key() {
+        use winit::platform::modifier_supplement::KeyEventExtModifierSupplement as _;
+        return event.key_without_modifiers();
+    }
+    let _ = mods;
     event.logical_key.clone()
 }
 
@@ -2467,6 +2557,7 @@ impl App {
                 notched,
                 held,
             } => return self.wheel(delta, notched, held),
+            ui::Command::Pinch { steps } => return self.pinch(steps),
             // The hand on the minimap: the view goes where it is put, as
             // it does for a drag on the picture.
             ui::Command::Center(at) => {
@@ -2581,6 +2672,24 @@ impl App {
             WheelAction::Zoom => self.zoom_wheel(steps, notched),
             WheelAction::LoupeMagnification => self.magnify(steps),
             WheelAction::Pan => self.pan_wheel(delta, notched),
+            stepper => self.step_wheel(stepper, steps),
+        }
+    }
+
+    /// Two fingers pinched on the picture by `steps` of the zoom: whatever
+    /// its slot steps, as the wheel does by as many notches, the hand on the
+    /// view throughout.
+    fn pinch(&mut self, steps: f32) -> Effect {
+        let Some(action) = self.gestures.pinch(Surface::Image, self.pointer.modifiers) else {
+            return Effect::Nothing;
+        };
+        if !steps.is_finite() {
+            return Effect::Nothing;
+        }
+        match action {
+            WheelAction::Zoom => self.zoom_wheel(steps, false),
+            WheelAction::LoupeMagnification => self.magnify(steps),
+            WheelAction::Pan => self.pan_wheel([0.0, steps], false),
             stepper => self.step_wheel(stepper, steps),
         }
     }
@@ -3414,9 +3523,14 @@ mod tests {
             named(Control::Rename).as_deref(),
             Some("Rename the current file (F2)")
         );
+        let delete = if cfg!(target_os = "macos") {
+            "\u{2326}"
+        } else {
+            "Del"
+        };
         assert_eq!(
-            named(Control::Delete).as_deref(),
-            Some("Trash the current file (Del)")
+            named(Control::Delete),
+            Some(format!("Trash the current file ({delete})"))
         );
         // The key that takes a file off the list, and the pair at the head
         // of the list by the chords that do the same.
@@ -3424,9 +3538,10 @@ mod tests {
             named(Control::Remove).as_deref(),
             Some("Remove the current file from the file list (\u{232b})")
         );
+        let alt = crate::gestures::modifiers_spelled(ALT);
         assert_eq!(
-            named(Control::Back).as_deref(),
-            Some("Back in image history (Alt+[, Alt+Page Up)")
+            named(Control::Back),
+            Some(format!("Back in image history ({alt}[, {alt}Page Up)"))
         );
         assert_eq!(
             named(Control::Filmstrip).as_deref(),

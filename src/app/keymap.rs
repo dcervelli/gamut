@@ -88,6 +88,15 @@ const NAMED: &[(NamedKey, &str, &str)] = &[
     (NamedKey::F12, "f12", "F12"),
 ];
 
+/// The line of the template that names the modifiers, in the words this
+/// platform writes them in.
+#[cfg(not(target_os = "macos"))]
+const MODIFIER_LINE: &str =
+    "# ctrl, alt, shift, super; the key one character as the keyboard types it\n";
+#[cfg(target_os = "macos")]
+const MODIFIER_LINE: &str =
+    "# ctrl, option, shift, cmd; the key one character as the keyboard types it\n";
+
 /// The four arrows, which a column of four with one prefix names at once.
 const ARROWS: [NamedKey; 4] = [
     NamedKey::ArrowLeft,
@@ -205,12 +214,30 @@ impl Chord {
                 character.to_ascii_uppercase().to_string()
             }
             Char(character) => character.to_string(),
-            Named(named) => NAMED
-                .iter()
-                .find(|(each, ..)| *each == named)
-                .map_or_else(|| format!("{named:?}"), |(.., spelled)| spelled.to_string()),
+            Named(named) => mac_word(named)
+                .or_else(|| {
+                    NAMED
+                        .iter()
+                        .find(|(each, ..)| *each == named)
+                        .map(|(.., spelled)| *spelled)
+                })
+                .map_or_else(|| format!("{named:?}"), str::to_string),
             Position(code) => digit(code).map_or_else(|| format!("{code:?}"), |d| d.to_string()),
         }
+    }
+}
+
+/// What a Mac's keycap calls a named key, where it calls it something else:
+/// the forward Delete key is ⌦ beside the Delete key's ⌫, and Enter is
+/// Return.
+fn mac_word(named: NamedKey) -> Option<&'static str> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    match named {
+        NamedKey::Delete => Some("\u{2326}"),
+        NamedKey::Enter => Some("Return"),
+        _ => None,
     }
 }
 
@@ -323,10 +350,15 @@ pub struct Keymap {
 }
 
 /// The chords in force before the configuration file is read: the table's
-/// own. What `--help`, the man page and `--print-config` describe.
+/// own, or on a Mac [`Keymap::mac`]. What `--help`, the man page and
+/// `--print-config` describe.
 impl Default for Keymap {
     fn default() -> Self {
-        Self::table()
+        if cfg!(target_os = "macos") {
+            Self::mac()
+        } else {
+            Self::table()
+        }
     }
 }
 
@@ -336,6 +368,20 @@ impl Keymap {
     /// that they say the same thing wherever they run.
     pub fn table() -> Self {
         Self::new(super::input::ROWS)
+    }
+
+    /// The table with a Mac's chords where they differ —
+    /// [`super::input::MAC_DEFAULTS`] bound over it, name by name. Built on
+    /// every platform, so that the tests hold it to the table's rules
+    /// wherever they run.
+    pub fn mac() -> Self {
+        let mut keymap = Self::table();
+        for (name, chords) in super::input::MAC_DEFAULTS {
+            keymap
+                .bind(name, chords.to_vec())
+                .unwrap_or_else(|error| panic!("{name} is not a name of the table: {error}"));
+        }
+        keymap
     }
 
     /// Every name of `rows` at its defaults.
@@ -534,9 +580,11 @@ impl Keymap {
     pub fn template(&self) -> String {
         let mut text = String::from(
             "\n# Keys: each keys.<name> takes its chords, whitespace between them; with\n\
-             # none the name is unbound. A chord is modifiers joined by + and then a key:\n\
-             # ctrl, alt, shift, super; the key one character as the keyboard types it\n\
-             # (> rather than shift+., L for Shift+L), a digit of the number row by its\n\
+             # none the name is unbound. A chord is modifiers joined by + and then a key:\n",
+        );
+        text.push_str(MODIFIER_LINE);
+        text.push_str(
+            "# (> rather than shift+., L for Shift+L), a digit of the number row by its\n\
              # place (shift+2), or space, enter, esc, tab, backspace, delete, insert,\n\
              # home, end, pageup, pagedown, left, right, up, down, f1 to f12. # starts\n\
              # a comment, so the key that types it is written by its place: shift+3.\n\
@@ -638,9 +686,38 @@ mod tests {
         assert_eq!(spelled("shift+2"), "Shift+2");
         assert_eq!(spelled("pageup"), "Page Up");
         assert_eq!(spelled("backspace"), "\u{232b}");
-        assert_eq!(spelled("delete"), "Del");
         assert_eq!(spelled("f2"), "F2");
-        assert_eq!(spelled("alt+["), "Alt+[");
+        // What a Mac's keycaps say differs from a PC's.
+        if cfg!(target_os = "macos") {
+            assert_eq!(spelled("delete"), "\u{2326}");
+            assert_eq!(spelled("enter"), "Return");
+            assert_eq!(spelled("alt+["), "Option+[");
+            assert_eq!(spelled("super+z"), "Cmd+Z");
+            assert_eq!(
+                spelled("ctrl+alt+shift+super+left"),
+                "Ctrl+Option+Shift+Cmd+Left"
+            );
+        } else {
+            assert_eq!(spelled("delete"), "Del");
+            assert_eq!(spelled("enter"), "Enter");
+            assert_eq!(spelled("alt+["), "Alt+[");
+            assert_eq!(spelled("super+z"), "Super+Z");
+            assert_eq!(
+                spelled("ctrl+alt+shift+super+left"),
+                "Ctrl+Alt+Super+Shift+Left"
+            );
+        }
+    }
+
+    /// Every word for a modifier reads on every platform, so that a file
+    /// written on one reads on the other.
+    #[test]
+    fn every_word_for_a_modifier_reads_everywhere() {
+        assert_eq!(chord("cmd+z"), chord("super+z"));
+        assert_eq!(chord("command+z"), chord("super+z"));
+        assert_eq!(chord("option+["), chord("alt+["));
+        assert_eq!(chord("opt+["), chord("alt+["));
+        assert_eq!(chord("Control+z"), chord("ctrl+z"));
     }
 
     #[test]
@@ -658,7 +735,7 @@ mod tests {
         assert_eq!(all(&["left", "right", "up", "down"]), "Arrows");
         assert_eq!(all(&["shift+2", "shift+3", "shift+4"]), "Shift+2, 3, 4");
         assert_eq!(all(&["1", "0"]), "1, 0");
-        assert_eq!(all(&["alt+[", "alt+pageup"]), "Alt+[, Alt+Page Up");
+        assert_eq!(all(&["ctrl+[", "ctrl+pageup"]), "Ctrl+[, Ctrl+Page Up");
         assert_eq!(all(&["A", "S"]), "Shift+A, Shift+S");
         assert_eq!(all(&[";", "'"]), ";, '");
         assert_eq!(all(&["left", "right"]), "Left, Right");
@@ -816,11 +893,16 @@ mod tests {
         );
     }
 
-    /// The template, read back line by line, is the default keymap.
+    /// The template, read back line by line, is the keymap it was written
+    /// from: the default, and the Mac's on any platform.
     #[test]
     fn the_template_reads_back_as_the_defaults() {
-        let defaults = Keymap::default();
-        let mut read = Keymap::default();
+        reads_back(Keymap::default());
+        reads_back(Keymap::mac());
+    }
+
+    fn reads_back(defaults: Keymap) {
+        let mut read = defaults.clone();
         for name in read
             .binds()
             .map(|(_, bound)| bound.name)
@@ -843,6 +925,74 @@ mod tests {
         }
         assert_eq!(names, defaults.binds().count());
         assert_eq!(read, defaults);
+    }
+
+    /// The Mac's chords keep the table's rules: every name it sets is the
+    /// table's, no chord has two holders in one context, none of its
+    /// characters asks for Shift, and nothing is held with Ctrl, which on a
+    /// Mac is Mission Control's.
+    #[test]
+    fn the_macs_chords_keep_the_tables_rules() {
+        let keymap = Keymap::mac();
+        let mut seen: Vec<(Chord, Option<Context>, &str)> = Vec::new();
+        for (row, bound) in keymap.binds() {
+            for chord in keymap.chords_of(bound.name) {
+                if let Some((.., first)) = seen
+                    .iter()
+                    .find(|(each, context, _)| each == chord && *context == row.context())
+                {
+                    panic!("{chord:?} is both {first} and {}", bound.name);
+                }
+                seen.push((*chord, row.context(), bound.name));
+                if let Char(_) = chord.key {
+                    assert!(!chord.mods.shift_key(), "{} asks for Shift", bound.name);
+                }
+                assert!(
+                    !chord.mods.control_key(),
+                    "{} is held with Ctrl",
+                    bound.name
+                );
+            }
+        }
+    }
+
+    /// On a Mac, Command does what Ctrl does elsewhere, and the Mac's own
+    /// shortcuts do what a Mac user expects of them.
+    #[test]
+    fn the_mac_holds_its_shortcuts_with_command() {
+        let keymap = Keymap::mac();
+        let press = |mods: Mods, character: &str| {
+            keymap.action_for(
+                &Key::Character(character.into()),
+                PhysicalKey::Code(KeyCode::KeyA),
+                mods,
+                false,
+            )
+        };
+        assert_eq!(press(Mods::SUPER, "z"), Some(Action::Undo));
+        assert_eq!(press(Mods::SUPER, "c"), Some(Action::CopyImage));
+        assert_eq!(press(Mods::SUPER, "v"), Some(Action::Paste));
+        assert_eq!(press(Mods::SUPER, "q"), Some(Action::Quit));
+        assert_eq!(press(Mods::SUPER, "w"), Some(Action::Quit));
+        assert_eq!(press(Mods::SUPER, "["), Some(Action::Back));
+        assert_eq!(press(Mods::CONTROL, "z"), None);
+        let backspace = |mods| {
+            keymap.action_for(
+                &Key::Named(NamedKey::Backspace),
+                PhysicalKey::Code(KeyCode::Backspace),
+                mods,
+                false,
+            )
+        };
+        assert_eq!(backspace(Mods::SUPER), Some(Action::Delete));
+        assert_eq!(backspace(Mods::empty()), Some(Action::Remove));
+        let zero = keymap.action_for(
+            &Key::Character("0".into()),
+            PhysicalKey::Code(KeyCode::Digit0),
+            Mods::SUPER,
+            false,
+        );
+        assert_eq!(zero, Some(Action::ZoomTo(1.0)));
     }
 
     /// No chord has two holders in one context, and none of the table's

@@ -2,7 +2,9 @@
 
 use crate::render::{Placement, Upscale};
 
-const ZOOM_STEP: f32 = 1.25;
+/// How much one step of the zoom — a notch of the wheel, a key — multiplies
+/// it by.
+pub const ZOOM_STEP: f32 = 1.25;
 const MIN_ZOOM: f32 = 0.02;
 const MAX_ZOOM: f32 = 64.0;
 

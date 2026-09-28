@@ -18,7 +18,8 @@ use std::fmt::Write as _;
 pub use winit::keyboard::ModifiersState as Mods;
 
 /// The modifiers, in the order a chord or a slot writes them, each with the
-/// word the configuration file reads and the word people read.
+/// word the configuration file writes and the word people read.
+#[cfg(not(target_os = "macos"))]
 const MODIFIERS: [(Mods, &str, &str); 4] = [
     (Mods::CONTROL, "ctrl", "Ctrl"),
     (Mods::ALT, "alt", "Alt"),
@@ -26,17 +27,38 @@ const MODIFIERS: [(Mods, &str, &str); 4] = [
     (Mods::SHIFT, "shift", "Shift"),
 ];
 
-/// The modifier a word of the file names, in any case; `control` is taken
-/// for `ctrl`.
+/// On a Mac, in the order Apple's menus write them, and named as its keys
+/// are: Super is the Command key, and Alt the Option key.
+#[cfg(target_os = "macos")]
+const MODIFIERS: [(Mods, &str, &str); 4] = [
+    (Mods::CONTROL, "ctrl", "Ctrl"),
+    (Mods::ALT, "option", "Option"),
+    (Mods::SHIFT, "shift", "Shift"),
+    (Mods::SUPER, "cmd", "Cmd"),
+];
+
+/// Every word the file reads for a modifier, on every platform, so that a
+/// file written on one reads on the other.
+const MODIFIER_WORDS: [(&str, Mods); 9] = [
+    ("ctrl", Mods::CONTROL),
+    ("control", Mods::CONTROL),
+    ("alt", Mods::ALT),
+    ("option", Mods::ALT),
+    ("opt", Mods::ALT),
+    ("super", Mods::SUPER),
+    ("cmd", Mods::SUPER),
+    ("command", Mods::SUPER),
+    ("shift", Mods::SHIFT),
+];
+
+/// The modifier a word of the file names, in any case: `ctrl` or `control`,
+/// `alt`, `option` or `opt`, `super`, `cmd` or `command`, and `shift`.
 pub fn read_modifier(word: &str) -> Option<Mods> {
     let word = word.to_ascii_lowercase();
-    if word == "control" {
-        return Some(Mods::CONTROL);
-    }
-    MODIFIERS
+    MODIFIER_WORDS
         .iter()
-        .find(|(_, token, _)| *token == word)
-        .map(|(mods, ..)| *mods)
+        .find(|(each, _)| *each == word)
+        .map(|(_, mods)| *mods)
 }
 
 /// `mods` as the file writes them, each followed by `+`: `ctrl+shift+`.
@@ -152,7 +174,8 @@ impl Kind {
 }
 
 /// What is pressed or turned: a button, held with modifiers and used one
-/// way; or the wheel, turned with modifiers and, it may be, a button held.
+/// way; the wheel, turned with modifiers and, it may be, a button held; or
+/// two fingers pinched on a trackpad, with modifiers.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Input {
     Button {
@@ -163,6 +186,10 @@ pub enum Input {
     Wheel {
         mods: Mods,
         held: Option<Button>,
+    },
+    /// Takes what the wheel takes, a pinch out being the wheel turned up.
+    Pinch {
+        mods: Mods,
     },
 }
 
@@ -184,7 +211,18 @@ impl Slot {
             .into_iter()
             .find(|each| each.token() == surface.to_ascii_lowercase())
             .ok_or_else(|| format!("unknown surface `{surface}`: image or minimap"))?;
-        let input = if rest.to_ascii_lowercase().ends_with("wheel") && !rest.contains('.') {
+        let input = if rest.to_ascii_lowercase().ends_with("pinch") && !rest.contains('.') {
+            let mut words: Vec<&str> = rest.split('+').collect();
+            let pinch = words.pop().unwrap_or_default();
+            if !pinch.eq_ignore_ascii_case("pinch") {
+                return Err(format!("unknown gesture `{rest}`"));
+            }
+            let (mods, held) = modifiers_and_button(&words)?;
+            if held.is_some() {
+                return Err("a pinch is made with no button held".to_string());
+            }
+            Input::Pinch { mods }
+        } else if rest.to_ascii_lowercase().ends_with("wheel") && !rest.contains('.') {
             let mut words: Vec<&str> = rest.split('+').collect();
             let wheel = words.pop().unwrap_or_default();
             if !wheel.eq_ignore_ascii_case("wheel") {
@@ -245,6 +283,7 @@ impl Slot {
                 modifiers_token(mods),
                 held.map_or(String::new(), |button| format!("{}+", button.token()))
             ),
+            Input::Pinch { mods } => format!("{}pinch", modifiers_token(mods)),
         };
         format!("{}.{input}", self.surface.token())
     }
@@ -304,6 +343,7 @@ impl Slot {
                 modifiers_spelled(mods),
                 held.map_or(String::new(), |button| format!("{}+", button.spelled()))
             ),
+            Input::Pinch { mods } => format!("{}Pinch", modifiers_spelled(mods)),
         };
         match self.surface {
             Surface::Image => input,
@@ -312,11 +352,11 @@ impl Slot {
     }
 
     /// The kind of gesture this is, and so which words it takes: `None` for
-    /// the wheel.
+    /// the wheel and for a pinch, which takes the wheel's.
     fn kind(&self) -> Option<Kind> {
         match self.input {
             Input::Button { kind, .. } => Some(kind),
-            Input::Wheel { .. } => None,
+            Input::Wheel { .. } | Input::Pinch { .. } => None,
         }
     }
 }
@@ -498,6 +538,7 @@ impl Behavior {
 fn slot_kind_word(slot: &Slot) -> &'static str {
     match (slot.surface, slot.kind()) {
         (Surface::Minimap, _) => "minimap gesture",
+        (_, None) if matches!(slot.input, Input::Pinch { .. }) => "pinch",
         (_, None) => "wheel",
         (_, Some(kind)) => kind.token(),
     }
@@ -543,14 +584,43 @@ const fn image(button: Button, kind: Kind) -> Slot {
 }
 
 /// The slots in force before the configuration file is read: the table's
-/// own. What `--help`, the man page and `--print-config` describe.
+/// own, or on a Mac [`Gestures::mac`]. What `--help`, the man page and
+/// `--print-config` describe.
 impl Default for Gestures {
     fn default() -> Self {
-        Self::table()
+        if cfg!(target_os = "macos") {
+            Self::mac()
+        } else {
+            Self::table()
+        }
     }
 }
 
 impl Gestures {
+    /// The table as a Mac has it: two fingers scrolling pan the picture, as
+    /// they do in every Mac program that shows one, and the zoom is a pinch,
+    /// or the wheel with Command held. Built on every platform, so that the
+    /// tests can read it wherever they run.
+    pub fn mac() -> Self {
+        let mut gestures = Self::table();
+        let wheel = |mods| Slot {
+            surface: Surface::Image,
+            input: Input::Wheel { mods, held: None },
+        };
+        gestures.set(wheel(Mods::empty()), Behavior::Wheel(WheelAction::Pan));
+        gestures.set(wheel(Mods::SUPER), Behavior::Wheel(WheelAction::Zoom));
+        gestures.set(
+            Slot {
+                surface: Surface::Image,
+                input: Input::Pinch {
+                    mods: Mods::empty(),
+                },
+            },
+            Behavior::Wheel(WheelAction::Zoom),
+        );
+        gestures
+    }
+
     /// Every slot at the behavior the table itself gives it, the same on
     /// every platform. What the tests that name a gesture read, so that they
     /// say the same thing wherever they run.
@@ -672,6 +742,17 @@ impl Gestures {
         }
     }
 
+    /// What a pinch steps on `surface`, made with `mods`.
+    pub fn pinch(&self, surface: Surface, mods: Mods) -> Option<WheelAction> {
+        match self.get(&Slot {
+            surface,
+            input: Input::Pinch { mods },
+        })? {
+            Behavior::Wheel(action) => Some(*action),
+            _ => None,
+        }
+    }
+
     /// The key a click — or, where `kind` is [`Kind::DoubleClick`], a
     /// double click — of `button` with `mods` on `surface` runs, by name.
     pub fn click(&self, surface: Surface, mods: Mods, button: Button, kind: Kind) -> Option<&str> {
@@ -727,12 +808,13 @@ impl Gestures {
              # A surface is image or minimap. An input is [mods+]<button>.<kind>, the kind\n\
              # drag, hold, click or double-click and the button left, middle, right, back\n\
              # or forward; or [mods+][button+]wheel for the wheel turned with a button\n\
-             # held. Modifiers as for keys. A drag takes pan, zoom-box, move-region or\n\
-             # none; a hold loupe or none; the wheel zoom, loupe-magnification,\n\
-             # exposure, black-point, white-point, files, frames, pan or none; a click\n\
-             # or a double-click a key's name or none. On the minimap, a drag or a\n\
-             # click takes center or none. Whatever the slot, a drag started with a\n\
-             # region asked for draws it, one from a handle pulls it, and one with\n\
+             # held; or [mods+]pinch for two fingers pinched on a trackpad, which takes\n\
+             # what the wheel takes. Modifiers as for keys. A drag takes pan, zoom-box,\n\
+             # move-region or none; a hold loupe or none; the wheel zoom,\n\
+             # loupe-magnification, exposure, black-point, white-point, files, frames, pan\n\
+             # or none; a click or a double-click a key's name or none. On the minimap, a\n\
+             # drag or a click takes center or none. Whatever the slot, a drag started\n\
+             # with a region asked for draws it, one from a handle pulls it, and one with\n\
              # zoom.fit's key held zooms to a box.\n",
         );
         for (slot, behavior) in &self.slots {
@@ -759,7 +841,11 @@ mod tests {
                 "image.shift+left.drag",
                 "image.back.click",
                 "image.ctrl+middle.double-click",
-                "image.alt+super+right.hold",
+                if cfg!(target_os = "macos") {
+                    "image.option+cmd+right.hold"
+                } else {
+                    "image.alt+super+right.hold"
+                },
             ]
             .map(str::to_string),
         );
@@ -771,6 +857,66 @@ mod tests {
             Slot::read("image.Control+Middle+Wheel").map(|slot| slot.token()),
             Ok("image.ctrl+middle+wheel".to_string())
         );
+    }
+
+    /// A pinch is a slot of its own, with modifiers and no button, taking
+    /// what the wheel takes; the minimap has none.
+    #[test]
+    fn a_pinch_is_a_slot_that_takes_the_wheels_words() {
+        let pinch = Slot::read("image.pinch").unwrap();
+        assert_eq!(
+            pinch.input,
+            Input::Pinch {
+                mods: Mods::empty()
+            }
+        );
+        assert_eq!(pinch.token(), "image.pinch");
+        let held = Slot::read("image.super+pinch").unwrap();
+        assert_eq!(held.input, Input::Pinch { mods: Mods::SUPER });
+        assert_eq!(Slot::read(&held.token()), Ok(held));
+        assert_eq!(
+            Behavior::read(&pinch, "exposure"),
+            Ok(Behavior::Wheel(WheelAction::Exposure))
+        );
+        assert!(Behavior::read(&pinch, "loupe").is_err());
+        assert!(Slot::read("image.right+pinch").is_err());
+        assert!(Slot::read("minimap.pinch").is_err());
+    }
+
+    /// On a Mac two fingers pan, and the zoom is a pinch or the wheel with
+    /// Command; everything else is the table's.
+    #[test]
+    fn the_mac_pans_with_two_fingers_and_zooms_with_a_pinch() {
+        let mac = Gestures::mac();
+        let table = Gestures::table();
+        assert_eq!(
+            mac.wheel(Surface::Image, Mods::empty(), None),
+            Some(WheelAction::Pan)
+        );
+        assert_eq!(
+            mac.wheel(Surface::Image, Mods::SUPER, None),
+            Some(WheelAction::Zoom)
+        );
+        assert_eq!(
+            mac.pinch(Surface::Image, Mods::empty()),
+            Some(WheelAction::Zoom)
+        );
+        assert_eq!(table.pinch(Surface::Image, Mods::empty()), None);
+        assert_eq!(
+            mac.drag(Surface::Image, Mods::empty(), Button::Left),
+            table.drag(Surface::Image, Mods::empty(), Button::Left)
+        );
+        let template = mac.template();
+        let mut read = Gestures { slots: Vec::new() };
+        for line in template
+            .lines()
+            .filter_map(|line| line.strip_prefix("# gesture."))
+        {
+            let (name, word) = line.split_once(" = ").expect("name = value");
+            let slot = Slot::read(name).unwrap();
+            read.set(slot, Behavior::read(&slot, word).unwrap());
+        }
+        assert_eq!(read, mac);
     }
 
     #[test]

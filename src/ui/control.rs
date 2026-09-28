@@ -297,6 +297,12 @@ pub enum Command {
         notched: bool,
         held: Option<Button>,
     },
+    /// Two fingers pinched on a trackpad over the picture, by `steps` of the
+    /// zoom — out is up, as the wheel's notches are — in fractions of one:
+    /// what it does is its slot's to say.
+    Pinch {
+        steps: f32,
+    },
     /// The hand is on one of the histogram band's handles: the value, on
     /// the image's own linear scale, that is to come out black, or white.
     /// Said on every frame of the drag, the value being where the hand is

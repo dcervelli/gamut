@@ -611,6 +611,12 @@ impl Pass<'_> {
                                 held,
                             })
                         }
+                        // A pinch arrives as the factor the fingers asked the
+                        // picture to grow by, which is so many steps of the
+                        // zoom.
+                        egui::Event::Zoom(factor) if *factor > 0.0 => Some(Command::Pinch {
+                            steps: factor.ln() / crate::view::ZOOM_STEP.ln(),
+                        }),
                         _ => None,
                     })
                     .collect()

@@ -34,8 +34,8 @@ inside it, in name order, and is read again as it changes: an image added
 to it or taken out of it joins or leaves the list. --paste puts the image
 on the clipboard at the front of the list, and needs no path at all. With
 no path and no paste the window opens empty, offering to open files or a
-folder through the desktop's file dialog, or to paste; Ctrl+O opens that
-dialog from any window.
+folder through the desktop's file dialog, or to paste; Ctrl+O, or Cmd+O on
+a Mac, opens that dialog from any window.
 
 OPTIONS:
     -h, --help              Show this help
