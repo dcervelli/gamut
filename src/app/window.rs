@@ -376,7 +376,12 @@ pub(super) fn centered_on(window: &Window, size: LogicalSize<u32>) -> Option<Log
             size: [room.width - left - right, room.height - top - bottom],
         }
     });
-    let [x, y] = centered([origin.x, origin.y], [outer.width, outer.height], frame, area);
+    let [x, y] = centered(
+        [origin.x, origin.y],
+        [outer.width, outer.height],
+        frame,
+        area,
+    );
     ((x, y) != (origin.x, origin.y)).then(|| LogicalPosition::new(x, y))
 }
 

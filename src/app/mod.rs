@@ -6996,7 +6996,12 @@ mod tests {
                 .set("Built-in", Mode::Hdr, headroom);
         };
         let weight = |app: &App| {
-            app.current.as_ref().unwrap().lift.as_ref().map(|table| table.weight())
+            app.current
+                .as_ref()
+                .unwrap()
+                .lift
+                .as_ref()
+                .map(|table| table.weight())
         };
 
         // The window lands on the display before it has ramped, and the
