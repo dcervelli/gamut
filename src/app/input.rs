@@ -3402,6 +3402,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gestures::spelled_here;
 
     /// The free readings of the table, over the default keys.
     fn names(tip: Tip) -> Option<String> {
@@ -3538,10 +3539,14 @@ mod tests {
             named(Control::Remove).as_deref(),
             Some("Remove the current file from the file list (\u{232b})")
         );
-        let alt = crate::gestures::modifiers_spelled(ALT);
+        let alt = |key| crate::gestures::with_modifiers(ALT, key);
         assert_eq!(
             named(Control::Back),
-            Some(format!("Back in image history ({alt}[, {alt}Page Up)"))
+            Some(format!(
+                "Back in image history ({}, {})",
+                alt("["),
+                alt("Page Up")
+            ))
         );
         assert_eq!(
             named(Control::Filmstrip).as_deref(),
@@ -3620,11 +3625,11 @@ mod tests {
     fn the_open_buttons_name_the_keys_that_open_the_dialog() {
         assert_eq!(
             names(Tip::Control(Control::OpenFiles)).as_deref(),
-            Some("Choose image files to open (Ctrl+O)")
+            Some(spelled_here("Choose image files to open (Ctrl+O)").as_str())
         );
         assert_eq!(
             names(Tip::Control(Control::OpenFolder)).as_deref(),
-            Some("Choose a folder of images to open (Ctrl+Shift+O)")
+            Some(spelled_here("Choose a folder of images to open (Ctrl+Shift+O)").as_str())
         );
         let namer = Namer {
             path: String::new(),
@@ -3639,13 +3644,16 @@ mod tests {
         };
         assert_eq!(
             namer.shortcut(Control::OpenFiles).as_deref(),
-            Some("Ctrl+O")
+            Some(spelled_here("Ctrl+O").as_str())
         );
         assert_eq!(
             namer.shortcut(Control::OpenFolder).as_deref(),
-            Some("Ctrl+Shift+O")
+            Some(spelled_here("Ctrl+Shift+O").as_str())
         );
-        assert_eq!(namer.shortcut(Control::Paste).as_deref(), Some("Ctrl+V"));
+        assert_eq!(
+            namer.shortcut(Control::Paste).as_deref(),
+            Some(spelled_here("Ctrl+V").as_str())
+        );
 
         // And the keys reach them: `o` with Ctrl, `O` with Ctrl and the
         // Shift the capital carries.
@@ -3778,7 +3786,7 @@ mod tests {
         };
         assert_eq!(
             key("Undo the last rename, deletion or removal").as_deref(),
-            Some("Ctrl+E")
+            Some(spelled_here("Ctrl+E").as_str())
         );
         assert_eq!(
             key("Export the picture as shown to a new JPG or PNG").as_deref(),
@@ -3953,7 +3961,7 @@ mod tests {
 
         assert_eq!(
             named(ZOOM_CHOICES[0]).as_deref(),
-            Some("Zoom to 10% (Shift+4)")
+            Some(spelled_here("Zoom to 10% (Shift+4)").as_str())
         );
         assert_eq!(
             named(ZOOM_CHOICES[3]).as_deref(),
@@ -4077,7 +4085,7 @@ mod tests {
         );
         assert_eq!(
             tooltip(Tip::WhitePoint).hints,
-            ["White point down / up (Shift+A, Shift+S)"]
+            [spelled_here("White point down / up (Shift+A, Shift+S)")]
         );
         // And the exposure's slider names the keys that step it.
         assert_eq!(
@@ -4110,9 +4118,9 @@ mod tests {
         assert_eq!(
             tooltip.hints,
             [
-                "Cycle pixel format: hex, decimal, mapped (.)",
-                "Copy pixel value under pointer (Ctrl+.)",
-                "Copy coordinate of pixel under pointer (Ctrl+>)",
+                spelled_here("Cycle pixel format: hex, decimal, mapped (.)"),
+                spelled_here("Copy pixel value under pointer (Ctrl+.)"),
+                spelled_here("Copy coordinate of pixel under pointer (Ctrl+>)"),
             ]
         );
 
@@ -4132,11 +4140,11 @@ mod tests {
         assert_eq!(
             tooltip.hints,
             [
-                "Cycle pixel format: hex, decimal, mapped (.)",
-                "Cycle coordinate: pixel, projected, geographic (,)",
-                "Switch latitude and longitude: decimal, DMS (<)",
-                "Copy pixel value under pointer (Ctrl+.)",
-                "Copy coordinate of pixel under pointer (Ctrl+>)",
+                spelled_here("Cycle pixel format: hex, decimal, mapped (.)"),
+                spelled_here("Cycle coordinate: pixel, projected, geographic (,)"),
+                spelled_here("Switch latitude and longitude: decimal, DMS (<)"),
+                spelled_here("Copy pixel value under pointer (Ctrl+.)"),
+                spelled_here("Copy coordinate of pixel under pointer (Ctrl+>)"),
             ]
         );
     }
@@ -4155,7 +4163,7 @@ mod tests {
         );
         assert_eq!(
             named(Copies::Path).as_deref(),
-            Some("Copy the absolute path of the current file (Shift+C)")
+            Some(spelled_here("Copy the absolute path of the current file (Shift+C)").as_str())
         );
 
         for copies in Copies::ALL {
@@ -4179,11 +4187,11 @@ mod tests {
         };
         assert_eq!(
             namer.shortcut(Control::Copies(Copies::Path)).as_deref(),
-            Some("Shift+C")
+            Some(spelled_here("Shift+C").as_str())
         );
         assert_eq!(
             namer.shortcut(Control::Copies(Copies::Image)).as_deref(),
-            Some("Ctrl+C")
+            Some(spelled_here("Ctrl+C").as_str())
         );
 
         // And the button it hangs from says what the menu is of, no one key
@@ -4274,9 +4282,9 @@ mod tests {
         assert_eq!(
             tooltip.hints,
             [
-                "Click to choose a file from the list (Ctrl+P)",
-                "Next file (], Page Down)",
-                "Previous file ([, Page Up)",
+                spelled_here("Click to choose a file from the list (Ctrl+P)"),
+                spelled_here("Next file (], Page Down)"),
+                spelled_here("Previous file ([, Page Up)"),
             ]
         );
     }

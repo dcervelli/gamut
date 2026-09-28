@@ -27,14 +27,15 @@ const MODIFIERS: [(Mods, &str, &str); 4] = [
     (Mods::SHIFT, "shift", "Shift"),
 ];
 
-/// On a Mac, in the order Apple's menus write them, and named as its keys
-/// are: Super is the Command key, and Alt the Option key.
+/// On a Mac, in the order Apple's menus write them, and named as its menus
+/// name them, by the glyph on each key: ⌃ Control, ⌥ Option, ⇧ Shift and
+/// ⌘ Command, which is Super.
 #[cfg(target_os = "macos")]
 const MODIFIERS: [(Mods, &str, &str); 4] = [
-    (Mods::CONTROL, "ctrl", "Ctrl"),
-    (Mods::ALT, "option", "Option"),
-    (Mods::SHIFT, "shift", "Shift"),
-    (Mods::SUPER, "cmd", "Cmd"),
+    (Mods::CONTROL, "ctrl", "\u{2303}"),
+    (Mods::ALT, "option", "\u{2325}"),
+    (Mods::SHIFT, "shift", "\u{21e7}"),
+    (Mods::SUPER, "cmd", "\u{2318}"),
 ];
 
 /// Every word the file reads for a modifier, on every platform, so that a
@@ -70,13 +71,63 @@ pub fn modifiers_token(mods: Mods) -> String {
         .collect()
 }
 
-/// `mods` as people read them, each followed by `+`: `Ctrl+Shift+`.
-pub fn modifiers_spelled(mods: Mods) -> String {
-    MODIFIERS
+/// `what` held with `mods`, as people read it: each modifier followed by
+/// `+`, `Ctrl+Shift+Z` and `Shift+Drag`. A Mac's glyphs run together and
+/// onto a key as its menus write them, `⇧⌘Z`, and a dash parts them from
+/// a word, `⇧-Drag`, where they would otherwise read as one.
+pub fn with_modifiers(mods: Mods, what: &str) -> String {
+    let separator = if cfg!(target_os = "macos") { "" } else { "+" };
+    let mut spelled: String = MODIFIERS
         .iter()
         .filter(|(modifier, ..)| mods.contains(*modifier))
-        .map(|(_, _, spelled)| format!("{spelled}+"))
-        .collect()
+        .map(|(_, _, word)| format!("{word}{separator}"))
+        .collect();
+    if cfg!(target_os = "macos") && !spelled.is_empty() && what.chars().nth(1).is_some() {
+        spelled.push('-');
+    }
+    spelled + what
+}
+
+/// `words` — a spelling in words, `Ctrl+Shift+Z` — as this platform spells
+/// it for people: itself, or on a Mac its modifiers as glyphs, `⌃⇧Z`, with
+/// the dash before a key or gesture of more than one character that
+/// [`with_modifiers`] writes, `⌃⇧-Arrows`. The order the words come in is
+/// left as it is, so the tests hold the one spelling to both platforms by
+/// writing modifiers in an order both keep.
+#[cfg(test)]
+pub fn spelled_here(words: &str) -> String {
+    if !cfg!(target_os = "macos") {
+        return words.to_string();
+    }
+    const GLYPHS: [(&str, char); 6] = [
+        ("Ctrl+", '\u{2303}'),
+        ("Alt+", '\u{2325}'),
+        ("Option+", '\u{2325}'),
+        ("Shift+", '\u{21e7}'),
+        ("Super+", '\u{2318}'),
+        ("Cmd+", '\u{2318}'),
+    ];
+    let mut spelled = String::new();
+    let mut rest = words;
+    while !rest.is_empty() {
+        let mut held = false;
+        while let Some((word, glyph)) = GLYPHS.iter().find(|(word, _)| rest.starts_with(word)) {
+            spelled.push(*glyph);
+            rest = &rest[word.len()..];
+            held = true;
+        }
+        let mut chars = rest.chars();
+        let first = chars.next();
+        let second = chars.next();
+        if held && second.is_some_and(|second| !matches!(second, ',' | ')' | ' ')) {
+            spelled.push('-');
+        }
+        if let Some(first) = first {
+            spelled.push(first);
+            rest = &rest[first.len_utf8()..];
+        }
+    }
+    spelled
 }
 
 /// What a gesture is made on.
@@ -296,54 +347,48 @@ impl Slot {
                 mods,
                 button,
                 kind: Kind::Drag,
-            } => format!(
-                "{}{}Drag",
-                modifiers_spelled(mods),
-                match button {
-                    Button::Left => String::new(),
-                    other => format!("{}+", other.spelled()),
-                }
+            } => with_modifiers(
+                mods,
+                &match button {
+                    Button::Left => "Drag".to_string(),
+                    other => format!("{}+Drag", other.spelled()),
+                },
             ),
             Input::Button {
                 mods,
                 button,
                 kind: Kind::Hold,
-            } => format!(
-                "{}{} button held",
-                modifiers_spelled(mods),
-                button.spelled()
-            ),
+            } => with_modifiers(mods, &format!("{} button held", button.spelled())),
             Input::Button {
                 mods,
                 button,
                 kind: Kind::Click,
-            } => format!(
-                "{}{}",
-                modifiers_spelled(mods),
-                match button {
+            } => with_modifiers(
+                mods,
+                &match button {
                     Button::Left => "Click".to_string(),
                     Button::Back | Button::Forward => button.spelled().to_string(),
                     other => format!("{} click", other.spelled()),
-                }
+                },
             ),
             Input::Button {
                 mods,
                 button,
                 kind: Kind::DoubleClick,
-            } => format!(
-                "{}{}",
-                modifiers_spelled(mods),
-                match button {
+            } => with_modifiers(
+                mods,
+                &match button {
                     Button::Left => "Double-click".to_string(),
                     other => format!("{} double-click", other.spelled()),
-                }
+                },
             ),
-            Input::Wheel { mods, held } => format!(
-                "{}{}Wheel",
-                modifiers_spelled(mods),
-                held.map_or(String::new(), |button| format!("{}+", button.spelled()))
+            Input::Wheel { mods, held } => with_modifiers(
+                mods,
+                &held.map_or("Wheel".to_string(), |button| {
+                    format!("{}+Wheel", button.spelled())
+                }),
             ),
-            Input::Pinch { mods } => format!("{}Pinch", modifiers_spelled(mods)),
+            Input::Pinch { mods } => with_modifiers(mods, "Pinch"),
         };
         match self.surface {
             Surface::Image => input,
@@ -941,18 +986,18 @@ mod tests {
     fn a_slot_is_spelled_for_people() {
         let spelled = |name| Slot::read(name).unwrap().spell();
         assert_eq!(spelled("image.left.drag"), "Drag");
-        assert_eq!(spelled("image.shift+left.drag"), "Shift+Drag");
+        assert_eq!(spelled("image.shift+left.drag"), spelled_here("Shift+Drag"));
         assert_eq!(spelled("image.middle.drag"), "Middle+Drag");
         assert_eq!(spelled("image.right.hold"), "Right button held");
         assert_eq!(spelled("image.wheel"), "Wheel");
         assert_eq!(spelled("image.right+wheel"), "Right+Wheel");
-        assert_eq!(spelled("image.ctrl+wheel"), "Ctrl+Wheel");
+        assert_eq!(spelled("image.ctrl+wheel"), spelled_here("Ctrl+Wheel"));
         assert_eq!(spelled("image.back.click"), "Back");
         assert_eq!(spelled("image.middle.click"), "Middle click");
         assert_eq!(spelled("image.left.double-click"), "Double-click");
         assert_eq!(
             spelled("image.shift+right.double-click"),
-            "Shift+Right double-click"
+            spelled_here("Shift+Right double-click")
         );
         assert_eq!(spelled("minimap.left.drag"), "Minimap: Drag");
     }

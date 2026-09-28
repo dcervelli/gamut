@@ -17,7 +17,7 @@ use std::fmt::Write as _;
 use winit::keyboard::{Key, KeyCode, NamedKey, PhysicalKey};
 
 use super::input::{Action, Section, When};
-use crate::gestures::{Mods, modifiers_spelled, modifiers_token, read_modifier};
+use crate::gestures::{Mods, modifiers_token, read_modifier, with_modifiers};
 
 /// A key: the character it types, the name of one that types none, or —
 /// where the character would depend on the layout — the place on the
@@ -195,16 +195,16 @@ impl Chord {
     /// Ctrl, Alt or Super held, as the keycap is; alone it is the letter it
     /// types.
     pub fn spell(&self) -> String {
-        format!("{}{}", self.prefix(), self.key_spelled())
+        with_modifiers(self.held(), &self.key_spelled())
     }
 
     /// What is held with the key, as [`Chord::spell`] writes it.
-    fn prefix(&self) -> String {
+    fn held(&self) -> Mods {
         let mut mods = self.mods;
         if matches!(self.key, Char(character) if character.is_ascii_uppercase()) {
             mods |= Mods::SHIFT;
         }
-        modifiers_spelled(mods)
+        mods
     }
 
     /// The key alone, as [`Chord::spell`] writes it.
@@ -249,7 +249,8 @@ fn digit(code: KeyCode) -> Option<usize> {
 /// Several chords as one cell of a column: each in full, joined by `, `,
 /// except that the four arrows held with one prefix are `Arrows` under it,
 /// and a run of the number row held with one prefix names it once —
-/// `Shift+2, 3, 4`.
+/// `Shift+2, 3, 4`. A Mac's glyph is short enough to say again, `⇧2, ⇧3,
+/// ⇧4`, and a run named once would leave its keys looking bare.
 pub fn spell_all(chords: &[Chord]) -> String {
     let mut words = Vec::new();
     let mut index = 0;
@@ -262,11 +263,12 @@ pub fn spell_all(chords: &[Chord]) -> String {
                     .all(|arrow| four.iter().any(|each| each.key == Named(*arrow)))
         });
         if arrows.is_some() {
-            words.push(format!("{}Arrows", chord.prefix()));
+            words.push(with_modifiers(chord.held(), "Arrows"));
             index += 4;
             continue;
         }
-        let run_on = index > 0
+        let run_on = !cfg!(target_os = "macos")
+            && index > 0
             && matches!(chord.key, Position(_))
             && matches!(chords[index - 1].key, Position(_))
             && chords[index - 1].mods == chord.mods;
@@ -632,6 +634,7 @@ impl Keymap {
 mod tests {
     use super::*;
     use crate::app::input::ROWS;
+    use crate::gestures::spelled_here;
     use winit::keyboard::SmolStr;
 
     const PLAIN: Mods = Mods::empty();
@@ -678,12 +681,12 @@ mod tests {
     #[test]
     fn a_chord_is_spelled_for_people() {
         let spelled = |token| chord(token).spell();
-        assert_eq!(spelled("ctrl+z"), "Ctrl+Z");
+        assert_eq!(spelled("ctrl+z"), spelled_here("Ctrl+Z"));
         assert_eq!(spelled("m"), "m");
-        assert_eq!(spelled("L"), "Shift+L");
-        assert_eq!(spelled("ctrl+shift+c"), "Ctrl+Shift+C");
-        assert_eq!(spelled("ctrl+>"), "Ctrl+>");
-        assert_eq!(spelled("shift+2"), "Shift+2");
+        assert_eq!(spelled("L"), spelled_here("Shift+L"));
+        assert_eq!(spelled("ctrl+shift+c"), spelled_here("Ctrl+Shift+C"));
+        assert_eq!(spelled("ctrl+>"), spelled_here("Ctrl+>"));
+        assert_eq!(spelled("shift+2"), spelled_here("Shift+2"));
         assert_eq!(spelled("pageup"), "Page Up");
         assert_eq!(spelled("backspace"), "\u{232b}");
         assert_eq!(spelled("f2"), "F2");
@@ -691,11 +694,11 @@ mod tests {
         if cfg!(target_os = "macos") {
             assert_eq!(spelled("delete"), "\u{2326}");
             assert_eq!(spelled("enter"), "Return");
-            assert_eq!(spelled("alt+["), "Option+[");
-            assert_eq!(spelled("super+z"), "Cmd+Z");
+            assert_eq!(spelled("alt+["), "\u{2325}[");
+            assert_eq!(spelled("super+z"), "\u{2318}Z");
             assert_eq!(
                 spelled("ctrl+alt+shift+super+left"),
-                "Ctrl+Option+Shift+Cmd+Left"
+                "\u{2303}\u{2325}\u{21e7}\u{2318}-Left"
             );
         } else {
             assert_eq!(spelled("delete"), "Del");
@@ -730,13 +733,22 @@ mod tests {
                 "ctrl+shift+up",
                 "ctrl+shift+down"
             ]),
-            "Ctrl+Shift+Arrows"
+            spelled_here("Ctrl+Shift+Arrows")
         );
         assert_eq!(all(&["left", "right", "up", "down"]), "Arrows");
-        assert_eq!(all(&["shift+2", "shift+3", "shift+4"]), "Shift+2, 3, 4");
+        assert_eq!(
+            all(&["shift+2", "shift+3", "shift+4"]),
+            match cfg!(target_os = "macos") {
+                true => "\u{21e7}2, \u{21e7}3, \u{21e7}4",
+                false => "Shift+2, 3, 4",
+            }
+        );
         assert_eq!(all(&["1", "0"]), "1, 0");
-        assert_eq!(all(&["ctrl+[", "ctrl+pageup"]), "Ctrl+[, Ctrl+Page Up");
-        assert_eq!(all(&["A", "S"]), "Shift+A, Shift+S");
+        assert_eq!(
+            all(&["ctrl+[", "ctrl+pageup"]),
+            spelled_here("Ctrl+[, Ctrl+Page Up")
+        );
+        assert_eq!(all(&["A", "S"]), spelled_here("Shift+A, Shift+S"));
         assert_eq!(all(&[";", "'"]), ";, '");
         assert_eq!(all(&["left", "right"]), "Left, Right");
         assert_eq!(all(&[]), "");
@@ -884,8 +896,11 @@ mod tests {
         let also = &TABLE[3];
         assert_eq!(keymap.column(also), "+");
         keymap.bind("zoom.in", vec![chord("ctrl+i")]).unwrap();
-        assert_eq!(keymap.column(also), "Ctrl+I");
-        assert_eq!(keymap.column(&TABLE[1]), "-, Left, m, Shift+C, c");
+        assert_eq!(keymap.column(also), spelled_here("Ctrl+I"));
+        assert_eq!(
+            keymap.column(&TABLE[1]),
+            spelled_here("-, Left, m, Shift+C, c")
+        );
         // A line that only describes never answers for its action.
         assert_eq!(
             keymap.row_for(Action::ZoomIn).map(|row| row.help),

@@ -550,6 +550,7 @@ fn write(path: &Path, contents: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gestures::spelled_here;
 
     #[test]
     fn an_empty_configuration_is_every_default() {
@@ -673,8 +674,16 @@ mod tests {
              keys.interface.grid = ctrl+e\n",
         );
         assert_eq!(config.keys.spelled("files.undo"), "");
-        assert_eq!(config.keys.spelled("interface.grid"), "Ctrl+E");
-        assert!(!config.keys.spelled("files.export").contains("Ctrl+E"));
+        assert_eq!(
+            config.keys.spelled("interface.grid"),
+            spelled_here("Ctrl+E")
+        );
+        assert!(
+            !config
+                .keys
+                .spelled("files.export")
+                .contains(&spelled_here("Ctrl+E"))
+        );
         assert_eq!(config.keys.spelled("region.move.left"), "h");
         assert_eq!(config.keys.spelled("interface.dismiss"), "");
         assert_eq!(config.keys.spelled("files.rename"), "F2");

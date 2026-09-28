@@ -2980,6 +2980,7 @@ impl ApplicationHandler<UserEvent> for App {
 
 #[cfg(test)]
 mod tests {
+    use crate::gestures::spelled_here;
     use std::path::Path;
     use std::time::Duration;
 
@@ -4131,13 +4132,13 @@ mod tests {
         };
         assert_eq!(
             copy_image(&app),
-            Some(vec!["Copy the region as displayed (Ctrl+C)".to_string()])
+            Some(vec![spelled_here("Copy the region as displayed (Ctrl+C)")])
         );
         let _ = app.perform(Action::ToggleRegion);
         assert_eq!(app.marking.selection, Selection::Off);
         assert_eq!(
             copy_image(&app),
-            Some(vec!["Copy the image as displayed (Ctrl+C)".to_string()])
+            Some(vec![spelled_here("Copy the image as displayed (Ctrl+C)")])
         );
         let _ = app.perform(Action::Pan(Direction::Right, PanStep::Coarse));
         assert!(app.motion.is_some(), "a pan of the view is a move");
@@ -5413,7 +5414,7 @@ mod tests {
         use crate::app::input::Action;
         use crate::app::keymap::Keymap;
         let keys = Keymap::table();
-        assert_eq!(keys.spelled("files.undo"), "Ctrl+Z");
+        assert_eq!(keys.spelled("files.undo"), spelled_here("Ctrl+Z"));
         assert_eq!(keys.action_named("files.undo"), Some(Action::Undo));
         assert_eq!(
             keys.action_for(
@@ -5444,7 +5445,7 @@ mod tests {
         assert!(!dir.join("a.png").exists());
         assert!(dir.join("Trash/files/a.png").exists());
         assert!(dir.join("Trash/info/a.png.trashinfo").exists());
-        assert_eq!(said(&app), "Trashed a.png. Ctrl+Z to undo.");
+        assert_eq!(said(&app), spelled_here("Trashed a.png. Ctrl+Z to undo."));
         assert!(app.watch.missing(), "the bar says so at once");
         assert_eq!(
             app.files.len(),
@@ -5546,7 +5547,10 @@ mod tests {
         app.remove_shown();
         assert!(dir.join("b.png").exists(), "nothing done to it on disk");
         assert!(!app.watch.missing(), "and the bar does not call it deleted");
-        assert_eq!(said(&app), "Took b.png off the list. Ctrl+Z to undo.");
+        assert_eq!(
+            said(&app),
+            spelled_here("Took b.png off the list. Ctrl+Z to undo.")
+        );
         assert_eq!(
             app.files.len(),
             3,
@@ -6220,7 +6224,7 @@ mod tests {
             app.current.as_ref().map(|current| current.label.as_str()),
             Some("c.jpg")
         );
-        assert_eq!(said(&app), "Renamed a.png. Ctrl+Z to undo.");
+        assert_eq!(said(&app), spelled_here("Renamed a.png. Ctrl+Z to undo."));
         assert!(app.conditions().undoable);
 
         // Step away, then undo: the old name is back, and so is the file.
@@ -6342,9 +6346,9 @@ mod tests {
         let hints = |tip| app.namer().tooltip(tip).map(|tooltip| tooltip.hints);
         assert_eq!(
             hints(ui::Tip::Name),
-            Some(vec![
-                "Copy the absolute path of the current file (Shift+C)".to_string()
-            ])
+            Some(vec![spelled_here(
+                "Copy the absolute path of the current file (Shift+C)"
+            )])
         );
         assert_eq!(
             hints(ui::Tip::Control(ui::Control::Maximize)),
@@ -6469,7 +6473,8 @@ mod tests {
                 .map(|tooltip| tooltip.hints),
             Some(vec![
                 ui::tooltip::loupe_held("Right button held"),
-                ui::tooltip::loupe_wheel(Some("Right+Wheel"), Some("Shift+L")).unwrap()
+                ui::tooltip::loupe_wheel(Some("Right+Wheel"), Some(&spelled_here("Shift+L")))
+                    .unwrap()
             ])
         );
 
