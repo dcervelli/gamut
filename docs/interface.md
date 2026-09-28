@@ -11,7 +11,9 @@ Every monitor is asked, not one. `primary_monitor` is `None` on Wayland by
 definition — there is no such thing there — and nothing before the surface is
 mapped says which monitor the compositor will choose. So `window_size` asks
 each monitor what window it would want, being the image held inside
-`MAX_WINDOW_FRACTION` of that monitor's room, and takes the largest of those
+`MAX_WINDOW_FRACTION` of that monitor's room — three quarters of its width
+and 85% of its height, more of the height since a portrait picture on a
+screen wider than it is tall would otherwise open small — and takes the largest of those
 answers that fits on *every* monitor. A window sized that way cannot overrun
 whichever screen it lands on. Where none of them fits everywhere — a monitor
 smaller than `MIN_WINDOW`, say — the smallest answer is taken as the least bad

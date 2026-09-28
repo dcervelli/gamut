@@ -28,6 +28,12 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 - The configuration file reads `cmd`, `command`, `option` and `opt` as
   modifiers, beside `super` and `alt`, so one file serves both systems.
 
+### Changed
+
+- A picture larger than the screen opens in a window up to three quarters of
+  the screen's width and 85% of its height, where it was two thirds of each,
+  so a portrait photograph on a laptop opens larger.
+
 ### Fixed
 
 - `Ctrl` with `+`, `=`, `-` or `0` no longer scales the whole interface.

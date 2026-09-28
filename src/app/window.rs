@@ -11,8 +11,12 @@ use crate::monitor::{Monitors, Room};
 use crate::ui;
 use crate::ui::chrome::{BAR_HEIGHT, SIDE_WIDTH};
 
-/// Fraction of a monitor's room a freshly opened window may occupy.
-const MAX_WINDOW_FRACTION: f64 = 0.66;
+/// Fraction of a monitor's room a freshly opened window may occupy, across
+/// and down. More of the height than of the width: a screen is wider than it
+/// is tall, so a portrait picture held to the same share of both would open
+/// small, and the desktop's share of the room is left beside the window
+/// rather than above and below it.
+const MAX_WINDOW_FRACTION: [f64; 2] = [0.75, 0.85];
 
 /// What the panels take out of the window, in the logical pixels they are
 /// laid out in: a side on each edge and a bar top and bottom.
@@ -255,8 +259,8 @@ fn wanted_window(monitor: Monitor, image: [f32; 2]) -> [f64; 2] {
     let mut width = f64::from(image[0]) / scale;
     let mut height = f64::from(image[1]) / scale;
 
-    let max_width = room[0] * MAX_WINDOW_FRACTION - CHROME[0];
-    let max_height = room[1] * MAX_WINDOW_FRACTION - CHROME[1];
+    let max_width = room[0] * MAX_WINDOW_FRACTION[0] - CHROME[0];
+    let max_height = room[1] * MAX_WINDOW_FRACTION[1] - CHROME[1];
     if max_width > 1.0 && max_height > 1.0 {
         let shrink = (max_width / width).min(max_height / height).min(1.0);
         width *= shrink;
@@ -367,6 +371,7 @@ mod tests {
         let size = icon.size();
         assert!(size.width > 0.0 && size.height > 0.0, "{size:?}");
     }
+
     use crate::ui::chrome::{Parts, content_area};
 
     /// A monitor as the event loop reports it, which is the only way a test
@@ -403,6 +408,23 @@ mod tests {
     fn an_asked_size_stops_at_the_smallest_window() {
         let size = window_size(&MONITOR, None, Some([1, 1]));
         assert_eq!(size, LogicalSize::new(MIN_WINDOW[0], MIN_WINDOW[1]));
+    }
+
+    /// A picture too large for the monitor is held to three quarters of its
+    /// width and 85% of its height: a tall one by the height, a wide one by
+    /// the width, the chrome added round either.
+    #[test]
+    fn a_large_picture_is_held_to_its_share_of_each_side() {
+        let laptop = [monitor(2880, 1864, 2.0)];
+        // 4316 × 6411: a portrait photograph, which the height holds.
+        let tall = window_size(&laptop, Some([4316.0, 6411.0]), None);
+        let height = (932.0 * 0.85_f64).round() as u32;
+        assert!(tall.height.abs_diff(height) <= 1, "{tall:?}");
+        assert!(tall.width < 1440 * 3 / 4, "{tall:?}");
+        // A panorama, which the width holds.
+        let wide = window_size(&laptop, Some([12000.0, 3000.0]), None);
+        assert!(wide.width.abs_diff(1080) <= 1, "{wide:?}");
+        assert!(wide.height < 932 * 85 / 100, "{wide:?}");
     }
 
     /// Without one, the image decides: its own size plus the chrome around
