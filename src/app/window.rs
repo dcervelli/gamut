@@ -124,6 +124,38 @@ pub(super) fn with_app_id(attributes: WindowAttributes) -> WindowAttributes {
     attributes
 }
 
+/// The program's icon, where the desktop takes it from the program rather
+/// than from somewhere it was installed: on a Mac with no application bundle
+/// to carry one, the Dock shows whatever the running program sets. The
+/// picture is the one in `packaging/`, which macOS reads as SVG itself.
+/// Elsewhere the desktop entry names the icon, and this does nothing.
+pub(super) fn show_icon() {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::MainThreadMarker;
+        use objc2_app_kit::NSApplication;
+
+        let (Some(main), Some(icon)) = (MainThreadMarker::new(), icon()) else {
+            return;
+        };
+        // SAFETY: an image, on the main thread, handed to the application
+        // that retains it.
+        unsafe { NSApplication::sharedApplication(main).setApplicationIconImage(Some(&icon)) };
+    }
+}
+
+/// The icon as an image AppKit can draw at any size, or `None` where this
+/// macOS cannot read SVG.
+#[cfg(target_os = "macos")]
+fn icon() -> Option<objc2::rc::Retained<objc2_app_kit::NSImage>> {
+    use objc2::AnyThread as _;
+    use objc2_app_kit::NSImage;
+    use objc2_foundation::NSData;
+
+    const SVG: &[u8] = include_bytes!("../../packaging/com.dcervelli.gamut.svg");
+    NSImage::initWithData(NSImage::alloc(), &NSData::with_bytes(SVG))
+}
+
 /// Open at the image's own size, shrunk to fit comfortably on the monitors —
 /// or at the size `--size` asked for, where it asked for one. The same
 /// sizing serves a window that opened on nothing and is given a picture
@@ -326,6 +358,15 @@ fn logical(size: [f64; 2]) -> LogicalSize<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// macOS reads the packaged SVG as an image, so the Dock has an icon.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_icon_is_an_image_a_mac_can_draw() {
+        let icon = icon().expect("AppKit reads the SVG");
+        let size = icon.size();
+        assert!(size.width > 0.0 && size.height > 0.0, "{size:?}");
+    }
     use crate::ui::chrome::{Parts, content_area};
 
     /// A monitor as the event loop reports it, which is the only way a test

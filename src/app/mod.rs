@@ -1832,6 +1832,7 @@ impl App {
             }
         };
         timing::window_open();
+        window::show_icon();
 
         let mut renderer = match Renderer::new(window.clone(), self.hdr) {
             Ok(renderer) => renderer,

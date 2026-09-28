@@ -8,7 +8,15 @@
 * Basic annotations? Not sure it should be included. If included, very basic: rectangle (filled/stroked), line, arrow, text box; nothing more.
 * MacOS build
 
+## MacOS
+* Brew
+* Mac Icon
+* Use Cmd icon instead of Cmd
+* Real menu
+* Initial size
+
 ## Improve
+* Native fullscreen command
 * Allow panning off screen?
 * Region fixed aspect
 * Advanced file list features

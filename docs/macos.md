@@ -121,8 +121,10 @@ and the Option key's reading, are in [keys and gestures](keymap.md#on-a-mac).
 
 - Files opened from Finder, the Dock, or "Open With" arrive as an Apple Event
   winit 0.30 does not surface; only the command line opens files for now.
-- There is no application bundle, so the program has no icon of its own in
-  the Dock, and `APP_ID` is only what `openers` leaves out of its own menu.
+- There is no application bundle, so `APP_ID` is only what `openers` leaves
+  out of its own menu. The Dock's icon is set by the running program instead,
+  from `packaging/`'s SVG, which AppKit reads itself (`window::show_icon`);
+  Finder and Launchpad have none to show.
 - The trackpad's smart zoom, a double tap, is not read.
 - The menu bar is winit's default: the application menu with Hide and Quit.
   Its Quit reaches `App::exiting` through winit's `applicationWillTerminate:`,
