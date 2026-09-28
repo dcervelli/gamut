@@ -1095,6 +1095,11 @@ impl App {
             eprintln!("gamut: monitor {name} is in {mode} mode");
         }
         self.monitor = mode;
+        // The room moving is a lift to weigh again even where the headroom
+        // stays above white: a Mac's display reads none until a window asks
+        // it for room and then ramps up, and a picture that arrived in that
+        // moment would otherwise keep the lift it got at none.
+        self.refresh_lift();
         // The switch changed whatever the picture did.
         self.sync_output(before).also(Effect::Redraw)
     }
@@ -6961,6 +6966,50 @@ mod tests {
         );
         assert_eq!(app.monitor, None);
         assert_eq!(app.monitor_headroom, None);
+    }
+
+    /// A display whose room grows while the headroom stays above white — a
+    /// Mac's, ramping up from none once the window asks for room — has the
+    /// lift of a gain-mapped picture weighed again, not left at the weight
+    /// the picture arrived to.
+    #[test]
+    fn the_lift_follows_the_room_as_it_ramps() {
+        use crate::image::gain_map::{GainMap, Lift};
+        let (mut app, _dir) = app_over("ramp", &[("a.png", 4, 3)]);
+        let current = app.current.as_mut().unwrap();
+        let mut image = (*current.image).clone();
+        image.gain_map = Some(Arc::new(GainMap {
+            width: 2,
+            height: 1,
+            channels: 1,
+            data: vec![0, 255],
+            lift: Lift::Apple { headroom: 4.0 },
+        }));
+        current.image = Arc::new(image);
+        app.headless_surface_hdr = true;
+        app.monitors = Some(Monitors::stub(true));
+        app.headless_monitor = Some("Built-in".to_string());
+        let set = |app: &App, headroom| {
+            app.monitors
+                .as_ref()
+                .expect("still there")
+                .set("Built-in", Mode::Hdr, headroom);
+        };
+        let weight = |app: &App| {
+            app.current.as_ref().unwrap().lift.as_ref().map(|table| table.weight())
+        };
+
+        // The window lands on the display before it has ramped, and the
+        // picture arrives to no room.
+        set(&app, 1.0);
+        assert_eq!(app.sync_monitor(), Effect::Redraw);
+        assert_eq!(app.headroom(), Headroom::Above);
+        app.refresh_lift();
+        assert_eq!(weight(&app), Some(0.0), "no room yet");
+
+        set(&app, 4.0);
+        assert_eq!(app.sync_monitor(), Effect::Redraw);
+        assert_eq!(weight(&app), Some(1.0), "the room ramped up");
     }
 
     /// Under `--output hdr` the surface is the HDR one from the start and
