@@ -10,3 +10,22 @@
 # beside them; tens of megabytes each, and not the tree's to carry.
 /test_images/raw-samples/*
 !/test_images/raw-samples/fetch.sh
+
+# What a Mac's Finder leaves behind in any directory it opens.
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+Icon?
