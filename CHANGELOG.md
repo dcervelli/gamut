@@ -30,6 +30,9 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 - On a Mac, a file opened in `gamut` from Finder, from "Open With", by a
   drop on its Dock icon or with `open -a` is shown, and joins the list of a
   window already open.
+- On a Mac the interface wears the system's appearance: light or dark, with
+  raised contrast where it is turned on, and the accent color chosen in
+  System Settings. Changing either reaches a window that is already open.
 - A Homebrew formula, which builds `gamut` from the release on the Mac it
   installs to and installs the manual page and the shell completions with
   it.

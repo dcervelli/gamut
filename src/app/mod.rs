@@ -270,7 +270,7 @@ pub struct App {
     /// wholesale when the desktop's theme changes, and the window should
     /// follow rather than stay in the theme it opened under.
     theme: Theme,
-    theme_watch: Watch,
+    theme_watch: theme::Watch,
     /// When to look at it next.
     next_poll: Instant,
     /// What the header said the first file's size was, so that the window can

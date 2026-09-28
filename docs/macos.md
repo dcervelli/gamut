@@ -21,6 +21,7 @@ names:
 | `openers/` | `linux.rs`: desktop entries and `mimeapps.list` | `macos.rs`: Launch Services through `NSWorkspace` |
 | `monitor/` | `wayland.rs`: the color-management protocol | `macos.rs`: `NSScreen` |
 | `ui/fonts/` | `fontconfig.rs` | `macos.rs`: `NSFont` |
+| `theme/` | `palette.rs`: Omarchy's palette file | `macos.rs`: `NSColor` under `NSApp`'s appearance |
 
 Everything else is one file with, at most, a `cfg!` inside it: `no_replace.rs`
 (`renameat2` or `renamex_np`), `thumbnailer.rs::lower_priority`, `xdg.rs`'s
@@ -48,6 +49,9 @@ main thread, so neither needs a thread of its own:
   `App::sync_monitor` does on every turn of the loop. `Monitors::live` is what
   tells the shared table to call `macos::refresh` first; a stub for the tests
   is not live, so what a test sets stays set.
+- **The appearance** is read afresh on every poll, as the palette file is
+  stat'ed on Linux, and the interface is retinted only when the colors it
+  resolves to differ; see [the theme](theme.md).
 
 Everything else here is safe off the main thread and is called from where the
 Linux half is: the pasteboard from the loader and the clipboard watch,

@@ -44,7 +44,7 @@ sans.
 On a Mac the faces are AppKit's: the system font, its bold and the system
 monospace. San Francisco is one variable file, so each face is handed to egui
 with the weight to set on its axis; see [macOS](macos.md#what-differs-and-why).
-There is no palette to read there, and the neutral dark set is used.
+The colors are AppKit's too; see below.
 
 Each face is handed to egui with one number worked out from its own
 metrics. egui makes a row as tall as ascent, descent and line gap together,
@@ -58,6 +58,36 @@ number is the distance from the box's middle to the capitals' middle, set
 as the face's `y_offset_factor`, so the capitals sit at the middle of the
 row whatever face the desktop supplies. It is read with `skrifa`, the
 reader egui's own layout uses, so the two see the same ascent and descent.
+
+On a Mac there is no palette file, and the appearance stands in for one.
+`src/theme/macos.rs` makes the application's effective appearance the
+current drawing appearance and reads AppKit's semantic colors under it —
+`windowBackgroundColor`, `labelColor`, `secondaryLabelColor`, `textColor`,
+`separatorColor`, `controlAccentColor` and the system red, yellow, orange
+and blue — into a `System`, and `Theme::from_system` derives the same roles
+from it that `Theme::from_palette` derives from a palette. The window's
+background is the bars', the two label colors the primary and dim text,
+`textColor` the file's name, the separator the hairline, and the user's
+accent what is switched on. Reading them under the appearance rather than
+from a table is what makes them faithful: the raised-contrast appearances,
+and whatever a later macOS does to its grays, come with them unasked.
+
+The label and separator colors are translucent, meant to be drawn over what
+is under them, so each is laid over the window's background to find the
+opaque ink it comes to there: the interface's text inks are opaque, and the
+hairline is also the second square of the checkerboard. Two choices are the
+Mac's rather than AppKit's colors read straight: a caution is written in the
+system yellow on a dark window and the system orange on a light one, where
+yellow all but vanishes; and the graphite accent, being a gray, lights
+nothing among gray text in the chooser, which lights its hits in the system
+blue instead.
+
+There is no file to watch for a change of appearance or of accent, and
+asking AppKit again is a handful of lookups, so on a Mac the theme is
+simply read again on every poll and compared: the interface is retinted
+only when the answer differs. The appearance is the main thread's to ask,
+and the poll runs there; asked from anywhere else — which is every test —
+the read answers nothing and the neutral dark set is used.
 
 The palette is not read literally. Omarchy resolves it through an alias and
 derivation cascade before any consumer sees it — short names, ANSI `color0`

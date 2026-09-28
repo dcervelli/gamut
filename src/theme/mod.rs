@@ -7,18 +7,27 @@
 //! the interface's handful of roles — panel, hairline, text, accent — are
 //! derived from it.
 //!
-//! Nothing here is required. With no palette to read, which is every machine
-//! that is not running Omarchy, [`Theme::FALLBACK`] is used: the neutral dark
-//! set the interface was designed in. The same set fills in for a palette too
+//! On a Mac the answer is AppKit's instead: its semantic colors, resolved
+//! under the appearance in force — light or dark, raised contrast or not,
+//! and the accent color the user chose — read by `macos.rs` into a
+//! [`System`], which [`Theme::from_system`] derives the same roles from.
+//! The appearance is asked again on every poll, so switching it reaches an
+//! open window as a new Omarchy theme does.
+//!
+//! Nothing here is required. With no palette to read, which is every Linux
+//! machine that is not running Omarchy, [`Theme::FALLBACK`] is used: the
+//! neutral dark set the interface was designed in. The same set fills in for a palette too
 //! sparse to answer, so a third-party theme that defines half a dozen keys
 //! degrades to something wearable rather than to black on black.
 //!
 //! Reading and resolving the palette file is [`palette`]'s job; this module
 //! is only the derivation of the interface's roles from what it hands back.
 
+#[cfg(target_os = "macos")]
+mod macos;
 mod palette;
 
-pub use palette::{Mode, Palette, watch};
+pub use palette::{Mode, Palette};
 
 use crate::render::Color;
 
@@ -121,6 +130,11 @@ const BRIGHT_LIFT: f32 = 0.45;
 /// resolves back to its `background` — which is what happens when it defines
 /// neither — would otherwise draw the hairline invisibly.
 const SEPARATION: u32 = 18;
+/// How far apart a color's channels have to be before it reads as a hue
+/// rather than a gray: well clear of the tint a Mac's graphite accent
+/// carries, well short of any accent a user picks for its color.
+#[cfg(any(target_os = "macos", test))]
+const HUE_SPREAD: u8 = 40;
 /// The most light the wash over the minimap may carry, as an HSV value. It
 /// goes over the part of the image the view is not showing, and has to read
 /// as "not this" whichever way round the theme runs, so whatever color the
@@ -169,6 +183,10 @@ impl Theme {
 
     /// The theme to draw with: the desktop's, where there is one to read.
     pub fn detect() -> Theme {
+        #[cfg(target_os = "macos")]
+        if let Some(theme) = macos::theme() {
+            return theme;
+        }
         match Palette::load() {
             Some(palette) => Theme::from_palette(&palette),
             None => Theme::FALLBACK,
@@ -278,6 +296,142 @@ impl Theme {
             minimap_dim: deep.with_alpha(Theme::FALLBACK.minimap_dim.a),
         }
     }
+}
+
+/// What notices that the desktop's theme may have changed: the palette file
+/// on Omarchy, and on a Mac every poll, since the appearance and the accent
+/// color have no file to watch and asking AppKit for them again is a handful
+/// of lookups. What changed is left to [`Theme::detect`] and a comparison.
+pub struct Watch {
+    palette: crate::watch::Watch,
+}
+
+/// Starts watching the desktop's theme.
+pub fn watch() -> Watch {
+    Watch {
+        palette: palette::watch(),
+    }
+}
+
+impl Watch {
+    /// Whether the theme is worth reading again.
+    pub fn poll(&mut self) -> bool {
+        self.palette.poll() || cfg!(target_os = "macos")
+    }
+}
+
+/// The colors a Mac's appearance resolves to: what [`Theme::from_system`]
+/// derives the interface's roles from, as a palette is on Omarchy.
+///
+/// Each is AppKit's semantic color of the same name, in sRGB. The label and
+/// separator colors are translucent — they are meant to be drawn over what is
+/// under them — so they keep their alpha here, and the derivation lays them
+/// over the window to find the ink they come to.
+#[cfg(any(target_os = "macos", test))]
+#[derive(Clone, Copy, Debug)]
+pub struct System {
+    pub mode: Mode,
+    pub window: Color,
+    pub label: Color,
+    pub secondary_label: Color,
+    pub text: Color,
+    pub separator: Color,
+    /// The accent the user chose in System Settings.
+    pub accent: Color,
+    pub blue: Color,
+    pub red: Color,
+    pub yellow: Color,
+    pub orange: Color,
+}
+
+#[cfg(any(target_os = "macos", test))]
+impl Theme {
+    /// Derives the interface's roles from a Mac's appearance, as
+    /// [`Theme::from_palette`] does from Omarchy's palette: the window's
+    /// background for the bars and the panels, the label colors for the
+    /// text, the separator for the hairline, and the user's accent for what
+    /// is switched on.
+    pub fn from_system(system: &System) -> Theme {
+        let window = system.window.with_alpha(255);
+        let label = over(system.label, window);
+        let secondary = over(system.secondary_label, window);
+        // `textColor` is the full-strength ink that `labelColor` is a
+        // shade short of, so it is the one that leads; where the appearance
+        // does not part them, it is carried away from the page as a palette
+        // that does not part its two inks is.
+        let text = over(system.text, window);
+        let text_bright = match separated(text, label) {
+            true => text,
+            false => mix(
+                text,
+                match system.mode {
+                    Mode::Dark => WHITE,
+                    Mode::Light => BLACK,
+                },
+                BRIGHT_LIFT,
+            ),
+        };
+        let border = Some(over(system.separator, window))
+            .filter(|shade| separated(*shade, window))
+            .unwrap_or_else(|| mix(window, label, BORDER_LIFT));
+        let accent = system.accent.with_alpha(255);
+        // A graphite accent is a gray, and a gray lit among gray text lights
+        // nothing, so the chooser's hits are lit in the system blue there.
+        let hit = match hued(accent) {
+            true => accent,
+            false => system.blue.with_alpha(255),
+        };
+        let warning = system.red.with_alpha(255);
+        // The system yellow is the Mac's caution, and reads on a dark window;
+        // on a light one it all but vanishes, and the Mac's own caution text
+        // there is orange.
+        let caution = match system.mode {
+            Mode::Dark => system.yellow,
+            Mode::Light => system.orange,
+        }
+        .with_alpha(255);
+        let deep = darkened(match system.mode {
+            Mode::Dark => mix(window, BLACK, 0.5),
+            Mode::Light => label,
+        });
+        let ink = system.label.with_alpha(255);
+
+        Theme {
+            mode: system.mode,
+            bar_background: window,
+            border,
+            menu_background: window.with_alpha(MENU_ALPHA),
+            panel_background: window.with_alpha(PANEL_ALPHA),
+            button_idle: ink.with_alpha(Theme::FALLBACK.button_idle.a),
+            button_hover: ink.with_alpha(Theme::FALLBACK.button_hover.a),
+            heading: ink.with_alpha(Theme::FALLBACK.heading.a),
+            text_primary: label,
+            text_dim: secondary,
+            text_bright,
+            accent,
+            hit,
+            warning,
+            caution,
+            inset_edge: ink.with_alpha(Theme::FALLBACK.inset_edge.a),
+            minimap_dim: deep.with_alpha(Theme::FALLBACK.minimap_dim.a),
+        }
+    }
+}
+
+/// `color` laid over the opaque `ground` at its own alpha: the ink a
+/// translucent color comes to where it is drawn.
+#[cfg(any(target_os = "macos", test))]
+fn over(color: Color, ground: Color) -> Color {
+    mix(ground, color.with_alpha(255), color.a as f32 / 255.0)
+}
+
+/// Whether `color` has a hue to tell it from text, rather than being a gray
+/// that only its lightness parts from the gray around it.
+#[cfg(any(target_os = "macos", test))]
+fn hued(color: Color) -> bool {
+    let peak = color.r.max(color.g).max(color.b);
+    let floor = color.r.min(color.g).min(color.b);
+    peak - floor >= HUE_SPREAD
 }
 
 /// A color taken down to [`DEEP_VALUE_CEIL`] if it is above it, scaled whole
@@ -473,6 +627,96 @@ darker_background = \"#b0b4bc\"
         // ink is a warm brown is a warm brown.
         let dim = Theme::from_palette(&palette(PALE_INK)).minimap_dim;
         assert!(dim.r > dim.g && dim.g > dim.b, "{dim:?}");
+    }
+
+    /// A Mac's appearance as AppKit resolves it: dark, with the label and
+    /// separator colors translucent as AppKit gives them.
+    const DARK_AQUA: System = System {
+        mode: Mode::Dark,
+        window: Color::rgb(0x1e, 0x1e, 0x1e),
+        label: Color::rgba(255, 255, 255, 217),
+        secondary_label: Color::rgba(255, 255, 255, 140),
+        text: Color::rgb(255, 255, 255),
+        separator: Color::rgba(255, 255, 255, 26),
+        accent: Color::rgb(0x0a, 0x84, 0xff),
+        blue: Color::rgb(0x0a, 0x84, 0xff),
+        red: Color::rgb(0xff, 0x45, 0x3a),
+        yellow: Color::rgb(0xff, 0xd6, 0x0a),
+        orange: Color::rgb(0xff, 0x9f, 0x0a),
+    };
+
+    const AQUA: System = System {
+        mode: Mode::Light,
+        window: Color::rgb(0xec, 0xec, 0xec),
+        label: Color::rgba(0, 0, 0, 217),
+        secondary_label: Color::rgba(0, 0, 0, 128),
+        text: Color::rgb(0, 0, 0),
+        separator: Color::rgba(0, 0, 0, 26),
+        accent: Color::rgb(0x00, 0x7a, 0xff),
+        blue: Color::rgb(0x00, 0x7a, 0xff),
+        red: Color::rgb(0xff, 0x3b, 0x30),
+        yellow: Color::rgb(0xff, 0xcc, 0x00),
+        orange: Color::rgb(0xff, 0x95, 0x00),
+    };
+
+    /// The bars are the window's own background, the text is the label
+    /// colors as they come out over it, and what is switched on is the
+    /// user's accent.
+    #[test]
+    fn a_macs_appearance_is_worn_as_appkit_resolves_it() {
+        for system in [DARK_AQUA, AQUA] {
+            let theme = Theme::from_system(&system);
+            assert_eq!(theme.mode, system.mode);
+            assert_eq!(theme.bar_background, system.window);
+            assert_eq!(theme.accent, system.accent);
+            assert_eq!(theme.warning, system.red);
+            // The translucent inks are laid over the window, so every role
+            // the interface draws text in is opaque.
+            for ink in [
+                theme.text_primary,
+                theme.text_dim,
+                theme.text_bright,
+                theme.border,
+            ] {
+                assert_eq!(ink.a, 255, "{ink:?}");
+            }
+            assert!(separated(theme.border, theme.bar_background));
+            assert!(separated(theme.text_bright, theme.text_primary));
+            assert!(separated(theme.text_primary, theme.text_dim));
+            let dim = theme.minimap_dim;
+            let value = dim.r.max(dim.g).max(dim.b) as f32 / 255.0;
+            assert!(value <= DEEP_VALUE_CEIL + 0.005, "{dim:?}");
+        }
+
+        // Light on dark, and dark on light.
+        let dark = Theme::from_system(&DARK_AQUA);
+        assert!(dark.text_primary.r > dark.text_dim.r);
+        assert_eq!(dark.text_bright, Color::rgb(255, 255, 255));
+        let light = Theme::from_system(&AQUA);
+        assert!(light.text_primary.r < light.text_dim.r);
+        assert_eq!(light.text_bright, Color::rgb(0, 0, 0));
+    }
+
+    /// The yellow a dark window reads a caution in all but vanishes on a
+    /// light one, where the Mac writes it in orange.
+    #[test]
+    fn a_caution_on_a_light_mac_is_orange() {
+        assert_eq!(Theme::from_system(&DARK_AQUA).caution, DARK_AQUA.yellow);
+        assert_eq!(Theme::from_system(&AQUA).caution, AQUA.orange);
+    }
+
+    /// A graphite accent is a gray the text may be, so the chooser lights
+    /// its hits in the system blue instead.
+    #[test]
+    fn a_graphite_accent_lights_the_choosers_hits_in_blue() {
+        let graphite = System {
+            accent: Color::rgb(0x8c, 0x8c, 0x8c),
+            ..DARK_AQUA
+        };
+        let theme = Theme::from_system(&graphite);
+        assert_eq!(theme.accent, graphite.accent);
+        assert_eq!(theme.hit, graphite.blue);
+        assert_eq!(Theme::from_system(&DARK_AQUA).hit, DARK_AQUA.accent);
     }
 
     #[test]
