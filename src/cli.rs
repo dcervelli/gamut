@@ -818,6 +818,62 @@ mod tests {
         );
     }
 
+    /// The application bundle's `Info.plist` names the bundle for `APP_ID`,
+    /// starts the program `PROGRAM`, and leaves the version to `bin/bundle`,
+    /// which takes it from the binary so the two cannot differ.
+    #[test]
+    fn the_bundle_is_named_after_the_program_and_the_app_id() {
+        let plist =
+            std::fs::read_to_string(packaging().join("Info.plist")).expect("the Info.plist reads");
+        for (key, value) in [
+            ("CFBundleIdentifier", APP_ID),
+            ("CFBundleExecutable", PROGRAM),
+            ("CFBundleIconFile", PROGRAM),
+        ] {
+            assert!(
+                plist.contains(&format!("<key>{key}</key>\n\t<string>{value}</string>")),
+                "the Info.plist's {key} should be {value}"
+            );
+        }
+        assert!(
+            !plist.contains("CFBundleShortVersionString") && !plist.contains("CFBundleVersion"),
+            "the version is stamped by bin/bundle, not kept in the tree"
+        );
+    }
+
+    /// The bundle claims every format the decoders read, by the type macOS
+    /// knows the extension as — so Finder offers this program for it — or,
+    /// where macOS knows none, by a type the bundle declares for it itself.
+    /// Asked of the system, so only on a Mac.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_bundle_claims_every_format() {
+        use objc2_foundation::NSString;
+        use objc2_uniform_type_identifiers::UTType;
+
+        let plist =
+            std::fs::read_to_string(packaging().join("Info.plist")).expect("the Info.plist reads");
+        let (claimed, imported) = plist
+            .split_once("<key>UTImportedTypeDeclarations</key>")
+            .expect("the Info.plist declares the types macOS lacks");
+        for extension in crate::image::decode::supported_extensions() {
+            let kind = UTType::typeWithFilenameExtension(&NSString::from_str(extension))
+                .expect("every extension has a type, if only a dynamic one");
+            if kind.isDynamic() {
+                assert!(
+                    imported.contains(&format!("<string>{extension}</string>")),
+                    ".{extension} has no type on this Mac and none is declared for it"
+                );
+            } else {
+                let identifier = kind.identifier().to_string();
+                assert!(
+                    claimed.contains(&format!("<string>{identifier}</string>")),
+                    ".{extension} is decoded but {identifier} is not claimed"
+                );
+            }
+        }
+    }
+
     /// The Homebrew formula builds the release the PKGBUILD does: the same
     /// tarball, at the version `Cargo.toml` says, under the same checksum.
     /// `bin/release` and `bin/pkgbuild-sha` move the two together, and this is

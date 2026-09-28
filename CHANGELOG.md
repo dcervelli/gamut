@@ -33,6 +33,10 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 - A Homebrew formula, which builds `gamut` from the release on the Mac it
   installs to and installs the manual page and the shell completions with
   it.
+- On a Mac, `gamut` is an application, `Gamut.app`, with its icon in Finder,
+  the Dock and Launchpad and its name at the head of the menu bar. Finder
+  offers it under "Open With" for every format it reads. The Homebrew formula
+  installs it, and `gamut` on the command line starts it.
 
 ### Changed
 

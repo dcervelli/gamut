@@ -1,0 +1,70 @@
+#!/bin/sh
+# Wrap a built binary in a Mac application bundle: Gamut.app, which Finder,
+# the Dock, Launchpad and "Open With" know the program by.
+#
+# The bundle holds the binary as it is, linked against the libraries it was
+# built with, so it runs where it was built: this is the bundle the Homebrew
+# formula installs, not one to hand to another Mac. It is signed ad hoc,
+# which is all a program built on the machine that runs it needs.
+#
+#   bin/bundle                      target/release/gamut into target/release/
+#   bin/bundle BINARY [DIRECTORY]   this binary, into this directory
+#
+# Everything used is part of macOS: sips draws the icon from the SVG,
+# iconutil packs it, plutil stamps the version, codesign signs.
+
+set -eu
+
+usage() {
+    echo "usage: bin/bundle [BINARY [DIRECTORY]]" >&2
+    exit 2
+}
+
+[ $# -le 2 ] || usage
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+BINARY=${1:-$ROOT/target/release/gamut}
+OUT=${2:-$(dirname "$BINARY")}
+
+for tool in sips iconutil plutil codesign; do
+    command -v "$tool" >/dev/null || { echo "$tool is not installed" >&2; exit 1; }
+done
+[ -x "$BINARY" ] || { echo "$BINARY is not a built binary" >&2; exit 1; }
+
+# The version is the binary's own, so the bundle cannot say another.
+VERSION=$("$BINARY" --version | awk '{ print $2 }')
+echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || {
+    echo "$BINARY reports no version" >&2
+    exit 1
+}
+
+APP="$OUT/Gamut.app"
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+
+rm -rf "$APP"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+
+cp "$ROOT/packaging/Info.plist" "$APP/Contents/Info.plist"
+plutil -insert CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Info.plist"
+plutil -insert CFBundleVersion -string "$VERSION" "$APP/Contents/Info.plist"
+plutil -lint -s "$APP/Contents/Info.plist"
+
+cp "$BINARY" "$APP/Contents/MacOS/gamut"
+
+# Every size an icon set holds, each at one and two device pixels to the
+# point, drawn from the SVG rather than scaled from one picture of it.
+SET="$TMP/gamut.iconset"
+mkdir "$SET"
+for size in 16 32 128 256 512; do
+    sips -s format png -z "$size" "$size" "$ROOT/packaging/com.dcervelli.gamut.svg" \
+        --out "$SET/icon_${size}x${size}.png" >/dev/null
+    double=$((size * 2))
+    sips -s format png -z "$double" "$double" "$ROOT/packaging/com.dcervelli.gamut.svg" \
+        --out "$SET/icon_${size}x${size}@2x.png" >/dev/null
+done
+iconutil -c icns "$SET" -o "$APP/Contents/Resources/gamut.icns"
+
+codesign --force --sign - "$APP"
+
+echo "$APP"

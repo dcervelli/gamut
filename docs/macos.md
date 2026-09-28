@@ -128,6 +128,32 @@ after that notification, so this is the one moment a handler both survives
 and hears the first files. An observer is used rather than the application's
 delegate because the delegate is winit's.
 
+## The bundle
+
+`bin/bundle` wraps a built binary in `Gamut.app`: `packaging/Info.plist`,
+stamped with the version the binary reports so the two cannot differ, the
+binary, and an icon set that `sips` draws from `packaging/`'s SVG at each
+size and `iconutil` packs. Everything it uses ships with macOS, so it runs in
+Homebrew's build as well as by hand. The bundle is signed ad hoc and keeps
+the binary linked against the libraries it was built with: it is for the Mac
+it was built on, which is how the Homebrew formula uses it, and handing one
+to another Mac would need the libraries inside it and a Developer ID
+signature.
+
+The Info.plist claims the image types by the identifiers macOS gives each
+extension, at `LSHandlerRank` `Alternate`, so Finder offers the program under
+"Open With" without taking any type over. Five extensions have no type on
+macOS — `jfif`, `pnm`, `pam`, `mef`, `kdc` — and an extension without one
+cannot be claimed, so the bundle declares a type for each as an imported
+declaration, which gives way to any other application's. `cli.rs`'s tests ask
+the system for every extension the decoders read and check the plist has it.
+
+The formula keeps the one copy of the binary inside the bundle and puts a
+script on the path that `exec`s it there. macOS gives a process its bundle's
+identity — the menu bar's name, the Dock's icon, `APP_ID` as its bundle
+identifier — only when the executable it was started from is inside the
+bundle; started through a symlink it finds the bundle but has no identifier.
+
 ## Keys and gestures
 
 The key table is the same; `input::MAC_DEFAULTS` is the names whose chords
@@ -138,10 +164,12 @@ and the Option key's reading, are in [keys and gestures](keymap.md#on-a-mac).
 
 ## Not yet
 
-- There is no application bundle, so `APP_ID` is only what `openers` leaves
-  out of its own menu. The Dock's icon is set by the running program instead,
-  from `packaging/`'s SVG, which AppKit reads itself (`window::show_icon`);
-  Finder and Launchpad have none to show.
+- A binary run outside the bundle, as `cargo run` does, has no bundle to
+  take an icon from, so the Dock's icon is set by the running program too,
+  from `packaging/`'s SVG, which AppKit reads itself (`window::show_icon`).
+- The executable is `gamut`, which winit's menu takes the program's name
+  from, so its items read "Hide gamut" and "Quit gamut" beside the bundle's
+  "Gamut" at the head of the menu.
 - The trackpad's smart zoom, a double tap, is not read.
 - The menu bar is winit's default: the application menu with Hide and Quit.
   Its Quit reaches `App::exiting` through winit's `applicationWillTerminate:`,

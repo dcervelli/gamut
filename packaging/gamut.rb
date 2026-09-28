@@ -25,17 +25,34 @@ class Gamut < Formula
   depends_on :macos
 
   def install
-    system "cargo", "install", *std_cargo_args
+    system "cargo", "install", *std_cargo_args(root: buildpath/"built")
+
+    # The binary lives in the application bundle, which is what Finder, the
+    # Dock and "Open With" know the program by, and the command on the path
+    # runs it there: macOS gives a program its bundle's name, icon and
+    # identity only when it is started from inside the bundle, which a
+    # symlink does not count as.
+    system "bin/bundle", buildpath/"built/bin/gamut", prefix
+    app = prefix/"Gamut.app/Contents/MacOS/gamut"
+    bin.write_exec_script opt_prefix/"Gamut.app/Contents/MacOS/gamut"
 
     # The manual page and the example configuration come out of the binary
     # just built, so they describe this version of the program and no other.
-    (man1/"gamut.1").write Utils.safe_popen_read(bin/"gamut", "--print-man")
-    (doc/"config.example").write Utils.safe_popen_read(bin/"gamut", "--print-config")
+    (man1/"gamut.1").write Utils.safe_popen_read(app, "--print-man")
+    (doc/"config.example").write Utils.safe_popen_read(app, "--print-config")
     doc.install "user-docs/KEYS.md", "user-docs/FORMATS.md", "user-docs/SETTINGS.md"
 
     bash_completion.install "packaging/completions/gamut.bash" => "gamut"
     zsh_completion.install "packaging/completions/_gamut"
     fish_completion.install "packaging/completions/gamut.fish"
+  end
+
+  def caveats
+    <<~EOS
+      Gamut.app is in #{opt_prefix}. To have it in /Applications:
+        ln -sf #{opt_prefix}/Gamut.app /Applications/Gamut.app
+      Finder offers it under "Open With" once it has been opened once.
+    EOS
   end
 
   test do
