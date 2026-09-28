@@ -14,6 +14,7 @@
 //! window is up joins it.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::NSObject;
@@ -26,6 +27,10 @@ use objc2_foundation::{
 /// How the files reach the window: what `main` made from the event loop's
 /// proxy.
 pub type Deliver = Box<dyn Fn(Vec<PathBuf>)>;
+
+/// Whether any files have been handed over. Read on the main thread, as
+/// it is written: see [`sent_any`].
+static SENT: AtomicBool = AtomicBool::new(false);
 
 /// The four-character codes Carbon names these by, spelled as the numbers
 /// they are, so that the Core Services bindings are not needed for three
@@ -69,6 +74,7 @@ define_class!(
         ) {
             let paths = autoreleasepool(|_| paths(event));
             if !paths.is_empty() {
+                SENT.store(true, Ordering::Relaxed);
                 (self.ivars())(paths);
             }
         }
@@ -97,6 +103,15 @@ pub fn listen(deliver: Deliver) {
     // Neither the center nor the event manager keeps it alive, and it
     // answers for as long as the program runs.
     std::mem::forget(listener);
+}
+
+/// Whether Launch Services has sent any files yet. The files a program is
+/// launched to open arrive before AppKit finishes launching, and so before
+/// the event loop's `resumed`; but they reach the loop through its proxy,
+/// which it reads only after, so this is how `resumed` knows they are on
+/// their way and the window can wait to open at their size.
+pub fn sent_any() -> bool {
+    SENT.load(Ordering::Relaxed)
 }
 
 /// The files an open-documents event names: its direct object, a list of

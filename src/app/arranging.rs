@@ -11,7 +11,7 @@
 //! that a folder of large raws holds nothing up while it is read. An order
 //! that needs only the names is put in place at once.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -148,30 +148,15 @@ impl App {
                 // first in it asked for instead.
                 let _ = self.apply_order();
                 self.files.start_at(0);
-                // With the window still to open, it opens at this file's
-                // size rather than the one whose header was read to make
-                // sure of the command line: the glimpse where the order
-                // read it, and the header otherwise.
-                if self.shown.is_none() {
-                    let first = self.files.path(0);
-                    self.header_size = self
-                        .glimpsed
-                        .get(first)
-                        .and_then(|glimpse| glimpse.size)
-                        .or_else(|| {
-                            crate::loader::guard("reading the header", || decode::probe(first))
-                                .ok()
-                                .flatten()
-                        })
-                        .map(|(width, height)| [width as f32, height as f32]);
-                }
                 // `settle_arranged` owes the frame, for this and the list.
                 let request = self.files.open_first(Source::Disk);
+                self.open_at(&request.path);
                 let _ = self.send(request);
             }
             Arrive::Append => {
                 let paths = super::arranged(paths, self.filmstrip.order(), &self.glimpsed);
                 if let Some(request) = self.files.append(paths) {
+                    self.open_at(&request.path);
                     let _ = self.send(request);
                 }
                 self.list_changed();
@@ -179,20 +164,47 @@ impl App {
         }
     }
 
-    /// When the window stops waiting for the command line's list to be put
-    /// in order, while it is being: the moment the wait would be said.
+    /// With the window still to open, has it open at `first`'s size: the
+    /// glimpse where the order read it, and the header otherwise — rather
+    /// than the size of the file whose header was read to make sure of the
+    /// command line, or the empty window's for files Finder sent. Opened at
+    /// the picture's size, the window is not sized again when it arrives;
+    /// opened at no size, it is.
+    fn open_at(&mut self, first: &Path) {
+        if self.shown.is_some() {
+            return;
+        }
+        self.header_size = self
+            .glimpsed
+            .get(first)
+            .and_then(|glimpse| glimpse.size)
+            .or_else(|| {
+                crate::loader::guard("reading the header", || decode::probe(first))
+                    .ok()
+                    .flatten()
+            })
+            .map(|(width, height)| [width as f32, height as f32]);
+        self.size_to_next = self.header_size.is_none();
+    }
+
+    /// When the window stops waiting for the list it opens on to be put in
+    /// order, while it is being: the moment the wait would be said.
     pub(super) fn window_due(&self) -> Option<Instant> {
         self.arranging
             .iter()
-            .find(|each| each.arrive == Arrive::Open)
+            .find(|each| self.opens_on(each))
             .map(|each| each.since + SLOW_READ)
     }
 
     /// Whether a list is being put in order before any of it is shown.
     pub(super) fn arranging_to_open(&self) -> bool {
-        self.arranging
-            .iter()
-            .any(|each| each.arrive == Arrive::Open)
+        self.arranging.iter().any(|each| self.opens_on(each))
+    }
+
+    /// Whether the window opens on `arranging`: the command line's list, or
+    /// files Finder sent before there was a window.
+    fn opens_on(&self, arranging: &Arranging) -> bool {
+        arranging.arrive == Arrive::Open || self.shown.is_none()
     }
 
     /// The toast about a list being put in order, once it has taken as long

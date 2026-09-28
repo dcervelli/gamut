@@ -1806,6 +1806,20 @@ impl App {
         Effect::redraw_if(changed)
     }
 
+    /// Opens the window, unless the list it opens on is still being put in
+    /// order: then it waits for it, for as long as a read waits before it
+    /// is said — see `about_to_wait`.
+    fn open_window_when_ready(&mut self, event_loop: &ActiveEventLoop) {
+        if let Some(due) = self.window_due()
+            && Instant::now() < due
+        {
+            self.awaiting_window = true;
+            event_loop.set_control_flow(ControlFlow::WaitUntil(due));
+            return;
+        }
+        self.open_window(event_loop);
+    }
+
     /// Opens the window, and the renderer and interface with it. Opened
     /// while the command line's list is still being put in order — it has
     /// taken longer than a read waits before it is said — the window opens
@@ -2829,6 +2843,11 @@ impl ApplicationHandler<UserEvent> for App {
             UserEvent::Arranged(arranged) => self.arranged_read(arranged),
             UserEvent::Opened(paths) => {
                 self.open_named(paths);
+                // The files the program was launched to open, which the
+                // window waited for.
+                if self.shown.is_none() {
+                    self.open_window_when_ready(event_loop);
+                }
                 Effect::Redraw
             }
             UserEvent::Clipboard(offered) => self.clipboard_changed(offered),
@@ -2855,17 +2874,14 @@ impl ApplicationHandler<UserEvent> for App {
         if self.shown.is_some() {
             return;
         }
-        // The command line's list still being put in order: the window
-        // waits for it, for as long as a read waits before it is said —
-        // see `about_to_wait`.
-        if let Some(due) = self.window_due()
-            && Instant::now() < due
-        {
-            self.awaiting_window = true;
-            event_loop.set_control_flow(ControlFlow::WaitUntil(due));
+        // Launched by Finder to open files, which are on their way through
+        // the proxy: the window waits for them, to open at the first one's
+        // size rather than open empty and be sized again where it stands.
+        #[cfg(target_os = "macos")]
+        if crate::finder::sent_any() {
             return;
         }
-        self.open_window(event_loop);
+        self.open_window_when_ready(event_loop);
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -3562,6 +3578,23 @@ mod tests {
                 .title,
             [ui::tooltip::NOTHING_OPEN]
         );
+    }
+
+    /// Files sent before there is a window — Finder's, launching the
+    /// program — have it open at the first one's size, as a command line
+    /// naming them would, rather than open empty and be sized again.
+    #[test]
+    fn files_sent_before_the_window_size_it() {
+        let (dir, paths) = written("sent", &[("a.png", 640, 320), ("b.png", 8, 16)]);
+        let mut app = opened_on_nothing();
+        assert!(app.size_to_next);
+        assert_eq!(app.opening_size(), None);
+
+        app.open_named(paths.clone());
+        assert_eq!(app.opening_size(), Some([640.0, 320.0]));
+        assert!(!app.size_to_next, "opened at its size already");
+
+        std::fs::remove_dir_all(dir).expect("we just wrote it");
     }
 
     /// What the dialog chose is opened as a command line naming it beside
