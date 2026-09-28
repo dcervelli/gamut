@@ -94,6 +94,11 @@ pub enum UserEvent {
     /// A list about to be opened has been read for its order — see
     /// [`arranging`].
     Arranged(arranging::Arranged),
+    /// The desktop has asked for these files to be opened: on a Mac, what
+    /// Finder sends — see `finder`. Nothing sends it elsewhere, where the
+    /// files arrive on the command line.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    Opened(Vec<PathBuf>),
 }
 
 /// The other threads, and how each reaches the loop: made in `main` from
@@ -2822,6 +2827,10 @@ impl ApplicationHandler<UserEvent> for App {
             UserEvent::Picked(picked) => self.picked(picked),
             UserEvent::Folder(listed) => self.folder_read(listed),
             UserEvent::Arranged(arranged) => self.arranged_read(arranged),
+            UserEvent::Opened(paths) => {
+                self.open_named(paths);
+                Effect::Redraw
+            }
             UserEvent::Clipboard(offered) => self.clipboard_changed(offered),
             UserEvent::Monitor => self.sync_monitor(),
             // A frame from the player of a file already stepped past is news

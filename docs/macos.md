@@ -109,6 +109,25 @@ Linux: on Darwin it is the whole process.
 written for GNU's C++ library, which a Mac does not have, so `build.rs` prints
 the link lines itself with `stdc++` read as `c++`.
 
+## Files from Finder
+
+A Mac starts a program for a file without naming the file: Launch Services
+starts it with no arguments and then sends a `kAEOpenDocuments` Apple Event
+with the files in it, and it sends the same event to a program already
+running. winit 0.30 does not pass that event on, so `finder.rs` answers it
+itself, with a handler on `NSAppleEventManager`, and hands the paths to the
+loop as `UserEvent::Opened`, which `App::open_named` takes as it takes what
+the file dialog chose. A program started this way has no command line, so it
+opens on the empty window, sized by the first picture as any empty window
+is.
+
+The handler is installed on `NSApplicationWillFinishLaunchingNotification`,
+observed from `main` before the loop runs. AppKit installs its own handler for
+the event while it finishes launching and delivers the launching event just
+after that notification, so this is the one moment a handler both survives
+and hears the first files. An observer is used rather than the application's
+delegate because the delegate is winit's.
+
 ## Keys and gestures
 
 The key table is the same; `input::MAC_DEFAULTS` is the names whose chords
@@ -119,8 +138,6 @@ and the Option key's reading, are in [keys and gestures](keymap.md#on-a-mac).
 
 ## Not yet
 
-- Files opened from Finder, the Dock, or "Open With" arrive as an Apple Event
-  winit 0.30 does not surface; only the command line opens files for now.
 - There is no application bundle, so `APP_ID` is only what `openers` leaves
   out of its own menu. The Dock's icon is set by the running program instead,
   from `packaging/`'s SVG, which AppKit reads itself (`window::show_icon`);

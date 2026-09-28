@@ -190,6 +190,9 @@ openers/       what else on the desktop can open the file on screen, and startin
 media.rs       MIME_TYPES: what the desktop calls each extension the decoders read
 clock.rs       a moment as a date and time — UTC, or the zone the system's own
                compiled zone file says it is in
+finder.rs      (macOS) the files Launch Services asks the program to open — a double
+               click in Finder, "Open With", the Dock — answered as the Apple Event
+               they arrive in and handed to the loop as UserEvent::Opened
 xdg.rs         the base directory specification's answers — home, and the cache, configuration
                and data directories — read once for everything that keeps something under
                them; on a Mac the cache and the state fall back to ~/Library

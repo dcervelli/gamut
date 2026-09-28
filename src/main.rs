@@ -6,6 +6,8 @@ mod clipboard;
 mod clock;
 #[cfg(target_os = "linux")]
 mod dbus;
+#[cfg(target_os = "macos")]
+mod finder;
 mod fuzzy;
 mod gestures;
 mod image;
@@ -205,6 +207,15 @@ fn run() -> Result<ExitCode> {
     let arranged: app::arranging::Deliver = std::sync::Arc::new(move |arranged| {
         let _ = proxy.send_event(app::UserEvent::Arranged(arranged));
     });
+    // Files Finder opens arrive after the program has started, as an Apple
+    // Event rather than as arguments.
+    #[cfg(target_os = "macos")]
+    {
+        let proxy = event_loop.create_proxy();
+        finder::listen(Box::new(move |paths| {
+            let _ = proxy.send_event(app::UserEvent::Opened(paths));
+        }));
+    }
     let proxy = event_loop.create_proxy();
     clipboard::watch(watch::INTERVAL, move |offered| {
         proxy.send_event(app::UserEvent::Clipboard(offered)).is_ok()
