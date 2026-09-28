@@ -4,9 +4,15 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 0.8.1 - 2026-09-29
 
-### 0.8.0 - 2026-09-29
+### Fixed
+
+- Fix `cargo doc` build on Linux.
+
+## 0.8.0 - 2026-09-29
+
+### Added
 
 - `gamut` builds and runs on macOS from source, with Homebrew's `libheif`
   and `libraw`. The file dialog, the clipboard, the Trash, the menu of other
