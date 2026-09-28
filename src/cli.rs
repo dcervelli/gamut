@@ -817,4 +817,40 @@ mod tests {
             "the help text still calls the program {PROGRAM}"
         );
     }
+
+    /// The Homebrew formula builds the release the PKGBUILD does: the same
+    /// tarball, at the version `Cargo.toml` says, under the same checksum.
+    /// `bin/release` and `bin/pkgbuild-sha` move the two together, and this is
+    /// what notices when one was edited by hand without the other.
+    #[test]
+    fn the_formula_and_the_pkgbuild_name_the_same_release() {
+        let formula = std::fs::read_to_string(packaging().join(format!("{PROGRAM}.rb")))
+            .expect("the formula reads");
+        let pkgbuild =
+            std::fs::read_to_string(packaging().join("PKGBUILD")).expect("the PKGBUILD reads");
+        let version = env!("CARGO_PKG_VERSION");
+        assert!(
+            formula.contains(&format!("/archive/refs/tags/v{version}.tar.gz\"")),
+            "the formula names the v{version} tarball"
+        );
+        let checksum = pkgbuild
+            .lines()
+            .find_map(|line| line.strip_prefix("sha256sums=('"))
+            .and_then(|rest| rest.split('\'').next())
+            .expect("the PKGBUILD has a checksum");
+        assert!(
+            formula.contains(&format!("sha256 \"{checksum}\"")),
+            "the formula carries the PKGBUILD's checksum, {checksum}"
+        );
+        for completion in [
+            format!("packaging/completions/{PROGRAM}.bash"),
+            format!("packaging/completions/_{PROGRAM}"),
+            format!("packaging/completions/{PROGRAM}.fish"),
+        ] {
+            assert!(
+                formula.contains(&completion),
+                "the formula installs {completion}"
+            );
+        }
+    }
 }

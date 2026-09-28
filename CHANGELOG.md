@@ -27,6 +27,9 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   behavior, `gesture.image.pinch`, on either system.
 - The configuration file reads `cmd`, `command`, `option` and `opt` as
   modifiers, beside `super` and `alt`, so one file serves both systems.
+- A Homebrew formula, which builds `gamut` from the release on the Mac it
+  installs to and installs the manual page and the shell completions with
+  it.
 
 ### Changed
 

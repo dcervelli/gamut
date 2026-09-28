@@ -1,15 +1,17 @@
 # Releasing
 
 A release is a tag. `bin/release` makes it, `git push` publishes it, and
-`bin/pkgbuild-sha` points the package at it afterwards. Nothing else is
+`bin/pkgbuild-sha` points the packages at it afterwards. Nothing else is
 built or uploaded: the `Release` workflow in
 [`.github/workflows/release.yml`](../.github/workflows/release.yml) turns
 the tag into a GitHub release with generated notes, and the point of that
 release is its source tarball, which is what
-[`packaging/PKGBUILD`](../packaging/PKGBUILD) names in `source=`. Omarchy
-builds the package from that tarball in an Arch container and signs the
-result itself, so no binary is attached — there is nothing a binary could be
-for that the tarball is not.
+[`packaging/PKGBUILD`](../packaging/PKGBUILD) names in `source=`, and
+[`packaging/gamut.rb`](../packaging/gamut.rb), the Homebrew formula, in
+`url`. Omarchy builds the package from that tarball in an Arch container
+and signs the result itself, and Homebrew builds the formula from the same
+tarball on the Mac it installs to, so no binary is attached — there is
+nothing a binary could be for that the tarball is not.
 
 ## Before
 
@@ -45,9 +47,9 @@ The script, in order:
 
 1. Refuses a dirty tree, a version that is not three numbers, and a tag
    that already exists.
-2. Writes the version into `Cargo.toml` and into the PKGBUILD's `pkgver`,
-   and resets `pkgrel=1` — a new upstream version is always release 1 of
-   the package.
+2. Writes the version into `Cargo.toml`, into the PKGBUILD's `pkgver`, and
+   into the formula's `url`, and resets `pkgrel=1` — a new upstream
+   version is always release 1 of the package.
 3. `cargo build`, which is what refreshes `Cargo.lock`'s own record of the
    version, then rewrites `THIRD-PARTY-NOTICES` from that lock, stamped
    with the lock's checksum.
@@ -59,10 +61,11 @@ The script, in order:
 5. Checks that the binary it just built reports `gamut X.Y.Z` — the
    version a user sees comes from `Cargo.toml` at compile time, and this
    is the proof the bump reached it.
-6. Commits `Cargo.toml`, `Cargo.lock`, the PKGBUILD and the notices as
+6. Commits `Cargo.toml`, `Cargo.lock`, the PKGBUILD, the formula and the
+   notices as
    `Release vX.Y.Z`, and tags that commit `vX.Y.Z`.
 
-If any step fails, the four files are put back and nothing is committed;
+If any step fails, the five files are put back and nothing is committed;
 the tree is as it was, and the failure is fixed and committed like any
 other change before trying again. If it got as far as the tag but the tag
 should not go out, undo it locally — `git tag -d vX.Y.Z` and
@@ -91,7 +94,7 @@ release is fixed in the next patch version.
 
 ```sh
 bin/pkgbuild-sha vX.Y.Z
-git commit -am "Update PKGBUILD"
+git commit -am "Update PKGBUILD and formula"
 git push
 ```
 
@@ -110,7 +113,22 @@ GitHub can take a few seconds to serve a tarball for a tag it has just
 been given; checks that it unpacks into `gamut-X.Y.Z/`, the directory the
 PKGBUILD's functions `cd` into; and writes the checksum into the first
 entry of `sha256sums=`, which is the tarball's — any entries after it
-belong to other sources and are left alone.
+belong to other sources and are left alone. The formula names the same
+tarball, so the same checksum goes into its `sha256`.
+
+## The tap
+
+Homebrew finds a formula in a tap, which is a repository of its own named
+`homebrew-<tap>`, so the formula is kept here beside the PKGBUILD, where
+the release scripts and the tests reach it, and copied into the tap once it
+points at the release:
+
+```sh
+cp packaging/gamut.rb ../homebrew-gamut/Formula/gamut.rb
+```
+
+A user then installs it with `brew install dcervelli/gamut/gamut`. The copy
+in the tap is the one Homebrew reads; the one here is where it is edited.
 
 ## What guards it
 
@@ -119,7 +137,8 @@ checks that matter run before the tag:
 
 - `cli.rs`'s tests and the CI step beside them assert that the PKGBUILD's
   `pkgver` is `Cargo.toml`'s `version`, that it packages `PROGRAM`, and
-  that it installs the desktop entry and the icon under `APP_ID`. A
+  that it installs the desktop entry and the icon under `APP_ID`; and that
+  the formula names the same tarball under the same checksum. A
   PKGBUILD kept in the tree can fall behind the program it packages
   without anyone noticing; this is what notices.
 - CI compares the lock stamp in `THIRD-PARTY-NOTICES` with `Cargo.lock`,

@@ -1,5 +1,6 @@
 #!/bin/sh
-# Point the PKGBUILD at a published release and record its checksum.
+# Point the PKGBUILD and the Homebrew formula at a published release and
+# record its checksum, which is the same tarball's in both.
 #
 # Separate from `bin/release` because it can only run once the tag has been
 # pushed and the release workflow has produced the source tarball. GitHub can
@@ -62,3 +63,10 @@ awk -v v="$VERSION" -v sha="$SHA" -v q="'" '
 
 bash -n packaging/PKGBUILD
 echo "packaging/PKGBUILD now points at $TAG"
+
+awk -v v="$VERSION" -v sha="$SHA" '
+    /^  url "/ { sub(/\/v[^\/]*\.tar\.gz"/, "/v" v ".tar.gz\"") }
+    /^  sha256 "/ { sub(/"[0-9a-f]*"/, "\"" sha "\"") }
+    { print }
+' packaging/gamut.rb >packaging/gamut.rb.new && mv packaging/gamut.rb.new packaging/gamut.rb
+echo "packaging/gamut.rb now points at $TAG"

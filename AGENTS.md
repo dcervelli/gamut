@@ -252,9 +252,11 @@ render/        the GPU
   shaders/       WGSL; each Params struct is mirrored by a #[repr(C)] struct in the .rs file that
                  loads it; texel.wgsl is the reading of one texel that mod.rs prepends to
                  image.wgsl and reduce.wgsl both
-packaging/     what an Arch package is built from: PKGBUILD, the .desktop entry,
-               the icon, and hand-written shell completions
-bin/           release, pkgbuild-sha which points the PKGBUILD at a published tag, and
+packaging/     what the packages are built from: the Arch PKGBUILD, the Homebrew
+               formula (gamut.rb), the .desktop entry, the icon, and
+               hand-written shell completions
+bin/           release, pkgbuild-sha which points the PKGBUILD and the formula at a
+               published tag, and
                icon, which draws packaging/'s icon from a model of its scene's light
 REUSE.toml     which file in the tree is under what license; LICENSES/ holds the
                texts it names, and `reuse lint` checks the two agree

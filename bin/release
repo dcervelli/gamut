@@ -60,10 +60,10 @@ git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && {
     exit 1
 }
 
-# Cargo.toml and the PKGBUILD are put back if anything below fails, so a failed
+# Cargo.toml and the packages are put back if anything below fails, so a failed
 # release leaves no half-bumped tree behind.
 restore() {
-    git checkout -- Cargo.toml Cargo.lock packaging/PKGBUILD \
+    git checkout -- Cargo.toml Cargo.lock packaging/PKGBUILD packaging/gamut.rb \
         THIRD-PARTY-NOTICES 2>/dev/null || true
 }
 trap restore EXIT
@@ -78,6 +78,13 @@ awk -v v="$VERSION" '
     /^pkgrel=/ { print "pkgrel=1"; next }
     { print }
 ' packaging/PKGBUILD >packaging/PKGBUILD.new && mv packaging/PKGBUILD.new packaging/PKGBUILD
+
+# The formula names the tarball by its tag. Its checksum, like the PKGBUILD's,
+# is the previous release's until `bin/pkgbuild-sha` runs.
+awk -v v="$VERSION" '
+    /^  url "/ { sub(/\/v[^\/]*\.tar\.gz"/, "/v" v ".tar.gz\"") }
+    { print }
+' packaging/gamut.rb >packaging/gamut.rb.new && mv packaging/gamut.rb.new packaging/gamut.rb
 
 # Refreshes Cargo.lock's own record of the version, and runs the same checks CI
 # will. `cargo test` covers the packaging drift tests, so a stale desktop entry
@@ -121,12 +128,12 @@ BUILT=$(./target/debug/"$NAME" --version)
 
 trap - EXIT
 
-git add Cargo.toml Cargo.lock packaging/PKGBUILD THIRD-PARTY-NOTICES
+git add Cargo.toml Cargo.lock packaging/PKGBUILD packaging/gamut.rb THIRD-PARTY-NOTICES
 git commit -m "Release $TAG"
 git tag "$TAG"
 
 echo
 echo "Committed and tagged $TAG. To publish it:"
 echo "    git push && git push origin $TAG"
-echo "Then, once the release exists, update the PKGBUILD checksum:"
+echo "Then, once the release exists, update the PKGBUILD's and the formula's checksum:"
 echo "    bin/pkgbuild-sha $TAG"
