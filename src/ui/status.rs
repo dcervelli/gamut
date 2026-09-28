@@ -7,7 +7,7 @@ use egui::{
 
 use crate::image::display::{AutoWindow, Headroom, ToneMap};
 
-use super::chrome::{BAR_PADDING, Corners, Pass, STEP_SEAM, measure};
+use super::chrome::{BAR_PADDING, BUTTON_SIZE, Corners, Pass, STEP_SEAM, measure};
 use super::control::Control;
 use super::style::TOGGLE_RADIUS;
 use super::tooltip::Tip;
@@ -22,7 +22,7 @@ const SEPARATOR: &str = " \u{00b7} ";
 /// The facts about the picture the top bar sets at its far end: its size,
 /// what each pixel holds, and the color space those numbers are meant in.
 /// Least to most disposable, for [`fit_segments`] to cut.
-pub(super) fn facts(current: &Current, _measure: impl FnMut(&str) -> f32) -> [String; 3] {
+pub(super) fn facts(current: &Current) -> [String; 3] {
     [
         {
             let [width, height] = current.pixels();
@@ -33,26 +33,55 @@ pub(super) fn facts(current: &Current, _measure: impl FnMut(&str) -> f32) -> [St
     ]
 }
 
-/// Joins as many leading segments as fit in `width`, keeping at least the
-/// first however narrow the window gets. The facts are dropped whole rather
-/// than clipped: half of "18333 x 15667" is worse than none of it.
+/// Joins as many leading segments as fit in `width`, and none at all when
+/// the first of them does not. The facts are dropped whole rather than
+/// clipped: half of "18333 x 15667" is worse than none of it.
 pub(super) fn fit_segments(
     mut measure: impl FnMut(&str) -> f32,
     segments: &[String],
     width: f32,
 ) -> String {
-    let Some((first, rest)) = segments.split_first() else {
-        return String::new();
-    };
-    let mut joined = first.clone();
-    for segment in rest {
-        let candidate = format!("{joined}{SEPARATOR}{segment}");
+    let mut joined = String::new();
+    for segment in segments {
+        let candidate = if joined.is_empty() {
+            segment.clone()
+        } else {
+            format!("{joined}{SEPARATOR}{segment}")
+        };
         if measure(&candidate) > width {
             break;
         }
         joined = candidate;
     }
     joined
+}
+
+/// What the near end of the top bar takes with the name written in full:
+/// the padding, the list's buttons and count while there is a list, the
+/// file's button, and the name in its bold face. What [`top_words`] will
+/// ask for, worked out ahead of it so that the facts at the far end can be
+/// given what the name leaves rather than a share of the bar the name then
+/// goes without: the name is what a reader wants from the bar, and the facts
+/// are the info panel's too.
+pub(super) fn head_width(pass: &Pass, ui: &egui::Ui, current: &Current) -> f32 {
+    let list = match counter(pass.input.index, pass.input.count) {
+        Some(counter) => {
+            3.0 * BUTTON_SIZE
+                + 2.0 * COUNTER_GAP
+                + 2.0 * STEP_SEAM
+                + measure(ui, &counter)
+                + 2.0 * STATE_PAD
+        }
+        None => 0.0,
+    };
+    let bold = egui::FontId::new(TEXT_SIZE, egui::FontFamily::Name(fonts::BOLD.into()));
+    let name = ui.ctx().fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap(current.label.clone(), bold, egui::Color32::PLACEHOLDER)
+            .size()
+            .x
+    });
+    BAR_PADDING + list + BUTTON_SIZE + COUNTER_GAP + name
 }
 
 /// The top bar's own words, from the near end: the pair that steps through
@@ -216,8 +245,8 @@ const STATE_PAD: f32 = 6.0;
 
 /// The words at the far end of the bottom bar: what is being done to the
 /// image, set against the switch that ends the bar, and nothing at all where
-/// nothing is being done. Cut by whole segments to half the bar, as the top
-/// bar's facts are.
+/// nothing is being done. Cut by whole segments to half the bar, the
+/// pointer's readout having the other half.
 ///
 /// Nothing, too, while another file is on its way in: the settings and the
 /// verdict are the outgoing picture's, and the one arriving has its own.
@@ -237,6 +266,9 @@ pub(super) fn state_words(pass: &mut Pass, ui: &mut egui::Ui, current: &Current)
     }
     let room = (ui.max_rect().width() / 2.0 - BAR_PADDING * 2.0).max(1.0);
     let line = fit_segments(|text| measure(ui, text), &segments, room);
+    if line.is_empty() {
+        return;
+    }
     // The word for a picture losing its highlights, which is the one thing
     // on this line that nobody asked for — set bold, and in the ink the line
     // takes when the pointer is on it, so that it reads as the thing being
@@ -502,8 +534,8 @@ mod tests {
     }
 
     /// The words are cut to the room by whole segments, so that they never
-    /// say half of anything, and the first of them survives however narrow
-    /// the window gets.
+    /// say half of anything, and go altogether once the first of them has
+    /// no room either.
     #[test]
     fn the_line_is_cut_by_whole_segments() {
         let mut current = photograph();
@@ -526,9 +558,14 @@ mod tests {
         assert!(!cut.ends_with(CLIPPED));
 
         assert_eq!(
-            fit_segments(monospace, &segments, 1.0),
+            fit_segments(monospace, &segments, monospace("full")),
             "full",
-            "the first segment stays however narrow the window gets"
+            "the first segment alone, with room for it alone"
+        );
+        assert_eq!(
+            fit_segments(monospace, &segments, 1.0),
+            "",
+            "nothing at all, rather than part of the first segment"
         );
     }
 

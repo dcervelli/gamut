@@ -4,6 +4,16 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+
+- The top bar gives the file's name its room before the size, pixels and
+  color space at its far end, which go one by one as the window narrows
+  and are gone altogether before the name is cut short. Before, the facts
+  kept half the bar whatever the name needed, and a narrow window showed
+  the facts of a file it had no room to name.
+
 ## 0.8.2 - 2026-09-29
 
 ### Fixed
