@@ -5307,6 +5307,16 @@ mod tests {
         player.read(|cache| assert_eq!(cache.error(), None));
     }
 
+    /// Stops the clock and starts it again at `now`, on the frame it was
+    /// on, so that a tick timed from `now` does not depend on how long the
+    /// decode before it took.
+    fn restart_clock(app: &mut App, now: Instant) {
+        let animation = app.animation.as_mut().expect("an animation has a clock");
+        assert!(animation.playing());
+        animation.toggle(now);
+        animation.toggle(now);
+    }
+
     /// The pixel at `(x, y)` of the picture on screen, as bytes.
     fn shown_pixel(app: &App, x: u32, y: u32) -> Vec<u8> {
         let image = &app.current.as_ref().expect("a picture is up").image;
@@ -5340,9 +5350,11 @@ mod tests {
         let first = shown_pixel(&app, 8, 6);
         assert_eq!(&first[..3], [255, 0, 0], "red quadrant first");
         decoded_to_the_end(&app);
+        let start = Instant::now();
+        restart_clock(&mut app, start);
 
         // A tenth and a half later the second frame is due.
-        let (changed, deadline) = app.tick_playback(Instant::now() + Duration::from_millis(150));
+        let (changed, deadline) = app.tick_playback(start + Duration::from_millis(150));
         assert!(changed);
         assert!(deadline.is_some(), "the next frame has a time");
         assert_eq!(app.animation.as_ref().unwrap().head(), 1);
@@ -5436,7 +5448,9 @@ mod tests {
         let [width, height] = app.image_size();
         let _ = app.perform(TurnRight);
         decoded_to_the_end(&app);
-        let (changed, _) = app.tick_playback(Instant::now() + Duration::from_millis(150));
+        let start = Instant::now();
+        restart_clock(&mut app, start);
+        let (changed, _) = app.tick_playback(start + Duration::from_millis(150));
         assert!(changed);
         app.show_due_frame();
         assert_eq!(app.animation.as_ref().unwrap().uploaded(), Some(1));
