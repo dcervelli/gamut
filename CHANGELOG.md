@@ -14,6 +14,11 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   kept half the bar whatever the name needed, and a narrow window showed
   the facts of a file it had no room to name.
 
+### Fixed
+
+- On macOS, associate images files with gamut at runtime.
+- Remove homebrew script section that fails to associate files with gamut.
+
 ## 0.8.2 - 2026-09-29
 
 ### Fixed
