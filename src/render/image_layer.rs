@@ -158,11 +158,14 @@ struct Marks {
 }
 
 /// What the marks on the texels depend on: the window as the shader applies
-/// it, exposure included, and the weight of the gain map's lift.
+/// it, exposure included, the weight of the gain map's lift, and which ends
+/// are painted — `shader_codes::marks`' bits — since a texel past both ends
+/// is marked at whichever of them is being painted, white first.
 #[derive(Clone, Copy, PartialEq)]
 struct MarksKey {
     window: (f32, f32),
     weight: f32,
+    marks: u32,
 }
 
 impl Marks {
@@ -560,6 +563,7 @@ impl ImageLayer {
         let wanted = (mark_clipped && coarse).then_some(MarksKey {
             window,
             weight: image.lift.as_ref().map_or(0.0, |lift| lift.weight),
+            marks,
         });
         if image.marks.as_ref().map(|marks| marks.key) != wanted {
             match wanted {
@@ -1276,7 +1280,7 @@ fn write_marks(
                 target,
                 display,
                 window: key.window,
-                marks: 0,
+                marks: key.marks,
                 lifted,
                 turn: Turn::NONE,
             },

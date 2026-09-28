@@ -91,9 +91,12 @@ impl ToneMap {
         match (self, headroom) {
             // The hardware clamps on the way into an SDR surface.
             (ToneMap::None, Headroom::None) => color.map(|c| c.clamp(0.0, 1.0)),
-            // The negatives go, as they do under every other curve here:
-            // undershoot from a bicubic lobe is not light.
-            (ToneMap::None, Headroom::Above) => color.map(|c| c.max(0.0)),
+            // The surface has the room, above white and below zero alike: a
+            // wide-gamut color comes to a negative BT.709 channel, and scRGB
+            // is defined to carry one, so it goes out as it is.
+            (ToneMap::None, Headroom::Above) => color,
+            // The curve's toe reads the darkest channel and its arithmetic
+            // is written for light, so the negatives go before it.
             (ToneMap::Neutral, _) => neutral(color.map(|c| c.max(0.0))),
         }
     }
@@ -140,8 +143,9 @@ pub enum Headroom {
     #[default]
     None,
     /// An HDR surface: the highlights go out at the brightness they were
-    /// graded to, and tone mapping is something the viewer asks for rather
-    /// than something the output imposes.
+    /// graded to, a wide-gamut color as the color it is, and tone mapping
+    /// is something the viewer asks for rather than something the output
+    /// imposes.
     Above,
 }
 
@@ -171,16 +175,15 @@ mod tests {
     }
 
     /// No curve means whatever the surface does: an SDR surface clamps at
-    /// white, and an HDR one passes the highlights through and clips nothing
-    /// but the light that is not there — the shader's arms 0 and 2.
+    /// both ends, and an HDR one passes everything through — the highlights
+    /// above white, and the channel below zero a wide-gamut color comes to
+    /// in BT.709, which is the color itself and not light that is not
+    /// there — the shader's arms 0 and 2.
     #[test]
     fn no_curve_is_a_clip_on_sdr_and_a_pass_through_on_hdr() {
         let color = [-0.25, 0.5, 6.31];
         assert_eq!(ToneMap::None.apply(color, Headroom::None), [0.0, 0.5, 1.0]);
-        assert_eq!(
-            ToneMap::None.apply(color, Headroom::Above),
-            [0.0, 0.5, 6.31]
-        );
+        assert_eq!(ToneMap::None.apply(color, Headroom::Above), color);
         // The curve is the curve whatever the surface.
         assert_eq!(
             ToneMap::Neutral.apply(color, Headroom::None),

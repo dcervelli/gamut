@@ -67,8 +67,25 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 - The EPSG code a GeoTIFF names is now looked up, to find its latitude and
   longitude, where before it was only quoted. The table of codes it is looked
   up in is linked into the binary.
+- A wide-gamut file — Display P3, Adobe RGB, BT.2020, a raw — is measured
+  where the screen has it rather than in its own channels. A color sRGB
+  cannot hold stands past white on the histogram, or below black, the
+  corners count it, `w` paints it, and the file opens with the neutral
+  curve rolling it off on an SDR surface as a PQ frame does; on an HDR
+  surface it is shown and nothing is marked. The bottom bar's **clipped**
+  says so for such a file, where before it was clipped in silence. A file
+  in sRGB is measured exactly as before.
+- The histogram of a 16-bit or float picture with a gain map is scanned
+  through the lift, as an 8-bit one's already was.
 
 ### Fixed
+
+- On an HDR surface a wide-gamut color went out as a brighter color of the
+  sRGB hue: the channels below zero it comes to in BT.709 were clipped
+  before the surface saw them, so a P3 red was an sRGB red at 122% of white.
+  They now go out as they are on an scRGB surface, and on an HDR10 surface
+  the color is taken to BT.2020, which holds P3 and Adobe RGB whole, before
+  anything is clipped.
 
 - A panel floating over the picture could take the pointer from a place
   left of where it is drawn: the right of the histogram panel let a click or

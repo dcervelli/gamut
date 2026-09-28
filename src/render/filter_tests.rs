@@ -1032,11 +1032,12 @@ fn rgb_f32_row(pixels: &[[f32; 3]], primaries: Primaries) -> DecodedImage {
 }
 
 /// The marks on clipped pixels paint a pixel any channel of which the window
-/// has taken to white or to black, in the file's own channels: a sun whose
-/// red has gone while its green has not is marked, and a vivid Rec. 2020
-/// red, whose BT.709 green is negative and red above one, is not — the
-/// file never clipped it. Off, nothing is painted; under a curve, white is
-/// not being clipped and only black is marked.
+/// has taken to white or to black, in the working space's channels: a sun
+/// whose red has gone while its green has not is marked, and so is a vivid
+/// Rec. 2020 red the file never clipped, whose red is above one once
+/// carried into BT.709 — which is what a surface that stops at white makes
+/// of it. Off, nothing is painted; under a curve, white is not being
+/// clipped and only black is marked.
 ///
 /// Every color is one texel with different neighbors, drawn at 1:1 and
 /// magnified through the bicubic filter, and each is marked or not by its
@@ -1113,7 +1114,7 @@ fn the_marks_paint_a_pixel_any_channel_of_which_has_reached_an_end() {
         let marked = draw(zoom, upscale, true, &Display::default());
         check(
             &marked,
-            &[white, black, plain[2], plain[3], white],
+            &[white, black, white, plain[3], white],
             &format!("{case} marked"),
         );
 
@@ -1121,13 +1122,15 @@ fn the_marks_paint_a_pixel_any_channel_of_which_has_reached_an_end() {
         check(&unmarked, &plain, &format!("{case} unmarked"));
 
         // A curve rolls the highlights off rather than clipping them, so
-        // white is not marked; the shadows still are.
+        // white is not marked; the shadows still are — and the vivid red,
+        // whose BT.709 green is below zero as well, wears the blue of that
+        // now that its red is not being lost.
         let mut curved = Display::default();
         curved.set_tone_map(ToneMap::Neutral, false);
         let curved = draw(zoom, upscale, true, &curved);
         check(
             &curved,
-            &[plain[0], black, plain[2], plain[3], plain[4]],
+            &[plain[0], black, black, plain[3], plain[4]],
             &format!("{case} curved"),
         );
     }

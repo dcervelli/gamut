@@ -326,24 +326,32 @@ fn shade(uv: vec2<f32>) -> vec4<f32> {
 
 // Whether the window in force has taken any channel of the texel at `coord`
 // of the picture as uploaded to white (`.x`) or to black (`.y`) — one or the
-// other, white first — where the picture has lost what that channel held,
-// and the color left is not the file's. Read through the same `load` and
-// `expanded` the draw reads by, so the verdict is on the lifted, straight
-// color the draw shows; a texel with no coverage marks nothing, there being
-// nothing of it on screen to have lost anything.
+// other, since the two are painted as a partition of the pixel — where the
+// picture has lost what that channel held, and the color left is not the
+// file's. Read through the same `load` and `expanded` the draw reads by, so
+// the verdict is on the lifted, straight color the draw shows; a texel with
+// no coverage marks nothing, there being nothing of it on screen to have
+// lost anything.
 //
-// Judged in the file's own channels, before the primaries matrix, which is
-// where the histogram's corners count the same share: the band's two ends
-// are on the file's axis, and a wide-gamut color's negative BT.709 channel
-// is a gamut matter the compositor's clip settles, not a shadow the window
-// took to black. The comparisons are exact, as the corners' are.
+// Judged in the working space's channels, after the primaries matrix, as
+// `shade` applies the window and as the histogram's corners count the same
+// share: a P3 red carried into BT.709 is past white in red and below zero
+// in green, and on a surface that stops at either end that is exactly what
+// is lost of it. Such a texel is past both ends at once, and is marked at
+// whichever is being painted, white first: under a curve, which rolls the
+// red off and clamps the green, it wears the blue of the green it lost.
+// The comparisons are exact, as the corners' are.
 fn judge(coord: vec2<i32>) -> vec2<f32> {
     let own = expanded(load(coord));
     if own.a <= 0.0 {
         return vec2<f32>(0.0);
     }
-    let native = (own.rgb - vec3<f32>(params.window.x)) * params.window.y;
-    if any(native >= vec3<f32>(1.0)) {
+    var color = own.rgb;
+    if params.swizzle >= 2u {
+        color = params.primaries * color;
+    }
+    let native = (color - vec3<f32>(params.window.x)) * params.window.y;
+    if (params.marks & 2u) != 0u && any(native >= vec3<f32>(1.0)) {
         return vec2<f32>(1.0, 0.0);
     }
     if any(native <= vec3<f32>(0.0)) {

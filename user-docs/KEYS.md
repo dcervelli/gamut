@@ -529,10 +529,13 @@ though its green never reached white, and the pink it shows is not what
 the scene held. The marks stay on until pressed off again, from one file
 to the next, and no reset of the display touches them. The paint and the
 corners of the plot count the same thing, a channel at a time, so the
-share in a corner is the share of the picture wearing the paint. Neither
-marks white where nothing is being clipped: on an HDR surface with no
-curve, or under a curve, the highlights are shown or rolled off rather
-than lost.
+share in a corner is the share of the picture wearing the paint. A color
+from a wide-gamut file — Display P3, Adobe RGB, a raw — that an ordinary
+monitor cannot show is painted too, since the screen loses it the same
+way, and such a file opens with the curve rolling those colors off as it
+would highlights. Neither marks white where nothing is being clipped: on
+an HDR surface with no curve, or under a curve, the highlights are shown
+or rolled off rather than lost.
 
 Under the band, every file gets the exposure: a slider over six stops each
 way, its reading at the end of the row. It snaps to the quarter stops `d`

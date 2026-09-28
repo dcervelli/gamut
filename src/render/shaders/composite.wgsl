@@ -76,11 +76,16 @@ fn neutral(color_in: vec3<f32>) -> vec3<f32> {
 // and `shader_codes::tone_map` says it.
 fn tone_map(color: vec3<f32>) -> vec3<f32> {
     switch params.tone_map {
+        // The curve's toe reads the darkest channel and its arithmetic is
+        // written for light, so the negatives go before it.
         case 1u: { return neutral(max(color, vec3<f32>(0.0))); }
         // Nothing to do: the surface has room above 1.0 and the highlights
-        // are meant to use it. Negatives still go, being light that is not
-        // there rather than headroom.
-        case 2u: { return max(color, vec3<f32>(0.0)); }
+        // are meant to use it, and room below 0.0 for the channel a
+        // wide-gamut color comes to in BT.709 — a P3 red is negative in
+        // green there, and scRGB is defined to carry that. On the HDR10
+        // path the color is taken to BT.2020 below, which holds such a
+        // color whole, and only what is outside that is clipped.
+        case 2u: { return color; }
         default: { return clamp(color, vec3<f32>(0.0), vec3<f32>(1.0)); }
     }
 }
@@ -88,8 +93,10 @@ fn tone_map(color: vec3<f32>) -> vec3<f32> {
 // The working space's BT.709 primaries taken to BT.2020, which is the gamut
 // an HDR10 surface reads its signal in. The inverse of
 // `Primaries::Bt2020.to_bt709()` in image/color/mod.rs, where a test holds
-// these nine numbers against it. BT.2020 contains BT.709 whole, so nothing in
-// range comes out negative; a wide-gamut source can, and is clipped after.
+// these nine numbers against it. BT.2020 contains BT.709, P3 and Adobe RGB
+// whole, so a color from any of them comes out in range even where its
+// BT.709 channels were not; what is outside BT.2020 too — ProPhoto's green
+// — is clipped here, there being no signal for it.
 fn bt709_to_bt2020(color: vec3<f32>) -> vec3<f32> {
     let matrix = mat3x3<f32>(
         vec3<f32>(0.6274021, 0.0690956, 0.0163942),

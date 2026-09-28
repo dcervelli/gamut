@@ -185,9 +185,34 @@ holds the curve at a clip while active, on either surface — a curve on top of
 a colormap would distort the mapping you are reading values off, and there is
 no color past the end of the ramp for headroom to show as.
 
-Two things the HDR path does not do, deliberately: it clips wide-gamut
-color to BT.709 even on scRGB, which could carry the negatives a P3 or
-BT.2020 file produces; and a scene-referred file on an HDR surface is still
-windowed to 0..1, since without a reference white there is nothing to put
-above it — widen the window or raise the exposure to use the room.
+**Wide gamut** is headroom of another kind. The working space is BT.709, and
+`params.primaries` in `shaders/image.wgsl` carries a P3, Adobe RGB or
+BT.2020 file's color into it before the window goes on, so a color outside
+BT.709 comes to a channel above white or below zero there: a P3 red is 1.22
+in red and −0.04 in green. On an SDR surface the compositor clips both,
+which loses the color as clipping a highlight loses it, and the program
+reads it as the same loss. `Stats::scan` measures the picture in the working
+space — `Values::to_working_space`, the lift and then the matrix, with the
+plotted channels put back on the file's own curve — so the histogram's red
+plane stands past white and its green below black; `Stats::peak` carries
+the highest channel, which is what `Display::exceeds_white` asks, since the
+luminance alone never passes white for a pure red of any gamut; the corners
+count the share; `judge` marks the pixels after the same matrix; and the
+neutral curve engages by default as it does for a PQ frame.
+`DecodedImage::sample` carries the matrix in `Sample::linear` for the same
+reason, so that the histogram's marker lands in the bar the scan counted the
+pixel in. On an HDR surface nothing is lost, so `tone_map`'s headroom arm in
+`shaders/composite.wgsl` passes the color through untouched, the negatives
+with it — scRGB is defined to carry them, and the `Rgba16Float` target holds
+them — and the HDR10 arm takes the color to BT.2020, which holds P3 and
+Adobe RGB whole, before it clips what is outside that. `ToneMap::apply` is
+the CPU twin of all three arms, and `the_tone_curve_on_the_device_is_the_readouts`
+in `render/filter_tests.rs` holds the device to it over a sweep that runs
+below zero. The neutral curve keeps its clamp on either surface: its toe
+reads the darkest channel, and its arithmetic is written for light.
+
+One thing the HDR path does not do, deliberately: a scene-referred file on
+an HDR surface is still windowed to 0..1, since without a reference white
+there is nothing to put above it — widen the window or raise the exposure to
+use the room.
 

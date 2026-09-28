@@ -45,6 +45,12 @@ impl Transfer {
     pub fn to_linear(self, value: f32) -> f32 {
         match self {
             Transfer::Linear => value,
+            // Mirrored, as `to_encoded` mirrors, so that the two stay each
+            // other's inverse below zero: the histogram's axis runs there
+            // for a wide-gamut file, whose green in BT.709 is negative, and
+            // a handle or a label on that stretch of the axis is worked
+            // back to a value through this.
+            _ if value < 0.0 => -self.to_linear(-value),
             Transfer::Srgb => {
                 if value <= 0.04045 {
                     value / 12.92

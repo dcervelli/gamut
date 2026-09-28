@@ -195,15 +195,18 @@ impl Display {
     /// for an SDR surface to clip.
     ///
     /// Measured at the value the window was set to put at white, where it was
-    /// set from the pixels, and at the brightest pixel otherwise. A
-    /// percentile window puts its percentile at white and leaves the outliers
-    /// above it by design — that is what the percentile is for — so on that
-    /// window the brightest pixel says nothing, and only exposure can carry
-    /// the picture past white.
+    /// set from the pixels, and at the highest channel otherwise — the
+    /// channel rather than the luminance, since a channel is what clips: a
+    /// pure red is a fifth of white in luminance with its red at white, and
+    /// a P3 red carried into the working space is past it. A percentile
+    /// window puts its percentile at white and leaves the outliers above it
+    /// by design — that is what the percentile is for — so on that window
+    /// the brightest pixel says nothing, and only exposure can carry the
+    /// picture past white.
     pub fn exceeds_white(&self, stats: &Stats) -> bool {
         let top = match self.auto {
             AutoWindow::Percentile => stats.percentile(0.999),
-            AutoWindow::Off | AutoWindow::MinMax | AutoWindow::Manual => stats.max,
+            AutoWindow::Off | AutoWindow::MinMax | AutoWindow::Manual => stats.peak,
         };
         self.windowed(top) > ABOVE_WHITE
     }
@@ -732,6 +735,44 @@ mod tests {
             );
             assert_eq!(display.tone_map, ToneMap::Neutral, "{transfer:?}");
         }
+    }
+
+    /// A wide-gamut color is above white in the working space though the
+    /// file never left 0..1: a P3 red carried into BT.709 is 1.22 in red,
+    /// which a surface that stops at white clips as it clips a highlight,
+    /// while its luminance is a fifth of white and says nothing. So it
+    /// opens rolled off on an SDR surface and straight on an HDR one, where
+    /// the surface has the room; an sRGB red, white in red and no further,
+    /// opens straight on both.
+    #[test]
+    fn a_wide_gamut_color_opens_rolled_off_on_sdr_and_straight_on_hdr() {
+        let red = |primaries| DecodedImage {
+            width: 2,
+            height: 1,
+            samples: Samples::U8 {
+                channels: Channels::Rgb,
+                data: vec![255, 0, 0, 128, 128, 128],
+            },
+            color: ColorSpace {
+                transfer: Transfer::Srgb,
+                primaries,
+            },
+            alpha: AlphaMode::Opaque,
+            referred: Referred::Display,
+            exposure: None,
+            nodata: None,
+            gain_map: None,
+        };
+        let p3 = red(Primaries::DisplayP3);
+        let stats = Stats::scan(&p3);
+        assert!(stats.max < 0.3, "luminance never reaches white: {}", stats.max);
+        assert!(stats.peak > 1.2, "the red channel is past it: {}", stats.peak);
+        assert_eq!(opened(&p3, Headroom::None).tone_map, ToneMap::Neutral);
+        assert_eq!(opened(&p3, Headroom::Above).tone_map, ToneMap::None);
+
+        let srgb = red(Primaries::Bt709);
+        assert_eq!(Stats::scan(&srgb).peak, 1.0);
+        assert_eq!(opened(&srgb, Headroom::None).tone_map, ToneMap::None);
     }
 
     /// What the histogram's ramp is painted with. The ends are the reason it
