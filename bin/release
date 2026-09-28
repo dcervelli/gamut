@@ -109,6 +109,11 @@ command -v cargo-about >/dev/null || {
     echo "    cargo install cargo-about --locked --features cli" >&2
     exit 1
 }
+# The graph is resolved for every target in about.toml, and the build above
+# only downloaded the host's crates: a Mac's objc2 crates are never fetched on
+# Linux, nor Linux's on a Mac. `cargo fetch` with no target fetches them all,
+# so that the generation after it can stay offline.
+cargo fetch --locked --quiet
 {
     printf 'Cargo.lock sha256: %s\n\n' "$(sha256 Cargo.lock)"
     cargo about generate --frozen packaging/about.hbs
