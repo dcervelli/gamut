@@ -366,6 +366,15 @@ impl DecodedImage {
             let gain = map.gain_at(table, x, y, self.width, self.height);
             table.apply(&mut linear[..channels.color_count()], gain);
         }
+        // Then the primaries, on the color as it still is, premultiplied
+        // and all: the matrix is linear, so the coverage divides out of the
+        // converted color as it would have out of the file's, and `linear`
+        // is what the statistics binned.
+        if !channels.is_gray() {
+            let converted =
+                to_working_space(self.color.primaries.to_bt709(), [linear[0], linear[1], linear[2]]);
+            linear[..3].copy_from_slice(&converted);
+        }
         let mut color = [0.0f32; 3];
         color.copy_from_slice(&linear[..3]);
         let alpha = match channels.alpha_index() {
@@ -383,9 +392,6 @@ impl DecodedImage {
             } else {
                 color = [0.0; 3];
             }
-        }
-        if !channels.is_gray() {
-            color = to_working_space(self.color.primaries.to_bt709(), color);
         }
 
         Some(Sample {
@@ -442,10 +448,11 @@ impl DecodedImage {
 pub struct Sample {
     pub channels: Channels,
     stored: [f32; 4],
-    /// Every component decoded to linear and lifted, alpha included where
-    /// there is one, before the premultiplication is undone or the
-    /// primaries converted: what the statistics bin, so that the marker on
-    /// the histogram lands on the bar the scan counted the pixel in.
+    /// Every component decoded to linear, lifted and carried into the
+    /// working space's primaries, alpha included where there is one, before
+    /// the premultiplication is undone: what the statistics bin, so that
+    /// the marker on the histogram lands on the bar the scan counted the
+    /// pixel in.
     linear: [f32; 4],
     color: [f32; 3],
     /// Coverage as a fraction; 1.0 where the image has no alpha channel.
@@ -460,9 +467,9 @@ impl Sample {
         &self.stored[..self.channels.count()]
     }
 
-    /// Every component decoded to linear, and lifted where the picture has
-    /// a gain map, in the file's own primaries with any premultiplication
-    /// still in: what [`Stats`] measured the pixel as.
+    /// Every component decoded to linear, lifted where the picture has a
+    /// gain map, and carried into the working space's primaries, with any
+    /// premultiplication still in: what [`Stats`] measured the pixel as.
     pub fn linear(&self) -> &[f32] {
         &self.linear[..self.channels.count()]
     }

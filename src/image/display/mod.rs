@@ -111,23 +111,20 @@ impl Display {
     /// it has already put the scene's own range at 0..1, and an exposure
     /// pushed on top of that would open the picture stops too bright.
     ///
-    /// The tone curve follows from the window and the exposure rather than
-    /// from the file: a curve exists to fit values above white into a
-    /// surface that stops there, so it is wanted when they leave something
-    /// above white and the surface has no room for it — the highlights of a
-    /// graded HDR picture, or of a metered scene, on an SDR surface — and
-    /// not otherwise. The startup exposure is applied after that decision
-    /// is made: it is a setting like any other, and what the file opens
-    /// with is a fact about the file.
-    ///
-    /// `headroom` is the surface's half of that decision. The surface can
-    /// change under a picture, and [`Display::adopt`] asks again when it does.
-    pub fn for_image_with(
-        image: &DecodedImage,
-        stats: &Stats,
-        startup: Startup,
-        headroom: Headroom,
-    ) -> Self {
+    /// The tone curve is a choice and never a default: every file opens
+    /// with none, on either surface. A curve exists to fit values above
+    /// white into a surface that stops there, but the one curve there is
+    /// changes the whole picture — its toe takes an offset out of every
+    /// shadow, and its shoulder starts well under white — so a curve that
+    /// came on by itself would render two files in a folder differently on
+    /// whether a specular reached a hair past white, and would move every
+    /// P3 photograph with a few pixels outside sRGB. What the surface
+    /// throws away is said instead: [`Display::exceeds_white`] is what the
+    /// bottom bar's **clipped**, the histogram's corner and the marks are
+    /// drawn from, and `t` is the answer to it. The startup exposure and
+    /// curve are applied after the window is found: they are settings like
+    /// any other, and what the file opens with is a fact about the file.
+    pub fn for_image_with(image: &DecodedImage, stats: &Stats, startup: Startup) -> Self {
         let auto = AutoWindow::default_for(image);
 
         let mut display = Self {
@@ -146,7 +143,6 @@ impl Display {
         if image.referred == Referred::Scene && display.auto == AutoWindow::Off {
             display.exposure_stops = Self::metered(stats);
         }
-        display.adopt(headroom, stats);
 
         // The false color is a reading of one channel, and a color image's
         // three are colors already: the display ignores it there, and so
@@ -176,34 +172,23 @@ impl Display {
         }
     }
 
-    /// Takes the tone curve the surface wants for what is on screen: none
-    /// where it has room for the highlights, a roll-off where it does not and
-    /// there are highlights to roll off. For when the surface has changed
-    /// under the picture — it is settled after the first file is decoded, and
-    /// it is switched.
-    ///
-    /// Not what was asked for with `t`: the switch chooses the curve the
-    /// surface wants, and `t` changes it afterwards. A curve given on the
-    /// command line is a choice rather than a default, and the caller keeps
-    /// that one.
-    pub fn adopt(&mut self, headroom: Headroom, stats: &Stats) {
-        self.tone_map = ToneMap::default_for(headroom, self.exceeds_white(stats));
-    }
-
     /// Whether the picture, as the window and the exposure have it, reaches
     /// past white: whether there is anything for a tone curve to act on, or
     /// for an SDR surface to clip.
     ///
     /// Measured at the value the window was set to put at white, where it was
-    /// set from the pixels, and at the brightest pixel otherwise. A
-    /// percentile window puts its percentile at white and leaves the outliers
-    /// above it by design — that is what the percentile is for — so on that
-    /// window the brightest pixel says nothing, and only exposure can carry
-    /// the picture past white.
+    /// set from the pixels, and at the highest channel otherwise — the
+    /// channel rather than the luminance, since a channel is what clips: a
+    /// pure red is a fifth of white in luminance with its red at white, and
+    /// a P3 red carried into the working space is past it. A percentile
+    /// window puts its percentile at white and leaves the outliers above it
+    /// by design — that is what the percentile is for — so on that window
+    /// the brightest pixel says nothing, and only exposure can carry the
+    /// picture past white.
     pub fn exceeds_white(&self, stats: &Stats) -> bool {
         let top = match self.auto {
             AutoWindow::Percentile => stats.percentile(0.999),
-            AutoWindow::Off | AutoWindow::MinMax | AutoWindow::Manual => stats.max,
+            AutoWindow::Off | AutoWindow::MinMax | AutoWindow::Manual => stats.peak,
         };
         self.windowed(top) > ABOVE_WHITE
     }
@@ -471,9 +456,9 @@ impl Display {
     /// not a rendering decision: it says which of the file's numbers you are
     /// trying to read, and a reset that threw that away would take the answer
     /// with it. There is a key and a row of buttons for changing it.
-    pub fn reset(&mut self, stats: &Stats, image: &DecodedImage, headroom: Headroom) {
+    pub fn reset(&mut self, stats: &Stats, image: &DecodedImage) {
         let colormap = self.colormap;
-        *self = Self::for_image_with(image, stats, Startup::default(), headroom);
+        *self = Self::for_image_with(image, stats, Startup::default());
         self.colormap = colormap;
     }
 
@@ -689,9 +674,7 @@ mod tests {
         let display = Display::for_image_with(
             &photographic,
             &Stats::scan(&photographic),
-            Startup::default(),
-            Headroom::None,
-        );
+            Startup::default());
         assert_eq!(display.auto, AutoWindow::Off);
         assert_eq!((display.window_low, display.window_high), (0.0, 1.0));
 
@@ -699,9 +682,7 @@ mod tests {
         let display = Display::for_image_with(
             &measurement,
             &Stats::scan(&measurement),
-            Startup::default(),
-            Headroom::None,
-        );
+            Startup::default());
         assert_eq!(display.auto, AutoWindow::Percentile);
         assert!(
             display.window_high < 0.1,
@@ -710,9 +691,9 @@ mod tests {
     }
 
     /// PQ carries its grading in absolute luminance, so the window has to
-    /// stay at reference white and let the tone map deal with the headroom
-    /// above it. Stretching a PQ frame's observed range into 0..1 is how a
-    /// dim night shot comes out looking like noon.
+    /// stay at reference white and leave the headroom above it to the
+    /// surface, or to a curve asked for. Stretching a PQ frame's observed
+    /// range into 0..1 is how a dim night shot comes out looking like noon.
     #[test]
     fn absolute_hdr_curves_open_at_reference_white_rather_than_stretched() {
         for transfer in [Transfer::Pq, Transfer::Hlg] {
@@ -720,8 +701,7 @@ mod tests {
             // whose darkest sample is nowhere near zero.
             let frame = gray(vec![30_000, 45_000, 60_000], transfer);
             let stats = Stats::scan(&frame);
-            let display =
-                Display::for_image_with(&frame, &stats, Startup::default(), Headroom::None);
+            let display = Display::for_image_with(&frame, &stats, Startup::default());
 
             assert!(stats.max > 1.0, "{transfer:?} should exceed SDR white");
             assert_eq!(display.auto, AutoWindow::Off, "{transfer:?}");
@@ -730,8 +710,49 @@ mod tests {
                 (0.0, 1.0),
                 "{transfer:?}"
             );
-            assert_eq!(display.tone_map, ToneMap::Neutral, "{transfer:?}");
+            assert_eq!(display.tone_map, ToneMap::None, "no curve by itself");
+            assert!(display.exceeds_white(&stats), "{transfer:?} says so instead");
         }
+    }
+
+    /// A wide-gamut color is above white in the working space though the
+    /// file never left 0..1: a P3 red carried into BT.709 is 1.22 in red,
+    /// which a surface that stops at white clips as it clips a highlight,
+    /// while its luminance is a fifth of white and says nothing. So the
+    /// display reports it past white, for the bar's word and the marks,
+    /// and opens it with no curve as it opens everything; an sRGB red,
+    /// white in red and no further, is not past white.
+    #[test]
+    fn a_wide_gamut_color_is_past_white_and_an_srgb_one_is_not() {
+        let red = |primaries| DecodedImage {
+            width: 2,
+            height: 1,
+            samples: Samples::U8 {
+                channels: Channels::Rgb,
+                data: vec![255, 0, 0, 128, 128, 128],
+            },
+            color: ColorSpace {
+                transfer: Transfer::Srgb,
+                primaries,
+            },
+            alpha: AlphaMode::Opaque,
+            referred: Referred::Display,
+            exposure: None,
+            nodata: None,
+            gain_map: None,
+        };
+        let p3 = red(Primaries::DisplayP3);
+        let stats = Stats::scan(&p3);
+        assert!(stats.max < 0.3, "luminance never reaches white: {}", stats.max);
+        assert!(stats.peak > 1.2, "the red channel is past it: {}", stats.peak);
+        let display = opened(&p3);
+        assert!(display.exceeds_white(&stats));
+        assert_eq!(display.tone_map, ToneMap::None);
+
+        let srgb = red(Primaries::Bt709);
+        let stats = Stats::scan(&srgb);
+        assert_eq!(stats.peak, 1.0);
+        assert!(!opened(&srgb).exceeds_white(&stats));
     }
 
     /// What the histogram's ramp is painted with. The ends are the reason it
@@ -795,16 +816,16 @@ mod tests {
     /// of sensor data, which the opening window stretches — but it was graded
     /// before the map lifted its highlights, and its decoder says so. What it
     /// says wins over what the samples look like: the window stays at white,
-    /// and the highlights above it get a curve rather than a stretch.
+    /// and the highlights above it are left there rather than stretched in.
     #[test]
     fn a_decoder_that_calls_linear_light_graded_is_believed() {
         let mut image = float_gray(vec![0.0, 0.5, 1.0, 3.9]);
         image.referred = Referred::Display;
         let stats = Stats::scan(&image);
-        let display = Display::for_image_with(&image, &stats, Startup::default(), Headroom::None);
+        let display = Display::for_image_with(&image, &stats, Startup::default());
         assert_eq!(display.auto, AutoWindow::Off);
         assert_eq!((display.window_low, display.window_high), (0.0, 1.0));
-        assert_eq!(display.tone_map, ToneMap::Neutral);
+        assert!(display.exceeds_white(&stats));
     }
 
     /// The number a readout shows is the window's own scale: whatever was set
@@ -1086,7 +1107,7 @@ mod tests {
         let image = gray(vec![0, 1000, 4095], Transfer::Linear);
         let stats = Stats::scan(&image);
         let mut display =
-            Display::for_image_with(&image, &stats, Startup::default(), Headroom::None);
+            Display::for_image_with(&image, &stats, Startup::default());
 
         display.step_black(0.05, Transfer::Linear, 0.0);
         assert_eq!(display.auto, AutoWindow::Manual);
@@ -1096,46 +1117,48 @@ mod tests {
         assert_eq!(display.auto, AutoWindow::MinMax);
     }
 
-    fn opened(image: &DecodedImage, headroom: Headroom) -> Display {
-        Display::for_image_with(image, &Stats::scan(image), Startup::default(), headroom)
+    fn opened(image: &DecodedImage) -> Display {
+        Display::for_image_with(image, &Stats::scan(image), Startup::default())
     }
 
-    /// The curve is for highlights the window and the exposure leave above
-    /// white on a surface that stops there. A graded HDR picture has them; an
-    /// ordinary one does not; a measurement — however wide its numbers — is
-    /// windowed to what it holds first, which leaves nothing above white for
-    /// a curve to act on and would make a curve a bend in the data for no
-    /// reason; and a metered scene has whatever the meter left above white,
-    /// which is the curve's to roll off.
+    /// No file opens with a curve, whatever it holds; what the window and
+    /// the exposure leave above white is said rather than rolled off. A
+    /// graded HDR picture leaves its highlights there; an ordinary one has
+    /// none; a measurement — however wide its numbers — is windowed to what
+    /// it holds first, which leaves nothing above white; and a metered
+    /// scene has whatever the meter left above white.
     #[test]
-    fn a_curve_is_added_only_where_the_window_leaves_highlights_above_white() {
+    fn no_file_opens_with_a_curve_and_exceeds_white_says_what_is_left_above_it() {
+        let past_white = |image: &DecodedImage| {
+            let display = opened(image);
+            assert_eq!(display.tone_map, ToneMap::None, "no curve by itself");
+            display.exceeds_white(&Stats::scan(image))
+        };
+
         let photograph = gray(vec![0, 4095], Transfer::Srgb);
-        assert_eq!(opened(&photograph, Headroom::None).tone_map, ToneMap::None);
+        assert!(!past_white(&photograph));
 
         let pq = gray(vec![30_000, 60_000], Transfer::Pq);
-        assert_eq!(opened(&pq, Headroom::None).tone_map, ToneMap::Neutral);
+        assert!(past_white(&pq));
 
         // Sensor counts: linear float that reaches well past 1.0, and is
-        // windowed to its own range rather than curved.
+        // windowed to its own range rather than left past white.
         let measurement = float_gray(vec![0.0, 100.0, 4000.0, 4095.0]);
-        let display = opened(&measurement, Headroom::None);
-        assert_eq!(display.auto, AutoWindow::Percentile);
-        assert_eq!(display.tone_map, ToneMap::None);
+        assert_eq!(opened(&measurement).auto, AutoWindow::Percentile);
+        assert!(!past_white(&measurement));
 
         // A render: a dim room and one light, in whatever units. Exposed for
-        // the room, which leaves the light above white for the curve.
+        // the room, which leaves the light above white.
         let mut room = vec![0.02; 15];
         room.push(50.0);
         let render = scene_gray(room);
-        let display = opened(&render, Headroom::None);
-        assert_eq!(display.auto, AutoWindow::Off);
-        assert_eq!(display.tone_map, ToneMap::Neutral);
-        assert_eq!(opened(&render, Headroom::Above).tone_map, ToneMap::None);
+        assert_eq!(opened(&render).auto, AutoWindow::Off);
+        assert!(past_white(&render));
 
         // The same render with its light no brighter than its key has
-        // nothing above white once metered, and no curve for no reason.
+        // nothing above white once metered.
         let flat = scene_gray(vec![0.02; 16]);
-        assert_eq!(opened(&flat, Headroom::None).tone_map, ToneMap::None);
+        assert!(!past_white(&flat));
     }
 
     /// Scene light opens metered: the window left at 0..1 of the file's own
@@ -1150,7 +1173,7 @@ mod tests {
         let key = 0.03;
         let scene = scene_gray(vec![key; 8]);
         let stats = Stats::scan(&scene);
-        let display = Display::for_image_with(&scene, &stats, Startup::default(), Headroom::None);
+        let display = Display::for_image_with(&scene, &stats, Startup::default());
         assert_eq!(display.auto, AutoWindow::Off);
         assert_eq!((display.window_low, display.window_high), (0.0, 1.0));
         let shown = display
@@ -1161,7 +1184,7 @@ mod tests {
         // The same scene a thousand times brighter opens the same.
         let bright = scene_gray(vec![key * 1000.0; 8]);
         let stats = Stats::scan(&bright);
-        let brighter = Display::for_image_with(&bright, &stats, Startup::default(), Headroom::None);
+        let brighter = Display::for_image_with(&bright, &stats, Startup::default());
         let shown = brighter
             .map(&bright.sample(0, 0, None).unwrap(), Headroom::None)
             .values()[0];
@@ -1175,15 +1198,13 @@ mod tests {
             Startup {
                 exposure_stops: Some(1.0),
                 ..Startup::default()
-            },
-            Headroom::None,
-        );
+            });
         assert_eq!(asked.exposure_stops, 1.0);
 
         // And a reset puts the meter's reading back, not zero.
         let mut moved = display.clone();
         moved.adjust_exposure(3.0);
-        moved.reset(&Stats::scan(&scene), &scene, Headroom::None);
+        moved.reset(&Stats::scan(&scene), &scene);
         assert_eq!(moved.exposure_stops, display.exposure_stops);
 
         // A window rule asked for at startup has put the scene's range at
@@ -1194,9 +1215,7 @@ mod tests {
             Startup {
                 auto: Some(AutoWindow::Percentile),
                 ..Startup::default()
-            },
-            Headroom::None,
-        );
+            });
         assert_eq!(windowed.auto, AutoWindow::Percentile);
         assert_eq!(windowed.exposure_stops, 0.0);
     }
@@ -1206,60 +1225,39 @@ mod tests {
     #[test]
     fn the_meter_stays_on_the_slider() {
         let dark = scene_gray(vec![0.0; 4]);
-        assert_eq!(opened(&dark, Headroom::None).exposure_stops, 0.0);
+        assert_eq!(opened(&dark).exposure_stops, 0.0);
 
         let faint = scene_gray(vec![1e-9; 4]);
         assert_eq!(
-            opened(&faint, Headroom::None).exposure_stops,
+            opened(&faint).exposure_stops,
             EXPOSURE_LIMIT
         );
 
         let blinding = scene_gray(vec![1e9; 4]);
         assert_eq!(
-            opened(&blinding, Headroom::None).exposure_stops,
+            opened(&blinding).exposure_stops,
             -EXPOSURE_LIMIT
         );
     }
 
-    /// The whole point of asking for an HDR surface is the room above SDR
-    /// white, so a curve that squeezes the highlights back into 0..1 before
-    /// they get there would undo it. The tone map is what the SDR path needs,
-    /// not what the content is.
+    /// A curve chosen is kept: nothing about the surface or the window
+    /// changes it, and only a reset takes it off — which puts the file back
+    /// as it opened, with none.
     #[test]
-    fn a_surface_with_headroom_starts_with_no_curve_at_all() {
-        for above_white in [true, false] {
-            assert_eq!(
-                ToneMap::default_for(Headroom::Above, above_white),
-                ToneMap::None,
-                "a surface with headroom takes the pixels as they are"
-            );
-        }
-        assert_eq!(ToneMap::default_for(Headroom::None, true), ToneMap::Neutral);
-        assert_eq!(ToneMap::default_for(Headroom::None, false), ToneMap::None);
-
-        let pq = gray(vec![30_000, 60_000], Transfer::Pq);
-        assert_eq!(opened(&pq, Headroom::Above).tone_map, ToneMap::None);
-    }
-
-    /// The switch chooses the curve the surface wants for what is on screen,
-    /// and asks about the picture as it is now rather than as it opened.
-    #[test]
-    fn adopting_a_surface_re_derives_the_curve_from_what_is_on_screen() {
+    fn a_curve_chosen_stays_until_reset() {
         let pq = gray(vec![30_000, 60_000], Transfer::Pq);
         let stats = Stats::scan(&pq);
-        let mut display = opened(&pq, Headroom::None);
-        assert_eq!(display.tone_map, ToneMap::Neutral);
+        let mut display = opened(&pq);
+        assert!(display.set_tone_map(ToneMap::Neutral, true));
 
-        display.adopt(Headroom::Above, &stats);
-        assert_eq!(display.tone_map, ToneMap::None);
-        display.adopt(Headroom::None, &stats);
-        assert_eq!(display.tone_map, ToneMap::Neutral);
-
-        // A window that brings the highlights under white leaves nothing for
-        // a curve to do, on either surface.
+        // A window that brings the highlights under white leaves nothing
+        // for the curve to do, and the curve stays on all the same.
         display.auto = AutoWindow::MinMax;
         display.refresh_auto(&stats);
-        display.adopt(Headroom::None, &stats);
+        assert!(!display.exceeds_white(&stats));
+        assert_eq!(display.tone_map, ToneMap::Neutral);
+
+        display.reset(&stats, &pq);
         assert_eq!(display.tone_map, ToneMap::None);
     }
 
@@ -1271,13 +1269,13 @@ mod tests {
     fn exceeding_white_is_measured_where_the_window_put_it() {
         let photograph = gray(vec![0, 32_768, u16::MAX], Transfer::Srgb);
         let stats = Stats::scan(&photograph);
-        let mut display = opened(&photograph, Headroom::None);
+        let mut display = opened(&photograph);
         assert!(!display.exceeds_white(&stats));
         display.adjust_exposure(1.0);
         assert!(display.exceeds_white(&stats));
 
         let pq = gray(vec![30_000, 60_000], Transfer::Pq);
-        assert!(opened(&pq, Headroom::None).exceeds_white(&Stats::scan(&pq)));
+        assert!(opened(&pq).exceeds_white(&Stats::scan(&pq)));
 
         // A thousand ordinary samples and one hot pixel: the percentile
         // window ignores the hot pixel, and so does this.
@@ -1285,7 +1283,7 @@ mod tests {
         counts.push(u16::MAX);
         let measurement = gray(counts, Transfer::Linear);
         let stats = Stats::scan(&measurement);
-        let mut display = opened(&measurement, Headroom::None);
+        let mut display = opened(&measurement);
         assert_eq!(display.auto, AutoWindow::Percentile);
         assert!(
             stats.max > display.window_high,
@@ -1310,9 +1308,7 @@ mod tests {
             Startup {
                 exposure_stops: Some(2.0),
                 ..Startup::default()
-            },
-            Headroom::None,
-        );
+            });
         assert_eq!(display.tone_map, ToneMap::None);
         assert_eq!(display.exposure_stops, 2.0);
     }
@@ -1327,7 +1323,7 @@ mod tests {
             ..Startup::default()
         };
         let gray = gray(vec![0, 4095], Transfer::Srgb);
-        let display = Display::for_image_with(&gray, &Stats::scan(&gray), startup, Headroom::None);
+        let display = Display::for_image_with(&gray, &Stats::scan(&gray), startup);
         assert_eq!(display.colormap, Colormap::Viridis);
 
         let color = DecodedImage::new(
@@ -1341,7 +1337,7 @@ mod tests {
             AlphaMode::Opaque,
         );
         let display =
-            Display::for_image_with(&color, &Stats::scan(&color), startup, Headroom::None);
+            Display::for_image_with(&color, &Stats::scan(&color), startup);
         assert_eq!(display.colormap, Colormap::Gray);
     }
 

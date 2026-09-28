@@ -40,7 +40,7 @@ use std::time::SystemTime;
 use anyhow::{Context, Result, anyhow};
 
 use crate::image::decode::{self, Overrides};
-use crate::image::display::{Display, Headroom, Startup};
+use crate::image::display::{Display, Startup};
 use crate::image::sequence::Sequence;
 use crate::image::xmp::{self, Xmp};
 use crate::image::{Channels, DecodedImage, Region, Stats, encode, exif, resample};
@@ -560,7 +560,7 @@ fn finish(
     if canceled.load(Ordering::Relaxed) {
         return Err(anyhow!("stopped"));
     }
-    let display = Display::for_image_with(&small, &stats, Startup::default(), Headroom::None);
+    let display = Display::for_image_with(&small, &stats, Startup::default());
     let raster = encode::displayed_on(
         &small,
         &display,

@@ -548,10 +548,12 @@ though its green never reached white, and the pink it shows is not what
 the scene held. The marks stay on until pressed off again, from one file
 to the next, and no reset of the display touches them. The paint and the
 corners of the plot count the same thing, a channel at a time, so the
-share in a corner is the share of the picture wearing the paint. Neither
-marks white where nothing is being clipped: on an HDR surface with no
-curve, or under a curve, the highlights are shown or rolled off rather
-than lost.
+share in a corner is the share of the picture wearing the paint. A color
+from a wide-gamut file — Display P3, Adobe RGB, a raw — that an ordinary
+monitor cannot show is painted too, since the screen loses it the same
+way. Neither marks white where nothing is being clipped: on
+an HDR surface with no curve, or under a curve, the highlights are shown
+or rolled off rather than lost.
 
 Under the band, every file gets the exposure: a slider over six stops each
 way, its reading at the end of the row. It snaps to the quarter stops `d`
@@ -573,12 +575,12 @@ of one: on an ordinary (SDR) surface the highlights are clipped at white,
 and on an HDR surface they are shown at the brightness they were graded to.
 *Roll off* brings them back under white with a curve that leaves everything
 below its shoulder as it was, so the rest of the picture does not move to
-make room. An image starts clipped on an HDR surface; on an SDR one it
-starts rolled off when there are highlights above white to roll off, and
-clipped otherwise. Switching the room with `o`, or the window landing on a
-different kind of monitor, chooses again for what it lands on; `t` changes
-it after that. `--tone-map none` and `--tone-map neutral` are the two
-choices at start-up.
+make room. Every image starts clipped, on either surface: the bottom bar
+says **clipped** when highlights are being thrown away, and `t` is the
+answer. The curve stays as you set it when the room is switched with `o`
+or the window lands on a different kind of monitor, and each file keeps
+its own. `--tone-map none` and `--tone-map neutral` are the two choices at
+start-up.
 
 The bottom bar says **rolled off** while the curve is on, and **clipped**
 when there is none, the surface is SDR and highlights are being thrown away

@@ -211,16 +211,20 @@ corner then answer the same question, the corner as a share and the paint
 as a place, and a number in the corner is the share of the picture wearing
 the paint. The comparisons are exact, as the corner's are.
 
-The test is made in the file's own channels — `native` in `shade`, the
-color windowed before `params.primaries` carries it into BT.709 — because
-that is where the band's two ends are, and where the corner counts. A vivid
-Rec. 2020 or P3 color has a negative BT.709 channel, and one above white, that
-the file never clipped: tested after the matrix, a raw's saturated red would
-wear the blue of a crushed shadow. What becomes of such a color on an SDR
-surface is the compositor's clip to BT.709, a gamut matter
-[color management](color.md) owns, not a pixel the window took to an end.
-The matrix keeps white, so windowing before it and after it are the same
-transform of the same color, and nothing else in the shader moves.
+The test is made in the working space's channels — the color after
+`params.primaries` has carried it into BT.709, which is the color `shade`
+windows — because that is where the band's two ends are, and where the
+corner counts: `Stats::scan` measures the picture there too. A vivid Rec.
+2020 or P3 color has a BT.709 channel above white, and one below zero, that
+the file never clipped but a surface that stops at either end will, and the
+mark says so; [color management](color.md) says why that is a highlight's
+clip and not a gamut matter of its own, and what becomes of the color on a
+surface with the room. Such a texel is past both ends at once, and the two
+marks are painted as a partition of the pixel, so `judge` gives it one:
+white where white is being painted, and black otherwise — which is why the
+paint's gate, `shader_codes::marks`, is part of `MarksKey`, and a curve
+switched on rewrites the chain. The matrix keeps white, so a BT.709 file is
+judged exactly as its codes are stored.
 
 The mark is a texel's, not a blend's, and it is kept as one. `judge` in the
 image shader is the verdict on one texel of the picture as uploaded, under

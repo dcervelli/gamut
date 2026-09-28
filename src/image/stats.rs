@@ -3,7 +3,7 @@
 //! 16-bit containers, or HDR frames with a few very bright highlights.
 
 use super::gain_map::{GainMap, Table};
-use super::{Channels, ColorSpace, DecodedImage, Sample, Samples, Transfer};
+use super::{Channels, ColorSpace, DecodedImage, Primaries, Sample, Samples, Transfer};
 
 /// Bins are plenty for percentile work and cheap to keep around; the UI draws
 /// this directly as a histogram.
@@ -60,9 +60,18 @@ const LOG_BINS: usize = (LOG_CEIL - LOG_FLOOR) as usize * LOG_BINS_PER_STOP;
 /// lands 8-bit codes one to a bin. Linear samples have no nominal range to
 /// speak of, since the case that matters is 12-bit data in a 16-bit
 /// container, so their axis is the range actually measured.
+///
+/// The channels plotted are the working space's, on the file's own curve: a
+/// P3 or BT.2020 file's color is carried into BT.709 before it is binned,
+/// as the shader carries it before the window goes on, so a vivid red the
+/// working space cannot hold stands past white on the plot — and its green,
+/// which the matrix takes below zero, below black — where the window and
+/// the surface will clip it. Encoded back through the file's curve, the
+/// axis is still the file's, and a BT.709 file's codes still land one to a
+/// bin, since its matrix is the identity and the codes are read as stored.
 #[derive(Clone, Debug)]
 pub struct Plot {
-    /// What the bins span, in the file's own encoding.
+    /// What the bins span, on the file's own curve.
     pub min: f32,
     pub max: f32,
     /// Counts over `min..max` for the luminance of each sampled pixel.
@@ -80,11 +89,11 @@ impl Plot {
     ///
     /// The twin of the luminance pass in [`Stats::scan`], and it has to be
     /// worked out from [`Sample::linear`] rather than from
-    /// [`Sample::color`]: the scan bins what the transfer function and the
-    /// lift alone make of the file's components, where that color has also
-    /// been carried into the working space and had its premultiplication
-    /// undone. On a P3 file, or one with premultiplied alpha, a bin taken
-    /// from the color would name a bar the pixel is not in.
+    /// [`Sample::color`]: the scan bins what the transfer function, the
+    /// lift and the primaries matrix make of the file's components, where
+    /// that color has also had its premultiplication undone. On a file with
+    /// premultiplied alpha, a bin taken from the color would name a bar the
+    /// pixel is not in.
     ///
     /// `None` where there is no bar to point at: an axis with no span, a
     /// value the scan would have thrown out as nodata, or one outside the
@@ -185,6 +194,13 @@ pub struct Stats {
     /// Smallest and largest linear value seen, in working-space units.
     pub min: f32,
     pub max: f32,
+    /// The largest value any plotted channel reaches, in working-space
+    /// units: the luminance's `max` on a gray image, and on a color one the
+    /// channel that would be first to clip. A pure red is a fifth of white
+    /// in luminance while its red channel is at white, and a P3 red carried
+    /// into BT.709 is past it — which is what a surface that stops at white
+    /// clips, and what [`super::display::Display::exceeds_white`] asks.
+    pub peak: f32,
     /// Counts over `min..max`, in linear units, for percentiles.
     pub histogram: [u32; BINS],
     pub counted: u32,
@@ -204,8 +220,10 @@ pub struct Stats {
 }
 
 impl Stats {
-    /// Scans `image`, converting to the linear working space as it goes so
-    /// that the numbers line up with what the shader will sample.
+    /// Scans `image`, converting to the linear working space as it goes —
+    /// the transfer function, the lift and the primaries matrix — so that
+    /// the numbers line up with what the shader has in hand when it applies
+    /// the window.
     ///
     /// Gray images are measured on their single channel; color images on
     /// relative luminance, which is what an exposure control should track.
@@ -246,6 +264,7 @@ impl Stats {
         let Range {
             min,
             max,
+            peak,
             axis_min,
             axis_max,
             log_counts,
@@ -268,11 +287,13 @@ impl Stats {
                         }
                     }
                     // The axis spans the channels that get plotted, in the
-                    // units they are plotted in.
+                    // units they are plotted in; the peak is the highest of
+                    // them in linear ones.
                     for (stored, decoded) in encoded[..plotted].iter().zip(linear) {
                         if is_data(*decoded) {
                             range.axis_min = range.axis_min.min(*stored);
                             range.axis_max = range.axis_max.max(*stored);
+                            range.peak = range.peak.max(*decoded);
                         }
                     }
                 });
@@ -287,6 +308,7 @@ impl Stats {
             return Self {
                 min: 0.0,
                 max: 1.0,
+                peak: 1.0,
                 histogram: [0; BINS],
                 counted: 0,
                 key: None,
@@ -359,6 +381,7 @@ impl Stats {
         Self {
             min,
             max,
+            peak: if peak.is_finite() { peak } else { max },
             histogram: counts.histogram,
             counted: counts.counted,
             key,
@@ -415,12 +438,14 @@ fn encode(transfer: Transfer, value: f32) -> f32 {
     }
 }
 
-/// What the first pass measures: the extremes of the luminance, in linear
-/// units, and of the plotted channels, in the file's own.
+/// What the first pass measures: the extremes of the luminance and the
+/// highest channel, in linear units, and the plotted channels' extremes on
+/// the file's own curve.
 #[derive(Clone)]
 struct Range {
     min: f32,
     max: f32,
+    peak: f32,
     axis_min: f32,
     axis_max: f32,
     /// The lit pixels' luminance binned by its logarithm, [`LOG_BINS`]
@@ -444,6 +469,7 @@ impl Range {
         Self {
             min: f32::INFINITY,
             max: f32::NEG_INFINITY,
+            peak: f32::NEG_INFINITY,
             axis_min,
             axis_max,
             log_counts: vec![0; LOG_BINS],
@@ -455,6 +481,7 @@ impl Range {
         Self {
             min: self.min.min(other.min),
             max: self.max.max(other.max),
+            peak: self.peak.max(other.peak),
             axis_min: self.axis_min.min(other.axis_min),
             axis_max: self.axis_max.max(other.axis_max),
             log_counts: self
@@ -564,6 +591,12 @@ struct Values<'a> {
     /// The gain map and the table to lift each pixel through, where the
     /// picture has one and the caller asked for it lifted.
     lift: Option<(&'a GainMap, &'a Table)>,
+    /// The matrix carrying the file's primaries into the working space's,
+    /// where the two differ and the file has color to carry: a gray file
+    /// has one channel and no primaries to speak of, and a BT.709 file's
+    /// matrix is the identity, which is left out so that its codes are
+    /// plotted exactly as stored.
+    matrix: Option<[[f32; 3]; 3]>,
 }
 
 impl<'a> Values<'a> {
@@ -574,6 +607,7 @@ impl<'a> Values<'a> {
         stride: usize,
     ) -> Self {
         let width = image.width as usize;
+        let primaries = image.color.primaries;
         Self {
             samples: &image.samples,
             color: image.color,
@@ -583,6 +617,39 @@ impl<'a> Values<'a> {
             width,
             height: image.height as usize,
             lift: lift.and_then(|table| Some((image.gain_map.as_deref()?, table))),
+            matrix: (!channels.is_gray() && primaries != Primaries::Bt709)
+                .then(|| primaries.to_bt709()),
+        }
+    }
+
+    /// Carries one decoded pixel the rest of the way into the working
+    /// space: the lift, where the picture has a gain map and it was asked
+    /// for, and then the primaries matrix, which is linear and so goes on
+    /// the premultiplied color to the same effect as on the straight. The
+    /// color channels are then put back on the file's curve, so that they
+    /// are plotted where the file would have stored what the screen shows:
+    /// past the top of the file's own range where the lift or the matrix
+    /// takes them, and below the bottom where the matrix does.
+    fn to_working_space(&self, pixel: usize, stored: &mut [f32; 4], linear: &mut [f32; 4]) {
+        let colors = self.channels.color_count();
+        let mut moved = false;
+        if let Some((map, table)) = self.lift {
+            let (x, y) = ((pixel % self.width) as u32, (pixel / self.width) as u32);
+            let gain = map.gain_at(table, x, y, self.width as u32, self.height as u32);
+            table.apply(&mut linear[..colors], gain);
+            moved = true;
+        }
+        if let Some(matrix) = self.matrix {
+            let color = [linear[0], linear[1], linear[2]];
+            for (slot, row) in linear.iter_mut().zip(matrix) {
+                *slot = row.iter().zip(color).map(|(m, c)| m * c).sum();
+            }
+            moved = true;
+        }
+        if moved {
+            for (stored, linear) in stored.iter_mut().zip(linear).take(colors) {
+                *stored = self.color.transfer.to_encoded(*linear);
+            }
         }
     }
 
@@ -639,10 +706,12 @@ impl<'a> Values<'a> {
             .collect()
     }
 
-    /// Calls `visit` with one pixel's components twice over: first as the
-    /// file holds them, normalized to 0..1 for integer samples, then decoded
-    /// to the linear working space. Alpha is included where the image has
-    /// one, since callers slice down to what they want.
+    /// Calls `visit` with one pixel's components twice over: first on the
+    /// file's own curve, normalized to 0..1 for integer samples, then
+    /// decoded to the linear working space — lifted and carried into its
+    /// primaries, with the stored side put back on the curve to match where
+    /// either moved it. Alpha is included where the image has one, since
+    /// callers slice down to what they want.
     fn for_each(self, mut visit: impl FnMut(&[f32], &[f32])) {
         let count = self.channels.count();
         let transfer = self.color.transfer;
@@ -665,8 +734,6 @@ impl<'a> Values<'a> {
                 let lut: Vec<f32> = (0..=u8::MAX)
                     .map(|v| transfer.to_linear(v as f32 * scale))
                     .collect();
-                let (width, height) = (self.width as u32, self.height as u32);
-                let colors = self.channels.color_count();
                 for (step, chunk) in data[span]
                     .chunks_exact(count)
                     .step_by(self.stride)
@@ -676,34 +743,31 @@ impl<'a> Values<'a> {
                         stored[index] = *raw as f32 * scale;
                         linear[index] = lut[*raw as usize];
                     }
-                    // Lifted, the pixel is measured as the screen shows it,
-                    // and plotted where the file would have stored what it
-                    // shows: back through the curve, past the top of the
-                    // file's own range where the lift takes it.
-                    if let Some((map, table)) = self.lift {
-                        let pixel = first + step * self.stride;
-                        let (x, y) = ((pixel % self.width) as u32, (pixel / self.width) as u32);
-                        let gain = map.gain_at(table, x, y, width, height);
-                        table.apply(&mut linear[..colors], gain);
-                        for channel in 0..colors {
-                            stored[channel] = transfer.to_encoded(linear[channel]);
-                        }
-                    }
+                    self.to_working_space(first + step * self.stride, &mut stored, &mut linear);
                     visit(&stored[..count], &linear[..count]);
                 }
             }
             Samples::U16 { data, .. } => {
                 let scale = 1.0 / u16::MAX as f32;
-                for chunk in data[span].chunks_exact(count).step_by(self.stride) {
+                for (step, chunk) in data[span]
+                    .chunks_exact(count)
+                    .step_by(self.stride)
+                    .enumerate()
+                {
                     for (index, raw) in chunk.iter().enumerate() {
                         stored[index] = *raw as f32 * scale;
                         linear[index] = transfer.to_linear(stored[index]);
                     }
+                    self.to_working_space(first + step * self.stride, &mut stored, &mut linear);
                     visit(&stored[..count], &linear[..count]);
                 }
             }
             Samples::F32 { data, .. } => {
-                for chunk in data[span].chunks_exact(count).step_by(self.stride) {
+                for (step, chunk) in data[span]
+                    .chunks_exact(count)
+                    .step_by(self.stride)
+                    .enumerate()
+                {
                     for (index, raw) in chunk.iter().enumerate() {
                         stored[index] = *raw;
                         linear[index] = if transfer.is_linear() {
@@ -712,6 +776,7 @@ impl<'a> Values<'a> {
                             transfer.to_linear(*raw)
                         };
                     }
+                    self.to_working_space(first + step * self.stride, &mut stored, &mut linear);
                     visit(&stored[..count], &linear[..count]);
                 }
             }
@@ -943,6 +1008,52 @@ mod tests {
                 assert_eq!(divided.plot.color, plain.plot.color, "{bands} bands");
             }
         }
+    }
+
+    /// A wide-gamut file is measured in the working space, as the shader
+    /// has it when the window goes on: a P3 red carried into BT.709 is
+    /// past white in red and below zero in green, so the peak is above
+    /// white and the axis runs past both ends of the file's own range,
+    /// where a surface that stops at them will clip it, with the red plane
+    /// piled at the top of the plot and the green at the bottom. An sRGB
+    /// red is white in red and no further, and its codes are plotted
+    /// exactly as stored.
+    #[test]
+    fn a_wide_gamut_color_is_measured_where_the_working_space_puts_it() {
+        let red = |primaries| DecodedImage {
+            width: 1,
+            height: 1,
+            samples: Samples::U8 {
+                channels: Channels::Rgb,
+                data: vec![255, 0, 0],
+            },
+            color: ColorSpace {
+                transfer: Transfer::Srgb,
+                primaries,
+            },
+            alpha: AlphaMode::Opaque,
+            referred: Referred::Display,
+            exposure: None,
+            nodata: None,
+            gain_map: None,
+        };
+
+        let p3 = Stats::scan(&red(Primaries::DisplayP3));
+        assert!((1.2..1.25).contains(&p3.peak), "{}", p3.peak);
+        assert!(p3.plot.max > 1.0, "{}", p3.plot.max);
+        assert!(p3.plot.min < 0.0, "{}", p3.plot.min);
+        let planes = p3.plot.color.expect("three planes");
+        assert_eq!(planes[0][BINS - 1], 1, "red at the top of the plot");
+        assert_eq!(planes[1][0], 1, "green at the bottom");
+        // The luminance is the color's own, which BT.709's weights give
+        // only once the color is in BT.709: a P3 red is a little brighter
+        // than an sRGB one.
+        assert!((p3.max - 0.229).abs() < 0.002, "{}", p3.max);
+
+        let srgb = Stats::scan(&red(Primaries::Bt709));
+        assert_eq!(srgb.peak, 1.0);
+        assert_eq!((srgb.plot.min, srgb.plot.max), (0.0, 1.0));
+        assert!((srgb.max - 0.2126).abs() < 1e-4, "{}", srgb.max);
     }
 
     /// Every pixel's marker lands on a bar that actually has the pixel in it.

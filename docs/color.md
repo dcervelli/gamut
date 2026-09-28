@@ -161,19 +161,24 @@ worse rendering of the same highlights would be a choice with nothing to
 choose. The panel's row calls the two *Clip* and *Roll off*, since that is
 what the choice is.
 
-What a picture opens with follows from both: none on an HDR surface, and on an
-SDR one a `neutral` roll-off where the window leaves highlights above white
-and none where it does not. That is a question about the window rather than
-about the file — `Display::exceeds_white` — so a PQ frame opens curved on
-SDR, and a float measurement raster, which is windowed to what it holds,
-opens straight; a curve on it would be a bend in the data for no reason. A
-photograph with a gain map opens straight either way: its lift is weighed
-by the surface's room, so nothing of it is above white that the surface
-cannot show, and the statistics the question is asked of are scanned
-through the lift at that weight. Switching the surface asks the question again (`Display::adopt`),
-and `t` changes the answer afterwards. The surface is settled after the first
-file is decoded — the window opens later — so `App::adopt_headroom` asks once
-more at that point too.
+A picture opens with no curve, on either surface, and a curve comes on only
+by `t`, the panel's row or `--tone-map`. The one curve there is changes the
+whole picture — its toe takes an offset out of every shadow, and its
+shoulder starts at 0.76 — so a curve that came on by itself would render
+two files in a folder differently on whether a specular reached a hair past
+white, and would move every P3 photograph with a few pixels outside sRGB
+(see **Wide gamut** below). What the surface throws away is said instead:
+`Display::exceeds_white` — whether the window and the exposure leave
+anything past white, a question about the display rather than the file —
+is what the bottom bar's **clipped**, the histogram's corner and the marks
+are drawn from. A file keeps the curve it was left in (`app/kept.rs`), and
+the panel's reset takes it off with the rest.
+
+A photograph with a gain map has nothing above white on an SDR surface
+anyway: its lift is weighed by the surface's room, and the statistics are
+scanned through the lift at that weight — `App::refresh_lift`, asked again
+when the surface is settled, which is after the first file is decoded and
+before the window opens, and whenever the room moves under it.
 
 The bottom bar names what is being done and nothing else: **rolled off** when
 the curve is on, and **clipped** when there is none, the surface is SDR and
@@ -185,9 +190,33 @@ holds the curve at a clip while active, on either surface — a curve on top of
 a colormap would distort the mapping you are reading values off, and there is
 no color past the end of the ramp for headroom to show as.
 
-Two things the HDR path does not do, deliberately: it clips wide-gamut
-color to BT.709 even on scRGB, which could carry the negatives a P3 or
-BT.2020 file produces; and a scene-referred file on an HDR surface is still
-windowed to 0..1, since without a reference white there is nothing to put
-above it — widen the window or raise the exposure to use the room.
+**Wide gamut** is headroom of another kind. The working space is BT.709, and
+`params.primaries` in `shaders/image.wgsl` carries a P3, Adobe RGB or
+BT.2020 file's color into it before the window goes on, so a color outside
+BT.709 comes to a channel above white or below zero there: a P3 red is 1.22
+in red and −0.04 in green. On an SDR surface the compositor clips both,
+which loses the color as clipping a highlight loses it, and the program
+reads it as the same loss. `Stats::scan` measures the picture in the working
+space — `Values::to_working_space`, the lift and then the matrix, with the
+plotted channels put back on the file's own curve — so the histogram's red
+plane stands past white and its green below black; `Stats::peak` carries
+the highest channel, which is what `Display::exceeds_white` asks, since the
+luminance alone never passes white for a pure red of any gamut; the corners
+count the share; and `judge` marks the pixels after the same matrix.
+`DecodedImage::sample` carries the matrix in `Sample::linear` for the same
+reason, so that the histogram's marker lands in the bar the scan counted the
+pixel in. On an HDR surface nothing is lost, so `tone_map`'s headroom arm in
+`shaders/composite.wgsl` passes the color through untouched, the negatives
+with it — scRGB is defined to carry them, and the `Rgba16Float` target holds
+them — and the HDR10 arm takes the color to BT.2020, which holds P3 and
+Adobe RGB whole, before it clips what is outside that. `ToneMap::apply` is
+the CPU twin of all three arms, and `the_tone_curve_on_the_device_is_the_readouts`
+in `render/filter_tests.rs` holds the device to it over a sweep that runs
+below zero. The neutral curve keeps its clamp on either surface: its toe
+reads the darkest channel, and its arithmetic is written for light.
+
+One thing the HDR path does not do, deliberately: a scene-referred file on
+an HDR surface is still windowed to 0..1, since without a reference white
+there is nothing to put above it — widen the window or raise the exposure to
+use the room.
 
