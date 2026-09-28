@@ -6,16 +6,13 @@
 * >2^15 px images. Perhaps a separate program for large rasters? Requires image pyramids and other optimizations.
 * Text extraction. Tesseract intergration that captures bounding boxes and allows visual text content extraction.
 * Basic annotations? Not sure it should be included. If included, very basic: rectangle (filled/stroked), line, arrow, text box; nothing more.
-* MacOS build
-
-## MacOS
-* Brew
-* Mac Icon
-* Use Cmd icon instead of Cmd
-* Real menu
-* Initial size
 
 ## Improve
+* Show in finder/explorer
+* Sort keyboard shortcuts
+* Configurable paste directory
+* Cascading app size growth?
+* Icon shape and border
 * Native fullscreen command
 * Allow panning off screen?
 * Region fixed aspect
