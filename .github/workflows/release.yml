@@ -4,9 +4,6 @@ on:
   push:
     tags: ['v*']
 
-# No binaries are attached. Omarchy builds this package from source in an Arch
-# container and signs the result itself, so what a release is for is to give
-# the tag a stable, checksummable source tarball for the PKGBUILD to name.
 jobs:
   release:
     name: Cut the GitHub release

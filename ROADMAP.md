@@ -8,6 +8,10 @@
 * Basic annotations? Not sure it should be included. If included, very basic: rectangle (filled/stroked), line, arrow, text box; nothing more.
 
 ## Improve
+* Histogram and info panel to not overlap image
+* First class info panel sections
+* Open config file in editor
+* Config exec shortcuts, example: `my_favorite_program %f` → ^1
 * Show in finder/explorer
 * Sort keyboard shortcuts
 * Configurable paste directory
