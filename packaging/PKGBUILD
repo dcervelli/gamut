@@ -41,7 +41,7 @@ makedepends=('cargo' 'pkgconf')
 options=('!debug')
 
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('58ac986d887b1be09a283799cc9e6446dbe47c255f70a993491d0cf234750709')
+sha256sums=('6f100608d179e5374b34b8be8d7efcc6bd440b497248e24c377bf32f747e86bb')
 
 prepare() {
   cd "$pkgname-$pkgver"
