@@ -25,6 +25,10 @@
 //! the map is decoded through `libheif` like any other image in the file
 //! and goes with the picture as [`crate::image::gain_map`] describes, the
 //! same as an Ultra HDR JPEG's, for the display to apply.
+//!
+//! A portrait may carry a depth map as well: another auxiliary image, of
+//! the type MPEG gives depth, decoded the same way and carried beside the
+//! picture for the readout under the pointer — see [`crate::image::depth`].
 
 use std::io::SeekFrom;
 use std::sync::{Arc, OnceLock};
@@ -35,6 +39,7 @@ use libheif_rs::{
     SecurityLimits, StreamReader,
 };
 
+use crate::image::depth::{DepthMap, Range};
 use crate::image::gain_map::{GainMap, Lift};
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
 
@@ -218,8 +223,55 @@ impl super::Decoder for Heif {
         if overrides.gain_map && channels == Channels::Rgb && !wide {
             image.gain_map = gain_map(lib, &context, &handle, tone_map)?;
         }
+        // A depth map that will not decode costs the readout its depth and
+        // nothing else, so it is let go rather than refusing the picture.
+        image.depth = depth_map(lib, &handle).ok().flatten();
         Ok(image)
     }
+}
+
+/// The picture's depth map, where it has one: the auxiliary image MPEG's
+/// type names as depth, which `libheif` finds by that type and hands back
+/// as a monochrome image at its own size. The file says nothing here about
+/// what its codes stand for, so they are kept as codes.
+fn depth_map(lib: &LibHeif, handle: &ImageHandle) -> Result<Option<Arc<DepthMap>>> {
+    if !handle.has_depth_image() {
+        return Ok(None);
+    }
+    let mut ids = [0; 1];
+    if handle.depth_image_ids(&mut ids) == 0 {
+        return Ok(None);
+    }
+    let map = handle.depth_image_handle(ids[0])?;
+    let (width, height) = (map.width(), map.height());
+    if width == 0 || height == 0 {
+        bail!("the depth map is {width}x{height}");
+    }
+    let bits = map.luma_bits_per_pixel();
+    if !(1..=16).contains(&bits) {
+        bail!("the depth map reports {bits} bits per sample");
+    }
+    super::check_decoded_size(width, height, 1, if bits > 8 { 16 } else { 8 })?;
+    let image = lib
+        .decode(&map, HeifColorSpace::Monochrome, None)
+        .context("decoding the depth map")?;
+    if (image.width(), image.height()) != (width, height) {
+        bail!(
+            "the depth map's handle says {width}x{height} but it decoded to {}x{}",
+            image.width(),
+            image.height()
+        );
+    }
+    let gray = image
+        .planes()
+        .y
+        .ok_or_else(|| anyhow!("the depth map decoded without a gray plane"))?;
+    Ok(Some(Arc::new(DepthMap {
+        width,
+        height,
+        samples: interleave_planes(&[gray], width, height)?,
+        range: Range::Unstated,
+    })))
 }
 
 /// The picture's gain map, where the file has one this reader can apply:

@@ -4,6 +4,17 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- A **Depth** pixel format, beside Hex, Decimal and Mapped: for a picture
+  carrying a depth map, the readout says how far away the pixel under the
+  pointer was. A JPEG with Google's depth block reads as a distance in the
+  file's units; a HEIC with a depth image reads as the code its map holds,
+  the file saying nothing of units. A picture without one reads
+  `(no depth)`. `pixel_format = "depth"` starts the readout there.
+
 ## 0.8.3 - 2026-09-29
 
 ### Changed

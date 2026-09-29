@@ -43,6 +43,7 @@ use std::sync::Arc;
 
 use crate::gestures::{Button, DragAction, Gestures, Kind, Mods, Surface};
 use crate::image::decode::{CameraJpeg, Rendering};
+use crate::image::depth::Depth;
 use crate::image::display::{Display, Headroom};
 use crate::image::exif::Exif;
 use crate::image::orient::Turn;
@@ -217,6 +218,18 @@ impl Current {
             .turn
             .stored([x, y], [self.image.width, self.image.height]);
         self.image.sample(x, y, self.lift.as_deref())
+    }
+
+    /// The depth map under `(x, y)` of the turned picture, where the file
+    /// carries one. `None` outside the picture or without a map.
+    pub fn depth(&self, x: u32, y: u32) -> Option<Depth> {
+        let [width, height] = self.pixels();
+        if x >= width || y >= height {
+            return None;
+        }
+        let size = [self.image.width, self.image.height];
+        let [x, y] = self.turn.stored([x, y], size);
+        self.image.depth.as_ref()?.at(x, y, size[0], size[1])
     }
 }
 

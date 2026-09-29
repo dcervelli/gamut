@@ -141,6 +141,41 @@ need comparing. The JPEG's ICC profile is read on the same pass as its
 map, because a phone JPEG is Display P3 far more often than it is sRGB,
 and P3 numbers shown as sRGB come out visibly flat.
 
+## Depth maps
+
+A portrait may carry a depth map beside the picture, and `image/depth.rs`
+holds it as `DecodedImage::depth`: one gray channel at its own size, and a
+`Range` saying what its codes mean. Nothing is drawn from it. It exists for
+the pixel readout's `Depth` format, which reads it one pixel at a time
+through `Current::depth` — the user's `Turn` read through as `sample` reads
+it — and `DepthMap::at`, which takes the map's pixel covering the same
+fraction of the picture, since a phone's map is a fraction of the
+photograph's size. A file's own orientation is applied to the map in
+`orient::apply` alongside the picture and the gain map, for the same reason
+the gain map is turned: it is read by the picture's coordinates.
+
+A HEIF names its depth image by MPEG's auxiliary type
+(`urn:mpeg:hevc:2015:auxid:2`, or the `mpegB` one for other codecs), which
+`libheif` finds by itself; `decode/heif/mod.rs::depth_map` decodes it as it
+decodes the gain map. What its codes mean can be stated in a depth
+representation SEI, which `libheif-rs` does not expose, so the range is
+`Unstated` and the readout gives the code.
+
+A JPEG carries Google's `GDepth` block in its XMP: the normalization —
+`RangeLinear` or `RangeInverse` between `Near` and `Far`, in `Units` — in
+the main packet, and the map, a base64 PNG or JPEG, in the extended packet
+the main one names by GUID under `xmpNote:HasExtendedXMP`, split over as
+many `APP1` segments as it takes. `decode/jpeg/depth.rs` walks the segments
+ahead of the scan for both, reassembles the extended packet by each piece's
+stated offset, and decodes the map through `image`. Apple's depth in a
+JPEG (a disparity map as a second MPF image) and Google's later Dynamic
+Depth container are not read.
+
+A map is extra: a failure anywhere in reading one leaves `depth` at `None`
+rather than refusing the picture. The fixtures are `heic-depth.heic` — the
+alpha plane of `heic-rgba8.heic` relabeled with the depth type, since
+`heif-enc` writes no depth image — and `jpeg-depth.jpg`.
+
 ## Orientation
 
 Every format that carries an orientation tag has it applied, and the

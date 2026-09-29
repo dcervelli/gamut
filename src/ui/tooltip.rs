@@ -93,7 +93,7 @@ pub const COPY_REGION: &str = "Copy the region as displayed";
 /// What the dot at the head of the pixel readout says under its name: the
 /// key that cycles the format, and the two copies that take what it is
 /// showing away — each followed by its key, which the application adds.
-pub const PIXEL_CYCLE: &str = "Cycle pixel format: hex, decimal, mapped";
+pub const PIXEL_CYCLE: &str = "Cycle pixel format: hex, decimal, mapped, depth";
 pub const PIXEL_COPY_VALUE: &str = "Copy pixel value under pointer";
 pub const PIXEL_COPY_COORDINATE: &str = "Copy coordinate of pixel under pointer";
 /// And, for a georeferenced file only, the two keys that change how the

@@ -400,6 +400,19 @@ const FIXTURES: &[Fixture] = &[
         nodata: None,
         tolerance: LOSSY,
     },
+    // `jpeg-rgb.jpg` with Google's depth block in its XMP.
+    Fixture {
+        file: "jpeg-depth.jpg",
+        covers: "JPEG with a GDepth depth map in extended XMP",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: LOSSY,
+    },
     // Stored upside down with an EXIF orientation saying so, the JPEG
     // counterpart of `webp-exif-rotated.webp`.
     Fixture {
@@ -875,6 +888,20 @@ const FIXTURES: &[Fixture] = &[
     Fixture {
         file: "heic-rgb8.heic",
         covers: "HEIC truecolor, 8-bit",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+    },
+    // The alpha plane of `heic-rgba8.heic` relabeled as a depth map, so
+    // the picture has no alpha and a map beside it.
+    Fixture {
+        file: "heic-depth.heic",
+        covers: "HEIC with a depth map beside it",
         channels: Channels::Rgb,
         kind: Kind::U8,
         color: SRGB,
@@ -1753,6 +1780,59 @@ fn rejected_fixtures_fail_with_a_useful_message() {
                     message.contains(phrase),
                     "{file}: expected `{phrase}` in `{message}`"
                 );
+            }
+        }
+    }
+}
+
+/// A fixture with a depth map, the code the map holds at each of the four
+/// probes, and the distance there where the file states one.
+type Depths = (&'static str, [f32; 4], Option<[f32; 4]>);
+
+/// Every fixture with a depth map. Every other fixture carries none, so
+/// none is made up.
+const DEPTHS: &[Depths] = &[
+    // The alpha ramp, as codes: nothing in the file says what they mean.
+    ("heic-depth.heic", [255.0, 191.0, 128.0, 64.0], None),
+    // The gray pattern, between planes 1 and 4 meters away.
+    (
+        "jpeg-depth.jpg",
+        [0.0, 85.0, 170.0, 255.0],
+        Some([1.0, 2.0, 3.0, 4.0]),
+    ),
+];
+
+#[test]
+fn every_fixture_carries_the_depth_map_it_says_it_does() {
+    for fixture in FIXTURES {
+        let image = load(&directory().join(fixture.file), Overrides::default())
+            .unwrap_or_else(|error| panic!("{}: {error:#}", fixture.file));
+        let Some((_, codes, distances)) = DEPTHS.iter().find(|(file, ..)| *file == fixture.file)
+        else {
+            assert!(image.depth.is_none(), "{}: a depth map", fixture.file);
+            continue;
+        };
+        let map = image
+            .depth
+            .as_ref()
+            .unwrap_or_else(|| panic!("{}: no depth map", fixture.file));
+        for (index, (x, y)) in PROBES.iter().copied().enumerate() {
+            let depth = map
+                .at(x, y, image.width, image.height)
+                .unwrap_or_else(|| panic!("{}: nothing at ({x}, {y})", fixture.file));
+            assert_eq!(
+                depth.stored, codes[index],
+                "{} quadrant {index}",
+                fixture.file
+            );
+            let distance = depth.distance.map(|(value, _)| value);
+            match distances {
+                Some(want) => assert!(
+                    distance.is_some_and(|found| (found - want[index]).abs() < 1e-5),
+                    "{} quadrant {index}: {distance:?}",
+                    fixture.file
+                ),
+                None => assert_eq!(distance, None, "{}", fixture.file),
             }
         }
     }

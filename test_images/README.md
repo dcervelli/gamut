@@ -8,14 +8,15 @@ from the outside world.
 Regenerate with `./generate.sh` — it is the authoritative description of how
 each file was made. Most fixtures need only ImageMagick; the HEIF ones need
 `heif-enc` from libheif, the JPEG XL ones `cjxl` from libjxl, and the
-measurement rasters at the end need GDAL, and one of them libtiff's `tiffcp`. Eighteen fixtures need Python as well,
+measurement rasters at the end need GDAL, and one of them libtiff's `tiffcp`. Twenty fixtures need Python as well,
 because ImageMagick will not write what they exist for: neither `cICP` nor
 `iCCP` for PNG, nor a `gAMA` or `cHRM` other than sRGB's own, nor an `eXIf`
 chunk — which the JPEG XL fixtures read their orientation from too — neither
 an `EXIF` chunk nor an animation for WebP, an EXIF segment on a JPEG made
-from a PNG, for ICO neither a PNG-compressed entry nor a directory that mixes
-depths, and for BMP no top-down row order. Each is assembled afterwards around output ImageMagick
-did write.
+from a PNG, a depth map in a JPEG's XMP, for ICO neither a PNG-compressed
+entry nor a directory that mixes depths, and for BMP no top-down row order;
+nor will `heif-enc` write a depth map beside a HEIF. Each is assembled
+afterwards around output ImageMagick or `heif-enc` did write.
 
 `display-p3.icc` is an input rather than a fixture: it is the profile the three
 ICC-tagged files are tagged with, checked in beside them and not regenerated
@@ -49,12 +50,13 @@ mapping.
 | PNG color tags | `cICP` for BT.2100 PQ on BT.2020 — the whole of how a PNG says it is HDR — and `iCCP` for Display P3; the older vocabulary, `gAMA` of 1.0 for linear light and `cHRM` stating Display P3 as chromaticities |
 | PNG orientation | an `eXIf` chunk applied on decode, and a quarter turn stored 24x32 and displayed 32x24 |
 | JPEG | baseline, grayscale, progressive, 4:2:0 subsampling, an EXIF orientation applied on decode, and a quarter turn stored 24x32 and displayed 32x24, so that `probe` and `decode` have to agree about a size neither reads off the frame |
+| JPEG depth | Google's `GDepth` block: the gray pattern at half size as a PNG, base64 in an extended XMP packet split over several segments, normalized linearly between 1 and 4 meters |
 | TIFF | gray / RGB / RGBA at 8 and 16 bits, 32-bit float, LZW / Deflate / PackBits / uncompressed, big-endian, tiled, five strips of which the last is short, and two directories of which the second is upside down |
 | TIFF tags | an embedded Display P3 profile on an 8-bit file and on a 16-bit one, where it overrides the reading of a deep file as linear; the `Orientation` tag applied on decode, and a quarter turn stored 24x32 and displayed 32x24 |
 | TIFF as raster data | BigTIFF, Deflate + floating-point predictor + tiling (how DEMs ship), signed Int16, GDAL no-data sentinel, JPEG compression with its YCbCr pixels and subsampled chroma (how scanned maps ship), an internal mask directory between two pages |
 | Radiance | RGBE with its shared exponent; the same with a `VIEW=` line ahead of the signature, as Debevec's `memorial.hdr` has; the same with two `EXPOSURE=` lines, as `pfilt` leaves a picture it has scaled to be looked at; and the same with `EXPOSURE=1`, as Blender wrote on every picture it saved |
 | OpenEXR | RGB, RGBA with associated alpha, zip compression |
-| HEIF | RGB / RGBA / monochrome / monochrome + a separate alpha plane at 8 bits, 10-bit, an `irot` rotation, and AV1 in the same container |
+| HEIF | RGB / RGBA / monochrome / monochrome + a separate alpha plane at 8 bits, 10-bit, an `irot` rotation, AV1 in the same container, and a depth map — the RGBA file's alpha plane relabeled as MPEG's depth type |
 | HEIF color tags | BT.2100 PQ on BT.2020, and Display P3 — the CICP codes a HEIF states outright rather than leaving to convention — plus one tagged by ICC profile with no `nclx` box, which is what some cameras write |
 | GIF | a palette, an interlaced one, a transparent index, and a two-frame animation whose second frame is upside down |
 | WebP | lossless (VP8L) with and without alpha, lossy (VP8) with and without an `ALPH` chunk beside it |

@@ -29,7 +29,7 @@ settings are:
 | `show_filmstrip` | `true` | The file list, while there is more than one file |
 | `show_histogram` | `false` | The histogram panel |
 | `show_info` | `false` | The file information panel |
-| `pixel_format` | `hex` | How the pixel under the pointer is read out: `hex`, `decimal` or `mapped` |
+| `pixel_format` | `hex` | How the pixel under the pointer is read out: `hex`, `decimal`, `mapped` or `depth` |
 | `coordinate_format` | `pixel` | Where the pixel under the pointer is read out as, in a georeferenced file: `pixel`, `projected` or `geographic`. A file that cannot give the one chosen shows the pixel |
 | `geographic_format` | `decimal` | How a latitude and longitude are written: `decimal` or `dms` |
 | `log_counts` | `false` | The histogram's bars as tall as the logarithm of their counts |

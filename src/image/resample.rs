@@ -74,6 +74,7 @@ pub fn downscale(image: &DecodedImage, side: u32) -> DecodedImage {
         exposure: image.exposure,
         nodata: image.nodata,
         gain_map: None,
+        depth: None,
     }
 }
 

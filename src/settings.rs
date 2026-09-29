@@ -92,7 +92,7 @@ const SETTINGS: [(&str, &str); 10] = [
     ("show_info", "The file information panel."),
     (
         "pixel_format",
-        "How the pixel under the pointer is read out: hex, decimal, or mapped.",
+        "How the pixel under the pointer is read out: hex, decimal, mapped, or depth.",
     ),
     (
         "coordinate_format",
@@ -221,7 +221,9 @@ impl Config {
                         Some(format) => config.pixel_format = format,
                         None => problems.push((
                             number,
-                            format!("unknown pixel_format `{value}`: hex, decimal, or mapped"),
+                            format!(
+                                "unknown pixel_format `{value}`: hex, decimal, mapped, or depth"
+                            ),
                         )),
                     }
                     None

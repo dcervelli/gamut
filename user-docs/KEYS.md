@@ -688,7 +688,7 @@ where all of it is set.
 | `l` | Show or hide the loupe | `interface.loupe` |
 | `Shift+L` | Cycle the loupe's magnification: 2, 4, 8 or 16 times | `interface.loupe-magnification` |
 | `x` | Select a region of the image; again, or `Esc`, removes it | `region.select` |
-| `.` | Cycle how the pixel under the pointer is read out: hex → decimal → mapped | `interface.pixel-format` |
+| `.` | Cycle how the pixel under the pointer is read out: hex → decimal → mapped → depth | `interface.pixel-format` |
 | `,` | In a georeferenced file, cycle where the pixel is read out as: pixel → projected → geographic | `interface.coordinate-format` |
 | `<` (`Shift+,`) | Switch a latitude and longitude between decimal degrees and degrees, minutes and seconds | `interface.geographic-format` |
 | `` ` `` | Show or hide the panels around the image | `interface.toggle` |
@@ -927,7 +927,7 @@ after them moves as the pointer crosses a power of ten. In a window too narrow
 for all of it, the coordinates stay.
 
 One pixel answers more than one question, so the value is written whichever of
-three ways you ask for. It starts in hex; the `pixel_format` setting in
+four ways you ask for. It starts in hex; the `pixel_format` setting in
 [the configuration file](SETTINGS.md) starts it in another. **Decimal** is the numbers the file holds, in its own
 units — codes for an 8-bit image, counts for a 16-bit one, the value itself
 for floating point — the numbers whatever wrote the file put there. **Hex** is
@@ -937,9 +937,14 @@ case, with no `#` and no `0x`, two digits to an 8-bit sample and four to a
 anything that takes a color. A floating-point file has no such code, and
 what you get there is the bits it actually stores. **Mapped** is what the
 window, the exposure and the tone curve have made of the numbers, where 0 and
-1 are the ends of the window the bar names on the right.
+1 are the ends of the window the bar names on the right. **Depth** is how far
+away the pixel was, for a picture that carries a depth map beside it, as a
+phone's portrait may: a distance, such as `1.372 m`, where the file says how
+its map is scaled, and otherwise the number the map holds there, which only
+says what is nearer and what is farther. A picture with no depth map reads
+`(no depth)`.
 
-`.` steps through the three, and the dot at the head of the readout opens a
+`.` steps through the four, and the dot at the head of the readout opens a
 menu of them; whichever is in force is lit. It applies to whichever image is
 on screen and stays as you set it.
 

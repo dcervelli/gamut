@@ -15,6 +15,7 @@
 //! upright — and the size `dimensions` reports is the size after the turn,
 //! so the window opens in the shape the picture will arrive in.
 
+mod depth;
 mod gain_map;
 
 use std::io::{BufReader, Cursor, Read, SeekFrom};
@@ -132,7 +133,8 @@ fn orientation<R: std::io::BufRead + std::io::Seek>(
 /// The picture as stored, decoded through `decoder` — or, where the
 /// container holds a gain map and it is wanted, reconstructed from the
 /// base image and the map, with `decoder` having served only to say which
-/// way up the file goes.
+/// way up the file goes. Either way, with the depth map its XMP carries
+/// beside it.
 fn stored(
     decoder: JpegDecoder<Cursor<&[u8]>>,
     bytes: &[u8],
@@ -148,16 +150,18 @@ fn stored(
         .map(|profile| crate::image::color::icc::color_space(&profile, ColorSpace::SRGB))
         .unwrap_or(ColorSpace::SRGB);
 
-    if overrides.gain_map
-        && let Some(container) = &container
-        && let Some(image) = container.gain_mapped(color)?
-    {
-        return Ok(image);
-    }
-
-    dynamic::describe(
-        DynamicImage::from_decoder(decoder)?,
-        Some(::image::ImageFormat::Jpeg),
-        color,
-    )
+    let gain_mapped = match &container {
+        Some(container) if overrides.gain_map => container.gain_mapped(color)?,
+        _ => None,
+    };
+    let mut image = match gain_mapped {
+        Some(image) => image,
+        None => dynamic::describe(
+            DynamicImage::from_decoder(decoder)?,
+            Some(::image::ImageFormat::Jpeg),
+            color,
+        )?,
+    };
+    image.depth = depth::find(bytes);
+    Ok(image)
 }

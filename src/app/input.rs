@@ -1041,7 +1041,7 @@ pub static ROWS: &[Row] = &[
     Row {
         section: Section::Interface,
         when: None,
-        help: "Cycle the pixel readout: hex, decimal, mapped",
+        help: "Cycle the pixel readout: hex, decimal, mapped, depth",
         keys: one!("interface.pixel-format", CyclePixelFormat, [key('.')]),
     },
     // The key beside it, and that key with Shift: where the pixel is,
@@ -3393,6 +3393,12 @@ impl App {
             self.toast("No pixel under the pointer.", Level::Warning);
             return;
         };
+        // The words the bar shows in place of a depth are not a value, and
+        // a copy of them would paste as one.
+        if !coordinate && text == ui::pixel::NO_DEPTH {
+            self.toast("This image has no depth map.", Level::Warning);
+            return;
+        }
         let said = match coordinate {
             true => "Copied pixel coordinate.",
             false => "Copied pixel value.",
@@ -3419,6 +3425,7 @@ impl App {
             &current.image,
             &sample,
             &mapped,
+            current.depth(at[0], at[1]),
             self.panels.pixel_format,
         ))
     }
@@ -4143,7 +4150,7 @@ mod tests {
         assert_eq!(
             tooltip.hints,
             [
-                spelled_here("Cycle pixel format: hex, decimal, mapped (.)"),
+                spelled_here("Cycle pixel format: hex, decimal, mapped, depth (.)"),
                 spelled_here("Copy pixel value under pointer (Ctrl+.)"),
                 spelled_here("Copy coordinate of pixel under pointer (Ctrl+>)"),
             ]
@@ -4165,7 +4172,7 @@ mod tests {
         assert_eq!(
             tooltip.hints,
             [
-                spelled_here("Cycle pixel format: hex, decimal, mapped (.)"),
+                spelled_here("Cycle pixel format: hex, decimal, mapped, depth (.)"),
                 spelled_here("Cycle coordinate: pixel, projected, geographic (,)"),
                 spelled_here("Switch latitude and longitude: decimal, DMS (<)"),
                 spelled_here("Copy pixel value under pointer (Ctrl+.)"),

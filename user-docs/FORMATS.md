@@ -6,12 +6,12 @@ pixels, and where each format will surprise you.
 | Format | Extensions | Depth kept | What the file can tell us |
 | --- | --- | --- | --- |
 | PNG | `.png` | 8 and 16-bit | Color space, including HDR; ICC profile; gamma and primaries; orientation; animation |
-| JPEG | `.jpg` `.jpeg` `.jpe` `.jfif` | 8-bit | ICC profile; orientation; HDR gain map |
+| JPEG | `.jpg` `.jpeg` `.jpe` `.jfif` | 8-bit | ICC profile; orientation; HDR gain map; depth map |
 | GIF | `.gif` | 8-bit | Animation — and always sRGB |
 | TIFF | `.tif` `.tiff` | 8 to 64-bit, integer or float | ICC profile, otherwise inferred from depth; orientation; pages |
 | WebP | `.webp` | 8-bit | ICC profile; orientation; animation |
 | JPEG XL | `.jxl` | 8 and 16-bit, or float | Color space, including HDR; ICC profile; orientation; animation |
-| HEIF | `.heic` `.heif` `.hif` `.avif` | 8, 10 and 12-bit | Color space, including HDR; ICC profile; orientation; HDR gain map |
+| HEIF | `.heic` `.heif` `.hif` `.avif` | 8, 10 and 12-bit | Color space, including HDR; ICC profile; orientation; HDR gain map; depth map |
 | ICO | `.ico` | Whatever the chosen icon holds | ICC profile, for the larger icons; every icon in the file |
 | BMP | `.bmp` | 8-bit | Nothing — always sRGB |
 | Netpbm | `.pnm` `.pbm` `.pgm` `.ppm` `.pam` | 8 and 16-bit | Nothing — always sRGB |
@@ -193,6 +193,15 @@ An iPhone's HEIC carries the same kind of map, and gets the same treatment.
   backwards. The message suggests `--no-gain-map`.
 - A JPEG carrying a second image that is not a gain map, such as one half of
   a stereo pair, opens as an ordinary JPEG.
+
+**Depth maps are read for the pixel readout.** A portrait from a phone may
+carry a map of how far away each pixel was. Choose **Depth** in the pixel
+readout (see KEYS.md) to read it under the pointer. A JPEG with the depth
+map Google's camera writes gives a distance in meters; a HEIC with a
+depth map gives the number the map holds, since the file does not say how
+it is scaled. Other ways of storing depth, including Apple's in a JPEG and
+Samsung's, are not read, and such a file reads `(no depth)`. A map that
+cannot be read costs the readout its depth, never the picture.
 
 **CMYK JPEGs open**, but the conversion to RGB does not use the file's CMYK
 profile, so the colors are approximate.
