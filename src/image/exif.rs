@@ -317,9 +317,11 @@ impl Exif {
         // already sorted that way — TIFF's own tags describe the file, the
         // Exif directory describes the shot, the GPS directory describes the
         // place — so the listing is grouped by asking each tag where it came
-        // from rather than by a table saying where each one belongs. The
-        // place carries on from the coordinate the summary drew out of it.
-        let mut place = location(exif);
+        // from rather than by a table saying where each one belongs. What
+        // the GPS directory says beyond the place itself is listed on its
+        // own, after the rest.
+        let place = location(exif);
+        let mut gps = Vec::new();
         let mut image = Vec::new();
         let mut capture = Vec::new();
         for field in exif.fields() {
@@ -335,7 +337,7 @@ impl Exif {
                 continue;
             }
             match field.tag.0 {
-                Context::Gps => place.push(entry),
+                Context::Gps => gps.push(entry),
                 Context::Tiff => image.push(entry),
                 // The interoperability directory is a corner of the Exif one
                 // and reads as more of the same.
@@ -350,6 +352,7 @@ impl Exif {
             (ABOUT, described),
             ("Image metadata", image),
             ("Capture metadata", capture),
+            ("GPS metadata", gps),
         ]
         .into_iter()
         .filter(|(_, entries)| !entries.is_empty())
@@ -370,7 +373,7 @@ impl Exif {
 
 /// The tags `Camera` and `Location` speak for, and so the ones the listing
 /// leaves out.
-const SUMMARIZED: [Tag; 17] = [
+const SUMMARIZED: [Tag; 20] = [
     Tag::Make,
     Tag::Model,
     Tag::LensModel,
@@ -388,6 +391,9 @@ const SUMMARIZED: [Tag; 17] = [
     Tag::GPSLongitudeRef,
     Tag::GPSAltitude,
     Tag::GPSAltitudeRef,
+    Tag::GPSImgDirection,
+    Tag::GPSImgDirectionRef,
+    Tag::GPSHPositioningError,
 ];
 
 /// The section the words go under, and the row among them that names the
@@ -593,14 +599,64 @@ pub const ISO: &str = "ISO";
 pub const COMPENSATION: &str = "Exposure compensation";
 pub const FOCAL_LENGTH: &str = "Focal length";
 
-/// Where the camera stood, as the two facts a map wants of it. The rest of
-/// the GPS directory is listed under these rather than beside them: this is
-/// the head of a section, not the whole of one.
+/// Where the camera stood and which way it faced: the two coordinates a map
+/// wants, how high it was, where it was pointed, and how far out the fix
+/// may be. The rest of the GPS directory is listed on its own.
 fn location(exif: &exif::Exif) -> Vec<Entry> {
     let mut rows = Vec::new();
-    push(&mut rows, "Coordinates", coordinates(exif));
+    if let Some((latitude, longitude)) = coordinates(exif) {
+        push(&mut rows, LATITUDE, Some(latitude));
+        push(&mut rows, LONGITUDE, Some(longitude));
+    }
     push(&mut rows, "Altitude", altitude(exif));
+    push(&mut rows, "Direction", direction(exif));
+    push(&mut rows, "Positioning error", positioning_error(exif));
     rows
+}
+
+/// The names of the location's two coordinates, which head its section.
+pub const LATITUDE: &str = "Latitude";
+pub const LONGITUDE: &str = "Longitude";
+
+/// Which way the camera was pointed, in whole degrees clockwise from the
+/// north the file names — true or magnetic, which can be twenty degrees
+/// apart.
+fn direction(exif: &exif::Exif) -> Option<String> {
+    let degrees = rational(exif, Tag::GPSImgDirection)?;
+    let north = match &primary(exif, Tag::GPSImgDirectionRef).map(|field| &field.value) {
+        Some(Value::Ascii(parts)) => match parts.first().map(Vec::as_slice) {
+            Some(b"T") => Some("true"),
+            Some(b"M") => Some("magnetic"),
+            _ => None,
+        },
+        _ => None,
+    };
+    let degrees = degrees.round().rem_euclid(360.0);
+    Some(match north {
+        Some(north) => format!("{degrees:.0}\u{00b0} from {north} north"),
+        None => format!("{degrees:.0}\u{00b0}"),
+    })
+}
+
+/// How far from where the file says the camera may have been, as the
+/// receiver judged it: to a tenth of a meter under ten, and to the meter
+/// above.
+fn positioning_error(exif: &exif::Exif) -> Option<String> {
+    let meters = rational(exif, Tag::GPSHPositioningError)?;
+    Some(if meters < 10.0 {
+        format!("\u{00b1}{} m", tidy_numbers(&format!("{meters:.1}")))
+    } else {
+        format!("\u{00b1}{meters:.0} m")
+    })
+}
+
+/// A tag holding one rational, as a number; `None` for one that holds
+/// anything else, or a zero denominator.
+fn rational(exif: &exif::Exif, tag: Tag) -> Option<f64> {
+    match &primary(exif, tag)?.value {
+        Value::Rational(parts) => Some(parts.first()?.to_f64()).filter(|value| value.is_finite()),
+        _ => None,
+    }
 }
 
 /// What the file says in words, under the names those fields are spoken by
@@ -712,7 +768,7 @@ fn comment(exif: &exif::Exif) -> Option<String> {
 /// Where the camera was, in the degrees a map will take: the sexagesimal the
 /// file holds is exact and unusable, and the hemisphere is kept as its letter
 /// rather than as a sign, which is read wrong more often than not.
-fn coordinates(exif: &exif::Exif) -> Option<String> {
+fn coordinates(exif: &exif::Exif) -> Option<(String, String)> {
     let axis = |value: Tag, reference: Tag| {
         let degrees = degrees(&primary(exif, value)?.value)?;
         let hemisphere = primary(exif, reference)?
@@ -724,7 +780,7 @@ fn coordinates(exif: &exif::Exif) -> Option<String> {
     };
     let latitude = axis(Tag::GPSLatitude, Tag::GPSLatitudeRef)?;
     let longitude = axis(Tag::GPSLongitude, Tag::GPSLongitudeRef)?;
-    Some(format!("{latitude}, {longitude}"))
+    Some((latitude, longitude))
 }
 
 /// Degrees, minutes and seconds as one number.
@@ -1228,6 +1284,10 @@ mod tests {
         gps.rational(0x0004, &[(169, 1), (9, 1), (4304, 100)]); // GPSLongitude
         gps.short(0x0005, 0); // GPSAltitudeRef, above sea level
         gps.rational(0x0006, &[(3329957, 10000)]); // GPSAltitude
+        gps.ascii(0x000c, "K"); // GPSSpeedRef, left to the listing
+        gps.ascii(0x0010, "T"); // GPSImgDirectionRef, true north
+        gps.rational(0x0011, &[(21180, 100)]); // GPSImgDirection
+        gps.rational(0x001f, &[(47, 10)]); // GPSHPositioningError
 
         let mut ifd0 = Block::new();
         ifd0.ascii(0x010f, "Apple"); // Make
@@ -1306,9 +1366,21 @@ mod tests {
         assert_eq!(
             rows("Location"),
             pairs(&[
-                ("Coordinates", "44.68202\u{00b0} S, 169.16196\u{00b0} E"),
+                ("Latitude", "44.68202\u{00b0} S"),
+                ("Longitude", "169.16196\u{00b0} E"),
                 ("Altitude", "333 m"),
+                ("Direction", "212\u{00b0} from true north"),
+                ("Positioning error", "\u{00b1}4.7 m"),
             ])
+        );
+        // The rest of the GPS directory is listed on its own, after the
+        // place it was read beside.
+        assert_eq!(
+            rows("GPS metadata")
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>(),
+            ["GPSSpeedRef"]
         );
 
         // What a section above spoke for is not listed again; what none of

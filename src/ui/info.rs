@@ -537,11 +537,9 @@ fn file_section(
     if let Some((index, folder)) = field(FOLDER) {
         ui.add_space(HEAD_GAP);
         block(pass, ui, Copyable::Fact(index), width, |ui| {
-            // At the size of the rest, in the names' ink: where the file
-            // is matters less than what it is.
             let text = RichText::new(&folder.value)
                 .size(TEXT_SIZE)
-                .color(theme.text_dim);
+                .color(theme.text_primary);
             ui.add(Label::new(text).wrap());
         });
     }
@@ -897,12 +895,17 @@ fn contents(current: &Current) -> Contents {
             .entries
             .iter()
             .map(|entry| (entry.name.as_str(), entry.value.clone()));
-        // The camera's own section is headed by the camera's name; every
-        // other the metadata reads out is a column of fields.
+        // The camera's own section is headed by the camera's name, and the
+        // location's by where it is; every other the metadata reads out is
+        // a column of fields.
         let face = match section.name {
             "Camera" => Face::Headed {
                 mark: icon::CAMERA,
                 head: &[exif::CAMERA],
+            },
+            "Location" => Face::Headed {
+                mark: icon::MAP_PIN,
+                head: &[exif::LATITUDE, exif::LONGITUDE],
             },
             _ => Face::Fields,
         };

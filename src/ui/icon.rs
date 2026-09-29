@@ -222,6 +222,18 @@ pub(super) const FILE: &[Mark] = &[
     Mark::Line([16.0, 8.0], [20.0, 8.0]),
 ];
 
+/// Lucide's `map-pin`: a pin with a hole through its head — the mark at the
+/// head of the info panel's section about where the picture was taken. The
+/// head is a half circle; Lucide's two curves down to the point are each
+/// drawn as the arc that leaves the head's side straight down and meets
+/// the other at the point, which is as close to the curve as an arc comes.
+pub(super) const MAP_PIN: &[Mark] = &[
+    Mark::arc([12.0, 10.0], 8.0, 0.0, -180.0),
+    Mark::arc([7.0, 10.0], 13.0, 0.0, 67.38),
+    Mark::arc([17.0, 10.0], 13.0, 180.0, -67.38),
+    Mark::circle([12.0, 10.0], 3.0),
+];
+
 /// Lucide's `camera`: the body with its raised top and the lens — the mark
 /// at the head of the info panel's section about what took the picture.
 /// Written out as sides and quarter turns, since the top edge rises
@@ -1079,7 +1091,7 @@ mod tests {
 
     /// Every icon in the table, so that a new one is held to the same
     /// promises as the rest.
-    const ICONS: [&[Mark]; 35] = [
+    const ICONS: [&[Mark]; 36] = [
         CHART_AREA,
         INFO,
         CIRCLE_QUESTION_MARK,
@@ -1088,6 +1100,7 @@ mod tests {
         FILE,
         IMAGE,
         CAMERA,
+        MAP_PIN,
         FILE_IMAGE,
         FOLDER,
         CLIPBOARD,

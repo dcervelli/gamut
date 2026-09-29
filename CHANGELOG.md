@@ -36,7 +36,11 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   rest in the same kind of table, the time it was taken first, said as how
   long ago with the date in its tooltip; the exposure
   is split into *Shutter speed*, *Aperture*, *ISO* and *Exposure
-  compensation*, each copied on its own, where it was one line. A click on any piece copies it, the size and
+  compensation*, each copied on its own, where it was one line. The
+  *Location* section is headed by the latitude and longitude beside a map
+  pin, over the altitude, the direction the camera faced and how far out the
+  fix may be; the rest of the GPS directory is listed after the other
+  metadata, under *GPS metadata*, where it followed the coordinates. A click on any piece copies it, the size and
   the date exactly.
 - Color spaces are called by their common names — *sRGB*, *Display P3*,
   *Rec. 2100 PQ*, *Adobe RGB (1998)* — in the top bar and the information
