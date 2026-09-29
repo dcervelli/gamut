@@ -101,7 +101,7 @@ impl App {
                 (None, Sequence::Pages { .. }) => Frames::Pages { page: current.page },
                 (None, _) => Frames::Still,
             },
-            metadata: !current.exif.sections.is_empty(),
+            metadata: !current.exif.sections.is_empty() || !current.exif.regions.list.is_empty(),
             region: region.map(|region| [region.width, region.height]),
             source: export::format_of(&name),
             upscale: self.view.upscale(),

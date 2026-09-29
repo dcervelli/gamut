@@ -103,13 +103,23 @@ pub struct Region {
     /// whatever else the writer chose.
     pub kind: Option<String>,
     pub description: Option<String>,
+    /// What a barcode region's code reads as.
+    pub barcode: Option<String>,
+    /// Whether a focus region was considered and used, in the schema's
+    /// words: `EvaluatedUsed`, `EvaluatedNotUsed`, `NotEvaluatedNotUsed`.
+    pub focus_usage: Option<String>,
+    /// Degrees, as Lightroom writes it; not in the schema, and never seen
+    /// other than zero.
+    pub rotation: Option<f64>,
     pub area: Option<Area>,
 }
 
 /// Where a region is. `x` and `y` are its center; a rectangle has a width
 /// and a height, a circle a diameter, and a point neither. The schema's unit
 /// is `normalized`, a share of the picture's side, which is what a missing
-/// unit is taken for; `pixel` is what a few writers put instead.
+/// unit is taken for; `pixel` is what a few writers put instead. Either is
+/// in the picture as stored, before the EXIF orientation turns it, as the
+/// Metadata Working Group's guidelines say.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Area {
     pub x: f64,
@@ -121,7 +131,7 @@ pub struct Area {
 }
 
 /// The regions a packet holds, and the size of the picture they were drawn
-/// on, in pixels, where it says.
+/// on, in pixels and as stored, where it says.
 #[derive(Clone, Default, PartialEq, Debug)]
 pub struct Regions {
     pub applied_to: Option<(f64, f64)>,
@@ -316,6 +326,9 @@ fn read_regions(regions: Node) -> Regions {
                 name: text("Name"),
                 kind: text("Type"),
                 description: text("Description"),
+                barcode: text("BarCodeValue"),
+                focus_usage: text("FocusUsage"),
+                rotation: number(region, MWG_RS, "Rotation"),
                 area: nested(region, MWG_RS, "Area").and_then(area),
             }
         })
@@ -768,6 +781,9 @@ mod tests {
                     name: Some("Jane Doe".to_string()),
                     kind: Some("Face".to_string()),
                     description: None,
+                    barcode: None,
+                    focus_usage: None,
+                    rotation: None,
                     area: Some(Area {
                         x: 0.5,
                         y: 0.25,
@@ -781,6 +797,9 @@ mod tests {
                     name: None,
                     kind: Some("Focus".to_string()),
                     description: None,
+                    barcode: None,
+                    focus_usage: None,
+                    rotation: None,
                     area: Some(Area {
                         x: 0.3,
                         y: 0.6,

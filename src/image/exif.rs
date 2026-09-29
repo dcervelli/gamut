@@ -15,7 +15,8 @@
 //! pulled out as `About` — from the EXIF block, and from the XMP packet
 //! beside it, which [`super::xmp`] reads and which is where a title, a
 //! caption or a keyword is written when a file has one at all — with the
-//! regions the packet marks out on the picture under `Regions`, and whatever
+//! regions the packet marks out on the picture kept aside, to be written out
+//! against the picture as it is shown, and whatever
 //! is left is listed under the directory it came out of, in the order the
 //! file carries it, because this is a viewer for looking at what is actually
 //! in a file rather than for a tidy précis of it.
@@ -24,8 +25,10 @@ use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
+use ::image::metadata::Orientation;
 use exif::{Context, In, Rational, Tag, Value};
 
+use super::orient::{self, Turn};
 use super::xmp::{self, Xmp};
 use super::{directory, enclosed, geo, tiff};
 
@@ -73,7 +76,7 @@ pub struct Section {
 /// what the fields say. Empty when the file carries none, or carries some
 /// that will not parse — a photograph with unreadable metadata is still a
 /// photograph, so nothing here is an error anything else has to handle.
-#[derive(Clone, Default, PartialEq, Eq, Debug)]
+#[derive(Clone, Default, PartialEq, Debug)]
 pub struct Exif {
     /// The groups the file's fields fall into, in the order they are read:
     /// what took the picture, where it was taken, where its pixels are on the
@@ -83,6 +86,14 @@ pub struct Exif {
     /// readout: the same tags the `Georeference` section is written from,
     /// kept as numbers. `None` for everything that is not a map.
     pub georeference: Option<geo::Georeference>,
+    /// The regions the XMP packet marks out on the picture, kept as numbers:
+    /// they are in the picture as stored, and the panel writes them out in
+    /// the picture as shown, which the turn in force decides — see
+    /// [`Exif::regions`].
+    pub regions: xmp::Regions,
+    /// The turn the EXIF orientation tag asks for, which the regions were
+    /// marked out before. `None` where the file does not say.
+    pub orientation: Option<Orientation>,
 }
 
 impl Exif {
@@ -156,6 +167,64 @@ impl Exif {
             .map(|entry| entry.value.as_str())
     }
 
+    /// The regions marked out on the picture, a row each, in the order the
+    /// packet lists them: named by what kind of region it is, and saying who
+    /// or what is in it, anything written about it, and where it is.
+    ///
+    /// Where it is is in the picture as shown — `shown` pixels across and
+    /// down, turned by `turn` from the upright picture — so that it reads as
+    /// the pointer's coordinate and a marked region do: the top left corner
+    /// and the size. The packet's numbers are in the picture as stored,
+    /// before the orientation tag turned it, so they are carried through
+    /// that turn and then through `turn`, and taken as shares of the
+    /// picture's sides, so that a picture made smaller since it was marked
+    /// is still marked in the right place.
+    pub fn regions(&self, shown: [u32; 2], turn: Turn) -> Vec<Entry> {
+        let orientation = self.orientation.unwrap_or(Orientation::NoTransforms);
+        let mut rows = Vec::new();
+        for region in &self.regions.list {
+            let kind = match region.kind.as_deref() {
+                None => "Region",
+                Some("BarCode") => "Barcode",
+                Some(kind) => kind,
+            };
+            let focus = region.focus_usage.as_deref().map(|usage| match usage {
+                "EvaluatedUsed" => "focused on".to_string(),
+                "EvaluatedNotUsed" => "considered, not focused on".to_string(),
+                "NotEvaluatedNotUsed" => "not considered".to_string(),
+                usage => usage.to_string(),
+            });
+            let rotation = region
+                .rotation
+                .filter(|degrees| *degrees != 0.0)
+                .map(|degrees| format!("rotated {}\u{00b0}", tidy(&degrees.to_string())));
+            let parts: Vec<String> = [
+                region.name.clone(),
+                region.description.clone(),
+                region.barcode.clone(),
+                focus,
+                rotation,
+                region
+                    .area
+                    .map(|area| place(&area, self.regions.applied_to, orientation, turn, shown)),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+            push(&mut rows, kind, join(&parts));
+        }
+        rows
+    }
+
+    /// Where the `Regions` section goes among [`Exif::sections`]: after the
+    /// summaries and the words, before the listings.
+    pub fn regions_at(&self) -> usize {
+        self.sections
+            .iter()
+            .rposition(|section| SUMMARIES.contains(&section.name))
+            .map_or(0, |at| at + 1)
+    }
+
     /// The EXIF block, parsed; `None` where there is none to parse.
     fn parse(path: &Path, prefix: u64) -> Option<exif::Exif> {
         let file = File::open(path).ok()?;
@@ -226,16 +295,20 @@ impl Exif {
     /// packet, which may be all a file has.
     fn assemble(exif: Option<&exif::Exif>, xmp: &Xmp) -> Self {
         let described = described(exif, xmp);
-        let regions = regions(xmp.regions());
+        let regions = xmp.regions().clone();
         let Some(exif) = exif else {
-            let sections = [(ABOUT, described), (REGIONS, regions)]
+            let sections = (!described.is_empty())
+                .then_some(Section {
+                    name: ABOUT,
+                    entries: described,
+                })
                 .into_iter()
-                .filter(|(_, entries)| !entries.is_empty())
-                .map(|(name, entries)| Section { name, entries })
                 .collect();
             return Self {
                 sections,
                 georeference: None,
+                regions,
+                orientation: None,
             };
         };
 
@@ -287,7 +360,6 @@ impl Exif {
             ("Location", place),
             ("Georeference", geo),
             (ABOUT, described),
-            (REGIONS, regions),
             ("Image metadata", image),
             ("Capture metadata", capture),
         ]
@@ -295,9 +367,15 @@ impl Exif {
         .filter(|(_, entries)| !entries.is_empty())
         .map(|(name, entries)| Section { name, entries })
         .collect();
+        let orientation = primary(exif, Tag::Orientation)
+            .and_then(|field| field.value.get_uint(0))
+            .and_then(|value| u8::try_from(value).ok())
+            .and_then(Orientation::from_exif);
         Self {
             sections,
             georeference: geo::Georeference::read(&tags),
+            regions,
+            orientation,
         }
     }
 }
@@ -330,7 +408,11 @@ const ABOUT: &str = "About";
 const TITLE: &str = "Title";
 
 /// The section the packet's regions go under.
-const REGIONS: &str = "Regions";
+pub const REGIONS: &str = "Regions";
+
+/// The sections the regions follow: the summaries, and the words. What comes
+/// after them is the listing of whatever was left.
+const SUMMARIES: [&str; 4] = ["Camera", "Location", "Georeference", ABOUT];
 
 /// One of the fields somebody wrote in words: what it is called when it is
 /// spoken of, the EXIF tag that holds it, and the XMP property that does —
@@ -542,63 +624,68 @@ fn described(exif: Option<&exif::Exif>, xmp: &Xmp) -> Vec<Entry> {
     rows
 }
 
-/// The regions marked out on the picture, a row each, in the order the
-/// packet lists them: named by what kind of region it is, and saying who or
-/// what is in it, anything written about it, and where it is.
+/// Where an area is in the picture as shown, `shown` pixels across and down:
+/// a rectangle's size and top left corner, a circle's diameter and center, a
+/// point. `applied_to` is the size, as stored, that an area in pixels is in.
 ///
-/// Where it is is in the pixels of the size the packet says the regions were
-/// drawn on, the top left corner and the size as the export dialog and a
-/// marked region write them; a packet that does not say is left in shares of
-/// the picture's sides. Either is the packet's own reading of the picture,
-/// taken as written.
-fn regions(regions: &xmp::Regions) -> Vec<Entry> {
-    let mut rows = Vec::new();
-    for region in &regions.list {
-        let kind = match region.kind.as_deref() {
-            None => "Region",
-            Some("BarCode") => "Barcode",
-            Some(kind) => kind,
-        };
-        let parts: Vec<String> = [
-            region.name.clone(),
-            region.description.clone(),
-            region.area.map(|area| place(&area, regions.applied_to)),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
-        push(&mut rows, kind, join(&parts));
-    }
-    rows
-}
-
-/// Where an area is, in pixels where the size it is a share of is known,
-/// and otherwise in percentages of the picture's sides.
-fn place(area: &xmp::Area, applied_to: Option<(f64, f64)>) -> String {
-    let (scale, unit) = match (area.normalized, applied_to) {
-        (false, _) => ((1.0, 1.0), ""),
-        (true, Some(size)) => (size, ""),
-        (true, None) => ((100.0, 100.0), "%"),
+/// A circle's diameter is taken as a share of the stored picture's width,
+/// the schema not saying of what.
+fn place(
+    area: &xmp::Area,
+    applied_to: Option<(f64, f64)>,
+    orientation: Orientation,
+    turn: Turn,
+    shown: [u32; 2],
+) -> String {
+    let shown = shown.map(f64::from);
+    // The picture as stored: the one shown with the turn taken back off,
+    // and then the orientation. Either is a swap of the sides or none.
+    let upright = turn.size(shown);
+    let stored = if orient::quarter_turn(orientation) {
+        [upright[1], upright[0]]
+    } else {
+        upright
     };
+    // What the area's numbers are measured against.
+    let basis = match (area.normalized, applied_to) {
+        (true, _) => [1.0, 1.0],
+        (false, Some((w, h))) => [w, h],
+        (false, None) => stored,
+    };
+    let center = orient::upright(
+        turn.orientation(),
+        orient::upright(orientation, [area.x / basis[0], area.y / basis[1]]),
+    );
+    let swapped = orient::quarter_turn(orientation) != turn.is_quarter();
     // Adding nothing turns a region's edge a hair past the picture's from
     // -0 into 0.
-    let across = |value: f64| format!("{}{unit}", (value * scale.0).round() + 0.0);
-    let down = |value: f64| format!("{}{unit}", (value * scale.1).round() + 0.0);
+    let pixels = |value: f64| value.round() + 0.0;
     match (area.w, area.h, area.d) {
-        (Some(w), Some(h), _) => format!(
-            "{} \u{00d7} {} at {}, {}",
-            across(w),
-            down(h),
-            across(area.x - w / 2.0),
-            down(area.y - h / 2.0),
-        ),
+        (Some(w), Some(h), _) => {
+            let mut size = [w / basis[0], h / basis[1]];
+            if swapped {
+                size.swap(0, 1);
+            }
+            let size = [size[0] * shown[0], size[1] * shown[1]];
+            format!(
+                "{} \u{00d7} {} at {}, {}",
+                pixels(size[0]),
+                pixels(size[1]),
+                pixels(center[0] * shown[0] - size[0] / 2.0),
+                pixels(center[1] * shown[1] - size[1] / 2.0),
+            )
+        }
         (_, _, Some(d)) => format!(
             "{} across at {}, {}",
-            across(d),
-            across(area.x),
-            down(area.y)
+            pixels(d / basis[0] * stored[0]),
+            pixels(center[0] * shown[0]),
+            pixels(center[1] * shown[1]),
         ),
-        _ => format!("{}, {}", across(area.x), down(area.y)),
+        _ => format!(
+            "{}, {}",
+            pixels(center[0] * shown[0]),
+            pixels(center[1] * shown[1])
+        ),
     }
 }
 
@@ -1309,63 +1396,109 @@ mod tests {
         assert_eq!(exif.sections.len(), 1, "{exif:?}");
     }
 
-    /// Each region is a row named by its kind, saying who is in it and
-    /// where: in the pixels of the size it was drawn on where the packet
-    /// says, and in shares of the sides where it does not.
+    /// Each region is a row named by its kind, saying who is in it, what was
+    /// written about it and where it is, in the pixels of the picture as it
+    /// is shown: carried through the orientation tag and the turn in force,
+    /// and scaled to the picture's size rather than the one it was marked on.
     #[test]
     fn a_region_says_who_is_in_it_and_where() {
-        let packet = |dimensions: &str| {
-            format!(
-                r#"<x:xmpmeta xmlns:x="adobe:ns:meta/">
+        const PACKET: &str = r#"<x:xmpmeta xmlns:x="adobe:ns:meta/">
 <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
 <rdf:Description rdf:about=""
  xmlns:mwg-rs="http://www.metadataworkinggroup.com/schemas/regions/"
  xmlns:stDim="http://ns.adobe.com/xap/1.0/sType/Dimensions#"
  xmlns:stArea="http://ns.adobe.com/xmp/sType/Area#">
-<mwg-rs:Regions rdf:parseType="Resource">{dimensions}<mwg-rs:RegionList><rdf:Bag>
-<rdf:li rdf:parseType="Resource" mwg-rs:Name="Jane Doe" mwg-rs:Type="Face">
+<mwg-rs:Regions rdf:parseType="Resource">
+<mwg-rs:AppliedToDimensions stDim:w="4000" stDim:h="3000" stDim:unit="pixel"/>
+<mwg-rs:RegionList><rdf:Bag>
+<rdf:li rdf:parseType="Resource" mwg-rs:Name="Jane Doe" mwg-rs:Type="Face" mwg-rs:Rotation="0.00000">
 <mwg-rs:Area stArea:x="0.5" stArea:y="0.25" stArea:w="0.1" stArea:h="0.2"/></rdf:li>
-<rdf:li rdf:parseType="Resource" mwg-rs:Type="BarCode" mwg-rs:Description="On the ring">
+<rdf:li rdf:parseType="Resource" mwg-rs:Type="BarCode" mwg-rs:Description="On the ring" mwg-rs:BarCodeValue="A-1234">
 <mwg-rs:Area stArea:x="0.3" stArea:y="0.6" stArea:d="0.05"/></rdf:li>
-<rdf:li rdf:parseType="Resource" mwg-rs:Name="Rex"/>
-<rdf:li rdf:parseType="Resource">
+<rdf:li rdf:parseType="Resource" mwg-rs:Name="Rex" mwg-rs:Rotation="12.5"/>
+<rdf:li rdf:parseType="Resource" mwg-rs:Type="Focus" mwg-rs:FocusUsage="EvaluatedUsed">
 <mwg-rs:Area stArea:x="0.001" stArea:y="0.5" stArea:unit="normalized"/></rdf:li>
+<rdf:li rdf:parseType="Resource">
+<mwg-rs:Area stArea:x="2000" stArea:y="750" stArea:unit="pixel"/></rdf:li>
 </rdf:Bag></mwg-rs:RegionList></mwg-rs:Regions>
-</rdf:Description></rdf:RDF></x:xmpmeta>"#
-            )
-        };
-        let rows = |dimensions: &str| -> Vec<(String, String)> {
-            let xmp = Xmp::parse(packet(dimensions).as_bytes()).expect("the packet parses");
-            let exif = Exif::assemble(None, &xmp);
-            assert_eq!(exif.sections.len(), 1, "{exif:?}");
-            section(&exif, "Regions")
-                .iter()
-                .map(|entry| (entry.name.clone(), entry.value.clone()))
+</rdf:Description></rdf:RDF></x:xmpmeta>"#;
+        let xmp = Xmp::parse(PACKET.as_bytes()).expect("the packet parses");
+        let mut exif = Exif::assemble(None, &xmp);
+        assert!(exif.sections.is_empty(), "{exif:?}");
+        let rows = |exif: &Exif, shown: [u32; 2], turn: Turn| -> Vec<(String, String)> {
+            exif.regions(shown, turn)
+                .into_iter()
+                .map(|entry| (entry.name, entry.value))
                 .collect()
         };
-        let owned = |rows: [(&str, &str); 4]| {
+        let owned = |rows: [(&str, &str); 5]| {
             rows.map(|(name, value)| (name.to_string(), value.to_string()))
         };
-        assert_eq!(
-            rows(
-                r#"<mwg-rs:AppliedToDimensions stDim:w="4000" stDim:h="3000" stDim:unit="pixel"/>"#
+
+        let upright = owned([
+            ("Face", "Jane Doe \u{00b7} 400 \u{00d7} 600 at 1800, 450"),
+            (
+                "Barcode",
+                "On the ring \u{00b7} A-1234 \u{00b7} 200 across at 1200, 1800",
             ),
-            owned([
-                ("Face", "Jane Doe \u{00b7} 400 \u{00d7} 600 at 1800, 450"),
-                ("Barcode", "On the ring \u{00b7} 200 across at 1200, 1800"),
-                ("Region", "Rex"),
-                ("Region", "4, 1500"),
-            ])
-        );
+            ("Region", "Rex \u{00b7} rotated 12.5\u{00b0}"),
+            ("Focus", "focused on \u{00b7} 4, 1500"),
+            ("Region", "2000, 750"),
+        ]);
+        assert_eq!(rows(&exif, [4000, 3000], Turn::NONE), upright);
+
+        // The same picture made half the size since it was marked.
         assert_eq!(
-            rows(""),
-            owned([
-                ("Face", "Jane Doe \u{00b7} 10% \u{00d7} 20% at 45%, 15%"),
-                ("Barcode", "On the ring \u{00b7} 5% across at 30%, 60%"),
-                ("Region", "Rex"),
-                ("Region", "0%, 50%"),
-            ])
+            rows(&exif, [2000, 1500], Turn::NONE)[0].1,
+            "Jane Doe \u{00b7} 200 \u{00d7} 300 at 900, 225"
         );
+
+        // Stood on its side, whether by the tag or by a turn: the top of the
+        // picture as stored is down the right.
+        let on_its_side = owned([
+            ("Face", "Jane Doe \u{00b7} 600 \u{00d7} 400 at 1950, 1800"),
+            (
+                "Barcode",
+                "On the ring \u{00b7} A-1234 \u{00b7} 200 across at 1200, 1200",
+            ),
+            ("Region", "Rex \u{00b7} rotated 12.5\u{00b0}"),
+            ("Focus", "focused on \u{00b7} 1500, 4"),
+            ("Region", "2250, 2000"),
+        ]);
+        assert_eq!(
+            rows(&exif, [3000, 4000], Turn::NONE.clockwise()),
+            on_its_side
+        );
+        exif.orientation = Some(Orientation::Rotate90);
+        assert_eq!(rows(&exif, [3000, 4000], Turn::NONE), on_its_side);
+        // And turned back by hand.
+        assert_eq!(
+            rows(&exif, [4000, 3000], Turn::NONE.counterclockwise()),
+            upright
+        );
+    }
+
+    /// The regions stand after the summaries and the words, before the
+    /// listings.
+    #[test]
+    fn the_regions_come_after_the_words() {
+        let named = |names: &[&'static str]| Exif {
+            sections: names
+                .iter()
+                .map(|&name| Section {
+                    name,
+                    entries: vec![Entry::new("a", "b")],
+                })
+                .collect(),
+            ..Exif::default()
+        };
+        assert_eq!(named(&[]).regions_at(), 0);
+        assert_eq!(named(&["Image metadata"]).regions_at(), 0);
+        assert_eq!(
+            named(&["Camera", "About", "Sensor", "Image metadata"]).regions_at(),
+            2
+        );
+        assert_eq!(named(&["Camera", "Location"]).regions_at(), 2);
     }
 
     /// Where the block and the packet both describe the picture, the block's

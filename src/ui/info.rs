@@ -22,6 +22,7 @@ use egui::{
 use crate::clock;
 use crate::image::AlphaMode;
 use crate::image::decode::Rendering;
+use crate::image::exif;
 use crate::image::sequence::{Loops, Sequence};
 use crate::render::Color;
 
@@ -476,13 +477,22 @@ fn contents(current: &Current) -> Contents {
         ("File", fields(file_facts(current))),
         ("Image", fields(image_facts(current))),
     ];
-    for section in &current.exif.sections {
+    let exif = &current.exif;
+    let first = sections.len();
+    for section in &exif.sections {
         let entries = section
             .entries
             .iter()
             .map(|entry| (entry.name.as_str(), entry.value.clone()));
         sections.push((section.name, fields(entries)));
     }
+    // The regions are written out here rather than with the rest, since
+    // where each is depends on the turn in force.
+    let regions = exif.regions(current.pixels(), current.turn);
+    let entries = regions
+        .iter()
+        .map(|entry| (entry.name.as_str(), entry.value.clone()));
+    sections.insert(first + exif.regions_at(), (exif::REGIONS, fields(entries)));
     sections.retain(|(_, facts)| !facts.is_empty());
     Contents { sections }
 }
@@ -806,7 +816,7 @@ mod tests {
                         .collect(),
                 },
             ],
-            georeference: None,
+            ..Exif::default()
         }
     }
 
@@ -861,6 +871,47 @@ mod tests {
         assert!(index("Resolution") < index("Camera"));
         assert!(index("Camera") < index("Capture metadata"));
         assert!(index("Capture metadata") < index("Field 0"));
+    }
+
+    /// A file whose XMP marks regions out on the picture has them under a
+    /// heading of their own after the summaries, each where it is in the
+    /// picture as it is turned now.
+    #[test]
+    fn the_regions_are_where_the_turn_puts_them() {
+        use crate::image::xmp::{Area, Region, Regions};
+        let mut current = current();
+        current.exif.regions = Regions {
+            applied_to: None,
+            list: vec![Region {
+                name: Some("Jane Doe".into()),
+                kind: Some("Face".into()),
+                area: Some(Area {
+                    x: 0.25,
+                    y: 0.2,
+                    w: Some(0.5),
+                    h: Some(0.4),
+                    d: None,
+                    normalized: true,
+                }),
+                ..Region::default()
+            }],
+        };
+        let written_now = written(&current);
+        let index = |text: &str| written_now.iter().position(|row| row == text);
+        assert!(index("Camera") < index("Regions"));
+        assert!(index("Regions") < index("Capture metadata"));
+        assert_eq!(
+            written_now[index("Face").expect("the region is written") + 1],
+            "Jane Doe \u{00b7} 2 \u{00d7} 2 at 0, 0"
+        );
+        current.turn = current.turn.clockwise();
+        assert!(
+            written(&current)
+                .iter()
+                .any(|row| row == "Jane Doe \u{00b7} 2 \u{00d7} 2 at 3, 0"),
+            "{:?}",
+            written(&current)
+        );
     }
 
     /// A file that carries no metadata still has a file and a picture to

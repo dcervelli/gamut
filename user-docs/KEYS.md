@@ -760,7 +760,8 @@ cataloging program wrote it since as XMP; where the two say the same thing
 differently, the EXIF field is the one shown. The regions a cataloging program
 marked out on the picture — faces with the names they were given, pets,
 barcodes, a point of focus — follow under *Regions*, one row each, with the
-corner and size of each in pixels of the picture they were marked on. Everything left over is listed
+corner and size of each in pixels of the picture as it is shown, the way the
+pointer's position reads: turning the picture moves them with it. Everything left over is listed
 after all of them, field by field, as the file gives it.
 
 Clicking copies. A click on a field copies what it says; a click on a heading

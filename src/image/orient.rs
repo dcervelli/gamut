@@ -101,7 +101,7 @@ fn turn_map(map: &GainMap, orientation: Orientation) -> Arc<GainMap> {
 }
 
 /// Whether the turn puts the picture on its side.
-fn quarter_turn(orientation: Orientation) -> bool {
+pub fn quarter_turn(orientation: Orientation) -> bool {
     matches!(
         orientation,
         Orientation::Rotate90
@@ -163,6 +163,23 @@ pub fn stored(orientation: Orientation, x: usize, y: usize, w: usize, h: usize) 
         Orientation::Rotate270FlipH => (w - 1 - y, h - 1 - x),
         // The first row down the left, the first column along the bottom.
         Orientation::Rotate270 => (w - 1 - y, x),
+    }
+}
+
+/// Where a point of the stored picture lands in the upright one, both
+/// written as shares of their sides: the inverse of [`stored`], for a point
+/// anywhere in the picture rather than a pixel of it. What turns a region
+/// the file marked out on the picture as stored.
+pub fn upright(orientation: Orientation, [s, t]: [f64; 2]) -> [f64; 2] {
+    match orientation {
+        Orientation::NoTransforms => [s, t],
+        Orientation::FlipHorizontal => [1.0 - s, t],
+        Orientation::Rotate180 => [1.0 - s, 1.0 - t],
+        Orientation::FlipVertical => [s, 1.0 - t],
+        Orientation::Rotate90FlipH => [t, s],
+        Orientation::Rotate90 => [1.0 - t, s],
+        Orientation::Rotate270FlipH => [1.0 - t, 1.0 - s],
+        Orientation::Rotate270 => [t, 1.0 - s],
     }
 }
 
@@ -353,6 +370,31 @@ mod tests {
                 let after = turned.sample(height - 1 - y, x, Some(&table)).unwrap();
                 assert_eq!(before.stored(), after.stored(), "({x}, {y})");
                 assert_eq!(before.linear(), after.linear(), "({x}, {y})");
+            }
+        }
+    }
+
+    /// A pixel's center, carried back to the upright picture as a share of
+    /// its sides, is the center of the pixel [`stored`] fetched it from.
+    #[test]
+    fn a_point_goes_back_where_the_pixel_came_from() {
+        let (w, h) = (5usize, 3usize);
+        for orientation in ALL {
+            let (uw, uh) = size(w as u32, h as u32, orientation);
+            for y in 0..uh as usize {
+                for x in 0..uw as usize {
+                    let (sx, sy) = stored(orientation, x, y, w, h);
+                    let share = [(sx as f64 + 0.5) / w as f64, (sy as f64 + 0.5) / h as f64];
+                    let [u, v] = upright(orientation, share);
+                    let expected = [
+                        (x as f64 + 0.5) / f64::from(uw),
+                        (y as f64 + 0.5) / f64::from(uh),
+                    ];
+                    assert!(
+                        (u - expected[0]).abs() < 1e-9 && (v - expected[1]).abs() < 1e-9,
+                        "{orientation:?} at {x}, {y}"
+                    );
+                }
             }
         }
     }

@@ -11,8 +11,9 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 - The information panel has a *Regions* section for a file whose XMP marks
   regions out on the picture, as cataloging programs do for the faces they
   find: a row for each, named by its kind, with who is in it, what was
-  written about it, and where it is, in pixels where the file says what size
-  of picture it was marked on and in percentages where it does not.
+  written about it, a barcode's value, whether a focus point was used, and
+  where it is — in pixels of the picture as shown, following the EXIF
+  orientation and any turn, as the pointer's position reads.
 
 ### Changed
 
