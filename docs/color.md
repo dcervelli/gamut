@@ -25,6 +25,14 @@ HDR content to survive until tone mapping.
 | 16-bit encoded | half float via a 65536-entry LUT |
 | 32-bit float | `R32Float` / `Rgba32Float`, or half float if the GPU cannot filter them |
 
+The two falls to half float in that table are the only places a picture loses
+precision it had. The upload says which it was as a `Reduced`, and the
+application puts it in the info panel's *Precision* row for that picture and
+in a warning toast the first time each reason comes up in a run — every file
+of the kind loses the same on the same device, so it is said once. Nothing
+about the texture format is shown otherwise: which format holds a picture
+that lost nothing is the renderer's business.
+
 Alpha is coverage, never light, so it is never put through a transfer
 function. Three-channel data is expanded to four because no graphics API has a
 three-component sampled texture; one- and two-channel data is *not* expanded,

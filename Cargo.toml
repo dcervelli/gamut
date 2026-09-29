@@ -78,6 +78,10 @@ image-webp = "0.2.4"
 # a vendored copy of skim's current matcher, or anything else — is a new
 # implementation there and nothing else moves.
 fuzzy-matcher = "0.3.7"
+# How long ago the file was last written, in the words the info panel says it
+# in: "2 weeks ago". English only; its translations and its chrono bridge
+# are features, and both are left off.
+timeago = { version = "0.6.1", default-features = false }
 # JPEG XL, pure Rust: no shared library for the package to depend on and no C
 # toolchain for the build, which is what sets this apart from the HEIF path.
 # It renders into the color encoding the file itself declares and hands the

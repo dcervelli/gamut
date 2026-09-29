@@ -47,8 +47,8 @@ impl Channels {
         match self {
             Channels::Gray => "gray",
             Channels::GrayAlpha => "gray+alpha",
-            Channels::Rgb => "rgb",
-            Channels::Rgba => "rgba",
+            Channels::Rgb => "RGB",
+            Channels::Rgba => "RGBA",
         }
     }
 

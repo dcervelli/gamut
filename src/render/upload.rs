@@ -61,7 +61,29 @@ pub struct Plan<'a> {
     pub bytes_per_row: u32,
     /// Set when we had to give up precision to get a filterable format, so
     /// the caller can say so.
-    pub precision_note: Option<&'static str>,
+    pub reduced: Option<Reduced>,
+}
+
+/// Precision a picture lost on its way to the device, which had no format
+/// that would hold it and still be filtered. Both land in half floats, whose
+/// 11-bit mantissa is a real loss against what the file holds.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Reduced {
+    /// 16-bit data with no curve to take off, on a device with no 16-bit
+    /// integer formats.
+    NoNorm16,
+    /// 32-bit floats, on a device that cannot filter a 32-bit texture.
+    NoFloat32Filter,
+}
+
+impl Reduced {
+    /// Why, in words: the panel's row and the toast both say this.
+    pub fn reason(self) -> &'static str {
+        match self {
+            Reduced::NoNorm16 => "this GPU has no 16-bit integer textures",
+            Reduced::NoFloat32Filter => "this GPU can't filter 32-bit float textures",
+        }
+    }
 }
 
 /// What the device can do, gathered once at start-up.
@@ -114,7 +136,7 @@ pub fn plan(image: &DecodedImage, capabilities: Capabilities) -> Plan<'_> {
             format: wgpu::TextureFormat::Rgba8UnormSrgb,
             pixels: expand_u8(data, channels, components, u8::MAX),
             bytes_per_row: (width * components) as u32,
-            precision_note: None,
+            reduced: None,
         },
 
         Samples::U8 { data, .. } if transfer.is_linear() => Plan {
@@ -125,7 +147,7 @@ pub fn plan(image: &DecodedImage, capabilities: Capabilities) -> Plan<'_> {
             },
             pixels: expand_u8(data, channels, components, u8::MAX),
             bytes_per_row: (width * components) as u32,
-            precision_note: None,
+            reduced: None,
         },
 
         // Gray with a curve on it. There is no `R8UnormSrgb`, so the choice is
@@ -140,7 +162,7 @@ pub fn plan(image: &DecodedImage, capabilities: Capabilities) -> Plan<'_> {
                 format: float16_format(components),
                 pixels: Pixels::F16(values),
                 bytes_per_row: (width * components * 2) as u32,
-                precision_note: None,
+                reduced: None,
             }
         }
 
@@ -152,7 +174,7 @@ pub fn plan(image: &DecodedImage, capabilities: Capabilities) -> Plan<'_> {
             },
             pixels: expand_u16(data, channels, components, u16::MAX),
             bytes_per_row: (width * components * 2) as u32,
-            precision_note: None,
+            reduced: None,
         },
 
         // Either the curve has to come off, or the device lacks 16-bit norm
@@ -168,9 +190,8 @@ pub fn plan(image: &DecodedImage, capabilities: Capabilities) -> Plan<'_> {
                 format: float16_format(components),
                 pixels: Pixels::F16(values),
                 bytes_per_row: (width * components * 2) as u32,
-                precision_note: (transfer.is_linear() && !capabilities.norm16).then_some(
-                    "16-bit data stored as half float: this GPU has no 16-bit norm formats",
-                ),
+                reduced: (transfer.is_linear() && !capabilities.norm16)
+                    .then_some(Reduced::NoNorm16),
             }
         }
 
@@ -182,7 +203,7 @@ pub fn plan(image: &DecodedImage, capabilities: Capabilities) -> Plan<'_> {
             },
             pixels: map_f32(data, channels, components, transfer),
             bytes_per_row: (width * components * 4) as u32,
-            precision_note: None,
+            reduced: None,
         },
 
         // Without `FLOAT32_FILTERABLE` a 32-bit float texture can only be
@@ -198,9 +219,7 @@ pub fn plan(image: &DecodedImage, capabilities: Capabilities) -> Plan<'_> {
                 format: float16_format(components),
                 pixels: Pixels::F16(values),
                 bytes_per_row: (width * components * 2) as u32,
-                precision_note: Some(
-                    "float data stored as half float: this GPU cannot filter 32-bit textures",
-                ),
+                reduced: Some(Reduced::NoFloat32Filter),
             }
         }
     }
@@ -444,7 +463,7 @@ mod tests {
         // Without the feature it has to become float, and says so.
         let fallback = plan(&measurement, BARE);
         assert_eq!(fallback.format, wgpu::TextureFormat::R16Float);
-        assert!(fallback.precision_note.is_some());
+        assert_eq!(fallback.reduced, Some(Reduced::NoNorm16));
     }
 
     #[test]
@@ -460,7 +479,7 @@ mod tests {
 
         let fallback = plan(&scene, BARE);
         assert_eq!(fallback.format, wgpu::TextureFormat::Rgba16Float);
-        assert!(fallback.precision_note.is_some());
+        assert_eq!(fallback.reduced, Some(Reduced::NoFloat32Filter));
     }
 
     /// Alpha is coverage, not light: running it through a transfer function

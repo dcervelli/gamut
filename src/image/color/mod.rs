@@ -306,33 +306,87 @@ impl ColorSpace {
         primaries: Primaries::Bt709,
     };
 
-    /// The space in one token — `BT.709/sRGB`, `BT.2020/PQ` — for the top
-    /// bar, which sets it beside the other facts about the file. Unspaced
-    /// around the solidus so that it reads as one thing rather than as two
-    /// segments the bar has parted.
+    /// The space as people who work in color name it — `sRGB`, `Display P3`,
+    /// `Rec. 2100 PQ`, `Adobe RGB (1998)` — for the top bar and the info
+    /// panel. A pairing of primaries and curve with no name of its own is
+    /// said as the two: `BT.2020, gamma 2.40`.
     pub fn label(&self) -> String {
-        let transfer = match self.transfer {
-            Transfer::Linear => "linear".to_string(),
-            Transfer::Srgb => "sRGB".to_string(),
-            Transfer::Pq => "PQ".to_string(),
-            Transfer::Hlg => "HLG".to_string(),
-            Transfer::Bt709 => "BT.709".to_string(),
-            Transfer::Gamma(g) => format!("gamma {g:.2}"),
+        use Primaries as P;
+        use Transfer as T;
+        // The one-entry curves of Adobe's and ProPhoto's own profiles arrive
+        // at the 8.8 precision the profile holds them in.
+        let gamma = |g: f32, of: f32| (g - of).abs() < 0.01;
+        let named = match (self.primaries, self.transfer) {
+            (P::Bt709, T::Srgb) => Some("sRGB"),
+            (P::Bt709, T::Linear) => Some("Linear sRGB"),
+            (P::Bt709, T::Bt709) => Some("Rec. 709"),
+            (P::DisplayP3, T::Srgb) => Some("Display P3"),
+            (P::DisplayP3, T::Linear) => Some("Linear Display P3"),
+            (P::Bt2020, T::Pq) => Some("Rec. 2100 PQ"),
+            (P::Bt2020, T::Hlg) => Some("Rec. 2100 HLG"),
+            (P::Bt2020, T::Bt709) => Some("Rec. 2020"),
+            (P::Bt2020, T::Linear) => Some("Linear Rec. 2020"),
+            (P::AdobeRgb, T::Gamma(g)) if gamma(g, 2.2) => Some("Adobe RGB (1998)"),
+            (P::ProPhoto, T::Gamma(g)) if gamma(g, 1.8) => Some("ProPhoto RGB"),
+            _ => None,
         };
+        if let Some(named) = named {
+            return named.to_string();
+        }
         let primaries = match self.primaries {
-            Primaries::Bt709 => "BT.709",
-            Primaries::DisplayP3 => "Display P3",
-            Primaries::Bt2020 => "BT.2020",
-            Primaries::AdobeRgb => "Adobe RGB",
-            Primaries::ProPhoto => "ProPhoto RGB",
+            P::Bt709 => "BT.709",
+            P::DisplayP3 => "Display P3",
+            P::Bt2020 => "BT.2020",
+            P::AdobeRgb => "Adobe RGB",
+            P::ProPhoto => "ProPhoto RGB",
         };
-        format!("{primaries}/{transfer}")
+        let transfer = match self.transfer {
+            T::Linear => "linear".to_string(),
+            T::Srgb => "sRGB curve".to_string(),
+            T::Pq => "PQ".to_string(),
+            T::Hlg => "HLG".to_string(),
+            T::Bt709 => "BT.709 curve".to_string(),
+            T::Gamma(g) => format!("gamma {g:.2}"),
+        };
+        format!("{primaries}, {transfer}")
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A space with a name is called by it, and one without is said as its
+    /// primaries and its curve.
+    #[test]
+    fn a_space_is_called_by_its_common_name() {
+        let space = |primaries, transfer| ColorSpace {
+            transfer,
+            primaries,
+        };
+        assert_eq!(ColorSpace::SRGB.label(), "sRGB");
+        assert_eq!(ColorSpace::LINEAR_BT709.label(), "Linear sRGB");
+        assert_eq!(
+            space(Primaries::Bt2020, Transfer::Pq).label(),
+            "Rec. 2100 PQ"
+        );
+        assert_eq!(
+            space(Primaries::AdobeRgb, Transfer::Gamma(2.199_218_8)).label(),
+            "Adobe RGB (1998)"
+        );
+        assert_eq!(
+            space(Primaries::ProPhoto, Transfer::Gamma(1.800_781_2)).label(),
+            "ProPhoto RGB"
+        );
+        assert_eq!(
+            space(Primaries::Bt2020, Transfer::Gamma(2.4)).label(),
+            "BT.2020, gamma 2.40"
+        );
+        assert_eq!(
+            space(Primaries::AdobeRgb, Transfer::Srgb).label(),
+            "Adobe RGB, sRGB curve"
+        );
+    }
 
     /// Each set of primaries is found from its own coordinates, written
     /// the way a PNG writes them, to five places; and the coordinates of

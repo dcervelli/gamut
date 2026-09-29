@@ -222,6 +222,17 @@ pub(super) const FILE: &[Mark] = &[
     Mark::Line([16.0, 8.0], [20.0, 8.0]),
 ];
 
+/// Lucide's `image`: a frame holding a sun and a hill — the mark at the
+/// head of the info panel's section about the picture. The hill's rounded
+/// peak is an arc about the center Lucide's path implies.
+pub(super) const IMAGE: &[Mark] = &[
+    Mark::rect([3.0, 3.0], [18.0, 18.0], 2.0),
+    Mark::circle([9.0, 9.0], 2.0),
+    Mark::Line([21.0, 15.0], [17.914, 11.914]),
+    Mark::arc([16.5, 13.328], 2.0, -45.0, -90.0),
+    Mark::Line([15.086, 11.914], [6.0, 21.0]),
+];
+
 /// Lucide's `file-image`: a sheet with its corner folded and a picture on
 /// it — the mark on the button that opens image files. The sheet is
 /// written out as `clipboard` below is, sides and quarter turns, since
@@ -1048,13 +1059,14 @@ mod tests {
 
     /// Every icon in the table, so that a new one is held to the same
     /// promises as the rest.
-    const ICONS: [&[Mark]; 33] = [
+    const ICONS: [&[Mark]; 34] = [
         CHART_AREA,
         INFO,
         CIRCLE_QUESTION_MARK,
         SQUARE_SQUARE,
         SQUARE_MENU,
         FILE,
+        IMAGE,
         FILE_IMAGE,
         FOLDER,
         CLIPBOARD,

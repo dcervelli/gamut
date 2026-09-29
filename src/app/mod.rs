@@ -21,7 +21,7 @@ mod region;
 mod visited;
 mod window;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -44,7 +44,7 @@ use crate::motion::Motion;
 use crate::openers::{self, Opener};
 use crate::player;
 use crate::portal::{self, Pick, Picked};
-use crate::render::{GpuImage, HdrPreference, Placement, Renderer, Scene, Upscale};
+use crate::render::{GpuImage, HdrPreference, Placement, Reduced, Renderer, Scene, Upscale};
 use crate::settings::{Config, State, StateFile};
 use crate::theme::{self, Theme};
 use crate::thumbnailer::{Delivered, Facts, News, Thumb, Thumbnailer};
@@ -377,6 +377,10 @@ pub struct App {
     /// The message about what was just done, and when it takes itself off.
     /// The one thing on screen that time alone changes.
     toasts: Toasts,
+    /// The reasons a picture has lost precision on this device that a toast
+    /// has already given: every file of the kind loses the same, and saying
+    /// so once is telling the reader about the device, not the file.
+    reduced_said: HashSet<Reduced>,
     /// The copies of the picture being prepared on threads of their own,
     /// and how they report back.
     copying: Copying,
@@ -563,6 +567,7 @@ impl App {
             pointer: Pointer::default(),
             marking: Marking::default(),
             toasts: Toasts::default(),
+            reduced_said: HashSet::new(),
             copying: Copying::default(),
             panels: Panels {
                 show_ui: config.show_ui,
@@ -1419,6 +1424,20 @@ impl App {
             .show(Instant::now(), message.into(), level, toast::LINGER);
     }
 
+    /// Says that the picture just put on the device lost precision on the
+    /// way: on the terminal each time, and in a toast the first time each
+    /// reason comes up.
+    fn say_reduced(&mut self, reduced: Option<Reduced>) {
+        let Some(reduced) = reduced else {
+            return;
+        };
+        let said = format!("Shown at half-float precision: {}", reduced.reason());
+        eprintln!("gamut: {said}");
+        if self.reduced_said.insert(reduced) {
+            self.toast(said, Level::Warning);
+        }
+    }
+
     /// Raises a warning before the window opens: what the command line asked
     /// for and could not have, said where the reader will be looking.
     pub fn say(&mut self, message: &str) {
@@ -1909,13 +1928,12 @@ impl App {
         // being made, and waiting here for somewhere to go. There is nothing
         // on screen yet for the wait to interrupt; everything opened
         // afterwards is uploaded on the loader's thread.
+        let mut reduced = None;
         if let (Some(current), Some(path)) = (&mut self.current, self.files.shown_path()) {
             match upload_here(&renderer, path, &current.image) {
                 Ok(uploaded) => {
-                    if let Some(note) = renderer.install_image(uploaded) {
-                        eprintln!("gamut: {note}");
-                    }
-                    current.stored = renderer.image_format_label();
+                    reduced = renderer.install_image(uploaded);
+                    current.reduced = reduced;
                 }
                 Err(error) => {
                     eprintln!("gamut: {}", crate::escape_controls(&format!("{error:#}")));
@@ -1924,6 +1942,7 @@ impl App {
                 }
             }
         }
+        self.say_reduced(reduced);
 
         // Asked for and not had is worth a line; asked for and had is worth
         // one too, since the switch's later lines say the same thing. A
@@ -2145,7 +2164,7 @@ impl App {
             _ => Display::for_image_with(&image, &stats, self.startup),
         };
 
-        let mut stored = None;
+        let mut reduced = None;
         if let Some(renderer) = self.shown.as_mut().map(|shown| &mut shown.renderer) {
             // Already across whenever the window was open when the read
             // started, which is every file but the one named on the command
@@ -2160,11 +2179,9 @@ impl App {
                     }
                 },
             };
-            if let Some(note) = renderer.install_image(uploaded) {
-                eprintln!("gamut: {note}");
-            }
-            stored = renderer.image_format_label();
+            reduced = renderer.install_image(uploaded);
         }
+        self.say_reduced(reduced);
 
         // A window that showed nothing takes the size it would have opened
         // at on this picture, as if it had — unless it was given it already,
@@ -2255,7 +2272,7 @@ impl App {
             label: file_label(&file.path),
             file: facts,
             exif,
-            stored,
+            reduced,
             sequence,
             page,
             lift: None,
@@ -2358,10 +2375,10 @@ impl App {
         let Some((head, frame)) = animation.due_frame() else {
             return;
         };
+        let mut reduced = None;
         if let Some(renderer) = self.shown.as_mut().map(|shown| &mut shown.renderer) {
             match renderer.refill_image(&frame.image) {
-                Ok(Some(note)) => eprintln!("gamut: {note}"),
-                Ok(None) => {}
+                Ok(lost) => reduced = lost,
                 Err(error) => {
                     eprintln!("gamut: {}", crate::escape_controls(&format!("{error:#}")));
                     return;
@@ -2371,8 +2388,10 @@ impl App {
         if let Some(current) = &mut self.current {
             current.image = Arc::clone(&frame.image);
             current.stats = frame.stats.clone();
+            current.reduced = reduced.or(current.reduced);
         }
         animation.shown(head);
+        self.say_reduced(reduced);
     }
 
     /// Moves the animation's clock on to `now`. Returns whether the frame
@@ -2814,10 +2833,7 @@ fn file_facts(path: &std::path::Path) -> FileFacts {
     FileFacts {
         path: path.display().to_string(),
         bytes: metadata.as_ref().map(|metadata| metadata.len()),
-        modified: metadata
-            .as_ref()
-            .and_then(|metadata| metadata.modified().ok()),
-        created: metadata.and_then(|metadata| metadata.created().ok()),
+        modified: metadata.and_then(|metadata| metadata.modified().ok()),
         reader: decode::reader(path),
     }
 }

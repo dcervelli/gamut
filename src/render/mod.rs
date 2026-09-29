@@ -46,6 +46,7 @@ use gpu::attachment;
 use image_layer::{Draw, ImageLayer};
 pub use image_layer::{GpuImage, Upload};
 use upload::Capabilities;
+pub use upload::Reduced;
 
 /// The image layer's shader, and the coarse chain's: each behind the texel
 /// reading the two share, `shaders/texel.wgsl`, which is prepended rather
@@ -336,12 +337,13 @@ impl Renderer {
             .uploader(&self.device, &self.queue, self.capabilities)
     }
 
-    /// Puts an image uploaded elsewhere on screen, returning its precision
-    /// note. Cheap: the pixels are already across, and this is the swap.
-    pub fn install_image(&mut self, image: GpuImage) -> Option<&'static str> {
-        let note = image.precision_note;
+    /// Puts an image uploaded elsewhere on screen, returning the precision
+    /// it lost on the way. Cheap: the pixels are already across, and this is
+    /// the swap.
+    pub fn install_image(&mut self, image: GpuImage) -> Option<Reduced> {
+        let reduced = image.reduced;
         self.image_layer.install(image);
-        note
+        reduced
     }
 
     /// Takes the image off the screen, for a window with nothing left to
@@ -353,23 +355,14 @@ impl Renderer {
     /// Shows `image` in place of the one on screen: written into the same
     /// texture where it is the same shape, which the next frame of an
     /// animation always is, and uploaded afresh where it is not. Returns the
-    /// precision note of a fresh upload; a refill keeps the one it had.
-    pub fn refill_image(&mut self, image: &DecodedImage) -> Result<Option<&'static str>> {
+    /// precision a fresh upload lost; a refill keeps what it had.
+    pub fn refill_image(&mut self, image: &DecodedImage) -> Result<Option<Reduced>> {
         let upload = self.uploader();
         if self.image_layer.refill(&upload, image)? {
             return Ok(None);
         }
         let uploaded = upload.run(image)?;
         Ok(self.install_image(uploaded))
-    }
-
-    /// What the current image was stored as on the device, for the interface
-    /// to report. A label rather than the format itself, so that nothing above
-    /// the renderer has to name a GPU type.
-    pub fn image_format_label(&self) -> Option<String> {
-        self.image_layer
-            .current()
-            .map(|image| format!("{:?}", image.format))
     }
 
     /// Draws `scene`, and takes in `textures`: what egui changed about its

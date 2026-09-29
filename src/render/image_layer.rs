@@ -14,7 +14,7 @@ use super::gpu::{self, Fullscreen};
 use super::placement::{Glass, Placement, Upscale};
 use super::reduce::{self, Level, Reducer};
 use super::shader_codes;
-use super::upload::{self, Capabilities};
+use super::upload::{self, Capabilities, Reduced};
 use crate::image::gain_map::GainMap;
 use crate::image::orient::Turn;
 use crate::image::{
@@ -239,7 +239,7 @@ pub struct GpuImage {
     /// The gain map, where the picture has one.
     lift: Option<Lift>,
     pub format: wgpu::TextureFormat,
-    pub precision_note: Option<&'static str>,
+    pub reduced: Option<Reduced>,
 }
 
 /// One draw's worth of constants, and the binding that points at them.
@@ -696,7 +696,7 @@ impl Lift {
             },
             pixels: upload::expand_u8(&map.data, channels, components, u8::MAX),
             bytes_per_row: map.width * components as u32,
-            precision_note: None,
+            reduced: None,
         };
         let map_texture = upload.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("gain map"),
@@ -967,7 +967,7 @@ impl Upload {
             primaries: to_columns(image.color.primaries.to_bt709()),
             lift,
             format: plan.format,
-            precision_note: plan.precision_note,
+            reduced: plan.reduced,
         })
     }
 

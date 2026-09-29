@@ -172,8 +172,9 @@ pub struct Current {
     pub file: FileFacts,
     /// And what its metadata says about the photograph, if it carries any.
     pub exif: Exif,
-    /// What the GPU actually stored it as, which is not always what we asked.
-    pub stored: Option<String>,
+    /// The precision it lost on its way to the device, which had no format
+    /// that would hold it; `None` for the usual picture, which lost nothing.
+    pub reduced: Option<crate::render::Reduced>,
     /// What else the file holds: the frames of an animation, or its pages.
     pub sequence: Sequence,
     /// Which page `image` is, where the file has pages; zero otherwise.

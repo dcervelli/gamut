@@ -920,6 +920,7 @@ dependencies = [
  "roxmltree",
  "skrifa",
  "tiff",
+ "timeago",
  "ultrahdr-rs",
  "wayland-client",
  "wayland-protocols",
@@ -2892,6 +2893,12 @@ dependencies = [
  "weezl",
  "zune-jpeg",
 ]
+
+[[package]]
+name = "timeago"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46c29b13d230e9cd58513d38701a661fc06e1215398937532a2d938ecca6f219"
 
 [[package]]
 name = "tiny-skia"

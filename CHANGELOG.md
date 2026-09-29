@@ -18,14 +18,31 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   where it is — in pixels of the picture as shown, following the EXIF
   orientation and any turn, as the pointer's position reads.
 
+- The information panel describes a picture's gain map under *Image*: whose
+  description of it the file gives (ISO 21496-1 or Apple's), the map's size
+  and whether it is one channel or three, how many stops above SDR white it
+  lifts the picture, and how much of that lift the display is showing.
+
 ### Changed
 
-- The information panel's *File* section is written as a few lines instead
-  of a column of fields: the folder, small, over the file's name and size,
-  then when it was last modified and — where the file system keeps it — when
-  it was created, under a heading with a file mark. Each line, and the name
-  and the size separately, still copies on a click, and the heading copies
-  the section. The *Read by* line has moved to the *Image* section.
+- The information panel opens on the file itself rather than on a column of
+  fields: its name as the heading, with a file mark, then the folder it is
+  in, then its size and how long ago it was modified — "366 bytes · 1 week
+  ago" — each exact in its tooltip. A long name is cut in its middle,
+  keeping its extension. The *Image* section is headed by the picture's size
+  and its format — "4000 × 3000 JPEG" — with the rest of what it said as a
+  table of two columns under it, which writes the layout in capitals:
+  *8-bit RGB*. A click on any piece copies it, the size and
+  the date exactly.
+- Color spaces are called by their common names — *sRGB*, *Display P3*,
+  *Rec. 2100 PQ*, *Adobe RGB (1998)* — in the top bar and the information
+  panel, where they were written as primaries and curve, `BT.709/sRGB`. A
+  pairing with no name is written as the two: *BT.2020, gamma 2.40*.
+- The information panel's *Stored as* row, which named the GPU's texture
+  format, is gone. In its place, a picture the GPU cannot hold at its full
+  precision — 16-bit linear data on a GPU with no 16-bit integer textures,
+  or float data on one that cannot filter 32-bit floats — has a *Precision*
+  row saying so, and the first such picture in a run raises a warning.
 - The top bar gives the file's name its room before the size, pixels and
   color space at its far end, which go one by one as the window narrows
   and are gone altogether before the name is cut short. Before, the facts
