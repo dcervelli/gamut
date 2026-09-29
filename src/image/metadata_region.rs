@@ -9,7 +9,7 @@
 //! [`MetadataRegion`] is what they have in common: what to call the region,
 //! the words it carries, and a [`Shape`] in the [`Units`] the source wrote
 //! it in. Every source measures in the picture as stored, before the EXIF
-//! orientation turns it; [`MetadataRegion::place`] carries a shape through
+//! orientation turns it; [`MetadataRegion::placed`] carries a shape through
 //! that turn and the one in force to the picture as shown, which is where
 //! everything the user reads is.
 
@@ -201,13 +201,12 @@ impl MetadataRegion {
     }
 
     /// Where the region is in the picture as shown, `shown` pixels across
-    /// and down: a rectangle's size and top left corner, as a marked region
-    /// and the export dialog write them; a circle's diameter and center; a
-    /// point. The shape is carried through `orientation` — the EXIF tag's
-    /// turn, which it was measured before — and then `turn`, and taken as
-    /// shares of the picture's sides, so that a picture made smaller since
-    /// the region was measured still has it in the right place.
-    pub fn place(&self, orientation: Orientation, turn: Turn, shown: [u32; 2]) -> Option<String> {
+    /// and down, in its pixels. The shape is carried through `orientation` —
+    /// the EXIF tag's turn, which it was measured before — and then `turn`,
+    /// and taken as shares of the picture's sides, so that a picture made
+    /// smaller since the region was measured still has it in the right
+    /// place.
+    pub fn placed(&self, orientation: Orientation, turn: Turn, shown: [u32; 2]) -> Option<Placed> {
         let shape = self.shape?;
         let shown = shown.map(f64::from);
         // The picture as stored: the one shown with the turn taken back off,
@@ -235,9 +234,6 @@ impl MetadataRegion {
             [x * shown[0], y * shown[1]]
         };
         let swapped = orient::quarter_turn(orientation) != turn.is_quarter();
-        // Adding nothing turns an edge a hair past the picture's from -0
-        // into 0.
-        let pixels = |value: f64| value.round() + 0.0;
         Some(match shape {
             Shape::Rectangle { center, size } => {
                 let mut size = [size[0] / basis[0], size[1] / basis[1]];
@@ -246,29 +242,75 @@ impl MetadataRegion {
                 }
                 let size = [size[0] * shown[0], size[1] * shown[1]];
                 let [x, y] = at(center);
-                format!(
-                    "{} \u{00d7} {} at {}, {}",
-                    pixels(size[0]),
-                    pixels(size[1]),
-                    pixels(x - size[0] / 2.0),
-                    pixels(y - size[1] / 2.0),
-                )
+                Placed::Rectangle {
+                    corner: [x - size[0] / 2.0, y - size[1] / 2.0],
+                    size,
+                }
             }
-            Shape::Circle { center, diameter } => {
-                let [x, y] = at(center);
-                format!(
-                    "{} across at {}, {}",
-                    pixels(diameter / basis[0] * stored[0]),
-                    pixels(x),
-                    pixels(y),
-                )
-            }
-            Shape::Point { center } => {
-                let [x, y] = at(center);
-                format!("{}, {}", pixels(x), pixels(y))
-            }
+            Shape::Circle { center, diameter } => Placed::Circle {
+                center: at(center),
+                diameter: diameter / basis[0] * stored[0],
+            },
+            Shape::Point { center } => Placed::Point { center: at(center) },
         })
     }
+}
+
+/// Where a region is in the picture as shown, in its pixels and unrounded:
+/// what the panel writes out, and what is drawn on the picture while the
+/// pointer is on its row.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Placed {
+    Point { center: [f64; 2] },
+    Circle { center: [f64; 2], diameter: f64 },
+    Rectangle { corner: [f64; 2], size: [f64; 2] },
+}
+
+impl Placed {
+    /// The rectangle it stands in, as its top left corner and its size, in
+    /// whole pixels: a circle's is the square around it, and a point has no
+    /// size.
+    pub fn bounds(self) -> [f64; 4] {
+        let [x, y, width, height] = match self {
+            Placed::Point { center } => [center[0], center[1], 0.0, 0.0],
+            Placed::Circle { center, diameter } => [
+                center[0] - diameter / 2.0,
+                center[1] - diameter / 2.0,
+                diameter,
+                diameter,
+            ],
+            Placed::Rectangle { corner, size } => [corner[0], corner[1], size[0], size[1]],
+        };
+        [x, y, width, height].map(pixels)
+    }
+
+    /// It in words, as the row copies it: a rectangle's size and top left
+    /// corner, as a marked region and the export dialog write them; a
+    /// circle's diameter and center; a point.
+    pub fn words(self) -> String {
+        match self {
+            Placed::Rectangle { corner, size } => format!(
+                "{} \u{00d7} {} at {}, {}",
+                pixels(size[0]),
+                pixels(size[1]),
+                pixels(corner[0]),
+                pixels(corner[1]),
+            ),
+            Placed::Circle { center, diameter } => format!(
+                "{} across at {}, {}",
+                pixels(diameter),
+                pixels(center[0]),
+                pixels(center[1]),
+            ),
+            Placed::Point { center } => format!("{}, {}", pixels(center[0]), pixels(center[1])),
+        }
+    }
+}
+
+/// A coordinate or a length in whole pixels. Adding nothing turns an edge a
+/// hair past the picture's from -0 into 0.
+fn pixels(value: f64) -> f64 {
+    value.round() + 0.0
 }
 
 #[cfg(test)]
@@ -354,13 +396,43 @@ mod tests {
         );
     }
 
+    /// The rectangle a placed region stands in: a rectangle's own, the
+    /// square around a circle, and a point with no size — each in whole
+    /// pixels, as the table writes them.
+    #[test]
+    fn a_placed_region_stands_in_a_rectangle() {
+        assert_eq!(
+            Placed::Rectangle {
+                corner: [10.4, 19.6],
+                size: [30.5, 40.0]
+            }
+            .bounds(),
+            [10.0, 20.0, 31.0, 40.0]
+        );
+        assert_eq!(
+            Placed::Circle {
+                center: [50.0, 60.0],
+                diameter: 20.0
+            }
+            .bounds(),
+            [40.0, 50.0, 20.0, 20.0]
+        );
+        assert_eq!(
+            Placed::Point {
+                center: [-0.2, 7.0]
+            }
+            .bounds(),
+            [0.0, 7.0, 0.0, 0.0]
+        );
+    }
+
     /// A size of nothing to measure against places nothing, rather than
     /// dividing by it.
     #[test]
     fn a_region_measured_against_nothing_is_not_placed() {
         let region = MetadataRegion::subject_area(&[1, 2], Some([0.0, 3000.0])).unwrap();
         assert_eq!(
-            region.place(Orientation::NoTransforms, Turn::NONE, [40, 30]),
+            region.placed(Orientation::NoTransforms, Turn::NONE, [40, 30]),
             None
         );
     }

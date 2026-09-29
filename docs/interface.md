@@ -1027,7 +1027,7 @@ the tags are taken to be measured as MWG's are. The account digest and ID
 beside each name are not read. The subject comes first, being the camera's,
 and its tags leave the listing once they have become regions. `Exif` keeps the regions
 as numbers beside the orientation tag, and the panel writes them out as it
-draws, through `Exif::regions` and `MetadataRegion::place`, which carries
+draws, through `Exif::regions` and `MetadataRegion::placed`, which carries
 each shape through the tag's turn and then the turn in force
 (`orient::upright` is the tag's reading for a point, the inverse of the one
 the pixels are fetched through) and scales it to the picture's size — so a
@@ -1039,6 +1039,26 @@ specification and is written only by Lightroom, as zero, so it is shown only
 when it is not. A file whose orientation came from somewhere other than an
 EXIF block this reads — a JPEG XL's codestream — has its regions taken as
 upright.
+
+The section is a table rather than a column of fields: the subject — who
+or what is in the region, or its kind where nothing names it — and the
+region's top left corner and size, a circle's the square around it and a
+point's no size, set right as numbers in a column are. `Placed` is the
+shape in the picture as shown and unrounded, which the table writes out
+whole and `mark_regions` in `ui/info.rs` draws: while the pointer is on a
+row, its region is outlined on the picture with its subject on a pill
+over it, and while it is on the heading, every region is. The
+outline is dashed, as the heading's mark is, so it is not taken for the
+region marked out by hand, which is solid and has handles. It is painted
+on the layer the picture's own marks go on — the painter the panel's
+`show` takes before it opens its area — and so goes under every panel,
+this one included; the hover is known only as the panel is laid out, and
+painting there rather than remembering it for the next frame keeps the
+outline on the frame the pointer arrived in. A row copies as its five
+cells in a line of CSV, and the heading as the whole table under a line of
+its column heads, rather than as the two columns every other section
+copies as: the section is a table on screen, and a region pasted anywhere
+is wanted as its numbers.
 
 The panel is also the one part of the interface that is read out rather than
 merely read. A click on a field copies it, a click on a heading copies the

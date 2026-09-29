@@ -234,6 +234,24 @@ pub(super) const MAP_PIN: &[Mark] = &[
     Mark::circle([12.0, 10.0], 3.0),
 ];
 
+/// Lucide's `square-dashed`: a square's four rounded corners and two dashes
+/// down each side — the mark at the head of the info panel's section about
+/// the regions the metadata marks out on the picture.
+pub(super) const SQUARE_DASHED: &[Mark] = &[
+    Mark::arc([5.0, 5.0], 2.0, -90.0, -90.0),
+    Mark::arc([19.0, 5.0], 2.0, -90.0, 90.0),
+    Mark::arc([19.0, 19.0], 2.0, 0.0, 90.0),
+    Mark::arc([5.0, 19.0], 2.0, 90.0, 90.0),
+    Mark::Line([9.0, 3.0], [10.0, 3.0]),
+    Mark::Line([14.0, 3.0], [15.0, 3.0]),
+    Mark::Line([9.0, 21.0], [10.0, 21.0]),
+    Mark::Line([14.0, 21.0], [15.0, 21.0]),
+    Mark::Line([3.0, 9.0], [3.0, 10.0]),
+    Mark::Line([3.0, 14.0], [3.0, 15.0]),
+    Mark::Line([21.0, 9.0], [21.0, 10.0]),
+    Mark::Line([21.0, 14.0], [21.0, 15.0]),
+];
+
 /// Lucide's `camera`: the body with its raised top and the lens — the mark
 /// at the head of the info panel's section about what took the picture.
 /// Written out as sides and quarter turns, since the top edge rises
@@ -1091,7 +1109,7 @@ mod tests {
 
     /// Every icon in the table, so that a new one is held to the same
     /// promises as the rest.
-    const ICONS: [&[Mark]; 36] = [
+    const ICONS: [&[Mark]; 37] = [
         CHART_AREA,
         INFO,
         CIRCLE_QUESTION_MARK,
@@ -1101,6 +1119,7 @@ mod tests {
         IMAGE,
         CAMERA,
         MAP_PIN,
+        SQUARE_DASHED,
         FILE_IMAGE,
         FOLDER,
         CLIPBOARD,

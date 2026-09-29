@@ -13,10 +13,15 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   regions its XMP marks, as cataloging programs do for the faces they find —
   in the Metadata Working Group's form, or as the people tags Windows Photo
   Gallery wrote, a face tagged both ways being shown once.
-  A row for each, named by its kind, with who is in it, what was
-  written about it, a barcode's value, whether a focus point was used, and
-  where it is — in pixels of the picture as shown, following the EXIF
-  orientation and any turn, as the pointer's position reads.
+  It is headed by a dashed square, over a table of each region's subject
+  — who is in it, or its kind where nothing says — and its top left corner
+  and size, in pixels of the picture as shown, following the EXIF
+  orientation and any turn, as the pointer's position reads. What else was
+  written about it — its kind, a description, a barcode's value, whether a
+  focus point was used — is in the subject's tooltip. A row copies as a
+  line of CSV, and the heading as the table under its column heads.
+  Resting the pointer on a row outlines its region on the picture, dashed,
+  with its subject over it; resting it on the heading outlines every one.
 
 - The information panel describes a picture's gain map under *Image*: whose
   description of it the file gives (ISO 21496-1 or Apple's), the map's size

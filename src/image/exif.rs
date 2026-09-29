@@ -28,7 +28,7 @@ use std::path::Path;
 use ::image::metadata::Orientation;
 use exif::{Context, In, Rational, Tag, Value};
 
-use super::metadata_region::MetadataRegion;
+use super::metadata_region::{MetadataRegion, Placed};
 use super::orient::Turn;
 use super::xmp::{self, Xmp};
 use super::{directory, enclosed, geo, tiff};
@@ -62,6 +62,23 @@ impl Entry {
             value: value.into(),
         }
     }
+}
+
+/// One region as the panel shows it, in the picture as shown: see
+/// [`Exif::regions`].
+#[derive(Clone, PartialEq, Debug)]
+pub struct ShownRegion {
+    /// The row as it is copied: named by the region's kind, and saying who
+    /// or what is in it, what is written about it, and where it is.
+    pub entry: Entry,
+    /// Who or what is in it, or what kind of region it is where nothing
+    /// says who.
+    pub subject: String,
+    /// Its kind, who or what is in it, and what is written about it.
+    pub about: String,
+    /// Where it is; `None` for a region that names something without
+    /// saying where.
+    pub placed: Option<Placed>,
 }
 
 /// One group of fields under the heading it is read by. Never empty: a
@@ -180,20 +197,37 @@ impl Exif {
     /// that turn and then through `turn`, and taken as shares of the
     /// picture's sides, so that a picture made smaller since it was marked
     /// is still marked in the right place.
-    pub fn regions(&self, shown: [u32; 2], turn: Turn) -> Vec<Entry> {
+    ///
+    /// A region that says nothing beyond its kind is no row.
+    pub fn regions(&self, shown: [u32; 2], turn: Turn) -> Vec<ShownRegion> {
         let orientation = self.orientation.unwrap_or(Orientation::NoTransforms);
-        let mut rows = Vec::new();
+        let mut shown_regions = Vec::new();
         for region in &self.regions {
+            let placed = region.placed(orientation, turn, shown);
             let parts: Vec<String> = region
                 .name
                 .iter()
                 .chain(&region.details)
                 .cloned()
-                .chain(region.place(orientation, turn, shown))
+                .chain(placed.map(Placed::words))
                 .collect();
+            let mut rows = Vec::new();
             push(&mut rows, &region.label, join(&parts));
+            let Some(entry) = rows.pop() else {
+                continue;
+            };
+            let about: Vec<String> = std::iter::once(region.label.clone())
+                .chain(region.name.clone())
+                .chain(region.details.iter().cloned())
+                .collect();
+            shown_regions.push(ShownRegion {
+                entry,
+                subject: shorten(region.name.as_deref().unwrap_or(&region.label)),
+                about: shorten(&about.join(SEPARATOR)),
+                placed,
+            });
         }
-        rows
+        shown_regions
     }
 
     /// Where the `Regions` section goes among [`Exif::sections`]: after the
@@ -1321,7 +1355,7 @@ mod tests {
     fn regions_of(exif: &Exif, shown: [u32; 2]) -> Vec<String> {
         exif.regions(shown, Turn::NONE)
             .into_iter()
-            .map(|entry| format!("{}: {}", entry.name, entry.value))
+            .map(|region| format!("{}: {}", region.entry.name, region.entry.value))
             .collect()
     }
 
@@ -1522,7 +1556,7 @@ mod tests {
         let rows = |exif: &Exif, shown: [u32; 2], turn: Turn| -> Vec<(String, String)> {
             exif.regions(shown, turn)
                 .into_iter()
-                .map(|entry| (entry.name, entry.value))
+                .map(|region| (region.entry.name, region.entry.value))
                 .collect()
         };
         let owned = |rows: [(&str, &str); 6]| {

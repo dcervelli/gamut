@@ -22,8 +22,9 @@ use egui::{
 use crate::clock;
 use crate::image::AlphaMode;
 use crate::image::decode::Rendering;
-use crate::image::exif;
+use crate::image::exif::{self, ShownRegion};
 use crate::image::gain_map::Lift;
+use crate::image::metadata_region::Placed;
 use crate::image::sequence::{Loops, Sequence};
 use crate::render::Color;
 
@@ -210,6 +211,10 @@ enum Face {
         mark: &'static [icon::Mark],
         head: &'static [&'static str],
     },
+    /// The regions the metadata marks out on the picture, as a table of who
+    /// or what each is and where, each drawn on the picture while the
+    /// pointer is on its row — see [`regions_section`].
+    Regions,
 }
 
 /// One section of the column: its name, how it is drawn, and its fields.
@@ -217,15 +222,19 @@ struct Section {
     name: &'static str,
     face: Face,
     facts: Vec<Fact>,
+    /// For [`Face::Regions`], each region a fact is the row of, in the same
+    /// order; empty for every other face.
+    regions: Vec<ShownRegion>,
 }
 
 impl Section {
-    /// A section drawn as a column of fields.
-    fn fields(name: &'static str, facts: Vec<Fact>) -> Section {
+    /// A section drawn as `face`, with no regions.
+    fn new(name: &'static str, face: Face, facts: Vec<Fact>) -> Section {
         Section {
             name,
-            face: Face::Fields,
+            face,
             facts,
+            regions: Vec::new(),
         }
     }
 }
@@ -392,6 +401,16 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
         return;
     }
     let area = egui::Rect::from_min_size(pos2(panel.x, panel.y), vec2(panel.width, panel.height));
+    // What the regions are drawn on while the pointer is on their rows: the
+    // layer the picture's own marks are painted on, under every panel, this
+    // one included. Nothing is drawn over a stand-in for another file.
+    let picture = ui
+        .painter()
+        .with_clip_rect(if pass.input.standin.is_none() {
+            content.into()
+        } else {
+            egui::Rect::NOTHING
+        });
     super::panel::area("info", panel, egui::Order::Middle).show(ui.ctx(), |ui| {
         egui::Frame::NONE
             .fill(theme.panel_background.into())
@@ -428,7 +447,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
                 rule(pass, ui, inside.x - SCROLLBAR_GUTTER);
                 ui.add_space((HEADER_GAP - RULE_WIDTH) / 2.0);
 
-                column(pass, ui, current);
+                column(pass, ui, current, &picture);
             });
     });
 }
@@ -440,7 +459,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
 /// read from the top: the scroll area is the file's own, so stepping to
 /// another file starts at the top of its column rather than however far
 /// down the last one had been read.
-fn column(pass: &mut Pass, ui: &mut egui::Ui, current: &Current) {
+fn column(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, picture: &egui::Painter) {
     let contents = contents(current);
     ui.spacing_mut().scroll.bar_inner_margin = SCROLLBAR_GUTTER - SCROLLBAR_WIDTH;
     egui::ScrollArea::vertical()
@@ -467,6 +486,9 @@ fn column(pass: &mut Pass, ui: &mut egui::Ui, current: &Current) {
                     Face::File => file_section(pass, ui, current, section, index, width),
                     Face::Headed { mark, head } => {
                         headed_section(pass, ui, place, section, index, width, mark, head)
+                    }
+                    Face::Regions => {
+                        regions_section(pass, ui, current, picture, place, section, index, width)
                     }
                 }
                 index += section.facts.len();
@@ -600,21 +622,7 @@ fn headed_section(
         })
         .collect();
     if pieces.is_empty() {
-        let grid = pass.grid;
-        block(pass, ui, Copyable::Section(place), width, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = MARK_GAP;
-                let (rect, _) = ui.allocate_exact_size(Vec2::splat(COPY_ICON), Sense::HOVER);
-                icon::paint(
-                    ui.painter(),
-                    mark,
-                    icon::square(grid, rect, COPY_ICON),
-                    theme.accent.into(),
-                    theme.panel_background.into(),
-                );
-                words(ui, Kind::Heading, section.name, theme);
-            });
-        });
+        marked_heading(pass, ui, place, section, width, mark);
     } else {
         line(pass, ui, width, Some(mark), theme.accent, None, pieces);
     }
@@ -624,6 +632,264 @@ fn headed_section(
     if rows.clone().next().is_some() {
         ui.add_space(HEAD_GAP);
         table(pass, ui, rows, width);
+    }
+}
+
+/// `section`'s name after `mark`, in the headings' ink, copying the section.
+/// Whether the pointer is on it.
+fn marked_heading(
+    pass: &mut Pass,
+    ui: &mut egui::Ui,
+    place: usize,
+    section: &Section,
+    width: f32,
+    mark: &[icon::Mark],
+) -> bool {
+    let theme = pass.theme;
+    let grid = pass.grid;
+    block(pass, ui, Copyable::Section(place), width, |ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = MARK_GAP;
+            let (rect, _) = ui.allocate_exact_size(Vec2::splat(COPY_ICON), Sense::HOVER);
+            icon::paint(
+                ui.painter(),
+                mark,
+                icon::square(grid, rect, COPY_ICON),
+                theme.accent.into(),
+                theme.panel_background.into(),
+            );
+            words(ui, Kind::Heading, section.name, theme);
+        });
+    })
+}
+
+/// The regions the metadata marks out, under their heading: a table of who
+/// or what each is and where, its top left corner and its size in the
+/// picture as shown — a circle's the square around it, a point's no size.
+/// Each row copies itself, and while the pointer is on one its region is
+/// drawn on the picture with its subject over it; while it is on the
+/// heading, every one of them is. A row copies as its five cells in CSV,
+/// and the heading as the table.
+///
+/// The subject takes what the four numbers leave, which are set right, as
+/// numbers in a column are, each column as wide as its widest.
+#[allow(clippy::too_many_arguments)]
+fn regions_section(
+    pass: &mut Pass,
+    ui: &mut egui::Ui,
+    current: &Current,
+    picture: &egui::Painter,
+    place: usize,
+    section: &Section,
+    first: usize,
+    width: f32,
+) {
+    let theme = pass.theme;
+    if marked_heading(pass, ui, place, section, width, icon::SQUARE_DASHED) {
+        mark_regions(pass, picture, current, &section.regions);
+    }
+    let cells: Vec<[String; 4]> = section.regions.iter().map(region_cells).collect();
+    let font = egui::FontId::proportional(TEXT_SIZE);
+    let measured = |text: &str| {
+        ui.ctx().fonts_mut(|fonts| {
+            fonts
+                .layout_no_wrap(text.to_string(), font.clone(), egui::Color32::PLACEHOLDER)
+                .size()
+                .x
+        })
+    };
+    let columns: [f32; 4] = std::array::from_fn(|column| {
+        cells
+            .iter()
+            .map(|row| measured(&row[column]))
+            .chain([measured(REGION_COLUMNS[column + 1])])
+            .fold(0.0, f32::max)
+            .ceil()
+    });
+    let subject = (width - columns.iter().sum::<f32>() - 4.0 * COLUMN_GAP).max(0.0);
+    // One row of the table, the subject first and the numbers after it,
+    // each set right in its column.
+    let row = |ui: &mut egui::Ui, first: RichText, rest: [RichText; 4]| {
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = COLUMN_GAP;
+            let response = ui
+                .scope(|ui| {
+                    ui.set_min_width(subject);
+                    ui.set_max_width(subject);
+                    ui.add(Label::new(first).wrap())
+                })
+                .inner;
+            for (text, column) in rest.into_iter().zip(columns) {
+                ui.allocate_ui_with_layout(vec2(column, 0.0), Layout::top_down(Align::Max), |ui| {
+                    ui.set_min_width(column);
+                    ui.label(text);
+                });
+            }
+            response
+        })
+        .inner
+    };
+    ui.add_space(HEAD_GAP);
+    let heading = |text: &str| RichText::new(text).size(LABEL_SIZE).color(theme.text_dim);
+    row(
+        ui,
+        heading(REGION_COLUMNS[0]),
+        std::array::from_fn(|column| heading(REGION_COLUMNS[column + 1])),
+    );
+    let value = |text: &str| {
+        RichText::new(text)
+            .size(TEXT_SIZE)
+            .color(theme.text_primary)
+    };
+    for ((index, region), cells) in (first..).zip(&section.regions).zip(&cells) {
+        ui.add_space(LINE_GAP);
+        let pointed = block(pass, ui, Copyable::Fact(index), width, |ui| {
+            let response = row(
+                ui,
+                value(&region.subject),
+                std::array::from_fn(|column| value(&cells[column])),
+            );
+            // What kind of region it is, and what is written about it,
+            // where that says more than the subject does.
+            if region.about != region.subject {
+                said(theme, response, region.about.clone());
+            }
+        });
+        if pointed {
+            mark_regions(pass, picture, current, std::slice::from_ref(region));
+        }
+    }
+}
+
+/// A region's four numbers as the table writes them: its top left corner
+/// and its size, a point's size left blank and a region with no place all
+/// four.
+fn region_cells(region: &ShownRegion) -> [String; 4] {
+    match region.placed {
+        Some(placed @ Placed::Point { .. }) => {
+            let [x, y, _, _] = placed.bounds();
+            [x.to_string(), y.to_string(), String::new(), String::new()]
+        }
+        Some(placed) => placed.bounds().map(|value| value.to_string()),
+        None => Default::default(),
+    }
+}
+
+/// A region's row as it is copied: the table's five cells as a line of
+/// CSV, the subject quoted where it has to be.
+fn region_row(region: &ShownRegion) -> String {
+    let [x, y, width, height] = region_cells(region);
+    [quoted(&region.subject), x, y, width, height].join(",")
+}
+
+/// The heads of the regions table's columns.
+const REGION_COLUMNS: [&str; 5] = ["Subject", "X", "Y", "W", "H"];
+
+/// The weight of a region's outline drawn on the picture: the marked
+/// region's, being the same kind of thing.
+const REGION_OUTLINE: f32 = 1.5;
+/// The dashes a region's outline is drawn in, and the gaps between them, in
+/// logical pixels: dashed as the heading's mark is, and so told apart from
+/// the region marked out by hand, which is drawn solid.
+const REGION_DASH: f32 = 6.0;
+const REGION_GAP: f32 = 4.0;
+/// The radius of the ring a region that is only a point is drawn as.
+const POINT_RING: f32 = 6.0;
+/// The room around a region's subject, inside the pill it is written on,
+/// and the space between the pill and the region.
+const PILL_INSET: [f32; 2] = [6.0, 2.0];
+const PILL_GAP: f32 = 4.0;
+
+/// Draws `regions` on the picture with `painter`, where each is in the
+/// picture as it is placed now, each with its subject written over it.
+fn mark_regions(pass: &Pass, painter: &egui::Painter, current: &Current, regions: &[ShownRegion]) {
+    let theme = pass.theme;
+    let grid = pass.grid;
+    let scale = pass.input.scale;
+    let placement = pass.view.placement(current.size(), pass.input.viewport);
+    let screen = |point: [f64; 2]| {
+        let [x, y] = placement.screen_point([point[0] as f32, point[1] as f32]);
+        pos2(x / scale, y / scale)
+    };
+    let accent: egui::Color32 = theme.accent.into();
+    let stroke = egui::Stroke::new(grid.line_width(REGION_OUTLINE), accent);
+    for region in regions {
+        let Some(placed) = region.placed else {
+            continue;
+        };
+        // Where the subject is written: over the region's top left corner,
+        // or over a point's ring.
+        let corner = match placed {
+            Placed::Rectangle { corner, size } => {
+                let start = screen(corner);
+                let end = screen([corner[0] + size[0], corner[1] + size[1]]);
+                let [left, top, right, bottom] = [
+                    grid.snap(start.x),
+                    grid.snap(start.y),
+                    grid.snap(end.x),
+                    grid.snap(end.y),
+                ];
+                let points = [
+                    pos2(left, top),
+                    pos2(right, top),
+                    pos2(right, bottom),
+                    pos2(left, bottom),
+                    pos2(left, top),
+                ];
+                painter.extend(egui::Shape::dashed_line(
+                    &points,
+                    stroke,
+                    REGION_DASH,
+                    REGION_GAP,
+                ));
+                pos2(left, top)
+            }
+            Placed::Circle { center, diameter } => {
+                let at = screen(center);
+                let radius = (diameter as f32 * placement.zoom / scale / 2.0).max(1.0);
+                // Enough links that each is a few pixels long whatever the
+                // circle's size, so the dashes follow the curve.
+                let steps = ((std::f32::consts::TAU * radius / 3.0).ceil() as usize).max(12);
+                let points: Vec<egui::Pos2> = (0..=steps)
+                    .map(|step| {
+                        let angle = std::f32::consts::TAU * step as f32 / steps as f32;
+                        at + radius * vec2(angle.cos(), angle.sin())
+                    })
+                    .collect();
+                painter.extend(egui::Shape::dashed_line(
+                    &points,
+                    stroke,
+                    REGION_DASH,
+                    REGION_GAP,
+                ));
+                at - vec2(radius, radius)
+            }
+            Placed::Point { center } => {
+                let at = screen(center);
+                painter.circle_stroke(at, POINT_RING, stroke);
+                painter.circle_filled(at, stroke.width, accent);
+                at - vec2(POINT_RING, POINT_RING)
+            }
+        };
+        let galley = painter.layout_no_wrap(
+            region.subject.clone(),
+            egui::FontId::proportional(LABEL_SIZE),
+            egui::Color32::PLACEHOLDER,
+        );
+        let size = galley.size() + 2.0 * Vec2::from(PILL_INSET);
+        let pill = egui::Rect::from_min_size(pos2(corner.x, corner.y - PILL_GAP - size.y), size);
+        painter.rect_filled(pill, PANEL_RADIUS, theme.menu_background);
+        painter.rect_stroke(
+            pill,
+            PANEL_RADIUS,
+            egui::Stroke::new(RULE_WIDTH, theme.border),
+            StrokeKind::Inside,
+        );
+        painter.galley(
+            pill.min + Vec2::from(PILL_INSET),
+            galley,
+            theme.text_primary.into(),
+        );
     }
 }
 
@@ -808,13 +1074,15 @@ fn words(ui: &mut egui::Ui, kind: Kind, text: &str, theme: &Theme) {
 /// words rather than beside them — the column is as wide as the panel lets
 /// it be and there is no margin to stand one in — nudged back inside the
 /// panel where centering it on the stretch would hang it over an edge.
+///
+/// Whether the pointer is on it.
 fn block(
     pass: &mut Pass,
     ui: &mut egui::Ui,
     copies: Copyable,
     width: f32,
     add: impl FnOnce(&mut egui::Ui),
-) {
+) -> bool {
     let response = ui
         .scope_builder(UiBuilder::new().sense(Sense::CLICK), |ui| {
             ui.set_width(width);
@@ -825,6 +1093,7 @@ fn block(
     // counts hovering, so it is asked where the pointer is instead.
     let pointed = ui.rect_contains_pointer(response.rect);
     offer(pass, ui, copies, &response, response.rect, pointed);
+    pointed
 }
 
 /// What makes something laid out in the column a thing that copies: its
@@ -874,19 +1143,15 @@ fn offer(
 /// picture always has a color space.
 fn contents(current: &Current) -> Contents {
     let mut sections = vec![
-        Section {
-            name: "File",
-            face: Face::File,
-            facts: fields(file_facts(current)),
-        },
-        Section {
-            name: "Image",
-            face: Face::Headed {
+        Section::new("File", Face::File, fields(file_facts(current))),
+        Section::new(
+            "Image",
+            Face::Headed {
                 mark: icon::IMAGE,
                 head: &[RESOLUTION, READ_BY],
             },
-            facts: fields(image_facts(current)),
-        },
+            fields(image_facts(current)),
+        ),
     ];
     let exif = &current.exif;
     let first = sections.len();
@@ -909,21 +1174,24 @@ fn contents(current: &Current) -> Contents {
             },
             _ => Face::Fields,
         };
-        sections.push(Section {
-            name: section.name,
-            face,
-            facts: fields(entries),
-        });
+        sections.push(Section::new(section.name, face, fields(entries)));
     }
     // The regions are written out here rather than with the rest, since
     // where each is depends on the turn in force.
+    // Each is copied as its row of the table, which is never empty, so the
+    // facts and the regions stay in step.
     let regions = exif.regions(current.pixels(), current.turn);
-    let entries = regions
-        .iter()
-        .map(|entry| (entry.name.as_str(), entry.value.clone()));
+    let facts = fields(
+        regions
+            .iter()
+            .map(|region| (region.entry.name.as_str(), region_row(region))),
+    );
     sections.insert(
         first + exif.regions_at(),
-        Section::fields(exif::REGIONS, fields(entries)),
+        Section {
+            regions,
+            ..Section::new(exif::REGIONS, Face::Regions, facts)
+        },
     );
     sections.retain(|section| !section.facts.is_empty());
     Contents { sections }
@@ -959,7 +1227,13 @@ pub fn copied(current: &Current, copies: Copyable) -> String {
                 .facts()
                 .map(|(section, fact)| format!("{},{}", quoted(section), row(fact))),
         ),
+        // The regions are a table already, and copy as one: its heads,
+        // then each row as it is copied on its own.
         Copyable::Section(index) => match contents.sections.get(index) {
+            Some(section) if matches!(section.face, Face::Regions) => joined(
+                std::iter::once(REGION_COLUMNS.join(","))
+                    .chain(section.facts.iter().map(|fact| fact.value.clone())),
+            ),
             Some(section) => joined(section.facts.iter().map(row)),
             None => String::new(),
         },
@@ -1392,19 +1666,50 @@ mod tests {
             }),
             units: Units::Shares,
         }];
+        // A table of its own, a region beside each row, named by who is
+        // in it and saying what kind of region it is in its tooltip.
+        let contents = contents(&current);
+        let section = contents
+            .sections
+            .iter()
+            .find(|section| section.name == exif::REGIONS)
+            .expect("a regions section");
+        assert!(matches!(section.face, Face::Regions));
+        assert_eq!(section.regions.len(), section.facts.len());
+        assert_eq!(section.regions[0].subject, "Jane Doe");
+        assert_eq!(section.regions[0].about, "Face \u{00b7} Jane Doe");
+        assert_eq!(
+            section.regions[0].placed.map(Placed::bounds),
+            Some([0.0, 0.0, 2.0, 2.0])
+        );
+        // A row copies as its cells, and the section as the table.
+        let at = contents
+            .facts()
+            .position(|(name, _)| name == exif::REGIONS)
+            .expect("a region's row");
+        assert_eq!(copied(&current, Copyable::Fact(at)), "Jane Doe,0,0,2,2");
+        let place = contents
+            .sections
+            .iter()
+            .position(|section| section.name == exif::REGIONS)
+            .expect("a regions section");
+        assert_eq!(
+            copied(&current, Copyable::Section(place)),
+            "Subject,X,Y,W,H\nJane Doe,0,0,2,2"
+        );
         let written_now = written(&current);
         let index = |text: &str| written_now.iter().position(|row| row == text);
         assert!(index("Camera") < index("Regions"));
         assert!(index("Regions") < index("Capture metadata"));
         assert_eq!(
             written_now[index("Face").expect("the region is written") + 1],
-            "Jane Doe \u{00b7} 2 \u{00d7} 2 at 0, 0"
+            "Jane Doe,0,0,2,2"
         );
         current.turn = current.turn.clockwise();
         assert!(
             written(&current)
                 .iter()
-                .any(|row| row == "Jane Doe \u{00b7} 2 \u{00d7} 2 at 3, 0"),
+                .any(|row| row == "Jane Doe,3,0,2,2"),
             "{:?}",
             written(&current)
         );
