@@ -878,24 +878,18 @@ mod tests {
     /// picture as it is turned now.
     #[test]
     fn the_regions_are_where_the_turn_puts_them() {
-        use crate::image::xmp::{Area, Region, Regions};
+        use crate::image::metadata_region::{MetadataRegion, Shape, Units};
         let mut current = current();
-        current.exif.regions = Regions {
-            applied_to: None,
-            list: vec![Region {
-                name: Some("Jane Doe".into()),
-                kind: Some("Face".into()),
-                area: Some(Area {
-                    x: 0.25,
-                    y: 0.2,
-                    w: Some(0.5),
-                    h: Some(0.4),
-                    d: None,
-                    normalized: true,
-                }),
-                ..Region::default()
-            }],
-        };
+        current.exif.regions = vec![MetadataRegion {
+            label: "Face".into(),
+            name: Some("Jane Doe".into()),
+            details: Vec::new(),
+            shape: Some(Shape::Rectangle {
+                center: [0.25, 0.2],
+                size: [0.5, 0.4],
+            }),
+            units: Units::Shares,
+        }];
         let written_now = written(&current);
         let index = |text: &str| written_now.iter().position(|row| row == text);
         assert!(index("Camera") < index("Regions"));

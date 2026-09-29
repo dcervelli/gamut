@@ -28,7 +28,8 @@ use std::path::Path;
 use ::image::metadata::Orientation;
 use exif::{Context, In, Rational, Tag, Value};
 
-use super::orient::{self, Turn};
+use super::metadata_region::MetadataRegion;
+use super::orient::Turn;
 use super::xmp::{self, Xmp};
 use super::{directory, enclosed, geo, tiff};
 
@@ -86,11 +87,11 @@ pub struct Exif {
     /// readout: the same tags the `Georeference` section is written from,
     /// kept as numbers. `None` for everything that is not a map.
     pub georeference: Option<geo::Georeference>,
-    /// The regions the XMP packet marks out on the picture, kept as numbers:
-    /// they are in the picture as stored, and the panel writes them out in
-    /// the picture as shown, which the turn in force decides — see
-    /// [`Exif::regions`].
-    pub regions: xmp::Regions,
+    /// The regions the metadata marks out on the picture — the block's
+    /// `SubjectArea`, then the XMP packet's — kept as numbers: they are in
+    /// the picture as stored, and the panel writes them out in the picture
+    /// as shown, which the turn in force decides — see [`Exif::regions`].
+    pub regions: Vec<MetadataRegion>,
     /// The turn the EXIF orientation tag asks for, which the regions were
     /// marked out before. `None` where the file does not say.
     pub orientation: Option<Orientation>,
@@ -182,36 +183,15 @@ impl Exif {
     pub fn regions(&self, shown: [u32; 2], turn: Turn) -> Vec<Entry> {
         let orientation = self.orientation.unwrap_or(Orientation::NoTransforms);
         let mut rows = Vec::new();
-        for region in &self.regions.list {
-            let kind = match region.kind.as_deref() {
-                None => "Region",
-                Some("BarCode") => "Barcode",
-                Some(kind) => kind,
-            };
-            let focus = region.focus_usage.as_deref().map(|usage| match usage {
-                "EvaluatedUsed" => "focused on".to_string(),
-                "EvaluatedNotUsed" => "considered, not focused on".to_string(),
-                "NotEvaluatedNotUsed" => "not considered".to_string(),
-                usage => usage.to_string(),
-            });
-            let rotation = region
-                .rotation
-                .filter(|degrees| *degrees != 0.0)
-                .map(|degrees| format!("rotated {}\u{00b0}", tidy(&degrees.to_string())));
-            let parts: Vec<String> = [
-                region.name.clone(),
-                region.description.clone(),
-                region.barcode.clone(),
-                focus,
-                rotation,
-                region
-                    .area
-                    .map(|area| place(&area, self.regions.applied_to, orientation, turn, shown)),
-            ]
-            .into_iter()
-            .flatten()
-            .collect();
-            push(&mut rows, kind, join(&parts));
+        for region in &self.regions {
+            let parts: Vec<String> = region
+                .name
+                .iter()
+                .chain(&region.details)
+                .cloned()
+                .chain(region.place(orientation, turn, shown))
+                .collect();
+            push(&mut rows, &region.label, join(&parts));
         }
         rows
     }
@@ -295,7 +275,7 @@ impl Exif {
     /// packet, which may be all a file has.
     fn assemble(exif: Option<&exif::Exif>, xmp: &Xmp) -> Self {
         let described = described(exif, xmp);
-        let regions = xmp.regions().clone();
+        let mut regions = MetadataRegion::mwg(xmp.regions());
         let Some(exif) = exif else {
             let sections = (!described.is_empty())
                 .then_some(Section {
@@ -323,6 +303,12 @@ impl Exif {
         told.extend(DESCRIBED.iter().filter_map(|described| described.tag));
         if !geo.is_empty() {
             told.extend(GEOREFERENCED.map(|number| Tag(Context::Tiff, number)));
+        }
+        // The subject the camera found is a region like any other, and is
+        // said with them; one that is not a shape stays in the listing.
+        if let Some(subject) = subject_area(exif) {
+            regions.insert(0, subject);
+            told.push(Tag::SubjectArea);
         }
 
         // What is left, under the directory it came out of. The block is
@@ -624,69 +610,21 @@ fn described(exif: Option<&exif::Exif>, xmp: &Xmp) -> Vec<Entry> {
     rows
 }
 
-/// Where an area is in the picture as shown, `shown` pixels across and down:
-/// a rectangle's size and top left corner, a circle's diameter and center, a
-/// point. `applied_to` is the size, as stored, that an area in pixels is in.
-///
-/// A circle's diameter is taken as a share of the stored picture's width,
-/// the schema not saying of what.
-fn place(
-    area: &xmp::Area,
-    applied_to: Option<(f64, f64)>,
-    orientation: Orientation,
-    turn: Turn,
-    shown: [u32; 2],
-) -> String {
-    let shown = shown.map(f64::from);
-    // The picture as stored: the one shown with the turn taken back off,
-    // and then the orientation. Either is a swap of the sides or none.
-    let upright = turn.size(shown);
-    let stored = if orient::quarter_turn(orientation) {
-        [upright[1], upright[0]]
-    } else {
-        upright
+/// The block's `SubjectArea`, measured in the pixels its own
+/// `PixelXDimension` and `PixelYDimension` count where it has both.
+fn subject_area(exif: &exif::Exif) -> Option<MetadataRegion> {
+    let values: Vec<u32> = match &primary(exif, Tag::SubjectArea)?.value {
+        Value::Short(values) => values.iter().map(|&value| u32::from(value)).collect(),
+        Value::Long(values) => values.clone(),
+        _ => return None,
     };
-    // What the area's numbers are measured against.
-    let basis = match (area.normalized, applied_to) {
-        (true, _) => [1.0, 1.0],
-        (false, Some((w, h))) => [w, h],
-        (false, None) => stored,
+    let side = |tag| {
+        primary(exif, tag)
+            .and_then(|field| field.value.get_uint(0))
+            .map(f64::from)
     };
-    let center = orient::upright(
-        turn.orientation(),
-        orient::upright(orientation, [area.x / basis[0], area.y / basis[1]]),
-    );
-    let swapped = orient::quarter_turn(orientation) != turn.is_quarter();
-    // Adding nothing turns a region's edge a hair past the picture's from
-    // -0 into 0.
-    let pixels = |value: f64| value.round() + 0.0;
-    match (area.w, area.h, area.d) {
-        (Some(w), Some(h), _) => {
-            let mut size = [w / basis[0], h / basis[1]];
-            if swapped {
-                size.swap(0, 1);
-            }
-            let size = [size[0] * shown[0], size[1] * shown[1]];
-            format!(
-                "{} \u{00d7} {} at {}, {}",
-                pixels(size[0]),
-                pixels(size[1]),
-                pixels(center[0] * shown[0] - size[0] / 2.0),
-                pixels(center[1] * shown[1] - size[1] / 2.0),
-            )
-        }
-        (_, _, Some(d)) => format!(
-            "{} across at {}, {}",
-            pixels(d / basis[0] * stored[0]),
-            pixels(center[0] * shown[0]),
-            pixels(center[1] * shown[1]),
-        ),
-        _ => format!(
-            "{}, {}",
-            pixels(center[0] * shown[0]),
-            pixels(center[1] * shown[1])
-        ),
-    }
+    let of = side(Tag::PixelXDimension).zip(side(Tag::PixelYDimension));
+    MetadataRegion::subject_area(&values, of.map(|(w, h)| [w, h]))
 }
 
 /// What `UserComment` says, which the renderer will not tell us. The field is
@@ -1226,6 +1164,16 @@ mod tests {
         exif.ascii(0x9011, "+12:00"); // OffsetTimeOriginal
         exif.rational(0x920a, &[(6765, 1000)]); // FocalLength
         exif.short(0xa405, 24); // FocalLengthIn35mmFilm
+        // SubjectArea: a rectangle about the middle, in the pixels the two
+        // after it count.
+        exif.pooled(
+            0x9214,
+            3,
+            4,
+            &[2000u16, 1500, 800, 600].map(u16::to_le_bytes).concat(),
+        );
+        exif.short(0xa002, 4000); // PixelXDimension
+        exif.short(0xa003, 3000); // PixelYDimension
         exif.ascii(0xa434, "A Lens 6.765mm f/1.78"); // LensModel
         // UserComment: eight bytes of character code, then the words.
         exif.undefined(0x9286, b"ASCII\0\0\0On a post by the jetty\0");
@@ -1264,6 +1212,14 @@ mod tests {
         block.extend_from_slice(&exif.at(exif_at));
         block.extend_from_slice(&gps.at(gps_at));
         block
+    }
+
+    /// The regions as rows, at `shown` and with no turn.
+    fn regions_of(exif: &Exif, shown: [u32; 2]) -> Vec<String> {
+        exif.regions(shown, Turn::NONE)
+            .into_iter()
+            .map(|entry| format!("{}: {}", entry.name, entry.value))
+            .collect()
     }
 
     /// The panel's top sections: the fields a photograph is read by, combined
@@ -1325,6 +1281,16 @@ mod tests {
             rows("About"),
             pairs(&[("Comment", "On a post by the jetty"), ("Software", "26.6")]),
             "{exif:?}"
+        );
+        // The subject is a region, and is written out in the picture as
+        // shown: stood on its side by the orientation tag, and made smaller.
+        assert_eq!(
+            regions_of(&exif, [3000, 4000]),
+            ["Subject: 600 \u{00d7} 800 at 1200, 1600"]
+        );
+        assert_eq!(
+            regions_of(&exif, [1500, 2000]),
+            ["Subject: 300 \u{00d7} 400 at 600, 800"]
         );
         let every: Vec<&str> = all(&exif).iter().map(|e| e.name.as_str()).collect();
         assert!(!every.contains(&"Model"), "{every:?}");

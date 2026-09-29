@@ -1004,9 +1004,19 @@ three ways RDF allows one to be spelled, fields as attributes or as
 elements. The guidelines put a region in the picture as stored: "Region
 metadata is applied to the stored image. When applying a rotation by
 applying Exif Orientation, the rotation must be applied to the regions as
-well." So `Exif` keeps the regions as numbers beside the orientation tag,
-and the panel writes them out as it draws, through `Exif::regions`, which
-carries each area through the tag's turn and then the turn in force
+well." EXIF's own `SubjectArea`, where the camera found the main subject,
+is measured the same way — in pixels of the stored picture, before the
+orientation — so the two are one thing to the panel: a
+`metadata_region::MetadataRegion`, which is a label, a name, the other
+things said about it already in words, and a `Shape` (a point, a circle or
+a rectangle about a center) in the `Units` its source wrote it in, shares of
+the sides or pixels of a stated size. Each source is turned into those by a
+constructor of its own, `MetadataRegion::mwg` and
+`MetadataRegion::subject_area`; the subject comes first, being the camera's,
+and leaves the listing once it has become a region. `Exif` keeps the regions
+as numbers beside the orientation tag, and the panel writes them out as it
+draws, through `Exif::regions` and `MetadataRegion::place`, which carries
+each shape through the tag's turn and then the turn in force
 (`orient::upright` is the tag's reading for a point, the inverse of the one
 the pixels are fetched through) and scales it to the picture's size — so a
 region reads as a marked region and the pointer's coordinate do, a top left

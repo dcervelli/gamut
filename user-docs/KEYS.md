@@ -757,9 +757,10 @@ measured. Anything somebody wrote in words — a title, a caption, a comment,
 keywords, who made the file and what may be done with it — is drawn out into
 a section of its own, *About*, whether the camera wrote it as EXIF or a
 cataloging program wrote it since as XMP; where the two say the same thing
-differently, the EXIF field is the one shown. The regions a cataloging program
-marked out on the picture — faces with the names they were given, pets,
-barcodes, a point of focus — follow under *Regions*, one row each, with the
+differently, the EXIF field is the one shown. The regions marked out on the picture
+follow under *Regions*, one row each: the subject the camera found, and
+whatever a cataloging program marked — faces with the names they were given,
+pets, barcodes, a point of focus — with the
 corner and size of each in pixels of the picture as it is shown, the way the
 pointer's position reads: turning the picture moves them with it. Everything left over is listed
 after all of them, field by field, as the file gives it.
