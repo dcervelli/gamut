@@ -25,11 +25,14 @@
 //! [`super::exif`]'s business, alongside the EXIF fields that say the same
 //! things.
 //!
-//! One property is read as the structure it is rather than as words: the
-//! Metadata Working Group's regions, the rectangles a cataloging program
+//! Two properties are read as the structures they are rather than as words:
+//! the Metadata Working Group's regions, the rectangles a cataloging program
 //! draws around the faces, pets and barcodes it found or was told of, each
-//! with the name it was given. [`Region`] is one of them as the packet
-//! writes it, with its area still in the packet's own terms.
+//! with the name it was given; and Microsoft's people tags, the older form
+//! of the same thing for faces alone, which Windows Photo Gallery wrote and
+//! digiKam still writes beside the first. [`Region`] and [`PersonRegion`]
+//! are one of each as the packet writes it, with its area still in the
+//! packet's own terms.
 
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
@@ -60,6 +63,22 @@ pub const BASIC: &str = "http://ns.adobe.com/xap/1.0/";
 /// The Metadata Working Group's regions: the list, and each region's name,
 /// kind and words.
 pub const MWG_RS: &str = "http://www.metadataworkinggroup.com/schemas/regions/";
+
+/// Microsoft's people tags: the property they are under, the list in it,
+/// and each region's fields. Microsoft's own documentation spells each with
+/// `https`, and every file written spells it with `http`, so either is read.
+const MP: [&str; 2] = [
+    "http://ns.microsoft.com/photo/1.2/",
+    "https://ns.microsoft.com/photo/1.2/",
+];
+const MP_REGION_INFO: [&str; 2] = [
+    "http://ns.microsoft.com/photo/1.2/t/RegionInfo#",
+    "https://ns.microsoft.com/photo/1.2/t/RegionInfo#",
+];
+const MP_REGION: [&str; 2] = [
+    "http://ns.microsoft.com/photo/1.2/t/Region#",
+    "https://ns.microsoft.com/photo/1.2/t/Region#",
+];
 
 /// The fields of a region's area.
 const AREA: &str = "http://ns.adobe.com/xmp/sType/Area#";
@@ -138,6 +157,18 @@ pub struct Regions {
     pub list: Vec<Region>,
 }
 
+/// One of Microsoft's people tags: who, and where — `x, y, w, h`, the top
+/// left corner and the size, in shares of the picture's sides.
+///
+/// The person's Live e-mail digest and Live ID beside them are left out:
+/// both are numbers standing for an account, and say nothing a reader
+/// could use.
+#[derive(Clone, Default, PartialEq, Debug)]
+pub struct PersonRegion {
+    pub name: Option<String>,
+    pub rectangle: Option<[f64; 4]>,
+}
+
 /// A file's XMP, as properties. Empty when the file carries none, or carries
 /// a packet that will not parse: what is missing is a caption, not a
 /// picture, so nothing here is an error anything else has to handle.
@@ -145,6 +176,7 @@ pub struct Regions {
 pub struct Xmp {
     properties: Vec<Property>,
     regions: Regions,
+    people: Vec<PersonRegion>,
 }
 
 impl Xmp {
@@ -170,6 +202,9 @@ impl Xmp {
     fn over(mut self, under: Self) -> Self {
         if self.regions.list.is_empty() {
             self.regions = under.regions;
+        }
+        if self.people.is_empty() {
+            self.people = under.people;
         }
         for property in under.properties {
             push(
@@ -198,6 +233,7 @@ impl Xmp {
             .find(|node| node.has_tag_name((RDF, "RDF")))?;
         let mut properties = Vec::new();
         let mut regions = Regions::default();
+        let mut people = Vec::new();
         for description in rdf
             .children()
             .filter(|node| node.has_tag_name((RDF, "Description")))
@@ -226,6 +262,12 @@ impl Xmp {
                 if element.has_tag_name((MWG_RS, "Regions")) && regions.list.is_empty() {
                     regions = read_regions(fields(element));
                 }
+                if MP.contains(&namespace)
+                    && element.tag_name().name() == "RegionInfo"
+                    && people.is_empty()
+                {
+                    people = read_people(fields(element));
+                }
                 push(
                     &mut properties,
                     namespace,
@@ -237,6 +279,7 @@ impl Xmp {
         Some(Self {
             properties,
             regions,
+            people,
         })
     }
 
@@ -254,6 +297,11 @@ impl Xmp {
     /// them.
     pub fn regions(&self) -> &Regions {
         &self.regions
+    }
+
+    /// Microsoft's people tags, in the order the packet lists them.
+    pub fn people(&self) -> &[PersonRegion] {
+        &self.people
     }
 }
 
@@ -335,6 +383,50 @@ fn read_regions(regions: Node) -> Regions {
         .filter(|region| *region != Region::default())
         .collect();
     Regions { applied_to, list }
+}
+
+/// The people tagged under `MP:RegionInfo`, at the node its fields are on.
+fn read_people(info: Node) -> Vec<PersonRegion> {
+    // A field in either spelling, as an attribute or as an element.
+    let text = |node: Node, name: &str| {
+        MP_REGION
+            .iter()
+            .find_map(|namespace| field(node, namespace, name))
+            .map(str::to_string)
+    };
+    let items = info
+        .children()
+        .find(|child| {
+            child.tag_name().name() == "Regions"
+                && child
+                    .tag_name()
+                    .namespace()
+                    .is_some_and(|namespace| MP_REGION_INFO.contains(&namespace))
+        })
+        .and_then(|list| {
+            list.children()
+                .find(|node| node.is_element() && node.tag_name().namespace() == Some(RDF))
+        });
+    items
+        .into_iter()
+        .flat_map(|items| items.children())
+        .filter(|item| item.has_tag_name((RDF, "li")))
+        .map(fields)
+        .map(|region| {
+            let rectangle = text(region, "Rectangle").and_then(|rectangle| {
+                let numbers: Vec<f64> = rectangle
+                    .split(',')
+                    .map(|part| part.trim().parse().ok().filter(|n: &f64| n.is_finite()))
+                    .collect::<Option<_>>()?;
+                <[f64; 4]>::try_from(numbers).ok()
+            });
+            PersonRegion {
+                name: text(region, "PersonDisplayName"),
+                rectangle,
+            }
+        })
+        .filter(|region| *region != PersonRegion::default())
+        .collect()
 }
 
 /// A region's area; `None` for one with no center, or one in a unit that is
@@ -818,6 +910,59 @@ mod tests {
         over = Xmp::parse(ATTRIBUTES.as_bytes()).unwrap().over(parsed());
         assert_eq!(over.regions(), &regions);
         assert!(parsed().regions().list.is_empty());
+    }
+
+    /// Microsoft's people tags as Windows Photo Gallery wrote them, each in
+    /// an `rdf:Description`, and in the `https` spelling Microsoft's own
+    /// documentation gives; a rectangle that is not four numbers is no
+    /// rectangle, but the name beside it stands.
+    #[test]
+    fn microsofts_people_tags_are_read() {
+        for scheme in ["http", "https"] {
+            let packet = format!(
+                r#"<x:xmpmeta xmlns:x="adobe:ns:meta/">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about="" xmlns:MP="{scheme}://ns.microsoft.com/photo/1.2/">
+   <MP:RegionInfo>
+    <rdf:Description xmlns:MPRI="{scheme}://ns.microsoft.com/photo/1.2/t/RegionInfo#">
+     <MPRI:Regions>
+      <rdf:Bag>
+       <rdf:li>
+        <rdf:Description xmlns:MPReg="{scheme}://ns.microsoft.com/photo/1.2/t/Region#">
+         <MPReg:Rectangle>0.790650, 0.441734, 0.209350, 0.279133</MPReg:Rectangle>
+         <MPReg:PersonDisplayName>John Doe</MPReg:PersonDisplayName>
+         <MPReg:PersonEmailDigest>2FD4E1C67A2D28FCED849EE1BB76E7391B93EB13</MPReg:PersonEmailDigest>
+        </rdf:Description>
+       </rdf:li>
+       <rdf:li>
+        <rdf:Description xmlns:MPReg="{scheme}://ns.microsoft.com/photo/1.2/t/Region#"
+          MPReg:PersonDisplayName="Jane Doe" MPReg:Rectangle="0.2, 0.3, wide"/>
+       </rdf:li>
+      </rdf:Bag>
+     </MPRI:Regions>
+    </rdf:Description>
+   </MP:RegionInfo>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>"#
+            );
+            let xmp = Xmp::parse(packet.as_bytes()).expect("the packet parses");
+            assert_eq!(
+                xmp.people(),
+                [
+                    PersonRegion {
+                        name: Some("John Doe".to_string()),
+                        rectangle: Some([0.790650, 0.441734, 0.209350, 0.279133]),
+                    },
+                    PersonRegion {
+                        name: Some("Jane Doe".to_string()),
+                        rectangle: None,
+                    },
+                ],
+                "{scheme}"
+            );
+        }
+        assert!(parsed().people().is_empty());
     }
 
     /// A packet whose padding is nulls rather than spaces, as some writers

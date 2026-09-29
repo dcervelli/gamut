@@ -3,8 +3,9 @@
 //! barcode it read.
 //!
 //! Each source says the same few things in its own way — EXIF's
-//! `SubjectArea` as pixels of the picture, the Metadata Working Group's
-//! regions as shares of its sides, with a name and a kind — and
+//! `SubjectArea` and `SubjectLocation` as pixels of the picture, the
+//! Metadata Working Group's regions as shares of its sides, with a name and
+//! a kind, and Microsoft's people tags as shares too, from a corner — and
 //! [`MetadataRegion`] is what they have in common: what to call the region,
 //! the words it carries, and a [`Shape`] in the [`Units`] the source wrote
 //! it in. Every source measures in the picture as stored, before the EXIF
@@ -40,6 +41,16 @@ pub enum Shape {
     Point { center: [f64; 2] },
     Circle { center: [f64; 2], diameter: f64 },
     Rectangle { center: [f64; 2], size: [f64; 2] },
+}
+
+impl Shape {
+    pub fn center(self) -> [f64; 2] {
+        match self {
+            Shape::Point { center }
+            | Shape::Circle { center, .. }
+            | Shape::Rectangle { center, .. } => center,
+        }
+    }
 }
 
 /// What a shape's numbers are measured in.
@@ -115,6 +126,49 @@ impl MetadataRegion {
                 }
             })
             .collect()
+    }
+
+    /// Microsoft's people tags, in their order, less those that say again
+    /// what a region in `beside` says: digiKam writes every face it tags
+    /// both ways, and one face is one row.
+    pub fn microsoft(people: &[xmp::PersonRegion], beside: &[Self]) -> Vec<Self> {
+        people
+            .iter()
+            .map(|person| Self {
+                label: "Person".to_string(),
+                name: person.name.clone(),
+                details: Vec::new(),
+                shape: person.rectangle.map(|[x, y, w, h]| Shape::Rectangle {
+                    center: [x + w / 2.0, y + h / 2.0],
+                    size: [w, h],
+                }),
+                units: Units::Shares,
+            })
+            .filter(|person| !beside.iter().any(|region| region.repeats(person)))
+            .collect()
+    }
+
+    /// Whether `other` says what this region says: the same name about the
+    /// same place, to within a hundredth of the picture's sides, which is
+    /// as near as two writers rounding differently come.
+    fn repeats(&self, other: &Self) -> bool {
+        const NEAR: f64 = 0.01;
+        let near =
+            |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).abs() <= NEAR && (a[1] - b[1]).abs() <= NEAR;
+        self.name == other.name
+            && self.units == Units::Shares
+            && other.units == Units::Shares
+            && match (self.shape, other.shape) {
+                (
+                    Some(Shape::Rectangle { center, size }),
+                    Some(Shape::Rectangle {
+                        center: other_center,
+                        size: other_size,
+                    }),
+                ) => near(center, other_center) && near(size, other_size),
+                (None, None) => true,
+                _ => false,
+            }
     }
 
     /// EXIF's `SubjectArea`: where the camera found the main subject, as a
@@ -224,6 +278,49 @@ mod tests {
     /// Two numbers are a point, three a circle, four a rectangle, each
     /// measured in pixels of the size the block says; any other count is
     /// nothing.
+    /// A people tag is a rectangle from its corner, turned into one about
+    /// its center; one that says again what a region beside it says, as
+    /// near as two writers' rounding, is left out, and one naming someone
+    /// else or somewhere else is not.
+    #[test]
+    fn a_people_tag_said_twice_is_one_region() {
+        let person = |name: &str, rectangle| xmp::PersonRegion {
+            name: Some(name.to_string()),
+            rectangle: Some(rectangle),
+        };
+        let beside = [MetadataRegion {
+            label: "Face".to_string(),
+            name: Some("Jane Doe".to_string()),
+            details: Vec::new(),
+            shape: Some(Shape::Rectangle {
+                center: [0.5, 0.25],
+                size: [0.1, 0.2],
+            }),
+            units: Units::Shares,
+        }];
+        let people = MetadataRegion::microsoft(
+            &[
+                person("Jane Doe", [0.4502, 0.1498, 0.1003, 0.2]),
+                person("John Doe", [0.45, 0.15, 0.1, 0.2]),
+                person("Jane Doe", [0.1, 0.1, 0.1, 0.2]),
+            ],
+            &beside,
+        );
+        let written: Vec<_> = people
+            .iter()
+            .map(|region| (region.name.as_deref(), region.shape))
+            .collect();
+        assert_eq!(written.len(), 2, "{written:?}");
+        assert_eq!(written[0].0, Some("John Doe"));
+        assert_eq!(written[1].0, Some("Jane Doe"));
+        let Some(Shape::Rectangle { center, size }) = written[1].1 else {
+            panic!("{written:?}");
+        };
+        assert!((center[0] - 0.15).abs() < 1e-9 && (center[1] - 0.2).abs() < 1e-9);
+        assert_eq!(size, [0.1, 0.2]);
+        assert_eq!(people[0].label, "Person");
+    }
+
     #[test]
     fn a_subject_area_is_shaped_by_how_many_numbers_it_holds() {
         let of = Some([4000.0, 3000.0]);

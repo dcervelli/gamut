@@ -10,7 +10,9 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 - The information panel has a *Regions* section for the regions a file's
   metadata marks out on the picture: the subject the camera found, and the
-  regions its XMP marks, as cataloging programs do for the faces they find.
+  regions its XMP marks, as cataloging programs do for the faces they find —
+  in the Metadata Working Group's form, or as the people tags Windows Photo
+  Gallery wrote, a face tagged both ways being shown once.
   A row for each, named by its kind, with who is in it, what was
   written about it, a barcode's value, whether a focus point was used, and
   where it is — in pixels of the picture as shown, following the EXIF

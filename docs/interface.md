@@ -1011,9 +1011,21 @@ orientation — so the two are one thing to the panel: a
 things said about it already in words, and a `Shape` (a point, a circle or
 a rectangle about a center) in the `Units` its source wrote it in, shares of
 the sides or pixels of a stated size. Each source is turned into those by a
-constructor of its own, `MetadataRegion::mwg` and
-`MetadataRegion::subject_area`; the subject comes first, being the camera's,
-and leaves the listing once it has become a region. `Exif` keeps the regions
+constructor of its own. `MetadataRegion::subject_area` reads `SubjectArea`
+and `SubjectLocation`, its older one-point form; a location at the middle of
+the area is the same subject said twice and is said once. `MetadataRegion::mwg`
+reads the Metadata Working Group's list, and `MetadataRegion::microsoft`
+Microsoft's people tags (`MP:RegionInfo`), which Windows Photo Gallery wrote
+and digiKam writes beside every MWG face — so a tag with the same name as
+an MWG region, and a rectangle within a hundredth of the picture's sides of
+it, is left out as a repeat. Microsoft's rectangle is `x, y, w, h` from the
+top left corner in shares of the sides (its documentation's prose says
+height before width, and its own sample only adds up the other way), its
+documentation spells the namespaces with `https` where every file written
+has `http`, so both are read, and it says nothing of the orientation, so
+the tags are taken to be measured as MWG's are. The account digest and ID
+beside each name are not read. The subject comes first, being the camera's,
+and its tags leave the listing once they have become regions. `Exif` keeps the regions
 as numbers beside the orientation tag, and the panel writes them out as it
 draws, through `Exif::regions` and `MetadataRegion::place`, which carries
 each shape through the tag's turn and then the turn in force

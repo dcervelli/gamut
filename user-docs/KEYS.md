@@ -760,7 +760,8 @@ cataloging program wrote it since as XMP; where the two say the same thing
 differently, the EXIF field is the one shown. The regions marked out on the picture
 follow under *Regions*, one row each: the subject the camera found, and
 whatever a cataloging program marked — faces with the names they were given,
-pets, barcodes, a point of focus — with the
+pets, barcodes, a point of focus, and the people Windows Photo Gallery
+tagged — with the
 corner and size of each in pixels of the picture as it is shown, the way the
 pointer's position reads: turning the picture moves them with it. Everything left over is listed
 after all of them, field by field, as the file gives it.

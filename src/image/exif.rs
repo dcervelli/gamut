@@ -276,6 +276,7 @@ impl Exif {
     fn assemble(exif: Option<&exif::Exif>, xmp: &Xmp) -> Self {
         let described = described(exif, xmp);
         let mut regions = MetadataRegion::mwg(xmp.regions());
+        regions.extend(MetadataRegion::microsoft(xmp.people(), &regions));
         let Some(exif) = exif else {
             let sections = (!described.is_empty())
                 .then_some(Section {
@@ -306,10 +307,11 @@ impl Exif {
         }
         // The subject the camera found is a region like any other, and is
         // said with them; one that is not a shape stays in the listing.
-        if let Some(subject) = subject_area(exif) {
-            regions.insert(0, subject);
-            told.push(Tag::SubjectArea);
+        let subjects = subject(exif);
+        for (tag, _) in &subjects {
+            told.push(*tag);
         }
+        regions.splice(0..0, subjects.into_iter().filter_map(|(_, region)| region));
 
         // What is left, under the directory it came out of. The block is
         // already sorted that way — TIFF's own tags describe the file, the
@@ -610,21 +612,49 @@ fn described(exif: Option<&exif::Exif>, xmp: &Xmp) -> Vec<Entry> {
     rows
 }
 
-/// The block's `SubjectArea`, measured in the pixels its own
-/// `PixelXDimension` and `PixelYDimension` count where it has both.
-fn subject_area(exif: &exif::Exif) -> Option<MetadataRegion> {
-    let values: Vec<u32> = match &primary(exif, Tag::SubjectArea)?.value {
-        Value::Short(values) => values.iter().map(|&value| u32::from(value)).collect(),
-        Value::Long(values) => values.clone(),
-        _ => return None,
-    };
+/// The subject the camera found, as regions, each beside the tag it was
+/// read from: `SubjectArea`, and `SubjectLocation`, the older tag for the
+/// same thing, which holds a point. A location at the middle of the area is
+/// the same subject said twice, so it is said once — its tag is still
+/// taken out of the listing, but it comes with no region of its own. Both
+/// are in the pixels the block's own `PixelXDimension` and
+/// `PixelYDimension` count where it has both.
+fn subject(exif: &exif::Exif) -> Vec<(Tag, Option<MetadataRegion>)> {
     let side = |tag| {
         primary(exif, tag)
             .and_then(|field| field.value.get_uint(0))
             .map(f64::from)
     };
-    let of = side(Tag::PixelXDimension).zip(side(Tag::PixelYDimension));
-    MetadataRegion::subject_area(&values, of.map(|(w, h)| [w, h]))
+    let of = side(Tag::PixelXDimension)
+        .zip(side(Tag::PixelYDimension))
+        .map(|(w, h)| [w, h]);
+    let values = |tag| -> Option<Vec<u32>> {
+        match &primary(exif, tag)?.value {
+            Value::Short(values) => Some(values.iter().map(|&value| u32::from(value)).collect()),
+            Value::Long(values) => Some(values.clone()),
+            _ => None,
+        }
+    };
+    let area =
+        values(Tag::SubjectArea).and_then(|values| MetadataRegion::subject_area(&values, of));
+    let location = values(Tag::SubjectLocation)
+        .filter(|values| values.len() == 2)
+        .and_then(|values| MetadataRegion::subject_area(&values, of));
+    let center = |region: &Option<MetadataRegion>| {
+        region
+            .as_ref()
+            .and_then(|region| region.shape)
+            .map(|shape| shape.center())
+    };
+    let said = area.is_some() && center(&area) == center(&location);
+    let mut subjects = Vec::new();
+    if area.is_some() {
+        subjects.push((Tag::SubjectArea, area));
+    }
+    if location.is_some() {
+        subjects.push((Tag::SubjectLocation, location.filter(|_| !said)));
+    }
+    subjects
 }
 
 /// What `UserComment` says, which the renderer will not tell us. The field is
@@ -1174,6 +1204,9 @@ mod tests {
         );
         exif.short(0xa002, 4000); // PixelXDimension
         exif.short(0xa003, 3000); // PixelYDimension
+        // SubjectLocation: the same subject's middle again, which is said
+        // once.
+        exif.entry(0xa214, 3, 2, [0xd0, 0x07, 0xdc, 0x05]);
         exif.ascii(0xa434, "A Lens 6.765mm f/1.78"); // LensModel
         // UserComment: eight bytes of character code, then the words.
         exif.undefined(0x9286, b"ASCII\0\0\0On a post by the jetty\0");
@@ -1293,6 +1326,8 @@ mod tests {
             ["Subject: 300 \u{00d7} 400 at 600, 800"]
         );
         let every: Vec<&str> = all(&exif).iter().map(|e| e.name.as_str()).collect();
+        assert!(!every.contains(&"SubjectArea"), "{every:?}");
+        assert!(!every.contains(&"SubjectLocation"), "{every:?}");
         assert!(!every.contains(&"Model"), "{every:?}");
         assert!(!every.contains(&"FNumber"), "{every:?}");
         assert!(!every.contains(&"GPSAltitude"), "{every:?}");
@@ -1387,6 +1422,15 @@ mod tests {
 <rdf:li rdf:parseType="Resource">
 <mwg-rs:Area stArea:x="2000" stArea:y="750" stArea:unit="pixel"/></rdf:li>
 </rdf:Bag></mwg-rs:RegionList></mwg-rs:Regions>
+<MP:RegionInfo xmlns:MP="http://ns.microsoft.com/photo/1.2/" rdf:parseType="Resource">
+<MPRI:Regions xmlns:MPRI="http://ns.microsoft.com/photo/1.2/t/RegionInfo#"><rdf:Bag>
+<rdf:li rdf:parseType="Resource" xmlns:MPReg="http://ns.microsoft.com/photo/1.2/t/Region#">
+<MPReg:PersonDisplayName>Jane Doe</MPReg:PersonDisplayName>
+<MPReg:Rectangle>0.45, 0.15, 0.1, 0.2</MPReg:Rectangle></rdf:li>
+<rdf:li rdf:parseType="Resource" xmlns:MPReg="http://ns.microsoft.com/photo/1.2/t/Region#">
+<MPReg:PersonDisplayName>John Doe</MPReg:PersonDisplayName>
+<MPReg:Rectangle>0, 0, 0.25, 0.5</MPReg:Rectangle></rdf:li>
+</rdf:Bag></MPRI:Regions></MP:RegionInfo>
 </rdf:Description></rdf:RDF></x:xmpmeta>"#;
         let xmp = Xmp::parse(PACKET.as_bytes()).expect("the packet parses");
         let mut exif = Exif::assemble(None, &xmp);
@@ -1397,7 +1441,7 @@ mod tests {
                 .map(|entry| (entry.name, entry.value))
                 .collect()
         };
-        let owned = |rows: [(&str, &str); 5]| {
+        let owned = |rows: [(&str, &str); 6]| {
             rows.map(|(name, value)| (name.to_string(), value.to_string()))
         };
 
@@ -1410,6 +1454,9 @@ mod tests {
             ("Region", "Rex \u{00b7} rotated 12.5\u{00b0}"),
             ("Focus", "focused on \u{00b7} 4, 1500"),
             ("Region", "2000, 750"),
+            // Microsoft's tag for Jane Doe says again what the first row
+            // says, and is left out; John Doe's is new.
+            ("Person", "John Doe \u{00b7} 1000 \u{00d7} 1500 at 0, 0"),
         ]);
         assert_eq!(rows(&exif, [4000, 3000], Turn::NONE), upright);
 
@@ -1430,6 +1477,7 @@ mod tests {
             ("Region", "Rex \u{00b7} rotated 12.5\u{00b0}"),
             ("Focus", "focused on \u{00b7} 1500, 4"),
             ("Region", "2250, 2000"),
+            ("Person", "John Doe \u{00b7} 1500 \u{00d7} 1000 at 1500, 0"),
         ]);
         assert_eq!(
             rows(&exif, [3000, 4000], Turn::NONE.clockwise()),
@@ -1442,6 +1490,49 @@ mod tests {
             rows(&exif, [4000, 3000], Turn::NONE.counterclockwise()),
             upright
         );
+    }
+
+    /// A subject location somewhere other than the middle of the subject
+    /// area is a second subject, and one on its own is a point; one that is
+    /// not two numbers is no shape, and stays in the listing.
+    #[test]
+    fn a_subject_location_is_a_point() {
+        let read = |area: Option<[u16; 4]>, location: &[u16]| {
+            let mut exif = Block::new();
+            if let Some(area) = area {
+                exif.pooled(0x9214, 3, 4, &area.map(u16::to_le_bytes).concat());
+            }
+            let location: Vec<u8> = location.iter().flat_map(|v| v.to_le_bytes()).collect();
+            if location.len() <= 4 {
+                let mut inline = [0u8; 4];
+                inline[..location.len()].copy_from_slice(&location);
+                exif.entry(0xa214, 3, (location.len() / 2) as u32, inline);
+            } else {
+                exif.pooled(0xa214, 3, (location.len() / 2) as u32, &location);
+            }
+            const HEADER: usize = 8;
+            let mut ifd0 = Block::new();
+            let exif_at = HEADER + Block::length_of(1, 0);
+            ifd0.entry(0x8769, 4, 1, (exif_at as u32).to_le_bytes()); // ExifIFDPointer
+            let mut block = b"II\x2a\x00\x08\x00\x00\x00".to_vec();
+            block.extend_from_slice(&ifd0.at(HEADER));
+            block.extend_from_slice(&exif.at(exif_at));
+            let path = written("subject.jpg", &jpeg_with(block));
+            let exif = Exif::read(&path);
+            let _ = std::fs::remove_file(&path);
+            exif
+        };
+        let exif = read(Some([50, 40, 20, 10]), &[10, 20]);
+        assert_eq!(
+            regions_of(&exif, [100, 80]),
+            ["Subject: 20 \u{00d7} 10 at 40, 35", "Subject: 10, 20"]
+        );
+        let exif = read(None, &[10, 20]);
+        assert_eq!(regions_of(&exif, [100, 80]), ["Subject: 10, 20"]);
+        let exif = read(None, &[10, 20, 30]);
+        assert!(regions_of(&exif, [100, 80]).is_empty());
+        let every: Vec<&str> = all(&exif).iter().map(|e| e.name.as_str()).collect();
+        assert!(every.contains(&"SubjectLocation"), "{every:?}");
     }
 
     /// The regions stand after the summaries and the words, before the
