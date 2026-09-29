@@ -20,6 +20,12 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Changed
 
+- The information panel's *File* section is written as a few lines instead
+  of a column of fields: the folder, small, over the file's name and size,
+  then when it was last modified and — where the file system keeps it — when
+  it was created, under a heading with a file mark. Each line, and the name
+  and the size separately, still copies on a click, and the heading copies
+  the section. The *Read by* line has moved to the *Image* section.
 - The top bar gives the file's name its room before the size, pixels and
   color space at its far end, which go one by one as the window narrows
   and are gone altogether before the name is cut short. Before, the facts

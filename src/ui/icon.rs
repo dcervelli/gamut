@@ -204,6 +204,24 @@ pub(super) const SQUARE_MENU: &[Mark] = &[
     Mark::Line([7.0, 16.0], [17.0, 16.0]),
 ];
 
+/// Lucide's `file`: the sheet of `file-image` below with nothing on it —
+/// the mark at the head of the info panel's section about the file itself.
+pub(super) const FILE: &[Mark] = &[
+    // The sheet, from the fold's foot round to the fold's head.
+    Mark::Line([15.0, 2.0], [6.0, 2.0]),
+    Mark::arc([6.0, 4.0], 2.0, -90.0, -90.0),
+    Mark::Line([4.0, 4.0], [4.0, 20.0]),
+    Mark::arc([6.0, 20.0], 2.0, 180.0, -90.0),
+    Mark::Line([6.0, 22.0], [18.0, 22.0]),
+    Mark::arc([18.0, 20.0], 2.0, 90.0, -90.0),
+    Mark::Line([20.0, 20.0], [20.0, 7.0]),
+    Mark::Line([20.0, 7.0], [15.0, 2.0]),
+    // The fold.
+    Mark::Line([14.0, 2.0], [14.0, 6.0]),
+    Mark::arc([16.0, 6.0], 2.0, 180.0, -90.0),
+    Mark::Line([16.0, 8.0], [20.0, 8.0]),
+];
+
 /// Lucide's `file-image`: a sheet with its corner folded and a picture on
 /// it — the mark on the button that opens image files. The sheet is
 /// written out as `clipboard` below is, sides and quarter turns, since
@@ -1030,12 +1048,13 @@ mod tests {
 
     /// Every icon in the table, so that a new one is held to the same
     /// promises as the rest.
-    const ICONS: [&[Mark]; 32] = [
+    const ICONS: [&[Mark]; 33] = [
         CHART_AREA,
         INFO,
         CIRCLE_QUESTION_MARK,
         SQUARE_SQUARE,
         SQUARE_MENU,
+        FILE,
         FILE_IMAGE,
         FOLDER,
         CLIPBOARD,

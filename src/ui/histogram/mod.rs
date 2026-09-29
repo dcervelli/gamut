@@ -904,6 +904,7 @@ mod tests {
                 path: "file".into(),
                 bytes: None,
                 modified: None,
+                created: None,
                 reader: None,
             },
             exif: Exif::default(),

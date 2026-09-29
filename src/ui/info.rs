@@ -62,6 +62,20 @@ const SECTION_GAP: f32 = 11.0;
 /// a pixel into one another's boxes without their ink coming any closer, and
 /// a name and what it names read as one thing rather than as two.
 const LABEL_GAP: f32 = -1.0;
+/// The space between two lines of a section written as prose rather than as
+/// fields, which are one account of one thing and are set as a paragraph is.
+const LINE_GAP: f32 = 1.0;
+/// The space between a heading's mark and its name.
+const MARK_GAP: f32 = 6.0;
+
+/// The fields of the section about the file on disk. Named here because the
+/// section is drawn from them by name rather than as a column of fields, and
+/// the names are what a copy of the section writes down beside each.
+const FOLDER: &str = "Folder";
+const NAME: &str = "Name";
+const SIZE: &str = "Size";
+const MODIFIED: &str = "Modified";
+const CREATED: &str = "Created";
 
 /// The words at the top of the panel. An instruction rather than a fact about
 /// the file, so it is written small and dim: what it says is worth knowing
@@ -96,6 +110,9 @@ pub struct FileFacts {
     /// between being read and being asked about.
     pub bytes: Option<u64>,
     pub modified: Option<SystemTime>,
+    /// When the file was made, where the file system keeps that at all:
+    /// many do not, and it is `None` there as well.
+    pub created: Option<SystemTime>,
     /// The decoder that claimed the file, which is chosen by what its bytes
     /// say rather than by what its name does. `None` on the same terms as the
     /// two above.
@@ -164,6 +181,37 @@ impl Copyable {
     }
 }
 
+/// How a section is drawn. The copying is the same for every one of them —
+/// a section is its fields, in order, whatever it looks like — and only the
+/// drawing is told apart.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Face {
+    /// Each field's name over its value, under the section's name: every
+    /// section the metadata reads out, and any that has no drawing of its own.
+    Fields,
+    /// The file on disk, as a few lines of prose under a heading with a mark:
+    /// see [`file_section`].
+    File,
+}
+
+/// One section of the column: its name, how it is drawn, and its fields.
+struct Section {
+    name: &'static str,
+    face: Face,
+    facts: Vec<Fact>,
+}
+
+impl Section {
+    /// A section drawn as a column of fields.
+    fn fields(name: &'static str, facts: Vec<Fact>) -> Section {
+        Section {
+            name,
+            face: Face::Fields,
+            facts,
+        }
+    }
+}
+
 /// One field as the clipboard takes it. Which section it stands under is
 /// [`Contents`]'s to know, that being the same for every field in one.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -180,7 +228,7 @@ struct Fact {
 /// hit testing then count the same list rather than two that could come to
 /// disagree about which field is which.
 struct Contents {
-    sections: Vec<(&'static str, Vec<Fact>)>,
+    sections: Vec<Section>,
 }
 
 impl Contents {
@@ -189,7 +237,7 @@ impl Contents {
     fn facts(&self) -> impl Iterator<Item = (&'static str, &Fact)> {
         self.sections
             .iter()
-            .flat_map(|(name, facts)| facts.iter().map(move |fact| (*name, fact)))
+            .flat_map(|section| section.facts.iter().map(move |fact| (section.name, fact)))
     }
 }
 
@@ -385,33 +433,147 @@ fn column(pass: &mut Pass, ui: &mut egui::Ui, current: &Current) {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
             let width = ui.available_width();
             let mut index = 0;
-            for (section, (name, facts)) in contents.sections.iter().enumerate() {
+            for (place, section) in contents.sections.iter().enumerate() {
                 // The first heading opens the column and has nothing above
                 // it to be parted from; every one after it is a section
                 // starting, parted from the last by a hairline through the
                 // middle of the space above it, so the gap reads as
                 // belonging to neither section more than the other.
-                if section > 0 {
+                if place > 0 {
                     ui.add_space((SECTION_GAP - RULE_WIDTH) / 2.0);
                     rule(pass, ui, width);
                     ui.add_space((SECTION_GAP - RULE_WIDTH) / 2.0);
                 }
-                block(pass, ui, Copyable::Section(section), width, |ui| {
-                    words(ui, Kind::Heading, name, pass.theme);
-                });
-                for fact in facts {
-                    ui.add_space(FIELD_GAP);
-                    // A field's name and the value under it are one block,
-                    // being one thing to point at and one row to copy.
-                    block(pass, ui, Copyable::Fact(index), width, |ui| {
-                        words(ui, Kind::Label, &fact.name, pass.theme);
-                        ui.add_space(LABEL_GAP);
-                        words(ui, Kind::Value, &fact.value, pass.theme);
-                    });
-                    index += 1;
+                match section.face {
+                    Face::Fields => fields_section(pass, ui, place, section, index, width),
+                    Face::File => file_section(pass, ui, current, place, section, index, width),
                 }
+                index += section.facts.len();
             }
         });
+}
+
+/// A section as a column of fields under its name. `place` is where the
+/// section is down the column and `first` where its first field is in the
+/// column's fields, which is what a click on either copies.
+fn fields_section(
+    pass: &mut Pass,
+    ui: &mut egui::Ui,
+    place: usize,
+    section: &Section,
+    first: usize,
+    width: f32,
+) {
+    block(pass, ui, Copyable::Section(place), width, |ui| {
+        words(ui, Kind::Heading, section.name, pass.theme);
+    });
+    for (index, fact) in (first..).zip(&section.facts) {
+        ui.add_space(FIELD_GAP);
+        // A field's name and the value under it are one block, being one
+        // thing to point at and one row to copy.
+        block(pass, ui, Copyable::Fact(index), width, |ui| {
+            words(ui, Kind::Label, &fact.name, pass.theme);
+            ui.add_space(LABEL_GAP);
+            words(ui, Kind::Value, &fact.value, pass.theme);
+        });
+    }
+}
+
+/// The file on disk, written as it would be said rather than as a table:
+/// the folder it is in, small, over its name and its size, and then when it
+/// was last written and when it was made.
+///
+/// Every line is still a field, and a click on one copies that field as a
+/// click on a field anywhere else does — the value alone, so a click on the
+/// date copies the date rather than the words around it, and a click on the
+/// size copies the size exactly, as the section's copy writes it too. The
+/// name and the size share a line and are pointed at apart.
+fn file_section(
+    pass: &mut Pass,
+    ui: &mut egui::Ui,
+    current: &Current,
+    place: usize,
+    section: &Section,
+    first: usize,
+    width: f32,
+) {
+    let theme = pass.theme;
+    let grid = pass.grid;
+    let field = |name: &str| {
+        (first..)
+            .zip(&section.facts)
+            .find(|(_, fact)| fact.name == name)
+    };
+    block(pass, ui, Copyable::Section(place), width, |ui| {
+        heading(ui, icon::FILE, section.name, grid, theme);
+    });
+    ui.add_space(FIELD_GAP);
+    if let Some((index, folder)) = field(FOLDER) {
+        block(pass, ui, Copyable::Fact(index), width, |ui| {
+            words(ui, Kind::Label, &folder.value, theme);
+        });
+        ui.add_space(LABEL_GAP);
+    }
+    let name = field(NAME);
+    // The size as the file list gives it, round: the exact count is what a
+    // click copies, and would say the same thing twice in brackets here.
+    let size = field(SIZE).zip(current.file.bytes.map(round_bytes));
+    if name.is_some() || size.is_some() {
+        let left = ui.cursor().min.x;
+        ui.horizontal_wrapped(|ui| {
+            ui.set_width(width);
+            ui.spacing_mut().item_spacing.x = measure(ui, " ");
+            let mut piece = |ui: &mut egui::Ui, index: usize, text: String| {
+                let response = ui.add(
+                    Label::new(
+                        RichText::new(text)
+                            .size(TEXT_SIZE)
+                            .color(theme.text_primary),
+                    )
+                    .wrap()
+                    .sense(Sense::CLICK),
+                );
+                // The button goes where every other one in the column does,
+                // at the column's end, level with the piece pointed at.
+                let across =
+                    egui::Rect::from_x_y_ranges(left..=left + width, response.rect.y_range());
+                let pointed = response.contains_pointer();
+                offer(pass, ui, Copyable::Fact(index), &response, across, pointed);
+            };
+            if let Some((index, name)) = name {
+                piece(ui, index, name.value.clone());
+            }
+            if let Some(((index, _), size)) = size {
+                piece(ui, index, format!("({size})"));
+            }
+        });
+    }
+    for (label, key) in [("Last modified on", MODIFIED), ("Created on", CREATED)] {
+        if let Some((index, time)) = field(key) {
+            ui.add_space(LINE_GAP);
+            block(pass, ui, Copyable::Fact(index), width, |ui| {
+                words(ui, Kind::Value, &format!("{label} {}", time.value), theme);
+            });
+        }
+    }
+}
+
+/// A section's name with the mark that stands for it before it, in the
+/// name's own ink and at the size the copy buttons' mark is drawn: a mark only
+/// as tall as the name's line comes out a size smaller than the words.
+fn heading(ui: &mut egui::Ui, mark: &[icon::Mark], name: &str, grid: icon::Grid, theme: &Theme) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = MARK_GAP;
+        let (rect, _) = ui.allocate_exact_size(Vec2::splat(COPY_ICON), Sense::HOVER);
+        icon::paint(
+            ui.painter(),
+            mark,
+            icon::square(grid, rect, COPY_ICON),
+            Kind::Heading.ink(theme).into(),
+            theme.panel_background.into(),
+        );
+        words(ui, Kind::Heading, name, theme);
+    });
 }
 
 /// One run of words in the column, broken to its width.
@@ -431,26 +593,42 @@ fn block(
     width: f32,
     add: impl FnOnce(&mut egui::Ui),
 ) {
-    let control = Control::Facts(copies);
     let response = ui
         .scope_builder(UiBuilder::new().sense(Sense::CLICK), |ui| {
             ui.set_width(width);
             add(ui);
         })
         .response;
+    // The pointer is on the words inside rather than on the block, as egui
+    // counts hovering, so it is asked where the pointer is instead.
+    let pointed = ui.rect_contains_pointer(response.rect);
+    offer(pass, ui, copies, &response, response.rect, pointed);
+}
+
+/// What makes something laid out in the column a thing that copies: its
+/// name for a screen reader, the button over the end of `across` while it is
+/// `pointed` at, and the press when it is clicked.
+fn offer(
+    pass: &mut Pass,
+    ui: &egui::Ui,
+    copies: Copyable,
+    response: &egui::Response,
+    across: egui::Rect,
+    pointed: bool,
+) {
+    let control = Control::Facts(copies);
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, control.label()));
-    let rect = response.rect;
-    if ui.rect_contains_pointer(rect) && ui.clip_rect().height() >= CHIP_HEIGHT {
+    if pointed && ui.clip_rect().height() >= CHIP_HEIGHT {
         let chip_width = chip_width(ui, copies);
         let clip = ui.clip_rect();
-        let y = (rect.center().y - CHIP_HEIGHT / 2.0)
+        let y = (across.center().y - CHIP_HEIGHT / 2.0)
             .round()
             .clamp(clip.min.y, clip.max.y - CHIP_HEIGHT);
         chip(
             pass,
             ui,
             egui::Rect::from_min_size(
-                pos2(rect.max.x - chip_width, y),
+                pos2(across.max.x - chip_width, y),
                 vec2(chip_width, CHIP_HEIGHT),
             ),
             copies,
@@ -474,8 +652,12 @@ fn block(
 /// picture always has a color space.
 fn contents(current: &Current) -> Contents {
     let mut sections = vec![
-        ("File", fields(file_facts(current))),
-        ("Image", fields(image_facts(current))),
+        Section {
+            name: "File",
+            face: Face::File,
+            facts: fields(file_facts(current)),
+        },
+        Section::fields("Image", fields(image_facts(current))),
     ];
     let exif = &current.exif;
     let first = sections.len();
@@ -484,7 +666,7 @@ fn contents(current: &Current) -> Contents {
             .entries
             .iter()
             .map(|entry| (entry.name.as_str(), entry.value.clone()));
-        sections.push((section.name, fields(entries)));
+        sections.push(Section::fields(section.name, fields(entries)));
     }
     // The regions are written out here rather than with the rest, since
     // where each is depends on the turn in force.
@@ -492,8 +674,11 @@ fn contents(current: &Current) -> Contents {
     let entries = regions
         .iter()
         .map(|entry| (entry.name.as_str(), entry.value.clone()));
-    sections.insert(first + exif.regions_at(), (exif::REGIONS, fields(entries)));
-    sections.retain(|(_, facts)| !facts.is_empty());
+    sections.insert(
+        first + exif.regions_at(),
+        Section::fields(exif::REGIONS, fields(entries)),
+    );
+    sections.retain(|section| !section.facts.is_empty());
     Contents { sections }
 }
 
@@ -528,7 +713,7 @@ pub fn copied(current: &Current, copies: Copyable) -> String {
                 .map(|(section, fact)| format!("{},{}", quoted(section), row(fact))),
         ),
         Copyable::Section(index) => match contents.sections.get(index) {
-            Some((_, facts)) => joined(facts.iter().map(row)),
+            Some(section) => joined(section.facts.iter().map(row)),
             None => String::new(),
         },
         Copyable::Fact(index) => contents
@@ -565,20 +750,23 @@ fn quoted(value: &str) -> String {
     }
 }
 
-/// What the panel says about the file as a file: what it is called and where
-/// it lives, which decoder turned out to own it, then how big it is and when
-/// it was last written. Nothing here is about the picture.
+/// What the panel says about the file as a file: where it lives and what it
+/// is called, how big it is, and when it was last written and first made.
+/// Nothing here is about the picture, nor about how it was read.
 fn file_facts(current: &Current) -> Vec<(&'static str, String)> {
     let file = &current.file;
+    // The folder as the path was given: a file named on its own on the
+    // command line has none to say, and the line goes.
+    let folder = std::path::Path::new(&file.path)
+        .parent()
+        .map(|folder| folder.display().to_string())
+        .unwrap_or_default();
     vec![
-        ("Name", current.label.clone()),
-        ("Path", file.path.clone()),
-        ("Read by", file.reader.unwrap_or_default().to_string()),
-        ("Size", file.bytes.map(format_bytes).unwrap_or_default()),
-        (
-            "Modified",
-            file.modified.map(format_time).unwrap_or_default(),
-        ),
+        (FOLDER, folder),
+        (NAME, current.label.clone()),
+        (SIZE, file.bytes.map(format_bytes).unwrap_or_default()),
+        (MODIFIED, file.modified.map(format_time).unwrap_or_default()),
+        (CREATED, file.created.map(format_time).unwrap_or_default()),
     ]
 }
 
@@ -589,6 +777,12 @@ fn file_facts(current: &Current) -> Vec<(&'static str, String)> {
 fn image_facts(current: &Current) -> Vec<(&'static str, String)> {
     let image = &current.image;
     vec![
+        // The decoder that claimed the file, by what its bytes say: the
+        // first thing to know about why the rest reads as it does.
+        (
+            "Read by",
+            current.file.reader.unwrap_or_default().to_string(),
+        ),
         // Which of a raw's two pictures the rest of these are about, where
         // it is the camera's rather than the one developed here.
         (
@@ -780,6 +974,7 @@ mod tests {
                 path: "/home/reader/pictures/kingfisher.png".into(),
                 bytes: Some(1_258_291),
                 modified: Some(SystemTime::UNIX_EPOCH + Duration::from_secs(1_756_632_722)),
+                created: Some(SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000)),
                 reader: Some("png"),
             },
             exif: photograph(),
@@ -826,9 +1021,10 @@ mod tests {
         contents(current)
             .sections
             .iter()
-            .flat_map(|(name, facts)| {
-                std::iter::once(name.to_string()).chain(
-                    facts
+            .flat_map(|section| {
+                std::iter::once(section.name.to_string()).chain(
+                    section
+                        .facts
                         .iter()
                         .flat_map(|fact| [fact.name.clone(), fact.value.clone()]),
                 )
@@ -844,10 +1040,11 @@ mod tests {
         let written = written(&current());
         for expected in [
             "kingfisher.png",
-            "/home/reader/pictures/kingfisher.png",
+            "/home/reader/pictures",
             "png",
             "1.26 MB (1,258,291 bytes)",
             "2025-08-31 09:32:02 UTC",
+            "2023-11-14 22:13:20 UTC",
             "4 \u{00d7} 5",
             "8-bit rgb",
             "BT.709/sRGB",
@@ -862,8 +1059,10 @@ mod tests {
         // Each fact is named, and the name comes before its value; each
         // section is headed, and the sections come in the order they are read.
         let index = |text: &str| written.iter().position(|row| row == text);
-        assert!(index("Path") < index("/home/reader/pictures/kingfisher.png"));
+        assert!(index("Folder") < index("/home/reader/pictures"));
         assert!(index("File") < index("Image"));
+        // How the file was read is said of the picture it was read into.
+        assert!(index("Image") < index("Read by"));
         assert!(index("Image") < index("Resolution"));
         // The picture's size is a fact about the picture, not about the file
         // it arrived in, and is read under the heading that says so.
@@ -908,6 +1107,16 @@ mod tests {
         );
     }
 
+    /// A file named on its own, with no folder in the path it was given,
+    /// has no folder line rather than an empty one.
+    #[test]
+    fn a_file_named_alone_has_no_folder() {
+        let mut current = current();
+        current.file.path = "kingfisher.png".into();
+        let written = written(&current);
+        assert!(!written.iter().any(|row| row == "Folder"), "{written:?}");
+    }
+
     /// A file that carries no metadata still has a file and a picture to
     /// describe, and is not given empty headings to explain the rest.
     #[test]
@@ -931,11 +1140,13 @@ mod tests {
         let mut current = current();
         current.file.bytes = None;
         current.file.modified = None;
+        current.file.created = None;
         current.file.reader = None;
         let written = written(&current);
         for absent in [
             "Size",
             "Modified",
+            "Created",
             "Read by",
             "Alpha",
             "Declared range",
@@ -993,18 +1204,18 @@ mod tests {
             .lines()
             .map(str::to_string)
             .collect();
-        assert_eq!(all[0], "File,Name,kingfisher.png");
+        assert_eq!(all[0], "File,Folder,/home/reader/pictures");
         assert_eq!(
-            copied(&current, Copyable::Section(0)).lines().next(),
+            copied(&current, Copyable::Section(0)).lines().nth(1),
             Some("Name,kingfisher.png")
         );
-        assert_eq!(copied(&current, Copyable::Fact(0)), "kingfisher.png");
+        assert_eq!(copied(&current, Copyable::Fact(1)), "kingfisher.png");
 
         // A size holds commas, which the two table shapes quote and the
         // field on its own does not: there is nothing there to run into.
-        assert_eq!(all[3], "File,Size,\"1.26 MB (1,258,291 bytes)\"");
+        assert_eq!(all[2], "File,Size,\"1.26 MB (1,258,291 bytes)\"");
         assert_eq!(
-            copied(&current, Copyable::Fact(3)),
+            copied(&current, Copyable::Fact(2)),
             "1.26 MB (1,258,291 bytes)"
         );
 
@@ -1014,8 +1225,9 @@ mod tests {
         // the last column of its own row.
         let contents = contents(&current);
         let mut index = 0;
-        for (section, (name, facts)) in contents.sections.iter().enumerate() {
-            let rows: Vec<String> = copied(&current, Copyable::Section(section))
+        for (place, section) in contents.sections.iter().enumerate() {
+            let (name, facts) = (section.name, &section.facts);
+            let rows: Vec<String> = copied(&current, Copyable::Section(place))
                 .lines()
                 .map(str::to_string)
                 .collect();

@@ -483,6 +483,7 @@ mod tests {
                 path: "a.png".into(),
                 bytes: None,
                 modified: None,
+                created: None,
                 reader: None,
             },
             exif: Exif::default(),

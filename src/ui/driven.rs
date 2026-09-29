@@ -106,6 +106,7 @@ fn picture(width: u32, height: u32) -> Current {
             path: "photo.png".into(),
             bytes: None,
             modified: None,
+            created: None,
             reader: None,
         },
         exif: Exif::default(),
