@@ -927,8 +927,8 @@ after them moves as the pointer crosses a power of ten. In a window too narrow
 for all of it, the coordinates stay.
 
 One pixel answers more than one question, so the value is written whichever of
-four ways you ask for. It starts in hex; the `pixel_format` setting in
-[the configuration file](SETTINGS.md) starts it in another. **Decimal** is the numbers the file holds, in its own
+four ways you ask for. It starts in hex, and after that in whichever you
+last chose. **Decimal** is the numbers the file holds, in its own
 units — codes for an 8-bit image, counts for a 16-bit one, the value itself
 for floating point — the numbers whatever wrote the file put there. **Hex** is
 those same numbers as a color is usually written down: run together, in upper
@@ -947,7 +947,7 @@ and what is farther. A picture with no depth map reads
 
 `.` steps through the four, and the dot at the head of the readout opens a
 menu of them; whichever is in force is lit. It applies to whichever image is
-on screen and stays as you set it.
+on screen and stays as you set it, into the next run too.
 
 A georeferenced raster — a scanned map, an elevation model, a satellite scene —
 can say where the pixel is on the ground as well as where it is in the image,
@@ -973,9 +973,8 @@ latitude and longitude is good to a meter or two, not to survey accuracy: it
 shifts between datums by a fixed offset rather than by the grids a surveyor's
 software uses. For every other image the rows are not in the menu at all, and
 wherever a file cannot answer what you chose, the readout shows the pixel —
-the choice stays, and applies again to the next map you open. The
-`coordinate_format` and `geographic_format` settings in
-[the configuration file](SETTINGS.md) choose where they start.
+the choice stays, and applies again to the next map you open, in the next
+run as well.
 
 The slot in the last column is the name of that gesture in the
 [configuration file](SETTINGS.md#gestures), which can give it something else

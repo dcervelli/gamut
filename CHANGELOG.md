@@ -15,7 +15,14 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   dual-camera portrait; a JPEG with Google's depth block reads as a distance
   in the file's units; any other HEIC with a depth image reads as the code
   its map holds. A picture without one reads `(no depth)`.
-  `pixel_format = "depth"` starts the readout there.
+
+### Changed
+
+- The pixel readout's formats — the value, and for a map the coordinates
+  and how a latitude is written — are remembered between runs in the state
+  file, as the sort order and the loupe's magnification are, rather than set
+  in the configuration file. `pixel_format`, `coordinate_format` and
+  `geographic_format` lines left in a configuration file are ignored.
 
 ## 0.8.3 - 2026-09-29
 

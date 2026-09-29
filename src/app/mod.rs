@@ -578,9 +578,9 @@ impl App {
                 show_loupe: false,
                 loupe_magnification: kept_state.loupe_magnification,
                 paste: false,
-                pixel_format: config.pixel_format,
-                coordinate_format: config.coordinate_format,
-                geographic_format: config.geographic_format,
+                pixel_format: kept_state.pixel_format,
+                coordinate_format: kept_state.coordinate_format,
+                geographic_format: kept_state.geographic_format,
             },
             trash: Trash::detect(),
             edits: Vec::new(),
@@ -3054,6 +3054,9 @@ impl ApplicationHandler<UserEvent> for App {
             loupe_magnification: self.panels.loupe_magnification,
             order: self.filmstrip.order(),
             camera_jpeg: self.rendering == Rendering::CameraJpeg,
+            pixel_format: self.panels.pixel_format,
+            coordinate_format: self.panels.coordinate_format,
+            geographic_format: self.panels.geographic_format,
         });
     }
 }
@@ -3151,9 +3154,6 @@ mod tests {
                 show_filmstrip: false,
                 show_histogram: false,
                 show_info: false,
-                pixel_format: ui::PixelFormat::Decimal,
-                coordinate_format: ui::CoordinateFormat::Pixel,
-                geographic_format: ui::GeographicFormat::Decimal,
                 log_counts: false,
                 browse_folder: true,
                 keys: keymap::Keymap::table(),
@@ -5283,6 +5283,31 @@ mod tests {
             threads(),
         );
         assert_eq!(app.rendering, Rendering::CameraJpeg);
+    }
+
+    /// How the readout was last written comes back from the state file:
+    /// the pixel's value, its place, and a latitude's.
+    #[test]
+    fn the_readout_s_formats_come_back_from_the_state_file() {
+        let app = App::new(
+            Vec::new(),
+            Vec::new(),
+            None,
+            options(),
+            StateFile::holding(State {
+                pixel_format: ui::PixelFormat::Depth,
+                coordinate_format: ui::CoordinateFormat::Projected,
+                geographic_format: ui::GeographicFormat::Dms,
+                ..State::default()
+            }),
+            threads(),
+        );
+        assert_eq!(app.panels.pixel_format, ui::PixelFormat::Depth);
+        assert_eq!(
+            app.panels.coordinate_format,
+            ui::CoordinateFormat::Projected
+        );
+        assert_eq!(app.panels.geographic_format, ui::GeographicFormat::Dms);
     }
 
     /// A fixture from `test_images/`, opened on its own.
