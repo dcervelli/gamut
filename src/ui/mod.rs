@@ -274,6 +274,10 @@ pub struct Panels {
     /// button held on the picture puts it up as well, whatever this says;
     /// where it is on any one frame is [`FrameInput::loupe`].
     pub show_loupe: bool,
+    /// Whether a picture's depth map is drawn in its place, stretched over
+    /// it. A way of looking like the grid and the loupe, so it stays on from
+    /// one file to the next, and applies to each that carries a map.
+    pub show_depth: bool,
     /// How much larger the loupe's glass shows what its eye rings: one of
     /// [`loupe::MAGNIFICATIONS`], which the wheel steps through while the
     /// secondary button holds the loupe up. The glass stays one size and
@@ -1043,6 +1047,7 @@ mod tests {
             show_minimap: true,
             show_grid: false,
             show_loupe: false,
+            show_depth: false,
             loupe_magnification: loupe::DEFAULT_MAGNIFICATION,
             paste: false,
             pixel_format: PixelFormat::default(),

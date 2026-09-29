@@ -658,7 +658,7 @@ mod tests {
             .lines()
             .filter(|line| line.starts_with("gesture."))
             .count();
-        assert_eq!(keys, 95, "{uncommented}");
+        assert_eq!(keys, 96, "{uncommented}");
         // A Mac's two more: the wheel with Command, and the pinch.
         let slots = if cfg!(target_os = "macos") { 12 } else { 10 };
         assert_eq!(gestures, slots, "{uncommented}");

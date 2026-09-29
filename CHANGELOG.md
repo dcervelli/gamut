@@ -15,6 +15,9 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   dual-camera portrait; a JPEG with Google's depth block reads as a distance
   in the file's units; any other HEIC with a depth image reads as the code
   its map holds. A picture without one reads `(no depth)`.
+- A **Depth** button at the bottom right, and `D`, for a picture carrying a
+  depth map: shows the map in the picture's place, stretched to its size,
+  and the picture again, without reading the file again.
 
 ### Changed
 

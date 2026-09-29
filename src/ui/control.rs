@@ -102,6 +102,11 @@ pub enum Control {
     /// on screen, and drawn only for a raw that carries a JPEG. `v` does the
     /// same.
     CameraJpeg,
+    /// The toggle in the bottom bar, between the camera's switch and the
+    /// headroom switch, that draws the picture's depth map in its place,
+    /// stretched over it: lit while it is, and drawn only for a picture
+    /// that carries one. `D` does the same.
+    Depth,
     /// The button at the foot of the right strip, which opens the help
     /// popup — every key, what it does and when — and closes it while it
     /// is up. `?` and `/` do the same.
@@ -233,6 +238,7 @@ impl Control {
             // The control's name, which stays put; what is drawn on it is
             // which picture is up — see `Pass::camera_switch`.
             Control::CameraJpeg => "Camera JPEG".to_string(),
+            Control::Depth => "Depth".to_string(),
             Control::Help => "Help".to_string(),
             Control::PixelFormat => "Pixel format".to_string(),
             Control::Dismiss => "Dismiss".to_string(),
@@ -514,6 +520,7 @@ impl Control {
         Control::Curve(0),
         Control::Output,
         Control::CameraJpeg,
+        Control::Depth,
         Control::Help,
         Control::PixelFormat,
         Control::Dismiss,
@@ -583,6 +590,7 @@ impl Control {
             | Control::Curve(_)
             | Control::Output
             | Control::CameraJpeg
+            | Control::Depth
             | Control::Help
             | Control::PixelFormat
             | Control::Dismiss

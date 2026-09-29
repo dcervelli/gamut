@@ -418,6 +418,18 @@ pub(super) const GRID_3X3: &[Mark] = &[
     Mark::Line([15.0, 3.0], [15.0, 21.0]),
 ];
 
+/// Lucide's `axis-3d`: two axes meeting at a rounded corner, and the third
+/// running back from it in dashes — depth, for the toggle that shows the
+/// depth map.
+pub(super) const AXIS_3D: &[Mark] = &[
+    Mark::Line([4.0, 4.0], [4.0, 19.0]),
+    Mark::arc([5.0, 19.0], 1.0, 180.0, -90.0),
+    Mark::Line([5.0, 20.0], [20.0, 20.0]),
+    Mark::Line([4.293, 19.707], [6.0, 18.0]),
+    Mark::Line([9.0, 15.0], [10.5, 13.5]),
+    Mark::Line([13.5, 10.5], [15.0, 9.0]),
+];
+
 /// Lucide's `zoom-in`: a magnifying glass with a plus in it, for the loupe,
 /// which is one.
 pub(super) const ZOOM_IN: &[Mark] = &[

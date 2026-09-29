@@ -592,6 +592,18 @@ carries the rendering it was asked for on `Opened::rendering`, and
 `App::follow_rendering` asks again once it lands if the preference has moved
 in the meantime.
 
+## The depth map
+
+The depth toggle sits between the camera's switch and the headroom switch
+(`Pass::depth_toggle`), and is left out on a picture with no depth map for
+the camera switch's reason: most pictures are not the kind of thing it is
+about. Its refusal for the key is `NO_DEPTH_MAP`. It is a toggle of the view
+like the grid and the loupe, held in `Panels::show_depth`, so it holds from
+one picture to the next, and lights while on through the same
+`Pass::worded_toggle` that draws those two with their readings. What it
+draws, and how the map is stretched over the picture, is in
+[formats](formats.md#depth-maps).
+
 ## The region
 
 A region is a `Region` in `src/image/region.rs`: a rectangle of whole image

@@ -112,6 +112,10 @@ pub struct Scene<'a> {
     /// interface stands a thumbnail of the file on its way in over it: the
     /// picture installed is the one being stepped away from.
     pub picture: bool,
+    /// Whether the image held beside the picture — its depth map — is drawn
+    /// in its place, stretched over the same placement. `display` is then
+    /// the one that image is windowed by.
+    pub beside: bool,
 }
 
 /// One pass of egui's interface, tessellated and ready to draw: the
@@ -344,6 +348,16 @@ impl Renderer {
         note
     }
 
+    /// Uploads `image` and holds it beside the picture on screen, for a
+    /// scene to draw in its place: the picture stays where it is on the
+    /// device, and goes back on screen without a read or an upload. Let go
+    /// when another picture is installed.
+    pub fn hold_beside(&mut self, image: &DecodedImage) -> Result<()> {
+        let uploaded = self.uploader().run(image)?;
+        self.image_layer.hold_beside(uploaded);
+        Ok(())
+    }
+
     /// Takes the image off the screen, for a window with nothing left to
     /// show: the next frame draws the backdrop alone, as the first did.
     pub fn clear_image(&mut self) {
@@ -459,6 +473,7 @@ impl Renderer {
                     headroom: scene.headroom,
                     lift: scene.lift,
                     turn: scene.turn,
+                    beside: scene.beside,
                 },
                 size,
                 display,
@@ -468,7 +483,7 @@ impl Renderer {
         // a checkerboard rather than as the plain backdrop. Asked of the image
         // layer rather than assumed from `placement`, since a frame drawn
         // before the first file has decoded has a placement but no image.
-        let drawn = self.image_layer.current().filter(|_| scene.picture);
+        let drawn = self.image_layer.drawn().filter(|_| scene.picture);
         let (checkered, glass, gray) = match drawn {
             Some(image) => ([Some(placement), thumbnail], loupe, image.is_gray()),
             None => ([None, None], None, false),

@@ -280,6 +280,52 @@ fn a_refilled_texture_draws_the_new_frame() {
 
 /// The claim minification rests on: an output pixel is the mean of exactly the
 /// texels it covers, not a bilinear tap at its center.
+/// An image held beside the picture — a depth map a quarter of its size —
+/// is drawn in the picture's place when asked for, stretched over the
+/// picture's own placement; the picture comes back when it is not asked
+/// for, and a new picture lets the image beside the old one go.
+#[test]
+fn an_image_beside_the_picture_is_stretched_over_it() {
+    let Some(gpu) = gpu::test_context() else {
+        return;
+    };
+    const SIZE: u32 = 8;
+    let picture = gray_u8(SIZE, SIZE, vec![255; (SIZE * SIZE) as usize]);
+    let beside = gray_u8(2, 2, vec![0, 85, 170, 255]);
+
+    let mut layer = ImageLayer::new(&gpu.device, &gpu.queue, WORKING_FORMAT);
+    let upload = layer.uploader(&gpu.device, &gpu.queue, gpu.capabilities);
+    layer.install(upload.run(&picture).expect("the picture uploads"));
+    layer.hold_beside(upload.run(&beside).expect("the map uploads"));
+    let placement = whole([SIZE, SIZE], &picture);
+    let asked = |beside| Draw {
+        beside,
+        ..Draw::plain(placement, None)
+    };
+
+    let pixels = draw_layer(gpu, &mut layer, [SIZE, SIZE], asked(true));
+    let width = SIZE as usize;
+    for (x, y, want) in [
+        (1, 1, 0.0),
+        (6, 1, 85.0 / 255.0),
+        (1, 6, 170.0 / 255.0),
+        (6, 6, 1.0),
+    ] {
+        let got = at(&pixels, width, x, y);
+        assert!(close(got, want, 1e-3), "({x}, {y}): got {got}, want {want}");
+    }
+
+    let pixels = draw_layer(gpu, &mut layer, [SIZE, SIZE], asked(false));
+    assert!(close(at(&pixels, width, 1, 1), 1.0, 1e-3), "the picture");
+
+    layer.install(upload.run(&picture).expect("the picture uploads"));
+    let pixels = draw_layer(gpu, &mut layer, [SIZE, SIZE], asked(true));
+    assert!(
+        close(at(&pixels, width, 1, 1), 1.0, 1e-3),
+        "nothing beside a new picture"
+    );
+}
+
 #[test]
 fn minification_averages_every_texel_it_covers() {
     let Some(gpu) = gpu::test_context() else {
@@ -544,6 +590,7 @@ fn the_thumbnail_is_drawn_beside_the_view_and_builds_the_chain_it_needs() {
             headroom: Headroom::None,
             lift: 0.0,
             turn: Turn::NONE,
+            beside: false,
         },
     );
 
@@ -639,6 +686,7 @@ fn the_loupe_is_cut_to_its_circle_and_replaces_what_is_under_it() {
             headroom: Headroom::None,
             lift: 0.0,
             turn: Turn::NONE,
+            beside: false,
         },
     );
     let width = target[0] as usize;
@@ -692,6 +740,7 @@ fn the_loupe_is_cut_to_its_circle_and_replaces_what_is_under_it() {
             headroom: Headroom::None,
             lift: 0.0,
             turn: Turn::NONE,
+            beside: false,
         },
     );
     // The last texel fills the two pixels left of the center and the two
@@ -777,6 +826,7 @@ fn the_compositor_clears_the_glass_past_the_pictures_edge() {
         lift: 0.0,
         turn: Turn::NONE,
         picture: true,
+        beside: false,
     };
     composite.prepare(
         &gpu.queue,
@@ -1318,6 +1368,7 @@ fn composited(
         lift: 0.0,
         turn: Turn::NONE,
         picture: true,
+        beside: false,
     };
     composite.prepare(&gpu.queue, &scene, gray, &output, [None, None], None);
     render_to(gpu, [width, 1], |encoder, view| {
@@ -1465,6 +1516,7 @@ fn the_thumbnail_is_drawn_over_the_glass() {
             headroom: Headroom::None,
             lift: 0.0,
             turn: Turn::NONE,
+            beside: false,
         },
     );
     // Inside both, the thumbnail's bright column shows, not the glass's

@@ -378,6 +378,7 @@ fn image(b: &mut Builder) -> Vec<Node> {
         Node::Separator,
         b.button("HDR Output", Control::Output),
         b.button("Camera JPEG", Control::CameraJpeg),
+        b.button("Depth Map", Control::Depth),
         Node::Separator,
         b.submenu("Histogram Plot", None, plot),
     ]
@@ -644,6 +645,7 @@ impl App {
                 Control::Info => panels.show_info,
                 Control::Grid => panels.show_grid,
                 Control::Loupe => panels.show_loupe,
+                Control::Depth => panels.show_depth,
                 Control::Luma => panels.show_luma,
                 Control::Planes => panels.show_planes,
                 Control::Log => panels.log_counts,

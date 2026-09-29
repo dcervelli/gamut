@@ -1,10 +1,12 @@
 //! A depth map beside the picture: how far from the camera each pixel was,
 //! as the phone or the program that wrote the file measured or estimated it.
 //!
-//! Nothing on screen is drawn from it. It is carried with the picture the
-//! way a gain map is, at its own size — a phone's depth map is a fraction of
-//! the photograph's — and turned with it, and read one pixel at a time by the
-//! readout under the pointer when the depth is what was asked for.
+//! It is carried with the picture the way a gain map is, at its own size — a
+//! phone's depth map is a fraction of the photograph's — and turned with it,
+//! read one pixel at a time by the readout under the pointer when the depth
+//! is what was asked for, and drawn, as [`DepthMap::image`], in the
+//! picture's place and stretched over it when the depth map is asked to be
+//! shown.
 //!
 //! Every vendor stores a map the same way underneath: a gray image whose
 //! codes are spread evenly over a range of some quantity, which is either
@@ -25,8 +27,8 @@ pub mod google;
 
 use std::sync::Arc;
 
-use super::Samples;
 use super::xmp::Xmp;
+use super::{AlphaMode, ColorSpace, DecodedImage, Referred, Samples};
 
 /// The depth map, shared between the image and every copy of it.
 pub type Shared = Arc<DepthMap>;
@@ -148,6 +150,21 @@ impl Scale {
 }
 
 impl DepthMap {
+    /// The map as a picture of its own, to be drawn in the place of the one
+    /// it belongs to: its codes as they are, gray, read as a measurement,
+    /// which windows them to the range they span rather than to white.
+    pub fn image(&self) -> DecodedImage {
+        let mut image = DecodedImage::new(
+            self.width,
+            self.height,
+            self.samples.clone(),
+            ColorSpace::LINEAR_BT709,
+            AlphaMode::Opaque,
+        );
+        image.referred = Referred::Measured;
+        image
+    }
+
     /// The map under the pixel `(x, y)` of a picture `width` by `height`,
     /// as it is stored: the map's own pixel covering the same fraction of
     /// the way across and down. `None` outside the picture.

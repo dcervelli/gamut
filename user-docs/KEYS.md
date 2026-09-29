@@ -541,6 +541,7 @@ that is not a paste; open it as an argument instead.
 | `w` | Mark the clipped pixels, or stop: red where a channel has reached white, blue where one has reached black | `display.marks` |
 | `o` | Turn the room above white off and on, where the monitor is in HDR mode | `display.hdr` |
 | `v` | Show a raw as the camera's JPEG of it, or as the picture developed from the sensor | `display.camera-jpeg` |
+| `Shift+D` | Show a picture's depth map in its place, or the picture again | `display.depth` |
 | `r` | Cycle false color: gray → viridis → magma → turbo | `display.colormap` |
 | `z` | Reset every display setting | `display.reset` |
 | `;` | Turn the picture a quarter counterclockwise | `display.turn.left` |
@@ -570,6 +571,19 @@ Some cameras write a JPEG the full size of the frame; others write a smaller
 one, around two megapixels, and the top bar says how large the picture on
 screen is. A raw with no JPEG in it has no button, and shows its developed
 picture while the camera's JPEG is chosen, saying so as it opens.
+
+A picture that carries a depth map — a phone's portrait, say — has a
+**Depth** button between that one and `HDR`. A click on it or `D` shows the
+depth map in the picture's place, stretched to the picture's size so that
+everything stays where it was, and lights the button; another shows the
+picture again. Nothing is read from the file again either way, so the two
+can be flicked between. The map is shown in gray, stretched from the lowest
+value it holds to the highest, with none of the picture's exposure or false
+color on it: in an iPhone's portrait the near things come out light, and in
+a map stored the other way round they come out dark. It stays on as you step through
+other pictures that carry a map, and a picture without one is shown as
+itself. The pixel readout still reads the picture; choose **Depth** in its
+menu to read the map.
 
 The window is the one place the case of a key matters: `a` and `s` move
 the value that comes out black, `A` and `S` the value that comes out white.
@@ -898,6 +912,7 @@ region behind: it belongs to the picture it was drawn on.
 | Click the dot beside the grid button | Choose how a pixel's value is read out | |
 | Click a turn button, near the bottom right | Turn the picture a quarter counterclockwise or clockwise, as `;` and `'` do | |
 | Click **Camera RAW** or **Camera JPEG**, before `HDR` at the bottom right | Show a raw as the camera's JPEG of it, or as the developed picture, as `v` does | |
+| Click **Depth**, just before `HDR` at the bottom right | Show a picture's depth map in its place, or the picture again, as `D` does | |
 
 The button at the top of the left strip opens a menu of the
 copies beside it: the file's **Name**, its **Path**, its **URI**, the

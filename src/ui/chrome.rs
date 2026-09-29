@@ -77,6 +77,8 @@ const OUTPUT_BUTTON: [f32; 2] = [42.0, 22.0];
 /// one, or the camera's JPEG.
 pub(super) const CAMERA_RAW: &str = "Camera RAW";
 pub(super) const CAMERA_JPEG: &str = "Camera JPEG";
+/// The word the depth toggle wears beside its mark.
+pub(super) const DEPTH: &str = "Depth";
 
 /// Width of the hairline along a panel's inner edge, in logical pixels. What
 /// it is drawn in is the theme's `border`.
@@ -511,6 +513,9 @@ impl Pass<'_> {
                 ui.add_space(BAR_PADDING);
                 self.output_switch(ui);
                 ui.add_space(PADDING);
+                if self.depth_toggle(ui, current) {
+                    ui.add_space(PADDING);
+                }
                 if self.camera_switch(ui, current) {
                     ui.add_space(PADDING);
                 }
@@ -675,6 +680,35 @@ impl Pass<'_> {
         control: Control,
         reading: Option<&str>,
     ) {
+        self.worded_toggle(ui, marks, control, reading, reading.is_some());
+    }
+
+    /// The toggle that draws the picture's depth map in its place, between
+    /// the camera's switch and the headroom switch: the mark and its word,
+    /// lit while the map is drawn. Left out, as the camera's switch is,
+    /// where there is no map — which is nearly every file — and while
+    /// another file is on its way in, whose map this would not be. Says
+    /// whether it was drawn.
+    fn depth_toggle(&mut self, ui: &mut Ui, current: &Current) -> bool {
+        if current.image.depth.is_none() || self.input.arriving.is_some() {
+            return false;
+        }
+        let on = self.panels.show_depth;
+        self.worded_toggle(ui, icon::AXIS_3D, Control::Depth, Some(DEPTH), on);
+        true
+    }
+
+    /// A square toggle's mark with words after it, where there are any, lit
+    /// while `lit`: the one shape the grid's and the loupe's toggles take,
+    /// with their readings, and the depth toggle, with its name.
+    fn worded_toggle(
+        &mut self,
+        ui: &mut Ui,
+        marks: &[Mark],
+        control: Control,
+        reading: Option<&str>,
+        lit: bool,
+    ) {
         let font = egui::TextStyle::Button.resolve(ui.style());
         // No ink of its own: the reading is drawn in the button's, which is
         // handed to the painter below. A color set here would be baked into
@@ -693,7 +727,7 @@ impl Pass<'_> {
             None => BUTTON_SIZE,
         };
         let (rect, response) = ui.allocate_exact_size(vec2(width, BUTTON_SIZE), Sense::CLICK);
-        let (background, ink) = self.button_ink(reading.is_some(), &response, true);
+        let (background, ink) = self.button_ink(lit, &response, true);
         ui.painter().rect_filled(rect, TOGGLE_RADIUS, background);
         let mark = Area::from_min_size(rect.min, Vec2::splat(BUTTON_SIZE));
         icon::paint(
@@ -710,9 +744,8 @@ impl Pass<'_> {
             );
             ui.painter().galley(at, galley, ink);
         }
-        response.widget_info(|| {
-            WidgetInfo::selected(WidgetType::Button, true, reading.is_some(), control.label())
-        });
+        response
+            .widget_info(|| WidgetInfo::selected(WidgetType::Button, true, lit, control.label()));
         let response = self.tooltip(response, Tip::Control(control));
         if response.clicked() {
             self.press(control);
