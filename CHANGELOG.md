@@ -35,6 +35,13 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Changed
 
+- The information panel's *About* section is headed by the file's title,
+  beside the mark the panel's own button wears, or by *About* where there is
+  no title. It holds only what somebody wrote — title, caption, comment,
+  artist, keywords and copyright — and is left out where the file says none
+  of them. The program that wrote the file and when it last did are listed
+  with the rest of the file's metadata, since a camera fills both in on
+  every file.
 - The information panel opens on the file itself rather than on a column of
   fields: its name as the heading, with a file mark, then the folder it is
   in, then its size and how long ago it was modified — "366 bytes · 1 week

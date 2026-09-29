@@ -1003,6 +1003,12 @@ heading is "About" and not
 shares a word with a row under it reads as a mistake; the row in turn is
 "Caption", the word the programs that write the field use for it, and what it
 holds — a sentence about the picture, not a description of the file.
+The program that wrote the file (`Software`, `xmp:CreatorTool`) and when it
+last did (`DateTime`) are said in words too, and are not in the table: a
+camera writes both into every file, its firmware and the moment of the shot,
+so they would head every photograph's words with two rows nobody wrote. They
+stay in the listing. The section is headed as `Camera` is, by its title where
+it has one, beside the mark the panel's own button wears.
 
 One XMP property is read as the structure it is rather than as words: the
 Metadata Working Group's regions (`mwg-rs:Regions`), which a cataloging

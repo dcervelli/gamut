@@ -439,7 +439,7 @@ const SUMMARIZED: [Tag; 20] = [
 /// The section the words go under, and the row among them that names the
 /// file: the two the chooser reads back out.
 const ABOUT: &str = "About";
-const TITLE: &str = "Title";
+pub const TITLE: &str = "Title";
 
 /// The section the packet's regions go under.
 pub const REGIONS: &str = "Regions";
@@ -458,9 +458,8 @@ struct Described {
     property: Option<(&'static str, &'static str)>,
 }
 
-/// The fields somebody wrote in words, or that the program writing the file
-/// wrote on their behalf: what the picture is called and what it is of, who
-/// made it, what may be done with it. They are what a reader looking for
+/// The fields somebody wrote in words: what the picture is called and what
+/// it is of, who made it, what may be done with it. They are what a reader looking for
 /// sentences rather than numbers is looking for, and the listing below is
 /// long enough to lose them in — so they are pulled out of it and named as
 /// they would be spoken.
@@ -471,7 +470,12 @@ struct Described {
 /// those is one the EXIF reader alone had nothing to say about. Where both
 /// speak, the EXIF field is shown: it is the older of the two, and a program
 /// that writes both writes them alike.
-const DESCRIBED: [Described; 8] = [
+///
+/// The program that wrote the file and when it last did are not among them,
+/// though both are said in words: a camera fills them in on every file, with
+/// its firmware and the moment of the shot, so they are listed with the rest
+/// of what the file carries rather than read as something said about it.
+const DESCRIBED: [Described; 6] = [
     Described {
         name: TITLE,
         tag: None,
@@ -504,16 +508,6 @@ const DESCRIBED: [Described; 8] = [
         name: "Copyright",
         tag: Some(Tag::Copyright),
         property: Some((xmp::DC, "rights")),
-    },
-    Described {
-        name: "Software",
-        tag: Some(Tag::Software),
-        property: Some((xmp::BASIC, "CreatorTool")),
-    },
-    Described {
-        name: "Written",
-        tag: Some(Tag::DateTime),
-        property: None,
     },
 ];
 
@@ -1453,18 +1447,18 @@ mod tests {
 
         // What a section above spoke for is not listed again; what none of
         // them did is, under the directory it came out of. The software that
-        // wrote the file is one of the fields worth reading in words, so it
-        // is drawn out of the listing rather than left in it.
+        // wrote the file is the camera's firmware, not something said about
+        // the picture, so it stays in the listing.
         let listing: Vec<&str> = section(&exif, "Image metadata")
             .iter()
             .map(|entry| entry.name.as_str())
             .collect();
-        assert_eq!(listing, ["Orientation"], "{listing:?}");
+        assert_eq!(listing, ["Orientation", "Software"], "{listing:?}");
         // The comment is read out of its character code rather than written
         // out as the hex the renderer would make of an undefined type.
         assert_eq!(
             rows("About"),
-            pairs(&[("Comment", "On a post by the jetty"), ("Software", "26.6")]),
+            pairs(&[("Comment", "On a post by the jetty")]),
             "{exif:?}"
         );
         // The subject is a region, and is written out in the picture as
@@ -1547,6 +1541,47 @@ mod tests {
             ]
         );
         assert_eq!(exif.sections.len(), 1, "{exif:?}");
+    }
+
+    /// A file saying every field About shows, the four EXIF has a tag for in
+    /// both blocks: all six rows, in the table's order, each of the four
+    /// read from EXIF and the comment out of UTF-16; and the program that
+    /// wrote the file and when, left to the listing.
+    #[test]
+    fn every_field_about_shows_is_read() {
+        let exif = Exif::read(&fixture("jpeg-about.jpg"));
+        assert_eq!(
+            description(&exif),
+            [
+                ("Title", "Four Quadrants"),
+                ("Caption", "Red, green, blue and white, a quadrant each"),
+                ("Comment", "Pattern \u{2014} made by generate.sh"),
+                ("Artist", "Test Pattern"),
+                (
+                    "Keywords",
+                    "red \u{00b7} green \u{00b7} blue \u{00b7} white"
+                ),
+                ("Copyright", "CC0 1.0"),
+            ]
+            .map(|(name, value)| (name.to_string(), value.to_string()))
+        );
+        assert_eq!(exif.title(), Some("Four Quadrants"));
+        let listing: Vec<&str> = section(&exif, "Image metadata")
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect();
+        assert_eq!(listing, ["Software", "DateTime"], "{listing:?}");
+    }
+
+    /// A file saying none of them has no About section, rather than an
+    /// empty one.
+    #[test]
+    fn a_file_saying_nothing_in_words_has_no_about() {
+        let exif = Exif::read(&fixture("jpeg-exif-rotated.jpg"));
+        assert!(
+            exif.sections.iter().all(|section| section.name != ABOUT),
+            "{exif:?}"
+        );
     }
 
     /// Each region is a row named by its kind, saying who is in it, what was

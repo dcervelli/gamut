@@ -49,6 +49,7 @@ mapping.
 | PNG color tags | `cICP` for BT.2100 PQ on BT.2020 — the whole of how a PNG says it is HDR — and `iCCP` for Display P3; the older vocabulary, `gAMA` of 1.0 for linear light and `cHRM` stating Display P3 as chromaticities |
 | PNG orientation | an `eXIf` chunk applied on decode, and a quarter turn stored 24x32 and displayed 32x24 |
 | JPEG | baseline, grayscale, progressive, 4:2:0 subsampling, an EXIF orientation applied on decode, and a quarter turn stored 24x32 and displayed 32x24, so that `probe` and `decode` have to agree about a size neither reads off the frame |
+| JPEG metadata | every field the info panel's *About* section shows: an EXIF caption, comment in UTF-16, artist and copyright, and an XMP title and keywords, with the packet saying the EXIF four differently |
 | TIFF | gray / RGB / RGBA at 8 and 16 bits, 32-bit float, LZW / Deflate / PackBits / uncompressed, big-endian, tiled, five strips of which the last is short, and two directories of which the second is upside down |
 | TIFF tags | an embedded Display P3 profile on an 8-bit file and on a 16-bit one, where it overrides the reading of a deep file as linear; the `Orientation` tag applied on decode, and a quarter turn stored 24x32 and displayed 32x24 |
 | TIFF as raster data | BigTIFF, Deflate + floating-point predictor + tiling (how DEMs ship), signed Int16, GDAL no-data sentinel, JPEG compression with its YCbCr pixels and subsampled chroma (how scanned maps ship), an internal mask directory between two pages |

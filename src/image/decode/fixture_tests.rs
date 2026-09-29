@@ -414,6 +414,20 @@ const FIXTURES: &[Fixture] = &[
         nodata: None,
         tolerance: LOSSY,
     },
+    // Every field the info panel's About section shows, in EXIF and XMP;
+    // `image::exif`'s tests read them. The pixels are `jpeg-rgb.jpg`'s.
+    Fixture {
+        file: "jpeg-about.jpg",
+        covers: "JPEG carrying every field the About section shows",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: LOSSY,
+    },
     // Stored 24x32 and displayed 32x24, as `jxl-quarter-turn.jxl` is, so
     // that `probe` and `decode` have to agree about a size neither reads
     // off the frame.

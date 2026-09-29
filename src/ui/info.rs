@@ -1205,9 +1205,10 @@ fn contents(current: &Current) -> Contents {
             .entries
             .iter()
             .map(|entry| (entry.name.as_str(), entry.value.clone()));
-        // The camera's own section is headed by the camera's name, and the
-        // location's by where it is; every other the metadata reads out is
-        // a column of fields.
+        // The camera's own section is headed by the camera's name, the
+        // location's by where it is, and the words by the title, under the
+        // mark the panel's own button wears; every other the metadata reads
+        // out is a column of fields.
         let face = match section.name {
             "Camera" => Face::Headed {
                 mark: icon::CAMERA,
@@ -1219,6 +1220,11 @@ fn contents(current: &Current) -> Contents {
                 head: &[exif::LATITUDE, exif::LONGITUDE],
                 // Only where the file gave numbers a map can take.
                 button: exif.position.map(|_| (icon::MAP, Control::OpenMap)),
+            },
+            "About" => Face::Headed {
+                mark: icon::INFO,
+                head: &[exif::TITLE],
+                button: None,
             },
             _ => Face::Fields,
         };

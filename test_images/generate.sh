@@ -241,6 +241,76 @@ jpeg_exif "$work/upside-down.jpg" jpeg-exif-rotated.jpg 3
 magick "$work/color.png" -rotate -90 -quality 95 -sampling-factor 4:4:4 "$work/quarter-turn.jpg"
 jpeg_exif "$work/quarter-turn.jpg" jpeg-quarter-turn.jpg 6
 
+# Every field the info panel's About section shows, which ImageMagick will not
+# write either: an EXIF block with the caption, the comment, the artist and
+# the copyright — the comment in UTF-16, the harder of the two codes — and an
+# XMP packet with the title and the keywords, which EXIF has no tag for. The
+# packet says the four EXIF fields too, differently, since the EXIF field is
+# the one shown; and the block carries `Software` and `DateTime`, which are
+# left to the listing.
+jpeg_about() {  # src dst
+  python3 - "$@" <<'ABOUT'
+import struct, sys
+
+src, dst = sys.argv[1], sys.argv[2]
+
+def ifd(entries, start):
+    """One directory at `start`, its values after it: (tag, type, count, bytes)."""
+    body = struct.pack("<H", len(entries))
+    after = start + 2 + 12 * len(entries) + 4
+    values = b""
+    for tag, kind, count, value in entries:
+        if len(value) <= 4:
+            body += struct.pack("<HHI", tag, kind, count) + value.ljust(4, b"\0")
+        else:
+            body += struct.pack("<HHII", tag, kind, count, after + len(values))
+            values += value + b"\0" * (len(value) % 2)
+    return body + struct.pack("<I", 0) + values
+
+def ascii(tag, text):
+    value = text.encode() + b"\0"
+    return (tag, 2, len(value), value)
+
+comment = b"UNICODE\0" + "Pattern — made by generate.sh".encode("utf-16-le")
+primary = [
+    ascii(0x010E, "Red, green, blue and white, a quadrant each"),
+    ascii(0x0131, "generate.sh"),
+    ascii(0x0132, "2026:09:30 12:00:00"),
+    ascii(0x013B, "Test Pattern"),
+    ascii(0x8298, "CC0 1.0"),
+]
+# The Exif directory's offset is known only once the primary one is laid out.
+size = len(ifd(primary + [(0x8769, 4, 1, b"\0" * 4)], 8))
+primary.append((0x8769, 4, 1, struct.pack("<I", 8 + size)))
+tiff = (b"II\x2a\x00" + struct.pack("<I", 8) + ifd(primary, 8)
+        + ifd([(0x9286, 7, len(comment), comment)], 8 + size))
+
+packet = """<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/">
+   <dc:title><rdf:Alt><rdf:li xml:lang="x-default">Four Quadrants</rdf:li></rdf:Alt></dc:title>
+   <dc:description><rdf:Alt><rdf:li xml:lang="x-default">The packet's caption</rdf:li></rdf:Alt></dc:description>
+   <dc:creator><rdf:Seq><rdf:li>The packet's artist</rdf:li></rdf:Seq></dc:creator>
+   <dc:rights><rdf:Alt><rdf:li xml:lang="x-default">The packet's copyright</rdf:li></rdf:Alt></dc:rights>
+   <dc:subject><rdf:Bag><rdf:li>red</rdf:li><rdf:li>green</rdf:li><rdf:li>blue</rdf:li><rdf:li>white</rdf:li></rdf:Bag></dc:subject>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>
+<?xpacket end="w"?>""".encode()
+
+def app1(payload):
+    return b"\xff\xe1" + struct.pack(">H", len(payload) + 2) + payload
+
+data = open(src, "rb").read()
+assert data[:2] == b"\xff\xd8", "not a JPEG"
+segments = app1(b"Exif\0\0" + tiff) + app1(b"http://ns.adobe.com/xap/1.0/\0" + packet)
+open(dst, "wb").write(data[:2] + segments + data[2:])
+ABOUT
+}
+
+jpeg_about jpeg-rgb.jpg jpeg-about.jpg
+
 # ----------------------------------------------------------------- GIF
 # Always a palette, always 8-bit, and always RGBA once decoded: the crate's
 # GIF decoder has one output layout and the transparent index has to go

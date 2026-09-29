@@ -56,10 +56,6 @@ const RDF: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 /// and the rights go.
 pub const DC: &str = "http://purl.org/dc/elements/1.1/";
 
-/// XMP's own basic schema, where the program that wrote the file names
-/// itself.
-pub const BASIC: &str = "http://ns.adobe.com/xap/1.0/";
-
 /// The Metadata Working Group's regions: the list, and each region's name,
 /// kind and words.
 pub const MWG_RS: &str = "http://www.metadataworkinggroup.com/schemas/regions/";
@@ -735,6 +731,11 @@ fn jxl(source: &mut BufReader<File>) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// XMP's own basic schema, where the program that wrote the file names
+    /// itself: a property the panel does not show, read to show that the
+    /// packet holds more than the panel asks of it.
+    const BASIC: &str = "http://ns.adobe.com/xap/1.0/";
 
     /// A packet as a cataloging program writes one: a title in a set of
     /// translations, a list of creators, a bag of keywords, and the
