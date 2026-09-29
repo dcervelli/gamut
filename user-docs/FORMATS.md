@@ -196,11 +196,14 @@ An iPhone's HEIC carries the same kind of map, and gets the same treatment.
 
 **Depth maps are read for the pixel readout.** A portrait from a phone may
 carry a map of how far away each pixel was. Choose **Depth** in the pixel
-readout (see KEYS.md) to read it under the pointer. A JPEG with the depth
-map Google's camera writes gives a distance in meters; a HEIC with a
-depth map gives the number the map holds, since the file does not say how
-it is scaled. Other ways of storing depth, including Apple's in a JPEG and
-Samsung's, are not read, and such a file reads `(no depth)`. A map that
+readout (see KEYS.md) to read it under the pointer. An iPhone's portrait
+HEIC and a JPEG with the depth map Google's camera writes both give a
+distance in meters. An iPhone portrait taken with two cameras marks its
+distances as estimates, and they read with `≈` before them: nearer and
+farther are right, but the meters can be off. A HEIC from elsewhere that
+does not say how its map is scaled gives the number the map holds. Other
+ways of storing depth, including Apple's in a JPEG and Samsung's, are not
+read, and such a file reads `(no depth)`. A map that
 cannot be read costs the readout its depth, never the picture.
 
 **CMYK JPEGs open**, but the conversion to RGB does not use the file's CMYK

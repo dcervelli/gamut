@@ -18,7 +18,7 @@
 
 use egui::{Label, RichText, Sense, StrokeKind, vec2};
 
-use crate::image::depth::{Depth, Unit};
+use crate::image::depth::{Accuracy, Depth, Unit};
 use crate::image::display::Mapped;
 use crate::image::geo::Georeference;
 use crate::image::{DecodedImage, Sample, Samples};
@@ -502,15 +502,30 @@ pub fn value(
     }
 }
 
+/// What the readout puts before a distance the file calls an estimate.
+const ESTIMATED: &str = "\u{2248}";
+
 /// A depth, as a distance in the file's unit where it says how to get one —
 /// to the millimeter, whichever unit that is — and otherwise as the code the
 /// map holds, in the terms `Decimal` writes a pixel's codes in.
+///
+/// A distance the file calls relative — right about what is nearer, but
+/// estimated in scale — is marked as the estimate it is, and written to the
+/// centimeter rather than the millimeter, since the last digit would claim
+/// more than the map knows.
 fn distance(depth: Depth) -> String {
-    match depth.distance {
-        Some((value, Unit::Meters)) => format!("{value:.3} m"),
-        Some((value, Unit::Millimeters)) => format!("{value:.0} mm"),
-        Some((value, Unit::Unknown)) => format!("{value:.3}"),
-        None => component(depth.stored, depth.float),
+    let Some(distance) = depth.distance else {
+        return component(depth.stored, depth.float);
+    };
+    let (mark, places) = match distance.accuracy {
+        Accuracy::Absolute => ("", 3),
+        Accuracy::Relative => (ESTIMATED, 2),
+    };
+    let value = distance.value;
+    match distance.unit {
+        Unit::Meters => format!("{mark}{value:.places$} m"),
+        Unit::Millimeters => format!("{mark}{:.0} mm", value),
+        Unit::Unknown => format!("{mark}{value:.places$}"),
     }
 }
 
@@ -691,13 +706,13 @@ mod tests {
     /// where there is no map at all.
     #[test]
     fn depth_reads_the_map_beside_the_picture() {
-        use crate::image::depth::{DepthMap, Range};
+        use crate::image::depth::{DepthMap, Quantity, Scale};
         use std::sync::Arc;
         let display = Display::default();
         let mut image = rgb8([231, 128, 64]);
         assert_eq!(read(&image, &display, [3, 4], PixelFormat::Depth), NO_DEPTH);
 
-        let map = |range| {
+        let map = |scale| {
             Arc::new(DepthMap {
                 width: 2,
                 height: 1,
@@ -705,30 +720,41 @@ mod tests {
                     channels: Channels::Gray,
                     data: vec![0, 51],
                 },
-                range,
+                scale,
             })
         };
-        image.depth = Some(map(Range::Unstated));
+        let linear = |values, unit, accuracy| {
+            Some(Scale {
+                codes: None,
+                values,
+                quantity: Quantity::Distance,
+                unit,
+                accuracy,
+            })
+        };
+        image.depth = Some(map(None));
         assert_eq!(read(&image, &display, [3, 4], PixelFormat::Depth), "51");
         assert_eq!(read(&image, &display, [0, 0], PixelFormat::Depth), "0");
 
-        image.depth = Some(map(Range::Linear {
-            near: 1.0,
-            far: 5.0,
-            unit: Unit::Meters,
-        }));
+        image.depth = Some(map(linear([1.0, 5.0], Unit::Meters, Accuracy::Absolute)));
         assert_eq!(
             read(&image, &display, [3, 4], PixelFormat::Depth),
             "1.800 m"
         );
-        image.depth = Some(map(Range::Linear {
-            near: 1000.0,
-            far: 5000.0,
-            unit: Unit::Millimeters,
-        }));
+        image.depth = Some(map(linear(
+            [1000.0, 5000.0],
+            Unit::Millimeters,
+            Accuracy::Absolute,
+        )));
         assert_eq!(
             read(&image, &display, [3, 4], PixelFormat::Depth),
             "1800 mm"
+        );
+        // An estimate says so, and claims a digit less.
+        image.depth = Some(map(linear([1.0, 5.0], Unit::Meters, Accuracy::Relative)));
+        assert_eq!(
+            read(&image, &display, [3, 4], PixelFormat::Depth),
+            "\u{2248}1.80 m"
         );
         // The other formats still read the pixel.
         assert_eq!(read(&image, &display, [3, 4], PixelFormat::Hex), "E78040");

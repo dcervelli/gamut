@@ -224,8 +224,9 @@ image/         the data model, nothing GPU
                  pages), Frame, and the FrameSource a decoder's frames come
                  through, each composited whole by the decoder
   stats.rs       the scan an image gets on load: min/max, histogram, plot; scan_with lifts a gain-mapped picture as the screen shows it
-  depth.rs       a depth map beside the picture — its codes, the Range saying what they mean,
-                 and at(), the map read under one of the picture's pixels — for the readout
+  depth/         a depth map beside the picture, for the readout: mod.rs its codes, the Scale
+                 every vendor's words come to, and at(), the map read under one of the
+                 picture's pixels; apple.rs and google.rs each vendor's XMP read into a Scale
   gain_map.rs    a gain map beside its SDR base: what its values mean (ISO 21496-1's or Apple's Lift), the
                  weight the display's room gives it, the Table a weight makes, and gain_at, the shaders' twin
   encode.rs      the displayed image, turned as shown, walked back out to an 8-bit sRGB PNG or

@@ -143,38 +143,65 @@ and P3 numbers shown as sRGB come out visibly flat.
 
 ## Depth maps
 
-A portrait may carry a depth map beside the picture, and `image/depth.rs`
-holds it as `DecodedImage::depth`: one gray channel at its own size, and a
-`Range` saying what its codes mean. Nothing is drawn from it. It exists for
-the pixel readout's `Depth` format, which reads it one pixel at a time
-through `Current::depth` — the user's `Turn` read through as `sample` reads
-it — and `DepthMap::at`, which takes the map's pixel covering the same
+A portrait may carry a depth map beside the picture, and `image/depth/`
+holds it as `DecodedImage::depth`: one gray channel at its own size, and an
+optional `Scale` saying what its codes mean. Nothing is drawn from it. It
+exists for the pixel readout's `Depth` format, which reads it one pixel at a
+time through `Current::depth` — the user's `Turn` read through as `sample`
+reads it — and `DepthMap::at`, which takes the map's pixel covering the same
 fraction of the picture, since a phone's map is a fraction of the
 photograph's size. A file's own orientation is applied to the map in
 `orient::apply` alongside the picture and the gain map, for the same reason
 the gain map is turned: it is read by the picture's coordinates.
 
+Every vendor's map is the same thing underneath, and `Scale` is that one
+shape: a range of codes spread evenly over a range of values, which are
+either the distance (`Quantity::Distance`) or its inverse
+(`Quantity::Inverse`), in a `Unit`, with an `Accuracy` saying whether the
+distances are measured or only right in order. Google's `RangeLinear` is the
+first, between its near and far planes; its `RangeInverse` is the second,
+between the planes' inverses; Apple's disparity is the second as well, in one
+over meters. What differs between vendors is only the words, so each has a
+module that translates its XMP into a `Scale` — `depth/apple.rs`,
+`depth/google.rs` — and `depth::scale` asks each in turn. A vendor new to the
+tree is a module and a line there. Where a map sits in its container stays
+the decoder's business, since that is what differs between containers
+rather than vendors.
+
 A HEIF names its depth image by MPEG's auxiliary type
 (`urn:mpeg:hevc:2015:auxid:2`, or the `mpegB` one for other codecs), which
 `libheif` finds by itself; `decode/heif/mod.rs::depth_map` decodes it as it
-decodes the gain map. What its codes mean can be stated in a depth
-representation SEI, which `libheif-rs` does not expose, so the range is
-`Unstated` and the readout gives the code.
+decodes the gain map, and reads the XMP packet the depth image carries of its
+own — a `mime` item the container ties to it, found by the same `xmp_of` the
+primary image's packet is. An iPhone's portrait writes Apple's pixel data
+info there: `NativeFormat`, the Core Video format the camera recorded (the
+four characters `hdis` as a number, for half-float disparity), and
+`IntMinValue`–`IntMaxValue` spread over `FloatMinValue`–`FloatMaxValue`,
+beside its depth data's `Accuracy`, which a dual-camera portrait gives as
+`relative`. The portrait's mattes are auxiliary images with the same packet,
+but `libheif` does not take them for depth, and their `NativeFormat` is plain
+gray, so `apple::scale` would refuse them anyway. A depth representation SEI
+can say the same things in MPEG's terms, and `libheif` reads Apple's; it is
+not used, since `libheif-rs` does not expose it, it carries no accuracy, and
+turning its disparity into meters is Apple's convention rather than the
+standard's.
 
-A JPEG carries Google's `GDepth` block in its XMP: the normalization —
-`RangeLinear` or `RangeInverse` between `Near` and `Far`, in `Units` — in
-the main packet, and the map, a base64 PNG or JPEG, in the extended packet
-the main one names by GUID under `xmpNote:HasExtendedXMP`, split over as
-many `APP1` segments as it takes. `decode/jpeg/depth.rs` walks the segments
-ahead of the scan for both, reassembles the extended packet by each piece's
-stated offset, and decodes the map through `image`. Apple's depth in a
-JPEG (a disparity map as a second MPF image) and Google's later Dynamic
-Depth container are not read.
+A JPEG carries Google's `GDepth` block in its XMP: the normalization in the
+main packet, and the map, a base64 PNG or JPEG, in the extended packet the
+main one names by GUID under `xmpNote:HasExtendedXMP`, split over as many
+`APP1` segments as it takes. `decode/jpeg/depth.rs` walks the segments ahead
+of the scan for both, reassembles the extended packet by each piece's stated
+offset, and decodes the map through `image`. Apple's depth in a JPEG (a
+disparity map as a second MPF image) and Google's later Dynamic Depth
+container are not read.
 
 A map is extra: a failure anywhere in reading one leaves `depth` at `None`
 rather than refusing the picture. The fixtures are `heic-depth.heic` — the
 alpha plane of `heic-rgba8.heic` relabeled with the depth type, since
-`heif-enc` writes no depth image — and `jpeg-depth.jpg`.
+`heif-enc` writes no depth image, and with no packet, so no scale — and
+`jpeg-depth.jpg`. Apple's words are tested from a packet transcribed from an
+iPhone's in `depth/apple.rs`, since nothing here writes a HEIF with an
+auxiliary image's own XMP.
 
 ## Orientation
 

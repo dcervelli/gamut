@@ -940,8 +940,9 @@ window, the exposure and the tone curve have made of the numbers, where 0 and
 1 are the ends of the window the bar names on the right. **Depth** is how far
 away the pixel was, for a picture that carries a depth map beside it, as a
 phone's portrait may: a distance, such as `1.372 m`, where the file says how
-its map is scaled, and otherwise the number the map holds there, which only
-says what is nearer and what is farther. A picture with no depth map reads
+its map is scaled — `≈0.92 m` where the file calls it an estimate — and
+otherwise the number the map holds there, which only says what is nearer
+and what is farther. A picture with no depth map reads
 `(no depth)`.
 
 `.` steps through the four, and the dot at the head of the readout opens a

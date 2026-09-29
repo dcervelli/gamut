@@ -108,7 +108,7 @@ fn turn_depth(map: &DepthMap, orientation: Orientation) -> Arc<DepthMap> {
         width,
         height,
         samples,
-        range: map.range.clone(),
+        scale: map.scale,
     })
 }
 
@@ -391,7 +391,7 @@ mod tests {
     /// pixel of the scene, as the gain map lifts it.
     #[test]
     fn a_turned_depth_map_reads_the_same_pixels() {
-        use crate::image::depth::{DepthMap, Range};
+        use crate::image::depth::DepthMap;
         let (width, height) = (4, 2);
         let mut image = DecodedImage::new(
             width,
@@ -410,7 +410,7 @@ mod tests {
                 channels: Channels::Gray,
                 data: vec![1, 2, 3, 4],
             },
-            range: Range::Unstated,
+            scale: None,
         }));
         let turned = apply(image.clone(), Orientation::Rotate90);
         let depth = |image: &DecodedImage, x, y| {

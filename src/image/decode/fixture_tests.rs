@@ -1825,7 +1825,7 @@ fn every_fixture_carries_the_depth_map_it_says_it_does() {
                 "{} quadrant {index}",
                 fixture.file
             );
-            let distance = depth.distance.map(|(value, _)| value);
+            let distance = depth.distance.map(|distance| distance.value);
             match distances {
                 Some(want) => assert!(
                     distance.is_some_and(|found| (found - want[index]).abs() < 1e-5),

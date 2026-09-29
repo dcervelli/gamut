@@ -1,9 +1,8 @@
-//! Google's depth map: the `GDepth` block a phone's portrait or a Lens Blur
-//! photograph carries in its XMP.
+//! Where a JPEG keeps a depth map: Google's `GDepth` block, which a phone's
+//! portrait or a Lens Blur picture carries in its XMP.
 //!
-//! The block says how the map was normalized — linearly or by the inverse of
-//! the distance, between a near and a far plane, in meters or millimeters —
-//! and holds the map itself as a base64 PNG or JPEG. A map is far longer than
+//! The block holds the map itself as a base64 PNG or JPEG, beside the words
+//! saying how it was normalized, which are [`google`]'s to read. A map is far longer than
 //! the 64 KB one `APP1` segment can hold, so the packet that names the block
 //! points by a GUID at an extended packet, split over as many segments as it
 //! takes under XMP's extension header, each saying where in the whole its
@@ -14,12 +13,9 @@ use std::sync::Arc;
 
 use ::image::{DynamicImage, ImageReader};
 
-use crate::image::depth::{DepthMap, Range, Unit};
+use crate::image::depth::{self, DepthMap, google};
 use crate::image::xmp::Xmp;
 use crate::image::{Channels, Samples};
-
-/// Google's namespace for the depth map's properties.
-const GDEPTH: &str = "http://ns.google.com/photos/1.0/depthmap/";
 
 /// XMP's note namespace, where the main packet names the extended one.
 const XMP_NOTE: &str = "http://ns.adobe.com/xmp/note/";
@@ -40,7 +36,7 @@ const GUID: usize = 32;
 pub fn find(bytes: &[u8]) -> Option<Arc<DepthMap>> {
     let (main, extensions) = segments(bytes);
     let main = Xmp::parse(main?)?;
-    let property = |xmp: &Xmp, name: &str| first(xmp, GDEPTH, name);
+    let property = |xmp: &Xmp, name: &str| first(xmp, google::NAMESPACE, name);
     // The data is in the main packet where it fits, which it seldom does,
     // and otherwise in the extended packet the main one names.
     let data = property(&main, "Data").or_else(|| {
@@ -51,28 +47,11 @@ pub fn find(bytes: &[u8]) -> Option<Arc<DepthMap>> {
     let encoded = base64(data.as_bytes())?;
     let (width, height, samples) = decode(&encoded)?;
 
-    let number = |name| {
-        property(&main, name)
-            .and_then(|value| value.trim().parse::<f32>().ok())
-            .filter(|value| value.is_finite())
-    };
-    let unit = property(&main, "Units")
-        .map(|word| Unit::parse(&word))
-        .unwrap_or(Unit::Unknown);
-    let range = match (
-        property(&main, "Format").as_deref(),
-        number("Near"),
-        number("Far"),
-    ) {
-        (Some("RangeLinear"), Some(near), Some(far)) => Range::Linear { near, far, unit },
-        (Some("RangeInverse"), Some(near), Some(far)) => Range::Inverse { near, far, unit },
-        _ => Range::Unstated,
-    };
     Some(Arc::new(DepthMap {
         width,
         height,
         samples,
-        range,
+        scale: depth::scale(&main),
     }))
 }
 
