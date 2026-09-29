@@ -265,20 +265,13 @@ impl Handle {
     }
 
     /// What took the picture and how, as LibRaw parsed it: the panel's
-    /// `Camera` section for a file the EXIF reader found nothing in.
+    /// `Camera` section for a file the EXIF reader found nothing in, in the
+    /// EXIF reader's order and under its names, so that either fills in
+    /// what the other left out a row at a time.
     fn camera(&self) -> Vec<Entry> {
+        use crate::image::exif::{APERTURE, CAMERA, FOCAL_LENGTH, ISO, LENS, SHUTTER, TAKEN};
         let mut rows = Vec::new();
         let params = self.params();
-        let make = text(&params.make);
-        let model = text(&params.model);
-        let camera = match (make, model) {
-            (Some(make), Some(model)) if model.starts_with(&make) => Some(model),
-            (Some(make), Some(model)) => Some(format!("{make} {model}")),
-            (some, None) | (None, some) => some,
-        };
-        push(&mut rows, "Camera", camera);
-        push(&mut rows, "Lens", text(&self.lens().lens));
-
         let other = self.other();
         if other.timestamp > 0 {
             // dcraw makes the camera's date a `time_t` as if it were in this
@@ -288,35 +281,48 @@ impl Handle {
             );
             push(
                 &mut rows,
-                "Taken",
+                TAKEN,
                 Some(format!(
                     "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
                     taken.year, taken.month, taken.day, taken.hour, taken.minute, taken.second
                 )),
             );
         }
-        let mut exposure = Vec::new();
+        let make = text(&params.make);
+        let model = text(&params.model);
+        let camera = match (make, model) {
+            (Some(make), Some(model)) if model.starts_with(&make) => Some(model),
+            (Some(make), Some(model)) => Some(format!("{make} {model}")),
+            (some, None) | (None, some) => some,
+        };
+        push(&mut rows, CAMERA, camera);
+        push(&mut rows, LENS, text(&self.lens().lens));
+
         if other.shutter > 0.0 {
-            exposure.push(if other.shutter < 1.0 {
+            let shutter = if other.shutter < 1.0 {
                 format!("1/{} s", tidy((1.0 / other.shutter).round()))
             } else {
                 format!("{} s", tidy(other.shutter))
-            });
+            };
+            push(&mut rows, SHUTTER, Some(shutter));
         }
         if other.aperture > 0.0 {
             // To a tenth, which is how an f-number is spoken; the maker's
             // block holds it to more places than the lens was ever set to.
             let aperture = format!("{:.1}", other.aperture);
-            exposure.push(format!("f/{}", aperture.trim_end_matches(".0")));
+            push(
+                &mut rows,
+                APERTURE,
+                Some(format!("f/{}", aperture.trim_end_matches(".0"))),
+            );
         }
         if other.iso_speed > 0.0 {
-            exposure.push(format!("ISO {}", tidy(other.iso_speed)));
+            push(&mut rows, ISO, Some(tidy(other.iso_speed)));
         }
-        push(&mut rows, "Exposure", join(&exposure));
         if other.focal_len > 0.0 {
             push(
                 &mut rows,
-                "Focal length",
+                FOCAL_LENGTH,
                 Some(format!("{} mm", tidy(other.focal_len))),
             );
         }
@@ -592,10 +598,6 @@ fn push(rows: &mut Vec<Entry>, name: &str, value: Option<String>) {
     if let Some(value) = value.filter(|value| !value.is_empty()) {
         rows.push(Entry::new(name, value));
     }
-}
-
-fn join(parts: &[String]) -> Option<String> {
-    (!parts.is_empty()).then(|| parts.join(" \u{00b7} "))
 }
 
 /// What LibRaw says a code means.

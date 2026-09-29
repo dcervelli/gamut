@@ -222,6 +222,26 @@ pub(super) const FILE: &[Mark] = &[
     Mark::Line([16.0, 8.0], [20.0, 8.0]),
 ];
 
+/// Lucide's `camera`: the body with its raised top and the lens — the mark
+/// at the head of the info panel's section about what took the picture.
+/// Written out as sides and quarter turns, since the top edge rises
+/// where the viewfinder sits.
+pub(super) const CAMERA: &[Mark] = &[
+    Mark::Line([14.5, 4.0], [9.5, 4.0]),
+    Mark::Line([9.5, 4.0], [7.0, 7.0]),
+    Mark::Line([7.0, 7.0], [4.0, 7.0]),
+    Mark::arc([4.0, 9.0], 2.0, -90.0, -90.0),
+    Mark::Line([2.0, 9.0], [2.0, 18.0]),
+    Mark::arc([4.0, 18.0], 2.0, 180.0, -90.0),
+    Mark::Line([4.0, 20.0], [20.0, 20.0]),
+    Mark::arc([20.0, 18.0], 2.0, 90.0, -90.0),
+    Mark::Line([22.0, 18.0], [22.0, 9.0]),
+    Mark::arc([20.0, 9.0], 2.0, 0.0, -90.0),
+    Mark::Line([20.0, 7.0], [17.0, 7.0]),
+    Mark::Line([17.0, 7.0], [14.5, 4.0]),
+    Mark::circle([12.0, 13.0], 3.0),
+];
+
 /// Lucide's `image`: a frame holding a sun and a hill — the mark at the
 /// head of the info panel's section about the picture. The hill's rounded
 /// peak is an arc about the center Lucide's path implies.
@@ -1059,7 +1079,7 @@ mod tests {
 
     /// Every icon in the table, so that a new one is held to the same
     /// promises as the rest.
-    const ICONS: [&[Mark]; 34] = [
+    const ICONS: [&[Mark]; 35] = [
         CHART_AREA,
         INFO,
         CIRCLE_QUESTION_MARK,
@@ -1067,6 +1087,7 @@ mod tests {
         SQUARE_MENU,
         FILE,
         IMAGE,
+        CAMERA,
         FILE_IMAGE,
         FOLDER,
         CLIPBOARD,

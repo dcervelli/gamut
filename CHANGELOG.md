@@ -32,7 +32,11 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   keeping its extension. The *Image* section is headed by the picture's size
   and its format — "4000 × 3000 JPEG" — with the rest of what it said as a
   table of two columns under it, which writes the layout in capitals:
-  *8-bit RGB*. A click on any piece copies it, the size and
+  *8-bit RGB*. The *Camera* section is headed by the camera's name, with the
+  rest in the same kind of table, the time it was taken first, said as how
+  long ago with the date in its tooltip; the exposure
+  is split into *Shutter speed*, *Aperture*, *ISO* and *Exposure
+  compensation*, each copied on its own, where it was one line. A click on any piece copies it, the size and
   the date exactly.
 - Color spaces are called by their common names — *sRGB*, *Display P3*,
   *Rec. 2100 PQ*, *Adobe RGB (1998)* — in the top bar and the information

@@ -527,13 +527,23 @@ fn geo_tags(exif: &exif::Exif) -> geo::Tags {
 }
 
 /// The handful of fields a photograph is read by, in the order they are read:
-/// what took it, then when, then at what settings. The exposure belongs with
-/// the camera rather than under a heading of its own — a shutter speed and
-/// the body it was set on are read as one thought, and two headings over
-/// five fields is more furniture than the panel can carry.
+/// when it was taken, what took it, then at what settings. The exposure
+/// belongs with the camera rather than under a heading of its own — a
+/// shutter speed and the body it was set on are read as one thought — and
+/// each of its settings is a row of its own, being a thing to copy on its
+/// own. The rows are named as [`super::decode::facts`] names LibRaw's, so
+/// that a raw's fills in whichever of them the EXIF left out.
 fn camera(exif: &exif::Exif) -> Vec<Entry> {
     let mut rows = Vec::new();
     let text = |tag| primary(exif, tag).map(|field| tidy_numbers(&display(exif, field)));
+
+    // The zone the camera was set to, where it recorded one: an hour is worth
+    // more than the minute it is quoted to.
+    let taken = match (text(Tag::DateTimeOriginal), text(Tag::OffsetTimeOriginal)) {
+        (Some(when), Some(offset)) => Some(format!("{when} {offset}")),
+        (when, _) => when,
+    };
+    push(&mut rows, TAKEN, taken);
 
     // The maker is usually the first word of the model — "Canon EOS R6" —
     // and a camera called "Canon Canon EOS R6" reads as a mistake.
@@ -544,30 +554,19 @@ fn camera(exif: &exif::Exif) -> Vec<Entry> {
         (Some(make), Some(model)) => Some(format!("{make} {model}")),
         (some, None) | (None, some) => some.clone(),
     };
-    push(&mut rows, "Camera", camera);
-    push(&mut rows, "Lens", text(Tag::LensModel));
+    push(&mut rows, CAMERA, camera);
+    push(&mut rows, LENS, text(Tag::LensModel));
 
-    // The zone the camera was set to, where it recorded one: an hour is worth
-    // more than the minute it is quoted to.
-    let taken = match (text(Tag::DateTimeOriginal), text(Tag::OffsetTimeOriginal)) {
-        (Some(when), Some(offset)) => Some(format!("{when} {offset}")),
-        (when, _) => when,
-    };
-    push(&mut rows, "Taken", taken);
-
-    // One line, because they are read as one setting: the exposure that was
-    // made. A compensation of zero is what every camera not being pushed
-    // reports, and says nothing.
-    let exposure: Vec<String> = [
-        text(Tag::ExposureTime),
-        text(Tag::FNumber),
-        text(Tag::PhotographicSensitivity).map(|iso| format!("ISO {iso}")),
+    // The exposure that was made. A compensation of zero is what every
+    // camera not being pushed reports, and says nothing.
+    push(&mut rows, SHUTTER, text(Tag::ExposureTime));
+    push(&mut rows, APERTURE, text(Tag::FNumber));
+    push(&mut rows, ISO, text(Tag::PhotographicSensitivity));
+    push(
+        &mut rows,
+        COMPENSATION,
         text(Tag::ExposureBiasValue).filter(|bias| !bias.starts_with('0')),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    push(&mut rows, "Exposure", join(&exposure));
+    );
 
     // The lens's own focal length, with what it comes to on the format the
     // reader is likelier to have a feel for.
@@ -578,10 +577,21 @@ fn camera(exif: &exif::Exif) -> Vec<Entry> {
         (Some(actual), _) => Some(actual),
         (None, equivalent) => equivalent.map(|shown| format!("{shown} equivalent")),
     };
-    push(&mut rows, "Focal length", focal);
+    push(&mut rows, FOCAL_LENGTH, focal);
 
     rows
 }
+
+/// The names of the camera section's rows, which LibRaw's rows for a raw
+/// are named by too.
+pub const CAMERA: &str = "Camera";
+pub const TAKEN: &str = "Taken";
+pub const LENS: &str = "Lens";
+pub const SHUTTER: &str = "Shutter speed";
+pub const APERTURE: &str = "Aperture";
+pub const ISO: &str = "ISO";
+pub const COMPENSATION: &str = "Exposure compensation";
+pub const FOCAL_LENGTH: &str = "Focal length";
 
 /// Where the camera stood, as the two facts a map wants of it. The rest of
 /// the GPS directory is listed under these rather than beside them: this is
@@ -1278,16 +1288,18 @@ mod tests {
         };
 
         // The exposure is read together with the body it was set on, so the
-        // two are one section rather than two.
+        // two are one section rather than two; the time it was taken first.
         assert_eq!(
             rows("Camera"),
             pairs(&[
+                ("Taken", "2026-08-27 20:06:17 +12:00"),
                 // The maker is not said twice, though the file says it twice.
                 ("Camera", "Apple iPhone 16 Pro"),
                 ("Lens", "A Lens 6.765mm f/1.78"),
-                ("Taken", "2026-08-27 20:06:17 +12:00"),
+                ("Shutter speed", "1/50 s"),
                 // 89/50 is exactly 1.78, and is quoted as such.
-                ("Exposure", "1/50 s \u{00b7} f/1.78 \u{00b7} ISO 200"),
+                ("Aperture", "f/1.78"),
+                ("ISO", "200"),
                 ("Focal length", "6.765 mm (24 mm equivalent)"),
             ])
         );

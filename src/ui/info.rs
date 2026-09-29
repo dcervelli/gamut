@@ -194,7 +194,7 @@ impl Copyable {
 /// How a section is drawn. The copying is the same for every one of them —
 /// a section is its fields, in order, whatever it looks like — and only the
 /// drawing is told apart.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy)]
 enum Face {
     /// Each field's name over its value, under the section's name: every
     /// section the metadata reads out, and any that has no drawing of its own.
@@ -202,9 +202,14 @@ enum Face {
     /// The file on disk, as a few lines of prose under a heading with a mark:
     /// see [`file_section`].
     File,
-    /// The picture, as its size and kind beside a mark over a table of the
-    /// rest: see [`image_section`].
-    Image,
+    /// A section with a head of its own: some of its fields written on one
+    /// line beside a mark, and the rest as a table under them — see
+    /// [`headed_section`]. The picture, headed by its size and its format,
+    /// and the camera, headed by its name.
+    Headed {
+        mark: &'static [icon::Mark],
+        head: &'static [&'static str],
+    },
 }
 
 /// One section of the column: its name, how it is drawn, and its fields.
@@ -460,7 +465,9 @@ fn column(pass: &mut Pass, ui: &mut egui::Ui, current: &Current) {
                 match section.face {
                     Face::Fields => fields_section(pass, ui, place, section, index, width),
                     Face::File => file_section(pass, ui, current, section, index, width),
-                    Face::Image => image_section(pass, ui, section, index, width),
+                    Face::Headed { mark, head } => {
+                        headed_section(pass, ui, place, section, index, width, mark, head)
+                    }
                 }
                 index += section.facts.len();
             }
@@ -567,25 +574,59 @@ fn file_section(
     }
 }
 
-/// The picture in the file: how large it is and what kind of file it came
-/// out of at the head, beside the mark, and under that everything else about
-/// it as a table of two columns, each row copying its value.
-fn image_section(pass: &mut Pass, ui: &mut egui::Ui, section: &Section, first: usize, width: f32) {
+/// A section headed by the fields named in `head`, written on one line after
+/// `mark` in the headings' ink, each copying itself, and under them the rest
+/// of its fields as a table of two columns, each row copying its value.
+///
+/// A section with none of the fields its head is made of is headed by its
+/// own name instead, which copies the section, as a column of fields is.
+#[allow(clippy::too_many_arguments)]
+fn headed_section(
+    pass: &mut Pass,
+    ui: &mut egui::Ui,
+    place: usize,
+    section: &Section,
+    first: usize,
+    width: f32,
+    mark: &[icon::Mark],
+    head: &[&str],
+) {
     let theme = pass.theme;
-    let head = [RESOLUTION, READ_BY]
-        .into_iter()
+    let pieces: Vec<Piece> = head
+        .iter()
         .filter_map(|name| find(section, first, name))
         .map(|(index, fact)| Piece {
             index,
             shown: fact.value.clone(),
             exact: None,
+        })
+        .collect();
+    if pieces.is_empty() {
+        let grid = pass.grid;
+        block(pass, ui, Copyable::Section(place), width, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = MARK_GAP;
+                let (rect, _) = ui.allocate_exact_size(Vec2::splat(COPY_ICON), Sense::HOVER);
+                icon::paint(
+                    ui.painter(),
+                    mark,
+                    icon::square(grid, rect, COPY_ICON),
+                    theme.accent.into(),
+                    theme.panel_background.into(),
+                );
+                words(ui, Kind::Heading, section.name, theme);
+            });
         });
-    line(pass, ui, width, Some(icon::IMAGE), theme.accent, None, head);
+    } else {
+        line(pass, ui, width, Some(mark), theme.accent, None, pieces);
+    }
     let rows = (first..)
         .zip(&section.facts)
-        .filter(|(_, fact)| ![RESOLUTION, READ_BY].contains(&fact.name.as_str()));
-    ui.add_space(HEAD_GAP);
-    table(pass, ui, rows, width);
+        .filter(|(_, fact)| !head.contains(&fact.name.as_str()));
+    if rows.clone().next().is_some() {
+        ui.add_space(HEAD_GAP);
+        table(pass, ui, rows, width);
+    }
 }
 
 /// The field of `section` called `name`, with its place in the column's
@@ -647,7 +688,7 @@ fn line(
             }
             let response = ui.add(Label::new(text(&piece.shown)).wrap().sense(Sense::CLICK));
             let response = match piece.exact {
-                Some(exact) => said(pass, response, exact),
+                Some(exact) => said(pass.theme, response, exact),
                 None => response,
             };
             let across = egui::Rect::from_x_y_ranges(left..=left + width, response.rect.y_range());
@@ -668,6 +709,9 @@ fn line(
 /// wide as the widest of them needs — up to [`NAMES_SHARE`] of `width` — and
 /// its value beside it, broken to what is left. A row is one block, copying
 /// its value.
+///
+/// A value [`short`] has a shorter way of saying is written that way, and
+/// says the whole of it in its tooltip; the copy is the whole of it too.
 fn table<'a>(
     pass: &mut Pass,
     ui: &mut egui::Ui,
@@ -704,25 +748,40 @@ fn table<'a>(
                         .color(theme.text_dim);
                     ui.add(Label::new(text).wrap());
                 });
-                let text = RichText::new(&fact.value)
+                let shown = short(fact);
+                let text = RichText::new(shown.as_deref().unwrap_or(&fact.value))
                     .size(TEXT_SIZE)
                     .color(theme.text_primary);
-                ui.add(Label::new(text).wrap());
+                let response = ui.add(Label::new(text).wrap());
+                if shown.is_some() {
+                    said(theme, response, fact.value.clone());
+                }
             });
         });
     }
 }
 
+/// A shorter way of saying `fact`'s value, where the table has one: when a
+/// photograph was taken, as how long ago — "3 weeks ago" — the date itself
+/// being what the tooltip and the clipboard are for.
+fn short(fact: &Fact) -> Option<String> {
+    if fact.name != exif::TAKEN {
+        return None;
+    }
+    let taken = clock::parse(&fact.value)?;
+    Some(ago(taken, SystemTime::now()))
+}
+
 /// `response` with a tooltip of the one line `words`: a fact written short,
 /// said in full. No key does what a click on it does, so there is nothing for
 /// [`Pass::tooltip`]'s keymap to add, and nothing here for it to compose.
-fn said(pass: &Pass, response: egui::Response, words: String) -> egui::Response {
-    let theme = pass.theme;
+fn said(theme: &Theme, response: egui::Response, words: String) -> egui::Response {
+    let theme = *theme;
     let tooltip = Tooltip {
         title: vec![words],
         hints: Vec::new(),
     };
-    response.on_hover_ui(move |ui| super::tooltip::show(ui, &tooltip, theme))
+    response.on_hover_ui(move |ui| super::tooltip::show(ui, &tooltip, &theme))
 }
 
 /// How long before `now` the file was written, as it is said: "2 weeks ago".
@@ -824,7 +883,10 @@ fn contents(current: &Current) -> Contents {
         },
         Section {
             name: "Image",
-            face: Face::Image,
+            face: Face::Headed {
+                mark: icon::IMAGE,
+                head: &[RESOLUTION, READ_BY],
+            },
             facts: fields(image_facts(current)),
         },
     ];
@@ -835,7 +897,20 @@ fn contents(current: &Current) -> Contents {
             .entries
             .iter()
             .map(|entry| (entry.name.as_str(), entry.value.clone()));
-        sections.push(Section::fields(section.name, fields(entries)));
+        // The camera's own section is headed by the camera's name; every
+        // other the metadata reads out is a column of fields.
+        let face = match section.name {
+            "Camera" => Face::Headed {
+                mark: icon::CAMERA,
+                head: &[exif::CAMERA],
+            },
+            _ => Face::Fields,
+        };
+        sections.push(Section {
+            name: section.name,
+            face,
+            facts: fields(entries),
+        });
     }
     // The regions are written out here rather than with the rest, since
     // where each is depends on the turn in force.
@@ -1378,6 +1453,44 @@ mod tests {
             assert!(!written.iter().any(|row| row == absent), "{written:?}");
         }
         assert!(written.iter().any(|row| row == "kingfisher.png"));
+    }
+
+    /// The camera's section is headed by the camera's name; the sections
+    /// after it are columns of fields.
+    #[test]
+    fn the_camera_is_headed_by_its_name() {
+        let contents = contents(&current());
+        let face = |name: &str| {
+            let section = contents
+                .sections
+                .iter()
+                .find(|section| section.name == name);
+            section.expect(name).face
+        };
+        assert!(matches!(
+            face("Camera"),
+            Face::Headed { head, .. } if head == [exif::CAMERA]
+        ));
+        assert!(matches!(face("Capture metadata"), Face::Fields));
+    }
+
+    /// When a photograph was taken is said as how long ago, where the date
+    /// can be read; anything else is written as it is.
+    #[test]
+    fn the_time_taken_is_said_as_how_long_ago() {
+        let fact = |name: &str, value: &str| Fact {
+            name: name.to_string(),
+            value: value.to_string(),
+        };
+        let long_ago = short(&fact(exif::TAKEN, "2001-01-01 12:00:00 +00:00"));
+        assert!(
+            long_ago
+                .as_deref()
+                .is_some_and(|said| said.ends_with("years ago")),
+            "{long_ago:?}"
+        );
+        assert_eq!(short(&fact(exif::TAKEN, "sometime in spring")), None);
+        assert_eq!(short(&fact(exif::LENS, "2001-01-01 12:00:00 +00:00")), None);
     }
 
     /// A picture with a gain map says what the map is and how much of its
