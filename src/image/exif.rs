@@ -104,6 +104,10 @@ pub struct Exif {
     /// readout: the same tags the `Georeference` section is written from,
     /// kept as numbers. `None` for everything that is not a map.
     pub georeference: Option<geo::Georeference>,
+    /// Where the camera was, as the GPS directory says: the latitude and
+    /// the longitude in signed degrees, for the map the `Location` section
+    /// offers to open. `None` where the file does not say.
+    pub position: Option<[f64; 2]>,
     /// The regions the metadata marks out on the picture — the block's
     /// `SubjectArea`, then the XMP packet's — kept as numbers: they are in
     /// the picture as stored, and the panel writes them out in the picture
@@ -322,6 +326,7 @@ impl Exif {
             return Self {
                 sections,
                 georeference: None,
+                position: None,
                 regions,
                 orientation: None,
             };
@@ -399,6 +404,7 @@ impl Exif {
         Self {
             sections,
             georeference: geo::Georeference::read(&tags),
+            position: position(exif),
             regions,
             orientation,
         }
@@ -803,6 +809,28 @@ fn comment(exif: &exif::Exif) -> Option<String> {
 /// file holds is exact and unusable, and the hemisphere is kept as its letter
 /// rather than as a sign, which is read wrong more often than not.
 fn coordinates(exif: &exif::Exif) -> Option<(String, String)> {
+    let [latitude, longitude] = hemispheres(exif)
+        .map(|axis| axis.map(|(degrees, hemisphere)| format!("{degrees:.5}\u{00b0} {hemisphere}")));
+    Some((latitude?, longitude?))
+}
+
+/// Where the camera was as the two signed numbers a map's address takes:
+/// the latitude, south of the equator below zero, and the longitude, west
+/// of Greenwich below zero.
+fn position(exif: &exif::Exif) -> Option<[f64; 2]> {
+    let [latitude, longitude] = hemispheres(exif).map(|axis| {
+        let (degrees, hemisphere) = axis?;
+        Some(match hemisphere.as_str() {
+            "S" | "W" => -degrees,
+            _ => degrees,
+        })
+    });
+    Some([latitude?, longitude?])
+}
+
+/// The latitude and the longitude, each as degrees and the letter of its
+/// hemisphere.
+fn hemispheres(exif: &exif::Exif) -> [Option<(f64, String)>; 2] {
     let axis = |value: Tag, reference: Tag| {
         let degrees = degrees(&primary(exif, value)?.value)?;
         let hemisphere = primary(exif, reference)?
@@ -810,11 +838,12 @@ fn coordinates(exif: &exif::Exif) -> Option<(String, String)> {
             .to_string()
             .trim_matches('"')
             .to_string();
-        Some(format!("{degrees:.5}\u{00b0} {hemisphere}"))
+        Some((degrees, hemisphere))
     };
-    let latitude = axis(Tag::GPSLatitude, Tag::GPSLatitudeRef)?;
-    let longitude = axis(Tag::GPSLongitude, Tag::GPSLongitudeRef)?;
-    Some((latitude, longitude))
+    [
+        axis(Tag::GPSLatitude, Tag::GPSLatitudeRef),
+        axis(Tag::GPSLongitude, Tag::GPSLongitudeRef),
+    ]
 }
 
 /// Degrees, minutes and seconds as one number.
@@ -1407,6 +1436,11 @@ mod tests {
                 ("Positioning error", "\u{00b1}4.7 m"),
             ])
         );
+        // And the same place as the signed numbers a map's address takes:
+        // south below zero.
+        let [latitude, longitude] = exif.position.expect("a position");
+        assert!((latitude + 44.68202).abs() < 1e-5, "{latitude}");
+        assert!((longitude - 169.16196).abs() < 1e-5, "{longitude}");
         // The rest of the GPS directory is listed on its own, after the
         // place it was read beside.
         assert_eq!(

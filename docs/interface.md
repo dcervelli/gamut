@@ -953,6 +953,17 @@ group that came to nothing is not carried at all, an empty heading being a
 question about where the rest of it went. Nothing there is a tag number or an
 offset by the time the interface sees it.
 
+The coordinates are kept as numbers too, as `Exif::position`: the latitude
+and longitude in signed degrees, south and west below zero, which is what a
+map's address takes where the panel shows the hemisphere's letter. The
+button after them at the head of the `Location` section opens
+`settings::map_link` of the `open_map_link` setting — `{lat}` and `{lng}`
+replaced by those numbers to six places — through `openers::browse`, which
+is `xdg-open` on Linux and the workspace's `openURL` on a Mac. It is drawn
+only where the file gave both numbers, so it is never dead. A setting that
+does not name both is refused as it is read: a link with one of them fixed
+would open the same place for every picture.
+
 The words — the `About` section — are read from two blocks, because a file
 keeps them in two. EXIF is what the camera wrote, and has a tag for a caption,
 an artist and a copyright; XMP is what every program since has written — the title, the

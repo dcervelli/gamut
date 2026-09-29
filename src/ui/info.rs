@@ -210,6 +210,9 @@ enum Face {
     Headed {
         mark: &'static [icon::Mark],
         head: &'static [&'static str],
+        /// A button after the head, with the mark it wears: the map of
+        /// where the picture was taken, beside the coordinates.
+        button: Option<(&'static [icon::Mark], Control)>,
     },
     /// The regions the metadata marks out on the picture, as a table of who
     /// or what each is and where, each drawn on the picture while the
@@ -484,8 +487,8 @@ fn column(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, picture: &egui:
                 match section.face {
                     Face::Fields => fields_section(pass, ui, place, section, index, width),
                     Face::File => file_section(pass, ui, current, section, index, width),
-                    Face::Headed { mark, head } => {
-                        headed_section(pass, ui, place, section, index, width, mark, head)
+                    Face::Headed { mark, head, button } => {
+                        headed_section(pass, ui, place, section, index, width, mark, head, button)
                     }
                     Face::Regions => {
                         regions_section(pass, ui, current, picture, place, section, index, width)
@@ -555,7 +558,16 @@ fn file_section(
             exact: whole,
         }
     });
-    line(pass, ui, width, Some(icon::FILE), theme.accent, None, name);
+    line(
+        pass,
+        ui,
+        width,
+        Some(icon::FILE),
+        theme.accent,
+        None,
+        name,
+        None,
+    );
     if let Some((index, folder)) = field(FOLDER) {
         ui.add_space(HEAD_GAP);
         block(pass, ui, Copyable::Fact(index), width, |ui| {
@@ -590,6 +602,7 @@ fn file_section(
             theme.text_primary,
             Some("\u{00b7}"),
             size.into_iter().chain(modified),
+            None,
         );
     }
 }
@@ -610,6 +623,7 @@ fn headed_section(
     width: f32,
     mark: &[icon::Mark],
     head: &[&str],
+    button: Option<(&[icon::Mark], Control)>,
 ) {
     let theme = pass.theme;
     let pieces: Vec<Piece> = head
@@ -624,7 +638,16 @@ fn headed_section(
     if pieces.is_empty() {
         marked_heading(pass, ui, place, section, width, mark);
     } else {
-        line(pass, ui, width, Some(mark), theme.accent, None, pieces);
+        line(
+            pass,
+            ui,
+            width,
+            Some(mark),
+            theme.accent,
+            None,
+            pieces,
+            button,
+        );
     }
     let rows = (first..)
         .zip(&section.facts)
@@ -910,12 +933,14 @@ struct Piece {
 }
 
 /// One line of `pieces` in `ink`, after `mark` where there is one and with
-/// `between` set between each two, broken to `width` where they do not fit.
+/// `between` set between each two, broken to `width` where they do not fit;
+/// and after them `button`, wearing its mark, where there is one.
 ///
 /// Each piece is pointed at and copied on its own, and says in its tooltip
 /// what it stands for where it is written short. The copy button goes where
 /// every other one in the column does, at the column's end, level with the
 /// piece pointed at.
+#[allow(clippy::too_many_arguments)]
 fn line(
     pass: &mut Pass,
     ui: &mut egui::Ui,
@@ -924,6 +949,7 @@ fn line(
     ink: Color,
     between: Option<&str>,
     pieces: impl IntoIterator<Item = Piece>,
+    button: Option<(&[icon::Mark], Control)>,
 ) {
     let grid = pass.grid;
     let ground = pass.theme.panel_background;
@@ -965,6 +991,24 @@ fn line(
                 across,
                 pointed,
             );
+        }
+        if let Some((mark, control)) = button {
+            ui.add_space(MARK_GAP - space);
+            let (rect, response) = ui.allocate_exact_size(Vec2::splat(CHIP_HEIGHT), Sense::CLICK);
+            let (background, ink) = pass.button_ink(false, &response, true);
+            ui.painter().rect_filled(rect, TOGGLE_RADIUS, background);
+            icon::paint(
+                ui.painter(),
+                mark,
+                icon::square(grid, rect, COPY_ICON),
+                ink,
+                background,
+            );
+            response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, control.label()));
+            let response = pass.tooltip(response, Tip::Control(control));
+            if response.clicked() {
+                pass.press(control);
+            }
         }
     });
 }
@@ -1149,6 +1193,7 @@ fn contents(current: &Current) -> Contents {
             Face::Headed {
                 mark: icon::IMAGE,
                 head: &[RESOLUTION, READ_BY],
+                button: None,
             },
             fields(image_facts(current)),
         ),
@@ -1167,10 +1212,13 @@ fn contents(current: &Current) -> Contents {
             "Camera" => Face::Headed {
                 mark: icon::CAMERA,
                 head: &[exif::CAMERA],
+                button: None,
             },
             "Location" => Face::Headed {
                 mark: icon::MAP_PIN,
                 head: &[exif::LATITUDE, exif::LONGITUDE],
+                // Only where the file gave numbers a map can take.
+                button: exif.position.map(|_| (icon::MAP, Control::OpenMap)),
             },
             _ => Face::Fields,
         };

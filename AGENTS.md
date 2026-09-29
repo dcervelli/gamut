@@ -191,7 +191,8 @@ dbus.rs        (Linux) the session bus, spoken directly: Value marshaled and unm
 openers/       what else on the desktop can open the file on screen, and starting one of
                them: mod.rs MAX_NAME; linux.rs the desktop entries that claim its MIME type,
                found through the desktop's own index and the user's associations;
-               macos.rs Launch Services' applications, through NSWorkspace
+               macos.rs Launch Services' applications, through NSWorkspace; and browse(),
+               a web address opened in the browser, for the map of where a picture was taken
 media.rs       MIME_TYPES: what the desktop calls each extension the decoders read
 clock.rs       a moment as a date and time — UTC, or the zone the system's own
                compiled zone file says it is in

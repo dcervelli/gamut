@@ -127,6 +127,10 @@ pub enum Control {
     /// A row of the information panel, or the button above the column that
     /// takes the whole of it.
     Facts(Copyable),
+    /// The button beside the coordinates at the head of the information
+    /// panel's `Location` section, which opens a map of where the picture
+    /// was taken in the browser.
+    OpenMap,
     /// The file chooser: opened by `Ctrl+P`, and closed by the same key
     /// pressed again while it is up — which arrives through here from the
     /// popup itself, since the field in it has the keyboard.
@@ -244,6 +248,7 @@ impl Control {
             Control::Facts(Copyable::All) => "Copy All".to_string(),
             Control::Facts(Copyable::Section(index)) => format!("Copy section {index}"),
             Control::Facts(Copyable::Fact(index)) => format!("Copy field {index}"),
+            Control::OpenMap => "Open in map".to_string(),
             Control::Chooser => "Choose a file".to_string(),
             Control::Choose(index) => format!("Choose file {}", index + 1),
             Control::FileMenu => "File".to_string(),
@@ -523,6 +528,7 @@ impl Control {
         Control::Geographic(GeographicFormat::Decimal),
         Control::Copies(Copies::Name),
         Control::Facts(Copyable::All),
+        Control::OpenMap,
         Control::Chooser,
         Control::Choose(0),
         Control::FileMenu,
@@ -592,6 +598,7 @@ impl Control {
             | Control::Geographic(_)
             | Control::Copies(_)
             | Control::Facts(_)
+            | Control::OpenMap
             | Control::Chooser
             | Control::Choose(_)
             | Control::FileMenu

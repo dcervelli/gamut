@@ -52,6 +52,9 @@ pub struct Config {
     /// Whether a single file named on the command line steps on through
     /// the other images in its folder.
     pub browse_folder: bool,
+    /// The web address the `Location` section's map button opens, with
+    /// `{lat}` and `{lng}` standing for the coordinates in signed degrees.
+    pub open_map_link: String,
     pub keys: Keymap,
     pub gestures: Gestures,
 }
@@ -69,6 +72,7 @@ impl Default for Config {
             geographic_format: GeographicFormat::Decimal,
             log_counts: false,
             browse_folder: true,
+            open_map_link: OPEN_MAP_LINK.to_string(),
             keys: Keymap::default(),
             gestures: Gestures::default(),
         }
@@ -78,7 +82,7 @@ impl Default for Config {
 /// Every setting the configuration file takes, in the order the template
 /// lists them, with the words it wears there. [`Config::value`] writes each
 /// one's value, and [`Config::parse`] reads it back.
-const SETTINGS: [(&str, &str); 10] = [
+const SETTINGS: [(&str, &str); 11] = [
     ("show_ui", "The panels around the picture."),
     (
         "show_minimap",
@@ -110,7 +114,22 @@ const SETTINGS: [(&str, &str); 10] = [
         "browse_folder",
         "A single file opened alone steps on through the other images in its folder.",
     ),
+    (
+        "open_map_link",
+        "The web page the map button in the info panel's Location section opens: {lat} and {lng} are where the picture was taken, in degrees.",
+    ),
 ];
+
+/// Where the map button goes unless the configuration says otherwise.
+pub const OPEN_MAP_LINK: &str = "https://www.google.com/maps/search/?api=1&query={lat},{lng}";
+
+/// `link` with the coordinates in it: `{lat}` the latitude and `{lng}` the
+/// longitude, each in signed degrees to six places, which is a tenth of a
+/// meter on the ground.
+pub fn map_link(link: &str, [latitude, longitude]: [f64; 2]) -> String {
+    link.replace("{lat}", &format!("{latitude:.6}"))
+        .replace("{lng}", &format!("{longitude:.6}"))
+}
 
 impl Config {
     /// The configuration as a file: every setting at its default, commented
@@ -155,6 +174,7 @@ impl Config {
             "geographic_format" => self.geographic_format.label().to_ascii_lowercase(),
             "log_counts" => self.log_counts.to_string(),
             "browse_folder" => self.browse_folder.to_string(),
+            "open_map_link" => self.open_map_link.clone(),
             _ => unreachable!("`{name}` is not in SETTINGS"),
         }
     }
@@ -235,6 +255,19 @@ impl Config {
                                 "unknown coordinate_format `{value}`: pixel, projected, or geographic"
                             ),
                         )),
+                    }
+                    None
+                }
+                "open_map_link" => {
+                    // A link without both would open the same place for
+                    // every picture, or nowhere.
+                    if value.contains("{lat}") && value.contains("{lng}") {
+                        config.open_map_link = value.to_string();
+                    } else {
+                        problems.push((
+                            number,
+                            "open_map_link needs {lat} and {lng} in it".to_string(),
+                        ));
                     }
                     None
                 }
@@ -773,6 +806,7 @@ mod tests {
             geographic_format: defaults.geographic_format.next(),
             log_counts: !defaults.log_counts,
             browse_folder: !defaults.browse_folder,
+            open_map_link: "https://www.openstreetmap.org/?mlat={lat}&mlon={lng}".to_string(),
             keys: defaults.keys.clone(),
             gestures: defaults.gestures.clone(),
         };
@@ -781,6 +815,19 @@ mod tests {
             .map(|(name, _)| format!("{name} = {}\n", changed.value(name)))
             .collect();
         assert_eq!(Config::parse(&text), (changed, Vec::new()));
+    }
+
+    /// The map's address takes the coordinates where it says, signed; one
+    /// that does not say where both go is a problem, and the default stands.
+    #[test]
+    fn the_map_link_takes_the_coordinates() {
+        assert_eq!(
+            map_link(OPEN_MAP_LINK, [-44.68202, 169.161956]),
+            "https://www.google.com/maps/search/?api=1&query=-44.682020,169.161956"
+        );
+        let (config, problems) = Config::parse("open_map_link = https://example.com/?q={lat}\n");
+        assert_eq!(config.open_map_link, OPEN_MAP_LINK);
+        assert_eq!(problems.len(), 1, "{problems:?}");
     }
 
     #[test]

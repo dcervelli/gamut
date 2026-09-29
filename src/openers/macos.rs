@@ -112,3 +112,17 @@ pub fn edit(path: &Path) -> Result<()> {
         Ok(())
     })
 }
+
+/// Opens the web address `url` in the default browser, as a link clicked
+/// anywhere else would be.
+pub fn browse(url: &str) -> Result<()> {
+    autoreleasepool(|_| {
+        let link = NSURL::URLWithString(&NSString::from_str(url))
+            .with_context(|| format!("{url} is not a web address"))?;
+        anyhow::ensure!(
+            NSWorkspace::sharedWorkspace().openURL(&link),
+            "nothing opens {url}"
+        );
+        Ok(())
+    })
+}

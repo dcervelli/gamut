@@ -2,17 +2,19 @@
 //! them: the list the menu under the open button offers. Where the answer is
 //! kept is the platform's — `linux.rs` reads the freedesktop desktop entries,
 //! and `macos.rs` asks Launch Services. And `edit`, which opens a text file
-//! in whatever edits text, for the configuration file.
+//! in whatever edits text, for the configuration file, and `browse`, which
+//! opens a web address in the browser, for the map of where a picture was
+//! taken.
 
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
-pub use linux::{Opener, edit, for_file, open};
+pub use linux::{Opener, browse, edit, for_file, open};
 
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "macos")]
-pub use macos::{Opener, edit, for_file, open};
+pub use macos::{Opener, browse, edit, for_file, open};
 
 /// The longest name an item of the menu may wear, in characters.
 ///

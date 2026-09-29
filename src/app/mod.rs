@@ -261,6 +261,9 @@ pub struct App {
     /// Whether a single file opened alone has its folder to step into:
     /// the setting, unless the command line said to open it alone.
     browse_folder: bool,
+    /// The web address the map button opens, with `{lat}` and `{lng}` for
+    /// the coordinates: the setting.
+    open_map_link: String,
     listed: Option<folder::Listed>,
     folder_delivered: folder::Deliver,
     glimpsed: HashMap<PathBuf, folder::Glimpse>,
@@ -537,6 +540,7 @@ impl App {
             directories,
             folder,
             browse_folder: config.browse_folder,
+            open_map_link: config.open_map_link.clone(),
             listed: None,
             folder_delivered,
             glimpsed: HashMap::new(),
@@ -3175,6 +3179,7 @@ mod tests {
                 geographic_format: ui::GeographicFormat::Decimal,
                 log_counts: false,
                 browse_folder: true,
+                open_map_link: crate::settings::OPEN_MAP_LINK.to_string(),
                 keys: keymap::Keymap::table(),
                 gestures: Gestures::table(),
             },
