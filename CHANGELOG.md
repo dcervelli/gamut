@@ -6,6 +6,14 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ## Unreleased
 
+### Added
+
+- The information panel has a *Regions* section for a file whose XMP marks
+  regions out on the picture, as cataloging programs do for the faces they
+  find: a row for each, named by its kind, with who is in it, what was
+  written about it, and where it is, in pixels where the file says what size
+  of picture it was marked on and in percentages where it does not.
+
 ### Changed
 
 - The top bar gives the file's name its room before the size, pixels and

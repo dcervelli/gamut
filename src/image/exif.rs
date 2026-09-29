@@ -14,7 +14,8 @@
 //! those apart into `Georeference`. The fields somebody wrote in words are
 //! pulled out as `About` — from the EXIF block, and from the XMP packet
 //! beside it, which [`super::xmp`] reads and which is where a title, a
-//! caption or a keyword is written when a file has one at all — and whatever
+//! caption or a keyword is written when a file has one at all — with the
+//! regions the packet marks out on the picture under `Regions`, and whatever
 //! is left is listed under the directory it came out of, in the order the
 //! file carries it, because this is a viewer for looking at what is actually
 //! in a file rather than for a tidy précis of it.
@@ -225,13 +226,12 @@ impl Exif {
     /// packet, which may be all a file has.
     fn assemble(exif: Option<&exif::Exif>, xmp: &Xmp) -> Self {
         let described = described(exif, xmp);
+        let regions = regions(xmp.regions());
         let Some(exif) = exif else {
-            let sections = (!described.is_empty())
-                .then_some(Section {
-                    name: ABOUT,
-                    entries: described,
-                })
+            let sections = [(ABOUT, described), (REGIONS, regions)]
                 .into_iter()
+                .filter(|(_, entries)| !entries.is_empty())
+                .map(|(name, entries)| Section { name, entries })
                 .collect();
             return Self {
                 sections,
@@ -287,6 +287,7 @@ impl Exif {
             ("Location", place),
             ("Georeference", geo),
             (ABOUT, described),
+            (REGIONS, regions),
             ("Image metadata", image),
             ("Capture metadata", capture),
         ]
@@ -327,6 +328,9 @@ const SUMMARIZED: [Tag; 17] = [
 /// file: the two the chooser reads back out.
 const ABOUT: &str = "About";
 const TITLE: &str = "Title";
+
+/// The section the packet's regions go under.
+const REGIONS: &str = "Regions";
 
 /// One of the fields somebody wrote in words: what it is called when it is
 /// spoken of, the EXIF tag that holds it, and the XMP property that does —
@@ -536,6 +540,66 @@ fn described(exif: Option<&exif::Exif>, xmp: &Xmp) -> Vec<Entry> {
         push(&mut rows, described.name, from_exif.or(from_xmp));
     }
     rows
+}
+
+/// The regions marked out on the picture, a row each, in the order the
+/// packet lists them: named by what kind of region it is, and saying who or
+/// what is in it, anything written about it, and where it is.
+///
+/// Where it is is in the pixels of the size the packet says the regions were
+/// drawn on, the top left corner and the size as the export dialog and a
+/// marked region write them; a packet that does not say is left in shares of
+/// the picture's sides. Either is the packet's own reading of the picture,
+/// taken as written.
+fn regions(regions: &xmp::Regions) -> Vec<Entry> {
+    let mut rows = Vec::new();
+    for region in &regions.list {
+        let kind = match region.kind.as_deref() {
+            None => "Region",
+            Some("BarCode") => "Barcode",
+            Some(kind) => kind,
+        };
+        let parts: Vec<String> = [
+            region.name.clone(),
+            region.description.clone(),
+            region.area.map(|area| place(&area, regions.applied_to)),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        push(&mut rows, kind, join(&parts));
+    }
+    rows
+}
+
+/// Where an area is, in pixels where the size it is a share of is known,
+/// and otherwise in percentages of the picture's sides.
+fn place(area: &xmp::Area, applied_to: Option<(f64, f64)>) -> String {
+    let (scale, unit) = match (area.normalized, applied_to) {
+        (false, _) => ((1.0, 1.0), ""),
+        (true, Some(size)) => (size, ""),
+        (true, None) => ((100.0, 100.0), "%"),
+    };
+    // Adding nothing turns a region's edge a hair past the picture's from
+    // -0 into 0.
+    let across = |value: f64| format!("{}{unit}", (value * scale.0).round() + 0.0);
+    let down = |value: f64| format!("{}{unit}", (value * scale.1).round() + 0.0);
+    match (area.w, area.h, area.d) {
+        (Some(w), Some(h), _) => format!(
+            "{} \u{00d7} {} at {}, {}",
+            across(w),
+            down(h),
+            across(area.x - w / 2.0),
+            down(area.y - h / 2.0),
+        ),
+        (_, _, Some(d)) => format!(
+            "{} across at {}, {}",
+            across(d),
+            across(area.x),
+            down(area.y)
+        ),
+        _ => format!("{}, {}", across(area.x), down(area.y)),
+    }
 }
 
 /// What `UserComment` says, which the renderer will not tell us. The field is
@@ -1243,6 +1307,65 @@ mod tests {
             ]
         );
         assert_eq!(exif.sections.len(), 1, "{exif:?}");
+    }
+
+    /// Each region is a row named by its kind, saying who is in it and
+    /// where: in the pixels of the size it was drawn on where the packet
+    /// says, and in shares of the sides where it does not.
+    #[test]
+    fn a_region_says_who_is_in_it_and_where() {
+        let packet = |dimensions: &str| {
+            format!(
+                r#"<x:xmpmeta xmlns:x="adobe:ns:meta/">
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+<rdf:Description rdf:about=""
+ xmlns:mwg-rs="http://www.metadataworkinggroup.com/schemas/regions/"
+ xmlns:stDim="http://ns.adobe.com/xap/1.0/sType/Dimensions#"
+ xmlns:stArea="http://ns.adobe.com/xmp/sType/Area#">
+<mwg-rs:Regions rdf:parseType="Resource">{dimensions}<mwg-rs:RegionList><rdf:Bag>
+<rdf:li rdf:parseType="Resource" mwg-rs:Name="Jane Doe" mwg-rs:Type="Face">
+<mwg-rs:Area stArea:x="0.5" stArea:y="0.25" stArea:w="0.1" stArea:h="0.2"/></rdf:li>
+<rdf:li rdf:parseType="Resource" mwg-rs:Type="BarCode" mwg-rs:Description="On the ring">
+<mwg-rs:Area stArea:x="0.3" stArea:y="0.6" stArea:d="0.05"/></rdf:li>
+<rdf:li rdf:parseType="Resource" mwg-rs:Name="Rex"/>
+<rdf:li rdf:parseType="Resource">
+<mwg-rs:Area stArea:x="0.001" stArea:y="0.5" stArea:unit="normalized"/></rdf:li>
+</rdf:Bag></mwg-rs:RegionList></mwg-rs:Regions>
+</rdf:Description></rdf:RDF></x:xmpmeta>"#
+            )
+        };
+        let rows = |dimensions: &str| -> Vec<(String, String)> {
+            let xmp = Xmp::parse(packet(dimensions).as_bytes()).expect("the packet parses");
+            let exif = Exif::assemble(None, &xmp);
+            assert_eq!(exif.sections.len(), 1, "{exif:?}");
+            section(&exif, "Regions")
+                .iter()
+                .map(|entry| (entry.name.clone(), entry.value.clone()))
+                .collect()
+        };
+        let owned = |rows: [(&str, &str); 4]| {
+            rows.map(|(name, value)| (name.to_string(), value.to_string()))
+        };
+        assert_eq!(
+            rows(
+                r#"<mwg-rs:AppliedToDimensions stDim:w="4000" stDim:h="3000" stDim:unit="pixel"/>"#
+            ),
+            owned([
+                ("Face", "Jane Doe \u{00b7} 400 \u{00d7} 600 at 1800, 450"),
+                ("Barcode", "On the ring \u{00b7} 200 across at 1200, 1800"),
+                ("Region", "Rex"),
+                ("Region", "4, 1500"),
+            ])
+        );
+        assert_eq!(
+            rows(""),
+            owned([
+                ("Face", "Jane Doe \u{00b7} 10% \u{00d7} 20% at 45%, 15%"),
+                ("Barcode", "On the ring \u{00b7} 5% across at 30%, 60%"),
+                ("Region", "Rex"),
+                ("Region", "0%, 50%"),
+            ])
+        );
     }
 
     /// Where the block and the packet both describe the picture, the block's

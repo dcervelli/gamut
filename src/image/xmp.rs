@@ -24,6 +24,12 @@
 //! it holds. Which of those the panel shows, and under what names, is
 //! [`super::exif`]'s business, alongside the EXIF fields that say the same
 //! things.
+//!
+//! One property is read as the structure it is rather than as words: the
+//! Metadata Working Group's regions, the rectangles a cataloging program
+//! draws around the faces, pets and barcodes it found or was told of, each
+//! with the name it was given. [`Region`] is one of them as the packet
+//! writes it, with its area still in the packet's own terms.
 
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
@@ -51,6 +57,16 @@ pub const DC: &str = "http://purl.org/dc/elements/1.1/";
 /// itself.
 pub const BASIC: &str = "http://ns.adobe.com/xap/1.0/";
 
+/// The Metadata Working Group's regions: the list, and each region's name,
+/// kind and words.
+pub const MWG_RS: &str = "http://www.metadataworkinggroup.com/schemas/regions/";
+
+/// The fields of a region's area.
+const AREA: &str = "http://ns.adobe.com/xmp/sType/Area#";
+
+/// The fields of the size a list of regions was drawn on.
+const DIMENSIONS: &str = "http://ns.adobe.com/xap/1.0/sType/Dimensions#";
+
 /// The header the packet wears in a JPEG's `APP1` segment, where it shares
 /// the marker with EXIF and is told apart by this.
 const JPEG_HEADER: &[u8] = b"http://ns.adobe.com/xap/1.0/\0";
@@ -76,12 +92,49 @@ pub struct Property {
     pub values: Vec<String>,
 }
 
+/// One of the regions marked out on the picture, as the packet writes it.
+/// Every field is optional in the schema, and every one is left out by some
+/// writer.
+#[derive(Clone, Default, PartialEq, Debug)]
+pub struct Region {
+    /// Who or what is in it: the person's name, most often.
+    pub name: Option<String>,
+    /// `Face`, `Pet`, `Focus` or `BarCode` in the schema's own words, or
+    /// whatever else the writer chose.
+    pub kind: Option<String>,
+    pub description: Option<String>,
+    pub area: Option<Area>,
+}
+
+/// Where a region is. `x` and `y` are its center; a rectangle has a width
+/// and a height, a circle a diameter, and a point neither. The schema's unit
+/// is `normalized`, a share of the picture's side, which is what a missing
+/// unit is taken for; `pixel` is what a few writers put instead.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Area {
+    pub x: f64,
+    pub y: f64,
+    pub w: Option<f64>,
+    pub h: Option<f64>,
+    pub d: Option<f64>,
+    pub normalized: bool,
+}
+
+/// The regions a packet holds, and the size of the picture they were drawn
+/// on, in pixels, where it says.
+#[derive(Clone, Default, PartialEq, Debug)]
+pub struct Regions {
+    pub applied_to: Option<(f64, f64)>,
+    pub list: Vec<Region>,
+}
+
 /// A file's XMP, as properties. Empty when the file carries none, or carries
 /// a packet that will not parse: what is missing is a caption, not a
 /// picture, so nothing here is an error anything else has to handle.
-#[derive(Clone, Default, PartialEq, Eq, Debug)]
+#[derive(Clone, Default, PartialEq, Debug)]
 pub struct Xmp {
     properties: Vec<Property>,
+    regions: Regions,
 }
 
 impl Xmp {
@@ -102,8 +155,12 @@ impl Xmp {
         }
     }
 
-    /// `self`'s properties, and whichever of `under`'s it does not have.
+    /// `self`'s properties, and whichever of `under`'s it does not have. The
+    /// regions are one property, taken whole from whichever packet has any.
     fn over(mut self, under: Self) -> Self {
+        if self.regions.list.is_empty() {
+            self.regions = under.regions;
+        }
         for property in under.properties {
             push(
                 &mut self.properties,
@@ -130,6 +187,7 @@ impl Xmp {
             .descendants()
             .find(|node| node.has_tag_name((RDF, "RDF")))?;
         let mut properties = Vec::new();
+        let mut regions = Regions::default();
         for description in rdf
             .children()
             .filter(|node| node.has_tag_name((RDF, "Description")))
@@ -155,6 +213,9 @@ impl Xmp {
                 let Some(namespace) = element.tag_name().namespace() else {
                     continue;
                 };
+                if element.has_tag_name((MWG_RS, "Regions")) && regions.list.is_empty() {
+                    regions = read_regions(fields(element));
+                }
                 push(
                     &mut properties,
                     namespace,
@@ -163,7 +224,10 @@ impl Xmp {
                 );
             }
         }
-        Some(Self { properties })
+        Some(Self {
+            properties,
+            regions,
+        })
     }
 
     /// What the property `name` in `namespace` says: every item of a list,
@@ -175,6 +239,107 @@ impl Xmp {
             .find(|property| property.namespace == namespace && property.name == name)
             .map(|property| property.values.as_slice())
     }
+
+    /// The regions marked out on the picture, in the order the packet lists
+    /// them.
+    pub fn regions(&self) -> &Regions {
+        &self.regions
+    }
+}
+
+/// The node a structure's fields are written on. A structure is written in
+/// one of three ways — the property element itself marked
+/// `rdf:parseType="Resource"`, the same with its fields as attributes, or an
+/// `rdf:Description` inside the property element — and the first two put the
+/// fields on the element itself.
+fn fields<'a, 'input>(node: Node<'a, 'input>) -> Node<'a, 'input> {
+    node.children()
+        .find(|child| child.has_tag_name((RDF, "Description")))
+        .unwrap_or(node)
+}
+
+/// A structure's field `name` in `namespace`, as an attribute or as an
+/// element holding words, whichever the writer chose.
+fn field<'a>(node: Node<'a, '_>, namespace: &str, name: &str) -> Option<&'a str> {
+    node.attribute((namespace, name))
+        .or_else(|| {
+            node.children()
+                .find(|child| child.has_tag_name((namespace, name)))
+                .and_then(|child| child.text())
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+/// A field that is itself a structure, at the node its own fields are on.
+fn nested<'a, 'input>(
+    node: Node<'a, 'input>,
+    namespace: &str,
+    name: &str,
+) -> Option<Node<'a, 'input>> {
+    node.children()
+        .find(|child| child.has_tag_name((namespace, name)))
+        .map(fields)
+}
+
+fn number(node: Node, namespace: &str, name: &str) -> Option<f64> {
+    field(node, namespace, name)?
+        .parse()
+        .ok()
+        .filter(|value: &f64| value.is_finite())
+}
+
+/// The regions under `mwg-rs:Regions`, at the node its fields are on.
+fn read_regions(regions: Node) -> Regions {
+    let applied_to = nested(regions, MWG_RS, "AppliedToDimensions").and_then(|dimensions| {
+        // A size in some other unit says nothing about pixels.
+        let unit = field(dimensions, DIMENSIONS, "unit").unwrap_or("pixel");
+        let w = number(dimensions, DIMENSIONS, "w")?;
+        let h = number(dimensions, DIMENSIONS, "h")?;
+        (unit == "pixel" && w > 0.0 && h > 0.0).then_some((w, h))
+    });
+    let items = regions
+        .children()
+        .find(|child| child.has_tag_name((MWG_RS, "RegionList")))
+        .and_then(|list| {
+            list.children()
+                .find(|node| node.is_element() && node.tag_name().namespace() == Some(RDF))
+        });
+    let list = items
+        .into_iter()
+        .flat_map(|items| items.children())
+        .filter(|item| item.has_tag_name((RDF, "li")))
+        .map(fields)
+        .map(|region| {
+            let text = |name| field(region, MWG_RS, name).map(str::to_string);
+            Region {
+                name: text("Name"),
+                kind: text("Type"),
+                description: text("Description"),
+                area: nested(region, MWG_RS, "Area").and_then(area),
+            }
+        })
+        .filter(|region| *region != Region::default())
+        .collect();
+    Regions { applied_to, list }
+}
+
+/// A region's area; `None` for one with no center, or one in a unit that is
+/// neither of the two anybody writes.
+fn area(node: Node) -> Option<Area> {
+    let normalized = match field(node, AREA, "unit") {
+        None | Some("normalized") => true,
+        Some("pixel") => false,
+        Some(_) => return None,
+    };
+    Some(Area {
+        x: number(node, AREA, "x")?,
+        y: number(node, AREA, "y")?,
+        w: number(node, AREA, "w"),
+        h: number(node, AREA, "h"),
+        d: number(node, AREA, "d"),
+        normalized,
+    })
 }
 
 /// Keeps a property whose words are worth keeping: one with a value that is
@@ -552,6 +717,88 @@ mod tests {
     fn a_blank_property_is_not_held() {
         assert_eq!(parsed().property(DC, "description"), None);
         assert_eq!(parsed().property(DC, "rights"), None);
+    }
+
+    /// Regions as the two kinds of writer spell them: the structures marked
+    /// `rdf:parseType="Resource"` with their fields as attributes, as
+    /// Lightroom and digiKam write them, and the same inside
+    /// `rdf:Description`s with their fields as elements. A region with
+    /// nothing in it is not one, and a list is read whole from the packet
+    /// that has one.
+    #[test]
+    fn regions_are_read_in_either_spelling() {
+        const ATTRIBUTES: &str = r#"<x:xmpmeta xmlns:x="adobe:ns:meta/">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about=""
+    xmlns:mwg-rs="http://www.metadataworkinggroup.com/schemas/regions/"
+    xmlns:stDim="http://ns.adobe.com/xap/1.0/sType/Dimensions#"
+    xmlns:stArea="http://ns.adobe.com/xmp/sType/Area#">
+   <mwg-rs:Regions rdf:parseType="Resource">
+    <mwg-rs:AppliedToDimensions stDim:w="4000" stDim:h="3000" stDim:unit="pixel"/>
+    <mwg-rs:RegionList>
+     <rdf:Bag>
+      <rdf:li>
+       <rdf:Description mwg-rs:Name="Jane Doe" mwg-rs:Type="Face">
+        <mwg-rs:Area stArea:x="0.5" stArea:y="0.25" stArea:w="0.1" stArea:h="0.2" stArea:unit="normalized"/>
+       </rdf:Description>
+      </rdf:li>
+      <rdf:li rdf:parseType="Resource">
+       <mwg-rs:Type>Focus</mwg-rs:Type>
+       <mwg-rs:Area rdf:parseType="Resource">
+        <stArea:x>0.3</stArea:x>
+        <stArea:y>0.6</stArea:y>
+       </mwg-rs:Area>
+      </rdf:li>
+      <rdf:li><rdf:Description/></rdf:li>
+     </rdf:Bag>
+    </mwg-rs:RegionList>
+   </mwg-rs:Regions>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>"#;
+        let regions = Xmp::parse(ATTRIBUTES.as_bytes())
+            .expect("the packet parses")
+            .regions()
+            .clone();
+        assert_eq!(regions.applied_to, Some((4000.0, 3000.0)));
+        assert_eq!(
+            regions.list,
+            [
+                Region {
+                    name: Some("Jane Doe".to_string()),
+                    kind: Some("Face".to_string()),
+                    description: None,
+                    area: Some(Area {
+                        x: 0.5,
+                        y: 0.25,
+                        w: Some(0.1),
+                        h: Some(0.2),
+                        d: None,
+                        normalized: true,
+                    }),
+                },
+                Region {
+                    name: None,
+                    kind: Some("Focus".to_string()),
+                    description: None,
+                    area: Some(Area {
+                        x: 0.3,
+                        y: 0.6,
+                        w: None,
+                        h: None,
+                        d: None,
+                        normalized: true,
+                    }),
+                },
+            ]
+        );
+
+        // The packet with no regions takes the other's, whichever is over.
+        let mut over = parsed().over(Xmp::parse(ATTRIBUTES.as_bytes()).unwrap());
+        assert_eq!(over.regions(), &regions);
+        over = Xmp::parse(ATTRIBUTES.as_bytes()).unwrap().over(parsed());
+        assert_eq!(over.regions(), &regions);
+        assert!(parsed().regions().list.is_empty());
     }
 
     /// A packet whose padding is nulls rather than spaces, as some writers

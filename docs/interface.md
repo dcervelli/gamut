@@ -993,6 +993,21 @@ shares a word with a row under it reads as a mistake; the row in turn is
 "Caption", the word the programs that write the field use for it, and what it
 holds — a sentence about the picture, not a description of the file.
 
+One XMP property is read as the structure it is rather than as words: the
+Metadata Working Group's regions (`mwg-rs:Regions`), which a cataloging
+program writes for the faces, pets and barcodes it found or was told of.
+`xmp::Region` holds each as the packet wrote it — name, kind, description, and
+an area whose `x` and `y` are its center, in shares of the sides unless the
+packet says pixels — reading a structure in any of the three ways RDF allows
+one to be spelled, fields as attributes or as elements. `exif.rs` makes a
+`Regions` section of them, a row each named by its kind, with the area put
+into pixels of the size the packet says the regions were drawn on
+(`AppliedToDimensions`) as a top left corner and a size, as the export
+dialog and a marked region write them, or left in percentages where the
+packet does not say. The area is the packet's own reading of the picture and
+is not turned by the orientation tag or by the turn in force, the
+specification leaving writers to disagree about which picture they meant.
+
 The panel is also the one part of the interface that is read out rather than
 merely read. A click on a field copies it, a click on a heading copies the
 section under it, and a button in a header above the column copies the lot.
