@@ -51,7 +51,7 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   estimated in scale — "relative", as an iPhone's dual-camera portrait says,
   with the range marked `≈` as the pixel readout marks it. A map whose file
   does not say what its codes stand for has its encoding given as unknown. The section describes the map whether the picture or the map is on
-  screen.
+  screen, and while the map is, its heading wears a *Showing* pill.
 - A **Depth** pixel format, beside Hex, Decimal and Mapped: for a picture
   carrying a depth map, the readout says how far away the pixel under the
   pointer was. An iPhone's portrait HEIC reads as a distance in meters,

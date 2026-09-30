@@ -48,6 +48,9 @@ use super::{
 const REGIONS: &str = "Regions";
 /// The heading of the depth map the picture carries.
 const DEPTH_MAP: &str = "Depth map";
+/// What the pill at the end of a heading says while its section is on
+/// screen in the picture's place.
+const SHOWING: &str = "Showing";
 
 /// Below this the panel would show its header, two facts and a scrollbar, so
 /// it stays off instead. There is no matching minimum for the width: the
@@ -194,6 +197,10 @@ struct Section {
     /// For [`Face::Regions`], each region a fact is the row of, in the same
     /// order; empty for every other face.
     regions: Vec<ShownRegion>,
+    /// Whether what the section describes is on screen in the picture's
+    /// place, which a pill at the end of its heading says: the depth map's,
+    /// while it is shown.
+    showing: bool,
 }
 
 impl Section {
@@ -204,6 +211,7 @@ impl Section {
             face,
             facts,
             regions: Vec::new(),
+            showing: false,
         }
     }
 }
@@ -620,18 +628,63 @@ fn marked_heading(
                 theme.accent.into(),
                 theme.panel_background.into(),
             );
-            // A heading is the one thing on the panel picked out in the
-            // accent; everything else wears the bars' own inks.
-            ui.add(
-                Label::new(
-                    RichText::new(section.name)
-                        .size(TEXT_SIZE)
-                        .color(theme.accent),
-                )
-                .wrap(),
-            );
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if section.showing {
+                    showing_pill(ui, theme, grid);
+                    ui.add_space(CHIP_GAP);
+                }
+                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                    // A heading is the one thing on the panel picked out in
+                    // the accent; everything else wears the bars' own inks.
+                    ui.add(
+                        Label::new(
+                            RichText::new(section.name)
+                                .size(TEXT_SIZE)
+                                .color(theme.accent),
+                        )
+                        .wrap(),
+                    );
+                });
+            });
         });
     })
+}
+
+/// The pill at the end of a heading whose section is on screen in the
+/// picture's place: an eye and the word, in the accent, round at both ends
+/// so it reads as a state rather than as a button to press.
+fn showing_pill(ui: &mut egui::Ui, theme: &Theme, grid: icon::Grid) {
+    let font = egui::FontId::proportional(LABEL_SIZE);
+    let galley = ui.ctx().fonts_mut(|fonts| {
+        fonts.layout_no_wrap(SHOWING.to_string(), font, egui::Color32::PLACEHOLDER)
+    });
+    let width = (2.0 * CHIP_PADDING + COPY_ICON + CHIP_GAP + galley.size().x).round();
+    let (rect, _) = ui.allocate_exact_size(vec2(width, CHIP_HEIGHT), Sense::HOVER);
+    let ink: egui::Color32 = theme.accent.into();
+    let ground: egui::Color32 = theme.panel_background.into();
+    let painter = ui.painter();
+    painter.rect_stroke(
+        rect,
+        CHIP_HEIGHT / 2.0,
+        egui::Stroke::new(RULE_WIDTH, ink),
+        StrokeKind::Inside,
+    );
+    let mark = egui::Rect::from_min_size(
+        pos2(rect.min.x + CHIP_PADDING, rect.min.y),
+        vec2(COPY_ICON, rect.height()),
+    );
+    icon::paint(
+        painter,
+        icon::EYE,
+        icon::square(grid, mark, COPY_ICON),
+        ink,
+        ground,
+    );
+    let at = pos2(
+        mark.max.x + CHIP_GAP,
+        rect.center().y - galley.size().y / 2.0,
+    );
+    painter.galley(at, galley, ink);
 }
 
 /// The regions the metadata marks out, under their heading: a table of who
@@ -1156,15 +1209,18 @@ fn contents(current: &Current) -> Contents {
         },
         fields(image_facts(current)),
     ));
-    sections.push(Section::new(
-        DEPTH_MAP,
-        Face::Headed {
-            mark: icon::AXIS_3D,
-            head: &[],
-            button: None,
-        },
-        fields(depth_facts(current)),
-    ));
+    sections.push(Section {
+        showing: current.showing == Showing::Auxiliary(Auxiliary::Depth),
+        ..Section::new(
+            DEPTH_MAP,
+            Face::Headed {
+                mark: icon::AXIS_3D,
+                head: &[],
+                button: None,
+            },
+            fields(depth_facts(current)),
+        )
+    });
     sections.extend(
         captured
             .into_iter()
@@ -1328,15 +1384,6 @@ fn image_facts(current: &Current) -> Vec<(&'static str, String)> {
             match current.rendering {
                 Rendering::Developed => String::new(),
                 Rendering::CameraJpeg => "camera JPEG".to_string(),
-            },
-        ),
-        // And which of the file's images, where it is not the picture but
-        // one the picture carries, shown in its place.
-        (
-            "Showing",
-            match current.showing {
-                Showing::Picture => String::new(),
-                Showing::Auxiliary(Auxiliary::Depth) => "depth map".to_string(),
             },
         ),
         (
@@ -1825,7 +1872,17 @@ mod tests {
             ])
         );
 
-        // Shown in the picture's place, the map is still the picture's.
+        // Shown in the picture's place, the map is still the picture's, and
+        // its heading says it is on screen rather than a row of the image's.
+        let showing = |current: &Current| {
+            contents(current)
+                .sections
+                .iter()
+                .find(|section| section.name == DEPTH_MAP)
+                .expect("a section")
+                .showing
+        };
+        assert!(!showing(&current));
         let (picture, _) = current.picture();
         let face = crate::ui::Face::new(picture.depth.as_ref().unwrap().image());
         current.show(
@@ -1833,6 +1890,8 @@ mod tests {
             |_| Some(face),
         );
         assert!(section(&current).contains(&"Apple".to_string()));
+        assert!(showing(&current));
+        assert!(!written(&current).iter().any(|row| row == "Showing"));
     }
 
     /// A file whose XMP marks regions out on the picture has them under a

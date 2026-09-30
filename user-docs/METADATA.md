@@ -49,7 +49,6 @@ describes the map.
 | Resolution | Width × height, after the file's orientation is applied. A turn made with the keys is not counted. |
 | Read by | The format the file turned out to be, by its contents rather than its extension. |
 | Rendering | *camera JPEG* while a raw's embedded JPEG is shown instead of the developed picture. |
-| Showing | *depth map* while the depth map is shown in the picture's place. |
 | Orientation | The turn the file's EXIF orientation asks for, which has already been applied. |
 | Compression | TIFF only: how its pixels are compressed. |
 | Samples | Bits per sample and the channel layout: *8-bit RGB*, *32-bit float gray*. |
@@ -68,7 +67,8 @@ describes the map.
 
 Only for a picture that carries a depth map: an iPhone portrait, or a JPEG
 with Google's depth data. It describes the map whether the picture or the
-map is on screen.
+map is on screen; while the map is shown in the picture's place, its heading
+wears a *Showing* pill.
 
 | Field | What it says |
 | --- | --- |

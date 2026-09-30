@@ -540,6 +540,20 @@ pub(super) const AXIS_3D: &[Mark] = &[
     Mark::Line([13.5, 10.5], [15.0, 9.0]),
 ];
 
+/// Lucide's `eye`: an almond with the pupil in it — what is on screen, for
+/// the pill that says the depth map is shown in the picture's place.
+///
+/// The almond is Lucide's two long arcs, of radius 10.75 about points four
+/// units above and below the middle, joined at either corner by an arc of
+/// radius one.
+pub(super) const EYE: &[Mark] = &[
+    Mark::arc([12.0, 15.751], 10.75, 202.41, 135.18),
+    Mark::arc([21.0, 12.0], 1.0, 339.64, 40.72),
+    Mark::arc([12.0, 8.249], 10.75, 22.41, 135.18),
+    Mark::arc([3.0, 12.0], 1.0, 159.64, 40.72),
+    Mark::circle([12.0, 12.0], 3.0),
+];
+
 /// Lucide's `zoom-in`: a magnifying glass with a plus in it, for the loupe,
 /// which is one.
 pub(super) const ZOOM_IN: &[Mark] = &[
@@ -1152,7 +1166,7 @@ mod tests {
 
     /// Every icon in the table, so that a new one is held to the same
     /// promises as the rest.
-    const ICONS: [&[Mark]; 40] = [
+    const ICONS: [&[Mark]; 41] = [
         CHART_AREA,
         INFO,
         CIRCLE_QUESTION_MARK,
@@ -1193,6 +1207,7 @@ mod tests {
         ARROW_LEFT,
         ARROW_RIGHT,
         AXIS_3D,
+        EYE,
     ];
 
     fn device(value: f32, scale: f32) -> f32 {

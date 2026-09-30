@@ -645,8 +645,9 @@ The toggle is a square with `axis-3d`'s mark alone, between the camera's
 switch and the headroom switch (`Pass::depth_toggle`), lit while the map is
 up, and is left out on a picture
 with no map for the camera switch's reason; `NO_DEPTH_MAP` is the refusal
-only the key reaches. The info panel's *Showing* row says when the facts
-under it are the map's.
+only the key reaches. While the map is up, the info panel's `Depth map`
+heading wears a pill with an eye and *Showing* (`Section::showing`), which
+is what says the `Image` section's facts are the map's.
 
 ## The region
 
