@@ -31,7 +31,7 @@ use std::collections::VecDeque;
 use std::sync::OnceLock;
 
 use super::encode::{self, Raster};
-use super::{DecodedImage, Samples, Transfer};
+use super::{Component, DecodedImage, Rebuild, Transfer};
 
 /// `image` fitted inside `side` pixels on its longer side, its aspect kept,
 /// each output pixel the mean of the block of source pixels it stands for.
@@ -48,33 +48,38 @@ pub fn downscale(image: &DecodedImage, side: u32) -> DecodedImage {
     let Some((width, height)) = fitted([image.width, image.height], side) else {
         return image.clone();
     };
-    let (w, h) = (image.width as usize, image.height as usize);
-    let (ow, oh) = (width as usize, height as usize);
-    let samples = match &image.samples {
-        Samples::U8 { channels, data } => Samples::U8 {
-            channels: *channels,
-            data: reduce(data, channels.count(), w, h, ow, oh, image.nodata),
-        },
-        Samples::U16 { channels, data } => Samples::U16 {
-            channels: *channels,
-            data: reduce(data, channels.count(), w, h, ow, oh, image.nodata),
-        },
-        Samples::F32 { channels, data } => Samples::F32 {
-            channels: *channels,
-            data: reduce(data, channels.count(), w, h, ow, oh, image.nodata),
-        },
+    let shrink = Shrink {
+        channels: image.channels().count(),
+        from: (image.width as usize, image.height as usize),
+        to: (width as usize, height as usize),
+        nodata: image.nodata,
     };
     DecodedImage {
         width,
         height,
-        samples,
-        color: image.color,
-        alpha: image.alpha,
-        referred: image.referred,
-        exposure: image.exposure,
-        nodata: image.nodata,
+        samples: image.samples.rebuilt(&shrink),
         gain_map: None,
         depth: None,
+        ..*image
+    }
+}
+
+/// One shrink of a buffer of `channels` components a pixel, `from` a size
+/// `to` another, for [`Samples::rebuilt`].
+///
+/// [`Samples::rebuilt`]: super::Samples::rebuilt
+struct Shrink {
+    channels: usize,
+    from: (usize, usize),
+    to: (usize, usize),
+    nodata: Option<f32>,
+}
+
+impl Rebuild for Shrink {
+    fn rebuild<T: Component>(&self, data: &[T]) -> Vec<T> {
+        let (w, h) = self.from;
+        let (ow, oh) = self.to;
+        reduce(data, self.channels, w, h, ow, oh, self.nodata)
     }
 }
 
@@ -373,40 +378,6 @@ impl Plan<'_> {
     }
 }
 
-/// A component the filter can average: read out to a double, and written
-/// back from one.
-trait Component: Copy {
-    fn to_f64(self) -> f64;
-    fn from_f64(mean: f64) -> Self;
-}
-
-impl Component for u8 {
-    fn to_f64(self) -> f64 {
-        f64::from(self)
-    }
-    fn from_f64(mean: f64) -> Self {
-        mean.round().clamp(0.0, 255.0) as u8
-    }
-}
-
-impl Component for u16 {
-    fn to_f64(self) -> f64 {
-        f64::from(self)
-    }
-    fn from_f64(mean: f64) -> Self {
-        mean.round().clamp(0.0, 65535.0) as u16
-    }
-}
-
-impl Component for f32 {
-    fn to_f64(self) -> f64 {
-        f64::from(self)
-    }
-    fn from_f64(mean: f64) -> Self {
-        mean as f32
-    }
-}
-
 /// The block of the source axis `full` long that output cell `at` of `out`
 /// stands for.
 fn block(at: usize, full: usize, out: usize) -> std::ops::Range<usize> {
@@ -464,7 +435,7 @@ fn reduce<T: Component>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::image::{AlphaMode, Channels, ColorSpace, Referred};
+    use crate::image::{AlphaMode, Channels, ColorSpace, Referred, Samples};
 
     /// The bytes `image` would be exported as, unchanged by the display:
     /// what the resize is handed.

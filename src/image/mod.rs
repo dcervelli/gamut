@@ -170,6 +170,70 @@ impl Samples {
         };
         format!("{}{depth}", self.channels().code())
     }
+
+    /// The buffer with its data made anew by `rebuild`, at the width and
+    /// in the layout it had: what a turn and a shrink both do to it, and
+    /// the one match on the three widths they share.
+    pub fn rebuilt(&self, rebuild: &impl Rebuild) -> Samples {
+        match self {
+            Samples::U8 { channels, data } => Samples::U8 {
+                channels: *channels,
+                data: rebuild.rebuild(data),
+            },
+            Samples::U16 { channels, data } => Samples::U16 {
+                channels: *channels,
+                data: rebuild.rebuild(data),
+            },
+            Samples::F32 { channels, data } => Samples::F32 {
+                channels: *channels,
+                data: rebuild.rebuild(data),
+            },
+        }
+    }
+}
+
+/// One component of a sample, whichever of the three widths it is stored
+/// at: read out to a double, and written back from one. What a filter
+/// averages, and what a walk over a buffer is generic in.
+pub trait Component: Copy {
+    fn to_f64(self) -> f64;
+    /// The component nearest `mean`: rounded and clamped to the width for
+    /// an integer, as it is for a float.
+    fn from_f64(mean: f64) -> Self;
+}
+
+impl Component for u8 {
+    fn to_f64(self) -> f64 {
+        f64::from(self)
+    }
+    fn from_f64(mean: f64) -> Self {
+        mean.round().clamp(0.0, 255.0) as u8
+    }
+}
+
+impl Component for u16 {
+    fn to_f64(self) -> f64 {
+        f64::from(self)
+    }
+    fn from_f64(mean: f64) -> Self {
+        mean.round().clamp(0.0, 65535.0) as u16
+    }
+}
+
+impl Component for f32 {
+    fn to_f64(self) -> f64 {
+        f64::from(self)
+    }
+    fn from_f64(mean: f64) -> Self {
+        mean as f32
+    }
+}
+
+/// A function of a buffer at any of the three widths, for
+/// [`Samples::rebuilt`]: a trait rather than a closure, since a closure
+/// cannot be generic over the component.
+pub trait Rebuild {
+    fn rebuild<T: Component>(&self, data: &[T]) -> Vec<T>;
 }
 
 /// Whether color components have already been multiplied by alpha. PNG says

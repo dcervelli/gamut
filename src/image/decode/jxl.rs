@@ -45,6 +45,8 @@ use jxl_oxide::{AllocTracker, InitializeResult, JxlImage, PixelFormat};
 use crate::image::sequence::{Frame, FrameSource, Loops, Sequence};
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
 
+use super::Width;
+
 pub struct Jxl;
 
 /// The bare codestream's two-byte signature.
@@ -91,7 +93,7 @@ impl super::Decoder for Jxl {
             layout.width,
             layout.height,
             layout.channels.count(),
-            layout.bits,
+            layout.held.bits(),
         )?;
         reading.finish(source)?;
         let image = reading.image;
@@ -151,7 +153,7 @@ impl super::Decoder for Jxl {
             layout.width,
             layout.height,
             layout.channels.count(),
-            layout.bits,
+            layout.held.bits(),
         )?;
         let Some((ticks, _)) = timing(&reading.image) else {
             bail!("the JPEG XL file is not an animation");
@@ -256,23 +258,12 @@ fn render(image: &JxlImage, layout: &Layout, index: usize) -> Result<DecodedImag
     // unclamped — which is what `Samples::full_scale` goes on to assume.
     let count = layout.width as usize * layout.height as usize * layout.channels.count();
     let channels = layout.channels;
-    let samples = match layout.depth {
-        Depth::U8 => {
-            let mut data = vec![0u8; count];
-            fill(&mut stream, &mut data)?;
-            Samples::U8 { channels, data }
-        }
-        Depth::U16 => {
-            let mut data = vec![0u16; count];
-            fill(&mut stream, &mut data)?;
-            Samples::U16 { channels, data }
-        }
-        Depth::F32 => {
-            let mut data = vec![0f32; count];
-            fill(&mut stream, &mut data)?;
-            Samples::F32 { channels, data }
-        }
-    };
+    let mut samples = layout.held.zeroed(channels, count);
+    match &mut samples {
+        Samples::U8 { data, .. } => fill(&mut stream, data)?,
+        Samples::U16 { data, .. } => fill(&mut stream, data)?,
+        Samples::F32 { data, .. } => fill(&mut stream, data)?,
+    }
 
     Ok(DecodedImage::new(
         layout.width,
@@ -401,32 +392,24 @@ fn fill<T: jxl_oxide::FrameBufferSample>(
     Ok(())
 }
 
-/// Which of the three sample types the file's own depth calls for.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Depth {
-    U8,
-    U16,
-    F32,
-}
-
-/// The sample type the file's own depth calls for, and the width to charge
-/// the size ceiling for it.
+/// The width the file's own depth calls for, which is also what the size
+/// ceiling is charged for it.
 ///
 /// The depth a file was authored at, not the one it decodes through: JPEG XL
 /// is float from end to end internally, so taking the internal form at face
 /// value would quadruple what an ordinary 8-bit photograph costs on the way
 /// to the GPU. A file authored in floating point keeps `F32`, where the
 /// highlights above 1.0 that are the point of it survive.
-fn depth_of(bit_depth: BitDepth) -> Result<(Depth, u8)> {
+fn depth_of(bit_depth: BitDepth) -> Result<Width> {
     Ok(match bit_depth {
-        BitDepth::FloatSample { .. } => (Depth::F32, 32),
+        BitDepth::FloatSample { .. } => Width::F32,
         BitDepth::IntegerSample { bits_per_sample } => match bits_per_sample {
             0 => bail!("JPEG XL image reports zero bits per sample"),
-            1..=8 => (Depth::U8, 8),
-            9..=16 => (Depth::U16, 16),
+            1..=8 => Width::U8,
+            9..=16 => Width::U16,
             // Past 16 bits an integer buffer would have to drop the low end,
             // so the float one takes it instead. The format allows up to 31.
-            _ => (Depth::F32, 32),
+            _ => Width::F32,
         },
     })
 }
@@ -436,9 +419,8 @@ struct Layout {
     width: u32,
     height: u32,
     channels: Channels,
-    depth: Depth,
-    /// Bits per component once widened to `depth`, for the size ceiling.
-    bits: u8,
+    /// The width the samples are held at.
+    held: Width,
     premultiplied: bool,
 }
 
@@ -457,7 +439,7 @@ impl Layout {
             }
         };
 
-        let (depth, bits) = depth_of(image.image_header().metadata.bit_depth)?;
+        let held = depth_of(image.image_header().metadata.bit_depth)?;
 
         // JPEG XL states premultiplication per alpha channel rather than for
         // the file, so the alpha actually being rendered is the one asked.
@@ -473,8 +455,7 @@ impl Layout {
             width: image.width(),
             height: image.height(),
             channels,
-            depth,
-            bits,
+            held,
             premultiplied,
         })
     }
@@ -557,20 +538,24 @@ mod tests {
         let integer = |bits| BitDepth::IntegerSample {
             bits_per_sample: bits,
         };
-        assert_eq!(depth_of(integer(8)).unwrap(), (Depth::U8, 8));
-        assert_eq!(depth_of(integer(1)).unwrap(), (Depth::U8, 8));
-        assert_eq!(depth_of(integer(10)).unwrap(), (Depth::U16, 16));
-        assert_eq!(depth_of(integer(16)).unwrap(), (Depth::U16, 16));
+        assert_eq!(depth_of(integer(8)).unwrap(), Width::U8);
+        assert_eq!(depth_of(integer(1)).unwrap(), Width::U8);
+        assert_eq!(depth_of(integer(10)).unwrap(), Width::U16);
+        assert_eq!(depth_of(integer(16)).unwrap(), Width::U16);
         // Wider than a `u16` holds, so the float buffer takes it.
-        assert_eq!(depth_of(integer(24)).unwrap(), (Depth::F32, 32));
+        assert_eq!(depth_of(integer(24)).unwrap(), Width::F32);
         assert_eq!(
             depth_of(BitDepth::FloatSample {
                 bits_per_sample: 32,
                 exp_bits: 8,
             })
             .unwrap(),
-            (Depth::F32, 32)
+            Width::F32
         );
+        // And the ceiling is charged for the width held, not the file's.
+        assert_eq!(Width::U8.bits(), 8);
+        assert_eq!(Width::U16.bits(), 16);
+        assert_eq!(Width::F32.bits(), 32);
 
         // A depth of nothing is a broken header, not a zero-byte sample.
         assert!(depth_of(integer(0)).is_err());

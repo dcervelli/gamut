@@ -43,7 +43,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use tiff::decoder::{Decoder, DecodingResult, DecodingSampleType, Limits};
 use tiff::tags::Tag;
 
-use super::Positioned;
+use super::{Positioned, Width};
 use crate::image::orient;
 use crate::image::sequence::Sequence;
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
@@ -161,7 +161,7 @@ impl super::Decoder for TiffRs {
         // every signed or wide type is widened to `f32` on the way in, up to
         // four times the size, and a signed 8-bit raster at the ceiling must
         // not balloon four times past it.
-        let held = Held::of(decoder.image_chunk_buffer_layout(0)?.sample_type);
+        let held = held_as(decoder.image_chunk_buffer_layout(0)?.sample_type);
         super::check_decoded_size(width, height, channels.count(), held.bits())?;
 
         // Read before the pixels move the decoder's position.
@@ -188,15 +188,15 @@ impl super::Decoder for TiffRs {
                 ycbcr: ycbcr.as_ref(),
             };
             match held {
-                Held::U8 => Samples::U8 {
+                Width::U8 => Samples::U8 {
                     channels,
                     data: read_chunks(&mut decoder, &read)?,
                 },
-                Held::U16 => Samples::U16 {
+                Width::U16 => Samples::U16 {
                     channels,
                     data: read_chunks(&mut decoder, &read)?,
                 },
-                Held::F32 => Samples::F32 {
+                Width::F32 => Samples::F32 {
                     channels,
                     data: read_chunks(&mut decoder, &read)?,
                 },
@@ -254,38 +254,20 @@ fn pages<R: io::Read + Seek>(decoder: &mut Decoder<R>) -> Result<Vec<usize>> {
     Ok(pages)
 }
 
-/// Which of the three sample types the rest of the program works in a
-/// file's samples are held as: the stored type for unsigned 8- and 16-bit
-/// data, and `f32` for everything else the format allows.
+/// The width a file's samples are held at: the stored type for unsigned
+/// 8- and 16-bit data, and `f32` for everything else the format allows.
 ///
 /// Signed and wide integer rasters become floats rather than being rescaled:
 /// an elevation model holds meters, and -86 at the Dead Sea is a real value,
 /// not something to normalize away. The display window is what turns them
-/// into something visible.
-#[derive(Clone, Copy)]
-enum Held {
-    U8,
-    U16,
-    F32,
-}
-
-impl Held {
-    /// `None` is a depth or format the crate cannot name, which it will not
-    /// decode either; `f32` keeps the size check honest until it says so.
-    fn of(sample_type: Option<DecodingSampleType>) -> Self {
-        match sample_type {
-            Some(DecodingSampleType::U8) => Self::U8,
-            Some(DecodingSampleType::U16) => Self::U16,
-            _ => Self::F32,
-        }
-    }
-
-    fn bits(self) -> u8 {
-        match self {
-            Self::U8 => 8,
-            Self::U16 => 16,
-            Self::F32 => 32,
-        }
+/// into something visible. `None` is a depth or format the crate cannot
+/// name, which it will not decode either; `f32` keeps the size check honest
+/// until it says so.
+fn held_as(sample_type: Option<DecodingSampleType>) -> Width {
+    match sample_type {
+        Some(DecodingSampleType::U8) => Width::U8,
+        Some(DecodingSampleType::U16) => Width::U16,
+        _ => Width::F32,
     }
 }
 
@@ -336,7 +318,7 @@ fn mismatch() -> anyhow::Error {
 }
 
 /// Everything the format allows onto the three sample types the rest of the
-/// program works in, for a file read whole. See [`Held`].
+/// program works in, for a file read whole. See [`held_as`].
 fn into_samples(result: DecodingResult, channels: Channels) -> Result<Samples> {
     Ok(match result {
         DecodingResult::U8(data) => Samples::U8 { channels, data },

@@ -19,7 +19,7 @@ use ::image::metadata::Orientation;
 
 use crate::image::depth::DepthMap;
 use crate::image::gain_map::GainMap;
-use crate::image::{DecodedImage, Samples};
+use crate::image::{Component, DecodedImage, Rebuild};
 
 /// The size a picture has once it is turned the way `orientation` says: a
 /// quarter turn swaps width and height. For a decoder's `dimensions`, which
@@ -62,44 +62,43 @@ pub fn apply(image: DecodedImage, orientation: Orientation) -> DecodedImage {
     if orientation == Orientation::NoTransforms {
         return image;
     }
-    let DecodedImage {
-        width,
-        height,
-        samples,
-        color,
-        alpha,
-        referred,
-        exposure,
-        nodata,
-        gain_map,
-        depth,
-    } = image;
-    let samples = match samples {
-        Samples::U8 { channels, data } => Samples::U8 {
-            channels,
-            data: turn(&data, width, height, channels.count(), orientation),
-        },
-        Samples::U16 { channels, data } => Samples::U16 {
-            channels,
-            data: turn(&data, width, height, channels.count(), orientation),
-        },
-        Samples::F32 { channels, data } => Samples::F32 {
-            channels,
-            data: turn(&data, width, height, channels.count(), orientation),
-        },
+    let turning = Turning {
+        width: image.width,
+        height: image.height,
+        channels: image.channels().count(),
+        orientation,
     };
-    let (width, height) = size(width, height, orientation);
+    let (width, height) = size(image.width, image.height, orientation);
     DecodedImage {
         width,
         height,
-        samples,
-        color,
-        alpha,
-        referred,
-        exposure,
-        nodata,
-        gain_map: gain_map.map(|map| turn_map(&map, orientation)),
-        depth: depth.map(|map| turn_depth(&map, orientation)),
+        samples: image.samples.rebuilt(&turning),
+        gain_map: image.gain_map.map(|map| turn_map(&map, orientation)),
+        depth: image.depth.map(|map| turn_depth(&map, orientation)),
+        ..image
+    }
+}
+
+/// One turn of a buffer of `channels` components a pixel, `width` by
+/// `height` as stored, for [`Samples::rebuilt`].
+///
+/// [`Samples::rebuilt`]: crate::image::Samples::rebuilt
+struct Turning {
+    width: u32,
+    height: u32,
+    channels: usize,
+    orientation: Orientation,
+}
+
+impl Rebuild for Turning {
+    fn rebuild<T: Component>(&self, data: &[T]) -> Vec<T> {
+        turn(
+            data,
+            self.width,
+            self.height,
+            self.channels,
+            self.orientation,
+        )
     }
 }
 
@@ -107,25 +106,16 @@ pub fn apply(image: DecodedImage, orientation: Orientation) -> DecodedImage {
 /// gain map: it is read by the picture's own coordinates.
 fn turn_depth(map: &DepthMap, orientation: Orientation) -> Arc<DepthMap> {
     let (width, height) = size(map.width, map.height, orientation);
-    let count = map.samples.channels().count();
-    let samples = match &map.samples {
-        Samples::U8 { channels, data } => Samples::U8 {
-            channels: *channels,
-            data: turn(data, map.width, map.height, count, orientation),
-        },
-        Samples::U16 { channels, data } => Samples::U16 {
-            channels: *channels,
-            data: turn(data, map.width, map.height, count, orientation),
-        },
-        Samples::F32 { channels, data } => Samples::F32 {
-            channels: *channels,
-            data: turn(data, map.width, map.height, count, orientation),
-        },
+    let turning = Turning {
+        width: map.width,
+        height: map.height,
+        channels: map.samples.channels().count(),
+        orientation,
     };
     Arc::new(DepthMap {
         width,
         height,
-        samples,
+        samples: map.samples.rebuilt(&turning),
         scale: map.scale,
     })
 }
@@ -317,7 +307,7 @@ impl Turn {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::image::{AlphaMode, Channels, ColorSpace};
+    use crate::image::{AlphaMode, Channels, ColorSpace, Samples};
 
     const ALL: [Orientation; 8] = [
         Orientation::NoTransforms,

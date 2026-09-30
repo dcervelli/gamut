@@ -233,6 +233,51 @@ pub trait Decoder: Sync {
     }
 }
 
+/// Which of the three sample types the rest of the program works in a
+/// decoder's samples are held as, decided from the header before a pixel
+/// is read: what the size ceiling charges for each, and the buffer a
+/// decoder writes into at that width. A format's own depths — TIFF's
+/// signed and wide integers, JPEG XL's floats and its integers past 16
+/// bits — are each decoder's to map onto these.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Width {
+    U8,
+    U16,
+    F32,
+}
+
+impl Width {
+    /// Bits a component takes once held at this width, for
+    /// [`check_decoded_size`].
+    pub(super) fn bits(self) -> u8 {
+        match self {
+            Width::U8 => 8,
+            Width::U16 => 16,
+            Width::F32 => 32,
+        }
+    }
+
+    /// A buffer of `count` zero components at this width, in the layout
+    /// `channels`, for a decoder to fill.
+    pub(super) fn zeroed(self, channels: super::Channels, count: usize) -> super::Samples {
+        use super::Samples;
+        match self {
+            Width::U8 => Samples::U8 {
+                channels,
+                data: vec![0; count],
+            },
+            Width::U16 => Samples::U16 {
+                channels,
+                data: vec![0; count],
+            },
+            Width::F32 => Samples::F32 {
+                channels,
+                data: vec![0.0; count],
+            },
+        }
+    }
+}
+
 /// Order matters only when two decoders claim the same extension, in which
 /// case the first wins.
 static DECODERS: &[&dyn Decoder] = &[
