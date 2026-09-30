@@ -170,8 +170,13 @@ pub fn quarter_turn(orientation: Orientation) -> bool {
 /// and EXIF says where in terms of the stored picture's first row and
 /// first column: for value 6, say, the stored first row is the upright
 /// picture's right-hand column and the stored first column its top row,
-/// which is the picture turned a quarter clockwise. The formula for each
-/// value is written out in those terms below.
+/// which is the picture turned a quarter clockwise. [`stored`] is the one
+/// reading of each value; what is done here is to fetch by the row rather
+/// than by the pixel. A flip top to bottom is the rows copied in the other
+/// order; a flip left to right is each row's pixels copied in the other
+/// order; a half turn is both. Each row of a quarter-turned picture is one
+/// column of the stored one, walked down or up, and is gathered at the
+/// stored row's stride.
 fn turn<T: Copy>(
     data: &[T],
     width: u32,
@@ -180,17 +185,53 @@ fn turn<T: Copy>(
     orientation: Orientation,
 ) -> Vec<T> {
     let (w, h) = (width as usize, height as usize);
-    let (turned_w, turned_h) = if quarter_turn(orientation) {
-        (h, w)
-    } else {
-        (w, h)
-    };
+    let row = w * channels;
     let mut turned = Vec::with_capacity(data.len());
-    for y in 0..turned_h {
-        for x in 0..turned_w {
-            let (sx, sy) = stored(orientation, x, y, w, h);
-            let at = (sy * w + sx) * channels;
-            turned.extend_from_slice(&data[at..at + channels]);
+    if row == 0 {
+        return turned;
+    }
+    let rows = data.chunks_exact(row);
+    match orientation {
+        Orientation::NoTransforms => turned.extend_from_slice(data),
+        Orientation::FlipVertical => {
+            for row in rows.rev() {
+                turned.extend_from_slice(row);
+            }
+        }
+        Orientation::FlipHorizontal => {
+            for row in rows {
+                for pixel in row.chunks_exact(channels).rev() {
+                    turned.extend_from_slice(pixel);
+                }
+            }
+        }
+        Orientation::Rotate180 => {
+            for row in rows.rev() {
+                for pixel in row.chunks_exact(channels).rev() {
+                    turned.extend_from_slice(pixel);
+                }
+            }
+        }
+        Orientation::Rotate90
+        | Orientation::Rotate270
+        | Orientation::Rotate90FlipH
+        | Orientation::Rotate270FlipH => {
+            for y in 0..w {
+                // The stored column this row is, and which way it runs:
+                // where the row's first pixel was stored, and whether its
+                // second was stored below or above it.
+                let (sx, sy) = stored(orientation, 0, y, w, h);
+                let down = h == 1 || stored(orientation, 1, y, w, h).1 > sy;
+                let start = (sy * w + sx) * channels;
+                for x in 0..h {
+                    let at = if down {
+                        start + x * row
+                    } else {
+                        start - x * row
+                    };
+                    turned.extend_from_slice(&data[at..at + channels]);
+                }
+            }
         }
     }
     turned

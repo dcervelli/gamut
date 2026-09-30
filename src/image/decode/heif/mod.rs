@@ -464,7 +464,8 @@ fn requested_color_space(channels: Channels, wide: bool) -> HeifColorSpace {
 ///
 /// Used for monochrome, where gray and alpha arrive as separate planes and
 /// have to be woven together; the interleaved case has its own path because
-/// its components are already adjacent.
+/// its components are already adjacent. A plane on its own — gray with no
+/// alpha — is copied a row at a time.
 fn interleave_planes(planes: &[Plane<&[u8]>], width: u32, height: u32) -> Result<Samples> {
     let channels = match planes.len() {
         1 => Channels::Gray,
@@ -476,25 +477,33 @@ fn interleave_planes(planes: &[Plane<&[u8]>], width: u32, height: u32) -> Result
         layouts.push(Layout::of(plane, width, height, 1)?);
     }
     let wide = layouts.iter().any(|layout| layout.wide);
+    let (w, h) = (width as usize, height as usize);
 
     if wide {
-        let mut data = vec![0u16; width as usize * height as usize * count];
+        let mut data = vec![0u16; w * h * count];
         for (component, (plane, layout)) in planes.iter().zip(&layouts).enumerate() {
-            for y in 0..height as usize {
+            let lookup = layout.lookup();
+            for y in 0..h {
                 let row = &plane.data[y * plane.stride..];
-                for x in 0..width as usize {
-                    data[(y * width as usize + x) * count + component] = layout.sample(row, x);
+                let out = &mut data[y * w * count..(y + 1) * w * count];
+                for (x, slot) in out.iter_mut().skip(component).step_by(count).enumerate() {
+                    *slot = layout.sample(lookup.as_deref(), row, x);
                 }
             }
         }
         Ok(Samples::U16 { channels, data })
     } else {
-        let mut data = vec![0u8; width as usize * height as usize * count];
+        let mut data = vec![0u8; w * h * count];
         for (component, plane) in planes.iter().enumerate() {
-            for y in 0..height as usize {
-                let row = &plane.data[y * plane.stride..];
-                for x in 0..width as usize {
-                    data[(y * width as usize + x) * count + component] = row[x];
+            for y in 0..h {
+                let row = &plane.data[y * plane.stride..][..w];
+                let out = &mut data[y * w * count..(y + 1) * w * count];
+                if count == 1 {
+                    out.copy_from_slice(row);
+                } else {
+                    for (slot, value) in out.iter_mut().skip(component).step_by(count).zip(row) {
+                        *slot = *value;
+                    }
                 }
             }
         }
@@ -515,12 +524,13 @@ fn pack_interleaved(
     let row_components = width as usize * count;
 
     if layout.wide {
+        let lookup = layout.lookup();
         let mut data = vec![0u16; row_components * height as usize];
         for y in 0..height as usize {
             let row = &plane.data[y * plane.stride..];
             let out = &mut data[y * row_components..][..row_components];
             for (component, slot) in out.iter_mut().enumerate() {
-                *slot = layout.sample(row, component);
+                *slot = layout.sample(lookup.as_deref(), row, component);
             }
         }
         Ok(Samples::U16 { channels, data })
@@ -593,7 +603,16 @@ impl Layout {
         })
     }
 
-    /// Reads component `index` of a row as a full-range 16-bit value.
+    /// [`Scale::to_full`] over every value the plane's depth can hold, so
+    /// that a plane is lifted by a lookup a sample rather than a division:
+    /// `None` for a 16-bit plane, whose values are already full range.
+    /// Built once for the plane, ahead of its rows.
+    fn lookup(&self) -> Option<Vec<u16>> {
+        self.scale.table()
+    }
+
+    /// Reads component `index` of a row as a full-range 16-bit value,
+    /// through the plane's `lookup`.
     ///
     /// A narrow plane widens on the way through, which is what a monochrome
     /// image with 10-bit gray and an 8-bit alpha plane needs: the two arrive
@@ -602,13 +621,16 @@ impl Layout {
     /// The `LE` in `libheif`'s chroma names is the buffer's byte order, not
     /// the host's, so the two bytes are combined explicitly rather than
     /// transmuted.
-    fn sample(self, row: &[u8], index: usize) -> u16 {
+    fn sample(self, lookup: Option<&[u16]>, row: &[u8], index: usize) -> u16 {
         let raw = if self.wide {
             u16::from_le_bytes([row[index * 2], row[index * 2 + 1]])
         } else {
             u16::from(row[index])
         };
-        self.scale.to_full(raw)
+        match lookup {
+            Some(table) => table[usize::from(raw).min(table.len() - 1)],
+            None => raw,
+        }
     }
 }
 
@@ -636,6 +658,18 @@ impl Scale {
         }
         let value = u32::from(value).min(self.max);
         ((value * 65535 + self.max / 2) / self.max) as u16
+    }
+
+    /// [`Scale::to_full`] of every value up to the depth's own maximum, in
+    /// order — a value past it is the maximum's, as `to_full` clamps it —
+    /// or `None` where the depth is the full sixteen bits and there is
+    /// nothing to lift.
+    fn table(self) -> Option<Vec<u16>> {
+        (self.max != u32::from(u16::MAX)).then(|| {
+            (0..=self.max)
+                .map(|value| self.to_full(value as u16))
+                .collect()
+        })
     }
 }
 
@@ -708,6 +742,28 @@ mod tests {
     #[test]
     fn an_out_of_range_sample_is_clamped() {
         assert_eq!(Scale::new(8).to_full(4000), u16::MAX);
+    }
+
+    /// The table a plane is lifted through is `to_full` at every value,
+    /// and a sample past the depth's maximum reads the maximum's entry.
+    #[test]
+    fn the_lookup_is_the_lift_at_every_value() {
+        for bits in [1, 8, 10, 12, 15] {
+            let scale = Scale::new(bits);
+            let table = scale.table().expect("a depth short of sixteen bits");
+            assert_eq!(table.len(), (1usize << bits), "{bits} bits");
+            for (value, lifted) in table.iter().enumerate() {
+                assert_eq!(
+                    *lifted,
+                    scale.to_full(value as u16),
+                    "{bits} bits at {value}"
+                );
+            }
+            let layout = Layout { wide: true, scale };
+            let over = (u16::MAX).to_le_bytes();
+            assert_eq!(layout.sample(Some(table.as_slice()), &over, 0), u16::MAX);
+        }
+        assert_eq!(Scale::new(16).table(), None);
     }
 
     /// The enum discriminants have to *be* the CICP code points, or the
