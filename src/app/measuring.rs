@@ -23,7 +23,7 @@ use crate::image::gain_map::Table;
 use crate::image::stats::Stats;
 
 /// How a measure comes home: through the event loop, as the folder does.
-pub type Deliver = Arc<dyn Fn(Measured) + Send + Sync>;
+pub type Deliver = super::Deliver<Measured>;
 
 /// A picture measured through its lift, on its way home.
 pub struct Measured {

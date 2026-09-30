@@ -43,7 +43,6 @@ use anyhow::Result;
 use winit::event_loop::{ControlFlow, EventLoop};
 
 use app::App;
-use loader::Loader;
 
 /// The word this program is called by: the binary a user types, the name in a
 /// window title, the Arch package, the man page and the completions. It is the
@@ -195,41 +194,7 @@ fn run() -> Result<ExitCode> {
     }
     let event_loop = builder.build()?;
     event_loop.set_control_flow(ControlFlow::Wait);
-    let proxy = event_loop.create_proxy();
-    let loader = Loader::new(move |decoded| {
-        proxy
-            .send_event(app::UserEvent::Decoded(Box::new(decoded)))
-            .is_ok()
-    });
-    let proxy = event_loop.create_proxy();
-    let wake: player::Wake =
-        std::sync::Arc::new(move |event| proxy.send_event(app::UserEvent::Frame(event)).is_ok());
-    let proxy = event_loop.create_proxy();
-    let monitors = monitor::watch(move || {
-        let _ = proxy.send_event(app::UserEvent::Monitor);
-    });
-    let proxy = event_loop.create_proxy();
-    let thumbnailer = thumbnailer::Thumbnailer::new(options.overrides, move |delivered| {
-        proxy
-            .send_event(app::UserEvent::Thumbnail(Box::new(delivered)))
-            .is_ok()
-    });
-    let proxy = event_loop.create_proxy();
-    let picker: portal::Deliver = std::sync::Arc::new(move |picked| {
-        let _ = proxy.send_event(app::UserEvent::Picked(picked));
-    });
-    let proxy = event_loop.create_proxy();
-    let folder: app::folder::Deliver = std::sync::Arc::new(move |listed| {
-        let _ = proxy.send_event(app::UserEvent::Folder(listed));
-    });
-    let proxy = event_loop.create_proxy();
-    let arranged: app::arranging::Deliver = std::sync::Arc::new(move |arranged| {
-        let _ = proxy.send_event(app::UserEvent::Arranged(arranged));
-    });
-    let proxy = event_loop.create_proxy();
-    let measured: app::measuring::Deliver = std::sync::Arc::new(move |measured| {
-        let _ = proxy.send_event(app::UserEvent::Measured(Box::new(measured)));
-    });
+    let threads = app::Threads::new(&event_loop, options.overrides);
     // Files Finder opens arrive after the program has started, as an Apple
     // Event rather than as arguments.
     #[cfg(target_os = "macos")]
@@ -239,27 +204,7 @@ fn run() -> Result<ExitCode> {
             let _ = proxy.send_event(app::UserEvent::Opened(paths));
         }));
     }
-    let proxy = event_loop.create_proxy();
-    clipboard::watch(watch::INTERVAL, move |offered| {
-        proxy.send_event(app::UserEvent::Clipboard(offered)).is_ok()
-    });
-    let mut app = App::new(
-        files,
-        named,
-        opening,
-        options,
-        state,
-        app::Threads {
-            loader,
-            wake,
-            monitors,
-            thumbnailer,
-            picker,
-            folder,
-            arranged,
-            measured,
-        },
-    );
+    let mut app = App::new(files, named, opening, options, state, threads);
     // `--paste` on purpose, and nothing to paste: said in the window as
     // well as on the terminal, since the window is where the reader is.
     if paste && opened_on_nothing {

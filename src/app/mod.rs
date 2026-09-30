@@ -30,7 +30,7 @@ use std::time::{Duration, Instant};
 
 use winit::application::ApplicationHandler;
 use winit::event::{KeyEvent, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, ControlFlow};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::window::{Window, WindowId};
 
 use crate::gestures::{Gestures, Surface};
@@ -113,8 +113,75 @@ pub enum UserEvent {
     Menu(crate::menubar::Chosen),
 }
 
-/// The other threads, and how each reaches the loop: made in `main` from
-/// the event loop, which is the only place a proxy to it can come from.
+/// How a thread hands the loop a `T`: a function it calls from wherever it
+/// is, which sends the `T` on as the [`UserEvent`] it stands for. Made by
+/// [`Threads::new`] from the loop's proxy — see [`deliver`] — and by the
+/// tests from nothing at all.
+pub type Deliver<T> = Arc<dyn Fn(T) + Send + Sync>;
+
+impl From<Decoded> for UserEvent {
+    fn from(decoded: Decoded) -> Self {
+        UserEvent::Decoded(Box::new(decoded))
+    }
+}
+
+impl From<player::Event> for UserEvent {
+    fn from(event: player::Event) -> Self {
+        UserEvent::Frame(event)
+    }
+}
+
+impl From<Delivered> for UserEvent {
+    fn from(delivered: Delivered) -> Self {
+        UserEvent::Thumbnail(Box::new(delivered))
+    }
+}
+
+impl From<Picked> for UserEvent {
+    fn from(picked: Picked) -> Self {
+        UserEvent::Picked(picked)
+    }
+}
+
+impl From<folder::Listed> for UserEvent {
+    fn from(listed: folder::Listed) -> Self {
+        UserEvent::Folder(listed)
+    }
+}
+
+impl From<arranging::Arranged> for UserEvent {
+    fn from(arranged: arranging::Arranged) -> Self {
+        UserEvent::Arranged(arranged)
+    }
+}
+
+impl From<Measured> for UserEvent {
+    fn from(measured: Measured) -> Self {
+        UserEvent::Measured(Box::new(measured))
+    }
+}
+
+/// A [`Deliver`] that sends each `T` to the loop as the user event it
+/// stands for, whether or not the loop is still there to take it: for a
+/// thread that finishes what it was asked and stops.
+fn deliver<T: Into<UserEvent> + 'static>(proxy: EventLoopProxy<UserEvent>) -> Deliver<T> {
+    Arc::new(move |sent| {
+        let _ = proxy.send_event(sent.into());
+    })
+}
+
+/// The same, saying whether the loop was still there to take it: what a
+/// thread that runs for the session asks for, so that it can stop once the
+/// window has gone.
+fn waking<T: Into<UserEvent> + 'static>(
+    proxy: EventLoopProxy<UserEvent>,
+) -> impl Fn(T) -> bool + Send + Sync + 'static {
+    move |sent| proxy.send_event(sent.into()).is_ok()
+}
+
+/// The other threads, and how each reaches the loop: made from the event
+/// loop by [`Threads::new`], which is the only place a proxy to it can come
+/// from, and by the tests from stubs.
 pub struct Threads {
     pub loader: Loader,
     /// How a player wakes the loop; one is started per animated file.
@@ -130,6 +197,35 @@ pub struct Threads {
     pub arranged: arranging::Deliver,
     /// How the picture measured through its lift comes back.
     pub measured: measuring::Deliver,
+}
+
+impl Threads {
+    /// Starts the threads that run for the session and makes the way back
+    /// for those started later, each with a proxy of its own to the loop.
+    /// The thread watching the clipboard is started here too; it reports
+    /// through the loop and is never spoken to again, so it has no handle.
+    /// A thread added is a variant of [`UserEvent`], a `From` for it, an
+    /// arm of `user_event` and a field here.
+    pub fn new(event_loop: &EventLoop<UserEvent>, overrides: decode::Overrides) -> Self {
+        let proxy = || event_loop.create_proxy();
+        let monitor = proxy();
+        let clipboard = proxy();
+        crate::clipboard::watch(watch::INTERVAL, move |offered| {
+            clipboard.send_event(UserEvent::Clipboard(offered)).is_ok()
+        });
+        Self {
+            loader: Loader::new(waking(proxy())),
+            wake: Arc::new(waking(proxy())),
+            monitors: monitor::watch(move || {
+                let _ = monitor.send_event(UserEvent::Monitor);
+            }),
+            thumbnailer: Thumbnailer::new(overrides, waking(proxy())),
+            picker: deliver(proxy()),
+            folder: deliver(proxy()),
+            arranged: deliver(proxy()),
+            measured: deliver(proxy()),
+        }
+    }
 }
 
 /// The file the command line asked for first, for the window to open on:
@@ -240,7 +336,7 @@ pub struct App {
     /// mode: what a gain map's lift is weighed against on an HDR surface.
     monitor_headroom: Option<f32>,
     /// Where the view is going: the pan and zoom every key and press act
-    /// on. What is on screen is [`App::shown_view`], which is this once it
+    /// on. What is on screen is `App::shown_view`, which is this once it
     /// has arrived.
     view: View,
     /// The move the view is in the middle of, from where it was shown when
@@ -1722,7 +1818,7 @@ impl App {
         self.frame_input_under(&sight, &conditions)
     }
 
-    /// [`App::frame_input`] from `sight`, under `conditions`, both read
+    /// `App::frame_input` from `sight`, under `conditions`, both read
     /// once for the frame.
     fn frame_input_under(&mut self, sight: &Sight, conditions: &input::Conditions) -> FrameInput {
         let Sight {

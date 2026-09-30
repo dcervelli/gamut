@@ -106,7 +106,7 @@ pub struct Listed {
 pub type Glimpses = std::collections::HashMap<PathBuf, Glimpse>;
 
 /// How a finished read reaches the event loop.
-pub type Deliver = Arc<dyn Fn(Listed) + Send + Sync>;
+pub type Deliver = super::Deliver<Listed>;
 
 /// Reads the folder `file` is in on a thread of its own, glimpsing each
 /// image for what `sort` needs, and hands it to `deliver`. Its progress is

@@ -53,7 +53,7 @@ pub struct Arranged {
 }
 
 /// How an arranged list reaches the event loop.
-pub type Deliver = Arc<dyn Fn(Arranged) + Send + Sync>;
+pub type Deliver = super::Deliver<Arranged>;
 
 /// Reads what `sort` needs of each of `paths`, on a thread of its own, and
 /// hands it to `deliver`.

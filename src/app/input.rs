@@ -2439,7 +2439,7 @@ impl App {
         self.namer_under(self.conditions())
     }
 
-    /// [`App::namer`] under `conditions` already read, so that a frame
+    /// `App::namer` under `conditions` already read, so that a frame
     /// reads them once for everything that asks.
     pub(super) fn namer_under(&self, conditions: Conditions) -> Namer {
         Namer {
