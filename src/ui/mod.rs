@@ -173,28 +173,20 @@ const CHECKER_SQUARE: f32 = 8.0;
 /// picture itself whatever is shown — what it carries, what it was left
 /// in — it asks [`Current::picture`].
 pub struct Current {
-    /// Shared rather than owned: copying the picture to the clipboard walks
-    /// every pixel on a thread of its own, and handing that thread the image
-    /// must not mean duplicating however many hundred megabytes it is.
-    pub image: Arc<DecodedImage>,
-    pub stats: Stats,
-    pub display: Display,
+    /// What is on screen: the image and everything derived from it, read
+    /// through `Current` itself — `current.image`, `current.display` — as
+    /// if they were its own fields, which is what `Deref` is for here.
+    /// Swapped whole for another of the file's images by [`Current::show`].
+    pub shown: Face,
     pub label: String,
     /// What the file it came from says about itself, for the info panel.
     pub file: FileFacts,
     /// And what its metadata says about the photograph, if it carries any.
     pub exif: Exif,
-    /// The precision it lost on its way to the device, which had no format
-    /// that would hold it; `None` for the usual picture, which lost nothing.
-    pub reduced: Option<crate::render::Reduced>,
     /// What else the file holds: the frames of an animation, or its pages.
     pub sequence: Sequence,
     /// Which page `image` is, where the file has pages; zero otherwise.
     pub page: usize,
-    /// The lift the picture is drawn through, where it has a gain map: the
-    /// table at the weight the surface's room asks for, which is what every
-    /// readout of a pixel reads it through too. `None` where it has none.
-    pub lift: Option<Arc<crate::image::gain_map::Table>>,
     /// How far the picture has been turned on screen. `image` stays as the
     /// file holds it; everything read off `Current` other than `image`
     /// itself is in the turned picture's coordinates — see [`Turn`].
@@ -210,6 +202,47 @@ pub struct Current {
     /// left, to be put back without being worked out again: the picture
     /// itself, while an image it carries is shown in its place.
     pub held: Vec<(Showing, Face)>,
+}
+
+#[cfg(test)]
+impl Current {
+    /// `image` on screen as a still called `name`, from a file called the
+    /// same that says nothing else of itself: what the tests build their
+    /// pictures from, changing the fields they are about.
+    pub fn of(image: crate::image::DecodedImage, name: &str) -> Self {
+        Self {
+            shown: Face::new(image),
+            label: name.to_string(),
+            file: FileFacts {
+                path: name.to_string(),
+                bytes: None,
+                modified: None,
+                reader: None,
+            },
+            exif: Exif::default(),
+            sequence: Sequence::Still,
+            page: 0,
+            turn: Turn::NONE,
+            rendering: Rendering::Developed,
+            camera_jpeg: CameraJpeg::Unavailable,
+            showing: Showing::Picture,
+            held: Vec::new(),
+        }
+    }
+}
+
+impl std::ops::Deref for Current {
+    type Target = Face;
+
+    fn deref(&self) -> &Face {
+        &self.shown
+    }
+}
+
+impl std::ops::DerefMut for Current {
+    fn deref_mut(&mut self) -> &mut Face {
+        &mut self.shown
+    }
 }
 
 /// What is on screen, as a copy or an export has to make it again off the
@@ -242,10 +275,18 @@ impl Seen {
 /// part of [`Current`] that belongs to whichever image is on screen, set
 /// aside whole while another is.
 pub struct Face {
+    /// Shared rather than owned: copying the picture to the clipboard walks
+    /// every pixel on a thread of its own, and handing that thread the image
+    /// must not mean duplicating however many hundred megabytes it is.
     pub image: Arc<DecodedImage>,
     pub stats: Stats,
     pub display: Display,
+    /// The precision it lost on its way to the device, which had no format
+    /// that would hold it; `None` for the usual picture, which lost nothing.
     pub reduced: Option<crate::render::Reduced>,
+    /// The lift the picture is drawn through, where it has a gain map: the
+    /// table at the weight the surface's room asks for, which is what every
+    /// readout of a pixel reads it through too. `None` where it has none.
     pub lift: Option<Arc<crate::image::gain_map::Table>>,
 }
 
@@ -318,13 +359,7 @@ impl Current {
     /// Puts `face` in the fields of what is on screen, and hands back what
     /// was there.
     fn swap(&mut self, face: Face) -> Face {
-        Face {
-            image: std::mem::replace(&mut self.image, face.image),
-            stats: std::mem::replace(&mut self.stats, face.stats),
-            display: std::mem::replace(&mut self.display, face.display),
-            reduced: std::mem::replace(&mut self.reduced, face.reduced),
-            lift: std::mem::replace(&mut self.lift, face.lift),
-        }
+        std::mem::replace(&mut self.shown, face)
     }
 
     /// The picture's size on screen, turned.
@@ -408,26 +443,11 @@ pub struct Panels {
     /// button held on the picture puts it up as well, whatever this says;
     /// where it is on any one frame is [`FrameInput::loupe`].
     pub show_loupe: bool,
-    /// Whether a picture's depth map is asked to be shown in its place. A
-    /// way of looking like the grid and the loupe, so it stays on from one
-    /// file to the next, and applies to each that carries a map; what is
-    /// actually up is [`Current::showing`].
-    pub show_depth: bool,
     /// How much larger the loupe's glass shows what its eye rings: one of
     /// [`loupe::MAGNIFICATIONS`], which the wheel steps through while the
     /// secondary button holds the loupe up. The glass stays one size and
     /// the eye shrinks as this grows.
     pub loupe_magnification: f32,
-    /// Whether the clipboard is holding a picture this program could show,
-    /// which is whether the paste button is on screen at all: a button that
-    /// did nothing when pressed would be worse than no button.
-    ///
-    /// Looked at on the same cadence as the file and the palette, from a
-    /// thread of its own, since nothing tells us when a selection changes
-    /// — see `clipboard::watch` and `App::clipboard_changed`. It is what
-    /// was true at the last look, so a press asks the clipboard again
-    /// rather than acting on it.
-    pub paste: bool,
     /// How the bottom bar writes out the value of the pixel under the
     /// pointer. Here rather than with the display's own settings because it
     /// is about the reading and not about the rendering: nothing on screen
@@ -588,6 +608,12 @@ pub struct FrameInput {
     /// area — see [`empty`]. Not merely `current` being `None`, which is
     /// also the moment before the first file arrives.
     pub empty: bool,
+    /// Whether the button that pastes the picture on the clipboard is on
+    /// screen: the clipboard holds a picture this program could show, as
+    /// the thread watching it last said, and the interface is showing —
+    /// since the button is the only thing that depends on the answer and
+    /// `` ` `` takes it away with the rest.
+    pub paste: bool,
     /// The folder the last picture came from, by name, while the empty
     /// window offers to open every image in it.
     pub folder: Option<String>,
@@ -1211,9 +1237,7 @@ mod tests {
             show_minimap: true,
             show_grid: false,
             show_loupe: false,
-            show_depth: false,
             loupe_magnification: loupe::DEFAULT_MAGNIFICATION,
-            paste: false,
             pixel_format: PixelFormat::default(),
             coordinate_format: CoordinateFormat::default(),
             geographic_format: GeographicFormat::default(),

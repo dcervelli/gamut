@@ -1,11 +1,5 @@
-use std::sync::Arc;
-
 use super::*;
-use crate::image::display::Startup;
-use crate::image::exif::Exif;
-use crate::image::sequence::Sequence;
-use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples, Stats};
-use crate::ui::FileFacts;
+use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
 use crate::ui::PADDING;
 
 /// A content area with room for everything.
@@ -19,29 +13,7 @@ fn full_panel() -> Rect {
 
 /// `image`, on screen.
 fn shown(image: DecodedImage) -> Current {
-    let stats = Stats::scan(&image);
-    Current {
-        display: Display::for_image_with(&image, &stats, Startup::default()),
-        image: Arc::new(image),
-        stats,
-        label: "file".into(),
-        file: FileFacts {
-            path: "file".into(),
-            bytes: None,
-            modified: None,
-            reader: None,
-        },
-        exif: Exif::default(),
-        reduced: None,
-        sequence: Sequence::Still,
-        page: 0,
-        lift: None,
-        turn: crate::image::orient::Turn::NONE,
-        rendering: crate::image::decode::Rendering::Developed,
-        camera_jpeg: crate::image::decode::CameraJpeg::Unavailable,
-        showing: crate::image::auxiliary::Showing::Picture,
-        held: Vec::new(),
-    }
+    Current::of(image, "file")
 }
 
 /// The exposure is stepped in quarter stops, so it is written in

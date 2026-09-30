@@ -888,7 +888,7 @@ impl Pass<'_> {
             }
             // Not in an empty window, where the same paste is one of the
             // three buttons in the middle: one control for one thing.
-            if self.panels.paste && !self.input.empty {
+            if self.input.paste && !self.input.empty {
                 ui.add_space(BUTTON_GAP);
                 let paste = self.icon_button(
                     ui,

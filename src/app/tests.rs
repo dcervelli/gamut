@@ -2234,7 +2234,7 @@ fn the_depth_toggle_answers_only_for_a_picture_with_a_depth_map() {
         app.press(crate::ui::Control::Depth),
         Effect::Nothing
     ));
-    assert!(!app.panels.show_depth, "refused");
+    assert!(!app.show_depth, "refused");
 
     let path = fixture("heic-depth.heic");
     let mut app = open(vec![path.clone()], vec![path]);
@@ -2244,11 +2244,11 @@ fn the_depth_toggle_answers_only_for_a_picture_with_a_depth_map() {
         app.press(crate::ui::Control::Depth),
         Effect::Redraw
     ));
-    assert!(app.panels.show_depth);
+    assert!(app.show_depth);
     assert!(app.files.is_idle(), "nothing asked for");
     assert!(app.current.is_some(), "the picture stays");
     let _ = app.perform(super::input::Action::ToggleDepth);
-    assert!(!app.panels.show_depth, "the key does what the button does");
+    assert!(!app.show_depth, "the key does what the button does");
 }
 
 /// The depth map shown in the picture's place is what is on screen in
@@ -3979,20 +3979,20 @@ fn the_paste_button_follows_the_clipboard_and_the_interface() {
     use input::Action::ToggleInterface;
 
     let (mut app, _dir) = app_over("paste", &[("a.png", 4, 3)]);
-    assert!(!app.panels.paste);
+    assert!(!app.frame_input(WINDOW, 1.0).paste);
     assert_eq!(app.clipboard_changed(true), Effect::Redraw);
-    assert!(app.panels.paste);
+    assert!(app.frame_input(WINDOW, 1.0).paste);
     assert_eq!(app.clipboard_changed(true), Effect::Nothing);
 
     let _ = app.perform(ToggleInterface);
-    assert!(!app.panels.paste, "hidden with the rest");
+    assert!(!app.frame_input(WINDOW, 1.0).paste, "hidden with the rest");
     assert_eq!(app.clipboard_changed(false), Effect::Nothing);
     assert_eq!(app.clipboard_changed(true), Effect::Nothing);
     let _ = app.perform(ToggleInterface);
-    assert!(app.panels.paste, "back with the bars");
+    assert!(app.frame_input(WINDOW, 1.0).paste, "back with the bars");
 
     assert_eq!(app.clipboard_changed(false), Effect::Redraw);
-    assert!(!app.panels.paste);
+    assert!(!app.frame_input(WINDOW, 1.0).paste);
 }
 
 /// Which surface is wanted: the monitor's own where the compositor

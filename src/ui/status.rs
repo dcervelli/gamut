@@ -455,11 +455,8 @@ pub fn explain_state(current: &Current, headroom: Headroom) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::image::display::{Colormap, Display, Startup};
-    use crate::image::exif::Exif;
-    use crate::image::sequence::Sequence;
-    use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples, Stats};
-    use crate::ui::FileFacts;
+    use crate::image::display::Colormap;
+    use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
 
     /// A gray photograph on screen: two codes, black and white, sRGB.
     fn photograph() -> Current {
@@ -473,29 +470,7 @@ mod tests {
             ColorSpace::SRGB,
             AlphaMode::Opaque,
         );
-        let stats = Stats::scan(&image);
-        Current {
-            display: Display::for_image_with(&image, &stats, Startup::default()),
-            image: std::sync::Arc::new(image),
-            stats,
-            label: "a.png".into(),
-            file: FileFacts {
-                path: "a.png".into(),
-                bytes: None,
-                modified: None,
-                reader: None,
-            },
-            exif: Exif::default(),
-            reduced: None,
-            sequence: Sequence::Still,
-            page: 0,
-            lift: None,
-            turn: crate::image::orient::Turn::NONE,
-            rendering: crate::image::decode::Rendering::Developed,
-            camera_jpeg: crate::image::decode::CameraJpeg::Unavailable,
-            showing: crate::image::auxiliary::Showing::Picture,
-            held: Vec::new(),
-        }
+        Current::of(image, "a.png")
     }
 
     /// Every glyph one `TEXT_SIZE` square, so that a test can say how much
@@ -518,7 +493,10 @@ mod tests {
             "a photograph as it was decoded has nothing being done to it"
         );
 
-        current.display.set_auto(AutoWindow::MinMax, &current.stats);
+        current
+            .shown
+            .display
+            .set_auto(AutoWindow::MinMax, &current.shown.stats);
         current.display.adjust_exposure(0.5);
         assert_eq!(
             describe_state(&current, Headroom::None),
@@ -541,7 +519,10 @@ mod tests {
     #[test]
     fn the_line_is_cut_by_whole_segments() {
         let mut current = photograph();
-        current.display.set_auto(AutoWindow::MinMax, &current.stats);
+        current
+            .shown
+            .display
+            .set_auto(AutoWindow::MinMax, &current.shown.stats);
         current.display.adjust_exposure(0.5);
         let segments = describe_state(&current, Headroom::None);
 
@@ -582,7 +563,10 @@ mod tests {
             "nothing is being done, so there are no words to rest on"
         );
 
-        current.display.set_auto(AutoWindow::MinMax, &current.stats);
+        current
+            .shown
+            .display
+            .set_auto(AutoWindow::MinMax, &current.shown.stats);
         current.display.set_window(0.012, 1.0);
         current.display.adjust_exposure(0.25);
         assert_eq!(

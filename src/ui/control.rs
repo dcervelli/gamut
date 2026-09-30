@@ -22,7 +22,7 @@ use super::tooltip::{Tip, Tooltip};
 
 /// Lays out [`Control`]: each line a kind of control, with its words, and
 /// — for a kind that carries a payload — the payload its representative
-/// carries in [`Control::ALL`]. One list makes both the enum and `ALL`, so
+/// carries in `Control::ALL`. One list makes both the enum and `ALL`, so
 /// that a kind cannot be added to the one and left out of the other.
 macro_rules! controls {
     ($( $(#[$meta:meta])* $name:ident $( ($payload:ty) = $sample:expr )? ),* $(,)?) => {
@@ -72,7 +72,7 @@ controls! {
     StepForward,
     Seek(usize) = 0,
     /// The button that pastes the picture on the clipboard. On screen only
-    /// while there is one — see [`Panels::paste`](super::Panels::paste).
+    /// while there is one — see [`FrameInput::paste`](super::FrameInput::paste).
     Paste,
     /// The button under those that starts a region: lit while one is being
     /// asked for or is on screen, and a press while it is lit takes the

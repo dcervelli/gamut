@@ -532,9 +532,14 @@ pub struct App {
     /// are drawn dead while it is, and the key does nothing.
     picking: bool,
     /// Whether the clipboard holds a picture this program could show, as
-    /// the thread watching it last said. `Panels::paste` is this and the
-    /// interface being on screen.
+    /// the thread watching it last said. `FrameInput::paste` is this and
+    /// the interface being on screen.
     clipboard_offers: bool,
+    /// Whether the depth toggle is on: the picture's depth map is shown in
+    /// its place, for this picture and every one after it that carries a
+    /// map — see [`App::follow_showing`]. Here rather than in [`Panels`],
+    /// which nothing under `ui` reads it from.
+    show_depth: bool,
     /// Whether the list is still the one the command line gave, with
     /// nothing opened from the window since. A command line whose every
     /// file fails to decode is a command line to answer by leaving, with a
@@ -722,9 +727,7 @@ impl App {
                 show_minimap: config.show_minimap,
                 show_grid: false,
                 show_loupe: false,
-                show_depth: false,
                 loupe_magnification: kept_state.loupe_magnification,
-                paste: false,
                 pixel_format: kept_state.pixel_format,
                 coordinate_format: kept_state.coordinate_format,
                 geographic_format: kept_state.geographic_format,
@@ -736,6 +739,7 @@ impl App {
             picker,
             picking: false,
             clipboard_offers: false,
+            show_depth: false,
             from_command_line: source.is_some(),
             said_how_to_restore: false,
             keys: Rc::new(config.keys),
@@ -1362,7 +1366,7 @@ impl App {
     /// Shows the picture's depth map in its place, or the picture again,
     /// for this picture and every one after it that carries a map.
     pub(super) fn toggle_depth(&mut self) -> Effect {
-        self.panels.show_depth = !self.panels.show_depth;
+        self.show_depth = !self.show_depth;
         self.follow_showing().also(Effect::Redraw)
     }
 
@@ -1374,7 +1378,7 @@ impl App {
         let depth = Showing::Auxiliary(Auxiliary::Depth);
         let wanted = match self.current.as_ref() {
             Some(current)
-                if self.panels.show_depth
+                if self.show_depth
                     && self.animation.is_none()
                     && current.picture().0.carries(Auxiliary::Depth) =>
             {
@@ -1888,6 +1892,7 @@ impl App {
             rename,
             export,
             empty: self.is_empty(),
+            paste: self.clipboard_offers && self.panels.show_ui,
             folder: self
                 .offered_folder
                 .as_deref()
@@ -2137,24 +2142,12 @@ impl App {
 
     /// Takes in what the thread watching the clipboard said: a picture
     /// this program could show has arrived on it, or the one there has
-    /// gone. What puts the paste button on screen and takes it off again.
+    /// gone. What puts the paste button on screen and takes it off again,
+    /// and so owes a frame where the button is showing — the interface
+    /// being up — and the answer moved.
     pub(super) fn clipboard_changed(&mut self, offered: bool) -> Effect {
-        self.clipboard_offers = offered;
-        self.refresh_paste()
-    }
-
-    /// Puts the paste button where the clipboard and the interface say:
-    /// on screen while the clipboard holds a picture and the interface is
-    /// showing, since the button is the only thing that depends on the
-    /// answer and `` ` `` takes it away with the rest. Says whether that
-    /// changed, and so whether the window owes a redraw.
-    pub(super) fn refresh_paste(&mut self) -> Effect {
-        let paste = self.clipboard_offers && self.panels.show_ui;
-        if paste == self.panels.paste {
-            return Effect::Nothing;
-        }
-        self.panels.paste = paste;
-        Effect::Redraw
+        let was = std::mem::replace(&mut self.clipboard_offers, offered);
+        Effect::redraw_if(was != offered && self.panels.show_ui)
     }
 
     /// Starts watching the configuration file, wherever it is, and whether
@@ -2615,16 +2608,18 @@ impl App {
             self.openers = openers::for_file(&file.path);
         }
         self.current = Some(Current {
-            image,
-            stats,
-            display,
+            shown: ui::Face {
+                image,
+                stats,
+                display,
+                reduced,
+                lift: None,
+            },
             label: file_label(&file.path),
             file: facts,
             exif,
-            reduced,
             sequence,
             page,
-            lift: None,
             turn,
             rendering,
             camera_jpeg,

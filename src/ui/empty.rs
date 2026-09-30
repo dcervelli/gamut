@@ -129,7 +129,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
                 Control::Paste,
                 icon::CLIPBOARD,
                 "Paste",
-                pass.panels.paste,
+                pass.input.paste,
             );
         });
     });

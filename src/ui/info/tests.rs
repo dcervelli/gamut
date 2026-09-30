@@ -2,10 +2,9 @@ use super::*;
 use crate::ui::histogram;
 use std::time::Duration;
 
-use crate::image::display::{Display, Startup};
 use crate::image::exif::{Entry, Exif, Section};
 use crate::image::sequence::Sequence;
-use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples, Stats};
+use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
 
 /// A window's worth of content area, for the panel to be placed in.
 const CONTENT: Rect = Rect {
@@ -26,12 +25,7 @@ fn current() -> Current {
         ColorSpace::SRGB,
         AlphaMode::Opaque,
     );
-    let stats = Stats::scan(&image);
     Current {
-        display: Display::for_image_with(&image, &stats, Startup::default()),
-        image: std::sync::Arc::new(image),
-        stats,
-        label: "kingfisher.png".into(),
         file: FileFacts {
             path: "/home/reader/pictures/kingfisher.png".into(),
             bytes: Some(1_258_291),
@@ -39,15 +33,7 @@ fn current() -> Current {
             reader: Some("png"),
         },
         exif: photograph(),
-        reduced: None,
-        sequence: Sequence::Still,
-        page: 0,
-        lift: None,
-        turn: crate::image::orient::Turn::NONE,
-        rendering: crate::image::decode::Rendering::Developed,
-        camera_jpeg: crate::image::decode::CameraJpeg::Unavailable,
-        showing: crate::image::auxiliary::Showing::Picture,
-        held: Vec::new(),
+        ..Current::of(image, "kingfisher.png")
     }
 }
 

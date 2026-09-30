@@ -2004,7 +2004,6 @@ impl App {
                 self.panels.show_ui = !self.panels.show_ui;
                 // The paste button goes with the bars, and comes back
                 // with them where the clipboard still holds a picture.
-                let _ = self.refresh_paste();
                 // A menu is part of the interface, and goes with it.
                 self.close_menus();
                 // The first time it goes, say how to get it back. With the
@@ -2054,7 +2053,7 @@ impl App {
             }
             CycleAutoWindow => {
                 return self.adjust(|current, _| {
-                    current.display.cycle_auto(&current.stats);
+                    current.shown.display.cycle_auto(&current.shown.stats);
                     true
                 });
             }
@@ -2064,29 +2063,31 @@ impl App {
             StepBlack(by) => {
                 return self.adjust(|current, _| {
                     let transfer = current.image.color.transfer;
-                    current
-                        .display
-                        .step_black(by, transfer, current.stats.plot.min)
+                    let plot_min = current.stats.plot.min;
+                    current.display.step_black(by, transfer, plot_min)
                 });
             }
             StepWhite(by) => {
                 return self.adjust(|current, _| {
                     let transfer = current.image.color.transfer;
-                    current
-                        .display
-                        .step_white(by, transfer, current.stats.plot.max)
+                    let plot_max = current.stats.plot.max;
+                    current.display.step_white(by, transfer, plot_max)
                 });
             }
             // Refused under a false color, and by the display itself, so that
             // the key and the button beside the histogram cannot drift.
             CycleToneMap => {
-                return self
-                    .adjust(|current, _| current.display.cycle_tone_map(current.image.is_gray()));
+                return self.adjust(|current, _| {
+                    let gray = current.image.is_gray();
+                    current.display.cycle_tone_map(gray)
+                });
             }
             MarkClipped => return self.press(Control::Marks),
             CycleColormap => {
-                return self
-                    .adjust(|current, _| current.display.cycle_colormap(current.image.is_gray()));
+                return self.adjust(|current, _| {
+                    let gray = current.image.is_gray();
+                    current.display.cycle_colormap(gray)
+                });
             }
             // A copy takes the selection and leaves the picture exactly as it
             // was, so the message at the foot of the window is the only sign
@@ -2154,7 +2155,8 @@ impl App {
             CopyPixelCoordinate => self.copy_pixel(true),
             ResetDisplay => {
                 return self.adjust(|current, _| {
-                    current.display.reset(&current.stats, &current.image);
+                    let shown = &mut current.shown;
+                    shown.display.reset(&shown.stats, &shown.image);
                     true
                 });
             }
@@ -2356,7 +2358,7 @@ impl App {
                 )
             }),
             pointer_on_picture: self.pointer_pixel().is_some(),
-            picture_on_clipboard: self.panels.paste,
+            picture_on_clipboard: self.clipboard_offers && self.panels.show_ui,
             single_channel: current.is_some_and(|current| current.image.is_gray()),
             undoable: !self.edits.is_empty(),
             visited_before: self
@@ -3136,16 +3138,20 @@ impl App {
             // The display refuses a false color on a color image, for the
             // key and the button alike.
             Control::Ramp(index) => self.adjust(|current, _| {
-                Colormap::ALL
-                    .get(index)
-                    .is_some_and(|map| current.display.set_colormap(*map, current.image.is_gray()))
+                Colormap::ALL.get(index).is_some_and(|map| {
+                    let gray = current.image.is_gray();
+                    current.display.set_colormap(*map, gray)
+                })
             }),
             // A window named outright rather than the next one along.
             Control::Window(index) => {
                 if let Some(current) = self.current.as_mut()
                     && let Some((_, window)) = histogram::WINDOWS.get(index)
                 {
-                    current.display.set_auto(*window, &current.stats);
+                    current
+                        .shown
+                        .display
+                        .set_auto(*window, &current.shown.stats);
                     return Effect::Redraw;
                 }
                 Effect::Nothing
@@ -3153,9 +3159,8 @@ impl App {
             // And a curve under a false color, the same way.
             Control::Curve(index) => self.adjust(|current, _| {
                 ToneMap::ALL.get(index).is_some_and(|curve| {
-                    current
-                        .display
-                        .set_tone_map(*curve, current.image.is_gray())
+                    let gray = current.image.is_gray();
+                    current.display.set_tone_map(*curve, gray)
                 })
             }),
             // A cell of the zoom menu: a zoom chosen here is a move.

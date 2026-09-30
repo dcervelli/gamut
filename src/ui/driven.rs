@@ -8,7 +8,6 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 
 use crate::image::display::{Display, Headroom, Startup, ToneMap};
-use crate::image::exif::Exif;
 use crate::image::sequence::{Loops, Sequence};
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples, Stats};
 use crate::theme::Theme;
@@ -26,8 +25,8 @@ use super::rename::{self, Verdict};
 use super::tooltip::{Tip, Tooltip};
 use super::transport::{Kind, Transport};
 use super::{
-    Command, Control, CoordinateFormat, Current, FileFacts, FrameInput, GeographicFormat, Grab,
-    PANELS_ROOM, Panels, PixelFormat, Selection,
+    Command, Control, CoordinateFormat, Current, FrameInput, GeographicFormat, Grab, PANELS_ROOM,
+    Panels, PixelFormat, Selection,
 };
 
 /// A window with room for everything.
@@ -96,29 +95,7 @@ fn picture(width: u32, height: u32) -> Current {
         ColorSpace::SRGB,
         AlphaMode::Opaque,
     );
-    let stats = Stats::scan(&image);
-    Current {
-        display: Display::for_image_with(&image, &stats, Startup::default()),
-        image: Arc::new(image),
-        stats,
-        label: "photo.png".into(),
-        file: FileFacts {
-            path: "photo.png".into(),
-            bytes: None,
-            modified: None,
-            reader: None,
-        },
-        exif: Exif::default(),
-        reduced: None,
-        sequence: Sequence::Still,
-        page: 0,
-        lift: None,
-        turn: crate::image::orient::Turn::NONE,
-        rendering: crate::image::decode::Rendering::Developed,
-        camera_jpeg: crate::image::decode::CameraJpeg::Unavailable,
-        showing: crate::image::auxiliary::Showing::Picture,
-        held: Vec::new(),
-    }
+    Current::of(image, "photo.png")
 }
 
 fn panels() -> Panels {
@@ -134,9 +111,7 @@ fn panels() -> Panels {
         show_minimap: true,
         show_grid: false,
         show_loupe: false,
-        show_depth: false,
         loupe_magnification: super::loupe::DEFAULT_MAGNIFICATION,
-        paste: false,
         pixel_format: PixelFormat::default(),
         coordinate_format: CoordinateFormat::default(),
         geographic_format: GeographicFormat::default(),
@@ -181,6 +156,7 @@ fn input(logical: [f32; 2], count: usize) -> FrameInput {
         rename: None,
         export: None,
         empty: false,
+        paste: false,
         folder: None,
         picking: false,
         standin: None,
@@ -811,9 +787,9 @@ fn buttons_that_would_do_nothing_are_not_there() {
     assert!(harness.query_by_label("File list").is_none());
     drop(harness);
 
-    let mut pasteable = panels();
-    pasteable.paste = true;
-    let mut harness = open(WINDOW, 3, pasteable);
+    let mut harness = build(WINDOW, 3, panels());
+    harness.state_mut().input.paste = true;
+    harness.run();
     assert_eq!(
         click(&mut harness, "Paste"),
         [Command::Press(Control::Paste)]
@@ -1015,12 +991,11 @@ fn the_file_list_scrolls_to_the_file_on_screen() {
 
 /// The interface over nothing: no list, no picture, nothing on its way.
 fn empty(paste: bool, picking: bool) -> Harness<'static, State> {
-    let mut panels = panels();
-    panels.paste = paste;
-    let mut harness = build(WINDOW, 0, panels);
+    let mut harness = build(WINDOW, 0, panels());
     let state = harness.state_mut();
     state.current = None;
     state.input.empty = true;
+    state.input.paste = paste;
     state.input.picking = picking;
     harness.run();
     harness
