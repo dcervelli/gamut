@@ -323,6 +323,12 @@ fn view(b: &mut Builder) -> Vec<Node> {
             Some(Control::Geographic(GeographicFormat::ALL[0])),
             geographic,
         ),
+        Node::Separator,
+        // AppKit adds an item of its own to a menu called View unless one
+        // already sends `toggleFullScreen:`; its icon would indent the group
+        // it lands in, which has no separator of its own.
+        // AppKit gives it the system's full-screen key, 🌐F, itself.
+        standard("Enter Full Screen", Standard::FullScreen, None),
     ]
 }
 

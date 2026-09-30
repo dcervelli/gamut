@@ -231,7 +231,11 @@ Command-key path.
 
 AppKit adds to the bar by the menus' names: Enter Full Screen to View,
 Dictation, Emoji & Symbols, AutoFill and Writing Tools to Edit, the window
-tiling items to Window. The tabbing items it would add are turned off with
+tiling items to Window. View holds its own Enter Full Screen, a
+`Standard::FullScreen` sending `toggleFullScreen:`, which AppKit takes as the
+item already being there: the one it would add has an icon, lands in the
+menu's last group with no separator, and indents every item of that group.
+The tabbing items it would add are turned off with
 `NSWindow::setAllowsAutomaticWindowTabbing`, the program having one window.
 Quit and Close Window are `Action::Quit`, so leaving from the menu reaches
 `App::exiting` as a key does; the Dock's Quit reaches it through winit's

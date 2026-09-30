@@ -61,6 +61,7 @@ pub enum Standard {
     ShowAll,
     Minimize,
     Zoom,
+    FullScreen,
     BringAllToFront,
 }
 
@@ -72,6 +73,7 @@ impl Standard {
             Standard::ShowAll => sel!(unhideAllApplications:),
             Standard::Minimize => sel!(performMiniaturize:),
             Standard::Zoom => sel!(performZoom:),
+            Standard::FullScreen => sel!(toggleFullScreen:),
             Standard::BringAllToFront => sel!(arrangeInFront:),
         }
     }
