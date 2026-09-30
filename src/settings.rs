@@ -74,34 +74,90 @@ impl Default for Config {
     }
 }
 
+/// One setting of the configuration file: its name, the words the template
+/// gives it, and the field it is, read and written as the file has it.
+struct Setting {
+    name: &'static str,
+    words: &'static str,
+    /// The value as the file writes it.
+    get: fn(&Config) -> String,
+    /// Sets the field from the file's value, or says what is wrong with the
+    /// value — after the setting's name, which [`Config::parse`] puts in
+    /// front.
+    set: fn(&mut Config, &str) -> Result<(), String>,
+}
+
 /// Every setting the configuration file takes, in the order the template
-/// lists them, with the words it wears there. [`Config::value`] writes each
-/// one's value, and [`Config::parse`] reads it back.
-const SETTINGS: [(&str, &str); 8] = [
-    ("show_ui", "The panels around the picture."),
-    (
-        "show_minimap",
-        "The minimap, while the picture is larger than the window.",
-    ),
-    (
-        "show_filmstrip",
-        "The file list down the left, while there is more than one file.",
-    ),
-    ("show_histogram", "The histogram panel."),
-    ("show_info", "The file information panel."),
-    (
-        "log_counts",
-        "The histogram's bars as tall as the logarithm of their counts.",
-    ),
-    (
-        "browse_folder",
-        "A single file opened alone steps on through the other images in its folder.",
-    ),
-    (
-        "open_map_link",
-        "The web page the map button in the info panel's Location section opens: {lat} and {lng} are where the picture was taken, in degrees.",
-    ),
+/// lists them. [`Config::template`] writes each one's value, and
+/// [`Config::parse`] reads it back.
+const SETTINGS: [Setting; 8] = [
+    Setting {
+        name: "show_ui",
+        words: "The panels around the picture.",
+        get: |config| config.show_ui.to_string(),
+        set: |config, value| flag(&mut config.show_ui, value),
+    },
+    Setting {
+        name: "show_minimap",
+        words: "The minimap, while the picture is larger than the window.",
+        get: |config| config.show_minimap.to_string(),
+        set: |config, value| flag(&mut config.show_minimap, value),
+    },
+    Setting {
+        name: "show_filmstrip",
+        words: "The file list down the left, while there is more than one file.",
+        get: |config| config.show_filmstrip.to_string(),
+        set: |config, value| flag(&mut config.show_filmstrip, value),
+    },
+    Setting {
+        name: "show_histogram",
+        words: "The histogram panel.",
+        get: |config| config.show_histogram.to_string(),
+        set: |config, value| flag(&mut config.show_histogram, value),
+    },
+    Setting {
+        name: "show_info",
+        words: "The file information panel.",
+        get: |config| config.show_info.to_string(),
+        set: |config, value| flag(&mut config.show_info, value),
+    },
+    Setting {
+        name: "log_counts",
+        words: "The histogram's bars as tall as the logarithm of their counts.",
+        get: |config| config.log_counts.to_string(),
+        set: |config, value| flag(&mut config.log_counts, value),
+    },
+    Setting {
+        name: "browse_folder",
+        words: "A single file opened alone steps on through the other images in its folder.",
+        get: |config| config.browse_folder.to_string(),
+        set: |config, value| flag(&mut config.browse_folder, value),
+    },
+    Setting {
+        name: "open_map_link",
+        words: "The web page the map button in the info panel's Location section opens: {lat} and {lng} are where the picture was taken, in degrees.",
+        get: |config| config.open_map_link.clone(),
+        set: |config, value| {
+            // A link without both would open the same place for every
+            // picture, or nowhere.
+            if !(value.contains("{lat}") && value.contains("{lng}")) {
+                return Err("needs {lat} and {lng} in it".to_string());
+            }
+            config.open_map_link = value.to_string();
+            Ok(())
+        },
+    },
 ];
+
+/// A setting that is on or off, as the file writes one.
+fn flag(field: &mut bool, value: &str) -> Result<(), String> {
+    *field = match value {
+        "true" => true,
+        "false" => false,
+        _ => return Err(format!("is true or false, not `{value}`")),
+    };
+    Ok(())
+}
 
 /// Where the map button goes unless the configuration says otherwise.
 pub const OPEN_MAP_LINK: &str = "https://geojson.io/#data=data:application/json,%7B%22type%22%3A%22Feature%22%2C%22properties%22%3A%7B%7D%2C%22geometry%22%3A%7B%22type%22%3A%22Point%22%2C%22coordinates%22%3A%5B{lng}%2C{lat}%5D%7D%7D";
@@ -134,35 +190,24 @@ impl Config {
              # --no-minimap and --alone win over what is set here.\n"
         );
         let config = Self::default();
-        for (name, words) in SETTINGS {
+        for setting in &SETTINGS {
             // Which key hides them, as the keys below have it.
             let key = config.keys.spelled("interface.toggle");
-            let words = match name {
+            let words = match setting.name {
                 "show_ui" if !key.is_empty() => {
                     format!("The panels around the picture; {key} hides and shows them.")
                 }
-                _ => words.to_string(),
+                _ => setting.words.to_string(),
             };
-            text.push_str(&format!("\n# {words}\n# {name} = {}\n", config.value(name)));
+            text.push_str(&format!(
+                "\n# {words}\n# {} = {}\n",
+                setting.name,
+                (setting.get)(&config)
+            ));
         }
         text.push_str(&config.keys.template());
         text.push_str(&config.gestures.template());
         text
-    }
-
-    /// The value of the setting `name`, as the file writes it.
-    fn value(&self, name: &str) -> String {
-        match name {
-            "show_ui" => self.show_ui.to_string(),
-            "show_minimap" => self.show_minimap.to_string(),
-            "show_filmstrip" => self.show_filmstrip.to_string(),
-            "show_histogram" => self.show_histogram.to_string(),
-            "show_info" => self.show_info.to_string(),
-            "log_counts" => self.log_counts.to_string(),
-            "browse_folder" => self.browse_folder.to_string(),
-            "open_map_link" => self.open_map_link.clone(),
-            _ => unreachable!("`{name}` is not in SETTINGS"),
-        }
     }
 
     /// The configuration file, read, and a word for the window about what
@@ -214,42 +259,17 @@ impl Config {
                 }
                 continue;
             }
-            let flag = match name {
-                "show_ui" => Some(&mut config.show_ui),
-                "show_minimap" => Some(&mut config.show_minimap),
-                "show_filmstrip" => Some(&mut config.show_filmstrip),
-                "show_histogram" => Some(&mut config.show_histogram),
-                "show_info" => Some(&mut config.show_info),
-                "log_counts" => Some(&mut config.log_counts),
-                "browse_folder" => Some(&mut config.browse_folder),
-                "open_map_link" => {
-                    // A link without both would open the same place for
-                    // every picture, or nowhere.
-                    if value.contains("{lat}") && value.contains("{lng}") {
-                        config.open_map_link = value.to_string();
-                    } else {
-                        problems.push((
-                            number,
-                            "open_map_link needs {lat} and {lng} in it".to_string(),
-                        ));
+            match SETTINGS.iter().find(|setting| setting.name == name) {
+                Some(setting) => {
+                    if let Err(problem) = (setting.set)(&mut config, value) {
+                        problems.push((number, format!("{name} {problem}")));
                     }
-                    None
                 }
                 // Remembered in the state file now, as the readout's menu
                 // leaves them; a line written for an older version is
                 // passed over rather than called a mistake.
-                _ if RETIRED.contains(&name) => None,
-                _ => {
-                    problems.push((number, format!("unknown setting `{name}`")));
-                    None
-                }
-            };
-            if let Some(flag) = flag {
-                match value {
-                    "true" => *flag = true,
-                    "false" => *flag = false,
-                    _ => problems.push((number, format!("{name} is true or false, not `{value}`"))),
-                }
+                None if RETIRED.contains(&name) => {}
+                None => problems.push((number, format!("unknown setting `{name}`"))),
             }
         }
         (config, problems)
@@ -357,6 +377,95 @@ impl Default for State {
     }
 }
 
+/// One line of the state file: its name, and the field it is, written as
+/// the file has it and read back from it.
+struct Kept {
+    name: &'static str,
+    /// The value as the file writes it.
+    get: fn(&State) -> String,
+    /// Sets the field from the file's value, where the value is one it can
+    /// be; a value that is not is left alone, the field keeping its default.
+    set: fn(&mut State, &str),
+}
+
+/// Every line of the state file, in the order it is written.
+const KEPT: [Kept; 8] = [
+    Kept {
+        name: "filmstrip_width",
+        get: |state| state.filmstrip_width.to_string(),
+        set: |state, value| {
+            if let Ok(number) = value.parse::<f32>()
+                && (filmstrip::SLOT_MIN..=filmstrip::SLOT_MAX).contains(&number)
+            {
+                state.filmstrip_width = number;
+            }
+        },
+    },
+    Kept {
+        name: "loupe_magnification",
+        get: |state| state.loupe_magnification.to_string(),
+        set: |state, value| {
+            if let Ok(number) = value.parse::<f32>()
+                && loupe::MAGNIFICATIONS.contains(&number)
+            {
+                state.loupe_magnification = number;
+            }
+        },
+    },
+    Kept {
+        name: "sort",
+        get: |state| state.order.sort.word().to_string(),
+        set: |state, value| {
+            if let Some(sort) = filmstrip::Sort::read(value) {
+                state.order.sort = sort;
+            }
+        },
+    },
+    Kept {
+        name: "sort_direction",
+        get: |state| state.order.direction.word().to_string(),
+        set: |state, value| {
+            if let Some(direction) = filmstrip::Direction::read(value) {
+                state.order.direction = direction;
+            }
+        },
+    },
+    Kept {
+        name: "camera_jpeg",
+        get: |state| state.camera_jpeg.to_string(),
+        set: |state, value| {
+            let _ = flag(&mut state.camera_jpeg, value);
+        },
+    },
+    Kept {
+        name: "pixel_format",
+        get: |state| state.pixel_format.label().to_ascii_lowercase(),
+        set: |state, value| {
+            if let Some(format) = PixelFormat::parse(value) {
+                state.pixel_format = format;
+            }
+        },
+    },
+    Kept {
+        name: "coordinate_format",
+        get: |state| state.coordinate_format.label().to_ascii_lowercase(),
+        set: |state, value| {
+            if let Some(format) = CoordinateFormat::parse(value) {
+                state.coordinate_format = format;
+            }
+        },
+    },
+    Kept {
+        name: "geographic_format",
+        get: |state| state.geographic_format.label().to_ascii_lowercase(),
+        set: |state, value| {
+            if let Some(format) = GeographicFormat::parse(value) {
+                state.geographic_format = format;
+            }
+        },
+    },
+];
+
 impl State {
     /// `text` as a state file. A value out of range is the default rather
     /// than the nearest one in range: a width past either end is a file
@@ -367,79 +476,22 @@ impl State {
             let Some((name, value)) = line else {
                 continue;
             };
-            let number = value.parse::<f32>().ok();
-            match name {
-                "filmstrip_width" => {
-                    if let Some(number) = number
-                        && (filmstrip::SLOT_MIN..=filmstrip::SLOT_MAX).contains(&number)
-                    {
-                        state.filmstrip_width = number;
-                    }
-                }
-                "loupe_magnification" => {
-                    if let Some(number) = number
-                        && loupe::MAGNIFICATIONS.contains(&number)
-                    {
-                        state.loupe_magnification = number;
-                    }
-                }
-                "sort" => {
-                    if let Some(sort) = filmstrip::Sort::read(value) {
-                        state.order.sort = sort;
-                    }
-                }
-                "sort_direction" => {
-                    if let Some(direction) = filmstrip::Direction::read(value) {
-                        state.order.direction = direction;
-                    }
-                }
-                "camera_jpeg" => match value {
-                    "true" => state.camera_jpeg = true,
-                    "false" => state.camera_jpeg = false,
-                    _ => {}
-                },
-                "pixel_format" => {
-                    if let Some(format) = PixelFormat::parse(value) {
-                        state.pixel_format = format;
-                    }
-                }
-                "coordinate_format" => {
-                    if let Some(format) = CoordinateFormat::parse(value) {
-                        state.coordinate_format = format;
-                    }
-                }
-                "geographic_format" => {
-                    if let Some(format) = GeographicFormat::parse(value) {
-                        state.geographic_format = format;
-                    }
-                }
-                _ => {}
+            if let Some(kept) = KEPT.iter().find(|kept| kept.name == name) {
+                (kept.set)(&mut state, value);
             }
         }
         state
     }
 
     fn render(&self) -> String {
-        format!(
+        let mut text = format!(
             "# Kept by {PROGRAM} between runs, and written when its window closes.\n\
-             # Deleting this file starts it afresh.\n\
-             filmstrip_width = {}\n\
-             loupe_magnification = {}\n\
-             sort = {}\n\
-             sort_direction = {}\n\
-             camera_jpeg = {}\n\
-             pixel_format = {}\n\
-             coordinate_format = {}\n\
-             geographic_format = {}\n",
-            self.filmstrip_width,
-            self.loupe_magnification,
-            self.order.sort.word(),
-            self.order.direction.word(),
-            self.camera_jpeg,
-            self.pixel_format.label().to_ascii_lowercase(),
-            self.coordinate_format.label().to_ascii_lowercase(),
-            self.geographic_format.label().to_ascii_lowercase(),
-        )
+             # Deleting this file starts it afresh.\n"
+        );
+        for kept in &KEPT {
+            text.push_str(&format!("{} = {}\n", kept.name, (kept.get)(self)));
+        }
+        text
     }
 }
 
@@ -806,7 +858,7 @@ mod tests {
         };
         let text: String = SETTINGS
             .iter()
-            .map(|(name, _)| format!("{name} = {}\n", changed.value(name)))
+            .map(|setting| format!("{} = {}\n", setting.name, (setting.get)(&changed)))
             .collect();
         assert_eq!(Config::parse(&text), (changed, Vec::new()));
     }
