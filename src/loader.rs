@@ -129,6 +129,12 @@ pub struct Ready {
     pub rendering: Rendering,
     /// Whether the file carries the camera's JPEG, whichever was read.
     pub camera_jpeg: CameraJpeg,
+    /// What the file turned out to be, by the decoder that read it — see
+    /// [`Decoder::format`](crate::image::decode::Decoder::format) — for the
+    /// info panel's "Read by" line and the file list's type, read off the
+    /// open the read was made through rather than by opening the file
+    /// again on the loop.
+    pub format: &'static str,
 }
 
 /// The handle the event loop keeps. Dropping it stops the thread and waits
@@ -393,6 +399,7 @@ fn read(request: Request, upload: Option<&Upload>, canceled: &AtomicBool) -> Opt
     // parse, which developing the frame spends; then the picture.
     let opened = received.and_then(|()| guard("opening", || decode::Opened::new(&path)));
     let decoded = opened.and_then(|mut opened| {
+        let format = opened.format();
         let sequence = guard("reading the header", || opened.sequence())?;
         let shown = match (page, sequence) {
             (Some(page), _) => page,
@@ -414,6 +421,7 @@ fn read(request: Request, upload: Option<&Upload>, canceled: &AtomicBool) -> Opt
             shown,
             rendering,
             camera_jpeg,
+            format,
         ))
     });
     if canceled.load(Ordering::Relaxed) {
@@ -421,7 +429,7 @@ fn read(request: Request, upload: Option<&Upload>, canceled: &AtomicBool) -> Opt
     }
 
     let scanned = decoded.and_then(
-        |(image, decoding, exif, sequence, page, rendering, camera_jpeg)| {
+        |(image, decoding, exif, sequence, page, rendering, camera_jpeg, format)| {
             let stats = guard("scanning", || Ok(Stats::scan(&image)))?;
             Ok((
                 image,
@@ -432,6 +440,7 @@ fn read(request: Request, upload: Option<&Upload>, canceled: &AtomicBool) -> Opt
                 page,
                 rendering,
                 camera_jpeg,
+                format,
             ))
         },
     );
@@ -440,7 +449,7 @@ fn read(request: Request, upload: Option<&Upload>, canceled: &AtomicBool) -> Opt
     }
 
     let outcome = scanned.and_then(
-        |(image, decoding, stats, exif, sequence, page, rendering, camera_jpeg)| {
+        |(image, decoding, stats, exif, sequence, page, rendering, camera_jpeg, format)| {
             // Measured once the pixels are ready to hand over, so that the time
             // reported is everything this thread did to them — the header, the
             // decode, the scan, the metadata — with the decoder's own share
@@ -467,6 +476,7 @@ fn read(request: Request, upload: Option<&Upload>, canceled: &AtomicBool) -> Opt
                 page,
                 rendering,
                 camera_jpeg,
+                format,
             })
         },
     );

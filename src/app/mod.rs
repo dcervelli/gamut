@@ -2445,6 +2445,7 @@ impl App {
             page,
             rendering,
             camera_jpeg,
+            format,
         } = ready;
         // What follows weighs the file arriving against the picture on
         // screen, and keeps what the picture was left in: the picture's,
@@ -2557,7 +2558,7 @@ impl App {
         // file changed on disk — the one in the cache is of the file as it
         // was, and its modification time no longer matches — and for one the
         // thread had given up on, which has just decoded here.
-        let facts = file_facts(&file.path);
+        let facts = file_facts(&file.path, Some(format));
         let image = Arc::new(image);
         // The file's own size, which is the developed picture's: the
         // camera's JPEG may be a fraction of it, and the file list orders by
@@ -3191,14 +3192,16 @@ fn upload_here(renderer: &Renderer, path: &Path, image: &DecodedImage) -> anyhow
 /// One look at it as the image goes up, rather than a look per frame: none of
 /// this changes while the image is on screen, and a file being written to is
 /// re-read whole anyway. Nothing is owed if it cannot be had — the file may
-/// have been replaced between being read and being asked about.
-fn file_facts(path: &std::path::Path) -> FileFacts {
+/// have been replaced between being read and being asked about. `reader`
+/// is what the loader's decoder said the file was, handed over with the
+/// picture rather than sniffed again here on the loop.
+fn file_facts(path: &std::path::Path, reader: Option<&'static str>) -> FileFacts {
     let metadata = std::fs::metadata(path).ok();
     FileFacts {
         path: path.display().to_string(),
         bytes: metadata.as_ref().map(|metadata| metadata.len()),
         modified: metadata.and_then(|metadata| metadata.modified().ok()),
-        reader: decode::reader(path),
+        reader,
     }
 }
 

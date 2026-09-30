@@ -197,6 +197,7 @@ fn answer(app: &mut App, mode: Reload) {
     // fills every request in with.
     let asked_rendering = app.rendering;
     let decoded = crate::loader::decode_rendering(&path, app.overrides, asked, asked_rendering);
+    let format = decode::reader(&path).unwrap_or_default();
     let outcome = decoded.map(|(image, _, rendering, camera_jpeg)| Ready {
         stats: Stats::scan(&image),
         exif: exif::Exif::read(&path),
@@ -206,6 +207,7 @@ fn answer(app: &mut App, mode: Reload) {
         page,
         rendering,
         camera_jpeg,
+        format,
     });
     let _ = app.deliver(Decoded {
         generation,
@@ -1779,6 +1781,7 @@ fn a_reply_the_user_has_stepped_past_is_dropped() {
             page: 0,
             rendering: Rendering::Developed,
             camera_jpeg: CameraJpeg::Unavailable,
+            format: "png",
         }),
     });
     assert_eq!(
