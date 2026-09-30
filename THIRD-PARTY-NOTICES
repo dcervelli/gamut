@@ -1,4 +1,4 @@
-Cargo.lock sha256: 7cf408d26e631df0edb29f5fd4cbb2f93c6f9f7f6d62625aa2e4a076a4f6d177
+Cargo.lock sha256: 209e660482ea734a45d70025986b10906f5decdd4a9f46a5fb0549a81abe76aa
 
                       gamut: third-party notices
 
@@ -2871,7 +2871,7 @@ MIT License
 --------------------------------------------------------------------------
 
 Used by:
-  wl-clipboard-rs 0.9.3
+  wl-clipboard-rs 0.9.4
 
 Copyright (c) 2019 Ivan Molodetskikh
 
@@ -3706,7 +3706,7 @@ MIT License
 --------------------------------------------------------------------------
 
 Used by:
-  gamut 0.9.0
+  gamut 0.10.0
 
 MIT License
 
@@ -4321,7 +4321,7 @@ MIT License
 --------------------------------------------------------------------------
 
 Used by:
-  gamut 0.9.0
+  gamut 0.10.0
 
 MIT License
 
