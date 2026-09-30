@@ -144,11 +144,8 @@ fn stored(
 
     // sRGB stays the answer for a JPEG that carries no profile, which is what
     // the format means in the absence of one.
-    let color = container
-        .as_ref()
-        .and_then(|jpeg| jpeg.icc_profile())
-        .map(|profile| crate::image::color::icc::color_space(&profile, ColorSpace::SRGB))
-        .unwrap_or(ColorSpace::SRGB);
+    let profile = container.as_ref().and_then(|jpeg| jpeg.icc_profile());
+    let color = ColorSpace::stated(None, profile.as_deref());
 
     let gain_mapped = match &container {
         Some(container) if overrides.gain_map => container.gain_mapped(color)?,

@@ -276,16 +276,12 @@ fn header(source: impl std::io::Read + Seek) -> Header {
     };
     let info = reader.info();
 
-    let color = if let Some(points) = info.coding_independent_code_points {
-        Some(crate::image::color::cicp::color_space(
-            points.color_primaries,
-            points.transfer_function,
-        ))
-    } else if let Some(profile) = info.icc_profile.as_ref() {
-        Some(crate::image::color::icc::color_space(
-            profile,
-            ColorSpace::SRGB,
-        ))
+    let points = info
+        .coding_independent_code_points
+        .map(|points| (points.color_primaries, points.transfer_function));
+    let profile = info.icc_profile.as_deref();
+    let color = if points.is_some() || profile.is_some() {
+        Some(ColorSpace::stated(points, profile))
     } else if info.srgb.is_some() {
         None
     } else {

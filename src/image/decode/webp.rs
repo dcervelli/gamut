@@ -210,10 +210,8 @@ impl<R: Read + Seek> Opened<R> {
         // Read the metadata chunks before the pixels. Both seek away from
         // where the bitstream sits, and doing it first keeps the one
         // expensive read last.
-        let color = match decoder.icc_profile().context("reading the ICCP chunk")? {
-            Some(profile) => crate::image::color::icc::color_space(&profile, ColorSpace::SRGB),
-            None => ColorSpace::SRGB,
-        };
+        let profile = decoder.icc_profile().context("reading the ICCP chunk")?;
+        let color = ColorSpace::stated(None, profile.as_deref());
         let orientation = decoder
             .exif_metadata()
             .context("reading the EXIF chunk")?

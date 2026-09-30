@@ -306,6 +306,23 @@ impl ColorSpace {
         primaries: Primaries::Bt709,
     };
 
+    /// What a container states about its color, in the order every format
+    /// here gives the two vocabularies: CICP code points where the file
+    /// carries them, as `(primaries, transfer)`, since they name a curve
+    /// this program models exactly; else the ICC profile, read with sRGB
+    /// assumed for whatever it leaves unsaid; else sRGB, which is what an
+    /// untagged still image means by convention. PNG, JPEG, WebP, JPEG XL,
+    /// TIFF and HEIF all decide this way, so they all decide it here.
+    pub fn stated(cicp: Option<(u8, u8)>, icc: Option<&[u8]>) -> Self {
+        if let Some((primaries, transfer)) = cicp {
+            return cicp::color_space(primaries, transfer);
+        }
+        match icc {
+            Some(profile) => icc::color_space(profile, Self::SRGB),
+            None => Self::SRGB,
+        }
+    }
+
     /// The space as people who work in color name it — `sRGB`, `Display P3`,
     /// `Rec. 2100 PQ`, `Adobe RGB (1998)` — for the top bar and the info
     /// panel. A pairing of primaries and curve with no name of its own is

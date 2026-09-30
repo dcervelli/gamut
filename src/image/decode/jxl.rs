@@ -492,13 +492,10 @@ impl Layout {
 /// Both are asked of the *rendered* encoding rather than the stored one, so
 /// that what is described is what the buffer actually holds.
 fn color_space(image: &JxlImage) -> ColorSpace {
-    if let Some([primaries, transfer, _matrix, _range]) = image.rendered_cicp() {
-        return crate::image::color::cicp::color_space(primaries, transfer);
-    }
-    match image.original_icc() {
-        Some(profile) => crate::image::color::icc::color_space(profile, ColorSpace::SRGB),
-        None => ColorSpace::SRGB,
-    }
+    let cicp = image
+        .rendered_cicp()
+        .map(|[primaries, transfer, _matrix, _range]| (primaries, transfer));
+    ColorSpace::stated(cicp, image.original_icc())
 }
 
 #[cfg(test)]

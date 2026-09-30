@@ -650,16 +650,23 @@ impl Scale {
 /// A file carrying neither falls back to sRGB, which is what an untagged
 /// still image means by convention and what every other decoder here assumes.
 fn color_space(handle: &ImageHandle) -> ColorSpace {
-    if let Some(nclx) = handle.color_profile_nclx() {
-        return crate::image::color::cicp::color_space(
+    let nclx = handle.color_profile_nclx().map(|nclx| {
+        (
             code(nclx.color_primaries() as i32),
             code(nclx.transfer_characteristics() as i32),
-        );
-    }
-    match handle.color_profile_raw() {
-        Some(profile) => crate::image::color::icc::color_space(&profile.data, ColorSpace::SRGB),
-        None => ColorSpace::SRGB,
-    }
+        )
+    });
+    // Asked for only where there is no `nclx` to prefer, as before: the
+    // profile is copied out of the handle on the way.
+    let profile = if nclx.is_none() {
+        handle.color_profile_raw()
+    } else {
+        None
+    };
+    ColorSpace::stated(
+        nclx,
+        profile.as_ref().map(|profile| profile.data.as_slice()),
+    )
 }
 
 /// `libheif-rs` gives back C enums whose discriminants are the CICP code

@@ -630,7 +630,7 @@ fn orientation<R: io::Read + Seek>(decoder: &mut Decoder<R>) -> Result<Orientati
 /// when the guess is wrong.
 fn color_space(samples: &Samples, profile: Option<tiff::decoder::ifd::Value>) -> ColorSpace {
     if let Some(profile) = profile.and_then(|value| value.into_u8_vec().ok()) {
-        return crate::image::color::icc::color_space(&profile, ColorSpace::SRGB);
+        return ColorSpace::stated(None, Some(&profile));
     }
     match samples {
         Samples::U8 { .. } => ColorSpace::SRGB,
