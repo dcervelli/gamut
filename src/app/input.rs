@@ -603,7 +603,7 @@ impl When {
             When::PictureOnClipboard => "a picture on the clipboard",
             When::HdrMode => "the monitor in HDR mode",
             When::CameraJpeg => "a raw with a camera JPEG",
-            When::Depth => "an image with a depth map",
+            When::Depth => "an image has a depth map",
             When::SingleChannel => "a single-channel image",
             When::Undoable => "an edit to undo",
             When::VisitedBefore => "a file shown before this one",
@@ -1390,7 +1390,7 @@ pub static ROWS: &[Row] = &[
     Row {
         section: Section::Display,
         when: Some(When::Depth),
-        help: "Toggle between the picture and its depth map",
+        help: "Toggle depth map display",
         keys: one!("display.depth", ToggleDepth, [key('D')]),
     },
     Row {

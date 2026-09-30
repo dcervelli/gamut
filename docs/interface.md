@@ -565,6 +565,13 @@ and both land on `Current`, which is what the bottom bar's switch
 and `Conditions::camera_jpeg` read. When the JPEG was asked for and the file
 has none, `App::apply` says so in a toast.
 
+The switch wears `camera`'s mark and the word for the picture up, `RAW` or
+`JPEG`, the mark saying the rest; where it is read out rather than seen it
+is called by its whole name, `CAMERA_RAW` or `CAMERA_JPEG`. It is drawn by
+`Pass::worded_button`, which the grid's and the loupe's toggles are drawn
+by too, holding the word's place at the wider of the two so that the turn
+pair beside it does not move when it is pressed.
+
 The switch is left out, not drawn dead, on a file with no JPEG. The headroom
 switch beside it is always drawn, because the surface is a question about
 every picture; this one is about a kind of file most pictures are not, and a
@@ -634,8 +641,9 @@ rather than shown in its place — the gain map now, a matte as the picture's
 alpha later — is carried on the picture's `DecodedImage` and read by
 `Seen::raster` and the image layer alike; it is not a `Showing`.
 
-The toggle sits between the camera's switch and the headroom switch
-(`Pass::depth_toggle`), lit while the map is up, and is left out on a picture
+The toggle is a square with `axis-3d`'s mark alone, between the camera's
+switch and the headroom switch (`Pass::depth_toggle`), lit while the map is
+up, and is left out on a picture
 with no map for the camera switch's reason; `NO_DEPTH_MAP` is the refusal
 only the key reaches. The info panel's *Showing* row says when the facts
 under it are the map's.

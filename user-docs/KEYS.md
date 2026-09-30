@@ -557,9 +557,9 @@ the pixel readout counts from the top left of the picture as you see it.
 A camera raw file holds two pictures: the one `gamut` develops from what
 the sensor counted, and the JPEG the camera rendered and wrote into the file
 beside it, with the camera's own curve, color and adjustments. While a raw
-that carries a JPEG is on screen, a button between the turn buttons and
-`HDR` names the picture you are looking at, **Camera RAW** or
-**Camera JPEG**, and a click on it or `v` shows the other one. The choice
+that carries a JPEG is on screen, a button with a camera on it, between the
+turn buttons and `HDR`, names the picture you are looking at, **RAW** or
+**JPEG**, and a click on it or `v` shows the other one. The choice
 holds for every raw you open after it, and for the next time `gamut` starts.
 Where you were looking stays where it was, at the same size, so the two can
 be compared by flicking between them. The display settings start over, since
@@ -573,7 +573,8 @@ screen is. A raw with no JPEG in it has no button, and shows its developed
 picture while the camera's JPEG is chosen, saying so as it opens.
 
 A picture that carries a depth map — a phone's portrait, say — has a
-**Depth** button between that one and `HDR`. A click on it or `D` shows the
+button with three axes on it, the third dashed, between that one and `HDR`.
+A click on it or `D` shows the
 depth map in the picture's place and lights the button; another shows the
 picture again. The map covers exactly what the picture covered, so the same
 thing stays under the pointer and the two can be flicked between; nothing is
@@ -917,8 +918,8 @@ region behind: it belongs to the picture it was drawn on.
 | Click the zoom percentage | Open the zoom menu: scale, fit and the magnification filter | |
 | Click the dot beside the grid button | Choose how a pixel's value is read out | |
 | Click a turn button, near the bottom right | Turn the picture a quarter counterclockwise or clockwise, as `;` and `'` do | |
-| Click **Camera RAW** or **Camera JPEG**, before `HDR` at the bottom right | Show a raw as the camera's JPEG of it, or as the developed picture, as `v` does | |
-| Click **Depth**, just before `HDR` at the bottom right | Show a picture's depth map in its place, or the picture again, as `D` does | |
+| Click the camera button reading **RAW** or **JPEG**, near the bottom right | Show a raw as the camera's JPEG of it, or as the developed picture, as `v` does | |
+| Click the axes button, just before `HDR` at the bottom right | Show a picture's depth map in its place, or the picture again, as `D` does | |
 
 The button at the top of the left strip opens a menu of the
 copies beside it: the file's **Name**, its **Path**, its **URI**, the

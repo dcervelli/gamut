@@ -2422,7 +2422,8 @@ fn the_depth_toggle_is_there_only_for_a_picture_with_a_depth_map() {
     use crate::image::depth::DepthMap;
 
     let harness = open(WINDOW, 1, panels());
-    assert!(harness.query_by_label(chrome::DEPTH).is_none());
+    let name = Control::Depth.label();
+    assert!(harness.query_by_label(&name).is_none());
 
     let mut harness = open(WINDOW, 1, panels());
     let current = harness.state_mut().current.as_mut().expect("a picture");
@@ -2438,8 +2439,5 @@ fn the_depth_toggle_is_there_only_for_a_picture_with_a_depth_map() {
     }));
     current.image = Arc::new(image);
     harness.run();
-    assert_eq!(
-        click(&mut harness, chrome::DEPTH),
-        [Command::Press(Control::Depth)]
-    );
+    assert_eq!(click(&mut harness, &name), [Command::Press(Control::Depth)]);
 }

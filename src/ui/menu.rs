@@ -190,7 +190,7 @@ pub fn describe_format(format: PixelFormat) -> &'static str {
         PixelFormat::Hex => "Pixel value from image in hex",
         PixelFormat::Decimal => "Pixel value from image in decimal",
         PixelFormat::Mapped => "Pixel value sent to display",
-        PixelFormat::Depth => "Distance from the camera, from the image's depth map",
+        PixelFormat::Depth => "Distance from camera (requires image depth map)",
     }
 }
 

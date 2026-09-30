@@ -418,6 +418,32 @@ pub(super) const GRID_3X3: &[Mark] = &[
     Mark::Line([15.0, 3.0], [15.0, 21.0]),
 ];
 
+/// Lucide's `camera`, as it was drawn before its corners were softened: a
+/// body with the viewfinder's hump on top, and the lens — for the switch
+/// between a raw's developed picture and the camera's own JPEG of it.
+///
+/// Written out as sides and quarter turns, as `rotate-ccw-square` is,
+/// because the body's top edge is open where the hump rises from it: a
+/// whole rounded rectangle would draw a stroke across the hump's foot.
+pub(super) const CAMERA: &[Mark] = &[
+    // The hump, from its left foot over to its right.
+    Mark::Line([7.0, 7.0], [9.5, 4.0]),
+    Mark::Line([9.5, 4.0], [14.5, 4.0]),
+    Mark::Line([14.5, 4.0], [17.0, 7.0]),
+    // The body, from the hump's right foot round clockwise to its left.
+    Mark::Line([17.0, 7.0], [20.0, 7.0]),
+    Mark::arc([20.0, 9.0], 2.0, 270.0, 90.0),
+    Mark::Line([22.0, 9.0], [22.0, 18.0]),
+    Mark::arc([20.0, 18.0], 2.0, 0.0, 90.0),
+    Mark::Line([20.0, 20.0], [4.0, 20.0]),
+    Mark::arc([4.0, 18.0], 2.0, 90.0, 90.0),
+    Mark::Line([2.0, 18.0], [2.0, 9.0]),
+    Mark::arc([4.0, 9.0], 2.0, 180.0, 90.0),
+    Mark::Line([4.0, 7.0], [7.0, 7.0]),
+    // The lens.
+    Mark::circle([12.0, 13.0], 3.0),
+];
+
 /// Lucide's `axis-3d`: two axes meeting at a rounded corner, and the third
 /// running back from it in dashes — depth, for the toggle that shows the
 /// depth map.
