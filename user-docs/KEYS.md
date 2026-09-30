@@ -762,33 +762,7 @@ itself has no room, in which case `--size` is the way past it.
 
 The file information sits down the right of the image, under headings, so
 that a long column can be read by looking for a thing rather than from the
-top. It opens with the file itself — what it is called, where it is, what it
-turned out to be, how large it is and when it was last written — and then the
-image in it: how many pixels across and down, what each pixel holds, the
-color space those numbers are meant in, and whether it carries transparency.
-
-After those comes what the file's own metadata says, for a file that carries
-any: the camera and lens, whose camera it was and its serial numbers where
-the camera recorded them; then when the photograph was taken, the exposure
-it was made at and how it was decided, the focal length, the metering, the
-white balance — with its color temperature, for a raw — and the flash; then where the camera stood, in degrees a map
-will take, with whatever else it recorded about the place. A georeferenced
-raster — a scanned map, an elevation model — gets a section of its own: the
-coordinate system it names, the size of a pixel on the ground, where its
-corner sits, the ground it covers, and the value that stands for nothing
-measured. Anything somebody wrote in words — a title, a caption, a comment,
-keywords, who made the file and what may be done with it — is drawn out into
-a section of its own, *About*, whether the camera wrote it as EXIF or a
-cataloging program wrote it since as XMP; where the two say the same thing
-differently, the EXIF field is the one shown. The regions marked out on the picture
-follow under *Regions*, one row each: the subject the camera found, and
-whatever a cataloging program marked — faces with the names they were given,
-pets, barcodes, a point of focus, and the people Windows Photo Gallery
-tagged — with the
-corner and size of each in pixels of the picture as it is shown, the way the
-pointer's position reads: turning the picture moves them with it. Whatever
-else the GPS receiver recorded is listed after all of them, field by field,
-as the file gives it.
+top. [METADATA.md](METADATA.md) lists every section and field it shows.
 
 Clicking copies. A click on a field copies what it says; a click on a heading
 copies that whole section, one line per field as a name and a value; and the
@@ -797,20 +771,9 @@ line as well — the same thing `Ctrl+I` does. A mark appears over whatever the
 pointer is on to show what a click would take. It goes away while the column
 is being scrolled, since the pointer is then resting rather than pointing.
 
-Coordinate systems are quoted as the file gives them, by name and by EPSG
-code. Turning a code into a projection and a datum needs a register this does
-not carry, so what you get is what was written.
-
-The file's own date is in UTC; the date the photograph was taken is whatever
-the camera recorded, with the offset from UTC it was set to where it recorded
-one. EXIF is read from JPEG, TIFF, PNG, WebP and HEIF files, and from a TIFF
-however large it is and wherever in the file it keeps it; XMP from those and
-from JPEG XL as well. An XMP sidecar beside a file — the file's name with
-`.xmp` in place of its extension, or added after it — is read for every
-file, raws included, and what it says wins over what the file itself says,
-the sidecar being what a cataloging program wrote last. Where it has more to say than
-fits, the wheel scrolls it — point at the panel rather than at the image, and
-the wheel moves the words instead of the zoom. Dragging the panel scrolls it
+Where the panel has more to say than fits, the wheel scrolls it — point at
+the panel rather than at the image, and the wheel moves the words instead of
+the zoom. Dragging the panel scrolls it
 as well, the drag holding the scrollbar's handle rather than the words: drag
 down to move down the column, and a short drag carries a long column a long
 way — as far as putting the handle there would. The pointer belongs to the
