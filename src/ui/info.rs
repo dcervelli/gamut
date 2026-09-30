@@ -12,6 +12,7 @@
 //! and the copying alike, so what is drawn lit and what lands on the
 //! clipboard cannot come to disagree.
 
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use egui::{
@@ -437,7 +438,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
 /// another file starts at the top of its column rather than however far
 /// down the last one had been read.
 fn column(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, picture: &egui::Painter) {
-    let contents = contents(current);
+    let contents = cached(ui, current);
     ui.spacing_mut().scroll.bar_inner_margin = SCROLLBAR_GUTTER - SCROLLBAR_WIDTH;
     egui::ScrollArea::vertical()
         .id_salt(("info column", current.file.path.as_str()))
@@ -1242,6 +1243,76 @@ fn contents(current: &Current) -> Contents {
     });
     sections.retain(|section| !section.facts.is_empty());
     Contents { sections }
+}
+
+/// What [`contents`] is made from, as far as the frame can tell it apart:
+/// the picture itself, the file it is called, the turn and the image of
+/// the file shown, the page, the rendering and the lift's weight. The
+/// same key means the same words.
+struct Key {
+    image: usize,
+    path: String,
+    label: String,
+    turn: orient::Turn,
+    showing: Showing,
+    page: usize,
+    rendering: Rendering,
+    lift: Option<u32>,
+}
+
+impl Key {
+    fn of(current: &Current) -> Self {
+        Self {
+            image: Arc::as_ptr(&current.image) as *const u8 as usize,
+            path: current.file.path.clone(),
+            label: current.label.clone(),
+            turn: current.turn,
+            showing: current.showing,
+            page: current.page,
+            rendering: current.rendering,
+            lift: current.lift.as_ref().map(|lift| lift.weight().to_bits()),
+        }
+    }
+
+    /// Whether `current` would make this same key, read without making one.
+    fn is(&self, current: &Current) -> bool {
+        self.image == Arc::as_ptr(&current.image) as *const u8 as usize
+            && self.turn == current.turn
+            && self.showing == current.showing
+            && self.page == current.page
+            && self.rendering == current.rendering
+            && self.lift == current.lift.as_ref().map(|lift| lift.weight().to_bits())
+            && self.path == current.file.path
+            && self.label == current.label
+    }
+}
+
+/// The contents kept between frames, in egui's memory under the column's
+/// id: made again only when the [`Key`] has moved.
+#[derive(Clone)]
+struct Cached {
+    key: Arc<Key>,
+    contents: Arc<Contents>,
+}
+
+/// The panel's contents for `current`, made once per picture rather than
+/// once per frame: they are a few dozen formatted facts and the regions
+/// placed under the turn, none of which changes while the picture sits
+/// there, and the panel is drawn on every frame it is up.
+fn cached(ui: &egui::Ui, current: &Current) -> Arc<Contents> {
+    let id = egui::Id::new("info contents");
+    let held = ui.data(|data| data.get_temp::<Cached>(id));
+    if let Some(held) = &held
+        && held.key.is(current)
+    {
+        return Arc::clone(&held.contents);
+    }
+    let made = Cached {
+        key: Arc::new(Key::of(current)),
+        contents: Arc::new(contents(current)),
+    };
+    ui.data_mut(|data| data.insert_temp(id, made.clone()));
+    made.contents
 }
 
 /// One section of the file's metadata, headed as its group is.
