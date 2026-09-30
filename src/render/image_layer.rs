@@ -15,6 +15,7 @@ use super::placement::{Glass, Placement, Upscale};
 use super::reduce::{self, Level, Reducer};
 use super::shader_codes;
 use super::upload::{self, Capabilities, Reduced};
+use crate::image::auxiliary::Showing;
 use crate::image::gain_map::GainMap;
 use crate::image::orient::Turn;
 use crate::image::{
@@ -331,6 +332,12 @@ pub struct ImageLayer {
     marks_slot: Slot,
     reducer: Reducer,
     image: Option<GpuImage>,
+    /// Which of the file's images `image` is.
+    showing: Showing,
+    /// The file's other images that have been drawn, kept on the device so
+    /// that going back to one uploads nothing: the picture, while an image
+    /// it carries is drawn in its place. Let go with the file.
+    held: Vec<(Showing, GpuImage)>,
     /// Which of the current image's bind groups the next draw reads, decided
     /// in `prepare` from the zoom.
     level: usize,
@@ -434,6 +441,8 @@ impl ImageLayer {
             rim: Slot::new(device, &params_layout, "loupe rim params"),
             marks_slot: Slot::new(device, &params_layout, "marks params"),
             image: None,
+            showing: Showing::Picture,
+            held: Vec::new(),
             level: 0,
             thumbnail_level: None,
             loupe_level: None,
@@ -442,6 +451,32 @@ impl ImageLayer {
 
     pub fn current(&self) -> Option<&GpuImage> {
         self.image.as_ref()
+    }
+
+    /// Draws `showing`, another image of the file on screen, in place of
+    /// the one that is: the texture held for it where it has been drawn
+    /// before, and otherwise the one `upload` makes. What was drawn is held
+    /// in turn. An upload that fails leaves what is drawn as it is.
+    pub fn show(
+        &mut self,
+        showing: Showing,
+        upload: impl FnOnce() -> Result<GpuImage>,
+    ) -> Result<()> {
+        if showing == self.showing || self.image.is_none() {
+            return Ok(());
+        }
+        let image = match self.held.iter().position(|(held, _)| *held == showing) {
+            Some(at) => self.held.remove(at).1,
+            None => upload()?,
+        };
+        let was = std::mem::replace(&mut self.showing, showing);
+        if let Some(left) = self.image.replace(image) {
+            self.held.push((was, left));
+        }
+        self.level = 0;
+        self.thumbnail_level = None;
+        self.loupe_level = None;
+        Ok(())
     }
 
     /// A handle that turns decoded images into [`GpuImage`]s. Held apart from
@@ -471,6 +506,8 @@ impl ImageLayer {
     /// describes rather than accumulating as files are stepped through.
     pub fn install(&mut self, image: GpuImage) {
         self.image = Some(image);
+        self.showing = Showing::Picture;
+        self.held.clear();
         self.level = 0;
         self.thumbnail_level = None;
         self.loupe_level = None;
@@ -480,6 +517,8 @@ impl ImageLayer {
     /// until another is installed.
     pub fn remove(&mut self) {
         self.image = None;
+        self.showing = Showing::Picture;
+        self.held.clear();
         self.level = 0;
         self.thumbnail_level = None;
         self.loupe_level = None;

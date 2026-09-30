@@ -25,6 +25,11 @@
 //! the map is decoded through `libheif` like any other image in the file
 //! and goes with the picture as [`crate::image::gain_map`] describes, the
 //! same as an Ultra HDR JPEG's, for the display to apply.
+//!
+//! A portrait may carry a depth map as well: another auxiliary image, of
+//! the type MPEG gives depth, decoded the same way and carried beside the
+//! picture for the readout under the pointer, with its own XMP saying what
+//! its codes stand for — see [`crate::image::depth`].
 
 use std::io::SeekFrom;
 use std::sync::{Arc, OnceLock};
@@ -35,7 +40,9 @@ use libheif_rs::{
     SecurityLimits, StreamReader,
 };
 
+use crate::image::depth::{self, DepthMap};
 use crate::image::gain_map::{GainMap, Lift};
+use crate::image::xmp::Xmp;
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
 
 mod apple;
@@ -95,13 +102,7 @@ impl super::Decoder for Heif {
     fn xmp(&self, source: &mut dyn super::ReadSeek) -> Result<Option<Vec<u8>>> {
         lib_heif();
         let handle = container(source)?.primary_image_handle()?;
-        let mut ids = vec![0; handle.number_of_metadata_blocks(b"mime").max(0) as usize];
-        let count = handle.metadata_block_ids(&mut ids, b"mime");
-        ids.truncate(count);
-        Ok(ids
-            .into_iter()
-            .find(|&id| handle.metadata_content_type(id) == Some("application/rdf+xml"))
-            .and_then(|id| handle.metadata(id).ok()))
+        Ok(xmp_of(&handle))
     }
 
     fn extensions(&self) -> &'static [&'static str] {
@@ -218,8 +219,59 @@ impl super::Decoder for Heif {
         if overrides.gain_map && channels == Channels::Rgb && !wide {
             image.gain_map = gain_map(lib, &context, &handle, tone_map)?;
         }
+        // A depth map that will not decode costs the readout its depth and
+        // nothing else, so it is let go rather than refusing the picture.
+        image.depth = depth_map(lib, &handle).ok().flatten();
         Ok(image)
     }
+}
+
+/// The picture's depth map, where it has one: the auxiliary image MPEG's
+/// type names as depth, which `libheif` finds by that type and hands back
+/// as a monochrome image at its own size. What its codes stand for is in
+/// the XMP packet the depth image carries of its own, in its vendor's
+/// words — an iPhone's portrait writes one — and where there is none, or
+/// none [`depth::scale`] knows, they are kept as codes.
+fn depth_map(lib: &LibHeif, handle: &ImageHandle) -> Result<Option<Arc<DepthMap>>> {
+    if !handle.has_depth_image() {
+        return Ok(None);
+    }
+    let mut ids = [0; 1];
+    if handle.depth_image_ids(&mut ids) == 0 {
+        return Ok(None);
+    }
+    let map = handle.depth_image_handle(ids[0])?;
+    let (width, height) = (map.width(), map.height());
+    if width == 0 || height == 0 {
+        bail!("the depth map is {width}x{height}");
+    }
+    let bits = map.luma_bits_per_pixel();
+    if !(1..=16).contains(&bits) {
+        bail!("the depth map reports {bits} bits per sample");
+    }
+    super::check_decoded_size(width, height, 1, if bits > 8 { 16 } else { 8 })?;
+    let image = lib
+        .decode(&map, HeifColorSpace::Monochrome, None)
+        .context("decoding the depth map")?;
+    if (image.width(), image.height()) != (width, height) {
+        bail!(
+            "the depth map's handle says {width}x{height} but it decoded to {}x{}",
+            image.width(),
+            image.height()
+        );
+    }
+    let gray = image
+        .planes()
+        .y
+        .ok_or_else(|| anyhow!("the depth map decoded without a gray plane"))?;
+    Ok(Some(Arc::new(DepthMap {
+        width,
+        height,
+        samples: interleave_planes(&[gray], width, height)?,
+        scale: xmp_of(&map)
+            .and_then(|packet| Xmp::parse(&packet))
+            .and_then(|xmp| depth::scale(&xmp)),
+    })))
 }
 
 /// The picture's gain map, where the file has one this reader can apply:
@@ -326,6 +378,18 @@ fn decode_map(lib: &LibHeif, handle: &ImageHandle) -> Result<(u32, u32, u8, Vec<
         bail!("an 8-bit gain map decoded to something wider");
     };
     Ok((width, height, channels.count() as u8, data))
+}
+
+/// The XMP packet an image of the file carries, if it carries one: a `mime`
+/// item of the packet's content type, which the container ties to the image
+/// it describes — the primary one, or an auxiliary one beside it.
+fn xmp_of(handle: &ImageHandle) -> Option<Vec<u8>> {
+    let mut ids = vec![0; handle.number_of_metadata_blocks(b"mime").max(0) as usize];
+    let count = handle.metadata_block_ids(&mut ids, b"mime");
+    ids.truncate(count);
+    ids.into_iter()
+        .find(|&id| handle.metadata_content_type(id) == Some("application/rdf+xml"))
+        .and_then(|id| handle.metadata(id).ok())
 }
 
 /// The pixel-count ceiling, on the same reasoning as `MAX_DECODED_BYTES`:

@@ -8,7 +8,8 @@
 //! `$XDG_STATE_HOME/gamut/state`, is the program's: what was left where it
 //! was set by hand — the file list's width where it was dragged, the
 //! loupe's magnification where the wheel left it, the order its menu put
-//! the list in — written when the window
+//! the list in, how the pointer's readout was last written — written when
+//! the window
 //! closes, and nothing lost when it is deleted.
 //!
 //! Both are lines of `name = value`, with `#` starting a comment. The
@@ -35,8 +36,8 @@ use crate::ui::{CoordinateFormat, GeographicFormat, PixelFormat};
 use crate::ui::{filmstrip, loupe};
 use crate::{PROGRAM, shown_path, xdg};
 
-/// The configuration: which panels the window opens with, how the
-/// pointer's pixel is written, and what the keys and the mouse do. A
+/// The configuration: which panels the window opens with, and what the keys
+/// and the mouse do. A
 /// command-line flag for the same thing wins over it.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Config {
@@ -45,9 +46,6 @@ pub struct Config {
     pub show_filmstrip: bool,
     pub show_histogram: bool,
     pub show_info: bool,
-    pub pixel_format: PixelFormat,
-    pub coordinate_format: CoordinateFormat,
-    pub geographic_format: GeographicFormat,
     pub log_counts: bool,
     /// Whether a single file named on the command line steps on through
     /// the other images in its folder.
@@ -67,9 +65,6 @@ impl Default for Config {
             show_filmstrip: true,
             show_histogram: false,
             show_info: false,
-            pixel_format: PixelFormat::Hex,
-            coordinate_format: CoordinateFormat::Pixel,
-            geographic_format: GeographicFormat::Decimal,
             log_counts: false,
             browse_folder: true,
             open_map_link: OPEN_MAP_LINK.to_string(),
@@ -82,7 +77,7 @@ impl Default for Config {
 /// Every setting the configuration file takes, in the order the template
 /// lists them, with the words it wears there. [`Config::value`] writes each
 /// one's value, and [`Config::parse`] reads it back.
-const SETTINGS: [(&str, &str); 11] = [
+const SETTINGS: [(&str, &str); 8] = [
     ("show_ui", "The panels around the picture."),
     (
         "show_minimap",
@@ -94,18 +89,6 @@ const SETTINGS: [(&str, &str); 11] = [
     ),
     ("show_histogram", "The histogram panel."),
     ("show_info", "The file information panel."),
-    (
-        "pixel_format",
-        "How the pixel under the pointer is read out: hex, decimal, or mapped.",
-    ),
-    (
-        "coordinate_format",
-        "Where the pointer is in a georeferenced file: pixel, projected, or geographic.",
-    ),
-    (
-        "geographic_format",
-        "How a latitude and longitude are written: decimal, or dms.",
-    ),
     (
         "log_counts",
         "The histogram's bars as tall as the logarithm of their counts.",
@@ -130,6 +113,12 @@ pub fn map_link(link: &str, [latitude, longitude]: [f64; 2]) -> String {
     link.replace("{lat}", &format!("{latitude:.6}"))
         .replace("{lng}", &format!("{longitude:.6}"))
 }
+
+/// Settings the configuration file once took, which the state file keeps
+/// now: how the pointer's pixel and place are written, chosen by hand from
+/// the readout's menu and remembered where they were left, like everything
+/// else set there. A line naming one is passed over.
+const RETIRED: [&str; 3] = ["pixel_format", "coordinate_format", "geographic_format"];
 
 impl Config {
     /// The configuration as a file: every setting at its default, commented
@@ -169,9 +158,6 @@ impl Config {
             "show_filmstrip" => self.show_filmstrip.to_string(),
             "show_histogram" => self.show_histogram.to_string(),
             "show_info" => self.show_info.to_string(),
-            "pixel_format" => self.pixel_format.label().to_ascii_lowercase(),
-            "coordinate_format" => self.coordinate_format.label().to_ascii_lowercase(),
-            "geographic_format" => self.geographic_format.label().to_ascii_lowercase(),
             "log_counts" => self.log_counts.to_string(),
             "browse_folder" => self.browse_folder.to_string(),
             "open_map_link" => self.open_map_link.clone(),
@@ -236,28 +222,6 @@ impl Config {
                 "show_info" => Some(&mut config.show_info),
                 "log_counts" => Some(&mut config.log_counts),
                 "browse_folder" => Some(&mut config.browse_folder),
-                "pixel_format" => {
-                    match PixelFormat::parse(value) {
-                        Some(format) => config.pixel_format = format,
-                        None => problems.push((
-                            number,
-                            format!("unknown pixel_format `{value}`: hex, decimal, or mapped"),
-                        )),
-                    }
-                    None
-                }
-                "coordinate_format" => {
-                    match CoordinateFormat::parse(value) {
-                        Some(format) => config.coordinate_format = format,
-                        None => problems.push((
-                            number,
-                            format!(
-                                "unknown coordinate_format `{value}`: pixel, projected, or geographic"
-                            ),
-                        )),
-                    }
-                    None
-                }
                 "open_map_link" => {
                     // A link without both would open the same place for
                     // every picture, or nowhere.
@@ -271,16 +235,10 @@ impl Config {
                     }
                     None
                 }
-                "geographic_format" => {
-                    match GeographicFormat::parse(value) {
-                        Some(format) => config.geographic_format = format,
-                        None => problems.push((
-                            number,
-                            format!("unknown geographic_format `{value}`: decimal or dms"),
-                        )),
-                    }
-                    None
-                }
+                // Remembered in the state file now, as the readout's menu
+                // leaves them; a line written for an older version is
+                // passed over rather than called a mistake.
+                _ if RETIRED.contains(&name) => None,
                 _ => {
                     problems.push((number, format!("unknown setting `{name}`")));
                     None
@@ -377,6 +335,12 @@ pub struct State {
     /// Whether a raw opens as the camera's JPEG of it rather than as the
     /// picture developed from its sensor counts.
     pub camera_jpeg: bool,
+    /// How the pointer's pixel was last written.
+    pub pixel_format: PixelFormat,
+    /// How its place was last written, in a georeferenced file.
+    pub coordinate_format: CoordinateFormat,
+    /// And a latitude and longitude, where it was one.
+    pub geographic_format: GeographicFormat,
 }
 
 impl Default for State {
@@ -386,6 +350,9 @@ impl Default for State {
             loupe_magnification: loupe::DEFAULT_MAGNIFICATION,
             order: filmstrip::Order::default(),
             camera_jpeg: false,
+            pixel_format: PixelFormat::default(),
+            coordinate_format: CoordinateFormat::default(),
+            geographic_format: GeographicFormat::default(),
         }
     }
 }
@@ -431,6 +398,21 @@ impl State {
                     "false" => state.camera_jpeg = false,
                     _ => {}
                 },
+                "pixel_format" => {
+                    if let Some(format) = PixelFormat::parse(value) {
+                        state.pixel_format = format;
+                    }
+                }
+                "coordinate_format" => {
+                    if let Some(format) = CoordinateFormat::parse(value) {
+                        state.coordinate_format = format;
+                    }
+                }
+                "geographic_format" => {
+                    if let Some(format) = GeographicFormat::parse(value) {
+                        state.geographic_format = format;
+                    }
+                }
                 _ => {}
             }
         }
@@ -445,12 +427,18 @@ impl State {
              loupe_magnification = {}\n\
              sort = {}\n\
              sort_direction = {}\n\
-             camera_jpeg = {}\n",
+             camera_jpeg = {}\n\
+             pixel_format = {}\n\
+             coordinate_format = {}\n\
+             geographic_format = {}\n",
             self.filmstrip_width,
             self.loupe_magnification,
             self.order.sort.word(),
             self.order.direction.word(),
             self.camera_jpeg,
+            self.pixel_format.label().to_ascii_lowercase(),
+            self.coordinate_format.label().to_ascii_lowercase(),
+            self.geographic_format.label().to_ascii_lowercase(),
         )
     }
 }
@@ -625,7 +613,6 @@ mod tests {
              \n\
              show_minimap=false   # it gets in the way\n\
              show_histogram = true\n\
-             pixel_format = \"Decimal\"\n\
              log_counts = true\n",
         );
         assert_eq!(problems, Vec::new());
@@ -635,7 +622,6 @@ mod tests {
                 show_ui: false,
                 show_minimap: false,
                 show_histogram: true,
-                pixel_format: PixelFormat::Decimal,
                 log_counts: true,
                 ..Config::default()
             }
@@ -646,7 +632,7 @@ mod tests {
     fn a_line_the_configuration_cannot_use_is_skipped_and_said() {
         let (config, problems) = Config::parse(
             "show_info = yes\n\
-             pixel_format = octal\n\
+             show_ui = maybe\n\
              show_grid = true\n\
              show_filmstrip\n\
              show_histogram = true\n",
@@ -705,7 +691,7 @@ mod tests {
             .lines()
             .filter(|line| line.starts_with("gesture."))
             .count();
-        assert_eq!(keys, 95, "{uncommented}");
+        assert_eq!(keys, 96, "{uncommented}");
         // A Mac's two more: the wheel with Command, and the pinch.
         let slots = if cfg!(target_os = "macos") { 12 } else { 10 };
         assert_eq!(gestures, slots, "{uncommented}");
@@ -801,9 +787,6 @@ mod tests {
             show_filmstrip: !defaults.show_filmstrip,
             show_histogram: !defaults.show_histogram,
             show_info: !defaults.show_info,
-            pixel_format: defaults.pixel_format.next(),
-            coordinate_format: CoordinateFormat::Geographic,
-            geographic_format: defaults.geographic_format.next(),
             log_counts: !defaults.log_counts,
             browse_folder: !defaults.browse_folder,
             open_map_link: "https://www.openstreetmap.org/?mlat={lat}&mlon={lng}".to_string(),
@@ -840,8 +823,32 @@ mod tests {
                 direction: filmstrip::Direction::Descending,
             },
             camera_jpeg: true,
+            pixel_format: PixelFormat::Depth,
+            coordinate_format: CoordinateFormat::Geographic,
+            geographic_format: GeographicFormat::Dms,
         };
         assert_eq!(State::parse(&state.render()), state);
+    }
+
+    /// The readout's formats were settings of the configuration once, and
+    /// are the state's now: a line an older configuration has for one is
+    /// passed over, not reported, whatever it says.
+    #[test]
+    fn a_retired_setting_is_passed_over() {
+        let (config, problems) = Config::parse(
+            "pixel_format = decimal\n\
+             coordinate_format = geographic\n\
+             geographic_format = nonsense\n\
+             show_info = true\n",
+        );
+        assert_eq!(problems, Vec::new());
+        assert_eq!(
+            config,
+            Config {
+                show_info: true,
+                ..Config::default()
+            }
+        );
     }
 
     #[test]

@@ -7,14 +7,18 @@
 //! states — and are the reason anyone points at a pixel; hexadecimal is those
 //! same codes written the way the rest of the world writes a color down. The
 //! mapped values are what the window, the exposure and the false color have
-//! made of them, and are the reason the pixel looks the way it does. One at a
-//! time rather than all at once: the bar is one line long, and a reader
-//! working in one of them is not reading the others. The swatch stands beside
-//! whichever is showing and settles the question none of the three answers
-//! without asking anyone to read three decimals and imagine a color.
+//! made of them, and are the reason the pixel looks the way it does. A
+//! picture that carries a depth map answers one question more — how far away
+//! the thing at that pixel was — which is not in the pixel at all but in the
+//! map beside it. One at a time rather than all at once: the bar is one line
+//! long, and a reader working in one of them is not reading the others. The
+//! swatch stands beside whichever is showing and settles the question none of
+//! the others answers without asking anyone to read three decimals and
+//! imagine a color.
 
 use egui::{Label, RichText, Sense, StrokeKind, vec2};
 
+use crate::image::depth::{Accuracy, Depth, Unit};
 use crate::image::display::Mapped;
 use crate::image::geo::Georeference;
 use crate::image::{DecodedImage, Sample, Samples};
@@ -37,7 +41,7 @@ const SEPARATOR: &str = "\u{00b7}";
 
 /// How the pixel's value is written out.
 ///
-/// Three ways of saying what is at one pixel, of which the bar shows one:
+/// Four ways of saying what is at one pixel, of which the bar shows one:
 /// chosen from the menu the dot at the head of the readout opens, or stepped
 /// through with the key that does the same.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -49,17 +53,27 @@ pub enum PixelFormat {
     #[default]
     Hex,
     /// Those codes as numbers, in the units the file keeps them in: the one
-    /// of the three that says what was measured.
+    /// of these that says what was measured.
     Decimal,
     /// What the window, the exposure and the false color have made of them.
     Mapped,
+    /// How far away the pixel was, from the depth map the file carries
+    /// beside the picture: a distance where the file says how to get one,
+    /// and the map's own code where it does not. Offered for every file, so
+    /// that the choice holds across a folder where only some have a map.
+    Depth,
 }
 
 impl PixelFormat {
     /// Every format, in the order the menu offers them — the same order
     /// [`PixelFormat::next`] steps through, so the key and the cells agree
     /// about what comes after what.
-    pub const ALL: [PixelFormat; 3] = [PixelFormat::Hex, PixelFormat::Decimal, PixelFormat::Mapped];
+    pub const ALL: [PixelFormat; 4] = [
+        PixelFormat::Hex,
+        PixelFormat::Decimal,
+        PixelFormat::Mapped,
+        PixelFormat::Depth,
+    ];
 
     /// What the interface calls this format, for the cell that chooses it.
     pub fn label(self) -> &'static str {
@@ -67,6 +81,7 @@ impl PixelFormat {
             PixelFormat::Hex => "Hex",
             PixelFormat::Decimal => "Decimal",
             PixelFormat::Mapped => "Mapped",
+            PixelFormat::Depth => "Depth",
         }
     }
 
@@ -82,7 +97,8 @@ impl PixelFormat {
         match self {
             PixelFormat::Hex => PixelFormat::Decimal,
             PixelFormat::Decimal => PixelFormat::Mapped,
-            PixelFormat::Mapped => PixelFormat::Hex,
+            PixelFormat::Mapped => PixelFormat::Depth,
+            PixelFormat::Depth => PixelFormat::Hex,
         }
     }
 }
@@ -240,7 +256,13 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
     // too narrow for a button gets no button; one too narrow for the values
     // loses the separator and the swatch with them, rather than leaving the
     // separator parting the coordinate from nothing.
-    let values = value(&current.image, &sample, &mapped, pass.panels.pixel_format);
+    let values = value(
+        &current.image,
+        &sample,
+        &mapped,
+        current.depth(at[0], at[1]),
+        pass.panels.pixel_format,
+    );
     let swatch = ui.available_height() >= SWATCH;
     let mut needed = GAP + measure(ui, SEPARATOR) + GAP + measure(ui, &values);
     if swatch {
@@ -441,12 +463,17 @@ fn dms(angle: f64, hemispheres: [char; 2], places: usize) -> String {
     format!("{degrees}\u{00b0}{minutes:02}'{seconds:0width$.places$}\"{hemisphere}")
 }
 
+/// What the readout says in place of a depth, for a picture with no map.
+pub const NO_DEPTH: &str = "(no depth)";
+
 /// What is there, in `format`. Also what a copy of the value contains, so
-/// that what is copied is exactly what was read.
+/// that what is copied is exactly what was read. `depth` is the map under
+/// the pixel, where the picture has one.
 pub fn value(
     image: &DecodedImage,
     sample: &Sample,
     mapped: &Mapped,
+    depth: Option<Depth>,
     format: PixelFormat,
 ) -> String {
     match format {
@@ -468,6 +495,37 @@ pub fn value(
                 .collect();
             displayed.join(" ")
         }
+        PixelFormat::Depth => match depth {
+            Some(depth) => distance(depth),
+            None => NO_DEPTH.to_string(),
+        },
+    }
+}
+
+/// What the readout puts before a distance the file calls an estimate.
+const ESTIMATED: &str = "\u{2248}";
+
+/// A depth, as a distance in the file's unit where it says how to get one —
+/// to the millimeter, whichever unit that is — and otherwise as the code the
+/// map holds, in the terms `Decimal` writes a pixel's codes in.
+///
+/// A distance the file calls relative — right about what is nearer, but
+/// estimated in scale — is marked as the estimate it is, and written to the
+/// centimeter rather than the millimeter, since the last digit would claim
+/// more than the map knows.
+fn distance(depth: Depth) -> String {
+    let Some(distance) = depth.distance else {
+        return component(depth.stored, depth.float);
+    };
+    let (mark, places) = match distance.accuracy {
+        Accuracy::Absolute => ("", 3),
+        Accuracy::Relative => (ESTIMATED, 2),
+    };
+    let value = distance.value;
+    match distance.unit {
+        Unit::Meters => format!("{mark}{value:.places$} m"),
+        Unit::Millimeters => format!("{mark}{:.0} mm", value),
+        Unit::Unknown => format!("{mark}{value:.places$}"),
     }
 }
 
@@ -543,10 +601,15 @@ mod tests {
 
     fn read(image: &DecodedImage, display: &Display, at: [u32; 2], format: PixelFormat) -> String {
         let sample = image.sample(at[0], at[1], None).expect("inside the image");
+        let depth = image
+            .depth
+            .as_ref()
+            .and_then(|map| map.at(at[0], at[1], image.width, image.height));
         value(
             image,
             &sample,
             &display.map(&sample, Headroom::None),
+            depth,
             format,
         )
     }
@@ -636,6 +699,65 @@ mod tests {
             read([0, 0], PixelFormat::Hex),
             format!("{:08X}", 0.125f32.to_bits())
         );
+    }
+
+    /// The depth is the map's, not the pixel's: a distance where the file
+    /// states the planes, the code where it does not, and a word saying so
+    /// where there is no map at all.
+    #[test]
+    fn depth_reads_the_map_beside_the_picture() {
+        use crate::image::depth::{DepthMap, Quantity, Scale};
+        use std::sync::Arc;
+        let display = Display::default();
+        let mut image = rgb8([231, 128, 64]);
+        assert_eq!(read(&image, &display, [3, 4], PixelFormat::Depth), NO_DEPTH);
+
+        let map = |scale| {
+            Arc::new(DepthMap {
+                width: 2,
+                height: 1,
+                samples: Samples::U8 {
+                    channels: Channels::Gray,
+                    data: vec![0, 51],
+                },
+                scale,
+            })
+        };
+        let linear = |values, unit, accuracy| {
+            Some(Scale {
+                codes: None,
+                values,
+                quantity: Quantity::Distance,
+                unit,
+                accuracy,
+            })
+        };
+        image.depth = Some(map(None));
+        assert_eq!(read(&image, &display, [3, 4], PixelFormat::Depth), "51");
+        assert_eq!(read(&image, &display, [0, 0], PixelFormat::Depth), "0");
+
+        image.depth = Some(map(linear([1.0, 5.0], Unit::Meters, Accuracy::Absolute)));
+        assert_eq!(
+            read(&image, &display, [3, 4], PixelFormat::Depth),
+            "1.800 m"
+        );
+        image.depth = Some(map(linear(
+            [1000.0, 5000.0],
+            Unit::Millimeters,
+            Accuracy::Absolute,
+        )));
+        assert_eq!(
+            read(&image, &display, [3, 4], PixelFormat::Depth),
+            "1800 mm"
+        );
+        // An estimate says so, and claims a digit less.
+        image.depth = Some(map(linear([1.0, 5.0], Unit::Meters, Accuracy::Relative)));
+        assert_eq!(
+            read(&image, &display, [3, 4], PixelFormat::Depth),
+            "\u{2248}1.80 m"
+        );
+        // The other formats still read the pixel.
+        assert_eq!(read(&image, &display, [3, 4], PixelFormat::Hex), "E78040");
     }
 
     /// The key steps through every format and comes back to where it started,

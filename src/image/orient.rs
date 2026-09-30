@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use ::image::metadata::Orientation;
 
+use crate::image::depth::DepthMap;
 use crate::image::gain_map::GainMap;
 use crate::image::{DecodedImage, Samples};
 
@@ -53,6 +54,7 @@ pub fn apply(image: DecodedImage, orientation: Orientation) -> DecodedImage {
         exposure,
         nodata,
         gain_map,
+        depth,
     } = image;
     let samples = match samples {
         Samples::U8 { channels, data } => Samples::U8 {
@@ -79,7 +81,35 @@ pub fn apply(image: DecodedImage, orientation: Orientation) -> DecodedImage {
         exposure,
         nodata,
         gain_map: gain_map.map(|map| turn_map(&map, orientation)),
+        depth: depth.map(|map| turn_depth(&map, orientation)),
     }
+}
+
+/// A depth map turned the way its picture was, for the same reason as the
+/// gain map: it is read by the picture's own coordinates.
+fn turn_depth(map: &DepthMap, orientation: Orientation) -> Arc<DepthMap> {
+    let (width, height) = size(map.width, map.height, orientation);
+    let count = map.samples.channels().count();
+    let samples = match &map.samples {
+        Samples::U8 { channels, data } => Samples::U8 {
+            channels: *channels,
+            data: turn(data, map.width, map.height, count, orientation),
+        },
+        Samples::U16 { channels, data } => Samples::U16 {
+            channels: *channels,
+            data: turn(data, map.width, map.height, count, orientation),
+        },
+        Samples::F32 { channels, data } => Samples::F32 {
+            channels: *channels,
+            data: turn(data, map.width, map.height, count, orientation),
+        },
+    };
+    Arc::new(DepthMap {
+        width,
+        height,
+        samples,
+        scale: map.scale,
+    })
 }
 
 /// A gain map turned the way its base was.
@@ -410,6 +440,47 @@ mod tests {
                         "{orientation:?} at {x}, {y}"
                     );
                 }
+            }
+        }
+    }
+
+    /// A depth map under a turned picture reads the same depth at the same
+    /// pixel of the scene, as the gain map lifts it.
+    #[test]
+    fn a_turned_depth_map_reads_the_same_pixels() {
+        use crate::image::depth::DepthMap;
+        let (width, height) = (4, 2);
+        let mut image = DecodedImage::new(
+            width,
+            height,
+            Samples::U8 {
+                channels: Channels::Gray,
+                data: vec![0; (width * height) as usize],
+            },
+            ColorSpace::SRGB,
+            AlphaMode::Opaque,
+        );
+        image.depth = Some(Arc::new(DepthMap {
+            width: 2,
+            height: 2,
+            samples: Samples::U8 {
+                channels: Channels::Gray,
+                data: vec![1, 2, 3, 4],
+            },
+            scale: None,
+        }));
+        let turned = apply(image.clone(), Orientation::Rotate90);
+        let depth = |image: &DecodedImage, x, y| {
+            let map = image.depth.as_ref().expect("a depth map");
+            map.at(x, y, image.width, image.height).unwrap().stored
+        };
+        for y in 0..height {
+            for x in 0..width {
+                assert_eq!(
+                    depth(&image, x, y),
+                    depth(&turned, height - 1 - y, x),
+                    "({x}, {y})"
+                );
             }
         }
     }

@@ -270,7 +270,9 @@ pub(super) const SQUARE_DASHED: &[Mark] = &[
 ];
 
 /// Lucide's `camera`: the body with its raised top and the lens — the mark
-/// at the head of the info panel's section about what took the picture.
+/// at the head of the info panel's section about what took the picture, and
+/// the switch between a raw's developed picture and the camera's own JPEG
+/// of it.
 /// Written out as sides and quarter turns, since the top edge rises
 /// where the viewfinder sits.
 pub(super) const CAMERA: &[Mark] = &[
@@ -524,6 +526,18 @@ pub(super) const GRID_3X3: &[Mark] = &[
     Mark::Line([3.0, 15.0], [21.0, 15.0]),
     Mark::Line([9.0, 3.0], [9.0, 21.0]),
     Mark::Line([15.0, 3.0], [15.0, 21.0]),
+];
+
+/// Lucide's `axis-3d`: two axes meeting at a rounded corner, and the third
+/// running back from it in dashes — depth, for the toggle that shows the
+/// depth map.
+pub(super) const AXIS_3D: &[Mark] = &[
+    Mark::Line([4.0, 4.0], [4.0, 19.0]),
+    Mark::arc([5.0, 19.0], 1.0, 180.0, -90.0),
+    Mark::Line([5.0, 20.0], [20.0, 20.0]),
+    Mark::Line([4.293, 19.707], [6.0, 18.0]),
+    Mark::Line([9.0, 15.0], [10.5, 13.5]),
+    Mark::Line([13.5, 10.5], [15.0, 9.0]),
 ];
 
 /// Lucide's `zoom-in`: a magnifying glass with a plus in it, for the loupe,
@@ -1138,7 +1152,7 @@ mod tests {
 
     /// Every icon in the table, so that a new one is held to the same
     /// promises as the rest.
-    const ICONS: [&[Mark]; 39] = [
+    const ICONS: [&[Mark]; 40] = [
         CHART_AREA,
         INFO,
         CIRCLE_QUESTION_MARK,
@@ -1178,6 +1192,7 @@ mod tests {
         ARROW_DOWN_WIDE_NARROW,
         ARROW_LEFT,
         ARROW_RIGHT,
+        AXIS_3D,
     ];
 
     fn device(value: f32, scale: f32) -> f32 {

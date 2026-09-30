@@ -6,12 +6,12 @@ pixels, and where each format will surprise you.
 | Format | Extensions | Depth kept | What the file can tell us |
 | --- | --- | --- | --- |
 | PNG | `.png` | 8 and 16-bit | Color space, including HDR; ICC profile; gamma and primaries; orientation; animation |
-| JPEG | `.jpg` `.jpeg` `.jpe` `.jfif` | 8-bit | ICC profile; orientation; HDR gain map |
+| JPEG | `.jpg` `.jpeg` `.jpe` `.jfif` | 8-bit | ICC profile; orientation; HDR gain map; depth map |
 | GIF | `.gif` | 8-bit | Animation — and always sRGB |
 | TIFF | `.tif` `.tiff` | 8 to 64-bit, integer or float | ICC profile, otherwise inferred from depth; orientation; pages |
 | WebP | `.webp` | 8-bit | ICC profile; orientation; animation |
 | JPEG XL | `.jxl` | 8 and 16-bit, or float | Color space, including HDR; ICC profile; orientation; animation |
-| HEIF | `.heic` `.heif` `.hif` `.avif` | 8, 10 and 12-bit | Color space, including HDR; ICC profile; orientation; HDR gain map |
+| HEIF | `.heic` `.heif` `.hif` `.avif` | 8, 10 and 12-bit | Color space, including HDR; ICC profile; orientation; HDR gain map; depth map |
 | ICO | `.ico` | Whatever the chosen icon holds | ICC profile, for the larger icons; every icon in the file |
 | BMP | `.bmp` | 8-bit | Nothing — always sRGB |
 | Netpbm | `.pnm` `.pbm` `.pgm` `.ppm` `.pam` | 8 and 16-bit | Nothing — always sRGB |
@@ -193,6 +193,18 @@ An iPhone's HEIC carries the same kind of map, and gets the same treatment.
   backwards. The message suggests `--no-gain-map`.
 - A JPEG carrying a second image that is not a gain map, such as one half of
   a stereo pair, opens as an ordinary JPEG.
+
+**Depth maps are read for the pixel readout.** A portrait from a phone may
+carry a map of how far away each pixel was. Choose **Depth** in the pixel
+readout (see KEYS.md) to read it under the pointer. An iPhone's portrait
+HEIC and a JPEG with the depth map Google's camera writes both give a
+distance in meters. An iPhone portrait taken with two cameras marks its
+distances as estimates, and they read with `≈` before them: nearer and
+farther are right, but the meters can be off. A HEIC from elsewhere that
+does not say how its map is scaled gives the number the map holds. Other
+ways of storing depth, including Apple's in a JPEG and Samsung's, are not
+read, and such a file reads `(no depth)`. A map that
+cannot be read costs the readout its depth, never the picture.
 
 **CMYK JPEGs open**, but the conversion to RGB does not use the file's CMYK
 profile, so the colors are approximate.
@@ -417,8 +429,8 @@ darker than the camera's own JPEG of it — that JPEG has a curve applied,
 and this has not. Exposure (`f` and `d`) and the tone map (`t`) are the
 controls; the window opens at 0–1 because the file has a white.
 
-The camera's JPEG is in the file too, and `v`, or the **Camera RAW** button
-at the bottom right, shows it in place of the developed picture: the frame
+The camera's JPEG is in the file too, and `v`, or the camera button reading
+**RAW** at the bottom right, shows it in place of the developed picture: the frame
 as the camera rendered it, to look at or export as it is. Canon, Nikon,
 Pentax, Samsung and most DNG files carry one the full size of the frame;
 Sony, Fujifilm and Panasonic carry one of about two megapixels, and the

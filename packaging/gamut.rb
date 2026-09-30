@@ -7,8 +7,8 @@
 class Gamut < Formula
   desc "GPU image viewer with color management for photographs, measurements and HDR"
   homepage "https://github.com/dcervelli/gamut"
-  url "https://github.com/dcervelli/gamut/archive/refs/tags/v0.8.2.tar.gz"
-  sha256 "58ac986d887b1be09a283799cc9e6446dbe47c255f70a993491d0cf234750709"
+  url "https://github.com/dcervelli/gamut/archive/refs/tags/v0.8.3.tar.gz"
+  sha256 "6f100608d179e5374b34b8be8d7efcc6bd440b497248e24c377bf32f747e86bb"
   license any_of: ["MIT", "Apache-2.0"]
 
   depends_on "pkgconf" => :build
@@ -45,15 +45,6 @@ class Gamut < Formula
     bash_completion.install "packaging/completions/gamut.bash" => "gamut"
     zsh_completion.install "packaging/completions/_gamut"
     fish_completion.install "packaging/completions/gamut.fish"
-  end
-
-  # Launch Services knows a bundle by the path it was registered at, and an
-  # upgrade moves the bundle to a new keg and deletes the old one, so the
-  # new bundle is registered here — otherwise "Open With" keeps naming the
-  # deleted one, and choosing it does nothing.
-  def post_install
-    system "/System/Library/Frameworks/CoreServices.framework/Frameworks/" \
-           "LaunchServices.framework/Support/lsregister", "-f", prefix/"Gamut.app"
   end
 
   def caveats

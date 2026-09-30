@@ -634,6 +634,7 @@ mod tests {
             exposure: None,
             nodata: None,
             gain_map: None,
+            depth: None,
         }
     }
 
@@ -662,6 +663,7 @@ mod tests {
             exposure: None,
             nodata: None,
             gain_map: None,
+            depth: None,
         }
     }
 
@@ -742,6 +744,7 @@ mod tests {
             exposure: None,
             nodata: None,
             gain_map: None,
+            depth: None,
         };
         let p3 = red(Primaries::DisplayP3);
         let stats = Stats::scan(&p3);
@@ -879,6 +882,7 @@ mod tests {
             exposure: None,
             nodata: None,
             gain_map: None,
+            depth: None,
         };
         let sample = image.sample(0, 0, None).expect("inside");
 

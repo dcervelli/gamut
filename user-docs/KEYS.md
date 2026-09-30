@@ -541,6 +541,7 @@ that is not a paste; open it as an argument instead.
 | `w` | Mark the clipped pixels, or stop: red where a channel has reached white, blue where one has reached black | `display.marks` |
 | `o` | Turn the room above white off and on, where the monitor is in HDR mode | `display.hdr` |
 | `v` | Show a raw as the camera's JPEG of it, or as the picture developed from the sensor | `display.camera-jpeg` |
+| `Shift+D` | Show a picture's depth map in its place, or the picture again | `display.depth` |
 | `r` | Cycle false color: gray → viridis → magma → turbo | `display.colormap` |
 | `z` | Reset every display setting | `display.reset` |
 | `;` | Turn the picture a quarter counterclockwise | `display.turn.left` |
@@ -556,9 +557,9 @@ the pixel readout counts from the top left of the picture as you see it.
 A camera raw file holds two pictures: the one `gamut` develops from what
 the sensor counted, and the JPEG the camera rendered and wrote into the file
 beside it, with the camera's own curve, color and adjustments. While a raw
-that carries a JPEG is on screen, a button between the turn buttons and
-`HDR` names the picture you are looking at, **Camera RAW** or
-**Camera JPEG**, and a click on it or `v` shows the other one. The choice
+that carries a JPEG is on screen, a button with a camera on it, between the
+turn buttons and `HDR`, names the picture you are looking at, **RAW** or
+**JPEG**, and a click on it or `v` shows the other one. The choice
 holds for every raw you open after it, and for the next time `gamut` starts.
 Where you were looking stays where it was, at the same size, so the two can
 be compared by flicking between them. The display settings start over, since
@@ -570,6 +571,26 @@ Some cameras write a JPEG the full size of the frame; others write a smaller
 one, around two megapixels, and the top bar says how large the picture on
 screen is. A raw with no JPEG in it has no button, and shows its developed
 picture while the camera's JPEG is chosen, saying so as it opens.
+
+A picture that carries a depth map — a phone's portrait, say — has a
+button with three axes on it, the third dashed, between that one and `HDR`.
+A click on it or `D` shows the
+depth map in the picture's place and lights the button; another shows the
+picture again. The map covers exactly what the picture covered, so the same
+thing stays under the pointer and the two can be flicked between; nothing is
+read from the file again either way.
+
+While it is up, the map is the image: the top bar gives its size — usually
+far smaller than the photograph's — and the zoom, the pixel readout, the
+histogram, the display keys, a copy with `Ctrl+C` and an export all work on
+it, exactly as the camera's JPEG of a raw is the image while that is up. It
+opens in gray, stretched from the lowest value it holds to the highest: in
+an iPhone's portrait the near things come out light, and in a map stored the
+other way round they come out dark. Its exposure, window and false color are
+its own, and the picture's are waiting as you left them when you go back. A
+region you had marked out goes, since it was marked in the other image's
+pixels. The toggle stays on as you step through other pictures that carry a
+map, and a picture without one is shown as itself.
 
 The window is the one place the case of a key matters: `a` and `s` move
 the value that comes out black, `A` and `S` the value that comes out white.
@@ -688,7 +709,7 @@ where all of it is set.
 | `l` | Show or hide the loupe | `interface.loupe` |
 | `Shift+L` | Cycle the loupe's magnification: 2, 4, 8 or 16 times | `interface.loupe-magnification` |
 | `x` | Select a region of the image; again, or `Esc`, removes it | `region.select` |
-| `.` | Cycle how the pixel under the pointer is read out: hex → decimal → mapped | `interface.pixel-format` |
+| `.` | Cycle how the pixel under the pointer is read out: hex → decimal → mapped → depth | `interface.pixel-format` |
 | `,` | In a georeferenced file, cycle where the pixel is read out as: pixel → projected → geographic | `interface.coordinate-format` |
 | `<` (`Shift+,`) | Switch a latitude and longitude between decimal degrees and degrees, minutes and seconds | `interface.geographic-format` |
 | `` ` `` | Show or hide the panels around the image | `interface.toggle` |
@@ -906,7 +927,8 @@ region behind: it belongs to the picture it was drawn on.
 | Click the zoom percentage | Open the zoom menu: scale, fit and the magnification filter | |
 | Click the dot beside the grid button | Choose how a pixel's value is read out | |
 | Click a turn button, near the bottom right | Turn the picture a quarter counterclockwise or clockwise, as `;` and `'` do | |
-| Click **Camera RAW** or **Camera JPEG**, before `HDR` at the bottom right | Show a raw as the camera's JPEG of it, or as the developed picture, as `v` does | |
+| Click the camera button reading **RAW** or **JPEG**, near the bottom right | Show a raw as the camera's JPEG of it, or as the developed picture, as `v` does | |
+| Click the axes button, just before `HDR` at the bottom right | Show a picture's depth map in its place, or the picture again, as `D` does | |
 
 The button at the top of the left strip opens a menu of the
 copies beside it: the file's **Name**, its **Path**, its **URI**, the
@@ -936,8 +958,8 @@ after them moves as the pointer crosses a power of ten. In a window too narrow
 for all of it, the coordinates stay.
 
 One pixel answers more than one question, so the value is written whichever of
-three ways you ask for. It starts in hex; the `pixel_format` setting in
-[the configuration file](SETTINGS.md) starts it in another. **Decimal** is the numbers the file holds, in its own
+four ways you ask for. It starts in hex, and after that in whichever you
+last chose. **Decimal** is the numbers the file holds, in its own
 units — codes for an 8-bit image, counts for a 16-bit one, the value itself
 for floating point — the numbers whatever wrote the file put there. **Hex** is
 those same numbers as a color is usually written down: run together, in upper
@@ -946,11 +968,17 @@ case, with no `#` and no `0x`, two digits to an 8-bit sample and four to a
 anything that takes a color. A floating-point file has no such code, and
 what you get there is the bits it actually stores. **Mapped** is what the
 window, the exposure and the tone curve have made of the numbers, where 0 and
-1 are the ends of the window the bar names on the right.
+1 are the ends of the window the bar names on the right. **Depth** is how far
+away the pixel was, for a picture that carries a depth map beside it, as a
+phone's portrait may: a distance, such as `1.372 m`, where the file says how
+its map is scaled — `≈0.92 m` where the file calls it an estimate — and
+otherwise the number the map holds there, which only says what is nearer
+and what is farther. A picture with no depth map reads
+`(no depth)`.
 
-`.` steps through the three, and the dot at the head of the readout opens a
+`.` steps through the four, and the dot at the head of the readout opens a
 menu of them; whichever is in force is lit. It applies to whichever image is
-on screen and stays as you set it.
+on screen and stays as you set it, into the next run too.
 
 A georeferenced raster — a scanned map, an elevation model, a satellite scene —
 can say where the pixel is on the ground as well as where it is in the image,
@@ -976,9 +1004,8 @@ latitude and longitude is good to a meter or two, not to survey accuracy: it
 shifts between datums by a fixed offset rather than by the grids a surveyor's
 software uses. For every other image the rows are not in the menu at all, and
 wherever a file cannot answer what you chose, the readout shows the pixel —
-the choice stays, and applies again to the next map you open. The
-`coordinate_format` and `geographic_format` settings in
-[the configuration file](SETTINGS.md) choose where they start.
+the choice stays, and applies again to the next map you open, in the next
+run as well.
 
 The slot in the last column is the name of that gesture in the
 [configuration file](SETTINGS.md#gestures), which can give it something else

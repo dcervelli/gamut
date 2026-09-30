@@ -203,6 +203,7 @@ fn gray(width: u32, height: u32, samples: Samples) -> DecodedImage {
         exposure: None,
         nodata: None,
         gain_map: None,
+        depth: None,
     }
 }
 
@@ -279,6 +280,73 @@ fn a_refilled_texture_draws_the_new_frame() {
 
 /// The claim minification rests on: an output pixel is the mean of exactly the
 /// texels it covers, not a bilinear tap at its center.
+/// Another of the file's images drawn in the picture's place — a depth map
+/// a quarter of its size — is drawn from a texture of its own at its own
+/// size; going back to the picture uploads nothing, the picture having been
+/// held on the device, and a new picture lets what was held go.
+#[test]
+fn another_image_of_the_file_is_drawn_in_the_picture_s_place() {
+    use crate::image::auxiliary::{Auxiliary, Showing};
+    let Some(gpu) = gpu::test_context() else {
+        return;
+    };
+    const SIZE: u32 = 8;
+    let picture = gray_u8(SIZE, SIZE, vec![255; (SIZE * SIZE) as usize]);
+    let depth = gray_u8(2, 2, vec![0, 85, 170, 255]);
+    let showing = Showing::Auxiliary(Auxiliary::Depth);
+
+    let mut layer = ImageLayer::new(&gpu.device, &gpu.queue, WORKING_FORMAT);
+    let upload = layer.uploader(&gpu.device, &gpu.queue, gpu.capabilities);
+    layer.install(upload.run(&picture).expect("the picture uploads"));
+    layer
+        .show(showing, || upload.run(&depth))
+        .expect("the map uploads");
+
+    // Placed as the view places it: the map over the same square, at its
+    // own zoom.
+    let pixels = draw_layer(
+        gpu,
+        &mut layer,
+        [SIZE, SIZE],
+        Draw::plain(whole([SIZE, SIZE], &depth), None),
+    );
+    let width = SIZE as usize;
+    for (x, y, want) in [
+        (1, 1, 0.0),
+        (6, 1, 85.0 / 255.0),
+        (1, 6, 170.0 / 255.0),
+        (6, 6, 1.0),
+    ] {
+        let got = at(&pixels, width, x, y);
+        assert!(close(got, want, 1e-3), "({x}, {y}): got {got}, want {want}");
+    }
+
+    layer
+        .show(Showing::Picture, || panic!("the picture is held"))
+        .expect("nothing to upload");
+    let pixels = draw_layer(
+        gpu,
+        &mut layer,
+        [SIZE, SIZE],
+        Draw::plain(whole([SIZE, SIZE], &picture), None),
+    );
+    assert!(close(at(&pixels, width, 1, 1), 1.0, 1e-3), "the picture");
+    layer
+        .show(showing, || panic!("the map is held"))
+        .expect("nothing to upload");
+
+    // A new picture: nothing of the last file's is held.
+    layer.install(upload.run(&picture).expect("the picture uploads"));
+    let mut uploaded = false;
+    layer
+        .show(showing, || {
+            uploaded = true;
+            upload.run(&depth)
+        })
+        .expect("the map uploads");
+    assert!(uploaded, "the new picture's map is its own");
+}
+
 #[test]
 fn minification_averages_every_texel_it_covers() {
     let Some(gpu) = gpu::test_context() else {
@@ -482,6 +550,7 @@ fn a_transparent_texel_does_not_bleed_its_color() {
         exposure: None,
         nodata: None,
         gain_map: None,
+        depth: None,
     };
 
     let placement = Placement {
@@ -1028,6 +1097,7 @@ fn rgb_f32_row(pixels: &[[f32; 3]], primaries: Primaries) -> DecodedImage {
         exposure: None,
         nodata: None,
         gain_map: None,
+        depth: None,
     }
 }
 

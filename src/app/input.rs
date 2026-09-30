@@ -8,7 +8,6 @@
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::Arc;
 use std::time::Instant;
 
 use winit::event::{ElementState, KeyEvent};
@@ -20,6 +19,7 @@ use super::folder::Then;
 use super::keymap::{Bound, Chord, KeyName, Keymap, Keys, Row};
 use crate::clipboard;
 use crate::gestures::{self, Button, Gestures, Surface, WheelAction};
+use crate::image::auxiliary::Auxiliary;
 use crate::image::decode::{CameraJpeg, Rendering};
 use crate::image::display::{Colormap, EV_STEP, Startup, ToneMap};
 use crate::image::encode;
@@ -157,6 +157,9 @@ pub enum Action {
     /// Between a raw's developed picture and the camera's JPEG of it, for
     /// every raw from then on.
     ToggleCameraJpeg,
+    /// Between the picture and its depth map, drawn in its place, for every
+    /// picture with one from then on.
+    ToggleDepth,
     /// Put the name of the file on screen on the clipboard, with nothing of
     /// the directory it sits in.
     CopyName,
@@ -367,6 +370,7 @@ pub(super) fn action_of(tip: Tip) -> Option<Action> {
         Tip::Control(Control::Maximize) => ToggleInterface,
         Tip::Control(Control::Output) => ToggleHdr,
         Tip::Control(Control::CameraJpeg) => ToggleCameraJpeg,
+        Tip::Control(Control::Depth) => ToggleDepth,
         Tip::Control(Control::Paste) => Action::Paste,
         Tip::Control(Control::Region) => ToggleRegion,
         Tip::Control(Control::Help) => ShowHelp,
@@ -550,6 +554,8 @@ pub enum When {
     HdrMode,
     /// The file on screen is a raw with the camera's JPEG in it.
     CameraJpeg,
+    /// The picture on screen carries a depth map.
+    Depth,
     SingleChannel,
     /// A rename, a deletion or a removal has been made this session and
     /// not yet undone.
@@ -568,7 +574,7 @@ impl When {
     /// Every condition, for a test to hold them all up against the
     /// application.
     #[cfg(test)]
-    pub const ALL: [When; 14] = [
+    pub const ALL: [When; 15] = [
         When::RegionSelected,
         When::SeveralFiles,
         When::Animation,
@@ -577,6 +583,7 @@ impl When {
         When::PictureOnClipboard,
         When::HdrMode,
         When::CameraJpeg,
+        When::Depth,
         When::SingleChannel,
         When::Undoable,
         When::VisitedBefore,
@@ -597,6 +604,7 @@ impl When {
             When::PictureOnClipboard => "a picture on the clipboard",
             When::HdrMode => "the monitor in HDR mode",
             When::CameraJpeg => "a raw with a camera JPEG",
+            When::Depth => "an image has a depth map",
             When::SingleChannel => "a single-channel image",
             When::Undoable => "an edit to undo",
             When::VisitedBefore => "a file shown before this one",
@@ -647,6 +655,9 @@ pub(super) struct Conditions {
     /// Whether the file on screen is a raw with the camera's JPEG in it,
     /// which is what the switch between the two needs.
     pub camera_jpeg: bool,
+    /// Whether the picture on screen carries a depth map, which is what
+    /// the depth toggle needs.
+    pub depth: bool,
     /// Whether anything out there offers to open the file on screen.
     pub openable: bool,
     /// Whether a false color is on the picture.
@@ -684,6 +695,7 @@ impl Default for Conditions {
             },
             hdr: Hdr::Unsupported,
             camera_jpeg: false,
+            depth: false,
             openable: false,
             false_colored: false,
             picking: false,
@@ -722,6 +734,7 @@ impl Conditions {
         },
         hdr: Hdr::Available,
         camera_jpeg: true,
+        depth: true,
         openable: true,
         false_colored: false,
         picking: false,
@@ -740,6 +753,7 @@ impl Conditions {
             When::PictureOnClipboard => self.picture_on_clipboard,
             When::HdrMode => self.hdr == Hdr::Available,
             When::CameraJpeg => self.camera_jpeg,
+            When::Depth => self.depth,
             When::SingleChannel => self.single_channel,
             When::Undoable => self.undoable,
             When::VisitedBefore => self.visited_before,
@@ -764,6 +778,7 @@ impl Conditions {
             visited_before: self.visited_before,
             visited_after: self.visited_after,
             camera_jpeg: self.camera_jpeg,
+            depth: self.depth,
         }
     }
 }
@@ -1042,7 +1057,7 @@ pub static ROWS: &[Row] = &[
     Row {
         section: Section::Interface,
         when: None,
-        help: "Cycle the pixel readout: hex, decimal, mapped",
+        help: "Cycle the pixel readout: hex, decimal, mapped, depth",
         keys: one!("interface.pixel-format", CyclePixelFormat, [key('.')]),
     },
     // The key beside it, and that key with Shift: where the pixel is,
@@ -1372,6 +1387,12 @@ pub static ROWS: &[Row] = &[
         when: Some(When::CameraJpeg),
         help: "Toggle between the developed picture and the camera's JPEG",
         keys: one!("display.camera-jpeg", ToggleCameraJpeg, [key('v')]),
+    },
+    Row {
+        section: Section::Display,
+        when: Some(When::Depth),
+        help: "Toggle depth map display",
+        keys: one!("display.depth", ToggleDepth, [key('D')]),
     },
     Row {
         section: Section::Display,
@@ -2277,6 +2298,7 @@ impl App {
             }
             ToggleHdr => return self.press(Control::Output),
             ToggleCameraJpeg => return self.press(Control::CameraJpeg),
+            ToggleDepth => return self.press(Control::Depth),
             ToggleRegion => return self.press(Control::Region),
             // Only a region moves, grows and shrinks, and there is none: see
             // `perform_on_region`.
@@ -2488,6 +2510,8 @@ impl App {
             hdr: self.hdr_state(),
             camera_jpeg: current
                 .is_some_and(|current| matches!(current.camera_jpeg, CameraJpeg::Present(_))),
+            depth: self.animation.is_none()
+                && current.is_some_and(|current| current.picture().0.carries(Auxiliary::Depth)),
             openable: !self.openers.is_empty(),
             false_colored: current
                 .is_some_and(|current| current.display.false_colored(current.image.is_gray())),
@@ -2879,10 +2903,7 @@ impl App {
         let Some(current) = &self.current else {
             return;
         };
-        let image = Arc::clone(&current.image);
-        let display = current.display.clone();
-        let lift = current.lift.clone();
-        let turn = current.turn;
+        let seen = current.seen();
         let said = match region {
             Some(_) => "Copied region.",
             None => "Copied image.",
@@ -2892,7 +2913,7 @@ impl App {
             let (width, height) = (region.width, region.height);
 
             let walked = Instant::now();
-            let raster = encode::displayed(&image, &display, turn, region, lift.as_deref());
+            let raster = seen.raster(region);
             timing::mapped_image(width, height, walked.elapsed());
 
             let encoded = Instant::now();
@@ -3324,6 +3345,7 @@ impl App {
             // key cannot come to mean different things.
             Control::Output => self.toggle_hdr(),
             Control::CameraJpeg => self.toggle_camera_jpeg(),
+            Control::Depth => self.toggle_depth(),
             // The cross on the message at the foot of the window. The frame
             // after re-tests the pointer, which is what takes the highlight
             // off a button that is no longer there.
@@ -3416,6 +3438,12 @@ impl App {
             self.toast("No pixel under the pointer.", Level::Warning);
             return;
         };
+        // The words the bar shows in place of a depth are not a value, and
+        // a copy of them would paste as one.
+        if !coordinate && text == ui::pixel::NO_DEPTH {
+            self.toast(ui::tooltip::NO_DEPTH_MAP, Level::Warning);
+            return;
+        }
         let said = match coordinate {
             true => "Copied pixel coordinate.",
             false => "Copied pixel value.",
@@ -3442,6 +3470,7 @@ impl App {
             &current.image,
             &sample,
             &mapped,
+            current.depth(at[0], at[1]),
             self.panels.pixel_format,
         ))
     }
@@ -4166,7 +4195,7 @@ mod tests {
         assert_eq!(
             tooltip.hints,
             [
-                spelled_here("Cycle pixel format: hex, decimal, mapped (.)"),
+                spelled_here("Cycle pixel format: hex, decimal, mapped, depth (.)"),
                 spelled_here("Copy pixel value under pointer (Ctrl+.)"),
                 spelled_here("Copy coordinate of pixel under pointer (Ctrl+>)"),
             ]
@@ -4188,7 +4217,7 @@ mod tests {
         assert_eq!(
             tooltip.hints,
             [
-                spelled_here("Cycle pixel format: hex, decimal, mapped (.)"),
+                spelled_here("Cycle pixel format: hex, decimal, mapped, depth (.)"),
                 spelled_here("Cycle coordinate: pixel, projected, geographic (,)"),
                 spelled_here("Switch latitude and longitude: decimal, DMS (<)"),
                 spelled_here("Copy pixel value under pointer (Ctrl+.)"),

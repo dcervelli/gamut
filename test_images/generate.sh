@@ -311,6 +311,57 @@ ABOUT
 
 jpeg_about jpeg-rgb.jpg jpeg-about.jpg
 
+# A depth map in Google's `GDepth` block, as a phone's portrait carries one:
+# the gray pattern at half the picture's size, as a PNG, base64 in an
+# extended XMP packet the main one names by its GUID, normalized linearly
+# between planes 1 and 4 meters away — so the quadrants stand at 1, 2, 3 and
+# 4 meters. ImageMagick writes no such block, so the segments are put in by
+# hand after the `APP0`.
+jpeg_depth() {  # src map dst
+  python3 - "$@" <<'DEPTH'
+import base64, hashlib, struct, sys
+
+src, depth_map, dst = sys.argv[1:4]
+GDEPTH = "http://ns.google.com/photos/1.0/depthmap/"
+extended = (
+    '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF '
+    'xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+    f'<rdf:Description rdf:about="" xmlns:GDepth="{GDEPTH}" GDepth:Data="'
+    + base64.b64encode(open(depth_map, "rb").read()).decode()
+    + '"/></rdf:RDF></x:xmpmeta>'
+).encode()
+guid = hashlib.md5(extended).hexdigest().upper()
+main = (
+    '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF '
+    'xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+    f'<rdf:Description rdf:about="" xmlns:GDepth="{GDEPTH}" '
+    'xmlns:xmpNote="http://ns.adobe.com/xmp/note/" '
+    'GDepth:Format="RangeLinear" GDepth:Near="1" GDepth:Far="4" '
+    'GDepth:Units="m" GDepth:Mime="image/png" '
+    f'xmpNote:HasExtendedXMP="{guid}"/></rdf:RDF></x:xmpmeta>'
+).encode()
+
+def app1(payload):
+    return b"\xff\xe1" + struct.pack(">H", len(payload) + 2) + payload
+
+segments = app1(b"http://ns.adobe.com/xap/1.0/\0" + main)
+# Pieces small enough that the map takes more than one, as a real one does.
+step = 256
+for offset in range(0, len(extended), step):
+    segments += app1(b"http://ns.adobe.com/xmp/extension/\0" + guid.encode()
+                     + struct.pack(">II", len(extended), offset)
+                     + extended[offset:offset + step])
+data = open(src, "rb").read()
+assert data[:2] == b"\xff\xd8", "not a JPEG"
+at = 2
+if data[2:4] == b"\xff\xe0":
+    at = 4 + struct.unpack(">H", data[4:6])[0]
+open(dst, "wb").write(data[:at] + segments + data[at:])
+DEPTH
+}
+magick "$work/gray.png" -sample 50% +repage -depth 8 -define png:color-type=0 "$work/depth.png"
+jpeg_depth jpeg-rgb.jpg "$work/depth.png" jpeg-depth.jpg
+
 # ----------------------------------------------------------------- GIF
 # Always a palette, always 8-bit, and always RGBA once decoded: the crate's
 # GIF decoder has one output layout and the transparent index has to go
@@ -414,6 +465,18 @@ heif-enc -L --hevc --rotate-cw 180 -o heic-rotated.heic \
   "$work/color-upside-down.png" > /dev/null
 # The same container with AV1 inside instead of HEVC.
 heif-enc -L -A -o avif-rgb8.avif "$work/color.png" > /dev/null
+# A depth map beside a HEIC: `heif-enc` writes none, but it writes an alpha
+# plane as an auxiliary image of HEVC's alpha type, and the depth type is the
+# same string one digit on. Relabeled, the alpha ramp is a depth map and the
+# picture has no alpha.
+python3 - heic-rgba8.heic heic-depth.heic <<'DEPTH'
+import sys
+src, dst = sys.argv[1:3]
+data = open(src, "rb").read()
+alpha, depth = b"urn:mpeg:hevc:2015:auxid:1", b"urn:mpeg:hevc:2015:auxid:2"
+assert data.count(alpha) == 1, "not one alpha auxiliary image"
+open(dst, "wb").write(data.replace(alpha, depth))
+DEPTH
 # A HEIF that states its color space with an ICC profile and no `nclx` box,
 # which is what some cameras write. `heif-enc` has no way to embed a profile,
 # but ImageMagick carries the source PNG's through untouched — the pixels are

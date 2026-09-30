@@ -116,6 +116,8 @@ fn picture(width: u32, height: u32) -> Current {
         turn: crate::image::orient::Turn::NONE,
         rendering: crate::image::decode::Rendering::Developed,
         camera_jpeg: crate::image::decode::CameraJpeg::Unavailable,
+        showing: crate::image::auxiliary::Showing::Picture,
+        held: Vec::new(),
     }
 }
 
@@ -132,6 +134,7 @@ fn panels() -> Panels {
         show_minimap: true,
         show_grid: false,
         show_loupe: false,
+        show_depth: false,
         loupe_magnification: super::loupe::DEFAULT_MAGNIFICATION,
         paste: false,
         pixel_format: PixelFormat::default(),
@@ -2410,4 +2413,31 @@ fn the_help_popup_stacks_its_rows_in_a_narrow_window() {
             "{heading} heads nothing when stacked"
         );
     }
+}
+
+/// The depth toggle is drawn only for a picture that carries a depth map,
+/// and a press on it asks for the map to be drawn in the picture's place.
+#[test]
+fn the_depth_toggle_is_there_only_for_a_picture_with_a_depth_map() {
+    use crate::image::depth::DepthMap;
+
+    let harness = open(WINDOW, 1, panels());
+    let name = Control::Depth.label();
+    assert!(harness.query_by_label(&name).is_none());
+
+    let mut harness = open(WINDOW, 1, panels());
+    let current = harness.state_mut().current.as_mut().expect("a picture");
+    let mut image = (*current.image).clone();
+    image.depth = Some(Arc::new(DepthMap {
+        width: 2,
+        height: 2,
+        samples: Samples::U8 {
+            channels: Channels::Gray,
+            data: vec![0, 85, 170, 255],
+        },
+        scale: None,
+    }));
+    current.image = Arc::new(image);
+    harness.run();
+    assert_eq!(click(&mut harness, &name), [Command::Press(Control::Depth)]);
 }

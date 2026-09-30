@@ -160,6 +160,16 @@ identity — the menu bar's name, the Dock's icon, `APP_ID` as its bundle
 identifier — only when the executable it was started from is inside the
 bundle; started through a symlink it finds the bundle but has no identifier.
 
+Launch Services knows a bundle by the path it was registered at, and an
+upgrade moves the bundle to a new keg and deletes the old one, leaving
+"Open With" naming a bundle that is gone. The formula cannot register the
+new one: `post_install` runs in Homebrew's sandbox, where `lsregister` cannot
+reach Launch Services and fails with -10822. So the program registers its
+own bundle each time it starts, in `finder::register`, through
+`LSRegisterURL` on a thread of its own — which is also why a program only
+ever run from the command line is offered by Finder at all. A binary outside
+a bundle, or in a bundle whose identifier is not `APP_ID`, registers nothing.
+
 ## Keys and gestures
 
 The key table is the same; `input::MAC_DEFAULTS` is the names whose chords

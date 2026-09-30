@@ -29,6 +29,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use anyhow::{Context, Result, anyhow};
 use winit::window::Window;
 
+use crate::image::auxiliary::Showing;
 use crate::image::orient::Turn;
 use crate::image::{
     DecodedImage,
@@ -344,6 +345,19 @@ impl Renderer {
         let reduced = image.reduced;
         self.image_layer.install(image);
         reduced
+    }
+
+    /// Draws `showing`, another of the file's images, in place of the one
+    /// on screen: `image`, uploaded where it has not been drawn before, and
+    /// otherwise the texture already held for it. What was drawn stays on
+    /// the device, so that going back to it uploads nothing; the lot goes
+    /// when another file's picture is installed. Returns the precision the
+    /// image now on screen lost on its way to the device, as
+    /// [`Renderer::install_image`] does.
+    pub fn show(&mut self, showing: Showing, image: &DecodedImage) -> Result<Option<Reduced>> {
+        let upload = self.uploader();
+        self.image_layer.show(showing, || upload.run(image))?;
+        Ok(self.image_layer.current().and_then(|image| image.reduced))
     }
 
     /// Takes the image off the screen, for a window with nothing left to

@@ -402,6 +402,7 @@ mod tests {
             exposure: None,
             nodata: None,
             gain_map: None,
+            depth: None,
         }
     }
 
@@ -564,6 +565,7 @@ mod tests {
                     exposure: None,
                     nodata: None,
                     gain_map: None,
+                    depth: None,
                 };
                 let plan = plan(&decoded, capabilities);
                 assert_eq!(

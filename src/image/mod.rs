@@ -8,8 +8,10 @@
 //! The pixel model is here; what the numbers mean is [`color`]; the decoders
 //! that produce it are [`decode`].
 
+pub mod auxiliary;
 pub mod color;
 pub mod decode;
+pub mod depth;
 pub mod directory;
 pub mod display;
 pub mod enclosed;
@@ -281,6 +283,10 @@ pub struct DecodedImage {
     /// the display at the weight the surface's room asks for. See
     /// [`gain_map`].
     pub gain_map: Option<gain_map::Shared>,
+    /// How far from the camera each pixel was, where the file carries a
+    /// depth map: read by the pointer's readout and by nothing else. See
+    /// [`depth`].
+    pub depth: Option<depth::Shared>,
 }
 
 impl DecodedImage {
@@ -304,6 +310,7 @@ impl DecodedImage {
             exposure: None,
             nodata: None,
             gain_map: None,
+            depth: None,
         }
     }
 
@@ -569,6 +576,7 @@ mod tests {
             exposure: None,
             nodata: None,
             gain_map: None,
+            depth: None,
         }
     }
 
@@ -637,6 +645,7 @@ mod tests {
             exposure: None,
             nodata: None,
             gain_map: None,
+            depth: None,
         };
 
         let sample = image.sample(0, 0, None).expect("inside the image");

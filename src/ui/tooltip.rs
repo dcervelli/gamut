@@ -93,7 +93,7 @@ pub const COPY_REGION: &str = "Copy the region as displayed";
 /// What the dot at the head of the pixel readout says under its name: the
 /// key that cycles the format, and the two copies that take what it is
 /// showing away — each followed by its key, which the application adds.
-pub const PIXEL_CYCLE: &str = "Cycle pixel format: hex, decimal, mapped";
+pub const PIXEL_CYCLE: &str = "Cycle pixel format: hex, decimal, mapped, depth";
 pub const PIXEL_COPY_VALUE: &str = "Copy pixel value under pointer";
 pub const PIXEL_COPY_COORDINATE: &str = "Copy coordinate of pixel under pointer";
 /// And, for a georeferenced file only, the two keys that change how the
@@ -146,6 +146,11 @@ pub const FALSE_COLOR_CLIPS: &str =
 /// in it. The switch itself is not drawn on such a file, so this is only
 /// ever the reason a press of `v` is refused.
 pub const NO_CAMERA_JPEG: &str = "This file carries no camera JPEG.";
+
+/// What the depth toggle says, for the key, on a picture with no depth map.
+/// The toggle is not drawn on such a picture, so, as with the camera's
+/// switch, this is only ever the reason a press of the key is refused.
+pub const NO_DEPTH_MAP: &str = "This image has no depth map.";
 
 /// What the camera's switch says: which of a raw's two pictures is up, and
 /// under it the other, which a press switches to. The size is left out; the
@@ -227,6 +232,8 @@ pub struct Reasons {
     /// Whether the file on screen is a raw with the camera's JPEG in it,
     /// which is what the switch between the two needs.
     pub camera_jpeg: bool,
+    /// Whether the picture on screen carries a depth map to show.
+    pub depth: bool,
 }
 
 impl Reasons {
@@ -250,6 +257,7 @@ impl Reasons {
         visited_before: true,
         visited_after: true,
         camera_jpeg: true,
+        depth: true,
     };
 }
 
@@ -291,6 +299,7 @@ pub fn disabled(tip: Tip, reasons: Reasons) -> Option<Refused> {
         visited_before,
         visited_after,
         camera_jpeg,
+        depth,
     } = reasons;
     let said = |said| Some(Refused { said, hint: None });
     if tip == Tip::Control(Control::Back) && !visited_before {
@@ -308,6 +317,9 @@ pub fn disabled(tip: Tip, reasons: Reasons) -> Option<Refused> {
     }
     if tip == Tip::Control(Control::CameraJpeg) && !camera_jpeg {
         return said(NO_CAMERA_JPEG);
+    }
+    if tip == Tip::Control(Control::Depth) && !depth {
+        return said(NO_DEPTH_MAP);
     }
     if tip == Tip::Control(Control::Paste) && !clipboard {
         return said(NOTHING_TO_PASTE);
@@ -338,6 +350,7 @@ pub fn disabled(tip: Tip, reasons: Reasons) -> Option<Refused> {
                 | Control::OpenIn
                 | Control::TurnLeft
                 | Control::TurnRight
+                | Control::Depth
                 | Control::Play
                 | Control::StepBack
                 | Control::StepForward
@@ -531,7 +544,9 @@ pub fn words(tip: Tip) -> Option<String> {
             | Control::Thumb(_)
             // Said from which picture is up, which only the application
             // knows — see `Namer::tooltip`.
-            | Control::CameraJpeg,
+            | Control::CameraJpeg
+            // Named by its key's row, like the other toggles.
+            | Control::Depth,
         )
         | Tip::Name
         | Tip::Counter

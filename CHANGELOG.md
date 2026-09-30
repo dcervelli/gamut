@@ -43,6 +43,19 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   description of it the file gives (ISO 21496-1 or Apple's), the map's size
   and whether it is one channel or three, how many stops above SDR white it
   lifts the picture, and how much of that lift the display is showing.
+- A **Depth** pixel format, beside Hex, Decimal and Mapped: for a picture
+  carrying a depth map, the readout says how far away the pixel under the
+  pointer was. An iPhone's portrait HEIC reads as a distance in meters,
+  marked `≈` where the phone calls it an estimate, as it does for a
+  dual-camera portrait; a JPEG with Google's depth block reads as a distance
+  in the file's units; any other HEIC with a depth image reads as the code
+  its map holds. A picture without one reads `(no depth)`.
+- A **Depth** button at the bottom right, and `D`, for a picture carrying a
+  depth map: shows the map in the picture's place, covering what the
+  picture covered, and the picture again, without reading the file again.
+  While it is up the map is the image, as a raw's camera JPEG is: the top
+  bar gives its size, and the zoom, the pixel readout, the histogram, the
+  display keys, a copy and an export all work on it.
 
 ### Changed
 
@@ -93,6 +106,22 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   precision — 16-bit linear data on a GPU with no 16-bit integer textures,
   or float data on one that cannot filter 32-bit floats — has a *Precision*
   row saying so, and the first such picture in a run raises a warning.
+- The pixel readout's formats — the value, and for a map the coordinates
+  and how a latitude is written — are remembered between runs in the state
+  file, as the sort order and the loupe's magnification are, rather than set
+  in the configuration file. `pixel_format`, `coordinate_format` and
+  `geographic_format` lines left in a configuration file are ignored.
+
+### Fixed
+
+- A BigTIFF, or a TIFF whose directory comes after its pixels, no longer
+  loses a metadata field of more than 32 values: a GeoTIFF key directory of
+  more than eight keys was one, and took the *Georeference* section with it.
+
+## 0.8.3 - 2026-09-29
+
+### Changed
+
 - The top bar gives the file's name its room before the size, pixels and
   color space at its far end, which go one by one as the window narrows
   and are gone altogether before the name is cut short. Before, the facts
@@ -101,9 +130,8 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Fixed
 
-- A BigTIFF, or a TIFF whose directory comes after its pixels, no longer
-  loses a metadata field of more than 32 values: a GeoTIFF key directory of
-  more than eight keys was one, and took the *Georeference* section with it.
+- On macOS, associate images files with gamut at runtime.
+- Remove homebrew script section that fails to associate files with gamut.
 
 ## 0.8.2 - 2026-09-29
 

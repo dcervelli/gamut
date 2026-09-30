@@ -565,6 +565,13 @@ and both land on `Current`, which is what the bottom bar's switch
 and `Conditions::camera_jpeg` read. When the JPEG was asked for and the file
 has none, `App::apply` says so in a toast.
 
+The switch wears `camera`'s mark and the word for the picture up, `RAW` or
+`JPEG`, the mark saying the rest; where it is read out rather than seen it
+is called by its whole name, `CAMERA_RAW` or `CAMERA_JPEG`. It is drawn by
+`Pass::worded_button`, which the grid's and the loupe's toggles are drawn
+by too, holding the word's place at the wider of the two so that the turn
+pair beside it does not move when it is pressed.
+
 The switch is left out, not drawn dead, on a file with no JPEG. The headroom
 switch beside it is always drawn, because the surface is a question about
 every picture; this one is about a kind of file most pictures are not, and a
@@ -591,6 +598,55 @@ because that read may be a step and a request would cancel it. The reply
 carries the rendering it was asked for on `Opened::rendering`, and
 `App::follow_rendering` asks again once it lands if the preference has moved
 in the meantime.
+
+## The file's other images
+
+What is on screen is what everything reads: the size the top bar gives, the
+pixel under the pointer and its coordinate, the zoom, the histogram and the
+keys that set the window, a copy and an export. A raw's camera JPEG gets
+that by being read in place of the developed picture. An image the picture
+carries — a depth map now, a portrait's mattes later — gets it without a
+read, by being made a picture of its own and put in the same place.
+
+`image/auxiliary.rs` names the kinds (`Auxiliary`) and which of a file's
+images is up (`Showing`), and `DecodedImage::auxiliary` makes the image
+(`DepthMap::image` for the depth map: gray, a measurement, windowed to the
+codes it holds). `Current`'s `image`, `stats`, `display`, `stored` and `lift`
+are always of what is up; they are a `Face`, and the faces not up are held in
+`Current::held` as they were left, so that going back puts back the
+picture's exposure and window rather than working them out again.
+`Current::picture` is the one way to the picture itself whatever is up —
+what it carries, what it was left in. The image layer holds textures the same
+way (`ImageLayer::show`, `ImageLayer::held`), so going back uploads nothing,
+and `install` lets the lot go with the file.
+
+`App::show` is the switch, and treats it as a change of picture in all but
+the file: the view is rescaled (`View::rescale`, as for `Arrival::Rerendered`)
+so the new image covers what the old one did, whatever its size, and the
+region, marked in the old image's pixels, is let go. `App::follow_showing`
+decides what should be up — the depth map while `Panels::show_depth` is on
+and the picture carries one and is not an animation, whose frames would
+replace it — and runs on the toggle and after each arrival, after the
+player has started. What is about the file rather than about what is seen
+is put back in the picture's terms first: `App::apply` shows the picture
+before it weighs the file arriving against it, and `App::keep_shown` and
+the stand-in read `App::picture_view`, the view as it would be over the
+picture.
+
+A copy and an export take `Current::seen` — the image, its display, its lift
+and the turn — to their threads, and draw it with `Seen::raster`. That is
+the one description of how what is on screen is drawn off it, so a way of
+drawing added later is added there once. An image *applied* to the picture
+rather than shown in its place — the gain map now, a matte as the picture's
+alpha later — is carried on the picture's `DecodedImage` and read by
+`Seen::raster` and the image layer alike; it is not a `Showing`.
+
+The toggle is a square with `axis-3d`'s mark alone, between the camera's
+switch and the headroom switch (`Pass::depth_toggle`), lit while the map is
+up, and is left out on a picture
+with no map for the camera switch's reason; `NO_DEPTH_MAP` is the refusal
+only the key reaches. The info panel's *Showing* row says when the facts
+under it are the map's.
 
 ## The region
 

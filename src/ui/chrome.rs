@@ -23,6 +23,7 @@ use super::tooltip::Tip;
 use super::{
     Current, FrameInput, MENU_OFFSET, PADDING, Panels, Room, filmstrip, menu, pixel, status,
 };
+use crate::image::auxiliary::{Auxiliary, Showing};
 use crate::image::decode::{CameraJpeg, Rendering};
 use crate::image::display::Headroom;
 use crate::theme::Theme;
@@ -77,6 +78,23 @@ const OUTPUT_BUTTON: [f32; 2] = [42.0, 22.0];
 /// one, or the camera's JPEG.
 pub(super) const CAMERA_RAW: &str = "Camera RAW";
 pub(super) const CAMERA_JPEG: &str = "Camera JPEG";
+/// What a button with words after its mark is drawn from — see
+/// [`Pass::worded_button`].
+struct Worded<'a> {
+    marks: &'a [Mark],
+    control: Control,
+    words: Option<&'a str>,
+    lit: bool,
+    /// The width the words' place is held at, whatever they come to.
+    room: f32,
+    /// What the button is called where it is read out, in place of the
+    /// control's name.
+    name: Option<String>,
+}
+
+/// The words the camera's switch wears after its mark, which says the rest.
+pub(super) const RAW: &str = "RAW";
+pub(super) const JPEG: &str = "JPEG";
 
 /// Width of the hairline along a panel's inner edge, in logical pixels. What
 /// it is drawn in is the theme's `border`.
@@ -511,6 +529,9 @@ impl Pass<'_> {
                 ui.add_space(BAR_PADDING);
                 self.output_switch(ui);
                 ui.add_space(PADDING);
+                if self.depth_toggle(ui, current) {
+                    ui.add_space(PADDING);
+                }
                 if self.camera_switch(ui, current) {
                     ui.add_space(PADDING);
                 }
@@ -587,7 +608,9 @@ impl Pass<'_> {
     }
 
     /// The switch between a raw's developed picture and the camera's JPEG of
-    /// it, labeled with the one on screen. Left out, unlike the headroom
+    /// it: the camera's mark, and after it the one on screen, `RAW` or
+    /// `JPEG` — called by its whole name where it is read out rather than
+    /// seen. Left out, unlike the headroom
     /// switch, where the file carries no JPEG — which is every file but a
     /// raw: a dead button on every PNG would be a button about something
     /// the file is not. As wide as the wider of its two words, so that the
@@ -598,31 +621,22 @@ impl Pass<'_> {
         if !matches!(current.camera_jpeg, CameraJpeg::Present(_)) || self.input.arriving.is_some() {
             return false;
         }
-        let words = match current.rendering {
-            Rendering::Developed => CAMERA_RAW,
-            Rendering::CameraJpeg => CAMERA_JPEG,
+        let (words, name) = match current.rendering {
+            Rendering::Developed => (RAW, CAMERA_RAW),
+            Rendering::CameraJpeg => (JPEG, CAMERA_JPEG),
         };
-        let font = egui::TextStyle::Button.resolve(ui.style());
-        let widest = ui.ctx().fonts_mut(|fonts| {
-            [CAMERA_RAW, CAMERA_JPEG]
-                .map(|words| {
-                    fonts
-                        .layout_no_wrap(words.to_string(), font.clone(), egui::Color32::PLACEHOLDER)
-                        .size()
-                        .x
-                })
-                .into_iter()
-                .fold(0.0, f32::max)
-        });
-        let size = vec2(
-            (widest + 2.0 * ui.spacing().button_padding.x).ceil(),
-            OUTPUT_BUTTON[1],
+        let room = Self::words_width(ui, RAW).max(Self::words_width(ui, JPEG));
+        self.worded_button(
+            ui,
+            Worded {
+                marks: icon::CAMERA,
+                control: Control::CameraJpeg,
+                words: Some(words),
+                lit: false,
+                room,
+                name: Some(name.to_string()),
+            },
         );
-        let response = ui.add_sized(size, Button::new(words));
-        let response = self.tooltip(response, Tip::Control(Control::CameraJpeg));
-        if response.clicked() {
-            self.press(Control::CameraJpeg);
-        }
         true
     }
 
@@ -675,6 +689,52 @@ impl Pass<'_> {
         control: Control,
         reading: Option<&str>,
     ) {
+        self.worded_button(
+            ui,
+            Worded {
+                marks,
+                control,
+                words: reading,
+                lit: reading.is_some(),
+                room: 0.0,
+                name: None,
+            },
+        );
+    }
+
+    /// The toggle that shows the picture's depth map in its place, between
+    /// the camera's switch and the headroom switch: a square with the mark
+    /// alone, lit while the map is up. Left out, as the camera's switch is,
+    /// where there is no map — which is nearly every file — and while
+    /// another file is on its way in, whose map this would not be. Says
+    /// whether it was drawn.
+    fn depth_toggle(&mut self, ui: &mut Ui, current: &Current) -> bool {
+        if !current.picture().0.carries(Auxiliary::Depth) || self.input.arriving.is_some() {
+            return false;
+        }
+        let on = current.showing == Showing::Auxiliary(Auxiliary::Depth);
+        let response = self.icon_button(ui, icon::AXIS_3D, Control::Depth, on, true, Corners::All);
+        if response.clicked() {
+            self.press(Control::Depth);
+        }
+        true
+    }
+
+    /// A square button's mark with words after it, where there are any, lit
+    /// while `lit`: the shape the grid's and the loupe's toggles take with
+    /// their readings, and the camera's switch with the picture it names.
+    /// `Worded::room` holds the words' place at a width, so that a button
+    /// whose words change does not move what is beside it; `Worded::name`
+    /// is what it is called where that is more than the control's name.
+    fn worded_button(&mut self, ui: &mut Ui, worded: Worded) {
+        let Worded {
+            marks,
+            control,
+            words: reading,
+            lit,
+            room,
+            name,
+        } = worded;
         let font = egui::TextStyle::Button.resolve(ui.style());
         // No ink of its own: the reading is drawn in the button's, which is
         // handed to the painter below. A color set here would be baked into
@@ -689,11 +749,11 @@ impl Pass<'_> {
             })
         });
         let width = match &galley {
-            Some(galley) => BUTTON_SIZE + READING_GAP + galley.size().x + READING_PAD,
+            Some(galley) => BUTTON_SIZE + READING_GAP + galley.size().x.max(room) + READING_PAD,
             None => BUTTON_SIZE,
         };
         let (rect, response) = ui.allocate_exact_size(vec2(width, BUTTON_SIZE), Sense::CLICK);
-        let (background, ink) = self.button_ink(reading.is_some(), &response, true);
+        let (background, ink) = self.button_ink(lit, &response, true);
         ui.painter().rect_filled(rect, TOGGLE_RADIUS, background);
         let mark = Area::from_min_size(rect.min, Vec2::splat(BUTTON_SIZE));
         icon::paint(
@@ -710,13 +770,23 @@ impl Pass<'_> {
             );
             ui.painter().galley(at, galley, ink);
         }
-        response.widget_info(|| {
-            WidgetInfo::selected(WidgetType::Button, true, reading.is_some(), control.label())
-        });
+        let name = name.unwrap_or_else(|| control.label());
+        response.widget_info(|| WidgetInfo::selected(WidgetType::Button, true, lit, &name));
         let response = self.tooltip(response, Tip::Control(control));
         if response.clicked() {
             self.press(control);
         }
+    }
+
+    /// How wide `words` come out in a button's face.
+    fn words_width(ui: &Ui, words: &str) -> f32 {
+        let font = egui::TextStyle::Button.resolve(ui.style());
+        ui.ctx().fonts_mut(|fonts| {
+            fonts
+                .layout_no_wrap(words.to_string(), font, egui::Color32::PLACEHOLDER)
+                .size()
+                .x
+        })
     }
 
     /// The dot at the head of the pixel readout, which opens the menu of ways
