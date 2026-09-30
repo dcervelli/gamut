@@ -104,6 +104,17 @@ impl super::Decoder for Jxl {
         render(&image, &layout, 0)
     }
 
+    /// Only the container has boxes to walk; the bare codestream carries
+    /// no packet.
+    fn xmp(&self, source: &mut dyn super::ReadSeek) -> Result<Option<Vec<u8>>> {
+        let mut signature = [0u8; CONTAINER.len()];
+        source.rewind()?;
+        if super::fill(source, &mut signature)? < signature.len() || signature != CONTAINER {
+            return Ok(None);
+        }
+        Ok(crate::image::xmp::in_jxl(source))
+    }
+
     fn sequence(&self, source: &mut dyn super::ReadSeek) -> Result<Sequence> {
         let mut reading = Reading::header(source)?;
         let Some((_, loops)) = timing(&reading.image) else {

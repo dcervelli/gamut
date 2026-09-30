@@ -62,6 +62,20 @@ impl super::Decoder for Raw {
         facts(source).map(Some)
     }
 
+    /// A raw that is a TIFF at the front keeps its packet in the directory,
+    /// as a TIFF does. The containers that are not — an ORF or RW2 under
+    /// its own letters, a RAF, an MRW, a CR3 — are not walked for one.
+    fn xmp(&self, source: &mut dyn super::ReadSeek) -> Result<Option<Vec<u8>>> {
+        let mut head = [0u8; 4];
+        source.rewind()?;
+        if super::fill(source, &mut head)? < head.len()
+            || crate::image::tiff::header(&head).is_none()
+        {
+            return Ok(None);
+        }
+        Ok(crate::image::directory::packet(source))
+    }
+
     fn extensions(&self) -> &'static [&'static str] {
         &[
             "dng", "nef", "nrw", "cr2", "cr3", "crw", "arw", "srf", "sr2", "raf", "orf", "rw2",

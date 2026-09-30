@@ -98,6 +98,12 @@ impl super::Decoder for TiffRs {
         self.decode_page(source, overrides, 0)
     }
 
+    /// The packet is a tag of the first directory, read through the
+    /// decoder, which seeks to the directory wherever the file keeps it.
+    fn xmp(&self, source: &mut dyn super::ReadSeek) -> Result<Option<Vec<u8>>> {
+        Ok(crate::image::directory::packet(source))
+    }
+
     /// How many pictures the chain holds, walked without reading any
     /// pixels.
     fn sequence(&self, source: &mut dyn super::ReadSeek) -> Result<Sequence> {

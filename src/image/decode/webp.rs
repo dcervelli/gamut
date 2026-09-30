@@ -79,6 +79,10 @@ impl super::Decoder for Webp {
         opened.describe(data)
     }
 
+    fn xmp(&self, source: &mut dyn super::ReadSeek) -> Result<Option<Vec<u8>>> {
+        Ok(crate::image::xmp::in_webp(source))
+    }
+
     fn sequence(&self, source: &mut dyn super::ReadSeek) -> Result<Sequence> {
         let decoder =
             WebPDecoder::new(BufReader::new(source)).context("reading the WebP container")?;

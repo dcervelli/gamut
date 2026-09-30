@@ -73,6 +73,10 @@ impl super::Decoder for Png {
         decode(source)
     }
 
+    fn xmp(&self, source: &mut dyn ReadSeek) -> Result<Option<Vec<u8>>> {
+        Ok(crate::image::xmp::in_png(source))
+    }
+
     fn sequence(&self, source: &mut dyn ReadSeek) -> Result<Sequence> {
         Ok(match header(&mut *source).animation {
             Some(animation) if animation.frames > 1 && animation.playable => Sequence::Animation {

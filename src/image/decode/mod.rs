@@ -217,10 +217,13 @@ pub trait Decoder: Sync {
         Ok(None)
     }
 
-    /// The XMP packet, where the container keeps it somewhere only the
-    /// format's own library reaches: a HEIF's, which is an item of its
-    /// `meta` box. `None` where the packet is found by walking the file —
-    /// see `image::xmp` — or where there is none.
+    /// The XMP packet the file carries, found the way its container keeps
+    /// it: walked to by the container's own headers — a JPEG's `APP1`
+    /// segment, a PNG's `iTXt` chunk, a WebP's `XMP ` chunk, a JPEG XL
+    /// container's `xml ` box, the tag of a TIFF's directory, whose walkers
+    /// are `image::xmp`'s and `image::directory`'s — or, a HEIF's, reached
+    /// through the item tables only its library reads. `None` where the
+    /// format has nowhere to keep one, or the file has none.
     fn xmp(&self, _source: &mut dyn ReadSeek) -> Result<Option<Vec<u8>>> {
         Ok(None)
     }
@@ -752,12 +755,6 @@ pub fn preview(path: &Path, overrides: Overrides) -> Result<Option<DecodedImage>
 #[cfg(test)]
 pub fn camera_jpeg(path: &Path) -> Result<CameraJpeg> {
     Opened::new(path)?.camera_jpeg()
-}
-
-/// The XMP packet of `path`, where its decoder is the one thing that can
-/// reach it — see [`Decoder::xmp`].
-pub fn xmp(path: &Path) -> Option<Vec<u8>> {
-    Opened::new(path).ok()?.xmp()
 }
 
 /// What `path` holds beyond the image [`load`] returns, from its header.

@@ -36,13 +36,12 @@
 //! packet's own terms.
 
 use std::fs::File;
-use std::io::{BufReader, Read, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use roxmltree::{Document, Node};
 
-use super::decode::Opened;
-use super::{directory, tiff};
+use super::decode::{Opened, ReadSeek};
 
 /// How large a packet is allowed to be. A packet is a few kilobytes of text,
 /// and one carrying an edit history runs to a few hundred; a container that
@@ -93,6 +92,7 @@ const PNG_KEYWORD: &[u8] = b"XML:com.adobe.xmp";
 
 /// The signature the JPEG XL container opens with: a box of that length
 /// and type, holding the two bytes a bare codestream opens with.
+#[cfg(test)]
 const JXL_SIGNATURE: [u8; 12] = [
     0x00, 0x00, 0x00, 0x0c, b'J', b'X', b'L', b' ', 0x0d, 0x0a, 0x87, 0x0a,
 ];
@@ -526,37 +526,18 @@ pub fn packet(path: &Path) -> Option<Vec<u8>> {
     packet_of(path, None)
 }
 
-/// The packet `path` carries, found by the container it is in. The file is
-/// read only as far as the headers that lead to the packet, and the packet
-/// itself; the pixels are seeked past. A TIFF is its own directory, and the
-/// tag the packet sits in is read through [`directory`], which seeks to the
-/// directory wherever the file keeps it. A HEIF's is an item only its
-/// decoder's tables lead to, and is asked of `opened` where the file is
-/// open. `None` for a container this does not know, one that holds no
+/// The packet `path` carries, asked of the decoder that claims the file —
+/// `opened` where the file is open, and the file opened for it otherwise.
+/// Each decoder walks its own container's headers to the packet, reading
+/// the packet whole and seeking past everything else: [`in_jpeg`],
+/// [`in_png`], [`in_webp`] and [`in_jxl`] here, a TIFF's directory through
+/// [`super::directory::packet`], and a HEIF's item through the tables only
+/// its library reads. `None` for a file nothing claims, one that holds no
 /// packet, or one whose headers do not add up.
 fn packet_of(path: &Path, opened: Option<&mut Opened>) -> Option<Vec<u8>> {
-    let mut source = BufReader::new(File::open(path).ok()?);
-    let mut signature = [0u8; 12];
-    let read = source.read(&mut signature).ok()?;
-    let signature = &signature[..read];
-    source.seek(SeekFrom::Start(0)).ok()?;
-    if signature.starts_with(&[0xff, 0xd8]) {
-        jpeg(&mut source)
-    } else if signature.starts_with(b"\x89PNG\r\n\x1a\n") {
-        png(&mut source)
-    } else if signature.starts_with(b"RIFF") && signature.get(8..12) == Some(b"WEBP") {
-        webp(&mut source)
-    } else if signature == JXL_SIGNATURE {
-        jxl(&mut source)
-    } else if signature.get(4..8) == Some(b"ftyp") {
-        match opened {
-            Some(opened) => opened.xmp(),
-            None => super::decode::xmp(path),
-        }
-    } else if tiff::header(signature).is_some() {
-        directory::packet(&mut source)
-    } else {
-        None
+    match opened {
+        Some(opened) => opened.xmp(),
+        None => Opened::new(path).ok()?.xmp(),
     }
 }
 
@@ -589,30 +570,30 @@ fn sidecar_names(path: &Path) -> Vec<PathBuf> {
 
 /// Reads `length` bytes, or gives up on a length nothing should be asked
 /// for.
-fn take(source: &mut impl Read, length: u64) -> Option<Vec<u8>> {
+fn take<R: Read + ?Sized>(source: &mut R, length: u64) -> Option<Vec<u8>> {
     if length > MAX_PACKET {
         return None;
     }
     let mut held = Vec::with_capacity(length as usize);
-    source.take(length).read_to_end(&mut held).ok()?;
+    (&mut *source).take(length).read_to_end(&mut held).ok()?;
     (held.len() as u64 == length).then_some(held)
 }
 
 /// Seeks past `length` bytes from where the reader stands.
-fn skip(source: &mut impl Seek, length: u64) -> Option<()> {
+fn skip<S: Seek + ?Sized>(source: &mut S, length: u64) -> Option<()> {
     source
         .seek(SeekFrom::Current(i64::try_from(length).ok()?))
         .ok()?;
     Some(())
 }
 
-/// The packet in an `APP1` segment headed [`JPEG_HEADER`]. The segments come
-/// before the scan, so the walk stops at the scan's marker rather than
-/// reading the entropy-coded data looking for more. Extended XMP — a
-/// packet too long for one segment, spread over several under a different
-/// header — is not gathered up; nothing shown here is long enough to need
-/// it.
-fn jpeg(source: &mut BufReader<File>) -> Option<Vec<u8>> {
+/// The packet in a JPEG's `APP1` segment headed [`JPEG_HEADER`]. The
+/// segments come before the scan, so the walk stops at the scan's marker
+/// rather than reading the entropy-coded data looking for more. Extended
+/// XMP — a packet too long for one segment, spread over several under a
+/// different header — is not gathered up; nothing shown here is long
+/// enough to need it.
+pub fn in_jpeg(source: &mut dyn ReadSeek) -> Option<Vec<u8>> {
     source.seek(SeekFrom::Start(2)).ok()?;
     loop {
         let mut marker = [0u8; 2];
@@ -646,12 +627,12 @@ fn jpeg(source: &mut BufReader<File>) -> Option<Vec<u8>> {
     }
 }
 
-/// The packet in an `iTXt` chunk keyed [`PNG_KEYWORD`]. The chunk may come
-/// before or after the image data, so the walk runs to `IEND`, seeking past
-/// the image data's chunks by their lengths. The chunk is written
+/// The packet in a PNG's `iTXt` chunk keyed [`PNG_KEYWORD`]. The chunk may
+/// come before or after the image data, so the walk runs to `IEND`, seeking
+/// past the image data's chunks by their lengths. The chunk is written
 /// uncompressed, as the packet's own specification asks; one that was
 /// compressed anyway is left.
-fn png(source: &mut BufReader<File>) -> Option<Vec<u8>> {
+pub fn in_png(source: &mut dyn ReadSeek) -> Option<Vec<u8>> {
     source.seek(SeekFrom::Start(8)).ok()?;
     loop {
         let mut header = [0u8; 8];
@@ -686,9 +667,9 @@ fn png(source: &mut BufReader<File>) -> Option<Vec<u8>> {
     }
 }
 
-/// The packet in the RIFF chunk called `XMP `, which sits beside the pixels
-/// rather than in them. Each chunk is padded to an even length.
-fn webp(source: &mut BufReader<File>) -> Option<Vec<u8>> {
+/// The packet in a WebP's RIFF chunk called `XMP `, which sits beside the
+/// pixels rather than in them. Each chunk is padded to an even length.
+pub fn in_webp(source: &mut dyn ReadSeek) -> Option<Vec<u8>> {
     source.seek(SeekFrom::Start(12)).ok()?;
     loop {
         let mut header = [0u8; 8];
@@ -705,12 +686,13 @@ fn webp(source: &mut BufReader<File>) -> Option<Vec<u8>> {
     }
 }
 
-/// The packet in the container's `xml ` box. The container's boxes are the
-/// ISO base media format's, at the top level: a length, a type, and the
-/// contents, with a length of one meaning an eight-byte length follows and
-/// a length of zero meaning the box runs to the end of the file. A box that
-/// was Brotli-compressed into a `brob` is left.
-fn jxl(source: &mut BufReader<File>) -> Option<Vec<u8>> {
+/// The packet in a JPEG XL container's `xml ` box. The container's boxes
+/// are the ISO base media format's, at the top level: a length, a type, and
+/// the contents, with a length of one meaning an eight-byte length follows
+/// and a length of zero meaning the box runs to the end of the file. A box
+/// that was Brotli-compressed into a `brob` is left. The bare codestream
+/// has no boxes, and its decoder does not ask.
+pub fn in_jxl(source: &mut dyn ReadSeek) -> Option<Vec<u8>> {
     source.seek(SeekFrom::Start(0)).ok()?;
     loop {
         let mut header = [0u8; 8];
@@ -742,7 +724,10 @@ fn jxl(source: &mut BufReader<File>) -> Option<Vec<u8>> {
                 Some(contents) => take(source, contents),
                 None => {
                     let mut held = Vec::new();
-                    source.take(MAX_PACKET).read_to_end(&mut held).ok()?;
+                    (&mut *source)
+                        .take(MAX_PACKET)
+                        .read_to_end(&mut held)
+                        .ok()?;
                     Some(held)
                 }
             };
@@ -1050,12 +1035,16 @@ mod tests {
         boxed(&mut jxl, b"xml ", packet);
         boxed(&mut jxl, b"jxlc", &[0xff, 0x0a]);
 
-        for (name, bytes) in [
-            ("found.jpg", jpeg),
-            ("found.png", png),
-            ("found.webp", webp),
-            ("found.jxl", jxl),
+        type Walk = fn(&mut dyn ReadSeek) -> Option<Vec<u8>>;
+        for (name, bytes, walk) in [
+            ("found.jpg", jpeg, in_jpeg as Walk),
+            ("found.png", png, in_png as Walk),
+            ("found.webp", webp, in_webp as Walk),
+            ("found.jxl", jxl, in_jxl as Walk),
         ] {
+            let found = walk(&mut std::io::Cursor::new(&bytes));
+            assert_eq!(found.as_deref(), Some(packet), "{name}");
+            // And the same packet through the decoder that claims the file.
             let found = super::packet(&written(name, &bytes));
             assert_eq!(found.as_deref(), Some(packet), "{name}");
             assert_eq!(
@@ -1136,28 +1125,21 @@ mod tests {
     /// read of the whole file.
     #[test]
     fn a_container_without_a_packet_gives_nothing() {
+        let cursor = |bytes: &'static [u8]| std::io::Cursor::new(bytes);
+        assert_eq!(in_jpeg(&mut cursor(b"\xff\xd8\xff\xd9")), None);
+        assert_eq!(in_jpeg(&mut cursor(b"\xff\xd8\xff\xe1\xff\xff")), None);
         assert_eq!(
-            super::packet(&written("plain.jpg", b"\xff\xd8\xff\xd9")),
+            in_webp(&mut cursor(b"RIFF\0\0\0\0WEBPVP8 \x00\x00\x00\x00")),
             None
         );
         assert_eq!(
-            super::packet(&written("short.jpg", b"\xff\xd8\xff\xe1\xff\xff")),
+            in_webp(&mut cursor(b"RIFF\0\0\0\0WEBPXMP \xff\xff\xff\x7f")),
             None
         );
-        assert_eq!(
-            super::packet(&written(
-                "plain.webp",
-                b"RIFF\0\0\0\0WEBPVP8 \x00\x00\x00\x00"
-            )),
-            None
-        );
-        assert_eq!(
-            super::packet(&written(
-                "lying.webp",
-                b"RIFF\0\0\0\0WEBPXMP \xff\xff\xff\x7f"
-            )),
-            None
-        );
+        assert_eq!(in_png(&mut cursor(b"")), None);
+        assert_eq!(in_jxl(&mut cursor(b"")), None);
+        // A file its decoder claims by its name alone, and one nothing
+        // claims.
         assert_eq!(super::packet(&written("empty.png", b"")), None);
         assert_eq!(super::packet(&written("nothing.txt", b"hello")), None);
         assert!(

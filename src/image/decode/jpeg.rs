@@ -59,6 +59,10 @@ impl super::Decoder for Jpeg {
         )))
     }
 
+    fn xmp(&self, source: &mut dyn ReadSeek) -> Result<Option<Vec<u8>>> {
+        Ok(crate::image::xmp::in_jpeg(source))
+    }
+
     fn decode(&self, source: &mut dyn ReadSeek, overrides: Overrides) -> Result<DecodedImage> {
         // JPEG is the one format read whole (the gain-map reader borrows a
         // slice of the tail), so the length is bounded before the read: a
