@@ -597,15 +597,16 @@ impl ImageLayer {
         // The marks' chain, where the marks are on and a coarse level is
         // drawn: written under this frame's window and lift unless it already
         // is, and let go otherwise. Every level's bind group names the marks
-        // at that level, so a change to the chain is a change to the
-        // bindings.
+        // at that level, so a change to the chain's textures is a change to
+        // the bindings — and writing the same textures again, which is what
+        // stepping the window does, is not.
         let wanted = (mark_clipped && coarse).then_some(MarksKey {
             window,
             weight: image.lift.as_ref().map_or(0.0, |lift| lift.weight),
             marks,
         });
         if image.marks.as_ref().map(|marks| marks.key) != wanted {
-            match wanted {
+            let textures_changed = match wanted {
                 Some(key) => write_marks(
                     device,
                     queue,
@@ -623,14 +624,20 @@ impl ImageLayer {
                     display,
                     key,
                 ),
-                None => image.marks = None,
+                None => {
+                    image.marks = None;
+                    true
+                }
+            };
+            if textures_changed {
+                rebind(device, &self.texture_layout, &self.blank_marks, image);
             }
-            rebind(device, &self.texture_layout, &self.blank_marks, image);
         }
 
         if coarse && !image.chain_built {
             image.levels = self.reducer.build(
                 device,
+                queue,
                 encoder,
                 reduce::Source {
                     view: &image.view,
@@ -1279,6 +1286,11 @@ struct Marking<'a> {
 /// three straight channels, the third empty, no lift, the marks being judged
 /// on lifted light already, and the first level's own extent, so that its
 /// last row and column weigh what they stand for.
+///
+/// Into the chain's textures where the picture has them already, since a
+/// window stepped is the same picture judged again; answers whether any
+/// texture is new, which is when the bindings naming them have to be made
+/// again.
 fn write_marks(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -1287,7 +1299,7 @@ fn write_marks(
     image: &mut GpuImage,
     display: &Display,
     key: MarksKey,
-) {
+) -> bool {
     let size = image.size;
     let step = reduce::STEP as f32;
     let target = [size[0] as f32 / step, size[1] as f32 / step];
@@ -1317,19 +1329,18 @@ fn write_marks(
         ),
     );
 
-    if image.marks.is_none() {
-        image.marks = Some(Marks::new(
+    // A first level made here is a texture the bindings have not seen.
+    let fresh = image.marks.is_none();
+    let marks = image.marks.get_or_insert_with(|| {
+        Marks::new(
             device,
             marking.layout,
             &image.view,
             marking.blank_marks,
             size,
             key,
-        ));
-    }
-    let Some(marks) = &mut image.marks else {
-        return;
-    };
+        )
+    });
     {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("marks"),
@@ -1346,8 +1357,9 @@ fn write_marks(
         pass.set_bind_group(3, marking.ramps, &[]);
         pass.draw(0..4, 0..1);
     }
-    marks.rest = marking.reducer.build(
+    let rest_changed = marking.reducer.build_into(
         device,
+        queue,
         encoder,
         reduce::Source {
             view: &marks.first,
@@ -1361,8 +1373,10 @@ fn write_marks(
             alpha: AlphaMode::Opaque,
             lift: Lifted::of(None, marking.blank_lift),
         },
+        &mut marks.rest,
     );
     marks.key = key;
+    fresh || rest_changed
 }
 
 /// WGSL matrices are column-major with 16-byte column stride, while

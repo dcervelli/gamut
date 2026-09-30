@@ -253,8 +253,11 @@ the marks are off or nothing coarse is drawn, so a black point dragged at
 over the picture and the chain from it, the same as the picture's own chain
 costs on every frame of an animation. `MarksKey` is what the chain was
 written under, the window transform and the lift's weight, and
-`ImageLayer::prepare` writes it again when that changes, drops it when the
-texels change or it is not wanted, and rebinds every level either way. The
+`ImageLayer::prepare` writes it again when that changes — into the textures
+it has, through `Reducer::build_into`, since a window stepped is the same
+picture judged again and allocates nothing — and drops it when the texels
+change or it is not wanted; every level is rebound only when the chain's
+textures change, which a rewrite does not. The
 pass reads the picture through a bind group of the chain's own
 (`Marks::reading`): the picture's level-1 group names the marks' first level
 beside it, and a texture cannot be a pass's target and its input at once.

@@ -58,10 +58,27 @@ pub struct Source<'a> {
     pub lift: Lifted<'a>,
 }
 
-/// One level, kept alongside its texture so that dropping the chain frees it.
+/// One level: its texture, and everything the pass that writes it was
+/// recorded with, kept so that the level can be written again — under
+/// another window, say — without any of it being made again. Dropping the
+/// chain frees the lot.
 pub struct Level {
-    _texture: wgpu::Texture,
+    texture: wgpu::Texture,
     pub view: wgpu::TextureView,
+    params: wgpu::Buffer,
+    params_group: wgpu::BindGroup,
+    /// What the pass reads: the source, or the level above.
+    input: wgpu::TextureView,
+    input_group: wgpu::BindGroup,
+}
+
+impl Level {
+    /// Whether a texture of this size and format is what the level has.
+    fn holds(&self, width: u32, height: u32, format: wgpu::TextureFormat) -> bool {
+        self.texture.width() == width
+            && self.texture.height() == height
+            && self.texture.format() == format
+    }
 }
 
 pub struct Reducer {
@@ -131,11 +148,35 @@ impl Reducer {
     pub fn build(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         source: Source<'_>,
     ) -> Vec<Level> {
+        let mut levels = Vec::new();
+        self.build_into(device, queue, encoder, source, &mut levels);
+        levels
+    }
+
+    /// As [`Reducer::build`], into `levels`, which may hold a chain built
+    /// before: a level whose texture is already the size and format this
+    /// chain wants is written again rather than made again — its constants
+    /// rewritten and its input rebound only where they differ — and the
+    /// rest are made, or let go. Answers whether the set of textures
+    /// changed, which is what a bind group naming them has to know.
+    ///
+    /// For the marks' chain, which is written again under every window as
+    /// the exposure is stepped: same size every time, so nothing is
+    /// allocated per step.
+    pub fn build_into(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        source: Source<'_>,
+        levels: &mut Vec<Level>,
+    ) -> bool {
         let Source {
-            view: input,
+            view: source,
             size,
             extent: occupied,
             format,
@@ -145,8 +186,9 @@ impl Reducer {
         } = source;
         let occupied = occupied.unwrap_or([size[0] as f32, size[1] as f32]);
         let pipeline = self.pipeline(device, format);
-        let mut levels: Vec<Level> = Vec::new();
+        let mut changed = false;
 
+        let mut index = 0;
         let mut divisor = 1u32;
         while size[0].div_ceil(divisor) > 1 || size[1].div_ceil(divisor) > 1 {
             // The extent a level covers is the image divided by the reduction
@@ -158,81 +200,127 @@ impl Reducer {
             let width = size[0].div_ceil(divisor).max(1);
             let height = size[1].div_ceil(divisor).max(1);
 
-            let params = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("reduce params"),
-                size: size_of::<Params>() as u64,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: true,
-            });
-            params
-                .slice(..)
-                .get_mapped_range_mut()
-                .expect("a buffer mapped at creation is always mappable")
-                .copy_from_slice(bytemuck::bytes_of(&Params {
-                    extent,
-                    step: STEP as f32,
-                    swizzle,
-                    // Only the first pass reads the image as it was uploaded;
-                    // every level it writes is premultiplied already, and
-                    // lifted already.
-                    alpha_mode: if levels.is_empty() {
-                        shader_codes::alpha(alpha)
-                    } else {
-                        shader_codes::level_alpha(alpha)
-                    },
-                    lift: if levels.is_empty() { lift.code } else { 0 },
-                    map_size: lift.map_size,
-                    base_offset: lift.base_offset,
-                    alternate_offset: lift.alternate_offset,
-                }));
-            params.unmap();
-
-            let params_group =
-                gpu::buffer_group(device, "reduce params", &self.params_layout, &params);
-
-            let texture = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("coarse level"),
-                size: wgpu::Extent3d {
-                    width,
-                    height,
-                    depth_or_array_layers: 1,
+            let params = Params {
+                extent,
+                step: STEP as f32,
+                swizzle,
+                // Only the first pass reads the image as it was uploaded;
+                // every level it writes is premultiplied already, and
+                // lifted already.
+                alpha_mode: if index == 0 {
+                    shader_codes::alpha(alpha)
+                } else {
+                    shader_codes::level_alpha(alpha)
                 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            });
-            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+                lift: if index == 0 { lift.code } else { 0 },
+                map_size: lift.map_size,
+                base_offset: lift.base_offset,
+                alternate_offset: lift.alternate_offset,
+            };
+            let input = if index == 0 {
+                source.clone()
+            } else {
+                levels[index - 1].view.clone()
+            };
 
-            {
-                let input = levels.last().map_or(input, |level| &level.view);
-                let texture_group =
-                    gpu::texture_group(device, "reduce source", &self.texture_layout, &[input]);
-
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("reduce"),
-                    color_attachments: &[Some(gpu::attachment(
-                        &view,
-                        wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                    ))],
-                    ..Default::default()
-                });
-                pass.set_pipeline(&self.pipelines[pipeline].1);
-                pass.set_bind_group(0, &params_group, &[]);
-                pass.set_bind_group(1, &texture_group, &[]);
-                pass.set_bind_group(2, lift.group, &[]);
-                pass.draw(0..4, 0..1);
+            match levels.get_mut(index) {
+                Some(level) if level.holds(width, height, format) => {
+                    queue.write_buffer(&level.params, 0, bytemuck::bytes_of(&params));
+                    if level.input != input {
+                        level.input_group = self.input_group(device, &input);
+                        level.input = input;
+                    }
+                }
+                kept => {
+                    let level = self.level(device, width, height, format, params, input);
+                    match kept {
+                        Some(kept) => *kept = level,
+                        None => levels.push(level),
+                    }
+                    changed = true;
+                }
             }
 
-            levels.push(Level {
-                _texture: texture,
-                view,
+            let level = &levels[index];
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("reduce"),
+                color_attachments: &[Some(gpu::attachment(
+                    &level.view,
+                    wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                ))],
+                ..Default::default()
             });
+            pass.set_pipeline(&self.pipelines[pipeline].1);
+            pass.set_bind_group(0, &level.params_group, &[]);
+            pass.set_bind_group(1, &level.input_group, &[]);
+            pass.set_bind_group(2, lift.group, &[]);
+            pass.draw(0..4, 0..1);
+            drop(pass);
+
+            index += 1;
         }
-        levels
+        if levels.len() > index {
+            levels.truncate(index);
+            changed = true;
+        }
+        changed
+    }
+
+    /// The binding a pass reads `input` through.
+    fn input_group(&self, device: &wgpu::Device, input: &wgpu::TextureView) -> wgpu::BindGroup {
+        gpu::texture_group(device, "reduce source", &self.texture_layout, &[input])
+    }
+
+    /// A level made afresh: a texture of `width` by `height` in `format`,
+    /// and the pass's constants and bindings.
+    fn level(
+        &self,
+        device: &wgpu::Device,
+        width: u32,
+        height: u32,
+        format: wgpu::TextureFormat,
+        params: Params,
+        input: wgpu::TextureView,
+    ) -> Level {
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("reduce params"),
+            size: size_of::<Params>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: true,
+        });
+        buffer
+            .slice(..)
+            .get_mapped_range_mut()
+            .expect("a buffer mapped at creation is always mappable")
+            .copy_from_slice(bytemuck::bytes_of(&params));
+        buffer.unmap();
+        let params_group = gpu::buffer_group(device, "reduce params", &self.params_layout, &buffer);
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("coarse level"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let input_group = self.input_group(device, &input);
+
+        Level {
+            texture,
+            view,
+            params: buffer,
+            params_group,
+            input,
+            input_group,
+        }
     }
 }
 

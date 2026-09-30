@@ -1286,6 +1286,66 @@ fn the_marks_below_one_to_one_are_the_share_of_the_texels_at_an_end() {
     );
 }
 
+/// The marks' chain is written into the textures it has when the window
+/// changes, rather than made again. Drawn far enough out to read a level
+/// reduced from the marks' own first level — sixty-four texels to the
+/// pixel, the chain's third — under one window and then another, a layer
+/// shows the second window's marks exactly as a layer that never saw the
+/// first does: the same pixels out of a rewrite as out of a build.
+#[test]
+fn the_marks_written_again_under_another_window_are_that_windows() {
+    let Some(gpu) = gpu::test_context() else {
+        return;
+    };
+    const PER_PIXEL: usize = 64;
+    // A ramp of grays from 0.2 to 0.8 under each pixel, so that each window
+    // below takes a different share of them to an end.
+    let pixels: Vec<[f32; 3]> = (0..PER_PIXEL * 3)
+        .map(|i| {
+            let value = 0.2 + (i % 16) as f32 / 15.0 * 0.6;
+            [value, value, value]
+        })
+        .collect();
+    let image = rgb_f32_row(&pixels, Primaries::Bt709);
+    let target = [3, 1];
+    let quads = Draw {
+        mark_clipped: true,
+        ..Draw::plain(whole(target, &image), None)
+    };
+    let mut wide = Display::default();
+    wide.set_window(0.3, 0.7);
+    let mut narrow = Display::default();
+    narrow.set_window(0.45, 0.55);
+
+    let fresh = |display: &Display| {
+        let mut layer = ImageLayer::new(&gpu.device, &gpu.queue, WORKING_FORMAT);
+        let uploaded = layer
+            .uploader(&gpu.device, &gpu.queue, gpu.capabilities)
+            .run(&image)
+            .expect("the image uploads");
+        layer.install(uploaded);
+        let got = draw_layer_as(gpu, &mut layer, target, quads, display);
+        (layer, got)
+    };
+
+    let (mut layer, under_wide) = fresh(&wide);
+    let rewritten = draw_layer_as(gpu, &mut layer, target, quads, &narrow);
+    let (_, built) = fresh(&narrow);
+
+    assert_ne!(
+        under_wide, rewritten,
+        "the narrower window marks more of the ramp"
+    );
+    for (x, (got, want)) in rewritten.iter().zip(&built).enumerate() {
+        for (channel, (got, want)) in got.iter().zip(want).enumerate() {
+            assert!(
+                close(*got, *want, 1e-5),
+                "pixel {x} channel {channel}: rewritten {got}, built {want}"
+            );
+        }
+    }
+}
+
 /// A one-row texture in `format`, holding `texels` — written as the
 /// working format's halves, or as the interface target's bytes.
 fn row_texture(
