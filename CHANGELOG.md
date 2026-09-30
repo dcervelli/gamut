@@ -21,8 +21,8 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   or knots.
 - A map button after the coordinates at the head of the information
   panel's *Location* section opens where the picture was taken in the
-  browser. Where it goes is the new `open_map_link` setting, Google Maps
-  unless it says otherwise, with `{lat}` and `{lng}` for the coordinates.
+  browser. Where it goes is the new `open_map_link` setting, geojson.io
+  with a point at the coordinates unless it says otherwise, with `{lat}` and `{lng}` for the coordinates.
 
 - The information panel has a *Regions* section for the regions a file's
   metadata marks out on the picture: the subject the camera found, and the

@@ -104,7 +104,7 @@ const SETTINGS: [(&str, &str); 8] = [
 ];
 
 /// Where the map button goes unless the configuration says otherwise.
-pub const OPEN_MAP_LINK: &str = "https://www.google.com/maps/search/?api=1&query={lat},{lng}";
+pub const OPEN_MAP_LINK: &str = "https://geojson.io/#data=data:application/json,%7B%22type%22%3A%22Feature%22%2C%22properties%22%3A%7B%7D%2C%22geometry%22%3A%7B%22type%22%3A%22Point%22%2C%22coordinates%22%3A%5B{lng}%2C{lat}%5D%7D%7D";
 
 /// `link` with the coordinates in it: `{lat}` the latitude and `{lng}` the
 /// longitude, each in signed degrees to six places, which is a tenth of a
@@ -555,12 +555,20 @@ fn state_path() -> Option<PathBuf> {
 /// name and value with the space around them taken off and a value's
 /// quotes taken off too, or `None` for a line with no `=` in it. Blank
 /// lines and comments are left out.
+///
+/// A comment starts at a `#` that begins the line or follows a space: a
+/// web address holds `#` inside itself, as the default map link does, and
+/// is not cut short there.
 fn lines(text: &str) -> impl Iterator<Item = (usize, Option<(&str, &str)>)> {
     text.lines().enumerate().filter_map(|(index, line)| {
-        let line = line
-            .split_once('#')
-            .map_or(line, |(before, _)| before)
-            .trim();
+        let comment = line.char_indices().find(|&(at, c)| {
+            c == '#'
+                && line[..at]
+                    .chars()
+                    .next_back()
+                    .is_none_or(char::is_whitespace)
+        });
+        let line = comment.map_or(line, |(at, _)| &line[..at]).trim();
         if line.is_empty() {
             return None;
         }
@@ -806,11 +814,17 @@ mod tests {
     fn the_map_link_takes_the_coordinates() {
         assert_eq!(
             map_link(OPEN_MAP_LINK, [-44.68202, 169.161956]),
-            "https://www.google.com/maps/search/?api=1&query=-44.682020,169.161956"
+            "https://geojson.io/#data=data:application/json,%7B%22type%22%3A%22Feature%22%2C%22properties%22%3A%7B%7D%2C%22geometry%22%3A%7B%22type%22%3A%22Point%22%2C%22coordinates%22%3A%5B169.161956%2C-44.682020%5D%7D%7D"
         );
         let (config, problems) = Config::parse("open_map_link = https://example.com/?q={lat}\n");
         assert_eq!(config.open_map_link, OPEN_MAP_LINK);
         assert_eq!(problems.len(), 1, "{problems:?}");
+        // The default's `#` is part of the address, not a comment; one
+        // after a space is.
+        let (config, problems) =
+            Config::parse(&format!("open_map_link = {OPEN_MAP_LINK}  # the default\n"));
+        assert_eq!(config.open_map_link, OPEN_MAP_LINK);
+        assert!(problems.is_empty(), "{problems:?}");
     }
 
     #[test]
