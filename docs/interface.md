@@ -998,17 +998,34 @@ can be the stored picture's on its side, and a TIFF's compression — only a
 TIFF's, since a raw's first directory describes the preview in front of it
 and every other container's block has no pixels of its own.
 
+A picture carrying a depth map has a section of its own for it, `Depth
+map`, after the picture's: its resolution and samples, and where the file
+says what its codes stand for — a `depth::Scale` — whose words said it
+(`depth::Vendor`), whether the codes are spread over the distance or its
+inverse, the distances the two ends of the codes stand for, nearest first,
+and whether those are measured or only right about what is nearer. The
+range is written by `pixel::written`, the readout's own writing of a
+distance, so a relative map's ends carry the same `≈` and the same two
+places the pointer's readout does. The section reads the picture's map
+through `Current::picture`, not `Current::image`: while the map is shown in
+the picture's place the `Image` section describes the map, and the depth
+map's section still describes the map the picture carries rather than
+nothing. A map whose file says nothing of its codes is still a map, and the
+section gives its encoding as unknown, which answers the question a reader
+of a bare number under the pointer is asking.
+
 The rest is its EXIF, read by `src/image/exif.rs` on the loader thread beside
 the decode, because it is one more parse of a file somebody else chose the
 bytes of and that is the thread with the panic guard around it. What comes
-back is already words, and already grouped: `Camera`, what took the picture
+back is already words, and already grouped: `About`, whatever somebody
+wrote in words, then `Camera`, what took the picture
 whatever it was taken of — the body, the lens, the owner and the serial
 numbers — then `Exposure`, how this picture was taken — when, the exposure
 and how it was decided, the focal length with its equivalent and any digital
 zoom, the metering, the white balance and the color temperature it was set
 for, the flash, and whether the picture was merged from several frames —
 then where it was taken, the coordinates in degrees a map will take, and
-last whatever somebody wrote in words. Nothing else is shown field by
+last where a raster's pixels are on the ground. Nothing else is shown field by
 field. Once those are read out of the block, what is left is how the file
 is laid out —
 strip offsets, bits per sample, a DNG's calibration matrices — and how the
@@ -1017,7 +1034,12 @@ exposure already given — and a column of it buried the few fields worth
 reading. A group that came to nothing is not carried at all, an empty heading
 being a question about where the rest of it went. Each group is an `exif::Group`, and
 `ui/info.rs` gives each its mark and its head in one exhaustive match, so a
-group cannot reach the panel without them; the regions come last.
+group cannot reach the panel without them; the regions come last. The
+panel does not read the groups in one run: `About` comes straight after the
+file, since a title and a caption say what the picture is before its size
+and samples say how it is stored, and the picture's own section and the
+depth map's come between it and the rest, which are about how the picture
+was taken.
 
 The coordinates are kept as numbers too, as `Exif::position`: the latitude
 and longitude in signed degrees, south and west below zero, which is what a

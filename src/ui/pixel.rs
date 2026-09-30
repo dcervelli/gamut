@@ -18,7 +18,7 @@
 
 use egui::{Label, RichText, Sense, StrokeKind, vec2};
 
-use crate::image::depth::{Accuracy, Depth, Unit};
+use crate::image::depth::{Accuracy, Depth, Distance, Unit};
 use crate::image::display::Mapped;
 use crate::image::geo::Georeference;
 use crate::image::{DecodedImage, Sample, Samples};
@@ -514,9 +514,15 @@ const ESTIMATED: &str = "\u{2248}";
 /// centimeter rather than the millimeter, since the last digit would claim
 /// more than the map knows.
 fn distance(depth: Depth) -> String {
-    let Some(distance) = depth.distance else {
-        return component(depth.stored, depth.float);
-    };
+    match depth.distance {
+        Some(distance) => written(distance),
+        None => component(depth.stored, depth.float),
+    }
+}
+
+/// A distance in its unit, marked and rounded as [`distance`] says: what
+/// the readout writes, and the info panel's depth map section with it.
+pub(super) fn written(distance: Distance) -> String {
     let (mark, places) = match distance.accuracy {
         Accuracy::Absolute => ("", 3),
         Accuracy::Relative => (ESTIMATED, 2),
@@ -706,7 +712,7 @@ mod tests {
     /// where there is no map at all.
     #[test]
     fn depth_reads_the_map_beside_the_picture() {
-        use crate::image::depth::{DepthMap, Quantity, Scale};
+        use crate::image::depth::{DepthMap, Quantity, Scale, Vendor};
         use std::sync::Arc;
         let display = Display::default();
         let mut image = rgb8([231, 128, 64]);
@@ -730,6 +736,7 @@ mod tests {
                 quantity: Quantity::Distance,
                 unit,
                 accuracy,
+                vendor: Vendor::Google,
             })
         };
         image.depth = Some(map(None));

@@ -86,16 +86,17 @@ pub struct Section {
     pub entries: Vec<Entry>,
 }
 
-/// Which group a section is, in the order the panel reads them: what took
-/// the picture, how, where, where its pixels are on the ground, and what
-/// was written about it.
+/// Which group a section is, in the order the panel reads them: what was
+/// written about the picture, what took it, how, where, and where its
+/// pixels are on the ground. The panel puts what it says about the picture
+/// itself between the first and the rest — see `ui/info.rs`.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Group {
+    About,
     Camera,
     Exposure,
     Location,
     Georeference,
-    About,
 }
 
 impl Group {
@@ -118,8 +119,8 @@ impl Group {
 #[derive(Clone, Default, PartialEq, Debug)]
 pub struct Exif {
     /// The groups the file's fields fall into, in the order they are read:
-    /// what took the picture, where it was taken, where its pixels are on the
-    /// ground, and what was written about it.
+    /// what was written about the picture, what took it, where it was taken,
+    /// and where its pixels are on the ground.
     pub sections: Vec<Section>,
     /// Where the raster's pixels are on the ground, for the pointer's
     /// readout: the same tags the `Georeference` section is written from,
@@ -370,11 +371,11 @@ impl Exif {
         regions.splice(0..0, subject(exif));
 
         let sections = [
+            (Group::About, described),
             (Group::Camera, camera(exif)),
             (Group::Exposure, exposure(exif)),
             (Group::Location, location(exif)),
             (Group::Georeference, geo),
-            (Group::About, described),
         ]
         .into_iter()
         .filter(|(_, entries)| !entries.is_empty())
@@ -1535,10 +1536,10 @@ mod tests {
         assert_eq!(
             names,
             [
+                Group::About,
                 Group::Camera,
                 Group::Exposure,
-                Group::Location,
-                Group::About
+                Group::Location
             ],
             "{names:?}"
         );

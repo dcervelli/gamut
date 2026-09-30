@@ -7,7 +7,7 @@
 //! the near plane either way. Where the map itself is kept is the JPEG's
 //! business; see `decode/jpeg/depth.rs`.
 
-use super::{Accuracy, Quantity, Scale, Unit};
+use super::{Accuracy, Quantity, Scale, Unit, Vendor};
 use crate::image::xmp::Xmp;
 
 /// Google's namespace for the depth map's properties.
@@ -37,6 +37,7 @@ pub fn scale(xmp: &Xmp) -> Option<Scale> {
         quantity,
         unit: word("Units").map_or(Unit::Unknown, |word| Unit::parse(&word)),
         accuracy: Accuracy::Absolute,
+        vendor: Vendor::Google,
     })
 }
 

@@ -43,6 +43,15 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   description of it the file gives (ISO 21496-1 or Apple's), the map's size
   and whether it is one channel or three, how many stops above SDR white it
   lifts the picture, and how much of that lift the display is showing.
+- The information panel has a *Depth map* section for a picture carrying
+  one, after *Image*: the map's resolution and samples, and where the file
+  says what its codes stand for, whose description it is (Apple's or
+  Google's), whether the codes are spread over the distance or its inverse,
+  the distances they run between, and whether those are measured or only
+  estimated in scale — "relative", as an iPhone's dual-camera portrait says,
+  with the range marked `≈` as the pixel readout marks it. A map whose file
+  does not say what its codes stand for has its encoding given as unknown. The section describes the map whether the picture or the map is on
+  screen.
 - A **Depth** pixel format, beside Hex, Decimal and Mapped: for a picture
   carrying a depth map, the readout says how far away the pixel under the
   pointer was. An iPhone's portrait HEIC reads as a distance in meters,
@@ -59,6 +68,9 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Changed
 
+- The information panel's *About* section comes straight after the file's
+  own, before *Image*: what somebody wrote about the picture says what it
+  is before its size and samples say how it is stored.
 - The information panel's *Camera* section is split in two: *Camera* says
   what took the picture — the body, the lens, the owner and the serial
   numbers — and *Exposure*, under an aperture's mark, how this picture was

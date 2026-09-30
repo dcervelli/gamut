@@ -15,8 +15,8 @@
 //! disparity, over the inverse, which gives the near things the finer steps.
 //! [`Scale`] is that one shape, and each vendor's metadata is translated into
 //! it by a module of its own — [`apple`], [`google`] — from the XMP the
-//! container carries, so that a vendor new to this tree is a module and a
-//! line in [`scale`], and the readout never learns whose map it is reading.
+//! container carries, so that a vendor new to this tree is a module, a
+//! [`Vendor`] and a line in [`scale`], and the readout never learns whose map it is reading.
 //!
 //! Finding the map and its XMP is the container's business, and stays with
 //! the decoder: a HEIF's is an auxiliary image with a packet of its own, a
@@ -59,6 +59,27 @@ pub struct Scale {
     pub quantity: Quantity,
     pub unit: Unit,
     pub accuracy: Accuracy,
+    /// Whose words the scale was read from, for the info panel to say.
+    pub vendor: Vendor,
+}
+
+/// The vendors whose depth metadata this tree reads, one module each.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Vendor {
+    /// Apple's pixel data info, beside a HEIC's depth image.
+    Apple,
+    /// Google's `GDepth` block, in a JPEG's XMP.
+    Google,
+}
+
+impl Vendor {
+    /// Its name, as the info panel writes it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Vendor::Apple => "Apple",
+            Vendor::Google => "Google",
+        }
+    }
 }
 
 /// What the values of a [`Scale`] are.
@@ -146,6 +167,22 @@ impl Scale {
             unit: self.unit,
             accuracy: self.accuracy,
         })
+    }
+}
+
+impl Scale {
+    /// The distances the ends of its codes stand for, in a map of
+    /// `samples`' width: the nearest the map can say, then the farthest.
+    /// An end standing for no distance — an inverse of zero, which is
+    /// infinitely far — is `None`, and last.
+    pub fn range(&self, samples: &Samples) -> [Option<Distance>; 2] {
+        let [low, high] = self.codes.unwrap_or([0.0, samples.full_scale()]);
+        let mut ends = [self.distance(low, samples), self.distance(high, samples)];
+        let far = |end: &Option<Distance>| end.map_or(f32::INFINITY, |distance| distance.value);
+        if far(&ends[0]) > far(&ends[1]) {
+            ends.swap(0, 1);
+        }
+        ends
     }
 }
 
@@ -238,6 +275,7 @@ mod tests {
             quantity: Quantity::Distance,
             unit: Unit::Meters,
             accuracy: Accuracy::Absolute,
+            vendor: Vendor::Google,
         };
         assert!((distance(linear, 0) - 1.0).abs() < 1e-6);
         assert!((distance(linear, 255) - 5.0).abs() < 1e-6);
@@ -263,10 +301,36 @@ mod tests {
             quantity: Quantity::Distance,
             unit: Unit::Meters,
             accuracy: Accuracy::Absolute,
+            vendor: Vendor::Google,
         };
         assert!((distance(scale, 10) - 2.0).abs() < 1e-6);
         assert!((distance(scale, 60) - 3.0).abs() < 1e-6);
         assert!((distance(scale, 110) - 4.0).abs() < 1e-6);
+    }
+
+    /// The range runs from the nearest end to the farthest, whichever of
+    /// the codes stands for which, and an end infinitely far is left last.
+    #[test]
+    fn a_range_runs_from_near_to_far() {
+        let samples = Samples::U8 {
+            channels: Channels::Gray,
+            data: Vec::new(),
+        };
+        let disparity = Scale {
+            codes: None,
+            values: [0.25, 1.0],
+            quantity: Quantity::Inverse,
+            unit: Unit::Meters,
+            accuracy: Accuracy::Relative,
+            vendor: Vendor::Apple,
+        };
+        let values = |scale: Scale| scale.range(&samples).map(|end| end.map(|d| d.value));
+        assert_eq!(values(disparity), [Some(1.0), Some(4.0)]);
+        let infinite = Scale {
+            values: [0.0, 2.0],
+            ..disparity
+        };
+        assert_eq!(values(infinite), [Some(0.5), None]);
     }
 
     /// An inverse of zero is infinitely far, which is no distance to write.
@@ -278,6 +342,7 @@ mod tests {
             quantity: Quantity::Inverse,
             unit: Unit::Meters,
             accuracy: Accuracy::Absolute,
+            vendor: Vendor::Google,
         };
         let depth = map(vec![0], 1, 1, Some(scale)).at(0, 0, 1, 1);
         assert_eq!(depth.and_then(|d| d.distance), None);

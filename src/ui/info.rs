@@ -23,6 +23,7 @@ use crate::clock;
 use crate::image::AlphaMode;
 use crate::image::auxiliary::{Auxiliary, Showing};
 use crate::image::decode::Rendering;
+use crate::image::depth::{Accuracy, Quantity};
 use crate::image::exif::{self, Group, ShownRegion};
 use crate::image::gain_map::Lift;
 use crate::image::metadata_region::Placed;
@@ -36,6 +37,7 @@ use crate::theme::Theme;
 use super::chrome::{ICON_SIDE, Pass, measure};
 use super::control::Control;
 use super::icon;
+use super::pixel;
 use super::style::{SCROLLBAR_GUTTER, SCROLLBAR_WIDTH, TOGGLE_RADIUS};
 use super::tooltip::{Tip, Tooltip};
 use super::{
@@ -44,6 +46,8 @@ use super::{
 
 /// The heading of the regions the metadata marks out on the picture.
 const REGIONS: &str = "Regions";
+/// The heading of the depth map the picture carries.
+const DEPTH_MAP: &str = "Depth map";
 
 /// Below this the panel would show its header, two facts and a scrollbar, so
 /// it stays off instead. There is no matching minimum for the width: the
@@ -1115,53 +1119,57 @@ fn offer(
 }
 
 /// Everything the panel has to say, in the order it says it: the file on
-/// disk, then the picture in it, then whatever its metadata has to say — the
-/// camera, the place, the ground, the words, and last the fields nothing
-/// above spoke for.
+/// disk, then what somebody wrote about the picture in it, then the picture
+/// itself and the depth map it carries, then what else its metadata has to
+/// say — the camera, the exposure, the place, the ground — and last the
+/// regions it marks out on the picture.
 ///
 /// A field the file would not give up is left out, a name with a blank under
 /// it saying less than nothing; a section left with nothing in it goes too,
 /// an empty heading being a question about where the rest of it went. In
-/// practice the first two always stand, since a file always has a size and a
-/// picture always has a color space.
+/// practice the first and the picture's always stand, since a file always
+/// has a size and a picture always has a color space.
 fn contents(current: &Current) -> Contents {
-    let mut sections = vec![
-        Section::new("File", Face::File, fields(file_facts(current))),
-        Section::new(
-            "Image",
-            Face::Headed {
-                mark: icon::IMAGE,
-                head: &[RESOLUTION, READ_BY],
-                button: None,
-            },
-            fields(image_facts(current)),
-        ),
-    ];
     let exif = &current.exif;
-    for section in &exif.sections {
-        let entries = section
-            .entries
-            .iter()
-            .map(|entry| (entry.name.as_str(), entry.value.clone()));
-        let (mark, head, button): (_, &'static [&'static str], _) = match section.group {
-            Group::Camera => (icon::CAMERA, &[exif::CAMERA], None),
-            Group::Exposure => (icon::APERTURE, &[], None),
-            // Only where the file gave numbers a map can take.
-            Group::Location => (
-                icon::MAP_PIN,
-                &[exif::LATITUDE, exif::LONGITUDE],
-                exif.position.map(|_| (icon::MAP, Control::OpenMap)),
-            ),
-            Group::Georeference => (icon::MAP, &[], None),
-            // The mark the panel's own button wears.
-            Group::About => (icon::INFO, &[exif::TITLE], None),
-        };
-        sections.push(Section::new(
-            section.group.name(),
-            Face::Headed { mark, head, button },
-            fields(entries),
-        ));
-    }
+    // What somebody wrote says what the picture is, so it comes before
+    // how the picture is stored; the rest of the metadata, after.
+    let (about, captured): (Vec<_>, Vec<_>) = exif
+        .sections
+        .iter()
+        .partition(|section| section.group == Group::About);
+    let mut sections = vec![Section::new(
+        "File",
+        Face::File,
+        fields(file_facts(current)),
+    )];
+    sections.extend(
+        about
+            .into_iter()
+            .map(|section| metadata_section(exif, section)),
+    );
+    sections.push(Section::new(
+        "Image",
+        Face::Headed {
+            mark: icon::IMAGE,
+            head: &[RESOLUTION, READ_BY],
+            button: None,
+        },
+        fields(image_facts(current)),
+    ));
+    sections.push(Section::new(
+        DEPTH_MAP,
+        Face::Headed {
+            mark: icon::AXIS_3D,
+            head: &[],
+            button: None,
+        },
+        fields(depth_facts(current)),
+    ));
+    sections.extend(
+        captured
+            .into_iter()
+            .map(|section| metadata_section(exif, section)),
+    );
     // The regions are written out here rather than with the rest, since
     // where each is depends on the turn in force.
     // Each is copied as its row of the table, which is never empty, so the
@@ -1178,6 +1186,32 @@ fn contents(current: &Current) -> Contents {
     });
     sections.retain(|section| !section.facts.is_empty());
     Contents { sections }
+}
+
+/// One section of the file's metadata, headed as its group is.
+fn metadata_section(exif: &exif::Exif, section: &exif::Section) -> Section {
+    let entries = section
+        .entries
+        .iter()
+        .map(|entry| (entry.name.as_str(), entry.value.clone()));
+    let (mark, head, button): (_, &'static [&'static str], _) = match section.group {
+        // The mark the panel's own button wears.
+        Group::About => (icon::INFO, &[exif::TITLE], None),
+        Group::Camera => (icon::CAMERA, &[exif::CAMERA], None),
+        Group::Exposure => (icon::APERTURE, &[], None),
+        // Only where the file gave numbers a map can take.
+        Group::Location => (
+            icon::MAP_PIN,
+            &[exif::LATITUDE, exif::LONGITUDE],
+            exif.position.map(|_| (icon::MAP, Control::OpenMap)),
+        ),
+        Group::Georeference => (icon::MAP, &[], None),
+    };
+    Section::new(
+        section.group.name(),
+        Face::Headed { mark, head, button },
+        fields(entries),
+    )
 }
 
 /// A section's fields, with the ones that came to nothing dropped.
@@ -1409,6 +1443,60 @@ fn image_facts(current: &Current) -> Vec<(&'static str, String)> {
         // What else the file holds, for the two kinds that hold more than
         // one picture; nothing for the usual kind.
         ("Holds", holds(current)),
+    ]);
+    facts
+}
+
+/// What the panel says about the depth map the picture carries, whichever
+/// of the two is on screen: its resolution and samples, whose words say what its
+/// codes stand for, whether they stand for the distance or its inverse, the
+/// distances the codes run between, and how far those can be believed.
+/// Nothing where the picture carries no map.
+///
+/// A map whose file does not say what its codes stand for is still a map,
+/// its encoding unknown: the readout shows its codes.
+fn depth_facts(current: &Current) -> Vec<(&'static str, String)> {
+    let (picture, _) = current.picture();
+    let Some(map) = picture.depth.as_deref() else {
+        return Vec::new();
+    };
+    let mut facts = vec![
+        (RESOLUTION, format!("{} \u{00d7} {}", map.width, map.height)),
+        (
+            "Samples",
+            format!(
+                "{} {}",
+                map.samples.component_name(),
+                map.samples.channels().label()
+            ),
+        ),
+    ];
+    let Some(scale) = map.scale else {
+        facts.push(("Encoding", "unknown".to_string()));
+        return facts;
+    };
+    let [near, far] = scale.range(&map.samples);
+    let near = near.map(pixel::written).unwrap_or_default();
+    let far = far.map_or_else(|| "infinity".to_string(), pixel::written);
+    facts.extend([
+        ("Described by", scale.vendor.name().to_string()),
+        (
+            "Encoding",
+            match scale.quantity {
+                Quantity::Distance => "distance",
+                Quantity::Inverse => "inverse distance",
+            }
+            .to_string(),
+        ),
+        ("Range", format!("{near} to {far}")),
+        (
+            "Accuracy",
+            match scale.accuracy {
+                Accuracy::Absolute => "absolute",
+                Accuracy::Relative => "relative",
+            }
+            .to_string(),
+        ),
     ]);
     facts
 }
@@ -1654,8 +1742,97 @@ mod tests {
         // it arrived in, and is read under the heading that says so.
         assert!(index("Size") < index("Image"));
         assert!(index("Resolution") < index("Camera"));
-        assert!(index("Camera") < index("About"));
+        // What somebody wrote about the picture comes before how it is
+        // stored, and what took it after.
+        assert!(index("File") < index("About"));
         assert!(index("About") < index("Field 0"));
+        assert!(index("Field 23") < index("Image"));
+    }
+
+    /// A picture carrying a depth map has it described in a section of its
+    /// own after the picture's and before the camera's, whichever of the two
+    /// is on screen; one without has no such section.
+    #[test]
+    fn a_depth_map_is_described_after_the_image() {
+        use crate::image::depth::{Accuracy, DepthMap, Quantity, Scale, Unit, Vendor};
+        let mut current = current();
+        assert!(!written(&current).iter().any(|row| row == DEPTH_MAP));
+        let map = |scale| DepthMap {
+            width: 2,
+            height: 3,
+            samples: Samples::U8 {
+                channels: Channels::Gray,
+                data: vec![0; 6],
+            },
+            scale,
+        };
+        let carrying = |current: &mut Current, map: DepthMap| {
+            let mut image = (*current.image).clone();
+            image.depth = Some(std::sync::Arc::new(map));
+            current.image = std::sync::Arc::new(image);
+        };
+        let section = |current: &Current| {
+            let rows = written(current);
+            let at = rows
+                .iter()
+                .position(|row| row == DEPTH_MAP)
+                .expect("a section");
+            assert!(rows.iter().position(|row| row == "Image") < Some(at));
+            assert!(rows.iter().position(|row| row == "Camera") > Some(at));
+            let end = rows.iter().position(|row| row == "Camera").unwrap();
+            rows[at + 1..end].to_vec()
+        };
+        let pairs = |pairs: &[(&str, &str)]| -> Vec<String> {
+            pairs
+                .iter()
+                .flat_map(|(name, value)| [name.to_string(), value.to_string()])
+                .collect()
+        };
+
+        // Codes with nothing said about them.
+        carrying(&mut current, map(None));
+        assert_eq!(
+            section(&current),
+            pairs(&[
+                ("Resolution", "2 \u{00d7} 3"),
+                ("Samples", "8-bit gray"),
+                ("Encoding", "unknown"),
+            ])
+        );
+
+        // An iPhone's disparity, estimated in scale: the range runs from
+        // near to far whichever code stands for which.
+        carrying(
+            &mut current,
+            map(Some(Scale {
+                codes: Some([0.0, 255.0]),
+                values: [0.25, 2.0],
+                quantity: Quantity::Inverse,
+                unit: Unit::Meters,
+                accuracy: Accuracy::Relative,
+                vendor: Vendor::Apple,
+            })),
+        );
+        assert_eq!(
+            section(&current),
+            pairs(&[
+                ("Resolution", "2 \u{00d7} 3"),
+                ("Samples", "8-bit gray"),
+                ("Described by", "Apple"),
+                ("Encoding", "inverse distance"),
+                ("Range", "\u{2248}0.50 m to \u{2248}4.00 m"),
+                ("Accuracy", "relative"),
+            ])
+        );
+
+        // Shown in the picture's place, the map is still the picture's.
+        let (picture, _) = current.picture();
+        let face = crate::ui::Face::new(picture.depth.as_ref().unwrap().image());
+        current.show(
+            crate::image::auxiliary::Showing::Auxiliary(crate::image::auxiliary::Auxiliary::Depth),
+            |_| Some(face),
+        );
+        assert!(section(&current).contains(&"Apple".to_string()));
     }
 
     /// A file whose XMP marks regions out on the picture has them under a

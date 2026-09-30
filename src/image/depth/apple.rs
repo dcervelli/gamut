@@ -16,7 +16,7 @@
 //! mattes for the person, their skin, their hair — with a `NativeFormat`
 //! that is plain gray, and those are no depth at all.
 
-use super::{Accuracy, Quantity, Scale, Unit};
+use super::{Accuracy, Quantity, Scale, Unit, Vendor};
 use crate::image::xmp::Xmp;
 
 /// Apple's pixel data info.
@@ -61,6 +61,7 @@ pub fn scale(xmp: &Xmp) -> Option<Scale> {
         quantity,
         unit: Unit::Meters,
         accuracy,
+        vendor: Vendor::Apple,
     })
 }
 
