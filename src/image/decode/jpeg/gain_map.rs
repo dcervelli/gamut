@@ -26,7 +26,7 @@ use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
 
 /// A JPEG, examined for the things the `image` crate throws away: the ICC
 /// profile, and a gain map if there is one.
-pub struct Container<'a> {
+pub(super) struct Container<'a> {
     decoder: Decoder<'a>,
 }
 

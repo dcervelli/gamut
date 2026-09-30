@@ -10,10 +10,12 @@
 //! expected values serves all of them. See `test_images/generate.sh`.
 
 use std::path::PathBuf;
-
+use std::sync::OnceLock;
 use std::time::Duration;
 
-use super::{Overrides, delays, frames, load, load_page, probe, sequence, supported_extensions};
+use super::{
+    CameraJpeg, Overrides, delays, frames, load, load_page, probe, sequence, supported_extensions,
+};
 use crate::image::sequence::{Loops, Sequence};
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Referred, Samples};
 
@@ -74,7 +76,54 @@ struct Fixture {
     /// The no-data sentinel the decoder should have picked up, if any.
     nodata: Option<f32>,
     tolerance: f32,
+    /// What the file holds beyond its first image, where it holds anything;
+    /// a still says nothing, and `every_fixture_says_what_else_it_holds`
+    /// checks both halves of that.
+    sequence: Option<Sequence>,
+    /// For an animation, the still fixture its first frame is: each animated
+    /// fixture is the pattern followed by the pattern upside down, a tenth of
+    /// a second each.
+    first_frame: Option<&'static str>,
+    /// The depth map the file carries, where it carries one. Every other
+    /// fixture carries none, so none is made up.
+    depth: Option<Depth>,
 }
+
+/// A depth map as the four probes read it: the code the map holds at each,
+/// and the distance there where the file states one.
+#[derive(Clone, Copy)]
+struct Depth {
+    codes: [f32; 4],
+    distances: Option<[f32; 4]>,
+}
+
+/// What every fixture is until its own entry says otherwise: the fields a
+/// still with nothing beside it leaves unsaid.
+const PLAIN: Fixture = Fixture {
+    file: "",
+    covers: "",
+    channels: Channels::Gray,
+    kind: Kind::U8,
+    color: SRGB,
+    alpha: AlphaMode::Opaque,
+    tone: Tone::Gray,
+    coverage: Coverage::Opaque,
+    nodata: None,
+    tolerance: EXACT,
+    sequence: None,
+    first_frame: None,
+    depth: None,
+};
+
+/// Two frames or pages, playing for ever where it plays.
+const TWO_FRAMES: Sequence = Sequence::Animation {
+    count: 2,
+    loops: Loops::Forever,
+};
+const TWO_PAGES: Sequence = Sequence::Pages {
+    count: 2,
+    default: 0,
+};
 
 /// Exact for lossless integer formats: 85/255 and 21845/65535 are both a
 /// third, so one table covers 8- and 16-bit alike.
@@ -128,6 +177,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "png-gray-alpha8.png",
@@ -140,6 +190,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Ramp,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "png-rgb8.png",
@@ -152,6 +203,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "png-rgba8.png",
@@ -164,6 +216,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Ramp,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "png-gray16.png",
@@ -176,6 +229,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "png-gray-alpha16.png",
@@ -188,6 +242,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Ramp,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "png-rgb16.png",
@@ -200,6 +255,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "png-rgba16.png",
@@ -212,6 +268,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Ramp,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "png-gray1.png",
@@ -224,6 +281,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "png-gray4.png",
@@ -236,6 +294,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "png-palette.png",
@@ -248,6 +307,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "png-palette-alpha.png",
@@ -260,6 +320,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::BinaryLastTransparent,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "png-interlaced.png",
@@ -272,6 +333,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // A PNG says it is HDR with a `cICP` chunk and nothing else, so this is
     // the fixture standing between the HDR PNG path and silence.
@@ -286,6 +348,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "png-icc-p3.png",
@@ -298,6 +361,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "png-gama-linear.png",
@@ -310,6 +374,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "png-chrm-p3.png",
@@ -322,6 +387,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // Stored upside down with an `eXIf` chunk saying so, the PNG counterpart
     // of `webp-exif-rotated.webp`.
@@ -336,6 +402,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // Stored 24x32 and displayed 32x24, so that `probe` and `decode` have to
     // agree about a size neither reads off the frame.
@@ -350,6 +417,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // ------------------------------------------------------------ JPEG
     Fixture {
@@ -363,6 +431,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: LOSSY,
+        ..PLAIN
     },
     Fixture {
         file: "jpeg-gray.jpg",
@@ -375,6 +444,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: LOSSY,
+        ..PLAIN
     },
     Fixture {
         file: "jpeg-progressive.jpeg",
@@ -387,6 +457,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: LOSSY,
+        ..PLAIN
     },
     Fixture {
         file: "jpeg-subsampled.jpg",
@@ -399,8 +470,10 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: LOSSY,
+        ..PLAIN
     },
-    // `jpeg-rgb.jpg` with Google's depth block in its XMP.
+    // `jpeg-rgb.jpg` with Google's depth block in its XMP: the gray pattern,
+    // between planes 1 and 4 meters away.
     Fixture {
         file: "jpeg-depth.jpg",
         covers: "JPEG with a GDepth depth map in extended XMP",
@@ -412,6 +485,11 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: LOSSY,
+        depth: Some(Depth {
+            codes: [0.0, 85.0, 170.0, 255.0],
+            distances: Some([1.0, 2.0, 3.0, 4.0]),
+        }),
+        ..PLAIN
     },
     // Stored upside down with an EXIF orientation saying so, the JPEG
     // counterpart of `webp-exif-rotated.webp`.
@@ -426,6 +504,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: LOSSY,
+        ..PLAIN
     },
     // Every field the info panel's About section shows, in EXIF and XMP;
     // `image::exif`'s tests read them. The pixels are `jpeg-rgb.jpg`'s.
@@ -440,6 +519,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: LOSSY,
+        ..PLAIN
     },
     // Stored 24x32 and displayed 32x24, as `jxl-quarter-turn.jxl` is, so
     // that `probe` and `decode` have to agree about a size neither reads
@@ -455,6 +535,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: LOSSY,
+        ..PLAIN
     },
     // ------------------------------------------------------------- GIF
     // Always a palette and always 8-bit, and always RGBA once decoded: the
@@ -471,6 +552,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // The rows stored in four passes rather than in order, GIF's counterpart
     // of Adam7.
@@ -485,6 +567,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // White is the transparent index here, so the last quadrant comes back
     // cleared rather than white behind a hole: see `Tone::ColorLastCleared`.
@@ -499,6 +582,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::BinaryLastTransparent,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // Two frames, the pattern first and an upside-down one second. Passing
     // this table means the first frame is what `load` shows.
@@ -513,6 +597,9 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        sequence: Some(TWO_FRAMES),
+        first_frame: Some("gif-palette.gif"),
+        ..PLAIN
     },
     // Two frames, the pattern first and an upside-down one second, of which
     // the first is also the default image. Passing this table means the
@@ -528,6 +615,9 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        sequence: Some(TWO_FRAMES),
+        first_frame: Some("png-rgb8.png"),
+        ..PLAIN
     },
     // ------------------------------------------------------------ TIFF
     Fixture {
@@ -541,6 +631,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "tiff-rgb8.tif",
@@ -553,6 +644,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "tiff-rgba8.tif",
@@ -565,6 +657,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Ramp,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "tiff-gray16.tif",
@@ -577,6 +670,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "tiff-rgb16.tif",
@@ -589,6 +683,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "tiff-float32.tif",
@@ -601,6 +696,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "tiff-lzw.tif",
@@ -613,6 +709,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "tiff-deflate.tiff",
@@ -625,6 +722,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "tiff-packbits.tif",
@@ -637,6 +735,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "tiff-bigendian.tif",
@@ -649,6 +748,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // Two directories, the pattern first and an upside-down one second.
     // Passing this table means the first is what `load` shows.
@@ -663,6 +763,8 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        sequence: Some(TWO_PAGES),
+        ..PLAIN
     },
     Fixture {
         file: "tiff-icc-p3.tif",
@@ -675,6 +777,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "tiff-icc-p3-16.tif",
@@ -687,6 +790,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // Stored upside down with the `Orientation` tag saying so.
     Fixture {
@@ -700,6 +804,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // Stored 24x32 and displayed 32x24: the header and the pixels have to agree.
     Fixture {
@@ -713,6 +818,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "tiff-tiled.tif",
@@ -725,6 +831,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "tiff-strips.tif",
@@ -737,6 +844,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // TIFF as it turns up in mapping and science: single band, floating
     // point, and encodings `image` cannot read at all.
@@ -751,6 +859,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "tiff-float-predictor.tif",
@@ -763,6 +872,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "tiff-int16.tif",
@@ -775,6 +885,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "tiff-nodata.tif",
@@ -787,7 +898,9 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: Some(-9999.0),
         tolerance: EXACT,
+        ..PLAIN
     },
+    // Three directories, of which the middle one is the first's mask.
     Fixture {
         file: "tiff-mask.tif",
         covers: "a GDAL internal mask between the picture and its second page: not a page, and stepped over to reach the one after it",
@@ -799,6 +912,8 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        sequence: Some(TWO_PAGES),
+        ..PLAIN
     },
     Fixture {
         file: "tiff-jpeg.tif",
@@ -811,6 +926,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: LOSSY,
+        ..PLAIN
     },
     // -------------------------------------------------------- Radiance
     Fixture {
@@ -824,6 +940,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: RGBE,
+        ..PLAIN
     },
     Fixture {
         file: "hdr-view-line.hdr",
@@ -836,6 +953,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: RGBE,
+        ..PLAIN
     },
     Fixture {
         file: "hdr-exposure.hdr",
@@ -848,6 +966,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: RGBE,
+        ..PLAIN
     },
     Fixture {
         file: "hdr-unit-exposure.hdr",
@@ -860,6 +979,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: RGBE,
+        ..PLAIN
     },
     // --------------------------------------------------------- OpenEXR
     Fixture {
@@ -873,6 +993,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "exr-rgba.exr",
@@ -885,6 +1006,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Ramp,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "exr-zip.exr",
@@ -897,6 +1019,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // ------------------------------------------------------------ HEIF
     Fixture {
@@ -910,9 +1033,11 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // The alpha plane of `heic-rgba8.heic` relabeled as a depth map, so
-    // the picture has no alpha and a map beside it.
+    // the picture has no alpha and a map beside it: the alpha ramp, as
+    // codes, since nothing in the file says what they mean.
     Fixture {
         file: "heic-depth.heic",
         covers: "HEIC with a depth map beside it",
@@ -924,6 +1049,11 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        depth: Some(Depth {
+            codes: [255.0, 191.0, 128.0, 64.0],
+            distances: None,
+        }),
+        ..PLAIN
     },
     Fixture {
         file: "heic-rgba8.heic",
@@ -936,6 +1066,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Ramp,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // Monochrome HEIF decodes through its own path, and has to stay one
     // channel rather than being tripled into RGB on the way to the GPU.
@@ -950,6 +1081,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // Gray and alpha arrive as two separate planes here, not interleaved.
     Fixture {
@@ -963,6 +1095,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Ramp,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // 10-bit samples arrive as 0..1023 in a 16-bit word and have to be lifted
     // to full scale, or the picture displays a sixteenth as bright as it is.
@@ -977,6 +1110,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "heif-p3.heif",
@@ -989,6 +1123,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // The same color space said the other way: an ICC profile with no
     // `nclx` box beside it, which is what some cameras write.
@@ -1003,6 +1138,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: NEAR_LOSSLESS,
+        ..PLAIN
     },
     // Stored upside down with an `irot` property saying so. It reads as the
     // ordinary pattern only because the transformation is applied on decode.
@@ -1017,6 +1153,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "avif-rgb8.avif",
@@ -1029,6 +1166,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // ---------------------------------------------------------- JPEG XL
     Fixture {
@@ -1042,6 +1180,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "jxl-gray-alpha8.jxl",
@@ -1054,6 +1193,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Ramp,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "jxl-rgb8.jxl",
@@ -1066,6 +1206,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "jxl-rgba8.jxl",
@@ -1078,6 +1219,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Ramp,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // The depth the file was authored at decides the sample type, so this
     // has to stay 16-bit rather than being flattened to bytes.
@@ -1092,6 +1234,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "jxl-premultiplied.jxl",
@@ -1104,6 +1247,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Ramp,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "jxl-lossy.jxl",
@@ -1116,6 +1260,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: VARDCT,
+        ..PLAIN
     },
     Fixture {
         file: "jxl-container.jxl",
@@ -1128,6 +1273,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "jxl-cicp-pq.jxl",
@@ -1140,6 +1286,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "jxl-icc-p3.jxl",
@@ -1152,6 +1299,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "jxl-rotated.jxl",
@@ -1164,6 +1312,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // Stored 24x32 and displayed 32x24. `probe` and `decode` have to agree
     // about that, which `every_fixture_probes_to_the_size_it_decodes_to` checks.
@@ -1178,6 +1327,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "jxl-animated.jxl",
@@ -1190,6 +1340,9 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        sequence: Some(TWO_FRAMES),
+        first_frame: Some("jxl-rgb8.jxl"),
+        ..PLAIN
     },
     // ------------------------------------------------------------ WebP
     Fixture {
@@ -1203,6 +1356,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // The alpha here is stated by a bit in the VP8L header rather than by an
     // extended container, which is the one place WebP hides it.
@@ -1217,6 +1371,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Ramp,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "webp-lossy-rgb8.webp",
@@ -1229,6 +1384,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: LOSSY,
+        ..PLAIN
     },
     // Lossy plus alpha is two bitstreams: an `ALPH` chunk for the coverage
     // and a `VP8` chunk for the color, which only the extended container can
@@ -1244,6 +1400,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Ramp,
         nodata: None,
         tolerance: LOSSY,
+        ..PLAIN
     },
     // The only thing a WebP has to say about its own color.
     Fixture {
@@ -1257,6 +1414,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // Stored upside down with an `EXIF` chunk saying so, the WebP counterpart
     // of `heic-rotated.heic`.
@@ -1271,6 +1429,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // Two frames, the pattern first and a rotated one second. Passing this
     // table means the first frame was the one composited onto the canvas.
@@ -1285,6 +1444,9 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        sequence: Some(TWO_FRAMES),
+        first_frame: Some("webp-lossless-rgb8.webp"),
+        ..PLAIN
     },
     // ------------------------------------------------------------- ICO
     // The two formats an entry can hold, and what each one costs. A bitmap
@@ -1301,6 +1463,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Ramp,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // A 4-bit palette with a fully opaque AND mask beside it: the shallow
     // bitmap path, and the one an icon written before 32-bit color takes.
@@ -1315,6 +1478,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // How every entry above 48 pixels has been stored since Vista.
     Fixture {
@@ -1328,6 +1492,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Ramp,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // A layout `image`'s own ICO decoder refuses outright, on the strength of
     // a note saying embedded PNGs must be 32-bit. Passing as `Gray` means the
@@ -1344,6 +1509,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // The same path's other payoff: a PNG entry's `iCCP` chunk is read, so an
     // icon can say it is Display P3 like any other PNG.
@@ -1358,10 +1524,11 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
-    // Two entries: the pattern at 32x24 in 4 bits, and a 16x12 thumbnail in
-    // 32. Passing this table at all means the larger one was chosen — see
-    // `the_largest_ico_entry_is_the_one_shown`.
+    // Two entries: the pattern at 32x24 in 4 bits, listed first and the one
+    // shown, and a 16x12 thumbnail in 32. Passing this table at all means
+    // the larger one was chosen — see `the_largest_ico_entry_is_the_one_shown`.
     Fixture {
         file: "ico-multi.ico",
         covers: "ICO directory of several sizes",
@@ -1373,6 +1540,8 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        sequence: Some(TWO_PAGES),
+        ..PLAIN
     },
     // ------------------------------------------------------------- BMP
     Fixture {
@@ -1386,6 +1555,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // Carrying alpha is what forces the `BITMAPV5HEADER` and the bitfield
     // masks that describe where each channel sits in the word.
@@ -1400,6 +1570,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Ramp,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "bmp-palette.bmp",
@@ -1412,6 +1583,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // The other palette width, and with it the run-length coding that only a
     // palette can use.
@@ -1426,6 +1598,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // The same picture with its rows reversed and a negative height saying
     // so, which is how screen capture writes one. Passing this table means
@@ -1441,6 +1614,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // ---------------------------------------------------------- netpbm
     Fixture {
@@ -1454,6 +1628,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     Fixture {
         file: "pnm-gray8.pgm",
@@ -1466,6 +1641,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // 16-bit samples, which netpbm stores big-endian whatever wrote them.
     Fixture {
@@ -1479,6 +1655,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // The ASCII member of the family, under the extension that names no
     // member in particular.
@@ -1493,6 +1670,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // `MAXVAL 1023` in a 16-bit word, which has to be lifted to 65535 or the
     // picture shows at a sixteenth of its brightness. Passing the ordinary
@@ -1508,6 +1686,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // `MAXVAL 1` at the other end, where a sample is one bit and white is
     // whatever the lift makes of it.
@@ -1522,6 +1701,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // PAM generalizes the three above, states its fields as keyword lines
     // rather than bare numbers, and is the only one that carries alpha.
@@ -1536,6 +1716,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Ramp,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
     // ------------------------------------------------------ camera raw
     // Sensor counts under a color filter, which LibRaw demosaics, balances
@@ -1555,6 +1736,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: DEVELOPED,
+        ..PLAIN
     },
     // A PNG under a TIFF name, decoded by sniffing rather than extension.
     Fixture {
@@ -1568,6 +1750,7 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: EXACT,
+        ..PLAIN
     },
 ];
 
@@ -1590,6 +1773,33 @@ const ALIASES: &[&str] = &[
 
 fn directory() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_images")
+}
+
+/// Every fixture decoded, once, in the table's order: what the tests that
+/// look at every fixture read, rather than each decoding the lot again.
+fn decoded() -> &'static [DecodedImage] {
+    static DECODED: OnceLock<Vec<DecodedImage>> = OnceLock::new();
+    DECODED.get_or_init(|| {
+        FIXTURES
+            .iter()
+            .map(|fixture| {
+                load(&directory().join(fixture.file), Overrides::default())
+                    .unwrap_or_else(|error| panic!("{}: {error:#}", fixture.file))
+            })
+            .collect()
+    })
+}
+
+/// Each fixture beside its decoded picture.
+fn fixtures() -> impl Iterator<Item = (&'static Fixture, &'static DecodedImage)> {
+    FIXTURES.iter().zip(decoded())
+}
+
+/// The animated fixtures, each with the still its first frame is.
+fn animations() -> impl Iterator<Item = (&'static str, &'static str)> {
+    FIXTURES
+        .iter()
+        .filter_map(|fixture| Some((fixture.file, fixture.first_frame?)))
 }
 
 fn kind_of(samples: &Samples) -> Kind {
@@ -1666,10 +1876,8 @@ fn expected(tone: Tone, coverage: Coverage) -> [[f32; 4]; 4] {
 /// window in the wrong shape. Anything the header will not say is `None` and
 /// falls back to a default, which is fine; saying the wrong thing is not.
 fn every_fixture_probes_to_the_size_it_decodes_to() {
-    for fixture in FIXTURES {
+    for (fixture, image) in fixtures() {
         let path = directory().join(fixture.file);
-        let image = load(&path, Overrides::default())
-            .unwrap_or_else(|error| panic!("{}: {error:#}", fixture.file));
         let probed = probe(&path).unwrap_or_else(|error| panic!("{}: {error:#}", fixture.file));
 
         if let Some(size) = probed {
@@ -1686,11 +1894,7 @@ fn every_fixture_probes_to_the_size_it_decodes_to() {
 
 #[test]
 fn every_fixture_decodes_to_what_it_says_it_does() {
-    for fixture in FIXTURES {
-        let path = directory().join(fixture.file);
-        let image = load(&path, Overrides::default())
-            .unwrap_or_else(|error| panic!("{}: {error:#}", fixture.file));
-
+    for (fixture, image) in fixtures() {
         let name = format!("{} ({})", fixture.file, fixture.covers);
         assert_eq!((image.width, image.height), (32, 24), "{name}");
         assert_eq!(image.channels(), fixture.channels, "{name}");
@@ -1705,7 +1909,7 @@ fn every_fixture_decodes_to_what_it_says_it_does() {
 
         let table = expected(fixture.tone, fixture.coverage);
         for (index, (x, y)) in PROBES.iter().copied().enumerate() {
-            let found = pixel(&image, x, y);
+            let found = pixel(image, x, y);
             let want = table[index];
 
             // Gray keeps its value in the red slot; alpha, where present, is
@@ -1745,10 +1949,8 @@ fn every_fixture_decodes_to_what_it_says_it_does() {
 /// `decode::raw` says display-referred and the fixture table agrees.
 #[test]
 fn every_fixture_says_what_its_light_is_referred_to() {
-    for fixture in FIXTURES {
+    for (fixture, image) in fixtures() {
         let path = directory().join(fixture.file);
-        let image = load(&path, Overrides::default())
-            .unwrap_or_else(|error| panic!("{}: {error:#}", fixture.file));
         let extension = path.extension().and_then(|extension| extension.to_str());
         let (referred, exposure) = match (extension, fixture.file) {
             (_, "hdr-exposure.hdr") => (Referred::Display, Some(2.0)),
@@ -1763,6 +1965,10 @@ fn every_fixture_says_what_its_light_is_referred_to() {
     }
 }
 
+/// No fixture carries a picture of itself, and none offers the camera's
+/// JPEG: a preview is a courtesy, never a failure, so every fixture answers
+/// the question. What the one raw here says of its own — that it could
+/// carry one and does not — is `decode::raw`'s test.
 #[test]
 fn every_fixture_answers_for_its_preview() {
     for fixture in FIXTURES {
@@ -1770,15 +1976,13 @@ fn every_fixture_answers_for_its_preview() {
         let preview = crate::image::decode::preview(&path, Overrides::default())
             .unwrap_or_else(|error| panic!("{}: {error:#}", fixture.file));
         assert!(preview.is_none(), "{} carries a preview", fixture.file);
-        // Only a raw can carry the camera's JPEG, and the one raw here, a
-        // DNG written by a program rather than a camera, carries none.
         let camera = crate::image::decode::camera_jpeg(&path)
             .unwrap_or_else(|error| panic!("{}: {error:#}", fixture.file));
-        let expected = match fixture.file.ends_with(".dng") {
-            true => crate::image::decode::CameraJpeg::Missing,
-            false => crate::image::decode::CameraJpeg::Unavailable,
-        };
-        assert_eq!(camera, expected, "{}", fixture.file);
+        assert!(
+            !matches!(camera, CameraJpeg::Present(_)),
+            "{} offers the camera's JPEG",
+            fixture.file
+        );
     }
 }
 
@@ -1799,30 +2003,10 @@ fn rejected_fixtures_fail_with_a_useful_message() {
     }
 }
 
-/// A fixture with a depth map, the code the map holds at each of the four
-/// probes, and the distance there where the file states one.
-type Depths = (&'static str, [f32; 4], Option<[f32; 4]>);
-
-/// Every fixture with a depth map. Every other fixture carries none, so
-/// none is made up.
-const DEPTHS: &[Depths] = &[
-    // The alpha ramp, as codes: nothing in the file says what they mean.
-    ("heic-depth.heic", [255.0, 191.0, 128.0, 64.0], None),
-    // The gray pattern, between planes 1 and 4 meters away.
-    (
-        "jpeg-depth.jpg",
-        [0.0, 85.0, 170.0, 255.0],
-        Some([1.0, 2.0, 3.0, 4.0]),
-    ),
-];
-
 #[test]
 fn every_fixture_carries_the_depth_map_it_says_it_does() {
-    for fixture in FIXTURES {
-        let image = load(&directory().join(fixture.file), Overrides::default())
-            .unwrap_or_else(|error| panic!("{}: {error:#}", fixture.file));
-        let Some((_, codes, distances)) = DEPTHS.iter().find(|(file, ..)| *file == fixture.file)
-        else {
+    for (fixture, image) in fixtures() {
+        let Some(Depth { codes, distances }) = fixture.depth else {
             assert!(image.depth.is_none(), "{}: a depth map", fixture.file);
             continue;
         };
@@ -2000,9 +2184,8 @@ fn every_fixture_produces_a_valid_upload_plan() {
             float32_filterable: false,
         },
     ] {
-        for fixture in FIXTURES {
-            let image = load(&directory().join(fixture.file), Overrides::default()).unwrap();
-            let plan = plan(&image, capabilities);
+        for (fixture, image) in fixtures() {
+            let plan = plan(image, capabilities);
             assert_eq!(
                 plan.pixels.as_bytes().len(),
                 plan.bytes_per_row as usize * image.height as usize,
@@ -2098,71 +2281,6 @@ fn a_tagged_orientation_is_applied_on_decode() {
     }
 }
 
-/// What each fixture holds beyond its first image. Everything not listed
-/// here is a still, and `every_fixture_says_what_else_it_holds` checks both
-/// halves of that.
-const SEQUENCES: &[(&str, Sequence)] = &[
-    (
-        "gif-animated.gif",
-        Sequence::Animation {
-            count: 2,
-            loops: Loops::Forever,
-        },
-    ),
-    (
-        "png-animated.png",
-        Sequence::Animation {
-            count: 2,
-            loops: Loops::Forever,
-        },
-    ),
-    (
-        "webp-animated.webp",
-        Sequence::Animation {
-            count: 2,
-            loops: Loops::Forever,
-        },
-    ),
-    (
-        "jxl-animated.jxl",
-        Sequence::Animation {
-            count: 2,
-            loops: Loops::Forever,
-        },
-    ),
-    (
-        "tiff-pages.tif",
-        Sequence::Pages {
-            count: 2,
-            default: 0,
-        },
-    ),
-    // Three directories, of which the middle one is the first's mask.
-    (
-        "tiff-mask.tif",
-        Sequence::Pages {
-            count: 2,
-            default: 0,
-        },
-    ),
-    // The 32x24 entry is listed first and is the one shown.
-    (
-        "ico-multi.ico",
-        Sequence::Pages {
-            count: 2,
-            default: 0,
-        },
-    ),
-];
-
-/// The four animated fixtures and the still each one's first frame is.
-const ANIMATIONS: &[(&str, &str)] = &[
-    ("gif-animated.gif", "gif-palette.gif"),
-    ("png-animated.png", "png-rgb8.png"),
-    ("webp-animated.webp", "webp-lossless-rgb8.webp"),
-    ("jxl-animated.jxl", "jxl-rgb8.jxl"),
-];
-
 /// The color of one pixel, alpha and all set aside: an animation's frames
 /// come back RGBA whatever the still they are compared with holds.
 fn rgb(image: &DecodedImage, x: u32, y: u32) -> [f32; 3] {
@@ -2178,18 +2296,17 @@ fn every_fixture_says_what_else_it_holds() {
     for fixture in FIXTURES {
         let path = directory().join(fixture.file);
         let found = sequence(&path).unwrap_or_else(|error| panic!("{}: {error:#}", fixture.file));
-        let want = SEQUENCES
-            .iter()
-            .find(|(file, _)| *file == fixture.file)
-            .map_or(Sequence::Still, |(_, sequence)| *sequence);
+        let want = fixture.sequence.unwrap_or(Sequence::Still);
         assert_eq!(found, want, "{} ({})", fixture.file, fixture.covers);
     }
-    for (file, _) in SEQUENCES {
-        assert!(
-            FIXTURES.iter().any(|fixture| fixture.file == *file),
-            "{file} is in SEQUENCES but not in FIXTURES"
-        );
-    }
+    assert_eq!(
+        FIXTURES
+            .iter()
+            .filter(|fixture| fixture.sequence.is_some())
+            .count(),
+        7,
+        "the animations and the paged files"
+    );
 }
 
 /// Each animated fixture is the pattern followed by the pattern upside
@@ -2197,7 +2314,8 @@ fn every_fixture_says_what_else_it_holds() {
 /// right time, and again after a rewind, is visible in the pixels.
 #[test]
 fn an_animation_yields_its_frames_in_order() {
-    for (animated, still) in ANIMATIONS {
+    assert_eq!(animations().count(), 4, "the four animated fixtures");
+    for (animated, still) in animations() {
         let still = load(&directory().join(still), Overrides::default()).unwrap();
         let mut source = frames(&directory().join(animated), Overrides::default())
             .unwrap_or_else(|error| panic!("{animated}: {error:#}"));
@@ -2252,7 +2370,7 @@ fn an_animation_yields_its_frames_in_order() {
 /// of the frames is what the clock then plays by.
 #[test]
 fn an_animation_states_the_delays_its_frames_arrive_with() {
-    for (animated, _) in ANIMATIONS {
+    for (animated, _) in animations() {
         let path = directory().join(animated);
         let stated = delays(&path)
             .unwrap_or_else(|error| panic!("{animated}: {error:#}"))
@@ -2310,13 +2428,12 @@ fn a_paged_file_exposes_its_pages() {
     let thumbnail = load_page(&ico, Overrides::default(), 1).unwrap();
     assert_eq!((thumbnail.width, thumbnail.height), (16, 12));
 
-    for fixture in FIXTURES {
+    for (fixture, shown) in fixtures() {
         let path = directory().join(fixture.file);
-        let default = match sequence(&path).unwrap() {
-            Sequence::Pages { default, .. } => default,
+        let default = match fixture.sequence {
+            Some(Sequence::Pages { default, .. }) => default,
             _ => 0,
         };
-        let shown = load(&path, Overrides::default()).unwrap();
         let page = load_page(&path, Overrides::default(), default)
             .unwrap_or_else(|error| panic!("{}: {error:#}", fixture.file));
         assert_eq!(
@@ -2328,7 +2445,7 @@ fn a_paged_file_exposes_its_pages() {
         for (x, y) in PROBES {
             assert_eq!(
                 pixel(&page, x, y),
-                pixel(&shown, x, y),
+                pixel(shown, x, y),
                 "{} at {x},{y}",
                 fixture.file
             );

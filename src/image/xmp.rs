@@ -546,7 +546,7 @@ fn packet_of(path: &Path, opened: Option<&mut Opened>) -> Option<Vec<u8>> {
 /// picture's name with `.xmp` in place of its extension, or, failing that,
 /// after it. `None` where there is neither, or the one there is runs past
 /// [`MAX_PACKET`], which a file holding one packet never does.
-pub fn sidecar(path: &Path) -> Option<Vec<u8>> {
+fn sidecar(path: &Path) -> Option<Vec<u8>> {
     sidecar_names(path)
         .into_iter()
         .find_map(|name| File::open(name).ok())

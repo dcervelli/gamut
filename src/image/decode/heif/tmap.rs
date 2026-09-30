@@ -339,9 +339,7 @@ mod tests {
     }
 
     fn full_box(kind: &[u8; 4], version: u8, body: &[u8]) -> Vec<u8> {
-        let mut out = plain_box(kind, &[&[version, 0, 0, 0][..], body].concat());
-        out.truncate(out.len());
-        out
+        plain_box(kind, &[&[version, 0, 0, 0][..], body].concat())
     }
 
     fn plain_box(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {

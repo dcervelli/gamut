@@ -134,7 +134,7 @@ impl super::Decoder for Ico {
 fn entry(source: &mut dyn super::ReadSeek, chosen: &Entry) -> Result<DecodedImage> {
     let payload = payload(source, chosen)?;
 
-    if payload.starts_with(b"\x89PNG\r\n\x1a\n") {
+    if png::is_png(&payload) {
         return png::decode(&mut Cursor::new(&payload[..]))
             .with_context(|| format!("the {chosen} entry, which holds a PNG"));
     }
@@ -313,13 +313,13 @@ mod tests {
         bytes
     }
 
+    /// The size of the entry the module would show, by the module's own
+    /// choice; and the page it says that is, held to the same entry.
     fn chosen(entries: &[(u8, u8, u16)]) -> (u16, u16) {
         let bytes = dir(1, entries);
         let read = directory(&mut Cursor::new(bytes)).unwrap();
-        let best = read
-            .iter()
-            .max_by_key(|entry| (entry.width as u32 * entry.height as u32, entry.depth))
-            .unwrap();
+        let best = choose(&read);
+        assert!(std::ptr::eq(best, &read[chosen_index(&read)]));
         (best.width, best.height)
     }
 

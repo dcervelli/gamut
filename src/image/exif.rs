@@ -1899,9 +1899,11 @@ mod tests {
         block
     }
 
-    /// The rows of `Camera`, then of `Exposure`.
-    fn camera_rows(ifd0: Block, exif: Block) -> Vec<(String, String)> {
-        let path = written("settings.jpg", &jpeg_with(with_exif(ifd0, exif)));
+    /// The rows of `Camera`, then of `Exposure`, of a JPEG written under
+    /// `name` — a name of the calling test's own, since the tests run at
+    /// once and one must not read another's file.
+    fn camera_rows(name: &str, ifd0: Block, exif: Block) -> Vec<(String, String)> {
+        let path = written(name, &jpeg_with(with_exif(ifd0, exif)));
         let exif = Exif::read(&path);
         let _ = std::fs::remove_file(&path);
         section(&exif, Group::Camera)
@@ -1941,7 +1943,7 @@ mod tests {
         exif.rational(0xa404, &[(2, 1)]); // DigitalZoomRatio
         exif.short(0xa460, 3); // CompositeImage, made while shooting
         assert_eq!(
-            camera_rows(ifd0, exif),
+            camera_rows("settings-words.jpg", ifd0, exif),
             owned(&[
                 ("Camera", "Sony ILCE-7M4"),
                 ("Lens", "Sigma 24-70mm F2.8 DG DN | Art"),
@@ -1984,7 +1986,7 @@ mod tests {
         exif.rational(0xa432, &[(18, 1), (55, 1), (35, 10), (56, 10)]); // LensSpecification
         exif.ascii(0xa433, "Canon"); // LensMake
         assert_eq!(
-            camera_rows(ifd0, exif),
+            camera_rows("lens-range.jpg", ifd0, exif),
             owned(&[
                 ("Camera", "Canon"),
                 ("Lens", "18\u{2013}55 mm f/3.5\u{2013}5.6")
@@ -1998,7 +2000,7 @@ mod tests {
         exif.ascii(0xa433, "Canon"); // LensMake
         exif.ascii(0xa434, "RF50mm F1.8 STM"); // LensModel
         assert_eq!(
-            camera_rows(ifd0, exif),
+            camera_rows("lens-named.jpg", ifd0, exif),
             owned(&[
                 ("Camera", "Canon"),
                 ("Lens", "RF50mm F1.8 STM"),

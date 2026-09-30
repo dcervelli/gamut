@@ -20,8 +20,6 @@ pub(crate) use limits::MAX_SEQUENCE_BYTES;
 use limits::{MAX_DECODED_BYTES, MAX_TEXTURE_DIMENSION, check_decoded_size};
 
 mod dynamic;
-// `pub` for its XMP reader, which `image::xmp` asks for the packet a HEIF
-// keeps in an item only the library's own tables lead to.
 mod heif;
 mod ico;
 mod image_rs;
@@ -128,13 +126,13 @@ impl ReadSeek for Claimed {
 /// reader's. What [`ReadSeek::share`] hands back is a duplicate descriptor,
 /// whose offset is shared with the original — which is exactly why the
 /// offset cannot be used.
-pub struct Positioned<'a> {
+pub(super) struct Positioned<'a> {
     file: &'a File,
     position: u64,
 }
 
 impl<'a> Positioned<'a> {
-    pub fn new(file: &'a File) -> Self {
+    pub(super) fn new(file: &'a File) -> Self {
         Self { file, position: 0 }
     }
 }
@@ -944,7 +942,8 @@ mod tests {
                 "bad" if name.ends_with(".dng") => "camera raw",
                 // Not fixtures: the script, the notes, a profile, the raw
                 // samples' directory, and the one format nothing reads.
-                _ => continue,
+                "generate" | "README" | "display" | "raw" | "unsupported" => continue,
+                other => panic!("{name}: no decoder is expected of a fixture named `{other}-`"),
             };
             let opened = Opened::new(&path).unwrap_or_else(|error| panic!("{name}: {error:#}"));
             assert_eq!(opened.decoder_name(), expected, "{name}");

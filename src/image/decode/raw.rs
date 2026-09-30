@@ -242,7 +242,7 @@ fn take_handle(source: &mut dyn ReadSeek) -> Result<Handle> {
 /// handle reads them for as long as it is open, and it is closed on drop.
 struct Handle {
     data: *mut ffi::Data,
-    _bytes: Vec<u8>,
+    bytes: Vec<u8>,
     /// What `unpack_thumb` answered, once it has: the library refuses to be
     /// asked twice, and a handle kept between questions is.
     thumbnail: Cell<Option<bool>>,
@@ -260,7 +260,7 @@ impl Handle {
         }
         let handle = Self {
             data,
-            _bytes: bytes,
+            bytes,
             thumbnail: Cell::new(None),
         };
         // SAFETY: the buffer outlives the handle, being owned by it, and the
@@ -268,8 +268,8 @@ impl Handle {
         let code = unsafe {
             ffi::libraw_open_buffer(
                 handle.data,
-                handle._bytes.as_ptr().cast(),
-                handle._bytes.len(),
+                handle.bytes.as_ptr().cast(),
+                handle.bytes.len(),
             )
         };
         handle.check("reading the header", code)?;
@@ -352,9 +352,9 @@ impl Handle {
 
         if other.shutter > 0.0 {
             let shutter = if other.shutter < 1.0 {
-                format!("1/{} s", tidy((1.0 / other.shutter).round()))
+                format!("1/{} s", few_decimals((1.0 / other.shutter).round()))
             } else {
-                format!("{} s", tidy(other.shutter))
+                format!("{} s", few_decimals(other.shutter))
             };
             push(&mut rows, SHUTTER, Some(shutter));
         }
@@ -369,13 +369,13 @@ impl Handle {
             );
         }
         if other.iso_speed > 0.0 {
-            push(&mut rows, ISO, Some(tidy(other.iso_speed)));
+            push(&mut rows, ISO, Some(few_decimals(other.iso_speed)));
         }
         if other.focal_len > 0.0 {
             push(
                 &mut rows,
                 FOCAL_LENGTH,
-                Some(format!("{} mm", tidy(other.focal_len))),
+                Some(format!("{} mm", few_decimals(other.focal_len))),
             );
         }
         rows
@@ -503,9 +503,8 @@ impl Handle {
             // camera's multipliers are handed back as the user's, which is
             // the same arithmetic. A file with none — a synthetic DNG, an
             // old scan — keeps the daylight balance its matrix implies.
-            let camera: Vec<f32> = (0..4)
-                .map(|index| ffi::libraw_get_cam_mul(self.data, index))
-                .collect();
+            let camera: [f32; 4] =
+                std::array::from_fn(|index| ffi::libraw_get_cam_mul(self.data, index as c_int));
             if camera[0] > 0.0 && camera[2] > 0.0 {
                 for (index, multiplier) in camera.into_iter().enumerate() {
                     ffi::libraw_set_user_mul(self.data, index as c_int, multiplier);
@@ -599,8 +598,9 @@ fn correlated_temperature(
     (2000.0..=12500.0).contains(&kelvin).then_some(kelvin)
 }
 
-/// A number to a few decimals, without the trailing zeros.
-fn tidy(value: f32) -> String {
+/// A number to a few decimals, without the trailing zeros. The EXIF
+/// reader's `tidy` does the same to a number already written out.
+fn few_decimals(value: f32) -> String {
     let text = format!("{value:.3}");
     text.trim_end_matches('0').trim_end_matches('.').to_string()
 }
@@ -934,6 +934,8 @@ impl<'a> Directory<'a> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Seek;
+
     use super::*;
     use crate::image::decode::Decoder;
 
@@ -1035,6 +1037,27 @@ mod tests {
         assert!(!tiff_holds_raw(&whole[..8 + 2 + 12 + 8]));
         // The whole second entry present, the terminator not.
         assert!(tiff_holds_raw(&whole[..8 + 2 + 24]));
+    }
+
+    /// The one raw among the fixtures, a DNG written by a program rather
+    /// than a camera, could carry the camera's JPEG of itself and does not:
+    /// it says so, rather than failing, and offers no preview.
+    #[test]
+    fn the_fixture_carries_no_camera_jpeg() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("test_images")
+            .join("dng-cfa.dng");
+        let mut source = std::io::BufReader::new(std::fs::File::open(&path).unwrap());
+        assert_eq!(
+            Raw.camera_jpeg(&mut source).unwrap(),
+            super::super::CameraJpeg::Missing
+        );
+        source.rewind().unwrap();
+        assert!(
+            Raw.preview(&mut source, super::super::Overrides::default())
+                .unwrap()
+                .is_none()
+        );
     }
 
     /// The fixture's header, as the panel will read it: the camera the

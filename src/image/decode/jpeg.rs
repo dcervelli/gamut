@@ -43,7 +43,7 @@ impl super::Decoder for Jpeg {
     }
 
     fn sniff(&self, header: &[u8]) -> bool {
-        header.starts_with(b"\xff\xd8\xff")
+        is_jpeg(header)
     }
 
     fn dimensions(&self, source: &mut dyn ReadSeek) -> Result<Option<(u32, u32)>> {
@@ -87,6 +87,12 @@ impl super::Decoder for Jpeg {
             .context("reading the file")?;
         decode(&bytes, overrides)
     }
+}
+
+/// Whether `header` opens with a JPEG's start-of-image marker and the
+/// marker after it.
+fn is_jpeg(header: &[u8]) -> bool {
+    header.starts_with(b"\xff\xd8\xff")
 }
 
 /// JPEG, container and all, turned the way its EXIF says.

@@ -69,7 +69,7 @@ impl Order {
         }
     }
 
-    pub fn read_u16(self, bytes: &[u8], at: usize) -> Option<u16> {
+    fn read_u16(self, bytes: &[u8], at: usize) -> Option<u16> {
         let bytes: [u8; 2] = bytes.get(at..at + 2)?.try_into().ok()?;
         Some(match self {
             Order::Little => u16::from_le_bytes(bytes),
@@ -172,7 +172,7 @@ pub fn entries_at(block: &[u8], order: Order, at: usize, skipping: &[u16]) -> Op
 }
 
 /// The size of one component of each TIFF type.
-pub fn type_size(kind: u16) -> Option<u16> {
+fn type_size(kind: u16) -> Option<u16> {
     Some(match kind {
         1 | 2 | 6 | 7 => 1,
         3 | 8 => 2,

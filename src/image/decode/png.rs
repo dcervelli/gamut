@@ -53,7 +53,7 @@ impl super::Decoder for Png {
     }
 
     fn sniff(&self, header: &[u8]) -> bool {
-        header.starts_with(b"\x89PNG\r\n\x1a\n")
+        is_png(header)
     }
 
     fn dimensions(&self, source: &mut dyn ReadSeek) -> Result<Option<(u32, u32)>> {
@@ -97,7 +97,7 @@ impl super::Decoder for Png {
         reader
             .read_exact(&mut signature)
             .context("reading the PNG signature")?;
-        if signature != *b"\x89PNG\r\n\x1a\n" {
+        if !is_png(&signature) {
             bail!("not a PNG");
         }
         let mut delays = Vec::new();
@@ -157,6 +157,12 @@ impl super::Decoder for Png {
             },
         )?))
     }
+}
+
+/// Whether `header` opens with the PNG signature: what the registry sniffs
+/// for, and what an ICO's entry is told apart by.
+pub(super) fn is_png(header: &[u8]) -> bool {
+    header.starts_with(b"\x89PNG\r\n\x1a\n")
 }
 
 /// An `fcTL` chunk's delay, a fraction of a second, the way `image` reads

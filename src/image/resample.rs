@@ -147,7 +147,7 @@ pub fn resize(raster: Raster, size: [u32; 2]) -> Raster {
 /// [`resize`], its rows divided between `bands` threads — a choice
 /// `resize` makes from the picture, and a test makes to hold a divided
 /// walk to a plain one.
-pub fn resize_on(raster: Raster, size: [u32; 2], bands: usize) -> Raster {
+fn resize_on(raster: Raster, size: [u32; 2], bands: usize) -> Raster {
     let empty = raster.width == 0 || raster.height == 0 || size[0] == 0 || size[1] == 0;
     if [raster.width, raster.height] == size || empty {
         return raster;

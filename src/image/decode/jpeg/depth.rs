@@ -33,7 +33,7 @@ const GUID: usize = 32;
 /// The depth map a JPEG's XMP carries, or `None` where it carries none this
 /// can read. A map that will not decode costs the readout its depth and
 /// nothing else, so every failure here is a `None`.
-pub fn find(bytes: &[u8]) -> Option<Arc<DepthMap>> {
+pub(super) fn find(bytes: &[u8]) -> Option<Arc<DepthMap>> {
     let (main, extensions) = segments(bytes);
     let main = Xmp::parse(main?)?;
     let property = |xmp: &Xmp, name: &str| first(xmp, google::NAMESPACE, name);

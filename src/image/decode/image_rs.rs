@@ -278,15 +278,15 @@ impl FrameSource for GifFrames {
     }
 }
 
-/// BMP's signature is two letters, which is thin enough that plain text can
-/// wear it — `BM` opens plenty of English sentences. The DIB header size that
-/// follows the file header is what makes the guess safe: it is a small number
-/// from a known set, and four bytes of prose are not.
 /// OpenEXR's magic number.
 fn is_exr(header: &[u8]) -> bool {
     header.starts_with(b"\x76\x2f\x31\x01")
 }
 
+/// BMP's signature is two letters, which is thin enough that plain text can
+/// wear it — `BM` opens plenty of English sentences. The DIB header size that
+/// follows the file header is what makes the guess safe: it is a small number
+/// from a known set, and four bytes of prose are not.
 fn is_bmp(header: &[u8]) -> bool {
     let Some(size) = header.get(14..18) else {
         return false;

@@ -397,13 +397,6 @@ fn xmp_of(handle: &ImageHandle) -> Option<Vec<u8>> {
 /// 32768 x 32768 could not be displayed even in principle.
 const MAX_PIXELS: u64 = 32768 * 32768;
 
-/// Is this the start of an ISO base media file whose brand says still image?
-///
-/// The brand list lives in `libheif` rather than here, so a format its plugins
-/// learn to open is recognized without this file changing. `MayBe` means the
-/// header did not reach the end of the brand list, which for a real HEIF is
-/// worth handing on: `decode` gives a better message than the registry's
-/// "unsupported image format" would.
 /// What the `ftyp` box's brands say the file is — its major brand and the
 /// compatible ones after it, since an AVIF's major brand may be the plain
 /// `mif1` with `avif` among the compatibles — or `None` for a box that is
@@ -433,6 +426,13 @@ fn brand(header: &[u8]) -> Option<&'static str> {
     heic.then_some("heic")
 }
 
+/// Is this the start of an ISO base media file whose brand says still image?
+///
+/// The brand list lives in `libheif` rather than here, so a format its plugins
+/// learn to open is recognized without this file changing. `MayBe` means the
+/// header did not reach the end of the brand list, which for a real HEIF is
+/// worth handing on: `decode` gives a better message than the registry's
+/// "unsupported image format" would.
 fn is_heif(header: &[u8]) -> bool {
     use libheif_rs::FileTypeResult::*;
     // The call reads a length prefix out of the buffer, so it needs enough of
@@ -718,8 +718,6 @@ mod tests {
 
     use libheif_rs::{ColorPrimaries, TransferCharacteristics};
 
-    use crate::image::{Primaries, Transfer};
-
     #[test]
     fn ten_bit_white_reaches_full_scale() {
         let scale = Scale::new(10);
@@ -785,12 +783,11 @@ mod tests {
         // And the invented variants, which stand for no code point at all,
         // must land on "unspecified" rather than on a real space.
         assert_eq!(
-            crate::image::color::cicp::transfer(code(T::Unknown as i32)),
-            Transfer::Srgb
-        );
-        assert_eq!(
-            crate::image::color::cicp::primaries(code(P::Unknown as i32)),
-            Primaries::Bt709
+            crate::image::color::cicp::color_space(
+                code(P::Unknown as i32),
+                code(T::Unknown as i32)
+            ),
+            ColorSpace::SRGB
         );
     }
 

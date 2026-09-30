@@ -23,7 +23,7 @@ pub fn color_space(primaries_code: u8, transfer_code: u8) -> ColorSpace {
     }
 }
 
-pub fn transfer(code: u8) -> Transfer {
+fn transfer(code: u8) -> Transfer {
     match code {
         // The one exact match: sRGB's own curve.
         13 => Transfer::Srgb,
@@ -47,7 +47,7 @@ pub fn transfer(code: u8) -> Transfer {
     }
 }
 
-pub fn primaries(code: u8) -> Primaries {
+fn primaries(code: u8) -> Primaries {
     match code {
         // BT.2020, which BT.2100 shares.
         9 => Primaries::Bt2020,
