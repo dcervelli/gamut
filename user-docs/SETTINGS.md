@@ -1,7 +1,8 @@
 # Settings
 
-`gamut` reads two files when it starts. One is yours and the other is its
-own, and neither has to exist.
+`gamut` reads two files when it starts: the configuration file, which is
+yours and which it reads again whenever you save it, and the state file,
+which is its own. Neither has to exist.
 
 ## The configuration file
 
@@ -17,6 +18,10 @@ gesture listed, commented out at its default, run:
 mkdir -p ~/.config/gamut
 gamut --print-config > ~/.config/gamut/config
 ```
+
+Or press `Ctrl+,` (`⌘,` on a Mac), or **Edit configuration file** at the foot
+of the help popup, which writes that file for you if there is none and opens
+it — see [Editing it from the window](#editing-it-from-the-window).
 
 Then remove the `#` from any line you want to change. A line you leave
 commented out keeps following the default if a later version changes it. The
@@ -151,6 +156,32 @@ Some of what the left button does on the picture comes before its slot and
 cannot be changed: a drag begun while a region is asked for draws it, one
 from a handle pulls the handle, one with `zoom.fit`'s key held draws a box
 to zoom to, and a click on a handle makes it the current one.
+
+### Editing it from the window
+
+`Ctrl+,` (`⌘,` on a Mac, or **Settings** in the menu bar), or **Edit
+configuration file** at the foot of the help popup, opens the configuration
+file in your editor. Where there is no file yet it writes one first, with every
+setting commented out at its default.
+
+On Linux the editor is the one `$VISUAL` names, or else `$EDITOR`, arguments
+and all; with neither set, it is your desktop's default for text files. Where
+the editor's desktop entry says it runs in a terminal, as `nvim`'s and
+`vim`'s do, it opens in a new terminal window — the one `xdg-terminal-exec`
+or `$TERMINAL` starts. An editor with no desktop entry is taken to run in a
+terminal too. A graphical editor opens its own window.
+
+On a Mac the file opens in the application that opens plain text, which you
+choose in Finder: Get Info on any `.txt` file, then **Open with** and
+**Change All**. `$EDITOR` is not read, since `gamut` started from the Dock
+or Finder never sees it.
+
+### While `gamut` is running
+
+Saving the file puts the keys and gestures in it in force at once, and the
+window says it was reloaded, or names the first line it could not use.
+Everything else in it is how the window opens: the panels stay as you have
+them, and `browse_folder` waits for the next start.
 
 ## The state file
 

@@ -1,13 +1,15 @@
 //! The help popup: every key the program answers, in the sections `--help`
 //! lists them under, with what each does and when it does anything. `?`
 //! and `/` open it, as does the button at the foot of the right strip; the
-//! same again, `Esc`, or a click outside closes it.
+//! same again, `Esc`, or a click outside closes it. Under the table, below
+//! a hairline, one button: the configuration file opened in an editor,
+//! which is where the keys the table lists are changed.
 //!
 //! A popup like the chooser's — its open state is in egui's memory under
 //! [`id`], so `Esc`, the click outside and the rule that one popup is open
 //! at a time are all the toolkit's — with nothing of its own to hand back:
 //! the table is read once from the application's [`Naming`] and laid out,
-//! and nothing on it can be pressed.
+//! and nothing on it can be pressed but the button under it.
 //!
 //! The table is three columns: the keys, what they do, and the condition
 //! on which they do anything. A row whose condition does not hold right
@@ -20,12 +22,13 @@
 //! [`Naming`]: super::control::Naming
 
 use egui::{
-    Frame, Label, LayerId, PopupAnchor, PopupCloseBehavior, PopupKind, RectAlign, RichText,
-    layers::ShapeIdx, pos2, vec2,
+    Button, Frame, Label, LayerId, PopupAnchor, PopupCloseBehavior, PopupKind, RectAlign,
+    RichText, Sense, layers::ShapeIdx, pos2, vec2,
 };
 
 use super::chrome::Pass;
 use super::control::{Command, Control};
+use super::tooltip::Tip;
 use super::info::HEADER_GAP;
 use super::style::{MENU_PADDING, MENU_RADIUS, POPUP_WIDTH, SCROLLBAR_GUTTER, SCROLLBAR_WIDTH};
 use super::{RULE_WIDTH, Rect, TEXT_SIZE, fonts, icon, info, panel, rule};
@@ -103,6 +106,10 @@ const HEADINGS: [&str; 3] = ["Key", "Action", "When"];
 pub const UNBOUND: &str = "unbound";
 /// The gap between the warning mark and that word.
 const MARK_GAP: f32 = 4.0;
+/// The room above and below the hairline between the table and the button
+/// under it, and how tall that button is: the dialogs' buttons' height.
+const FOOT_GAP: f32 = 8.0;
+const FOOT_BUTTON: f32 = 24.0;
 
 /// Where the popup goes: the middle of `content`, at most [`POPUP_WIDTH`] by
 /// [`HEIGHT_MAX`] and inside the padding everything floating over the image
@@ -173,12 +180,41 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
         // to the width the rows have, and the rows' width must not depend
         // on whether the bar is showing.
         ui.spacing_mut().scroll.bar_inner_margin = SCROLLBAR_GUTTER - SCROLLBAR_WIDTH;
+        // The rows scroll in what the foot leaves them.
+        let foot = 2.0 * FOOT_GAP + pass.grid.line_width(RULE_WIDTH) + FOOT_BUTTON;
         egui::ScrollArea::vertical()
             .id_salt("help table")
             .auto_shrink(false)
+            .max_height(ui.available_height() - foot)
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
             .show(ui, |ui| table(pass, ui, &sections, width));
+        ui.add_space(FOOT_GAP);
+        rule(pass, ui, width);
+        ui.add_space(FOOT_GAP);
+        // Centered under the hairline, which runs the table's width.
+        ui.allocate_ui_with_layout(
+            vec2(width, FOOT_BUTTON),
+            egui::Layout::top_down(egui::Align::Center),
+            |ui| edit_button(pass, ui),
+        );
     });
+}
+
+/// The button under the table, with the key that does the same beside its
+/// words, as a menu's items have theirs.
+fn edit_button(pass: &mut Pass, ui: &mut egui::Ui) {
+    let control = Control::EditConfig;
+    let mut button = Button::new(RichText::new(control.label()).size(TEXT_SIZE))
+        .sense(Sense::CLICK)
+        .min_size(vec2(0.0, FOOT_BUTTON));
+    if let Some(key) = pass.namer.shortcut(control) {
+        button = button.shortcut_text(RichText::new(key).size(TEXT_SIZE));
+    }
+    let response = ui.add(button);
+    let response = pass.tooltip(response, Tip::Control(control));
+    if response.clicked() {
+        pass.press(control);
+    }
 }
 
 /// Paints the band a popup's headings sit on, into `shape`, set aside for

@@ -21,9 +21,10 @@
 //!   through its `Exec` line like any other, which the specification requires
 //!   entries to keep for exactly this reason. Speaking the activation
 //!   protocol would mean linking a D-Bus client for one menu.
-//! - **Entries that want a terminal.** `Terminal=true` asks to be run inside
-//!   one, and there is no terminal here to run it in — nor any way to know
-//!   which the user would want.
+//! - **Entries that want a terminal, on the menu.** `Terminal=true` asks to
+//!   be run inside one, and an image editor never does; what does is a text
+//!   editor, which is what `edit` looks for, and it gives the entry a
+//!   terminal — see [`in_terminal`].
 //! - **`%i`, and the deprecated field codes.** The icon pair is dropped
 //!   rather than passed on: a program is being handed a file, not a window to
 //!   decorate.
@@ -72,6 +73,8 @@ pub struct Opener {
     words: Vec<String>,
     /// Where the entry itself is, which is what `%k` stands for.
     entry: PathBuf,
+    /// Whether it asks to be run in a terminal: `Terminal=true`.
+    terminal: bool,
 }
 
 impl Opener {
@@ -159,6 +162,13 @@ pub fn for_file(path: &Path) -> Vec<Opener> {
     if types.is_empty() {
         return Vec::new();
     }
+    offering(types, false)
+}
+
+/// Every program the desktop says can open a file of any of `types`, the
+/// default first and the rest by name — those that ask for a terminal too
+/// where `terminals` says, and only then.
+fn offering(types: &[&str], terminals: bool) -> Vec<Opener> {
     let associations = Associations::read(types);
     let dirs = application_dirs();
 
@@ -194,7 +204,7 @@ pub fn for_file(path: &Path) -> Vec<Opener> {
         if !seen.insert(candidate.id.clone()) {
             continue;
         }
-        if let Some(opener) = read_entry(&candidate, &dirs, types) {
+        if let Some(opener) = read_entry(&candidate, &dirs, types, terminals) {
             openers.push(opener);
         }
     }
@@ -246,7 +256,165 @@ fn distinguish(openers: &mut [Opener]) {
     }
 }
 
-/// Hands `path` to `opener`, and returns as soon as it has been started.
+/// Hands `path` to `opener`, and returns as soon as it has been started —
+/// in a process group of its own, and collected by a thread: see [`start`].
+pub fn open(opener: &Opener, path: &Path) -> Result<()> {
+    let mut argv = opener.argv(path);
+    if argv.is_empty() {
+        return Err(anyhow!("{} says nothing to run", opener.name));
+    }
+    let program = argv.remove(0);
+    start(Command::new(&program).args(argv))
+        .with_context(|| format!("starting {}", opener.name))
+}
+
+/// Opens the text file at `path` in the editor `VISUAL` or `EDITOR` names,
+/// or else in the desktop's default for plain text — each in a terminal of
+/// its own where it wants one — and returns as soon as it has been started.
+/// With neither, the file goes to `xdg-open`, which on a desktop with an
+/// opener of its own asks that.
+pub fn edit(path: &Path) -> Result<()> {
+    let dirs = application_dirs();
+    let (argv, name, terminal) = match named_editor() {
+        // Run as git runs it, through the shell, so that the line's own
+        // arguments and quoting are read as the user wrote them.
+        Some(editor) => {
+            let terminal = wants_terminal(&dirs, program(&editor));
+            (shell_arguments(&editor, path), editor, terminal)
+        }
+        None => match text_default() {
+            Some(opener) => (opener.argv(path), opener.name.clone(), opener.terminal),
+            None => {
+                return start(Command::new("xdg-open").arg(path)).context("starting xdg-open");
+            }
+        },
+    };
+    if terminal {
+        return in_terminal(&argv, &name);
+    }
+    let (program, arguments) = argv.split_first().context("nothing to run")?;
+    start(Command::new(program).args(arguments)).with_context(|| format!("starting {name}"))
+}
+
+/// The editor the user names, as the shell would run it — a command line,
+/// with any arguments it carries: `VISUAL`, then `EDITOR`, as git reads
+/// them. `None` where neither is set to anything.
+fn named_editor() -> Option<String> {
+    ["VISUAL", "EDITOR"]
+        .into_iter()
+        .filter_map(|name| std::env::var(name).ok())
+        .map(|editor| editor.trim().to_string())
+        .find(|editor| !editor.is_empty())
+}
+
+/// The program a command line runs: its first word, without the directory.
+fn program(line: &str) -> &str {
+    let first = line.split_whitespace().next().unwrap_or_default();
+    first.rsplit('/').next().unwrap_or(first)
+}
+
+/// What `sh` is run with to run `editor` on `path`, as git runs it: the
+/// command line as a script, with the path after it as the script's one
+/// argument, so that the path is never read as shell at all.
+fn shell_arguments(editor: &str, path: &Path) -> Vec<OsString> {
+    vec![
+        "sh".into(),
+        "-c".into(),
+        format!("{editor} \"$@\"").into(),
+        editor.into(),
+        path.into(),
+    ]
+}
+
+/// Whether the editor `program` runs wants a terminal, as its desktop entry
+/// says: `Terminal=true` on the first entry, in the order the directories
+/// are searched, whose `Exec` runs the same program. An editor with no entry
+/// is taken to want one, which is what `EDITOR` has always meant — the
+/// terminal git or crontab is already in — and what a graphical editor
+/// installed without an entry survives anyway: a terminal left open beside
+/// its window.
+fn wants_terminal(dirs: &[PathBuf], program: &str) -> bool {
+    let mut seen = HashSet::new();
+    for dir in dirs {
+        for id in walk(dir) {
+            // The first entry of an id is the one in force, whatever it says;
+            // a later one of the same id is the one it stands in front of.
+            if !seen.insert(id.clone()) {
+                continue;
+            }
+            let Some(text) = entry_paths(&id)
+                .into_iter()
+                .find_map(|tail| read_capped(&dir.join(tail), MAX_ENTRY_BYTES))
+            else {
+                continue;
+            };
+            if let Some(terminal) = runs_in_terminal(&text, program) {
+                return terminal;
+            }
+        }
+    }
+    true
+}
+
+/// Whether the entry `text` asks for a terminal, where it is an application
+/// whose `Exec` runs `program`; `None` where it is not one.
+fn runs_in_terminal(text: &str, program: &str) -> Option<bool> {
+    let mut exec = None;
+    let mut application = false;
+    let mut hidden = false;
+    let mut terminal = false;
+    for (key, value) in group(text, "Desktop Entry") {
+        match key {
+            "Type" => application = value == "Application",
+            "Exec" => exec = Some(value),
+            "Hidden" => hidden |= value == "true",
+            "Terminal" => terminal = value == "true",
+            _ => {}
+        }
+    }
+    let words = words(exec?)?;
+    let runs = words.first()?;
+    let runs = runs.rsplit('/').next().unwrap_or(runs);
+    (application && !hidden && runs == program).then_some(terminal)
+}
+
+/// The desktop's default for plain text, installed: the first of the
+/// defaults the association files list that is.
+fn text_default() -> Option<Opener> {
+    const TEXT: &[&str] = &["text/plain"];
+    let offered = offering(TEXT, true);
+    Associations::read(TEXT)
+        .default
+        .iter()
+        .find_map(|id| offered.iter().find(|opener| opener.id == *id))
+        .cloned()
+}
+
+/// Starts `argv` in a new terminal: `xdg-terminal-exec`, the freedesktop
+/// proposal's way of asking for the user's own, then the terminal `TERMINAL`
+/// names, then Debian's `x-terminal-emulator`, each handed the command after
+/// `-e`, which all three take — the first of them installed. `name` is what
+/// is being run, for saying so where none is.
+fn in_terminal(argv: &[OsString], name: &str) -> Result<()> {
+    let terminals = ["xdg-terminal-exec".to_string()]
+        .into_iter()
+        .chain(
+            std::env::var("TERMINAL")
+                .ok()
+                .filter(|terminal| !terminal.trim().is_empty()),
+        )
+        .chain(["x-terminal-emulator".to_string()]);
+    for terminal in terminals {
+        match start(Command::new(&terminal).arg("-e").args(argv)) {
+            Ok(()) => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error).with_context(|| format!("starting {terminal}")),
+        }
+    }
+    Err(anyhow!("no terminal to run {name} in"))
+}
+
+/// Starts `command`, and returns as soon as it has been started.
 ///
 /// The program is put in a process group of its own, so that it outlives the
 /// window that started it: a viewer launched from a terminal and then closed
@@ -254,43 +422,17 @@ fn distinguish(openers: &mut [Opener]) {
 /// group being signaled together. Nobody waits on it in line — a thread does
 /// that, and does nothing else — so the child is collected rather than left a
 /// zombie, and is adopted and goes on running if this program leaves first.
-pub fn open(opener: &Opener, path: &Path) -> Result<()> {
+/// Nothing is written to it and nothing is read back; standard error is left
+/// alone, so that a program that fails says so where every other message
+/// from here goes.
+fn start(command: &mut Command) -> std::io::Result<()> {
     use std::os::unix::process::CommandExt as _;
 
-    let mut argv = opener.argv(path);
-    if argv.is_empty() {
-        return Err(anyhow!("{} says nothing to run", opener.name));
-    }
-    let program = argv.remove(0);
-    let mut child = Command::new(&program)
-        .args(argv)
-        // Nothing is written to it and nothing is read back: what it has to
-        // say about the file is said in its own window. Standard error is
-        // left alone, so that a program that fails to start says so where
-        // every other message from here goes.
+    let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .process_group(0)
-        .spawn()
-        .with_context(|| format!("starting {}", opener.name))?;
-    std::thread::spawn(move || {
-        let _ = child.wait();
-    });
-    Ok(())
-}
-
-/// Opens the text file at `path` in whatever the desktop opens it with,
-/// through `xdg-open`, which asks the desktop's own associations.
-pub fn edit(path: &Path) -> Result<()> {
-    use std::os::unix::process::CommandExt as _;
-
-    let mut child = Command::new("xdg-open")
-        .arg(path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .process_group(0)
-        .spawn()
-        .context("starting xdg-open")?;
+        .spawn()?;
     std::thread::spawn(move || {
         let _ = child.wait();
     });
@@ -392,10 +534,15 @@ fn entry_paths(id: &str) -> Vec<PathBuf> {
 /// menu.
 ///
 /// `None` for everything that would be a dead item: an entry that is not a
-/// program, one hidden from menus, one wanting a terminal, one whose program
-/// is not installed — and one that never claimed the type at all, unless the
-/// user associated it by hand.
-fn read_entry(candidate: &Candidate, dirs: &[PathBuf], types: &[&str]) -> Option<Opener> {
+/// program, one hidden from menus, one wanting a terminal unless `terminals`
+/// says one can be had, one whose program is not installed — and one that
+/// never claimed the type at all, unless the user associated it by hand.
+fn read_entry(
+    candidate: &Candidate,
+    dirs: &[PathBuf],
+    types: &[&str],
+    terminals: bool,
+) -> Option<Opener> {
     let (path, text) = dirs
         .iter()
         .flat_map(|dir| {
@@ -451,7 +598,7 @@ fn read_entry(candidate: &Candidate, dirs: &[PathBuf], types: &[&str]) -> Option
         }
     }
 
-    if kind != Some("Application") || hidden || terminal {
+    if kind != Some("Application") || hidden || (terminal && !terminals) {
         return None;
     }
     // Case-insensitively, as the index above is read: a type is a type
@@ -481,6 +628,7 @@ fn read_entry(candidate: &Candidate, dirs: &[PathBuf], types: &[&str]) -> Option
         id: candidate.id.clone(),
         words,
         entry: path,
+        terminal,
     })
 }
 
@@ -749,7 +897,54 @@ mod tests {
             id: "editor.desktop".to_string(),
             words: words(exec).expect("an exec line with words in it"),
             entry: PathBuf::from("/usr/share/applications/editor.desktop"),
+            terminal: false,
         }
+    }
+
+    /// An editor's entry says whether it wants a terminal, found by the
+    /// program its `Exec` runs wherever that is and whatever it is given;
+    /// an entry for another program, one that is not an application, and
+    /// one deleted by `Hidden` say nothing.
+    #[test]
+    fn an_editor_s_entry_says_whether_it_wants_a_terminal() {
+        let nvim = "[Desktop Entry]\nType=Application\nExec=nvim %F\nTerminal=true\n";
+        let zed = "[Desktop Entry]\nType=Application\nExec=/usr/bin/zeditor %U\n";
+        assert_eq!(runs_in_terminal(nvim, "nvim"), Some(true));
+        assert_eq!(runs_in_terminal(zed, "zeditor"), Some(false));
+        assert_eq!(runs_in_terminal(nvim, "vim"), None);
+        let link = "[Desktop Entry]\nType=Link\nExec=nvim\nTerminal=true\n";
+        assert_eq!(runs_in_terminal(link, "nvim"), None);
+        let hidden = format!("{nvim}Hidden=true\n");
+        assert_eq!(runs_in_terminal(&hidden, "nvim"), None);
+        // What another group of the file says is not the entry's.
+        let action = "[Desktop Entry]\nType=Application\nExec=nvim\n\
+                      [Desktop Action new]\nExec=nvim --new\nTerminal=true\n";
+        assert_eq!(runs_in_terminal(action, "nvim"), Some(false));
+    }
+
+    /// An editor is known by its program's name, wherever it is and
+    /// whatever it is given.
+    #[test]
+    fn an_editor_is_known_by_its_program() {
+        assert_eq!(program("nvim"), "nvim");
+        assert_eq!(program("/usr/bin/vim -p"), "vim");
+        assert_eq!(program("  code --wait"), "code");
+    }
+
+    /// The editor's line is the shell's to read, and the path is handed over
+    /// beside it rather than written into it: a path with a quote or a space
+    /// in it reaches the editor whole.
+    #[test]
+    fn the_path_is_an_argument_and_never_shell() {
+        let path = Path::new("/home/o'brien/my config");
+        let argv = shell_arguments("printf %s", path);
+        assert_eq!(argv[2], "printf %s \"$@\"");
+        assert_eq!(argv[4], path.as_os_str());
+        let output = Command::new(&argv[0])
+            .args(&argv[1..])
+            .output()
+            .expect("sh runs");
+        assert_eq!(output.stdout, path.as_os_str().as_encoded_bytes());
     }
 
     /// An `Exec` line is split the way a shell would split it, and only that

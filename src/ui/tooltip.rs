@@ -540,6 +540,7 @@ pub fn words(tip: Tip) -> Option<String> {
             | Control::Back
             | Control::Forward
             | Control::Thumb(_)
+            | Control::EditConfig
             // Said from which picture is up, which only the application
             // knows — see `Namer::tooltip`.
             | Control::CameraJpeg

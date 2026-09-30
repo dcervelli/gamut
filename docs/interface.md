@@ -1365,6 +1365,55 @@ with the file on screen is one that has to be found again, and a missing
 button could not have explained itself.
 
 
+## Editing the configuration file
+
+`Ctrl+,` — a Mac's `⌘,`, and its Settings item — and the button under the
+help popup's table open the configuration file in an editor, through
+`App::press`'s `Control::EditConfig`. `settings::edit` writes
+`Config::template()` first where there is no file, opening it with
+`create_new` so that a file written in the meantime is never replaced, and
+hands the path to `openers::edit`.
+
+On Linux the editor is `VISUAL`, then `EDITOR`, read as git reads them — a
+command line handed to `sh -c` with the path after it as `"$@"`, so that
+`code --wait` works and a path with a quote in it is never read as shell —
+and with neither, the desktop's default for `text/plain`, found through the
+same desktop entries and association files the open menu reads. Whether it
+needs a terminal is what its desktop entry's `Terminal=` says: for the
+default that is its own entry, and for a named editor the first entry, in
+search order, whose `Exec` runs the same program. An editor with no entry is
+given a terminal, which is what `EDITOR` has always meant — the terminal git
+is already in. The terminal is `xdg-terminal-exec`, then `TERMINAL`, then
+`x-terminal-emulator`, each handed `-e`. `xdg-open` is not used where an
+answer was found, because its generic path ignores `Terminal=` and would run
+`nvim` with no terminal at all; it is the last resort, where the desktop
+names no default.
+
+On a Mac it is the application Launch Services opens `public.plain-text`
+with, and never `EDITOR`: an application started from Finder or the Dock is
+handed none of the shell's environment, so honoring it would make the key
+open a different editor by how the program was started.
+
+## The configuration read again
+
+`App::config_watch` is a `watch::Watch` on the file, polled with the rest on
+`App::poll`'s cadence, and idle until `main` calls `App::watch_config` — the
+tests build `App` from a `Config` of their own and never read the user's.
+A change that settles is read with `Config::load` and handed to
+`App::reconfigure`, which swaps the `Rc`s the keymap and the gestures are
+held in. Everything that names a key reads them through those each frame —
+the `Namer` for the tooltips and the help popup, `FrameInput` for the
+gestures — so nothing else has to be told, except a Mac's menu bar, whose key
+equivalents are set on its items: `App::rekey_menubar` builds the same tree
+again from the new keymap, and `menubar::Bar::rekey` sets each tagged item's
+key, the tags being the same items' since the tree depends on the keymap only
+for its keys.
+
+The panels the file sets are not applied again. They say how the window
+opens, and a save that reset every panel the user had toggled since would
+be undoing their work to apply a line they did not touch. `browse_folder`
+was settled when the command line was read.
+
 ## The empty window and the file dialog
 
 A program started with no path opens on nothing — and comes back to

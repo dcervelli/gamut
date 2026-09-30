@@ -2,7 +2,10 @@
 //! them: the list the menu under the open button offers. Where the answer is
 //! kept is the platform's — `linux.rs` reads the freedesktop desktop entries,
 //! and `macos.rs` asks Launch Services. And `edit`, which opens a text file
-//! in whatever edits text, for the configuration file.
+//! in whatever edits text, for the configuration file: on Linux the editor
+//! `VISUAL` or `EDITOR` names, or else the desktop's default for plain text,
+//! each in a terminal where its desktop entry asks for one; on a Mac the
+//! application that opens plain text.
 
 #[cfg(target_os = "linux")]
 mod linux;

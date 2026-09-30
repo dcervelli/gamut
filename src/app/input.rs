@@ -225,9 +225,10 @@ pub enum Action {
     /// The same dialog for a folder, which stands for the images inside
     /// it as a directory on the command line does.
     OpenFolder,
-    /// Open the configuration file in the desktop's text editor, writing
-    /// it first from the template `--print-config` prints where there is
-    /// none — see `settings::edit`. A Mac's `⌘,`; Linux binds nothing to it.
+    /// Open the configuration file in the user's editor, writing it first
+    /// from the template `--print-config` prints where there is none — see
+    /// `settings::edit`. `Ctrl+,`, a Mac's `⌘,`: where each desktop's
+    /// programs keep their settings.
     OpenSettings,
 }
 
@@ -374,6 +375,7 @@ pub(super) fn action_of(tip: Tip) -> Option<Action> {
         Tip::Control(Control::Paste) => Action::Paste,
         Tip::Control(Control::Region) => ToggleRegion,
         Tip::Control(Control::Help) => ShowHelp,
+        Tip::Control(Control::EditConfig) => OpenSettings,
         Tip::Control(Control::Play) => TogglePlay,
         Tip::Control(Control::StepBack) => PreviousFrame,
         Tip::Control(Control::StepForward) => NextFrame,
@@ -1077,13 +1079,13 @@ pub static ROWS: &[Row] = &[
             [key('<')]
         ),
     },
-    // A Mac's Settings item: nothing on Linux, where the file is where
-    // `--print-config` says and the editor is whoever the user runs.
+    // The key every desktop's programs open their settings with; the
+    // button at the foot of the help popup, and a Mac's Settings item.
     Row {
         section: Section::Interface,
         when: None,
         help: "Open the configuration file in a text editor",
-        keys: one!("interface.settings", OpenSettings, []),
+        keys: one!("interface.settings", OpenSettings, [typed(CTRL, ',')]),
     },
     Row {
         section: Section::Interface,
@@ -2318,14 +2320,7 @@ impl App {
             // things.
             OpenFiles => return self.press(Control::OpenFiles),
             OpenFolder => return self.press(Control::OpenFolder),
-            // Nothing changes in the window: the editor opens beside it,
-            // and what is written there is read at the next start.
-            OpenSettings => {
-                if let Err(error) = crate::settings::edit() {
-                    report(&error);
-                    self.toast(briefly(&error), Level::Error);
-                }
-            }
+            OpenSettings => return self.press(Control::EditConfig),
         }
         Effect::Redraw
     }
@@ -3361,6 +3356,17 @@ impl App {
                     self.chooser.open(self.files.paths(), self.files.index());
                     let wanted = self.chooser.wanted(0..FIRST_ROWS, &self.thumbs);
                     self.thumbnailer.prioritize(wanted);
+                }
+                Effect::Redraw
+            }
+            // The button at the foot of the help popup, and the key. The
+            // popup goes, since what is next is in the editor beside the
+            // window, and what is saved there is read again as it lands.
+            Control::EditConfig => {
+                self.close_menus();
+                if let Err(error) = crate::settings::edit() {
+                    report(&error);
+                    self.toast(briefly(&error), Level::Error);
                 }
                 Effect::Redraw
             }

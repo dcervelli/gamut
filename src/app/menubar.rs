@@ -554,6 +554,22 @@ impl App {
         self.publish_menu();
     }
 
+    /// Gives the menu bar's items the keys the keymap now binds, after the
+    /// configuration has been read again: the same tree, built again, so
+    /// that each tag is the same item and only its key has moved.
+    pub(super) fn rekey_menubar(&self) {
+        let Some(menubar) = &self.menubar else {
+            return;
+        };
+        let mut builder = Builder {
+            keys: &self.keys,
+            tags: Vec::new(),
+        };
+        let menus = menus(&mut builder);
+        debug_assert_eq!(builder.tags, menubar.tags, "the same items, in the same order");
+        menubar.bar.rekey(&menus);
+    }
+
     /// Hands the menu bar how each item is to be shown now. Called as each
     /// handler settles, when whatever it changed has been changed: a menu
     /// opens between handlers, never during one.

@@ -260,6 +260,7 @@ fn run() -> Result<ExitCode> {
             let _ = proxy.send_event(app::UserEvent::Menu(chosen));
         }));
     }
+    app.watch_config();
     // Said last, so that it is the one up: a configuration that did not
     // take is why the window is not as it was asked to be, and whoever
     // started it from a launcher has no terminal to read.

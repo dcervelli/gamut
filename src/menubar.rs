@@ -179,6 +179,9 @@ struct Ivars {
     snapshot: RefCell<Snapshot>,
     /// Each tag's own title, which it wears when the snapshot gives none.
     titles: RefCell<Vec<String>>,
+    /// Each tag's item, where the tag is an item's: what [`Bar::rekey`]
+    /// binds again.
+    items: RefCell<Vec<Option<Retained<NSMenuItem>>>>,
     /// The menu that [`Node::List`] opens, made again from the snapshot.
     list: OnceCell<Retained<NSMenu>>,
 }
@@ -338,6 +341,7 @@ impl Bar {
             identity,
             snapshot: RefCell::default(),
             titles: RefCell::default(),
+            items: RefCell::default(),
             list: OnceCell::new(),
         });
         // SAFETY: `init` on an allocated NSObject subclass with its ivars set.
@@ -370,6 +374,38 @@ impl Bar {
     pub fn publish(&self, snapshot: Snapshot) {
         *self.target.ivars().snapshot.borrow_mut() = snapshot;
     }
+
+    /// Gives each of the application's items the key `menus` gives it, or
+    /// none: `menus` is the tree that was installed, built again from a
+    /// keymap read again, so that its tags are the same items'.
+    pub fn rekey(&self, menus: &[Menu]) {
+        let items = self.target.ivars().items.borrow();
+        for menu in menus {
+            rekey(&items, &menu.nodes);
+        }
+    }
+}
+
+/// The items of `nodes` and of the submenus in them keyed again.
+fn rekey(items: &[Option<Retained<NSMenuItem>>], nodes: &[Node]) {
+    for node in nodes {
+        match node {
+            Node::Item { key, tag, .. } => {
+                let Some(Some(item)) = items.get(*tag) else {
+                    continue;
+                };
+                match key {
+                    Some(key) => set_key(item, key),
+                    None => {
+                        item.setKeyEquivalent(&NSString::from_str(""));
+                        item.setKeyEquivalentModifierMask(NSEventModifierFlags::empty());
+                    }
+                }
+            }
+            Node::Submenu { nodes, .. } => rekey(items, nodes),
+            _ => {}
+        }
+    }
 }
 
 /// `node` built, and added to `menu`.
@@ -383,6 +419,11 @@ fn add(menu: &NSMenu, node: &Node, target: &Target, app: &NSApplication, mtm: Ma
                 titles.resize(*tag + 1, String::new());
             }
             titles[*tag] = title.clone();
+            let mut items = target.ivars().items.borrow_mut();
+            if items.len() <= *tag {
+                items.resize(*tag + 1, None);
+            }
+            items[*tag] = Some(built.clone());
             menu.addItem(&built);
         }
         Node::Standard {

@@ -59,9 +59,8 @@ way: `⇧⌘O`, `⌘`-Arrows, `⌦`, `Return`.
 The menu bar holds what the buttons and keys do, with each item's key beside
 it — the key bound now, so one changed in the configuration file shows there.
 An item is grayed out where it would do nothing. Settings (`⌘,`) opens the
-configuration file in your text editor, first writing it with every setting
-commented out at its default if there is none; a change takes effect the next
-time `gamut` starts.
+configuration file in the application that opens plain text — see
+[Settings](SETTINGS.md#editing-it-from-the-window).
 
 ## Zoom and position
 
@@ -715,7 +714,7 @@ where all of it is set.
 | `` ` `` | Show or hide the panels around the image | `interface.toggle` |
 | `~` | The same, and closes the histogram, information, minimap and file list | `interface.toggle-panels` |
 | `?`, `/` | Show the keys: every one of them, what it does and when. Again, `Esc` or a click outside closes it. The button at the foot of the right strip does the same | `interface.help` |
-| (none) | Open the configuration file in the desktop's text editor, writing it first if there is none | `interface.settings` |
+| `Ctrl+,` | Open the configuration file in your editor, writing it first if there is none. The button at the foot of the help popup does the same | `interface.settings` |
 | `q`, `Esc` | Quit. `Esc` closes a popup, a message or a region, or brings the panels back | `interface.quit`, `interface.dismiss` |
 
 The panels are opaque and the image is fitted inside them, so hiding them

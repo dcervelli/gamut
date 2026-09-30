@@ -8,6 +8,11 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Added
 
+- **Edit configuration file**, a button at the foot of the help popup, and
+  `Ctrl+,` on Linux: opens the configuration file in your editor, writing it
+  first with every setting at its default where there is none, as the Mac's
+  Settings item (`⌘,`) already did.
+
 - A **Depth** pixel format, beside Hex, Decimal and Mapped: for a picture
   carrying a depth map, the readout says how far away the pixel under the
   pointer was. An iPhone's portrait HEIC reads as a distance in meters,
@@ -23,6 +28,14 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   display keys, a copy and an export all work on it.
 
 ### Changed
+
+- On Linux, the configuration file opens in the editor `$VISUAL` or
+  `$EDITOR` names, or else in the desktop's default for text files, in a
+  terminal of its own where the editor's desktop entry asks for one. A
+  default text editor that runs in a terminal, such as `nvim`, no longer
+  starts with no terminal to run in.
+- Keys and gestures changed in the configuration file take effect as the
+  file is saved, rather than at the next start.
 
 - The pixel readout's formats — the value, and for a map the coordinates
   and how a latitude is written — are remembered between runs in the state

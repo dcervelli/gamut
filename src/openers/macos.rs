@@ -93,6 +93,11 @@ pub fn open(opener: &Opener, path: &Path) -> Result<()> {
 /// Opens the text file at `path` in the application that opens plain text:
 /// the one Finder would, had the file an extension that said it was text.
 /// Asked by type rather than of the file, whose name has no extension.
+///
+/// Not `EDITOR`: an application started from Finder or the Dock is handed
+/// none of the shell's environment, so honoring it would make the same key
+/// open a different editor by how the program happened to be started. The
+/// plain-text default is the Mac's own answer, set in Finder's Get Info.
 pub fn edit(path: &Path) -> Result<()> {
     autoreleasepool(|_| {
         let file = NSURL::from_file_path(path)

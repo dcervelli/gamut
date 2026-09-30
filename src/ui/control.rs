@@ -199,6 +199,10 @@ pub enum Control {
     /// disk: what `Backspace` presses. Not drawn anywhere; a control so
     /// that the key goes through `App::press` as every other job does.
     Remove,
+    /// The button at the foot of the help popup that opens the
+    /// configuration file in an editor — see `settings::edit`. `Ctrl+,`,
+    /// a Mac's `⌘,`, comes through here too.
+    EditConfig,
 }
 
 impl Control {
@@ -274,6 +278,7 @@ impl Control {
             Control::Forward => "Forward".to_string(),
             Control::Thumb(row) => format!("Show file {}", row + 1),
             Control::Remove => "Remove from list".to_string(),
+            Control::EditConfig => "Edit configuration file".to_string(),
         }
     }
 }
@@ -554,6 +559,7 @@ impl Control {
         Control::Forward,
         Control::Thumb(0),
         Control::Remove,
+        Control::EditConfig,
     ];
 
     /// Whether `control` is a kind [`Control::ALL`] lists — which is every
@@ -623,7 +629,8 @@ impl Control {
             | Control::Back
             | Control::Forward
             | Control::Thumb(_)
-            | Control::Remove => true,
+            | Control::Remove
+            | Control::EditConfig => true,
         }
     }
 }

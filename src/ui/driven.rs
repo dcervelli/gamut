@@ -2247,7 +2247,8 @@ fn the_chooser_scrolls_a_moved_cursor_into_view() {
 
 /// The help button at the foot of the right strip hands back its press; the popup
 /// it opens lays the table out — the three headings, each section's title
-/// and each row's three columns — and takes no key from the window.
+/// and each row's three columns — with the button under it, and takes no
+/// key from the window.
 #[test]
 fn the_help_popup_lays_the_keys_out() {
     let mut harness = open(WINDOW, 1, panels());
@@ -2306,6 +2307,14 @@ fn the_help_popup_lays_the_keys_out() {
             "{label} is on the popup"
         );
     }
+    assert!(!harness.ctx.egui_wants_keyboard_input());
+
+    // The button under the table hands back its press, and takes no key
+    // from the window either.
+    assert_eq!(
+        click(&mut harness, "Edit configuration file"),
+        [Command::Press(Control::EditConfig)]
+    );
     assert!(!harness.ctx.egui_wants_keyboard_input());
 
     // A click on the lit button hands back the same press, and the popup is

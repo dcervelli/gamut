@@ -288,6 +288,12 @@ pub struct App {
     /// follow rather than stay in the theme it opened under.
     theme: Theme,
     theme_watch: theme::Watch,
+    /// The configuration file, watched on the same cadence, so that a key
+    /// or a gesture changed in it is in force once the file is saved — see
+    /// [`App::reconfigure`]. Idle until `main` asks for it: the tests build
+    /// the application from a configuration of their own, and the user's
+    /// file is never theirs to read.
+    config_watch: Watch,
     /// When to look at it next.
     next_poll: Instant,
     /// What the header said the first file's size was, so that the window can
@@ -546,6 +552,7 @@ impl App {
             awaiting_window: false,
             theme: Theme::detect(),
             theme_watch,
+            config_watch: Watch::idle(),
             next_poll: Instant::now() + watch::INTERVAL,
             loader,
             animation: None,
@@ -1564,6 +1571,7 @@ impl App {
             .also(Effect::redraw_if(self.arranging_counts()))
             .also(self.poll_order())
             .also(self.poll_theme())
+            .also(self.poll_config())
             .also(self.poll_copies())
     }
 
@@ -1920,6 +1928,42 @@ impl App {
             return Effect::Nothing;
         }
         self.panels.paste = paste;
+        Effect::Redraw
+    }
+
+    /// Starts watching the configuration file, wherever it is, and whether
+    /// or not there is one yet: a file written later is read as it lands.
+    pub fn watch_config(&mut self) {
+        if let Some(path) = crate::settings::config_path() {
+            self.config_watch = Watch::new(&path);
+        }
+    }
+
+    /// Reads the configuration file again once a change to it has settled.
+    fn poll_config(&mut self) -> Effect {
+        if !self.config_watch.poll() {
+            return Effect::Nothing;
+        }
+        let (config, complaint) = Config::load();
+        self.reconfigure(config, complaint)
+    }
+
+    /// Puts in force what can change in `config` while the window is up:
+    /// the keys and the gestures, and with them everything that names them —
+    /// the tooltips, the help popup, and a Mac's menu bar. The panels it
+    /// sets are how the window opens, and toggling one since is not undone;
+    /// whether a file named alone browses its folder was settled when the
+    /// command line was read. `complaint` is what the file got wrong, said
+    /// in place of the word that it was read.
+    pub(super) fn reconfigure(&mut self, config: Config, complaint: Option<String>) -> Effect {
+        self.keys = Rc::new(config.keys);
+        self.gestures = Rc::new(config.gestures);
+        #[cfg(target_os = "macos")]
+        self.rekey_menubar();
+        match complaint {
+            Some(complaint) => self.toast(complaint, Level::Warning),
+            None => self.toast(RECONFIGURED, Level::Message),
+        }
         Effect::Redraw
     }
 
@@ -2800,6 +2844,9 @@ fn hdr_state_of(offered: bool, speaks_modes: bool, monitor: Option<Mode>) -> Hdr
     Hdr::Available
 }
 
+/// Said when the configuration file has been read again and taken whole.
+const RECONFIGURED: &str = "Configuration reloaded.";
+
 /// Said when a raw arrives with the camera's JPEG asked for and none in it.
 const NO_CAMERA_JPEG_SHOWN: &str = "No camera JPEG in this file; showing the developed picture.";
 
@@ -3232,6 +3279,31 @@ mod tests {
             StateFile::none(),
             threads(),
         )
+    }
+
+    /// The configuration read again puts its keys and gestures in force,
+    /// and says so — or says what it got wrong. The panels it sets are left
+    /// as the window has them.
+    #[test]
+    fn a_configuration_read_again_rebinds_the_keys() {
+        let mut app = opened_on_nothing();
+        app.panels.show_histogram = true;
+        let mut config = options().config;
+        config
+            .keys
+            .bind("interface.help", vec![keymap::Chord::read("F1").unwrap()])
+            .unwrap();
+        config.show_histogram = false;
+        let _ = app.reconfigure(config, None);
+        assert_eq!(app.keys.spelled("interface.help"), "F1");
+        assert!(app.panels.show_histogram);
+        let toast = app.toasts.showing().expect("the reload is said");
+        assert_eq!(toast.message, RECONFIGURED);
+
+        let _ = app.reconfigure(options().config, Some("Configuration line 3: no".into()));
+        assert_eq!(app.keys.spelled("interface.help"), "?, /");
+        let toast = app.toasts.showing().expect("the problem is said");
+        assert_eq!(toast.message, "Configuration line 3: no");
     }
 
     /// The application as `gamut` alone opens it: no list, and nothing
