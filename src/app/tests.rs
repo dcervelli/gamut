@@ -196,8 +196,7 @@ fn answer(app: &mut App, mode: Reload) {
     // Asked for in the rendering the application prefers, as `App::send`
     // fills every request in with.
     let asked_rendering = app.rendering;
-    let decoded =
-        crate::loader::decode_rendering(&path, app.files.overrides(), asked, asked_rendering);
+    let decoded = crate::loader::decode_rendering(&path, app.overrides, asked, asked_rendering);
     let outcome = decoded.map(|(image, _, rendering, camera_jpeg)| Ready {
         stats: Stats::scan(&image),
         exif: exif::Exif::read(&path),
@@ -1761,7 +1760,7 @@ fn a_reply_the_user_has_stepped_past_is_dropped() {
 
     // The first file arrives late, after the user has moved past it.
     let path = app.files.path(1).to_path_buf();
-    let image = decode::load(&path, app.files.overrides()).expect("we just wrote it");
+    let image = decode::load(&path, app.overrides).expect("we just wrote it");
     let _ = app.deliver(Decoded {
         generation: overtaken,
         file: Opened {

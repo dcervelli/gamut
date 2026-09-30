@@ -5,7 +5,7 @@ use egui::{
     Align2, Label, RichText, Sense, TextFormat, WidgetInfo, WidgetType, pos2, text::LayoutJob, vec2,
 };
 
-use crate::image::display::{AutoWindow, Headroom, ToneMap};
+use crate::image::display::{AutoWindow, Colormap, Headroom, ToneMap};
 
 use super::chrome::{BAR_PADDING, BUTTON_SIZE, Corners, Pass, STEP_SEAM, measure};
 use super::control::Control;
@@ -314,25 +314,81 @@ pub(super) fn state_words(pass: &mut Pass, ui: &mut egui::Ui, current: &Current)
 /// asked for. What the bounds are is in the tooltip for anyone reading the
 /// bar rather than the panel.
 fn describe_state(current: &Current, headroom: Headroom) -> Vec<String> {
-    let mut parts = Vec::new();
-    if current.display.auto() != AutoWindow::Off {
-        parts.push(current.display.auto().label().to_string());
+    state_items(current, headroom)
+        .into_iter()
+        .map(|item| item.short())
+        .collect()
+}
+
+/// One thing being done to the picture, as the bar's words and the
+/// tooltip's sentences both say it — from one reading, so that the two
+/// cannot disagree about what is in force.
+enum StateItem {
+    Window(AutoWindow),
+    Exposure(f32),
+    FalseColor(Colormap),
+    Highlights(&'static str),
+}
+
+/// What is being done to the picture, in the order the bar says it: the
+/// window where one is derived, the exposure where it is not zero, the
+/// false color where one is on — a reading of one channel, which the
+/// display leaves off a color image, and so does the bar — and what is
+/// becoming of the highlights.
+fn state_items(current: &Current, headroom: Headroom) -> Vec<StateItem> {
+    let display = &current.display;
+    let mut items = Vec::new();
+    if display.auto() != AutoWindow::Off {
+        items.push(StateItem::Window(display.auto()));
     }
-    if current.display.exposure_stops() != 0.0 {
-        parts.push(format!(
-            "{} EV",
-            histogram::stops_label(current.display.exposure_stops())
-        ));
+    if display.exposure_stops() != 0.0 {
+        items.push(StateItem::Exposure(display.exposure_stops()));
     }
-    // The false color is a reading of one channel, and the display leaves
-    // it off a color image; so does the bar.
-    if current.display.false_colored(current.image.is_gray()) {
-        parts.push(current.display.colormap().label().to_string());
+    if display.false_colored(current.image.is_gray()) {
+        items.push(StateItem::FalseColor(display.colormap()));
     }
     if let Some(highlights) = describe_highlights(current, headroom) {
-        parts.push(highlights.to_string());
+        items.push(StateItem::Highlights(highlights));
     }
-    parts
+    items
+}
+
+impl StateItem {
+    /// The bar's word or two for it.
+    fn short(&self) -> String {
+        match self {
+            StateItem::Window(auto) => auto.label().to_string(),
+            StateItem::Exposure(stops) => format!("{} EV", histogram::stops_label(*stops)),
+            StateItem::FalseColor(colormap) => colormap.label().to_string(),
+            StateItem::Highlights(words) => words.to_string(),
+        }
+    }
+
+    /// The tooltip's sentence for it.
+    fn sentence(&self, current: &Current) -> String {
+        match self {
+            StateItem::Window(auto) => {
+                let [low, high] = window_bounds(current);
+                format!(
+                    "{} window spans {low} to {high}.",
+                    capitalized(auto.label())
+                )
+            }
+            StateItem::Exposure(stops) => {
+                format!("Exposure {} EV.", histogram::stops_label(*stops))
+            }
+            StateItem::FalseColor(colormap) => {
+                format!("{} false color.", capitalized(colormap.label()))
+            }
+            // The one of them that is not a setting: what is becoming of
+            // the picture, in the words the bar sets in bold.
+            StateItem::Highlights(CLIPPED) => "The image is currently clipped.".to_string(),
+            StateItem::Highlights(_) => format!(
+                "The highlights are rolled off by the {} curve.",
+                current.display.tone_map().label()
+            ),
+        }
+    }
 }
 
 /// The word for a picture whose highlights are being thrown away.
@@ -400,38 +456,10 @@ fn window_bounds(current: &Current) -> [String; 2] {
 /// bar's own line is: nothing is being done, so there are no words there to
 /// rest on.
 pub fn explain_state(current: &Current, headroom: Headroom) -> Vec<String> {
-    let display = &current.display;
-    let mut said = Vec::new();
-    if display.auto() != AutoWindow::Off {
-        let [low, high] = window_bounds(current);
-        said.push(format!(
-            "{} window spans {low} to {high}.",
-            capitalized(display.auto().label())
-        ));
-    }
-    if display.exposure_stops() != 0.0 {
-        said.push(format!(
-            "Exposure {} EV.",
-            histogram::stops_label(display.exposure_stops())
-        ));
-    }
-    if display.false_colored(current.image.is_gray()) {
-        said.push(format!(
-            "{} false color.",
-            capitalized(display.colormap().label())
-        ));
-    }
-    match describe_highlights(current, headroom) {
-        // The one of them that is not a setting: what is becoming of the
-        // picture, in the words the bar sets in bold.
-        Some(CLIPPED) => said.push("The image is currently clipped.".to_string()),
-        Some(_) => said.push(format!(
-            "The highlights are rolled off by the {} curve.",
-            display.tone_map().label()
-        )),
-        None => {}
-    }
-    said
+    state_items(current, headroom)
+        .into_iter()
+        .map(|item| item.sentence(current))
+        .collect()
 }
 
 #[cfg(test)]

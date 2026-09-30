@@ -93,17 +93,47 @@ pub(super) struct Files {
     /// [`Files::relist`] leaves them out; opening one by name again is what
     /// puts it back.
     hidden: HashSet<PathBuf>,
-    overrides: decode::Overrides,
     /// Numbers the requests. Only the newest one's reply is acted on.
     generation: u64,
     pending: Option<Pending>,
+}
+
+/// A read the list has asked for, as far as the list knows it: which read
+/// it is, of which file, how and from where, and which page where one
+/// was named. `App::send` makes the loader's [`Request`] of it, adding
+/// what is the application's to say — the decode overrides, which of a
+/// raw's renderings is wanted, and the page the file was left on — so
+/// that no half-made request ever exists.
+pub(super) struct Asked {
+    pub generation: u64,
+    pub index: usize,
+    pub path: PathBuf,
+    pub mode: Reload,
+    pub source: Source,
+    pub page: Option<usize>,
+}
+
+impl Asked {
+    /// The loader's request for this, under `overrides` and `rendering`.
+    pub(super) fn request(self, overrides: decode::Overrides, rendering: Rendering) -> Request {
+        Request {
+            generation: self.generation,
+            index: self.index,
+            path: self.path,
+            overrides,
+            mode: self.mode,
+            source: self.source,
+            page: self.page,
+            rendering,
+        }
+    }
 }
 
 impl Files {
     /// `index` is the file to open first: the first one whose header could be
     /// read, which is not necessarily the first one named. An empty list is
     /// a program opened on nothing, and `index` is then nothing either.
-    pub(super) fn new(paths: Vec<PathBuf>, index: usize, overrides: decode::Overrides) -> Self {
+    pub(super) fn new(paths: Vec<PathBuf>, index: usize) -> Self {
         let mut files = Self {
             paths,
             places: HashMap::new(),
@@ -112,7 +142,6 @@ impl Files {
             index,
             leaving: None,
             hidden: HashSet::new(),
-            overrides,
             generation: 0,
             pending: None,
         };
@@ -186,12 +215,8 @@ impl Files {
     /// walk, since one particular file was named; and not held back by a
     /// read in flight, as `adopt` is not — a pick wins over whatever step
     /// was on its way.
-    pub(super) fn go_to(&mut self, index: usize) -> Request {
+    pub(super) fn go_to(&mut self, index: usize) -> Asked {
         self.request(index, Reload::Fresh, None, Source::Disk)
-    }
-
-    pub(super) fn overrides(&self) -> decode::Overrides {
-        self.overrides
     }
 
     /// The read that has been asked for and not yet answered, if any.
@@ -215,7 +240,7 @@ impl Files {
     /// named directory would otherwise put it back into. A paste that will
     /// not arrive is walked past like a file that will not decode: the rest
     /// of the list was asked for too.
-    pub(super) fn open_first(&mut self, source: Source) -> Request {
+    pub(super) fn open_first(&mut self, source: Source) -> Asked {
         if let Source::Clipboard(_) = source {
             self.adopted.push(self.paths[self.index].clone());
         }
@@ -245,7 +270,7 @@ impl Files {
     /// same neighbor over and over while a slow file opens. Only the last of
     /// those requests is decoded; the ones passed over are files the user has
     /// already scrolled past.
-    pub(super) fn step(&mut self, forward: bool) -> Option<Request> {
+    pub(super) fn step(&mut self, forward: bool) -> Option<Asked> {
         if self.paths.len() < 2 {
             return None;
         }
@@ -271,7 +296,7 @@ impl Files {
     /// flight: a file being written continuously would otherwise stack up a
     /// decode every interval, and the reply already on its way carries a
     /// watch taken later than this one anyway.
-    pub(super) fn reload(&mut self) -> Option<Request> {
+    pub(super) fn reload(&mut self) -> Option<Asked> {
         if self.pending.is_some() || self.paths.is_empty() {
             return None;
         }
@@ -281,7 +306,7 @@ impl Files {
     /// Asks for another page of the file on screen. `None` while a read is
     /// in flight, as for a reload: a key held down would otherwise stack up
     /// a decode per repeat, each aimed at a page the next has moved past.
-    pub(super) fn page(&mut self, page: usize) -> Option<Request> {
+    pub(super) fn page(&mut self, page: usize) -> Option<Asked> {
         if self.pending.is_some() || self.paths.is_empty() {
             return None;
         }
@@ -298,7 +323,7 @@ impl Files {
     /// a reload: that read may be a step, which this would otherwise cancel.
     /// The reply to it says which rendering it was asked for, and
     /// `App::deliver` asks again if the preference has moved since.
-    pub(super) fn rerender(&mut self) -> Option<Request> {
+    pub(super) fn rerender(&mut self) -> Option<Asked> {
         if self.pending.is_some() || self.paths.is_empty() {
             return None;
         }
@@ -318,7 +343,7 @@ impl Files {
     /// was going somewhere, but a paste is one particular picture that was
     /// asked for, and wandering off to a neighbor instead would answer a
     /// question nobody put.
-    pub(super) fn adopt(&mut self, path: PathBuf, source: Source) -> Request {
+    pub(super) fn adopt(&mut self, path: PathBuf, source: Source) -> Asked {
         // Beside the file on screen, or at the head of a list with nothing
         // on it yet.
         let at = match self.paths.is_empty() {
@@ -343,7 +368,7 @@ impl Files {
     /// At the end rather than beside the file on screen, as a paste goes:
     /// a paste is one picture that belongs next to where the user is, and
     /// this is a set of files that keeps the order it was chosen in.
-    pub(super) fn append(&mut self, paths: Vec<PathBuf>) -> Option<Request> {
+    pub(super) fn append(&mut self, paths: Vec<PathBuf>) -> Option<Asked> {
         let first = paths.first()?.clone();
         let fresh: Vec<PathBuf> = paths
             .into_iter()
@@ -375,7 +400,7 @@ impl Files {
     /// next, or back to the previous from the last of the list — the walk
     /// that was being made, rather than a wrap round to the first. `None`
     /// with nowhere to go.
-    pub(super) fn step_away(&mut self) -> Option<Request> {
+    pub(super) fn step_away(&mut self) -> Option<Asked> {
         let forward = self.index + 1 < self.paths.len();
         self.step(forward)
     }
@@ -436,7 +461,7 @@ impl Files {
     /// the trash — at `index`, or at the end where the list has grown
     /// shorter than that, and asks for it. `adopted` is whether a rebuild
     /// of the list should keep it, as it was kept before.
-    pub(super) fn reinstate(&mut self, path: PathBuf, index: usize, adopted: bool) -> Request {
+    pub(super) fn reinstate(&mut self, path: PathBuf, index: usize, adopted: bool) -> Asked {
         let at = index.min(self.paths.len());
         // The file on screen moves along when the newcomer goes in ahead of
         // it — where there is one: an empty list has nothing on screen to
@@ -502,13 +527,7 @@ impl Files {
         }
     }
 
-    fn request(
-        &mut self,
-        index: usize,
-        mode: Reload,
-        step: Option<Step>,
-        source: Source,
-    ) -> Request {
+    fn request(&mut self, index: usize, mode: Reload, step: Option<Step>, source: Source) -> Asked {
         self.generation += 1;
         let announced = self.pending.as_ref().and_then(|pending| pending.announced);
         self.pending = Some(Pending {
@@ -519,17 +538,13 @@ impl Files {
             since: Instant::now(),
             announced,
         });
-        Request {
+        Asked {
             generation: self.generation,
             index,
             path: self.paths[index].clone(),
-            overrides: self.overrides,
             mode,
             source,
             page: None,
-            // Filled in by `App::send` from the viewer's preference, as the
-            // page is from where the file was left.
-            rendering: Rendering::Developed,
         }
     }
 
@@ -688,7 +703,7 @@ impl Files {
     /// A reply would not go on screen. Carries a walk on past the file, so
     /// that one bad file cannot trap navigation; `None` once it has tried them
     /// all, or when the read was not part of a walk.
-    pub(super) fn failed(&mut self, from: usize, step: Option<Step>) -> Option<Request> {
+    pub(super) fn failed(&mut self, from: usize, step: Option<Step>) -> Option<Asked> {
         let step = step?;
         if step.remaining == 0 {
             return None;

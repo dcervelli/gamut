@@ -40,7 +40,7 @@ use crate::image::decode::{self, CameraJpeg, Rendering};
 use crate::image::display::{Display, Headroom, Startup};
 use crate::image::orient::Turn;
 use crate::image::sequence::Sequence;
-use crate::loader::{Decoded, Loader, Opened, Ready, Reload, Request, Source};
+use crate::loader::{Decoded, Loader, Opened, Ready, Reload, Source};
 use crate::monitor::{self, Mode, Monitors};
 use crate::motion::Motion;
 use crate::openers::{self, Opener};
@@ -67,7 +67,7 @@ use chooser::{Chooser, Thumbs};
 use copying::{Copying, Done};
 use edits::{Edit, Renaming};
 use exporting::Exporting;
-use files::{Announce, Files};
+use files::{Announce, Asked, Files};
 use gui::Gui;
 use input::{Effect, Pointer};
 use kept::{Kept, Left, Settings};
@@ -360,6 +360,9 @@ struct Shown {
 
 pub struct App {
     files: Files,
+    /// What the command line said about how to read every file: what the
+    /// loader is told with each request.
+    overrides: decode::Overrides,
     current: Option<Current>,
     startup: Startup,
     /// What the surface goes out to: what was asked of it, and what the
@@ -643,7 +646,8 @@ impl App {
         view.set_upscale(upscale);
         let kept_state = state.state();
         let mut app = Self {
-            files: Files::new(files, index, overrides),
+            files: Files::new(files, index),
+            overrides,
             current: None,
             startup,
             output: Output {
@@ -2359,7 +2363,8 @@ impl App {
     /// at once is what says where in the list the key has gone: the count,
     /// the file list's highlight, the name in the bar and the title. Hence
     /// the frame owed, for a request that goes somewhere else.
-    fn send(&mut self, mut request: Request) -> Effect {
+    fn send(&mut self, asked: Asked) -> Effect {
+        let mut request = asked.request(self.overrides, self.rendering);
         let elsewhere = request.mode == Reload::Fresh
             && (self.current.is_none() || self.files.shown_path() != Some(request.path.as_path()));
         // A paged file comes back to the page it was left on, which has to
@@ -2377,7 +2382,6 @@ impl App {
         if elsewhere && self.predicted_slow(&request.path) {
             self.files.announce_now(Instant::now());
         }
-        request.rendering = self.rendering;
         self.loader.request(request);
         if !elsewhere {
             return Effect::Nothing;
@@ -2417,7 +2421,7 @@ impl App {
     /// stays until the file arrives; the list's readouts move at once.
     pub(super) fn step(&mut self, forward: bool) -> Effect {
         if self.files.len() < 2 {
-            if self.files.len() == 0 || self.read_folder(Then::Step(forward)) {
+            if self.files.len() == 0 || self.folder_first(Then::Step(forward)) {
                 return Effect::Nothing;
             }
             self.toast("No other files to step to", Level::Message);
@@ -2696,7 +2700,7 @@ impl App {
         self.players += 1;
         self.animation = Some(Animation::start(
             path,
-            self.files.overrides(),
+            self.overrides,
             count,
             loops,
             left,

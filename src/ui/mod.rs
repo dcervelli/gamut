@@ -88,6 +88,49 @@ pub struct Thumb {
     pub copies: [egui::load::SizedTexture; 3],
 }
 
+/// Paints `thumb` fitted and centered in `slot` — the copy that covers
+/// `side` device pixels, drawn no larger than itself — or, with none held
+/// yet, the slot as an empty frame in the bar's own ground. What the
+/// chooser's rows and the file list's both put in their slot.
+/// The width of a hairline: the thinnest rule the interface draws, put on
+/// the device's grid by [`icon::Grid::line_width`] before it is drawn.
+pub(crate) const HAIRLINE: f32 = 1.0;
+
+pub(super) fn thumb_in_slot(
+    painter: &egui::Painter,
+    grid: icon::Grid,
+    slot: egui::Rect,
+    side: f32,
+    thumb: Option<&Thumb>,
+    theme: &Theme,
+) {
+    match thumb {
+        Some(thumb) => {
+            let texture = thumb.for_side(side);
+            let size = texture.size;
+            let scale = (slot.width() / size.x).min(slot.height() / size.y).min(1.0);
+            let fitted = egui::vec2((size.x * scale).round(), (size.y * scale).round());
+            let at = egui::Rect::from_center_size(slot.center(), fitted);
+            painter.image(
+                texture.id,
+                at,
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        }
+        None => {
+            painter.rect_filled(slot, 0.0, theme.button_idle);
+            outline(
+                painter,
+                grid,
+                Rect::new(slot.left(), slot.top(), slot.width(), slot.height()),
+                HAIRLINE,
+                theme.border.into(),
+            );
+        }
+    }
+}
+
 impl Thumb {
     /// The copy to draw across `side` device pixels: the smallest at least
     /// that large, which is never shrunk to less than half itself, or the

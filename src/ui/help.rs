@@ -26,6 +26,7 @@ use egui::{
     Sense, layers::ShapeIdx, pos2, vec2,
 };
 
+use super::HAIRLINE;
 use super::chrome::Pass;
 use super::control::{Command, Control};
 use super::info::HEADER_GAP;
@@ -80,9 +81,6 @@ const HEIGHT_MIN: f32 = info::INFO_MIN_HEIGHT;
 /// nothing, which egui refuses to lay out. egui has no notion of a layout
 /// that answers to its width; this is that notion, for this one table.
 const STACK_BELOW: f32 = 520.0;
-/// The hairline around a popup: what `ui/style.rs` sets egui's
-/// `window_stroke` to, which the frame of every popup wears.
-pub(super) const HAIRLINE: f32 = 1.0;
 /// The key column's width — room for `Ctrl+Shift+Arrows` in the monospace
 /// face on one line — and the condition column's; what each does gets the
 /// rest of the line.

@@ -25,6 +25,7 @@ use std::time::SystemTime;
 
 use egui::{Align, Layout, RectAlign, Sense, WidgetInfo, WidgetType, pos2, vec2};
 
+use super::HAIRLINE;
 use super::chrome::{BAR_HEIGHT, BAR_PADDING, BUTTON_GAP, Corners, Pass, STEP_SEAM};
 use super::control::{Command, Control};
 use super::style::{ACTIVE_BUTTON_WASH, SCROLLBAR_GUTTER, SCROLLBAR_WIDTH};
@@ -109,9 +110,6 @@ const VALUE_WASH: u8 = 235;
 /// its last characters before its extension, where a numbered run of
 /// files differs.
 pub(super) const TAIL_KEPT: usize = 4;
-/// The hairline under the head, and around an empty slot.
-const HAIRLINE: f32 = 1.0;
-
 /// What the files are sorted by. A file whose key
 /// is not yet known — a size or a type the header has not been read for —
 /// sorts after every file whose key is.
@@ -601,31 +599,14 @@ fn file(
         pos2(rect.left() + INSET, title.bottom() + TOP_INSET),
         vec2(input.slot, slot_height(input.slot, size)),
     );
-    match thumb {
-        Some(thumb) => {
-            let texture = thumb.for_side(slot.size().max_elem() * ui.ctx().pixels_per_point());
-            let size = texture.size;
-            let scale = (slot.width() / size.x).min(slot.height() / size.y).min(1.0);
-            let fitted = vec2((size.x * scale).round(), (size.y * scale).round());
-            let at = egui::Rect::from_center_size(slot.center(), fitted);
-            painter.image(
-                texture.id,
-                at,
-                egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-                egui::Color32::WHITE,
-            );
-        }
-        None => {
-            painter.rect_filled(slot, 0.0, theme.button_idle);
-            super::outline(
-                &painter,
-                pass.grid,
-                super::Rect::new(slot.left(), slot.top(), slot.width(), slot.height()),
-                HAIRLINE,
-                theme.border.into(),
-            );
-        }
-    }
+    super::thumb_in_slot(
+        &painter,
+        pass.grid,
+        slot,
+        slot.size().max_elem() * ui.ctx().pixels_per_point(),
+        thumb.as_ref(),
+        theme,
+    );
     let beside = egui::Rect::from_min_max(pos2(edge, slot.top()), pos2(edge, slot.bottom()));
     let response = pass.caption(response, Some(beside), || {
         (vec![name.to_string()], known.about(path))

@@ -26,10 +26,11 @@ use std::path::Path;
 
 use egui::{Align, Button, Frame, Key, Modifiers, RichText, Sense, TextEdit, vec2};
 
+use super::HAIRLINE;
 use super::chrome::Pass;
 use super::control::{Command, Control};
 use super::style::{MENU_PADDING, MENU_RADIUS, TOGGLE_RADIUS};
-use super::{PADDING, TEXT_SIZE, help, menu};
+use super::{PADDING, TEXT_SIZE, menu};
 
 /// The modal's id in egui's memory.
 pub fn id() -> egui::Id {
@@ -52,7 +53,6 @@ pub(super) const GAP: f32 = 8.0;
 /// The field's text is inset this far from its edge, and the hairline
 /// around it.
 const FIELD_INSET: f32 = 8.0;
-const HAIRLINE: f32 = 1.0;
 /// What is said wherever a name is refused because a file already has it:
 /// in either dialog as the name is typed, and after OK where a file took
 /// the name in the moment between.
@@ -326,7 +326,7 @@ pub(super) fn dialog_frame(pass: &Pass) -> Frame {
     let theme = pass.theme;
     Frame::NONE
         .fill(theme.menu_background.into())
-        .stroke(egui::Stroke::new(help::HAIRLINE, theme.border))
+        .stroke(egui::Stroke::new(HAIRLINE, theme.border))
         .corner_radius(MENU_RADIUS)
         .inner_margin(MENU_PADDING)
 }

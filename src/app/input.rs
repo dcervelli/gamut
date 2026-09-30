@@ -3003,7 +3003,7 @@ impl App {
             // With one file, the folder beside it, where there is one to
             // read: the list comes up once it is in.
             Control::Filmstrip => {
-                if self.files.len() < 2 && self.read_folder(Then::Filmstrip) {
+                if self.folder_first(Then::Filmstrip) {
                     return Effect::Nothing;
                 }
                 let flag = self
@@ -3223,7 +3223,7 @@ impl App {
                 // it, where there is one to read, and the chooser once it
                 // is in; the key does nothing otherwise, as the count it
                 // stands beside is not shown.
-                if !open && self.files.len() < 2 && self.read_folder(Then::Chooser) {
+                if !open && self.folder_first(Then::Chooser) {
                     return Effect::Nothing;
                 }
                 let Some(shown) = &self.shown else {

@@ -4,7 +4,7 @@ fn list(count: usize) -> Files {
     let paths = (0..count)
         .map(|i| PathBuf::from(format!("{i}.png")))
         .collect();
-    Files::new(paths, 0, decode::Overrides::default())
+    Files::new(paths, 0)
 }
 
 /// Holding `]` through a directory asks for each file in turn without
@@ -327,11 +327,7 @@ fn a_pasted_file_survives_the_list_being_read_again() {
 /// never arrives.
 #[test]
 fn a_paste_at_the_head_of_the_list_is_kept_like_any_other() {
-    let mut files = Files::new(
-        named(&["pasted.png", "0.png", "1.png"]),
-        0,
-        decode::Overrides::default(),
-    );
+    let mut files = Files::new(named(&["pasted.png", "0.png", "1.png"]), 0);
     let request = files.open_first(Source::Clipboard("image/png".into()));
     assert_eq!(request.index, 0);
     assert!(matches!(request.source, Source::Clipboard(_)));

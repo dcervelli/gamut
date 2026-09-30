@@ -278,8 +278,21 @@ impl App {
     /// Between reads only, as any rebuild is — a read in flight is aimed at
     /// an index — so under one it waits for the next chance.
     pub(super) fn settle_folder(&mut self) -> Effect {
+        match self.take_folder() {
+            Ok(then) => self.after_folder(then),
+            Err(effect) => effect,
+        }
+    }
+
+    /// Takes a folder read in: the folder goes among the names in the
+    /// file's place and is watched, what it glimpsed of each image is
+    /// kept, and the list is built again with it. What was waiting on
+    /// the read comes back to be done; otherwise what the window owes —
+    /// nothing where there was nothing to take in, a frame where a
+    /// failure or a folder of one was said.
+    fn take_folder(&mut self) -> Result<Then, Effect> {
         if self.beside.landed.is_none() || !self.files.is_idle() {
-            return Effect::Nothing;
+            return Err(Effect::Nothing);
         }
         let Some(Listed {
             file,
@@ -288,19 +301,19 @@ impl App {
             glimpses,
         }) = self.beside.landed.take()
         else {
-            return Effect::Nothing;
+            return Err(Effect::Nothing);
         };
         let then = match std::mem::take(&mut self.beside.folder) {
             Folder::Reading { then, .. } => then,
             other => {
                 self.beside.folder = other;
-                return Effect::Nothing;
+                return Err(Effect::Nothing);
             }
         };
         // The file went while its folder was being read, and with it the
         // list the folder was to join.
         if self.files.len() == 0 {
-            return Effect::Nothing;
+            return Err(Effect::Nothing);
         }
         let images = match images {
             Ok(images) => images,
@@ -309,7 +322,7 @@ impl App {
             Err(error) => {
                 input::report(&error);
                 self.toast(format!("Could not read {}", name(&dir)), Level::Warning);
-                return Effect::Redraw;
+                return Err(Effect::Redraw);
             }
         };
         // The folder takes the file's place among the names, so that it is
@@ -342,8 +355,13 @@ impl App {
         let _ = self.apply_order();
         if self.files.len() < 2 {
             self.toast(format!("No other images in {}", name(&dir)), Level::Message);
-            return Effect::Redraw;
+            return Err(Effect::Redraw);
         }
+        Ok(then)
+    }
+
+    /// Does what was waiting on the folder, now that it is in.
+    fn after_folder(&mut self, then: Then) -> Effect {
         match then {
             Then::Step(forward) => self.step(forward),
             Then::Chooser => self.press(Control::Chooser),
@@ -353,6 +371,14 @@ impl App {
                 Effect::Redraw
             }
         }
+    }
+
+    /// Whether the folder has to be read before `then` can be done: the
+    /// list holds no other file to step to, list or choose from, and
+    /// there is a folder to read for one — in which case the read has
+    /// been started, and `then` waits on it.
+    pub(super) fn folder_first(&mut self, then: Then) -> bool {
+        self.files.len() < 2 && self.read_folder(then)
     }
 
     /// The toast about the folder being read, once it has been read for

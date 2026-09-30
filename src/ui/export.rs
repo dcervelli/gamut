@@ -35,6 +35,7 @@ use std::path::Path;
 
 use egui::{Key, Label, Modifiers, RichText, Sense, vec2};
 
+use super::HAIRLINE;
 use super::chrome::Pass;
 use super::control::{Command, Control};
 use super::rename::{self, FIELD_HEIGHT, GAP, NameField, Tone};
@@ -58,8 +59,6 @@ const SLIDER: f32 = 140.0;
 const ROW: f32 = 20.0;
 /// What the warning mark before the heading is sized to.
 const ICON: f32 = 14.0;
-/// The heading's rule.
-const HAIRLINE: f32 = 1.0;
 /// How wide each of the size's boxes is: room for five digits, or a
 /// percentage to two decimals and its sign.
 const BOX: f32 = 76.0;

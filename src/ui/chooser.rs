@@ -24,6 +24,7 @@ use egui::{
     WidgetInfo, WidgetType, pos2, vec2,
 };
 
+use super::HAIRLINE;
 use super::chrome::{ICON_SIDE, Pass};
 use super::control::{Command, Control};
 use super::icon;
@@ -69,8 +70,6 @@ const TITLE_SHARE: f32 = 0.5;
 const CURRENT_MARK: f32 = 2.0;
 /// The field's text is inset this far from its edge.
 const FIELD_INSET: f32 = 8.0;
-/// The hairline around the field, and around a thumbnail's slot.
-const HAIRLINE: f32 = 1.0;
 /// What the field says while it is empty.
 const HINT: &str = "Type to filter";
 /// What stands in the list's place when nothing fits the query, and the
@@ -464,31 +463,14 @@ fn row(
         ),
         vec2(THUMB_SLOT[0], THUMB_SLOT[1]),
     );
-    match item.thumb {
-        Some(thumb) => {
-            let texture = thumb.for_side(THUMB_SLOT[0] * ui.ctx().pixels_per_point());
-            let size = texture.size;
-            let scale = (slot.width() / size.x).min(slot.height() / size.y).min(1.0);
-            let fitted = vec2((size.x * scale).round(), (size.y * scale).round());
-            let at = egui::Rect::from_center_size(slot.center(), fitted);
-            painter.image(
-                texture.id,
-                at,
-                egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-                egui::Color32::WHITE,
-            );
-        }
-        None => {
-            painter.rect_filled(slot, 0.0, theme.button_idle);
-            super::outline(
-                &painter,
-                grid,
-                Rect::new(slot.left(), slot.top(), slot.width(), slot.height()),
-                HAIRLINE,
-                theme.border.into(),
-            );
-        }
-    }
+    super::thumb_in_slot(
+        &painter,
+        grid,
+        slot,
+        THUMB_SLOT[0] * ui.ctx().pixels_per_point(),
+        item.thumb.as_ref(),
+        theme,
+    );
 
     // Two lines of words after the thumbnail: the name in bold with the
     // directory dim after it, each with the chars the query was found at
