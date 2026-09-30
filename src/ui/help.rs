@@ -140,7 +140,6 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
         panel.width - 2.0 * MENU_PADDING,
         panel.height - 2.0 * MENU_PADDING,
     );
-    let sections = pass.namer.help();
     let width = table_width(panel.width);
     egui::Popup::new(
         id(),
@@ -157,6 +156,9 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
     .width(panel.width)
     .frame(frame)
     .show(|ui| {
+        // The table is spelled from the keymap only while the popup is
+        // open, which is what the closure being run says.
+        let sections = pass.namer.help();
         ui.set_min_size(inside);
         ui.set_max_size(inside);
         ui.spacing_mut().item_spacing = vec2(COLUMN_GAP, 0.0);

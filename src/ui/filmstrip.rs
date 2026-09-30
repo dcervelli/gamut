@@ -633,12 +633,9 @@ fn file(
         }
     }
     let beside = egui::Rect::from_min_max(pos2(edge, slot.top()), pos2(edge, slot.bottom()));
-    let response = pass.caption(
-        response,
-        Some(beside),
-        vec![name.to_string()],
-        known.about(path),
-    );
+    let response = pass.caption(response, Some(beside), || {
+        (vec![name.to_string()], known.about(path))
+    });
 
     // What the list is sorted by, where that is not the name itself: a
     // label centered across the foot of the slot, a little way up it, on

@@ -1048,24 +1048,31 @@ impl Pass<'_> {
     /// With `beside`, the words hang off that rectangle's right edge, their
     /// top level with its top, rather than wherever egui finds room around
     /// `response`; when they come up is still `response`'s hover.
+    ///
+    /// `words` makes the title and the hints, and is asked only once egui
+    /// is going to show them, as [`Pass::tooltip`]'s are: a row of the file
+    /// list would otherwise gather what it knows of its file on every frame.
     pub fn caption(
         &self,
         response: Response,
         beside: Option<Area>,
-        title: Vec<String>,
-        hints: Vec<String>,
+        words: impl FnOnce() -> (Vec<String>, Vec<String>),
     ) -> Response {
+        // egui anchors a tooltip to the rectangle of the response it is
+        // made for, so with `beside` it is made for a stand-in wearing
+        // that; whether it is open is asked of the real one either way,
+        // whose rectangle is where the pointer has to be.
+        let open = response.enabled() && egui::Tooltip::should_show_tooltip(&response, true);
+        if !open {
+            return response;
+        }
         let theme = self.theme;
+        let (title, hints) = words();
         let tooltip = super::tooltip::Tooltip { title, hints };
         let show = move |ui: &mut Ui| super::tooltip::show(ui, &tooltip, theme);
         let Some(beside) = beside else {
             return response.on_hover_ui(show);
         };
-        // egui anchors a tooltip to the rectangle of the response it is
-        // made for, so it is made for a stand-in wearing `beside`; whether
-        // it is open is asked of the real one, whose rectangle is where
-        // the pointer has to be.
-        let open = response.enabled() && egui::Tooltip::should_show_tooltip(&response, true);
         let mut anchor = response.clone();
         anchor.rect = beside;
         let mut tooltip = egui::Tooltip::for_widget(&anchor);
@@ -1087,7 +1094,15 @@ impl Pass<'_> {
     /// dead button drawn by hand is only sensing hover in a live `Ui`, and
     /// egui opens a disabled hover's tooltip only where it disabled the
     /// widget itself, as `add_enabled_ui` does for the surface switch.
+    ///
+    /// The words are composed only once egui is going to show them — the
+    /// same reading of the response `on_hover_ui` makes for itself — since
+    /// composing them means reading the keymap, and every widget of every
+    /// frame asks.
     pub fn tooltip(&self, response: Response, tip: Tip) -> Response {
+        if !egui::Tooltip::should_show_tooltip(&response, true) {
+            return response;
+        }
         let Some(tooltip) = self.namer.tooltip(tip) else {
             return response;
         };
