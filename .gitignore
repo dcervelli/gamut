@@ -11,6 +11,8 @@
 /test_images/raw-samples/*
 !/test_images/raw-samples/fetch.sh
 
+/.claude
+
 # What a Mac's Finder leaves behind in any directory it opens.
 .DS_Store
 .AppleDouble

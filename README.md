@@ -25,13 +25,14 @@ An image viewer serves many audiences: photographer, data scientist, programmer,
   - [Linux](#linux)
     - [Omarchy setup](#omarchy-setup)
   - [macOS](#macos)
+  - [Optional: exiftool](#optional-exiftool)
 - [Getting Started](#getting-started)
 - [Features](#features)
   - [High performance](#high-performance)
   - [Many formats](#many-formats)
   - [Animated/multi-image formats](#animatedmulti-image-formats)
   - [Versatile controls (Keyboard, UI, CLI)](#versatile-controls-keyboard-ui-cli)
-  - [Metadata extraction](#metadata-extraction)
+  - [Curated and raw metadata](#curated-and-raw-metadata)
   - [Copy/paste image](#copypaste-image)
   - [Region selection/measurement](#region-selectionmeasurement)
   - [Pixel info](#pixel-info)
@@ -40,6 +41,7 @@ An image viewer serves many audiences: photographer, data scientist, programmer,
   - [Histogram](#histogram)
   - [HDR](#hdr)
   - [Color management](#color-management)
+  - [Depth map display](#depth-map-display)
   - [Single channel false color](#single-channel-false-color)
   - [Fuzzy file navigation](#fuzzy-file-navigation)
   - [Filmstrip](#filmstrip)
@@ -105,6 +107,10 @@ ln -sf "$(brew --prefix gamut)/Gamut.app" /Applications/Gamut.app
 
 Note: you currently won't be able to send files to Gamut from Finder's "Open With". We'll fix this once we start doing proper App bundle builds.
 
+### Optional: exiftool
+
+`gamut` uses [`exiftool`](https://exiftool.org) for comprehensive raw image metadata presentation. Install it on your system if you want access to that data.
+
 ## Getting Started
 
 Just pass filenames or directories to `gamut`:
@@ -152,11 +158,17 @@ All features can be keyboard driven but the hideable UI also contains controls w
 
 ![UI controls](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/ui.gif)
 
-### Metadata extraction
+### Curated and raw metadata
 
-Get file, image, EXIF, XMP, georeference, and other metadata. Easily copy all, by section, or by item.
+A curated set of image metadata is collected from the file. EXIF, XMP, RAW fields, and other sources are used to put together the curated, interactive set of data.
 
-![Image info/metadata/EXIF](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/info.jpg)
+The curated data includes sections about the file, the camera, the capture, GPS data, georeference, depth map, and more.
+
+For access to the all of the raw data, `gamut` uses `exiftool` to provide a filterable interface to all of the image's metadata.
+
+All data is easily copyable and exportable.
+
+![Image info/metadata/EXIF](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/info.gif)
 
 ### Copy/paste image
 
@@ -205,6 +217,13 @@ When available on the monitor (on Linux, `--output hdr` attempts to force the di
 ### Color management
 
 Untagged files are treated as sRGB. ICC profiles (sRGB, Display P3, BT.2020 and Adobe RGB primaries, power-law tone response) and CICP tags are honored; PQ and HLG are decoded. 16-bit, float and single-channel data are not flattened to 8-bit RGB. 
+
+### Depth map display
+
+Display embedded depth maps. Many modern smart phones capture these regularly. Inspect depth values in specific locations.
+
+![Depth maps](https://raw.githubusercontent.com/dcervelli/gamut-scripting/master/screenshots/depth_maps.gif)
+
 
 ### Single channel false color
 

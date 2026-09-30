@@ -9,19 +9,20 @@
 * >2^15 px images. Perhaps a separate program for large rasters? Requires image pyramids and other optimizations.
 * Text extraction. Tesseract intergration that captures bounding boxes and allows visual text content extraction.
 * Basic annotations? Not sure it should be included. If included, very basic: rectangle (filled/stroked), line, arrow, text box; nothing more.
+* Mirror/flip image.
+* Histogram (and other stats) and info panel should be toggles on the content of a right panel that doesn't overlap the image.
+* Configurable executable shortcuts (example: `my_favorite_program %f` → ^1).
+* More advanced file list/filmstrip features including a simple mark/flag and a few bulk operations.
 
 ## Improve
-* Histogram and info panel to not overlap image
-* Config exec shortcuts, example: `my_favorite_program %f` → ^1
-* Show in finder/explorer
+* Fixed aspect region selection
+* Show in finder/explorer button
 * Sort keyboard shortcuts
 * Configurable paste directory
 * Cascading app size growth?
 * Icon shape and border
 * Native fullscreen command (Linux)
 * Allow panning off screen?
-* Region fixed aspect
-* Advanced file list features
 * Drop down for back/forward buttons
 * Another security pass
 * Histogram documentation
@@ -32,7 +33,6 @@
 * --recursive directory option
 * Red-to-blue color spectrum / more spectra with a chooser
 * Comparison mode toggle
-* Chrome separators
 * Error toasts
 * Settings
   * Date time format
