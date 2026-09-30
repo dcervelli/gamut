@@ -7,21 +7,23 @@
 //! rendering pipeline run again on the CPU, over every pixel instead of the
 //! one under the pointer.
 //!
-//! It is run through [`DecodedImage::sample`] and [`Display::map`] for exactly
-//! that reason. They are the twins the readout in the bottom bar already uses,
-//! kept in step with `shaders/image.wgsl` and `shaders/composite.wgsl`
-//! deliberately, so what is copied cannot drift from what was on screen
-//! without the readout drifting with it and giving the game away.
+//! It is run through [`Reader`] and [`Display::map`] for exactly that
+//! reason. They are the twins the readout in the bottom bar already uses —
+//! [`DecodedImage::sample`] is the reader run on one pixel — kept in step
+//! with `shaders/image.wgsl` and `shaders/composite.wgsl` deliberately, so
+//! what is copied cannot drift from what was on screen without the readout
+//! drifting with it and giving the game away.
 //!
 //! What comes out is 8-bit sRGB, which is what the screen was showing and what
 //! anything receiving a PNG expects. The tone curve has already decided what
 //! becomes of anything brighter than white.
 //!
 //! Running a per-pixel pipeline over every pixel is the slow way round, and it
-//! is sped up only in ways that cannot change the answer: the sRGB curve on
-//! the way out is a table rather than a `powf` ([`levels`]), and the rows are
-//! divided between threads, which changes who does the arithmetic and not what
-//! it is.
+//! is sped up only in ways that cannot change the answer: the file's curve
+//! on the way in and the sRGB curve on the way out are tables rather than a
+//! `powf` per component ([`Reader::tabulated`], [`levels`]), the display's
+//! window is worked out once ([`Display::mapping`]), and the rows are divided
+//! between threads, which changes who does the arithmetic and not what it is.
 
 use std::num::NonZero;
 use std::sync::OnceLock;
@@ -31,9 +33,9 @@ use super::gain_map::Table;
 use anyhow::{Context, Result};
 use png::{BitDepth, ColorType, Compression, Encoder, SrgbRenderingIntent};
 
-use super::display::{Colormap, Display, Headroom};
+use super::display::{Colormap, Display, Headroom, Mapping};
 use super::orient::Turn;
-use super::{Channels, DecodedImage, Region, Transfer};
+use super::{Channels, DecodedImage, Reader, Region, Transfer};
 
 /// Pixels below which the walk is not worth dividing: the threads cost more to
 /// start than they save on a picture this small.
@@ -106,13 +108,17 @@ pub fn displayed_on(
     // nothing from it; the split is over who does the work, not over what
     // the work is.
     let bands = bands.clamp(1, height.max(1));
+    // Set up once for the picture, and read through by every band.
+    let reader = Reader::tabulated(image, lift);
     let walk = Walk {
         image,
-        display,
+        reader: &reader,
+        // An SDR reading: a PNG stops at white, so what is copied is the
+        // picture as an SDR surface shows it, whatever the window is on.
+        mapping: display.mapping(Headroom::None),
         channels,
         turn,
         region,
-        lift,
     };
     if bands == 1 {
         fill(&mut data, region.y, &walk);
@@ -162,19 +168,19 @@ pub(super) fn bands(stride: usize, height: usize) -> usize {
         .min(height)
 }
 
-/// What every band of the walk reads: the picture, how it is shown, and
-/// the part of it wanted.
+/// What every band of the walk reads: the picture and the pipeline it is
+/// read through — set up with the lift the screen is drawn through, where
+/// the picture has a gain map, so that what is copied is what is on screen,
+/// which on a monitor with no room above white is the base as it was graded
+/// — how it is shown, and the part of it wanted.
 struct Walk<'a> {
     image: &'a DecodedImage,
-    display: &'a Display,
+    reader: &'a Reader<'a>,
+    mapping: Mapping,
     channels: Channels,
     /// How the picture is turned, which `region` and the rows are in.
     turn: Turn,
     region: Region,
-    /// The lift the screen is drawn through, where the picture has a gain
-    /// map — so that what is copied is what is on screen, which on a
-    /// monitor with no room above white is the base as it was graded.
-    lift: Option<&'a Table>,
 }
 
 /// Writes the rows of `band`, which start at row `first` of the image and
@@ -182,11 +188,11 @@ struct Walk<'a> {
 fn fill(band: &mut [u8], first: u32, walk: &Walk<'_>) {
     let Walk {
         image,
-        display,
+        reader,
+        mapping,
         channels,
         turn,
         region,
-        lift,
     } = *walk;
     let stored = [image.width, image.height];
     let levels = levels();
@@ -198,12 +204,10 @@ fn fill(band: &mut [u8], first: u32, walk: &Walk<'_>) {
         for (column, pixel) in row.chunks_exact_mut(count).enumerate() {
             let [x, y] = turn.stored([region.x + column as u32, y], stored);
             // Only `None` outside the image, which this walk never goes.
-            let Some(sample) = image.sample(x, y, lift) else {
+            let Some(sample) = reader.read(x, y) else {
                 continue;
             };
-            // An SDR reading: a PNG stops at white, so what is copied is the
-            // picture as an SDR surface shows it, whatever the window is on.
-            let mapped = display.map(&sample, Headroom::None);
+            let mapped = mapping.map(&sample);
             if gray {
                 // Gray reaches the screen as the same number in all three, so
                 // any one of them is the whole of it.

@@ -2,8 +2,8 @@
 //! numbers do not conveniently fill 0..1 — 12-bit sensor data stored in
 //! 16-bit containers, or HDR frames with a few very bright highlights.
 
-use super::gain_map::{GainMap, Table};
-use super::{Channels, ColorSpace, DecodedImage, Primaries, Sample, Samples, Transfer};
+use super::gain_map::Table;
+use super::{Channels, DecodedImage, Reader, Sample, Transfer};
 
 /// Bins are plenty for percentile work and cheap to keep around; the UI draws
 /// this directly as a histogram.
@@ -252,7 +252,9 @@ impl Stats {
     /// a divided scan against the same one undivided.
     fn scan_in(image: &DecodedImage, lift: Option<&Table>, stride: usize, bands: usize) -> Self {
         let channels = image.samples.channels();
-        let values = Values::new(image, lift, channels, stride);
+        // Set up once and read through by every band.
+        let reader = Reader::tabulated(image, lift);
+        let values = Values::new(image, &reader, stride);
         let transfer = image.color.transfer;
         let nodata = image.nodata;
         let is_data =
@@ -579,77 +581,25 @@ const BAND_PIXELS: usize = 1 << 15;
 /// Iterator over each sampled pixel, as stored and as decoded.
 #[derive(Clone)]
 struct Values<'a> {
-    samples: &'a Samples,
-    color: ColorSpace,
-    channels: Channels,
+    /// The pipeline every pixel is read through, set up once for the scan.
+    reader: &'a Reader<'a>,
+    transfer: Transfer,
     stride: usize,
     /// The rows this walk covers, as a range of pixel indices: the whole
     /// image, or one band of it.
     pixels: std::ops::Range<usize>,
     width: usize,
-    height: usize,
-    /// The gain map and the table to lift each pixel through, where the
-    /// picture has one and the caller asked for it lifted.
-    lift: Option<(&'a GainMap, &'a Table)>,
-    /// The matrix carrying the file's primaries into the working space's,
-    /// where the two differ and the file has color to carry: a gray file
-    /// has one channel and no primaries to speak of, and a BT.709 file's
-    /// matrix is the identity, which is left out so that its codes are
-    /// plotted exactly as stored.
-    matrix: Option<[[f32; 3]; 3]>,
 }
 
 impl<'a> Values<'a> {
-    fn new(
-        image: &'a DecodedImage,
-        lift: Option<&'a Table>,
-        channels: Channels,
-        stride: usize,
-    ) -> Self {
+    fn new(image: &'a DecodedImage, reader: &'a Reader<'a>, stride: usize) -> Self {
         let width = image.width as usize;
-        let primaries = image.color.primaries;
         Self {
-            samples: &image.samples,
-            color: image.color,
-            channels,
+            reader,
+            transfer: image.color.transfer,
             stride,
             pixels: 0..width * image.height as usize,
             width,
-            height: image.height as usize,
-            lift: lift.and_then(|table| Some((image.gain_map.as_deref()?, table))),
-            matrix: (!channels.is_gray() && primaries != Primaries::Bt709)
-                .then(|| primaries.to_bt709()),
-        }
-    }
-
-    /// Carries one decoded pixel the rest of the way into the working
-    /// space: the lift, where the picture has a gain map and it was asked
-    /// for, and then the primaries matrix, which is linear and so goes on
-    /// the premultiplied color to the same effect as on the straight. The
-    /// color channels are then put back on the file's curve, so that they
-    /// are plotted where the file would have stored what the screen shows:
-    /// past the top of the file's own range where the lift or the matrix
-    /// takes them, and below the bottom where the matrix does.
-    fn to_working_space(&self, pixel: usize, stored: &mut [f32; 4], linear: &mut [f32; 4]) {
-        let colors = self.channels.color_count();
-        let mut moved = false;
-        if let Some((map, table)) = self.lift {
-            let (x, y) = ((pixel % self.width) as u32, (pixel / self.width) as u32);
-            let gain = map.gain_at(table, x, y, self.width as u32, self.height as u32);
-            table.apply(&mut linear[..colors], gain);
-            moved = true;
-        }
-        if let Some(matrix) = self.matrix {
-            let color = [linear[0], linear[1], linear[2]];
-            for (slot, row) in linear.iter_mut().zip(matrix) {
-                *slot = row.iter().zip(color).map(|(m, c)| m * c).sum();
-            }
-            moved = true;
-        }
-        if moved {
-            for (stored, linear) in stored.iter_mut().zip(linear).take(colors) {
-                *stored = self.color.transfer.to_encoded(*linear);
-            }
         }
     }
 
@@ -709,14 +659,21 @@ impl<'a> Values<'a> {
     /// Calls `visit` with one pixel's components twice over: first on the
     /// file's own curve, normalized to 0..1 for integer samples, then
     /// decoded to the linear working space — lifted and carried into its
-    /// primaries, with the stored side put back on the curve to match where
-    /// either moved it. Alpha is included where the image has one, since
-    /// callers slice down to what they want.
+    /// primaries by the reader, with the stored side put back on the curve
+    /// to match where either moved it, so that the color channels are
+    /// plotted where the file would have stored what the screen shows:
+    /// past the top of the file's own range where the lift or the matrix
+    /// takes them, and below the bottom where the matrix does. Alpha is
+    /// included where the image has one, since callers slice down to what
+    /// they want.
     fn for_each(self, mut visit: impl FnMut(&[f32], &[f32])) {
-        let count = self.channels.count();
-        let transfer = self.color.transfer;
+        let reader = self.reader;
+        let channels = reader.channels();
+        let count = channels.count();
+        let colors = channels.color_count();
+        let scale = reader.scale();
+        let moved = reader.moves_color();
         let mut stored = [0.0f32; 4];
-        let mut linear = [0.0f32; 4];
         // From the first pixel of the band the whole image's stride would
         // land on, not from the band's own first pixel.
         let first = self
@@ -724,62 +681,18 @@ impl<'a> Values<'a> {
             .start
             .next_multiple_of(self.stride.max(1))
             .min(self.pixels.end);
-        let span = first * count..self.pixels.end * count;
-
-        match self.samples {
-            Samples::U8 { data, .. } => {
-                let scale = 1.0 / u8::MAX as f32;
-                // Only 256 codes, and every one of them needs the curve
-                // applied; a table beats calling it per component.
-                let lut: Vec<f32> = (0..=u8::MAX)
-                    .map(|v| transfer.to_linear(v as f32 * scale))
-                    .collect();
-                for (step, chunk) in data[span]
-                    .chunks_exact(count)
-                    .step_by(self.stride)
-                    .enumerate()
-                {
-                    for (index, raw) in chunk.iter().enumerate() {
-                        stored[index] = *raw as f32 * scale;
-                        linear[index] = lut[*raw as usize];
-                    }
-                    self.to_working_space(first + step * self.stride, &mut stored, &mut linear);
-                    visit(&stored[..count], &linear[..count]);
+        for pixel in (first..self.pixels.end).step_by(self.stride) {
+            let (x, y) = ((pixel % self.width) as u32, (pixel / self.width) as u32);
+            let (raw, linear) = reader.decode(x, y);
+            for (slot, value) in stored.iter_mut().zip(&raw[..count]) {
+                *slot = *value * scale;
+            }
+            if moved {
+                for (stored, linear) in stored.iter_mut().zip(&linear).take(colors) {
+                    *stored = self.transfer.to_encoded(*linear);
                 }
             }
-            Samples::U16 { data, .. } => {
-                let scale = 1.0 / u16::MAX as f32;
-                for (step, chunk) in data[span]
-                    .chunks_exact(count)
-                    .step_by(self.stride)
-                    .enumerate()
-                {
-                    for (index, raw) in chunk.iter().enumerate() {
-                        stored[index] = *raw as f32 * scale;
-                        linear[index] = transfer.to_linear(stored[index]);
-                    }
-                    self.to_working_space(first + step * self.stride, &mut stored, &mut linear);
-                    visit(&stored[..count], &linear[..count]);
-                }
-            }
-            Samples::F32 { data, .. } => {
-                for (step, chunk) in data[span]
-                    .chunks_exact(count)
-                    .step_by(self.stride)
-                    .enumerate()
-                {
-                    for (index, raw) in chunk.iter().enumerate() {
-                        stored[index] = *raw;
-                        linear[index] = if transfer.is_linear() {
-                            *raw
-                        } else {
-                            transfer.to_linear(*raw)
-                        };
-                    }
-                    self.to_working_space(first + step * self.stride, &mut stored, &mut linear);
-                    visit(&stored[..count], &linear[..count]);
-                }
-            }
+            visit(&stored[..count], &linear[..count]);
         }
     }
 }
@@ -787,7 +700,7 @@ impl<'a> Values<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::image::{AlphaMode, ColorSpace, Primaries, Referred, Transfer};
+    use crate::image::{AlphaMode, ColorSpace, Primaries, Referred, Samples, Transfer};
 
     fn linear_gray(data: Vec<u16>) -> DecodedImage {
         DecodedImage {

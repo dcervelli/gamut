@@ -465,28 +465,24 @@ impl Display {
     /// What this display state makes of one pixel on a surface with
     /// `headroom`: the number it becomes and the color it comes out as. The
     /// readout in the bottom bar is this run for whichever pixel the pointer
-    /// is over.
+    /// is over; a walk over every pixel sets [`Display::mapping`] up once
+    /// and runs that.
     pub fn map(&self, sample: &Sample, headroom: Headroom) -> Mapped {
+        self.mapping(headroom).map(sample)
+    }
+
+    /// [`Display::map`] set up once for this state and a surface with
+    /// `headroom`: the window's offset and gain worked out — the exposure's
+    /// power of two among them — so that a walk over every pixel does the
+    /// pixel's own arithmetic and no more.
+    pub fn mapping(&self, headroom: Headroom) -> Mapping {
         let (offset, gain) = self.transform();
-        let mut values = [0.0; 3];
-        for (slot, value) in values.iter_mut().zip(sample.color()) {
-            *slot = (value - offset) * gain;
-        }
-        let count = sample.channels.color_count();
-
-        // The order the pipeline uses: window, then false color for a single
-        // channel, then the tone curve over whatever that produced.
-        let color = match (sample.channels.is_gray(), self.colormap) {
-            (true, Colormap::Gray) => [values[0]; 3],
-            (true, colormap) => colormap.color(values[0]),
-            (false, _) => values,
-        };
-
-        Mapped {
-            values,
-            count,
-            color: self.curve(sample.channels.is_gray(), headroom, color),
-            alpha: sample.alpha,
+        Mapping {
+            offset,
+            gain,
+            colormap: self.colormap,
+            on_gray: self.curve_on(true, headroom),
+            on_color: self.curve_on(false, headroom),
         }
     }
 
@@ -583,6 +579,47 @@ impl Display {
     fn windowed(&self, value: f32) -> f32 {
         let (offset, gain) = self.transform();
         (value - offset) * gain
+    }
+}
+
+/// A [`Display`] as it maps pixels on one surface: the window as offset
+/// and gain, the false color, and the curve and the room it goes out into
+/// as [`Display::curve_on`] decided them for a gray pixel and a color one.
+/// See [`Display::mapping`].
+#[derive(Clone, Copy, Debug)]
+pub struct Mapping {
+    offset: f32,
+    gain: f32,
+    colormap: Colormap,
+    on_gray: (ToneMap, Headroom),
+    on_color: (ToneMap, Headroom),
+}
+
+impl Mapping {
+    /// What the display makes of one pixel: see [`Display::map`].
+    pub fn map(&self, sample: &Sample) -> Mapped {
+        let mut values = [0.0; 3];
+        for (slot, value) in values.iter_mut().zip(sample.color()) {
+            *slot = (value - self.offset) * self.gain;
+        }
+        let count = sample.channels.color_count();
+        let gray = sample.channels.is_gray();
+
+        // The order the pipeline uses: window, then false color for a single
+        // channel, then the tone curve over whatever that produced.
+        let color = match (gray, self.colormap) {
+            (true, Colormap::Gray) => [values[0]; 3],
+            (true, colormap) => colormap.color(values[0]),
+            (false, _) => values,
+        };
+        let (tone_map, headroom) = if gray { self.on_gray } else { self.on_color };
+
+        Mapped {
+            values,
+            count,
+            color: tone_map.apply(color, headroom),
+            alpha: sample.alpha,
+        }
     }
 }
 

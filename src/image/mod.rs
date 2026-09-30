@@ -397,84 +397,11 @@ impl DecodedImage {
     /// the screen is drawn through, where the picture has a gain map; with
     /// none, or with no table, the base is what is read.
     ///
-    /// One pixel at a time: this is for a readout following the pointer, not
-    /// for anything that walks the image.
+    /// One pixel at a time: this is for a readout following the pointer.
+    /// Anything that walks the image sets up a [`Reader`] once and reads
+    /// every pixel through it, which is the same arithmetic.
     pub fn sample(&self, x: u32, y: u32, lift: Option<&gain_map::Table>) -> Option<Sample> {
-        if x >= self.width || y >= self.height {
-            return None;
-        }
-        let channels = self.channels();
-        let count = channels.count();
-        let base = (y as usize * self.width as usize + x as usize) * count;
-
-        let mut stored = [0.0f32; 4];
-        match &self.samples {
-            Samples::U8 { data, .. } => {
-                for (slot, raw) in stored.iter_mut().zip(&data[base..base + count]) {
-                    *slot = *raw as f32;
-                }
-            }
-            Samples::U16 { data, .. } => {
-                for (slot, raw) in stored.iter_mut().zip(&data[base..base + count]) {
-                    *slot = *raw as f32;
-                }
-            }
-            Samples::F32 { data, .. } => {
-                for (slot, raw) in stored.iter_mut().zip(&data[base..base + count]) {
-                    *slot = *raw;
-                }
-            }
-        }
-
-        let scale = 1.0 / self.samples.full_scale();
-        let mut linear = [0.0f32; 4];
-        for (slot, value) in linear.iter_mut().zip(&stored[..count]) {
-            *slot = self.color.transfer.to_linear(value * scale);
-        }
-        // The lift, in the base's own color space, before anything else:
-        // the map multiplies light, and the shader multiplies the texel it
-        // loaded before it filters, unpremultiplies or converts it.
-        if let (Some(table), Some(map)) = (lift, &self.gain_map) {
-            let gain = map.gain_at(table, x, y, self.width, self.height);
-            table.apply(&mut linear[..channels.color_count()], gain);
-        }
-        // Then the primaries, on the color as it still is, premultiplied
-        // and all: the matrix is linear, so the coverage divides out of the
-        // converted color as it would have out of the file's, and `linear`
-        // is what the statistics binned.
-        if !channels.is_gray() {
-            let converted = to_working_space(
-                self.color.primaries.to_bt709(),
-                [linear[0], linear[1], linear[2]],
-            );
-            linear[..3].copy_from_slice(&converted);
-        }
-        let mut color = [0.0f32; 3];
-        color.copy_from_slice(&linear[..3]);
-        let alpha = match channels.alpha_index() {
-            Some(index) => (stored[index] * scale).clamp(0.0, 1.0),
-            None => 1.0,
-        };
-        if self.alpha == AlphaMode::Premultiplied {
-            // The shader's threshold as well as its division: a texel that has
-            // resolved to nearly nothing is nothing, rather than a wild color
-            // divided out of it.
-            if alpha > 1e-4 {
-                for value in &mut color {
-                    *value /= alpha;
-                }
-            } else {
-                color = [0.0; 3];
-            }
-        }
-
-        Some(Sample {
-            channels,
-            stored,
-            linear,
-            color,
-            alpha,
-        })
+        Reader::new(self, lift).read(x, y)
     }
 
     /// Sanity check used by the loader, so a broken decoder fails loudly
@@ -556,14 +483,203 @@ impl Sample {
     }
 }
 
-/// Row-major 3x3 times a color, the CPU-side twin of the `primaries` matrix
-/// multiply in `shaders/image.wgsl`.
-fn to_working_space(matrix: [[f32; 3]; 3], color: [f32; 3]) -> [f32; 3] {
-    let mut out = [0.0; 3];
-    for (slot, row) in out.iter_mut().zip(matrix) {
-        *slot = row[0] * color[0] + row[1] * color[1] + row[2] * color[2];
+/// The pipeline a pixel of one image is read through, set up once for the
+/// image: the curve, as a table over every code where the reader is for a
+/// walk over integer samples; the matrix carrying the file's primaries
+/// into the working space's, only where the two differ and the file has
+/// color to carry; the gain map and the table it is lifted through; the
+/// scale and the alpha. [`DecodedImage::sample`] reads one pixel through
+/// one, and the statistics scan and the encoder hold one for a walk over
+/// every pixel, so that the work done per pixel is the pixel's alone. The
+/// arithmetic is the same however the reader was set up: a code looked up
+/// in the table is the curve run on that code, and a matrix left out is
+/// the identity, so a pixel reads the same through any of them.
+pub struct Reader<'a> {
+    image: &'a DecodedImage,
+    channels: Channels,
+    count: usize,
+    curve: Curve,
+    /// What an integer sample is multiplied by to be a fraction of full
+    /// scale: one for float samples.
+    scale: f32,
+    lift: Option<(&'a gain_map::GainMap, &'a gain_map::Table)>,
+    matrix: Option<[[f32; 3]; 3]>,
+}
+
+/// The transfer curve as a reader runs it: on each component as it comes,
+/// or looked up in a table over every code the samples can hold.
+enum Curve {
+    Direct(Transfer),
+    Table(Vec<f32>),
+}
+
+impl<'a> Reader<'a> {
+    /// A reader for one pixel at a time — the readout under the pointer —
+    /// which runs the curve on the components it reads rather than tabulating
+    /// it first.
+    pub fn new(image: &'a DecodedImage, lift: Option<&'a gain_map::Table>) -> Self {
+        Self::with_curve(image, lift, Curve::Direct(image.color.transfer))
     }
-    out
+
+    /// A reader for a walk over the picture, the curve tabulated over every
+    /// code an integer sample can hold: 256 entries for bytes, 65536 for
+    /// words, each the curve run on that code, so that the walk looks the
+    /// answer up rather than working it out again a million times over. A
+    /// float sample has no codes to tabulate and runs the curve.
+    pub fn tabulated(image: &'a DecodedImage, lift: Option<&'a gain_map::Table>) -> Self {
+        let transfer = image.color.transfer;
+        let scale = 1.0 / image.samples.full_scale();
+        let table = |codes: usize| {
+            Curve::Table(
+                (0..codes)
+                    .map(|code| transfer.to_linear(code as f32 * scale))
+                    .collect(),
+            )
+        };
+        let curve = match image.samples {
+            Samples::U8 { .. } => table(1 << 8),
+            Samples::U16 { .. } => table(1 << 16),
+            Samples::F32 { .. } => Curve::Direct(transfer),
+        };
+        Self::with_curve(image, lift, curve)
+    }
+
+    fn with_curve(
+        image: &'a DecodedImage,
+        lift: Option<&'a gain_map::Table>,
+        curve: Curve,
+    ) -> Self {
+        let channels = image.channels();
+        let primaries = image.color.primaries;
+        Self {
+            image,
+            channels,
+            count: channels.count(),
+            curve,
+            scale: 1.0 / image.samples.full_scale(),
+            lift: lift.and_then(|table| Some((image.gain_map.as_deref()?, table))),
+            // A gray file has one channel and no primaries to speak of, and
+            // a BT.709 file's matrix is the identity: left out, so that its
+            // codes come through exactly as stored.
+            matrix: (!channels.is_gray() && primaries != Primaries::Bt709)
+                .then(|| primaries.to_bt709()),
+        }
+    }
+
+    pub fn channels(&self) -> Channels {
+        self.channels
+    }
+
+    /// What an integer sample is multiplied by to be a fraction of full
+    /// scale.
+    pub fn scale(&self) -> f32 {
+        self.scale
+    }
+
+    /// Whether the reader moves a color from where the curve alone would
+    /// put it: a lift, or a matrix.
+    pub fn moves_color(&self) -> bool {
+        self.lift.is_some() || self.matrix.is_some()
+    }
+
+    /// One pixel's components twice over: as stored — counts for integer
+    /// samples, the value itself for floats — and decoded to the linear
+    /// working space, lifted and carried into its primaries, alpha included
+    /// where the image has one. `(x, y)` must be inside the image.
+    pub fn decode(&self, x: u32, y: u32) -> ([f32; 4], [f32; 4]) {
+        let image = self.image;
+        let count = self.count;
+        let base = (y as usize * image.width as usize + x as usize) * count;
+        let mut stored = [0.0f32; 4];
+        let mut linear = [0.0f32; 4];
+        match (&image.samples, &self.curve) {
+            (Samples::U8 { data, .. }, Curve::Table(table)) => {
+                for (index, raw) in data[base..base + count].iter().enumerate() {
+                    stored[index] = *raw as f32;
+                    linear[index] = table[usize::from(*raw)];
+                }
+            }
+            (Samples::U8 { data, .. }, Curve::Direct(transfer)) => {
+                for (index, raw) in data[base..base + count].iter().enumerate() {
+                    stored[index] = *raw as f32;
+                    linear[index] = transfer.to_linear(stored[index] * self.scale);
+                }
+            }
+            (Samples::U16 { data, .. }, Curve::Table(table)) => {
+                for (index, raw) in data[base..base + count].iter().enumerate() {
+                    stored[index] = *raw as f32;
+                    linear[index] = table[usize::from(*raw)];
+                }
+            }
+            (Samples::U16 { data, .. }, Curve::Direct(transfer)) => {
+                for (index, raw) in data[base..base + count].iter().enumerate() {
+                    stored[index] = *raw as f32;
+                    linear[index] = transfer.to_linear(stored[index] * self.scale);
+                }
+            }
+            (Samples::F32 { data, .. }, _) => {
+                let transfer = image.color.transfer;
+                for (index, raw) in data[base..base + count].iter().enumerate() {
+                    stored[index] = *raw;
+                    linear[index] = transfer.to_linear(*raw);
+                }
+            }
+        }
+        // The lift, in the base's own color space, before anything else:
+        // the map multiplies light, and the shader multiplies the texel it
+        // loaded before it filters, unpremultiplies or converts it.
+        if let Some((map, table)) = self.lift {
+            let gain = map.gain_at(table, x, y, image.width, image.height);
+            table.apply(&mut linear[..self.channels.color_count()], gain);
+        }
+        // Then the primaries, on the color as it still is, premultiplied
+        // and all: the matrix is linear, so the coverage divides out of the
+        // converted color as it would have out of the file's. The CPU-side
+        // twin of the `primaries` multiply in `shaders/image.wgsl`.
+        if let Some(matrix) = self.matrix {
+            let color = [linear[0], linear[1], linear[2]];
+            for (slot, row) in linear.iter_mut().zip(matrix) {
+                *slot = row[0] * color[0] + row[1] * color[1] + row[2] * color[2];
+            }
+        }
+        (stored, linear)
+    }
+
+    /// The pixel at `(x, y)` — see [`DecodedImage::sample`] — or `None`
+    /// when that is outside the image.
+    pub fn read(&self, x: u32, y: u32) -> Option<Sample> {
+        let image = self.image;
+        if x >= image.width || y >= image.height {
+            return None;
+        }
+        let channels = self.channels;
+        let (stored, linear) = self.decode(x, y);
+        let mut color = [0.0f32; 3];
+        color.copy_from_slice(&linear[..3]);
+        let alpha = match channels.alpha_index() {
+            Some(index) => (stored[index] * self.scale).clamp(0.0, 1.0),
+            None => 1.0,
+        };
+        if image.alpha == AlphaMode::Premultiplied {
+            // The shader's threshold as well as its division: a texel that has
+            // resolved to nearly nothing is nothing, rather than a wild color
+            // divided out of it.
+            if alpha > 1e-4 {
+                for value in &mut color {
+                    *value /= alpha;
+                }
+            } else {
+                color = [0.0; 3];
+            }
+        }
+        Some(Sample {
+            channels,
+            stored,
+            linear,
+            color,
+            alpha,
+        })
+    }
 }
 
 #[cfg(test)]
