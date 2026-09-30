@@ -12,15 +12,13 @@
 
 ## Improve
 * Histogram and info panel to not overlap image
-* First class info panel sections
-* Open config file in editor
 * Config exec shortcuts, example: `my_favorite_program %f` → ^1
 * Show in finder/explorer
 * Sort keyboard shortcuts
 * Configurable paste directory
 * Cascading app size growth?
 * Icon shape and border
-* Native fullscreen command
+* Native fullscreen command (Linux)
 * Allow panning off screen?
 * Region fixed aspect
 * Advanced file list features

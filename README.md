@@ -103,7 +103,7 @@ This installs the `gamut` command and `Gamut.app`. To launch it from Finder or S
 ln -sf "$(brew --prefix gamut)/Gamut.app" /Applications/Gamut.app
 ```
 
-Note: start gamut once to register itself with macOS so that Finder's "Open With" will work properly.
+Note: you currently won't be able to send files to Gamut from Finder's "Open With". We'll fix this once we start doing proper App bundle builds.
 
 ## Getting Started
 
