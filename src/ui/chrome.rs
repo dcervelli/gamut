@@ -672,7 +672,7 @@ impl Pass<'_> {
     /// force, and the loupe is in force either way. While it is, the
     /// magnification is written after the mark, as the grid's spacing is.
     fn loupe_toggle(&mut self, ui: &mut Ui) {
-        let on = self.panels.show_loupe || self.input.loupe_held;
+        let on = self.panels.lit(Control::Loupe) || self.input.loupe_held;
         let reading = on.then(|| super::loupe::label(self.panels.loupe_magnification));
         self.reading_toggle(ui, icon::ZOOM_IN, Control::Loupe, reading.as_deref());
     }
@@ -916,7 +916,7 @@ impl Pass<'_> {
                 ui,
                 icon::SQUARE_SQUARE,
                 Control::Minimap,
-                self.panels.show_minimap,
+                self.panels.lit(Control::Minimap),
                 true,
                 Corners::All,
             );
@@ -943,7 +943,7 @@ impl Pass<'_> {
                 ui,
                 icon::CHART_AREA,
                 Control::Histogram,
-                self.panels.show_histogram,
+                self.panels.lit(Control::Histogram),
                 room.histogram,
                 Corners::All,
             );
@@ -955,7 +955,7 @@ impl Pass<'_> {
                 ui,
                 icon::INFO,
                 Control::Info,
-                self.panels.show_info,
+                self.panels.lit(Control::Info),
                 room.info,
                 Corners::All,
             );

@@ -20,14 +20,35 @@ use super::menu::{Copies, ZoomChoice};
 use super::pixel::{CoordinateFormat, GeographicFormat, PixelFormat};
 use super::tooltip::{Tip, Tooltip};
 
-/// Something in the interface that can be pressed: a toggle in a side
-/// strip, a button in one of the bars, a cell of a menu.
-#[derive(Clone, Copy, PartialEq, Debug)]
-#[allow(
-    dead_code,
-    reason = "the information panel's rows arrive as it moves over"
-)]
-pub enum Control {
+/// Lays out [`Control`]: each line a kind of control, with its words, and
+/// — for a kind that carries a payload — the payload its representative
+/// carries in [`Control::ALL`]. One list makes both the enum and `ALL`, so
+/// that a kind cannot be added to the one and left out of the other.
+macro_rules! controls {
+    ($( $(#[$meta:meta])* $name:ident $( ($payload:ty) = $sample:expr )? ),* $(,)?) => {
+        /// Something in the interface that can be pressed: a toggle in a side
+        /// strip, a button in one of the bars, a cell of a menu.
+        #[derive(Clone, Copy, PartialEq, Debug)]
+        #[allow(
+            dead_code,
+            reason = "the information panel's rows arrive as it moves over"
+        )]
+        pub enum Control {
+            $( $(#[$meta])* $name $( ($payload) )? ),*
+        }
+
+        #[cfg(test)]
+        impl Control {
+            /// Every control, one of each kind — the ones that carry a
+            /// payload by a representative, the first cell or the first row
+            /// — for the tests that ask something of every button. Made from
+            /// the same list as the enum, so it is complete by construction.
+            pub const ALL: &[Control] = &[ $( Control::$name $( ($sample) )? ),* ];
+        }
+    };
+}
+
+controls! {
     /// The two buttons at the head of the top bar, which step back and on
     /// through the file list. On screen only while there is more than one
     /// file.
@@ -42,14 +63,14 @@ pub enum Control {
     /// [`FrameInput::openers`](super::FrameInput::openers).
     OpenIn,
     /// An item of that menu, by its place in that list.
-    Opener(usize),
+    Opener(usize) = 0,
     /// The transport bar's buttons, on screen only for a file of frames or
     /// pages: play or pause, and one frame or page back or on. `Seek` is a
     /// press on the timeline, at a frame.
     Play,
     StepBack,
     StepForward,
-    Seek(usize),
+    Seek(usize) = 0,
     /// The button that pastes the picture on the clipboard. On screen only
     /// while there is one — see [`Panels::paste`](super::Panels::paste).
     Paste,
@@ -84,16 +105,16 @@ pub enum Control {
     Marks,
     /// One of the false colors offered under that panel's ramp, by its place
     /// in [`crate::image::display::Colormap::ALL`].
-    Ramp(usize),
+    Ramp(usize) = 0,
     /// The two steps of the exposure row under that ramp, a quarter of a stop
     /// each — see [`crate::image::display::EV_STEP`].
     /// One of the windows the row below those offers, by its place in
     /// [`super::histogram::WINDOWS`]. They set a window rather than showing
     /// which one is in force: the handles on the band are what say that.
-    Window(usize),
+    Window(usize) = 0,
     /// One of the two choices for the curve in the row under that, by its
     /// place in [`crate::image::display::ToneMap::ALL`].
-    Curve(usize),
+    Curve(usize) = 0,
     /// The switch at the end of the bottom bar between the SDR and the HDR
     /// surface.
     Output,
@@ -118,20 +139,20 @@ pub enum Control {
     /// it off. On screen only while there is a message.
     Dismiss,
     /// A cell of the zoom menu: a zoom to go to, a fit, or a filter.
-    ZoomTo(ZoomChoice),
+    ZoomTo(ZoomChoice) = ZoomChoice::Scale(1.0),
     /// A cell of the pixel-format menu.
-    Format(PixelFormat),
+    Format(PixelFormat) = PixelFormat::Hex,
     /// A cell of the same menu's row of coordinates, which is on it only
     /// for a georeferenced file.
-    Coordinates(CoordinateFormat),
+    Coordinates(CoordinateFormat) = CoordinateFormat::Pixel,
     /// A cell of its row of ways to write a latitude, on it only for a file
     /// that can give one.
-    Geographic(GeographicFormat),
+    Geographic(GeographicFormat) = GeographicFormat::Decimal,
     /// An item of the menu of copies.
-    Copies(Copies),
+    Copies(Copies) = Copies::Name,
     /// A row of the information panel, or the button above the column that
     /// takes the whole of it.
-    Facts(Copyable),
+    Facts(Copyable) = Copyable::All,
     /// The button beside the coordinates at the head of the information
     /// panel's `Location` section, which opens a map of where the picture
     /// was taken in the browser.
@@ -142,7 +163,7 @@ pub enum Control {
     Chooser,
     /// A row of the chooser, by its place in the list the same frame was
     /// drawn from: the file to open.
-    Choose(usize),
+    Choose(usize) = 0,
     /// The button before the file's name in the top bar, which opens the
     /// menu of what can be done to the file itself: its name and path
     /// copied, and the file renamed or moved to the trash.
@@ -162,7 +183,7 @@ pub enum Control {
     /// own two buttons, the export itself, which `Enter` also asks for, and
     /// putting the dialog away, which `Esc` and a click outside it also do.
     Export,
-    ExportAs(Format),
+    ExportAs(Format) = Format::Png,
     ExportTo,
     CancelExport,
     /// The rename dialog's two buttons: the rename itself, which `Enter`
@@ -188,17 +209,17 @@ pub enum Control {
     /// The button at the head of that list, which opens the menu of sorts,
     /// and a cell of it.
     Sorting,
-    SortBy(Sort),
+    SortBy(Sort) = Sort::Name,
     /// The two rows at the foot of the sort menu, which run the sort one
     /// way or the other.
-    SortDirection(Direction),
+    SortDirection(Direction) = Direction::Ascending,
     /// The pair beside them, which go back and forward through the files
     /// that have been on screen. Dead with nothing to go to.
     Back,
     Forward,
     /// A row of the list, by its place in the rows the same frame was
     /// drawn from: the file to show.
-    Thumb(usize),
+    Thumb(usize) = 0,
     /// Taking the file on screen off the list, leaving it as it is on
     /// disk: what `Backspace` presses. Not drawn anywhere; a control so
     /// that the key goes through `App::press` as every other job does.
@@ -497,161 +518,15 @@ impl Naming for Unnamed {
 }
 
 #[cfg(test)]
-impl Control {
-    /// Every control, one of each kind — the ones that carry a payload by a
-    /// representative, the first cell or the first row — for the tests that
-    /// ask something of every button. Kept complete by [`Control::listed`].
-    pub const ALL: &[Control] = &[
-        Control::Previous,
-        Control::Next,
-        Control::Minimap,
-        Control::Copy,
-        Control::OpenIn,
-        Control::Opener(0),
-        Control::Play,
-        Control::StepBack,
-        Control::StepForward,
-        Control::Seek(0),
-        Control::Paste,
-        Control::Region,
-        Control::Histogram,
-        Control::Info,
-        Control::Grid,
-        Control::Loupe,
-        Control::Zoom,
-        Control::Maximize,
-        Control::Luma,
-        Control::Planes,
-        Control::Log,
-        Control::Reset,
-        Control::Marks,
-        Control::Ramp(0),
-        Control::Window(0),
-        Control::Curve(0),
-        Control::Output,
-        Control::CameraJpeg,
-        Control::Depth,
-        Control::Help,
-        Control::PixelFormat,
-        Control::Dismiss,
-        Control::ZoomTo(ZoomChoice::Scale(1.0)),
-        Control::Format(PixelFormat::Hex),
-        Control::Coordinates(CoordinateFormat::Pixel),
-        Control::Geographic(GeographicFormat::Decimal),
-        Control::Copies(Copies::Name),
-        Control::Facts(Copyable::All),
-        Control::OpenMap,
-        Control::Chooser,
-        Control::Choose(0),
-        Control::FileMenu,
-        Control::Rename,
-        Control::Delete,
-        Control::TurnLeft,
-        Control::TurnRight,
-        Control::Export,
-        Control::ExportAs(Format::Png),
-        Control::ExportTo,
-        Control::CancelExport,
-        Control::RenameTo,
-        Control::CancelRename,
-        Control::OpenFiles,
-        Control::OpenFolder,
-        Control::OpenLastFolder,
-        Control::Filmstrip,
-        Control::Sorting,
-        Control::SortBy(Sort::Name),
-        Control::SortDirection(Direction::Ascending),
-        Control::Back,
-        Control::Forward,
-        Control::Thumb(0),
-        Control::Remove,
-        Control::EditConfig,
-    ];
-
-    /// Whether `control` is a kind [`Control::ALL`] lists — which is every
-    /// kind, and the compiler is what holds it to that: a variant added to
-    /// the enum is missing from the match below until it is added here, and
-    /// then to `ALL`.
-    fn listed(control: Control) -> bool {
-        match control {
-            Control::Previous
-            | Control::Next
-            | Control::Minimap
-            | Control::Copy
-            | Control::OpenIn
-            | Control::Opener(_)
-            | Control::Play
-            | Control::StepBack
-            | Control::StepForward
-            | Control::Seek(_)
-            | Control::Paste
-            | Control::Region
-            | Control::Histogram
-            | Control::Info
-            | Control::Grid
-            | Control::Loupe
-            | Control::Zoom
-            | Control::Maximize
-            | Control::Luma
-            | Control::Planes
-            | Control::Log
-            | Control::Reset
-            | Control::Marks
-            | Control::Ramp(_)
-            | Control::Window(_)
-            | Control::Curve(_)
-            | Control::Output
-            | Control::CameraJpeg
-            | Control::Depth
-            | Control::Help
-            | Control::PixelFormat
-            | Control::Dismiss
-            | Control::ZoomTo(_)
-            | Control::Format(_)
-            | Control::Coordinates(_)
-            | Control::Geographic(_)
-            | Control::Copies(_)
-            | Control::Facts(_)
-            | Control::OpenMap
-            | Control::Chooser
-            | Control::Choose(_)
-            | Control::FileMenu
-            | Control::Rename
-            | Control::Delete
-            | Control::TurnLeft
-            | Control::TurnRight
-            | Control::Export
-            | Control::ExportAs(_)
-            | Control::ExportTo
-            | Control::CancelExport
-            | Control::RenameTo
-            | Control::CancelRename
-            | Control::OpenFiles
-            | Control::OpenFolder
-            | Control::OpenLastFolder
-            | Control::Filmstrip
-            | Control::Sorting
-            | Control::SortBy(_)
-            | Control::SortDirection(_)
-            | Control::Back
-            | Control::Forward
-            | Control::Thumb(_)
-            | Control::Remove
-            | Control::EditConfig => true,
-        }
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
 
-    /// `ALL` has one of every kind of control, and no kind twice.
+    /// `ALL` has no kind of control twice; that it has every kind is the
+    /// macro's doing.
     #[test]
     fn every_kind_of_control_is_listed_once() {
         let kinds: Vec<_> = Control::ALL.iter().map(std::mem::discriminant).collect();
         for (index, kind) in kinds.iter().enumerate() {
-            assert!(Control::listed(Control::ALL[index]));
             assert!(
                 !kinds[..index].contains(kind),
                 "{:?} is listed twice",

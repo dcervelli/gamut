@@ -128,7 +128,7 @@ pub(super) fn list_buttons(pass: &mut Pass, ui: &mut egui::Ui) {
             ui,
             icon::PANEL_LEFT,
             Control::Filmstrip,
-            pass.panels.show_filmstrip,
+            pass.panels.lit(Control::Filmstrip),
             true,
             Corners::All,
         );

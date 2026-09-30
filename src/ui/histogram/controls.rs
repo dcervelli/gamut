@@ -29,15 +29,10 @@ pub(super) fn controls(
 
     for (slot, widget) in toolbar(gray).iter().enumerate() {
         let rect = toolbar_button(panel, gray, slot);
-        let active = match widget {
-            Control::Luma => panels.show_luma,
-            Control::Planes => panels.show_planes,
-            Control::Log => panels.log_counts,
-            // The reset is never lit, where the two above it are: it does
-            // something rather than being something, and a momentary button
-            // holding a state is a button that has to explain itself.
-            _ => false,
-        };
+        // The reset is never lit, where the toggles above it are: it does
+        // something rather than being something, and a momentary button
+        // holding a state is a button that has to explain itself.
+        let active = panels.lit(*widget);
         let (_, background, ink) = button(pass, ui, rect, *widget, active, true, TOGGLE_RADIUS);
         let grid = pass.grid;
         let square = icon::square(grid, area(rect), ICON_SIDE);
@@ -95,7 +90,7 @@ pub(super) fn controls(
             ui,
             rect,
             Control::Marks,
-            panels.mark_clipped,
+            panels.lit(Control::Marks),
             true,
             TOGGLE_RADIUS,
         );

@@ -441,6 +441,35 @@ pub struct Panels {
     pub geographic_format: GeographicFormat,
 }
 
+impl Panels {
+    /// The flag `control` toggles, for the toggles that are one flag and
+    /// nothing else: what the button is lit by, what the menu item is
+    /// checked by, and what the press flips, so the three cannot come to
+    /// read different fields. `None` for every other control.
+    pub fn flag_mut(&mut self, control: Control) -> Option<&mut bool> {
+        Some(match control {
+            Control::Filmstrip => &mut self.show_filmstrip,
+            Control::Minimap => &mut self.show_minimap,
+            Control::Histogram => &mut self.show_histogram,
+            Control::Info => &mut self.show_info,
+            Control::Grid => &mut self.show_grid,
+            Control::Loupe => &mut self.show_loupe,
+            Control::Luma => &mut self.show_luma,
+            Control::Planes => &mut self.show_planes,
+            Control::Log => &mut self.log_counts,
+            Control::Marks => &mut self.mark_clipped,
+            _ => return None,
+        })
+    }
+
+    /// Whether the flag `control` toggles is on — see [`Panels::flag_mut`]
+    /// — and `false` for a control that toggles none, which is never lit.
+    pub fn lit(&self, control: Control) -> bool {
+        let mut panels = *self;
+        panels.flag_mut(control).is_some_and(|flag| *flag)
+    }
+}
+
 /// What this frame looks like, beyond the image and the panels: the values
 /// the application derives per frame from its window, pointer and loader.
 pub struct FrameInput {

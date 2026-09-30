@@ -636,7 +636,7 @@ impl App {
         match does {
             Does::Control(control) => {
                 let tip = Tip::Control(control);
-                ui::tooltip::disabled(tip, conditions.reasons()).is_none()
+                ui::tooltip::disabled(tip, *conditions).is_none()
                     && waits(action_of(tip))
                     && !(conditions.nothing_open && about_picture(does))
                     && match control {
@@ -665,18 +665,20 @@ impl App {
             Does::Action(_) => false,
             Does::Magnification(times) => panels.loupe_magnification == times,
             Does::Control(control) => match control {
-                Control::Filmstrip => panels.show_filmstrip,
-                Control::Minimap => panels.show_minimap,
-                Control::Histogram => panels.show_histogram,
-                Control::Info => panels.show_info,
-                Control::Grid => panels.show_grid,
-                Control::Loupe => panels.show_loupe,
+                // The toggles that are one flag of the panels, read through
+                // the one reading of which — see `Panels::flag_mut`.
+                Control::Filmstrip
+                | Control::Minimap
+                | Control::Histogram
+                | Control::Info
+                | Control::Grid
+                | Control::Loupe
+                | Control::Luma
+                | Control::Planes
+                | Control::Log
+                | Control::Marks => panels.lit(control),
                 Control::Depth => current
                     .is_some_and(|current| current.showing == Showing::Auxiliary(Auxiliary::Depth)),
-                Control::Luma => panels.show_luma,
-                Control::Planes => panels.show_planes,
-                Control::Log => panels.log_counts,
-                Control::Marks => panels.mark_clipped,
                 Control::Region => self.marking.selection.is_on(),
                 Control::Output => self.headroom() == crate::image::display::Headroom::Above,
                 Control::CameraJpeg => {

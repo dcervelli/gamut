@@ -196,68 +196,121 @@ pub const NOTHING_OPEN: &str = "Nothing is open.";
 /// press would act on.
 pub const STILL_OPENING: &str = "Waiting for file.";
 
-/// Everything that could make a control dead this frame, read off the
-/// application before the frame. One struct rather than a parameter each,
-/// since every reason is asked about every tip and the list has grown.
+/// What holds at the moment, read off the application once: which of the
+/// conditions the keys wait on, for the help popup to dim the keys that
+/// would do nothing; and everything that makes a control dead, for the
+/// tooltip that says why and for the press that is refused. One reading
+/// for all three, so that a button drawn dead, its label and its press
+/// cannot come to disagree.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct Reasons {
-    /// Whether the content area has room for each floating panel, which is
-    /// what makes a toggle dead.
-    pub room: Room,
-    /// Whether the surface switch has anything to switch.
-    pub hdr: Hdr,
-    /// Whether anything out there offers to open the file on screen, which
-    /// is what makes the open button dead.
-    pub openable: bool,
-    /// Whether a false color is on the picture, which is what makes the
-    /// histogram's row of curves dead.
-    pub false_colored: bool,
-    /// Whether the desktop's file dialog is up, which is what makes the
-    /// buttons that put it up dead.
-    pub picking: bool,
-    /// Whether the clipboard holds a picture, which is what the empty
-    /// window's paste button waits on.
-    pub clipboard: bool,
-    /// Whether there is no picture at all, which is what makes the buttons
-    /// about one dead.
-    pub nothing_open: bool,
-    /// Whether another file is on its way in to replace the picture, which
-    /// is what makes the controls acting on the file dead.
-    pub arriving: bool,
-    /// Whether a file was on screen before this one, and after it, which
-    /// is what the pair at the head of the file list goes back and forward
-    /// to.
+pub struct Conditions {
+    pub region_selected: bool,
+    pub several_files: bool,
+    pub animation: bool,
+    pub pages: bool,
+    pub pointer_on_picture: bool,
+    pub picture_on_clipboard: bool,
+    pub single_channel: bool,
+    pub undoable: bool,
+    /// Whether a file was on screen before this one, and after it.
     pub visited_before: bool,
     pub visited_after: bool,
+    /// Whether the file on screen offers a coordinate other than the
+    /// pixel's, and whether one of them is a latitude.
+    pub georeferenced: bool,
+    pub geographic: bool,
+    /// Whether the content area has room for each floating panel.
+    pub room: Room,
+    /// Whether the surface switch has anything to switch, and why not.
+    pub hdr: Hdr,
     /// Whether the file on screen is a raw with the camera's JPEG in it,
     /// which is what the switch between the two needs.
     pub camera_jpeg: bool,
-    /// Whether the picture on screen carries a depth map to show.
+    /// Whether the picture on screen carries a depth map, which is what
+    /// the depth toggle needs.
     pub depth: bool,
+    /// Whether anything out there offers to open the file on screen.
+    pub openable: bool,
+    /// Whether a false color is on the picture.
+    pub false_colored: bool,
+    /// Whether the desktop's file dialog is up.
+    pub picking: bool,
+    /// Whether there is no picture at all.
+    pub nothing_open: bool,
+    /// Whether another file is on its way in to replace the picture on
+    /// screen, which the bar names already: what acts on the file waits
+    /// until the file named is the one on screen.
+    pub arriving: bool,
 }
 
-impl Reasons {
-    /// Nothing dead for any reason: a large window, a monitor in HDR mode,
-    /// a file something else opens, a picture up in its own colors, the
-    /// dialog down and a picture on the clipboard.
+impl Default for Conditions {
+    /// Nothing holds: no room, no surface to switch to, nothing open.
+    fn default() -> Self {
+        Self {
+            region_selected: false,
+            several_files: false,
+            animation: false,
+            pages: false,
+            pointer_on_picture: false,
+            picture_on_clipboard: false,
+            single_channel: false,
+            undoable: false,
+            visited_before: false,
+            visited_after: false,
+            georeferenced: false,
+            geographic: false,
+            room: Room {
+                histogram: false,
+                info: false,
+                help: false,
+            },
+            hdr: Hdr::Unsupported,
+            camera_jpeg: false,
+            depth: false,
+            openable: false,
+            false_colored: false,
+            picking: false,
+            nothing_open: true,
+            arriving: false,
+        }
+    }
+}
+
+impl Conditions {
+    /// Nothing dead for any reason, and no key's condition met: a large
+    /// window, a monitor in HDR mode, a file something else opens, a
+    /// picture up in its own colors, the dialog down, a picture on the
+    /// clipboard, files seen either side of this one and a raw with the
+    /// camera's JPEG in it — the four conditions that do hold, the paste
+    /// button, the pair that go back and forward and the camera's switch
+    /// being alive only then.
     #[cfg(test)]
-    pub const NONE: Reasons = Reasons {
+    pub const ALIVE: Conditions = Conditions {
+        region_selected: false,
+        several_files: false,
+        animation: false,
+        pages: false,
+        pointer_on_picture: false,
+        picture_on_clipboard: true,
+        single_channel: false,
+        undoable: false,
+        visited_before: true,
+        visited_after: true,
+        georeferenced: false,
+        geographic: false,
         room: Room {
             histogram: true,
             info: true,
             help: true,
         },
         hdr: Hdr::Available,
+        camera_jpeg: true,
+        depth: true,
         openable: true,
         false_colored: false,
         picking: false,
-        clipboard: true,
         nothing_open: false,
         arriving: false,
-        visited_before: true,
-        visited_after: true,
-        camera_jpeg: true,
-        depth: true,
     };
 }
 
@@ -286,21 +339,22 @@ pub struct Refused {
 ///
 /// Asked before a tooltip is composed out of the key table, since what a dead
 /// control owes the reader is the reason and not the binding.
-pub fn disabled(tip: Tip, reasons: Reasons) -> Option<Refused> {
-    let Reasons {
+pub fn disabled(tip: Tip, conditions: Conditions) -> Option<Refused> {
+    let Conditions {
         room,
         hdr,
         openable,
         false_colored,
         picking,
-        clipboard,
+        picture_on_clipboard: clipboard,
         nothing_open,
         arriving,
         visited_before,
         visited_after,
         camera_jpeg,
         depth,
-    } = reasons;
+        ..
+    } = conditions;
     let said = |said| Some(Refused { said, hint: None });
     if tip == Tip::Control(Control::Back) && !visited_before {
         return said(NOTHING_BEFORE);
@@ -591,9 +645,9 @@ mod tests {
         assert_eq!(
             disabled(
                 Tip::Control(Control::Histogram),
-                Reasons {
+                Conditions {
                     room: none,
-                    ..Reasons::NONE
+                    ..Conditions::ALIVE
                 }
             ),
             no_room
@@ -601,27 +655,30 @@ mod tests {
         assert_eq!(
             disabled(
                 Tip::Control(Control::Info),
-                Reasons {
+                Conditions {
                     room: none,
-                    ..Reasons::NONE
+                    ..Conditions::ALIVE
                 }
             ),
             no_room
         );
         assert_eq!(
-            disabled(Tip::Control(Control::Histogram), Reasons::NONE),
+            disabled(Tip::Control(Control::Histogram), Conditions::ALIVE),
             None
         );
-        assert_eq!(disabled(Tip::Control(Control::Info), Reasons::NONE), None);
+        assert_eq!(
+            disabled(Tip::Control(Control::Info), Conditions::ALIVE),
+            None
+        );
 
         // Only those two: nothing else on the interface has a panel to make
         // room for, so nothing else goes dead when the window is small.
         assert_eq!(
             disabled(
                 Tip::Control(Control::Minimap),
-                Reasons {
+                Conditions {
                     room: none,
-                    ..Reasons::NONE
+                    ..Conditions::ALIVE
                 }
             ),
             None
@@ -629,9 +686,9 @@ mod tests {
         assert_eq!(
             disabled(
                 Tip::Name,
-                Reasons {
+                Conditions {
                     room: none,
-                    ..Reasons::NONE
+                    ..Conditions::ALIVE
                 }
             ),
             None
@@ -647,9 +704,9 @@ mod tests {
         assert_eq!(
             disabled(
                 Tip::Control(Control::Histogram),
-                Reasons {
+                Conditions {
                     room: column,
-                    ..Reasons::NONE
+                    ..Conditions::ALIVE
                 }
             ),
             no_room
@@ -657,9 +714,9 @@ mod tests {
         assert_eq!(
             disabled(
                 Tip::Control(Control::Info),
-                Reasons {
+                Conditions {
                     room: column,
-                    ..Reasons::NONE
+                    ..Conditions::ALIVE
                 }
             ),
             None
@@ -674,13 +731,13 @@ mod tests {
     fn the_surface_switch_says_why_it_is_dead() {
         let switch = Tip::Control(Control::Output);
 
-        assert_eq!(disabled(switch, Reasons::NONE), None);
+        assert_eq!(disabled(switch, Conditions::ALIVE), None);
         assert_eq!(
             disabled(
                 switch,
-                Reasons {
+                Conditions {
                     hdr: Hdr::NotInHdrMode,
-                    ..Reasons::NONE
+                    ..Conditions::ALIVE
                 }
             ),
             Some(Refused {
@@ -691,9 +748,9 @@ mod tests {
         assert_eq!(
             disabled(
                 switch,
-                Reasons {
+                Conditions {
                     hdr: Hdr::Unsupported,
-                    ..Reasons::NONE
+                    ..Conditions::ALIVE
                 }
             ),
             Some(Refused {
@@ -712,9 +769,9 @@ mod tests {
         assert_eq!(
             disabled(
                 switch,
-                Reasons {
+                Conditions {
                     room: none,
-                    ..Reasons::NONE
+                    ..Conditions::ALIVE
                 }
             ),
             None
@@ -732,13 +789,13 @@ mod tests {
     fn the_curves_say_why_they_are_dead_under_a_false_color() {
         for index in 0..ToneMap::ALL.len() {
             let curve = Tip::Control(Control::Curve(index));
-            assert_eq!(disabled(curve, Reasons::NONE), None);
+            assert_eq!(disabled(curve, Conditions::ALIVE), None);
             assert_eq!(
                 disabled(
                     curve,
-                    Reasons {
+                    Conditions {
                         false_colored: true,
-                        ..Reasons::NONE
+                        ..Conditions::ALIVE
                     }
                 ),
                 Some(Refused {
@@ -750,9 +807,9 @@ mod tests {
         assert_eq!(
             disabled(
                 Tip::Control(Control::Ramp(0)),
-                Reasons {
+                Conditions {
                     false_colored: true,
-                    ..Reasons::NONE
+                    ..Conditions::ALIVE
                 }
             ),
             None
@@ -763,13 +820,13 @@ mod tests {
     fn the_open_button_says_when_nothing_can_open_the_file() {
         let button = Tip::Control(Control::OpenIn);
 
-        assert_eq!(disabled(button, Reasons::NONE), None);
+        assert_eq!(disabled(button, Conditions::ALIVE), None);
         assert_eq!(
             disabled(
                 button,
-                Reasons {
+                Conditions {
                     openable: false,
-                    ..Reasons::NONE
+                    ..Conditions::ALIVE
                 }
             ),
             Some(Refused {
@@ -784,9 +841,9 @@ mod tests {
         assert_eq!(
             disabled(
                 Tip::Control(Control::Copy),
-                Reasons {
+                Conditions {
                     openable: false,
-                    ..Reasons::NONE
+                    ..Conditions::ALIVE
                 }
             ),
             None
@@ -794,9 +851,9 @@ mod tests {
         assert_eq!(
             disabled(
                 Tip::Control(Control::Paste),
-                Reasons {
+                Conditions {
                     openable: false,
-                    ..Reasons::NONE
+                    ..Conditions::ALIVE
                 }
             ),
             None
@@ -808,12 +865,12 @@ mod tests {
     /// clipboard empty, nothing open — and each says it only of itself.
     #[test]
     fn the_empty_window_and_the_picture_buttons_say_why_they_are_dead() {
-        let picking = Reasons {
+        let picking = Conditions {
             picking: true,
-            ..Reasons::NONE
+            ..Conditions::ALIVE
         };
         for button in [Control::OpenFiles, Control::OpenFolder] {
-            assert_eq!(disabled(Tip::Control(button), Reasons::NONE), None);
+            assert_eq!(disabled(Tip::Control(button), Conditions::ALIVE), None);
             assert_eq!(
                 disabled(Tip::Control(button), picking),
                 Some(Refused {
@@ -824,9 +881,9 @@ mod tests {
         }
         assert_eq!(disabled(Tip::Control(Control::Paste), picking), None);
 
-        let empty_clipboard = Reasons {
-            clipboard: false,
-            ..Reasons::NONE
+        let empty_clipboard = Conditions {
+            picture_on_clipboard: false,
+            ..Conditions::ALIVE
         };
         assert_eq!(
             disabled(Tip::Control(Control::Paste), empty_clipboard),
@@ -842,9 +899,9 @@ mod tests {
 
         // What acts on the file waits while another is on its way in; what
         // acts on the view or the list does not.
-        let arriving = Reasons {
+        let arriving = Conditions {
             arriving: true,
-            ..Reasons::NONE
+            ..Conditions::ALIVE
         };
         for button in [
             Control::Copy,
@@ -878,9 +935,9 @@ mod tests {
             assert_eq!(disabled(Tip::Control(button), arriving), None);
         }
 
-        let nothing_open = Reasons {
+        let nothing_open = Conditions {
             nothing_open: true,
-            ..Reasons::NONE
+            ..Conditions::ALIVE
         };
         for button in [Control::Copy, Control::Region] {
             assert_eq!(

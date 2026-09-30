@@ -33,7 +33,8 @@ use crate::ui::histogram;
 use crate::ui::info::Copyable;
 use crate::ui::menu::{Copies, ZoomChoice};
 use crate::ui::toast::Level;
-use crate::ui::tooltip::{Hdr, Reasons};
+pub(super) use crate::ui::tooltip::Conditions;
+use crate::ui::tooltip::Hdr;
 use crate::ui::{self, Control, Current, Grab, Naming, Selection, Tip};
 
 use super::region::Framing;
@@ -627,123 +628,7 @@ impl When {
     }
 }
 
-/// What holds at the moment, read off the application once: which of the
-/// conditions the keys wait on, for the help popup to dim the keys that
-/// would do nothing; and everything that makes a control dead, for the
-/// tooltip that says why and for the press that is refused. One reading
-/// for all three, so that a button drawn dead, its label and its press
-/// cannot come to disagree.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) struct Conditions {
-    pub region_selected: bool,
-    pub several_files: bool,
-    pub animation: bool,
-    pub pages: bool,
-    pub pointer_on_picture: bool,
-    pub picture_on_clipboard: bool,
-    pub single_channel: bool,
-    pub undoable: bool,
-    /// Whether a file was on screen before this one, and after it.
-    pub visited_before: bool,
-    pub visited_after: bool,
-    /// Whether the file on screen offers a coordinate other than the
-    /// pixel's, and whether one of them is a latitude.
-    pub georeferenced: bool,
-    pub geographic: bool,
-    /// Whether the content area has room for each floating panel.
-    pub room: ui::Room,
-    /// Whether the surface switch has anything to switch, and why not.
-    pub hdr: Hdr,
-    /// Whether the file on screen is a raw with the camera's JPEG in it,
-    /// which is what the switch between the two needs.
-    pub camera_jpeg: bool,
-    /// Whether the picture on screen carries a depth map, which is what
-    /// the depth toggle needs.
-    pub depth: bool,
-    /// Whether anything out there offers to open the file on screen.
-    pub openable: bool,
-    /// Whether a false color is on the picture.
-    pub false_colored: bool,
-    /// Whether the desktop's file dialog is up.
-    pub picking: bool,
-    /// Whether there is no picture at all.
-    pub nothing_open: bool,
-    /// Whether another file is on its way in to replace the picture on
-    /// screen, which the bar names already: what acts on the file waits
-    /// until the file named is the one on screen.
-    pub arriving: bool,
-}
-
-impl Default for Conditions {
-    /// Nothing holds: no room, no surface to switch to, nothing open.
-    fn default() -> Self {
-        Self {
-            region_selected: false,
-            several_files: false,
-            animation: false,
-            pages: false,
-            pointer_on_picture: false,
-            picture_on_clipboard: false,
-            single_channel: false,
-            undoable: false,
-            visited_before: false,
-            visited_after: false,
-            georeferenced: false,
-            geographic: false,
-            room: ui::Room {
-                histogram: false,
-                info: false,
-                help: false,
-            },
-            hdr: Hdr::Unsupported,
-            camera_jpeg: false,
-            depth: false,
-            openable: false,
-            false_colored: false,
-            picking: false,
-            nothing_open: true,
-            arriving: false,
-        }
-    }
-}
-
 impl Conditions {
-    /// Nothing dead for any reason, and no key's condition met: a large
-    /// window, a monitor in HDR mode, a file something else opens, a
-    /// picture up in its own colors, the dialog down, a picture on the
-    /// clipboard, files seen either side of this one and a raw with the
-    /// camera's JPEG in it — the four conditions that do hold, the paste
-    /// button, the pair that go back and forward and the camera's switch
-    /// being alive only then.
-    #[cfg(test)]
-    pub const ALIVE: Conditions = Conditions {
-        region_selected: false,
-        several_files: false,
-        animation: false,
-        pages: false,
-        pointer_on_picture: false,
-        picture_on_clipboard: true,
-        single_channel: false,
-        undoable: false,
-        visited_before: true,
-        visited_after: true,
-        georeferenced: false,
-        geographic: false,
-        room: ui::Room {
-            histogram: true,
-            info: true,
-            help: true,
-        },
-        hdr: Hdr::Available,
-        camera_jpeg: true,
-        depth: true,
-        openable: true,
-        false_colored: false,
-        picking: false,
-        nothing_open: false,
-        arriving: false,
-    };
-
     /// Whether `when` holds.
     pub fn met(&self, when: When) -> bool {
         match when {
@@ -762,25 +647,6 @@ impl Conditions {
             When::VisitedAfter => self.visited_after,
             When::Georeferenced => self.georeferenced,
             When::Geographic => self.geographic,
-        }
-    }
-
-    /// What makes a control dead, in the form the interface's tooltips
-    /// read it: the same reading, projected.
-    pub fn reasons(&self) -> Reasons {
-        Reasons {
-            room: self.room,
-            hdr: self.hdr,
-            openable: self.openable,
-            false_colored: self.false_colored,
-            picking: self.picking,
-            clipboard: self.picture_on_clipboard,
-            nothing_open: self.nothing_open,
-            arriving: self.arriving,
-            visited_before: self.visited_before,
-            visited_after: self.visited_after,
-            camera_jpeg: self.camera_jpeg,
-            depth: self.depth,
         }
     }
 }
@@ -1569,7 +1435,7 @@ impl Naming for Namer {
         // the surface switch on a monitor with no room above white — refuses
         // the press, so the label says why rather than naming the thing and
         // the key beside it, neither of which is going to happen.
-        if let Some(refused) = ui::tooltip::disabled(at, self.conditions.reasons()) {
+        if let Some(refused) = ui::tooltip::disabled(at, self.conditions) {
             return Some(ui::Tooltip {
                 title: vec![refused.said.to_string()],
                 hints: refused.hint.map(str::to_string).into_iter().collect(),
@@ -2522,7 +2388,7 @@ impl App {
     /// [`Conditions`]. A press on a dead control that quietly set something
     /// no one could see would be worse than one that does nothing.
     fn refuses(&self, control: Control) -> bool {
-        ui::tooltip::disabled(Tip::Control(control), self.conditions().reasons()).is_some()
+        ui::tooltip::disabled(Tip::Control(control), self.conditions()).is_some()
     }
 
     /// Acts on what a pass of the interface asked for, and says what the
@@ -3086,23 +2952,29 @@ impl App {
             // stays until it arrives.
             Control::Previous => self.step(false),
             Control::Next => self.step(true),
-            Control::Minimap => {
-                self.panels.show_minimap = !self.panels.show_minimap;
-                Effect::Redraw
-            }
-            // Where the window has no room for the panel the press was
-            // refused above, as the surface switch is where there is no
-            // headroom to switch to.
-            Control::Histogram => {
-                self.panels.show_histogram = !self.panels.show_histogram;
-                Effect::Redraw
-            }
-            Control::Grid => {
-                self.panels.show_grid = !self.panels.show_grid;
-                Effect::Redraw
-            }
-            Control::Loupe => {
-                self.panels.show_loupe = !self.panels.show_loupe;
+            // The toggles that are one flag of the panels and nothing else,
+            // flipped through the one reading of which flag each is — see
+            // `Panels::flag_mut`. Where the window has no room for a panel
+            // the press was refused above, as the surface switch is where
+            // there is no headroom to switch to. The plot's log axis is how
+            // the measurement is being read rather than anything about the
+            // rendering, which is why the reset below leaves it alone; the
+            // marks are where `w` lands too, so that the key and the button
+            // beside the panel's band cannot come to mean different things.
+            Control::Minimap
+            | Control::Histogram
+            | Control::Grid
+            | Control::Loupe
+            | Control::Info
+            | Control::Luma
+            | Control::Planes
+            | Control::Log
+            | Control::Marks => {
+                let flag = self
+                    .panels
+                    .flag_mut(widget)
+                    .expect("each of these toggles one flag");
+                *flag = !*flag;
                 Effect::Redraw
             }
             // The keys' own actions, and which of the two by the modifier
@@ -3115,10 +2987,6 @@ impl App {
                     false => ToggleInterface,
                 };
                 self.perform(action)
-            }
-            Control::Info => {
-                self.panels.show_info = !self.panels.show_info;
-                Effect::Redraw
             }
             // The seven buttons that open a menu: the menu is egui's, and
             // opens itself on the press, so there is nothing here to do.
@@ -3136,7 +3004,11 @@ impl App {
                 if self.files.len() < 2 && self.read_folder(Then::Filmstrip) {
                     return Effect::Nothing;
                 }
-                self.panels.show_filmstrip = !self.panels.show_filmstrip;
+                let flag = self
+                    .panels
+                    .flag_mut(Control::Filmstrip)
+                    .expect("the file list toggles one flag");
+                *flag = !*flag;
                 self.filmstrip.reveal();
                 Effect::Redraw
             }
@@ -3256,27 +3128,6 @@ impl App {
             Control::StepBack => self.step_frame(-1),
             Control::StepForward => self.step_frame(1),
             Control::Seek(frame) => self.seek(frame),
-            Control::Luma => {
-                self.panels.show_luma = !self.panels.show_luma;
-                Effect::Redraw
-            }
-            Control::Planes => {
-                self.panels.show_planes = !self.panels.show_planes;
-                Effect::Redraw
-            }
-            // The plot's own axis rather than anything about the rendering,
-            // which is why the reset below leaves it alone: it is how the
-            // measurement is being read, not what is being read.
-            Control::Log => {
-                self.panels.log_counts = !self.panels.log_counts;
-                Effect::Redraw
-            }
-            // Where `w` lands too, so that the key and the button beside
-            // the panel's band cannot come to mean different things.
-            Control::Marks => {
-                self.panels.mark_clipped = !self.panels.mark_clipped;
-                Effect::Redraw
-            }
             // The action the key runs, rather than a second reading of what
             // "reset" means: two of them would answer differently the first
             // time either was touched, and a button and a key that disagree
