@@ -21,8 +21,18 @@
 //!
 //! A zone that cannot be read at all leaves the offset at zero, which is to
 //! say local time falls back to UTC rather than to a guess.
+//!
+//! The file is read and parsed once per zone it names, and the table kept:
+//! the file list asks for the local time of every row on screen on every
+//! frame it draws sorted by date, and the answer does not change between
+//! frames. Which file to read is settled again on every call — an
+//! environment read, and a stat where `TZ` names a zone — so a `TZ` set
+//! between calls is honored; a zone file rewritten under the same name
+//! during a run is not, since nothing rewrites one.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::{LazyLock, Mutex, PoisonError};
 use std::time::SystemTime;
 
 /// A moment, split into the fields a date is written from. Which zone it is
@@ -161,13 +171,22 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
     (if month <= 2 { year + 1 } else { year }, month, day)
 }
 
+/// The zones read so far, by the file each was read from: the table, or
+/// `None` for a file that was not one, which is not read again either.
+static ZONES: LazyLock<Mutex<HashMap<PathBuf, Option<Zone>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
 /// How far ahead of UTC this machine's clock was at `at`, in seconds. Zero
 /// where there is no zone to be read, which leaves local time reading as UTC
 /// rather than as a guess.
 fn offset_at(at: i64) -> i64 {
-    std::fs::read(zone_file())
-        .ok()
-        .and_then(|bytes| offset_in(&bytes, at))
+    let path = zone_file();
+    let mut zones = ZONES.lock().unwrap_or_else(PoisonError::into_inner);
+    zones
+        .entry(path)
+        .or_insert_with_key(|path| std::fs::read(path).ok().and_then(|bytes| zone(&bytes)))
+        .as_ref()
+        .and_then(|zone| zone.offset_at(at))
         .unwrap_or(0)
 }
 
@@ -205,21 +224,62 @@ fn zone_file() -> PathBuf {
 }
 
 /// Reads a TZif file — RFC 8536 — for the offset in force at `at`, and
-/// `None` for anything it cannot make sense of. Every read is bounds-checked
-/// against the length actually there rather than against the counts the file
-/// claims, since the counts are as much a part of the file as the data.
+/// `None` for anything it cannot make sense of: the file's table, read once
+/// and asked once, which is how the tests hold a file they wrote to its
+/// answer.
+#[cfg(test)]
 fn offset_in(bytes: &[u8], at: i64) -> Option<i64> {
+    zone(bytes)?.offset_at(at)
+}
+
+/// A zone's table, as a TZif file holds it: the moments the offset changed,
+/// which of the offsets each change went to, and the offset the zone had
+/// before any of them.
+#[derive(Debug)]
+struct Zone {
+    /// In order, as the file has them.
+    transitions: Vec<i64>,
+    /// The type each transition goes to, as an index into `offsets`.
+    which: Vec<u8>,
+    /// Each type's offset from UTC, in seconds.
+    offsets: Vec<i64>,
+    /// The first type that is standard time: the file's own answer for a
+    /// moment before its first transition.
+    standard: Option<usize>,
+}
+
+impl Zone {
+    /// The offset in force at `at`.
+    ///
+    /// The transitions are in order, so the one in force is the last that
+    /// has already happened. Before the first — or in a zone that has never
+    /// changed offset — the file's own answer is its first standard type.
+    fn offset_at(&self, at: i64) -> Option<i64> {
+        let past = self.transitions.partition_point(|&when| when <= at);
+        let kind = match past.checked_sub(1) {
+            Some(last) => usize::from(*self.which.get(last)?),
+            None => self.standard.unwrap_or(0),
+        };
+        self.offsets.get(kind).copied()
+    }
+}
+
+/// Reads a TZif file — RFC 8536 — as its table, and `None` for anything it
+/// cannot make sense of. Every read is bounds-checked against the length
+/// actually there rather than against the counts the file claims, since the
+/// counts are as much a part of the file as the data.
+fn zone(bytes: &[u8]) -> Option<Zone> {
     let mut reader = Reader { bytes, at: 0 };
     let counts = header(&mut reader)?;
     if counts.version < b'2' {
-        return block(&mut reader, &counts, 4, at);
+        return block(&mut reader, &counts, 4);
     }
     // The whole file again, with room for the times a 32-bit count cannot
     // reach. The first copy is skipped rather than read: it stops in 2038,
     // and everything in it is in the second copy as well.
     reader.skip(block_length(&counts, 4))?;
     let counts = header(&mut reader)?;
-    block(&mut reader, &counts, 8, at)
+    block(&mut reader, &counts, 8)
 }
 
 /// The header's six counts, and the version that says how wide the times in
@@ -262,9 +322,9 @@ fn block_length(counts: &Counts, width: usize) -> usize {
         + counts.ut_indicators
 }
 
-/// The offset in force at `at`, read out of the data block the reader is
-/// standing at the start of.
-fn block(reader: &mut Reader, counts: &Counts, width: usize, at: i64) -> Option<i64> {
+/// The zone's table, read out of the data block the reader is standing at
+/// the start of.
+fn block(reader: &mut Reader, counts: &Counts, width: usize) -> Option<Zone> {
     let mut transitions = Vec::new();
     for _ in 0..counts.transitions {
         transitions.push(reader.time(width)?);
@@ -284,15 +344,12 @@ fn block(reader: &mut Reader, counts: &Counts, width: usize, at: i64) -> Option<
         }
     }
 
-    // The transitions are in order, so the one in force is the last that has
-    // already happened. Before the first — or in a zone that has never
-    // changed offset — the file's own answer is its first standard type.
-    let past = transitions.partition_point(|&when| when <= at);
-    let kind = match past.checked_sub(1) {
-        Some(last) => usize::from(*which.get(last)?),
-        None => standard.unwrap_or(0),
-    };
-    offsets.get(kind).copied()
+    Some(Zone {
+        transitions,
+        which,
+        offsets,
+        standard,
+    })
 }
 
 /// A position in the bytes, with every read answering `None` rather than
@@ -514,6 +571,25 @@ mod tests {
         // And the local clock is the UTC one moved by exactly that much.
         let moved = utc(SystemTime::UNIX_EPOCH + Duration::from_secs((now + offset) as u64));
         assert_eq!(local(SystemTime::now()).hour, moved.hour);
+    }
+
+    /// The zone kept from the first call answers as a fresh read of the file
+    /// does, and keeps answering so: the cache changes where the table lives,
+    /// not what it says.
+    #[test]
+    fn the_kept_zone_answers_as_a_fresh_read_does() {
+        let path = zone_file();
+        let fresh = std::fs::read(&path).ok();
+        for seconds in [0, 1_000_000_000, epoch_seconds(SystemTime::now())] {
+            let direct = fresh
+                .as_deref()
+                .and_then(|bytes| offset_in(bytes, seconds))
+                .unwrap_or(0);
+            assert_eq!(offset_at(seconds), direct, "at {seconds}");
+            assert_eq!(offset_at(seconds), direct, "at {seconds}, asked again");
+        }
+        let zones = ZONES.lock().unwrap_or_else(PoisonError::into_inner);
+        assert!(zones.contains_key(&path), "the zone is kept under its path");
     }
 
     /// A zone that has never changed offset has no transitions at all, and
