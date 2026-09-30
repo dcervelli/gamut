@@ -23,6 +23,7 @@ use super::tooltip::Tip;
 use super::{
     Current, FrameInput, MENU_OFFSET, PADDING, Panels, Room, filmstrip, menu, pixel, status,
 };
+use crate::image::auxiliary::{Auxiliary, Showing};
 use crate::image::decode::{CameraJpeg, Rendering};
 use crate::image::display::Headroom;
 use crate::theme::Theme;
@@ -690,10 +691,11 @@ impl Pass<'_> {
     /// another file is on its way in, whose map this would not be. Says
     /// whether it was drawn.
     fn depth_toggle(&mut self, ui: &mut Ui, current: &Current) -> bool {
-        if current.image.depth.is_none() || self.input.arriving.is_some() {
+        let depth = Showing::Auxiliary(Auxiliary::Depth);
+        if !current.picture().0.carries(Auxiliary::Depth) || self.input.arriving.is_some() {
             return false;
         }
-        let on = self.panels.show_depth;
+        let on = current.showing == depth;
         self.worded_toggle(ui, icon::AXIS_3D, Control::Depth, Some(DEPTH), on);
         true
     }

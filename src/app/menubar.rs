@@ -18,6 +18,7 @@ use super::edits::Edit;
 use super::input::{Action, Conditions, Effect, action_of};
 use super::keymap::{Chord, KeyName, Keymap};
 use crate::PROGRAM;
+use crate::image::auxiliary::{Auxiliary, Showing};
 use crate::image::decode::Rendering;
 use crate::image::display::{Colormap, EV_STEP, ToneMap};
 use crate::menubar::{
@@ -645,7 +646,8 @@ impl App {
                 Control::Info => panels.show_info,
                 Control::Grid => panels.show_grid,
                 Control::Loupe => panels.show_loupe,
-                Control::Depth => panels.show_depth,
+                Control::Depth => current
+                    .is_some_and(|current| current.showing == Showing::Auxiliary(Auxiliary::Depth)),
                 Control::Luma => panels.show_luma,
                 Control::Planes => panels.show_planes,
                 Control::Log => panels.log_counts,

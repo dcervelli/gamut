@@ -42,6 +42,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::gestures::{Button, DragAction, Gestures, Kind, Mods, Surface};
+use crate::image::auxiliary::Showing;
 use crate::image::decode::{CameraJpeg, Rendering};
 use crate::image::depth::Depth;
 use crate::image::display::{Display, Headroom};
@@ -160,7 +161,17 @@ use style::PANEL_RADIUS;
 /// as a texture behind the image rather than as a pattern competing with it.
 const CHECKER_SQUARE: f32 = 8.0;
 
-/// The image on screen, with everything derived from it.
+/// The image on screen, with everything derived from it, and the file it is
+/// one of.
+///
+/// `image`, `stats`, `display`, `stored` and `lift` are always of what is
+/// on screen — the picture, or an image it carries shown in its place (see
+/// [`Showing`]) — which is what makes everything that reads them read what
+/// is seen: the size in the top bar, the pixel under the pointer, the
+/// histogram and the keys that set the window, a copy, an export. The rest
+/// is the file's, whichever of its images is up. Where a reader wants the
+/// picture itself whatever is shown — what it carries, what it was left
+/// in — it asks [`Current::picture`].
 pub struct Current {
     /// Shared rather than owned: copying the picture to the clipboard walks
     /// every pixel on a thread of its own, and handing that thread the image
@@ -192,9 +203,129 @@ pub struct Current {
     /// Whether the file carries the camera's JPEG, whichever is shown: what
     /// decides whether the bottom bar offers the switch between them.
     pub camera_jpeg: CameraJpeg,
+    /// Which of the file's images the fields above are of.
+    pub showing: Showing,
+    /// The file's other images that have been on screen, each as it was
+    /// left, to be put back without being worked out again: the picture
+    /// itself, while an image it carries is shown in its place.
+    pub held: Vec<(Showing, Face)>,
+}
+
+/// What is on screen, as a copy or an export has to make it again off the
+/// screen: the image, and everything that decides how it is drawn. Taken
+/// whole from [`Current::seen`], cheaply — the image is shared — to be
+/// worked on a thread of its own, so that what is written out is what was
+/// seen, and a way of drawing the picture added later is added here once
+/// for both.
+pub struct Seen {
+    pub image: Arc<DecodedImage>,
+    pub display: Display,
+    pub lift: Option<Arc<crate::image::gain_map::Table>>,
+    pub turn: Turn,
+}
+
+impl Seen {
+    /// `region` of it, in the turned image's pixels, as the screen shows it.
+    pub fn raster(&self, region: Region) -> crate::image::encode::Raster {
+        crate::image::encode::displayed(
+            &self.image,
+            &self.display,
+            self.turn,
+            region,
+            self.lift.as_deref(),
+        )
+    }
+}
+
+/// One image of a file, with what was worked out from it to show it: the
+/// part of [`Current`] that belongs to whichever image is on screen, set
+/// aside whole while another is.
+pub struct Face {
+    pub image: Arc<DecodedImage>,
+    pub stats: Stats,
+    pub display: Display,
+    pub stored: Option<String>,
+    pub lift: Option<Arc<crate::image::gain_map::Table>>,
+}
+
+impl Face {
+    /// An image the file carries, as it first goes on screen: its own
+    /// statistics, and a display found in them as any file's is.
+    pub fn new(image: DecodedImage) -> Self {
+        let stats = Stats::scan(&image);
+        Self {
+            display: Display::for_image_with(&image, &stats, Default::default()),
+            image: Arc::new(image),
+            stats,
+            stored: None,
+            lift: None,
+        }
+    }
 }
 
 impl Current {
+    /// What is on screen, taken away to be drawn again off it.
+    pub fn seen(&self) -> Seen {
+        Seen {
+            image: Arc::clone(&self.image),
+            display: self.display.clone(),
+            lift: self.lift.clone(),
+            turn: self.turn,
+        }
+    }
+
+    /// The picture itself, whichever of the file's images is on screen:
+    /// what it carries beside it, and what it was left in.
+    pub fn picture(&self) -> (&Arc<DecodedImage>, &Display) {
+        match self.showing {
+            Showing::Picture => (&self.image, &self.display),
+            Showing::Auxiliary(_) => self
+                .held
+                .iter()
+                .find(|(showing, _)| *showing == Showing::Picture)
+                .map(|(_, face)| (&face.image, &face.display))
+                .expect("the picture is held while another image is shown"),
+        }
+    }
+
+    /// Puts `showing` on screen in place of what is, holding what was: the
+    /// face held for it where it has been up before, and otherwise one made
+    /// by `make`. Says whether anything changed; nothing does where
+    /// `showing` is already up, or is an image the picture does not carry.
+    pub fn show(
+        &mut self,
+        showing: Showing,
+        make: impl FnOnce(&DecodedImage) -> Option<Face>,
+    ) -> bool {
+        if showing == self.showing {
+            return false;
+        }
+        let held = self.held.iter().position(|(held, _)| *held == showing);
+        let face = match held {
+            Some(at) => self.held.remove(at).1,
+            None => match make(self.picture().0) {
+                Some(face) => face,
+                None => return false,
+            },
+        };
+        let was = std::mem::replace(&mut self.showing, showing);
+        let left = self.swap(face);
+        self.held.push((was, left));
+        true
+    }
+
+    /// Puts `face` in the fields of what is on screen, and hands back what
+    /// was there.
+    fn swap(&mut self, face: Face) -> Face {
+        Face {
+            image: std::mem::replace(&mut self.image, face.image),
+            stats: std::mem::replace(&mut self.stats, face.stats),
+            display: std::mem::replace(&mut self.display, face.display),
+            stored: std::mem::replace(&mut self.stored, face.stored),
+            lift: std::mem::replace(&mut self.lift, face.lift),
+        }
+    }
+
     /// The picture's size on screen, turned.
     pub fn size(&self) -> [f32; 2] {
         let [width, height] = self.pixels();
@@ -220,8 +351,10 @@ impl Current {
         self.image.sample(x, y, self.lift.as_deref())
     }
 
-    /// The depth map under `(x, y)` of the turned picture, where the file
-    /// carries one. `None` outside the picture or without a map.
+    /// The depth map under `(x, y)` of the image on screen, turned, where
+    /// the picture carries one: read at the same place in the scene
+    /// whichever image is up, the map being read by the fraction of the way
+    /// across and down. `None` outside the image or without a map.
     pub fn depth(&self, x: u32, y: u32) -> Option<Depth> {
         let [width, height] = self.pixels();
         if x >= width || y >= height {
@@ -229,7 +362,7 @@ impl Current {
         }
         let size = [self.image.width, self.image.height];
         let [x, y] = self.turn.stored([x, y], size);
-        self.image.depth.as_ref()?.at(x, y, size[0], size[1])
+        self.picture().0.depth.as_ref()?.at(x, y, size[0], size[1])
     }
 }
 
@@ -274,9 +407,10 @@ pub struct Panels {
     /// button held on the picture puts it up as well, whatever this says;
     /// where it is on any one frame is [`FrameInput::loupe`].
     pub show_loupe: bool,
-    /// Whether a picture's depth map is drawn in its place, stretched over
-    /// it. A way of looking like the grid and the loupe, so it stays on from
-    /// one file to the next, and applies to each that carries a map.
+    /// Whether a picture's depth map is asked to be shown in its place. A
+    /// way of looking like the grid and the loupe, so it stays on from one
+    /// file to the next, and applies to each that carries a map; what is
+    /// actually up is [`Current::showing`].
     pub show_depth: bool,
     /// How much larger the loupe's glass shows what its eye rings: one of
     /// [`loupe::MAGNIFICATIONS`], which the wheel steps through while the

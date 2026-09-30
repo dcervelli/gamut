@@ -8,6 +8,7 @@
 //! The pixel model is here; what the numbers mean is [`color`]; the decoders
 //! that produce it are [`decode`].
 
+pub mod auxiliary;
 pub mod color;
 pub mod decode;
 pub mod depth;

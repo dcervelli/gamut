@@ -592,17 +592,53 @@ carries the rendering it was asked for on `Opened::rendering`, and
 `App::follow_rendering` asks again once it lands if the preference has moved
 in the meantime.
 
-## The depth map
+## The file's other images
 
-The depth toggle sits between the camera's switch and the headroom switch
-(`Pass::depth_toggle`), and is left out on a picture with no depth map for
-the camera switch's reason: most pictures are not the kind of thing it is
-about. Its refusal for the key is `NO_DEPTH_MAP`. It is a toggle of the view
-like the grid and the loupe, held in `Panels::show_depth`, so it holds from
-one picture to the next, and lights while on through the same
-`Pass::worded_toggle` that draws those two with their readings. What it
-draws, and how the map is stretched over the picture, is in
-[formats](formats.md#depth-maps).
+What is on screen is what everything reads: the size the top bar gives, the
+pixel under the pointer and its coordinate, the zoom, the histogram and the
+keys that set the window, a copy and an export. A raw's camera JPEG gets
+that by being read in place of the developed picture. An image the picture
+carries — a depth map now, a portrait's mattes later — gets it without a
+read, by being made a picture of its own and put in the same place.
+
+`image/auxiliary.rs` names the kinds (`Auxiliary`) and which of a file's
+images is up (`Showing`), and `DecodedImage::auxiliary` makes the image
+(`DepthMap::image` for the depth map: gray, a measurement, windowed to the
+codes it holds). `Current`'s `image`, `stats`, `display`, `stored` and `lift`
+are always of what is up; they are a `Face`, and the faces not up are held in
+`Current::held` as they were left, so that going back puts back the
+picture's exposure and window rather than working them out again.
+`Current::picture` is the one way to the picture itself whatever is up —
+what it carries, what it was left in. The image layer holds textures the same
+way (`ImageLayer::show`, `ImageLayer::held`), so going back uploads nothing,
+and `install` lets the lot go with the file.
+
+`App::show` is the switch, and treats it as a change of picture in all but
+the file: the view is rescaled (`View::rescale`, as for `Arrival::Rerendered`)
+so the new image covers what the old one did, whatever its size, and the
+region, marked in the old image's pixels, is let go. `App::follow_showing`
+decides what should be up — the depth map while `Panels::show_depth` is on
+and the picture carries one and is not an animation, whose frames would
+replace it — and runs on the toggle and after each arrival, after the
+player has started. What is about the file rather than about what is seen
+is put back in the picture's terms first: `App::apply` shows the picture
+before it weighs the file arriving against it, and `App::keep_shown` and
+the stand-in read `App::picture_view`, the view as it would be over the
+picture.
+
+A copy and an export take `Current::seen` — the image, its display, its lift
+and the turn — to their threads, and draw it with `Seen::raster`. That is
+the one description of how what is on screen is drawn off it, so a way of
+drawing added later is added there once. An image *applied* to the picture
+rather than shown in its place — the gain map now, a matte as the picture's
+alpha later — is carried on the picture's `DecodedImage` and read by
+`Seen::raster` and the image layer alike; it is not a `Showing`.
+
+The toggle sits between the camera's switch and the headroom switch
+(`Pass::depth_toggle`), lit while the map is up, and is left out on a picture
+with no map for the camera switch's reason; `NO_DEPTH_MAP` is the refusal
+only the key reaches. The info panel's *Showing* row says when the facts
+under it are the map's.
 
 ## The region
 

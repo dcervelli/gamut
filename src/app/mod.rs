@@ -33,6 +33,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::{Window, WindowId};
 
 use crate::gestures::{Gestures, Surface};
+use crate::image::auxiliary::{Auxiliary, Showing};
 use crate::image::decode::{self, CameraJpeg, Rendering};
 use crate::image::display::{Display, Headroom, Startup};
 use crate::image::orient::Turn;
@@ -202,12 +203,6 @@ pub struct App {
     /// the camera's JPEG. One preference for every raw, kept between runs;
     /// a raw with no JPEG in it shows its developed picture whatever it is.
     rendering: Rendering,
-    /// The display the depth map is windowed by while it is drawn in the
-    /// picture's place: its own, found in its codes, since the picture's
-    /// exposure and window mean nothing to them. Made as the map goes onto
-    /// the device beside the picture — see [`App::hold_depth`] — and let go
-    /// with it when another picture is installed.
-    depth_display: Option<Display>,
     /// The compositor's word on the monitors, where it gives one.
     monitors: Option<Monitors>,
     /// The mode of the monitor the window is on, as last read: `None` until
@@ -523,7 +518,6 @@ impl App {
                 true => Rendering::CameraJpeg,
                 false => Rendering::Developed,
             },
-            depth_display: None,
             monitors,
             monitor: None,
             monitor_headroom: None,
@@ -810,11 +804,14 @@ impl App {
             (None, Sequence::Pages { .. }) => Some(Left::Page(current.page)),
             (None, _) => None,
         };
+        let Some((view, _)) = self.picture_view() else {
+            return;
+        };
         self.kept.keep(
             path,
             Settings {
-                view: self.view,
-                display: current.display.clone(),
+                view,
+                display: current.picture().1.clone(),
                 left,
                 turn: current.turn,
                 rendering: current.rendering,
@@ -1196,53 +1193,90 @@ impl App {
         Effect::Nothing
     }
 
-    /// Draws the picture's depth map in its place, or the picture again.
-    /// Neither is read nor decoded: the map came with the picture, and the
-    /// picture stays on the device while the map is drawn.
+    /// Shows the picture's depth map in its place, or the picture again,
+    /// for this picture and every one after it that carries a map.
     pub(super) fn toggle_depth(&mut self) -> Effect {
         self.panels.show_depth = !self.panels.show_depth;
-        self.hold_depth();
+        self.follow_showing().also(Effect::Redraw)
+    }
+
+    /// Which of the file's images the toggles ask for: the depth map while
+    /// its toggle is on and the picture carries one — and is a still,
+    /// since an animation's frames replace the picture as they play — and
+    /// the picture otherwise. Put on screen where it is not already.
+    fn follow_showing(&mut self) -> Effect {
+        let depth = Showing::Auxiliary(Auxiliary::Depth);
+        let wanted = match self.current.as_ref() {
+            Some(current)
+                if self.panels.show_depth
+                    && self.animation.is_none()
+                    && current.picture().0.carries(Auxiliary::Depth) =>
+            {
+                depth
+            }
+            _ => Showing::Picture,
+        };
+        self.show(wanted)
+    }
+
+    /// Puts `showing`, one of the file's images, on screen in place of the
+    /// one that is. Nothing is read or decoded: an image the picture carries
+    /// came with it, and is worked out and uploaded the first time it goes
+    /// up; after that each is held, face and texture, as it was left.
+    ///
+    /// What is on screen is what everything reads — see [`Current`] — so the
+    /// switch is a change of picture in all but the file: the view is
+    /// rescaled, as it is between a raw's two renderings, so that the same
+    /// detail stays under the same place on screen at the size it had, and
+    /// the region, marked out in the other image's pixels, is let go.
+    fn show(&mut self, showing: Showing) -> Effect {
+        let Some(current) = self.current.as_mut() else {
+            return Effect::Nothing;
+        };
+        let was = current.showing;
+        let from = current.size();
+        let made = current.show(showing, |picture| match showing {
+            Showing::Picture => None,
+            Showing::Auxiliary(kind) => picture.auxiliary(kind).map(ui::Face::new),
+        });
+        if !made {
+            return Effect::Nothing;
+        }
+        if let Some(shown) = self.shown.as_mut() {
+            match shown.renderer.show(showing, &current.image) {
+                Ok(stored) => current.stored = stored,
+                Err(error) => {
+                    eprintln!("gamut: {}", crate::escape_controls(&format!("{error:#}")));
+                    current.show(was, |_| None);
+                    return Effect::Nothing;
+                }
+            }
+        }
+        let to = current.size();
+        self.view.rescale(from, to);
+        self.motion = None;
+        self.marking.clear();
+        // The picture's lift was worked out for the room the surface had
+        // when it was last up, which may have changed since.
+        self.refresh_lift();
         Effect::Redraw
     }
 
-    /// Puts the picture's depth map on the device beside it, with the
-    /// display it is windowed by, where it is to be shown and is not there
-    /// already. Small — a phone's map is a fraction of the photograph — so
-    /// it is uploaded here rather than on the loader's thread.
-    fn hold_depth(&mut self) {
-        if !self.panels.show_depth || self.depth_display.is_some() {
-            return;
+    /// The view as it would be over the picture itself, whichever of the
+    /// file's images is on screen, and the picture's size: what the file is
+    /// left in, and what a file arriving is weighed against, both being
+    /// about the file and not about what was being looked at in it.
+    fn picture_view(&self) -> Option<(View, [f32; 2])> {
+        let current = self.current.as_ref()?;
+        let (picture, _) = current.picture();
+        let size = current
+            .turn
+            .size([picture.width as f32, picture.height as f32]);
+        let mut view = self.view;
+        if current.showing != Showing::Picture {
+            view.rescale(current.size(), size);
         }
-        let Some(map) = self
-            .current
-            .as_ref()
-            .and_then(|current| current.image.depth.clone())
-        else {
-            return;
-        };
-        let Some(shown) = self.shown.as_mut() else {
-            return;
-        };
-        let image = map.image();
-        if let Err(error) = shown.renderer.hold_beside(&image) {
-            eprintln!("gamut: {}", crate::escape_controls(&format!("{error:#}")));
-            return;
-        }
-        let stats = Stats::scan(&image);
-        self.depth_display = Some(Display::for_image_with(&image, &stats, Startup::default()));
-    }
-
-    /// The display the depth map is drawn through, while it is drawn in the
-    /// picture's place: the toggle is on and the picture has a map on the
-    /// device beside it.
-    fn depth_shown(&self) -> Option<&Display> {
-        self.depth_display.as_ref().filter(|_| {
-            self.panels.show_depth
-                && self
-                    .current
-                    .as_ref()
-                    .is_some_and(|current| current.image.depth.is_some())
-        })
+        Some((view, size))
     }
 
     /// A read asked for `asked` has landed. Where the preference has moved
@@ -1441,13 +1475,17 @@ impl App {
         let kept = self.kept.left(path);
         let turn = kept.map_or(Turn::NONE, |left| left.turn);
         let size = turn.size([width as f32, height as f32]);
-        let shown = self
-            .current
-            .as_ref()
+        // Weighed against the picture on screen as `apply` will weigh it,
+        // once it has put the picture itself back up.
+        let (view, picture) = match self.picture_view() {
+            Some((view, picture)) => (view, Some(picture)),
+            None => (self.view, None),
+        };
+        let shown = picture
             .zip(self.files.shown_path())
-            .map(|(current, path)| (path, current.size()));
+            .map(|(size, path)| (path, size));
         let (arrival, _) = arrival(Reload::Fresh, path, size, shown);
-        let view = arriving_view(arrival, kept, self.view, shown.map(|(_, size)| size), size);
+        let view = arriving_view(arrival, kept, view, picture, size);
         Some(ui::Standin {
             thumb,
             placement: view.placement(size, self.viewport()),
@@ -1972,7 +2010,6 @@ impl App {
                     if let Some(note) = renderer.install_image(uploaded) {
                         eprintln!("gamut: {note}");
                     }
-                    self.depth_display = None;
                     current.stored = renderer.image_format_label();
                 }
                 Err(error) => {
@@ -2140,6 +2177,10 @@ impl App {
             rendering,
             camera_jpeg,
         } = ready;
+        // What follows weighs the file arriving against the picture on
+        // screen, and keeps what the picture was left in: the picture's,
+        // not an image it carries shown in its place.
+        let _ = self.show(Showing::Picture);
         self.last_folder = std::path::absolute(&file.path)
             .ok()
             .and_then(|path| path.parent().map(Path::to_path_buf))
@@ -2221,9 +2262,6 @@ impl App {
             if let Some(note) = renderer.install_image(uploaded) {
                 eprintln!("gamut: {note}");
             }
-            // The depth map on the device went with the picture it was
-            // beside, and its display with it.
-            self.depth_display = None;
             stored = renderer.image_format_label();
         }
 
@@ -2323,6 +2361,8 @@ impl App {
             turn,
             rendering,
             camera_jpeg,
+            showing: Showing::Picture,
+            held: Vec::new(),
         });
         // The camera's JPEG was asked for and the file has none: said, since
         // the button that would say it is not drawn for such a file. Not for
@@ -2336,14 +2376,16 @@ impl App {
         // The loader measured the base; a surface with room above white
         // shows the lift, and the numbers follow it.
         self.refresh_lift();
-        // The depth map goes up beside it straight away where the toggle
-        // is on, so that stepping on keeps showing depth.
-        self.hold_depth();
         self.start_player(
             &file.path,
             sequence,
             kept.as_ref().and_then(|kept| kept.left),
         );
+        // And the image the toggles ask for in its place, where it carries
+        // one: stepping on with the depth map up keeps showing depth. After
+        // the player, whose frames would replace an image shown in the
+        // picture's place, and which says whether there are any.
+        let _ = self.follow_showing();
         self.set_title(&window_title(&file.path));
         true
     }
@@ -2628,7 +2670,6 @@ impl App {
         let loupe = loupe.filter(|_| picture);
         let namer = self.namer();
         let backdrop = ui::backdrop(&self.theme);
-        let beside = self.depth_shown().is_some();
 
         let Some(shown) = &mut self.shown else {
             return Effect::Nothing;
@@ -2647,17 +2688,11 @@ impl App {
         });
 
         let fallback = Display::default();
-        // The depth map, drawn in the picture's place, is windowed by its
-        // own display; nothing of the picture's — its exposure, its lift,
-        // the marks on what it clips — means anything to it.
-        let display = match (beside, &self.depth_display) {
-            (true, Some(depth)) => depth,
-            _ => self
-                .current
-                .as_ref()
-                .map(|current| &current.display)
-                .unwrap_or(&fallback),
-        };
+        let display = self
+            .current
+            .as_ref()
+            .map(|current| &current.display)
+            .unwrap_or(&fallback);
 
         let scene = Scene {
             placement,
@@ -2668,19 +2703,17 @@ impl App {
             scale,
             backdrop,
             headroom,
-            mark_clipped: self.panels.mark_clipped && !beside,
+            mark_clipped: self.panels.mark_clipped,
             lift: self
                 .current
                 .as_ref()
                 .and_then(|current| current.lift.as_ref())
-                .filter(|_| !beside)
                 .map_or(0.0, |table| table.weight()),
             turn: self
                 .current
                 .as_ref()
                 .map_or(Turn::NONE, |current| current.turn),
             picture,
-            beside,
         };
         match shown.renderer.render(scene, textures) {
             Ok(()) => self.reported_error = false,
@@ -5348,6 +5381,91 @@ mod tests {
         assert!(app.current.is_some(), "the picture stays");
         let _ = app.perform(super::input::Action::ToggleDepth);
         assert!(!app.panels.show_depth, "the key does what the button does");
+    }
+
+    /// The depth map shown in the picture's place is what is on screen in
+    /// every sense that matters: its size is what `Current` says, and so
+    /// what the top bar, the readout, a copy and an export read; its display
+    /// is its own; and the view is rescaled so that it covers what the
+    /// picture covered. Going back puts the picture back as it was left.
+    #[test]
+    fn the_depth_map_is_what_is_on_screen_while_it_is_shown() {
+        let path = fixture("jpeg-depth.jpg");
+        let mut app = open(vec![path.clone()], vec![path]);
+        answer(&mut app, Reload::Fresh);
+        let viewport = app.viewport();
+        let picture = app.current.as_ref().expect("the picture").size();
+        // A zoom the map can be shown at twice over: the window a test
+        // opens is small enough that a fitted picture sits at the floor.
+        app.view.set_zoom_at(1.0, [0.0, 0.0], picture, viewport);
+        let covered = app.view.placement(picture, viewport);
+        app.current
+            .as_mut()
+            .expect("the picture")
+            .display
+            .set_exposure(1.0);
+
+        let _ = app.press(crate::ui::Control::Depth);
+        let current = app.current.as_ref().expect("the map");
+        assert_eq!(current.showing, Showing::Auxiliary(Auxiliary::Depth));
+        assert_eq!(current.size(), [16.0, 12.0], "the map's own size");
+        assert!(current.image.is_gray());
+        assert_eq!(
+            current.display.exposure_stops(),
+            0.0,
+            "a display of its own"
+        );
+        // A copy, or an export, is of the map: what is seen is what is
+        // written out.
+        let raster = current.seen().raster(Region::whole(current.pixels()));
+        assert_eq!((raster.width, raster.height), (16, 12));
+        let over = app.view.placement(current.size(), viewport);
+        assert!(
+            (over.width - covered.width).abs() < 1e-3 && (over.x - covered.x).abs() < 1e-3,
+            "the map covers what the picture covered: {over:?} against {covered:?}"
+        );
+        // What the picture carries, and what it was left in, are still the
+        // picture's.
+        assert!(current.picture().0.carries(Auxiliary::Depth));
+        assert_eq!(current.picture().1.exposure_stops(), 1.0);
+        assert_eq!(app.picture_view().map(|(_, size)| size), Some(picture));
+
+        let _ = app.press(crate::ui::Control::Depth);
+        let current = app.current.as_ref().expect("the picture");
+        assert_eq!(current.showing, Showing::Picture);
+        assert_eq!(current.size(), picture);
+        assert_eq!(current.display.exposure_stops(), 1.0, "as it was left");
+        let back = app.view.placement(current.size(), viewport);
+        assert!((back.width - covered.width).abs() < 1e-3);
+    }
+
+    /// A file arriving is weighed against the picture, not against the depth
+    /// map shown in its place; and with the toggle on, the next picture with
+    /// a map comes up showing it, the next without one as itself.
+    #[test]
+    fn stepping_with_the_depth_map_up_follows_each_picture() {
+        // In the order the list sorts them: two with a map, one without.
+        let first = fixture("heic-depth.heic");
+        let paths = vec![
+            first.clone(),
+            fixture("jpeg-depth.jpg"),
+            fixture("png-rgb8.png"),
+        ];
+        let mut app = open(paths, vec![first]);
+        answer(&mut app, Reload::Fresh);
+        let _ = app.press(crate::ui::Control::Depth);
+
+        let _ = app.step(true);
+        answer(&mut app, Reload::Fresh);
+        let current = app.current.as_ref().expect("the second picture");
+        assert_eq!(current.showing, Showing::Auxiliary(Auxiliary::Depth));
+        assert_eq!(current.size(), [16.0, 12.0], "its own map, at its size");
+
+        let _ = app.step(true);
+        answer(&mut app, Reload::Fresh);
+        let current = app.current.as_ref().expect("the third picture");
+        assert_eq!(current.showing, Showing::Picture, "no map to show");
+        assert_eq!(current.size(), [32.0, 24.0]);
     }
 
     /// A file with nothing but the one picture is read the same whichever

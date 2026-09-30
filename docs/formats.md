@@ -195,19 +195,9 @@ offset, and decodes the map through `image`. Apple's depth in a JPEG (a
 disparity map as a second MPF image) and Google's later Dynamic Depth
 container are not read.
 
-The map can also be drawn in the picture's place, stretched over it, by the
-bottom bar's toggle or `D` (`Control::Depth`, `Panels::show_depth`).
-`DepthMap::image` makes it a gray measurement, which `App::hold_depth`
-uploads beside the picture with `Renderer::hold_beside` and windows with a
-`Display` of its own, found in its codes, in `App::depth_display`: the
-picture's exposure, lift and marks mean nothing to it. The image layer holds
-it in `ImageLayer::beside`, next to the picture it belongs to, and a `Draw`
-with `beside` set draws it through the picture's own placement, its zoom
-restated against its own texels by `stretched` so that the level and the
-filter are chosen for the texture actually read. Nothing is read or
-uploaded to go back: the picture never left the device. Installing another
-picture lets the map go, and `App::apply` clears the display with it and
-puts the new picture's map up in turn while the toggle is on.
+The map can also be shown in the picture's place, by the bottom bar's toggle
+or `D`; how is [the interface's](interface.md#the-files-other-images),
+since it is the same thing a raw's camera JPEG is.
 
 A map is extra: a failure anywhere in reading one leaves `depth` at `None`
 rather than refusing the picture. The fixtures are `heic-depth.heic` — the

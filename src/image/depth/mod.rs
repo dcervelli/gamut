@@ -4,9 +4,9 @@
 //! It is carried with the picture the way a gain map is, at its own size — a
 //! phone's depth map is a fraction of the photograph's — and turned with it,
 //! read one pixel at a time by the readout under the pointer when the depth
-//! is what was asked for, and drawn, as [`DepthMap::image`], in the
-//! picture's place and stretched over it when the depth map is asked to be
-//! shown.
+//! is what was asked for, and made a picture of its own by
+//! [`DepthMap::image`] to be shown in the picture's place — see
+//! [`super::auxiliary`].
 //!
 //! Every vendor stores a map the same way underneath: a gray image whose
 //! codes are spread evenly over a range of some quantity, which is either

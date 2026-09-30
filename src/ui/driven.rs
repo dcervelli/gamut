@@ -116,6 +116,8 @@ fn picture(width: u32, height: u32) -> Current {
         turn: crate::image::orient::Turn::NONE,
         rendering: crate::image::decode::Rendering::Developed,
         camera_jpeg: crate::image::decode::CameraJpeg::Unavailable,
+        showing: crate::image::auxiliary::Showing::Picture,
+        held: Vec::new(),
     }
 }
 

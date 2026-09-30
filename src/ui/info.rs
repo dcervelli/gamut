@@ -21,6 +21,7 @@ use egui::{
 
 use crate::clock;
 use crate::image::AlphaMode;
+use crate::image::auxiliary::{Auxiliary, Showing};
 use crate::image::decode::Rendering;
 use crate::image::sequence::{Loops, Sequence};
 use crate::render::Color;
@@ -588,6 +589,15 @@ fn image_facts(current: &Current) -> Vec<(&'static str, String)> {
                 Rendering::CameraJpeg => "camera JPEG".to_string(),
             },
         ),
+        // And which of the file's images, where it is not the picture but
+        // one the picture carries, shown in its place.
+        (
+            "Showing",
+            match current.showing {
+                Showing::Picture => String::new(),
+                Showing::Auxiliary(Auxiliary::Depth) => "depth map".to_string(),
+            },
+        ),
         (
             "Resolution",
             format!("{} \u{00d7} {}", image.width, image.height),
@@ -780,6 +790,8 @@ mod tests {
             turn: crate::image::orient::Turn::NONE,
             rendering: crate::image::decode::Rendering::Developed,
             camera_jpeg: crate::image::decode::CameraJpeg::Unavailable,
+            showing: crate::image::auxiliary::Showing::Picture,
+            held: Vec::new(),
         }
     }
 

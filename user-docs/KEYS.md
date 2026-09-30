@@ -574,16 +574,22 @@ picture while the camera's JPEG is chosen, saying so as it opens.
 
 A picture that carries a depth map — a phone's portrait, say — has a
 **Depth** button between that one and `HDR`. A click on it or `D` shows the
-depth map in the picture's place, stretched to the picture's size so that
-everything stays where it was, and lights the button; another shows the
-picture again. Nothing is read from the file again either way, so the two
-can be flicked between. The map is shown in gray, stretched from the lowest
-value it holds to the highest, with none of the picture's exposure or false
-color on it: in an iPhone's portrait the near things come out light, and in
-a map stored the other way round they come out dark. It stays on as you step through
-other pictures that carry a map, and a picture without one is shown as
-itself. The pixel readout still reads the picture; choose **Depth** in its
-menu to read the map.
+depth map in the picture's place and lights the button; another shows the
+picture again. The map covers exactly what the picture covered, so the same
+thing stays under the pointer and the two can be flicked between; nothing is
+read from the file again either way.
+
+While it is up, the map is the image: the top bar gives its size — usually
+far smaller than the photograph's — and the zoom, the pixel readout, the
+histogram, the display keys, a copy with `Ctrl+C` and an export all work on
+it, exactly as the camera's JPEG of a raw is the image while that is up. It
+opens in gray, stretched from the lowest value it holds to the highest: in
+an iPhone's portrait the near things come out light, and in a map stored the
+other way round they come out dark. Its exposure, window and false color are
+its own, and the picture's are waiting as you left them when you go back. A
+region you had marked out goes, since it was marked in the other image's
+pixels. The toggle stays on as you step through other pictures that carry a
+map, and a picture without one is shown as itself.
 
 The window is the one place the case of a key matters: `a` and `s` move
 the value that comes out black, `A` and `S` the value that comes out white.

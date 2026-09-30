@@ -8,7 +8,6 @@
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::Arc;
 use std::time::Instant;
 
 use winit::event::{ElementState, KeyEvent};
@@ -20,6 +19,7 @@ use super::folder::Then;
 use super::keymap::{Bound, Chord, KeyName, Keymap, Keys, Row};
 use crate::clipboard;
 use crate::gestures::{self, Button, Gestures, Surface, WheelAction};
+use crate::image::auxiliary::Auxiliary;
 use crate::image::decode::{CameraJpeg, Rendering};
 use crate::image::display::{Colormap, EV_STEP, Startup, ToneMap};
 use crate::image::encode;
@@ -2509,7 +2509,8 @@ impl App {
             hdr: self.hdr_state(),
             camera_jpeg: current
                 .is_some_and(|current| matches!(current.camera_jpeg, CameraJpeg::Present(_))),
-            depth: current.is_some_and(|current| current.image.depth.is_some()),
+            depth: self.animation.is_none()
+                && current.is_some_and(|current| current.picture().0.carries(Auxiliary::Depth)),
             openable: !self.openers.is_empty(),
             false_colored: current
                 .is_some_and(|current| current.display.false_colored(current.image.is_gray())),
@@ -2901,10 +2902,7 @@ impl App {
         let Some(current) = &self.current else {
             return;
         };
-        let image = Arc::clone(&current.image);
-        let display = current.display.clone();
-        let lift = current.lift.clone();
-        let turn = current.turn;
+        let seen = current.seen();
         let said = match region {
             Some(_) => "Copied region.",
             None => "Copied image.",
@@ -2914,7 +2912,7 @@ impl App {
             let (width, height) = (region.width, region.height);
 
             let walked = Instant::now();
-            let raster = encode::displayed(&image, &display, turn, region, lift.as_deref());
+            let raster = seen.raster(region);
             timing::mapped_image(width, height, walked.elapsed());
 
             let encoded = Instant::now();

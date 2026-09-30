@@ -16,8 +16,11 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   in the file's units; any other HEIC with a depth image reads as the code
   its map holds. A picture without one reads `(no depth)`.
 - A **Depth** button at the bottom right, and `D`, for a picture carrying a
-  depth map: shows the map in the picture's place, stretched to its size,
-  and the picture again, without reading the file again.
+  depth map: shows the map in the picture's place, covering what the
+  picture covered, and the picture again, without reading the file again.
+  While it is up the map is the image, as a raw's camera JPEG is: the top
+  bar gives its size, and the zoom, the pixel readout, the histogram, the
+  display keys, a copy and an export all work on it.
 
 ### Changed
 

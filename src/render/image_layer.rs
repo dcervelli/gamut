@@ -15,6 +15,7 @@ use super::placement::{Glass, Placement, Upscale};
 use super::reduce::{self, Level, Reducer};
 use super::shader_codes;
 use super::upload::{self, Capabilities};
+use crate::image::auxiliary::Showing;
 use crate::image::gain_map::GainMap;
 use crate::image::orient::Turn;
 use crate::image::{
@@ -274,10 +275,6 @@ pub struct Draw {
     pub lift: f32,
     /// How far the picture is turned: both quads read the texture turned.
     pub turn: Turn,
-    /// Whether the image held beside the picture is drawn in its place,
-    /// stretched over the picture's placement — see
-    /// [`ImageLayer::hold_beside`].
-    pub beside: bool,
 }
 
 impl Draw {
@@ -292,7 +289,6 @@ impl Draw {
             headroom: Headroom::None,
             lift: 0.0,
             turn: Turn::NONE,
-            beside: false,
         }
     }
 }
@@ -336,12 +332,12 @@ pub struct ImageLayer {
     marks_slot: Slot,
     reducer: Reducer,
     image: Option<GpuImage>,
-    /// Another image that belongs to the picture, held on the device beside
-    /// it so that it can be drawn in its place and back without either
-    /// being uploaded again: the depth map. Let go with the picture.
-    beside: Option<GpuImage>,
-    /// Whether the last `prepare` chose it, which `render` draws.
-    drawing_beside: bool,
+    /// Which of the file's images `image` is.
+    showing: Showing,
+    /// The file's other images that have been drawn, kept on the device so
+    /// that going back to one uploads nothing: the picture, while an image
+    /// it carries is drawn in its place. Let go with the file.
+    held: Vec<(Showing, GpuImage)>,
     /// Which of the current image's bind groups the next draw reads, decided
     /// in `prepare` from the zoom.
     level: usize,
@@ -445,8 +441,8 @@ impl ImageLayer {
             rim: Slot::new(device, &params_layout, "loupe rim params"),
             marks_slot: Slot::new(device, &params_layout, "marks params"),
             image: None,
-            beside: None,
-            drawing_beside: false,
+            showing: Showing::Picture,
+            held: Vec::new(),
             level: 0,
             thumbnail_level: None,
             loupe_level: None,
@@ -457,21 +453,30 @@ impl ImageLayer {
         self.image.as_ref()
     }
 
-    /// What the last `prepare` chose to draw: the image held beside the
-    /// picture where it was asked for and is there, and the picture
-    /// otherwise.
-    pub fn drawn(&self) -> Option<&GpuImage> {
-        match (self.drawing_beside, &self.beside) {
-            (true, Some(beside)) => Some(beside),
-            _ => self.image.as_ref(),
+    /// Draws `showing`, another image of the file on screen, in place of
+    /// the one that is: the texture held for it where it has been drawn
+    /// before, and otherwise the one `upload` makes. What was drawn is held
+    /// in turn. An upload that fails leaves what is drawn as it is.
+    pub fn show(
+        &mut self,
+        showing: Showing,
+        upload: impl FnOnce() -> Result<GpuImage>,
+    ) -> Result<()> {
+        if showing == self.showing || self.image.is_none() {
+            return Ok(());
         }
-    }
-
-    /// Holds `image` beside the picture on screen, to be drawn in its place
-    /// by a draw that asks for it. Replaced by the next, and let go when
-    /// the picture is.
-    pub fn hold_beside(&mut self, image: GpuImage) {
-        self.beside = Some(image);
+        let image = match self.held.iter().position(|(held, _)| *held == showing) {
+            Some(at) => self.held.remove(at).1,
+            None => upload()?,
+        };
+        let was = std::mem::replace(&mut self.showing, showing);
+        if let Some(left) = self.image.replace(image) {
+            self.held.push((was, left));
+        }
+        self.level = 0;
+        self.thumbnail_level = None;
+        self.loupe_level = None;
+        Ok(())
     }
 
     /// A handle that turns decoded images into [`GpuImage`]s. Held apart from
@@ -501,7 +506,8 @@ impl ImageLayer {
     /// describes rather than accumulating as files are stepped through.
     pub fn install(&mut self, image: GpuImage) {
         self.image = Some(image);
-        self.beside = None;
+        self.showing = Showing::Picture;
+        self.held.clear();
         self.level = 0;
         self.thumbnail_level = None;
         self.loupe_level = None;
@@ -511,7 +517,8 @@ impl ImageLayer {
     /// until another is installed.
     pub fn remove(&mut self) {
         self.image = None;
-        self.beside = None;
+        self.showing = Showing::Picture;
+        self.held.clear();
         self.level = 0;
         self.thumbnail_level = None;
         self.loupe_level = None;
@@ -551,29 +558,9 @@ impl ImageLayer {
             headroom,
             lift: weight,
             turn,
-            beside,
         } = draw;
-        self.drawing_beside = beside && self.beside.is_some();
-        let image = match (self.drawing_beside, &mut self.beside) {
-            (true, Some(beside)) => beside,
-            _ => match &mut self.image {
-                Some(image) => image,
-                None => return,
-            },
-        };
-        // An image beside the picture is stretched over the picture's own
-        // placement, whatever its size: its zoom, which chooses the level
-        // and the filter, is the quad's against its own texels.
-        let (view, thumbnail, loupe) = match self.drawing_beside {
-            true => (
-                stretched(view, image.size, turn),
-                thumbnail.map(|thumbnail| stretched(thumbnail, image.size, turn)),
-                loupe.map(|glass| Glass {
-                    placement: stretched(glass.placement, image.size, turn),
-                    ..glass
-                }),
-            ),
-            false => (view, thumbnail, loupe),
+        let Some(image) = &mut self.image else {
+            return;
         };
         let window = display.transform();
         let marks = shader_codes::marks(
@@ -692,7 +679,7 @@ impl ImageLayer {
     }
 
     pub fn render(&self, pass: &mut wgpu::RenderPass<'_>) {
-        let Some(image) = self.drawn() else {
+        let Some(image) = &self.image else {
             return;
         };
         // The loupe's glass goes down over the view, replacing rather than
@@ -1142,17 +1129,6 @@ impl Slot {
 /// pixel. Below one it is magnifying and reads the image itself; above it,
 /// the coarse chain does everything past a factor of four so that the
 /// filter's tap count stays small.
-/// `placement`, which is the picture's, with the zoom a texture `size`
-/// texels across has when stretched over it: the quad's width against the
-/// width the texture has once turned.
-fn stretched(placement: Placement, size: [u32; 2], turn: Turn) -> Placement {
-    let [across, _] = turn.size(size);
-    Placement {
-        zoom: placement.width / (across.max(1) as f32),
-        ..placement
-    }
-}
-
 fn shrink(placement: Placement) -> f32 {
     if placement.zoom > 0.0 {
         1.0 / placement.zoom

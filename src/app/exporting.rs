@@ -11,7 +11,6 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::time::Instant;
 
 use super::App;
@@ -211,10 +210,7 @@ impl App {
         let Some(current) = &self.current else {
             return;
         };
-        let image = Arc::clone(&current.image);
-        let display = current.display.clone();
-        let lift = current.lift.clone();
-        let turn = current.turn;
+        let seen = current.seen();
         let region = self
             .marking
             .selection
@@ -222,7 +218,7 @@ impl App {
             .unwrap_or_else(|| Region::whole(current.pixels()));
         self.copying.spawn_aside(move |ticket| {
             let walked = Instant::now();
-            let raster = encode::displayed(&image, &display, turn, region, lift.as_deref());
+            let raster = seen.raster(region);
             timing::mapped_image(region.width, region.height, walked.elapsed());
             let raster = resample::resize(raster, size);
             let bytes = match format {
