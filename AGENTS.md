@@ -445,6 +445,7 @@ author's own roadmap — read it, do not write to it.
 ## Checks
 
 ```sh
+cargo fmt                     # after every change, so `cargo fmt --check` is clean
 cargo test
 GAMUT_REQUIRE_GPU=1 cargo test render::   # the GPU tests, made to fail rather than skip
 cargo clippy --all-targets    # clean
