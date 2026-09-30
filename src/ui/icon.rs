@@ -289,6 +289,18 @@ pub(super) const CAMERA: &[Mark] = &[
     Mark::circle([12.0, 13.0], 3.0),
 ];
 
+/// Lucide's `aperture`: an iris of six blades in a ring — the mark at the
+/// head of the info panel's section about how the picture was exposed.
+pub(super) const APERTURE: &[Mark] = &[
+    Mark::circle([12.0, 12.0], 10.0),
+    Mark::Line([14.31, 8.0], [20.05, 17.94]),
+    Mark::Line([9.69, 8.0], [21.17, 8.0]),
+    Mark::Line([7.38, 12.0], [13.12, 2.06]),
+    Mark::Line([9.69, 16.0], [3.95, 6.06]),
+    Mark::Line([14.31, 16.0], [2.83, 16.0]),
+    Mark::Line([16.62, 12.0], [10.88, 21.94]),
+];
+
 /// Lucide's `image`: a frame holding a sun and a hill — the mark at the
 /// head of the info panel's section about the picture. The hill's rounded
 /// peak is an arc about the center Lucide's path implies.
@@ -1126,7 +1138,7 @@ mod tests {
 
     /// Every icon in the table, so that a new one is held to the same
     /// promises as the rest.
-    const ICONS: [&[Mark]; 38] = [
+    const ICONS: [&[Mark]; 39] = [
         CHART_AREA,
         INFO,
         CIRCLE_QUESTION_MARK,
@@ -1135,6 +1147,7 @@ mod tests {
         FILE,
         IMAGE,
         CAMERA,
+        APERTURE,
         MAP_PIN,
         SQUARE_DASHED,
         MAP,

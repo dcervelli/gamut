@@ -940,25 +940,26 @@ to. Two of the picture's facts come out of the EXIF block rather than the
 decoder: the turn its orientation tag asks for, which is why the resolution
 can be the stored picture's on its side, and a TIFF's compression — only a
 TIFF's, since a raw's first directory describes the preview in front of it
-and every other container's block has no pixels of its own. Both are taken
-out of the listing below, where they would otherwise be said again.
+and every other container's block has no pixels of its own.
 
 The rest is its EXIF, read by `src/image/exif.rs` on the loader thread beside
 the decode, because it is one more parse of a file somebody else chose the
 bytes of and that is the thread with the panic guard around it. What comes
-back is already words, and already grouped: the fields a photograph is read by
-— camera, lens, when, the exposure and how it was decided, the focal length
-with its equivalent and any digital zoom, the metering, white balance and
-flash, whether the picture was merged from several frames, and the owner and
-serial numbers the camera was given — then where it was taken, the coordinates in degrees a map will
-take with the rest of the GPS directory under them, then whatever somebody
-wrote in words, and last everything left over. That last split is had for
-nothing: TIFF's own tags describe the file and the Exif directory describes
-the shot, and every tag says which directory it came from — so the long tail
-is grouped by asking each one rather than by a table of where each belongs. A
-group that came to nothing is not carried at all, an empty heading being a
-question about where the rest of it went. Nothing there is a tag number or an
-offset by the time the interface sees it.
+back is already words, and already grouped: `Camera`, what took the picture
+whatever it was taken of — the body, the lens, the owner and the serial
+numbers — then `Exposure`, how this picture was taken — when, the exposure
+and how it was decided, the focal length with its equivalent and any digital
+zoom, the metering, the white balance and the color temperature it was set
+for, the flash, and whether the picture was merged from several frames —
+then where it was taken, the coordinates in degrees a map will take, and
+last whatever somebody wrote in words. Nothing else is shown field by
+field. Once those are read out of the block, what is left is how the file
+is laid out —
+strip offsets, bits per sample, a DNG's calibration matrices — and how the
+camera describes itself — the Exif version, APEX restatements of the
+exposure already given — and a column of it buried the few fields worth
+reading. A group that came to nothing is not carried at all, an empty heading
+being a question about where the rest of it went.
 
 The coordinates are kept as numbers too, as `Exif::position`: the latitude
 and longitude in signed degrees, south and west below zero, which is what a
@@ -1010,6 +1011,18 @@ heading is "About" and not
 shares a word with a row under it reads as a mistake; the row in turn is
 "Caption", the word the programs that write the field use for it, and what it
 holds — a sentence about the picture, not a description of the file.
+
+For a raw, what LibRaw read of its header fills in whatever of `Camera`
+and `Exposure` the EXIF left out, a row at a time and each where the EXIF
+reader would have put it (`Exif::fill`): all of it for a CRW, which has no
+EXIF. LibRaw also gives the color temperature, which EXIF has no field for.
+The camera's as-shot multipliers balance a gray surface, which the sensor
+therefore read as their inverse; LibRaw's matrix takes the sensor's values,
+scaled by its own daylight multipliers, to sRGB, so that gray scaled that
+way and put through it is the illuminant's color. From there it is CIE xy,
+and McCamy's cubic gives the correlated color temperature, to the nearest
+50 K. On a Canon R6 Mark II it comes within 2% of the temperature Canon's
+own maker note records.
 
 A lens is named by `LensModel`, with `LensMake` in front only where it is not
 the camera's maker and the name does not already say it — the case of a

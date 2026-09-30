@@ -439,12 +439,11 @@ four one-directory TIFFs in boxes under Canon's `uuid` — which, read alone,
 put Exif tags in the image's directory where they mean nothing, so three of
 them are written back out as one TIFF with the offsets moved. A CRW has no
 EXIF anywhere. What every raw has is LibRaw's own reading of its header,
-and `raw::facts` turns that into the panel's `Sensor` section — the frame
-and the picture inside it, the filter cell spelled from dcraw's bit
-pattern, the white level, the as-shot and daylight balances, the camera
-matrix, the DNG version — and into the entries of `Camera`, which
-`Exif::read` takes whatever of from that the EXIF did not say: all of it
-for a CRW, the exposure for a Phase One. Two structs more are transcribed
+and `raw::facts` turns that into the entries of `Camera` and `Exposure`,
+which `Exif::read` takes whatever of from that the EXIF did not say: all of
+it for a CRW, the exposure for a Phase One — and the color temperature the
+as-shot multipliers balance for, worked out through LibRaw's matrix, which
+no EXIF field holds. Two structs more are transcribed
 for it, `Other` and the front of `Lens`, both reached through accessors so
 that only their leading fields have to be right.
 

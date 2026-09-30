@@ -453,10 +453,9 @@ Caveats:
 - **Lens corrections are not applied,** and neither is noise reduction: the
   frame is the sensor's, distortion and vignetting included.
 - **The information panel reads every format's metadata,** including the
-  ones that keep it somewhere other than where a TIFF would, and adds a
-  Sensor section: the sensor's size and the picture's inside it, the color
-  filter pattern, the white level, the white balance the camera set and
-  the daylight one its matrix implies, and the matrix itself. The one
+  ones that keep it somewhere other than where a TIFF would, and adds the
+  color temperature the camera's white balance was set for, which the
+  file's metadata does not say outright. The one
   format with no metadata to read is Canon's old CRW, and there the panel
   says what the file's own header does: the camera, the exposure, the
   focal length and the time.

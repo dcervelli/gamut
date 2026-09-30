@@ -143,13 +143,11 @@ pub trait Decoder: Sync {
 
     /// What the format's own reader of the file has to say about it, for
     /// the information panel, beyond what the EXIF reader gets out of it:
-    /// the exposure as the library parsed it from the maker's own block,
-    /// and a section of its own. `None` where the format has no reader of
-    /// its own, which is what every format but the camera raws says.
-    fn facts(
-        &self,
-        _source: &mut dyn ReadSeek,
-    ) -> Result<Option<(Vec<super::exif::Entry>, super::exif::Section)>> {
+    /// the camera and the exposure as the library parsed them from the
+    /// maker's own block, as rows named as the `Camera` and `Exposure`
+    /// sections name theirs. `None` where the format has no reader of its
+    /// own, which is what every format but the camera raws says.
+    fn facts(&self, _source: &mut dyn ReadSeek) -> Result<Option<Vec<super::exif::Entry>>> {
         Ok(None)
     }
 
@@ -500,7 +498,7 @@ pub fn camera_jpeg(path: &Path) -> Result<CameraJpeg> {
 /// What the decoder of `path` read out of its header, for the information
 /// panel — see [`Decoder::facts`] — or nothing for a file whose decoder
 /// has nothing of its own to say, or that will not open.
-pub fn facts(path: &Path) -> Option<(Vec<super::exif::Entry>, super::exif::Section)> {
+pub fn facts(path: &Path) -> Option<Vec<super::exif::Entry>> {
     let (mut source, decoder) = open(path).ok()?;
     decoder.facts(&mut source).ok().flatten()
 }

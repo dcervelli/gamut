@@ -46,6 +46,17 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Changed
 
+- The information panel's *Camera* section is split in two: *Camera* says
+  what took the picture — the body, the lens, the owner and the serial
+  numbers — and *Exposure*, under an aperture's mark, how this picture was
+  taken. For a raw, *Exposure* gives the color temperature the white
+  balance was set for, beside the white balance.
+- The information panel's *Sensor* and *GPS metadata* sections are gone.
+- A camera whose make is a company's whole name is no longer named twice:
+  "NIKON D100" rather than "NIKON CORPORATION NIKON D100".
+- The information panel no longer lists the *Image metadata* and *Capture
+  metadata* sections, the rest of the file's EXIF field by field. What was
+  worth reading in them is in *Camera*, *Exposure* and *Image* now.
 - The information panel's *Georeference* section is headed by a map's mark
   over a table, as *Camera* is, and gives the ground a raster covers as
   *Min easting*, *Max easting*, *Min northing* and *Max northing* — or the
@@ -71,9 +82,8 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   compensation*, each copied on its own, where it was one line. The
   *Location* section is headed by the latitude and longitude beside a map
   pin, over the altitude, the direction the camera faced and how far out the
-  fix may be; the rest of the GPS directory is listed after the other
-  metadata, under *GPS metadata*, where it followed the coordinates. A click on any piece copies it, the size and
-  the date exactly.
+  fix may be. A click on any piece copies it, the size and the date
+  exactly.
 - Color spaces are called by their common names — *sRGB*, *Display P3*,
   *Rec. 2100 PQ*, *Adobe RGB (1998)* — in the top bar and the information
   panel, where they were written as primaries and curve, `BT.709/sRGB`. A

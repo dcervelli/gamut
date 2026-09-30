@@ -747,10 +747,10 @@ image in it: how many pixels across and down, what each pixel holds, the
 color space those numbers are meant in, and whether it carries transparency.
 
 After those comes what the file's own metadata says, for a file that carries
-any: the camera and lens, when the photograph was taken, the exposure it was
-made at and how it was decided, the focal length, the metering, the white
-balance and the flash, and whose camera it was and its serial numbers where
-the camera recorded them; then where the camera stood, in degrees a map
+any: the camera and lens, whose camera it was and its serial numbers where
+the camera recorded them; then when the photograph was taken, the exposure
+it was made at and how it was decided, the focal length, the metering, the
+white balance — with its color temperature, for a raw — and the flash; then where the camera stood, in degrees a map
 will take, with whatever else it recorded about the place. A georeferenced
 raster — a scanned map, an elevation model — gets a section of its own: the
 coordinate system it names, the size of a pixel on the ground, where its
@@ -765,8 +765,9 @@ whatever a cataloging program marked — faces with the names they were given,
 pets, barcodes, a point of focus, and the people Windows Photo Gallery
 tagged — with the
 corner and size of each in pixels of the picture as it is shown, the way the
-pointer's position reads: turning the picture moves them with it. Everything left over is listed
-after all of them, field by field, as the file gives it.
+pointer's position reads: turning the picture moves them with it. Whatever
+else the GPS receiver recorded is listed after all of them, field by field,
+as the file gives it.
 
 Clicking copies. A click on a field copies what it says; a click on a heading
 copies that whole section, one line per field as a name and a value; and the
