@@ -233,10 +233,7 @@ impl Filmstrip {
                 let known = key(path);
                 Row {
                     index: index + 1,
-                    name: path
-                        .file_name()
-                        .map(|name| name.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| path.display().to_string()),
+                    name: crate::basename(path),
                     path: path.display().to_string(),
                     format: known.format,
                     size: known.size,

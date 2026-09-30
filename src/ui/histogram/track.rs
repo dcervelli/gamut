@@ -71,9 +71,17 @@ pub(super) fn track(
     let id = ui.id().with("levels");
     // The stretch between the handles first and the handles after, so that
     // where they overlap it is the handle that is under the pointer.
-    let between = ui.interact(area(band), id.with("window"), Sense::DRAG);
-    let black_handle = ui.interact(area(grip(band, at(black_t))), id.with("black"), Sense::DRAG);
-    let white_handle = ui.interact(area(grip(band, at(white_t))), id.with("white"), Sense::DRAG);
+    let between = ui.interact(egui::Rect::from(band), id.with("window"), Sense::DRAG);
+    let black_handle = ui.interact(
+        egui::Rect::from(grip(band, at(black_t))),
+        id.with("black"),
+        Sense::DRAG,
+    );
+    let white_handle = ui.interact(
+        egui::Rect::from(grip(band, at(white_t))),
+        id.with("white"),
+        Sense::DRAG,
+    );
     between.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "Window"));
     black_handle.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "Black point"));
     white_handle.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "White point"));

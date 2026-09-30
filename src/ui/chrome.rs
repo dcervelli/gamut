@@ -765,13 +765,7 @@ impl Pass<'_> {
 
     /// How wide `words` come out in a button's face.
     fn words_width(ui: &Ui, words: &str) -> f32 {
-        let font = egui::TextStyle::Button.resolve(ui.style());
-        ui.ctx().fonts_mut(|fonts| {
-            fonts
-                .layout_no_wrap(words.to_string(), font, egui::Color32::PLACEHOLDER)
-                .size()
-                .x
-        })
+        super::text_width(ui, words, egui::TextStyle::Button.resolve(ui.style()))
     }
 
     /// The dot at the head of the pixel readout, which opens the menu of ways
@@ -1134,13 +1128,7 @@ enum Edge {
 /// How wide `text` comes out in the bar's face, for laying words out
 /// against what is left of a bar.
 pub(super) fn measure(ui: &Ui, text: &str) -> f32 {
-    let font = egui::TextStyle::Body.resolve(ui.style());
-    ui.ctx().fonts_mut(|fonts| {
-        fonts
-            .layout_no_wrap(text.to_string(), font, egui::Color32::WHITE)
-            .size()
-            .x
-    })
+    super::text_width(ui, text, egui::TextStyle::Body.resolve(ui.style()))
 }
 
 #[cfg(test)]

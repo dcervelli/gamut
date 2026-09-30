@@ -92,6 +92,19 @@ pub struct Glimpse {
     pub modified: Option<SystemTime>,
 }
 
+impl Glimpse {
+    /// The glimpse a header read gives: the same four facts, out of what
+    /// the thumbnail thread learned of the file.
+    pub fn of(facts: &crate::thumbnailer::Facts) -> Self {
+        Self {
+            format: facts.format,
+            bytes: facts.bytes,
+            size: facts.size,
+            modified: facts.modified,
+        }
+    }
+}
+
 /// A folder read: which file it was read for, the folder as that file's
 /// name has it, and the images in it with a glimpse of each. `images` is
 /// the error where the folder would not list.

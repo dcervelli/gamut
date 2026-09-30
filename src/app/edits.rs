@@ -82,11 +82,7 @@ fn to_undo(keys: &super::keymap::Keymap) -> String {
 
 /// The last part of `path`, for a message about the file.
 pub(super) fn name_of(path: &Path) -> String {
-    let name = path.file_name().map_or_else(
-        || path.display().to_string(),
-        |name| name.to_string_lossy().into_owned(),
-    );
-    crate::escape_controls(&name)
+    crate::escape_controls(&crate::basename(path))
 }
 
 impl App {

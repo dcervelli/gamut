@@ -37,21 +37,23 @@ impl<'a> Key<'a> {
     /// been read, and what a folder read glimpsed of it where they have
     /// not.
     pub(super) fn of(path: &'a Path, facts: Option<&Facts>, glimpse: Option<&Glimpse>) -> Self {
-        match facts {
-            Some(facts) => Key {
-                path,
-                format: facts.format,
-                bytes: facts.bytes,
-                size: facts.size,
-                modified: facts.modified,
-            },
-            None => Key {
-                path,
-                format: glimpse.and_then(|glimpse| glimpse.format),
-                bytes: glimpse.and_then(|glimpse| glimpse.bytes),
-                size: glimpse.and_then(|glimpse| glimpse.size),
-                modified: glimpse.and_then(|glimpse| glimpse.modified),
-            },
+        // What the header said, or failing that what a folder read
+        // glimpsed, or nothing.
+        let Glimpse {
+            format,
+            bytes,
+            size,
+            modified,
+        } = facts
+            .map(Glimpse::of)
+            .or_else(|| glimpse.copied())
+            .unwrap_or_default();
+        Key {
+            path,
+            format,
+            bytes,
+            size,
+            modified,
         }
     }
 

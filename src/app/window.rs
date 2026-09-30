@@ -65,10 +65,7 @@ const DEFAULT_IMAGE: [f32; 2] = [960.0, 640.0];
 const MAX_LABEL_CHARS: usize = 256;
 
 pub(super) fn file_label(path: &Path) -> String {
-    let name = path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.display().to_string());
+    let name = crate::basename(path);
     match name.char_indices().nth(MAX_LABEL_CHARS) {
         Some((cut, _)) => format!("{}\u{2026}", &name[..cut]),
         None => name,

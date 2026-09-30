@@ -60,6 +60,18 @@ use crate::theme::Theme;
 use crate::view::{View, Viewport};
 
 pub use control::{Command, Control, Grab, Naming, Selection};
+
+/// How wide `text` comes out in `font`: the one measure of a piece of
+/// text the interface takes before it lays it out, in the placeholder ink
+/// since the color is no part of the width.
+pub(crate) fn text_width(ui: &egui::Ui, text: &str, font: egui::FontId) -> f32 {
+    ui.ctx().fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap(text.to_string(), font, egui::Color32::PLACEHOLDER)
+            .size()
+            .x
+    })
+}
 pub use info::FileFacts;
 pub use pixel::{CoordinateFormat, GeographicFormat, PixelFormat};
 pub use rect::Rect;

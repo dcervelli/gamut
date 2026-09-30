@@ -35,7 +35,7 @@ pub(super) fn controls(
         let active = panels.lit(*widget);
         let (_, background, ink) = button(pass, ui, rect, *widget, active, true, TOGGLE_RADIUS);
         let grid = pass.grid;
-        let square = icon::square(grid, area(rect), ICON_SIDE);
+        let square = icon::square(grid, egui::Rect::from(rect), ICON_SIDE);
         let painter = ui.painter();
         match widget {
             // The two plane toggles are drawn here rather than taken from
@@ -94,7 +94,7 @@ pub(super) fn controls(
             true,
             TOGGLE_RADIUS,
         );
-        let square = icon::square(pass.grid, area(rect), ICON_SIDE);
+        let square = icon::square(pass.grid, egui::Rect::from(rect), ICON_SIDE);
         icon::paint(ui.painter(), icon::TRIANGLE_ALERT, square, ink, background);
     }
 

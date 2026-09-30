@@ -69,6 +69,15 @@ pub(crate) fn escape_controls(text: &str) -> String {
         .collect()
 }
 
+/// What a file is called: the last part of `path` where it has one, and
+/// the whole path where it has not — a bare `/`, or one ending in `..`.
+pub(crate) fn basename(path: &Path) -> String {
+    path.file_name().map_or_else(
+        || path.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    )
+}
+
 /// A path rendered for a message, with any control characters defused.
 pub(crate) fn shown_path(path: &Path) -> String {
     escape_controls(&path.display().to_string())

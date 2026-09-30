@@ -11,7 +11,7 @@
 //! would change something, so that a hand resting still is not a frame a
 //! second.
 
-use egui::{Color32, CursorIcon, Sense, WidgetInfo, pos2, vec2};
+use egui::{Color32, CursorIcon, Sense, WidgetInfo};
 
 use super::Rect;
 use super::chrome::Pass;
@@ -78,7 +78,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, line: Line<'_>, room: Rec
     let at = |t: f32| track.x + t.clamp(0.0, 1.0) * track.width;
 
     let sense = if line.live { Sense::DRAG } else { Sense::HOVER };
-    let response = ui.interact(area(room), ui.id().with(line.name), sense);
+    let response = ui.interact(egui::Rect::from(room), ui.id().with(line.name), sense);
     let (live, value, name) = (line.live, line.value, line.name);
     response.widget_info(|| WidgetInfo::slider(live, f64::from(value), name));
     let mut asked = None;
@@ -108,7 +108,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, line: Line<'_>, room: Rec
     let middle = room.y + room.height / 2.0;
     let groove = grid.rect(Rect::new(track.x, middle - TRACK / 2.0, track.width, TRACK));
     painter.rect_filled(
-        area(groove),
+        egui::Rect::from(groove),
         TRACK / 2.0,
         theme.text_dim.with_alpha(GROOVE_ALPHA),
     );
@@ -122,7 +122,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, line: Line<'_>, room: Rec
         } else {
             theme.text_dim
         };
-        painter.rect_filled(area(fill), TRACK / 2.0, ink);
+        painter.rect_filled(egui::Rect::from(fill), TRACK / 2.0, ink);
     }
     if line.low < line.origin && line.origin < line.high {
         let tick = grid.rect(Rect::new(
@@ -131,7 +131,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, line: Line<'_>, room: Rec
             HANDLE_RING,
             2.0 * TICK,
         ));
-        painter.rect_filled(area(tick), 0.0, theme.text_dim);
+        painter.rect_filled(egui::Rect::from(tick), 0.0, theme.text_dim);
     }
 
     let mark = grid.rect(Rect::new(
@@ -176,7 +176,7 @@ pub(super) fn handle(
     ground: Color,
 ) {
     let ring = mark.inset(-HANDLE_RING, -HANDLE_RING);
-    painter.rect_filled(area(ring), HANDLE_RADIUS + HANDLE_RING, ground);
+    painter.rect_filled(egui::Rect::from(ring), HANDLE_RADIUS + HANDLE_RING, ground);
     let ink: Color32 = match hand {
         Hand::Off => theme.accent,
         Hand::On => theme.text_primary,
@@ -184,13 +184,8 @@ pub(super) fn handle(
     }
     .into();
     if (0.0..=1.0).contains(&t) {
-        painter.rect_filled(area(mark), HANDLE_RADIUS, ink);
+        painter.rect_filled(egui::Rect::from(mark), HANDLE_RADIUS, ink);
     } else {
         outline(painter, grid, mark, grid.line_width(1.0), ink);
     }
-}
-
-/// An egui rectangle for one of ours.
-fn area(rect: Rect) -> egui::Rect {
-    egui::Rect::from_min_size(pos2(rect.x, rect.y), vec2(rect.width, rect.height))
 }

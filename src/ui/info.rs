@@ -378,7 +378,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
         super::panel::waiting(ui.ctx(), "info", None, panel, theme);
         return;
     }
-    let area = egui::Rect::from_min_size(pos2(panel.x, panel.y), vec2(panel.width, panel.height));
+    let area = egui::Rect::from(panel);
     // What the regions are drawn on while the pointer is on their rows: the
     // layer the picture's own marks are painted on, under every panel, this
     // one included. Nothing is drawn over a stand-in for another file.

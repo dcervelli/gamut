@@ -13,7 +13,7 @@ use plot::{bin_across, plot};
 use slider::slider;
 use track::track;
 
-use egui::{Align2, Color32, FontId, Sense, WidgetInfo, WidgetType, pos2, vec2};
+use egui::{Align2, Color32, FontId, Sense, WidgetInfo, WidgetType, pos2};
 
 use crate::image::display::{AutoWindow, Colormap, Display, EV_STEP, ToneMap};
 use crate::image::stats::BINS;
@@ -586,18 +586,9 @@ pub fn marked(
 }
 
 /// An egui rectangle for one of ours.
-fn area(rect: Rect) -> egui::Rect {
-    egui::Rect::from_min_size(pos2(rect.x, rect.y), vec2(rect.width, rect.height))
-}
-
 /// How wide `text` comes out at `size`.
 fn width_of(ui: &egui::Ui, text: &str, size: f32) -> f32 {
-    ui.ctx().fonts_mut(|fonts| {
-        fonts
-            .layout_no_wrap(text.to_string(), FontId::proportional(size), Color32::WHITE)
-            .size()
-            .x
-    })
+    crate::ui::text_width(ui, text, FontId::proportional(size))
 }
 
 /// A value on the plot's axis, written in the units the file counts in.
@@ -680,10 +671,14 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
         return;
     }
     panel::area("histogram", panel, egui::Order::Middle).show(ui.ctx(), |ui| {
-        let (_, body) = ui.allocate_exact_size(area(panel).size(), Sense::CLICK | Sense::DRAG);
+        let (_, body) =
+            ui.allocate_exact_size(egui::Rect::from(panel).size(), Sense::CLICK | Sense::DRAG);
         body.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "Histogram panel"));
-        ui.painter()
-            .rect_filled(area(panel), PANEL_RADIUS, theme.panel_background);
+        ui.painter().rect_filled(
+            egui::Rect::from(panel),
+            PANEL_RADIUS,
+            theme.panel_background,
+        );
         plot(pass, ui, current, panel, content);
         let held = controls(pass, ui, current, panel);
         header(pass, ui, current, panel, held);
@@ -790,9 +785,10 @@ fn button(
     enabled: bool,
     radius: f32,
 ) -> (egui::Response, Color32, Color32) {
-    let response = ui.allocate_rect(area(rect), Sense::CLICK);
+    let response = ui.allocate_rect(egui::Rect::from(rect), Sense::CLICK);
     let (background, ink) = pass.button_ink(active, &response, enabled);
-    ui.painter().rect_filled(area(rect), radius, background);
+    ui.painter()
+        .rect_filled(egui::Rect::from(rect), radius, background);
     response
         .widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, active, control.label()));
     let response = pass.tooltip(response, Tip::Control(control));
@@ -862,7 +858,7 @@ fn rows(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, panel: Rect) {
         let enabled = !(false_colored && matches!(widget, Control::Curve(_)));
         let (_, _, ink) = button(pass, ui, rect, widget, active, enabled, TOGGLE_RADIUS);
         ui.painter().text(
-            area(rect).center(),
+            egui::Rect::from(rect).center(),
             Align2::CENTER_CENTER,
             label,
             font.clone(),

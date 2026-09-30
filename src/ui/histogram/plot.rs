@@ -160,7 +160,7 @@ pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect, c
     let gray = current.image.is_gray();
     let bars = plot_area(panel, gray);
     painter.rect_filled(
-        area(bars.inset(-PLOT_INSET, -PLOT_INSET)),
+        egui::Rect::from(bars.inset(-PLOT_INSET, -PLOT_INSET)),
         PLOT_RADIUS,
         PLOT_BACKGROUND,
     );
@@ -249,7 +249,7 @@ pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect, c
     let marked = marked(current, content, input.cursor, input.pointer);
     if let Some(across) = marked.map(bin_across) {
         painter.rect_filled(
-            area(grid.rect(Rect::new(
+            egui::Rect::from(grid.rect(Rect::new(
                 bars.x + across * bars.width - CURSOR_WIDTH / 2.0,
                 bars.y,
                 CURSOR_WIDTH,
@@ -297,7 +297,7 @@ pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect, c
         };
         let text = Rect::new(x, bars.y + CLIP_INSET, width, CLIP_TEXT);
         painter.rect_filled(
-            area(text.inset(-CLIP_PAD, -CLIP_PAD)),
+            egui::Rect::from(text.inset(-CLIP_PAD, -CLIP_PAD)),
             CLIP_PAD,
             PLOT_BACKGROUND.with_alpha(CLIP_BACKING_ALPHA),
         );
