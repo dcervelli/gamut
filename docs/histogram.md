@@ -180,7 +180,7 @@ file already holds the ramp's color.
 A toggle, like the grid: a way of looking at the picture rather than a
 setting of it. `Panels::mark_clipped` is the state, beside the plane and
 count-axis toggles, `shader_codes::marks` the two bits, and
-`Scene::mark_clipped` the way in — not a field of `Display`, which is kept
+`Draw::mark_clipped` the way in — not a field of `Display`, which is kept
 per file and restored when a file comes back, where the marks stay on across
 files and are left alone by every reset. The key and the button both go
 through `App::press(Control::Marks)`, so the two cannot drift.

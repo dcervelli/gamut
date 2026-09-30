@@ -473,7 +473,7 @@ holds both halves.
 Between the two moments the bar names one file and the screen shows
 another, so what acts on "the file" — the copies, rename, remove, delete,
 export, opening it elsewhere, the turn — is dead while `App::arriving` says a file is
-on its way in (`Reasons::arriving`, `tooltip::STILL_OPENING`), and so are the arriving
+on its way in (`Conditions::arriving`, `tooltip::STILL_OPENING`), and so are the arriving
 file's own transport bar's steps, play and timeline, there being nothing of
 it decoded to move through. Acting on the
 file on screen would act on one the bar no longer names; acting on the one
@@ -524,8 +524,8 @@ as the vertex shader reads the texture.
 It is the interface's to draw, in the thumbnail's own sRGB, rather than the
 image layer's: it is a stand-in, and the window, tone curve and false color
 the picture will be shown under do not apply to it. While it is up,
-`Scene::picture` keeps the image layer from drawing the picture being
-stepped away from, and what reads or marks up the picture on screen — the
+an empty `Scene::picture` keeps the image layer from drawing the picture
+being stepped away from, and what reads or marks up the picture on screen — the
 pointer's pixel, the grid, the region, the loupe, the minimap — stays off,
 since what it would read or mark is not what is shown. The file on screen
 read again gets no stand-in: the picture already up is a better picture of
@@ -624,7 +624,7 @@ and `install` lets the lot go with the file.
 the file: the view is rescaled (`View::rescale`, as for `Arrival::Rerendered`)
 so the new image covers what the old one did, whatever its size, and the
 region, marked in the old image's pixels, is let go. `App::follow_showing`
-decides what should be up — the depth map while `Panels::show_depth` is on
+decides what should be up — the depth map while `App::show_depth` is on
 and the picture carries one and is not an animation, whose frames would
 replace it — and runs on the toggle and after each arrival, after the
 player has started. What is about the file rather than about what is seen
@@ -1403,8 +1403,8 @@ condition rather than the words themselves, so that the popup can say
 whether it holds as well as what it is: `App::conditions` reads each off the same state the key's own
 arm of `perform` reads, `Namer` carries the answers into the frame as
 `Conditions`, and `help_sections` marks each row's `help::Condition` met or
-not. The same reading is what makes a control dead: `Conditions::reasons`
-is the tooltips' view of it and `App::refuses` the press's, so a button
+not. The same reading is what makes a control dead: `tooltip::disabled`
+reads it for the tooltips and `App::refuses` for the press, so a button
 drawn dead, its label and its press cannot disagree. A row whose condition does not hold is set in the dim ink throughout,
 its condition in `Theme::caution` — what the row says is still true, and
 what it needs is what is missing — so that the keys that would do something
@@ -1590,7 +1590,7 @@ picture down, tells the renderer to `clear_image` so that the frame draws
 the backdrop alone, as the first did.
 
 The first picture to arrive in an empty window sizes it, as the first file
-sizes the window at start-up: `App::size_to_next` is set while the window
+sizes the window at start-up: `Sizing::to_next` is set while the window
 shows nothing and spent by the arrival in `App::apply`, which runs the
 picture's size through the same `window::initial_window_size` that
 `resumed` used — the window's own account of the monitors standing in for

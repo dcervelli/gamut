@@ -96,7 +96,7 @@ pub struct Thumb {
 /// the device's grid by [`icon::Grid::line_width`] before it is drawn.
 pub(crate) const HAIRLINE: f32 = 1.0;
 
-pub(super) fn thumb_in_slot(
+fn thumb_in_slot(
     painter: &egui::Painter,
     grid: icon::Grid,
     slot: egui::Rect,

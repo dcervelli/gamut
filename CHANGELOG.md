@@ -137,6 +137,11 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   file, as the sort order and the loupe's magnification are, rather than set
   in the configuration file. `pixel_format`, `coordinate_format` and
   `geographic_format` lines left in a configuration file are ignored.
+- The window does less work on every frame: a tooltip's words and the help
+  popup's key table are composed only when they are shown, the information
+  panel's contents are kept between frames, the time zone is read once
+  rather than for every date drawn, and the file list and the chooser read
+  the list only when it has changed. Nothing on screen changes.
 
 ### Fixed
 
