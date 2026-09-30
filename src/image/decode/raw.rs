@@ -386,14 +386,13 @@ impl Handle {
     /// its own numbering — 3 upside down, 5 a quarter turn one way, 6 the
     /// other — and each of those is one of EXIF's, which `image` reads.
     fn orientation(&self) -> ::image::metadata::Orientation {
-        use ::image::metadata::Orientation;
         let exif = match self.sizes().flip {
             3 => 3,
             5 => 8,
             6 => 6,
             _ => 1,
         };
-        Orientation::from_exif(exif).unwrap_or(Orientation::NoTransforms)
+        crate::image::orient::from_tag(Some(exif))
     }
 
     /// Reads the preview out of the file, saying whether there was one.

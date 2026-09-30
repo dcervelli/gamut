@@ -613,10 +613,9 @@ impl YCbCr {
 /// `Orientation` tag, which a scanner or a camera writing TIFF sets and a
 /// GIS leaves out. A value the tag does not define asks for nothing.
 fn orientation<R: io::Read + Seek>(decoder: &mut Decoder<R>) -> Result<Orientation> {
-    Ok(decoder
-        .find_tag_unsigned::<u8>(Tag::Orientation)?
-        .and_then(Orientation::from_exif)
-        .unwrap_or(Orientation::NoTransforms))
+    Ok(orient::from_tag(
+        decoder.find_tag_unsigned::<u8>(Tag::Orientation)?,
+    ))
 }
 
 /// TIFF is the awkward container: the same tags carry a scanned photograph and

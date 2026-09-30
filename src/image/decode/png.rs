@@ -299,11 +299,7 @@ fn header(source: impl std::io::Read + Seek) -> Header {
             primaries: primaries.unwrap_or(Primaries::Bt709),
         })
     };
-    let orientation = info
-        .exif_metadata
-        .as_deref()
-        .and_then(Orientation::from_exif_chunk)
-        .unwrap_or(Orientation::NoTransforms);
+    let orientation = orient::from_chunk(info.exif_metadata.as_deref());
     let animation = info.animation_control().map(|control| Animation {
         frames: control.num_frames,
         plays: control.num_plays,

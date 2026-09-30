@@ -34,6 +34,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use ::image::metadata::Orientation;
 use image_webp::{DecodingError, WebPDecoder};
 
+use crate::image::orient;
 use crate::image::sequence::{Frame, FrameSource, Loops, Sequence};
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
 
@@ -56,16 +57,12 @@ impl super::Decoder for Webp {
         let mut decoder =
             WebPDecoder::new(BufReader::new(source)).context("reading the WebP container")?;
         let (width, height) = decoder.dimensions();
-        // A quarter turn swaps them, exactly as `reorient` will once the
+        // A quarter turn swaps them, exactly as `decode` will once the
         // pixels are read. Reporting the stored size for a rotated file would
         // open the window in the wrong shape.
-        let orientation = decoder
-            .exif_metadata()
-            .context("reading the EXIF chunk")?
-            .as_deref()
-            .and_then(Orientation::from_exif_chunk)
-            .unwrap_or(Orientation::NoTransforms);
-        Ok(Some(crate::image::orient::size(width, height, orientation)))
+        let exif = decoder.exif_metadata().context("reading the EXIF chunk")?;
+        let orientation = orient::from_chunk(exif.as_deref());
+        Ok(Some(orient::size(width, height, orientation)))
     }
 
     fn decode(
@@ -212,12 +209,8 @@ impl<R: Read + Seek> Opened<R> {
         // expensive read last.
         let profile = decoder.icc_profile().context("reading the ICCP chunk")?;
         let color = ColorSpace::stated(None, profile.as_deref());
-        let orientation = decoder
-            .exif_metadata()
-            .context("reading the EXIF chunk")?
-            .as_deref()
-            .and_then(Orientation::from_exif_chunk)
-            .unwrap_or(Orientation::NoTransforms);
+        let exif = decoder.exif_metadata().context("reading the EXIF chunk")?;
+        let orientation = orient::from_chunk(exif.as_deref());
 
         Ok(Self {
             decoder,
@@ -258,7 +251,7 @@ impl<R: Read + Seek> Opened<R> {
             self.color,
             AlphaMode::of(self.channels, false),
         );
-        Ok(crate::image::orient::apply(image, self.orientation))
+        Ok(orient::apply(image, self.orientation))
     }
 }
 

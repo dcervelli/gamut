@@ -33,6 +33,24 @@ pub fn size(width: u32, height: u32, orientation: Orientation) -> (u32, u32) {
     }
 }
 
+/// The turn an EXIF block asks for: what a WebP's `EXIF` chunk and a
+/// PNG's `eXIf` chunk carry, and what a JPEG's decoder reads for itself.
+/// No block, or one that says nothing about the way up, asks for nothing.
+pub fn from_chunk(block: Option<&[u8]>) -> Orientation {
+    block
+        .and_then(Orientation::from_exif_chunk)
+        .unwrap_or(Orientation::NoTransforms)
+}
+
+/// The turn an `Orientation` tag's value asks for: a TIFF's own tag, or
+/// the EXIF value a raw's `flip` maps to. No tag, or a value the tag does
+/// not define, asks for nothing.
+pub fn from_tag(value: Option<u8>) -> Orientation {
+    value
+        .and_then(Orientation::from_exif)
+        .unwrap_or(Orientation::NoTransforms)
+}
+
 /// The image turned the way `orientation` says, with everything else about
 /// it kept. The common case, no turn asked for, hands the image straight
 /// back.
