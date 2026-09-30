@@ -116,52 +116,225 @@ pub fn encoding(encoding: Encoding) -> u32 {
     }
 }
 
+/// The shaders as naga reads them, for the tests that hold one side of a
+/// contract to the other: where `struct Params` puts each member, which
+/// values a `switch` on one of them has arms for, what a member is compared
+/// against, and what a constant holds. Read from the parsed module rather
+/// than from the text, so that reformatting a shader cannot fail a test
+/// that is about its meaning.
+#[cfg(test)]
+pub(super) mod wgsl {
+    use std::collections::BTreeSet;
+
+    use wgpu::naga::{
+        BinaryOperator, Block, Expression, Function, Handle, Literal, Module, Statement,
+        SwitchValue, TypeInner, front::wgsl::parse_str,
+    };
+
+    /// The names and offsets of a Rust `Params`, in declaration order, as
+    /// [`assert_params_match`] takes them.
+    macro_rules! fields {
+        ($params:ty: $($field:ident),* $(,)?) => {
+            &[$((stringify!($field), std::mem::offset_of!($params, $field))),*]
+        };
+    }
+    pub(crate) use fields;
+
+    /// `source` parsed, or the parser's own account of why it could not be.
+    pub fn parse(source: &str) -> Module {
+        parse_str(source).unwrap_or_else(|error| panic!("{}", error.emit_to_string(source)))
+    }
+
+    /// Holds a Rust `Params` to the shader's `struct Params`: the same
+    /// members, in the same order, at the same offsets, and the two the
+    /// same size. `fields` is the Rust side, from [`fields!`]; `size` is
+    /// `size_of` it.
+    pub fn assert_params_match(source: &str, fields: &[(&str, usize)], size: usize) {
+        let module = parse(source);
+        let (_, params) = module
+            .types
+            .iter()
+            .find(|(_, ty)| ty.name.as_deref() == Some("Params"))
+            .expect("the shader declares a struct Params");
+        let TypeInner::Struct { members, span } = &params.inner else {
+            panic!("Params is not a struct");
+        };
+        let shader: Vec<(&str, usize)> = members
+            .iter()
+            .map(|member| {
+                (
+                    member.name.as_deref().expect("a named member"),
+                    member.offset as usize,
+                )
+            })
+            .collect();
+        assert_eq!(shader, fields, "the members and their offsets");
+        assert_eq!(*span as usize, size, "the struct's size");
+    }
+
+    /// The function called `name`, whether it is an entry point or not.
+    fn function<'a>(module: &'a Module, name: &str) -> &'a Function {
+        module
+            .functions
+            .iter()
+            .map(|(_, function)| function)
+            .chain(module.entry_points.iter().map(|entry| &entry.function))
+            .find(|function| function.name.as_deref() == Some(name))
+            .unwrap_or_else(|| panic!("no function {name}"))
+    }
+
+    /// Which member of the uniform `params` the expression reads, where it
+    /// is a read of one: `params.swizzle` lowers to a load through an index
+    /// into the global.
+    fn member_read(
+        module: &Module,
+        function: &Function,
+        expression: Handle<Expression>,
+    ) -> Option<String> {
+        match function.expressions[expression] {
+            Expression::Load { pointer } => member_read(module, function, pointer),
+            Expression::AccessIndex { base, index } => {
+                let Expression::GlobalVariable(global) = function.expressions[base] else {
+                    return None;
+                };
+                let global = &module.global_variables[global];
+                if global.name.as_deref() != Some("params") {
+                    return None;
+                }
+                let TypeInner::Struct { members, .. } = &module.types[global.ty].inner else {
+                    return None;
+                };
+                members[index as usize].name.clone()
+            }
+            _ => None,
+        }
+    }
+
+    /// Every statement in `block` and the blocks nested in it, in order.
+    fn walk<'a>(block: &'a Block, each: &mut impl FnMut(&'a Statement)) {
+        for statement in block.iter() {
+            each(statement);
+            match statement {
+                Statement::Block(inner) => walk(inner, each),
+                Statement::If { accept, reject, .. } => {
+                    walk(accept, each);
+                    walk(reject, each);
+                }
+                Statement::Switch { cases, .. } => {
+                    for case in cases {
+                        walk(&case.body, each);
+                    }
+                }
+                Statement::Loop {
+                    body, continuing, ..
+                } => {
+                    walk(body, each);
+                    walk(continuing, each);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// The `case` values of every `switch` on `params.<member>` in the
+    /// function called `name`, one set per switch in the order they
+    /// appear. Each switch has a `default` arm besides, so what a set
+    /// leaves out is what the default takes.
+    pub fn cases(module: &Module, name: &str, member: &str) -> Vec<BTreeSet<u32>> {
+        let function = function(module, name);
+        let mut switches = Vec::new();
+        walk(&function.body, &mut |statement| {
+            let Statement::Switch { selector, cases } = statement else {
+                return;
+            };
+            if member_read(module, function, *selector).as_deref() != Some(member) {
+                return;
+            }
+            switches.push(
+                cases
+                    .iter()
+                    .filter_map(|case| match case.value {
+                        SwitchValue::U32(value) => Some(value),
+                        SwitchValue::I32(value) => Some(value as u32),
+                        SwitchValue::Default => None,
+                    })
+                    .collect(),
+            );
+        });
+        assert!(
+            !switches.is_empty(),
+            "no switch on params.{member} in {name}"
+        );
+        switches
+    }
+
+    /// Every comparison of `params.<member>` against a literal in the
+    /// function called `name`, in the order they appear.
+    pub fn comparisons(module: &Module, name: &str, member: &str) -> Vec<(BinaryOperator, u32)> {
+        let function = function(module, name);
+        function
+            .expressions
+            .iter()
+            .filter_map(|(_, expression)| {
+                let Expression::Binary { op, left, right } = *expression else {
+                    return None;
+                };
+                if member_read(module, function, left).as_deref() != Some(member) {
+                    return None;
+                }
+                match function.expressions[right] {
+                    Expression::Literal(Literal::U32(value)) => Some((op, value)),
+                    Expression::Literal(Literal::I32(value)) => Some((op, value as u32)),
+                    _ => None,
+                }
+            })
+            .collect()
+    }
+
+    /// The components of the module-scope `const` called `name`, which is
+    /// a float or a vector of them.
+    pub fn constant(module: &Module, name: &str) -> Vec<f32> {
+        fn floats(module: &Module, expression: Handle<Expression>, out: &mut Vec<f32>) {
+            match &module.global_expressions[expression] {
+                Expression::Literal(Literal::F32(value)) => out.push(*value),
+                Expression::Literal(Literal::AbstractFloat(value)) => out.push(*value as f32),
+                Expression::Compose { components, .. } => {
+                    for component in components {
+                        floats(module, *component, out);
+                    }
+                }
+                Expression::Splat { size, value } => {
+                    for _ in 0..*size as usize {
+                        floats(module, *value, out);
+                    }
+                }
+                other => panic!("{other:?} is not a float constant"),
+            }
+        }
+        let (_, constant) = module
+            .constants
+            .iter()
+            .find(|(_, constant)| constant.name.as_deref() == Some(name))
+            .unwrap_or_else(|| panic!("no const {name}"));
+        let mut out = Vec::new();
+        floats(module, constant.init, &mut out);
+        out
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
 
-    use super::*;
+    use wgpu::naga::BinaryOperator;
 
-    const TEXEL: &str = include_str!("shaders/texel.wgsl");
+    use super::wgsl;
+    use super::*;
+    use crate::render::{IMAGE_SHADER, REDUCE_SHADER};
+
     const IMAGE: &str = include_str!("shaders/image.wgsl");
     const REDUCE: &str = include_str!("shaders/reduce.wgsl");
     const COMPOSITE: &str = include_str!("shaders/composite.wgsl");
-
-    /// The `case Nu:` arms of every `switch <selector> {` in `source`, one
-    /// set per switch in the order they appear. Each switch has a `default`
-    /// arm besides, so what a set leaves out is what the default takes.
-    fn cases(source: &str, selector: &str) -> Vec<BTreeSet<u32>> {
-        let opening = format!("switch {selector} {{");
-        let switches: Vec<_> = source
-            .match_indices(&opening)
-            .map(|(at, _)| {
-                let body = &source[at + opening.len()..];
-                let mut depth = 1;
-                let end = body
-                    .char_indices()
-                    .find(|&(_, c)| {
-                        match c {
-                            '{' => depth += 1,
-                            '}' => depth -= 1,
-                            _ => {}
-                        }
-                        depth == 0
-                    })
-                    .map(|(at, _)| at)
-                    .expect("the switch closes");
-                body[..end]
-                    .lines()
-                    .filter_map(|line| {
-                        let arm = line.trim().strip_prefix("case ")?;
-                        let digits: String = arm.chars().take_while(char::is_ascii_digit).collect();
-                        digits.parse().ok()
-                    })
-                    .collect()
-            })
-            .collect();
-        assert!(!switches.is_empty(), "no `{opening}`");
-        switches
-    }
 
     fn set(codes: impl IntoIterator<Item = u32>) -> BTreeSet<u32> {
         codes.into_iter().collect()
@@ -179,8 +352,15 @@ mod tests {
             swizzle(Channels::GrayAlpha),
             swizzle(Channels::Rgb),
         ]);
-        assert_eq!(cases(TEXEL, "params.swizzle"), [with_alpha]);
-        assert_eq!(cases(IMAGE, "params.swizzle"), [expanded]);
+        for source in [IMAGE_SHADER, REDUCE_SHADER] {
+            let module = wgsl::parse(source);
+            assert_eq!(
+                wgsl::cases(&module, "premultiplied", "swizzle"),
+                std::slice::from_ref(&with_alpha)
+            );
+        }
+        let image = wgsl::parse(IMAGE_SHADER);
+        assert_eq!(wgsl::cases(&image, "expanded", "swizzle"), [expanded]);
     }
 
     /// The texel reading is shared by being prepended, not copied: neither
@@ -200,10 +380,20 @@ mod tests {
     /// layer does not divide back out.
     #[test]
     fn the_alpha_modes_are_the_shaders_comparisons() {
-        let straight = format!("params.alpha_mode != {}u", alpha(AlphaMode::Straight));
-        assert!(TEXEL.contains(&straight), "{straight}");
-        let opaque = format!("params.alpha_mode == {}u", alpha(AlphaMode::Opaque));
-        assert!(IMAGE.contains(&opaque), "{opaque}");
+        let straight = (BinaryOperator::NotEqual, alpha(AlphaMode::Straight));
+        for source in [IMAGE_SHADER, REDUCE_SHADER] {
+            let module = wgsl::parse(source);
+            assert_eq!(
+                wgsl::comparisons(&module, "premultiplied", "alpha_mode"),
+                [straight]
+            );
+        }
+        let image = wgsl::parse(IMAGE_SHADER);
+        let opaque = (BinaryOperator::Equal, alpha(AlphaMode::Opaque));
+        assert_eq!(
+            wgsl::comparisons(&image, "expanded", "alpha_mode"),
+            [opaque]
+        );
         assert_eq!(
             level_alpha(AlphaMode::Straight),
             alpha(AlphaMode::Premultiplied)
@@ -218,7 +408,11 @@ mod tests {
         let rows = set(Colormap::ALL.iter().map(|map| colormap(*map)));
         assert_eq!(rows, set(0..Colormap::ALL.len() as u32));
         assert_eq!(colormap(Colormap::Gray), 0);
-        assert!(IMAGE.contains("params.colormap != 0u"));
+        let image = wgsl::parse(IMAGE_SHADER);
+        assert_eq!(
+            wgsl::comparisons(&image, "shade", "colormap"),
+            [(BinaryOperator::NotEqual, colormap(Colormap::Gray))]
+        );
     }
 
     /// The curve and the pass-through are arms; the clip is the default.
@@ -228,7 +422,8 @@ mod tests {
             tone_map(ToneMap::Neutral, Headroom::None),
             tone_map(ToneMap::None, Headroom::Above),
         ]);
-        assert_eq!(cases(COMPOSITE, "params.tone_map"), [arms]);
+        let composite = wgsl::parse(COMPOSITE);
+        assert_eq!(wgsl::cases(&composite, "tone_map", "tone_map"), [arms]);
         assert_eq!(
             tone_map(ToneMap::None, Headroom::None),
             0,
@@ -248,17 +443,33 @@ mod tests {
             resampler(2.0, Upscale::Nearest),
             resampler(2.0, Upscale::Bicubic),
         ]);
-        assert_eq!(cases(IMAGE, "params.resampler"), [arms]);
+        let image = wgsl::parse(IMAGE_SHADER);
+        assert_eq!(wgsl::cases(&image, "resample", "resampler"), [arms]);
         for upscale in [Upscale::Nearest, Upscale::Bicubic] {
             assert_eq!(resampler(0.5, upscale), 0, "minifying is the default arm");
         }
+    }
+
+    /// The three quarter turns are arms; no turn is the default.
+    #[test]
+    fn the_turns_are_the_shaders_arms() {
+        let quarter = Turn::NONE.clockwise();
+        let arms = set([
+            turn(quarter),
+            turn(quarter.clockwise()),
+            turn(quarter.clockwise().clockwise()),
+        ]);
+        let image = wgsl::parse(IMAGE_SHADER);
+        assert_eq!(wgsl::cases(&image, "turned", "turn"), [arms]);
+        assert_eq!(turn(Turn::NONE), 0, "no turn is the default arm");
     }
 
     /// The two SDR-shaped encodings are arms; PQ is the default.
     #[test]
     fn the_encodings_are_the_compositors_arms() {
         let arms = set([encoding(Encoding::Srgb), encoding(Encoding::ScRgbLinear)]);
-        assert_eq!(cases(COMPOSITE, "params.encoding"), [arms]);
+        let composite = wgsl::parse(COMPOSITE);
+        assert_eq!(wgsl::cases(&composite, "fs_main", "encoding"), [arms]);
         assert_eq!(encoding(Encoding::Pq), 2, "PQ is the default arm");
     }
 
@@ -272,16 +483,14 @@ mod tests {
         assert_eq!(marks(true, true), 3);
     }
 
-    /// The shader paints the two colors [`MARKS`] says it does: a line of
-    /// the WGSL source is held to each, so that a change to either side
-    /// without the other fails here rather than on screen.
+    /// The shader paints the two colors [`MARKS`] says it does: each of its
+    /// constants is held to one, so that a change to either side without
+    /// the other fails here rather than on screen.
     #[test]
     fn the_shader_paints_the_marks_the_codes_name() {
-        let source = include_str!("shaders/image.wgsl");
+        let image = wgsl::parse(IMAGE_SHADER);
         for (name, color) in [("MARK_WHITE", MARKS[0]), ("MARK_BLACK", MARKS[1])] {
-            let [r, g, b] = color.map(|channel| format!("{channel:?}"));
-            let line = format!("const {name}: vec3<f32> = vec3<f32>({r}, {g}, {b});");
-            assert!(source.contains(&line), "{line}");
+            assert_eq!(wgsl::constant(&image, name), color, "{name}");
         }
     }
 }

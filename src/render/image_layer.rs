@@ -1385,3 +1385,26 @@ fn to_columns(rows: [[f32; 3]; 3]) -> [[f32; 4]; 3] {
     }
     columns
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::shader_codes::wgsl;
+    use super::*;
+
+    /// The uniform is laid out as the shader reads it: every member at the
+    /// offset WGSL gives it, and the two the same size. The draws in
+    /// `filter_tests` read back what the shader made of the values; this is
+    /// what says it read each from the field it was written to.
+    #[test]
+    fn the_params_are_laid_out_as_the_shader_reads_them() {
+        wgsl::assert_params_match(
+            super::super::IMAGE_SHADER,
+            wgsl::fields!(Params:
+                offset, scale, window, texels_per_pixel, extent, marks, turn, primaries,
+                swizzle, alpha_mode, colormap, resampler, lift, level, map_size,
+                base_offset, alternate_offset, clip, picture
+            ),
+            size_of::<Params>(),
+        );
+    }
+}

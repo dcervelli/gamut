@@ -269,7 +269,21 @@ pub fn level_for(factor: f32, available: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
+    use super::super::shader_codes::wgsl;
     use super::*;
+
+    /// The uniform is laid out as the shader reads it: every member at the
+    /// offset WGSL gives it, and the two the same size.
+    #[test]
+    fn the_params_are_laid_out_as_the_shader_reads_them() {
+        wgsl::assert_params_match(
+            super::super::REDUCE_SHADER,
+            wgsl::fields!(Params:
+                extent, step, swizzle, alpha_mode, lift, map_size, base_offset, alternate_offset
+            ),
+            size_of::<Params>(),
+        );
+    }
 
     /// What the draw is left to do once it has picked a level.
     fn remainder(factor: f32, level: usize) -> f32 {

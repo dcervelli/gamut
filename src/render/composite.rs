@@ -187,3 +187,22 @@ impl Composite {
         pass.draw(0..3, 0..1);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::shader_codes::wgsl;
+    use super::*;
+
+    /// The uniform is laid out as the shader reads it: every member at the
+    /// offset WGSL gives it, and the two the same size.
+    #[test]
+    fn the_params_are_laid_out_as_the_shader_reads_them() {
+        wgsl::assert_params_match(
+            include_str!("shaders/composite.wgsl"),
+            wgsl::fields!(Params:
+                tone_map, encoding, white_scale, checker, base, alternate, regions, glass
+            ),
+            size_of::<Params>(),
+        );
+    }
+}
