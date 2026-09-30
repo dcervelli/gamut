@@ -14,17 +14,124 @@
 //! So the transfer function is resolved here, once per image, never per frame,
 //! and every weighted sum in `image_layer` is over linear light.
 
+use std::sync::{Arc, Mutex, PoisonError};
+
 use half::f16;
 
 use crate::image::{Channels, DecodedImage, Samples, Transfer};
 
-/// How many components the texture carries. Never three: no graphics API has
-/// a three-component sampled texture format.
-fn components_for(channels: Channels) -> usize {
-    match channels {
-        Channels::Gray => 1,
-        Channels::GrayAlpha => 2,
-        Channels::Rgb | Channels::Rgba => 4,
+/// How many components a texture carries. Never three: no graphics API has
+/// a three-component sampled texture format, so RGB is stored as RGBA with
+/// an opaque alpha.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Components {
+    One,
+    Two,
+    Four,
+}
+
+impl Components {
+    fn of(channels: Channels) -> Self {
+        match channels {
+            Channels::Gray => Components::One,
+            Channels::GrayAlpha => Components::Two,
+            Channels::Rgb | Channels::Rgba => Components::Four,
+        }
+    }
+
+    pub fn count(self) -> usize {
+        match self {
+            Components::One => 1,
+            Components::Two => 2,
+            Components::Four => 4,
+        }
+    }
+}
+
+/// What each component of a texture is stored as.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Storage {
+    /// A byte the hardware decodes from the sRGB curve as it reads it. Four
+    /// components only: there is no one- or two-channel sRGB format.
+    Srgb8,
+    /// A byte, read as the fraction it is of 255.
+    Unorm8,
+    /// Two bytes, read as the fraction they are of 65535.
+    Unorm16,
+    Float16,
+    Float32,
+}
+
+impl Storage {
+    fn bytes(self) -> usize {
+        match self {
+            Storage::Srgb8 | Storage::Unorm8 => 1,
+            Storage::Unorm16 | Storage::Float16 => 2,
+            Storage::Float32 => 4,
+        }
+    }
+}
+
+/// A texture format as this tree chooses one: how many components, each
+/// stored as what. The one table from a layout to a `wgpu::TextureFormat`,
+/// so that the picture, its gain map and the coarse chain reduced from
+/// either all go through the same door — a format added here is added for
+/// all three, and one left out of the table does not compile.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Layout {
+    pub components: Components,
+    pub storage: Storage,
+}
+
+impl Layout {
+    pub fn format(self) -> wgpu::TextureFormat {
+        use Components::{Four, One, Two};
+        use wgpu::TextureFormat as F;
+        match (self.storage, self.components) {
+            (Storage::Srgb8, Four) => F::Rgba8UnormSrgb,
+            (Storage::Srgb8, One | Two) => {
+                unreachable!(
+                    "there is no one- or two-channel sRGB format, and plan() asks for none"
+                )
+            }
+            (Storage::Unorm8, One) => F::R8Unorm,
+            (Storage::Unorm8, Two) => F::Rg8Unorm,
+            (Storage::Unorm8, Four) => F::Rgba8Unorm,
+            (Storage::Unorm16, One) => F::R16Unorm,
+            (Storage::Unorm16, Two) => F::Rg16Unorm,
+            (Storage::Unorm16, Four) => F::Rgba16Unorm,
+            (Storage::Float16, One) => F::R16Float,
+            (Storage::Float16, Two) => F::Rg16Float,
+            (Storage::Float16, Four) => F::Rgba16Float,
+            (Storage::Float32, One) => F::R32Float,
+            (Storage::Float32, Two) => F::Rg32Float,
+            (Storage::Float32, Four) => F::Rgba32Float,
+        }
+    }
+
+    /// The format a coarse chain reduced from a texture of this layout is
+    /// stored in — see `render::reduce`.
+    ///
+    /// Float, so that a level holds linear light with no transfer function
+    /// to think about, and premultiplied color without an 8-bit floor under
+    /// it. Half floats everywhere except under a 32-bit float source, where
+    /// the range and the low bits are the point of the file.
+    pub fn level_format(self) -> wgpu::TextureFormat {
+        let storage = match self.storage {
+            Storage::Float32 => Storage::Float32,
+            Storage::Srgb8 | Storage::Unorm8 | Storage::Unorm16 | Storage::Float16 => {
+                Storage::Float16
+            }
+        };
+        Layout {
+            components: self.components,
+            storage,
+        }
+        .format()
+    }
+
+    fn bytes_per_texel(self) -> usize {
+        self.components.count() * self.storage.bytes()
     }
 }
 
@@ -54,14 +161,42 @@ impl Pixels<'_> {
     }
 }
 
-/// A texture format and the bytes to fill it with.
+/// A texture layout and the bytes to fill it with.
 pub struct Plan<'a> {
-    pub format: wgpu::TextureFormat,
+    pub layout: Layout,
     pub pixels: Pixels<'a>,
     pub bytes_per_row: u32,
     /// Set when we had to give up precision to get a filterable format, so
     /// the caller can say so.
     pub reduced: Option<Reduced>,
+}
+
+impl<'a> Plan<'a> {
+    /// `pixels` laid out as `layout`, `width` texels to the row.
+    fn new(layout: Layout, pixels: Pixels<'a>, width: u32, reduced: Option<Reduced>) -> Self {
+        Self {
+            layout,
+            pixels,
+            bytes_per_row: width * layout.bytes_per_texel() as u32,
+            reduced,
+        }
+    }
+
+    /// 8-bit samples stored as they are, a byte a component, RGB widened to
+    /// RGBA: what the picture takes when its values are linear already, and
+    /// what a gain map takes, whose values are the shader's to interpret.
+    pub fn unorm8(data: &'a [u8], channels: Channels, width: u32) -> Self {
+        let layout = Layout {
+            components: Components::of(channels),
+            storage: Storage::Unorm8,
+        };
+        let pixels = expand_u8(data, channels, layout.components.count(), u8::MAX);
+        Self::new(layout, pixels, width, None)
+    }
+
+    pub fn format(&self) -> wgpu::TextureFormat {
+        self.layout.format()
+    }
 }
 
 /// Precision a picture lost on its way to the device, which had no format
@@ -121,9 +256,13 @@ impl Capabilities {
 
 pub fn plan(image: &DecodedImage, capabilities: Capabilities) -> Plan<'_> {
     let channels = image.samples.channels();
-    let components = components_for(channels);
+    let components = Components::of(channels);
+    let layout = |storage| Layout {
+        components,
+        storage,
+    };
     let transfer = image.color.transfer;
-    let width = image.width as usize;
+    let width = image.width;
 
     // The one case where hardware does the transfer decode for us, and the
     // only case where 8-bit storage survives to the GPU.
@@ -132,105 +271,103 @@ pub fn plan(image: &DecodedImage, capabilities: Capabilities) -> Plan<'_> {
         && matches!(channels, Channels::Rgb | Channels::Rgba);
 
     match &image.samples {
-        Samples::U8 { data, .. } if hardware_srgb => Plan {
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            pixels: expand_u8(data, channels, components, u8::MAX),
-            bytes_per_row: (width * components) as u32,
-            reduced: None,
-        },
+        Samples::U8 { data, .. } if hardware_srgb => Plan::new(
+            layout(Storage::Srgb8),
+            expand_u8(data, channels, components.count(), u8::MAX),
+            width,
+            None,
+        ),
 
-        Samples::U8 { data, .. } if transfer.is_linear() => Plan {
-            format: match components {
-                1 => wgpu::TextureFormat::R8Unorm,
-                2 => wgpu::TextureFormat::Rg8Unorm,
-                _ => wgpu::TextureFormat::Rgba8Unorm,
-            },
-            pixels: expand_u8(data, channels, components, u8::MAX),
-            bytes_per_row: (width * components) as u32,
-            reduced: None,
-        },
+        Samples::U8 { data, .. } if transfer.is_linear() => Plan::unorm8(data, channels, width),
 
         // Gray with a curve on it. There is no `R8UnormSrgb`, so the choice is
         // a 4x expansion to `Rgba8UnormSrgb` or a 2x one to half floats;
         // half floats also keep the single-channel path uniform.
         Samples::U8 { data, .. } => {
-            let lut: Vec<f16> = (0..=u8::MAX)
-                .map(|v| f16::from_f32(transfer.to_linear(v as f32 / u8::MAX as f32)))
-                .collect();
-            let values = map_to_f16(data, channels, components, &lut, u8::MAX as f32);
-            Plan {
-                format: float16_format(components),
-                pixels: Pixels::F16(values),
-                bytes_per_row: (width * components * 2) as u32,
-                reduced: None,
-            }
+            let lut = lut(transfer, u8::MAX as u32);
+            let values = map_to_f16(data, channels, components.count(), &lut, u8::MAX as f32);
+            Plan::new(layout(Storage::Float16), Pixels::F16(values), width, None)
         }
 
-        Samples::U16 { data, .. } if transfer.is_linear() && capabilities.norm16 => Plan {
-            format: match components {
-                1 => wgpu::TextureFormat::R16Unorm,
-                2 => wgpu::TextureFormat::Rg16Unorm,
-                _ => wgpu::TextureFormat::Rgba16Unorm,
-            },
-            pixels: expand_u16(data, channels, components, u16::MAX),
-            bytes_per_row: (width * components * 2) as u32,
-            reduced: None,
-        },
+        Samples::U16 { data, .. } if transfer.is_linear() && capabilities.norm16 => Plan::new(
+            layout(Storage::Unorm16),
+            expand_u16(data, channels, components.count(), u16::MAX),
+            width,
+            None,
+        ),
 
         // Either the curve has to come off, or the device lacks 16-bit norm
         // formats. Half floats answer both. Their 11-bit mantissa is a real
         // loss against 16-bit integers, but only for linear data — and only
         // where the device forced it.
         Samples::U16 { data, .. } => {
-            let lut: Vec<f16> = (0..=u16::MAX)
-                .map(|v| f16::from_f32(transfer.to_linear(v as f32 / u16::MAX as f32)))
-                .collect();
-            let values = map_to_f16(data, channels, components, &lut, u16::MAX as f32);
-            Plan {
-                format: float16_format(components),
-                pixels: Pixels::F16(values),
-                bytes_per_row: (width * components * 2) as u32,
-                reduced: (transfer.is_linear() && !capabilities.norm16)
-                    .then_some(Reduced::NoNorm16),
-            }
+            let lut = lut(transfer, u16::MAX as u32);
+            let values = map_to_f16(data, channels, components.count(), &lut, u16::MAX as f32);
+            Plan::new(
+                layout(Storage::Float16),
+                Pixels::F16(values),
+                width,
+                (transfer.is_linear() && !capabilities.norm16).then_some(Reduced::NoNorm16),
+            )
         }
 
-        Samples::F32 { data, .. } if capabilities.float32_filterable => Plan {
-            format: match components {
-                1 => wgpu::TextureFormat::R32Float,
-                2 => wgpu::TextureFormat::Rg32Float,
-                _ => wgpu::TextureFormat::Rgba32Float,
-            },
-            pixels: map_f32(data, channels, components, transfer),
-            bytes_per_row: (width * components * 4) as u32,
-            reduced: None,
-        },
+        Samples::F32 { data, .. } if capabilities.float32_filterable => Plan::new(
+            layout(Storage::Float32),
+            map_f32(data, channels, components.count(), transfer),
+            width,
+            None,
+        ),
 
         // Without `FLOAT32_FILTERABLE` a 32-bit float texture can only be
         // point-sampled, which would alias badly at fit-to-window scales.
         // Half floats stay filterable.
         Samples::F32 { data, .. } => {
-            let widened = map_f32(data, channels, components, transfer);
+            let widened = map_f32(data, channels, components.count(), transfer);
             let values: Vec<f16> = bytemuck::cast_slice::<u8, f32>(widened.as_bytes())
                 .iter()
                 .map(|value| f16::from_f32(*value))
                 .collect();
-            Plan {
-                format: float16_format(components),
-                pixels: Pixels::F16(values),
-                bytes_per_row: (width * components * 2) as u32,
-                reduced: Some(Reduced::NoFloat32Filter),
-            }
+            Plan::new(
+                layout(Storage::Float16),
+                Pixels::F16(values),
+                width,
+                Some(Reduced::NoFloat32Filter),
+            )
         }
     }
 }
 
-fn float16_format(components: usize) -> wgpu::TextureFormat {
-    match components {
-        1 => wgpu::TextureFormat::R16Float,
-        2 => wgpu::TextureFormat::Rg16Float,
-        _ => wgpu::TextureFormat::Rgba16Float,
+/// How many linearizing tables are kept at once. Four covers the curves a
+/// session sees — sRGB at both depths, and a raw's or a TIFF's gamma or two
+/// — at 128 KiB for a 16-bit table.
+const KEPT_LUTS: usize = 4;
+
+/// The linear light of every value an integer sample can take, `0..=full_scale`,
+/// through `transfer`, as the half floats a linearized picture is uploaded
+/// as. Kept once made: the 16-bit table is a power per entry, sixty-five
+/// thousand of them, and every 16-bit picture with a curve on it would pay
+/// it again. A small cache rather than a table per curve, since
+/// `Transfer::Gamma` carries its exponent and so has no fixed number of
+/// values; the oldest goes when it is full.
+fn lut(transfer: Transfer, full_scale: u32) -> Arc<[f16]> {
+    /// A table kept: the curve and the full scale it was made for.
+    type Kept = (Transfer, u32, Arc<[f16]>);
+    static LUTS: Mutex<Vec<Kept>> = Mutex::new(Vec::new());
+    let mut luts = LUTS.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some((_, _, lut)) = luts
+        .iter()
+        .find(|(kept, scale, _)| *kept == transfer && *scale == full_scale)
+    {
+        return Arc::clone(lut);
     }
+    let lut: Arc<[f16]> = (0..=full_scale)
+        .map(|value| f16::from_f32(transfer.to_linear(value as f32 / full_scale as f32)))
+        .collect();
+    if luts.len() >= KEPT_LUTS {
+        luts.remove(0);
+    }
+    luts.push((transfer, full_scale, Arc::clone(&lut)));
+    lut
 }
 
 /// Pixels below which a repack is not worth dividing: handing bands to the
@@ -311,12 +448,7 @@ fn expand<T: bytemuck::Zeroable + Copy + Send + Sync>(
     ))
 }
 
-pub(super) fn expand_u8(
-    data: &[u8],
-    channels: Channels,
-    components: usize,
-    opaque: u8,
-) -> Pixels<'_> {
+fn expand_u8(data: &[u8], channels: Channels, components: usize, opaque: u8) -> Pixels<'_> {
     match expand(data, channels, components, opaque) {
         Some(out) => Pixels::U8(out),
         None => Pixels::Borrowed(data),
@@ -419,7 +551,7 @@ mod tests {
             Transfer::Srgb,
         );
         let plan = plan(&decoded, FULL);
-        assert_eq!(plan.format, wgpu::TextureFormat::Rgba8UnormSrgb);
+        assert_eq!(plan.format(), wgpu::TextureFormat::Rgba8UnormSrgb);
         // Three channels became four, with an opaque alpha.
         assert_eq!(plan.pixels.as_bytes().len(), 8);
         assert_eq!(plan.pixels.as_bytes()[3], u8::MAX);
@@ -438,7 +570,7 @@ mod tests {
             Transfer::Srgb,
         );
         let plan = plan(&decoded, FULL);
-        assert_eq!(plan.format, wgpu::TextureFormat::R16Float);
+        assert_eq!(plan.format(), wgpu::TextureFormat::R16Float);
 
         let values: &[f16] = bytemuck::cast_slice(plan.pixels.as_bytes());
         assert_eq!(values[0].to_f32(), 0.0);
@@ -457,13 +589,13 @@ mod tests {
             Transfer::Linear,
         );
         assert_eq!(
-            plan(&measurement, FULL).format,
+            plan(&measurement, FULL).format(),
             wgpu::TextureFormat::R16Unorm
         );
 
         // Without the feature it has to become float, and says so.
         let fallback = plan(&measurement, BARE);
-        assert_eq!(fallback.format, wgpu::TextureFormat::R16Float);
+        assert_eq!(fallback.format(), wgpu::TextureFormat::R16Float);
         assert_eq!(fallback.reduced, Some(Reduced::NoNorm16));
     }
 
@@ -476,10 +608,13 @@ mod tests {
             },
             Transfer::Linear,
         );
-        assert_eq!(plan(&scene, FULL).format, wgpu::TextureFormat::Rgba32Float);
+        assert_eq!(
+            plan(&scene, FULL).format(),
+            wgpu::TextureFormat::Rgba32Float
+        );
 
         let fallback = plan(&scene, BARE);
-        assert_eq!(fallback.format, wgpu::TextureFormat::Rgba16Float);
+        assert_eq!(fallback.format(), wgpu::TextureFormat::Rgba16Float);
         assert_eq!(fallback.reduced, Some(Reduced::NoFloat32Filter));
     }
 
@@ -495,7 +630,7 @@ mod tests {
             Transfer::Srgb,
         );
         let plan = plan(&decoded, FULL);
-        assert_eq!(plan.format, wgpu::TextureFormat::Rg16Float);
+        assert_eq!(plan.format(), wgpu::TextureFormat::Rg16Float);
 
         let values: &[f16] = bytemuck::cast_slice(plan.pixels.as_bytes());
         assert!(
@@ -506,6 +641,58 @@ mod tests {
             (values[1].to_f32() - 128.0 / 255.0).abs() < 1e-3,
             "alpha is untouched"
         );
+    }
+
+    /// A gain map is stored a byte a component like a linear 8-bit picture,
+    /// its three channels widened to four, its one left alone.
+    #[test]
+    fn a_gain_map_is_stored_a_byte_a_component() {
+        let three = Plan::unorm8(&[1, 2, 3, 4, 5, 6], Channels::Rgb, 2);
+        assert_eq!(three.format(), wgpu::TextureFormat::Rgba8Unorm);
+        assert_eq!(three.bytes_per_row, 8);
+        assert_eq!(three.pixels.as_bytes(), [1, 2, 3, 255, 4, 5, 6, 255]);
+
+        let one = Plan::unorm8(&[7, 8], Channels::Gray, 2);
+        assert_eq!(one.format(), wgpu::TextureFormat::R8Unorm);
+        assert_eq!(one.bytes_per_row, 2);
+        assert!(matches!(one.pixels, Pixels::Borrowed([7, 8])));
+    }
+
+    /// The chain is stored in half floats under everything but a 32-bit
+    /// float source, with the source's own component count: the table the
+    /// reducer used to keep for itself, held here to what it said.
+    #[test]
+    fn a_coarse_level_keeps_the_components_and_floats_the_storage() {
+        use wgpu::TextureFormat as F;
+        let level = |components, storage| {
+            Layout {
+                components,
+                storage,
+            }
+            .level_format()
+        };
+        for storage in [Storage::Unorm8, Storage::Unorm16, Storage::Float16] {
+            assert_eq!(level(Components::One, storage), F::R16Float);
+            assert_eq!(level(Components::Two, storage), F::Rg16Float);
+            assert_eq!(level(Components::Four, storage), F::Rgba16Float);
+        }
+        assert_eq!(level(Components::Four, Storage::Srgb8), F::Rgba16Float);
+        assert_eq!(level(Components::One, Storage::Float32), F::R32Float);
+        assert_eq!(level(Components::Two, Storage::Float32), F::Rg32Float);
+        assert_eq!(level(Components::Four, Storage::Float32), F::Rgba32Float);
+    }
+
+    /// The same curve at the same depth is one table, made once.
+    #[test]
+    fn a_linearizing_table_is_made_once() {
+        let first = lut(Transfer::Gamma(2.2), u16::MAX as u32);
+        let again = lut(Transfer::Gamma(2.2), u16::MAX as u32);
+        assert!(Arc::ptr_eq(&first, &again));
+        assert_eq!(first.len(), 65536);
+        assert_eq!(first[0], f16::ZERO);
+        assert_eq!(first[65535], f16::ONE);
+        let other = lut(Transfer::Gamma(1.8), u16::MAX as u32);
+        assert!(!Arc::ptr_eq(&first, &other));
     }
 
     /// Dividing a repack between threads must not move a sample: every

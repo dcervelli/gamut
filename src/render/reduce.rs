@@ -47,7 +47,8 @@ pub struct Source<'a> {
     /// chain, whose last row and column stand for partial blocks and are
     /// weighted as such. `None` for a texture the picture fills.
     pub extent: Option<[f32; 2]>,
-    /// What the levels themselves are stored in, from `level_format`.
+    /// What the levels themselves are stored in: `Layout::level_format` for
+    /// a picture's chain, the marks' own format for theirs.
     pub format: wgpu::TextureFormat,
     pub swizzle: u32,
     pub alpha: AlphaMode,
@@ -69,8 +70,8 @@ pub struct Reducer {
     texture_layout: wgpu::BindGroupLayout,
     pipeline_layout: wgpu::PipelineLayout,
     /// One per target format, since a render pipeline is tied to one. There
-    /// are only a handful of formats `level_format` can name, so this settles
-    /// after the first few images.
+    /// are only a handful of formats `Layout::level_format` can name, so
+    /// this settles after the first few images.
     pipelines: Vec<(wgpu::TextureFormat, wgpu::RenderPipeline)>,
 }
 
@@ -232,24 +233,6 @@ impl Reducer {
             });
         }
         levels
-    }
-}
-
-/// The format the chain is stored in.
-///
-/// Float, so that a level holds linear light with no transfer function to
-/// think about, and premultiplied color without an 8-bit floor under it. Half
-/// floats everywhere except above a 32-bit float source, where the range and
-/// the low bits are the point of the file.
-pub fn level_format(source: wgpu::TextureFormat) -> wgpu::TextureFormat {
-    use wgpu::TextureFormat as F;
-    match source {
-        F::R32Float => F::R32Float,
-        F::Rg32Float => F::Rg32Float,
-        F::Rgba32Float => F::Rgba32Float,
-        F::R8Unorm | F::R16Unorm | F::R16Float => F::R16Float,
-        F::Rg8Unorm | F::Rg16Unorm | F::Rg16Float => F::Rg16Float,
-        _ => F::Rgba16Float,
     }
 }
 

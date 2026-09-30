@@ -14,7 +14,7 @@ use super::gpu::{self, Fullscreen};
 use super::placement::{Glass, Placement, Upscale};
 use super::reduce::{self, Level, Reducer};
 use super::shader_codes;
-use super::upload::{self, Capabilities, Reduced};
+use super::upload::{self, Capabilities, Layout, Reduced};
 use crate::image::auxiliary::Showing;
 use crate::image::gain_map::GainMap;
 use crate::image::orient::Turn;
@@ -233,13 +233,13 @@ pub struct GpuImage {
     /// Set once the chain has been built, which is not the same as its being
     /// non-empty: an image only a few texels across has no levels to make.
     chain_built: bool,
-    level_format: wgpu::TextureFormat,
+    /// What the texture is, and so what its coarse chain is stored in.
+    layout: Layout,
     swizzle: u32,
     alpha: AlphaMode,
     primaries: [[f32; 4]; 3],
     /// The gain map, where the picture has one.
     lift: Option<Lift>,
-    pub format: wgpu::TextureFormat,
     pub reduced: Option<Reduced>,
 }
 
@@ -636,7 +636,7 @@ impl ImageLayer {
                     view: &image.view,
                     size: image.size,
                     extent: None,
-                    format: image.level_format,
+                    format: image.layout.level_format(),
                     swizzle: image.swizzle,
                     alpha: image.alpha,
                     lift: Lifted::of(image.lift.as_ref(), &self.blank_lift),
@@ -726,17 +726,9 @@ impl Lift {
             1 => Channels::Gray,
             _ => Channels::Rgb,
         };
-        let components = if map.channels == 1 { 1 } else { 4 };
-        let plan = upload::Plan {
-            format: if map.channels == 1 {
-                wgpu::TextureFormat::R8Unorm
-            } else {
-                wgpu::TextureFormat::Rgba8Unorm
-            },
-            pixels: upload::expand_u8(&map.data, channels, components, u8::MAX),
-            bytes_per_row: map.width * components as u32,
-            reduced: None,
-        };
+        // A byte a component, as the map holds it: the shader reads each
+        // through the table, so no curve comes off on the way in.
+        let plan = upload::Plan::unorm8(&map.data, channels, map.width);
         let map_texture = upload.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("gain map"),
             size: wgpu::Extent3d {
@@ -747,7 +739,7 @@ impl Lift {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: plan.format,
+            format: plan.format(),
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
@@ -973,7 +965,7 @@ impl Upload {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: plan.format,
+            format: plan.format(),
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
@@ -1000,12 +992,11 @@ impl Upload {
             levels: Vec::new(),
             marks: None,
             chain_built: false,
-            level_format: reduce::level_format(plan.format),
+            layout: plan.layout,
             swizzle: shader_codes::swizzle(image.channels()),
             alpha: image.alpha,
             primaries: to_columns(image.color.primaries.to_bt709()),
             lift,
-            format: plan.format,
             reduced: plan.reduced,
         })
     }
@@ -1025,7 +1016,7 @@ impl Upload {
         // A gain map is a picture's own; a frame with one, or one written
         // over a picture with one, is uploaded afresh.
         if held.size != [image.width, image.height]
-            || held.format != plan.format
+            || held.layout != plan.layout
             || held.lift.is_some()
             || image.gain_map.is_some()
         {
@@ -1046,7 +1037,7 @@ impl Upload {
     }
 
     /// Copies `plan`'s bytes into `texture`, which is `width` by `height`
-    /// of `plan.format`.
+    /// of `plan`'s format.
     fn fill(
         &self,
         texture: &wgpu::Texture,
