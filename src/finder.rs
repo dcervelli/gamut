@@ -12,15 +12,7 @@
 //! first files would already have gone to AppKit's. Once installed it
 //! answers for the rest of the run, so a file opened from Finder while a
 //! window is up joins it.
-//!
-//! Launch Services knows the program by the path its bundle was registered
-//! at, and an upgrade through Homebrew moves the bundle to a new keg and
-//! deletes the old one. Nothing registers the new one — the formula's
-//! `post_install` runs in a sandbox that cannot reach Launch Services — so
-//! the program registers its own bundle each time it starts; see
-//! [`register`].
 
-use std::ffi::c_void;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -29,15 +21,8 @@ use objc2::runtime::NSObject;
 use objc2::{AllocAnyThread, DefinedClass, define_class, msg_send, sel};
 use objc2_app_kit::NSApplicationWillFinishLaunchingNotification;
 use objc2_foundation::{
-    NSAppleEventDescriptor, NSAppleEventManager, NSBundle, NSNotification, NSNotificationCenter,
+    NSAppleEventDescriptor, NSAppleEventManager, NSNotification, NSNotificationCenter,
 };
-
-#[link(name = "CoreServices", kind = "framework")]
-unsafe extern "C" {
-    /// Adds a bundle to Launch Services' database, or brings its entry up to
-    /// date; `update` false leaves one whose modification date is unchanged.
-    fn LSRegisterURL(url: *const c_void, update: u8) -> i32;
-}
 
 /// How the files reach the window: what `main` made from the event loop's
 /// proxy.
@@ -118,29 +103,6 @@ pub fn listen(deliver: Deliver) {
     // Neither the center nor the event manager keeps it alive, and it
     // answers for as long as the program runs.
     std::mem::forget(listener);
-}
-
-/// Registers the bundle the program is running from with Launch Services,
-/// on a thread of its own, so that "Open With" names this bundle rather
-/// than one an upgrade deleted. A binary outside a bundle, or inside one
-/// that is not this program's, registers nothing.
-pub fn register() {
-    std::thread::spawn(|| {
-        autoreleasepool(|_| {
-            let bundle = NSBundle::mainBundle();
-            let ours = bundle
-                .bundleIdentifier()
-                .is_some_and(|id| id.to_string() == crate::APP_ID);
-            if !ours {
-                return;
-            }
-            let url = bundle.bundleURL();
-            // SAFETY: an NSURL is toll-free bridged to the CFURLRef the call
-            // takes, and `url` outlives it. A refusal leaves the database as
-            // it was, which is all there is to do about one.
-            unsafe { LSRegisterURL(Retained::as_ptr(&url).cast(), 0) };
-        });
-    });
 }
 
 /// Whether Launch Services has sent any files yet. The files a program is
