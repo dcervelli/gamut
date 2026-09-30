@@ -572,7 +572,10 @@ impl App {
             tags: Vec::new(),
         };
         let menus = menus(&mut builder);
-        debug_assert_eq!(builder.tags, menubar.tags, "the same items, in the same order");
+        debug_assert_eq!(
+            builder.tags, menubar.tags,
+            "the same items, in the same order"
+        );
         menubar.bar.rekey(&menus);
     }
 

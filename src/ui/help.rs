@@ -22,15 +22,15 @@
 //! [`Naming`]: super::control::Naming
 
 use egui::{
-    Button, Frame, Label, LayerId, PopupAnchor, PopupCloseBehavior, PopupKind, RectAlign,
-    RichText, Sense, layers::ShapeIdx, pos2, vec2,
+    Button, Frame, Label, LayerId, PopupAnchor, PopupCloseBehavior, PopupKind, RectAlign, RichText,
+    Sense, layers::ShapeIdx, pos2, vec2,
 };
 
 use super::chrome::Pass;
 use super::control::{Command, Control};
-use super::tooltip::Tip;
 use super::info::HEADER_GAP;
 use super::style::{MENU_PADDING, MENU_RADIUS, POPUP_WIDTH, SCROLLBAR_GUTTER, SCROLLBAR_WIDTH};
+use super::tooltip::Tip;
 use super::{RULE_WIDTH, Rect, TEXT_SIZE, fonts, icon, info, panel, rule};
 
 /// The popup's id in egui's memory: what the application opens, and what

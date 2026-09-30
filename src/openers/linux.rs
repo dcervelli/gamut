@@ -264,8 +264,7 @@ pub fn open(opener: &Opener, path: &Path) -> Result<()> {
         return Err(anyhow!("{} says nothing to run", opener.name));
     }
     let program = argv.remove(0);
-    start(Command::new(&program).args(argv))
-        .with_context(|| format!("starting {}", opener.name))
+    start(Command::new(&program).args(argv)).with_context(|| format!("starting {}", opener.name))
 }
 
 /// Opens the text file at `path` in the editor `VISUAL` or `EDITOR` names,
