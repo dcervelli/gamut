@@ -16,9 +16,10 @@ use super::shader_codes;
 /// circle as well.
 const REGIONS: usize = 3;
 
-/// Layout must match `struct Params` in shaders/composite.wgsl.
+/// Layout must match `struct Params` in shaders/composite.wgsl, which the
+/// test at the foot of this file holds it to.
 #[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
+#[derive(Clone, Copy, PartialEq, Pod, Zeroable)]
 struct Params {
     tone_map: u32,
     encoding: u32,
@@ -48,6 +49,9 @@ pub struct Backdrop {
 pub struct Composite {
     pipeline: wgpu::RenderPipeline,
     params: wgpu::Buffer,
+    /// What `params` holds, so that a frame that moves nothing on the
+    /// surface stages no copy for it.
+    written: Option<Params>,
     params_group: wgpu::BindGroup,
     targets_layout: wgpu::BindGroupLayout,
     targets_group: Option<wgpu::BindGroup>,
@@ -85,6 +89,7 @@ impl Composite {
         Self {
             pipeline,
             params,
+            written: None,
             params_group,
             targets_layout,
             targets_group: None,
@@ -114,7 +119,7 @@ impl Composite {
     /// is on it. Of the scene, this reads the display state, the backdrop
     /// and the headroom; of the output, only how it is encoded.
     pub fn prepare(
-        &self,
+        &mut self,
         queue: &wgpu::Queue,
         scene: &Scene<'_>,
         gray: bool,
@@ -159,22 +164,23 @@ impl Composite {
             ];
         }
 
-        queue.write_buffer(
-            &self.params,
-            0,
-            bytemuck::bytes_of(&Params {
-                tone_map,
-                encoding: shader_codes::encoding(output.encoding),
-                white_scale: 1.0,
-                checker: (backdrop.square * scale).max(1.0),
-                base: backdrop.base.to_linear(),
-                alternate: backdrop.alternate.to_linear(),
-                regions: bounds,
-                glass: glass.map_or([0.0; 4], |glass| {
-                    [glass.center[0], glass.center[1], glass.radius, 0.0]
-                }),
+        let params = Params {
+            tone_map,
+            encoding: shader_codes::encoding(output.encoding),
+            white_scale: 1.0,
+            checker: (backdrop.square * scale).max(1.0),
+            base: backdrop.base.to_linear(),
+            alternate: backdrop.alternate.to_linear(),
+            regions: bounds,
+            glass: glass.map_or([0.0; 4], |glass| {
+                [glass.center[0], glass.center[1], glass.radius, 0.0]
             }),
-        );
+        };
+        if self.written == Some(params) {
+            return;
+        }
+        queue.write_buffer(&self.params, 0, bytemuck::bytes_of(&params));
+        self.written = Some(params);
     }
 
     pub fn render(&self, pass: &mut wgpu::RenderPass<'_>) {

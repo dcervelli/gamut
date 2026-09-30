@@ -29,9 +29,10 @@ use crate::image::{
 /// thousand steps puts it under what a 16-bit target resolves.
 const RAMP_LENGTH: u32 = 1024;
 
-/// Layout must match `struct Params` in shaders/image.wgsl.
+/// Layout must match `struct Params` in shaders/image.wgsl, which the
+/// test at the foot of this file holds it to.
 #[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
+#[derive(Clone, Copy, PartialEq, Pod, Zeroable)]
 struct Params {
     offset: [f32; 2],
     scale: [f32; 2],
@@ -251,6 +252,10 @@ pub struct GpuImage {
 struct Slot {
     buffer: wgpu::Buffer,
     group: wgpu::BindGroup,
+    /// What the buffer holds, so that a frame that changes nothing about a
+    /// quad — one drawn again while a panel is redrawn, say — stages no
+    /// copy for it.
+    written: Option<Params>,
 }
 
 /// What one frame draws: the view, the minimap's thumbnail when it is on
@@ -613,7 +618,7 @@ impl ImageLayer {
                     encoder,
                     Marking {
                         pipeline: &self.marking,
-                        slot: &self.marks_slot,
+                        slot: &mut self.marks_slot,
                         reducer: &mut self.reducer,
                         layout: &self.texture_layout,
                         blank_lift: &self.blank_lift,
@@ -676,7 +681,7 @@ impl ImageLayer {
         self.loupe_level =
             loupe.map(|glass| reduce::level_for(shrink(glass.placement), image.levels.len()));
         if let (Some(glass), Some(level)) = (loupe, self.loupe_level) {
-            for (slot, cut) in [(&self.loupe, Cut::Disc), (&self.rim, Cut::Band)] {
+            for (slot, cut) in [(&mut self.loupe, Cut::Disc), (&mut self.rim, Cut::Band)] {
                 slot.write(
                     queue,
                     params_for(image, glass.placement, Some((glass, cut)), level, quad),
@@ -1115,11 +1120,20 @@ impl Slot {
     fn new(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, label: &str) -> Self {
         let buffer = gpu::uniform_buffer::<Params>(device, label);
         let group = gpu::buffer_group(device, label, layout, &buffer);
-        Self { buffer, group }
+        Self {
+            buffer,
+            group,
+            written: None,
+        }
     }
 
-    fn write(&self, queue: &wgpu::Queue, params: Params) {
+    /// Puts `params` in the buffer, unless they are what it holds.
+    fn write(&mut self, queue: &wgpu::Queue, params: Params) {
+        if self.written == Some(params) {
+            return;
+        }
         queue.write_buffer(&self.buffer, 0, bytemuck::bytes_of(&params));
+        self.written = Some(params);
     }
 }
 
@@ -1269,7 +1283,7 @@ fn rebind(
 /// while the picture is borrowed from it.
 struct Marking<'a> {
     pipeline: &'a wgpu::RenderPipeline,
-    slot: &'a Slot,
+    slot: &'a mut Slot,
     reducer: &'a mut Reducer,
     layout: &'a wgpu::BindGroupLayout,
     blank_lift: &'a wgpu::BindGroup,

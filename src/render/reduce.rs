@@ -23,9 +23,10 @@ use super::shader_codes;
 /// Size ratio between one level and the next, per axis.
 pub const STEP: u32 = 4;
 
-/// Layout must match `struct Params` in shaders/reduce.wgsl.
+/// Layout must match `struct Params` in shaders/reduce.wgsl, which the
+/// test at the foot of this file holds it to.
 #[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
+#[derive(Clone, Copy, PartialEq, Pod, Zeroable)]
 struct Params {
     extent: [f32; 2],
     step: f32,
@@ -66,6 +67,9 @@ pub struct Level {
     texture: wgpu::Texture,
     pub view: wgpu::TextureView,
     params: wgpu::Buffer,
+    /// What `params` holds, so that a level written again under the same
+    /// constants stages no copy for them.
+    written: Params,
     params_group: wgpu::BindGroup,
     /// What the pass reads: the source, or the level above.
     input: wgpu::TextureView,
@@ -225,7 +229,10 @@ impl Reducer {
 
             match levels.get_mut(index) {
                 Some(level) if level.holds(width, height, format) => {
-                    queue.write_buffer(&level.params, 0, bytemuck::bytes_of(&params));
+                    if level.written != params {
+                        queue.write_buffer(&level.params, 0, bytemuck::bytes_of(&params));
+                        level.written = params;
+                    }
                     if level.input != input {
                         level.input_group = self.input_group(device, &input);
                         level.input = input;
@@ -317,6 +324,7 @@ impl Reducer {
             texture,
             view,
             params: buffer,
+            written: params,
             params_group,
             input,
             input_group,
