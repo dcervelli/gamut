@@ -3014,6 +3014,18 @@ impl App {
     /// The one place a frame is asked for, called last by each of the
     /// handlers.
     fn settle(&mut self, effect: Effect, event_loop: &ActiveEventLoop) {
+        self.pay(effect, event_loop);
+        // What the menus show as they next open, now that the handler has
+        // changed what it was going to.
+        #[cfg(target_os = "macos")]
+        self.publish_menu();
+    }
+
+    /// [`App::settle`] with the menus left as they were published: for a
+    /// bare move of the pointer, which changes nothing they show but whether
+    /// the pointer is on a pixel of the picture — and a change to that is a
+    /// frame owed, whose own settling publishes it.
+    fn pay(&mut self, effect: Effect, event_loop: &ActiveEventLoop) {
         match effect {
             Effect::Redraw => {
                 if let Some(shown) = &self.shown {
@@ -3023,10 +3035,6 @@ impl App {
             Effect::Quit => event_loop.exit(),
             Effect::Nothing => {}
         }
-        // What the menus show as they next open, now that the handler has
-        // changed what it was going to.
-        #[cfg(target_os = "macos")]
-        self.publish_menu();
     }
 }
 
@@ -3385,6 +3393,7 @@ impl ApplicationHandler<UserEvent> for App {
                 && !matches!(event, WindowEvent::RedrawRequested),
         );
         let consumed = response.is_some_and(|response| response.consumed);
+        let moved = matches!(event, WindowEvent::CursorMoved { .. });
         let effect = match event {
             _ if consumed && !matches!(event, WindowEvent::RedrawRequested) => Effect::Nothing,
             WindowEvent::CloseRequested => Effect::Quit,
@@ -3431,7 +3440,11 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::RedrawRequested => self.redraw(),
             _ => Effect::Nothing,
         };
-        self.settle(repaint.also(effect), event_loop);
+        if moved {
+            self.pay(repaint.also(effect), event_loop);
+        } else {
+            self.settle(repaint.also(effect), event_loop);
+        }
     }
 
     /// The loop is done. A copy that is still being prepared gets to finish

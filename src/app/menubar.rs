@@ -15,7 +15,7 @@ use winit::keyboard::{KeyCode, NamedKey};
 
 use super::App;
 use super::edits::Edit;
-use super::input::{Action, Conditions, Effect, action_of};
+use super::input::{Action, Conditions, Effect, When, action_of};
 use super::keymap::{Chord, KeyName, Keymap};
 use crate::PROGRAM;
 use crate::image::auxiliary::{Auxiliary, Showing};
@@ -45,6 +45,9 @@ enum Does {
 pub(super) struct MenuBar {
     bar: Bar,
     tags: Vec<Does>,
+    /// What each tag's key waits on in the keymap in force, looked up once
+    /// per keymap rather than each time the items are shown.
+    waits: Vec<Option<When>>,
 }
 
 /// What the program is called at the head of the bar and in its items: the
@@ -67,9 +70,28 @@ impl MenuBar {
         };
         Self {
             bar: Bar::install(&menus, identity, deliver, mtm),
+            waits: waits(keys, &builder.tags),
             tags: builder.tags,
         }
     }
+}
+
+/// What each of `tags` waits on under `keys`: the condition on the line
+/// that binds its action, or the action of the key that does its button's
+/// job.
+fn waits(keys: &Keymap, tags: &[Does]) -> Vec<Option<When>> {
+    tags.iter()
+        .map(|does| {
+            let action = match does {
+                Does::Action(action) => Some(*action),
+                Does::Control(control) => action_of(Tip::Control(*control)),
+                Does::Magnification(_) => None,
+            };
+            action
+                .and_then(|action| keys.row_for(action))
+                .and_then(|row| row.when)
+        })
+        .collect()
 }
 
 /// Builds the tree, numbering each item as it goes.
@@ -563,8 +585,8 @@ impl App {
     /// Gives the menu bar's items the keys the keymap now binds, after the
     /// configuration has been read again: the same tree, built again, so
     /// that each tag is the same item and only its key has moved.
-    pub(super) fn rekey_menubar(&self) {
-        let Some(menubar) = &self.menubar else {
+    pub(super) fn rekey_menubar(&mut self) {
+        let Some(menubar) = &mut self.menubar else {
             return;
         };
         let mut builder = Builder {
@@ -577,6 +599,7 @@ impl App {
             "the same items, in the same order"
         );
         menubar.bar.rekey(&menus);
+        menubar.waits = waits(&self.keys, &menubar.tags);
     }
 
     /// Hands the menu bar how each item is to be shown now. Called as each
@@ -590,8 +613,9 @@ impl App {
         let shown = menubar
             .tags
             .iter()
-            .map(|does| Shown {
-                enabled: self.alive(*does, &conditions),
+            .zip(&menubar.waits)
+            .map(|(does, waits)| Shown {
+                enabled: self.alive(*does, *waits, &conditions),
                 checked: self.checked(*does),
                 title: self.retitled(*does, &conditions),
             })
@@ -624,20 +648,15 @@ impl App {
         }
     }
 
-    /// Whether `does` would do anything now: its button alive, and the
-    /// condition its key waits on met.
-    fn alive(&self, does: Does, conditions: &Conditions) -> bool {
-        let waits = |action: Option<Action>| {
-            action
-                .and_then(|action| self.keys.row_for(action))
-                .and_then(|row| row.when)
-                .is_none_or(|when| conditions.met(when))
-        };
+    /// Whether `does` would do anything now: its button alive, and
+    /// `waits`, the condition its key waits on, met.
+    fn alive(&self, does: Does, waits: Option<When>, conditions: &Conditions) -> bool {
+        let met = waits.is_none_or(|when| conditions.met(when));
         match does {
             Does::Control(control) => {
                 let tip = Tip::Control(control);
                 ui::tooltip::disabled(tip, *conditions).is_none()
-                    && waits(action_of(tip))
+                    && met
                     && !(conditions.nothing_open && about_picture(does))
                     && match control {
                         Control::Coordinates(format) => format.offered(
@@ -648,9 +667,7 @@ impl App {
                         _ => true,
                     }
             }
-            Does::Action(action) => {
-                waits(Some(action)) && !(conditions.nothing_open && about_picture(does))
-            }
+            Does::Action(_) => met && !(conditions.nothing_open && about_picture(does)),
             Does::Magnification(_) => true,
         }
     }
