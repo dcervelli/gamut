@@ -134,6 +134,15 @@ pub fn entries(tiff: &[u8], order: Order, skipping: &[u16]) -> Option<Vec<Entry>
         return None;
     }
     let at = order.read_u32(tiff, 4)? as usize;
+    entries_at(tiff, order, at, skipping)
+}
+
+/// The entries of the directory at `at` in `block`, written in `order`,
+/// whose offsets count from the block's first byte: a TIFF's own, or the
+/// directory a maker note keeps behind a header of its own. `None` where
+/// the directory does not add up.
+pub fn entries_at(block: &[u8], order: Order, at: usize, skipping: &[u16]) -> Option<Vec<Entry>> {
+    let tiff = block;
     let count = order.read_u16(tiff, at)? as usize;
     let mut entries = Vec::with_capacity(count);
     for index in 0..count {

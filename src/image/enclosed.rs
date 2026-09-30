@@ -138,14 +138,8 @@ fn mrw(file: &mut dyn ReadSeek) -> Option<Vec<u8>> {
 fn cr3(file: &mut dyn ReadSeek) -> Option<Vec<u8>> {
     // Everything wanted is in `moov`, which comes right after `ftyp`; the
     // pixels are in `mdat` after it, and nothing here goes near them.
-    let mut bytes = Vec::new();
-    (&mut *file)
-        .take(PREFIX as u64)
-        .read_to_end(&mut bytes)
-        .ok()?;
-
-    let (moov, _) = isobmff::find(&bytes, 0, bytes.len(), b"moov")?;
-    let (uuid, uuid_end) = isobmff::find(&bytes, moov, bytes.len(), b"uuid")?;
+    let bytes = isobmff::top_level(file, b"moov", Some(b"mdat"), PREFIX as u64).ok()??;
+    let (uuid, uuid_end) = isobmff::find(&bytes, 0, bytes.len(), b"uuid")?;
     // Canon's uuid, the 16 bytes after the box header.
     const CANON: [u8; 16] = [
         0x85, 0xc0, 0xb6, 0x87, 0x82, 0x0f, 0x11, 0xe0, 0x81, 0x11, 0xf4, 0xce, 0x46, 0x2b, 0x6a,

@@ -42,6 +42,7 @@ use std::path::{Path, PathBuf};
 use roxmltree::{Document, Node};
 
 use super::decode::{Opened, ReadSeek};
+use super::isobmff;
 
 /// How large a packet is allowed to be. A packet is a few kilobytes of text,
 /// and one carrying an edit history runs to a few hundred; a container that
@@ -686,55 +687,14 @@ pub fn in_webp(source: &mut dyn ReadSeek) -> Option<Vec<u8>> {
     }
 }
 
-/// The packet in a JPEG XL container's `xml ` box. The container's boxes
-/// are the ISO base media format's, at the top level: a length, a type, and
-/// the contents, with a length of one meaning an eight-byte length follows
-/// and a length of zero meaning the box runs to the end of the file. A box
-/// that was Brotli-compressed into a `brob` is left. The bare codestream
-/// has no boxes, and its decoder does not ask.
+/// The packet in a JPEG XL container's `xml ` box, one of the ISO base
+/// media boxes at the file's top level, which [`isobmff::top_level`] walks
+/// to. A box that was Brotli-compressed into a `brob` is left. The bare
+/// codestream has no boxes, and its decoder does not ask.
 pub fn in_jxl(source: &mut dyn ReadSeek) -> Option<Vec<u8>> {
-    source.seek(SeekFrom::Start(0)).ok()?;
-    loop {
-        let mut header = [0u8; 8];
-        if source.read_exact(&mut header).is_err() {
-            return None;
-        }
-        let short = u64::from(u32::from_be_bytes([
-            header[0], header[1], header[2], header[3],
-        ]));
-        let kind = &header[4..8];
-        let mut used = 8;
-        let length = match short {
-            0 => None,
-            1 => {
-                let mut long = [0u8; 8];
-                source.read_exact(&mut long).ok()?;
-                used += 8;
-                Some(u64::from_be_bytes(long))
-            }
-            _ => Some(short),
-        };
-        // A box shorter than its own header is a file that does not add up.
-        let contents = match length {
-            Some(length) => Some(length.checked_sub(used)?),
-            None => None,
-        };
-        if kind == b"xml " {
-            return match contents {
-                Some(contents) => take(source, contents),
-                None => {
-                    let mut held = Vec::new();
-                    (&mut *source)
-                        .take(MAX_PACKET)
-                        .read_to_end(&mut held)
-                        .ok()?;
-                    Some(held)
-                }
-            };
-        }
-        // A box that runs to the end of the file is the last one.
-        skip(source, contents?)?;
-    }
+    isobmff::top_level(source, b"xml ", None, MAX_PACKET)
+        .ok()
+        .flatten()
 }
 
 #[cfg(test)]

@@ -11,6 +11,8 @@
 //! offsets count from the note's first byte. Tags 33 and 48 are the two,
 //! each a signed rational.
 
+use crate::image::tiff::{self, Order};
+
 /// The auxiliary type of the map.
 pub(super) const GAIN_MAP: &str = "urn:com:apple:photo:2020:aux:hdrgainmap";
 
@@ -53,52 +55,31 @@ fn maker_note(exif_item: &[u8]) -> Option<Vec<u8>> {
     }
 }
 
-/// One of the note's signed rationals, by tag.
+/// One of the note's signed rationals, by tag. The directory is a TIFF's,
+/// read as one; only its header is Apple's.
 fn tag(note: &[u8], wanted: u16) -> Option<f32> {
     if !note.starts_with(b"Apple iOS\0") {
         return None;
     }
-    let big_endian = match note.get(12..14)? {
-        b"MM" => true,
-        b"II" => false,
+    let order = match note.get(12..14)? {
+        b"MM" => Order::Big,
+        b"II" => Order::Little,
         _ => return None,
-    };
-    let u16_at = |at: usize| -> Option<u16> {
-        let bytes: [u8; 2] = note.get(at..at + 2)?.try_into().ok()?;
-        Some(if big_endian {
-            u16::from_be_bytes(bytes)
-        } else {
-            u16::from_le_bytes(bytes)
-        })
-    };
-    let u32_at = |at: usize| -> Option<u32> {
-        let bytes: [u8; 4] = note.get(at..at + 4)?.try_into().ok()?;
-        Some(if big_endian {
-            u32::from_be_bytes(bytes)
-        } else {
-            u32::from_le_bytes(bytes)
-        })
     };
     const DIRECTORY: usize = 14;
     const SRATIONAL: u16 = 10;
-    let count = u16_at(DIRECTORY)?;
-    for entry in 0..usize::from(count) {
-        let at = DIRECTORY + 2 + entry * 12;
-        if u16_at(at)? != wanted {
-            continue;
-        }
-        if u16_at(at + 2)? != SRATIONAL || u32_at(at + 4)? != 1 {
-            return None;
-        }
-        let value = u32_at(at + 8)? as usize;
-        let numerator = u32_at(value)? as i32;
-        let denominator = u32_at(value + 4)? as i32;
-        if denominator == 0 {
-            return None;
-        }
-        return Some(numerator as f32 / denominator as f32);
+    let entry = tiff::entries_at(note, order, DIRECTORY, &[])?
+        .into_iter()
+        .find(|entry| entry.tag == wanted)?;
+    if entry.kind != SRATIONAL || entry.count != 1 {
+        return None;
     }
-    None
+    let numerator = order.read_u32(note, entry.offset)? as i32;
+    let denominator = order.read_u32(note, entry.offset + 4)? as i32;
+    if denominator == 0 {
+        return None;
+    }
+    Some(numerator as f32 / denominator as f32)
 }
 
 #[cfg(test)]

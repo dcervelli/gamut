@@ -23,7 +23,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use ultrahdr_rs::GainMapMetadata;
 
 use crate::image::decode::ReadSeek;
-use crate::image::isobmff;
+use crate::image::isobmff::{self, Fields};
 
 /// What a `tmap` item says.
 #[derive(Debug, Clone)]
@@ -46,8 +46,10 @@ const MAX_META: u64 = 16 << 20;
 /// cannot reach, or a reference the file left out — since the picture
 /// without its gain map is still the picture.
 pub(super) fn find(source: &mut dyn ReadSeek) -> Result<Option<ToneMap>> {
-    source.seek(SeekFrom::Start(0))?;
-    let Some(meta) = meta_box(source)? else {
+    // The top-level `meta` box's body, the boxes before it skipped by their
+    // lengths and the search stopped at `mdat`, past which nothing but
+    // pixels lies.
+    let Some(meta) = isobmff::top_level(source, b"meta", Some(b"mdat"), MAX_META)? else {
         return Ok(None);
     };
     let Some(found) = Meta::parse(&meta) else {
@@ -108,57 +110,6 @@ pub(super) fn find(source: &mut dyn ReadSeek) -> Result<Option<ToneMap>> {
     }))
 }
 
-/// The top-level `meta` box's body. The boxes before it are skipped by
-/// their lengths; the search stops at `mdat`, past which nothing but pixels
-/// lies.
-fn meta_box(source: &mut dyn ReadSeek) -> Result<Option<Vec<u8>>> {
-    let mut at = 0u64;
-    loop {
-        let mut header = [0u8; 8];
-        if source.read_exact(&mut header).is_err() {
-            return Ok(None);
-        }
-        let mut size = u64::from(u32::from_be_bytes([
-            header[0], header[1], header[2], header[3],
-        ]));
-        let kind = &header[4..8];
-        let mut header_len = 8u64;
-        if size == 1 {
-            let mut large = [0u8; 8];
-            if source.read_exact(&mut large).is_err() {
-                return Ok(None);
-            }
-            size = u64::from_be_bytes(large);
-            header_len = 16;
-        } else if size == 0 {
-            // To the end of the file: only ever the last box.
-            size = source.seek(SeekFrom::End(0))?.saturating_sub(at);
-        }
-        if size < header_len {
-            return Ok(None);
-        }
-        if kind == b"meta" {
-            let length = size - header_len;
-            if length > MAX_META {
-                return Ok(None);
-            }
-            let mut body = vec![0; length as usize];
-            source.seek(SeekFrom::Start(at + header_len))?;
-            source
-                .read_exact(&mut body)
-                .context("reading the meta box")?;
-            return Ok(Some(body));
-        }
-        if kind == b"mdat" {
-            return Ok(None);
-        }
-        at = at
-            .checked_add(size)
-            .ok_or_else(|| anyhow!("box runs off the file"))?;
-        source.seek(SeekFrom::Start(at))?;
-    }
-}
-
 /// Where an item's payload is: which of the three ways the offsets are
 /// meant, and the extents.
 #[derive(Debug, Default)]
@@ -201,83 +152,31 @@ impl Meta {
     }
 }
 
-struct Cursor<'a> {
-    bytes: &'a [u8],
-    at: usize,
-}
-
-impl Cursor<'_> {
-    fn u8(&mut self) -> Option<u8> {
-        let value = *self.bytes.get(self.at)?;
-        self.at += 1;
-        Some(value)
-    }
-    fn u16(&mut self) -> Option<u16> {
-        let value = self.bytes.get(self.at..self.at + 2)?.first_chunk::<2>()?;
-        self.at += 2;
-        Some(u16::from_be_bytes(*value))
-    }
-    fn u32(&mut self) -> Option<u32> {
-        let value = self.bytes.get(self.at..self.at + 4)?.first_chunk::<4>()?;
-        self.at += 4;
-        Some(u32::from_be_bytes(*value))
-    }
-    fn i32(&mut self) -> Option<i32> {
-        self.u32().map(|value| value as i32)
-    }
-    fn u64(&mut self) -> Option<u64> {
-        let value = self.bytes.get(self.at..self.at + 8)?.first_chunk::<8>()?;
-        self.at += 8;
-        Some(u64::from_be_bytes(*value))
-    }
-    /// A field whose width the table's header chose: 0, 4 or 8 bytes.
-    fn sized(&mut self, size: u8) -> Option<u64> {
-        match size {
-            0 => Some(0),
-            4 => self.u32().map(u64::from),
-            8 => self.u64(),
-            _ => None,
-        }
-    }
-    /// An item id, 16 bits before version 2 of a table and 32 from it.
-    fn id(&mut self, version: u8, wide_from: u8) -> Option<u32> {
-        if version >= wide_from {
-            self.u32()
-        } else {
-            self.u16().map(u32::from)
-        }
-    }
-}
-
 /// `iinf`: the item ids and their types, from the `infe` boxes inside.
 fn iinf(body: &[u8]) -> Option<Vec<(u32, [u8; 4])>> {
-    let mut cursor = Cursor { bytes: body, at: 0 };
-    let version = cursor.u8()?;
-    cursor.at += 3;
+    let mut fields = Fields::new(body);
+    let version = fields.u8()?;
+    fields.skip(3);
     let count = if version == 0 {
-        cursor.u16()? as usize
+        fields.u16()? as usize
     } else {
-        cursor.u32()? as usize
+        fields.u32()? as usize
     };
     let mut items = Vec::with_capacity(count.min(1024));
-    for (kind, start, end) in isobmff::boxes(body, cursor.at, body.len()) {
+    for (kind, start, end) in isobmff::boxes(body, fields.at(), body.len()) {
         if &kind != b"infe" {
             continue;
         }
-        let entry = &body[start..end];
-        let mut cursor = Cursor {
-            bytes: entry,
-            at: 0,
-        };
-        let version = cursor.u8()?;
-        cursor.at += 3;
+        let mut fields = Fields::new(&body[start..end]);
+        let version = fields.u8()?;
+        fields.skip(3);
         // Versions 0 and 1 name no type, and no item of theirs is a `tmap`.
         if version < 2 {
             continue;
         }
-        let id = cursor.id(version, 3)?;
-        cursor.at += 2; // protection index
-        let kind: [u8; 4] = entry.get(cursor.at..cursor.at + 4)?.try_into().ok()?;
+        let id = fields.id(version, 3)?;
+        fields.skip(2); // protection index
+        let kind: [u8; 4] = fields.bytes(4)?.try_into().ok()?;
         items.push((id, kind));
     }
     Some(items)
@@ -288,15 +187,12 @@ fn iref(body: &[u8]) -> Option<References> {
     let mut references = HashMap::new();
     let version = *body.first()?;
     for (kind, start, end) in isobmff::boxes(body, 4, body.len()) {
-        let mut cursor = Cursor {
-            bytes: &body[start..end],
-            at: 0,
-        };
-        let from = cursor.id(version, 1)?;
-        let count = cursor.u16()?;
+        let mut fields = Fields::new(&body[start..end]);
+        let from = fields.id(version, 1)?;
+        let count = fields.u16()?;
         let mut to = Vec::with_capacity(usize::from(count).min(1024));
         for _ in 0..count {
-            to.push(cursor.id(version, 1)?);
+            to.push(fields.id(version, 1)?);
         }
         references.insert((from, kind), to);
     }
@@ -305,38 +201,38 @@ fn iref(body: &[u8]) -> Option<References> {
 
 /// `iloc`: where each item's payload is.
 fn iloc(body: &[u8]) -> Option<HashMap<u32, Location>> {
-    let mut cursor = Cursor { bytes: body, at: 0 };
-    let version = cursor.u8()?;
-    cursor.at += 3;
-    let sizes = cursor.u16()?;
+    let mut fields = Fields::new(body);
+    let version = fields.u8()?;
+    fields.skip(3);
+    let sizes = fields.u16()?;
     let offset_size = (sizes >> 12) as u8;
     let length_size = ((sizes >> 8) & 15) as u8;
     let base_offset_size = ((sizes >> 4) & 15) as u8;
     let index_size = if version >= 1 { (sizes & 15) as u8 } else { 0 };
     let count = if version < 2 {
-        cursor.u16()? as usize
+        fields.u16()? as usize
     } else {
-        cursor.u32()? as usize
+        fields.u32()? as usize
     };
     let mut locations = HashMap::new();
     for _ in 0..count {
-        let id = cursor.id(version, 2)?;
+        let id = fields.id(version, 2)?;
         let construction = if version >= 1 {
-            (cursor.u16()? & 15) as u8
+            (fields.u16()? & 15) as u8
         } else {
             0
         };
-        cursor.at += 2; // data reference index
-        let base = cursor.sized(base_offset_size)?;
-        let extents = cursor.u16()?;
+        fields.skip(2); // data reference index
+        let base = fields.sized(base_offset_size)?;
+        let extents = fields.u16()?;
         let mut location = Location {
             construction,
             extents: Vec::with_capacity(usize::from(extents).min(1024)),
         };
         for _ in 0..extents {
-            let _index = cursor.sized(index_size)?;
-            let offset = cursor.sized(offset_size)?;
-            let length = cursor.sized(length_size)?;
+            let _index = fields.sized(index_size)?;
+            let offset = fields.sized(offset_size)?;
+            let length = fields.sized(length_size)?;
             location.extents.push((base.checked_add(offset)?, length));
         }
         locations.insert(id, location);
@@ -347,25 +243,22 @@ fn iloc(body: &[u8]) -> Option<HashMap<u32, Location>> {
 /// The `tmap` item's payload, read as ISO 21496-1's gain map metadata.
 /// `None` for a version this reader does not know, or a payload cut short.
 pub(super) fn metadata(payload: &[u8]) -> Option<GainMapMetadata> {
-    let mut cursor = Cursor {
-        bytes: payload,
-        at: 0,
-    };
-    if cursor.u8()? != 0 {
+    let mut fields = Fields::new(payload);
+    if fields.u8()? != 0 {
         return None;
     }
-    let _minimum_version = cursor.u16()?;
-    let _writer_version = cursor.u16()?;
-    let flags = cursor.u8()?;
+    let _minimum_version = fields.u16()?;
+    let _writer_version = fields.u16()?;
+    let flags = fields.u8()?;
     let multichannel = flags & 0x80 != 0;
     let use_base_color_space = flags & 0x40 != 0;
     let mut ratio = |signed: bool| -> Option<f64> {
         let numerator = if signed {
-            f64::from(cursor.i32()?)
+            f64::from(fields.i32()?)
         } else {
-            f64::from(cursor.u32()?)
+            f64::from(fields.u32()?)
         };
-        let denominator = f64::from(cursor.u32()?);
+        let denominator = f64::from(fields.u32()?);
         (denominator != 0.0).then(|| numerator / denominator)
     };
     let base_hdr_headroom = ratio(false)?;
