@@ -35,7 +35,7 @@ use ::image::codecs::png::PngDecoder;
 use ::image::metadata::Orientation;
 use ::image::{AnimationDecoder, ImageFormat};
 
-use crate::image::sequence::{Frame, FrameSource, Loops, Sequence};
+use crate::image::sequence::{FrameSource, Loops, Sequence};
 use crate::image::{ColorSpace, DecodedImage, Primaries, Transfer};
 
 use super::{Overrides, ReadSeek, dynamic};
@@ -140,14 +140,18 @@ impl super::Decoder for Png {
         if !stated.animation.is_some_and(|animation| animation.playable) {
             bail!("the PNG is not an animation this build can play");
         }
-        let mut frames = PngFrames {
+        Ok(Box::new(dynamic::Animated::new(
             file,
-            color: stated.color.unwrap_or(ColorSpace::SRGB),
-            orientation: stated.orientation,
-            frames: None,
-        };
-        frames.rewind()?;
-        Ok(Box::new(frames))
+            ImageFormat::Png,
+            stated.color.unwrap_or(ColorSpace::SRGB),
+            stated.orientation,
+            |reader| {
+                let decoder = PngDecoder::with_limits(reader, dynamic::limits())
+                    .context("reading the PNG header")?;
+                let animation = decoder.apng().context("reading the PNG animation")?;
+                Ok(animation.into_frames())
+            },
+        )?))
     }
 }
 
@@ -161,45 +165,6 @@ fn apng_delay(numerator: u16, denominator: u16) -> Duration {
         stated => u64::from(stated),
     };
     Duration::from_micros(u64::from(numerator) * 1_000_000 / denominator)
-}
-
-/// An animated PNG's frames, composited by `image` onto the canvas.
-///
-/// The same arrangement as a GIF's: the crate's iterator owns the decoder,
-/// so a rewind is a fresh decoder over the file seeked back to its start.
-struct PngFrames {
-    file: File,
-    color: ColorSpace,
-    orientation: Orientation,
-    frames: Option<::image::Frames<'static>>,
-}
-
-impl FrameSource for PngFrames {
-    fn next(&mut self) -> Result<Option<Frame>> {
-        let Some(frames) = self.frames.as_mut() else {
-            return Ok(None);
-        };
-        match frames.next() {
-            None => Ok(None),
-            Some(frame) => {
-                let frame = frame.context("decoding a PNG frame")?;
-                let mut frame = dynamic::frame(frame, ImageFormat::Png, self.color)?;
-                frame.image = orient::apply(frame.image, self.orientation);
-                Ok(Some(frame))
-            }
-        }
-    }
-
-    fn rewind(&mut self) -> Result<()> {
-        self.frames = None;
-        self.file.seek(SeekFrom::Start(0))?;
-        let handle = self.file.try_clone().context("reopening the PNG")?;
-        let decoder = PngDecoder::with_limits(BufReader::new(handle), dynamic::limits())
-            .context("reading the PNG header")?;
-        let animation = decoder.apng().context("reading the PNG animation")?;
-        self.frames = Some(animation.into_frames());
-        Ok(())
-    }
 }
 
 /// PNG, container and all.

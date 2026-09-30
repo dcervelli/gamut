@@ -55,13 +55,14 @@
 //! that never had one.
 
 use std::fs::File;
-use std::io::{BufReader, Seek, SeekFrom};
+use std::io::{BufReader, Seek};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 
 use ::image::codecs::gif::GifDecoder;
 use ::image::codecs::hdr::HdrDecoder;
+use ::image::metadata::Orientation;
 use ::image::{AnimationDecoder, DynamicImage, ImageDecoder, ImageFormat};
 
 use crate::image::sequence::{Frame, FrameSource, Loops, Sequence, gif_delay};
@@ -199,9 +200,19 @@ impl super::Decoder for ImageRs {
         if super::fill(&mut file, &mut signature)? < signature.len() || !is_gif(&signature) {
             bail!("only a GIF among these formats is animated");
         }
-        let mut frames = GifFrames { file, frames: None };
-        frames.rewind()?;
-        Ok(Box::new(frames))
+        Ok(Box::new(GifFrames(dynamic::Animated::new(
+            file,
+            ImageFormat::Gif,
+            ColorSpace::SRGB,
+            Orientation::NoTransforms,
+            |reader| {
+                let mut decoder = GifDecoder::new(reader).context("reading the GIF header")?;
+                decoder
+                    .set_limits(dynamic::limits())
+                    .context("reading the GIF header")?;
+                Ok(decoder.into_frames())
+            },
+        )?)))
     }
 }
 
@@ -250,45 +261,20 @@ fn is_gif(header: &[u8]) -> bool {
     header.starts_with(b"GIF87a") || header.starts_with(b"GIF89a")
 }
 
-/// A GIF's frames, composited by `image` onto the logical screen.
-///
-/// The crate's iterator takes the decoder and the decoder takes the reader,
-/// so a rewind is a fresh decoder over the same open file: the handle is
-/// kept, seeked back to the start, and read again from there.
-struct GifFrames {
-    file: File,
-    frames: Option<::image::Frames<'static>>,
-}
+/// A GIF's frames, composited by `image` onto the logical screen, with the
+/// browsers' floor put under each frame's delay.
+struct GifFrames(dynamic::Animated);
 
 impl FrameSource for GifFrames {
     fn next(&mut self) -> Result<Option<Frame>> {
-        let Some(frames) = self.frames.as_mut() else {
-            return Ok(None);
-        };
-        match frames.next() {
-            None => Ok(None),
-            Some(frame) => {
-                let frame = frame.context("decoding a GIF frame")?;
-                let mut frame = dynamic::frame(frame, ImageFormat::Gif, ColorSpace::SRGB)?;
-                frame.delay = gif_delay(frame.delay);
-                Ok(Some(frame))
-            }
-        }
+        Ok(self.0.next()?.map(|mut frame| {
+            frame.delay = gif_delay(frame.delay);
+            frame
+        }))
     }
 
     fn rewind(&mut self) -> Result<()> {
-        // Dropped before the file is seeked: the old decoder holds a clone
-        // of the same handle, and the two share one offset.
-        self.frames = None;
-        self.file.seek(SeekFrom::Start(0))?;
-        let handle = self.file.try_clone().context("reopening the GIF")?;
-        let mut decoder =
-            GifDecoder::new(BufReader::new(handle)).context("reading the GIF header")?;
-        decoder
-            .set_limits(dynamic::limits())
-            .context("reading the GIF header")?;
-        self.frames = Some(decoder.into_frames());
-        Ok(())
+        self.0.rewind()
     }
 }
 

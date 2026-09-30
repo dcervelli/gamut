@@ -5,16 +5,105 @@
 //! the decoded numbers *mean*, and handing them on without flattening 16-bit
 //! or floating-point data down to bytes.
 
-use std::io::{BufReader, Seek};
+use std::fs::File;
+use std::io::{BufReader, Seek, SeekFrom};
 use std::time::Duration;
 
-use ::image::{DynamicImage, ImageFormat};
+use ::image::metadata::Orientation;
+use ::image::{DynamicImage, Frames, ImageFormat};
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 
+use crate::image::orient;
+use crate::image::sequence::{Frame, FrameSource};
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Referred, Samples};
 
 use super::ReadSeek;
+
+/// A decoder's frames over the file, built afresh by a rewind: what each
+/// animated format the crate reads brings of its own to [`Animated`].
+pub(super) type Open = fn(BufReader<File>) -> Result<Frames<'static>>;
+
+/// An animation the crate composites frame by frame — a GIF's onto its
+/// logical screen, an APNG's onto its canvas — so that a frame stored as a
+/// patch arrives whole, each described as the container said and turned
+/// the way it asked.
+///
+/// The crate's iterator owns the decoder and the decoder the reader, so a
+/// rewind is a fresh decoder over the same open file seeked back to its
+/// start, which is what `open` builds.
+pub(super) struct Animated {
+    file: File,
+    format: ImageFormat,
+    /// What the container said the frames' color is.
+    color: ColorSpace,
+    /// The turn the container asks for, applied to every frame.
+    orientation: Orientation,
+    open: Open,
+    frames: Option<Frames<'static>>,
+}
+
+impl Animated {
+    /// The animation over `file`, at its first frame.
+    pub(super) fn new(
+        file: File,
+        format: ImageFormat,
+        color: ColorSpace,
+        orientation: Orientation,
+        open: Open,
+    ) -> Result<Self> {
+        let mut animated = Self {
+            file,
+            format,
+            color,
+            orientation,
+            open,
+            frames: None,
+        };
+        animated.rewind()?;
+        Ok(animated)
+    }
+
+    /// The format's name, for the errors.
+    fn name(&self) -> &'static str {
+        match self.format {
+            ImageFormat::Gif => "GIF",
+            ImageFormat::Png => "PNG",
+            _ => "animation",
+        }
+    }
+}
+
+impl FrameSource for Animated {
+    fn next(&mut self) -> Result<Option<Frame>> {
+        let name = self.name();
+        let Some(frames) = self.frames.as_mut() else {
+            return Ok(None);
+        };
+        match frames.next() {
+            None => Ok(None),
+            Some(frame) => {
+                let frame = frame.with_context(|| format!("decoding a {name} frame"))?;
+                let mut frame = self::frame(frame, self.format, self.color)?;
+                frame.image = orient::apply(frame.image, self.orientation);
+                Ok(Some(frame))
+            }
+        }
+    }
+
+    fn rewind(&mut self) -> Result<()> {
+        // Dropped before the file is seeked: the old decoder holds a clone
+        // of the same handle, and the two share one offset.
+        self.frames = None;
+        self.file.seek(SeekFrom::Start(0))?;
+        let handle = self
+            .file
+            .try_clone()
+            .with_context(|| format!("reopening the {}", self.name()))?;
+        self.frames = Some((self.open)(BufReader::new(handle))?);
+        Ok(())
+    }
+}
 
 /// The size stated in the header of whatever format the crate recognizes.
 pub(super) fn dimensions(source: &mut dyn ReadSeek) -> Result<Option<(u32, u32)>> {
