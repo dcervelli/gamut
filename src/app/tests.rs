@@ -1898,16 +1898,19 @@ fn a_slow_read_stands_the_thumbnail_where_the_picture_lands_and_the_panels_wait(
     let left_a = landed(&app);
 
     let _ = app.step(true);
-    assert!(app.standin().is_none(), "the wait has not been said");
+    assert!(
+        app.standin(&app.sight()).is_none(),
+        "the wait has not been said"
+    );
     assert!(!app.frame_input([1000.0, 700.0], 1.0).waiting);
     said(&mut app);
-    assert!(app.standin().is_none(), "no thumbnail is held");
+    assert!(app.standin(&app.sight()).is_none(), "no thumbnail is held");
     assert!(app.reading().is_some());
     // The panels wait whether or not there is a thumbnail to show.
     assert!(app.frame_input([1000.0, 700.0], 1.0).waiting);
     thumbnailed(&mut app, &b, (32, 16));
     let standin = app
-        .standin()
+        .standin(&app.sight())
         .expect("the wait is said and the thumbnail held");
     assert_eq!(standin.turn, Turn::NONE);
     assert!(
@@ -1917,7 +1920,10 @@ fn a_slow_read_stands_the_thumbnail_where_the_picture_lands_and_the_panels_wait(
     let stood = standin.placement;
     assert!(app.frame_input([1000.0, 700.0], 1.0).standin.is_some());
     answer(&mut app, Reload::Fresh);
-    assert!(app.standin().is_none(), "the picture itself is up");
+    assert!(
+        app.standin(&app.sight()).is_none(),
+        "the picture itself is up"
+    );
     assert!(!app.frame_input([1000.0, 700.0], 1.0).waiting);
     assert_eq!(landed(&app), [stood.x, stood.y, stood.width, stood.height]);
 
@@ -1925,7 +1931,7 @@ fn a_slow_read_stands_the_thumbnail_where_the_picture_lands_and_the_panels_wait(
     said(&mut app);
     thumbnailed(&mut app, &a, (64, 48));
     let standin = app
-        .standin()
+        .standin(&app.sight())
         .expect("the wait is said and the thumbnail held");
     assert_eq!(standin.turn, Turn::NONE.clockwise());
     let stood = standin.placement;
@@ -1936,7 +1942,7 @@ fn a_slow_read_stands_the_thumbnail_where_the_picture_lands_and_the_panels_wait(
     // The file on screen read again stays up as it is.
     let _ = app.files.reload();
     said(&mut app);
-    assert!(app.standin().is_none());
+    assert!(app.standin(&app.sight()).is_none());
     assert!(!app.frame_input([1000.0, 700.0], 1.0).waiting);
 
     std::fs::remove_dir_all(dir).expect("we just wrote it");

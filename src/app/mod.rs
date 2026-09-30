@@ -189,6 +189,27 @@ pub struct Options {
 /// window tiled never does, and must not leave the window pinned.
 const SIZING_GRACE: Duration = Duration::from_secs(1);
 
+/// One reading of the window and the view, taken at the top of a frame
+/// or an event and read by everything under it: the picture's viewport,
+/// which panels are up, the window in logical pixels, and the view as it
+/// is on screen at that instant. Everything that reads where the picture
+/// is reads the same one, so that the pixel under the pointer, the loupe
+/// and the frame drawn agree with one another mid-move — and so that the
+/// panels' geometry is worked out once rather than by each of them.
+#[derive(Clone, Copy)]
+struct Sight {
+    /// Physical pixels to the logical one.
+    scale: f32,
+    /// The window in logical pixels.
+    logical: [f32; 2],
+    /// Where the image is drawn, in physical pixels.
+    viewport: Viewport,
+    /// Which of the panels that come and go are up.
+    parts: Parts,
+    /// The view as shown at the reading's instant — see [`App::view_at`].
+    view: View,
+}
+
 /// What there is once the window is open, made together in `resumed`.
 struct Shown {
     /// First, so that the surface goes before the window it draws into.
@@ -1521,7 +1542,7 @@ impl App {
     /// replacing. Only for another file, whose size its header has said and
     /// whose thumbnail is held; the file on screen read again stays up as it
     /// is, being a better picture of itself than any thumbnail.
-    fn standin(&self) -> Option<ui::Standin> {
+    fn standin(&self, sight: &Sight) -> Option<ui::Standin> {
         let path = self.replacing()?;
         let (width, height) = self.chooser.facts_of(path)?.size?;
         let thumb = self.thumbs.get(path)?;
@@ -1542,7 +1563,7 @@ impl App {
         let view = arriving_view(arrival, kept, view, picture, size);
         Some(ui::Standin {
             thumb,
-            placement: view.placement(size, self.viewport()),
+            placement: view.placement(size, sight.viewport),
             turn,
         })
     }
@@ -1664,6 +1685,27 @@ impl App {
         )
     }
 
+    /// The window and the view read now — see [`Sight`].
+    fn sight(&self) -> Sight {
+        self.sight_at(Instant::now())
+    }
+
+    /// The window and the view read at `now`.
+    fn sight_at(&self, now: Instant) -> Sight {
+        let scale = self.scale_factor();
+        let physical = self.window_size();
+        let logical = [physical[0] / scale, physical[1] / scale];
+        let parts = self.parts();
+        let viewport = image_viewport(physical, scale, self.panels.show_ui, parts);
+        Sight {
+            scale,
+            logical,
+            viewport,
+            parts,
+            view: self.view_in(now, viewport),
+        }
+    }
+
     /// What this frame's interface is laid out from, in a window `logical`
     /// pixels across at `scale` device pixels to each: everything the
     /// application derives per frame from its window, pointer and loader.
@@ -1671,17 +1713,24 @@ impl App {
     /// application with no window behind it.
     #[cfg(test)]
     fn frame_input(&mut self, logical: [f32; 2], scale: f32) -> FrameInput {
+        let sight = Sight {
+            logical,
+            scale,
+            ..self.sight()
+        };
         let conditions = self.conditions();
-        self.frame_input_under(logical, scale, &conditions)
+        self.frame_input_under(&sight, &conditions)
     }
 
-    /// [`App::frame_input`] under `conditions` already read for the frame.
-    fn frame_input_under(
-        &mut self,
-        logical: [f32; 2],
-        scale: f32,
-        conditions: &input::Conditions,
-    ) -> FrameInput {
+    /// [`App::frame_input`] from `sight`, under `conditions`, both read
+    /// once for the frame.
+    fn frame_input_under(&mut self, sight: &Sight, conditions: &input::Conditions) -> FrameInput {
+        let Sight {
+            logical,
+            scale,
+            viewport,
+            ..
+        } = *sight;
         let chooser = self.chooser_open().then(|| {
             let target = self.current.as_ref().and_then(|_| self.files.target_path());
             self.chooser.input(&self.thumbs, target)
@@ -1701,19 +1750,18 @@ impl App {
         };
         let rename = self.rename_input();
         let export = self.export_input();
-        let viewport = self.viewport();
         // What reads the picture on screen reads nothing while a thumbnail
         // of another file stands over it.
-        let standin = self.standin();
+        let standin = self.standin(sight);
         let picture = standin.is_none();
         FrameInput {
             logical,
             scale,
             viewport,
-            pointer: self.pointer_pixel().filter(|_| picture),
-            cursor: self.logical_cursor(),
-            minimap_on_screen: self.minimap_on_screen() && picture,
-            loupe: self.loupe().filter(|_| picture),
+            pointer: self.pointer_pixel_in(sight).filter(|_| picture),
+            cursor: self.logical_cursor_at(scale),
+            minimap_on_screen: self.minimap_on_screen_in(sight) && picture,
+            loupe: self.loupe_in(sight).filter(|_| picture),
             loupe_held: self.loupe_held(),
             index: self.files.target(),
             count: self.files.len(),
@@ -1759,16 +1807,21 @@ impl App {
     /// pointer, the grid's spacing, the minimap's marker — reads this, so
     /// that they agree with one another about what is on screen mid-move.
     fn view_at(&self, now: Instant) -> View {
+        self.view_in(now, self.viewport())
+    }
+
+    /// [`App::view_at`] with the viewport already worked out.
+    fn view_in(&self, now: Instant, viewport: Viewport) -> View {
         match &self.motion {
             Some(motion) => {
-                let (image, viewport) = (self.image_size(), self.viewport());
-                let to = self.view.position(image, viewport);
+                let to = self.view.position(self.image_size(), viewport);
                 self.view.at(motion.position(to, now))
             }
             None => self.view,
         }
     }
 
+    #[cfg(test)]
     pub(super) fn shown_view(&self) -> View {
         self.view_at(Instant::now())
     }
@@ -1798,8 +1851,7 @@ impl App {
 
     /// The pointer in logical pixels, which is what the interface is laid out
     /// in. Events arrive in physical ones.
-    fn logical_cursor(&self) -> Option<[f32; 2]> {
-        let scale = self.scale_factor();
+    fn logical_cursor_at(&self, scale: f32) -> Option<[f32; 2]> {
         self.pointer
             .cursor
             .map(|cursor| [cursor[0] / scale, cursor[1] / scale])
@@ -1813,6 +1865,12 @@ impl App {
     /// image runs on underneath the panels, where it is not drawn and so has
     /// no pixel to report.
     fn pointer_pixel(&self) -> Option<[u32; 2]> {
+        self.pointer_pixel_in(&self.sight())
+    }
+
+    /// [`App::pointer_pixel`] under `sight`: the frame's own, so that
+    /// the pixel named is under the view drawn.
+    fn pointer_pixel_in(&self, sight: &Sight) -> Option<[u32; 2]> {
         // Anything drawn over the picture takes the pointer rather than
         // letting it through: the bar would otherwise read out a pixel nobody
         // can see, under the panel that is covering it, and the histogram's
@@ -1823,15 +1881,12 @@ impl App {
             return None;
         }
         let cursor = self.pointer.cursor?;
-        let viewport = self.viewport();
+        let viewport = sight.viewport;
         if !viewport.contains(cursor) {
             return None;
         }
         let image = self.current.as_ref()?.size();
-        let point = self
-            .shown_view()
-            .placement(image, viewport)
-            .image_point(cursor);
+        let point = sight.view.placement(image, viewport).image_point(cursor);
         // A positive range test rather than four negated bounds, so that a
         // NaN coordinate is rejected: every `<`/`>=` comparison is false for
         // NaN, which would otherwise read as pixel (0, 0) — a coordinate the
@@ -1850,9 +1905,10 @@ impl App {
     /// the margin beside the picture, the pointer is not pointing at anything
     /// a zoom could keep.
     pub(super) fn zoom_anchor(&self) -> [f32; 2] {
-        match (self.pointer_pixel(), self.pointer.cursor) {
+        let sight = self.sight();
+        match (self.pointer_pixel_in(&sight), self.pointer.cursor) {
             (Some(_), Some(cursor)) => cursor,
-            _ => self.viewport().center(),
+            _ => sight.viewport.center(),
         }
     }
 
@@ -1863,14 +1919,11 @@ impl App {
     /// comes back on the zoom that first cuts something off. The toggle keeps
     /// its state through that, so the button stays lit and the minimap
     /// returns without being asked for again.
-    fn minimap_on_screen(&self) -> bool {
+    fn minimap_on_screen_in(&self, sight: &Sight) -> bool {
         // Panning and the minimap answer the same question: whether any of the
         // image is off screen. Pan is clamped to the image, so a view with
         // nowhere to go is one showing all of it.
-        self.panels.show_minimap
-            && self
-                .shown_view()
-                .can_pan(self.image_size(), self.viewport())
+        self.panels.show_minimap && sight.view.can_pan(self.image_size(), sight.viewport)
     }
 
     /// Whether a button is held on the picture whose hold slot is the loupe,
@@ -1892,13 +1945,17 @@ impl App {
     /// on the picture it follows the hand, the pass handing the pointer
     /// over as `Command::Dragging` while winit is not.
     fn loupe(&self) -> Option<ui::loupe::Loupe> {
+        self.loupe_in(&self.sight())
+    }
+
+    /// [`App::loupe`] under `sight`.
+    fn loupe_in(&self, sight: &Sight) -> Option<ui::loupe::Loupe> {
         if !(self.panels.show_loupe || self.loupe_held()) {
             return None;
         }
-        self.pointer_pixel()?;
-        let cursor = self.logical_cursor()?;
-        let content =
-            ui::chrome::content_area(self.logical_size(), self.panels.show_ui, self.parts());
+        self.pointer_pixel_in(sight)?;
+        let cursor = self.logical_cursor_at(sight.scale)?;
+        let content = ui::chrome::content_area(sight.logical, self.panels.show_ui, sight.parts);
         Some(ui::loupe::place(
             cursor,
             content,
@@ -1913,16 +1970,16 @@ impl App {
     /// itself, so this is a placement like any other and everything that
     /// applies to the image — the window, the colormap, the tone map — comes
     /// with it for nothing.
-    fn minimap_placement(&self, logical: [f32; 2], scale: f32) -> Option<Placement> {
-        if !self.minimap_on_screen() {
+    fn minimap_placement(&self, sight: &Sight) -> Option<Placement> {
+        if !self.minimap_on_screen_in(sight) {
             return None;
         }
         let image = self.current.as_ref()?.size();
         ui::minimap::placement(
-            logical,
-            scale,
+            sight.logical,
+            sight.scale,
             self.panels.show_ui,
-            self.parts(),
+            sight.parts,
             image,
             self.view.upscale(),
         )
@@ -2760,28 +2817,30 @@ impl App {
         if self.motion.as_ref().is_some_and(|motion| motion.done(now)) {
             self.motion = None;
         }
-        let view = self.view_at(now);
         self.show_due_frame();
         for (path, thumb) in std::mem::take(&mut self.pending_thumbs) {
             self.hold_thumb(path, thumb);
         }
 
-        let scale = self.scale_factor();
-        let physical = self.window_size();
-        let logical = [physical[0] / scale, physical[1] / scale];
-        let viewport = self.viewport();
+        // The frame's one reading of the window and the view: what the
+        // picture is placed by, and what everything under it reads.
+        let sight = self.sight_at(now);
+        let Sight {
+            scale, viewport, ..
+        } = sight;
+        let view = sight.view;
         let placement = view.placement(self.image_size(), viewport);
-        let thumbnail = self.minimap_placement(logical, scale);
+        let thumbnail = self.minimap_placement(&sight);
         // Through the same placement the frame is drawn with: the glass
         // magnifies what the eye rings on this very frame.
         let loupe = self
-            .loupe()
+            .loupe_in(&sight)
             .map(|loupe| ui::loupe::glass(loupe, placement, scale));
         let headroom = self.headroom();
         // What holds this frame, read once for the frame's input and for
         // the words the interface may ask for.
         let conditions = self.conditions();
-        let input = self.frame_input_under(logical, scale, &conditions);
+        let input = self.frame_input_under(&sight, &conditions);
         // A thumbnail standing in for the file on its way in takes the
         // picture it is replacing off the image layer, the minimap and the
         // glass with it.
