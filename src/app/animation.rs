@@ -159,16 +159,16 @@ impl Animation {
     /// Moves the clock on to `now`, against what the player has decoded so
     /// far.
     pub fn tick(&mut self, now: Instant) -> Ticked {
-        let (delays, count, error) = self.player.read(|cache| {
-            (
-                cache.delays().to_vec(),
-                cache.count(),
-                cache.error().map(str::to_string),
-            )
+        // The clock reads the delays where the cache holds them rather
+        // than taking a copy every wake: the two are fields of their own,
+        // so the one is read while the other is moved on.
+        let (playback, failed) = (&mut self.playback, self.failed);
+        let (tick, error) = self.player.read(|cache| {
+            playback.shrink(cache.count());
+            let tick = playback.tick(now, cache.delays());
+            let error = cache.error().filter(|_| !failed).map(str::to_string);
+            (tick, error)
         });
-        self.playback.shrink(count);
-        let tick = self.playback.tick(now, &delays);
-        let error = error.filter(|_| !self.failed);
         if error.is_some() {
             self.failed = true;
         }
