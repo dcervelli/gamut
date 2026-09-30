@@ -32,15 +32,20 @@
 //! The file is read whole and handed over as one buffer. LibRaw reads by
 //! seeking about a stream, and a buffer is the one form of stream its C
 //! interface takes; a raw is tens of megabytes, which is a few milliseconds
-//! of copying beside the few hundred the demosaic takes.
+//! of copying beside the few hundred the demosaic takes. Read once per open
+//! file, though: the handle over the buffer is kept with the source between
+//! the questions a load asks — the size, the camera's JPEG, the panel's
+//! facts — and only developing the frame spends it.
 
 mod ffi;
 
+use std::cell::Cell;
 use std::ffi::CStr;
 use std::os::raw::c_int;
 
 use anyhow::{Result, anyhow, bail};
 
+use super::{Kept, ReadSeek};
 use crate::image::exif::Entry;
 use crate::image::{
     AlphaMode, Channels, ColorSpace, DecodedImage, Primaries, Referred, Samples, Transfer,
@@ -75,15 +80,17 @@ impl super::Decoder for Raw {
     }
 
     fn dimensions(&self, source: &mut dyn super::ReadSeek) -> Result<Option<(u32, u32)>> {
-        let handle = Handle::open(source)?;
-        // A camera whose photosites are not square has its picture stretched
-        // to fix that on the way out, and the header does not say by how
-        // much. Rare — a handful of cameras from the early 2000s — and the
-        // window takes its default shape rather than a wrong one.
-        if handle.sizes().pixel_aspect != 1.0 {
-            return Ok(None);
-        }
-        Ok(Some(handle.output_size()))
+        with_handle(source, |handle| {
+            // A camera whose photosites are not square has its picture
+            // stretched to fix that on the way out, and the header does not
+            // say by how much. Rare — a handful of cameras from the early
+            // 2000s — and the window takes its default shape rather than a
+            // wrong one.
+            if handle.sizes().pixel_aspect != 1.0 {
+                return Ok(None);
+            }
+            Ok(Some(handle.output_size()))
+        })
     }
 
     fn preview(
@@ -91,44 +98,46 @@ impl super::Decoder for Raw {
         source: &mut dyn super::ReadSeek,
         overrides: super::Overrides,
     ) -> Result<Option<DecodedImage>> {
-        let handle = Handle::open(source)?;
-        // A file with no preview in it is a file with none, not a failure.
-        if !handle.unpack_thumbnail()? {
-            return Ok(None);
-        }
-        let thumbnail = handle.make_thumbnail()?;
-        let image = match thumbnail.kind() {
-            ffi::IMAGE_JPEG => super::jpeg::decode_stored(thumbnail.bytes(), overrides)?,
-            ffi::IMAGE_BITMAP => thumbnail.bitmap()?,
-            other => bail!("LibRaw handed back a preview of kind {other}"),
-        };
-        // The JPEG is stored as the sensor saw the scene, with the way the
-        // camera was held beside it; the developed picture is turned to
-        // match, so the preview is too — by this orientation alone, since
-        // a preview that repeats the tag in an EXIF of its own, as a RAF's
-        // does, would otherwise be turned twice.
-        let image = crate::image::orient::apply(image, handle.orientation());
-        Ok(Some(image))
+        with_handle(source, |handle| {
+            // A file with no preview in it is a file with none, not a failure.
+            if !handle.unpack_thumbnail()? {
+                return Ok(None);
+            }
+            let thumbnail = handle.make_thumbnail()?;
+            let image = match thumbnail.kind() {
+                ffi::IMAGE_JPEG => super::jpeg::decode_stored(thumbnail.bytes(), overrides)?,
+                ffi::IMAGE_BITMAP => thumbnail.bitmap()?,
+                other => bail!("LibRaw handed back a preview of kind {other}"),
+            };
+            // The JPEG is stored as the sensor saw the scene, with the way
+            // the camera was held beside it; the developed picture is turned
+            // to match, so the preview is too — by this orientation alone,
+            // since a preview that repeats the tag in an EXIF of its own, as
+            // a RAF's does, would otherwise be turned twice.
+            let image = crate::image::orient::apply(image, handle.orientation());
+            Ok(Some(image))
+        })
     }
 
     fn camera_jpeg(&self, source: &mut dyn super::ReadSeek) -> Result<super::CameraJpeg> {
-        let handle = Handle::open(source)?;
-        if !handle.unpack_thumbnail()? {
-            return Ok(super::CameraJpeg::Missing);
-        }
-        // Copied out but not decoded: the JPEG's header says its size, and
-        // a bitmap's is in the library's own header.
-        let thumbnail = handle.make_thumbnail()?;
-        let (width, height) = match thumbnail.kind() {
-            ffi::IMAGE_JPEG => super::jpeg::stored_size(thumbnail.bytes())?,
-            ffi::IMAGE_BITMAP => {
-                let header = thumbnail.header();
-                (u32::from(header.width), u32::from(header.height))
+        with_handle(source, |handle| {
+            if !handle.unpack_thumbnail()? {
+                return Ok(super::CameraJpeg::Missing);
             }
-            other => bail!("LibRaw handed back a preview of kind {other}"),
-        };
-        let (width, height) = crate::image::orient::size(width, height, handle.orientation());
-        Ok(super::CameraJpeg::Present([width, height]))
+            // Copied out but not decoded: the JPEG's header says its size,
+            // and a bitmap's is in the library's own header.
+            let thumbnail = handle.make_thumbnail()?;
+            let (width, height) = match thumbnail.kind() {
+                ffi::IMAGE_JPEG => super::jpeg::stored_size(thumbnail.bytes())?,
+                ffi::IMAGE_BITMAP => {
+                    let header = thumbnail.header();
+                    (u32::from(header.width), u32::from(header.height))
+                }
+                other => bail!("LibRaw handed back a preview of kind {other}"),
+            };
+            let (width, height) = crate::image::orient::size(width, height, handle.orientation());
+            Ok(super::CameraJpeg::Present([width, height]))
+        })
     }
 
     fn decode(
@@ -136,7 +145,10 @@ impl super::Decoder for Raw {
         source: &mut dyn super::ReadSeek,
         _overrides: super::Overrides,
     ) -> Result<DecodedImage> {
-        let handle = Handle::open(source)?;
+        // Taken rather than borrowed: developing the frame rewrites the
+        // handle's multipliers, so it could not answer for the camera's
+        // balance again, and is spent here.
+        let handle = take_handle(source)?;
         let (width, height) = handle.output_size();
         if width == 0 || height == 0 {
             bail!("raw image is {width}x{height}");
@@ -178,14 +190,38 @@ impl super::Decoder for Raw {
 /// temperature the camera balanced for, which only the library's reading
 /// of the sensor can work out.
 pub(super) fn facts(source: &mut dyn super::ReadSeek) -> Result<Vec<Entry>> {
-    let handle = Handle::open(source)?;
-    let mut rows = handle.camera();
-    push(
-        &mut rows,
-        crate::image::exif::COLOR_TEMPERATURE,
-        handle.color_temperature(),
-    );
-    Ok(rows)
+    with_handle(source, |handle| {
+        let mut rows = handle.camera();
+        push(
+            &mut rows,
+            crate::image::exif::COLOR_TEMPERATURE,
+            handle.color_temperature(),
+        );
+        Ok(rows)
+    })
+}
+
+/// Asks `ask` of the LibRaw handle over `source`: the one kept with the
+/// source by an earlier question, where the source keeps anything, or one
+/// opened now — and left with the source afterwards, for the next question.
+/// Opening reads the whole file, so a load that asks a raw three things
+/// reads it once.
+fn with_handle<T>(source: &mut dyn ReadSeek, ask: impl FnOnce(&Handle) -> Result<T>) -> Result<T> {
+    let handle = take_handle(source)?;
+    let answer = ask(&handle);
+    if let Some(kept) = source.kept() {
+        kept.put(handle);
+    }
+    answer
+}
+
+/// The handle over `source`, out of the source's keeping or opened now,
+/// for a question that spends it.
+fn take_handle(source: &mut dyn ReadSeek) -> Result<Handle> {
+    match source.kept().and_then(Kept::take::<Handle>) {
+        Some(handle) => Ok(handle),
+        None => Handle::open(source),
+    }
 }
 
 /// One LibRaw handle over one file's bytes. The bytes live here because the
@@ -193,6 +229,9 @@ pub(super) fn facts(source: &mut dyn super::ReadSeek) -> Result<Vec<Entry>> {
 struct Handle {
     data: *mut ffi::Data,
     _bytes: Vec<u8>,
+    /// What `unpack_thumb` answered, once it has: the library refuses to be
+    /// asked twice, and a handle kept between questions is.
+    thumbnail: Cell<Option<bool>>,
 }
 
 impl Handle {
@@ -208,6 +247,7 @@ impl Handle {
         let handle = Self {
             data,
             _bytes: bytes,
+            thumbnail: Cell::new(None),
         };
         // SAFETY: the buffer outlives the handle, being owned by it, and the
         // handle is a live one from `libraw_init`.
@@ -395,15 +435,21 @@ impl Handle {
         crate::image::orient::from_tag(Some(exif))
     }
 
-    /// Reads the preview out of the file, saying whether there was one.
+    /// Reads the preview out of the file, saying whether there was one;
+    /// asked again, says what it said.
     fn unpack_thumbnail(&self) -> Result<bool> {
+        if let Some(answered) = self.thumbnail.get() {
+            return Ok(answered);
+        }
         // SAFETY: an open handle.
         let code = unsafe { ffi::libraw_unpack_thumb(self.data) };
-        match code {
-            ffi::SUCCESS => Ok(true),
-            ffi::NO_THUMBNAIL | ffi::UNSUPPORTED_THUMBNAIL => Ok(false),
-            other => Err(anyhow!("reading the preview: {}", describe(other))),
-        }
+        let answer = match code {
+            ffi::SUCCESS => true,
+            ffi::NO_THUMBNAIL | ffi::UNSUPPORTED_THUMBNAIL => false,
+            other => return Err(anyhow!("reading the preview: {}", describe(other))),
+        };
+        self.thumbnail.set(Some(answer));
+        Ok(answer)
     }
 
     fn make_thumbnail(&self) -> Result<Developed> {

@@ -5,9 +5,10 @@
 //! with [`Samples`](super::Samples) and [`ColorSpace`]
 //! rather than converting it.
 
+use std::any::Any;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -46,6 +47,13 @@ pub trait ReadSeek: Read + Seek {
     fn share(&self) -> std::io::Result<Option<File>> {
         Ok(None)
     }
+
+    /// Where a decoder may keep what it made of the file between the
+    /// questions asked of it — see [`Kept`] — or `None` for a source that
+    /// keeps nothing, which has each question parse the file afresh.
+    fn kept(&mut self) -> Option<&mut Kept> {
+        None
+    }
 }
 
 impl ReadSeek for BufReader<File> {
@@ -55,6 +63,64 @@ impl ReadSeek for BufReader<File> {
 }
 
 impl<T: AsRef<[u8]>> ReadSeek for std::io::Cursor<T> {}
+
+/// A place a decoder may keep what it made of one open file between the
+/// questions asked of it, where the file is one of [`Opened`]'s: the raw
+/// decoder's LibRaw handle, which read the whole file to answer any of
+/// them, and answers the size, the camera's JPEG and the panel's facts
+/// from the one parse. One thing at a time, of whatever type the decoder
+/// puts there; a source that offers none — a cursor over bytes, a test's
+/// reader — has each question parse the file afresh, as every source once
+/// did.
+#[derive(Default)]
+pub struct Kept(Option<Box<dyn Any>>);
+
+impl Kept {
+    /// Puts `value` in keeping, in place of whatever was there.
+    pub fn put<T: Any>(&mut self, value: T) {
+        self.0 = Some(Box::new(value));
+    }
+
+    /// Takes what is kept, if it is a `T`; anything else stays.
+    pub fn take<T: Any>(&mut self) -> Option<T> {
+        match self.0.take()?.downcast::<T>() {
+            Ok(value) => Some(*value),
+            Err(other) => {
+                self.0 = Some(other);
+                None
+            }
+        }
+    }
+}
+
+/// The source of an [`Opened`] file: the reader over it, and the keeping a
+/// decoder may leave something in between questions.
+struct Claimed {
+    reader: BufReader<File>,
+    kept: Kept,
+}
+
+impl Read for Claimed {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        self.reader.read(buffer)
+    }
+}
+
+impl Seek for Claimed {
+    fn seek(&mut self, to: SeekFrom) -> std::io::Result<u64> {
+        self.reader.seek(to)
+    }
+}
+
+impl ReadSeek for Claimed {
+    fn share(&self) -> std::io::Result<Option<File>> {
+        self.reader.share()
+    }
+
+    fn kept(&mut self) -> Option<&mut Kept> {
+        Some(&mut self.kept)
+    }
+}
 
 /// A reader over a file that keeps its place in itself rather than in the
 /// file's descriptor, so that several can read the same file at once: each
@@ -391,76 +457,258 @@ pub fn supported_extensions() -> Vec<&'static str> {
     extensions
 }
 
-/// Opens `path` and works out which decoder owns it, reading only the header.
-/// The cheap half of [`load`], and all of [`probe`].
-fn open(path: &Path) -> Result<(BufReader<File>, &'static dyn Decoder)> {
-    // Only a regular file, decided by a `stat` before the open. A directory, a
-    // device such as `/dev/zero`, or a FIFO would each otherwise reach a
-    // decoder: `/dev/zero` feeds a decoder that reads to the end (JPEG) until
-    // it exhausts memory, and — the reason this comes before `File::open`
-    // rather than after — opening a FIFO with no writer blocks in `open(2)`
-    // itself, with no window and no way out. `stat` follows symlinks and does
-    // not block, so it settles the question first. This is the one place every
-    // format passes through, so the check need only live here.
-    let metadata =
-        std::fs::metadata(path).with_context(|| format!("reading {}", path.display()))?;
-    if !metadata.is_file() {
-        return Err(anyhow!("{} is not a regular file", path.display()));
-    }
-    let file = File::open(path).with_context(|| format!("opening {}", path.display()))?;
-    let mut source = BufReader::new(file);
-
-    let mut header = [0u8; HEADER];
-    let read =
-        fill(&mut source, &mut header).with_context(|| format!("reading {}", path.display()))?;
-    let header = &header[..read];
-    source
-        .seek(SeekFrom::Start(0))
-        .with_context(|| format!("reading {}", path.display()))?;
-
-    let extension = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_ascii_lowercase())
-        .unwrap_or_default();
-
-    // Content first, extension second. A file with the wrong extension is
-    // ordinary; a file whose leading bytes lie about what it is, is not.
-    let decoder = DECODERS
-        .iter()
-        .find(|d| d.sniff(header))
-        .or_else(|| {
-            DECODERS
-                .iter()
-                .find(|d| d.extensions().contains(&extension.as_str()))
-        })
-        .ok_or_else(|| {
-            anyhow!(
-                "unsupported image format for {} (known extensions: {})",
-                path.display(),
-                supported_extensions().join(", ")
-            )
-        })?;
-
-    Ok((source, *decoder))
+/// A file opened and claimed by its decoder: the source, the decoder that
+/// owns it, and the header it was claimed by. Everything asked of a file
+/// goes through one of these — the free functions below each open one and
+/// ask it one thing — so that a load, which asks several things, opens the
+/// file once and sniffs it once, and a decoder that parses the whole file
+/// to answer anything parses it once, through [`Kept`].
+///
+/// Each question is asked with the source rewound to the start, as the
+/// decoders expect it, so the order the questions are asked in does not
+/// matter to any of them.
+pub struct Opened {
+    path: PathBuf,
+    source: Claimed,
+    decoder: &'static dyn Decoder,
+    /// The first [`HEADER`] bytes, as many as the file has: what the
+    /// decoder was chosen by, and names the format from.
+    header: Vec<u8>,
 }
 
-/// Opens `path` and asks its decoder one thing, timing the ask: the one
-/// road every free function here takes to a decoder. `doing` is the
-/// error's opening — "decoding", "reading the header of" — completed by
-/// which file and which decoder, so that a failure is laid at a format's
-/// door by name. The time is the decoder's own, apart from the open before
-/// it: what the loader reports beside the whole read's.
-fn ask<T>(
-    path: &Path,
-    doing: &str,
-    call: impl FnOnce(BufReader<File>, &'static dyn Decoder) -> Result<T>,
-) -> Result<(T, Duration)> {
-    let (source, decoder) = open(path)?;
-    let started = Instant::now();
-    let answer = call(source, decoder)
-        .with_context(|| format!("{doing} {} as {}", path.display(), decoder.name()))?;
-    Ok((answer, started.elapsed()))
+impl Opened {
+    /// Opens `path` and works out which decoder owns it, reading only the
+    /// header. The cheap half of every read, and all of [`probe`].
+    pub fn new(path: &Path) -> Result<Self> {
+        // Only a regular file, decided by a `stat` before the open. A
+        // directory, a device such as `/dev/zero`, or a FIFO would each
+        // otherwise reach a decoder: `/dev/zero` feeds a decoder that reads
+        // to the end (JPEG) until it exhausts memory, and — the reason this
+        // comes before `File::open` rather than after — opening a FIFO with
+        // no writer blocks in `open(2)` itself, with no window and no way
+        // out. `stat` follows symlinks and does not block, so it settles the
+        // question first. This is the one place every format passes
+        // through, so the check need only live here.
+        let metadata =
+            std::fs::metadata(path).with_context(|| format!("reading {}", path.display()))?;
+        if !metadata.is_file() {
+            return Err(anyhow!("{} is not a regular file", path.display()));
+        }
+        let file = File::open(path).with_context(|| format!("opening {}", path.display()))?;
+        let mut source = BufReader::new(file);
+
+        let mut header = vec![0u8; HEADER];
+        let read = fill(&mut source, &mut header)
+            .with_context(|| format!("reading {}", path.display()))?;
+        header.truncate(read);
+        source
+            .seek(SeekFrom::Start(0))
+            .with_context(|| format!("reading {}", path.display()))?;
+
+        let extension = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase())
+            .unwrap_or_default();
+
+        // Content first, extension second. A file with the wrong extension
+        // is ordinary; a file whose leading bytes lie about what it is, is
+        // not.
+        let decoder = DECODERS
+            .iter()
+            .find(|d| d.sniff(&header))
+            .or_else(|| {
+                DECODERS
+                    .iter()
+                    .find(|d| d.extensions().contains(&extension.as_str()))
+            })
+            .ok_or_else(|| {
+                anyhow!(
+                    "unsupported image format for {} (known extensions: {})",
+                    path.display(),
+                    supported_extensions().join(", ")
+                )
+            })?;
+
+        Ok(Self {
+            path: path.to_path_buf(),
+            source: Claimed {
+                reader: source,
+                kept: Kept::default(),
+            },
+            decoder: *decoder,
+            header,
+        })
+    }
+
+    /// The decoder's name, as the errors say it.
+    #[cfg(test)]
+    pub fn decoder_name(&self) -> &'static str {
+        self.decoder.name()
+    }
+
+    /// The format of the file, as the decoder that owns it says — chosen
+    /// by what the leading bytes say first, and by the extension only where
+    /// they say nothing. So this answers what the file turned out to *be*
+    /// rather than what it is called, which is worth saying out loud for a
+    /// file whose name was wrong. A decoder that reads several formats says
+    /// which one — see [`Decoder::format`] — so that a GIF and an EXR are
+    /// not one kind of file to the list that sorts by kind.
+    pub fn format(&self) -> &'static str {
+        self.decoder.format(&self.header)
+    }
+
+    /// The source, rewound to the start: for a reader of the file's
+    /// metadata that is not its decoder, so that it reads the file the
+    /// loader has open rather than opening it again.
+    pub fn source(&mut self) -> Result<&mut dyn ReadSeek> {
+        self.source
+            .seek(SeekFrom::Start(0))
+            .with_context(|| format!("reading {}", self.path.display()))?;
+        Ok(&mut self.source)
+    }
+
+    /// Asks the decoder one thing, timing the ask: the one road every
+    /// question takes. `doing` is the error's opening — "decoding",
+    /// "reading the header of" — completed by which file and which
+    /// decoder, so that a failure is laid at a format's door by name. The
+    /// time is the decoder's own: what the loader reports beside the whole
+    /// read's.
+    fn ask<T>(
+        &mut self,
+        doing: &str,
+        call: impl FnOnce(&mut dyn ReadSeek, &'static dyn Decoder) -> Result<T>,
+    ) -> Result<(T, Duration)> {
+        let decoder = self.decoder;
+        let source = self.source()?;
+        let started = Instant::now();
+        let answer = call(source, decoder)
+            .with_context(|| format!("{doing} {} as {}", self.path.display(), decoder.name()))?;
+        Ok((answer, started.elapsed()))
+    }
+
+    /// How large the picture is, from the header — see
+    /// [`Decoder::dimensions`].
+    pub fn dimensions(&mut self) -> Result<Option<(u32, u32)>> {
+        self.ask("reading the header of", |source, decoder| {
+            decoder.dimensions(source)
+        })
+        .map(|(size, _)| size)
+    }
+
+    /// What the file holds beyond the image [`Opened::decode`] returns,
+    /// from its header.
+    pub fn sequence(&mut self) -> Result<Sequence> {
+        self.ask("reading the header of", |source, decoder| {
+            decoder.sequence(source)
+        })
+        .map(|(sequence, _)| sequence)
+    }
+
+    /// How long each frame of the animation is shown for, from its headers
+    /// — see [`Decoder::delays`].
+    pub fn delays(&mut self) -> Result<Option<Vec<Duration>>> {
+        self.ask("reading the frame headers of", |source, decoder| {
+            decoder.delays(source)
+        })
+        .map(|(delays, _)| delays)
+    }
+
+    /// The picture, or one page of a file that holds several given its
+    /// number, finished as every decoded image is, and how long the decoder
+    /// itself took: the one call that hands the file to the format's own
+    /// code, apart from the open before it and the finish after. The loader
+    /// reports that beside the time the whole read took, so that a slow
+    /// file can be laid at the decoder's door or at ours.
+    pub fn decode(
+        &mut self,
+        overrides: Overrides,
+        page: Option<usize>,
+    ) -> Result<(DecodedImage, Duration)> {
+        let doing = match page {
+            None => "decoding".to_string(),
+            Some(page) => format!("decoding page {page} of"),
+        };
+        let (image, decoding) = self.ask(&doing, |source, decoder| match page {
+            None => decoder.decode(source, overrides),
+            Some(page) => decoder.decode_page(source, overrides, page),
+        })?;
+        Ok((overrides.finish(image, &self.path)?, decoding))
+    }
+
+    /// The smaller picture the file carries of itself, if it carries one,
+    /// finished the way the picture is — see [`Decoder::preview`] — for
+    /// the thumbnailer, which wants a likeness.
+    pub fn preview(&mut self, overrides: Overrides) -> Result<Option<(DecodedImage, Duration)>> {
+        self.preview_as(overrides, "reading the preview in")
+    }
+
+    /// The same picture asked for as the camera's own rendering, in the
+    /// loader's words: what is read in place of the developed picture.
+    pub fn camera_picture(
+        &mut self,
+        overrides: Overrides,
+    ) -> Result<Option<(DecodedImage, Duration)>> {
+        self.preview_as(overrides, "reading the camera's JPEG in")
+    }
+
+    fn preview_as(
+        &mut self,
+        overrides: Overrides,
+        doing: &str,
+    ) -> Result<Option<(DecodedImage, Duration)>> {
+        let (image, decoding) =
+            self.ask(doing, |source, decoder| decoder.preview(source, overrides))?;
+        image
+            .map(|image| Ok((overrides.finish(image, &self.path)?, decoding)))
+            .transpose()
+    }
+
+    /// Whether the file carries the camera's JPEG of itself. See
+    /// [`Decoder::camera_jpeg`].
+    pub fn camera_jpeg(&mut self) -> Result<CameraJpeg> {
+        self.ask("looking for the camera's JPEG in", |source, decoder| {
+            decoder.camera_jpeg(source)
+        })
+        .map(|(found, _)| found)
+    }
+
+    /// What the decoder read out of the header, for the information panel
+    /// — see [`Decoder::facts`] — or nothing for a file whose decoder has
+    /// nothing of its own to say.
+    pub fn facts(&mut self) -> Option<Vec<super::exif::Entry>> {
+        self.ask("reading the facts of", |source, decoder| {
+            decoder.facts(source)
+        })
+        .ok()
+        .and_then(|(facts, _)| facts)
+    }
+
+    /// The XMP packet, where the decoder is the one thing that can reach it
+    /// — see [`Decoder::xmp`].
+    pub fn xmp(&mut self) -> Option<Vec<u8>> {
+        self.ask("reading the XMP packet of", |source, decoder| {
+            decoder.xmp(source)
+        })
+        .ok()
+        .and_then(|(packet, _)| packet)
+    }
+
+    /// The frames of the animation, from the first, each finished the way
+    /// the picture is. The file is taken whole: the frames outlive the
+    /// call, and rewinding may mean opening it again.
+    pub fn frames(mut self, overrides: Overrides) -> Result<Box<dyn FrameSource>> {
+        self.source()?;
+        let decoder = self.decoder;
+        let source = decoder
+            .frames(self.source.reader, overrides)
+            .with_context(|| format!("opening {} as {}", self.path.display(), decoder.name()))?;
+        Ok(Box::new(Finished {
+            source,
+            overrides,
+            path: self.path,
+        }))
+    }
 }
 
 /// Reads and decodes `path`, picking a decoder by extension and falling back
@@ -471,115 +719,59 @@ pub fn load(path: &Path, overrides: Overrides) -> Result<DecodedImage> {
 
 /// Reads one page of a file that holds several, chosen the way [`load`]
 /// chooses. What [`load`] returns is one of them: the decoder's default,
-/// which [`sequence`] names. The program itself reads a page through
-/// [`load_timed`]; this is the fixtures' way of asking for one by number.
+/// which [`Opened::sequence`] names. The program itself reads a page through
+/// [`Opened::decode`]; this is the fixtures' way of asking for one by
+/// number.
 #[cfg(test)]
 pub fn load_page(path: &Path, overrides: Overrides, page: usize) -> Result<DecodedImage> {
     load_timed(path, overrides, Some(page)).map(|(image, _)| image)
 }
 
 /// [`load`], or one page of a file that holds several given its number,
-/// saying as well how long the decoder itself took: the one call that hands
-/// the file to the format's own code, apart from the open before it and the
-/// finish after. The loader reports that beside the time the whole read took,
-/// so that a slow file can be laid at the decoder's door or at ours.
+/// saying as well how long the decoder itself took — see
+/// [`Opened::decode`].
 pub fn load_timed(
     path: &Path,
     overrides: Overrides,
     page: Option<usize>,
 ) -> Result<(DecodedImage, Duration)> {
-    let doing = match page {
-        None => "decoding".to_string(),
-        Some(page) => format!("decoding page {page} of"),
-    };
-    let (image, decoding) = ask(path, &doing, |mut source, decoder| match page {
-        None => decoder.decode(&mut source, overrides),
-        Some(page) => decoder.decode_page(&mut source, overrides, page),
-    })?;
-    Ok((overrides.finish(image, path)?, decoding))
+    Opened::new(path)?.decode(overrides, page)
 }
 
 /// The smaller picture `path` carries of itself, if it carries one, finished
 /// the way [`load`]'s image is. See [`Decoder::preview`].
 pub fn preview(path: &Path, overrides: Overrides) -> Result<Option<DecodedImage>> {
-    preview_as(path, overrides, "reading the preview in").map(|found| found.map(|(image, _)| image))
-}
-
-/// [`preview`], saying as well how long the decoder took, as
-/// [`load_timed`] does: the loader's read of the camera's JPEG in place of
-/// the developed picture.
-pub fn preview_timed(
-    path: &Path,
-    overrides: Overrides,
-) -> Result<Option<(DecodedImage, Duration)>> {
-    preview_as(path, overrides, "reading the camera's JPEG in")
-}
-
-/// The preview, asked for as `doing` says: the thumbnailer wants a likeness
-/// and the loader the camera's own rendering, and each is told what failed
-/// in its own words.
-fn preview_as(
-    path: &Path,
-    overrides: Overrides,
-    doing: &str,
-) -> Result<Option<(DecodedImage, Duration)>> {
-    let (image, decoding) = ask(path, doing, |mut source, decoder| {
-        decoder.preview(&mut source, overrides)
-    })?;
-    image
-        .map(|image| Ok((overrides.finish(image, path)?, decoding)))
-        .transpose()
+    Opened::new(path)?
+        .preview(overrides)
+        .map(|found| found.map(|(image, _)| image))
 }
 
 /// Whether `path` carries the camera's JPEG of itself. See
-/// [`Decoder::camera_jpeg`].
+/// [`Decoder::camera_jpeg`]. The program asks [`Opened::camera_jpeg`] of
+/// the file it has open; this is the tests' way of asking by name.
+#[cfg(test)]
 pub fn camera_jpeg(path: &Path) -> Result<CameraJpeg> {
-    ask(
-        path,
-        "looking for the camera's JPEG in",
-        |mut source, decoder| decoder.camera_jpeg(&mut source),
-    )
-    .map(|(found, _)| found)
-}
-
-/// What the decoder of `path` read out of its header, for the information
-/// panel — see [`Decoder::facts`] — or nothing for a file whose decoder
-/// has nothing of its own to say, or that will not open.
-pub fn facts(path: &Path) -> Option<Vec<super::exif::Entry>> {
-    ask(path, "reading the facts of", |mut source, decoder| {
-        decoder.facts(&mut source)
-    })
-    .ok()
-    .and_then(|(facts, _)| facts)
+    Opened::new(path)?.camera_jpeg()
 }
 
 /// The XMP packet of `path`, where its decoder is the one thing that can
 /// reach it — see [`Decoder::xmp`].
 pub fn xmp(path: &Path) -> Option<Vec<u8>> {
-    ask(path, "reading the XMP packet of", |mut source, decoder| {
-        decoder.xmp(&mut source)
-    })
-    .ok()
-    .and_then(|(packet, _)| packet)
+    Opened::new(path).ok()?.xmp()
 }
 
 /// What `path` holds beyond the image [`load`] returns, from its header.
+/// The program asks [`Opened::sequence`] of the file it has open; this is
+/// the tests' way of asking by name.
+#[cfg(test)]
 pub fn sequence(path: &Path) -> Result<Sequence> {
-    ask(path, "reading the header of", |mut source, decoder| {
-        decoder.sequence(&mut source)
-    })
-    .map(|(sequence, _)| sequence)
+    Opened::new(path)?.sequence()
 }
 
 /// How long each frame of the animation at `path` is shown for, from its
 /// headers — see [`Decoder::delays`].
 pub fn delays(path: &Path) -> Result<Option<Vec<Duration>>> {
-    ask(
-        path,
-        "reading the frame headers of",
-        |mut source, decoder| decoder.delays(&mut source),
-    )
-    .map(|(delays, _)| delays)
+    Opened::new(path)?.delays()
 }
 
 /// The frames of the animation at `path`, from the first. Each comes out
@@ -587,14 +779,7 @@ pub fn delays(path: &Path) -> Result<Option<Vec<Duration>>> {
 ///
 /// [`Frames::next`]: FrameSource::next
 pub fn frames(path: &Path, overrides: Overrides) -> Result<Box<dyn FrameSource>> {
-    let (source, _) = ask(path, "opening", |source, decoder| {
-        decoder.frames(source, overrides)
-    })?;
-    Ok(Box::new(Finished {
-        source,
-        overrides,
-        path: path.to_path_buf(),
-    }))
+    Opened::new(path)?.frames(overrides)
 }
 
 /// A decoder's frames with the finish every decoded image gets on the way
@@ -602,7 +787,7 @@ pub fn frames(path: &Path, overrides: Overrides) -> Result<Box<dyn FrameSource>>
 struct Finished {
     source: Box<dyn FrameSource>,
     overrides: Overrides,
-    path: std::path::PathBuf,
+    path: PathBuf,
 }
 
 impl FrameSource for Finished {
@@ -630,28 +815,16 @@ impl FrameSource for Finished {
 /// stays a plain command-line failure, rather than a window that appears only
 /// to close again.
 pub fn probe(path: &Path) -> Result<Option<(u32, u32)>> {
-    ask(path, "reading the header of", |mut source, decoder| {
-        decoder.dimensions(&mut source)
-    })
-    .map(|(size, _)| size)
+    Opened::new(path)?.dimensions()
 }
 
-/// The format of `path`, as the decoder that owns it says — chosen the way
-/// [`load`] chooses it: by what the leading bytes say first, and by the
-/// extension only where they say nothing. So this answers what the file
-/// turned out to *be* rather than what it is called, which is worth saying
-/// out loud for a file whose name was wrong. A decoder that reads several
-/// formats says which one — see [`Decoder::format`] — so that a GIF and an
-/// EXR are not one kind of file to the list that sorts by kind.
-///
-/// `None` where nothing claims it, or where it cannot be opened at all — the
-/// panel then says nothing rather than something wrong, which is what it
-/// does with every other fact it asks the file for after the event.
+/// The format of `path`, as the decoder that owns it says — see
+/// [`Opened::format`]. `None` where nothing claims it, or where it cannot
+/// be opened at all — the panel then says nothing rather than something
+/// wrong, which is what it does with every other fact it asks the file for
+/// after the event.
 pub fn reader(path: &Path) -> Option<&'static str> {
-    let (mut source, decoder) = open(path).ok()?;
-    let mut header = [0u8; HEADER];
-    let read = fill(&mut source, &mut header).ok()?;
-    Some(decoder.format(&header[..read]))
+    Some(Opened::new(path).ok()?.format())
 }
 
 /// Reads as much as `buffer` holds, tolerating a file shorter than that.
@@ -776,8 +949,8 @@ mod tests {
                 // samples' directory, and the one format nothing reads.
                 _ => continue,
             };
-            let (_, decoder) = open(&path).unwrap_or_else(|error| panic!("{name}: {error:#}"));
-            assert_eq!(decoder.name(), expected, "{name}");
+            let opened = Opened::new(&path).unwrap_or_else(|error| panic!("{name}: {error:#}"));
+            assert_eq!(opened.decoder_name(), expected, "{name}");
             seen += 1;
         }
         assert!(seen > 100, "{seen} fixtures were claimed");

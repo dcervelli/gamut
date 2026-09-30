@@ -23,12 +23,13 @@
 //! reading about the picture is better without it.
 
 use std::fs::File;
-use std::io::{BufReader, Read, Seek, SeekFrom};
+use std::io::{BufReader, Read, SeekFrom};
 use std::path::Path;
 
 use ::image::metadata::Orientation;
 use exif::{Context, In, Rational, Tag, Value};
 
+use super::decode::{Opened, ReadSeek};
 use super::metadata_region::{MetadataRegion, Placed};
 use super::orient::Turn;
 use super::xmp::{self, Xmp};
@@ -146,16 +147,50 @@ pub struct Exif {
 }
 
 impl Exif {
-    /// Reads `path`'s metadata, or gives back nothing at all.
+    /// Reads `path`'s metadata, or gives back nothing at all. The program
+    /// reads it through [`Exif::read_with`], off the file it has open; this
+    /// is the tests' way of asking by name.
+    #[cfg(test)]
     pub fn read(path: &Path) -> Self {
-        let mut exif = Self::read_with(path, tiff::PREFIX);
+        match Opened::new(path) {
+            Ok(mut opened) => Self::read_with(path, Some(&mut opened)),
+            // A file no decoder claims still has whatever EXIF and XMP it
+            // carries read off it.
+            Err(_) => Self::read_with(path, None),
+        }
+    }
+
+    /// The same, given the file as the loader has it open — or `None` for
+    /// a file nothing claims, which is read as it is. The EXIF is read off
+    /// `opened`'s own source, and what its decoder has to say — a raw's
+    /// facts from the library that parsed it, a HEIF's packet — is asked
+    /// of it, rather than of the file opened again for each.
+    pub fn read_with(path: &Path, opened: Option<&mut Opened>) -> Self {
+        Self::read_bounded(path, opened, tiff::PREFIX)
+    }
+
+    /// [`Exif::read_with`], a TIFF read to `prefix` rather than to
+    /// [`tiff::PREFIX`]: what a test holds the prefix to.
+    fn read_bounded(path: &Path, mut opened: Option<&mut Opened>, prefix: u64) -> Self {
+        let block = Self::parse(path, opened.as_deref_mut(), prefix);
+        // A TIFF keeps its packet in a tag of the directory just read, so it
+        // is taken from there where the read reached it; every other
+        // container keeps it in a chunk of its own, which is found by
+        // walking the file a second time — as is a TIFF's when the
+        // directory had to be read the long way round, since the block
+        // written back leaves anything this long behind.
+        let xmp = match block.as_ref().and_then(embedded_packet) {
+            Some(packet) => Xmp::read_with(path, Some(packet)),
+            None => Xmp::read_from(path, opened.as_deref_mut()),
+        };
+        let mut exif = Self::assemble(block.as_ref(), &xmp);
         // A raw has a second reader of its header, the library that will
         // develop it. What it made of the camera and the exposure fills in
         // whatever the EXIF left out, a row at a time — all of it, for a
         // CRW, which has no EXIF, and the exposure of a Phase One, whose
         // EXIF names the camera and stops — and the color temperature, which
         // only the library's reading of the sensor can work out.
-        if let Some(rows) = super::decode::facts(path) {
+        if let Some(rows) = opened.and_then(Opened::facts) {
             for entry in rows {
                 let group = if rank(&entry.name) < rank(TAKEN) {
                     Group::Camera
@@ -201,22 +236,6 @@ impl Exif {
             .position(|have| rank(&have.name) > rank(&entry.name))
             .unwrap_or(entries.len());
         entries.insert(before, entry);
-    }
-
-    /// `prefix` is how much of a TIFF to read; see [`tiff::PREFIX`].
-    fn read_with(path: &Path, prefix: u64) -> Self {
-        let block = Self::parse(path, prefix);
-        // A TIFF keeps its packet in a tag of the directory just read, so it
-        // is taken from there where the read reached it; every other
-        // container keeps it in a chunk of its own, which is found by
-        // walking the file a second time — as is a TIFF's when the
-        // directory had to be read the long way round, since the block
-        // written back leaves anything this long behind.
-        let xmp = match block.as_ref().and_then(embedded_packet) {
-            Some(packet) => Xmp::read_with(path, Some(packet)),
-            None => Xmp::read(path),
-        };
-        Self::assemble(block.as_ref(), &xmp)
     }
 
     /// What the file is called, as the panel shows it: the chooser's row
@@ -274,10 +293,18 @@ impl Exif {
         shown_regions
     }
 
-    /// The EXIF block, parsed; `None` where there is none to parse.
-    fn parse(path: &Path, prefix: u64) -> Option<exif::Exif> {
-        let file = File::open(path).ok()?;
-        let mut source = BufReader::new(file);
+    /// The EXIF block, parsed, off `opened`'s source where the file is
+    /// open and off the file otherwise; `None` where there is none to
+    /// parse. A TIFF is read to `prefix`.
+    fn parse(path: &Path, opened: Option<&mut Opened>, prefix: u64) -> Option<exif::Exif> {
+        let mut file;
+        let source: &mut dyn ReadSeek = match opened {
+            Some(opened) => opened.source().ok()?,
+            None => {
+                file = BufReader::new(File::open(path).ok()?);
+                &mut file
+            }
+        };
 
         // `read_exact` rather than one read: a short read on a file long
         // enough to be a TIFF would send it down the path that reads the
@@ -301,12 +328,12 @@ impl Exif {
         let enclosed = if tiff || bigtiff {
             None
         } else {
-            enclosed::block(path)
+            enclosed::block(source)
         };
         let block = if bigtiff {
             // Not a form this reader knows: what it is handed is the same
             // directory written back out as the form it does.
-            reader.read_raw(directory::block(path)?)
+            reader.read_raw(directory::block(source)?)
         } else if let Some(enclosed) = enclosed {
             // A raw container that is not a TIFF at the front, with the
             // block it keeps inside it brought out.
@@ -321,10 +348,11 @@ impl Exif {
             // read and parsed as one, rather than handed back to a container
             // scan that would read the rest of it looking for a chunk.
             let mut held = Vec::new();
-            source.by_ref().take(prefix).read_to_end(&mut held).ok()?;
+            (&mut *source).take(prefix).read_to_end(&mut held).ok()?;
             reader.read_raw(held)
         } else {
-            reader.read_from_container(&mut source)
+            source.seek(SeekFrom::Start(0)).ok()?;
+            reader.read_from_container(&mut BufReader::new(&mut *source))
         };
         block
             .or_else(|error| error.distill_partial_result(|_| ()))
@@ -335,7 +363,7 @@ impl Exif {
             // decoder seeks to it wherever it is.
             .filter(|block| block.fields().len() > 0)
             .or_else(|| {
-                tiff.then(|| reader.read_raw(directory::block(path)?).ok())
+                tiff.then(|| reader.read_raw(directory::block(source)?).ok())
                     .flatten()
             })
     }
@@ -515,7 +543,7 @@ fn geo_tags(exif: &exif::Exif) -> geo::Tags {
 /// belongs with the camera rather than under a heading of its own — a
 /// shutter speed and the body it was set on are read as one thought — and
 /// each of its settings is a row of its own, being a thing to copy on its
-/// own. The rows are named as [`super::decode::facts`] names LibRaw's, so
+/// own. The rows are named as [`super::decode::Decoder::facts`] names LibRaw's, so
 /// that a raw's fills in whichever of them the EXIF left out.
 fn camera(exif: &exif::Exif) -> Vec<Entry> {
     let mut rows = Vec::new();
@@ -2041,15 +2069,19 @@ mod tests {
 
         // Read no further than the directory itself, and the fields are all
         // still there.
-        let bounded = Exif::read_with(&path, directory as u64);
-        let whole = Exif::read_with(&path, u64::MAX);
+        let bounded = Exif::read_bounded(&path, None, directory as u64);
+        let whole = Exif::read_bounded(&path, None, u64::MAX);
         let _ = std::fs::remove_file(&path);
         assert_eq!(bounded.sections, whole.sections);
         assert!(!bounded.sections.is_empty());
 
         // And a prefix that stops short of it is a file with nothing to say,
         // rather than an error anything upstream has to handle.
-        assert!(empty(&Exif::read_with(Path::new("/nonexistent.tif"), 8)));
+        assert!(empty(&Exif::read_bounded(
+            Path::new("/nonexistent.tif"),
+            None,
+            8
+        )));
     }
 
     #[test]

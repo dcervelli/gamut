@@ -425,17 +425,19 @@ fn run(
 /// What the file's header says, under the loader's own panic guard: the
 /// decoders parse bytes chosen by whoever wrote the file, and a panic in
 /// one must become a failed file rather than a thread that reads no more.
-/// The title is read with the rest because it costs the same — a walk of
-/// the container's headers — and the chooser matches on it.
+/// The file is opened once for all of it. The title is read with the rest
+/// because it costs the same — a walk of the container's headers — and the
+/// chooser matches on it.
 fn header(path: &Path) -> Result<Facts> {
     let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
     let metadata = std::fs::metadata(&absolute).ok();
     guard("reading the header", || {
+        let mut opened = decode::Opened::new(&absolute)?;
         Ok(Facts {
-            size: decode::probe(&absolute)?,
-            sequence: decode::sequence(&absolute)?,
-            title: title(&absolute),
-            format: decode::reader(&absolute),
+            size: opened.dimensions()?,
+            sequence: opened.sequence()?,
+            title: title(&absolute, &mut opened),
+            format: Some(opened.format()),
             bytes: metadata.as_ref().map(std::fs::Metadata::len),
             modified: metadata.and_then(|metadata| metadata.modified().ok()),
         })
@@ -443,8 +445,8 @@ fn header(path: &Path) -> Result<Facts> {
 }
 
 /// The file's title as the info panel would show it, or nothing.
-fn title(path: &Path) -> Option<String> {
-    Xmp::read(path)
+fn title(path: &Path, opened: &mut decode::Opened) -> Option<String> {
+    Xmp::read_from(path, Some(opened))
         .property(xmp::DC, "title")?
         .first()
         .map(|title| exif::shorten(title))

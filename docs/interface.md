@@ -554,9 +554,9 @@ preference that held per file would have the same key mean different things
 from one file to the next.
 
 `App::send` fills every request's `rendering` from the preference, whatever
-the reason for the read, and `loader::decode_rendering` makes the choice: the
-camera's JPEG through `decode::preview_timed` where it was asked for and the
-file has one, the developed frame through `decode::load_timed` otherwise.
+the reason for the read, and `loader::decode_rendering_of` makes the choice: the
+camera's JPEG through `decode::Opened::camera_picture` where it was asked for and
+the file has one, the developed frame through `decode::Opened::decode` otherwise.
 A raw without a JPEG, or with one that will not decode, is read as developed
 and the read succeeds, so a step onto one is not a step onto a broken file.
 `Ready` carries back what was read and `CameraJpeg`, whether the file has one,

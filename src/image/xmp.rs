@@ -17,9 +17,10 @@
 //! is taken over the embedded packet's, since the sidecar is what was
 //! written last, and the rest of the packet's properties stand.
 //!
-//! Nothing here reaches the decoders or the image. [`packet`] finds the
-//! block by walking the container's headers, reading a packet whole and
-//! seeking past everything else, and [`Xmp::parse`] takes the packet apart
+//! Nothing here reaches the image. [`packet_of`] finds the block by
+//! walking the container's headers, reading a packet whole and seeking
+//! past everything else — or, for a container only its decoder can walk,
+//! asks the decoder — and [`Xmp::parse`] takes the packet apart
 //! into properties: the namespace each is in, its name there, and the words
 //! it holds. Which of those the panel shows, and under what names, is
 //! [`super::exif`]'s business, alongside the EXIF fields that say the same
@@ -40,6 +41,7 @@ use std::path::{Path, PathBuf};
 
 use roxmltree::{Document, Node};
 
+use super::decode::Opened;
 use super::{directory, tiff};
 
 /// How large a packet is allowed to be. A packet is a few kilobytes of text,
@@ -177,9 +179,19 @@ pub struct Xmp {
 
 impl Xmp {
     /// Reads `path`'s packet out of whatever container the file is, and the
-    /// sidecar beside it, or gives back nothing at all.
+    /// sidecar beside it, or gives back nothing at all. The program reads
+    /// it through [`Xmp::read_from`], with the file it has open; this is
+    /// the tests' way of asking by name.
+    #[cfg(test)]
     pub fn read(path: &Path) -> Self {
-        Self::read_with(path, packet(path).as_deref())
+        Self::read_from(path, None)
+    }
+
+    /// The same, given the file as the loader has it open, where it is: a
+    /// packet only the file's decoder reaches is asked of `opened` rather
+    /// than of the file opened again.
+    pub fn read_from(path: &Path, opened: Option<&mut Opened>) -> Self {
+        Self::read_with(path, packet_of(path, opened).as_deref())
     }
 
     /// The same, for a caller that has the embedded packet already — the
@@ -507,13 +519,22 @@ fn values(element: Node) -> Vec<String> {
     }
 }
 
+/// [`packet_of`] for a file not otherwise open: the tests' way of asking
+/// by name.
+#[cfg(test)]
+pub fn packet(path: &Path) -> Option<Vec<u8>> {
+    packet_of(path, None)
+}
+
 /// The packet `path` carries, found by the container it is in. The file is
 /// read only as far as the headers that lead to the packet, and the packet
 /// itself; the pixels are seeked past. A TIFF is its own directory, and the
 /// tag the packet sits in is read through [`directory`], which seeks to the
-/// directory wherever the file keeps it. `None` for a container this does
-/// not know, one that holds no packet, or one whose headers do not add up.
-pub fn packet(path: &Path) -> Option<Vec<u8>> {
+/// directory wherever the file keeps it. A HEIF's is an item only its
+/// decoder's tables lead to, and is asked of `opened` where the file is
+/// open. `None` for a container this does not know, one that holds no
+/// packet, or one whose headers do not add up.
+fn packet_of(path: &Path, opened: Option<&mut Opened>) -> Option<Vec<u8>> {
     let mut source = BufReader::new(File::open(path).ok()?);
     let mut signature = [0u8; 12];
     let read = source.read(&mut signature).ok()?;
@@ -528,9 +549,12 @@ pub fn packet(path: &Path) -> Option<Vec<u8>> {
     } else if signature == JXL_SIGNATURE {
         jxl(&mut source)
     } else if signature.get(4..8) == Some(b"ftyp") {
-        super::decode::xmp(path)
+        match opened {
+            Some(opened) => opened.xmp(),
+            None => super::decode::xmp(path),
+        }
     } else if tiff::header(signature).is_some() {
-        directory::packet(path)
+        directory::packet(&mut source)
     } else {
         None
     }

@@ -273,13 +273,28 @@ fn absorb(command: Command, queued: &mut Option<Request>, upload: &mut Option<Up
 
 /// The picture of `path` a read hands over, with how long the decoder took,
 /// which picture it turned out to be, and whether the file carries the
-/// camera's JPEG. The camera's JPEG where it was asked for and is there to
-/// be read; otherwise the developed picture, which is what a raw with no
+/// camera's JPEG — see [`decode_rendering_of`], for the file opened here:
+/// the tests' way of asking by name.
+#[cfg(test)]
+pub(crate) fn decode_rendering(
+    path: &Path,
+    overrides: Overrides,
+    page: Option<usize>,
+    rendering: Rendering,
+) -> Result<(DecodedImage, std::time::Duration, Rendering, CameraJpeg)> {
+    let mut opened = guard("opening", || decode::Opened::new(path))?;
+    decode_rendering_of(&mut opened, overrides, page, rendering)
+}
+
+/// The picture of `opened` a read hands over, with how long the decoder
+/// took, which picture it turned out to be, and whether the file carries
+/// the camera's JPEG. The camera's JPEG where it was asked for and is there
+/// to be read; otherwise the developed picture, which is what a raw with no
 /// JPEG in it shows rather than failing — a step onto one is not a step
 /// onto a broken file. Each stage behind its own panic guard, as in
 /// [`read`]'s.
-pub(crate) fn decode_rendering(
-    path: &Path,
+pub(crate) fn decode_rendering_of(
+    opened: &mut decode::Opened,
     overrides: Overrides,
     page: Option<usize>,
     rendering: Rendering,
@@ -288,7 +303,7 @@ pub(crate) fn decode_rendering(
         // A JPEG that will not decode falls back the same way: the
         // developed picture is still there to be shown.
         (Rendering::CameraJpeg, None) => guard("reading the camera's JPEG", || {
-            decode::preview_timed(path, overrides)
+            opened.camera_picture(overrides)
         })
         .unwrap_or_else(|error| {
             eprintln!(
@@ -300,26 +315,23 @@ pub(crate) fn decode_rendering(
         }),
         _ => None,
     };
-    let (image, decoding, rendering) = match camera {
-        Some((image, decoding)) => (image, decoding, Rendering::CameraJpeg),
-        None => {
-            let (image, decoding) =
-                guard("decoding", || decode::load_timed(path, overrides, page))?;
-            (image, decoding, Rendering::Developed)
-        }
-    };
     // What the window offers is known from the read itself where the JPEG
-    // was it; otherwise asked of the header. A JPEG the library cannot copy
-    // out, or one that will not say its size, is a file with none, not a
-    // failed read.
-    let camera_jpeg = match rendering {
-        Rendering::CameraJpeg => CameraJpeg::Present([image.width, image.height]),
-        Rendering::Developed => guard("looking for the camera's JPEG", || {
-            decode::camera_jpeg(path)
-        })
-        .unwrap_or(CameraJpeg::Unavailable),
-    };
-    Ok((image, decoding, rendering, camera_jpeg))
+    // was it; otherwise asked of the header — before the frame is developed,
+    // since a raw answers both from the one parse of the file and the
+    // development spends it. A JPEG the library cannot copy out, or one that
+    // will not say its size, is a file with none, not a failed read.
+    match camera {
+        Some((image, decoding)) => {
+            let camera_jpeg = CameraJpeg::Present([image.width, image.height]);
+            Ok((image, decoding, Rendering::CameraJpeg, camera_jpeg))
+        }
+        None => {
+            let camera_jpeg = guard("looking for the camera's JPEG", || opened.camera_jpeg())
+                .unwrap_or(CameraJpeg::Unavailable);
+            let (image, decoding) = guard("decoding", || opened.decode(overrides, page))?;
+            Ok((image, decoding, Rendering::Developed, camera_jpeg))
+        }
+    }
 }
 
 /// Runs one fallible stage, turning a panic into an error rather than letting
@@ -373,29 +385,44 @@ fn read(request: Request, upload: Option<&Upload>, canceled: &AtomicBool) -> Opt
     // then answer nothing ever again, and the window would sit in "loading"
     // for good. Caught, a panic becomes an ordinary decode failure, which the
     // event loop already knows how to step over.
-    // What the file holds first, so that a page asked for by number is read
-    // of a file known to have it, and the default page is known by name.
-    let sequence = received.and_then(|()| guard("reading the header", || decode::sequence(&path)));
-    let decoded = sequence.and_then(|sequence| {
+    // The file is opened once, and everything asked of it is asked of that
+    // one open: what it holds first, so that a page asked for by number is
+    // read of a file known to have it, and the default page is known by
+    // name; then its metadata, ahead of the pixels, since a raw's decoder
+    // parsed the whole file to open it and the panel's facts come off that
+    // parse, which developing the frame spends; then the picture.
+    let opened = received.and_then(|()| guard("opening", || decode::Opened::new(&path)));
+    let decoded = opened.and_then(|mut opened| {
+        let sequence = guard("reading the header", || opened.sequence())?;
         let shown = match (page, sequence) {
             (Some(page), _) => page,
             (None, Sequence::Pages { default, .. }) => default,
             (None, _) => 0,
         };
+        // A file with no metadata, or with metadata that will not parse, is
+        // not a failure: the panel simply has less to say about it.
+        let exif = guard("reading the metadata", || {
+            Ok(Exif::read_with(&path, Some(&mut opened)))
+        })?;
         let (image, decoding, rendering, camera_jpeg) =
-            decode_rendering(&path, overrides, page, rendering)?;
-        Ok((image, decoding, sequence, shown, rendering, camera_jpeg))
+            decode_rendering_of(&mut opened, overrides, page, rendering)?;
+        Ok((
+            image,
+            decoding,
+            exif,
+            sequence,
+            shown,
+            rendering,
+            camera_jpeg,
+        ))
     });
     if canceled.load(Ordering::Relaxed) {
         return None;
     }
 
     let scanned = decoded.and_then(
-        |(image, decoding, sequence, page, rendering, camera_jpeg)| {
+        |(image, decoding, exif, sequence, page, rendering, camera_jpeg)| {
             let stats = guard("scanning", || Ok(Stats::scan(&image)))?;
-            // A file with no metadata, or with metadata that will not parse, is
-            // not a failure: the panel simply has less to say about it.
-            let exif = guard("reading the metadata", || Ok(Exif::read(&path)))?;
             Ok((
                 image,
                 decoding,

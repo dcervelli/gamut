@@ -30,10 +30,9 @@
 //! CRW is the one raw that has no EXIF anywhere in it — Canon's earlier
 //! container, from before they wrote it — and is not here.
 
-use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
-use std::path::Path;
+use std::io::{Read, SeekFrom};
 
+use super::decode::ReadSeek;
 use super::isobmff;
 use super::tiff::{self, Entry, Kind, Order, tag};
 
@@ -51,10 +50,10 @@ pub enum Block {
     Jpeg(Vec<u8>),
 }
 
-/// The block inside `path`, or `None` for a file that is not one of the
-/// five containers, or one whose block could not be found.
-pub fn block(path: &Path) -> Option<Block> {
-    let mut file = File::open(path).ok()?;
+/// The block inside the file `file` reads, or `None` for a file that is
+/// not one of the five containers, or one whose block could not be found.
+pub fn block(file: &mut dyn ReadSeek) -> Option<Block> {
+    file.seek(SeekFrom::Start(0)).ok()?;
     let mut head = [0u8; 16];
     let read = file.read(&mut head).ok()?;
     let head = &head[..read];
@@ -62,32 +61,35 @@ pub fn block(path: &Path) -> Option<Block> {
 
     if head.starts_with(b"IIRO") || head.starts_with(b"IIRS") || head.starts_with(b"IIU\0") {
         return Some(Block::Tiff(relabeled(
-            &mut file,
+            file,
             &tiff::signature(Order::Little, Kind::Classic),
         )?));
     }
     if head.starts_with(b"MMOR") {
         return Some(Block::Tiff(relabeled(
-            &mut file,
+            file,
             &tiff::signature(Order::Big, Kind::Classic),
         )?));
     }
     if head.starts_with(b"FUJIFILMCCD-RAW") {
-        return raf(&mut file).map(Block::Jpeg);
+        return raf(file).map(Block::Jpeg);
     }
     if head.starts_with(b"\0MRM") {
-        return mrw(&mut file).map(Block::Tiff);
+        return mrw(file).map(Block::Tiff);
     }
     if head.get(4..12) == Some(b"ftypcrx ") {
-        return cr3(&mut file).map(Block::Tiff);
+        return cr3(file).map(Block::Tiff);
     }
     None
 }
 
 /// The prefix of the file with TIFF's own four bytes over the vendor's.
-fn relabeled(file: &mut File, signature: &[u8; 4]) -> Option<Vec<u8>> {
+fn relabeled(file: &mut dyn ReadSeek, signature: &[u8; 4]) -> Option<Vec<u8>> {
     let mut bytes = Vec::new();
-    file.take(PREFIX as u64).read_to_end(&mut bytes).ok()?;
+    (&mut *file)
+        .take(PREFIX as u64)
+        .read_to_end(&mut bytes)
+        .ok()?;
     if bytes.len() < 8 {
         return None;
     }
@@ -97,7 +99,7 @@ fn relabeled(file: &mut File, signature: &[u8; 4]) -> Option<Vec<u8>> {
 
 /// The JPEG a RAF names in its header: an offset and a length, big-endian,
 /// at bytes 84 and 88.
-fn raf(file: &mut File) -> Option<Vec<u8>> {
+fn raf(file: &mut dyn ReadSeek) -> Option<Vec<u8>> {
     let mut header = [0u8; 92];
     file.read_exact(&mut header).ok()?;
     let offset = u32::from_be_bytes(header[84..88].try_into().ok()?);
@@ -111,7 +113,7 @@ fn raf(file: &mut File) -> Option<Vec<u8>> {
 /// The `TTW` block of an MRW: after the eight-byte file header, blocks of a
 /// four-byte name and a big-endian length, the length not counting the
 /// eight bytes of its own.
-fn mrw(file: &mut File) -> Option<Vec<u8>> {
+fn mrw(file: &mut dyn ReadSeek) -> Option<Vec<u8>> {
     let mut header = [0u8; 8];
     file.read_exact(&mut header).ok()?;
     let end = u64::from(u32::from_be_bytes(header[4..8].try_into().ok()?)) + 8;
@@ -133,11 +135,14 @@ fn mrw(file: &mut File) -> Option<Vec<u8>> {
 
 /// The `CMT1`, `CMT2` and `CMT4` boxes of a CR3, written back out as one
 /// TIFF.
-fn cr3(file: &mut File) -> Option<Vec<u8>> {
+fn cr3(file: &mut dyn ReadSeek) -> Option<Vec<u8>> {
     // Everything wanted is in `moov`, which comes right after `ftyp`; the
     // pixels are in `mdat` after it, and nothing here goes near them.
     let mut bytes = Vec::new();
-    file.take(PREFIX as u64).read_to_end(&mut bytes).ok()?;
+    (&mut *file)
+        .take(PREFIX as u64)
+        .read_to_end(&mut bytes)
+        .ok()?;
 
     let (moov, _) = isobmff::find(&bytes, 0, bytes.len(), b"moov")?;
     let (uuid, uuid_end) = isobmff::find(&bytes, moov, bytes.len(), b"uuid")?;
@@ -247,7 +252,7 @@ fn combine(image: &[u8], exif: Option<&[u8]>, gps: Option<&[u8]>) -> Option<Vec<
 /// and the interoperability directory says nothing worth the trip.
 const POINTERS: [u16; 3] = [tag::EXIF_IFD, tag::GPS_IFD, tag::INTEROP_IFD];
 
-fn read_at(file: &mut File, offset: u64, length: usize) -> Option<Vec<u8>> {
+fn read_at(file: &mut dyn ReadSeek, offset: u64, length: usize) -> Option<Vec<u8>> {
     file.seek(SeekFrom::Start(offset)).ok()?;
     let mut bytes = vec![0; length];
     file.read_exact(&mut bytes).ok()?;

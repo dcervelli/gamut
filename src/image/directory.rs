@@ -17,14 +17,13 @@
 //! every file, which is the point of doing it this way rather than rendering
 //! a second kind of directory a second way.
 
-use std::fs::File;
-use std::io::BufReader;
-use std::path::Path;
+use std::io::{BufReader, SeekFrom};
 
 use tiff::decoder::Decoder;
 use tiff::decoder::ifd::Value;
 use tiff::tags::Tag;
 
+use super::decode::ReadSeek;
 use super::tiff::tag;
 
 /// How large the rewritten block may be. What does not fit is left out,
@@ -38,15 +37,16 @@ const MAX_BLOCK: usize = 1 << 20;
 /// The tag a TIFF keeps its XMP packet in.
 const XMP: u16 = 700;
 
-/// The XMP packet in `path`'s first directory, read through the decoder
-/// the same way as [`block`]: for the file whose directory the metadata
-/// reader's prefix does not reach, and for the thumbnail thread, which
-/// wants the title alone and not the 8 MB read that goes with the rest.
-/// The packet is bulk by the block's own rule, so the block never carries
-/// it and this is the only way it comes out of a directory read here.
-pub fn packet(path: &Path) -> Option<Vec<u8>> {
-    let file = File::open(path).ok()?;
-    let mut decoder = Decoder::new(BufReader::new(file)).ok()?;
+/// The XMP packet in the first directory of the TIFF `source` reads, read
+/// through the decoder the same way as [`block`]: for the file whose
+/// directory the metadata reader's prefix does not reach, and for the
+/// thumbnail thread, which wants the title alone and not the 8 MB read that
+/// goes with the rest. The packet is bulk by the block's own rule, so the
+/// block never carries it and this is the only way it comes out of a
+/// directory read here.
+pub fn packet(source: &mut dyn ReadSeek) -> Option<Vec<u8>> {
+    source.seek(SeekFrom::Start(0)).ok()?;
+    let mut decoder = Decoder::new(BufReader::new(source)).ok()?;
     decoder
         .find_tag_unsigned_vec::<u8>(Tag::Unknown(XMP))
         .ok()
@@ -63,14 +63,14 @@ pub fn packet(path: &Path) -> Option<Vec<u8>> {
 /// raster keeps everything it says in the first directory.
 const POINTERS: [u16; 3] = [tag::SUB_IFDS, tag::EXIF_IFD, tag::GPS_IFD];
 
-/// Reads `path`'s first directory and writes it back out as an ordinary TIFF
-/// block. `None` for a file that will not open, or that has nothing in it
-/// worth writing out.
-pub fn block(path: &Path) -> Option<Vec<u8>> {
-    let file = File::open(path).ok()?;
+/// Reads the first directory of the TIFF `source` reads and writes it back
+/// out as an ordinary TIFF block. `None` for a file that will not read, or
+/// that has nothing in it worth writing out.
+pub fn block(source: &mut dyn ReadSeek) -> Option<Vec<u8>> {
+    source.seek(SeekFrom::Start(0)).ok()?;
     // Only the header and the first directory are read; the decoder does not
     // touch a pixel until it is asked for one.
-    let mut decoder = Decoder::new(BufReader::new(file)).ok()?;
+    let mut decoder = Decoder::new(BufReader::new(source)).ok()?;
 
     let mut fields: Vec<(u16, Value)> = decoder
         .tag_iter()
