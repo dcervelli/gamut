@@ -445,6 +445,24 @@ fn open(path: &Path) -> Result<(BufReader<File>, &'static dyn Decoder)> {
     Ok((source, *decoder))
 }
 
+/// Opens `path` and asks its decoder one thing, timing the ask: the one
+/// road every free function here takes to a decoder. `doing` is the
+/// error's opening — "decoding", "reading the header of" — completed by
+/// which file and which decoder, so that a failure is laid at a format's
+/// door by name. The time is the decoder's own, apart from the open before
+/// it: what the loader reports beside the whole read's.
+fn ask<T>(
+    path: &Path,
+    doing: &str,
+    call: impl FnOnce(BufReader<File>, &'static dyn Decoder) -> Result<T>,
+) -> Result<(T, Duration)> {
+    let (source, decoder) = open(path)?;
+    let started = Instant::now();
+    let answer = call(source, decoder)
+        .with_context(|| format!("{doing} {} as {}", path.display(), decoder.name()))?;
+    Ok((answer, started.elapsed()))
+}
+
 /// Reads and decodes `path`, picking a decoder by extension and falling back
 /// to content sniffing.
 pub fn load(path: &Path, overrides: Overrides) -> Result<DecodedImage> {
@@ -470,39 +488,21 @@ pub fn load_timed(
     overrides: Overrides,
     page: Option<usize>,
 ) -> Result<(DecodedImage, Duration)> {
-    let (mut source, decoder) = open(path)?;
-
-    let started = Instant::now();
-    let image = match page {
-        None => decoder
-            .decode(&mut source, overrides)
-            .with_context(|| format!("decoding {} as {}", path.display(), decoder.name()))?,
-        Some(page) => decoder
-            .decode_page(&mut source, overrides, page)
-            .with_context(|| {
-                format!(
-                    "decoding page {page} of {} as {}",
-                    path.display(),
-                    decoder.name()
-                )
-            })?,
+    let doing = match page {
+        None => "decoding".to_string(),
+        Some(page) => format!("decoding page {page} of"),
     };
-    let decoding = started.elapsed();
+    let (image, decoding) = ask(path, &doing, |mut source, decoder| match page {
+        None => decoder.decode(&mut source, overrides),
+        Some(page) => decoder.decode_page(&mut source, overrides, page),
+    })?;
     Ok((overrides.finish(image, path)?, decoding))
 }
 
 /// The smaller picture `path` carries of itself, if it carries one, finished
 /// the way [`load`]'s image is. See [`Decoder::preview`].
 pub fn preview(path: &Path, overrides: Overrides) -> Result<Option<DecodedImage>> {
-    let (mut source, decoder) = open(path)?;
-    let image = decoder.preview(&mut source, overrides).with_context(|| {
-        format!(
-            "reading the preview in {} as {}",
-            path.display(),
-            decoder.name()
-        )
-    })?;
-    image.map(|image| overrides.finish(image, path)).transpose()
+    preview_as(path, overrides, "reading the preview in").map(|found| found.map(|(image, _)| image))
 }
 
 /// [`preview`], saying as well how long the decoder took, as
@@ -512,16 +512,20 @@ pub fn preview_timed(
     path: &Path,
     overrides: Overrides,
 ) -> Result<Option<(DecodedImage, Duration)>> {
-    let (mut source, decoder) = open(path)?;
-    let started = Instant::now();
-    let image = decoder.preview(&mut source, overrides).with_context(|| {
-        format!(
-            "reading the camera's JPEG in {} as {}",
-            path.display(),
-            decoder.name()
-        )
+    preview_as(path, overrides, "reading the camera's JPEG in")
+}
+
+/// The preview, asked for as `doing` says: the thumbnailer wants a likeness
+/// and the loader the camera's own rendering, and each is told what failed
+/// in its own words.
+fn preview_as(
+    path: &Path,
+    overrides: Overrides,
+    doing: &str,
+) -> Result<Option<(DecodedImage, Duration)>> {
+    let (image, decoding) = ask(path, doing, |mut source, decoder| {
+        decoder.preview(&mut source, overrides)
     })?;
-    let decoding = started.elapsed();
     image
         .map(|image| Ok((overrides.finish(image, path)?, decoding)))
         .transpose()
@@ -530,54 +534,52 @@ pub fn preview_timed(
 /// Whether `path` carries the camera's JPEG of itself. See
 /// [`Decoder::camera_jpeg`].
 pub fn camera_jpeg(path: &Path) -> Result<CameraJpeg> {
-    let (mut source, decoder) = open(path)?;
-    decoder.camera_jpeg(&mut source).with_context(|| {
-        format!(
-            "looking for the camera's JPEG in {} as {}",
-            path.display(),
-            decoder.name()
-        )
-    })
+    ask(
+        path,
+        "looking for the camera's JPEG in",
+        |mut source, decoder| decoder.camera_jpeg(&mut source),
+    )
+    .map(|(found, _)| found)
 }
 
 /// What the decoder of `path` read out of its header, for the information
 /// panel — see [`Decoder::facts`] — or nothing for a file whose decoder
 /// has nothing of its own to say, or that will not open.
 pub fn facts(path: &Path) -> Option<Vec<super::exif::Entry>> {
-    let (mut source, decoder) = open(path).ok()?;
-    decoder.facts(&mut source).ok().flatten()
+    ask(path, "reading the facts of", |mut source, decoder| {
+        decoder.facts(&mut source)
+    })
+    .ok()
+    .and_then(|(facts, _)| facts)
 }
 
 /// The XMP packet of `path`, where its decoder is the one thing that can
 /// reach it — see [`Decoder::xmp`].
 pub fn xmp(path: &Path) -> Option<Vec<u8>> {
-    let (mut source, decoder) = open(path).ok()?;
-    decoder.xmp(&mut source).ok().flatten()
+    ask(path, "reading the XMP packet of", |mut source, decoder| {
+        decoder.xmp(&mut source)
+    })
+    .ok()
+    .and_then(|(packet, _)| packet)
 }
 
 /// What `path` holds beyond the image [`load`] returns, from its header.
 pub fn sequence(path: &Path) -> Result<Sequence> {
-    let (mut source, decoder) = open(path)?;
-    decoder.sequence(&mut source).with_context(|| {
-        format!(
-            "reading the header of {} as {}",
-            path.display(),
-            decoder.name()
-        )
+    ask(path, "reading the header of", |mut source, decoder| {
+        decoder.sequence(&mut source)
     })
+    .map(|(sequence, _)| sequence)
 }
 
 /// How long each frame of the animation at `path` is shown for, from its
 /// headers — see [`Decoder::delays`].
 pub fn delays(path: &Path) -> Result<Option<Vec<Duration>>> {
-    let (mut source, decoder) = open(path)?;
-    decoder.delays(&mut source).with_context(|| {
-        format!(
-            "reading the frame headers of {} as {}",
-            path.display(),
-            decoder.name()
-        )
-    })
+    ask(
+        path,
+        "reading the frame headers of",
+        |mut source, decoder| decoder.delays(&mut source),
+    )
+    .map(|(delays, _)| delays)
 }
 
 /// The frames of the animation at `path`, from the first. Each comes out
@@ -585,10 +587,9 @@ pub fn delays(path: &Path) -> Result<Option<Vec<Duration>>> {
 ///
 /// [`Frames::next`]: FrameSource::next
 pub fn frames(path: &Path, overrides: Overrides) -> Result<Box<dyn FrameSource>> {
-    let (source, decoder) = open(path)?;
-    let source = decoder
-        .frames(source, overrides)
-        .with_context(|| format!("opening {} as {}", path.display(), decoder.name()))?;
+    let (source, _) = ask(path, "opening", |source, decoder| {
+        decoder.frames(source, overrides)
+    })?;
     Ok(Box::new(Finished {
         source,
         overrides,
@@ -629,14 +630,10 @@ impl FrameSource for Finished {
 /// stays a plain command-line failure, rather than a window that appears only
 /// to close again.
 pub fn probe(path: &Path) -> Result<Option<(u32, u32)>> {
-    let (mut source, decoder) = open(path)?;
-    decoder.dimensions(&mut source).with_context(|| {
-        format!(
-            "reading the header of {} as {}",
-            path.display(),
-            decoder.name()
-        )
+    ask(path, "reading the header of", |mut source, decoder| {
+        decoder.dimensions(&mut source)
     })
+    .map(|(size, _)| size)
 }
 
 /// The format of `path`, as the decoder that owns it says — chosen the way
