@@ -58,6 +58,9 @@ const HAIRLINE: f32 = 1.0;
 /// the name in the moment between.
 pub const TAKEN: &str = "File already exists.";
 
+/// Said of a slash in a new name: the file is not moved by a rename.
+const SLASH: &str = "A name cannot hold a slash: the file stays where it is.";
+
 /// The two buttons at the foot, each this wide.
 const BUTTON: [f32; 2] = [60.0, 24.0];
 
@@ -76,18 +79,56 @@ pub struct Input {
     pub opened: bool,
 }
 
+/// What is wrong with a name typed for a file, the same for a new name
+/// and for an export's: nothing typed, a slash in it, a name no file can
+/// have, or one already taken in the directory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Refusal {
+    Empty,
+    Slash,
+    NotAName,
+    Taken,
+}
+
+impl Refusal {
+    /// The line under the field. `slash` is the dialog's own sentence
+    /// about a slash, since what becomes of the file differs: a rename
+    /// leaves it where it is, an export puts the new file beside it.
+    pub fn words(self, slash: &'static str) -> &'static str {
+        match self {
+            Refusal::Empty => "Type a name.",
+            Refusal::Slash => slash,
+            Refusal::NotAName => "That is not a name a file can have.",
+            Refusal::Taken => TAKEN,
+        }
+    }
+}
+
+/// Whether `typed` can be a file's name in a directory where `exists`
+/// says which names are taken, and what is wrong with it where it cannot.
+pub fn judge_name(typed: &str, exists: impl FnOnce(&str) -> bool) -> Result<(), Refusal> {
+    if typed.is_empty() {
+        return Err(Refusal::Empty);
+    }
+    if typed.contains('/') {
+        return Err(Refusal::Slash);
+    }
+    if typed == "." || typed == ".." || typed.contains('\0') {
+        return Err(Refusal::NotAName);
+    }
+    if exists(typed) {
+        return Err(Refusal::Taken);
+    }
+    Ok(())
+}
+
 /// What can be made of the name in the field.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Verdict {
     /// The file's name as it is: nothing to do.
     Unchanged,
-    Empty,
-    /// The dialog renames; it does not move.
-    Slash,
-    /// `.`, `..`, or a name a filesystem refuses outright.
-    NotAName,
-    /// A file of that name is already in the directory.
-    Taken,
+    /// What is wrong with it — see [`Refusal`].
+    Refused(Refusal),
     /// Can be done — with the extension changed, where it is.
     Fine(Option<ExtensionChange>),
 }
@@ -123,10 +164,7 @@ impl Verdict {
         let refused = |words: &str| Some((words.to_string(), Tone::Refusal));
         match self {
             Verdict::Unchanged | Verdict::Fine(None) => None,
-            Verdict::Empty => refused("Type a name."),
-            Verdict::Slash => refused("A name cannot hold a slash: the file stays where it is."),
-            Verdict::NotAName => refused("That is not a name a file can have."),
-            Verdict::Taken => refused(TAKEN),
+            Verdict::Refused(refusal) => refused(refusal.words(SLASH)),
             Verdict::Fine(Some(change)) => {
                 let dotted = |extension: &str| format!(".{extension}");
                 let words = match (&change.from, &change.to) {
@@ -156,17 +194,8 @@ pub fn judge(current: &str, typed: &str, exists: impl FnOnce(&str) -> bool) -> V
     if typed == current {
         return Verdict::Unchanged;
     }
-    if typed.is_empty() {
-        return Verdict::Empty;
-    }
-    if typed.contains('/') {
-        return Verdict::Slash;
-    }
-    if typed == "." || typed == ".." || typed.contains('\0') {
-        return Verdict::NotAName;
-    }
-    if exists(typed) {
-        return Verdict::Taken;
+    if let Err(refusal) = judge_name(typed, exists) {
+        return Verdict::Refused(refusal);
     }
     let extension = |name: &str| {
         Path::new(name)
@@ -192,21 +221,61 @@ pub fn stem_chars(name: &str) -> usize {
 }
 
 /// Draws the dialog, and reads what was pressed in it.
-pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
-    let width = WIDTH.min(pass.input.logical[0] - 2.0 * PADDING);
+/// What a dialog is opened as: egui's id for it, its title, how wide it
+/// would be given the room, and the control pressed when egui closes it
+/// — `Esc`, or a click outside.
+pub(super) struct Dialog<'a> {
+    pub id: egui::Id,
+    pub title: &'a str,
+    pub width: f32,
+    pub cancel: Control,
+}
+
+/// The modal both dialogs are: as wide as `dialog.width` or the window
+/// allows and not drawn at all under [`WIDTH_MIN`], framed and titled as
+/// a menu is, `keys` read inside it before anything is laid out, and
+/// `body` given the width inside its padding.
+pub(super) fn modal(
+    pass: &mut Pass,
+    ui: &mut egui::Ui,
+    dialog: Dialog<'_>,
+    keys: impl FnOnce(&mut Pass, &mut egui::Ui),
+    body: impl FnOnce(&mut Pass, &mut egui::Ui, f32),
+) {
+    let width = dialog.width.min(pass.input.logical[0] - 2.0 * PADDING);
     if width < WIDTH_MIN {
         return;
     }
     let frame = dialog_frame(pass);
     let inside = width - 2.0 * MENU_PADDING;
-    let response = egui::Modal::new(id()).frame(frame).show(ui.ctx(), |ui| {
-        ui.set_width(inside);
-        ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
-        keys(pass, ui, input);
-        // Headed with the file's name, so that the question says which
-        // file it is about.
-        let title = format!("{} {}", Control::Rename.label(), input.current);
-        menu::titled(pass, ui, &title, |pass, ui| {
+    let response = egui::Modal::new(dialog.id)
+        .frame(frame)
+        .show(ui.ctx(), |ui| {
+            ui.set_width(inside);
+            ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
+            keys(pass, ui);
+            menu::titled(pass, ui, dialog.title, |pass, ui| body(pass, ui, inside));
+        });
+    if response.should_close() {
+        pass.press(dialog.cancel);
+    }
+}
+
+pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
+    // Headed with the file's name, so that the question says which file
+    // it is about.
+    let title = format!("{} {}", Control::Rename.label(), input.current);
+    modal(
+        pass,
+        ui,
+        Dialog {
+            id: id(),
+            title: &title,
+            width: WIDTH,
+            cancel: Control::CancelRename,
+        },
+        |pass, ui| keys(pass, ui, input),
+        |pass, ui, inside| {
             let refused = matches!(input.verdict.message(), Some((_, Tone::Refusal)));
             name_field(
                 pass,
@@ -232,11 +301,8 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
                 Control::CancelRename,
                 input.verdict.allows(),
             );
-        });
-    });
-    if response.should_close() {
-        pass.press(Control::CancelRename);
-    }
+        },
+    );
 }
 
 /// `Enter`, taken before the field can see it: the rename where the name
@@ -434,13 +500,22 @@ mod tests {
     fn a_name_is_judged_before_the_directory_is_asked() {
         let never = |_: &str| false;
         assert_eq!(judge("a.png", "a.png", never), Verdict::Unchanged);
-        assert_eq!(judge("a.png", "", never), Verdict::Empty);
-        assert_eq!(judge("a.png", "b/c.png", never), Verdict::Slash);
-        assert_eq!(judge("a.png", "..", never), Verdict::NotAName);
-        assert_eq!(judge("a.png", ".", never), Verdict::NotAName);
+        assert_eq!(judge("a.png", "", never), Verdict::Refused(Refusal::Empty));
+        assert_eq!(
+            judge("a.png", "b/c.png", never),
+            Verdict::Refused(Refusal::Slash)
+        );
+        assert_eq!(
+            judge("a.png", "..", never),
+            Verdict::Refused(Refusal::NotAName)
+        );
+        assert_eq!(
+            judge("a.png", ".", never),
+            Verdict::Refused(Refusal::NotAName)
+        );
         assert_eq!(
             judge("a.png", "b.png", |name| name == "b.png"),
-            Verdict::Taken
+            Verdict::Refused(Refusal::Taken)
         );
         // The name as it is is not asked about, even though it is there.
         assert_eq!(judge("a.png", "a.png", |_| true), Verdict::Unchanged);
@@ -486,10 +561,10 @@ mod tests {
         assert_eq!(Verdict::Fine(None).message(), None);
         assert_eq!(Verdict::Unchanged.message(), None);
         for refused in [
-            Verdict::Empty,
-            Verdict::Slash,
-            Verdict::NotAName,
-            Verdict::Taken,
+            Verdict::Refused(Refusal::Empty),
+            Verdict::Refused(Refusal::Slash),
+            Verdict::Refused(Refusal::NotAName),
+            Verdict::Refused(Refusal::Taken),
         ] {
             assert_eq!(said(refused.clone()).1, Tone::Refusal, "{refused:?}");
             assert!(!refused.allows());

@@ -68,7 +68,7 @@ impl Exporting {
 
 /// Whether `name` is already something in `dir`, a link that leads nowhere
 /// included: the rename that puts the file in place would refuse it.
-fn taken(dir: &Path, name: &str) -> bool {
+pub(super) fn taken(dir: &Path, name: &str) -> bool {
     std::fs::symlink_metadata(dir.join(name)).is_ok()
 }
 
@@ -115,7 +115,7 @@ impl App {
             format,
             quality: encode::JPEG_QUALITY,
             resize: Resize::new(facts.region.unwrap_or_else(|| current.pixels())),
-            verdict: Verdict::Empty,
+            verdict: Verdict::Refused(crate::ui::rename::Refusal::Empty),
             facts,
             resume: false,
             opened: true,

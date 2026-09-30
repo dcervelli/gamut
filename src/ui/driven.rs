@@ -1963,7 +1963,11 @@ fn the_rename_dialog_takes_the_keys_and_hands_back_the_name() {
     );
 
     // A name that will not do: OK is dead, and `Enter` does nothing.
-    harness.state_mut().input.rename = dialog("b.png", Verdict::Taken, false);
+    harness.state_mut().input.rename = dialog(
+        "b.png",
+        Verdict::Refused(super::rename::Refusal::Taken),
+        false,
+    );
     harness.run();
     assert!(harness.get_by_label("OK").accesskit_node().is_disabled());
     let after_enter = pressed(&mut harness, egui::Key::Enter);
@@ -2096,7 +2100,11 @@ fn the_export_dialog_takes_the_keys_and_hands_back_the_name_and_format() {
         asked(harness)
     };
     // A name that will not do: Export is dead, and `Enter` does nothing.
-    harness.state_mut().input.export = dialog("photo.png", export::Verdict::Taken, false);
+    harness.state_mut().input.export = dialog(
+        "photo.png",
+        export::Verdict::Refused(super::rename::Refusal::Taken),
+        false,
+    );
     harness.run();
     assert!(
         harness

@@ -481,7 +481,7 @@ impl Pass<'_> {
 
     /// The button that ends the top bar, hiding the interface.
     fn maximize_button(&mut self, ui: &mut Ui) {
-        let maximize = self.icon_button(
+        self.toggle(
             ui,
             icon::MAXIMIZE_2,
             Control::Maximize,
@@ -489,9 +489,6 @@ impl Pass<'_> {
             true,
             Corners::All,
         );
-        if maximize.clicked() {
-            self.press(Control::Maximize);
-        }
     }
 
     /// The zoom readout: what the view is doing now, and one press from a
@@ -565,7 +562,7 @@ impl Pass<'_> {
     /// file it was made to, which would be the one the bar no longer names.
     fn turn_buttons(&mut self, ui: &mut Ui) {
         let alive = self.input.arriving.is_none();
-        let right = self.icon_button(
+        self.toggle(
             ui,
             icon::ROTATE_CW_SQUARE,
             Control::TurnRight,
@@ -573,11 +570,8 @@ impl Pass<'_> {
             alive,
             Corners::Trailing,
         );
-        if right.clicked() {
-            self.press(Control::TurnRight);
-        }
         ui.add_space(STEP_SEAM);
-        let left = self.icon_button(
+        self.toggle(
             ui,
             icon::ROTATE_CCW_SQUARE,
             Control::TurnLeft,
@@ -585,9 +579,6 @@ impl Pass<'_> {
             alive,
             Corners::Leading,
         );
-        if left.clicked() {
-            self.press(Control::TurnLeft);
-        }
     }
 
     /// The headroom switch: one word, lit while the picture is going out
@@ -646,7 +637,7 @@ impl Pass<'_> {
     /// light for nothing on screen.
     fn help_button(&mut self, ui: &mut Ui, room: bool) {
         let open = room && egui::Popup::is_id_open(ui.ctx(), super::help::id());
-        let response = self.icon_button(
+        self.toggle(
             ui,
             icon::CIRCLE_QUESTION_MARK,
             Control::Help,
@@ -654,9 +645,6 @@ impl Pass<'_> {
             room,
             Corners::All,
         );
-        if response.clicked() {
-            self.press(Control::Help);
-        }
     }
 
     /// The grid toggle: the icon always, and — while the grid is on — how far
@@ -713,10 +701,7 @@ impl Pass<'_> {
             return false;
         }
         let on = current.showing == Showing::Auxiliary(Auxiliary::Depth);
-        let response = self.icon_button(ui, icon::AXIS_3D, Control::Depth, on, true, Corners::All);
-        if response.clicked() {
-            self.press(Control::Depth);
-        }
+        self.toggle(ui, icon::AXIS_3D, Control::Depth, on, true, Corners::All);
         true
     }
 
@@ -822,22 +807,15 @@ impl Pass<'_> {
     /// below is the other way round for the other reason: what it does is not
     /// about the file at all, and there is nothing for it to explain.
     fn open_button(&mut self, ui: &mut Ui) {
-        let id = egui::Id::new("open menu");
-        let open = egui::Popup::is_id_open(ui.ctx(), id);
         let enabled = !self.input.openers.is_empty();
-        let button = self.icon_button(
+        self.menu_button(
             ui,
             icon::EXTERNAL_LINK,
             Control::OpenIn,
-            open,
+            egui::RectAlign::RIGHT_START,
             enabled,
-            Corners::All,
+            menu::open_items,
         );
-        egui::Popup::menu(&button)
-            .id(id)
-            .align(egui::RectAlign::RIGHT_START)
-            .gap(MENU_OFFSET)
-            .show(|ui| menu::open_items(self, ui));
     }
 
     /// The left strip: the copy button, the open button under it, the region
@@ -862,20 +840,20 @@ impl Pass<'_> {
         let picture = self.current.is_some();
         ui.vertical_centered(|ui| {
             ui.add_space(BAR_PADDING);
-            let id = egui::Id::new("copy menu");
-            let open = egui::Popup::is_id_open(ui.ctx(), id);
-            let copy = self.icon_button(ui, icon::COPY, Control::Copy, open, picture, Corners::All);
             // From a button in a column, which has its neighbors above and
             // below it and its room to the side.
-            egui::Popup::menu(&copy)
-                .id(id)
-                .align(egui::RectAlign::RIGHT_START)
-                .gap(MENU_OFFSET)
-                .show(|ui| menu::copy_items(self, ui));
+            self.menu_button(
+                ui,
+                icon::COPY,
+                Control::Copy,
+                egui::RectAlign::RIGHT_START,
+                picture,
+                menu::copy_items,
+            );
             ui.add_space(BUTTON_GAP);
             self.open_button(ui);
             ui.add_space(BUTTON_GAP);
-            let region = self.icon_button(
+            self.toggle(
                 ui,
                 icon::CROP,
                 Control::Region,
@@ -883,14 +861,11 @@ impl Pass<'_> {
                 picture,
                 Corners::All,
             );
-            if region.clicked() {
-                self.press(Control::Region);
-            }
             // Not in an empty window, where the same paste is one of the
             // three buttons in the middle: one control for one thing.
             if self.input.paste && !self.input.empty {
                 ui.add_space(BUTTON_GAP);
-                let paste = self.icon_button(
+                self.toggle(
                     ui,
                     icon::CLIPBOARD,
                     Control::Paste,
@@ -898,9 +873,6 @@ impl Pass<'_> {
                     true,
                     Corners::All,
                 );
-                if paste.clicked() {
-                    self.press(Control::Paste);
-                }
             }
         });
         // The room the column above keeps, whether or not the paste button
@@ -912,7 +884,7 @@ impl Pass<'_> {
         }
         ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
             ui.add_space(BAR_PADDING);
-            let minimap = self.icon_button(
+            self.toggle(
                 ui,
                 icon::SQUARE_SQUARE,
                 Control::Minimap,
@@ -920,9 +892,6 @@ impl Pass<'_> {
                 true,
                 Corners::All,
             );
-            if minimap.clicked() {
-                self.press(Control::Minimap);
-            }
         });
     }
 
@@ -939,7 +908,7 @@ impl Pass<'_> {
         let room = self.room;
         ui.vertical_centered(|ui| {
             ui.add_space(BAR_PADDING);
-            let histogram = self.icon_button(
+            self.toggle(
                 ui,
                 icon::CHART_AREA,
                 Control::Histogram,
@@ -947,11 +916,8 @@ impl Pass<'_> {
                 room.histogram,
                 Corners::All,
             );
-            if histogram.clicked() {
-                self.press(Control::Histogram);
-            }
             ui.add_space(BUTTON_GAP);
-            let info = self.icon_button(
+            self.toggle(
                 ui,
                 icon::INFO,
                 Control::Info,
@@ -959,9 +925,6 @@ impl Pass<'_> {
                 room.info,
                 Corners::All,
             );
-            if info.clicked() {
-                self.press(Control::Info);
-            }
         });
         let taken = BAR_PADDING + 2.0 * (BUTTON_SIZE + BUTTON_GAP);
         if taken + BUTTON_SIZE + BAR_PADDING > height {
@@ -1038,6 +1001,49 @@ impl Pass<'_> {
         response
             .widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, on, control.label()));
         self.tooltip(response, Tip::Control(control))
+    }
+
+    /// A toggle of the bars and strips: [`Pass::icon_button`], its press
+    /// handed to the application as `control`. For the buttons that do
+    /// nothing else; one that opens a menu is [`Pass::menu_button`].
+    pub fn toggle(
+        &mut self,
+        ui: &mut Ui,
+        marks: &[Mark],
+        control: Control,
+        on: bool,
+        enabled: bool,
+        corners: Corners,
+    ) -> Response {
+        let response = self.icon_button(ui, marks, control, on, enabled, corners);
+        if response.clicked() {
+            self.press(control);
+        }
+        response
+    }
+
+    /// A button that opens a menu: [`Pass::icon_button`] lit while the menu
+    /// is open, as a toggle is while it is on, with the menu hung `align`
+    /// to it under an id of the control's own. The menu opens, closes and
+    /// takes the pointer by itself, so there is no press to hand on;
+    /// `contents` lays its cells out.
+    pub fn menu_button(
+        &mut self,
+        ui: &mut Ui,
+        marks: &[Mark],
+        control: Control,
+        align: egui::RectAlign,
+        enabled: bool,
+        contents: impl FnOnce(&mut Pass, &mut Ui),
+    ) {
+        let id = egui::Id::new(("menu", control.label()));
+        let open = egui::Popup::is_id_open(ui.ctx(), id);
+        let button = self.icon_button(ui, marks, control, open, enabled, Corners::All);
+        egui::Popup::menu(&button)
+            .id(id)
+            .align(align)
+            .gap(MENU_OFFSET)
+            .show(|ui| contents(self, ui));
     }
 
     /// Hangs words the frame itself holds off `response`, laid out as a

@@ -11,9 +11,7 @@ use super::chrome::{BAR_PADDING, BUTTON_SIZE, Corners, Pass, STEP_SEAM, measure}
 use super::control::Control;
 use super::style::TOGGLE_RADIUS;
 use super::tooltip::Tip;
-use super::{
-    COUNTER_GAP, Current, MENU_OFFSET, TEXT_SIZE, capitalized, fonts, histogram, icon, menu,
-};
+use super::{COUNTER_GAP, Current, TEXT_SIZE, capitalized, fonts, histogram, icon, menu};
 
 /// Between one segment of a bar and the next. A thin gap: the middot already
 /// parts them, and the bars are short of room before they are short of air.
@@ -124,7 +122,7 @@ pub(super) fn list_buttons(pass: &mut Pass, ui: &mut egui::Ui) {
     if let Some(counter) = counter(pass.input.index, pass.input.count) {
         // Before the pair: the list they step through, laid out down the
         // side of the window, and this the toggle that puts it there.
-        let strip = pass.icon_button(
+        pass.toggle(
             ui,
             icon::PANEL_LEFT,
             Control::Filmstrip,
@@ -132,11 +130,8 @@ pub(super) fn list_buttons(pass: &mut Pass, ui: &mut egui::Ui) {
             true,
             Corners::All,
         );
-        if strip.clicked() {
-            pass.press(Control::Filmstrip);
-        }
         ui.add_space(COUNTER_GAP);
-        let previous = pass.icon_button(
+        pass.toggle(
             ui,
             icon::CHEVRON_LEFT,
             Control::Previous,
@@ -144,13 +139,10 @@ pub(super) fn list_buttons(pass: &mut Pass, ui: &mut egui::Ui) {
             true,
             Corners::Leading,
         );
-        if previous.clicked() {
-            pass.press(Control::Previous);
-        }
         ui.add_space(STEP_SEAM);
         counter_button(pass, ui, &counter);
         ui.add_space(STEP_SEAM);
-        let next = pass.icon_button(
+        pass.toggle(
             ui,
             icon::CHEVRON_RIGHT,
             Control::Next,
@@ -158,9 +150,6 @@ pub(super) fn list_buttons(pass: &mut Pass, ui: &mut egui::Ui) {
             true,
             Corners::Trailing,
         );
-        if next.clicked() {
-            pass.press(Control::Next);
-        }
         ui.add_space(COUNTER_GAP);
     }
 }
@@ -170,21 +159,14 @@ pub(super) fn list_buttons(pass: &mut Pass, ui: &mut egui::Ui) {
 /// menu is open, as the other menu buttons are; hung below, where the name
 /// it is about is read along the bar.
 fn file_button(pass: &mut Pass, ui: &mut egui::Ui) {
-    let id = egui::Id::new("file menu");
-    let open = egui::Popup::is_id_open(ui.ctx(), id);
-    let button = pass.icon_button(
+    pass.menu_button(
         ui,
         icon::SQUARE_MENU,
         Control::FileMenu,
-        open,
+        egui::RectAlign::BOTTOM_START,
         true,
-        Corners::All,
+        menu::file_items,
     );
-    egui::Popup::menu(&button)
-        .id(id)
-        .align(egui::RectAlign::BOTTOM_START)
-        .gap(MENU_OFFSET)
-        .show(|ui| menu::file_items(pass, ui));
 }
 
 /// The count as a press: the middle piece of the row the two steps make,

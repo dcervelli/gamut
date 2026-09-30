@@ -37,10 +37,9 @@ use egui::{Key, Label, Modifiers, RichText, Sense, vec2};
 
 use super::chrome::Pass;
 use super::control::{Command, Control};
-use super::rename::{self, FIELD_HEIGHT, GAP, NameField, Tone, WIDTH_MIN};
+use super::rename::{self, FIELD_HEIGHT, GAP, NameField, Tone};
 use super::slider::{self, Line};
-use super::style::MENU_PADDING;
-use super::{PADDING, Rect, TEXT_SIZE, icon, menu};
+use super::{Rect, TEXT_SIZE, icon};
 use crate::image::encode;
 use crate::render::Upscale;
 
@@ -141,15 +140,8 @@ pub fn default_name(stem: &str, format: Format, exists: impl Fn(&str) -> bool) -
 /// What can be made of the name in the field.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Verdict {
-    Empty,
-    /// The dialog writes beside the file on screen; it does not choose a
-    /// directory.
-    Slash,
-    /// `.`, `..`, or a name a filesystem refuses outright.
-    NotAName,
-    /// A file of that name is already in the directory, and is not written
-    /// over.
-    Taken,
+    /// What is wrong with the name — see [`rename::Refusal`].
+    Refused(rename::Refusal),
     Fine,
 }
 
@@ -163,10 +155,7 @@ impl Verdict {
     pub fn message(&self) -> Option<(String, Tone)> {
         let words = match self {
             Verdict::Fine => return None,
-            Verdict::Empty => "Type a name.",
-            Verdict::Slash => "A name cannot hold a slash: the file goes beside this one.",
-            Verdict::NotAName => "That is not a name a file can have.",
-            Verdict::Taken => rename::TAKEN,
+            Verdict::Refused(refusal) => refusal.words(SLASH),
         };
         Some((words.to_string(), Tone::Refusal))
     }
@@ -176,20 +165,15 @@ impl Verdict {
 /// whether a file of that name is already in the directory. A name that is
 /// not a name is not worth asking the directory about.
 pub fn judge(typed: &str, exists: impl FnOnce(&str) -> bool) -> Verdict {
-    if typed.is_empty() {
-        return Verdict::Empty;
+    match rename::judge_name(typed, exists) {
+        Ok(()) => Verdict::Fine,
+        Err(refusal) => Verdict::Refused(refusal),
     }
-    if typed.contains('/') {
-        return Verdict::Slash;
-    }
-    if typed == "." || typed == ".." || typed.contains('\0') {
-        return Verdict::NotAName;
-    }
-    if exists(typed) {
-        return Verdict::Taken;
-    }
-    Verdict::Fine
 }
+
+/// Said of a slash in an export's name: the new file goes where the
+/// picture's is.
+const SLASH: &str = "A name cannot hold a slash: the file goes beside this one.";
 
 /// One of the three boxes the size is typed in, in the order they stand.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -516,18 +500,18 @@ pub const BUSY: &str = "Still writing the last export.";
 
 /// Draws the dialog, and reads what was pressed in it.
 pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
-    let width = WIDTH.min(pass.input.logical[0] - 2.0 * PADDING);
-    if width < WIDTH_MIN {
-        return;
-    }
-    let frame = rename::dialog_frame(pass);
-    let inside = width - 2.0 * MENU_PADDING;
-    let response = egui::Modal::new(id()).frame(frame).show(ui.ctx(), |ui| {
-        ui.set_width(inside);
-        ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
-        keys(pass, ui, input);
-        let title = format!("{}\u{2026}", Control::Export.label());
-        menu::titled(pass, ui, &title, |pass, ui| {
+    let title = format!("{}\u{2026}", Control::Export.label());
+    rename::modal(
+        pass,
+        ui,
+        rename::Dialog {
+            id: id(),
+            title: &title,
+            width: WIDTH,
+            cancel: Control::CancelExport,
+        },
+        |pass, ui| keys(pass, ui, input),
+        |pass, ui, inside| {
             rename::name_field(
                 pass,
                 ui,
@@ -576,11 +560,8 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
                 Control::CancelExport,
                 allowed(input),
             );
-        });
-    });
-    if response.should_close() {
-        pass.press(Control::CancelExport);
-    }
+        },
+    );
 }
 
 /// `Enter`, taken before the fields can see it: the export where the name
@@ -775,18 +756,27 @@ mod tests {
     #[test]
     fn a_name_is_judged_before_the_directory_is_asked() {
         let never = |_: &str| false;
-        assert_eq!(judge("", never), Verdict::Empty);
-        assert_eq!(judge("b/c.png", |_| true), Verdict::Slash);
-        assert_eq!(judge("..", |_| true), Verdict::NotAName);
-        assert_eq!(judge("b.png", |name| name == "b.png"), Verdict::Taken);
+        assert_eq!(judge("", never), Verdict::Refused(rename::Refusal::Empty));
+        assert_eq!(
+            judge("b/c.png", |_| true),
+            Verdict::Refused(rename::Refusal::Slash)
+        );
+        assert_eq!(
+            judge("..", |_| true),
+            Verdict::Refused(rename::Refusal::NotAName)
+        );
+        assert_eq!(
+            judge("b.png", |name| name == "b.png"),
+            Verdict::Refused(rename::Refusal::Taken)
+        );
         assert_eq!(judge("b.png", never), Verdict::Fine);
         assert!(Verdict::Fine.allows());
         assert_eq!(Verdict::Fine.message(), None);
         for refused in [
-            Verdict::Empty,
-            Verdict::Slash,
-            Verdict::NotAName,
-            Verdict::Taken,
+            Verdict::Refused(rename::Refusal::Empty),
+            Verdict::Refused(rename::Refusal::Slash),
+            Verdict::Refused(rename::Refusal::NotAName),
+            Verdict::Refused(rename::Refusal::Taken),
         ] {
             assert!(!refused.allows());
             assert_eq!(refused.message().expect("words").1, Tone::Refusal);

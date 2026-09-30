@@ -28,7 +28,7 @@ use egui::{Align, Layout, RectAlign, Sense, WidgetInfo, WidgetType, pos2, vec2};
 use super::chrome::{BAR_HEIGHT, BAR_PADDING, BUTTON_GAP, Corners, Pass, STEP_SEAM};
 use super::control::{Command, Control};
 use super::style::{ACTIVE_BUTTON_WASH, SCROLLBAR_GUTTER, SCROLLBAR_WIDTH};
-use super::{MENU_OFFSET, TEXT_SIZE, fonts, icon, menu};
+use super::{TEXT_SIZE, fonts, icon, menu};
 
 /// The width each thumbnail is fitted into, at its narrowest: the
 /// thumbnail thread's smallest display copy, drawn at its own size.
@@ -397,26 +397,26 @@ fn head(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
             .layout(Layout::left_to_right(Align::Center)),
     );
     row.spacing_mut().item_spacing = egui::Vec2::ZERO;
-    let ctx = row.ctx().clone();
-    let sorting = egui::Id::new("sort menu");
-    let open = egui::Popup::is_id_open(&ctx, sorting);
     // The menu first, lit while it is open, as the other menu buttons are,
-    // and hung below. The button wears the way the sort runs: bars growing down the mark
-    // for ascending, shrinking for descending.
+    // and hung below. The button wears the way the sort runs: bars growing
+    // down the mark for ascending, shrinking for descending.
     let mark = match input.order.direction {
         Direction::Ascending => icon::ARROW_DOWN_NARROW_WIDE,
         Direction::Descending => icon::ARROW_DOWN_WIDE_NARROW,
     };
-    let button = pass.icon_button(&mut row, mark, Control::Sorting, open, true, Corners::All);
-    egui::Popup::menu(&button)
-        .id(sorting)
-        .align(RectAlign::BOTTOM_START)
-        .gap(MENU_OFFSET)
-        .show(|ui| menu::sort_cells(pass, ui, input.order));
+    let order = input.order;
+    pass.menu_button(
+        &mut row,
+        mark,
+        Control::Sorting,
+        RectAlign::BOTTOM_START,
+        true,
+        move |pass, ui| menu::sort_cells(pass, ui, order),
+    );
     row.add_space(BUTTON_GAP);
     // Then the pair, set against each other as the pair that steps
     // through the list is: the two ways of one thing.
-    let back = pass.icon_button(
+    pass.toggle(
         &mut row,
         icon::ARROW_LEFT,
         Control::Back,
@@ -424,11 +424,8 @@ fn head(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
         input.back,
         Corners::Leading,
     );
-    if back.clicked() {
-        pass.press(Control::Back);
-    }
     row.add_space(STEP_SEAM);
-    let forward = pass.icon_button(
+    pass.toggle(
         &mut row,
         icon::ARROW_RIGHT,
         Control::Forward,
@@ -436,9 +433,6 @@ fn head(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
         input.forward,
         Corners::Trailing,
     );
-    if forward.clicked() {
-        pass.press(Control::Forward);
-    }
     // The hairline along the foot of the head, on the device's grid so
     // that it is one pixel wide wherever it lands.
     let grid = pass.grid;

@@ -104,7 +104,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, transport: &Transport) {
         // While a file is on its way in the bar is that file's, from its
         // header, and there is nothing yet to step or play.
         let alive = pass.input.arriving.is_none();
-        let back = pass.icon_button(
+        pass.toggle(
             ui,
             icon::STEP_BACK,
             Control::StepBack,
@@ -112,19 +112,13 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, transport: &Transport) {
             alive,
             Corners::Leading,
         );
-        if back.clicked() {
-            pass.press(Control::StepBack);
-        }
         ui.add_space(STEP_SEAM);
         if let Kind::Animation { playing, .. } = &transport.kind {
             let marks = if *playing { icon::PAUSE } else { icon::PLAY };
-            let play = pass.icon_button(ui, marks, Control::Play, *playing, alive, Corners::Middle);
-            if play.clicked() {
-                pass.press(Control::Play);
-            }
+            pass.toggle(ui, marks, Control::Play, *playing, alive, Corners::Middle);
             ui.add_space(STEP_SEAM);
         }
-        let forward = pass.icon_button(
+        pass.toggle(
             ui,
             icon::STEP_FORWARD,
             Control::StepForward,
@@ -132,9 +126,6 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, transport: &Transport) {
             alive,
             Corners::Trailing,
         );
-        if forward.clicked() {
-            pass.press(Control::StepForward);
-        }
         ui.add_space(PADDING);
 
         let counter = format!("{} / {}", transport.index + 1, transport.count);

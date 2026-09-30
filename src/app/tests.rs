@@ -3245,7 +3245,10 @@ fn an_export_is_judged_as_typed_and_written_beside_the_source() {
     let _ = app.act(ui::Command::Press(ui::Control::ExportAs(Format::Png)));
     assert_eq!(app.export_input().unwrap().name, "b.png");
     let _ = app.act(ui::Command::ExportName("a.png".to_string()));
-    assert_eq!(app.export_input().unwrap().verdict, Verdict::Taken);
+    assert_eq!(
+        app.export_input().unwrap().verdict,
+        Verdict::Refused(ui::rename::Refusal::Taken)
+    );
     // Export does nothing while the name will not do.
     let _ = app.act(ui::Command::Press(ui::Control::ExportTo));
     assert!(app.export_input().is_some(), "still up");
@@ -3447,7 +3450,10 @@ fn a_rename_is_judged_as_typed_and_undone_by_name() {
         Effect::Redraw,
         app.act(ui::Command::Name("b.png".to_string()))
     );
-    assert_eq!(app.rename_input().expect("up").verdict, Verdict::Taken);
+    assert_eq!(
+        app.rename_input().expect("up").verdict,
+        Verdict::Refused(ui::rename::Refusal::Taken)
+    );
     assert_eq!(
         Effect::Redraw,
         app.act(ui::Command::Name("c.jpg".to_string()))

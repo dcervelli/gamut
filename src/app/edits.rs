@@ -90,6 +90,49 @@ pub(super) fn name_of(path: &Path) -> String {
 }
 
 impl App {
+    /// The file on screen, where a change to it on disk or on the list can
+    /// be made now: nothing is being read, there is one, and it has not
+    /// already been taken off the list or moved to the trash — each of
+    /// which is said in place of doing it again.
+    fn editable(&mut self) -> Option<PathBuf> {
+        if !self.files.is_idle() {
+            return None;
+        }
+        let path = self.files.shown_path().map(Path::to_path_buf)?;
+        if self.files.is_hidden(&path) {
+            self.toast("Already taken off the list.", Level::Warning);
+            return None;
+        }
+        if self.files.is_condemned(&path) {
+            self.toast("Already in the trash.", Level::Warning);
+            return None;
+        }
+        Some(path)
+    }
+
+    /// Steps away from the file on screen, which is leaving the list: to
+    /// a neighbor, where there is one — a file `condemned` to the trash
+    /// stays on the list until the neighbor arrives, and is watched for
+    /// its return meanwhile — and otherwise into the empty window, the
+    /// file taken off at once.
+    fn step_off(&mut self, condemned: Option<&Path>) {
+        match self.files.step_away() {
+            Some(request) => {
+                if let Some(path) = condemned {
+                    self.files.condemn();
+                    // The bar says the file has gone at once, rather than half
+                    // a second on when the watch would notice.
+                    self.watch = Watch::new(path);
+                }
+                let _ = self.send(request);
+            }
+            None => {
+                self.leave_picture();
+                self.files.remove_shown();
+            }
+        }
+    }
+
     /// Moves the file on screen to the trash, and steps on to the next.
     ///
     /// The file stays on the list, and on screen, until its neighbor has
@@ -101,22 +144,9 @@ impl App {
     /// the window shows nothing until something is opened — or undo puts
     /// the file back at the head of the list, where it is shown again.
     pub(super) fn delete_shown(&mut self) {
-        // One at a time: a key held down deletes as fast as the neighbors
-        // decode, and never the file already on its way out.
-        if !self.files.is_idle() {
-            return;
-        }
-        let Some(listed) = self.files.shown_path().map(Path::to_path_buf) else {
+        let Some(listed) = self.editable() else {
             return;
         };
-        if self.files.is_hidden(&listed) {
-            self.toast("Already taken off the list.", Level::Warning);
-            return;
-        }
-        if self.files.is_condemned(&listed) {
-            self.toast("Already in the trash.", Level::Warning);
-            return;
-        }
         let Some(trash) = &self.trash else {
             self.toast("No trash to move the file to: HOME is unset.", Level::Error);
             return;
@@ -135,21 +165,7 @@ impl App {
             adopted: self.files.is_adopted(&listed),
             listed: listed.clone(),
         });
-        match self.files.step_away() {
-            Some(request) => {
-                self.files.condemn();
-                // The bar says the file has gone at once, rather than half
-                // a second on when the watch would notice.
-                self.watch = Watch::new(&listed);
-                let _ = self.send(request);
-            }
-            // The picture first, kept under its path while the list still
-            // names it; then the list.
-            None => {
-                self.leave_picture();
-                self.files.remove_shown();
-            }
-        }
+        self.step_off(Some(&listed));
         self.toast(
             format!("Trashed {}.{}", name_of(&listed), to_undo(&self.keys)),
             Level::Message,
@@ -163,38 +179,16 @@ impl App {
     /// stood. The directory being read again does not bring it back: see
     /// `Files::hide`.
     pub(super) fn remove_shown(&mut self) {
-        // One at a time, as a deletion is, and never the file already on
-        // its way out.
-        if !self.files.is_idle() {
-            return;
-        }
-        let Some(path) = self.files.shown_path().map(Path::to_path_buf) else {
+        let Some(path) = self.editable() else {
             return;
         };
-        if self.files.is_hidden(&path) {
-            self.toast("Already taken off the list.", Level::Warning);
-            return;
-        }
-        if self.files.is_condemned(&path) {
-            self.toast("Already in the trash.", Level::Warning);
-            return;
-        }
         self.edits.push(Edit::Removed {
             index: self.files.index(),
             adopted: self.files.is_adopted(&path),
             path: path.clone(),
         });
         self.files.hide();
-        match self.files.step_away() {
-            // The toast below owes the frame.
-            Some(request) => {
-                let _ = self.send(request);
-            }
-            None => {
-                self.leave_picture();
-                self.files.remove_shown();
-            }
-        }
+        self.step_off(None);
         self.toast(
             format!(
                 "Took {} off the list.{}",
@@ -237,7 +231,7 @@ impl App {
         let dir = renaming.path.parent().map(Path::to_path_buf);
         renaming.verdict = rename::judge(&current, &name, |typed| {
             dir.as_deref()
-                .is_some_and(|dir| std::fs::symlink_metadata(dir.join(typed)).is_ok())
+                .is_some_and(|dir| super::exporting::taken(dir, typed))
         });
         renaming.name = name;
     }
@@ -248,6 +242,36 @@ impl App {
     /// The directory is asked again by the rename itself, which refuses to
     /// replace: what the dialog said about the name was true when it was
     /// typed, and a file can have arrived since.
+    /// Renames `from` to `to` on disk, refusing to replace whatever is at
+    /// `to`, and says how it went: `taken` is what to say where something
+    /// is, and anything else that goes wrong is said with `doing` for what
+    /// was being done. Whether the file is called `to` now.
+    fn rename_file(
+        &mut self,
+        from: &Path,
+        to: &Path,
+        doing: &str,
+        taken: impl FnOnce() -> String,
+    ) -> bool {
+        match rename_no_replace(from, to) {
+            Ok(()) => true,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                self.toast(taken(), Level::Warning);
+                false
+            }
+            Err(error) => {
+                let error = anyhow::Error::from(error).context(format!(
+                    "{doing} {} to {}",
+                    crate::shown_path(from),
+                    name_of(to)
+                ));
+                super::input::report(&error);
+                self.toast(super::input::briefly(&error), Level::Error);
+                false
+            }
+        }
+    }
+
     pub(super) fn rename_shown(&mut self) {
         let Some(renaming) = self.renaming.take() else {
             return;
@@ -257,22 +281,8 @@ impl App {
         }
         let from = renaming.path;
         let to = from.with_file_name(&renaming.name);
-        match rename_no_replace(&from, &to) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                self.toast(TAKEN, Level::Warning);
-                return;
-            }
-            Err(error) => {
-                let error = anyhow::Error::from(error).context(format!(
-                    "renaming {} to {}",
-                    crate::shown_path(&from),
-                    name_of(&to)
-                ));
-                super::input::report(&error);
-                self.toast(super::input::briefly(&error), Level::Error);
-                return;
-            }
+        if !self.rename_file(&from, &to, "renaming", || TAKEN.to_string()) {
+            return;
         }
         self.renamed(&from, &to);
         self.toast(
@@ -316,29 +326,15 @@ impl App {
                 adopted,
             } => self.untrash(&entry, listed, index, adopted),
             Edit::Renamed { from, to } => {
-                match rename_no_replace(&to, &from) {
-                    Ok(()) => {}
-                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                        self.toast(
-                            format!(
-                                "Could not rename {} back: a file called {} is there now.",
-                                name_of(&to),
-                                name_of(&from)
-                            ),
-                            Level::Warning,
-                        );
-                        return Effect::Redraw;
-                    }
-                    Err(error) => {
-                        let error = anyhow::Error::from(error).context(format!(
-                            "renaming {} back to {}",
-                            crate::shown_path(&to),
-                            name_of(&from)
-                        ));
-                        super::input::report(&error);
-                        self.toast(super::input::briefly(&error), Level::Error);
-                        return Effect::Redraw;
-                    }
+                let back = || {
+                    format!(
+                        "Could not rename {} back: a file called {} is there now.",
+                        name_of(&to),
+                        name_of(&from)
+                    )
+                };
+                if !self.rename_file(&to, &from, "renaming back", back) {
+                    return Effect::Redraw;
                 }
                 self.renamed(&to, &from);
                 if let Some(at) = self.files.position(&from)
