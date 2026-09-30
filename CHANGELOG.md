@@ -4,7 +4,7 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 0.9.0 - 2026-09-30
 
 ### Added
 
@@ -12,7 +12,6 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   `Ctrl+,` on Linux: opens the configuration file in your editor, writing it
   first with every setting at its default where there is none, as the Mac's
   Settings item (`⌘,`) already did.
-
 - The information panel's *Camera* section says more of how the picture was
   made: the exposure mode and whether it was bracketed, the metering, the
   white balance, the flash, a digital zoom beside the focal length, whether
@@ -28,7 +27,6 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   panel's *Location* section opens where the picture was taken in the
   browser. Where it goes is the new `open_map_link` setting, geojson.io
   with a point at the coordinates unless it says otherwise, with `{lat}` and `{lng}` for the coordinates.
-
 - The information panel has a *Regions* section for the regions a file's
   metadata marks out on the picture: the subject the camera found, and the
   regions its XMP marks, as cataloging programs do for the faces they find —
@@ -43,7 +41,6 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   line of CSV, and the heading as the table under its column heads.
   Resting the pointer on a row outlines its region on the picture, dashed,
   with its subject over it; resting it on the heading outlines every one.
-
 - The information panel describes a picture's gain map under *Image*: whose
   description of it the file gives (ISO 21496-1 or Apple's), the map's size
   and whether it is one channel or three, how many stops above SDR white it
@@ -81,7 +78,6 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 - Keys, gestures and the `open_map_link` setting changed in the
   configuration file take effect as the file is saved, rather than at the
   next start.
-
 - The information panel's *About* section comes straight after the file's
   own, before *Image*: what somebody wrote about the picture says what it
   is before its size and samples say how it is stored.
