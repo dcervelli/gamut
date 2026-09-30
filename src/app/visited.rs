@@ -81,12 +81,12 @@ impl Visited {
     /// the list.
     fn nearest(&self, forward: bool, listed: &impl Fn(&Path) -> bool) -> Option<usize> {
         let at = self.at?;
-        let mut candidates: Box<dyn Iterator<Item = usize>> = if forward {
-            Box::new(at + 1..self.paths.len())
+        let still = |index: &usize| listed(&self.paths[*index]);
+        if forward {
+            (at + 1..self.paths.len()).find(still)
         } else {
-            Box::new((0..at).rev())
-        };
-        candidates.find(|&index| listed(&self.paths[index]))
+            (0..at).rev().find(still)
+        }
     }
 
     /// The file at `from` is called `to` now, wherever it is in the past.

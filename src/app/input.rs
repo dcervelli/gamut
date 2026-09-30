@@ -2434,7 +2434,14 @@ impl App {
 
     /// The words the interface may need this frame, gathered from wherever
     /// the application keeps them.
+    #[cfg(test)]
     pub(super) fn namer(&self) -> Namer {
+        self.namer_under(self.conditions())
+    }
+
+    /// [`App::namer`] under `conditions` already read, so that a frame
+    /// reads them once for everything that asks.
+    pub(super) fn namer_under(&self, conditions: Conditions) -> Namer {
         Namer {
             // The file the bar names, which is the one last asked for.
             path: match self.arriving() {
@@ -2452,7 +2459,7 @@ impl App {
                 .as_ref()
                 .map(|current| ui::explain_state(current, self.headroom()))
                 .unwrap_or_default(),
-            conditions: self.conditions(),
+            conditions,
             keys: Rc::clone(&self.keys),
             gestures: Rc::clone(&self.gestures),
             camera: self

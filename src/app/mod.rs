@@ -1669,22 +1669,32 @@ impl App {
     /// application derives per frame from its window, pointer and loader.
     /// Apart from `redraw` so that the interface can be driven over the
     /// application with no window behind it.
+    #[cfg(test)]
     fn frame_input(&mut self, logical: [f32; 2], scale: f32) -> FrameInput {
+        let conditions = self.conditions();
+        self.frame_input_under(logical, scale, &conditions)
+    }
+
+    /// [`App::frame_input`] under `conditions` already read for the frame.
+    fn frame_input_under(
+        &mut self,
+        logical: [f32; 2],
+        scale: f32,
+        conditions: &input::Conditions,
+    ) -> FrameInput {
         let chooser = self.chooser_open().then(|| {
             let target = self.current.as_ref().and_then(|_| self.files.target_path());
             self.chooser.input(&self.thumbs, target)
         });
         let filmstrip = if self.filmstrip_showing() {
-            let (files, chooser, visited) = (&self.files, &self.chooser, &self.visited);
+            let (files, chooser) = (&self.files, &self.chooser);
             let glimpsed = &self.glimpsed;
-            let listed = |path: &Path| files.position(path).is_some();
-            let (back, forward) = (visited.can_back(listed), visited.can_forward(listed));
             Some(self.filmstrip.input(
                 &self.thumbs,
                 |path| Self::key_of(chooser, glimpsed, path),
                 files.target_path(),
-                back,
-                forward,
+                conditions.visited_before,
+                conditions.visited_after,
             ))
         } else {
             None
@@ -2768,14 +2778,17 @@ impl App {
             .loupe()
             .map(|loupe| ui::loupe::glass(loupe, placement, scale));
         let headroom = self.headroom();
-        let input = self.frame_input(logical, scale);
+        // What holds this frame, read once for the frame's input and for
+        // the words the interface may ask for.
+        let conditions = self.conditions();
+        let input = self.frame_input_under(logical, scale, &conditions);
         // A thumbnail standing in for the file on its way in takes the
         // picture it is replacing off the image layer, the minimap and the
         // glass with it.
         let picture = input.standin.is_none();
         let thumbnail = thumbnail.filter(|_| picture);
         let loupe = loupe.filter(|_| picture);
-        let namer = self.namer();
+        let namer = self.namer_under(conditions);
         let backdrop = ui::backdrop(&self.theme);
 
         let Some(shown) = &mut self.shown else {

@@ -4,7 +4,7 @@
 //! calls for and never sends one, so it needs no loader, no window and no
 //! disk, and can be driven through a whole walk in a test.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -66,6 +66,10 @@ pub(super) struct Step {
 /// the first read.
 pub(super) struct Files {
     paths: Vec<PathBuf>,
+    /// Where each path stands in `paths` — the first place, should a path
+    /// stand twice — built again by [`Files::reindex`] whenever the list
+    /// changes, so that asking where a file is costs nothing per file.
+    places: HashMap<PathBuf, usize>,
     /// Files written while the program was running — a picture pasted from
     /// the clipboard — which live where pictures are kept rather than
     /// wherever we were told to look. No directory named on the command line
@@ -95,8 +99,9 @@ impl Files {
     /// read, which is not necessarily the first one named. An empty list is
     /// a program opened on nothing, and `index` is then nothing either.
     pub(super) fn new(paths: Vec<PathBuf>, index: usize, overrides: decode::Overrides) -> Self {
-        Self {
+        let mut files = Self {
             paths,
+            places: HashMap::new(),
             adopted: Vec::new(),
             index,
             leaving: None,
@@ -104,6 +109,17 @@ impl Files {
             overrides,
             generation: 0,
             pending: None,
+        };
+        files.reindex();
+        files
+    }
+
+    /// Builds `places` from `paths` again: called by everything that
+    /// changes the list, once it has.
+    fn reindex(&mut self) {
+        self.places.clear();
+        for (index, path) in self.paths.iter().enumerate() {
+            self.places.entry(path.clone()).or_insert(index);
         }
     }
 
@@ -149,7 +165,7 @@ impl Files {
 
     /// Where `path` stands in the list, if it is on it.
     pub(super) fn position(&self, path: &Path) -> Option<usize> {
-        self.paths.iter().position(|held| held == path)
+        self.places.get(path).copied()
     }
 
     /// Straight to the file at `index`: what the chooser asks for. Not a
@@ -298,6 +314,7 @@ impl Files {
         self.hidden.remove(&path);
         self.paths.insert(at, path.clone());
         self.adopted.push(path);
+        self.reindex();
         self.request(at, Reload::Fresh, None, source)
     }
 
@@ -316,7 +333,7 @@ impl Files {
         let first = paths.first()?.clone();
         let fresh: Vec<PathBuf> = paths
             .into_iter()
-            .filter(|path| !self.paths.contains(path))
+            .filter(|path| !self.places.contains_key(path))
             .collect();
         if fresh.is_empty() {
             let at = self.position(&first)?;
@@ -328,6 +345,7 @@ impl Files {
             self.hidden.remove(path);
         }
         self.paths.extend(fresh);
+        self.reindex();
         Some(self.request(
             at,
             Reload::Fresh,
@@ -412,6 +430,7 @@ impl Files {
         let shifts = !self.paths.is_empty() && at <= self.index;
         self.hidden.remove(&path);
         self.paths.insert(at, path.clone());
+        self.reindex();
         if shifts {
             self.index += 1;
         }
@@ -432,6 +451,7 @@ impl Files {
     /// command line stays where the command line put it.
     pub(super) fn rename(&mut self, index: usize, to: PathBuf) {
         let from = std::mem::replace(&mut self.paths[index], to.clone());
+        self.reindex();
         for held in &mut self.adopted {
             if *held == from {
                 *held = to.clone();
@@ -452,6 +472,7 @@ impl Files {
             return;
         };
         self.paths.remove(at);
+        self.reindex();
         self.adopted.retain(|held| held != path);
         if at < self.index {
             self.index -= 1;
@@ -552,6 +573,7 @@ impl Files {
         if self.paths.is_empty() {
             let changed = !paths.is_empty();
             self.paths = paths;
+            self.reindex();
             return changed;
         }
         let listed: HashSet<&Path> = paths.iter().map(PathBuf::as_path).collect();
@@ -591,6 +613,7 @@ impl Files {
             .expect("the file on screen was kept whatever the rebuild dropped");
         let changed = merged != self.paths;
         self.paths = merged;
+        self.reindex();
         changed
     }
 
@@ -611,10 +634,21 @@ impl Files {
             return false;
         }
         let shown = self.shown_path().map(Path::to_path_buf);
+        // Moved into their new places rather than copied: a permutation
+        // takes each path once.
+        let mut held: Vec<Option<PathBuf>> = std::mem::take(&mut self.paths)
+            .into_iter()
+            .map(Some)
+            .collect();
         self.paths = places
             .iter()
-            .map(|&index| self.paths[index].clone())
+            .map(|&index| {
+                held[index]
+                    .take()
+                    .expect("a permutation names each place once")
+            })
             .collect();
+        self.reindex();
         if let Some(shown) = shown {
             self.index = self
                 .position(&shown)
