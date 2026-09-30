@@ -99,6 +99,12 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   kept half the bar whatever the name needed, and a narrow window showed
   the facts of a file it had no room to name.
 
+### Fixed
+
+- A BigTIFF, or a TIFF whose directory comes after its pixels, no longer
+  loses a metadata field of more than 32 values: a GeoTIFF key directory of
+  more than eight keys was one, and took the *Georeference* section with it.
+
 ## 0.8.2 - 2026-09-29
 
 ### Fixed

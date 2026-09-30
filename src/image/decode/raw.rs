@@ -1135,7 +1135,7 @@ mod tests {
             let sections: Vec<String> = exif
                 .sections
                 .iter()
-                .map(|section| format!("{} ({})", section.name, section.entries.len()))
+                .map(|section| format!("{} ({})", section.group.name(), section.entries.len()))
                 .collect();
             println!(
                 "{name}: {}x{} {:?} in {} ms; preview {}x{} in {} ms; metadata: {}",
@@ -1151,7 +1151,7 @@ mod tests {
             for section in exif
                 .sections
                 .iter()
-                .filter(|section| ["Camera", "Exposure"].contains(&section.name))
+                .filter(|section| section.group <= crate::image::exif::Group::Exposure)
             {
                 for entry in &section.entries {
                     println!("    {}: {}", entry.name, entry.value);

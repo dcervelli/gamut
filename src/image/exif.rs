@@ -34,12 +34,6 @@ use super::orient::Turn;
 use super::xmp::{self, Xmp};
 use super::{directory, enclosed, geo, tiff};
 
-/// How many components a field may have before it is left out of a block
-/// [`directory`] writes back. A TIFF's strip offsets run to thousands of
-/// numbers, which is a fact about how the file is laid out rather than one
-/// about the picture.
-pub(super) const MAX_COMPONENTS: usize = 32;
-
 /// How long a rendered value may be before it is cut short. Long enough for a
 /// lens name or a comment, short enough that one field cannot become the
 /// whole panel.
@@ -88,8 +82,33 @@ pub struct ShownRegion {
 /// went, so a group that came to nothing is not carried at all.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Section {
-    pub name: &'static str,
+    pub group: Group,
     pub entries: Vec<Entry>,
+}
+
+/// Which group a section is, in the order the panel reads them: what took
+/// the picture, how, where, where its pixels are on the ground, and what
+/// was written about it.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub enum Group {
+    Camera,
+    Exposure,
+    Location,
+    Georeference,
+    About,
+}
+
+impl Group {
+    /// Its heading.
+    pub fn name(self) -> &'static str {
+        match self {
+            Group::Camera => "Camera",
+            Group::Exposure => "Exposure",
+            Group::Location => "Location",
+            Group::Georeference => "Georeference",
+            Group::About => "About",
+        }
+    }
 }
 
 /// A file's metadata, ready to be read: no tags, no types, no offsets, only
@@ -137,63 +156,50 @@ impl Exif {
         // only the library's reading of the sensor can work out.
         if let Some(rows) = super::decode::facts(path) {
             for entry in rows {
-                let name = if of_camera(&entry.name) {
-                    "Camera"
+                let group = if rank(&entry.name) < rank(TAKEN) {
+                    Group::Camera
                 } else {
-                    EXPOSURE
+                    Group::Exposure
                 };
-                exif.fill(name, entry);
+                exif.fill(group, entry);
             }
             exif.compression = None;
         }
         exif
     }
 
-    /// Puts `entry` in the section called `name` where the section does not
-    /// already have a row of its name: where the EXIF reader would have put
-    /// it, before the first row that comes after it, and the section made
-    /// where there was none, in its place among the others.
-    fn fill(&mut self, name: &'static str, entry: Entry) {
-        let at = match self
+    /// Puts `entry` in `group`'s section where the section does not already
+    /// have a row of its name: where the EXIF reader would have put it,
+    /// before the first row that comes after it, and the section made where
+    /// there was none, in its place among the others.
+    fn fill(&mut self, group: Group, entry: Entry) {
+        let at = self
             .sections
             .iter()
-            .position(|section| section.name == name)
+            .position(|section| section.group >= group)
+            .unwrap_or(self.sections.len());
+        if self
+            .sections
+            .get(at)
+            .is_none_or(|section| section.group != group)
         {
-            Some(at) => at,
-            None => {
-                let order = ["Camera", EXPOSURE];
-                let mine = order.iter().position(|n| *n == name).unwrap_or(0);
-                let at = self
-                    .sections
-                    .iter()
-                    .position(|section| {
-                        order
-                            .iter()
-                            .position(|n| *n == section.name)
-                            .is_none_or(|theirs| theirs > mine)
-                    })
-                    .unwrap_or(self.sections.len());
-                self.sections.insert(
-                    at,
-                    Section {
-                        name,
-                        entries: Vec::new(),
-                    },
-                );
-                at
-            }
-        };
-        let section = &mut self.sections[at];
-        if section.entries.iter().any(|have| have.name == entry.name) {
+            self.sections.insert(
+                at,
+                Section {
+                    group,
+                    entries: Vec::new(),
+                },
+            );
+        }
+        let entries = &mut self.sections[at].entries;
+        if entries.iter().any(|have| have.name == entry.name) {
             return;
         }
-        let rank = rank(&entry.name);
-        let before = section
-            .entries
+        let before = entries
             .iter()
-            .position(|have| self::rank(&have.name) > rank)
-            .unwrap_or(section.entries.len());
-        section.entries.insert(before, entry);
+            .position(|have| rank(&have.name) > rank(&entry.name))
+            .unwrap_or(entries.len());
+        entries.insert(before, entry);
     }
 
     /// `prefix` is how much of a TIFF to read; see [`tiff::PREFIX`].
@@ -218,7 +224,7 @@ impl Exif {
     pub fn title(&self) -> Option<&str> {
         self.sections
             .iter()
-            .find(|section| section.name == ABOUT)
+            .find(|section| section.group == Group::About)
             .and_then(|section| section.entries.iter().find(|entry| entry.name == TITLE))
             .map(|entry| entry.value.as_str())
     }
@@ -249,11 +255,10 @@ impl Exif {
                 .cloned()
                 .chain(placed.map(Placed::words))
                 .collect();
-            let mut rows = Vec::new();
-            push(&mut rows, &region.label, join(&parts));
-            let Some(entry) = rows.pop() else {
+            let Some(value) = join(&parts).filter(|value| !value.is_empty()) else {
                 continue;
             };
+            let entry = Entry::new(region.label.clone(), shorten(&value));
             let about: Vec<String> = std::iter::once(region.label.clone())
                 .chain(region.name.clone())
                 .chain(region.details.iter().cloned())
@@ -266,15 +271,6 @@ impl Exif {
             });
         }
         shown_regions
-    }
-
-    /// Where the `Regions` section goes among [`Exif::sections`]: after the
-    /// summaries and the words.
-    pub fn regions_at(&self) -> usize {
-        self.sections
-            .iter()
-            .rposition(|section| SUMMARIES.contains(&section.name))
-            .map_or(0, |at| at + 1)
     }
 
     /// The EXIF block, parsed; `None` where there is none to parse.
@@ -352,7 +348,7 @@ impl Exif {
         let Some(exif) = exif else {
             let sections = (!described.is_empty())
                 .then_some(Section {
-                    name: ABOUT,
+                    group: Group::About,
                     entries: described,
                 })
                 .into_iter()
@@ -374,15 +370,15 @@ impl Exif {
         regions.splice(0..0, subject(exif));
 
         let sections = [
-            ("Camera", camera(exif)),
-            (EXPOSURE, exposure(exif)),
-            ("Location", location(exif)),
-            ("Georeference", geo),
-            (ABOUT, described),
+            (Group::Camera, camera(exif)),
+            (Group::Exposure, exposure(exif)),
+            (Group::Location, location(exif)),
+            (Group::Georeference, geo),
+            (Group::About, described),
         ]
         .into_iter()
         .filter(|(_, entries)| !entries.is_empty())
-        .map(|(name, entries)| Section { name, entries })
+        .map(|(group, entries)| Section { group, entries })
         .collect();
         let orientation = primary(exif, Tag::Orientation)
             .and_then(|field| field.value.get_uint(0))
@@ -401,19 +397,8 @@ impl Exif {
     }
 }
 
-/// The section the words go under, and the row among them that names the
-/// file: the two the chooser reads back out.
-const ABOUT: &str = "About";
+/// The row of `About` that names the file, which the chooser reads back out.
 pub const TITLE: &str = "Title";
-
-/// The section the packet's regions go under.
-pub const REGIONS: &str = "Regions";
-
-/// The sections the regions follow: the summaries, and the words.
-const SUMMARIES: [&str; 5] = ["Camera", EXPOSURE, "Location", "Georeference", ABOUT];
-
-/// The section of how the picture was taken.
-pub const EXPOSURE: &str = "Exposure";
 
 /// One of the fields somebody wrote in words: what it is called when it is
 /// spoken of, the EXIF tag that holds it, and the XMP property that does —
@@ -769,7 +754,8 @@ fn flash(exif: &exif::Exif) -> Option<String> {
 
 /// Where a row stands in its section, `Camera` or `Exposure`: the order
 /// [`camera`] and [`exposure`] push them in, which LibRaw's rows for a raw
-/// are fitted into.
+/// are fitted into, and which of the two it is in — every row before
+/// `Taken` is the camera's.
 fn rank(name: &str) -> usize {
     ORDER
         .iter()
@@ -797,11 +783,6 @@ const ORDER: [&str; 17] = [
     FLASH,
     COMPOSITE,
 ];
-
-/// Whether a row LibRaw read goes under `Camera` rather than `Exposure`.
-fn of_camera(name: &str) -> bool {
-    rank(name) < rank(TAKEN)
-}
 
 /// The names of the `Camera` and `Exposure` sections' rows, which LibRaw's
 /// rows for a raw are named by too.
@@ -1264,19 +1245,16 @@ mod tests {
             .join("test_images")
             .join("dng-cfa.dng");
         let exif = Exif::read(&path);
-        let names: Vec<&str> = exif.sections.iter().map(|section| section.name).collect();
-        assert_eq!(names, ["Camera", EXPOSURE], "{exif:?}");
+        let names: Vec<Group> = exif.sections.iter().map(|section| section.group).collect();
+        assert_eq!(names, [Group::Camera, Group::Exposure], "{exif:?}");
         assert_eq!(
-            section(&exif, EXPOSURE),
+            section(&exif, Group::Exposure),
             [Entry::new(COLOR_TEMPERATURE, "6500 K")]
         );
-        let camera = names.iter().position(|name| *name == "Camera").unwrap();
-        let camera = &exif.sections[camera];
         assert_eq!(
-            camera
-                .entries
+            section(&exif, Group::Camera)
                 .iter()
-                .filter(|entry| entry.name == "Camera")
+                .filter(|entry| entry.name == CAMERA)
                 .count(),
             1
         );
@@ -1401,8 +1379,8 @@ mod tests {
 
     /// What one group holds, and nothing where the file gave that group no
     /// fields and it was therefore never made.
-    fn section<'a>(exif: &'a Exif, name: &str) -> &'a [Entry] {
-        match exif.sections.iter().find(|section| section.name == name) {
+    fn section(exif: &Exif, group: Group) -> &[Entry] {
+        match exif.sections.iter().find(|section| section.group == group) {
             Some(section) => &section.entries,
             None => &[],
         }
@@ -1501,8 +1479,8 @@ mod tests {
         let exif = Exif::read(&path);
         let _ = std::fs::remove_file(&path);
 
-        let rows = |name: &str| -> Vec<(String, String)> {
-            section(&exif, name)
+        let rows = |group: Group| -> Vec<(String, String)> {
+            section(&exif, group)
                 .iter()
                 .map(|entry| (entry.name.clone(), entry.value.clone()))
                 .collect()
@@ -1516,7 +1494,7 @@ mod tests {
 
         // What took it, and then how: the time it was taken first.
         assert_eq!(
-            rows("Camera"),
+            rows(Group::Camera),
             pairs(&[
                 // The maker is not said twice, though the file says it twice.
                 ("Camera", "Apple iPhone 16 Pro"),
@@ -1524,7 +1502,7 @@ mod tests {
             ])
         );
         assert_eq!(
-            rows(EXPOSURE),
+            rows(Group::Exposure),
             pairs(&[
                 ("Taken", "2026-08-27 20:06:17 +12:00"),
                 ("Shutter speed", "1/50 s"),
@@ -1535,7 +1513,7 @@ mod tests {
             ])
         );
         assert_eq!(
-            rows("Location"),
+            rows(Group::Location),
             pairs(&[
                 ("Latitude", "44.68202\u{00b0} S"),
                 ("Longitude", "169.16196\u{00b0} E"),
@@ -1553,13 +1531,22 @@ mod tests {
         // Nothing is listed field by field: not the rest of the GPS
         // directory, not the software that wrote the file — the camera's
         // firmware — and not the orientation, which the `Image` section says.
-        let names: Vec<&str> = exif.sections.iter().map(|section| section.name).collect();
-        assert_eq!(names, ["Camera", EXPOSURE, "Location", ABOUT], "{names:?}");
+        let names: Vec<Group> = exif.sections.iter().map(|section| section.group).collect();
+        assert_eq!(
+            names,
+            [
+                Group::Camera,
+                Group::Exposure,
+                Group::Location,
+                Group::About
+            ],
+            "{names:?}"
+        );
         assert_eq!(exif.orientation, Some(Orientation::Rotate90));
         // The comment is read out of its character code rather than written
         // out as the hex the renderer would make of an undefined type.
         assert_eq!(
-            rows("About"),
+            rows(Group::About),
             pairs(&[("Comment", "On a post by the jetty")]),
             "{exif:?}"
         );
@@ -1611,7 +1598,7 @@ mod tests {
 </rdf:Description></rdf:RDF></x:xmpmeta>"#;
 
     fn description(exif: &Exif) -> Vec<(String, String)> {
-        section(exif, "About")
+        section(exif, Group::About)
             .iter()
             .map(|entry| (entry.name.clone(), entry.value.clone()))
             .collect()
@@ -1662,8 +1649,8 @@ mod tests {
             .map(|(name, value)| (name.to_string(), value.to_string()))
         );
         assert_eq!(exif.title(), Some("Four Quadrants"));
-        let names: Vec<&str> = exif.sections.iter().map(|section| section.name).collect();
-        assert_eq!(names, [ABOUT], "{exif:?}");
+        let names: Vec<Group> = exif.sections.iter().map(|section| section.group).collect();
+        assert_eq!(names, [Group::About], "{exif:?}");
     }
 
     /// A file saying none of them has no About section, rather than an
@@ -1672,7 +1659,9 @@ mod tests {
     fn a_file_saying_nothing_in_words_has_no_about() {
         let exif = Exif::read(&fixture("jpeg-exif-rotated.jpg"));
         assert!(
-            exif.sections.iter().all(|section| section.name != ABOUT),
+            exif.sections
+                .iter()
+                .all(|section| section.group != Group::About),
             "{exif:?}"
         );
     }
@@ -1813,24 +1802,6 @@ mod tests {
         assert!(regions_of(&exif, [100, 80]).is_empty());
     }
 
-    /// The regions stand after the summaries and the words.
-    #[test]
-    fn the_regions_come_after_the_words() {
-        let named = |names: &[&'static str]| Exif {
-            sections: names
-                .iter()
-                .map(|&name| Section {
-                    name,
-                    entries: vec![Entry::new("a", "b")],
-                })
-                .collect(),
-            ..Exif::default()
-        };
-        assert_eq!(named(&[]).regions_at(), 0);
-        assert_eq!(named(&["Camera", EXPOSURE, "About"]).regions_at(), 3);
-        assert_eq!(named(&["Camera", "Location"]).regions_at(), 2);
-    }
-
     /// Where the block and the packet both describe the picture, the block's
     /// words are the ones shown; the packet fills in what the block has no
     /// field for.
@@ -1883,8 +1854,8 @@ mod tests {
             Some(&("Title".to_string(), "Common Buzzard".to_string())),
             "{exif:?}"
         );
-        let names: Vec<&str> = exif.sections.iter().map(|section| section.name).collect();
-        assert_eq!(names, [ABOUT], "{exif:?}");
+        let names: Vec<Group> = exif.sections.iter().map(|section| section.group).collect();
+        assert_eq!(names, [Group::About], "{exif:?}");
     }
 
     /// A block of `ifd0` and an Exif directory of `exif`, one after the
@@ -1904,9 +1875,9 @@ mod tests {
         let path = written("settings.jpg", &jpeg_with(with_exif(ifd0, exif)));
         let exif = Exif::read(&path);
         let _ = std::fs::remove_file(&path);
-        section(&exif, "Camera")
+        section(&exif, Group::Camera)
             .iter()
-            .chain(section(&exif, EXPOSURE))
+            .chain(section(&exif, Group::Exposure))
             .map(|entry| (entry.name.clone(), entry.value.clone()))
             .collect()
     }
@@ -2048,7 +2019,7 @@ mod tests {
         assert_eq!(
             exif.sections,
             [Section {
-                name: "Georeference",
+                group: Group::Georeference,
                 entries: vec![Entry::new("No data", "-9999")],
             }],
         );

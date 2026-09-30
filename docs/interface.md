@@ -959,7 +959,9 @@ strip offsets, bits per sample, a DNG's calibration matrices — and how the
 camera describes itself — the Exif version, APEX restatements of the
 exposure already given — and a column of it buried the few fields worth
 reading. A group that came to nothing is not carried at all, an empty heading
-being a question about where the rest of it went.
+being a question about where the rest of it went. Each group is an `exif::Group`, and
+`ui/info.rs` gives each its mark and its head in one exhaustive match, so a
+group cannot reach the panel without them; the regions come last.
 
 The coordinates are kept as numbers too, as `Exif::position`: the latitude
 and longitude in signed degrees, south and west below zero, which is what a
@@ -1032,8 +1034,8 @@ never shown together, since the name nearly always carries the range.
 The program that wrote the file (`Software`, `xmp:CreatorTool`) and when it
 last did (`DateTime`) are said in words too, and are not in the table: a
 camera writes both into every file, its firmware and the moment of the shot,
-so they would head every photograph's words with two rows nobody wrote. They
-stay in the listing. The section is headed as `Camera` is, by its title where
+so they would head every photograph's words with two rows nobody wrote. The
+section is headed as `Camera` is, by its title where
 it has one, beside the mark the panel's own button wears.
 
 One XMP property is read as the structure it is rather than as words: the
@@ -1067,8 +1069,7 @@ height before width, and its own sample only adds up the other way), its
 documentation spells the namespaces with `https` where every file written
 has `http`, so both are read, and it says nothing of the orientation, so
 the tags are taken to be measured as MWG's are. The account digest and ID
-beside each name are not read. The subject comes first, being the camera's,
-and its tags leave the listing once they have become regions. `Exif` keeps the regions
+beside each name are not read. The subject comes first, being the camera's. `Exif` keeps the regions
 as numbers beside the orientation tag, and the panel writes them out as it
 draws, through `Exif::regions` and `MetadataRegion::placed`, which carries
 each shape through the tag's turn and then the turn in force
@@ -1083,7 +1084,7 @@ when it is not. A file whose orientation came from somewhere other than an
 EXIF block this reads — a JPEG XL's codestream — has its regions taken as
 upright.
 
-The section is a table rather than a column of fields: the subject — who
+The section is a table: the subject — who
 or what is in the region, or its kind where nothing names it — and the
 region's top left corner and size, a circle's the square around it and a
 point's no size, set right as numbers in a column are. `Placed` is the

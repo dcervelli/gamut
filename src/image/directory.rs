@@ -25,13 +25,15 @@ use tiff::decoder::Decoder;
 use tiff::decoder::ifd::Value;
 use tiff::tags::Tag;
 
-use super::exif::MAX_COMPONENTS;
 use super::tiff::tag;
 
-/// How large the rewritten block may be. It holds one directory of small
-/// values — the long ones are left behind with everything else bulky — so
-/// this is a ceiling rather than a size anything reaches.
-const MAX_BLOCK: usize = 64 * 1024;
+/// How large the rewritten block may be. What does not fit is left out,
+/// the largest fields first: a raster's tables of strip or tile offsets run
+/// to thousands of numbers and say how the file is laid out rather than
+/// anything about the picture, while the fields worth reading — a GeoTIFF
+/// key directory, a tie point, a camera's name — are small. A mebibyte
+/// holds any directory's worth of those with room to spare.
+const MAX_BLOCK: usize = 1 << 20;
 
 /// The tag a TIFF keeps its XMP packet in.
 const XMP: u16 = 700;
@@ -92,26 +94,49 @@ fn write(fields: &[(u16, Value)]) -> Option<Vec<u8>> {
     // and the offset of the directory after this one.
     let start = 8 + 2 + fields.len() * 12 + 4;
 
-    for (tag, value) in fields {
-        let Some((kind, count, bytes)) = encode(value) else {
-            continue;
-        };
-        if count > MAX_COMPONENTS || pool.len() + bytes.len() > MAX_BLOCK {
-            continue;
+    // Which fields go in: the smallest first, for as long as the pool has
+    // room, so that one table of offsets cannot crowd out the fields after
+    // it. A value of four bytes or fewer sits in its entry and costs the
+    // pool nothing.
+    let encoded: Vec<(u16, u16, usize, Vec<u8>)> = fields
+        .iter()
+        .filter_map(|(tag, value)| {
+            let (kind, count, bytes) = encode(value)?;
+            Some((*tag, kind, count, bytes))
+        })
+        .collect();
+    let pooled = |bytes: &[u8]| if bytes.len() <= 4 { 0 } else { bytes.len() + 1 };
+    let mut by_size: Vec<usize> = (0..encoded.len()).collect();
+    by_size.sort_by_key(|&index| pooled(&encoded[index].3));
+    let mut kept = vec![false; encoded.len()];
+    let mut budget = MAX_BLOCK;
+    for index in by_size {
+        let cost = pooled(&encoded[index].3);
+        if cost <= budget {
+            budget -= cost;
+            kept[index] = true;
         }
+    }
+
+    for (tag, kind, count, bytes) in encoded
+        .iter()
+        .zip(&kept)
+        .filter(|(_, kept)| **kept)
+        .map(|(field, _)| field)
+    {
         let mut entry = [0u8; 12];
         entry[0..2].copy_from_slice(&tag.to_le_bytes());
         entry[2..4].copy_from_slice(&kind.to_le_bytes());
-        entry[4..8].copy_from_slice(&(count as u32).to_le_bytes());
+        entry[4..8].copy_from_slice(&(*count as u32).to_le_bytes());
         if bytes.len() <= 4 {
-            entry[8..8 + bytes.len()].copy_from_slice(&bytes);
+            entry[8..8 + bytes.len()].copy_from_slice(bytes);
         } else {
             // Values start on an even byte, as the format requires.
             if !pool.len().is_multiple_of(2) {
                 pool.push(0);
             }
             entry[8..12].copy_from_slice(&((start + pool.len()) as u32).to_le_bytes());
-            pool.extend_from_slice(&bytes);
+            pool.extend_from_slice(bytes);
         }
         entries.push(entry);
     }
@@ -282,10 +307,24 @@ mod tests {
             assert!(write(&[(256, value)]).is_none());
         }
 
-        // And the bulky ones: a table of tile offsets says how the file is
-        // laid out, not what the image is.
-        let offsets = Value::List(vec![Value::Unsigned(0); MAX_COMPONENTS + 1]);
+        // And a table too large for the block: tile offsets say how the file
+        // is laid out, not what the image is.
+        let offsets = Value::List(vec![Value::Unsigned(0); MAX_BLOCK / 4 + 1]);
         assert!(encode(&offsets).is_some(), "it encodes, and is dropped");
         assert!(write(&[(324, offsets)]).is_none());
+    }
+
+    /// A long field that fits is kept — a GeoTIFF key directory of ten keys
+    /// is forty numbers — and a table that takes most of the block does not
+    /// crowd out the smaller fields after it.
+    #[test]
+    fn the_smallest_fields_are_kept_first() {
+        let offsets = Value::List(vec![Value::Unsigned(0); MAX_BLOCK / 4 - 4]);
+        let keys = Value::List(vec![Value::Short(1); 40]);
+        let block = write(&[(324, offsets), (34735, keys)]).expect("a block");
+        let count = u16::from_le_bytes([block[8], block[9]]);
+        assert_eq!(count, 1, "the offsets are left out");
+        let tag = u16::from_le_bytes([block[10], block[11]]);
+        assert_eq!(tag, 34735, "the keys are kept");
     }
 }

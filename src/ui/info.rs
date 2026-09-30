@@ -22,7 +22,7 @@ use egui::{
 use crate::clock;
 use crate::image::AlphaMode;
 use crate::image::decode::Rendering;
-use crate::image::exif::{self, ShownRegion};
+use crate::image::exif::{self, Group, ShownRegion};
 use crate::image::gain_map::Lift;
 use crate::image::metadata_region::Placed;
 use crate::image::orient;
@@ -41,38 +41,29 @@ use super::{
     Current, PADDING, PANEL_INSET, PANEL_RADIUS, PANEL_WIDTH, RULE_WIDTH, TEXT_SIZE, rule,
 };
 
+/// The heading of the regions the metadata marks out on the picture.
+const REGIONS: &str = "Regions";
+
 /// Below this the panel would show its header, two facts and a scrollbar, so
 /// it stays off instead. There is no matching minimum for the width: the
 /// panel is [`PANEL_WIDTH`] wide or it is not on screen.
 pub(super) const INFO_MIN_HEIGHT: f32 = 160.0;
 
-/// The size a field's name is written at, against [`TEXT_SIZE`] for its
-/// value: the values are what is being read, and the names only say which is
+/// The size a field's name is written at, against [`TEXT_SIZE`] for what it
+/// says: the values are what is being read, and the names only say which is
 /// which.
 const LABEL_SIZE: f32 = TEXT_SIZE * 0.85;
 
-/// The space above a field's name. Enough that a name reads as belonging to
-/// the value under it rather than to the one above, and no more: the column
-/// is long, and every pixel spent parting two fields is a pixel of some
-/// further field pushed off the bottom of the panel.
-const FIELD_GAP: f32 = 6.0;
-/// The space above a section's name, which has to part two sections more
-/// plainly than a field parts two fields — near enough twice as plainly, with
-/// a hairline drawn through the middle of it doing part of the parting.
+/// The space above a section's name, with a hairline drawn through the
+/// middle of it doing part of the parting.
 const SECTION_GAP: f32 = 11.0;
-/// The space between a field's name and its value. Less than nothing: a line
-/// box carries its own leading above the glyphs, so the two lines are pulled
-/// a pixel into one another's boxes without their ink coming any closer, and
-/// a name and what it names read as one thing rather than as two.
-const LABEL_GAP: f32 = -1.0;
 /// The space between two lines of a section written as prose rather than as
 /// fields, which are one account of one thing and are set as a paragraph is.
 const LINE_GAP: f32 = 1.0;
 /// The space between a heading's mark and its name.
 const MARK_GAP: f32 = 6.0;
-/// The space under the head of a section drawn with a mark: less than
-/// [`FIELD_GAP`], the mark already making the head's line taller than the
-/// words in it.
+/// The space under the head of a section drawn with a mark: small, the mark
+/// already making the head's line taller than the words in it.
 const HEAD_GAP: f32 = 3.0;
 /// The space between a table's two columns.
 const COLUMN_GAP: f32 = 8.0;
@@ -131,35 +122,6 @@ pub struct FileFacts {
     pub reader: Option<&'static str>,
 }
 
-/// What a row of the column is, which is what it is drawn as: the name of a
-/// section, the name of a field, or what that field says.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Kind {
-    Heading,
-    Label,
-    Value,
-}
-
-impl Kind {
-    /// The size it is written at.
-    fn size(self) -> f32 {
-        match self {
-            Kind::Heading | Kind::Value => TEXT_SIZE,
-            Kind::Label => LABEL_SIZE,
-        }
-    }
-
-    fn ink(self, theme: &Theme) -> Color {
-        // The panel is the bars' own ground, so the words on it are the bars'
-        // own ink; a heading is the one thing on it that is picked out.
-        match self {
-            Kind::Heading => theme.accent,
-            Kind::Label => theme.text_dim,
-            Kind::Value => theme.text_primary,
-        }
-    }
-}
-
 /// Something the panel can put on the clipboard: the whole of it, one
 /// section of it, or one field.
 ///
@@ -198,16 +160,14 @@ impl Copyable {
 /// drawing is told apart.
 #[derive(Clone, Copy)]
 enum Face {
-    /// Each field's name over its value, under the section's name: every
-    /// section the metadata reads out, and any that has no drawing of its own.
-    Fields,
     /// The file on disk, as a few lines of prose under a heading with a mark:
     /// see [`file_section`].
     File,
     /// A section with a head of its own: some of its fields written on one
     /// line beside a mark, and the rest as a table under them — see
     /// [`headed_section`]. The picture, headed by its size and its format,
-    /// and the camera, headed by its name.
+    /// the camera by its name, and so on; one with no head of its own, by
+    /// its name.
     Headed {
         mark: &'static [icon::Mark],
         head: &'static [&'static str],
@@ -486,7 +446,6 @@ fn column(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, picture: &egui:
                     ui.add_space((SECTION_GAP - RULE_WIDTH) / 2.0);
                 }
                 match section.face {
-                    Face::Fields => fields_section(pass, ui, place, section, index, width),
                     Face::File => file_section(pass, ui, current, section, index, width),
                     Face::Headed { mark, head, button } => {
                         headed_section(pass, ui, place, section, index, width, mark, head, button)
@@ -498,32 +457,6 @@ fn column(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, picture: &egui:
                 index += section.facts.len();
             }
         });
-}
-
-/// A section as a column of fields under its name. `place` is where the
-/// section is down the column and `first` where its first field is in the
-/// column's fields, which is what a click on either copies.
-fn fields_section(
-    pass: &mut Pass,
-    ui: &mut egui::Ui,
-    place: usize,
-    section: &Section,
-    first: usize,
-    width: f32,
-) {
-    block(pass, ui, Copyable::Section(place), width, |ui| {
-        words(ui, Kind::Heading, section.name, pass.theme);
-    });
-    for (index, fact) in (first..).zip(&section.facts) {
-        ui.add_space(FIELD_GAP);
-        // A field's name and the value under it are one block, being one
-        // thing to point at and one row to copy.
-        block(pass, ui, Copyable::Fact(index), width, |ui| {
-            words(ui, Kind::Label, &fact.name, pass.theme);
-            ui.add_space(LABEL_GAP);
-            words(ui, Kind::Value, &fact.value, pass.theme);
-        });
-    }
 }
 
 /// The file on disk, written as it would be said rather than as a table:
@@ -682,7 +615,16 @@ fn marked_heading(
                 theme.accent.into(),
                 theme.panel_background.into(),
             );
-            words(ui, Kind::Heading, section.name, theme);
+            // A heading is the one thing on the panel picked out in the
+            // accent; everything else wears the bars' own inks.
+            ui.add(
+                Label::new(
+                    RichText::new(section.name)
+                        .size(TEXT_SIZE)
+                        .color(theme.accent),
+                )
+                .wrap(),
+            );
         });
     })
 }
@@ -1109,11 +1051,6 @@ fn exact_bytes(bytes: u64) -> String {
     }
 }
 
-/// One run of words in the column, broken to its width.
-fn words(ui: &mut egui::Ui, kind: Kind, text: &str, theme: &Theme) {
-    ui.add(Label::new(RichText::new(text).size(kind.size()).color(kind.ink(theme))).wrap());
-}
-
 /// A stretch of the column that can be pointed at: what a click on it
 /// copies. While the pointer is on it, the button saying so appears over the
 /// words rather than beside them — the column is as wide as the panel lets
@@ -1200,48 +1137,29 @@ fn contents(current: &Current) -> Contents {
         ),
     ];
     let exif = &current.exif;
-    let first = sections.len();
     for section in &exif.sections {
         let entries = section
             .entries
             .iter()
             .map(|entry| (entry.name.as_str(), entry.value.clone()));
-        // The camera's own section is headed by the camera's name, the
-        // exposure by its own name under an aperture's mark, the
-        // location's by where it is, and the words by the title, under the
-        // mark the panel's own button wears; the georeference by its own
-        // name, under a map's mark. Every other the metadata reads out is a
-        // column of fields.
-        let face = match section.name {
-            "Camera" => Face::Headed {
-                mark: icon::CAMERA,
-                head: &[exif::CAMERA],
-                button: None,
-            },
-            "Location" => Face::Headed {
-                mark: icon::MAP_PIN,
-                head: &[exif::LATITUDE, exif::LONGITUDE],
-                // Only where the file gave numbers a map can take.
-                button: exif.position.map(|_| (icon::MAP, Control::OpenMap)),
-            },
-            exif::EXPOSURE => Face::Headed {
-                mark: icon::APERTURE,
-                head: &[],
-                button: None,
-            },
-            "Georeference" => Face::Headed {
-                mark: icon::MAP,
-                head: &[],
-                button: None,
-            },
-            "About" => Face::Headed {
-                mark: icon::INFO,
-                head: &[exif::TITLE],
-                button: None,
-            },
-            _ => Face::Fields,
+        let (mark, head, button): (_, &'static [&'static str], _) = match section.group {
+            Group::Camera => (icon::CAMERA, &[exif::CAMERA], None),
+            Group::Exposure => (icon::APERTURE, &[], None),
+            // Only where the file gave numbers a map can take.
+            Group::Location => (
+                icon::MAP_PIN,
+                &[exif::LATITUDE, exif::LONGITUDE],
+                exif.position.map(|_| (icon::MAP, Control::OpenMap)),
+            ),
+            Group::Georeference => (icon::MAP, &[], None),
+            // The mark the panel's own button wears.
+            Group::About => (icon::INFO, &[exif::TITLE], None),
         };
-        sections.push(Section::new(section.name, face, fields(entries)));
+        sections.push(Section::new(
+            section.group.name(),
+            Face::Headed { mark, head, button },
+            fields(entries),
+        ));
     }
     // The regions are written out here rather than with the rest, since
     // where each is depends on the turn in force.
@@ -1253,13 +1171,10 @@ fn contents(current: &Current) -> Contents {
             .iter()
             .map(|region| (region.entry.name.as_str(), region_row(region))),
     );
-    sections.insert(
-        first + exif.regions_at(),
-        Section {
-            regions,
-            ..Section::new(exif::REGIONS, Face::Regions, facts)
-        },
-    );
+    sections.push(Section {
+        regions,
+        ..Section::new(REGIONS, Face::Regions, facts)
+    });
     sections.retain(|section| !section.facts.is_empty());
     Contents { sections }
 }
@@ -1658,14 +1573,14 @@ mod tests {
         Exif {
             sections: vec![
                 Section {
-                    name: "Camera",
+                    group: Group::Camera,
                     entries: vec![
                         entry("Camera", "Apple iPhone 16 Pro"),
                         entry("Exposure", "1/50 s \u{00b7} f/1.78 \u{00b7} ISO 200"),
                     ],
                 },
                 Section {
-                    name: "Capture metadata",
+                    group: Group::About,
                     entries: (0..24)
                         .map(|index| entry(&format!("Field {index}"), &format!("value {index}")))
                         .collect(),
@@ -1727,8 +1642,8 @@ mod tests {
         // it arrived in, and is read under the heading that says so.
         assert!(index("Size") < index("Image"));
         assert!(index("Resolution") < index("Camera"));
-        assert!(index("Camera") < index("Capture metadata"));
-        assert!(index("Capture metadata") < index("Field 0"));
+        assert!(index("Camera") < index("About"));
+        assert!(index("About") < index("Field 0"));
     }
 
     /// A file whose XMP marks regions out on the picture has them under a
@@ -1754,7 +1669,7 @@ mod tests {
         let section = contents
             .sections
             .iter()
-            .find(|section| section.name == exif::REGIONS)
+            .find(|section| section.name == REGIONS)
             .expect("a regions section");
         assert!(matches!(section.face, Face::Regions));
         assert_eq!(section.regions.len(), section.facts.len());
@@ -1767,13 +1682,13 @@ mod tests {
         // A row copies as its cells, and the section as the table.
         let at = contents
             .facts()
-            .position(|(name, _)| name == exif::REGIONS)
+            .position(|(name, _)| name == REGIONS)
             .expect("a region's row");
         assert_eq!(copied(&current, Copyable::Fact(at)), "Jane Doe,0,0,2,2");
         let place = contents
             .sections
             .iter()
-            .position(|section| section.name == exif::REGIONS)
+            .position(|section| section.name == REGIONS)
             .expect("a regions section");
         assert_eq!(
             copied(&current, Copyable::Section(place)),
@@ -1782,7 +1697,6 @@ mod tests {
         let written_now = written(&current);
         let index = |text: &str| written_now.iter().position(|row| row == text);
         assert!(index("Camera") < index("Regions"));
-        assert!(index("Regions") < index("Capture metadata"));
         assert_eq!(
             written_now[index("Face").expect("the region is written") + 1],
             "Jane Doe,0,0,2,2"
@@ -1817,10 +1731,7 @@ mod tests {
         assert!(written.contains(&"File".to_string()), "{written:?}");
         assert!(written.contains(&"Image".to_string()), "{written:?}");
         assert!(!written.contains(&"Camera".to_string()), "{written:?}");
-        assert!(
-            !written.contains(&"Capture metadata".to_string()),
-            "{written:?}"
-        );
+        assert!(!written.contains(&"About".to_string()), "{written:?}");
     }
 
     /// A fact the file will not give up is left out altogether: a name with a
@@ -1861,7 +1772,6 @@ mod tests {
             face("Camera"),
             Face::Headed { head, .. } if head == [exif::CAMERA]
         ));
-        assert!(matches!(face("Capture metadata"), Face::Fields));
     }
 
     /// When a photograph was taken is said as how long ago, where the date
