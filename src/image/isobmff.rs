@@ -109,7 +109,8 @@ pub fn boxes(bytes: &[u8], mut from: usize, to: usize) -> Vec<([u8; 4], usize, u
         } else if size == 0 {
             size = to - from;
         }
-        if size < header {
+        // A header that runs past the range is a box that is not in it.
+        if from + header > to || size < header {
             break;
         }
         let Some(end) = from.checked_add(size) else {
@@ -325,6 +326,22 @@ mod tests {
         let mut skipped = Fields::new(&[0, 0, 0, 8]);
         skipped.skip(3);
         assert_eq!(skipped.u8(), Some(8));
+    }
+
+    /// A box whose sixteen-byte header runs past the end of the range,
+    /// with bytes beyond the range for the header to be read from, ends the
+    /// walk rather than being handed back with its body starting past its
+    /// end.
+    #[test]
+    fn a_long_header_past_the_range_ends_the_walk() {
+        let mut bytes = boxed(b"ftyp", &[0; 8]);
+        bytes.extend(1u32.to_be_bytes());
+        bytes.extend(b"mdat");
+        bytes.extend(40u64.to_be_bytes());
+        bytes.extend([0; 24]);
+        // The range ends inside the second box's long length field.
+        assert_eq!(boxes(&bytes, 0, 28), [(*b"ftyp", 8, 16)]);
+        assert_eq!(boxes(&bytes, 0, 32).len(), 2);
     }
 
     /// A box that does not add up ends the walk rather than looping on it

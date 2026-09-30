@@ -163,11 +163,18 @@ fn stored(
     };
     let mut image = match gain_mapped {
         Some(image) => image,
-        None => dynamic::describe(
-            DynamicImage::from_decoder(decoder)?,
-            Some(::image::ImageFormat::Jpeg),
-            color,
-        )?,
+        None => {
+            // Checked from the header, as every decoder checks, before the
+            // crate allocates for what it claims.
+            let (width, height) = decoder.dimensions();
+            let components = decoder.color_type().channel_count() as usize;
+            super::check_decoded_size(width, height, components, 8)?;
+            dynamic::describe(
+                DynamicImage::from_decoder(decoder)?,
+                Some(::image::ImageFormat::Jpeg),
+                color,
+            )?
+        }
     };
     image.depth = depth::find(bytes);
     Ok(image)

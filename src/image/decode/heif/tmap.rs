@@ -40,6 +40,12 @@ pub(super) struct ToneMap {
 /// this is not carrying a gain map worth finding.
 const MAX_META: u64 = 16 << 20;
 
+/// The most a `tmap` item's payload may run to, over all its extents: the
+/// metadata is a few dozen bytes for one channel and under two hundred for
+/// three, so an item claiming kilobytes — in one extent or in thousands —
+/// is not one, and is refused before it is gathered.
+const MAX_TMAP: usize = 4096;
+
 /// The `tmap` item of the file, if it has one this reader can make sense
 /// of. `None` for a file with none, and for one whose item tables say
 /// something this reader does not follow — a payload kept somewhere it
@@ -71,8 +77,9 @@ pub(super) fn find(source: &mut dyn ReadSeek) -> Result<Option<ToneMap>> {
     let mut payload = Vec::new();
     for &(offset, length) in &location.extents {
         let length = usize::try_from(length).map_err(|_| anyhow!("tmap extent too long"))?;
-        if length > MAX_META as usize {
-            bail!("tmap item claims {length} bytes");
+        let total = payload.len().saturating_add(length);
+        if total > MAX_TMAP {
+            bail!("tmap item claims {total} bytes");
         }
         match location.construction {
             // In the file itself.
@@ -436,6 +443,18 @@ mod tests {
             found.metadata.alternate_hdr_headroom,
             expected.alternate_hdr_headroom
         );
+    }
+
+    /// An item claiming more than any tone map's metadata comes to is
+    /// refused before its extents are gathered, rather than read in.
+    #[test]
+    fn a_tone_map_claiming_kilobytes_is_refused() {
+        let bytes = file(&vec![0u8; MAX_TMAP + 1], true);
+        let error = find(&mut std::io::Cursor::new(bytes)).expect_err("refused");
+        assert!(format!("{error:#}").contains("claims"), "{error:#}");
+        // And one at the ceiling is read, and found not to parse.
+        let bytes = file(&vec![0u8; MAX_TMAP], true);
+        assert!(find(&mut std::io::Cursor::new(bytes)).unwrap().is_none());
     }
 
     #[test]

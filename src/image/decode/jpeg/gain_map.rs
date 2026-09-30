@@ -92,11 +92,10 @@ impl<'a> Container<'a> {
             bail!("the gain map has a zero dimension");
         }
         let channels = if map.color().has_color() { 3 } else { 1 };
-        crate::image::decode::check_decoded_size(map_width, map_height, channels as usize, 8)?;
         let data = if channels == 3 {
-            map.to_rgb8().into_raw()
+            map.into_rgb8().into_raw()
         } else {
-            map.to_luma8().into_raw()
+            map.into_luma8().into_raw()
         };
 
         // The base as it decoded, with the map beside it: the lift is the
@@ -156,13 +155,19 @@ fn states_hdr_base(gain_map: &[u8]) -> bool {
     value == b"true"
 }
 
+/// One of the two JPEGs decoded, under the ceilings every decoder here
+/// works under, and checked against the byte ceiling from its header before
+/// the crate allocates for it. The base and the map are each checked in
+/// their own right: the map's size is independent of the base's, and a tiny
+/// picture may carry a huge map.
 fn decode(bytes: &[u8]) -> Result<::image::DynamicImage> {
-    let mut reader =
-        ::image::ImageReader::with_format(std::io::Cursor::new(bytes), ::image::ImageFormat::Jpeg);
-    let mut limits = ::image::Limits::default();
-    limits.max_alloc = Some(crate::image::decode::MAX_DECODED_BYTES);
-    reader.limits(limits);
-    Ok(reader.decode()?)
+    use ::image::ImageDecoder;
+    let mut decoder = ::image::codecs::jpeg::JpegDecoder::new(std::io::Cursor::new(bytes))?;
+    decoder.set_limits(super::super::dynamic::limits())?;
+    let (width, height) = decoder.dimensions();
+    let components = decoder.color_type().channel_count() as usize;
+    crate::image::decode::check_decoded_size(width, height, components, 8)?;
+    Ok(::image::DynamicImage::from_decoder(decoder)?)
 }
 
 #[cfg(test)]

@@ -132,6 +132,11 @@ impl super::Decoder for ImageRs {
             decoder
                 .set_limits(dynamic::limits())
                 .context("reading the Radiance header")?;
+            // Three floats a pixel, twelve bytes, which a header inside the
+            // dimension limits can still claim more than the ceiling of:
+            // refused here, before the crate allocates for it.
+            let (width, height) = decoder.dimensions();
+            super::check_decoded_size(width, height, 3, 32)?;
             let exposure = decoder.metadata().exposure;
             let decoded =
                 DynamicImage::from_decoder(decoder).context("decoding the Radiance picture")?;
@@ -425,6 +430,19 @@ mod tests {
         // The oldest pictures have no signature at all; the format line is
         // what says what they are.
         assert!(is_radiance(b"pvalue -r\nFORMAT=32-bit_rle_rgbe\n\n"));
+    }
+
+    /// A Radiance header claiming a picture past the ceiling is refused
+    /// from the header, with the sentence that says so, rather than
+    /// allocated for: 30000 by 30000 is inside the dimension limits and
+    /// twelve bytes a pixel is past the byte one.
+    #[test]
+    fn a_radiance_picture_past_the_ceiling_is_refused_from_its_header() {
+        let header = b"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 30000 +X 30000\n".to_vec();
+        let error = ImageRs
+            .decode(&mut std::io::Cursor::new(header), Overrides::default())
+            .expect_err("refused before the pixels");
+        assert!(format!("{error:#}").contains("GB decoded"), "{error:#}");
     }
 
     /// The format line is only trusted inside a text header: past a blank

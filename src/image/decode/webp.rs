@@ -54,15 +54,18 @@ impl super::Decoder for Webp {
     }
 
     fn dimensions(&self, source: &mut dyn super::ReadSeek) -> Result<Option<(u32, u32)>> {
-        let mut decoder =
-            WebPDecoder::new(BufReader::new(source)).context("reading the WebP container")?;
-        let (width, height) = decoder.dimensions();
-        // A quarter turn swaps them, exactly as `decode` will once the
-        // pixels are read. Reporting the stored size for a rotated file would
-        // open the window in the wrong shape.
-        let exif = decoder.exif_metadata().context("reading the EXIF chunk")?;
-        let orientation = orient::from_chunk(exif.as_deref());
-        Ok(Some(orient::size(width, height, orientation)))
+        // Through the same open the decode makes, so that the EXIF chunk is
+        // read under the same memory budget: a chunk claiming gigabytes is
+        // refused rather than allocated for. A quarter turn swaps the size,
+        // exactly as `decode` will once the pixels are read; reporting the
+        // stored size for a rotated file would open the window in the wrong
+        // shape.
+        let opened = Opened::new(source)?;
+        Ok(Some(orient::size(
+            opened.width,
+            opened.height,
+            opened.orientation,
+        )))
     }
 
     fn decode(
@@ -332,6 +335,20 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(stated, [40, 250, 70_000].map(Duration::from_millis));
+    }
+
+    /// A metadata chunk claiming more than the file holds is refused by the
+    /// header read as by the decode, rather than allocated for: the fixture
+    /// with an `EXIF` chunk, its chunk's length rewritten to two gigabytes.
+    #[test]
+    fn a_metadata_chunk_claiming_gigabytes_is_refused_by_the_header_read() {
+        let mut bytes = std::fs::read("test_images/webp-exif-rotated.webp").unwrap();
+        let at = bytes
+            .windows(4)
+            .position(|window| window == b"EXIF")
+            .expect("the fixture carries an EXIF chunk");
+        bytes[at + 4..at + 8].copy_from_slice(&0x7fff_ffffu32.to_le_bytes());
+        assert!(Webp.dimensions(&mut std::io::Cursor::new(bytes)).is_err());
     }
 
     /// The form type is what makes a RIFF file ours. A WAV is a RIFF file

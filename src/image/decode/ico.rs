@@ -88,10 +88,11 @@ impl super::Decoder for Ico {
 
     fn dimensions(&self, source: &mut dyn super::ReadSeek) -> Result<Option<(u32, u32)>> {
         // The directory states each entry's size, so the one we are going to
-        // show can be measured without unpacking it.
+        // show can be measured without unpacking it — as far as the
+        // directory can state it; see `stated_size`.
         let entries = directory(source)?;
         let chosen = choose(&entries);
-        Ok(Some((chosen.width as u32, chosen.height as u32)))
+        stated_size(source, chosen).map(Some)
     }
 
     fn decode(
@@ -128,6 +129,26 @@ impl super::Decoder for Ico {
         };
         entry(source, chosen)
     }
+}
+
+/// The size `entry` decodes to. The directory's fields are a byte each and
+/// stop at 256, and a PNG entry need not: its own `IHDR`, the first chunk
+/// after the signature, says what it is, and is read for the size the
+/// decode will hand back. A bitmap's DIB is held to the directory by
+/// `image`, so the directory's word is the decode's there.
+fn stated_size(source: &mut dyn super::ReadSeek, entry: &Entry) -> Result<(u32, u32)> {
+    source
+        .seek(SeekFrom::Start(entry.offset as u64))
+        .with_context(|| format!("seeking to the {entry} entry"))?;
+    let mut head = [0u8; 24];
+    let read =
+        super::fill(source, &mut head).with_context(|| format!("reading the {entry} entry"))?;
+    if read == head.len() && png::is_png(&head) && &head[12..16] == b"IHDR" {
+        let width = u32::from_be_bytes([head[16], head[17], head[18], head[19]]);
+        let height = u32::from_be_bytes([head[20], head[21], head[22], head[23]]);
+        return Ok((width, height));
+    }
+    Ok((entry.width as u32, entry.height as u32))
 }
 
 /// One entry's picture, by whichever of the two routes its bytes call for.
@@ -364,6 +385,41 @@ mod tests {
         let mut overlapping = dir(1, &[(16, 16, 32)]);
         overlapping[18..22].copy_from_slice(&8u32.to_le_bytes());
         assert!(!Ico.sniff(&overlapping));
+    }
+
+    /// The directory's size fields stop at 256, and a PNG entry larger than
+    /// that says its own size in its `IHDR`: the header read and the decode
+    /// have to agree on it, since the window opens at the one and shows the
+    /// other.
+    #[test]
+    fn a_png_entry_larger_than_the_directory_can_say_is_measured_from_its_header() {
+        let (width, height) = (300u32, 200u32);
+        let mut payload = Vec::new();
+        {
+            let mut encoder = ::png::Encoder::new(&mut payload, width, height);
+            encoder.set_color(::png::ColorType::Grayscale);
+            encoder.set_depth(::png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            writer
+                .write_image_data(&vec![7u8; (width * height) as usize])
+                .unwrap();
+        }
+        // One entry, its width and height bytes both zero — 256, as far as
+        // the directory can say.
+        let mut bytes = vec![0, 0, ICON as u8, 0, 1, 0];
+        bytes.extend([0u8, 0, 0, 0]);
+        bytes.extend(1u16.to_le_bytes());
+        bytes.extend(8u16.to_le_bytes());
+        bytes.extend((payload.len() as u32).to_le_bytes());
+        bytes.extend(((DIRECTORY + ENTRY) as u32).to_le_bytes());
+        bytes.extend(&payload);
+
+        let mut cursor = Cursor::new(bytes);
+        assert_eq!(Ico.dimensions(&mut cursor).unwrap(), Some((width, height)));
+        let image = Ico
+            .decode(&mut cursor, crate::image::decode::Overrides::default())
+            .unwrap();
+        assert_eq!((image.width, image.height), (width, height));
     }
 
     /// A cursor opened as `.ico` gets past the sniff only by its extension,
