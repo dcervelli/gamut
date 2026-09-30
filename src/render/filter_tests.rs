@@ -602,7 +602,7 @@ fn the_thumbnail_is_drawn_beside_the_view_and_builds_the_chain_it_needs() {
             loupe: None,
             mark_clipped: false,
             headroom: Headroom::None,
-            lift: 0.0,
+            lift: None,
             turn: Turn::NONE,
         },
     );
@@ -697,7 +697,7 @@ fn the_loupe_is_cut_to_its_circle_and_replaces_what_is_under_it() {
             }),
             mark_clipped: false,
             headroom: Headroom::None,
-            lift: 0.0,
+            lift: None,
             turn: Turn::NONE,
         },
     );
@@ -750,7 +750,7 @@ fn the_loupe_is_cut_to_its_circle_and_replaces_what_is_under_it() {
             }),
             mark_clipped: false,
             headroom: Headroom::None,
-            lift: 0.0,
+            lift: None,
             turn: Turn::NONE,
         },
     );
@@ -821,9 +821,15 @@ fn the_compositor_clears_the_glass_past_the_pictures_edge() {
         radius: 6.0,
     };
     let scene = Scene {
-        placement,
-        thumbnail: None,
-        loupe: Some(glass),
+        picture: Some(Draw {
+            view: placement,
+            thumbnail: None,
+            loupe: Some(glass),
+            mark_clipped: false,
+            headroom: Headroom::None,
+            lift: None,
+            turn: Turn::NONE,
+        }),
         display: &display,
         ui: &paint,
         scale: 1.0,
@@ -833,10 +839,6 @@ fn the_compositor_clears_the_glass_past_the_pictures_edge() {
             square: 8.0,
         },
         headroom: Headroom::None,
-        mark_clipped: false,
-        lift: 0.0,
-        turn: Turn::NONE,
-        picture: true,
     };
     composite.prepare(
         &gpu.queue,
@@ -942,7 +944,7 @@ fn the_lift_on_the_device_agrees_with_the_readout() {
     for weight in [1.0f32, 0.0, 0.5] {
         let table = map.table(weight);
         let mut quads = Draw::plain(whole(target, &image), None);
-        quads.lift = weight;
+        quads.lift = Some(&table);
         let pixels = draw_layer(gpu, &mut layer, target, quads);
         for y in 0..image.height {
             for x in 0..image.width {
@@ -995,7 +997,7 @@ fn the_coarse_chain_is_reduced_from_lifted_light() {
     for weight in [0.0f32, 1.0] {
         let table = map.table(weight);
         let mut quads = Draw::plain(placement, None);
-        quads.lift = weight;
+        quads.lift = Some(&table);
         let pixels = draw_layer(gpu, &mut layer, target, quads);
         for block in 0..2u32 {
             let mut total = [0.0f32; 3];
@@ -1412,16 +1414,22 @@ fn composited(
         pixels_per_point: 1.0,
     };
     let scene = Scene {
-        placement: Placement {
-            x: 0.0,
-            y: 0.0,
-            width: width as f32,
-            height: 1.0,
-            zoom: 1.0,
-            upscale: Upscale::Nearest,
-        },
-        thumbnail: None,
-        loupe: None,
+        picture: Some(Draw {
+            view: Placement {
+                x: 0.0,
+                y: 0.0,
+                width: width as f32,
+                height: 1.0,
+                zoom: 1.0,
+                upscale: Upscale::Nearest,
+            },
+            thumbnail: None,
+            loupe: None,
+            mark_clipped: false,
+            headroom,
+            lift: None,
+            turn: Turn::NONE,
+        }),
         display,
         ui: &paint,
         scale: 1.0,
@@ -1431,10 +1439,6 @@ fn composited(
             square: 8.0,
         },
         headroom,
-        mark_clipped: false,
-        lift: 0.0,
-        turn: Turn::NONE,
-        picture: true,
     };
     composite.prepare(&gpu.queue, &scene, gray, &output, [None, None], None);
     render_to(gpu, [width, 1], |encoder, view| {
@@ -1580,7 +1584,7 @@ fn the_thumbnail_is_drawn_over_the_glass() {
             }),
             mark_clipped: false,
             headroom: Headroom::None,
-            lift: 0.0,
+            lift: None,
             turn: Turn::NONE,
         },
     );

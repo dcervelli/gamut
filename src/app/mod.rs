@@ -46,7 +46,7 @@ use crate::motion::Motion;
 use crate::openers::{self, Opener};
 use crate::player;
 use crate::portal::{self, Pick, Picked};
-use crate::render::{GpuImage, HdrPreference, Placement, Reduced, Renderer, Scene, Upscale};
+use crate::render::{Draw, GpuImage, HdrPreference, Placement, Reduced, Renderer, Scene, Upscale};
 use crate::settings::{Config, State, StateFile};
 use crate::theme::{self, Theme};
 use crate::thumbnailer::{Delivered, Facts, News, Thumb, Thumbnailer};
@@ -2964,25 +2964,26 @@ impl App {
             .unwrap_or(&fallback);
 
         let scene = Scene {
-            placement,
-            thumbnail,
-            loupe,
+            picture: picture.then(|| Draw {
+                view: placement,
+                thumbnail,
+                loupe,
+                mark_clipped: self.panels.mark_clipped,
+                headroom,
+                lift: self
+                    .current
+                    .as_ref()
+                    .and_then(|current| current.lift.as_deref()),
+                turn: self
+                    .current
+                    .as_ref()
+                    .map_or(Turn::NONE, |current| current.turn),
+            }),
             display,
             ui: &painted,
             scale,
             backdrop,
             headroom,
-            mark_clipped: self.panels.mark_clipped,
-            lift: self
-                .current
-                .as_ref()
-                .and_then(|current| current.lift.as_ref())
-                .map_or(0.0, |table| table.weight()),
-            turn: self
-                .current
-                .as_ref()
-                .map_or(Turn::NONE, |current| current.turn),
-            picture,
         };
         match shown.renderer.render(scene, textures) {
             Ok(()) => self.reported_error = false,

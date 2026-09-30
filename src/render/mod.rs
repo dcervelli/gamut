@@ -30,7 +30,6 @@ use anyhow::{Context, Result, anyhow};
 use winit::window::Window;
 
 use crate::image::auxiliary::Showing;
-use crate::image::orient::Turn;
 use crate::image::{
     DecodedImage,
     display::{Display, Headroom},
@@ -44,7 +43,8 @@ pub use placement::{Glass, Placement, Upscale};
 
 use composite::Composite;
 use gpu::attachment;
-use image_layer::{Draw, ImageLayer};
+pub use image_layer::Draw;
+use image_layer::ImageLayer;
 pub use image_layer::{GpuImage, Upload};
 use upload::Capabilities;
 pub use upload::Reduced;
@@ -85,35 +85,22 @@ struct Targets {
 /// without any of that having to be reimplemented in sRGB.
 #[derive(Clone, Copy)]
 pub struct Scene<'a> {
-    pub placement: Placement,
-    pub thumbnail: Option<Placement>,
-    pub loupe: Option<Glass>,
+    /// What the image layer draws — the picture, the minimap's thumbnail
+    /// and the loupe's glass, under the marks, the lift and the turn —
+    /// where the picture is on screen at all: `None` while a thumbnail of
+    /// another file stands in for it, when the layer draws nothing and the
+    /// compositor lays the interface over the backdrop alone.
+    pub picture: Option<Draw<'a>>,
+    /// The display in force, for the compositor's curve.
     pub display: &'a Display,
-    /// What the interface drew this pass.
+    /// What egui drew this frame.
     pub ui: &'a UiPaint,
-    /// Physical pixels to the logical one the interface is laid out in.
+    /// Physical pixels to the logical one.
     pub scale: f32,
     pub backdrop: Backdrop,
-    /// Whether the picture is going out with room above white, which decides
-    /// what the compositor does with no curve on the highlights: clip, or
-    /// let them through. Not the surface's alone to say: an HDR surface on a
-    /// monitor in SDR mode has none, and the switch can turn it off.
+    /// Whether the surface has room above white — see [`Headroom`] — which
+    /// chooses the curve and what the marks count as clipped.
     pub headroom: Headroom,
-    /// Whether the pixels the window has taken to black or to white are
-    /// painted in the warning colors: a toggle of the interface, and
-    /// nothing to do with the file, which is why it is not in `display`.
-    pub mark_clipped: bool,
-    /// How much of a gain map's lift the picture gets, from none to all of
-    /// it: the weight the surface's room above white asks for. Nothing for
-    /// a picture without a map.
-    pub lift: f32,
-    /// How far the picture is turned on screen. `placement` is already the
-    /// turned picture's; the turn says which way the texture runs inside it.
-    pub turn: Turn,
-    /// Whether the image layer draws the picture at all. Not while the
-    /// interface stands a thumbnail of the file on its way in over it: the
-    /// picture installed is the one being stepped away from.
-    pub picture: bool,
 }
 
 /// One pass of egui's interface, tessellated and ready to draw: the
@@ -392,9 +379,7 @@ impl Renderer {
 
         // The backdrop is the compositor's, and it reads the scene itself.
         let Scene {
-            placement,
-            thumbnail,
-            loupe,
+            picture,
             display,
             ui,
             ..
@@ -453,31 +438,21 @@ impl Renderer {
 
         // A view that has just zoomed out past what the coarse chain covers
         // builds the rest of it here.
-        if scene.picture {
-            self.image_layer.prepare(
-                &self.device,
-                &self.queue,
-                &mut encoder,
-                Draw {
-                    view: placement,
-                    thumbnail,
-                    loupe,
-                    mark_clipped: scene.mark_clipped,
-                    headroom: scene.headroom,
-                    lift: scene.lift,
-                    turn: scene.turn,
-                },
-                size,
-                display,
-            );
+        if let Some(draw) = picture {
+            self.image_layer
+                .prepare(&self.device, &self.queue, &mut encoder, draw, size, display);
         }
         // Where an image quad lands, and so where transparency has to read as
         // a checkerboard rather than as the plain backdrop. Asked of the image
         // layer rather than assumed from `placement`, since a frame drawn
         // before the first file has decoded has a placement but no image.
-        let drawn = self.image_layer.current().filter(|_| scene.picture);
+        let drawn = self.image_layer.current().zip(picture);
         let (checkered, glass, gray) = match drawn {
-            Some(image) => ([Some(placement), thumbnail], loupe, image.is_gray()),
+            Some((image, draw)) => (
+                [Some(draw.view), draw.thumbnail],
+                draw.loupe,
+                image.is_gray(),
+            ),
             None => ([None, None], None, false),
         };
         self.composite
@@ -508,7 +483,7 @@ impl Renderer {
                 ))],
                 ..Default::default()
             });
-            if scene.picture {
+            if picture.is_some() {
                 self.image_layer.render(&mut pass);
             }
         }

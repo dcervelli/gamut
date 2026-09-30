@@ -16,7 +16,7 @@ use super::reduce::{self, Level, Reducer};
 use super::shader_codes;
 use super::upload::{self, Capabilities, Layout, Reduced};
 use crate::image::auxiliary::Showing;
-use crate::image::gain_map::GainMap;
+use crate::image::gain_map::{GainMap, Table};
 use crate::image::orient::Turn;
 use crate::image::{
     AlphaMode, Channels, DecodedImage,
@@ -261,7 +261,7 @@ struct Slot {
 /// two things about the frame that the shader's marks on clipped pixels
 /// depend on.
 #[derive(Clone, Copy)]
-pub struct Draw {
+pub struct Draw<'a> {
     pub view: Placement,
     pub thumbnail: Option<Placement>,
     pub loupe: Option<Glass>,
@@ -271,14 +271,16 @@ pub struct Draw {
     /// What decides whether white is being clipped at all, which is the
     /// display's to say — see `Display::clips_white`.
     pub headroom: Headroom,
-    /// How much of a gain map's lift the picture gets, from none to all of
-    /// it: the weight the surface's room above white asks for.
-    pub lift: f32,
+    /// The gain map's lift the picture is drawn through: the table at the
+    /// weight the surface's room asks for, worked out once by the
+    /// application and read here as the readouts read it. `None` for a
+    /// picture with no map, and for the base alone.
+    pub lift: Option<&'a Table>,
     /// How far the picture is turned: both quads read the texture turned.
     pub turn: Turn,
 }
 
-impl Draw {
+impl Draw<'_> {
     /// A draw with nothing marked, on an SDR surface: what a test draws.
     #[cfg(test)]
     pub fn plain(view: Placement, thumbnail: Option<Placement>) -> Self {
@@ -288,7 +290,7 @@ impl Draw {
             loupe: None,
             mark_clipped: false,
             headroom: Headroom::None,
-            lift: 0.0,
+            lift: None,
             turn: Turn::NONE,
         }
     }
@@ -547,7 +549,7 @@ impl ImageLayer {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
-        draw: Draw,
+        draw: Draw<'_>,
         target: [f32; 2],
         display: &Display,
     ) {
@@ -557,7 +559,7 @@ impl ImageLayer {
             loupe,
             mark_clipped,
             headroom,
-            lift: weight,
+            lift: table,
             turn,
         } = draw;
         let Some(image) = &mut self.image else {
@@ -573,10 +575,20 @@ impl ImageLayer {
         // on the device — and the coarse chain, reduced from light lifted
         // by the old one, goes with it, to be built again from the new, as
         // do the marks, which were judged on the old light.
+        let weight = table.map_or(0.0, Table::weight);
         if let Some(lift) = &mut image.lift
             && lift.weight != weight
         {
-            lift.write(queue, weight);
+            // The table handed down, or — asked for none — the base alone.
+            let base;
+            let table = match table {
+                Some(table) => table,
+                None => {
+                    base = lift.map.table(0.0);
+                    &base
+                }
+            };
+            lift.write(queue, table);
             image.levels.clear();
             image.bindings.truncate(1);
             image.chain_built = false;
@@ -771,13 +783,14 @@ impl Lift {
             base_offset: [0.0; 3],
             alternate_offset: [0.0; 3],
         };
-        lift.write(&upload.queue, 0.0);
+        // The base alone until a frame asks for a weight.
+        let base = map.table(0.0);
+        lift.write(&upload.queue, &base);
         Ok(lift)
     }
 
-    /// Writes the table at `weight` over the one on the device.
-    fn write(&mut self, queue: &wgpu::Queue, weight: f32) {
-        let table = self.map.table(weight);
+    /// Writes `table` over the one on the device.
+    fn write(&mut self, queue: &wgpu::Queue, table: &Table) {
         let texels = table.texels();
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
