@@ -4,6 +4,25 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- The information panel has a *Raw Data* tab beside its *Curated* one:
+  every tag ExifTool reads from the file, maker notes included, grouped by
+  where each comes from, with a filter that lists the best matches first, a
+  click on a tag copying its value, a click on a filtered one showing it in
+  the tree, and the tags shown copied as plain text, CSV, JSON or XML. `I`
+  opens the panel on it, and `i` now opens the panel on its curated facts. It needs ExifTool
+  installed, runs it only while the tab is showing, and finds it through the
+  new `exiftool` setting, a name or a path.
+
+### Fixed
+
+- On Linux, a large copy — the picture, or a long list of tags — no longer
+  disappears from the clipboard when something reads only the start of it,
+  as a clipboard manager's preview may.
+
 ## 0.9.0 - 2026-09-30
 
 ### Added

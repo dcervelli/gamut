@@ -21,6 +21,7 @@ pub mod minimap;
 pub mod rename;
 mod slider;
 pub mod standin;
+pub mod tags;
 pub mod toast;
 pub mod tooltip;
 pub mod transport;
@@ -514,6 +515,9 @@ pub struct Panels {
     pub coordinate_format: CoordinateFormat,
     /// And how a latitude and a longitude are written, where they are.
     pub geographic_format: GeographicFormat,
+    /// Which tab the information panel is on. Not a flag, and not kept
+    /// between runs: the panel opens on the facts.
+    pub info_tab: tags::Tab,
 }
 
 impl Panels {
@@ -650,6 +654,9 @@ pub struct FrameInput {
     /// [`chooser::id`] — and this has to be handed over on every frame it
     /// is, since a popup not drawn for a frame is a popup egui has closed.
     pub chooser: Option<chooser::Input>,
+    /// The information panel's Tags tab, on every frame it is on screen,
+    /// and `None` while it is not.
+    pub tags: Option<tags::Input>,
     /// The rename dialog, on every frame it is up, and `None` while it is
     /// not. Its open state is the application's — see `App::renaming` —
     /// which is why it is a modal rather than a popup: nothing egui does
@@ -1296,6 +1303,7 @@ mod tests {
             pixel_format: PixelFormat::default(),
             coordinate_format: CoordinateFormat::default(),
             geographic_format: GeographicFormat::default(),
+            info_tab: tags::Tab::Facts,
         };
         let area = |width, height| room(Rect::new(0.0, 0.0, width, height), &panels);
 

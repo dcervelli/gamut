@@ -19,6 +19,7 @@ mod menubar;
 mod order;
 mod playback;
 mod region;
+mod tags;
 mod visited;
 mod window;
 
@@ -33,6 +34,7 @@ use winit::event::{KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::window::{Window, WindowId};
 
+use crate::exiftool;
 use crate::gestures::{Gestures, Surface};
 use crate::image::DecodedImage;
 use crate::image::auxiliary::{Auxiliary, Showing};
@@ -73,6 +75,7 @@ use input::{Effect, Pointer};
 use kept::{Kept, Left, Settings};
 use measuring::{Measured, Measuring};
 use region::Marking;
+use tags::Tags;
 use window::{file_label, initial_window_size, loading_title, window_title};
 
 /// What wakes the event loop from another thread.
@@ -102,6 +105,9 @@ pub enum UserEvent {
     /// The picture has been measured through its lift — see [`measuring`].
     /// Boxed: it carries the histograms.
     Measured(Box<Measured>),
+    /// exiftool has read a file for the info panel's Tags tab — see
+    /// [`exiftool`]. Boxed: it carries every tag.
+    Tags(Box<exiftool::Delivered>),
     /// The desktop has asked for these files to be opened: on a Mac, what
     /// Finder sends — see `finder`. Nothing sends it elsewhere, where the
     /// files arrive on the command line.
@@ -161,6 +167,12 @@ impl From<Measured> for UserEvent {
     }
 }
 
+impl From<exiftool::Delivered> for UserEvent {
+    fn from(delivered: exiftool::Delivered) -> Self {
+        UserEvent::Tags(Box::new(delivered))
+    }
+}
+
 /// A [`Deliver`] that sends each `T` to the loop as the user event it
 /// stands for, whether or not the loop is still there to take it: for a
 /// thread that finishes what it was asked and stops.
@@ -197,6 +209,8 @@ pub struct Threads {
     pub arranged: arranging::Deliver,
     /// How the picture measured through its lift comes back.
     pub measured: measuring::Deliver,
+    /// How exiftool's reading of a file comes back.
+    pub tags: exiftool::Deliver,
 }
 
 impl Threads {
@@ -224,6 +238,7 @@ impl Threads {
             folder: deliver(proxy()),
             arranged: deliver(proxy()),
             measured: deliver(proxy()),
+            tags: deliver(proxy()),
         }
     }
 }
@@ -424,6 +439,12 @@ pub struct App {
     /// The web address the map button opens, with `{lat}` and `{lng}` for
     /// the coordinates: the setting.
     open_map_link: String,
+    /// Where exiftool is, for the info panel's Tags tab: the setting, and
+    /// the program it was found as.
+    exiftool: exiftool::Program,
+    /// What the Tags tab holds, and how a run of exiftool comes back.
+    tags: Tags,
+    tags_delivered: exiftool::Deliver,
     glimpsed: HashMap<PathBuf, folder::Glimpse>,
     /// The folder the last picture shown came from, whole, which the
     /// desktop's file dialog starts in; and that folder while the empty
@@ -604,6 +625,7 @@ impl App {
             folder: folder_delivered,
             arranged: arranged_delivered,
             measured,
+            tags: tags_delivered,
         } = threads;
         let Options {
             overrides,
@@ -692,6 +714,9 @@ impl App {
             named,
             directories,
             open_map_link: config.open_map_link.clone(),
+            exiftool: exiftool::Program::new(&config.exiftool),
+            tags: Tags::default(),
+            tags_delivered,
             glimpsed: HashMap::new(),
             last_folder: None,
             offered_folder: None,
@@ -735,6 +760,7 @@ impl App {
                 pixel_format: kept_state.pixel_format,
                 coordinate_format: kept_state.coordinate_format,
                 geographic_format: kept_state.geographic_format,
+                info_tab: ui::tags::Tab::Facts,
             },
             trash: Trash::detect(),
             edits: Vec::new(),
@@ -978,6 +1004,78 @@ impl App {
         self.shown
             .as_ref()
             .is_some_and(|shown| egui::Popup::is_id_open(&shown.gui.ctx, ui::chooser::id()))
+    }
+
+    /// Whether the info panel's Tags tab is on screen: the panel is up, on
+    /// that tab, with room for it — the reading the frame draws it by, so
+    /// that what is drawn and what is run cannot disagree.
+    pub(super) fn tags_showing(&self) -> bool {
+        self.panels.show_info && self.panels.info_tab == ui::tags::Tab::Tags && self.room().info
+    }
+
+    /// Puts the information panel up on `tab`, or takes it down where it is
+    /// up on that tab already: what `i` and `I` do. Refused, as the panel's
+    /// button is, where the window has no room for it.
+    pub(super) fn show_info_on(&mut self, tab: ui::tags::Tab) -> Effect {
+        if self.refuses(ui::Control::Info) {
+            return Effect::Nothing;
+        }
+        if self.panels.show_info && self.panels.info_tab == tab {
+            self.panels.show_info = false;
+        } else {
+            self.panels.show_info = true;
+            self.panels.info_tab = tab;
+            if self.tags_showing() {
+                self.request_tags();
+            }
+        }
+        Effect::Redraw
+    }
+
+    /// Asks exiftool for the tags of the file on screen, unless they are
+    /// kept or on their way: what the tab coming on screen does, and a file
+    /// arriving while it is.
+    pub(super) fn request_tags(&mut self) {
+        if self.current.is_none() {
+            return;
+        }
+        let Some(path) = self.files.shown_path().map(Path::to_path_buf) else {
+            return;
+        };
+        let Some(stamp) = watch::Signature::of(&path) else {
+            return;
+        };
+        let Some(request) = self.tags.want(&path, stamp) else {
+            return;
+        };
+        match self.exiftool.locate() {
+            Some(program) => {
+                exiftool::run_on_thread(
+                    program.to_path_buf(),
+                    request,
+                    Arc::clone(&self.tags_delivered),
+                );
+            }
+            None => {
+                self.tags.take(exiftool::Delivered {
+                    asked: request.asked,
+                    path: request.path,
+                    stamp: request.stamp,
+                    outcome: Err(exiftool::Failure::NotInstalled),
+                });
+            }
+        }
+    }
+
+    /// Takes in what exiftool said, and says whether the tab on screen
+    /// shows it. A spawn that found nothing where the program was found has
+    /// it looked for again next time.
+    fn tags_read(&mut self, delivered: exiftool::Delivered) -> Effect {
+        if matches!(delivered.outcome, Err(exiftool::Failure::NotInstalled)) {
+            self.exiftool.lost();
+        }
+        let about = self.tags.take(delivered);
+        Effect::redraw_if(about && self.tags_showing())
     }
 
     /// The list has changed — a directory read again, a paste taken in —
@@ -1840,6 +1938,16 @@ impl App {
             self.chooser.follow(&self.files);
             self.chooser.input(&self.thumbs, target)
         });
+        let tags = if self.tags_showing() {
+            let file = self
+                .current
+                .as_ref()
+                .map(|current| current.file.path.clone());
+            let configured = self.exiftool.configured().to_string();
+            Some(self.tags.input(&file.unwrap_or_default(), &configured))
+        } else {
+            None
+        };
         let filmstrip = if self.filmstrip_showing() {
             self.filmstrip.follow(&self.files);
             let (files, chooser) = (&self.files, &self.chooser);
@@ -1893,6 +2001,7 @@ impl App {
             transport: self.transport(),
             filmstrip,
             chooser,
+            tags,
             rename,
             export,
             empty: self.is_empty(),
@@ -2183,6 +2292,15 @@ impl App {
         self.keys = Rc::new(config.keys);
         self.gestures = Rc::new(config.gestures);
         self.open_map_link = config.open_map_link;
+        // Looked for again where it was not found too, since what the
+        // configuration names may have been installed since; and where the
+        // tab is waiting on it, it reads the file at once.
+        if config.exiftool != self.exiftool.configured() || !self.exiftool.found() {
+            self.exiftool = exiftool::Program::new(&config.exiftool);
+            if self.tags_showing() {
+                self.request_tags();
+            }
+        }
         #[cfg(target_os = "macos")]
         self.rekey_menubar();
         match complaint {
@@ -2631,6 +2749,11 @@ impl App {
             showing: Showing::Picture,
             held: Vec::new(),
         });
+        // The Tags tab follows the file on screen, whatever brought it:
+        // another file, or this one read again after a write.
+        if self.tags_showing() {
+            self.request_tags();
+        }
         // The camera's JPEG was asked for and the file has none: said, since
         // the button that would say it is not drawn for such a file. Not for
         // a file rewritten on disk, which said it when it arrived.
@@ -3291,6 +3414,7 @@ impl ApplicationHandler<UserEvent> for App {
             UserEvent::Folder(listed) => self.folder_read(listed),
             UserEvent::Arranged(arranged) => self.arranged_read(arranged),
             UserEvent::Measured(measured) => self.measured(*measured),
+            UserEvent::Tags(delivered) => self.tags_read(*delivered),
             UserEvent::Opened(paths) => {
                 self.open_sent(paths);
                 // The files the program was launched to open, which the

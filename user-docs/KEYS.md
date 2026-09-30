@@ -702,7 +702,8 @@ where all of it is set.
 | --- | --- | --- |
 | `h` | Show or hide the histogram | `interface.histogram` |
 | `y` | Count the histogram's bars up its axis, or the logarithm of them | `interface.log-counts` |
-| `i` | Show or hide the file information | `interface.info` |
+| `i` | Show the file information on its *Curated* tab, or hide it | `interface.info` |
+| `I` | Show the file information on its *Raw Data* tab, or hide it | `interface.raw-data` |
 | `m` | Show or hide the minimap | `interface.minimap` |
 | `g` | Show or hide the grid over the image | `interface.grid` |
 | `l` | Show or hide the loupe | `interface.loupe` |

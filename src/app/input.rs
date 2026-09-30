@@ -129,7 +129,11 @@ pub enum Action {
     /// counts. About the plot rather than about the image, which is why it
     /// is not one of the things [`Action::ResetDisplay`] puts back.
     ToggleLogCounts,
+    /// The information panel on one of its tabs, or away where it is up on
+    /// that tab already: `i` the curated facts, `I` every tag exiftool
+    /// reads. The panel's button is the plain toggle, which keeps the tab.
     ToggleInfo,
+    ToggleRawData,
     ToggleMinimap,
     ToggleGrid,
     /// The loupe: the toggle the button beside the grid's presses, and the
@@ -438,6 +442,14 @@ pub(super) fn action_of(tip: Tip) -> Option<Action> {
             | Control::Zoom
             | Control::Dismiss
             | Control::Facts(_)
+            | Control::InfoTab(_)
+            | Control::TagsCopyMenu
+            | Control::TagsCopy(_)
+            | Control::TagsFold(_)
+            | Control::VisitExiftool
+            | Control::TagsRefresh
+            | Control::TagGroup(_)
+            | Control::TagRow(_)
             | Control::OpenMap
             | Control::Chooser
             | Control::Choose(_)
@@ -475,6 +487,25 @@ pub(super) fn action_of(tip: Tip) -> Option<Action> {
 /// Which copy each cell is is the menu's; what that copy does, what it is
 /// called and which key runs it are all the key table's, and this is the one
 /// place the two are put together.
+/// What the information panel's button is called: the toggle itself, with
+/// the two keys that each put up one of its tabs named under it.
+const INFO_TOGGLE: &str = "Show or hide the file information";
+
+/// What the window says when a row of the Tags tab is copied.
+const COPIED_TAG: &str = "Copied value.";
+
+/// And when the tags shown are, `count` of them, as `table`.
+fn copied_tags(count: usize, table: ui::tags::Table) -> String {
+    let tags = if count == 1 { "tag" } else { "tags" };
+    let form = match table {
+        ui::tags::Table::Text => "plain text",
+        ui::tags::Table::Csv => "CSV",
+        ui::tags::Table::Json => "JSON",
+        ui::tags::Table::Xml => "XML",
+    };
+    format!("Copied {count} {tags} as {form}.")
+}
+
 fn copy_action(what: Copies) -> Action {
     match what {
         Copies::Name => CopyName,
@@ -876,8 +907,14 @@ pub static ROWS: &[Row] = &[
     Row {
         section: Section::Interface,
         when: None,
-        help: "Toggle the file information panel",
+        help: "Show the file information's Curated tab, or hide it",
         keys: one!("interface.info", ToggleInfo, [key('i')]),
+    },
+    Row {
+        section: Section::Interface,
+        when: None,
+        help: "Show the file information's Raw Data tab, or hide it",
+        keys: one!("interface.raw-data", ToggleRawData, [key('I')]),
     },
     Row {
         section: Section::Interface,
@@ -1478,6 +1515,16 @@ impl Naming for Namer {
             // coordinate's keys only for a file they do something in, read
             // from the conditions the help popup dims those keys by, as the
             // menu shows their rows only then.
+            // The panel's button is the plain toggle, keeping the tab; the
+            // two keys each put up a tab of their own, and are named under
+            // it.
+            Tip::Control(Control::Info) => (
+                vec![INFO_TOGGLE.to_string()],
+                [ToggleInfo, ToggleRawData]
+                    .into_iter()
+                    .filter_map(|action| hint(keys, action))
+                    .collect(),
+            ),
             Tip::Control(Control::PixelFormat) => (
                 vec![ui::tooltip::words(at)?],
                 [
@@ -2037,7 +2084,8 @@ impl App {
             ToggleLuma => return self.press(Control::Luma),
             TogglePlanes => return self.press(Control::Planes),
             ToggleLogCounts => return self.press(Control::Log),
-            ToggleInfo => return self.press(Control::Info),
+            ToggleInfo => return self.show_info_on(ui::tags::Tab::Facts),
+            ToggleRawData => return self.show_info_on(ui::tags::Tab::Tags),
             ToggleMinimap => return self.press(Control::Minimap),
             ToggleGrid => return self.press(Control::Grid),
             ToggleLoupe => return self.press(Control::Loupe),
@@ -2382,6 +2430,7 @@ impl App {
             picking: self.picking,
             nothing_open: current.is_none(),
             arriving: self.arriving().is_some(),
+            tags_in: self.tags.tags_in(),
         }
     }
 
@@ -2389,7 +2438,7 @@ impl App {
     /// is drawn dead, and its tooltip says why, since the three read one
     /// [`Conditions`]. A press on a dead control that quietly set something
     /// no one could see would be worse than one that does nothing.
-    fn refuses(&self, control: Control) -> bool {
+    pub(super) fn refuses(&self, control: Control) -> bool {
         ui::tooltip::disabled(Tip::Control(control), self.conditions()).is_some()
     }
 
@@ -2486,6 +2535,8 @@ impl App {
             // which rows are on screen — whose thumbnails go to the front of
             // the queue, and are the ones the screen keeps.
             ui::Command::Query(query) => self.chooser.set_query(query),
+            // The Tags tab's field: the tags that fit it, made again.
+            ui::Command::Filter(query) => self.tags.set_query(query),
             // The rename dialog's field: what it says now, judged for the
             // next frame to say what is wrong with it.
             ui::Command::Name(name) => self.set_rename_name(name),
@@ -2977,6 +3028,11 @@ impl App {
                     .flag_mut(widget)
                     .expect("each of these toggles one flag");
                 *flag = !*flag;
+                // The panel up again on the Tags tab reads the file it is
+                // about, which may have changed while it was down.
+                if widget == Control::Info && self.tags_showing() {
+                    self.request_tags();
+                }
                 Effect::Redraw
             }
             // The keys' own actions, and which of the two by the modifier
@@ -3187,6 +3243,58 @@ impl App {
             Control::Copies(what) => self.perform(copy_action(what)),
             Control::Facts(copies) => {
                 self.copy_facts(copies);
+                Effect::Redraw
+            }
+            // The information panel's two tabs: the Tags tab reads the file
+            // on screen as it comes up, and only then.
+            Control::InfoTab(tab) => {
+                self.panels.info_tab = tab;
+                if self.tags_showing() {
+                    self.request_tags();
+                }
+                Effect::Redraw
+            }
+            Control::TagGroup(row) => {
+                self.tags.toggle_group(row);
+                Effect::Redraw
+            }
+            Control::TagsFold(fold) => {
+                self.tags.fold(fold);
+                Effect::Redraw
+            }
+            // The Raw Data tab's own while exiftool is not found: where to
+            // get it, and a look for it again once it is installed.
+            Control::VisitExiftool => {
+                if let Err(error) = openers::browse(crate::exiftool::WEBSITE) {
+                    report(&error);
+                    self.toast(briefly(&error), Level::Error);
+                }
+                Effect::Redraw
+            }
+            Control::TagsRefresh => {
+                self.exiftool.lost();
+                self.request_tags();
+                Effect::Redraw
+            }
+            // A query's hit is the way back to the tree: the query put away
+            // and the tag shown where it is, nothing copied. A tag in the
+            // tree is copied.
+            Control::TagRow(row) => {
+                if !self.tags.filtering()
+                    && let Some(value) = self.tags.value_at(row)
+                {
+                    self.copy(value.as_bytes(), clipboard::TEXT, COPIED_TAG);
+                }
+                self.tags.choose(row);
+                Effect::Redraw
+            }
+            // Opens the menu, which is egui's to do.
+            Control::TagsCopyMenu => Effect::Nothing,
+            Control::TagsCopy(table) => {
+                if let Some((text, count)) = self.tags.copied(table) {
+                    let said = copied_tags(count, table);
+                    self.copy(text.as_bytes(), clipboard::TEXT, &said);
+                }
                 Effect::Redraw
             }
             Control::OpenMap => {

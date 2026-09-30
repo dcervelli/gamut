@@ -19,6 +19,7 @@ use super::filmstrip::{Direction, Order, Sort};
 use super::info::HEADER_GAP;
 use super::pixel::{CoordinateFormat, GeographicFormat, PixelFormat};
 use super::style::TOGGLE_RADIUS;
+use super::tags::Table;
 use super::tooltip::Tip;
 use super::{TEXT_SIZE, fonts, help, icon};
 
@@ -474,6 +475,20 @@ pub(super) fn copy_items(pass: &mut Pass, ui: &mut Ui) {
             }
         }
     });
+}
+
+/// The menu of the forms the Raw Data tab's tags can be copied in, off the
+/// copy button at the head of the tab. No title: the button it hangs off
+/// says what it is.
+pub(super) fn tags_copy_items(pass: &mut Pass, ui: &mut Ui) {
+    for table in Table::ALL {
+        let control = Control::TagsCopy(table);
+        let response = ui.add(Button::new(table.label()));
+        let response = pass.tooltip(response, Tip::Control(control));
+        if response.clicked() {
+            pass.press(control);
+        }
+    }
 }
 
 /// The menu of the file itself, off the button before its name: its name,

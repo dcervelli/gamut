@@ -415,6 +415,13 @@ pub(super) const CHEVRON_RIGHT: &[Mark] = &[
     Mark::Line([15.0, 12.0], [9.0, 6.0]),
 ];
 
+/// Lucide's `chevron-down`: a group of the Tags tab's tree open, where
+/// [`CHEVRON_RIGHT`] is one folded shut.
+pub(super) const CHEVRON_DOWN: &[Mark] = &[
+    Mark::Line([6.0, 9.0], [12.0, 15.0]),
+    Mark::Line([12.0, 15.0], [18.0, 9.0]),
+];
+
 /// Lucide's `chevrons-left-right`: a pair of edges pushed apart, the mark
 /// for the fit that fills the window across.
 pub(super) const CHEVRONS_LEFT_RIGHT: &[Mark] = &[
@@ -433,6 +440,16 @@ pub(super) const CHEVRONS_UP_DOWN: &[Mark] = &[
     Mark::Line([12.0, 4.0], [17.0, 9.0]),
     Mark::Line([7.0, 15.0], [12.0, 20.0]),
     Mark::Line([12.0, 20.0], [17.0, 15.0]),
+];
+
+/// Lucide's `chevrons-down-up`: the same pair pointing in, the mark for
+/// folding every group of the Raw Data tab's tree, where
+/// [`CHEVRONS_UP_DOWN`] opens them all.
+pub(super) const CHEVRONS_DOWN_UP: &[Mark] = &[
+    Mark::Line([7.0, 20.0], [12.0, 15.0]),
+    Mark::Line([12.0, 15.0], [17.0, 20.0]),
+    Mark::Line([7.0, 4.0], [12.0, 9.0]),
+    Mark::Line([12.0, 9.0], [17.0, 4.0]),
 ];
 
 /// Lucide's `rotate-ccw`: a turn back to where the rendering started.
@@ -1166,7 +1183,7 @@ mod tests {
 
     /// Every icon in the table, so that a new one is held to the same
     /// promises as the rest.
-    const ICONS: [&[Mark]; 41] = [
+    const ICONS: [&[Mark]; 43] = [
         CHART_AREA,
         INFO,
         CIRCLE_QUESTION_MARK,
@@ -1185,8 +1202,10 @@ mod tests {
         EXPAND,
         CHEVRON_LEFT,
         CHEVRON_RIGHT,
+        CHEVRON_DOWN,
         CHEVRONS_LEFT_RIGHT,
         CHEVRONS_UP_DOWN,
+        CHEVRONS_DOWN_UP,
         ROTATE_CCW,
         SPLINE,
         TRIANGLE_ALERT,

@@ -6,6 +6,7 @@ mod clipboard;
 mod clock;
 #[cfg(target_os = "linux")]
 mod dbus;
+mod exiftool;
 #[cfg(target_os = "macos")]
 mod finder;
 mod fuzzy;

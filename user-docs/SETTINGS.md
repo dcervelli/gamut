@@ -36,6 +36,7 @@ settings are:
 | `show_info` | `false` | The file information panel |
 | `log_counts` | `false` | The histogram's bars as tall as the logarithm of their counts |
 | `browse_folder` | `true` | A single file opened by itself steps on through the other images in its folder |
+| `exiftool` | `exiftool` | The program the info panel's *Raw Data* tab reads every tag with: a name looked for on your `PATH` and where packages put it, or a path to it |
 | `open_map_link` | `https://geojson.io/#data=data:application/json,%7B%22type%22%3A%22Feature%22%2C%22properties%22%3A%7B%7D%2C%22geometry%22%3A%7B%22type%22%3A%22Point%22%2C%22coordinates%22%3A%5B{lng}%2C{lat}%5D%7D%7D` | The web page the map button in the info panel's *Location* section opens. `{lat}` and `{lng}` become where the picture was taken, in degrees, negative south and west; the link must have both |
 
 `--histogram`, `--info`, `--no-minimap` and `--alone` override the file for
@@ -179,8 +180,8 @@ or Finder never sees it.
 
 ### While `gamut` is running
 
-Saving the file puts the keys, the gestures and `open_map_link` in it in
-force at once, and the window says it was reloaded, or names the first line
+Saving the file puts the keys, the gestures, `open_map_link` and `exiftool`
+in it in force at once, and the window says it was reloaded, or names the first line
 it could not use.
 Everything else in it is how the window opens: the panels stay as you have
 them, and `browse_folder` waits for the next start.

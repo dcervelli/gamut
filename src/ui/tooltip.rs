@@ -14,7 +14,9 @@ use crate::theme::Theme;
 use super::Room;
 use super::control::Control;
 use super::histogram::WINDOWS;
+use super::info::Copyable;
 use super::menu::{self, Copies};
+use super::tags::{Fold, Tab, Table};
 
 /// Something in the interface that names itself when the pointer rests on it.
 ///
@@ -152,6 +154,10 @@ pub const NO_CAMERA_JPEG: &str = "This file carries no camera JPEG.";
 /// switch, this is only ever the reason a press of the key is refused.
 pub const NO_DEPTH_MAP: &str = "This image has no depth map.";
 
+/// What the Raw Data tab's copy button says while there are no tags to
+/// copy: exiftool is not there, is reading the file, or could not.
+pub const NO_TAGS: &str = "No tags to copy.";
+
 /// What the camera's switch says: which of a raw's two pictures is up, and
 /// under it the other, which a press switches to. The size is left out; the
 /// top bar says it.
@@ -241,6 +247,9 @@ pub struct Conditions {
     /// screen, which the bar names already: what acts on the file waits
     /// until the file named is the one on screen.
     pub arriving: bool,
+    /// Whether exiftool's tags for the file on screen are in, which is what
+    /// the Raw Data tab's copy button copies.
+    pub tags_in: bool,
 }
 
 impl Default for Conditions {
@@ -272,6 +281,7 @@ impl Default for Conditions {
             picking: false,
             nothing_open: true,
             arriving: false,
+            tags_in: false,
         }
     }
 }
@@ -311,6 +321,7 @@ impl Conditions {
         picking: false,
         nothing_open: false,
         arriving: false,
+        tags_in: true,
     };
 }
 
@@ -349,6 +360,7 @@ pub fn disabled(tip: Tip, conditions: Conditions) -> Option<Refused> {
         picture_on_clipboard: clipboard,
         nothing_open,
         arriving,
+        tags_in,
         visited_before,
         visited_after,
         camera_jpeg,
@@ -380,6 +392,13 @@ pub fn disabled(tip: Tip, conditions: Conditions) -> Option<Refused> {
     }
     if matches!(
         tip,
+        Tip::Control(Control::TagsCopyMenu | Control::TagsCopy(_))
+    ) && !tags_in
+    {
+        return said(NO_TAGS);
+    }
+    if matches!(
+        tip,
         Tip::Control(
             Control::Copy
                 | Control::Region
@@ -397,6 +416,11 @@ pub fn disabled(tip: Tip, conditions: Conditions) -> Option<Refused> {
             Control::Copy
                 | Control::Copies(_)
                 | Control::Facts(_)
+                | Control::TagsCopyMenu
+                | Control::TagsCopy(_)
+                | Control::TagsFold(_)
+                | Control::TagGroup(_)
+                | Control::TagRow(_)
                 | Control::Rename
                 | Control::Remove
                 | Control::Delete
@@ -480,6 +504,21 @@ pub fn words(tip: Tip) -> Option<String> {
         Tip::Control(Control::OpenIn) => "Open the file in another application",
         // No key opens it: it is on screen only beside the coordinates.
         Tip::Control(Control::OpenMap) => "Open map to this location",
+        // The information panel's head: its two tabs, and the buttons
+        // that copy what is on the one on screen. Copy All carries what
+        // the rest of the column's copies do, which no key reaches.
+        Tip::Control(Control::InfoTab(Tab::Facts)) => "What the file is",
+        Tip::Control(Control::InfoTab(Tab::Tags)) => "Every tag exiftool reads from the file",
+        Tip::Control(Control::TagsCopyMenu) => "Copy the tags shown",
+        Tip::Control(Control::TagsCopy(Table::Text)) => "Copy the tags shown as plain text",
+        Tip::Control(Control::TagsCopy(Table::Csv)) => "Copy the tags shown as CSV",
+        Tip::Control(Control::TagsCopy(Table::Json)) => "Copy the tags shown as JSON",
+        Tip::Control(Control::TagsCopy(Table::Xml)) => "Copy the tags shown as XML",
+        Tip::Control(Control::VisitExiftool) => "Open the exiftool website in your browser",
+        Tip::Control(Control::TagsRefresh) => "Look for exiftool again",
+        Tip::Control(Control::TagsFold(Fold::Open)) => "Expand every group",
+        Tip::Control(Control::TagsFold(Fold::Shut)) => "Collapse every group",
+        Tip::Control(Control::Facts(Copyable::All)) => "Click to copy section or item.",
         // And the same again for the menu of the file: every item of it
         // has a key of its own, and the button says what the menu is of.
         Tip::Control(Control::FileMenu) => "Open file menu",
@@ -586,6 +625,8 @@ pub fn words(tip: Tip) -> Option<String> {
             | Control::Info
             | Control::Loupe
             | Control::Facts(_)
+            | Control::TagGroup(_)
+            | Control::TagRow(_)
             | Control::Chooser
             | Control::Choose(_)
             | Control::ExportAs(_)

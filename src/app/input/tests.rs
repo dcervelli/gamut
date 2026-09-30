@@ -170,8 +170,8 @@ fn a_button_is_named_by_the_key_that_does_the_same_job() {
 /// the pointer rests on for nothing. Every kind of control is asked,
 /// less the few that wear their own words on screen — an item of the
 /// open menu wears the program's name, a row of the chooser the file's,
-/// a row of the information panel its fact, the dialog's buttons their
-/// labels — and the two that are pressed through something else: the
+/// a row of the information panel its fact or its tag, the dialog's
+/// buttons their labels — and the two that are pressed through something else: the
 /// timeline names itself as a whole, and the chooser is opened by a
 /// press on the count, which has words of its own.
 #[test]
@@ -181,7 +181,9 @@ fn every_chrome_button_has_something_to_say() {
             widget,
             Control::Opener(_)
                 | Control::Choose(_)
-                | Control::Facts(_)
+                | Control::Facts(ui::info::Copyable::Section(_) | ui::info::Copyable::Fact(_))
+                | Control::TagGroup(_)
+                | Control::TagRow(_)
                 | Control::RenameTo
                 | Control::CancelRename
                 | Control::ExportAs(_)

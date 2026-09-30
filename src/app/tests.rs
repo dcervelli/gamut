@@ -77,9 +77,11 @@ fn a_configuration_read_again_rebinds_the_keys() {
         .unwrap();
     config.show_histogram = false;
     config.open_map_link = "https://example.com/?{lat},{lng}".to_string();
+    config.exiftool = "/opt/exiftool/exiftool".to_string();
     let _ = app.reconfigure(config, None);
     assert_eq!(app.keys.spelled("interface.help"), "F1");
     assert_eq!(app.open_map_link, "https://example.com/?{lat},{lng}");
+    assert_eq!(app.exiftool.configured(), "/opt/exiftool/exiftool");
     assert!(app.panels.show_histogram);
     let toast = app.toasts.showing().expect("the reload is said");
     assert_eq!(toast.message, RECONFIGURED);
@@ -87,8 +89,47 @@ fn a_configuration_read_again_rebinds_the_keys() {
     let _ = app.reconfigure(options().config, Some("Configuration line 3: no".into()));
     assert_eq!(app.keys.spelled("interface.help"), "?, /");
     assert_eq!(app.open_map_link, crate::settings::OPEN_MAP_LINK);
+    assert_eq!(app.exiftool.configured(), "exiftool");
     let toast = app.toasts.showing().expect("the problem is said");
     assert_eq!(toast.message, "Configuration line 3: no");
+}
+
+/// The Tags tab reads the file on screen when it comes up, and not again
+/// for the same file as it stands; it reads each file arriving while it is
+/// up, and none once it is left.
+#[test]
+fn the_tags_tab_reads_each_file_once_while_it_is_up() {
+    let (mut app, dir) = app_over("tags-tab", &[("a.png", 8, 8), ("b.png", 8, 8)]);
+    app.headless = Some(WINDOW);
+    // Found where nothing is: a run started fails at once, and its answer
+    // goes nowhere, so each stays waited for.
+    app.exiftool = exiftool::Program::at(Path::new("/nonexistent/exiftool"));
+    let _ = app.press(ui::Control::Info);
+    assert!(app.panels.show_info);
+    assert_eq!(app.tags.asked(), 0, "the panel opens on the facts");
+
+    let _ = app.press(ui::Control::InfoTab(ui::tags::Tab::Tags));
+    assert_eq!(app.tags.asked(), 1);
+    let _ = app.press(ui::Control::InfoTab(ui::tags::Tab::Facts));
+    let _ = app.press(ui::Control::InfoTab(ui::tags::Tab::Tags));
+    assert_eq!(app.tags.asked(), 1, "already on its way");
+
+    let _ = app.step(true);
+    answer(&mut app, Reload::Fresh);
+    assert_eq!(app.tags.asked(), 2, "the file arriving is read");
+
+    let _ = app.press(ui::Control::InfoTab(ui::tags::Tab::Facts));
+    let _ = app.step(false);
+    answer(&mut app, Reload::Fresh);
+    assert_eq!(app.tags.asked(), 2, "left, the tab reads nothing");
+
+    // Taken down and put up again on the tab, it reads the file on screen.
+    let _ = app.press(ui::Control::InfoTab(ui::tags::Tab::Tags));
+    assert_eq!(app.tags.asked(), 3);
+    let _ = app.press(ui::Control::Info);
+    let _ = app.press(ui::Control::Info);
+    assert_eq!(app.tags.asked(), 3, "the same file, still on its way");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// The application as `gamut` alone opens it: no list, and nothing
@@ -120,6 +161,7 @@ fn options() -> Options {
             log_counts: false,
             browse_folder: true,
             open_map_link: crate::settings::OPEN_MAP_LINK.to_string(),
+            exiftool: "exiftool".to_string(),
             keys: keymap::Keymap::table(),
             gestures: Gestures::table(),
         },
@@ -141,6 +183,7 @@ fn threads() -> Threads {
         folder: Arc::new(|_| {}),
         arranged: Arc::new(|_| {}),
         measured: Arc::new(|_| {}),
+        tags: Arc::new(|_| {}),
     }
 }
 
@@ -4299,4 +4342,69 @@ fn the_room_follows_the_monitor_and_the_switch_and_the_curve_stays() {
     assert_eq!(app.toggle_hdr(), Effect::Redraw);
     assert_eq!(app.headroom(), Headroom::Above);
     assert_eq!(curve(&app), ToneMap::Neutral, "the switch on");
+}
+
+/// exiftool not found is looked for again when the configuration is read
+/// again, even under the same name, and the tab waiting on it reads the
+/// file at once; and the tab's copy button is dead until tags are in.
+#[test]
+fn exiftool_not_found_is_looked_for_again_on_reload() {
+    let (mut app, dir) = app_over("tags-reload", &[("a.png", 8, 8)]);
+    app.headless = Some(WINDOW);
+    let mut config = options().config;
+    config.exiftool = "/nonexistent/exiftool".to_string();
+    let _ = app.reconfigure(config.clone(), None);
+    let _ = app.press(ui::Control::Info);
+    let _ = app.press(ui::Control::InfoTab(ui::tags::Tab::Tags));
+    assert_eq!(app.tags.asked(), 1);
+    assert!(!app.conditions().tags_in);
+    assert!(
+        ui::tooltip::disabled(
+            ui::Tip::Control(ui::Control::TagsCopy(ui::tags::Table::Json)),
+            app.conditions()
+        )
+        .is_some()
+    );
+
+    let _ = app.reconfigure(config.clone(), None);
+    assert_eq!(app.tags.asked(), 2, "looked for again, and asked again");
+
+    // Found, it is left alone.
+    app.exiftool = exiftool::Program::at(Path::new("/nonexistent/exiftool"));
+    let _ = app.reconfigure(config, None);
+    assert!(app.exiftool.found());
+
+    // Refresh looks again, as the reload does.
+    let _ = app.press(ui::Control::TagsRefresh);
+    assert!(!app.exiftool.found());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `i` puts the information panel up on its curated facts and `I` on its
+/// raw data, each taking it down where it is up on its own tab already and
+/// switching tabs where it is up on the other; the button is the plain
+/// toggle, keeping the tab.
+#[test]
+fn i_and_shift_i_each_put_up_their_own_tab() {
+    use ui::tags::Tab;
+
+    let (mut app, dir) = app_over("info-keys", &[("a.png", 8, 8)]);
+    app.headless = Some(WINDOW);
+    app.exiftool = exiftool::Program::at(Path::new("/nonexistent/exiftool"));
+    let shown = |app: &App| (app.panels.show_info, app.panels.info_tab);
+
+    let _ = app.perform(input::Action::ToggleRawData);
+    assert_eq!(shown(&app), (true, Tab::Tags));
+    assert_eq!(app.tags.asked(), 1, "the raw data is read");
+    let _ = app.perform(input::Action::ToggleInfo);
+    assert_eq!(shown(&app), (true, Tab::Facts));
+    let _ = app.perform(input::Action::ToggleInfo);
+    assert!(!app.panels.show_info);
+    let _ = app.perform(input::Action::ToggleRawData);
+    let _ = app.perform(input::Action::ToggleRawData);
+    assert!(!app.panels.show_info);
+
+    let _ = app.press(ui::Control::Info);
+    assert_eq!(shown(&app), (true, Tab::Tags), "the button keeps the tab");
+    let _ = std::fs::remove_dir_all(&dir);
 }

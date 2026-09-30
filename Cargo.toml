@@ -188,7 +188,7 @@ wayland-protocols = { version = "0.32.13", features = ["client", "staging", "uns
 # a string in, only a promise to hand the bytes over when someone later asks.
 # This speaks that protocol directly rather than shelling out to `wl-copy`,
 # which would be a runtime dependency on a package the user may not have.
-wl-clipboard-rs = "0.9.3"
+wl-clipboard-rs = "0.9.4"
 
 # And what a Mac is spoken to through: its own frameworks, by their
 # Objective-C interfaces. The same family of bindings wgpu already links for

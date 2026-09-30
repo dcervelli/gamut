@@ -7,6 +7,9 @@ with nothing in it. A click on a field copies its value; a click on a
 section's heading copies the whole section as CSV; **Copy All** at the top
 copies everything, one line per field, as `Ctrl+I` does.
 
+What is listed here is a selection. The *Raw Data* tab at the top of the panel
+lists every tag in the file instead — see [Every tag](#every-tag).
+
 EXIF is read from JPEG, TIFF, PNG, WebP and HEIF files, and XMP from those
 and from JPEG XL. An XMP sidecar beside any file, raws included — the file's
 name with `.xmp` in place of its extension, or added after it — is read
@@ -156,3 +159,46 @@ The regions come from:
 The subject column names who is in the region, or what kind of region it is
 where nothing says. Anything else written about it, such as a description,
 a barcode's value or whether it was a focus point, is in its tooltip.
+
+## Every tag
+
+*Raw Data*, beside *Curated* at the top of the panel — or `I`, where `i`
+opens the panel on *Curated* — lists every tag the
+file carries, maker notes and unknown tags included, as
+[ExifTool](https://exiftool.org) reads them. The tags are grouped by the
+kind of metadata — EXIF, XMP, MakerNotes, File, Composite — and then by
+where in it, such as IFD0 or XMP-dc. Each tag is headed by ExifTool's
+description of it, such as *File Modification Date/Time*, and the filter
+matches the tag's name as well. Every group starts folded; a click on
+one opens or folds it, and the button at the end of the line under the
+filter opens them all or folds them all. What you open stays open as you
+step through files. Each tag
+shows its value under that, with the raw value in parentheses where it
+differs. A list of values is written on one line, `[1, 2, 3]`; a structure
+says how many fields it holds, and each follows on a line of its own.
+
+Click the field above the list to filter it; `Esc` hands the keyboard back
+to the window. The filter matches a tag's group, name, value, description
+and ID. While it is up the tags are one list, best match first, each with
+its group before its name: tags whose name holds every word you typed, then
+tags that hold them anywhere else, such as in their value. Only when no tag
+holds the words does the list fall back to looser matches.
+
+A click on a tag in the tree copies its value. A click on one in a
+filtered list copies nothing: it clears the filter and shows the tag where
+it is in the tree, opening only the groups it is in and scrolling to it,
+and it stays highlighted there.
+
+**Copy** at the top opens a menu of the forms to copy every tag the filter
+leaves in: **Plaintext**, laid out as ExifTool prints them; **CSV**, one row
+per tag; and **JSON** or **XML**, which keep lists and structures nested.
+
+The tab needs ExifTool installed. It is `perl-image-exiftool` on Arch,
+`libimage-exiftool-perl` on Debian and Ubuntu, `perl-Image-ExifTool` on
+Fedora, and `exiftool` in Homebrew. If it is installed somewhere `gamut`
+does not find it, set `exiftool` in the
+[configuration file](SETTINGS.md) to its path. While it is not found, the
+tab has buttons to visit the ExifTool website, to edit the configuration
+file, and to look for it again; saving the configuration file looks again
+too. It is run only while the tab
+is showing, once for each file, and not again for a file until it changes.

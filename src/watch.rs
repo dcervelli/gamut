@@ -20,7 +20,7 @@ pub const INTERVAL: Duration = Duration::from_millis(250);
 /// both the length and the timestamp alone goes unnoticed, which in practice
 /// means a write that did not happen.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-struct Signature {
+pub struct Signature {
     modified: Option<SystemTime>,
     len: u64,
 }
@@ -108,6 +108,24 @@ impl Watch {
         }
         self.loaded = seen;
         true
+    }
+}
+
+impl Signature {
+    /// `path` as `stat` sees it now, or `None` where there is nothing there:
+    /// what else is kept per file tells a file rewritten since by it.
+    pub fn of(path: &Path) -> Option<Signature> {
+        signature(path)
+    }
+
+    /// A file of `len` bytes that says nothing of when it was written: for
+    /// the tests of what is kept per file.
+    #[cfg(test)]
+    pub fn of_length(len: u64) -> Signature {
+        Signature {
+            modified: None,
+            len,
+        }
     }
 }
 

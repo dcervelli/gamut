@@ -115,6 +115,7 @@ fn panels() -> Panels {
         pixel_format: PixelFormat::default(),
         coordinate_format: CoordinateFormat::default(),
         geographic_format: GeographicFormat::default(),
+        info_tab: super::tags::Tab::Facts,
     }
 }
 
@@ -153,6 +154,7 @@ fn input(logical: [f32; 2], count: usize) -> FrameInput {
         transport: None,
         filmstrip: None,
         chooser: None,
+        tags: None,
         rename: None,
         export: None,
         empty: false,
@@ -2432,4 +2434,133 @@ fn the_depth_toggle_is_there_only_for_a_picture_with_a_depth_map() {
     current.image = Arc::new(image);
     harness.run();
     assert_eq!(click(&mut harness, &name), [Command::Press(Control::Depth)]);
+}
+
+/// The information panel's Tags tab, with tags handed in: the field takes
+/// the keyboard only when clicked and hands it back on `Esc`, what is typed
+/// in it and what is clicked come back as commands, and the Facts tab is a
+/// click away.
+#[test]
+fn the_tags_tab_filters_copies_and_folds() {
+    use super::tags;
+
+    let mut shown = panels();
+    shown.show_info = true;
+    shown.info_tab = tags::Tab::Tags;
+    let mut harness = build(WINDOW, 1, shown);
+    let row = |kind, depth, name: &str, value: &str| tags::Row {
+        kind,
+        depth,
+        name: name.to_string(),
+        value: value.to_string(),
+        raw: None,
+        group: None,
+        name_lit: Vec::new(),
+        value_lit: Vec::new(),
+        collapsed: false,
+        count: 1,
+    };
+    let rows = vec![
+        row(tags::Kind::Group, 0, "EXIF", ""),
+        row(tags::Kind::Group, 1, "IFD0", ""),
+        row(tags::Kind::Tag, 2, "Orientation", "Rotate 180"),
+    ];
+    let tops = tags::tops(&rows);
+    harness.state_mut().input.tags = Some(tags::Input {
+        file: "photo.png".to_string(),
+        query: String::new(),
+        version: Some("13.55".to_string()),
+        state: tags::State::Ready,
+        rows: rows.into(),
+        tops: tops.into(),
+        shown: 1,
+        total: 1,
+        fold: Some(tags::Fold::Shut),
+        marked: None,
+        reveal: false,
+    });
+    harness.run();
+    assert!(harness.query_by_label("Copy All").is_none());
+    assert!(
+        !harness.ctx.egui_wants_keyboard_input(),
+        "not until clicked"
+    );
+
+    assert!(click(&mut harness, "Toggle group 0").contains(&Command::Press(Control::TagGroup(0))));
+    assert!(click(&mut harness, "Copy tag 2").contains(&Command::Press(Control::TagRow(2))));
+    assert!(
+        click(&mut harness, "Collapse all")
+            .contains(&Command::Press(Control::TagsFold(tags::Fold::Shut)))
+    );
+    // The copy button opens its menu, and an item of it is the press.
+    let _ = click(&mut harness, "Copy tags");
+    assert!(
+        click(&mut harness, "JSON").contains(&Command::Press(Control::TagsCopy(tags::Table::Json)))
+    );
+
+    harness
+        .get_by_role(egui::accesskit::Role::TextInput)
+        .click();
+    harness.run();
+    assert!(harness.ctx.egui_wants_keyboard_input());
+    harness.state_mut().commands.clear();
+    harness.event(egui::Event::Text("b".to_string()));
+    harness.step();
+    assert!(
+        asked(&harness).contains(&Command::Filter("b".to_string())),
+        "{:?}",
+        asked(&harness)
+    );
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert!(
+        !harness.ctx.egui_wants_keyboard_input(),
+        "Esc hands it back"
+    );
+
+    assert!(
+        click(&mut harness, "Curated")
+            .contains(&Command::Press(Control::InfoTab(tags::Tab::Facts)))
+    );
+}
+
+/// While exiftool is not found, the Raw Data tab says so with the three
+/// buttons at its foot, and its copy button is dead: no menu opens.
+#[test]
+fn the_raw_data_tab_without_exiftool_offers_a_way_out() {
+    use super::tags;
+
+    let mut shown = panels();
+    shown.show_info = true;
+    shown.info_tab = tags::Tab::Tags;
+    let mut harness = build(WINDOW, 1, shown);
+    harness.state_mut().input.tags = Some(tags::Input {
+        file: "photo.png".to_string(),
+        query: String::new(),
+        version: None,
+        state: tags::State::NotInstalled {
+            configured: "exiftool".to_string(),
+        },
+        rows: Arc::from([]),
+        tops: Arc::from([0.0]),
+        shown: 0,
+        total: 0,
+        fold: None,
+        marked: None,
+        reveal: false,
+    });
+    harness.run();
+    for (label, control) in [
+        ("Visit https://exiftool.org", Control::VisitExiftool),
+        ("Edit configuration file", Control::EditConfig),
+        ("Refresh", Control::TagsRefresh),
+    ] {
+        assert!(
+            click(&mut harness, label).contains(&Command::Press(control)),
+            "{label}: {:?}",
+            asked(&harness)
+        );
+    }
+    let _ = click(&mut harness, "Copy tags");
+    assert!(harness.query_by_label("JSON").is_none(), "no menu opens");
 }

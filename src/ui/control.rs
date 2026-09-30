@@ -18,6 +18,7 @@ use super::help;
 use super::info::Copyable;
 use super::menu::{Copies, ZoomChoice};
 use super::pixel::{CoordinateFormat, GeographicFormat, PixelFormat};
+use super::tags::{Fold, Tab, Table};
 use super::tooltip::{Tip, Tooltip};
 
 /// Lays out [`Control`]: each line a kind of control, with its words, and
@@ -153,6 +154,27 @@ controls! {
     /// A row of the information panel, or the button above the column that
     /// takes the whole of it.
     Facts(Copyable) = Copyable::All,
+    /// The two tabs at the head of the information panel: the file's facts,
+    /// and every tag `exiftool` reads from it.
+    InfoTab(Tab) = Tab::Tags,
+    /// The button at the head of the Raw Data tab that opens the menu of
+    /// forms the tags that fit the filter can be copied in, and an item of
+    /// that menu.
+    TagsCopyMenu,
+    TagsCopy(Table) = Table::Csv,
+    /// A group of the Tags tab's tree, by its place in the rows the same
+    /// frame was drawn from, folded or unfolded; and a tag or a piece of
+    /// one, whose value a click copies.
+    TagGroup(usize) = 0,
+    TagRow(usize) = 0,
+    /// The button at the end of the line under the Raw Data tab's field,
+    /// which opens every group of the tree or folds them all.
+    TagsFold(Fold) = Fold::Open,
+    /// The buttons at the foot of the Raw Data tab while exiftool is not
+    /// found: its website opened in the browser, and exiftool looked for
+    /// again. The third there is [`Control::EditConfig`].
+    VisitExiftool,
+    TagsRefresh,
     /// The button beside the coordinates at the head of the information
     /// panel's `Location` section, which opens a map of where the picture
     /// was taken in the browser.
@@ -279,6 +301,14 @@ impl Control {
             Control::Facts(Copyable::All) => "Copy All".to_string(),
             Control::Facts(Copyable::Section(index)) => format!("Copy section {index}"),
             Control::Facts(Copyable::Fact(index)) => format!("Copy field {index}"),
+            Control::InfoTab(tab) => tab.label().to_string(),
+            Control::TagsCopyMenu => "Copy tags".to_string(),
+            Control::TagsCopy(table) => table.label().to_string(),
+            Control::TagGroup(index) => format!("Toggle group {index}"),
+            Control::TagRow(index) => format!("Copy tag {index}"),
+            Control::TagsFold(fold) => fold.label().to_string(),
+            Control::VisitExiftool => format!("Visit {}", crate::exiftool::WEBSITE),
+            Control::TagsRefresh => "Refresh".to_string(),
             Control::OpenMap => "Open in map".to_string(),
             Control::Chooser => "Choose a file".to_string(),
             Control::Choose(index) => format!("Choose file {}", index + 1),
@@ -414,6 +444,8 @@ pub enum Command {
     Handle(Grip),
     /// The chooser's field changed: this is what it now says.
     Query(String),
+    /// The Tags tab's field changed: this is what it now says.
+    Filter(String),
     /// The rename dialog's field changed: this is the name it now holds.
     Name(String),
     /// The export dialog's field changed: this is the name it now holds.

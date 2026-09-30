@@ -53,6 +53,9 @@ pub struct Config {
     /// The web address the `Location` section's map button opens, with
     /// `{lat}` and `{lng}` standing for the coordinates in signed degrees.
     pub open_map_link: String,
+    /// The program the info panel's Tags tab runs: a name looked for in
+    /// `PATH` and the places packages put it, or a path.
+    pub exiftool: String,
     pub keys: Keymap,
     pub gestures: Gestures,
 }
@@ -68,6 +71,7 @@ impl Default for Config {
             log_counts: false,
             browse_folder: true,
             open_map_link: OPEN_MAP_LINK.to_string(),
+            exiftool: "exiftool".to_string(),
             keys: Keymap::default(),
             gestures: Gestures::default(),
         }
@@ -90,7 +94,7 @@ struct Setting {
 /// Every setting the configuration file takes, in the order the template
 /// lists them. [`Config::template`] writes each one's value, and
 /// [`Config::parse`] reads it back.
-const SETTINGS: [Setting; 8] = [
+const SETTINGS: [Setting; 9] = [
     Setting {
         name: "show_ui",
         words: "The panels around the picture.",
@@ -144,6 +148,18 @@ const SETTINGS: [Setting; 8] = [
                 return Err("needs {lat} and {lng} in it".to_string());
             }
             config.open_map_link = value.to_string();
+            Ok(())
+        },
+    },
+    Setting {
+        name: "exiftool",
+        words: "The program the info panel's Raw Data tab reads every tag with: a name looked for on the PATH, or a path.",
+        get: |config| config.exiftool.clone(),
+        set: |config, value| {
+            if value.is_empty() {
+                return Err("needs a program name or a path".to_string());
+            }
+            config.exiftool = value.to_string();
             Ok(())
         },
     },
@@ -754,7 +770,7 @@ mod tests {
             .lines()
             .filter(|line| line.starts_with("gesture."))
             .count();
-        assert_eq!(keys, 96, "{uncommented}");
+        assert_eq!(keys, 97, "{uncommented}");
         // A Mac's two more: the wheel with Command, and the pinch.
         let slots = if cfg!(target_os = "macos") { 12 } else { 10 };
         assert_eq!(gestures, slots, "{uncommented}");
@@ -853,6 +869,7 @@ mod tests {
             log_counts: !defaults.log_counts,
             browse_folder: !defaults.browse_folder,
             open_map_link: "https://www.openstreetmap.org/?mlat={lat}&mlon={lng}".to_string(),
+            exiftool: "/opt/exiftool/exiftool".to_string(),
             keys: defaults.keys.clone(),
             gestures: defaults.gestures.clone(),
         };
@@ -879,6 +896,18 @@ mod tests {
         let (config, problems) =
             Config::parse(&format!("open_map_link = {OPEN_MAP_LINK}  # the default\n"));
         assert_eq!(config.open_map_link, OPEN_MAP_LINK);
+        assert!(problems.is_empty(), "{problems:?}");
+    }
+
+    /// exiftool is found by the name or path given, and a setting naming
+    /// nothing is a problem, the default standing.
+    #[test]
+    fn exiftool_needs_a_name() {
+        let (config, problems) = Config::parse("exiftool = \n");
+        assert_eq!(config.exiftool, "exiftool");
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        let (config, problems) = Config::parse("exiftool = /usr/bin/vendor_perl/exiftool\n");
+        assert_eq!(config.exiftool, "/usr/bin/vendor_perl/exiftool");
         assert!(problems.is_empty(), "{problems:?}");
     }
 

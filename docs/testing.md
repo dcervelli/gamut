@@ -74,6 +74,13 @@ has nothing to do with the code; on a machine that has one, setting
 `GAMUT_REQUIRE_GPU` makes a run that could not open it fail instead, which is
 how a run proves they ran. On a Mac they run on Metal.
 
+One test runs `exiftool` itself over the fixtures (`exiftool::tests`): a
+file's tags, a missing file's refusal, and a truncated file read with
+warnings. It returns early where the program is not installed, and
+`GAMUT_REQUIRE_EXIFTOOL` makes that a failure instead, in the same way. The
+parsing, the tree and the copies are tested without it, over a fixture of
+its output written into the test.
+
 The suite runs on Linux and on a Mac alike. The tests that name a chord or a
 gesture read `Keymap::table()` and `Gestures::table()`, the same on both;
 `Keymap::mac()` and `Gestures::mac()` are built and tested on both too, so a

@@ -3,8 +3,9 @@
 //!
 //! The only part of the interface with more to say than fits, so it is the
 //! only part that scrolls: the column lives in a scroll area, under a header
-//! that does not scroll, holding the one instruction the panel needs and the
-//! button that copies the whole of it.
+//! that does not scroll, holding the switch between the panel's two tabs and
+//! the button that copies the whole of the one on screen. The second tab,
+//! every tag `exiftool` reads, is [`super::tags`]'s.
 //!
 //! It is also the only part of the interface that is read out rather than
 //! merely read: a click on a field or on a heading puts it on the clipboard.
@@ -40,6 +41,7 @@ use super::control::Control;
 use super::icon;
 use super::pixel;
 use super::style::{SCROLLBAR_GUTTER, SCROLLBAR_WIDTH, TOGGLE_RADIUS};
+use super::tags::Tab;
 use super::tooltip::{Tip, Tooltip};
 use super::{
     Current, PADDING, PANEL_INSET, PANEL_RADIUS, PANEL_WIDTH, RULE_WIDTH, TEXT_SIZE, rule,
@@ -61,7 +63,7 @@ pub(super) const INFO_MIN_HEIGHT: f32 = 160.0;
 /// The size a field's name is written at, against [`TEXT_SIZE`] for what it
 /// says: the values are what is being read, and the names only say which is
 /// which.
-const LABEL_SIZE: f32 = TEXT_SIZE * 0.85;
+pub(super) const LABEL_SIZE: f32 = TEXT_SIZE * 0.85;
 
 /// The space above a section's name, with a hairline drawn through the
 /// middle of it doing part of the parting.
@@ -91,11 +93,6 @@ const MODIFIED: &str = "Modified";
 /// rather than in its table.
 const RESOLUTION: &str = "Resolution";
 const READ_BY: &str = "Read by";
-
-/// The words at the top of the panel. An instruction rather than a fact about
-/// the file, so it is written small and dim: what it says is worth knowing
-/// once and not worth re-reading every time the panel is opened.
-const HINT: &str = "Click to copy section or item.";
 
 /// The space under the header, with the hairline that parts it from the
 /// column through the middle of it. The help popup keeps the same under its
@@ -283,8 +280,8 @@ pub fn panel(content: Rect, above: Option<Rect>) -> Option<Rect> {
 
 /// The width of the button for `copies`: its mark, whatever label goes
 /// before it, and what is kept clear around them.
-fn chip_width(ui: &egui::Ui, copies: Copyable) -> f32 {
-    let label = copies.label().map_or(0.0, |label| {
+fn chip_width(ui: &egui::Ui, label: Option<&str>) -> f32 {
+    let label = label.map_or(0.0, |label| {
         measure(ui, label) * LABEL_SIZE / TEXT_SIZE + CHIP_GAP
     });
     (2.0 * CHIP_PADDING + label + COPY_ICON).round()
@@ -297,9 +294,30 @@ fn chip_width(ui: &egui::Ui, copies: Copyable) -> f32 {
 /// column is drawn over the words it would copy and they must not show
 /// through it; and outlined, because ground the color of the panel it sits
 /// on would otherwise leave it no edge.
-fn chip(pass: &Pass, ui: &egui::Ui, rect: egui::Rect, copies: Copyable, hover: bool) {
+fn chip(pass: &Pass, ui: &egui::Ui, rect: egui::Rect, label: Option<&str>, hover: bool) {
+    chip_in(pass, ui, rect, label, hover, true);
+}
+
+/// [`chip`], drawn dead where it is not `enabled`: its words and mark faded
+/// as a dead button's are, and never lit.
+fn chip_in(
+    pass: &Pass,
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    label: Option<&str>,
+    hover: bool,
+    enabled: bool,
+) {
     let theme = pass.theme;
-    let (edge, ink): (egui::Color32, egui::Color32) = if hover {
+    let (edge, ink): (egui::Color32, egui::Color32) = if !enabled {
+        (
+            theme.border.into(),
+            theme
+                .text_dim
+                .with_alpha(super::style::DEAD_BUTTON_INK)
+                .into(),
+        )
+    } else if hover {
         (theme.accent.into(), theme.text_primary.into())
     } else {
         (theme.border.into(), theme.text_dim.into())
@@ -317,7 +335,7 @@ fn chip(pass: &Pass, ui: &egui::Ui, rect: egui::Rect, copies: Copyable, hover: b
     // Centered as one, so that a button wearing only the mark has it in the
     // middle rather than pushed to the end a label would have started at.
     let font = egui::FontId::proportional(LABEL_SIZE);
-    let label = copies.label().map(|label| {
+    let label = label.map(|label| {
         let galley = ui
             .ctx()
             .fonts_mut(|fonts| fonts.layout_no_wrap(label.to_string(), font.clone(), ink));
@@ -352,14 +370,93 @@ fn chip(pass: &Pass, ui: &egui::Ui, rect: egui::Rect, copies: Copyable, hover: b
 /// it says what it would take, since the header has not yet said that a
 /// click copies.
 fn copy_all(pass: &mut Pass, ui: &mut egui::Ui) {
-    let width = chip_width(ui, Copyable::All);
+    copy_button(
+        pass,
+        ui,
+        Copyable::All.label(),
+        Control::Facts(Copyable::All),
+    );
+}
+
+/// A copy button at the head of the panel, saying `label` and pressing
+/// `control`: Copy All on the Facts tab, and the Tags tab's two.
+fn copy_button(pass: &mut Pass, ui: &mut egui::Ui, label: Option<&str>, control: Control) {
+    let width = chip_width(ui, label);
     let (rect, response) = ui.allocate_exact_size(vec2(width, CHIP_HEIGHT), Sense::CLICK);
-    chip(pass, ui, rect, Copyable::All, response.hovered());
-    let control = Control::Facts(Copyable::All);
+    chip(pass, ui, rect, label, response.hovered());
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, control.label()));
     let response = pass.tooltip(response, Tip::Control(control));
     if response.clicked() {
         pass.press(control);
+    }
+}
+
+/// The Raw Data tab's copy button: a chip like Copy All, which opens the
+/// menu of the forms the tags shown can be copied in.
+fn copy_menu(pass: &mut Pass, ui: &mut egui::Ui) {
+    let control = Control::TagsCopyMenu;
+    let label = Some("Copy");
+    let width = chip_width(ui, label);
+    let (rect, response) = ui.allocate_exact_size(vec2(width, CHIP_HEIGHT), Sense::CLICK);
+    let id = egui::Id::new(("menu", control.label()));
+    let open = egui::Popup::is_id_open(ui.ctx(), id);
+    // Dead while there is nothing to copy: exiftool not there, or not done.
+    let enabled = pass
+        .input
+        .tags
+        .as_ref()
+        .is_some_and(|tags| tags.state == super::tags::State::Ready);
+    chip_in(pass, ui, rect, label, open || response.hovered(), enabled);
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, control.label()));
+    let response = pass.tooltip(response, Tip::Control(control));
+    if enabled {
+        egui::Popup::menu(&response)
+            .id(id)
+            .align(egui::RectAlign::BOTTOM_END)
+            .gap(super::MENU_OFFSET)
+            .show(|ui| super::menu::tags_copy_items(pass, ui));
+    }
+}
+
+/// The switch between the two tabs, at the head of the panel: each tab's
+/// name, the one on screen washed and in the text's ink, the other dim.
+fn tabs(pass: &mut Pass, ui: &mut egui::Ui) {
+    let theme = pass.theme;
+    for tab in [Tab::Facts, Tab::Tags] {
+        let control = Control::InfoTab(tab);
+        let live = pass.panels.info_tab == tab;
+        let galley = ui.ctx().fonts_mut(|fonts| {
+            fonts.layout_no_wrap(
+                tab.label().to_string(),
+                egui::FontId::proportional(LABEL_SIZE),
+                egui::Color32::PLACEHOLDER,
+            )
+        });
+        let width = (galley.size().x + 2.0 * CHIP_PADDING).round();
+        let (rect, response) = ui.allocate_exact_size(vec2(width, CHIP_HEIGHT), Sense::CLICK);
+        if live {
+            ui.painter()
+                .rect_filled(rect, TOGGLE_RADIUS, theme.button_hover);
+        }
+        let ink: egui::Color32 = if live || response.hovered() {
+            theme.text_primary.into()
+        } else {
+            theme.text_dim.into()
+        };
+        ui.painter().galley(
+            pos2(
+                rect.min.x + CHIP_PADDING,
+                rect.center().y - galley.size().y / 2.0,
+            ),
+            galley,
+            ink,
+        );
+        response
+            .widget_info(|| WidgetInfo::selected(WidgetType::Button, true, live, control.label()));
+        let response = pass.tooltip(response, Tip::Control(control));
+        if response.clicked() {
+            pass.press(control);
+        }
     }
 }
 
@@ -400,22 +497,15 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
                 ui.set_max_size(inside);
                 ui.spacing_mut().item_spacing = Vec2::ZERO;
 
-                // The header: the button first, and the hint takes what
-                // is left, wrapping into it. The button has a size it
-                // must be to be pressed and the hint is words, which set
-                // on two lines as readily as on one.
+                // The header: the two tabs at the left, and at the right
+                // what copies the one on screen.
                 ui.horizontal(|ui| {
+                    tabs(pass, ui);
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        copy_all(pass, ui);
-                        ui.add_space(CHIP_GAP);
-                        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                            ui.add(
-                                Label::new(
-                                    RichText::new(HINT).size(LABEL_SIZE).color(theme.text_dim),
-                                )
-                                .wrap(),
-                            );
-                        });
+                        match pass.panels.info_tab {
+                            Tab::Facts => copy_all(pass, ui),
+                            Tab::Tags => copy_menu(pass, ui),
+                        }
                     });
                 });
                 // A hairline between the header and the column, which
@@ -425,7 +515,13 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
                 rule(pass, ui, inside.x - SCROLLBAR_GUTTER);
                 ui.add_space((HEADER_GAP - RULE_WIDTH) / 2.0);
 
-                column(pass, ui, current, &picture);
+                let input = pass.input;
+                match (pass.panels.info_tab, &input.tags) {
+                    (Tab::Tags, Some(tags)) => {
+                        super::tags::show(pass, ui, tags, inside.x);
+                    }
+                    _ => column(pass, ui, current, &picture),
+                }
             });
     });
 }
@@ -1151,7 +1247,7 @@ fn offer(
     let control = Control::Facts(copies);
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, control.label()));
     if pointed && ui.clip_rect().height() >= CHIP_HEIGHT {
-        let chip_width = chip_width(ui, copies);
+        let chip_width = chip_width(ui, copies.label());
         let clip = ui.clip_rect();
         let y = (across.center().y - CHIP_HEIGHT / 2.0)
             .round()
@@ -1163,7 +1259,7 @@ fn offer(
                 pos2(across.max.x - chip_width, y),
                 vec2(chip_width, CHIP_HEIGHT),
             ),
-            copies,
+            copies.label(),
             true,
         );
     }
@@ -1407,7 +1503,7 @@ fn joined(rows: impl Iterator<Item = String>) -> String {
 ///
 /// Only where there are columns to keep apart. A field copied on its own goes
 /// as it is written: there is nothing for it to run into.
-fn quoted(value: &str) -> String {
+pub(super) fn quoted(value: &str) -> String {
     if value.contains([',', '"', '\n', '\r']) {
         format!("\"{}\"", value.replace('"', "\"\""))
     } else {

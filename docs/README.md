@@ -16,6 +16,7 @@ wants [`user-docs/`](../user-docs/) instead.
 | [Animation and pages](animation.md) | The frames a decoder composites, the thread that decodes them ahead under a budget, and the clock they play by |
 | [Deleting, renaming, removing, undo and exporting](editing.md) | The desktop's trash followed by hand, why a deleted or removed file stays on the list until its neighbor is up, one undo stack for what touched the disk or the list, the rename dialog as a modal, and exporting the picture as shown |
 | [The file chooser](chooser.md) | `Ctrl+P`: a popup that fuzzy-matches the session's files, the thread that thumbnails them into the desktop's own cache, and who gets the keys while it is up |
+| [Every tag](tags.md) | The information panel's Raw Data tab: exiftool run as a process, what each flag it is given buys, finding it where the desktop's `PATH` does not, answers kept per file, a filter ranked in tiers, and rows of two heights |
 | [The file list](filmstrip.md) | `Tab`: the strip of thumbnails down the left, why the order it shows is the list's own and is applied between reads, a stable sort, the files seen as a browser keeps them, and a file taken off the list |
 | [Theme](theme.md) | Reading the desktop's palette, and the two things that resist being themed |
 | [macOS](macos.md) | Where the platform is split off, the Cocoa half of each desktop service, and what the main thread asks of it |
