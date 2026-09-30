@@ -233,7 +233,7 @@ fn alone_in(name: &str, files: &[(&str, u32, u32)], at: usize) -> (App, PathBuf,
 /// instead: its thread delivers to nothing in a test.
 fn read_beside(app: &mut App, file: &Path) {
     assert!(
-        matches!(app.folder, Folder::Reading { .. }),
+        matches!(app.beside.folder, Folder::Reading { .. }),
         "the folder is being read"
     );
     let listed = folder::read(file, app.filmstrip.order().sort, &Default::default());
@@ -251,7 +251,7 @@ fn a_single_file_steps_on_into_its_folder() {
         1,
     );
     assert_eq!(app.files.len(), 1);
-    assert!(app.folder.unread());
+    assert!(app.beside.folder.unread());
     assert!(app.conditions().several_files, "the keys are live");
 
     let _ = app.step(true);
@@ -268,7 +268,7 @@ fn a_single_file_steps_on_into_its_folder() {
         std::slice::from_ref(&dir),
         "the folder is what is named now"
     );
-    assert!(matches!(app.folder, Folder::Closed));
+    assert!(matches!(app.beside.folder, Folder::Closed));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -316,7 +316,10 @@ fn a_folder_of_one_says_so() {
     assert!(said.starts_with("No other images in "), "{said}");
 
     let _ = app.step(true);
-    assert!(matches!(app.folder, Folder::Closed), "read once only");
+    assert!(
+        matches!(app.beside.folder, Folder::Closed),
+        "read once only"
+    );
     let said = app.showing_toast().expect("a message").message;
     assert_eq!(said, "No other files to step to");
     let _ = std::fs::remove_dir_all(&dir);
@@ -332,7 +335,7 @@ fn a_folder_read_waits_for_the_file_in_flight() {
     let _ = app.send(reload);
     read_beside(&mut app, &paths[0]);
     assert_eq!(app.files.len(), 1, "not under a read");
-    assert!(app.listed.is_some());
+    assert!(app.beside.landed.is_some());
 
     answer(&mut app, Reload::InPlace);
     assert_eq!(app.files.len(), 2);
@@ -429,9 +432,9 @@ fn a_directory_opens_in_the_order_last_left() {
     assert!(!app.is_empty(), "no buttons while it is read for");
     assert_eq!(app.title(), crate::PROGRAM);
     assert!(app.window_due().is_some(), "the window waits for it");
-    assert!(!app.size_to_next, "nor sized by the first picture yet");
+    assert!(!app.sizing.to_next, "nor sized by the first picture yet");
 
-    let read = arranging::read_now(app.jobs, paths.clone(), order.sort);
+    let read = arranging::read_now(app.arranging.next_job, paths.clone(), order.sort);
     let _ = app.arranged_read(read);
     assert!(app.window_due().is_none());
     assert_eq!(
@@ -472,7 +475,7 @@ fn files_chosen_open_on_the_first_in_the_order() {
 
     app.open_named(vec![more.clone()]);
     assert_eq!(app.files.len(), 1, "not on the list until read for");
-    let read = arranging::read_now(app.jobs, paths.clone(), order.sort);
+    let read = arranging::read_now(app.arranging.next_job, paths.clone(), order.sort);
     let _ = app.arranged_read(read);
     assert_eq!(app.files.len(), 4);
     let pending = app.files.pending().expect("the first of them asked for");
@@ -486,10 +489,10 @@ fn files_chosen_open_on_the_first_in_the_order() {
 #[test]
 fn only_a_file_named_alone_has_a_folder() {
     let (app, dir) = opening_directory("folder-dir", &[("a.png", 8, 8)]);
-    assert!(matches!(app.folder, Folder::Closed));
+    assert!(matches!(app.beside.folder, Folder::Closed));
     let _ = std::fs::remove_dir_all(&dir);
     let (app, dir) = opening("folder-two", &[("a.png", 8, 8), ("b.png", 8, 8)]);
-    assert!(matches!(app.folder, Folder::Closed));
+    assert!(matches!(app.beside.folder, Folder::Closed));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -609,19 +612,19 @@ fn opened_on_nothing_the_window_is_empty_and_the_file_keys_are_dead() {
 fn files_sent_before_the_window_size_it() {
     let (dir, paths) = written("sent", &[("a.png", 640, 320), ("b.png", 8, 16)]);
     let mut app = opened_on_nothing();
-    assert!(app.size_to_next);
+    assert!(app.sizing.to_next);
     assert_eq!(app.opening_size(), None);
 
     app.open_named(paths.clone());
     assert_eq!(app.opening_size(), Some([640.0, 320.0]));
     assert_eq!(
-        app.sized_for,
+        app.sizing.sized_for,
         Some([640.0, 320.0]),
         "opened at its size already"
     );
     answer(&mut app, Reload::Fresh);
-    assert!(!app.size_to_next, "spent on the arrival");
-    assert_eq!(app.sized_for, None);
+    assert!(!app.sizing.to_next, "spent on the arrival");
+    assert_eq!(app.sizing.sized_for, None);
 
     std::fs::remove_dir_all(dir).expect("we just wrote it");
 }
@@ -638,7 +641,7 @@ fn a_single_file_sent_steps_on_into_its_folder() {
     app.open_sent(vec![paths[1].clone()]);
     answer(&mut app, Reload::Fresh);
     assert_eq!(app.files.len(), 1);
-    assert!(app.folder.unread());
+    assert!(app.beside.folder.unread());
     assert!(app.conditions().several_files, "the keys are live");
 
     let _ = app.step(true);
@@ -649,7 +652,7 @@ fn a_single_file_sent_steps_on_into_its_folder() {
 
     let mut app = opened_on_nothing();
     app.open_sent(paths[..2].to_vec());
-    assert!(matches!(app.folder, Folder::Closed));
+    assert!(matches!(app.beside.folder, Folder::Closed));
     std::fs::remove_dir_all(dir).expect("we just wrote it");
 }
 
@@ -2762,7 +2765,7 @@ fn deleting_the_only_file_empties_the_window() {
     assert!(app.current.is_none());
     assert_eq!(app.files.len(), 0);
     assert!(!app.watch.missing());
-    assert!(app.size_to_next);
+    assert!(app.sizing.to_next);
     assert!(!app.from_command_line, "nothing showing is no failure now");
     assert!(!app.showed_nothing());
     assert_eq!(app.title(), crate::PROGRAM);
@@ -2779,7 +2782,7 @@ fn deleting_the_only_file_empties_the_window() {
     assert!(app.current.is_some());
     assert_eq!(app.files.index(), 0);
     assert_eq!(app.files.shown_path(), Some(dir.join("a.png").as_path()));
-    assert!(!app.size_to_next, "spent on the arrival");
+    assert!(!app.sizing.to_next, "spent on the arrival");
     assert_eq!(zoom(&app), zoomed, "as it was left");
 
     std::fs::remove_dir_all(dir).expect("we just wrote it");
@@ -2880,7 +2883,7 @@ fn removing_the_only_file_empties_the_window() {
     assert!(dir.join("a.png").exists());
     assert!(app.is_empty());
     assert_eq!(app.files.len(), 0);
-    assert!(app.size_to_next);
+    assert!(app.sizing.to_next);
     assert!(
         said(&app).starts_with("Took a.png off the list"),
         "{}",
@@ -4060,27 +4063,28 @@ fn a_monitor_change_is_noticed_once_and_kept() {
     let (mut app, _dir) = app_over("monitor", &[("a.png", 4, 3)]);
     let monitors = Monitors::stub(true);
     monitors.set("HDMI-A-1", Mode::Hdr, 4.0);
-    app.monitors = Some(monitors);
+    app.output.monitors = Some(monitors);
     assert_eq!(app.sync_monitor(), Effect::Nothing, "not on a monitor yet");
-    assert_eq!(app.monitor, None);
+    assert_eq!(app.output.mode, None);
 
     app.headless_monitor = Some("HDMI-A-1".to_string());
     assert_eq!(app.sync_monitor(), Effect::Redraw);
-    assert_eq!(app.monitor, Some(Mode::Hdr));
-    assert_eq!(app.monitor_headroom, Some(4.0));
+    assert_eq!(app.output.mode, Some(Mode::Hdr));
+    assert_eq!(app.output.headroom, Some(4.0));
     assert_eq!(app.sync_monitor(), Effect::Nothing, "nothing moved");
     assert!(app.surface_hdr(), "the HDR surface is wanted");
     assert_eq!(app.hdr_state(), Hdr::Unsupported, "no surface to switch");
     assert_eq!(app.headroom(), Headroom::None);
     assert_eq!(app.sync_output(app.headroom()), Effect::Nothing);
 
-    app.monitors
+    app.output
+        .monitors
         .as_ref()
         .expect("still there")
         .set("HDMI-A-1", Mode::Sdr, 1.0);
     assert_eq!(app.sync_monitor(), Effect::Redraw);
-    assert_eq!(app.monitor, Some(Mode::Sdr));
-    assert_eq!(app.monitor_headroom, Some(1.0));
+    assert_eq!(app.output.mode, Some(Mode::Sdr));
+    assert_eq!(app.output.headroom, Some(1.0));
     assert!(!app.surface_hdr());
 
     app.headless_monitor = Some("DP-2".to_string());
@@ -4089,8 +4093,8 @@ fn a_monitor_change_is_noticed_once_and_kept() {
         Effect::Redraw,
         "a monitor nothing has described"
     );
-    assert_eq!(app.monitor, None);
-    assert_eq!(app.monitor_headroom, None);
+    assert_eq!(app.output.mode, None);
+    assert_eq!(app.output.headroom, None);
 }
 
 /// A display whose room grows while the headroom stays above white — a
@@ -4112,10 +4116,11 @@ fn the_lift_follows_the_room_as_it_ramps() {
     }));
     current.image = Arc::new(image);
     app.headless_surface_hdr = true;
-    app.monitors = Some(Monitors::stub(true));
+    app.output.monitors = Some(Monitors::stub(true));
     app.headless_monitor = Some("Built-in".to_string());
     let set = |app: &App, headroom| {
-        app.monitors
+        app.output
+            .monitors
             .as_ref()
             .expect("still there")
             .set("Built-in", Mode::Hdr, headroom);
@@ -4173,10 +4178,11 @@ fn the_numbers_follow_the_lift_off_the_loop() {
     }));
     current.image = Arc::new(image);
     app.headless_surface_hdr = true;
-    app.monitors = Some(Monitors::stub(true));
+    app.output.monitors = Some(Monitors::stub(true));
     app.headless_monitor = Some("Built-in".to_string());
     let set = |app: &App, headroom| {
-        app.monitors
+        app.output
+            .monitors
             .as_ref()
             .expect("still there")
             .set("Built-in", Mode::Hdr, headroom);
@@ -4247,11 +4253,12 @@ fn the_room_follows_the_monitor_and_the_switch_and_the_curve_stays() {
     // A picture pushed above white — the fixture is mid gray, three
     // stops up — so that a curve would have something to be for.
     app.current.as_mut().unwrap().display.set_exposure(3.0);
-    app.hdr = HdrPreference::On;
+    app.output.asked = HdrPreference::On;
     app.headless_surface_hdr = true;
-    app.monitors = Some(Monitors::stub(true));
+    app.output.monitors = Some(Monitors::stub(true));
     let set = |app: &App, mode, headroom| {
-        app.monitors
+        app.output
+            .monitors
             .as_ref()
             .expect("still there")
             .set("HDMI-A-1", mode, headroom);

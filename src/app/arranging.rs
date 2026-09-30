@@ -55,6 +55,21 @@ pub struct Arranged {
 /// How an arranged list reaches the event loop.
 pub type Deliver = super::Deliver<Arranged>;
 
+/// The lists being read for their order, as the application holds them:
+/// `jobs` those in flight, `landed` those read and waiting for a read of a
+/// file to finish, `deliver` how one comes back, `next_job` the count that
+/// tells them apart, and `awaiting_window` whether the loop has asked for
+/// the window and been kept waiting on the command line's order — the
+/// window opens at the size of the first file in it if the order is in by
+/// [`super::files::SLOW_READ`], and at the empty window's size if not.
+pub(super) struct Arrangings {
+    pub(super) jobs: Vec<Arranging>,
+    pub(super) landed: Vec<Arranged>,
+    pub(super) deliver: Deliver,
+    pub(super) next_job: u64,
+    pub(super) awaiting_window: bool,
+}
+
 /// Reads what `sort` needs of each of `paths`, on a thread of its own, and
 /// hands it to `deliver`.
 fn read_on_thread(job: u64, paths: Vec<PathBuf>, sort: Sort, deliver: Deliver) -> Arc<Progress> {
@@ -98,10 +113,15 @@ impl App {
             self.arrived(arrive, paths);
             return;
         }
-        self.jobs += 1;
-        let progress = read_on_thread(self.jobs, paths, sort, Arc::clone(&self.arranged_delivered));
-        self.arranging.push(Arranging {
-            job: self.jobs,
+        self.arranging.next_job += 1;
+        let progress = read_on_thread(
+            self.arranging.next_job,
+            paths,
+            sort,
+            Arc::clone(&self.arranging.deliver),
+        );
+        self.arranging.jobs.push(Arranging {
+            job: self.arranging.next_job,
             arrive,
             sort,
             since: Instant::now(),
@@ -112,26 +132,26 @@ impl App {
     /// Takes in a list read for its order, which is acted on at the first
     /// chance.
     pub(super) fn arranged_read(&mut self, arranged: Arranged) -> Effect {
-        self.arranged.push(arranged);
+        self.arranging.landed.push(arranged);
         self.settle_arranged()
     }
 
     /// Acts on every list read for its order. Between reads only, as any
     /// change to the list is: a read in flight is aimed at an index.
     pub(super) fn settle_arranged(&mut self) -> Effect {
-        if self.arranged.is_empty() || !self.files.is_idle() {
+        if self.arranging.landed.is_empty() || !self.files.is_idle() {
             return Effect::Nothing;
         }
         for Arranged {
             job,
             paths,
             glimpses,
-        } in std::mem::take(&mut self.arranged)
+        } in std::mem::take(&mut self.arranging.landed)
         {
-            let Some(at) = self.arranging.iter().position(|each| each.job == job) else {
+            let Some(at) = self.arranging.jobs.iter().position(|each| each.job == job) else {
                 continue;
             };
-            let arrive = self.arranging.remove(at).arrive;
+            let arrive = self.arranging.jobs.remove(at).arrive;
             self.glimpsed.extend(glimpses);
             self.arrived(arrive, paths);
         }
@@ -173,7 +193,7 @@ impl App {
     /// sized to it at once rather than once the picture arrives, which
     /// sizes it again only if it turns out another size.
     fn open_at(&mut self, first: &Path) {
-        if self.current.is_some() || (self.shown.is_some() && !self.size_to_next) {
+        if self.current.is_some() || (self.shown.is_some() && !self.sizing.to_next) {
             return;
         }
         let size = self
@@ -188,24 +208,25 @@ impl App {
             .map(|(width, height)| [width as f32, height as f32]);
         match self.shown {
             None => {
-                self.header_size = size;
-                self.size_to_next = true;
+                self.sizing.header = size;
+                self.sizing.to_next = true;
             }
             Some(_) => {
                 if let Some(size) = size
-                    && self.asked_size.is_none()
+                    && self.sizing.asked.is_none()
                 {
                     self.size_window_to(size);
                 }
             }
         }
-        self.sized_for = size;
+        self.sizing.sized_for = size;
     }
 
     /// When the window stops waiting for the list it opens on to be put in
     /// order, while it is being: the moment the wait would be said.
     pub(super) fn window_due(&self) -> Option<Instant> {
         self.arranging
+            .jobs
             .iter()
             .find(|each| self.opens_on(each))
             .map(|each| each.since + SLOW_READ)
@@ -213,7 +234,7 @@ impl App {
 
     /// Whether a list is being put in order before any of it is shown.
     pub(super) fn arranging_to_open(&self) -> bool {
-        self.arranging.iter().any(|each| self.opens_on(each))
+        self.arranging.jobs.iter().any(|each| self.opens_on(each))
     }
 
     /// Whether the window opens on `arranging`: the command line's list, or
@@ -225,7 +246,7 @@ impl App {
     /// The toast about a list being put in order, once it has taken as long
     /// as a file does before its wait is said.
     pub(super) fn arranging_toast(&self) -> Option<Toast> {
-        let arranging = self.arranging.first()?;
+        let arranging = self.arranging.jobs.first()?;
         let raised = arranging.since + SLOW_READ;
         if Instant::now() < raised {
             return None;
@@ -241,7 +262,7 @@ impl App {
     /// When the toast about a list being put in order goes up, while that
     /// is still to come.
     pub(super) fn arranging_due(&self, now: Instant) -> Option<Instant> {
-        let due = self.arranging.first()?.since + SLOW_READ;
+        let due = self.arranging.jobs.first()?.since + SLOW_READ;
         (due > now).then_some(due)
     }
 

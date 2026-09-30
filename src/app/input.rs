@@ -2481,7 +2481,7 @@ impl App {
         let georeference = current.and_then(|current| current.exif.georeference.as_ref());
         Conditions {
             region_selected: matches!(self.marking.selection, Selection::Shown(_)),
-            several_files: self.files.len() > 1 || self.folder.unread(),
+            several_files: self.files.len() > 1 || self.beside.folder.unread(),
             animation: self.animation.is_some(),
             pages: current.is_some_and(|current| {
                 matches!(

@@ -285,6 +285,49 @@ pub struct Options {
 /// window tiled never does, and must not leave the window pinned.
 const SIZING_GRACE: Duration = Duration::from_secs(1);
 
+/// What the surface goes out to. `asked` is what was asked of it: by
+/// `--output`, and by every press of the switch since, read against the
+/// monitor's mode in [`App::surface_hdr`] and [`App::headroom`]. The rest
+/// is the compositor's word, where it gives one: `monitors` its table,
+/// `mode` that of the monitor the window is on as last read — `None` until
+/// the window has landed on one, and for good where nothing says — and
+/// `headroom` its room above white, its peak over its white, read with the
+/// mode: what a gain map's lift is weighed against on an HDR surface.
+struct Output {
+    asked: HdrPreference,
+    monitors: Option<Monitors>,
+    mode: Option<Mode>,
+    headroom: Option<f32>,
+}
+
+/// How the window is sized to the picture. `header` is what the header
+/// said the first file's size was, so that the window can open at the
+/// right shape before the pixels arrive: only ever consulted while there
+/// is no picture, and `None` for a format whose header would not say.
+/// `asked` is the size `--size` asked the window to open at, in logical
+/// pixels, read once when the window is made; every size after that is
+/// the compositor's to give. `to_next` is whether the next picture to
+/// arrive is to size the window, as the first sizes it at start-up: set
+/// while the window shows nothing — it opened on nothing, or the last file
+/// was deleted — and spent by the arrival; a window opened at `--size`
+/// keeps the size it was asked for, that being a choice rather than a
+/// default. `sized_for` is the size the window was given ahead of the
+/// picture that spends `to_next`, from its header: the arrival sizes the
+/// window again only where the picture turns out another size — turned by
+/// its orientation, or a file that would not read walked past. `held` is
+/// when the window was last held to a size, while it is: the moment
+/// [`App::size_window_to`] pinned its least and greatest size to the one
+/// it asked for, which is released when the compositor has answered or
+/// after [`SIZING_GRACE`] — see there for why the size is asked for that
+/// way.
+struct Sizing {
+    header: Option<[f32; 2]>,
+    asked: Option<[u32; 2]>,
+    to_next: bool,
+    sized_for: Option<[f32; 2]>,
+    held: Option<Instant>,
+}
+
 /// One reading of the window and the view, taken at the top of a frame
 /// or an event and read by everything under it: the picture's viewport,
 /// which panels are up, the window in logical pixels, and the view as it
@@ -319,22 +362,21 @@ pub struct App {
     files: Files,
     current: Option<Current>,
     startup: Startup,
-    /// What was asked of the surface: by `--output`, and by every press of
-    /// the switch since. Read against the monitor's mode in
-    /// [`App::surface_hdr`] and [`App::headroom`].
-    hdr: HdrPreference,
+    /// What the surface goes out to: what was asked of it, and what the
+    /// monitor the window is on is in.
+    output: Output,
+    /// How the window is sized to the picture: ahead of the first file
+    /// from its header, and again by a picture arriving into an empty one.
+    sizing: Sizing,
+    /// The folder beside a single file named alone — see [`folder`].
+    beside: folder::Beside,
+    /// Lists being read for the list's order before any of them is shown
+    /// — see [`arranging`].
+    arranging: arranging::Arrangings,
     /// Which of a raw's two pictures is asked for: the developed frame, or
     /// the camera's JPEG. One preference for every raw, kept between runs;
     /// a raw with no JPEG in it shows its developed picture whatever it is.
     rendering: Rendering,
-    /// The compositor's word on the monitors, where it gives one.
-    monitors: Option<Monitors>,
-    /// The mode of the monitor the window is on, as last read: `None` until
-    /// the window has landed on one, and for good where nothing says.
-    monitor: Option<Mode>,
-    /// And its room above white — its peak over its white — read with the
-    /// mode: what a gain map's lift is weighed against on an HDR surface.
-    monitor_headroom: Option<f32>,
     /// Where the view is going: the pan and zoom every key and press act
     /// on. What is on screen is `App::shown_view`, which is this once it
     /// has arrived.
@@ -376,39 +418,15 @@ pub struct App {
     /// was a file.
     named: Vec<PathBuf>,
     directories: Vec<Watch>,
-    /// The folder beside a single file named alone: unread until a step,
-    /// the chooser or the file list asks for more than the one file, then
-    /// read on its thread — see [`folder`]. A read that comes back under a
-    /// read of a file waits in `listed` until the list can be rebuilt; what
-    /// it learned of each image for the order is kept in `glimpsed` until
-    /// the thumbnail thread has read that image's header.
-    folder: Folder,
-    /// Whether a single file opened alone has its folder to step into:
-    /// the setting, unless the command line said to open it alone.
-    browse_folder: bool,
     /// The web address the map button opens, with `{lat}` and `{lng}` for
     /// the coordinates: the setting.
     open_map_link: String,
-    listed: Option<folder::Listed>,
-    folder_delivered: folder::Deliver,
     glimpsed: HashMap<PathBuf, folder::Glimpse>,
     /// The folder the last picture shown came from, whole, which the
     /// desktop's file dialog starts in; and that folder while the empty
     /// window offers to open it, which it does where it still holds images.
     last_folder: Option<PathBuf>,
     offered_folder: Option<PathBuf>,
-    /// Lists being read for the list's order before any of them is shown,
-    /// those read and waiting for a read of a file to finish, how they come
-    /// back, and the count that tells them apart — see [`arranging`].
-    arranging: Vec<arranging::Arranging>,
-    arranged: Vec<arranging::Arranged>,
-    arranged_delivered: arranging::Deliver,
-    jobs: u64,
-    /// Whether the loop has asked for the window and been kept waiting: the
-    /// command line's list is being put in order, and the window opens at
-    /// the size of the first file in it if the order is in by
-    /// [`files::SLOW_READ`], and at the empty window's size if not.
-    awaiting_window: bool,
     /// The colors everything is drawn in, and the palette file they came
     /// from, watched on the same cadence as the image: Omarchy rewrites it
     /// wholesale when the desktop's theme changes, and the window should
@@ -423,32 +441,6 @@ pub struct App {
     config_watch: Watch,
     /// When to look at it next.
     next_poll: Instant,
-    /// What the header said the first file's size was, so that the window can
-    /// open at the right shape before the pixels arrive. Only ever consulted
-    /// while `current` is empty, and `None` for a format whose header would
-    /// not say.
-    header_size: Option<[f32; 2]>,
-    /// The size `--size` asked the window to open at, in logical pixels, if it
-    /// asked for one. Read once, when the window is made; every size after
-    /// that is the compositor's to give.
-    asked_size: Option<[u32; 2]>,
-    /// Whether the next picture to arrive is to size the window, as the
-    /// first sizes it at start-up: set while the window shows nothing — it
-    /// opened on nothing, or the last file was deleted — and spent by the
-    /// arrival. A window opened at `--size` keeps the size it was asked
-    /// for, that being a choice rather than a default.
-    size_to_next: bool,
-    /// The size the window was given ahead of the picture that spends
-    /// `size_to_next`, from its header: the arrival sizes the window again
-    /// only where the picture turns out another size — turned by its
-    /// orientation, or a file that would not read walked past.
-    sized_for: Option<[f32; 2]>,
-    /// When the window was last held to a size, while it is: the moment
-    /// [`App::size_window_to`] pinned its least and greatest size to the
-    /// one it asked for, which is released when the compositor has
-    /// answered or after [`SIZING_GRACE`] — see there for why the size is
-    /// asked for that way.
-    sizing: Option<Instant>,
     /// The thread that reads files.
     ///
     /// Declared before the renderer on purpose: fields are dropped in the
@@ -648,20 +640,37 @@ impl App {
         let mut app = Self {
             files: Files::new(files, index, overrides),
             current: None,
-            header_size: size,
-            asked_size,
-            size_to_next: source.is_none(),
-            sized_for: None,
-            sizing: None,
             startup,
-            hdr,
+            output: Output {
+                asked: hdr,
+                monitors,
+                mode: None,
+                headroom: None,
+            },
+            sizing: Sizing {
+                header: size,
+                asked: asked_size,
+                to_next: source.is_none(),
+                sized_for: None,
+                held: None,
+            },
+            beside: folder::Beside {
+                folder,
+                landed: None,
+                deliver: folder_delivered,
+                browse: config.browse_folder,
+            },
+            arranging: arranging::Arrangings {
+                jobs: Vec::new(),
+                landed: Vec::new(),
+                deliver: arranged_delivered,
+                next_job: 0,
+                awaiting_window: false,
+            },
             rendering: match kept_state.camera_jpeg {
                 true => Rendering::CameraJpeg,
                 false => Rendering::Developed,
             },
-            monitors,
-            monitor: None,
-            monitor_headroom: None,
             view,
             motion: None,
             kept: Kept::default(),
@@ -673,19 +682,10 @@ impl App {
             menu_deliver: None,
             named,
             directories,
-            folder,
-            browse_folder: config.browse_folder,
             open_map_link: config.open_map_link.clone(),
-            listed: None,
-            folder_delivered,
             glimpsed: HashMap::new(),
             last_folder: None,
             offered_folder: None,
-            arranging: Vec::new(),
-            arranged: Vec::new(),
-            arranged_delivered,
-            jobs: 0,
-            awaiting_window: false,
             theme: Theme::detect(),
             theme_watch,
             config_watch: Watch::idle(),
@@ -866,7 +866,7 @@ impl App {
         let window = &shown.window;
         let wanted = initial_window_size(
             window.available_monitors(),
-            self.monitors.as_ref(),
+            self.output.monitors.as_ref(),
             Some(image),
             None,
         );
@@ -882,12 +882,12 @@ impl App {
         }
         window.set_min_inner_size(Some(wanted));
         window.set_max_inner_size(Some(wanted));
-        self.sizing = Some(Instant::now());
+        self.sizing.held = Some(Instant::now());
     }
 
     /// Lets go of the size the window was held to, if it was.
     fn release_size(&mut self) {
-        if self.sizing.take().is_some()
+        if self.sizing.held.take().is_some()
             && let Some(shown) = &self.shown
         {
             let window = &shown.window;
@@ -920,8 +920,8 @@ impl App {
         self.openers.clear();
         self.marking.clear();
         self.from_command_line = false;
-        self.size_to_next = true;
-        self.sized_for = None;
+        self.sizing.to_next = true;
+        self.sizing.sized_for = None;
         let title = self.title();
         if let Some(shown) = &mut self.shown {
             shown.renderer.clear_image();
@@ -1104,7 +1104,7 @@ impl App {
     /// it. Not while a read is in flight, since what is coming is a
     /// picture, and the buttons would be up for the length of a decode.
     fn is_empty(&self) -> bool {
-        self.current.is_none() && self.files.is_idle() && self.arranging.is_empty()
+        self.current.is_none() && self.files.is_idle() && self.arranging.jobs.is_empty()
     }
 
     /// The size to open the window at: the image's, once there is one, and
@@ -1113,7 +1113,7 @@ impl App {
         self.current
             .as_ref()
             .map(Current::size)
-            .or(self.header_size)
+            .or(self.sizing.header)
     }
 
     /// Whether the surface should be the HDR one. The monitor decides where
@@ -1124,7 +1124,7 @@ impl App {
     /// asks a compositor to switch a monitor over. Where nothing says what
     /// the monitor is, what was asked for is all there is to go on.
     fn surface_hdr(&self) -> bool {
-        surface_wanted(self.monitor, self.hdr)
+        surface_wanted(self.output.mode, self.output.asked)
     }
 
     /// Whether the picture is going out with room above SDR white, which is
@@ -1143,7 +1143,7 @@ impl App {
             .is_some_and(|shown| shown.renderer.output().is_hdr);
         #[cfg(test)]
         let surface = surface || self.headless_surface_hdr;
-        headroom_of(surface, self.monitor, self.hdr)
+        headroom_of(surface, self.output.mode, self.output.asked)
     }
 
     /// Whether the switch has anything to switch, and where it has not, which
@@ -1159,8 +1159,12 @@ impl App {
             .shown
             .as_ref()
             .is_some_and(|shown| shown.renderer.hdr_available());
-        let speaks = self.monitors.as_ref().is_some_and(Monitors::speaks_modes);
-        hdr_state_of(offered, speaks, self.monitor)
+        let speaks = self
+            .output
+            .monitors
+            .as_ref()
+            .is_some_and(Monitors::speaks_modes);
+        hdr_state_of(offered, speaks, self.output.mode)
     }
 
     /// The key the monitor thread's table knows the window's monitor by —
@@ -1218,21 +1222,21 @@ impl App {
     /// nothing else says. Says whether anything on screen changed — the
     /// picture, or only the switch, which a monitor's mode lights or kills.
     fn sync_monitor(&mut self) -> Effect {
-        let Some(monitors) = &self.monitors else {
+        let Some(monitors) = &self.output.monitors else {
             return Effect::Nothing;
         };
         let name = self.monitor_name();
         let mode = name.as_deref().and_then(|name| monitors.mode(name));
         let headroom = name.as_deref().and_then(|name| monitors.headroom(name));
-        if mode == self.monitor && headroom == self.monitor_headroom {
+        if mode == self.output.mode && headroom == self.output.headroom {
             return Effect::Nothing;
         }
         let before = self.headroom();
-        self.monitor_headroom = headroom;
+        self.output.headroom = headroom;
         // Worth a line, since it is what lights the switch or kills it; the
         // room above white alone can move by the moment on a Mac, and is not.
         if let (Some(name), Some(mode)) = (&name, mode)
-            && Some(mode) != self.monitor
+            && Some(mode) != self.output.mode
         {
             let mode = match mode {
                 Mode::Hdr => "HDR",
@@ -1240,7 +1244,7 @@ impl App {
             };
             eprintln!("gamut: monitor {name} is in {mode} mode");
         }
-        self.monitor = mode;
+        self.output.mode = mode;
         // The room moving is a lift to weigh again even where the headroom
         // stays above white: a Mac's display reads none until a window asks
         // it for room and then ramps up, and a picture that arrived in that
@@ -1258,7 +1262,7 @@ impl App {
         if self.headroom() != Headroom::Above {
             return 1.0;
         }
-        self.monitor_headroom.unwrap_or(f32::INFINITY)
+        self.output.headroom.unwrap_or(f32::INFINITY)
     }
 
     /// Puts the lift of a picture with a gain map where the surface's room
@@ -1333,7 +1337,7 @@ impl App {
     /// screen, and `t` changes it afterwards.
     pub(super) fn toggle_hdr(&mut self) -> Effect {
         let before = self.headroom();
-        self.hdr = if before == Headroom::Above {
+        self.output.asked = if before == Headroom::Above {
             HdrPreference::Off
         } else {
             HdrPreference::On
@@ -2214,7 +2218,7 @@ impl App {
         if let Some(due) = self.window_due()
             && Instant::now() < due
         {
-            self.awaiting_window = true;
+            self.arranging.awaiting_window = true;
             event_loop.set_control_flow(ControlFlow::WaitUntil(due));
             return;
         }
@@ -2228,15 +2232,15 @@ impl App {
     /// not be the first, and the first picture sizes it when it arrives.
     fn open_window(&mut self, event_loop: &ActiveEventLoop) {
         if self.arranging_to_open() {
-            self.header_size = None;
-            self.size_to_next = true;
-            self.sized_for = None;
+            self.sizing.header = None;
+            self.sizing.to_next = true;
+            self.sizing.sized_for = None;
         }
         let size = initial_window_size(
             event_loop.available_monitors(),
-            self.monitors.as_ref(),
+            self.output.monitors.as_ref(),
             self.opening_size(),
-            self.asked_size,
+            self.sizing.asked,
         );
         let attributes = window::with_app_id(
             Window::default_attributes()
@@ -2259,7 +2263,7 @@ impl App {
         timing::window_open();
         window::show_icon();
 
-        let mut renderer = match Renderer::new(window.clone(), self.hdr) {
+        let mut renderer = match Renderer::new(window.clone(), self.output.asked) {
             Ok(renderer) => renderer,
             Err(error) => {
                 crate::report(&error);
@@ -2291,7 +2295,7 @@ impl App {
         // Asked for and not had is worth a line; asked for and had is worth
         // one too, since the switch's later lines say the same thing. A
         // surface that follows the monitor says so when it moves.
-        if self.hdr == HdrPreference::On {
+        if self.output.asked == HdrPreference::On {
             let output = renderer.output();
             eprintln!(
                 "gamut: {} \u{2192} {} output{}",
@@ -2534,9 +2538,9 @@ impl App {
         // A window that showed nothing takes the size it would have opened
         // at on this picture, as if it had — unless it was given it already,
         // from the header; the fit follows on the frame the new size brings.
-        let sized_for = self.sized_for.take();
-        if std::mem::take(&mut self.size_to_next)
-            && self.asked_size.is_none()
+        let sized_for = self.sizing.sized_for.take();
+        if std::mem::take(&mut self.sizing.to_next)
+            && self.sizing.asked.is_none()
             && sized_for != Some(size)
         {
             self.size_window_to(size);
@@ -3209,14 +3213,18 @@ impl ApplicationHandler<UserEvent> for App {
         let now = Instant::now();
         // The window kept waiting on the command line's order: opened once
         // the order is in, or once the wait has gone on long enough to say.
-        if self.awaiting_window && self.window_due().is_none_or(|due| now >= due) {
-            self.awaiting_window = false;
+        if self.arranging.awaiting_window && self.window_due().is_none_or(|due| now >= due) {
+            self.arranging.awaiting_window = false;
             self.open_window(event_loop);
         }
         let moved = self.sync_monitor();
 
         // The hold on the window's size, given up unanswered.
-        if self.sizing.is_some_and(|since| now >= since + SIZING_GRACE) {
+        if self
+            .sizing
+            .held
+            .is_some_and(|since| now >= since + SIZING_GRACE)
+        {
             self.release_size();
         }
         let polled = self.poll(now);
@@ -3231,8 +3239,8 @@ impl ApplicationHandler<UserEvent> for App {
             self.toasts.deadline(),
             self.shown.as_ref().and_then(|shown| shown.gui.deadline()),
             next_frame,
-            self.sizing.map(|since| since + SIZING_GRACE),
-            self.window_due().filter(|_| self.awaiting_window),
+            self.sizing.held.map(|since| since + SIZING_GRACE),
+            self.window_due().filter(|_| self.arranging.awaiting_window),
             self.folder_due(now),
             self.arranging_due(now),
         ]

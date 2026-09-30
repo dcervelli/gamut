@@ -108,6 +108,19 @@ pub type Glimpses = std::collections::HashMap<PathBuf, Glimpse>;
 /// How a finished read reaches the event loop.
 pub type Deliver = super::Deliver<Listed>;
 
+/// The folder beside a single file, as the application holds it: where
+/// the read of it stands, a read that has come back under a read of a file
+/// and waits in `landed` until the list can be rebuilt, how a read comes
+/// back, and whether a single file opened alone has its folder to step
+/// into at all — the setting, unless the command line said to open it
+/// alone.
+pub(super) struct Beside {
+    pub(super) folder: Folder,
+    pub(super) landed: Option<Listed>,
+    pub(super) deliver: Deliver,
+    pub(super) browse: bool,
+}
+
 /// Reads the folder `file` is in on a thread of its own, glimpsing each
 /// image for what `sort` needs, and hands it to `deliver`. Its progress is
 /// the one handed back.
@@ -198,7 +211,7 @@ impl App {
     /// one named alone on the command line does.
     pub(super) fn open_sent(&mut self, named: Vec<PathBuf>) {
         let alone = match named.as_slice() {
-            [file] if self.browse_folder && self.files.len() == 0 && !file.is_dir() => {
+            [file] if self.beside.browse && self.files.len() == 0 && !file.is_dir() => {
                 Some(file.clone())
             }
             _ => None,
@@ -209,7 +222,7 @@ impl App {
         if let Some(file) = alone
             && self.named.contains(&file)
         {
-            self.folder = Folder::Unread { file };
+            self.beside.folder = Folder::Unread { file };
         }
     }
 
@@ -218,14 +231,14 @@ impl App {
     /// changes what it is read for. Says whether it is being read, which
     /// is whether the caller has nothing more to do.
     pub(super) fn read_folder(&mut self, then: Then) -> bool {
-        match &mut self.folder {
+        match &mut self.beside.folder {
             Folder::Unread { file } => {
                 let progress = read_on_thread(
                     file.clone(),
                     self.filmstrip.order().sort,
-                    Arc::clone(&self.folder_delivered),
+                    Arc::clone(&self.beside.deliver),
                 );
-                self.folder = Folder::Reading {
+                self.beside.folder = Folder::Reading {
                     dir: crate::listing::folder_of(file),
                     then,
                     since: Instant::now(),
@@ -244,7 +257,7 @@ impl App {
     /// Takes in a folder read, which goes into the list at the first
     /// chance.
     pub(super) fn folder_read(&mut self, listed: Listed) -> Effect {
-        self.listed = Some(listed);
+        self.beside.landed = Some(listed);
         self.settle_folder()
     }
 
@@ -252,7 +265,7 @@ impl App {
     /// Between reads only, as any rebuild is — a read in flight is aimed at
     /// an index — so under one it waits for the next chance.
     pub(super) fn settle_folder(&mut self) -> Effect {
-        if self.listed.is_none() || !self.files.is_idle() {
+        if self.beside.landed.is_none() || !self.files.is_idle() {
             return Effect::Nothing;
         }
         let Some(Listed {
@@ -260,14 +273,14 @@ impl App {
             dir,
             images,
             glimpses,
-        }) = self.listed.take()
+        }) = self.beside.landed.take()
         else {
             return Effect::Nothing;
         };
-        let then = match std::mem::take(&mut self.folder) {
+        let then = match std::mem::take(&mut self.beside.folder) {
             Folder::Reading { then, .. } => then,
             other => {
-                self.folder = other;
+                self.beside.folder = other;
                 return Effect::Nothing;
             }
         };
@@ -338,7 +351,7 @@ impl App {
             since,
             progress,
             ..
-        } = &self.folder
+        } = &self.beside.folder
         else {
             return None;
         };
@@ -357,7 +370,7 @@ impl App {
     /// When the toast about the folder being read goes up, while that is
     /// still to come.
     pub(super) fn folder_due(&self, now: Instant) -> Option<Instant> {
-        match &self.folder {
+        match &self.beside.folder {
             Folder::Reading { since, .. } => Some(*since + SLOW_READ).filter(|due| *due > now),
             _ => None,
         }
@@ -367,7 +380,7 @@ impl App {
     /// list, and redraws the toast while the count in it moves on.
     pub(super) fn poll_folder(&mut self) -> Effect {
         let counting = matches!(
-            &self.folder,
+            &self.beside.folder,
             Folder::Reading { progress, .. } if progress.counted().is_some()
         );
         self.settle_folder().also(Effect::redraw_if(
