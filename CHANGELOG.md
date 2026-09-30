@@ -22,6 +22,11 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 - On Linux, a large copy — the picture, or a long list of tags — no longer
   disappears from the clipboard when something reads only the start of it,
   as a clipboard manager's preview may.
+- While a depth map is shown in the picture's place, the information
+  panel's *Image* section goes on describing the picture instead of the map,
+  and the *Showing* pill moves between it and the *Depth map* section to
+  say which of the two is on screen. The *Image* section wears the pill on
+  every picture, depth map or not.
 
 ## 0.9.0 - 2026-09-30
 

@@ -645,9 +645,13 @@ The toggle is a square with `axis-3d`'s mark alone, between the camera's
 switch and the headroom switch (`Pass::depth_toggle`), lit while the map is
 up, and is left out on a picture
 with no map for the camera switch's reason; `NO_DEPTH_MAP` is the refusal
-only the key reaches. While the map is up, the info panel's `Depth map`
-heading wears a pill with an eye and *Showing* (`Section::showing`), which
-is what says the `Image` section's facts are the map's.
+only the key reaches. The info panel's `Image` and `Depth map` sections
+each describe their own image whichever is up, and the pill with an eye and
+*Showing* (`Section::showing`) on one of the two headings says which is on
+screen. A picture with no map has the pill on its `Image` heading all the
+same, so that the pill is always somewhere rather than only sometimes. The
+`Image` heading is its facts rather than its name, laid out by `line`, which
+keeps the pill's room clear at its end.
 
 ## The region
 
@@ -1007,11 +1011,14 @@ inverse, the distances the two ends of the codes stand for, nearest first,
 and whether those are measured or only right about what is nearer. The
 range is written by `pixel::written`, the readout's own writing of a
 distance, so a relative map's ends carry the same `≈` and the same two
-places the pointer's readout does. The section reads the picture's map
-through `Current::picture`, not `Current::image`: while the map is shown in
-the picture's place the `Image` section describes the map, and the depth
-map's section still describes the map the picture carries rather than
-nothing. A map whose file says nothing of its codes is still a map, and the
+places the pointer's readout does. Both sections read the picture through
+`Current::picture` and `Current::picture_face`, not `Current::image`, so
+that neither changes when the map is shown in the picture's place: the
+`Image` section goes on describing the picture — its color space and how
+its numbers are referred, rather than the ones the map is drawn under,
+which the file never said — and the depth map's section the map. The one
+fact of the map that exists only while it is shown, the precision it lost
+on its way to the device, is added to its section then. A map whose file says nothing of its codes is still a map, and the
 section gives its encoding as unknown, which answers the question a reader
 of a bare number under the pointer is asking.
 

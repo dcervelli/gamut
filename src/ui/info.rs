@@ -195,9 +195,9 @@ struct Section {
     /// For [`Face::Regions`], each region a fact is the row of, in the same
     /// order; empty for every other face.
     regions: Vec<ShownRegion>,
-    /// Whether what the section describes is on screen in the picture's
-    /// place, which a pill at the end of its heading says: the depth map's,
-    /// while it is shown.
+    /// Whether what the section describes is on screen, which a pill at the
+    /// end of its heading says: the picture's, or the depth map's while it
+    /// is shown in its place.
     showing: bool,
 }
 
@@ -611,6 +611,7 @@ fn file_section(
         None,
         name,
         None,
+        0.0,
     );
     if let Some((index, folder)) = field(FOLDER) {
         ui.add_space(HEAD_GAP);
@@ -647,6 +648,7 @@ fn file_section(
             Some("\u{00b7}"),
             size.into_iter().chain(modified),
             None,
+            0.0,
         );
     }
 }
@@ -682,7 +684,11 @@ fn headed_section(
     if pieces.is_empty() {
         marked_heading(pass, ui, place, section, width, mark);
     } else {
-        line(
+        // The pill stands at the column's end, level with the mark, in
+        // room the head is kept out of.
+        let left = ui.cursor().min.x;
+        let pill = section.showing.then(|| showing_width(ui));
+        let at = line(
             pass,
             ui,
             width,
@@ -691,7 +697,18 @@ fn headed_section(
             None,
             pieces,
             button,
+            pill.map_or(0.0, |pill| pill + CHIP_GAP),
         );
+        if let (Some(pill), Some(at)) = (pill, at) {
+            let rect = egui::Rect::from_min_size(
+                pos2(
+                    left + width - pill,
+                    (at.center().y - CHIP_HEIGHT / 2.0).round(),
+                ),
+                vec2(pill, CHIP_HEIGHT),
+            );
+            paint_showing(ui, rect, theme, pass.grid);
+        }
     }
     let rows = (first..)
         .zip(&section.facts)
@@ -747,16 +764,30 @@ fn marked_heading(
     })
 }
 
-/// The pill at the end of a heading whose section is on screen in the
-/// picture's place: an eye and the word, in the accent, round at both ends
-/// so it reads as a state rather than as a button to press.
+/// The pill at the end of a heading whose section is on screen: an eye and
+/// the word, in the accent, round at both ends so it reads as a state
+/// rather than as a button to press.
 fn showing_pill(ui: &mut egui::Ui, theme: &Theme, grid: icon::Grid) {
+    let (rect, _) = ui.allocate_exact_size(vec2(showing_width(ui), CHIP_HEIGHT), Sense::HOVER);
+    paint_showing(ui, rect, theme, grid);
+}
+
+/// The words the pill says, laid out to be drawn.
+fn showing_galley(ui: &egui::Ui) -> Arc<egui::Galley> {
     let font = egui::FontId::proportional(LABEL_SIZE);
-    let galley = ui.ctx().fonts_mut(|fonts| {
+    ui.ctx().fonts_mut(|fonts| {
         fonts.layout_no_wrap(SHOWING.to_string(), font, egui::Color32::PLACEHOLDER)
-    });
-    let width = (2.0 * CHIP_PADDING + COPY_ICON + CHIP_GAP + galley.size().x).round();
-    let (rect, _) = ui.allocate_exact_size(vec2(width, CHIP_HEIGHT), Sense::HOVER);
+    })
+}
+
+/// How wide the pill is.
+fn showing_width(ui: &egui::Ui) -> f32 {
+    (2.0 * CHIP_PADDING + COPY_ICON + CHIP_GAP + showing_galley(ui).size().x).round()
+}
+
+/// The pill drawn in `rect`, wherever the heading has put it.
+fn paint_showing(ui: &egui::Ui, rect: egui::Rect, theme: &Theme, grid: icon::Grid) {
+    let galley = showing_galley(ui);
     let ink: egui::Color32 = theme.accent.into();
     let ground: egui::Color32 = theme.panel_background.into();
     let painter = ui.painter();
@@ -1031,8 +1062,9 @@ struct Piece {
 }
 
 /// One line of `pieces` in `ink`, after `mark` where there is one and with
-/// `between` set between each two, broken to `width` where they do not fit;
-/// and after them `button`, wearing its mark, where there is one.
+/// `between` set between each two, broken to `width` less `reserve` where
+/// they do not fit; and after them `button`, wearing its mark, where there
+/// is one. Where the mark went, for whatever stands level with it.
 ///
 /// Each piece is pointed at and copied on its own, and says in its tooltip
 /// what it stands for where it is written short. The copy button goes where
@@ -1048,17 +1080,20 @@ fn line(
     between: Option<&str>,
     pieces: impl IntoIterator<Item = Piece>,
     button: Option<(&[icon::Mark], Control)>,
-) {
+    reserve: f32,
+) -> Option<egui::Rect> {
     let grid = pass.grid;
     let ground = pass.theme.panel_background;
     let left = ui.cursor().min.x;
+    let mut marked = None;
     ui.horizontal_wrapped(|ui| {
-        ui.set_width(width);
+        ui.set_width(width - reserve);
         let space = measure(ui, " ");
         ui.spacing_mut().item_spacing.x = space;
         let text = |text: &str| RichText::new(text).size(TEXT_SIZE).color(ink);
         if let Some(mark) = mark {
             let (rect, _) = ui.allocate_exact_size(Vec2::splat(COPY_ICON), Sense::HOVER);
+            marked = Some(rect);
             icon::paint(
                 ui.painter(),
                 mark,
@@ -1109,6 +1144,7 @@ fn line(
             }
         }
     });
+    marked
 }
 
 /// `rows` as a table of two columns: each field's name, dim, in a column as
@@ -1297,15 +1333,19 @@ fn contents(current: &Current) -> Contents {
             .into_iter()
             .map(|section| metadata_section(exif, section)),
     );
-    sections.push(Section::new(
-        "Image",
-        Face::Headed {
-            mark: icon::IMAGE,
-            head: &[RESOLUTION, READ_BY],
-            button: None,
-        },
-        fields(image_facts(current)),
-    ));
+    // The pill goes on whichever of the two is on screen.
+    sections.push(Section {
+        showing: current.showing == Showing::Picture,
+        ..Section::new(
+            "Image",
+            Face::Headed {
+                mark: icon::IMAGE,
+                head: &[RESOLUTION, READ_BY],
+                button: None,
+            },
+            fields(image_facts(current)),
+        )
+    });
     sections.push(Section {
         showing: current.showing == Showing::Auxiliary(Auxiliary::Depth),
         ..Section::new(
@@ -1534,8 +1574,12 @@ fn file_facts(current: &Current) -> Vec<(&'static str, String)> {
 /// and what those numbers are meant as light. The bars say some of this too,
 /// but they say it in passing and drop it when the window narrows; this is
 /// where it is written out and stays written.
+///
+/// Always the picture's, whichever of the file's images is on screen: a
+/// depth map shown in its place is described in its own section.
 fn image_facts(current: &Current) -> Vec<(&'static str, String)> {
-    let image = &current.image;
+    let face = current.picture_face();
+    let image = &face.image;
     let mut facts = vec![
         // The decoder that claimed the file, by what its bytes say: the
         // first thing to know about why the rest reads as it does.
@@ -1582,13 +1626,7 @@ fn image_facts(current: &Current) -> Vec<(&'static str, String)> {
         ),
         // What the device could not keep of what the file holds, and why:
         // nothing for the usual picture, which the device holds as it is.
-        (
-            "Precision",
-            current
-                .reduced
-                .map(|reduced| format!("half float: {}", reduced.reason()))
-                .unwrap_or_default(),
-        ),
+        ("Precision", precision(face)),
         ("Color space", image.color.label()),
         // Only where there is an alpha channel to have been multiplied
         // through or not: "opaque" under an image the line above already
@@ -1639,7 +1677,7 @@ fn image_facts(current: &Current) -> Vec<(&'static str, String)> {
         ),
         (
             "Gain applied",
-            map.map(|_| applied(current.lift.as_ref().map_or(0.0, |lift| lift.weight())))
+            map.map(|_| applied(face.lift.as_ref().map_or(0.0, |lift| lift.weight())))
                 .unwrap_or_default(),
         ),
     ]);
@@ -1662,7 +1700,8 @@ fn image_facts(current: &Current) -> Vec<(&'static str, String)> {
 }
 
 /// What the panel says about the depth map the picture carries, whichever
-/// of the two is on screen: its resolution and samples, whose words say what its
+/// of the two is on screen: its resolution and samples, the precision it
+/// lost on its way to the device while it is shown, whose words say what its
 /// codes stand for, whether they stand for the distance or its inverse, the
 /// distances the codes run between, and how far those can be believed.
 /// Nothing where the picture carries no map.
@@ -1683,6 +1722,16 @@ fn depth_facts(current: &Current) -> Vec<(&'static str, String)> {
                 map.samples.component_name(),
                 map.samples.channels().label()
             ),
+        ),
+        // Only while the map is on screen: until then it has not been on
+        // its way to the device at all.
+        (
+            "Precision",
+            if current.showing == Showing::Auxiliary(Auxiliary::Depth) {
+                precision(&current.shown)
+            } else {
+                String::new()
+            },
         ),
     ];
     let Some(scale) = map.scale else {
@@ -1713,6 +1762,15 @@ fn depth_facts(current: &Current) -> Vec<(&'static str, String)> {
         ),
     ]);
     facts
+}
+
+/// What an image on screen could not keep of what it holds on its way to
+/// the device, and why: nothing for the usual image, which the device
+/// holds as it is.
+fn precision(face: &crate::ui::Face) -> String {
+    face.reduced
+        .map(|reduced| format!("half float: {}", reduced.reason()))
+        .unwrap_or_default()
 }
 
 /// How much of a gain map's lift is on screen, at `weight`: all of it, a

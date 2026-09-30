@@ -375,13 +375,20 @@ impl Current {
     /// The picture itself, whichever of the file's images is on screen:
     /// what it carries beside it, and what it was left in.
     pub fn picture(&self) -> (&Arc<DecodedImage>, &Display) {
+        let face = self.picture_face();
+        (&face.image, &face.display)
+    }
+
+    /// The same, with everything else derived from it: the precision it
+    /// lost on its way to the device, and the lift it is drawn through.
+    pub fn picture_face(&self) -> &Face {
         match self.showing {
-            Showing::Picture => (&self.image, &self.display),
+            Showing::Picture => &self.shown,
             Showing::Auxiliary(_) => self
                 .held
                 .iter()
                 .find(|(showing, _)| *showing == Showing::Picture)
-                .map(|(_, face)| (&face.image, &face.display))
+                .map(|(_, face)| face)
                 .expect("the picture is held while another image is shown"),
         }
     }

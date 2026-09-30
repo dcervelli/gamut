@@ -44,8 +44,8 @@ field, the EXIF one is shown.
 ## Image
 
 Headed by the picture's size and the format that read it — "4000 × 3000
-JPEG". While the depth map is shown in the picture's place, this section
-describes the map.
+JPEG". It describes the picture even while the depth map is shown in its
+place. Its heading wears a *Showing* pill while the picture is on screen.
 
 | Field | What it says |
 | --- | --- |
@@ -77,6 +77,7 @@ wears a *Showing* pill.
 | --- | --- |
 | Resolution | The map's own size, usually much smaller than the picture's. |
 | Samples | Bits per sample of the map. |
+| Precision | Only while the map is shown, and only when the GPU could not hold it at full precision, and why. |
 | Described by | Apple or Google: whose description of the map the file carries. |
 | Encoding | *distance* or *inverse distance*, which is what the map's numbers are spread over. *unknown* where the file does not say; the pixel readout then shows the raw numbers. |
 | Range | The nearest and farthest distances the map can express. |

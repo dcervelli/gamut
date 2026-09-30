@@ -200,25 +200,58 @@ fn a_depth_map_is_described_after_the_image() {
     );
 
     // Shown in the picture's place, the map is still the picture's, and
-    // its heading says it is on screen rather than a row of the image's.
-    let showing = |current: &Current| {
+    // the pill moves from the image's heading to the map's; the image's
+    // rows go on describing the picture, the map saying what it lost on
+    // its way to the device.
+    let showing = |current: &Current, name: &str| {
         contents(current)
             .sections
             .iter()
-            .find(|section| section.name == DEPTH_MAP)
+            .find(|section| section.name == name)
             .expect("a section")
             .showing
     };
-    assert!(!showing(&current));
+    let image = |current: &Current| {
+        contents(current)
+            .sections
+            .into_iter()
+            .find(|section| section.name == "Image")
+            .expect("a section")
+            .facts
+            .into_iter()
+            .map(|fact| [fact.name, fact.value])
+            .collect::<Vec<_>>()
+    };
+    assert!(showing(&current, "Image"));
+    assert!(!showing(&current, DEPTH_MAP));
+    let before = image(&current);
     let (picture, _) = current.picture();
-    let face = crate::ui::Face::new(picture.depth.as_ref().unwrap().image());
+    let mut face = crate::ui::Face::new(picture.depth.as_ref().unwrap().image());
+    face.reduced = Some(crate::render::Reduced::NoNorm16);
     current.show(
         crate::image::auxiliary::Showing::Auxiliary(crate::image::auxiliary::Auxiliary::Depth),
         |_| Some(face),
     );
     assert!(section(&current).contains(&"Apple".to_string()));
-    assert!(showing(&current));
+    assert!(section(&current).contains(&"Precision".to_string()));
+    assert!(!showing(&current, "Image"));
+    assert!(showing(&current, DEPTH_MAP));
+    assert_eq!(image(&current), before);
     assert!(!written(&current).iter().any(|row| row == "Showing"));
+}
+
+/// A picture that carries nothing else to show still has the pill on its
+/// image's heading, and on no other.
+#[test]
+fn a_picture_alone_is_showing() {
+    let current = current();
+    let showing: Vec<_> = contents(&current)
+        .sections
+        .iter()
+        .filter(|section| section.showing)
+        .map(|section| section.name)
+        .collect();
+    assert_eq!(showing, ["Image"]);
 }
 
 /// A file whose XMP marks regions out on the picture has them under a
