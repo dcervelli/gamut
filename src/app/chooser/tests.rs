@@ -87,7 +87,8 @@ fn a_colon_query_asks_by_index() {
     let list: Vec<PathBuf> = (1..=12)
         .map(|n| PathBuf::from(format!("{n}.png")))
         .collect();
-    chooser.open(&list, 0);
+    chooser.relist(&list);
+    chooser.open(0);
     chooser.set_query(":2".to_string());
     assert_eq!(chooser.cursor, 0);
     assert_eq!(chooser.path_at(0), Some(Path::new("2.png")));
@@ -139,7 +140,8 @@ fn the_common_directory_is_the_deepest_shared_one() {
 #[test]
 fn the_cursor_is_clamped_to_the_list() {
     let mut chooser = Chooser::with(Box::new(Plain));
-    chooser.open(&paths(&["a.png", "b.png", "c.png", "d.png"]), 1);
+    chooser.relist(&paths(&["a.png", "b.png", "c.png", "d.png"]));
+    chooser.open(1);
     assert_eq!(chooser.cursor, 1);
     chooser.step(Step::Up);
     chooser.step(Step::Up);
@@ -181,7 +183,8 @@ fn the_cursor_is_clamped_to_the_list() {
 fn the_rows_fill_in_as_facts_arrive() {
     let mut chooser = Chooser::with(Box::new(Plain));
     let list = paths(&["clip.gif", "scan.tiff", "photo.jpeg"]);
-    chooser.open(&list, 2);
+    chooser.relist(&list);
+    chooser.open(2);
     let thumbs = Thumbs::default();
     let input = chooser.input(&thumbs, Some(Path::new("photo.jpeg")));
     assert_eq!(input.rows.len(), 3);
@@ -251,7 +254,8 @@ fn the_rows_fill_in_as_facts_arrive() {
 fn a_title_is_matched_on_once_it_is_known() {
     let mut chooser = Chooser::with(Box::new(Plain));
     let list = paths(&["buteo-buteo-2.webp", "falco-1.webp", "aquila-3.webp"]);
-    chooser.open(&list, 0);
+    chooser.relist(&list);
+    chooser.open(0);
     let thumbs = Thumbs::default();
     chooser.set_query("zzard".to_string());
     assert!(chooser.input(&thumbs, None).rows.is_empty());
@@ -323,7 +327,8 @@ fn a_title_is_matched_on_once_it_is_known() {
 #[test]
 fn a_new_query_asks_for_the_rows_under_the_screen_again() {
     let mut chooser = Chooser::with(Box::new(Plain));
-    chooser.open(&paths(&["a.png", "b.png", "c.png"]), 0);
+    chooser.relist(&paths(&["a.png", "b.png", "c.png"]));
+    chooser.open(0);
     let thumbs = Thumbs::default();
     chooser.wanted(0..3, &thumbs);
     assert_eq!(chooser.input(&thumbs, None).visible, 0..3);
@@ -336,7 +341,8 @@ fn a_new_query_asks_for_the_rows_under_the_screen_again() {
 #[test]
 fn the_visible_rows_ask_for_what_they_lack() {
     let mut chooser = Chooser::with(Box::new(Plain));
-    chooser.open(&paths(&["a.png", "b.png", "c.png"]), 0);
+    chooser.relist(&paths(&["a.png", "b.png", "c.png"]));
+    chooser.open(0);
     let mut thumbs = Thumbs::default();
     chooser.take(Delivered {
         path: PathBuf::from("b.png"),

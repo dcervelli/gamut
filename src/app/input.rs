@@ -3377,7 +3377,8 @@ impl App {
                 egui::Popup::close_all(ctx);
                 if !open && self.files.len() > 1 {
                     egui::Popup::open_id(ctx, ui::chooser::id());
-                    self.chooser.open(self.files.paths(), self.files.index());
+                    self.chooser.follow(&self.files);
+                    self.chooser.open(self.files.index());
                     let wanted = self.chooser.wanted(0..FIRST_ROWS, &self.thumbs);
                     self.thumbnailer.prioritize(wanted);
                 }

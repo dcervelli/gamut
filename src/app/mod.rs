@@ -770,7 +770,6 @@ impl App {
         // file is being looked at, and the chooser then has thumbnails the
         // moment it opens.
         app.thumbnailer.enqueue(app.files.paths().to_vec());
-        app.filmstrip.relist(app.files.paths());
         // Up from the start, the strip is scrolled to the first file as it
         // is when it is switched on.
         if app.panels.show_filmstrip {
@@ -977,9 +976,9 @@ impl App {
     /// so the chooser reads it again, and the thread is told about any
     /// files new to it.
     pub(super) fn list_changed(&mut self) {
-        self.chooser.relist(self.files.paths());
-        self.filmstrip.relist(self.files.paths());
-        // Whatever changed it, the list may have fallen out of its order:
+        // The two panels read the list again by themselves, at the next
+        // frame — see [`Files::listing`]. Whatever changed it, the list
+        // may have fallen out of its order:
         // a rebuild comes back merged, a file put back lands where it was.
         self.filmstrip.mark_stale();
         self.thumbnailer.enqueue(self.files.paths().to_vec());
@@ -1016,14 +1015,11 @@ impl App {
         });
         let moved = self.files.reorder(&places);
         // The list itself has not changed, only its order: the two panels
-        // read it again, and the thread has nothing new to make. The strip
-        // reads it whether or not anything moved, since this is the first
-        // it hears of a list that was in order already.
-        self.filmstrip.relist(self.files.paths());
+        // read it again at the next frame, and the thread has nothing new
+        // to make.
         if !moved {
             return Effect::Nothing;
         }
-        self.chooser.relist(self.files.paths());
         // The file on screen is wherever the order has put it now, and
         // the strip follows it there.
         self.filmstrip.reveal();
@@ -1829,9 +1825,11 @@ impl App {
         } = *sight;
         let chooser = self.chooser_open().then(|| {
             let target = self.current.as_ref().and_then(|_| self.files.target_path());
+            self.chooser.follow(&self.files);
             self.chooser.input(&self.thumbs, target)
         });
         let filmstrip = if self.filmstrip_showing() {
+            self.filmstrip.follow(&self.files);
             let (files, chooser) = (&self.files, &self.chooser);
             let glimpsed = &self.glimpsed;
             Some(self.filmstrip.input(
@@ -2544,9 +2542,6 @@ impl App {
             self.size_window_to(size);
         }
         self.files.shown(file.index);
-        // A file on its way out has left the list now, if this is its
-        // neighbor arriving: the strip reads the list again.
-        self.filmstrip.relist(self.files.paths());
         // Another file on screen: it goes on the stack of files seen,
         // and the file list scrolls to it.
         if file.mode == Reload::Fresh {

@@ -148,7 +148,6 @@ impl App {
             None => {
                 self.leave_picture();
                 self.files.remove_shown();
-                self.filmstrip.relist(self.files.paths());
             }
         }
         self.toast(
@@ -194,7 +193,6 @@ impl App {
             None => {
                 self.leave_picture();
                 self.files.remove_shown();
-                self.filmstrip.relist(self.files.paths());
             }
         }
         self.toast(

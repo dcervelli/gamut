@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::chooser::Thumbs;
+use super::files::Files;
 use super::order::Key;
 use crate::ui::filmstrip::{self, Input, Order, Row};
 
@@ -34,6 +35,9 @@ pub(super) struct Filmstrip {
     /// changed: which files, or in what order.
     paths: Vec<PathBuf>,
     listing: u64,
+    /// Which list `paths` was read from — see [`Files::listing`] — so
+    /// that following the list costs a comparison until it changes.
+    followed: u64,
     /// The rows as the frame last saw them, where each row starts, and
     /// whether anything they were built from has changed since.
     rows: Option<Arc<[Row]>>,
@@ -57,6 +61,7 @@ impl Default for Filmstrip {
             stale: true,
             paths: Vec::new(),
             listing: 0,
+            followed: 0,
             rows: None,
             tops: Arc::from([0.0]),
             dirty: true,
@@ -114,6 +119,16 @@ impl Filmstrip {
     }
 
     /// The list as it stands now.
+    /// Reads the list again where it has changed since it was last read:
+    /// what the frame does before it asks for the rows, so that nothing
+    /// that changes the list has to remember to say so.
+    pub(super) fn follow(&mut self, files: &Files) {
+        if self.followed != files.listing() {
+            self.followed = files.listing();
+            self.relist(files.paths());
+        }
+    }
+
     pub(super) fn relist(&mut self, paths: &[PathBuf]) {
         if self.paths != paths {
             self.paths = paths.to_vec();

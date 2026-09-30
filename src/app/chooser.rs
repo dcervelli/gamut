@@ -24,6 +24,7 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use super::files::Files;
 use crate::fuzzy::{self, Matcher};
 use crate::image::sequence::Sequence;
 use crate::thumbnailer::{Delivered, Facts, News, Thumb};
@@ -43,6 +44,8 @@ pub struct Chooser {
     /// The list as it was last handed over, and each file's place in it
     /// relative to the directory they all share.
     paths: Vec<PathBuf>,
+    /// Which list `paths` was read from — see [`Chooser::follow`].
+    followed: u64,
     relative: Vec<(String, String)>,
     several_dirs: bool,
     /// Which files fit the query, best first, with where the query was
@@ -78,6 +81,7 @@ impl Chooser {
             query: String::new(),
             cursor: 0,
             paths: Vec::new(),
+            followed: 0,
             relative: Vec::new(),
             several_dirs: false,
             matches: Vec::new(),
@@ -95,9 +99,21 @@ impl Chooser {
     /// Opens over `paths`, the query cleared and the cursor on `shown`, the
     /// file already on screen: `Enter` at once is then no move at all, and
     /// `Down` is the next file, which is what the list is walked by.
-    pub fn open(&mut self, paths: &[PathBuf], shown: usize) {
+    /// Reads the list again where it has changed since it was last read —
+    /// see [`Files::listing`]: what the frame does before it asks for the
+    /// rows while the chooser is up, and what opening it does first.
+    pub fn follow(&mut self, files: &Files) {
+        if self.followed != files.listing() {
+            self.followed = files.listing();
+            self.relist(files.paths());
+        }
+    }
+
+    /// Opens on the list as last followed, the query cleared and the
+    /// cursor on `shown`, the file on screen.
+    pub fn open(&mut self, shown: usize) {
         self.query.clear();
-        self.relist(paths);
+        self.rematch();
         self.cursor = self
             .matches
             .iter()

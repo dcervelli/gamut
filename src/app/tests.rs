@@ -505,7 +505,8 @@ fn choosing_a_row_asks_for_its_file() {
         &[("a.png", 8, 8), ("b.png", 8, 8), ("c.png", 8, 8)],
     );
     assert!(app.files.is_idle());
-    app.chooser.open(app.files.paths(), app.files.index());
+    app.chooser.follow(&app.files);
+    app.chooser.open(app.files.index());
     let _ = app.act(ui::Command::Press(Control::Choose(0)));
     assert!(
         app.files.is_idle(),
@@ -531,6 +532,7 @@ fn choosing_a_row_asks_for_its_file() {
             .relist(crate::listing::relist(std::slice::from_ref(&dir)))
     );
     app.list_changed();
+    app.chooser.follow(&app.files);
     let input = app.chooser.input(&app.thumbs, app.files.shown_path());
     assert_eq!(input.rows.len(), 4);
     assert_eq!(input.current, Some(2));
@@ -2821,6 +2823,7 @@ fn a_removed_file_leaves_the_list_and_stays_off_it_until_undo() {
     assert_eq!(app.files.index(), 1);
     assert!(app.conditions().undoable);
     let rows = |app: &mut App| {
+        app.filmstrip.follow(&app.files);
         let chooser = &app.chooser;
         app.filmstrip
             .input(

@@ -70,6 +70,11 @@ pub(super) struct Files {
     /// stand twice — built again by [`Files::reindex`] whenever the list
     /// changes, so that asking where a file is costs nothing per file.
     places: HashMap<PathBuf, usize>,
+    /// Which list this is: moved on by every change to `paths`, so that
+    /// whatever holds a reading of the list — the file list's rows, the
+    /// chooser's matches — can tell whether it is the list as it stands
+    /// without comparing it, and read it again only when it is not.
+    listing: u64,
     /// Files written while the program was running — a picture pasted from
     /// the clipboard — which live where pictures are kept rather than
     /// wherever we were told to look. No directory named on the command line
@@ -102,6 +107,7 @@ impl Files {
         let mut files = Self {
             paths,
             places: HashMap::new(),
+            listing: 0,
             adopted: Vec::new(),
             index,
             leaving: None,
@@ -117,6 +123,7 @@ impl Files {
     /// Builds `places` from `paths` again: called by everything that
     /// changes the list, once it has.
     fn reindex(&mut self) {
+        self.listing += 1;
         self.places.clear();
         for (index, path) in self.paths.iter().enumerate() {
             self.places.entry(path.clone()).or_insert(index);
@@ -125,6 +132,13 @@ impl Files {
 
     pub(super) fn len(&self) -> usize {
         self.paths.len()
+    }
+
+    /// Which list this is — see the field. Never the same number for two
+    /// lists that differ, so a reading taken under one number is a reading
+    /// of the list as it stands while the number stands.
+    pub(super) fn listing(&self) -> u64 {
+        self.listing
     }
 
     /// Which file is on screen. Meaningless on an empty list.
