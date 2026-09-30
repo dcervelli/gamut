@@ -140,6 +140,11 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Fixed
 
+- Switching HDR on and off with a gain-mapped photograph up, or the Mac's
+  display ramping its brightness up after a picture opens, no longer
+  freezes the window while the histogram is measured again: the picture
+  changes at once and the histogram follows a moment later. Switching back
+  to a brightness already measured is instant.
 - A BigTIFF, or a TIFF whose directory comes after its pixels, no longer
   loses a metadata field of more than 32 values: a GeoTIFF key directory of
   more than eight keys was one, and took the *Georeference* section with it.

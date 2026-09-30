@@ -191,7 +191,8 @@ the panel's reset takes it off with the rest.
 
 A photograph with a gain map has nothing above white on an SDR surface
 anyway: its lift is weighed by the surface's room, and the statistics are
-scanned through the lift at that weight — `App::refresh_lift`, asked again
+scanned through the lift at that weight, off the loop — `App::refresh_lift`,
+asked again
 when the surface is settled, which is after the first file is decoded and
 before the window opens, and whenever the room moves under it.
 

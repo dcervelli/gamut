@@ -102,8 +102,16 @@ a table and the chain rather than a decode.
 
 Everything that says what the screen shows reads through the same table:
 `DecodedImage::sample` takes it, for the readout and the copy, and
-`Stats::scan_with` for the histogram, which `App::refresh_lift` scans again
-whenever the weight changes. `GainMap::gain_at` is the CPU twin of the
+`Stats::scan_with` for the histogram, which `App::refresh_lift` has scanned
+again whenever the weight changes. That scan walks the whole picture, so it
+runs on a thread of its own (`app/measuring.rs`) rather than on the loop: a
+Mac's display ramps its room up over a second or two once a window asks for
+it, every step of the ramp is a new weight, and scanned in line each step
+was a stall. The picture takes the new table at once and the histogram
+follows when its measure lands; one request waits for the thread and a later
+one replaces it, so a ramp costs the scan under way and the last one asked
+for. The base the loader measured and the last weight scanned are both kept,
+so `o` pressed back and forth measures nothing again. `GainMap::gain_at` is the CPU twin of the
 shaders' `gain`; `filter_tests` holds the device to it texel for texel, at
 1:1 and through the chain. On a monitor in SDR mode the weight is zero and
 every one of them is the base, so what is copied is the photograph as it

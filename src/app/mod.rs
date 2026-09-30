@@ -13,6 +13,7 @@ mod gui;
 pub mod input;
 mod kept;
 pub mod keymap;
+pub mod measuring;
 #[cfg(target_os = "macos")]
 mod menubar;
 mod order;
@@ -33,12 +34,12 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::{Window, WindowId};
 
 use crate::gestures::{Gestures, Surface};
+use crate::image::DecodedImage;
 use crate::image::auxiliary::{Auxiliary, Showing};
 use crate::image::decode::{self, CameraJpeg, Rendering};
 use crate::image::display::{Display, Headroom, Startup};
 use crate::image::orient::Turn;
 use crate::image::sequence::Sequence;
-use crate::image::{DecodedImage, Stats};
 use crate::loader::{Decoded, Loader, Opened, Ready, Reload, Request, Source};
 use crate::monitor::{self, Mode, Monitors};
 use crate::motion::Motion;
@@ -70,6 +71,7 @@ use files::{Announce, Files};
 use gui::Gui;
 use input::{Effect, Pointer};
 use kept::{Kept, Left, Settings};
+use measuring::{Measured, Measuring};
 use region::Marking;
 use window::{file_label, initial_window_size, loading_title, window_title};
 
@@ -97,6 +99,9 @@ pub enum UserEvent {
     /// A list about to be opened has been read for its order — see
     /// [`arranging`].
     Arranged(arranging::Arranged),
+    /// The picture has been measured through its lift — see [`measuring`].
+    /// Boxed: it carries the histograms.
+    Measured(Box<Measured>),
     /// The desktop has asked for these files to be opened: on a Mac, what
     /// Finder sends — see `finder`. Nothing sends it elsewhere, where the
     /// files arrive on the command line.
@@ -123,6 +128,8 @@ pub struct Threads {
     pub folder: folder::Deliver,
     /// How a list read for its order comes back.
     pub arranged: arranging::Deliver,
+    /// How the picture measured through its lift comes back.
+    pub measured: measuring::Deliver,
 }
 
 /// The file the command line asked for first, for the window to open on:
@@ -394,6 +401,9 @@ pub struct App {
     /// The copies of the picture being prepared on threads of their own,
     /// and how they report back.
     copying: Copying,
+    /// The picture measured through its lift on a thread of its own, and
+    /// the measures a switch moves between.
+    measuring: Measuring,
     /// Where a deleted file goes: the desktop's trash, where the file
     /// manager shows it. `None` where there is no way to find it — no home
     /// directory — in which case a deletion is refused rather than done
@@ -476,6 +486,7 @@ impl App {
             picker,
             folder: folder_delivered,
             arranged: arranged_delivered,
+            measured,
         } = threads;
         let Options {
             overrides,
@@ -581,6 +592,7 @@ impl App {
             toasts: Toasts::default(),
             reduced_said: HashSet::new(),
             copying: Copying::default(),
+            measuring: Measuring::new(measured),
             panels: Panels {
                 show_ui: config.show_ui,
                 show_filmstrip: config.show_filmstrip,
@@ -1137,11 +1149,13 @@ impl App {
     }
 
     /// Puts the lift of a picture with a gain map where the surface's room
-    /// asks, and measures the picture again through it: the histogram and
-    /// every readout describe what is on screen, which is the base on a
+    /// asks, and has the picture measured again through it: the histogram
+    /// and every readout describe what is on screen, which is the base on a
     /// monitor with no room above white and the lifted picture on one with
-    /// room. Nothing happens for a picture with no map, or a lift already
-    /// at the weight.
+    /// room. The picture follows at once; the numbers follow once
+    /// [`measuring`] has them, which for a weight met before is at once
+    /// too. Nothing happens for a picture with no map, or a lift already at
+    /// the weight.
     fn refresh_lift(&mut self) {
         let headroom = self.display_headroom();
         let Some(current) = &mut self.current else {
@@ -1158,13 +1172,32 @@ impl App {
         {
             return;
         }
-        let table = map.table(weight);
-        // The loader measured the base, which is what no lift shows: a
-        // picture arriving on a surface with no room is not scanned twice.
-        if weight > 0.0 || current.lift.is_some() {
-            current.stats = Stats::scan_with(&current.image, Some(&table));
+        let table = Arc::new(map.table(weight));
+        // The loader measured the base, which is what no lift shows: kept
+        // for the lift's coming back to nothing, and a picture arriving on
+        // a surface with no room is not measured twice.
+        if current.lift.is_none() {
+            self.measuring.keep_base(&current.image, &current.stats);
         }
-        current.lift = Some(Arc::new(table));
+        if let Some(stats) = self.measuring.measure(&current.image, &table) {
+            current.stats = stats;
+        }
+        current.lift = Some(table);
+    }
+
+    /// Takes the picture's measure through its lift in, where it is still
+    /// the measure of what is on screen.
+    fn measured(&mut self, measured: Measured) -> Effect {
+        let Some(current) = &mut self.current else {
+            return Effect::Nothing;
+        };
+        match self.measuring.arrived(measured, &current.image) {
+            Some(stats) => {
+                current.stats = stats;
+                Effect::Redraw
+            }
+            None => Effect::Nothing,
+        }
     }
 
     /// Switches the room above white on or off. Returns whether anything
@@ -3075,6 +3108,7 @@ impl ApplicationHandler<UserEvent> for App {
             UserEvent::Picked(picked) => self.picked(picked),
             UserEvent::Folder(listed) => self.folder_read(listed),
             UserEvent::Arranged(arranged) => self.arranged_read(arranged),
+            UserEvent::Measured(measured) => self.measured(*measured),
             UserEvent::Opened(paths) => {
                 self.open_sent(paths);
                 // The files the program was launched to open, which the
@@ -3388,6 +3422,7 @@ mod tests {
             picker: Arc::new(|_| {}),
             folder: Arc::new(|_| {}),
             arranged: Arc::new(|_| {}),
+            measured: Arc::new(|_| {}),
         }
     }
 
@@ -7381,6 +7416,88 @@ mod tests {
         set(&app, 4.0);
         assert_eq!(app.sync_monitor(), Effect::Redraw);
         assert_eq!(weight(&app), Some(1.0), "the room ramped up");
+    }
+
+    /// The lift moves the moment the room does, and the numbers once the
+    /// thread has measured the picture through it; a report a later step
+    /// has overtaken is thrown away. The switch then moves between the
+    /// base and the lift without measuring anything again.
+    #[test]
+    fn the_numbers_follow_the_lift_off_the_loop() {
+        use crate::image::gain_map::{GainMap, Lift};
+        use std::sync::mpsc;
+        use std::time::Duration;
+        let (mut app, _dir) = app_over("measured", &[("a.png", 4, 3)]);
+        let (send, receive) = mpsc::channel();
+        let send = std::sync::Mutex::new(send);
+        app.measuring = Measuring::new(Arc::new(move |measured| {
+            let _ = send.lock().expect("not poisoned").send(measured);
+        }));
+        let next = || {
+            receive
+                .recv_timeout(Duration::from_secs(10))
+                .expect("the thread reports")
+        };
+        let current = app.current.as_mut().unwrap();
+        let mut image = (*current.image).clone();
+        image.gain_map = Some(Arc::new(GainMap {
+            width: 2,
+            height: 1,
+            channels: 1,
+            data: vec![0, 255],
+            lift: Lift::Apple { headroom: 4.0 },
+        }));
+        current.image = Arc::new(image);
+        app.headless_surface_hdr = true;
+        app.monitors = Some(Monitors::stub(true));
+        app.headless_monitor = Some("Built-in".to_string());
+        let set = |app: &App, headroom| {
+            app.monitors
+                .as_ref()
+                .expect("still there")
+                .set("Built-in", Mode::Hdr, headroom);
+        };
+        let max = |app: &App| app.current.as_ref().unwrap().stats.max;
+        let weight = |app: &App| {
+            app.current
+                .as_ref()
+                .unwrap()
+                .lift
+                .as_ref()
+                .map(|table| table.weight())
+        };
+
+        set(&app, 1.0);
+        let _ = app.sync_monitor();
+        assert_eq!(weight(&app), Some(0.0));
+        let base = max(&app);
+
+        // Two steps of a ramp: the lift is at the second at once, and the
+        // numbers are the base's until the second's measure is in.
+        set(&app, 2.0);
+        let _ = app.sync_monitor();
+        let first = next();
+        set(&app, 4.0);
+        let _ = app.sync_monitor();
+        assert_eq!(weight(&app), Some(1.0), "the lift is not kept waiting");
+        assert_eq!(max(&app), base, "the numbers are");
+        assert_eq!(app.measured(first), Effect::Nothing, "overtaken");
+        assert_eq!(max(&app), base);
+        assert_eq!(app.measured(next()), Effect::Redraw);
+        let lifted = max(&app);
+        assert!(lifted > base, "{lifted} over {base}");
+
+        // The switch, off and on: each measure is there already.
+        let _ = app.toggle_hdr();
+        assert_eq!(weight(&app), Some(0.0));
+        assert_eq!(max(&app), base, "the base, kept");
+        let _ = app.toggle_hdr();
+        assert_eq!(weight(&app), Some(1.0));
+        assert_eq!(max(&app), lifted, "the lift, kept");
+        assert!(
+            receive.recv_timeout(Duration::from_millis(200)).is_err(),
+            "nothing measured again"
+        );
     }
 
     /// Under `--output hdr` the surface is the HDR one from the start and

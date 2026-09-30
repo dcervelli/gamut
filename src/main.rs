@@ -217,6 +217,10 @@ fn run() -> Result<ExitCode> {
     let arranged: app::arranging::Deliver = std::sync::Arc::new(move |arranged| {
         let _ = proxy.send_event(app::UserEvent::Arranged(arranged));
     });
+    let proxy = event_loop.create_proxy();
+    let measured: app::measuring::Deliver = std::sync::Arc::new(move |measured| {
+        let _ = proxy.send_event(app::UserEvent::Measured(Box::new(measured)));
+    });
     // Files Finder opens arrive after the program has started, as an Apple
     // Event rather than as arguments.
     #[cfg(target_os = "macos")]
@@ -244,6 +248,7 @@ fn run() -> Result<ExitCode> {
             picker,
             folder,
             arranged,
+            measured,
         },
     );
     // `--paste` on purpose, and nothing to paste: said in the window as
