@@ -1,14 +1,17 @@
 //! The command line: what was asked for, and `--help`.
 //!
-//! The key sections of the help text are rendered from [`ROWS`], so a binding
-//! is documented by the same edit that adds it, and the mouse's from the
-//! default [`Gestures`]. Both at their defaults: what a configuration file
-//! rebinds is the window's help popup's to say.
+//! The options are [`FLAGS`], one table that `--help`, the manual page and
+//! the parse all read, so a flag is documented by the same edit that adds
+//! it. The key sections of the help text are rendered from [`ROWS`] the same
+//! way, and the mouse's from the default [`Gestures`]. Both at their
+//! defaults: what a configuration file rebinds is the window's help popup's
+//! to say.
 
+use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
 
 use crate::PROGRAM;
 use crate::app::Options;
@@ -21,13 +24,14 @@ use crate::image::{Primaries, Transfer};
 use crate::render::{HdrPreference, Upscale};
 use crate::settings::Config;
 
-const OPTIONS: &str = "\
-gamut — preview images
+/// What the program is, after its name at the top of `--help` and in the
+/// manual page's NAME line.
+const TAGLINE: &str = "preview images";
 
-USAGE:
-    gamut [OPTIONS] [PATH]...
-    gamut --paste [OPTIONS] [PATH]...
-
+/// The paragraph between the usage lines and the options, wrapped for a
+/// terminal; the manual page sets its own width, and takes it a paragraph
+/// at a time.
+const DESCRIPTION: &str = "\
 The first file is shown, stretched to fit the window, and re-read whenever
 something else writes to it. A directory stands for the images directly
 inside it, in name order, and is read again as it changes: an image added
@@ -35,46 +39,392 @@ to it or taken out of it joins or leaves the list. --paste puts the image
 on the clipboard at the front of the list, and needs no path at all. With
 no path and no paste the window opens empty, offering to open files or a
 folder through the desktop's file dialog, or to paste; Ctrl+O, or Cmd+O on
-a Mac, opens that dialog from any window.
+a Mac, opens that dialog from any window.";
 
-OPTIONS:
-    -h, --help              Show this help
-    -V, --version           Show the version
-        --print-config      Print a configuration file, every setting at its
-                            default and commented out, to be saved as
-                            ~/.config/gamut/config and edited
-        --output <SURFACE>  Start on an sdr or an hdr surface. Left alone, the
-                            surface follows the monitor: HDR where the
-                            compositor says it is in HDR mode. hdr asks for
-                            one regardless; o switches later
-        --transfer <FN>     Override the transfer function the file is assumed
-                            to use: linear, srgb, pq, hlg, or gamma:<N>
-        --primaries <P>     Override the color primaries: bt709, p3, bt2020,
-                            adobe, or prophoto
-        --no-gain-map       Show the SDR base image of an Ultra HDR JPEG or
-                            a HEIC with a gain map, rather than reconstructing
-                            the HDR one from the map beside it
-        --colormap <MAP>    Start with false color on single-channel images:
-                            gray, viridis, magma, or turbo
-        --tone-map <MAP>    Start with none or neutral
-        --window <MODE>     Start with the window set to stored, full, or trimmed
-        --exposure <STOPS>  Start at this exposure, in stops
-        --upscale <FILTER>  How to resample above 100%: nearest or bicubic
-        --size <W> <H>      Open the window at this size in logical pixels,
-                            rather than at the image's own
-        --histogram         Start with the histogram showing
-        --info              Start with the file information panel showing
-        --no-minimap        Start with the minimap off
-        --alone             Step only through the files named, even when that
-                            is a single file, rather than on through the
-                            other images in its folder
-        --paused            Open an animation stopped on its first frame,
-                            rather than playing
-        --paste             Paste the image on the clipboard, saved among your
-                            pictures, and show it first, ahead of any PATH
-        --timing            Print decode and startup timings to stderr
-    --                      Treat every later argument as a path
-";
+/// Where the options stop, and what `--help` says of it: every argument
+/// after it is a path, whatever it starts with. Not an option itself, so
+/// read ahead of the table and listed after it.
+const END_OF_OPTIONS: (&str, &str) = ("--", "Treat every later argument as a path");
+
+/// What the command line has said so far, as each flag fills it in; what
+/// [`parse_args`] makes the [`Options`] from once the configuration file is
+/// read under it.
+#[derive(Default)]
+struct Parsed {
+    files: Vec<PathBuf>,
+    overrides: Overrides,
+    startup: Startup,
+    hdr: HdrPreference,
+    /// The flags that say which panels are up are only half the answer: the
+    /// configuration file is the other, and the flags win over it.
+    histogram: Option<bool>,
+    info: Option<bool>,
+    minimap: Option<bool>,
+    paused: bool,
+    alone: bool,
+    paste: bool,
+    upscale: Upscale,
+    size: Option<[u32; 2]>,
+}
+
+/// What a flag leaves the command line at once it has been read.
+enum Then {
+    /// The next argument.
+    Continue,
+    /// Nothing more: the flag printed what was asked for, and the program
+    /// is done.
+    Quit,
+}
+
+/// The arguments after a flag, for the flag to take its value from.
+struct Rest<'a> {
+    /// The flag, as the command line spelled it, for saying which one wanted
+    /// a value it did not get.
+    flag: &'static str,
+    arguments: &'a mut dyn Iterator<Item = OsString>,
+}
+
+impl Rest<'_> {
+    /// The next argument, taken as this flag's value; none is refused.
+    fn value(&mut self) -> Result<String> {
+        match self
+            .arguments
+            .next()
+            .and_then(|value| value.into_string().ok())
+        {
+            Some(value) => Ok(value),
+            None => bail!("`{}` needs a value (try --help)", self.flag),
+        }
+    }
+}
+
+/// One option of the command line: how it is spelled, what `--help` says
+/// of it, and what it does.
+struct Flag {
+    long: &'static str,
+    short: Option<&'static str>,
+    /// The value it takes, as `--help` names it: `<SURFACE>`, or `<W> <H>`
+    /// for two; empty for a flag that takes none.
+    value: &'static str,
+    /// What it does, on the lines `--help` shows it on — wrapped by hand for
+    /// a terminal, which the manual page joins back up. Empty for a flag
+    /// `--help` leaves out.
+    help: &'static [&'static str],
+    /// What it does to what was parsed, taking its value, where it has one,
+    /// from the arguments after it.
+    apply: fn(&mut Parsed, &mut Rest) -> Result<Then>,
+}
+
+impl Flag {
+    /// The flag as the option column writes it: `-h, --help`,
+    /// `--output <SURFACE>`.
+    fn column(&self) -> String {
+        let mut column = match self.short {
+            Some(short) => format!("{short}, {}", self.long),
+            None => self.long.to_string(),
+        };
+        if !self.value.is_empty() {
+            column.push(' ');
+            column.push_str(self.value);
+        }
+        column
+    }
+}
+
+/// Every option, in the order `--help` lists them.
+const FLAGS: &[Flag] = &[
+    Flag {
+        long: "--help",
+        short: Some("-h"),
+        value: "",
+        help: &["Show this help"],
+        apply: |_, _| {
+            print!("{}", usage());
+            Ok(Then::Quit)
+        },
+    },
+    Flag {
+        long: "--version",
+        short: Some("-V"),
+        value: "",
+        help: &["Show the version"],
+        apply: |_, _| {
+            println!("{PROGRAM} {}", env!("CARGO_PKG_VERSION"));
+            Ok(Then::Quit)
+        },
+    },
+    Flag {
+        long: "--print-config",
+        short: None,
+        value: "",
+        help: &[
+            "Print a configuration file, every setting at its",
+            "default and commented out, to be saved as",
+            "~/.config/gamut/config and edited",
+        ],
+        apply: |_, _| {
+            print!("{}", Config::template());
+            Ok(Then::Quit)
+        },
+    },
+    // Undocumented, like `--serve-clipboard`: this is how the package build
+    // gets a manual page, not something to press.
+    Flag {
+        long: "--print-man",
+        short: None,
+        value: "",
+        help: &[],
+        apply: |_, _| {
+            print!("{}", man());
+            Ok(Then::Quit)
+        },
+    },
+    Flag {
+        long: "--output",
+        short: None,
+        value: "<SURFACE>",
+        help: &[
+            "Start on an sdr or an hdr surface. Left alone, the",
+            "surface follows the monitor: HDR where the",
+            "compositor says it is in HDR mode. hdr asks for",
+            "one regardless; o switches later",
+        ],
+        apply: |parsed, rest| {
+            let value = rest.value()?;
+            parsed.hdr = HdrPreference::parse(&value)
+                .ok_or_else(|| anyhow!("unknown output `{value}`: sdr or hdr (try --help)"))?;
+            Ok(Then::Continue)
+        },
+    },
+    Flag {
+        long: "--transfer",
+        short: None,
+        value: "<FN>",
+        help: &[
+            "Override the transfer function the file is assumed",
+            "to use: linear, srgb, pq, hlg, or gamma:<N>",
+        ],
+        apply: |parsed, rest| {
+            let value = rest.value()?;
+            parsed.overrides.transfer =
+                Some(Transfer::parse(&value).ok_or_else(
+                    || match value.strip_prefix("gamma:") {
+                        Some(exponent) => {
+                            anyhow!("`--transfer gamma:` needs a number, got `{exponent}`")
+                        }
+                        None => anyhow!("unknown transfer function `{value}` (try --help)"),
+                    },
+                )?);
+            Ok(Then::Continue)
+        },
+    },
+    Flag {
+        long: "--primaries",
+        short: None,
+        value: "<P>",
+        help: &[
+            "Override the color primaries: bt709, p3, bt2020,",
+            "adobe, or prophoto",
+        ],
+        apply: |parsed, rest| {
+            let value = rest.value()?;
+            parsed.overrides.primaries = Some(
+                Primaries::parse(&value)
+                    .ok_or_else(|| anyhow!("unknown primaries `{value}` (try --help)"))?,
+            );
+            Ok(Then::Continue)
+        },
+    },
+    Flag {
+        long: "--no-gain-map",
+        short: None,
+        value: "",
+        help: &[
+            "Show the SDR base image of an Ultra HDR JPEG or",
+            "a HEIC with a gain map, rather than reconstructing",
+            "the HDR one from the map beside it",
+        ],
+        apply: |parsed, _| {
+            parsed.overrides.gain_map = false;
+            Ok(Then::Continue)
+        },
+    },
+    Flag {
+        long: "--colormap",
+        short: None,
+        value: "<MAP>",
+        help: &[
+            "Start with false color on single-channel images:",
+            "gray, viridis, magma, or turbo",
+        ],
+        apply: |parsed, rest| {
+            let value = rest.value()?;
+            parsed.startup.colormap =
+                Some(Colormap::parse(&value).ok_or_else(|| anyhow!("unknown colormap `{value}`"))?);
+            Ok(Then::Continue)
+        },
+    },
+    Flag {
+        long: "--tone-map",
+        short: None,
+        value: "<MAP>",
+        help: &["Start with none or neutral"],
+        apply: |parsed, rest| {
+            let value = rest.value()?;
+            parsed.startup.tone_map =
+                Some(ToneMap::parse(&value).ok_or_else(|| anyhow!("unknown tone map `{value}`"))?);
+            Ok(Then::Continue)
+        },
+    },
+    Flag {
+        long: "--window",
+        short: None,
+        value: "<MODE>",
+        help: &["Start with the window set to stored, full, or trimmed"],
+        apply: |parsed, rest| {
+            let value = rest.value()?;
+            parsed.startup.auto = Some(
+                AutoWindow::parse(&value)
+                    .ok_or_else(|| anyhow!("unknown window mode `{value}` (try --help)"))?,
+            );
+            Ok(Then::Continue)
+        },
+    },
+    Flag {
+        long: "--exposure",
+        short: None,
+        value: "<STOPS>",
+        help: &["Start at this exposure, in stops"],
+        apply: |parsed, rest| {
+            let value = rest.value()?;
+            let stops: f32 = value
+                .parse()
+                .map_err(|_| anyhow!("`--exposure` needs a number, got `{value}`"))?;
+            // `nan` and `inf` both parse as `f32`, and unclamped they would
+            // put a non-finite gain into the shader uniform, the pixel
+            // readout and the status bar. The keyboard path clamps to +/-16
+            // stops; the command line gets the same ceiling, and rejects a
+            // value that is not a number at all.
+            if !stops.is_finite() {
+                bail!("`--exposure` needs a finite number, got `{value}`");
+            }
+            parsed.startup.exposure_stops = Some(stops.clamp(-16.0, 16.0));
+            Ok(Then::Continue)
+        },
+    },
+    Flag {
+        long: "--upscale",
+        short: None,
+        value: "<FILTER>",
+        help: &["How to resample above 100%: nearest or bicubic"],
+        apply: |parsed, rest| {
+            let value = rest.value()?;
+            parsed.upscale = Upscale::parse(&value)
+                .ok_or_else(|| anyhow!("unknown upscale filter `{value}`"))?;
+            Ok(Then::Continue)
+        },
+    },
+    Flag {
+        long: "--size",
+        short: None,
+        value: "<W> <H>",
+        help: &[
+            "Open the window at this size in logical pixels,",
+            "rather than at the image's own",
+        ],
+        apply: |parsed, rest| {
+            let width = rest.value()?;
+            let height = rest.value()?;
+            parsed.size = Some([side(&width)?, side(&height)?]);
+            Ok(Then::Continue)
+        },
+    },
+    Flag {
+        long: "--histogram",
+        short: None,
+        value: "",
+        help: &["Start with the histogram showing"],
+        apply: |parsed, _| {
+            parsed.histogram = Some(true);
+            Ok(Then::Continue)
+        },
+    },
+    Flag {
+        long: "--info",
+        short: None,
+        value: "",
+        help: &["Start with the file information panel showing"],
+        apply: |parsed, _| {
+            parsed.info = Some(true);
+            Ok(Then::Continue)
+        },
+    },
+    Flag {
+        long: "--no-minimap",
+        short: None,
+        value: "",
+        help: &["Start with the minimap off"],
+        apply: |parsed, _| {
+            parsed.minimap = Some(false);
+            Ok(Then::Continue)
+        },
+    },
+    Flag {
+        long: "--alone",
+        short: None,
+        value: "",
+        help: &[
+            "Step only through the files named, even when that",
+            "is a single file, rather than on through the",
+            "other images in its folder",
+        ],
+        apply: |parsed, _| {
+            parsed.alone = true;
+            Ok(Then::Continue)
+        },
+    },
+    Flag {
+        long: "--paused",
+        short: None,
+        value: "",
+        help: &[
+            "Open an animation stopped on its first frame,",
+            "rather than playing",
+        ],
+        apply: |parsed, _| {
+            parsed.paused = true;
+            Ok(Then::Continue)
+        },
+    },
+    Flag {
+        long: "--paste",
+        short: None,
+        value: "",
+        help: &[
+            "Paste the image on the clipboard, saved among your",
+            "pictures, and show it first, ahead of any PATH",
+        ],
+        apply: |parsed, _| {
+            parsed.paste = true;
+            Ok(Then::Continue)
+        },
+    },
+    Flag {
+        long: "--timing",
+        short: None,
+        value: "",
+        help: &["Print decode and startup timings to stderr"],
+        apply: |_, _| {
+            crate::timing::enable();
+            Ok(Then::Continue)
+        },
+    },
+];
+
+/// The flags `--help` lists: every one it has words for.
+fn documented() -> impl Iterator<Item = &'static Flag> {
+    FLAGS.iter().filter(|flag| !flag.help.is_empty())
+}
 
 /// The heading a section's keys are listed under: its title in capitals,
 /// as the option heading is, with `KEYS` after it. `--help`, the manual page
@@ -118,10 +468,40 @@ fn key_line(key: &str, help: &str) -> String {
     format!("    {key}{:gap$}{help}", "")
 }
 
-/// The whole of `--help`: the options, then every key under its heading,
-/// then the mouse.
+/// One line of the options block: `column` — a flag's, or nothing for a
+/// line carrying on a description — set in from the left by `indent`, and
+/// `words` where the description column begins.
+fn option_line(indent: usize, column: &str, words: &str) -> String {
+    let width = DESCRIPTION_COLUMN - indent;
+    format!("{:indent$}{column:<width$}{words}", "")
+}
+
+/// The whole of `--help`: the usage lines and the description, the options
+/// in two columns, then every key under its heading, then the mouse.
 pub fn usage() -> String {
-    let mut text = OPTIONS.to_string();
+    let mut text = format!(
+        "{PROGRAM} \u{2014} {TAGLINE}\n\
+         \n\
+         USAGE:\n    {PROGRAM} [OPTIONS] [PATH]...\n    {PROGRAM} --paste [OPTIONS] [PATH]...\n\
+         \n\
+         {DESCRIPTION}\n\
+         \n\
+         OPTIONS:\n"
+    );
+    for flag in documented() {
+        // A flag with a short form starts at the margin; one without starts
+        // where the long forms line up.
+        let indent = if flag.short.is_some() { 4 } else { 8 };
+        let Some((first, rest)) = flag.help.split_first() else {
+            continue;
+        };
+        let _ = writeln!(text, "{}", option_line(indent, &flag.column(), first));
+        for words in rest {
+            let _ = writeln!(text, "{}", option_line(DESCRIPTION_COLUMN, "", words));
+        }
+    }
+    let (end, words) = END_OF_OPTIONS;
+    let _ = writeln!(text, "{}", option_line(4, end, words));
     for (heading, lines) in listed() {
         let _ = writeln!(text, "\n{heading}:");
         for (key, help) in lines {
@@ -131,9 +511,8 @@ pub fn usage() -> String {
     text
 }
 
-/// Where the description column of `OPTIONS` begins. Both the option lines and
-/// their continuations are laid out against it, so it is the one number the
-/// manual page has to know to take that block apart again.
+/// Where the description column of the options block begins. Both the
+/// option lines and their continuations are laid out against it.
 const DESCRIPTION_COLUMN: usize = 28;
 
 /// Text with the three characters roff reads as instructions defused: a
@@ -148,41 +527,9 @@ fn roff(text: &str) -> String {
     }
 }
 
-/// `OPTIONS` taken apart into one entry per option: the flag column, and the
-/// description gathered back into a single line from however many it was
-/// wrapped over.
-///
-/// The block is written for a terminal, where the wrapping is the layout. A
-/// manual page sets its own width, so the wrapping has to be undone rather
-/// than carried across.
-fn option_entries() -> Vec<(String, String)> {
-    let body = OPTIONS
-        .split_once("\nOPTIONS:\n")
-        .expect("OPTIONS has its heading")
-        .1;
-    let mut entries: Vec<(String, String)> = Vec::new();
-    for line in body.lines().filter(|line| !line.trim().is_empty()) {
-        match line.len() > DESCRIPTION_COLUMN && line[..DESCRIPTION_COLUMN].trim().is_empty() {
-            // A continuation: it belongs to the option above it.
-            true => {
-                let entry = entries
-                    .last_mut()
-                    .expect("a continuation follows an option");
-                entry.1.push(' ');
-                entry.1.push_str(line[DESCRIPTION_COLUMN..].trim());
-            }
-            false => {
-                let (flags, description) = line.split_at(DESCRIPTION_COLUMN.min(line.len()));
-                entries.push((flags.trim().to_string(), description.trim().to_string()));
-            }
-        }
-    }
-    entries
-}
-
 /// The manual page, in roff.
 ///
-/// Rendered from `OPTIONS` and [`ROWS`] rather than written out beside them,
+/// Rendered from [`FLAGS`] and [`ROWS`] rather than written out beside them,
 /// for the reason `--help` is: there is one list of options and one list of
 /// keys, and a second copy would be a second thing to keep in step. `--help`
 /// and `gamut(1)` therefore cannot disagree.
@@ -190,12 +537,6 @@ pub fn man() -> String {
     let mut text = String::new();
     let version = env!("CARGO_PKG_VERSION");
     let upper = PROGRAM.to_uppercase();
-    let tagline = OPTIONS
-        .lines()
-        .next()
-        .and_then(|line| line.split_once('\u{2014}'))
-        .map(|(_, rest)| rest.trim())
-        .unwrap_or("preview images");
 
     let _ = writeln!(
         text,
@@ -204,7 +545,7 @@ pub fn man() -> String {
         roff(PROGRAM),
         roff(version)
     );
-    let _ = writeln!(text, ".SH NAME\n{} \\- {}", roff(PROGRAM), roff(tagline));
+    let _ = writeln!(text, ".SH NAME\n{} \\- {}", roff(PROGRAM), roff(TAGLINE));
 
     // Both usage lines, each its own line of the synopsis.
     let _ = writeln!(text, ".SH SYNOPSIS");
@@ -213,27 +554,25 @@ pub fn man() -> String {
     let _ = writeln!(text, ".br\n.B {} \\-\\-paste", roff(PROGRAM));
     let _ = writeln!(text, r"[\fIOPTIONS\fR] [\fIPATH\fR]...");
 
-    // The prose between the usage lines and the options list, as its own
-    // paragraphs; blank lines in the block are the paragraph breaks, and the
-    // first of them is where the usage lines end.
+    // The description as its own paragraphs, the blank lines being the
+    // breaks; the page sets its own width, so the terminal's wrapping is
+    // taken out rather than carried across.
     let _ = writeln!(text, ".SH DESCRIPTION");
-    let header = OPTIONS
-        .split_once("\nOPTIONS:\n")
-        .expect("OPTIONS has its heading")
-        .0;
-    let prose = header
-        .split_once("USAGE:\n")
-        .and_then(|(_, usage)| usage.split_once("\n\n"))
-        .map(|(_, rest)| rest)
-        .unwrap_or("");
-    for paragraph in prose.split("\n\n").filter(|p| !p.trim().is_empty()) {
+    for paragraph in DESCRIPTION.split("\n\n").filter(|p| !p.trim().is_empty()) {
         let _ = writeln!(text, ".PP\n{}", roff(paragraph.trim()));
     }
 
     let _ = writeln!(text, ".SH OPTIONS");
-    for (flags, description) in option_entries() {
-        let _ = writeln!(text, ".TP\n.B {}\n{}", roff(&flags), roff(&description));
+    for flag in documented() {
+        let _ = writeln!(
+            text,
+            ".TP\n.B {}\n{}",
+            roff(&flag.column()),
+            roff(&flag.help.join(" "))
+        );
     }
+    let (end, words) = END_OF_OPTIONS;
+    let _ = writeln!(text, ".TP\n.B {}\n{}", roff(end), roff(words));
 
     for (heading, lines) in listed() {
         let _ = writeln!(text, ".SH {heading}");
@@ -301,173 +640,54 @@ pub struct Args {
 
 /// `Ok(None)` means we printed help or the version and should exit quietly.
 pub fn parse_args() -> Result<Option<Args>> {
-    let mut files = Vec::new();
-    let mut overrides = Overrides::default();
-    let mut startup = Startup::default();
-    let mut hdr = HdrPreference::Follow;
-    // The flags that say which panels are up are only half the answer: the
-    // configuration file is the other, and the flags win over it.
-    let mut histogram = None;
-    let mut info = None;
-    let mut minimap = None;
-    let mut paused = false;
-    let mut alone = false;
-    let mut paste = false;
-    let mut upscale = Upscale::default();
-    let mut size = None;
+    let mut parsed = Parsed::default();
     let mut only_files = false;
 
     let mut arguments = std::env::args_os().skip(1);
     while let Some(argument) = arguments.next() {
-        if !only_files {
-            match argument.to_str() {
-                Some("-h") | Some("--help") => {
-                    print!("{}", usage());
-                    return Ok(None);
+        if !only_files && let Some(word) = argument.to_str() {
+            if word == END_OF_OPTIONS.0 {
+                only_files = true;
+                continue;
+            }
+            if let Some(flag) = FLAGS
+                .iter()
+                .find(|flag| flag.long == word || flag.short == Some(word))
+            {
+                let mut rest = Rest {
+                    flag: flag.long,
+                    arguments: &mut arguments,
+                };
+                match (flag.apply)(&mut parsed, &mut rest)? {
+                    Then::Continue => continue,
+                    Then::Quit => return Ok(None),
                 }
-                Some("-V") | Some("--version") => {
-                    println!("{PROGRAM} {}", env!("CARGO_PKG_VERSION"));
-                    return Ok(None);
-                }
-                Some("--print-config") => {
-                    print!("{}", Config::template());
-                    return Ok(None);
-                }
-                // Undocumented, like `--serve-clipboard`: this is how the
-                // package build gets a manual page, not something to press.
-                Some("--print-man") => {
-                    print!("{}", man());
-                    return Ok(None);
-                }
-                Some("--output") => {
-                    let value = next_value(&mut arguments, "--output")?;
-                    hdr = HdrPreference::parse(&value).ok_or_else(|| {
-                        anyhow::anyhow!("unknown output `{value}`: sdr or hdr (try --help)")
-                    })?;
-                    continue;
-                }
-                Some("--transfer") => {
-                    let value = next_value(&mut arguments, "--transfer")?;
-                    overrides.transfer = Some(Transfer::parse(&value).ok_or_else(|| {
-                        match value.strip_prefix("gamma:") {
-                            Some(exponent) => anyhow::anyhow!(
-                                "`--transfer gamma:` needs a number, got `{exponent}`"
-                            ),
-                            None => {
-                                anyhow::anyhow!("unknown transfer function `{value}` (try --help)")
-                            }
-                        }
-                    })?);
-                    continue;
-                }
-                Some("--no-gain-map") => {
-                    overrides.gain_map = false;
-                    continue;
-                }
-                Some("--primaries") => {
-                    let value = next_value(&mut arguments, "--primaries")?;
-                    overrides.primaries = Some(Primaries::parse(&value).ok_or_else(|| {
-                        anyhow::anyhow!("unknown primaries `{value}` (try --help)")
-                    })?);
-                    continue;
-                }
-                Some("--colormap") => {
-                    let value = next_value(&mut arguments, "--colormap")?;
-                    startup.colormap = Some(
-                        Colormap::parse(&value)
-                            .ok_or_else(|| anyhow::anyhow!("unknown colormap `{value}`"))?,
-                    );
-                    continue;
-                }
-                Some("--tone-map") => {
-                    let value = next_value(&mut arguments, "--tone-map")?;
-                    startup.tone_map = Some(
-                        ToneMap::parse(&value)
-                            .ok_or_else(|| anyhow::anyhow!("unknown tone map `{value}`"))?,
-                    );
-                    continue;
-                }
-                Some("--window") => {
-                    let value = next_value(&mut arguments, "--window")?;
-                    startup.auto = Some(AutoWindow::parse(&value).ok_or_else(|| {
-                        anyhow::anyhow!("unknown window mode `{value}` (try --help)")
-                    })?);
-                    continue;
-                }
-                Some("--exposure") => {
-                    let value = next_value(&mut arguments, "--exposure")?;
-                    let stops: f32 = value.parse().map_err(|_| {
-                        anyhow::anyhow!("`--exposure` needs a number, got `{value}`")
-                    })?;
-                    // `nan` and `inf` both parse as `f32`, and unclamped they
-                    // would put a non-finite gain into the shader uniform, the
-                    // pixel readout and the status bar. The keyboard path
-                    // clamps to +/-16 stops; the command line gets the same
-                    // ceiling, and rejects a value that is not a number at all.
-                    if !stops.is_finite() {
-                        anyhow::bail!("`--exposure` needs a finite number, got `{value}`");
-                    }
-                    startup.exposure_stops = Some(stops.clamp(-16.0, 16.0));
-                    continue;
-                }
-                Some("--size") => {
-                    let width = next_value(&mut arguments, "--size")?;
-                    let height = next_value(&mut arguments, "--size")?;
-                    size = Some([side(&width)?, side(&height)?]);
-                    continue;
-                }
-                Some("--upscale") => {
-                    let value = next_value(&mut arguments, "--upscale")?;
-                    upscale = Upscale::parse(&value)
-                        .ok_or_else(|| anyhow::anyhow!("unknown upscale filter `{value}`"))?;
-                    continue;
-                }
-                Some("--histogram") => {
-                    histogram = Some(true);
-                    continue;
-                }
-                Some("--info") => {
-                    info = Some(true);
-                    continue;
-                }
-                Some("--timing") => {
-                    crate::timing::enable();
-                    continue;
-                }
-                Some("--no-minimap") => {
-                    minimap = Some(false);
-                    continue;
-                }
-                Some("--paused") => {
-                    paused = true;
-                    continue;
-                }
-                Some("--alone") => {
-                    alone = true;
-                    continue;
-                }
-                Some("--paste") => {
-                    paste = true;
-                    continue;
-                }
-                Some("--") => {
-                    only_files = true;
-                    continue;
-                }
-                Some(other) if other.starts_with('-') && other.len() > 1 => {
-                    bail!("unknown option `{other}` (try --help)");
-                }
-                _ => {}
+            }
+            if word.starts_with('-') && word.len() > 1 {
+                bail!("unknown option `{word}` (try --help)");
             }
         }
-        files.push(PathBuf::from(argument));
+        parsed.files.push(PathBuf::from(argument));
     }
+    let Parsed {
+        files: named,
+        overrides,
+        startup,
+        hdr,
+        histogram,
+        info,
+        minimap,
+        paused,
+        alone,
+        paste,
+        upscale,
+        size,
+    } = parsed;
 
     // No path at all is a complete command line: the window opens on the
     // buttons that give it something. So is `--paste` alone, a paste being
     // a file to show; whether the clipboard actually holds one is found out
     // when it is asked for.
-    let named = files;
     let files = match crate::listing::expand(named.clone()) {
         Ok(files) => files,
         // Nothing to show among the paths is fatal only when they were all
@@ -517,16 +737,6 @@ fn side(value: &str) -> Result<u32> {
     }
 }
 
-fn next_value(
-    arguments: &mut impl Iterator<Item = std::ffi::OsString>,
-    option: &str,
-) -> Result<String> {
-    match arguments.next().and_then(|value| value.into_string().ok()) {
-        Some(value) => Ok(value),
-        None => bail!("`{option}` needs a value (try --help)"),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -573,24 +783,9 @@ mod tests {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("packaging")
     }
 
-    /// Every long option, as `--help` spells them.
+    /// Every long option `--help` lists.
     fn long_options() -> Vec<String> {
-        option_entries()
-            .iter()
-            .flat_map(|(flags, _)| {
-                flags
-                    .split(',')
-                    .map(|flag| {
-                        flag.trim()
-                            .split(' ')
-                            .next()
-                            .unwrap_or_default()
-                            .to_string()
-                    })
-                    .filter(|flag| flag.starts_with("--") && flag.len() > 2)
-                    .collect::<Vec<_>>()
-            })
-            .collect()
+        documented().map(|flag| flag.long.to_string()).collect()
     }
 
     /// The manual page is the help text in another notation, so it says the
@@ -598,16 +793,19 @@ mod tests {
     #[test]
     fn the_manual_page_lists_every_option_and_binding() {
         let page = man();
-        for (flags, description) in option_entries() {
+        for flag in documented() {
+            let column = flag.column();
             assert!(
-                page.contains(&roff(&flags)),
-                "{flags:?} should reach the manual page"
+                page.contains(&roff(&column)),
+                "{column:?} should reach the manual page"
             );
             assert!(
-                page.contains(&roff(&description)),
-                "the description of {flags:?} should reach the manual page"
+                page.contains(&roff(&flag.help.join(" "))),
+                "the description of {column:?} should reach the manual page"
             );
         }
+        let (end, words) = END_OF_OPTIONS;
+        assert!(page.contains(&format!(".B {}\n{words}\n", roff(end))));
         for row in ROWS {
             assert!(
                 page.contains(&roff(row.help)),
@@ -622,26 +820,47 @@ mod tests {
         );
     }
 
-    /// Taking `OPTIONS` apart must not lose a line of it: every option line
-    /// becomes an entry, and every continuation joins the entry above it.
+    /// The options block is two columns: every flag's column stops short of
+    /// the description column, each is spelled once, and each description
+    /// starts where the column does, with a capital, on a line of its own.
     #[test]
-    fn every_option_line_is_accounted_for() {
-        let body = OPTIONS.split_once("\nOPTIONS:\n").expect("a heading").1;
-        let lines = body.lines().filter(|line| !line.trim().is_empty()).count();
-        let entries = option_entries();
-        assert!(entries.len() >= 15, "every option should be found");
-        assert!(
-            entries.len() <= lines,
-            "an entry cannot come from no line at all"
-        );
-        for (flags, description) in &entries {
-            assert!(!flags.is_empty(), "an entry has a flag column");
-            assert!(!description.is_empty(), "{flags:?} should say what it does");
+    fn the_options_are_laid_out_in_two_columns() {
+        let text = usage();
+        let mut names: Vec<&str> = Vec::new();
+        assert!(documented().count() >= 15, "every option should be listed");
+        for flag in FLAGS {
             assert!(
-                !description.starts_with(char::is_lowercase) || flags == "--",
-                "{flags:?}: a description starts where the column does"
+                flag.long.starts_with("--") && flag.long.len() > 2,
+                "{}",
+                flag.long
             );
+            for name in [Some(flag.long), flag.short].into_iter().flatten() {
+                assert!(!names.contains(&name), "{name} twice");
+                names.push(name);
+            }
+            let Some((first, rest)) = flag.help.split_first() else {
+                assert!(!text.contains(flag.long), "{} is undocumented", flag.long);
+                continue;
+            };
+            let indent = if flag.short.is_some() { 4 } else { 8 };
+            assert!(
+                indent + flag.column().len() + 2 <= DESCRIPTION_COLUMN,
+                "{} reaches the description column",
+                flag.long
+            );
+            assert!(
+                !first.starts_with(char::is_lowercase),
+                "{}: a description starts with a capital",
+                flag.long
+            );
+            let line = option_line(indent, &flag.column(), first);
+            assert_eq!(text.matches(&line).count(), 1, "{line:?}");
+            for words in rest {
+                let line = option_line(DESCRIPTION_COLUMN, "", words);
+                assert!(text.contains(&format!("\n{line}\n")), "{line:?}");
+            }
         }
+        assert!(text.contains(&format!("\n{}\n\n", option_line(4, "--", END_OF_OPTIONS.1))));
     }
 
     /// The completions offer what the program actually accepts. They are
@@ -813,7 +1032,7 @@ mod tests {
         );
 
         assert!(
-            OPTIONS.contains(PROGRAM),
+            usage().starts_with(&format!("{PROGRAM} ")),
             "the help text still calls the program {PROGRAM}"
         );
     }
