@@ -12,6 +12,7 @@
 //! in the same context held it. A context is where a name is tried first —
 //! [`ORDER`] — before the plain names, which hold always.
 
+use std::collections::HashMap;
 use std::fmt::Write as _;
 
 use winit::keyboard::{Key, KeyCode, NamedKey, PhysicalKey};
@@ -342,13 +343,25 @@ impl Row {
     }
 }
 
+/// One name of the table: the line it is on, what it binds, and the chords
+/// it answers to now.
+#[derive(Clone, PartialEq, Debug)]
+struct Entry {
+    row: &'static Row,
+    bound: &'static Bound,
+    chords: Vec<Chord>,
+}
+
 /// The chords each name answers to, as the table has them or the
 /// configuration file set them.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Keymap {
     rows: &'static [Row],
-    /// Indexed as the names come in the table: see [`Keymap::binds`].
-    chords: Vec<Vec<Chord>>,
+    /// Every name of the table, in the order the table has them: the lines
+    /// flattened once, so that a lookup walks a list rather than the table.
+    entries: Vec<Entry>,
+    /// Where each name is in `entries`.
+    index: HashMap<&'static str, usize>,
 }
 
 /// The chords in force before the configuration file is read: the table's
@@ -388,12 +401,26 @@ impl Keymap {
 
     /// Every name of `rows` at its defaults.
     pub fn new(rows: &'static [Row]) -> Self {
-        let chords = rows
+        let entries: Vec<Entry> = rows
             .iter()
-            .flat_map(Row::binds)
-            .map(|bound| bound.defaults.to_vec())
+            .flat_map(|row| {
+                row.binds().iter().map(move |bound| Entry {
+                    row,
+                    bound,
+                    chords: bound.defaults.to_vec(),
+                })
+            })
             .collect();
-        Self { rows, chords }
+        let index = entries
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| (entry.bound.name, index))
+            .collect();
+        Self {
+            rows,
+            entries,
+            index,
+        }
     }
 
     /// Every line of the table.
@@ -401,15 +428,21 @@ impl Keymap {
         self.rows
     }
 
-    /// Every name, with the line it is on, in the order `chords` is.
-    fn binds(&self) -> impl Iterator<Item = (&'static Row, &'static Bound)> + Clone + use<> {
-        let rows = self.rows;
-        rows.iter()
-            .flat_map(|row| row.binds().iter().map(move |bound| (row, bound)))
+    /// Every name, with the line it is on, in the order the table has them:
+    /// what the tests walk to hold every name to a rule.
+    #[cfg(test)]
+    fn binds(&self) -> impl Iterator<Item = (&'static Row, &'static Bound)> + Clone {
+        self.entries.iter().map(|entry| (entry.row, entry.bound))
     }
 
+    /// Where `name` is in `entries`, where it is a name.
     fn index_of(&self, name: &str) -> Option<usize> {
-        self.binds().position(|(_, bound)| bound.name == name)
+        self.index.get(name).copied()
+    }
+
+    /// The entry of `name`, where it is a name.
+    fn entry(&self, name: &str) -> Option<&Entry> {
+        self.index_of(name).map(|index| &self.entries[index])
     }
 
     /// Makes `chords` the whole of what `name` answers to, and takes each
@@ -419,7 +452,7 @@ impl Keymap {
         let index = self
             .index_of(name)
             .ok_or_else(|| format!("unknown key name `{name}`"))?;
-        let context = self.binds().nth(index).and_then(|(row, _)| row.context());
+        let context = self.entries[index].row.context();
         let mut unique = Vec::new();
         for chord in chords {
             if !unique.contains(&chord) {
@@ -427,51 +460,41 @@ impl Keymap {
             }
         }
         let mut displaced = Vec::new();
-        for (other, (row, bound)) in self.binds().enumerate() {
-            if other == index || row.context() != context {
+        for (other, entry) in self.entries.iter_mut().enumerate() {
+            if other == index || entry.row.context() != context {
                 continue;
             }
-            let held = &mut self.chords[other];
-            let before = held.len();
-            held.retain(|chord| !unique.contains(chord));
-            if held.len() != before && !displaced.contains(&bound.name) {
-                displaced.push(bound.name);
+            let before = entry.chords.len();
+            entry.chords.retain(|chord| !unique.contains(chord));
+            if entry.chords.len() != before && !displaced.contains(&entry.bound.name) {
+                displaced.push(entry.bound.name);
             }
         }
-        self.chords[index] = unique;
+        self.entries[index].chords = unique;
         Ok(displaced)
     }
 
     /// `name` as the table spells it, where it is a name: the one that
     /// lives as long as the table does.
     pub fn name_of(&self, name: &str) -> Option<&'static str> {
-        self.binds()
-            .find(|(_, bound)| bound.name == name)
-            .map(|(_, bound)| bound.name)
+        self.entry(name).map(|entry| entry.bound.name)
     }
 
     /// The action `name` runs, where it is a name.
     pub fn action_named(&self, name: &str) -> Option<Action> {
-        self.binds()
-            .find(|(_, bound)| bound.name == name)
-            .map(|(_, bound)| bound.action)
+        self.entry(name).map(|entry| entry.bound.action)
     }
 
     /// What the line `name` is on says it does.
     pub fn help_of(&self, name: &str) -> Option<&'static str> {
-        self.binds()
-            .find(|(_, bound)| bound.name == name)
-            .map(|(row, _)| row.help)
+        self.entry(name).map(|entry| entry.row.help)
     }
 
-    /// The name in `context` that holds `chord`, as its place in `chords`.
+    /// The name in `context` that holds `chord`, as its place in `entries`.
     fn holder(&self, chord: Chord, context: Option<Context>) -> Option<usize> {
-        self.binds()
-            .enumerate()
-            .find(|(index, (row, _))| {
-                row.context() == context && self.chords[*index].contains(&chord)
-            })
-            .map(|(index, _)| index)
+        self.entries
+            .iter()
+            .position(|entry| entry.row.context() == context && entry.chords.contains(&chord))
     }
 
     /// What `key`, pressed at `position` and held with `mods`, asks for,
@@ -504,9 +527,9 @@ impl Keymap {
                     let mods = mods.difference(Mods::SHIFT);
                     let exact = Chord::new(mods, Char(character));
                     let held = |chord| {
-                        self.chords
+                        self.entries
                             .iter()
-                            .any(|chords: &Vec<Chord>| chords.contains(&chord))
+                            .any(|entry| entry.chords.contains(&chord))
                     };
                     candidates.push(match character.is_ascii_uppercase() && !held(exact) {
                         true => Chord::new(mods, Char(character.to_ascii_lowercase())),
@@ -523,19 +546,18 @@ impl Keymap {
             })
             .map(|context| Some(*context))
             .chain([None]);
-        let actions: Vec<Action> = self.binds().map(|(_, bound)| bound.action).collect();
         candidates.into_iter().find_map(|chord| {
             contexts
                 .clone()
                 .find_map(|context| self.holder(chord, context))
-                .map(|index| actions[index])
+                .map(|index| self.entries[index].bound.action)
         })
     }
 
     /// The chords `name` answers to.
     pub fn chords_of(&self, name: &str) -> &[Chord] {
-        self.index_of(name)
-            .map_or(&[], |index| self.chords[index].as_slice())
+        self.entry(name)
+            .map_or(&[], |entry| entry.chords.as_slice())
     }
 
     /// The chords `name` answers to, as people read them: empty where it
@@ -567,9 +589,10 @@ impl Keymap {
     /// The line that binds `action`, and the name on it that does; a line
     /// that only describes never answers.
     pub fn bound_for(&self, action: Action) -> Option<(&'static Row, &'static str)> {
-        self.binds()
-            .find(|(_, bound)| bound.action == action)
-            .map(|(row, bound)| (row, bound.name))
+        self.entries
+            .iter()
+            .find(|entry| entry.bound.action == action)
+            .map(|entry| (entry.row, entry.bound.name))
     }
 
     /// The line that binds `action`.
