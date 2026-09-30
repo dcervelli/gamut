@@ -23,6 +23,11 @@ use crate::clock;
 use crate::image::AlphaMode;
 use crate::image::auxiliary::{Auxiliary, Showing};
 use crate::image::decode::Rendering;
+use crate::image::depth::{Accuracy, Quantity};
+use crate::image::exif::{self, Group, ShownRegion};
+use crate::image::gain_map::Lift;
+use crate::image::metadata_region::Placed;
+use crate::image::orient;
 use crate::image::sequence::{Loops, Sequence};
 use crate::render::Color;
 
@@ -32,36 +37,59 @@ use crate::theme::Theme;
 use super::chrome::{ICON_SIDE, Pass, measure};
 use super::control::Control;
 use super::icon;
+use super::pixel;
 use super::style::{SCROLLBAR_GUTTER, SCROLLBAR_WIDTH, TOGGLE_RADIUS};
-use super::tooltip::Tip;
+use super::tooltip::{Tip, Tooltip};
 use super::{
     Current, PADDING, PANEL_INSET, PANEL_RADIUS, PANEL_WIDTH, RULE_WIDTH, TEXT_SIZE, rule,
 };
+
+/// The heading of the regions the metadata marks out on the picture.
+const REGIONS: &str = "Regions";
+/// The heading of the depth map the picture carries.
+const DEPTH_MAP: &str = "Depth map";
+/// What the pill at the end of a heading says while its section is on
+/// screen in the picture's place.
+const SHOWING: &str = "Showing";
 
 /// Below this the panel would show its header, two facts and a scrollbar, so
 /// it stays off instead. There is no matching minimum for the width: the
 /// panel is [`PANEL_WIDTH`] wide or it is not on screen.
 pub(super) const INFO_MIN_HEIGHT: f32 = 160.0;
 
-/// The size a field's name is written at, against [`TEXT_SIZE`] for its
-/// value: the values are what is being read, and the names only say which is
+/// The size a field's name is written at, against [`TEXT_SIZE`] for what it
+/// says: the values are what is being read, and the names only say which is
 /// which.
 const LABEL_SIZE: f32 = TEXT_SIZE * 0.85;
 
-/// The space above a field's name. Enough that a name reads as belonging to
-/// the value under it rather than to the one above, and no more: the column
-/// is long, and every pixel spent parting two fields is a pixel of some
-/// further field pushed off the bottom of the panel.
-const FIELD_GAP: f32 = 6.0;
-/// The space above a section's name, which has to part two sections more
-/// plainly than a field parts two fields — near enough twice as plainly, with
-/// a hairline drawn through the middle of it doing part of the parting.
+/// The space above a section's name, with a hairline drawn through the
+/// middle of it doing part of the parting.
 const SECTION_GAP: f32 = 11.0;
-/// The space between a field's name and its value. Less than nothing: a line
-/// box carries its own leading above the glyphs, so the two lines are pulled
-/// a pixel into one another's boxes without their ink coming any closer, and
-/// a name and what it names read as one thing rather than as two.
-const LABEL_GAP: f32 = -1.0;
+/// The space between two lines of a section written as prose rather than as
+/// fields, which are one account of one thing and are set as a paragraph is.
+const LINE_GAP: f32 = 1.0;
+/// The space between a heading's mark and its name.
+const MARK_GAP: f32 = 6.0;
+/// The space under the head of a section drawn with a mark: small, the mark
+/// already making the head's line taller than the words in it.
+const HEAD_GAP: f32 = 3.0;
+/// The space between a table's two columns.
+const COLUMN_GAP: f32 = 8.0;
+/// The most of the column's width a table's names are given, so that a long
+/// name wraps rather than leaving its value no room.
+const NAMES_SHARE: f32 = 0.45;
+
+/// The fields of the section about the file on disk. Named here because the
+/// section is drawn from them by name rather than as a column of fields, and
+/// the names are what a copy of the section writes down beside each.
+const NAME: &str = "Name";
+const FOLDER: &str = "Folder";
+const SIZE: &str = "Size";
+const MODIFIED: &str = "Modified";
+/// The fields of the section about the picture that stand at its head
+/// rather than in its table.
+const RESOLUTION: &str = "Resolution";
+const READ_BY: &str = "Read by";
 
 /// The words at the top of the panel. An instruction rather than a fact about
 /// the file, so it is written small and dim: what it says is worth knowing
@@ -102,35 +130,6 @@ pub struct FileFacts {
     pub reader: Option<&'static str>,
 }
 
-/// What a row of the column is, which is what it is drawn as: the name of a
-/// section, the name of a field, or what that field says.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Kind {
-    Heading,
-    Label,
-    Value,
-}
-
-impl Kind {
-    /// The size it is written at.
-    fn size(self) -> f32 {
-        match self {
-            Kind::Heading | Kind::Value => TEXT_SIZE,
-            Kind::Label => LABEL_SIZE,
-        }
-    }
-
-    fn ink(self, theme: &Theme) -> Color {
-        // The panel is the bars' own ground, so the words on it are the bars'
-        // own ink; a heading is the one thing on it that is picked out.
-        match self {
-            Kind::Heading => theme.accent,
-            Kind::Label => theme.text_dim,
-            Kind::Value => theme.text_primary,
-        }
-    }
-}
-
 /// Something the panel can put on the clipboard: the whole of it, one
 /// section of it, or one field.
 ///
@@ -164,6 +163,59 @@ impl Copyable {
     }
 }
 
+/// How a section is drawn. The copying is the same for every one of them —
+/// a section is its fields, in order, whatever it looks like — and only the
+/// drawing is told apart.
+#[derive(Clone, Copy)]
+enum Face {
+    /// The file on disk, as a few lines of prose under a heading with a mark:
+    /// see [`file_section`].
+    File,
+    /// A section with a head of its own: some of its fields written on one
+    /// line beside a mark, and the rest as a table under them — see
+    /// [`headed_section`]. The picture, headed by its size and its format,
+    /// the camera by its name, and so on; one with no head of its own, by
+    /// its name.
+    Headed {
+        mark: &'static [icon::Mark],
+        head: &'static [&'static str],
+        /// A button after the head, with the mark it wears: the map of
+        /// where the picture was taken, beside the coordinates.
+        button: Option<(&'static [icon::Mark], Control)>,
+    },
+    /// The regions the metadata marks out on the picture, as a table of who
+    /// or what each is and where, each drawn on the picture while the
+    /// pointer is on its row — see [`regions_section`].
+    Regions,
+}
+
+/// One section of the column: its name, how it is drawn, and its fields.
+struct Section {
+    name: &'static str,
+    face: Face,
+    facts: Vec<Fact>,
+    /// For [`Face::Regions`], each region a fact is the row of, in the same
+    /// order; empty for every other face.
+    regions: Vec<ShownRegion>,
+    /// Whether what the section describes is on screen in the picture's
+    /// place, which a pill at the end of its heading says: the depth map's,
+    /// while it is shown.
+    showing: bool,
+}
+
+impl Section {
+    /// A section drawn as `face`, with no regions.
+    fn new(name: &'static str, face: Face, facts: Vec<Fact>) -> Section {
+        Section {
+            name,
+            face,
+            facts,
+            regions: Vec::new(),
+            showing: false,
+        }
+    }
+}
+
 /// One field as the clipboard takes it. Which section it stands under is
 /// [`Contents`]'s to know, that being the same for every field in one.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -180,7 +232,7 @@ struct Fact {
 /// hit testing then count the same list rather than two that could come to
 /// disagree about which field is which.
 struct Contents {
-    sections: Vec<(&'static str, Vec<Fact>)>,
+    sections: Vec<Section>,
 }
 
 impl Contents {
@@ -189,7 +241,7 @@ impl Contents {
     fn facts(&self) -> impl Iterator<Item = (&'static str, &Fact)> {
         self.sections
             .iter()
-            .flat_map(|(name, facts)| facts.iter().map(move |fact| (*name, fact)))
+            .flat_map(|section| section.facts.iter().map(move |fact| (section.name, fact)))
     }
 }
 
@@ -326,6 +378,16 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
         return;
     }
     let area = egui::Rect::from_min_size(pos2(panel.x, panel.y), vec2(panel.width, panel.height));
+    // What the regions are drawn on while the pointer is on their rows: the
+    // layer the picture's own marks are painted on, under every panel, this
+    // one included. Nothing is drawn over a stand-in for another file.
+    let picture = ui
+        .painter()
+        .with_clip_rect(if pass.input.standin.is_none() {
+            content.into()
+        } else {
+            egui::Rect::NOTHING
+        });
     super::panel::area("info", panel, egui::Order::Middle).show(ui.ctx(), |ui| {
         egui::Frame::NONE
             .fill(theme.panel_background.into())
@@ -362,7 +424,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
                 rule(pass, ui, inside.x - SCROLLBAR_GUTTER);
                 ui.add_space((HEADER_GAP - RULE_WIDTH) / 2.0);
 
-                column(pass, ui, current);
+                column(pass, ui, current, &picture);
             });
     });
 }
@@ -374,7 +436,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
 /// read from the top: the scroll area is the file's own, so stepping to
 /// another file starts at the top of its column rather than however far
 /// down the last one had been read.
-fn column(pass: &mut Pass, ui: &mut egui::Ui, current: &Current) {
+fn column(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, picture: &egui::Painter) {
     let contents = contents(current);
     ui.spacing_mut().scroll.bar_inner_margin = SCROLLBAR_GUTTER - SCROLLBAR_WIDTH;
     egui::ScrollArea::vertical()
@@ -385,38 +447,666 @@ fn column(pass: &mut Pass, ui: &mut egui::Ui, current: &Current) {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
             let width = ui.available_width();
             let mut index = 0;
-            for (section, (name, facts)) in contents.sections.iter().enumerate() {
+            for (place, section) in contents.sections.iter().enumerate() {
                 // The first heading opens the column and has nothing above
                 // it to be parted from; every one after it is a section
                 // starting, parted from the last by a hairline through the
                 // middle of the space above it, so the gap reads as
                 // belonging to neither section more than the other.
-                if section > 0 {
+                if place > 0 {
                     ui.add_space((SECTION_GAP - RULE_WIDTH) / 2.0);
                     rule(pass, ui, width);
                     ui.add_space((SECTION_GAP - RULE_WIDTH) / 2.0);
                 }
-                block(pass, ui, Copyable::Section(section), width, |ui| {
-                    words(ui, Kind::Heading, name, pass.theme);
-                });
-                for fact in facts {
-                    ui.add_space(FIELD_GAP);
-                    // A field's name and the value under it are one block,
-                    // being one thing to point at and one row to copy.
-                    block(pass, ui, Copyable::Fact(index), width, |ui| {
-                        words(ui, Kind::Label, &fact.name, pass.theme);
-                        ui.add_space(LABEL_GAP);
-                        words(ui, Kind::Value, &fact.value, pass.theme);
-                    });
-                    index += 1;
+                match section.face {
+                    Face::File => file_section(pass, ui, current, section, index, width),
+                    Face::Headed { mark, head, button } => {
+                        headed_section(pass, ui, place, section, index, width, mark, head, button)
+                    }
+                    Face::Regions => {
+                        regions_section(pass, ui, current, picture, place, section, index, width)
+                    }
                 }
+                index += section.facts.len();
             }
         });
 }
 
-/// One run of words in the column, broken to its width.
-fn words(ui: &mut egui::Ui, kind: Kind, text: &str, theme: &Theme) {
-    ui.add(Label::new(RichText::new(text).size(kind.size()).color(kind.ink(theme))).wrap());
+/// The file on disk, written as it would be said rather than as a table:
+/// its name at the head, the folder it is in under that, and then how big
+/// it is and how long ago it was last written.
+///
+/// Every piece is still a field, and a click on one copies that field as a
+/// click on a field anywhere else does. The size and the date are written
+/// roundly, as they are read at a glance, and each is exact in its tooltip
+/// and on the clipboard: "2 weeks ago" is no use pasted anywhere. With the
+/// file's name standing at the head, there is no heading left to copy the
+/// section by; Copy All still has it.
+fn file_section(
+    pass: &mut Pass,
+    ui: &mut egui::Ui,
+    current: &Current,
+    section: &Section,
+    first: usize,
+    width: f32,
+) {
+    let theme = pass.theme;
+    let field = |name: &str| find(section, first, name);
+    // The name cut in its middle to the room beside the mark, keeping its
+    // extension: a name cut at its end loses what kind of file it is.
+    let name = field(NAME).map(|(index, name)| {
+        let font = egui::FontId::proportional(TEXT_SIZE);
+        let room = width - COPY_ICON - MARK_GAP;
+        let shown = super::filmstrip::cut_name(ui, "", &name.value, &font, room);
+        let whole = (shown != name.value).then(|| name.value.clone());
+        Piece {
+            index,
+            shown,
+            exact: whole,
+        }
+    });
+    line(
+        pass,
+        ui,
+        width,
+        Some(icon::FILE),
+        theme.accent,
+        None,
+        name,
+        None,
+    );
+    if let Some((index, folder)) = field(FOLDER) {
+        ui.add_space(HEAD_GAP);
+        block(pass, ui, Copyable::Fact(index), width, |ui| {
+            let text = RichText::new(&folder.value)
+                .size(TEXT_SIZE)
+                .color(theme.text_primary);
+            ui.add(Label::new(text).wrap());
+        });
+    }
+    let file = &current.file;
+    let size = field(SIZE)
+        .zip(file.bytes)
+        .map(|((index, _), bytes)| Piece {
+            index,
+            shown: round_bytes(bytes),
+            exact: Some(exact_bytes(bytes)),
+        });
+    let modified = field(MODIFIED)
+        .zip(file.modified)
+        .map(|((index, _), time)| Piece {
+            index,
+            shown: ago(time, SystemTime::now()),
+            exact: Some(format_time(time)),
+        });
+    if size.is_some() || modified.is_some() {
+        ui.add_space(LINE_GAP);
+        line(
+            pass,
+            ui,
+            width,
+            None,
+            theme.text_primary,
+            Some("\u{00b7}"),
+            size.into_iter().chain(modified),
+            None,
+        );
+    }
+}
+
+/// A section headed by the fields named in `head`, written on one line after
+/// `mark` in the headings' ink, each copying itself, and under them the rest
+/// of its fields as a table of two columns, each row copying its value.
+///
+/// A section with none of the fields its head is made of is headed by its
+/// own name instead, which copies the section, as a column of fields is.
+#[allow(clippy::too_many_arguments)]
+fn headed_section(
+    pass: &mut Pass,
+    ui: &mut egui::Ui,
+    place: usize,
+    section: &Section,
+    first: usize,
+    width: f32,
+    mark: &[icon::Mark],
+    head: &[&str],
+    button: Option<(&[icon::Mark], Control)>,
+) {
+    let theme = pass.theme;
+    let pieces: Vec<Piece> = head
+        .iter()
+        .filter_map(|name| find(section, first, name))
+        .map(|(index, fact)| Piece {
+            index,
+            shown: fact.value.clone(),
+            exact: None,
+        })
+        .collect();
+    if pieces.is_empty() {
+        marked_heading(pass, ui, place, section, width, mark);
+    } else {
+        line(
+            pass,
+            ui,
+            width,
+            Some(mark),
+            theme.accent,
+            None,
+            pieces,
+            button,
+        );
+    }
+    let rows = (first..)
+        .zip(&section.facts)
+        .filter(|(_, fact)| !head.contains(&fact.name.as_str()));
+    if rows.clone().next().is_some() {
+        ui.add_space(HEAD_GAP);
+        table(pass, ui, rows, width);
+    }
+}
+
+/// `section`'s name after `mark`, in the headings' ink, copying the section.
+/// Whether the pointer is on it.
+fn marked_heading(
+    pass: &mut Pass,
+    ui: &mut egui::Ui,
+    place: usize,
+    section: &Section,
+    width: f32,
+    mark: &[icon::Mark],
+) -> bool {
+    let theme = pass.theme;
+    let grid = pass.grid;
+    block(pass, ui, Copyable::Section(place), width, |ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = MARK_GAP;
+            let (rect, _) = ui.allocate_exact_size(Vec2::splat(COPY_ICON), Sense::HOVER);
+            icon::paint(
+                ui.painter(),
+                mark,
+                icon::square(grid, rect, COPY_ICON),
+                theme.accent.into(),
+                theme.panel_background.into(),
+            );
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if section.showing {
+                    showing_pill(ui, theme, grid);
+                    ui.add_space(CHIP_GAP);
+                }
+                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                    // A heading is the one thing on the panel picked out in
+                    // the accent; everything else wears the bars' own inks.
+                    ui.add(
+                        Label::new(
+                            RichText::new(section.name)
+                                .size(TEXT_SIZE)
+                                .color(theme.accent),
+                        )
+                        .wrap(),
+                    );
+                });
+            });
+        });
+    })
+}
+
+/// The pill at the end of a heading whose section is on screen in the
+/// picture's place: an eye and the word, in the accent, round at both ends
+/// so it reads as a state rather than as a button to press.
+fn showing_pill(ui: &mut egui::Ui, theme: &Theme, grid: icon::Grid) {
+    let font = egui::FontId::proportional(LABEL_SIZE);
+    let galley = ui.ctx().fonts_mut(|fonts| {
+        fonts.layout_no_wrap(SHOWING.to_string(), font, egui::Color32::PLACEHOLDER)
+    });
+    let width = (2.0 * CHIP_PADDING + COPY_ICON + CHIP_GAP + galley.size().x).round();
+    let (rect, _) = ui.allocate_exact_size(vec2(width, CHIP_HEIGHT), Sense::HOVER);
+    let ink: egui::Color32 = theme.accent.into();
+    let ground: egui::Color32 = theme.panel_background.into();
+    let painter = ui.painter();
+    painter.rect_stroke(
+        rect,
+        CHIP_HEIGHT / 2.0,
+        egui::Stroke::new(RULE_WIDTH, ink),
+        StrokeKind::Inside,
+    );
+    let mark = egui::Rect::from_min_size(
+        pos2(rect.min.x + CHIP_PADDING, rect.min.y),
+        vec2(COPY_ICON, rect.height()),
+    );
+    icon::paint(
+        painter,
+        icon::EYE,
+        icon::square(grid, mark, COPY_ICON),
+        ink,
+        ground,
+    );
+    let at = pos2(
+        mark.max.x + CHIP_GAP,
+        rect.center().y - galley.size().y / 2.0,
+    );
+    painter.galley(at, galley, ink);
+}
+
+/// The regions the metadata marks out, under their heading: a table of who
+/// or what each is and where, its top left corner and its size in the
+/// picture as shown — a circle's the square around it, a point's no size.
+/// Each row copies itself, and while the pointer is on one its region is
+/// drawn on the picture with its subject over it; while it is on the
+/// heading, every one of them is. A row copies as its five cells in CSV,
+/// and the heading as the table.
+///
+/// The subject takes what the four numbers leave, which are set right, as
+/// numbers in a column are, each column as wide as its widest.
+#[allow(clippy::too_many_arguments)]
+fn regions_section(
+    pass: &mut Pass,
+    ui: &mut egui::Ui,
+    current: &Current,
+    picture: &egui::Painter,
+    place: usize,
+    section: &Section,
+    first: usize,
+    width: f32,
+) {
+    let theme = pass.theme;
+    if marked_heading(pass, ui, place, section, width, icon::SQUARE_DASHED) {
+        mark_regions(pass, picture, current, &section.regions);
+    }
+    let cells: Vec<[String; 4]> = section.regions.iter().map(region_cells).collect();
+    let font = egui::FontId::proportional(TEXT_SIZE);
+    let measured = |text: &str| {
+        ui.ctx().fonts_mut(|fonts| {
+            fonts
+                .layout_no_wrap(text.to_string(), font.clone(), egui::Color32::PLACEHOLDER)
+                .size()
+                .x
+        })
+    };
+    let columns: [f32; 4] = std::array::from_fn(|column| {
+        cells
+            .iter()
+            .map(|row| measured(&row[column]))
+            .chain([measured(REGION_COLUMNS[column + 1])])
+            .fold(0.0, f32::max)
+            .ceil()
+    });
+    let subject = (width - columns.iter().sum::<f32>() - 4.0 * COLUMN_GAP).max(0.0);
+    // One row of the table, the subject first and the numbers after it,
+    // each set right in its column.
+    let row = |ui: &mut egui::Ui, first: RichText, rest: [RichText; 4]| {
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = COLUMN_GAP;
+            let response = ui
+                .scope(|ui| {
+                    ui.set_min_width(subject);
+                    ui.set_max_width(subject);
+                    ui.add(Label::new(first).wrap())
+                })
+                .inner;
+            for (text, column) in rest.into_iter().zip(columns) {
+                ui.allocate_ui_with_layout(vec2(column, 0.0), Layout::top_down(Align::Max), |ui| {
+                    ui.set_min_width(column);
+                    ui.label(text);
+                });
+            }
+            response
+        })
+        .inner
+    };
+    ui.add_space(HEAD_GAP);
+    let heading = |text: &str| RichText::new(text).size(LABEL_SIZE).color(theme.text_dim);
+    row(
+        ui,
+        heading(REGION_COLUMNS[0]),
+        std::array::from_fn(|column| heading(REGION_COLUMNS[column + 1])),
+    );
+    let value = |text: &str| {
+        RichText::new(text)
+            .size(TEXT_SIZE)
+            .color(theme.text_primary)
+    };
+    for ((index, region), cells) in (first..).zip(&section.regions).zip(&cells) {
+        ui.add_space(LINE_GAP);
+        let pointed = block(pass, ui, Copyable::Fact(index), width, |ui| {
+            let response = row(
+                ui,
+                value(&region.subject),
+                std::array::from_fn(|column| value(&cells[column])),
+            );
+            // What kind of region it is, and what is written about it,
+            // where that says more than the subject does.
+            if region.about != region.subject {
+                said(theme, response, region.about.clone());
+            }
+        });
+        if pointed {
+            mark_regions(pass, picture, current, std::slice::from_ref(region));
+        }
+    }
+}
+
+/// A region's four numbers as the table writes them: its top left corner
+/// and its size, a point's size left blank and a region with no place all
+/// four.
+fn region_cells(region: &ShownRegion) -> [String; 4] {
+    match region.placed {
+        Some(placed @ Placed::Point { .. }) => {
+            let [x, y, _, _] = placed.bounds();
+            [x.to_string(), y.to_string(), String::new(), String::new()]
+        }
+        Some(placed) => placed.bounds().map(|value| value.to_string()),
+        None => Default::default(),
+    }
+}
+
+/// A region's row as it is copied: the table's five cells as a line of
+/// CSV, the subject quoted where it has to be.
+fn region_row(region: &ShownRegion) -> String {
+    let [x, y, width, height] = region_cells(region);
+    [quoted(&region.subject), x, y, width, height].join(",")
+}
+
+/// The heads of the regions table's columns.
+const REGION_COLUMNS: [&str; 5] = ["Subject", "X", "Y", "W", "H"];
+
+/// The weight of a region's outline drawn on the picture: the marked
+/// region's, being the same kind of thing.
+const REGION_OUTLINE: f32 = 1.5;
+/// The dashes a region's outline is drawn in, and the gaps between them, in
+/// logical pixels: dashed as the heading's mark is, and so told apart from
+/// the region marked out by hand, which is drawn solid.
+const REGION_DASH: f32 = 6.0;
+const REGION_GAP: f32 = 4.0;
+/// The radius of the ring a region that is only a point is drawn as.
+const POINT_RING: f32 = 6.0;
+/// The room around a region's subject, inside the pill it is written on,
+/// and the space between the pill and the region.
+const PILL_INSET: [f32; 2] = [6.0, 2.0];
+const PILL_GAP: f32 = 4.0;
+
+/// Draws `regions` on the picture with `painter`, where each is in the
+/// picture as it is placed now, each with its subject written over it.
+fn mark_regions(pass: &Pass, painter: &egui::Painter, current: &Current, regions: &[ShownRegion]) {
+    let theme = pass.theme;
+    let grid = pass.grid;
+    let scale = pass.input.scale;
+    let placement = pass.view.placement(current.size(), pass.input.viewport);
+    let screen = |point: [f64; 2]| {
+        let [x, y] = placement.screen_point([point[0] as f32, point[1] as f32]);
+        pos2(x / scale, y / scale)
+    };
+    let accent: egui::Color32 = theme.accent.into();
+    let stroke = egui::Stroke::new(grid.line_width(REGION_OUTLINE), accent);
+    for region in regions {
+        let Some(placed) = region.placed else {
+            continue;
+        };
+        // Where the subject is written: over the region's top left corner,
+        // or over a point's ring.
+        let corner = match placed {
+            Placed::Rectangle { corner, size } => {
+                let start = screen(corner);
+                let end = screen([corner[0] + size[0], corner[1] + size[1]]);
+                let [left, top, right, bottom] = [
+                    grid.snap(start.x),
+                    grid.snap(start.y),
+                    grid.snap(end.x),
+                    grid.snap(end.y),
+                ];
+                let points = [
+                    pos2(left, top),
+                    pos2(right, top),
+                    pos2(right, bottom),
+                    pos2(left, bottom),
+                    pos2(left, top),
+                ];
+                painter.extend(egui::Shape::dashed_line(
+                    &points,
+                    stroke,
+                    REGION_DASH,
+                    REGION_GAP,
+                ));
+                pos2(left, top)
+            }
+            Placed::Circle { center, diameter } => {
+                let at = screen(center);
+                let radius = (diameter as f32 * placement.zoom / scale / 2.0).max(1.0);
+                // Enough links that each is a few pixels long whatever the
+                // circle's size, so the dashes follow the curve.
+                let steps = ((std::f32::consts::TAU * radius / 3.0).ceil() as usize).max(12);
+                let points: Vec<egui::Pos2> = (0..=steps)
+                    .map(|step| {
+                        let angle = std::f32::consts::TAU * step as f32 / steps as f32;
+                        at + radius * vec2(angle.cos(), angle.sin())
+                    })
+                    .collect();
+                painter.extend(egui::Shape::dashed_line(
+                    &points,
+                    stroke,
+                    REGION_DASH,
+                    REGION_GAP,
+                ));
+                at - vec2(radius, radius)
+            }
+            Placed::Point { center } => {
+                let at = screen(center);
+                painter.circle_stroke(at, POINT_RING, stroke);
+                painter.circle_filled(at, stroke.width, accent);
+                at - vec2(POINT_RING, POINT_RING)
+            }
+        };
+        let galley = painter.layout_no_wrap(
+            region.subject.clone(),
+            egui::FontId::proportional(LABEL_SIZE),
+            egui::Color32::PLACEHOLDER,
+        );
+        let size = galley.size() + 2.0 * Vec2::from(PILL_INSET);
+        let pill = egui::Rect::from_min_size(pos2(corner.x, corner.y - PILL_GAP - size.y), size);
+        painter.rect_filled(pill, PANEL_RADIUS, theme.menu_background);
+        painter.rect_stroke(
+            pill,
+            PANEL_RADIUS,
+            egui::Stroke::new(RULE_WIDTH, theme.border),
+            StrokeKind::Inside,
+        );
+        painter.galley(
+            pill.min + Vec2::from(PILL_INSET),
+            galley,
+            theme.text_primary.into(),
+        );
+    }
+}
+
+/// The field of `section` called `name`, with its place in the column's
+/// fields, `first` being where the section's first one is.
+fn find<'a>(section: &'a Section, first: usize, name: &str) -> Option<(usize, &'a Fact)> {
+    (first..)
+        .zip(&section.facts)
+        .find(|(_, fact)| fact.name == name)
+}
+
+/// A field written as part of a line rather than under its name: what the
+/// line shows of it, and what its tooltip says where that is more.
+struct Piece {
+    index: usize,
+    shown: String,
+    exact: Option<String>,
+}
+
+/// One line of `pieces` in `ink`, after `mark` where there is one and with
+/// `between` set between each two, broken to `width` where they do not fit;
+/// and after them `button`, wearing its mark, where there is one.
+///
+/// Each piece is pointed at and copied on its own, and says in its tooltip
+/// what it stands for where it is written short. The copy button goes where
+/// every other one in the column does, at the column's end, level with the
+/// piece pointed at.
+#[allow(clippy::too_many_arguments)]
+fn line(
+    pass: &mut Pass,
+    ui: &mut egui::Ui,
+    width: f32,
+    mark: Option<&[icon::Mark]>,
+    ink: Color,
+    between: Option<&str>,
+    pieces: impl IntoIterator<Item = Piece>,
+    button: Option<(&[icon::Mark], Control)>,
+) {
+    let grid = pass.grid;
+    let ground = pass.theme.panel_background;
+    let left = ui.cursor().min.x;
+    ui.horizontal_wrapped(|ui| {
+        ui.set_width(width);
+        let space = measure(ui, " ");
+        ui.spacing_mut().item_spacing.x = space;
+        let text = |text: &str| RichText::new(text).size(TEXT_SIZE).color(ink);
+        if let Some(mark) = mark {
+            let (rect, _) = ui.allocate_exact_size(Vec2::splat(COPY_ICON), Sense::HOVER);
+            icon::paint(
+                ui.painter(),
+                mark,
+                icon::square(grid, rect, COPY_ICON),
+                ink.into(),
+                ground.into(),
+            );
+            ui.add_space(MARK_GAP - space);
+        }
+        for (count, piece) in pieces.into_iter().enumerate() {
+            if count > 0
+                && let Some(between) = between
+            {
+                ui.label(text(between));
+            }
+            let response = ui.add(Label::new(text(&piece.shown)).wrap().sense(Sense::CLICK));
+            let response = match piece.exact {
+                Some(exact) => said(pass.theme, response, exact),
+                None => response,
+            };
+            let across = egui::Rect::from_x_y_ranges(left..=left + width, response.rect.y_range());
+            let pointed = response.contains_pointer();
+            offer(
+                pass,
+                ui,
+                Copyable::Fact(piece.index),
+                &response,
+                across,
+                pointed,
+            );
+        }
+        if let Some((mark, control)) = button {
+            ui.add_space(MARK_GAP - space);
+            let (rect, response) = ui.allocate_exact_size(Vec2::splat(CHIP_HEIGHT), Sense::CLICK);
+            let (background, ink) = pass.button_ink(false, &response, true);
+            ui.painter().rect_filled(rect, TOGGLE_RADIUS, background);
+            icon::paint(
+                ui.painter(),
+                mark,
+                icon::square(grid, rect, COPY_ICON),
+                ink,
+                background,
+            );
+            response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, control.label()));
+            let response = pass.tooltip(response, Tip::Control(control));
+            if response.clicked() {
+                pass.press(control);
+            }
+        }
+    });
+}
+
+/// `rows` as a table of two columns: each field's name, dim, in a column as
+/// wide as the widest of them needs — up to [`NAMES_SHARE`] of `width` — and
+/// its value beside it, broken to what is left. A row is one block, copying
+/// its value.
+///
+/// A value [`short`] has a shorter way of saying is written that way, and
+/// says the whole of it in its tooltip; the copy is the whole of it too.
+fn table<'a>(
+    pass: &mut Pass,
+    ui: &mut egui::Ui,
+    rows: impl Iterator<Item = (usize, &'a Fact)> + Clone,
+    width: f32,
+) {
+    let theme = pass.theme;
+    let font = egui::FontId::proportional(TEXT_SIZE);
+    let names = rows
+        .clone()
+        .map(|(_, fact)| {
+            ui.ctx().fonts_mut(|fonts| {
+                fonts
+                    .layout_no_wrap(fact.name.clone(), font.clone(), egui::Color32::PLACEHOLDER)
+                    .size()
+                    .x
+            })
+        })
+        .fold(0.0, f32::max)
+        .min(width * NAMES_SHARE)
+        .ceil();
+    for (count, (index, fact)) in rows.enumerate() {
+        if count > 0 {
+            ui.add_space(LINE_GAP);
+        }
+        block(pass, ui, Copyable::Fact(index), width, |ui| {
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = COLUMN_GAP;
+                ui.scope(|ui| {
+                    ui.set_min_width(names);
+                    ui.set_max_width(names);
+                    let text = RichText::new(&fact.name)
+                        .size(TEXT_SIZE)
+                        .color(theme.text_dim);
+                    ui.add(Label::new(text).wrap());
+                });
+                let shown = short(fact);
+                let text = RichText::new(shown.as_deref().unwrap_or(&fact.value))
+                    .size(TEXT_SIZE)
+                    .color(theme.text_primary);
+                let response = ui.add(Label::new(text).wrap());
+                if shown.is_some() {
+                    said(theme, response, fact.value.clone());
+                }
+            });
+        });
+    }
+}
+
+/// A shorter way of saying `fact`'s value, where the table has one: when a
+/// photograph was taken, as how long ago — "3 weeks ago" — the date itself
+/// being what the tooltip and the clipboard are for.
+fn short(fact: &Fact) -> Option<String> {
+    if fact.name != exif::TAKEN {
+        return None;
+    }
+    let taken = clock::parse(&fact.value)?;
+    Some(ago(taken, SystemTime::now()))
+}
+
+/// `response` with a tooltip of the one line `words`: a fact written short,
+/// said in full. No key does what a click on it does, so there is nothing for
+/// [`Pass::tooltip`]'s keymap to add, and nothing here for it to compose.
+fn said(theme: &Theme, response: egui::Response, words: String) -> egui::Response {
+    let theme = *theme;
+    let tooltip = Tooltip {
+        title: vec![words],
+        hints: Vec::new(),
+    };
+    response.on_hover_ui(move |ui| super::tooltip::show(ui, &tooltip, &theme))
+}
+
+/// How long before `now` the file was written, as it is said: "2 weeks ago".
+/// A time after `now` — a clock set wrong somewhere — is said as now rather
+/// than as a time to come, which would read as a mistake of this panel's.
+fn ago(time: SystemTime, now: SystemTime) -> String {
+    let since = now.duration_since(time).unwrap_or_default();
+    timeago::Formatter::new().convert(since)
+}
+
+/// A file's size exactly: `1,258,291 bytes`.
+fn exact_bytes(bytes: u64) -> String {
+    match bytes {
+        1 => "1 byte".to_string(),
+        _ => format!("{} bytes", grouped(bytes)),
+    }
 }
 
 /// A stretch of the column that can be pointed at: what a click on it
@@ -424,33 +1114,52 @@ fn words(ui: &mut egui::Ui, kind: Kind, text: &str, theme: &Theme) {
 /// words rather than beside them — the column is as wide as the panel lets
 /// it be and there is no margin to stand one in — nudged back inside the
 /// panel where centering it on the stretch would hang it over an edge.
+///
+/// Whether the pointer is on it.
 fn block(
     pass: &mut Pass,
     ui: &mut egui::Ui,
     copies: Copyable,
     width: f32,
     add: impl FnOnce(&mut egui::Ui),
-) {
-    let control = Control::Facts(copies);
+) -> bool {
     let response = ui
         .scope_builder(UiBuilder::new().sense(Sense::CLICK), |ui| {
             ui.set_width(width);
             add(ui);
         })
         .response;
+    // The pointer is on the words inside rather than on the block, as egui
+    // counts hovering, so it is asked where the pointer is instead.
+    let pointed = ui.rect_contains_pointer(response.rect);
+    offer(pass, ui, copies, &response, response.rect, pointed);
+    pointed
+}
+
+/// What makes something laid out in the column a thing that copies: its
+/// name for a screen reader, the button over the end of `across` while it is
+/// `pointed` at, and the press when it is clicked.
+fn offer(
+    pass: &mut Pass,
+    ui: &egui::Ui,
+    copies: Copyable,
+    response: &egui::Response,
+    across: egui::Rect,
+    pointed: bool,
+) {
+    let control = Control::Facts(copies);
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, control.label()));
-    let rect = response.rect;
-    if ui.rect_contains_pointer(rect) && ui.clip_rect().height() >= CHIP_HEIGHT {
+    if pointed && ui.clip_rect().height() >= CHIP_HEIGHT {
         let chip_width = chip_width(ui, copies);
         let clip = ui.clip_rect();
-        let y = (rect.center().y - CHIP_HEIGHT / 2.0)
+        let y = (across.center().y - CHIP_HEIGHT / 2.0)
             .round()
             .clamp(clip.min.y, clip.max.y - CHIP_HEIGHT);
         chip(
             pass,
             ui,
             egui::Rect::from_min_size(
-                pos2(rect.max.x - chip_width, y),
+                pos2(across.max.x - chip_width, y),
                 vec2(chip_width, CHIP_HEIGHT),
             ),
             copies,
@@ -463,29 +1172,102 @@ fn block(
 }
 
 /// Everything the panel has to say, in the order it says it: the file on
-/// disk, then the picture in it, then whatever its metadata has to say — the
-/// camera, the place, the ground, the words, and last the fields nothing
-/// above spoke for.
+/// disk, then what somebody wrote about the picture in it, then the picture
+/// itself and the depth map it carries, then what else its metadata has to
+/// say — the camera, the exposure, the place, the ground — and last the
+/// regions it marks out on the picture.
 ///
 /// A field the file would not give up is left out, a name with a blank under
 /// it saying less than nothing; a section left with nothing in it goes too,
 /// an empty heading being a question about where the rest of it went. In
-/// practice the first two always stand, since a file always has a size and a
-/// picture always has a color space.
+/// practice the first and the picture's always stand, since a file always
+/// has a size and a picture always has a color space.
 fn contents(current: &Current) -> Contents {
-    let mut sections = vec![
-        ("File", fields(file_facts(current))),
-        ("Image", fields(image_facts(current))),
-    ];
-    for section in &current.exif.sections {
-        let entries = section
-            .entries
+    let exif = &current.exif;
+    // What somebody wrote says what the picture is, so it comes before
+    // how the picture is stored; the rest of the metadata, after.
+    let (about, captured): (Vec<_>, Vec<_>) = exif
+        .sections
+        .iter()
+        .partition(|section| section.group == Group::About);
+    let mut sections = vec![Section::new(
+        "File",
+        Face::File,
+        fields(file_facts(current)),
+    )];
+    sections.extend(
+        about
+            .into_iter()
+            .map(|section| metadata_section(exif, section)),
+    );
+    sections.push(Section::new(
+        "Image",
+        Face::Headed {
+            mark: icon::IMAGE,
+            head: &[RESOLUTION, READ_BY],
+            button: None,
+        },
+        fields(image_facts(current)),
+    ));
+    sections.push(Section {
+        showing: current.showing == Showing::Auxiliary(Auxiliary::Depth),
+        ..Section::new(
+            DEPTH_MAP,
+            Face::Headed {
+                mark: icon::AXIS_3D,
+                head: &[],
+                button: None,
+            },
+            fields(depth_facts(current)),
+        )
+    });
+    sections.extend(
+        captured
+            .into_iter()
+            .map(|section| metadata_section(exif, section)),
+    );
+    // The regions are written out here rather than with the rest, since
+    // where each is depends on the turn in force.
+    // Each is copied as its row of the table, which is never empty, so the
+    // facts and the regions stay in step.
+    let regions = exif.regions(current.pixels(), current.turn);
+    let facts = fields(
+        regions
             .iter()
-            .map(|entry| (entry.name.as_str(), entry.value.clone()));
-        sections.push((section.name, fields(entries)));
-    }
-    sections.retain(|(_, facts)| !facts.is_empty());
+            .map(|region| (region.entry.name.as_str(), region_row(region))),
+    );
+    sections.push(Section {
+        regions,
+        ..Section::new(REGIONS, Face::Regions, facts)
+    });
+    sections.retain(|section| !section.facts.is_empty());
     Contents { sections }
+}
+
+/// One section of the file's metadata, headed as its group is.
+fn metadata_section(exif: &exif::Exif, section: &exif::Section) -> Section {
+    let entries = section
+        .entries
+        .iter()
+        .map(|entry| (entry.name.as_str(), entry.value.clone()));
+    let (mark, head, button): (_, &'static [&'static str], _) = match section.group {
+        // The mark the panel's own button wears.
+        Group::About => (icon::INFO, &[exif::TITLE], None),
+        Group::Camera => (icon::CAMERA, &[exif::CAMERA], None),
+        Group::Exposure => (icon::APERTURE, &[], None),
+        // Only where the file gave numbers a map can take.
+        Group::Location => (
+            icon::MAP_PIN,
+            &[exif::LATITUDE, exif::LONGITUDE],
+            exif.position.map(|_| (icon::MAP, Control::OpenMap)),
+        ),
+        Group::Georeference => (icon::MAP, &[], None),
+    };
+    Section::new(
+        section.group.name(),
+        Face::Headed { mark, head, button },
+        fields(entries),
+    )
 }
 
 /// A section's fields, with the ones that came to nothing dropped.
@@ -518,8 +1300,14 @@ pub fn copied(current: &Current, copies: Copyable) -> String {
                 .facts()
                 .map(|(section, fact)| format!("{},{}", quoted(section), row(fact))),
         ),
+        // The regions are a table already, and copy as one: its heads,
+        // then each row as it is copied on its own.
         Copyable::Section(index) => match contents.sections.get(index) {
-            Some((_, facts)) => joined(facts.iter().map(row)),
+            Some(section) if matches!(section.face, Face::Regions) => joined(
+                std::iter::once(REGION_COLUMNS.join(","))
+                    .chain(section.facts.iter().map(|fact| fact.value.clone())),
+            ),
+            Some(section) => joined(section.facts.iter().map(row)),
             None => String::new(),
         },
         Copyable::Fact(index) => contents
@@ -557,19 +1345,21 @@ fn quoted(value: &str) -> String {
 }
 
 /// What the panel says about the file as a file: what it is called and where
-/// it lives, which decoder turned out to own it, then how big it is and when
-/// it was last written. Nothing here is about the picture.
+/// it lives, how big it is, and when it was last written. Nothing here is
+/// about the picture, nor about how it was read.
 fn file_facts(current: &Current) -> Vec<(&'static str, String)> {
     let file = &current.file;
+    // The folder as the path was given: a file named on its own on the
+    // command line has none to say, and the line goes.
+    let folder = std::path::Path::new(&file.path)
+        .parent()
+        .map(|folder| folder.display().to_string())
+        .unwrap_or_default();
     vec![
-        ("Name", current.label.clone()),
-        ("Path", file.path.clone()),
-        ("Read by", file.reader.unwrap_or_default().to_string()),
-        ("Size", file.bytes.map(format_bytes).unwrap_or_default()),
-        (
-            "Modified",
-            file.modified.map(format_time).unwrap_or_default(),
-        ),
+        (NAME, current.label.clone()),
+        (FOLDER, folder),
+        (SIZE, file.bytes.map(format_bytes).unwrap_or_default()),
+        (MODIFIED, file.modified.map(format_time).unwrap_or_default()),
     ]
 }
 
@@ -579,7 +1369,14 @@ fn file_facts(current: &Current) -> Vec<(&'static str, String)> {
 /// where it is written out and stays written.
 fn image_facts(current: &Current) -> Vec<(&'static str, String)> {
     let image = &current.image;
-    vec![
+    let mut facts = vec![
+        // The decoder that claimed the file, by what its bytes say: the
+        // first thing to know about why the rest reads as it does.
+        // Upper case, as a format's name is written: `PNG`, `JPEG XL`.
+        (
+            READ_BY,
+            current.file.reader.unwrap_or_default().to_uppercase(),
+        ),
         // Which of a raw's two pictures the rest of these are about, where
         // it is the camera's rather than the one developed here.
         (
@@ -589,18 +1386,24 @@ fn image_facts(current: &Current) -> Vec<(&'static str, String)> {
                 Rendering::CameraJpeg => "camera JPEG".to_string(),
             },
         ),
-        // And which of the file's images, where it is not the picture but
-        // one the picture carries, shown in its place.
         (
-            "Showing",
-            match current.showing {
-                Showing::Picture => String::new(),
-                Showing::Auxiliary(Auxiliary::Depth) => "depth map".to_string(),
-            },
+            RESOLUTION,
+            format!("{} \u{00d7} {}", image.width, image.height),
+        ),
+        // What the file asks to be done to its pixels to stand them up,
+        // the turn the resolution above is after; and for a TIFF, how they are packed.
+        (
+            "Orientation",
+            current
+                .exif
+                .orientation
+                .and_then(orient::words)
+                .unwrap_or_default()
+                .to_string(),
         ),
         (
-            "Resolution",
-            format!("{} \u{00d7} {}", image.width, image.height),
+            "Compression",
+            current.exif.compression.clone().unwrap_or_default(),
         ),
         (
             "Samples",
@@ -610,10 +1413,15 @@ fn image_facts(current: &Current) -> Vec<(&'static str, String)> {
                 image.channels().label()
             ),
         ),
-        // What we asked the GPU for is not always what it had: a 16-bit image
-        // on a device without the format lands somewhere wider or narrower,
-        // and the difference belongs beside what the file holds.
-        ("Stored as", current.stored.clone().unwrap_or_default()),
+        // What the device could not keep of what the file holds, and why:
+        // nothing for the usual picture, which the device holds as it is.
+        (
+            "Precision",
+            current
+                .reduced
+                .map(|reduced| format!("half float: {}", reduced.reason()))
+                .unwrap_or_default(),
+        ),
         ("Color space", image.color.label()),
         // Only where there is an alpha channel to have been multiplied
         // through or not: "opaque" under an image the line above already
@@ -632,6 +1440,43 @@ fn image_facts(current: &Current) -> Vec<(&'static str, String)> {
         // holds. The one fact the opening view is decided by, and the one a
         // reader asking why a file opened dark or stretched is looking for.
         ("Referred to", image.referred.label().to_string()),
+    ];
+    // The gain map, where there is one: whose description of it the file
+    // gives, the map itself, how far above the base it can lift the picture,
+    // and how much of that this display's room is showing.
+    let map = image.gain_map.as_deref();
+    facts.extend([
+        (
+            "Gain map",
+            map.map(|map| match map.lift {
+                Lift::Iso(_) => "ISO 21496-1".to_string(),
+                Lift::Apple { .. } => "Apple".to_string(),
+            })
+            .unwrap_or_default(),
+        ),
+        (
+            "Gain map size",
+            map.map(|map| {
+                let kind = match map.channels {
+                    1 => "luminance",
+                    _ => "RGB",
+                };
+                format!("{} \u{00d7} {}, {kind}", map.width, map.height)
+            })
+            .unwrap_or_default(),
+        ),
+        (
+            "HDR headroom",
+            map.map(|map| format!("{:.1} stops above SDR white", map.stops()))
+                .unwrap_or_default(),
+        ),
+        (
+            "Gain applied",
+            map.map(|_| applied(current.lift.as_ref().map_or(0.0, |lift| lift.weight())))
+                .unwrap_or_default(),
+        ),
+    ]);
+    facts.extend([
         // The multiplier a Radiance picture says has already been applied
         // to it, which is why it is graded rather than metered; nothing for
         // a file with no place to say it.
@@ -645,7 +1490,77 @@ fn image_facts(current: &Current) -> Vec<(&'static str, String)> {
         // What else the file holds, for the two kinds that hold more than
         // one picture; nothing for the usual kind.
         ("Holds", holds(current)),
-    ]
+    ]);
+    facts
+}
+
+/// What the panel says about the depth map the picture carries, whichever
+/// of the two is on screen: its resolution and samples, whose words say what its
+/// codes stand for, whether they stand for the distance or its inverse, the
+/// distances the codes run between, and how far those can be believed.
+/// Nothing where the picture carries no map.
+///
+/// A map whose file does not say what its codes stand for is still a map,
+/// its encoding unknown: the readout shows its codes.
+fn depth_facts(current: &Current) -> Vec<(&'static str, String)> {
+    let (picture, _) = current.picture();
+    let Some(map) = picture.depth.as_deref() else {
+        return Vec::new();
+    };
+    let mut facts = vec![
+        (RESOLUTION, format!("{} \u{00d7} {}", map.width, map.height)),
+        (
+            "Samples",
+            format!(
+                "{} {}",
+                map.samples.component_name(),
+                map.samples.channels().label()
+            ),
+        ),
+    ];
+    let Some(scale) = map.scale else {
+        facts.push(("Encoding", "unknown".to_string()));
+        return facts;
+    };
+    let [near, far] = scale.range(&map.samples);
+    let near = near.map(pixel::written).unwrap_or_default();
+    let far = far.map_or_else(|| "infinity".to_string(), pixel::written);
+    facts.extend([
+        ("Described by", scale.vendor.name().to_string()),
+        (
+            "Encoding",
+            match scale.quantity {
+                Quantity::Distance => "distance",
+                Quantity::Inverse => "inverse distance",
+            }
+            .to_string(),
+        ),
+        ("Range", format!("{near} to {far}")),
+        (
+            "Accuracy",
+            match scale.accuracy {
+                Accuracy::Absolute => "absolute",
+                Accuracy::Relative => "relative",
+            }
+            .to_string(),
+        ),
+    ]);
+    facts
+}
+
+/// How much of a gain map's lift is on screen, at `weight`: all of it, a
+/// share, or none — which is what a display with no room above white gets.
+fn applied(weight: f32) -> String {
+    if weight >= 1.0 {
+        "all".to_string()
+    } else if weight <= 0.0 {
+        "none: the display has no room above white".to_string()
+    } else {
+        format!(
+            "{:.0}%, as much as the display has room for",
+            weight * 100.0
+        )
+    }
 }
 
 /// The frames or pages a file holds, in a phrase: how many, and for an
@@ -783,7 +1698,7 @@ mod tests {
                 reader: Some("png"),
             },
             exif: photograph(),
-            stored: None,
+            reduced: None,
             sequence: Sequence::Still,
             page: 0,
             lift: None,
@@ -805,20 +1720,20 @@ mod tests {
         Exif {
             sections: vec![
                 Section {
-                    name: "Camera",
+                    group: Group::Camera,
                     entries: vec![
                         entry("Camera", "Apple iPhone 16 Pro"),
                         entry("Exposure", "1/50 s \u{00b7} f/1.78 \u{00b7} ISO 200"),
                     ],
                 },
                 Section {
-                    name: "Capture metadata",
+                    group: Group::About,
                     entries: (0..24)
                         .map(|index| entry(&format!("Field {index}"), &format!("value {index}")))
                         .collect(),
                 },
             ],
-            georeference: None,
+            ..Exif::default()
         }
     }
 
@@ -828,9 +1743,10 @@ mod tests {
         contents(current)
             .sections
             .iter()
-            .flat_map(|(name, facts)| {
-                std::iter::once(name.to_string()).chain(
-                    facts
+            .flat_map(|section| {
+                std::iter::once(section.name.to_string()).chain(
+                    section
+                        .facts
                         .iter()
                         .flat_map(|fact| [fact.name.clone(), fact.value.clone()]),
                 )
@@ -846,13 +1762,13 @@ mod tests {
         let written = written(&current());
         for expected in [
             "kingfisher.png",
-            "/home/reader/pictures/kingfisher.png",
-            "png",
+            "/home/reader/pictures",
+            "PNG",
             "1.26 MB (1,258,291 bytes)",
             "2025-08-31 09:32:02 UTC",
             "4 \u{00d7} 5",
-            "8-bit rgb",
-            "BT.709/sRGB",
+            "8-bit RGB",
+            "sRGB",
             "Apple iPhone 16 Pro",
             "value 23",
         ] {
@@ -864,15 +1780,193 @@ mod tests {
         // Each fact is named, and the name comes before its value; each
         // section is headed, and the sections come in the order they are read.
         let index = |text: &str| written.iter().position(|row| row == text);
-        assert!(index("Path") < index("/home/reader/pictures/kingfisher.png"));
+        assert!(index("Folder") < index("/home/reader/pictures"));
         assert!(index("File") < index("Image"));
+        // How the file was read is said of the picture it was read into.
+        assert!(index("Image") < index("Read by"));
         assert!(index("Image") < index("Resolution"));
         // The picture's size is a fact about the picture, not about the file
         // it arrived in, and is read under the heading that says so.
         assert!(index("Size") < index("Image"));
         assert!(index("Resolution") < index("Camera"));
-        assert!(index("Camera") < index("Capture metadata"));
-        assert!(index("Capture metadata") < index("Field 0"));
+        // What somebody wrote about the picture comes before how it is
+        // stored, and what took it after.
+        assert!(index("File") < index("About"));
+        assert!(index("About") < index("Field 0"));
+        assert!(index("Field 23") < index("Image"));
+    }
+
+    /// A picture carrying a depth map has it described in a section of its
+    /// own after the picture's and before the camera's, whichever of the two
+    /// is on screen; one without has no such section.
+    #[test]
+    fn a_depth_map_is_described_after_the_image() {
+        use crate::image::depth::{Accuracy, DepthMap, Quantity, Scale, Unit, Vendor};
+        let mut current = current();
+        assert!(!written(&current).iter().any(|row| row == DEPTH_MAP));
+        let map = |scale| DepthMap {
+            width: 2,
+            height: 3,
+            samples: Samples::U8 {
+                channels: Channels::Gray,
+                data: vec![0; 6],
+            },
+            scale,
+        };
+        let carrying = |current: &mut Current, map: DepthMap| {
+            let mut image = (*current.image).clone();
+            image.depth = Some(std::sync::Arc::new(map));
+            current.image = std::sync::Arc::new(image);
+        };
+        let section = |current: &Current| {
+            let rows = written(current);
+            let at = rows
+                .iter()
+                .position(|row| row == DEPTH_MAP)
+                .expect("a section");
+            assert!(rows.iter().position(|row| row == "Image") < Some(at));
+            assert!(rows.iter().position(|row| row == "Camera") > Some(at));
+            let end = rows.iter().position(|row| row == "Camera").unwrap();
+            rows[at + 1..end].to_vec()
+        };
+        let pairs = |pairs: &[(&str, &str)]| -> Vec<String> {
+            pairs
+                .iter()
+                .flat_map(|(name, value)| [name.to_string(), value.to_string()])
+                .collect()
+        };
+
+        // Codes with nothing said about them.
+        carrying(&mut current, map(None));
+        assert_eq!(
+            section(&current),
+            pairs(&[
+                ("Resolution", "2 \u{00d7} 3"),
+                ("Samples", "8-bit gray"),
+                ("Encoding", "unknown"),
+            ])
+        );
+
+        // An iPhone's disparity, estimated in scale: the range runs from
+        // near to far whichever code stands for which.
+        carrying(
+            &mut current,
+            map(Some(Scale {
+                codes: Some([0.0, 255.0]),
+                values: [0.25, 2.0],
+                quantity: Quantity::Inverse,
+                unit: Unit::Meters,
+                accuracy: Accuracy::Relative,
+                vendor: Vendor::Apple,
+            })),
+        );
+        assert_eq!(
+            section(&current),
+            pairs(&[
+                ("Resolution", "2 \u{00d7} 3"),
+                ("Samples", "8-bit gray"),
+                ("Described by", "Apple"),
+                ("Encoding", "inverse distance"),
+                ("Range", "\u{2248}0.50 m to \u{2248}4.00 m"),
+                ("Accuracy", "relative"),
+            ])
+        );
+
+        // Shown in the picture's place, the map is still the picture's, and
+        // its heading says it is on screen rather than a row of the image's.
+        let showing = |current: &Current| {
+            contents(current)
+                .sections
+                .iter()
+                .find(|section| section.name == DEPTH_MAP)
+                .expect("a section")
+                .showing
+        };
+        assert!(!showing(&current));
+        let (picture, _) = current.picture();
+        let face = crate::ui::Face::new(picture.depth.as_ref().unwrap().image());
+        current.show(
+            crate::image::auxiliary::Showing::Auxiliary(crate::image::auxiliary::Auxiliary::Depth),
+            |_| Some(face),
+        );
+        assert!(section(&current).contains(&"Apple".to_string()));
+        assert!(showing(&current));
+        assert!(!written(&current).iter().any(|row| row == "Showing"));
+    }
+
+    /// A file whose XMP marks regions out on the picture has them under a
+    /// heading of their own after the summaries, each where it is in the
+    /// picture as it is turned now.
+    #[test]
+    fn the_regions_are_where_the_turn_puts_them() {
+        use crate::image::metadata_region::{MetadataRegion, Shape, Units};
+        let mut current = current();
+        current.exif.regions = vec![MetadataRegion {
+            label: "Face".into(),
+            name: Some("Jane Doe".into()),
+            details: Vec::new(),
+            shape: Some(Shape::Rectangle {
+                center: [0.25, 0.2],
+                size: [0.5, 0.4],
+            }),
+            units: Units::Shares,
+        }];
+        // A table of its own, a region beside each row, named by who is
+        // in it and saying what kind of region it is in its tooltip.
+        let contents = contents(&current);
+        let section = contents
+            .sections
+            .iter()
+            .find(|section| section.name == REGIONS)
+            .expect("a regions section");
+        assert!(matches!(section.face, Face::Regions));
+        assert_eq!(section.regions.len(), section.facts.len());
+        assert_eq!(section.regions[0].subject, "Jane Doe");
+        assert_eq!(section.regions[0].about, "Face \u{00b7} Jane Doe");
+        assert_eq!(
+            section.regions[0].placed.map(Placed::bounds),
+            Some([0.0, 0.0, 2.0, 2.0])
+        );
+        // A row copies as its cells, and the section as the table.
+        let at = contents
+            .facts()
+            .position(|(name, _)| name == REGIONS)
+            .expect("a region's row");
+        assert_eq!(copied(&current, Copyable::Fact(at)), "Jane Doe,0,0,2,2");
+        let place = contents
+            .sections
+            .iter()
+            .position(|section| section.name == REGIONS)
+            .expect("a regions section");
+        assert_eq!(
+            copied(&current, Copyable::Section(place)),
+            "Subject,X,Y,W,H\nJane Doe,0,0,2,2"
+        );
+        let written_now = written(&current);
+        let index = |text: &str| written_now.iter().position(|row| row == text);
+        assert!(index("Camera") < index("Regions"));
+        assert_eq!(
+            written_now[index("Face").expect("the region is written") + 1],
+            "Jane Doe,0,0,2,2"
+        );
+        current.turn = current.turn.clockwise();
+        assert!(
+            written(&current)
+                .iter()
+                .any(|row| row == "Jane Doe,3,0,2,2"),
+            "{:?}",
+            written(&current)
+        );
+    }
+
+    /// A file named on its own, with no folder in the path it was given,
+    /// has no folder line rather than an empty one.
+    #[test]
+    fn a_file_named_alone_has_no_folder() {
+        let mut current = current();
+        current.file.path = "kingfisher.png".into();
+        let written = written(&current);
+        assert!(!written.iter().any(|row| row == "Folder"), "{written:?}");
     }
 
     /// A file that carries no metadata still has a file and a picture to
@@ -885,10 +1979,7 @@ mod tests {
         assert!(written.contains(&"File".to_string()), "{written:?}");
         assert!(written.contains(&"Image".to_string()), "{written:?}");
         assert!(!written.contains(&"Camera".to_string()), "{written:?}");
-        assert!(
-            !written.contains(&"Capture metadata".to_string()),
-            "{written:?}"
-        );
+        assert!(!written.contains(&"About".to_string()), "{written:?}");
     }
 
     /// A fact the file will not give up is left out altogether: a name with a
@@ -906,11 +1997,104 @@ mod tests {
             "Read by",
             "Alpha",
             "Declared range",
-            "Stored as",
+            "Precision",
         ] {
             assert!(!written.iter().any(|row| row == absent), "{written:?}");
         }
         assert!(written.iter().any(|row| row == "kingfisher.png"));
+    }
+
+    /// The camera's section is headed by the camera's name; the sections
+    /// after it are columns of fields.
+    #[test]
+    fn the_camera_is_headed_by_its_name() {
+        let contents = contents(&current());
+        let face = |name: &str| {
+            let section = contents
+                .sections
+                .iter()
+                .find(|section| section.name == name);
+            section.expect(name).face
+        };
+        assert!(matches!(
+            face("Camera"),
+            Face::Headed { head, .. } if head == [exif::CAMERA]
+        ));
+    }
+
+    /// When a photograph was taken is said as how long ago, where the date
+    /// can be read; anything else is written as it is.
+    #[test]
+    fn the_time_taken_is_said_as_how_long_ago() {
+        let fact = |name: &str, value: &str| Fact {
+            name: name.to_string(),
+            value: value.to_string(),
+        };
+        let long_ago = short(&fact(exif::TAKEN, "2001-01-01 12:00:00 +00:00"));
+        assert!(
+            long_ago
+                .as_deref()
+                .is_some_and(|said| said.ends_with("years ago")),
+            "{long_ago:?}"
+        );
+        assert_eq!(short(&fact(exif::TAKEN, "sometime in spring")), None);
+        assert_eq!(short(&fact(exif::LENS, "2001-01-01 12:00:00 +00:00")), None);
+    }
+
+    /// A picture with a gain map says what the map is and how much of its
+    /// lift is on screen; one without says nothing about a map.
+    #[test]
+    fn a_gain_map_is_described_under_the_image() {
+        use crate::image::gain_map::{GainMap, Lift};
+        let mut current = current();
+        assert!(!written(&current).iter().any(|row| row == "Gain map"));
+        let map = GainMap {
+            width: 2,
+            height: 3,
+            channels: 1,
+            data: vec![0; 6],
+            lift: Lift::Apple { headroom: 8.0 },
+        };
+        let mut image = (*current.image).clone();
+        image.gain_map = Some(std::sync::Arc::new(map.clone()));
+        current.image = std::sync::Arc::new(image);
+        let value = |current: &Current, name: &str| {
+            let rows = written(current);
+            let at = rows.iter().position(|row| row == name).expect(name);
+            rows[at + 1].clone()
+        };
+        assert_eq!(value(&current, "Gain map"), "Apple");
+        assert_eq!(value(&current, "Gain map size"), "2 \u{00d7} 3, luminance");
+        assert_eq!(value(&current, "HDR headroom"), "3.0 stops above SDR white");
+        assert_eq!(
+            value(&current, "Gain applied"),
+            "none: the display has no room above white"
+        );
+        current.lift = Some(std::sync::Arc::new(map.table(0.5)));
+        assert_eq!(
+            value(&current, "Gain applied"),
+            "50%, as much as the display has room for"
+        );
+        current.lift = Some(std::sync::Arc::new(map.table(1.0)));
+        assert_eq!(value(&current, "Gain applied"), "all");
+    }
+
+    /// Precision lost on the way to the device is said, with why; a picture
+    /// that lost none says nothing about it.
+    #[test]
+    fn precision_is_mentioned_only_where_it_was_lost() {
+        let mut current = current();
+        assert!(!written(&current).iter().any(|row| row == "Precision"));
+        current.reduced = Some(crate::render::Reduced::NoNorm16);
+        let rows = written(&current);
+        let at = rows
+            .iter()
+            .position(|row| row == "Precision")
+            .expect("a row");
+        assert_eq!(
+            rows[at + 1],
+            "half float: this GPU has no 16-bit integer textures"
+        );
     }
 
     /// A file of frames or pages says how many it holds, and a still says
@@ -962,16 +2146,16 @@ mod tests {
             .collect();
         assert_eq!(all[0], "File,Name,kingfisher.png");
         assert_eq!(
-            copied(&current, Copyable::Section(0)).lines().next(),
-            Some("Name,kingfisher.png")
+            copied(&current, Copyable::Section(0)).lines().nth(1),
+            Some("Folder,/home/reader/pictures")
         );
         assert_eq!(copied(&current, Copyable::Fact(0)), "kingfisher.png");
 
         // A size holds commas, which the two table shapes quote and the
         // field on its own does not: there is nothing there to run into.
-        assert_eq!(all[3], "File,Size,\"1.26 MB (1,258,291 bytes)\"");
+        assert_eq!(all[2], "File,Size,\"1.26 MB (1,258,291 bytes)\"");
         assert_eq!(
-            copied(&current, Copyable::Fact(3)),
+            copied(&current, Copyable::Fact(2)),
             "1.26 MB (1,258,291 bytes)"
         );
 
@@ -981,8 +2165,9 @@ mod tests {
         // the last column of its own row.
         let contents = contents(&current);
         let mut index = 0;
-        for (section, (name, facts)) in contents.sections.iter().enumerate() {
-            let rows: Vec<String> = copied(&current, Copyable::Section(section))
+        for (place, section) in contents.sections.iter().enumerate() {
+            let (name, facts) = (section.name, &section.facts);
+            let rows: Vec<String> = copied(&current, Copyable::Section(place))
                 .lines()
                 .map(str::to_string)
                 .collect();
@@ -1077,6 +2262,18 @@ mod tests {
         assert_eq!(format_bytes(1_258_291), "1.26 MB (1,258,291 bytes)");
         assert_eq!(format_bytes(45_600_000), "45.6 MB (45,600,000 bytes)");
         assert_eq!(format_bytes(999_500_000), "1.00 GB (999,500,000 bytes)");
+    }
+
+    /// The date is said as how long ago it was, and a date after now as now.
+    #[test]
+    fn a_date_is_said_as_how_long_ago_it_was() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_756_632_722);
+        let before = |seconds: u64| ago(now - Duration::from_secs(seconds), now);
+        assert_eq!(before(14 * 24 * 60 * 60), "2 weeks ago");
+        assert_eq!(before(3 * 60 * 60), "3 hours ago");
+        assert_eq!(ago(now + Duration::from_secs(60), now), "now");
+        assert_eq!(exact_bytes(1), "1 byte");
+        assert_eq!(exact_bytes(1_258_291), "1,258,291 bytes");
     }
 
     #[test]

@@ -164,7 +164,7 @@ const CHECKER_SQUARE: f32 = 8.0;
 /// The image on screen, with everything derived from it, and the file it is
 /// one of.
 ///
-/// `image`, `stats`, `display`, `stored` and `lift` are always of what is
+/// `image`, `stats`, `display`, `reduced` and `lift` are always of what is
 /// on screen — the picture, or an image it carries shown in its place (see
 /// [`Showing`]) — which is what makes everything that reads them read what
 /// is seen: the size in the top bar, the pixel under the pointer, the
@@ -184,8 +184,9 @@ pub struct Current {
     pub file: FileFacts,
     /// And what its metadata says about the photograph, if it carries any.
     pub exif: Exif,
-    /// What the GPU actually stored it as, which is not always what we asked.
-    pub stored: Option<String>,
+    /// The precision it lost on its way to the device, which had no format
+    /// that would hold it; `None` for the usual picture, which lost nothing.
+    pub reduced: Option<crate::render::Reduced>,
     /// What else the file holds: the frames of an animation, or its pages.
     pub sequence: Sequence,
     /// Which page `image` is, where the file has pages; zero otherwise.
@@ -244,7 +245,7 @@ pub struct Face {
     pub image: Arc<DecodedImage>,
     pub stats: Stats,
     pub display: Display,
-    pub stored: Option<String>,
+    pub reduced: Option<crate::render::Reduced>,
     pub lift: Option<Arc<crate::image::gain_map::Table>>,
 }
 
@@ -257,7 +258,7 @@ impl Face {
             display: Display::for_image_with(&image, &stats, Default::default()),
             image: Arc::new(image),
             stats,
-            stored: None,
+            reduced: None,
             lift: None,
         }
     }
@@ -321,7 +322,7 @@ impl Current {
             image: std::mem::replace(&mut self.image, face.image),
             stats: std::mem::replace(&mut self.stats, face.stats),
             display: std::mem::replace(&mut self.display, face.display),
-            stored: std::mem::replace(&mut self.stored, face.stored),
+            reduced: std::mem::replace(&mut self.reduced, face.reduced),
             lift: std::mem::replace(&mut self.lift, face.lift),
         }
     }

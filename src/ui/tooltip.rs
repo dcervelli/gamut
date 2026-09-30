@@ -424,6 +424,8 @@ pub fn words(tip: Tip) -> Option<String> {
         // The same: no key opens it, and what is on it is whatever the
         // desktop has installed rather than anything this program binds.
         Tip::Control(Control::OpenIn) => "Open the file in another application",
+        // No key opens it: it is on screen only beside the coordinates.
+        Tip::Control(Control::OpenMap) => "Open map to this location",
         // And the same again for the menu of the file: every item of it
         // has a key of its own, and the button says what the menu is of.
         Tip::Control(Control::FileMenu) => "Open file menu",

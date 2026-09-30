@@ -645,8 +645,9 @@ The toggle is a square with `axis-3d`'s mark alone, between the camera's
 switch and the headroom switch (`Pass::depth_toggle`), lit while the map is
 up, and is left out on a picture
 with no map for the camera switch's reason; `NO_DEPTH_MAP` is the refusal
-only the key reaches. The info panel's *Showing* row says when the facts
-under it are the map's.
+only the key reaches. While the map is up, the info panel's `Depth map`
+heading wears a pill with an eye and *Showing* (`Section::showing`), which
+is what says the `Image` section's facts are the map's.
 
 ## The region
 
@@ -992,22 +993,65 @@ own are what the decoder already said: its size, what each pixel holds, the
 color space those numbers are meant in, and what the GPU stored them as. The
 bars say some of that as well, but they say it in passing and drop it when the
 window narrows, and a fact worth reading is a fact worth being able to go back
-to.
+to. Two of the picture's facts come out of the EXIF block rather than the
+decoder: the turn its orientation tag asks for, which is why the resolution
+can be the stored picture's on its side, and a TIFF's compression — only a
+TIFF's, since a raw's first directory describes the preview in front of it
+and every other container's block has no pixels of its own.
+
+A picture carrying a depth map has a section of its own for it, `Depth
+map`, after the picture's: its resolution and samples, and where the file
+says what its codes stand for — a `depth::Scale` — whose words said it
+(`depth::Vendor`), whether the codes are spread over the distance or its
+inverse, the distances the two ends of the codes stand for, nearest first,
+and whether those are measured or only right about what is nearer. The
+range is written by `pixel::written`, the readout's own writing of a
+distance, so a relative map's ends carry the same `≈` and the same two
+places the pointer's readout does. The section reads the picture's map
+through `Current::picture`, not `Current::image`: while the map is shown in
+the picture's place the `Image` section describes the map, and the depth
+map's section still describes the map the picture carries rather than
+nothing. A map whose file says nothing of its codes is still a map, and the
+section gives its encoding as unknown, which answers the question a reader
+of a bare number under the pointer is asking.
 
 The rest is its EXIF, read by `src/image/exif.rs` on the loader thread beside
 the decode, because it is one more parse of a file somebody else chose the
 bytes of and that is the thread with the panic guard around it. What comes
-back is already words, and already grouped: the fields a photograph is read by
-— camera, lens, when, the exposure as one line, the focal length with its
-equivalent — then where it was taken, the coordinates in degrees a map will
-take with the rest of the GPS directory under them, then whatever somebody
-wrote in words, and last everything left over. That last split is had for
-nothing: TIFF's own tags describe the file and the Exif directory describes
-the shot, and every tag says which directory it came from — so the long tail
-is grouped by asking each one rather than by a table of where each belongs. A
-group that came to nothing is not carried at all, an empty heading being a
-question about where the rest of it went. Nothing there is a tag number or an
-offset by the time the interface sees it.
+back is already words, and already grouped: `About`, whatever somebody
+wrote in words, then `Camera`, what took the picture
+whatever it was taken of — the body, the lens, the owner and the serial
+numbers — then `Exposure`, how this picture was taken — when, the exposure
+and how it was decided, the focal length with its equivalent and any digital
+zoom, the metering, the white balance and the color temperature it was set
+for, the flash, and whether the picture was merged from several frames —
+then where it was taken, the coordinates in degrees a map will take, and
+last where a raster's pixels are on the ground. Nothing else is shown field by
+field. Once those are read out of the block, what is left is how the file
+is laid out —
+strip offsets, bits per sample, a DNG's calibration matrices — and how the
+camera describes itself — the Exif version, APEX restatements of the
+exposure already given — and a column of it buried the few fields worth
+reading. A group that came to nothing is not carried at all, an empty heading
+being a question about where the rest of it went. Each group is an `exif::Group`, and
+`ui/info.rs` gives each its mark and its head in one exhaustive match, so a
+group cannot reach the panel without them; the regions come last. The
+panel does not read the groups in one run: `About` comes straight after the
+file, since a title and a caption say what the picture is before its size
+and samples say how it is stored, and the picture's own section and the
+depth map's come between it and the rest, which are about how the picture
+was taken.
+
+The coordinates are kept as numbers too, as `Exif::position`: the latitude
+and longitude in signed degrees, south and west below zero, which is what a
+map's address takes where the panel shows the hemisphere's letter. The
+button after them at the head of the `Location` section opens
+`settings::map_link` of the `open_map_link` setting — `{lat}` and `{lng}`
+replaced by those numbers to six places — through `openers::browse`, which
+is `xdg-open` on Linux and the workspace's `openURL` on a Mac. It is drawn
+only where the file gave both numbers, so it is never dead. A setting that
+does not name both is refused as it is read: a link with one of them fixed
+would open the same place for every picture.
 
 The words — the `About` section — are read from two blocks, because a file
 keeps them in two. EXIF is what the camera wrote, and has a tag for a caption,
@@ -1048,6 +1092,96 @@ heading is "About" and not
 shares a word with a row under it reads as a mistake; the row in turn is
 "Caption", the word the programs that write the field use for it, and what it
 holds — a sentence about the picture, not a description of the file.
+
+For a raw, what LibRaw read of its header fills in whatever of `Camera`
+and `Exposure` the EXIF left out, a row at a time and each where the EXIF
+reader would have put it (`Exif::fill`): all of it for a CRW, which has no
+EXIF. LibRaw also gives the color temperature, which EXIF has no field for.
+The camera's as-shot multipliers balance a gray surface, which the sensor
+therefore read as their inverse; LibRaw's matrix takes the sensor's values,
+scaled by its own daylight multipliers, to sRGB, so that gray scaled that
+way and put through it is the illuminant's color. From there it is CIE xy,
+and McCamy's cubic gives the correlated color temperature, to the nearest
+50 K. On a Canon R6 Mark II it comes within 2% of the temperature Canon's
+own maker note records.
+
+A lens is named by `LensModel`, with `LensMake` in front only where it is not
+the camera's maker and the name does not already say it — the case of a
+lens by another maker, which is where it tells the reader something. Where
+there is no name, `LensSpecification`'s range stands in for one; the two are
+never shown together, since the name nearly always carries the range.
+The program that wrote the file (`Software`, `xmp:CreatorTool`) and when it
+last did (`DateTime`) are said in words too, and are not in the table: a
+camera writes both into every file, its firmware and the moment of the shot,
+so they would head every photograph's words with two rows nobody wrote. The
+section is headed as `Camera` is, by its title where
+it has one, beside the mark the panel's own button wears.
+
+One XMP property is read as the structure it is rather than as words: the
+Metadata Working Group's regions (`mwg-rs:Regions`), which a cataloging
+program writes for the faces, pets, barcodes and points of focus it found or
+was told of. `xmp::Region` holds each as the packet wrote it — name, kind,
+description, a barcode's value, a focus point's usage, Lightroom's
+`Rotation`, and an area whose `x` and `y` are its center, in shares of the
+sides unless the packet says pixels — reading a structure in any of the
+three ways RDF allows one to be spelled, fields as attributes or as
+elements. The guidelines put a region in the picture as stored: "Region
+metadata is applied to the stored image. When applying a rotation by
+applying Exif Orientation, the rotation must be applied to the regions as
+well." EXIF's own `SubjectArea`, where the camera found the main subject,
+is measured the same way — in pixels of the stored picture, before the
+orientation — so the two are one thing to the panel: a
+`metadata_region::MetadataRegion`, which is a label, a name, the other
+things said about it already in words, and a `Shape` (a point, a circle or
+a rectangle about a center) in the `Units` its source wrote it in, shares of
+the sides or pixels of a stated size. Each source is turned into those by a
+constructor of its own. `MetadataRegion::subject_area` reads `SubjectArea`
+and `SubjectLocation`, its older one-point form; a location at the middle of
+the area is the same subject said twice and is said once. `MetadataRegion::mwg`
+reads the Metadata Working Group's list, and `MetadataRegion::microsoft`
+Microsoft's people tags (`MP:RegionInfo`), which Windows Photo Gallery wrote
+and digiKam writes beside every MWG face — so a tag with the same name as
+an MWG region, and a rectangle within a hundredth of the picture's sides of
+it, is left out as a repeat. Microsoft's rectangle is `x, y, w, h` from the
+top left corner in shares of the sides (its documentation's prose says
+height before width, and its own sample only adds up the other way), its
+documentation spells the namespaces with `https` where every file written
+has `http`, so both are read, and it says nothing of the orientation, so
+the tags are taken to be measured as MWG's are. The account digest and ID
+beside each name are not read. The subject comes first, being the camera's. `Exif` keeps the regions
+as numbers beside the orientation tag, and the panel writes them out as it
+draws, through `Exif::regions` and `MetadataRegion::placed`, which carries
+each shape through the tag's turn and then the turn in force
+(`orient::upright` is the tag's reading for a point, the inverse of the one
+the pixels are fetched through) and scales it to the picture's size — so a
+region reads as a marked region and the pointer's coordinate do, a top left
+corner and a size in the picture as shown, and a picture made smaller since
+it was marked is still marked in the right place. `AppliedToDimensions` is
+read only to measure an area written in pixels. `Rotation` is not in the
+specification and is written only by Lightroom, as zero, so it is shown only
+when it is not. A file whose orientation came from somewhere other than an
+EXIF block this reads — a JPEG XL's codestream — has its regions taken as
+upright.
+
+The section is a table: the subject — who
+or what is in the region, or its kind where nothing names it — and the
+region's top left corner and size, a circle's the square around it and a
+point's no size, set right as numbers in a column are. `Placed` is the
+shape in the picture as shown and unrounded, which the table writes out
+whole and `mark_regions` in `ui/info.rs` draws: while the pointer is on a
+row, its region is outlined on the picture with its subject on a pill
+over it, and while it is on the heading, every region is. The
+outline is dashed, as the heading's mark is, so it is not taken for the
+region marked out by hand, which is solid and has handles. It is painted
+on the layer the picture's own marks go on — the painter the panel's
+`show` takes before it opens its area — and so goes under every panel,
+this one included; the hover is known only as the panel is laid out, and
+painting there rather than remembering it for the next frame keeps the
+outline on the frame the pointer arrived in. A row copies as its five
+cells in a line of CSV, and the heading as the whole table under a line of
+its column heads, rather than as the two columns every other section
+copies as: the section is a table on screen, and a region pasted anywhere
+is wanted as its numbers.
 
 The panel is also the one part of the interface that is read out rather than
 merely read. A click on a field copies it, a click on a heading copies the

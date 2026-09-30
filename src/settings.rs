@@ -50,6 +50,9 @@ pub struct Config {
     /// Whether a single file named on the command line steps on through
     /// the other images in its folder.
     pub browse_folder: bool,
+    /// The web address the `Location` section's map button opens, with
+    /// `{lat}` and `{lng}` standing for the coordinates in signed degrees.
+    pub open_map_link: String,
     pub keys: Keymap,
     pub gestures: Gestures,
 }
@@ -64,6 +67,7 @@ impl Default for Config {
             show_info: false,
             log_counts: false,
             browse_folder: true,
+            open_map_link: OPEN_MAP_LINK.to_string(),
             keys: Keymap::default(),
             gestures: Gestures::default(),
         }
@@ -73,7 +77,7 @@ impl Default for Config {
 /// Every setting the configuration file takes, in the order the template
 /// lists them, with the words it wears there. [`Config::value`] writes each
 /// one's value, and [`Config::parse`] reads it back.
-const SETTINGS: [(&str, &str); 7] = [
+const SETTINGS: [(&str, &str); 8] = [
     ("show_ui", "The panels around the picture."),
     (
         "show_minimap",
@@ -93,7 +97,22 @@ const SETTINGS: [(&str, &str); 7] = [
         "browse_folder",
         "A single file opened alone steps on through the other images in its folder.",
     ),
+    (
+        "open_map_link",
+        "The web page the map button in the info panel's Location section opens: {lat} and {lng} are where the picture was taken, in degrees.",
+    ),
 ];
+
+/// Where the map button goes unless the configuration says otherwise.
+pub const OPEN_MAP_LINK: &str = "https://geojson.io/#data=data:application/json,%7B%22type%22%3A%22Feature%22%2C%22properties%22%3A%7B%7D%2C%22geometry%22%3A%7B%22type%22%3A%22Point%22%2C%22coordinates%22%3A%5B{lng}%2C{lat}%5D%7D%7D";
+
+/// `link` with the coordinates in it: `{lat}` the latitude and `{lng}` the
+/// longitude, each in signed degrees to six places, which is a tenth of a
+/// meter on the ground.
+pub fn map_link(link: &str, [latitude, longitude]: [f64; 2]) -> String {
+    link.replace("{lat}", &format!("{latitude:.6}"))
+        .replace("{lng}", &format!("{longitude:.6}"))
+}
 
 /// Settings the configuration file once took, which the state file keeps
 /// now: how the pointer's pixel and place are written, chosen by hand from
@@ -141,6 +160,7 @@ impl Config {
             "show_info" => self.show_info.to_string(),
             "log_counts" => self.log_counts.to_string(),
             "browse_folder" => self.browse_folder.to_string(),
+            "open_map_link" => self.open_map_link.clone(),
             _ => unreachable!("`{name}` is not in SETTINGS"),
         }
     }
@@ -202,6 +222,19 @@ impl Config {
                 "show_info" => Some(&mut config.show_info),
                 "log_counts" => Some(&mut config.log_counts),
                 "browse_folder" => Some(&mut config.browse_folder),
+                "open_map_link" => {
+                    // A link without both would open the same place for
+                    // every picture, or nowhere.
+                    if value.contains("{lat}") && value.contains("{lng}") {
+                        config.open_map_link = value.to_string();
+                    } else {
+                        problems.push((
+                            number,
+                            "open_map_link needs {lat} and {lng} in it".to_string(),
+                        ));
+                    }
+                    None
+                }
                 // Remembered in the state file now, as the readout's menu
                 // leaves them; a line written for an older version is
                 // passed over rather than called a mistake.
@@ -525,12 +558,20 @@ fn state_path() -> Option<PathBuf> {
 /// name and value with the space around them taken off and a value's
 /// quotes taken off too, or `None` for a line with no `=` in it. Blank
 /// lines and comments are left out.
+///
+/// A comment starts at a `#` that begins the line or follows a space: a
+/// web address holds `#` inside itself, as the default map link does, and
+/// is not cut short there.
 fn lines(text: &str) -> impl Iterator<Item = (usize, Option<(&str, &str)>)> {
     text.lines().enumerate().filter_map(|(index, line)| {
-        let line = line
-            .split_once('#')
-            .map_or(line, |(before, _)| before)
-            .trim();
+        let comment = line.char_indices().find(|&(at, c)| {
+            c == '#'
+                && line[..at]
+                    .chars()
+                    .next_back()
+                    .is_none_or(char::is_whitespace)
+        });
+        let line = comment.map_or(line, |(at, _)| &line[..at]).trim();
         if line.is_empty() {
             return None;
         }
@@ -759,6 +800,7 @@ mod tests {
             show_info: !defaults.show_info,
             log_counts: !defaults.log_counts,
             browse_folder: !defaults.browse_folder,
+            open_map_link: "https://www.openstreetmap.org/?mlat={lat}&mlon={lng}".to_string(),
             keys: defaults.keys.clone(),
             gestures: defaults.gestures.clone(),
         };
@@ -767,6 +809,25 @@ mod tests {
             .map(|(name, _)| format!("{name} = {}\n", changed.value(name)))
             .collect();
         assert_eq!(Config::parse(&text), (changed, Vec::new()));
+    }
+
+    /// The map's address takes the coordinates where it says, signed; one
+    /// that does not say where both go is a problem, and the default stands.
+    #[test]
+    fn the_map_link_takes_the_coordinates() {
+        assert_eq!(
+            map_link(OPEN_MAP_LINK, [-44.68202, 169.161956]),
+            "https://geojson.io/#data=data:application/json,%7B%22type%22%3A%22Feature%22%2C%22properties%22%3A%7B%7D%2C%22geometry%22%3A%7B%22type%22%3A%22Point%22%2C%22coordinates%22%3A%5B169.161956%2C-44.682020%5D%7D%7D"
+        );
+        let (config, problems) = Config::parse("open_map_link = https://example.com/?q={lat}\n");
+        assert_eq!(config.open_map_link, OPEN_MAP_LINK);
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        // The default's `#` is part of the address, not a comment; one
+        // after a space is.
+        let (config, problems) =
+            Config::parse(&format!("open_map_link = {OPEN_MAP_LINK}  # the default\n"));
+        assert_eq!(config.open_map_link, OPEN_MAP_LINK);
+        assert!(problems.is_empty(), "{problems:?}");
     }
 
     #[test]

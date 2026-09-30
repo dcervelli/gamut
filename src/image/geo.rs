@@ -133,17 +133,20 @@ pub fn describe(tags: &Tags) -> Vec<Entry> {
             "Origin",
             format!("{}, {}", number(place.origin[0]), number(place.origin[1])),
         ));
-        // One row per axis rather than one row of both: two spans of
-        // seven-figure coordinates do not fit on a line of a panel this wide,
-        // and a coordinate broken across two lines is a coordinate misread.
-        if let Some([across, down]) = extent(&place, tags.size) {
-            let (x, y) = if geographic {
-                ("Longitude", "Latitude")
+        // One row per end of each axis rather than a span: a span of two
+        // seven-figure coordinates does not fit on a line of a panel this
+        // wide, and a coordinate broken across two lines is a coordinate
+        // misread.
+        if let Some(axes) = extent(&place, tags.size) {
+            let names = if geographic {
+                ["longitude", "latitude"]
             } else {
-                ("Easting", "Northing")
+                ["easting", "northing"]
             };
-            rows.push(Entry::new(x, across));
-            rows.push(Entry::new(y, down));
+            for (axis, [low, high]) in names.into_iter().zip(axes) {
+                rows.push(Entry::new(format!("Min {axis}"), number(low)));
+                rows.push(Entry::new(format!("Max {axis}"), number(high)));
+            }
         }
         if place.rotated {
             rows.push(Entry::new(
@@ -512,7 +515,9 @@ fn affine(tags: &Tags) -> Option<[f64; 6]> {
 /// pixels multiplied out. Only for a raster whose rows run east and whose
 /// columns run south, since anything else is not a rectangle in these
 /// coordinates and quoting one would be inventing corners.
-fn extent(place: &Placement, size: Option<[u32; 2]>) -> Option<[String; 2]> {
+///
+/// Each axis as its least and its greatest.
+fn extent(place: &Placement, size: Option<[u32; 2]>) -> Option<[[f64; 2]; 2]> {
     let size = size?;
     if place.rotated {
         return None;
@@ -521,10 +526,7 @@ fn extent(place: &Placement, size: Option<[u32; 2]>) -> Option<[String; 2]> {
         place.origin[0] + size[0] as f64 * place.scale[0],
         place.origin[1] - size[1] as f64 * place.scale[1],
     ];
-    let span = |a: f64, b: f64| {
-        let (low, high) = if a <= b { (a, b) } else { (b, a) };
-        format!("{}\u{2013}{}", number(low), number(high))
-    };
+    let span = |a: f64, b: f64| [a.min(b), a.max(b)];
     Some([span(place.origin[0], far[0]), span(place.origin[1], far[1])])
 }
 
@@ -605,8 +607,10 @@ mod tests {
                 ("Pixel is", "area (coordinates are corners)"),
                 ("Pixel size", "2.5 \u{00d7} 2.5 m"),
                 ("Origin", "2655000, 1110000"),
-                ("Easting", "2655000\u{2013}2690000"),
-                ("Northing", "1086000\u{2013}1110000"),
+                ("Min easting", "2655000"),
+                ("Max easting", "2690000"),
+                ("Min northing", "1086000"),
+                ("Max northing", "1110000"),
             ]
             .map(|(name, value)| (name.to_string(), value.to_string()))
         );
@@ -655,7 +659,7 @@ mod tests {
         tags.transform[1] = 0.5;
         let turned = rows(&tags);
         assert!(
-            !turned.iter().any(|(name, _)| name == "Easting"),
+            !turned.iter().any(|(name, _)| name.ends_with("easting")),
             "{turned:?}"
         );
         assert!(turned.iter().any(|(name, _)| name == "Orientation"));

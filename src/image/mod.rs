@@ -20,6 +20,7 @@ pub mod exif;
 pub mod gain_map;
 pub mod geo;
 pub mod isobmff;
+pub mod metadata_region;
 pub mod orient;
 pub mod region;
 pub mod resample;
@@ -48,8 +49,8 @@ impl Channels {
         match self {
             Channels::Gray => "gray",
             Channels::GrayAlpha => "gray+alpha",
-            Channels::Rgb => "rgb",
-            Channels::Rgba => "rgba",
+            Channels::Rgb => "RGB",
+            Channels::Rgba => "RGBA",
         }
     }
 

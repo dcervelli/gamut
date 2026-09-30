@@ -437,6 +437,7 @@ pub(super) fn action_of(tip: Tip) -> Option<Action> {
             | Control::Zoom
             | Control::Dismiss
             | Control::Facts(_)
+            | Control::OpenMap
             | Control::Chooser
             | Control::Choose(_)
             | Control::FileMenu
@@ -2964,6 +2965,24 @@ impl App {
         }
     }
 
+    /// Opens a map of where the picture on screen was taken in the browser,
+    /// at the address the configuration gives.
+    fn open_map(&mut self) {
+        let Some(position) = self
+            .current
+            .as_ref()
+            .and_then(|current| current.exif.position)
+        else {
+            return;
+        };
+        let url = crate::settings::map_link(&self.open_map_link, position);
+        // Nothing said when it goes: the browser coming up is the answer.
+        if let Err(error) = openers::browse(&url) {
+            report(&error);
+            self.toast(briefly(&error), Level::Error);
+        }
+    }
+
     /// Writes the picture on the clipboard to a file of its own and shows it.
     ///
     /// A file and not just pixels: a paste comes from somewhere with no file
@@ -3311,6 +3330,10 @@ impl App {
             Control::Copies(what) => self.perform(copy_action(what)),
             Control::Facts(copies) => {
                 self.copy_facts(copies);
+                Effect::Redraw
+            }
+            Control::OpenMap => {
+                self.open_map();
                 Effect::Redraw
             }
             // As with the reset: the key's action, so that the button and the

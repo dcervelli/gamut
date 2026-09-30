@@ -1,5 +1,8 @@
 # Roadmap
 
+# Bugs
+* Open image -> don't finish decode, go second image -> resize to fit second image.
+
 ## New Features
 * RGBA channel toggle. For gamedev people.
 * SVG rasterizer. How to choose DPI correctly?

@@ -109,7 +109,7 @@ fn picture(width: u32, height: u32) -> Current {
             reader: None,
         },
         exif: Exif::default(),
-        stored: None,
+        reduced: None,
         sequence: Sequence::Still,
         page: 0,
         lift: None,

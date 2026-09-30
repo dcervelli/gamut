@@ -5,17 +5,18 @@
 //! in whatever edits text, for the configuration file: on Linux the editor
 //! `VISUAL` or `EDITOR` names, or else the desktop's default for plain text,
 //! each in a terminal where its desktop entry asks for one; on a Mac the
-//! application that opens plain text.
+//! application that opens plain text. And `browse`, which opens a web
+//! address in the browser, for the map of where a picture was taken.
 
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
-pub use linux::{Opener, edit, for_file, open};
+pub use linux::{Opener, browse, edit, for_file, open};
 
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "macos")]
-pub use macos::{Opener, edit, for_file, open};
+pub use macos::{Opener, browse, edit, for_file, open};
 
 /// The longest name an item of the menu may wear, in characters.
 ///

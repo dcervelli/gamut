@@ -6,32 +6,33 @@
 //! of a file whoever wrote it chose the bytes of.
 //!
 //! What comes back is [`Section`]s, in the order the panel reads them. A
-//! photograph is looked at through a handful of fields — what took it, when,
-//! at what exposure — and those are gathered, combined and given their units
-//! under `Camera`, with the GPS directory becoming `Location`. A raster is
+//! photograph is looked at through a handful of fields — what took it, and
+//! when and at what exposure — and those are gathered, combined and given
+//! their units under `Camera` and `Exposure`, with the GPS directory
+//! becoming `Location`. A raster is
 //! looked at through a different handful, which are not EXIF at all but
 //! GeoTIFF keys packed into the same directory, and [`super::geo`] takes
 //! those apart into `Georeference`. The fields somebody wrote in words are
 //! pulled out as `About` — from the EXIF block, and from the XMP packet
 //! beside it, which [`super::xmp`] reads and which is where a title, a
-//! caption or a keyword is written when a file has one at all — and whatever
-//! is left is listed under the directory it came out of, in the order the
-//! file carries it, because this is a viewer for looking at what is actually
-//! in a file rather than for a tidy précis of it.
+//! caption or a keyword is written when a file has one at all — with the
+//! regions the packet marks out on the picture kept aside, to be written out
+//! against the picture as it is shown. Nothing is listed field by field:
+//! once those are read out of the block, what is left describes how the
+//! file is laid out and how the camera describes itself, and a panel for
+//! reading about the picture is better without it.
 
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
+use ::image::metadata::Orientation;
 use exif::{Context, In, Rational, Tag, Value};
 
+use super::metadata_region::{MetadataRegion, Placed};
+use super::orient::Turn;
 use super::xmp::{self, Xmp};
 use super::{directory, enclosed, geo, tiff};
-
-/// How many components a field may have before it is left out of the listing.
-/// A TIFF's strip offsets run to thousands of numbers, which is a fact about
-/// how the file is laid out rather than one about the photograph.
-pub(super) const MAX_COMPONENTS: usize = 32;
 
 /// How long a rendered value may be before it is cut short. Long enough for a
 /// lens name or a comment, short enough that one field cannot become the
@@ -59,29 +60,89 @@ impl Entry {
     }
 }
 
+/// One region as the panel shows it, in the picture as shown: see
+/// [`Exif::regions`].
+#[derive(Clone, PartialEq, Debug)]
+pub struct ShownRegion {
+    /// The row as it is copied: named by the region's kind, and saying who
+    /// or what is in it, what is written about it, and where it is.
+    pub entry: Entry,
+    /// Who or what is in it, or what kind of region it is where nothing
+    /// says who.
+    pub subject: String,
+    /// Its kind, who or what is in it, and what is written about it.
+    pub about: String,
+    /// Where it is; `None` for a region that names something without
+    /// saying where.
+    pub placed: Option<Placed>,
+}
+
 /// One group of fields under the heading it is read by. Never empty: a
 /// heading with a blank under it is a question about where the rest of it
 /// went, so a group that came to nothing is not carried at all.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Section {
-    pub name: &'static str,
+    pub group: Group,
     pub entries: Vec<Entry>,
+}
+
+/// Which group a section is, in the order the panel reads them: what was
+/// written about the picture, what took it, how, where, and where its
+/// pixels are on the ground. The panel puts what it says about the picture
+/// itself between the first and the rest — see `ui/info.rs`.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub enum Group {
+    About,
+    Camera,
+    Exposure,
+    Location,
+    Georeference,
+}
+
+impl Group {
+    /// Its heading.
+    pub fn name(self) -> &'static str {
+        match self {
+            Group::Camera => "Camera",
+            Group::Exposure => "Exposure",
+            Group::Location => "Location",
+            Group::Georeference => "Georeference",
+            Group::About => "About",
+        }
+    }
 }
 
 /// A file's metadata, ready to be read: no tags, no types, no offsets, only
 /// what the fields say. Empty when the file carries none, or carries some
 /// that will not parse — a photograph with unreadable metadata is still a
 /// photograph, so nothing here is an error anything else has to handle.
-#[derive(Clone, Default, PartialEq, Eq, Debug)]
+#[derive(Clone, Default, PartialEq, Debug)]
 pub struct Exif {
     /// The groups the file's fields fall into, in the order they are read:
-    /// what took the picture, where it was taken, where its pixels are on the
-    /// ground, what was written about it, then everything left over.
+    /// what was written about the picture, what took it, where it was taken,
+    /// and where its pixels are on the ground.
     pub sections: Vec<Section>,
     /// Where the raster's pixels are on the ground, for the pointer's
     /// readout: the same tags the `Georeference` section is written from,
     /// kept as numbers. `None` for everything that is not a map.
     pub georeference: Option<geo::Georeference>,
+    /// Where the camera was, as the GPS directory says: the latitude and
+    /// the longitude in signed degrees, for the map the `Location` section
+    /// offers to open. `None` where the file does not say.
+    pub position: Option<[f64; 2]>,
+    /// The regions the metadata marks out on the picture — the block's
+    /// `SubjectArea`, then the XMP packet's — kept as numbers: they are in
+    /// the picture as stored, and the panel writes them out in the picture
+    /// as shown, which the turn in force decides — see [`Exif::regions`].
+    pub regions: Vec<MetadataRegion>,
+    /// The turn the EXIF orientation tag asks for, which the regions were
+    /// marked out before. `None` where the file does not say.
+    pub orientation: Option<Orientation>,
+    /// How the pixels are compressed, for a TIFF: its own directory says,
+    /// and the info panel's `Image` section shows it. `None` for every other
+    /// file — a raw's directory is about the preview in front of it, and
+    /// any other container's EXIF block has no pixels of its own.
+    pub compression: Option<String>,
 }
 
 impl Exif {
@@ -89,43 +150,57 @@ impl Exif {
     pub fn read(path: &Path) -> Self {
         let mut exif = Self::read_with(path, tiff::PREFIX);
         // A raw has a second reader of its header, the library that will
-        // develop it. What that made of the sensor goes in with what the
-        // EXIF said, after the summaries and before the listings; and what
-        // it made of the exposure fills in whatever the `Camera` section
-        // is missing — all of it, for a CRW, which has no EXIF, and the
-        // exposure of a Phase One, whose EXIF names the camera and stops.
-        if let Some((camera, sensor)) = super::decode::facts(path) {
-            let at = exif
-                .sections
-                .iter()
-                .position(|section| section.name == "Camera")
-                .unwrap_or_else(|| {
-                    exif.sections.insert(
-                        0,
-                        Section {
-                            name: "Camera",
-                            entries: Vec::new(),
-                        },
-                    );
-                    0
-                });
-            let section = &mut exif.sections[at];
-            for entry in camera {
-                if !section.entries.iter().any(|have| have.name == entry.name) {
-                    section.entries.push(entry);
-                }
+        // develop it. What it made of the camera and the exposure fills in
+        // whatever the EXIF left out, a row at a time — all of it, for a
+        // CRW, which has no EXIF, and the exposure of a Phase One, whose
+        // EXIF names the camera and stops — and the color temperature, which
+        // only the library's reading of the sensor can work out.
+        if let Some(rows) = super::decode::facts(path) {
+            for entry in rows {
+                let group = if rank(&entry.name) < rank(TAKEN) {
+                    Group::Camera
+                } else {
+                    Group::Exposure
+                };
+                exif.fill(group, entry);
             }
-            if section.entries.is_empty() {
-                exif.sections.remove(at);
-            }
-            let at = exif
-                .sections
-                .iter()
-                .position(|section| section.name.ends_with(" metadata"))
-                .unwrap_or(exif.sections.len());
-            exif.sections.insert(at, sensor);
+            exif.compression = None;
         }
         exif
+    }
+
+    /// Puts `entry` in `group`'s section where the section does not already
+    /// have a row of its name: where the EXIF reader would have put it,
+    /// before the first row that comes after it, and the section made where
+    /// there was none, in its place among the others.
+    fn fill(&mut self, group: Group, entry: Entry) {
+        let at = self
+            .sections
+            .iter()
+            .position(|section| section.group >= group)
+            .unwrap_or(self.sections.len());
+        if self
+            .sections
+            .get(at)
+            .is_none_or(|section| section.group != group)
+        {
+            self.sections.insert(
+                at,
+                Section {
+                    group,
+                    entries: Vec::new(),
+                },
+            );
+        }
+        let entries = &mut self.sections[at].entries;
+        if entries.iter().any(|have| have.name == entry.name) {
+            return;
+        }
+        let before = entries
+            .iter()
+            .position(|have| rank(&have.name) > rank(&entry.name))
+            .unwrap_or(entries.len());
+        entries.insert(before, entry);
     }
 
     /// `prefix` is how much of a TIFF to read; see [`tiff::PREFIX`].
@@ -150,9 +225,53 @@ impl Exif {
     pub fn title(&self) -> Option<&str> {
         self.sections
             .iter()
-            .find(|section| section.name == ABOUT)
+            .find(|section| section.group == Group::About)
             .and_then(|section| section.entries.iter().find(|entry| entry.name == TITLE))
             .map(|entry| entry.value.as_str())
+    }
+
+    /// The regions marked out on the picture, a row each, in the order the
+    /// packet lists them: named by what kind of region it is, and saying who
+    /// or what is in it, anything written about it, and where it is.
+    ///
+    /// Where it is is in the picture as shown — `shown` pixels across and
+    /// down, turned by `turn` from the upright picture — so that it reads as
+    /// the pointer's coordinate and a marked region do: the top left corner
+    /// and the size. The packet's numbers are in the picture as stored,
+    /// before the orientation tag turned it, so they are carried through
+    /// that turn and then through `turn`, and taken as shares of the
+    /// picture's sides, so that a picture made smaller since it was marked
+    /// is still marked in the right place.
+    ///
+    /// A region that says nothing beyond its kind is no row.
+    pub fn regions(&self, shown: [u32; 2], turn: Turn) -> Vec<ShownRegion> {
+        let orientation = self.orientation.unwrap_or(Orientation::NoTransforms);
+        let mut shown_regions = Vec::new();
+        for region in &self.regions {
+            let placed = region.placed(orientation, turn, shown);
+            let parts: Vec<String> = region
+                .name
+                .iter()
+                .chain(&region.details)
+                .cloned()
+                .chain(placed.map(Placed::words))
+                .collect();
+            let Some(value) = join(&parts).filter(|value| !value.is_empty()) else {
+                continue;
+            };
+            let entry = Entry::new(region.label.clone(), shorten(&value));
+            let about: Vec<String> = std::iter::once(region.label.clone())
+                .chain(region.name.clone())
+                .chain(region.details.iter().cloned())
+                .collect();
+            shown_regions.push(ShownRegion {
+                entry,
+                subject: shorten(region.name.as_deref().unwrap_or(&region.label)),
+                about: shorten(&about.join(SEPARATOR)),
+                placed,
+            });
+        }
+        shown_regions
     }
 
     /// The EXIF block, parsed; `None` where there is none to parse.
@@ -225,10 +344,12 @@ impl Exif {
     /// packet, which may be all a file has.
     fn assemble(exif: Option<&exif::Exif>, xmp: &Xmp) -> Self {
         let described = described(exif, xmp);
+        let mut regions = MetadataRegion::mwg(xmp.regions());
+        regions.extend(MetadataRegion::microsoft(xmp.people(), &regions));
         let Some(exif) = exif else {
             let sections = (!described.is_empty())
                 .then_some(Section {
-                    name: ABOUT,
+                    group: Group::About,
                     entries: described,
                 })
                 .into_iter()
@@ -236,97 +357,49 @@ impl Exif {
             return Self {
                 sections,
                 georeference: None,
+                position: None,
+                regions,
+                orientation: None,
+                compression: None,
             };
         };
 
         let tags = geo_tags(exif);
         let geo = geo::describe(&tags);
-        // Whatever a group below has already said is not said again: the
-        // listing is what is left in the file, not a second copy of the top
-        // of the panel. The georeference speaks for its tags only when it
-        // came to something — a directory nothing could be read out of is
-        // better listed raw than dropped.
-        let mut told: Vec<Tag> = SUMMARIZED.to_vec();
-        told.extend(DESCRIBED.iter().filter_map(|described| described.tag));
-        if !geo.is_empty() {
-            told.extend(GEOREFERENCED.map(|number| Tag(Context::Tiff, number)));
-        }
-
-        // What is left, under the directory it came out of. The block is
-        // already sorted that way — TIFF's own tags describe the file, the
-        // Exif directory describes the shot, the GPS directory describes the
-        // place — so the listing is grouped by asking each tag where it came
-        // from rather than by a table saying where each one belongs. The
-        // place carries on from the coordinate the summary drew out of it.
-        let mut place = location(exif);
-        let mut image = Vec::new();
-        let mut capture = Vec::new();
-        for field in exif.fields() {
-            if field.ifd_num != In::PRIMARY || told.contains(&field.tag) || is_bulk(&field.value) {
-                continue;
-            }
-            let entry = Entry::new(
-                tag_name(field.tag),
-                shorten(&tidy_numbers(&display(exif, field))),
-            );
-            // A field whose value is nothing but padding has nothing to say.
-            if entry.value.is_empty() {
-                continue;
-            }
-            match field.tag.0 {
-                Context::Gps => place.push(entry),
-                Context::Tiff => image.push(entry),
-                // The interoperability directory is a corner of the Exif one
-                // and reads as more of the same.
-                _ => capture.push(entry),
-            }
-        }
+        // The subject the camera found is a region like any other, and is
+        // said with them.
+        regions.splice(0..0, subject(exif));
 
         let sections = [
-            ("Camera", camera(exif)),
-            ("Location", place),
-            ("Georeference", geo),
-            (ABOUT, described),
-            ("Image metadata", image),
-            ("Capture metadata", capture),
+            (Group::About, described),
+            (Group::Camera, camera(exif)),
+            (Group::Exposure, exposure(exif)),
+            (Group::Location, location(exif)),
+            (Group::Georeference, geo),
         ]
         .into_iter()
         .filter(|(_, entries)| !entries.is_empty())
-        .map(|(name, entries)| Section { name, entries })
+        .map(|(group, entries)| Section { group, entries })
         .collect();
+        let orientation = primary(exif, Tag::Orientation)
+            .and_then(|field| field.value.get_uint(0))
+            .and_then(|value| u8::try_from(value).ok())
+            .and_then(Orientation::from_exif);
         Self {
             sections,
             georeference: geo::Georeference::read(&tags),
+            position: position(exif),
+            regions,
+            orientation,
+            compression: primary(exif, Tag::Compression)
+                .map(|field| display(exif, field))
+                .filter(|value| !value.is_empty()),
         }
     }
 }
 
-/// The tags `Camera` and `Location` speak for, and so the ones the listing
-/// leaves out.
-const SUMMARIZED: [Tag; 17] = [
-    Tag::Make,
-    Tag::Model,
-    Tag::LensModel,
-    Tag::DateTimeOriginal,
-    Tag::OffsetTimeOriginal,
-    Tag::ExposureTime,
-    Tag::FNumber,
-    Tag::PhotographicSensitivity,
-    Tag::ExposureBiasValue,
-    Tag::FocalLength,
-    Tag::FocalLengthIn35mmFilm,
-    Tag::GPSLatitude,
-    Tag::GPSLatitudeRef,
-    Tag::GPSLongitude,
-    Tag::GPSLongitudeRef,
-    Tag::GPSAltitude,
-    Tag::GPSAltitudeRef,
-];
-
-/// The section the words go under, and the row among them that names the
-/// file: the two the chooser reads back out.
-const ABOUT: &str = "About";
-const TITLE: &str = "Title";
+/// The row of `About` that names the file, which the chooser reads back out.
+pub const TITLE: &str = "Title";
 
 /// One of the fields somebody wrote in words: what it is called when it is
 /// spoken of, the EXIF tag that holds it, and the XMP property that does —
@@ -338,12 +411,10 @@ struct Described {
     property: Option<(&'static str, &'static str)>,
 }
 
-/// The fields somebody wrote in words, or that the program writing the file
-/// wrote on their behalf: what the picture is called and what it is of, who
-/// made it, what may be done with it. They are what a reader looking for
-/// sentences rather than numbers is looking for, and the listing below is
-/// long enough to lose them in — so they are pulled out of it and named as
-/// they would be spoken.
+/// The fields somebody wrote in words: what the picture is called and what
+/// it is of, who made it, what may be done with it: what a reader looking
+/// for sentences rather than numbers is looking for, named as they would be
+/// spoken.
 ///
 /// Most have two homes. EXIF has a tag for the caption and the artist,
 /// and XMP's Dublin Core has a property for each; a title and a set of
@@ -351,7 +422,12 @@ struct Described {
 /// those is one the EXIF reader alone had nothing to say about. Where both
 /// speak, the EXIF field is shown: it is the older of the two, and a program
 /// that writes both writes them alike.
-const DESCRIBED: [Described; 8] = [
+///
+/// The program that wrote the file and when it last did are not among them,
+/// though both are said in words: a camera fills them in on every file, with
+/// its firmware and the moment of the shot, so they are not read as
+/// something said about the picture.
+const DESCRIBED: [Described; 6] = [
     Described {
         name: TITLE,
         tag: None,
@@ -385,16 +461,6 @@ const DESCRIBED: [Described; 8] = [
         tag: Some(Tag::Copyright),
         property: Some((xmp::DC, "rights")),
     },
-    Described {
-        name: "Software",
-        tag: Some(Tag::Software),
-        property: Some((xmp::BASIC, "CreatorTool")),
-    },
-    Described {
-        name: "Written",
-        tag: Some(Tag::DateTime),
-        property: None,
-    },
 ];
 
 /// The XMP packet a TIFF keeps in its own directory, under tag 700, as the
@@ -406,14 +472,6 @@ fn embedded_packet(exif: &exif::Exif) -> Option<&[u8]> {
         _ => None,
     }
 }
-
-/// The tags the georeference speaks for: the two that place the raster, the
-/// matrix form of the same thing, the directory of keys and the pool of names
-/// it points into, and the value that means nothing was measured.
-///
-/// Not the pool of doubles, 34736: a key that points into it is a projection
-/// parameter nothing above reads, so it stays in the listing.
-const GEOREFERENCED: [u16; 6] = [33550, 33922, 34264, 34735, 34737, 42113];
 
 /// The tags a georeference is built from, as the parser hands them over.
 /// Reading them here rather than in [`geo`] keeps that module to arithmetic
@@ -453,25 +511,39 @@ fn geo_tags(exif: &exif::Exif) -> geo::Tags {
 }
 
 /// The handful of fields a photograph is read by, in the order they are read:
-/// what took it, then when, then at what settings. The exposure belongs with
-/// the camera rather than under a heading of its own — a shutter speed and
-/// the body it was set on are read as one thought, and two headings over
-/// five fields is more furniture than the panel can carry.
+/// when it was taken, what took it, then at what settings. The exposure
+/// belongs with the camera rather than under a heading of its own — a
+/// shutter speed and the body it was set on are read as one thought — and
+/// each of its settings is a row of its own, being a thing to copy on its
+/// own. The rows are named as [`super::decode::facts`] names LibRaw's, so
+/// that a raw's fills in whichever of them the EXIF left out.
 fn camera(exif: &exif::Exif) -> Vec<Entry> {
     let mut rows = Vec::new();
     let text = |tag| primary(exif, tag).map(|field| tidy_numbers(&display(exif, field)));
-
-    // The maker is usually the first word of the model — "Canon EOS R6" —
-    // and a camera called "Canon Canon EOS R6" reads as a mistake.
     let make = text(Tag::Make);
-    let model = text(Tag::Model);
-    let camera = match (&make, &model) {
-        (Some(make), Some(model)) if model.starts_with(make.as_str()) => Some(model.clone()),
-        (Some(make), Some(model)) => Some(format!("{make} {model}")),
-        (some, None) | (None, some) => some.clone(),
-    };
-    push(&mut rows, "Camera", camera);
-    push(&mut rows, "Lens", text(Tag::LensModel));
+    push(
+        &mut rows,
+        CAMERA,
+        camera_name(make.clone(), text(Tag::Model)),
+    );
+    push(&mut rows, LENS, lens(exif, make.as_deref()));
+
+    // Whose camera it is, and which camera and lens: set in the camera's
+    // menu, and padded with spaces where they were not.
+    let named = |tag| text(tag).map(|value: String| value.trim().to_string());
+    push(&mut rows, OWNER, named(Tag::CameraOwnerName));
+    push(&mut rows, CAMERA_SERIAL, named(Tag::BodySerialNumber));
+    push(&mut rows, LENS_SERIAL, named(Tag::LensSerialNumber));
+    rows
+}
+
+/// How this picture was taken: when, how the exposure was decided and what
+/// it came to, the focal length it was taken at, and what the camera did
+/// about the light — its metering, its balance, its flash, and whether it
+/// merged several frames.
+fn exposure(exif: &exif::Exif) -> Vec<Entry> {
+    let mut rows = Vec::new();
+    let text = |tag| primary(exif, tag).map(|field| tidy_numbers(&display(exif, field)));
 
     // The zone the camera was set to, where it recorded one: an hour is worth
     // more than the minute it is quoted to.
@@ -479,21 +551,20 @@ fn camera(exif: &exif::Exif) -> Vec<Entry> {
         (Some(when), Some(offset)) => Some(format!("{when} {offset}")),
         (when, _) => when,
     };
-    push(&mut rows, "Taken", taken);
+    push(&mut rows, TAKEN, taken);
 
-    // One line, because they are read as one setting: the exposure that was
-    // made. A compensation of zero is what every camera not being pushed
-    // reports, and says nothing.
-    let exposure: Vec<String> = [
-        text(Tag::ExposureTime),
-        text(Tag::FNumber),
-        text(Tag::PhotographicSensitivity).map(|iso| format!("ISO {iso}")),
+    // How the exposure was decided, then the exposure that was made. A
+    // compensation of zero is what every camera not being pushed reports,
+    // and says nothing.
+    push(&mut rows, MODE, mode(exif));
+    push(&mut rows, SHUTTER, text(Tag::ExposureTime));
+    push(&mut rows, APERTURE, text(Tag::FNumber));
+    push(&mut rows, ISO, text(Tag::PhotographicSensitivity));
+    push(
+        &mut rows,
+        COMPENSATION,
         text(Tag::ExposureBiasValue).filter(|bias| !bias.starts_with('0')),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    push(&mut rows, "Exposure", join(&exposure));
+    );
 
     // The lens's own focal length, with what it comes to on the format the
     // reader is likelier to have a feel for.
@@ -504,19 +575,315 @@ fn camera(exif: &exif::Exif) -> Vec<Entry> {
         (Some(actual), _) => Some(actual),
         (None, equivalent) => equivalent.map(|shown| format!("{shown} equivalent")),
     };
-    push(&mut rows, "Focal length", focal);
+    // A zoom the camera made by cropping rather than with the lens: only
+    // where it made one.
+    let zoom = rational(exif, Tag::DigitalZoomRatio)
+        .filter(|ratio| *ratio > 1.0)
+        .map(|ratio| format!("{}\u{00d7} digital zoom", number(ratio)));
+    let focal = match (focal, zoom) {
+        (Some(focal), Some(zoom)) => Some(format!("{focal}{SEPARATOR}{zoom}")),
+        (focal, zoom) => focal.or(zoom),
+    };
+    push(&mut rows, FOCAL_LENGTH, focal);
 
+    push(&mut rows, METERING, metering(exif));
+    push(
+        &mut rows,
+        WHITE_BALANCE,
+        match uint(exif, Tag::WhiteBalance) {
+            Some(0) => Some("Auto".to_string()),
+            Some(1) => Some("Manual".to_string()),
+            _ => None,
+        },
+    );
+    push(&mut rows, FLASH, flash(exif));
+    push(
+        &mut rows,
+        COMPOSITE,
+        match uint(exif, Tag::CompositeImage) {
+            Some(2) => Some("Merged from several images".to_string()),
+            Some(3) => Some("Merged from several frames as it was taken".to_string()),
+            _ => None,
+        },
+    );
     rows
 }
 
-/// Where the camera stood, as the two facts a map wants of it. The rest of
-/// the GPS directory is listed under these rather than beside them: this is
-/// the head of a section, not the whole of one.
+/// The camera, by its maker and its model. The maker is usually the first
+/// word of the model — "Canon EOS R6", and Nikon's "NIKON D100" under the
+/// make "NIKON CORPORATION" — and a camera called "Canon Canon EOS R6"
+/// reads as a mistake, so a model that starts with the make, or with its
+/// first word, is the name on its own.
+pub fn camera_name(make: Option<String>, model: Option<String>) -> Option<String> {
+    match (make, model) {
+        (Some(make), Some(model)) => {
+            let first = make.split_whitespace().next().unwrap_or_default();
+            let lower = model.to_lowercase();
+            if lower.starts_with(&make.to_lowercase())
+                || (!first.is_empty() && lower.starts_with(&first.to_lowercase()))
+            {
+                Some(model)
+            } else {
+                Some(format!("{make} {model}"))
+            }
+        }
+        (some, None) | (None, some) => some,
+    }
+}
+
+/// A tag holding one whole number.
+fn uint(exif: &exif::Exif, tag: Tag) -> Option<u32> {
+    primary(exif, tag)?.value.get_uint(0)
+}
+
+/// The lens, by its name where the file gives one, with its maker's in
+/// front where that is not the camera's and the name does not already say
+/// it — a Sigma on a Sony. Where the file gives no name, the range of focal
+/// lengths and apertures it says the lens has stands in for one: the name
+/// nearly always says the same, so the two are never shown together.
+fn lens(exif: &exif::Exif, camera_make: Option<&str>) -> Option<String> {
+    let text = |tag| {
+        primary(exif, tag)
+            .map(|field| tidy_numbers(&display(exif, field)).trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
+    if let Some(model) = text(Tag::LensModel) {
+        return Some(match text(Tag::LensMake) {
+            Some(make)
+                if !model.starts_with(&make)
+                    && camera_make.is_none_or(|camera| !camera.eq_ignore_ascii_case(&make)) =>
+            {
+                format!("{make} {model}")
+            }
+            _ => model,
+        });
+    }
+    let Value::Rational(parts) = &primary(exif, Tag::LensSpecification)?.value else {
+        return None;
+    };
+    let known = |at: usize| {
+        parts
+            .get(at)
+            .map(Rational::to_f64)
+            .filter(|value| value.is_finite() && *value > 0.0)
+    };
+    let range = |low: Option<f64>, high: Option<f64>| match (low, high) {
+        (Some(low), Some(high)) if low != high => {
+            Some(format!("{}\u{2013}{}", number(low), number(high)))
+        }
+        (Some(one), _) | (None, Some(one)) => Some(number(one)),
+        (None, None) => None,
+    };
+    let focal = range(known(0), known(1)).map(|focal| format!("{focal} mm"));
+    let aperture = range(known(2), known(3)).map(|aperture| format!("f/{aperture}"));
+    match (focal, aperture) {
+        (Some(focal), Some(aperture)) => Some(format!("{focal} {aperture}")),
+        (focal, aperture) => focal.or(aperture),
+    }
+}
+
+/// A number from a rational, to two places at most and no more than it
+/// has: 18, 3.5, 1.25.
+fn number(value: f64) -> String {
+    let text = format!("{value:.2}");
+    text.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// How the exposure was decided: which of its settings the camera chose and
+/// which were chosen for it, and whether it was one of a bracket.
+fn mode(exif: &exif::Exif) -> Option<String> {
+    let program = match uint(exif, Tag::ExposureProgram) {
+        Some(1) => Some("Manual"),
+        Some(2) => Some("Program"),
+        Some(3) => Some("Aperture priority"),
+        Some(4) => Some("Shutter priority"),
+        Some(5) => Some("Creative"),
+        Some(6) => Some("Action"),
+        Some(7) => Some("Portrait"),
+        Some(8) => Some("Landscape"),
+        _ => None,
+    };
+    let bracket = (uint(exif, Tag::ExposureMode) == Some(2)).then_some("Auto bracket");
+    let parts: Vec<String> = program
+        .into_iter()
+        .chain(bracket)
+        .map(str::to_string)
+        .collect();
+    join(&parts)
+}
+
+/// How the camera measured the light it set the exposure by.
+fn metering(exif: &exif::Exif) -> Option<String> {
+    Some(
+        match uint(exif, Tag::MeteringMode)? {
+            1 => "Average",
+            2 => "Center-weighted",
+            3 => "Spot",
+            4 => "Multi-spot",
+            5 => "Evaluative",
+            6 => "Partial",
+            _ => return None,
+        }
+        .to_string(),
+    )
+}
+
+/// Whether the flash fired, and what it was set to: the tag is a set of
+/// bits, and a camera with no flash says so in one of them, which is no row.
+fn flash(exif: &exif::Exif) -> Option<String> {
+    let bits = uint(exif, Tag::Flash)?;
+    if bits & 0x20 != 0 {
+        return None;
+    }
+    let fired = bits & 0x01 != 0;
+    let mut parts = vec![if fired { "Fired" } else { "Did not fire" }];
+    match (bits >> 3) & 0x03 {
+        1 => parts.push("forced on"),
+        2 => parts.push("off"),
+        3 => parts.push("auto"),
+        _ => {}
+    }
+    if bits & 0x40 != 0 {
+        parts.push("red-eye reduction");
+    }
+    if fired && (bits >> 1) & 0x03 == 2 {
+        parts.push("no return light");
+    }
+    let parts: Vec<String> = parts.into_iter().map(str::to_string).collect();
+    join(&parts)
+}
+
+/// Where a row stands in its section, `Camera` or `Exposure`: the order
+/// [`camera`] and [`exposure`] push them in, which LibRaw's rows for a raw
+/// are fitted into, and which of the two it is in — every row before
+/// `Taken` is the camera's.
+fn rank(name: &str) -> usize {
+    ORDER
+        .iter()
+        .position(|row| *row == name)
+        .unwrap_or(usize::MAX)
+}
+
+/// The rows of `Camera`, then of `Exposure`, in the order they are read.
+const ORDER: [&str; 17] = [
+    CAMERA,
+    LENS,
+    OWNER,
+    CAMERA_SERIAL,
+    LENS_SERIAL,
+    TAKEN,
+    MODE,
+    SHUTTER,
+    APERTURE,
+    ISO,
+    COMPENSATION,
+    FOCAL_LENGTH,
+    METERING,
+    WHITE_BALANCE,
+    COLOR_TEMPERATURE,
+    FLASH,
+    COMPOSITE,
+];
+
+/// The names of the `Camera` and `Exposure` sections' rows, which LibRaw's
+/// rows for a raw are named by too.
+pub const CAMERA: &str = "Camera";
+pub const TAKEN: &str = "Taken";
+pub const LENS: &str = "Lens";
+const OWNER: &str = "Owner";
+const CAMERA_SERIAL: &str = "Camera serial number";
+const LENS_SERIAL: &str = "Lens serial number";
+pub const MODE: &str = "Mode";
+pub const SHUTTER: &str = "Shutter speed";
+pub const APERTURE: &str = "Aperture";
+pub const ISO: &str = "ISO";
+pub const COMPENSATION: &str = "Exposure compensation";
+pub const FOCAL_LENGTH: &str = "Focal length";
+const METERING: &str = "Metering";
+const WHITE_BALANCE: &str = "White balance";
+pub const COLOR_TEMPERATURE: &str = "Color temperature";
+const FLASH: &str = "Flash";
+const COMPOSITE: &str = "Composite";
+
+/// Where the camera stood and which way it faced: the two coordinates a map
+/// wants, how high it was, where it was pointed, and how far out the fix
+/// may be.
 fn location(exif: &exif::Exif) -> Vec<Entry> {
     let mut rows = Vec::new();
-    push(&mut rows, "Coordinates", coordinates(exif));
+    if let Some((latitude, longitude)) = coordinates(exif) {
+        push(&mut rows, LATITUDE, Some(latitude));
+        push(&mut rows, LONGITUDE, Some(longitude));
+    }
     push(&mut rows, "Altitude", altitude(exif));
+    push(&mut rows, "Direction", direction(exif));
+    push(&mut rows, "Speed", speed(exif));
+    push(&mut rows, "Positioning error", positioning_error(exif));
     rows
+}
+
+/// The names of the location's two coordinates, which head its section.
+pub const LATITUDE: &str = "Latitude";
+pub const LONGITUDE: &str = "Longitude";
+
+/// Which way the camera was pointed, in whole degrees clockwise from the
+/// north the file names — true or magnetic, which can be twenty degrees
+/// apart.
+fn direction(exif: &exif::Exif) -> Option<String> {
+    let degrees = rational(exif, Tag::GPSImgDirection)?;
+    let north = match &primary(exif, Tag::GPSImgDirectionRef).map(|field| &field.value) {
+        Some(Value::Ascii(parts)) => match parts.first().map(Vec::as_slice) {
+            Some(b"T") => Some("true"),
+            Some(b"M") => Some("magnetic"),
+            _ => None,
+        },
+        _ => None,
+    };
+    let degrees = degrees.round().rem_euclid(360.0);
+    Some(match north {
+        Some(north) => format!("{degrees:.0}\u{00b0} from {north} north"),
+        None => format!("{degrees:.0}\u{00b0}"),
+    })
+}
+
+/// How fast the camera was moving, in the unit the file names — kilometers,
+/// miles or knots an hour, kilometers where it names none, as the standard
+/// says — to a tenth under ten, and to the whole unit above.
+fn speed(exif: &exif::Exif) -> Option<String> {
+    let value = rational(exif, Tag::GPSSpeed)?;
+    let unit = match &primary(exif, Tag::GPSSpeedRef).map(|field| &field.value) {
+        Some(Value::Ascii(parts)) => match parts.first().map(Vec::as_slice) {
+            Some(b"M") => "mph",
+            Some(b"N") => "knots",
+            _ => "km/h",
+        },
+        _ => "km/h",
+    };
+    Some(if value < 10.0 {
+        format!("{} {unit}", tidy_numbers(&format!("{value:.1}")))
+    } else {
+        format!("{value:.0} {unit}")
+    })
+}
+
+/// How far from where the file says the camera may have been, as the
+/// receiver judged it: to a tenth of a meter under ten, and to the meter
+/// above.
+fn positioning_error(exif: &exif::Exif) -> Option<String> {
+    let meters = rational(exif, Tag::GPSHPositioningError)?;
+    Some(if meters < 10.0 {
+        format!("\u{00b1}{} m", tidy_numbers(&format!("{meters:.1}")))
+    } else {
+        format!("\u{00b1}{meters:.0} m")
+    })
+}
+
+/// A tag holding one rational, as a number; `None` for one that holds
+/// anything else, or a zero denominator.
+fn rational(exif: &exif::Exif, tag: Tag) -> Option<f64> {
+    match &primary(exif, tag)?.value {
+        Value::Rational(parts) => Some(parts.first()?.to_f64()).filter(|value| value.is_finite()),
+        _ => None,
+    }
 }
 
 /// What the file says in words, under the names those fields are spoken by
@@ -536,6 +903,42 @@ fn described(exif: Option<&exif::Exif>, xmp: &Xmp) -> Vec<Entry> {
         push(&mut rows, described.name, from_exif.or(from_xmp));
     }
     rows
+}
+
+/// The subject the camera found, as regions: `SubjectArea`, and
+/// `SubjectLocation`, the older tag for the same thing, which holds a point.
+/// A location at the middle of the area is the same subject said twice, so
+/// it is said once. Both are in the pixels the block's own
+/// `PixelXDimension` and `PixelYDimension` count where it has both.
+fn subject(exif: &exif::Exif) -> Vec<MetadataRegion> {
+    let side = |tag| {
+        primary(exif, tag)
+            .and_then(|field| field.value.get_uint(0))
+            .map(f64::from)
+    };
+    let of = side(Tag::PixelXDimension)
+        .zip(side(Tag::PixelYDimension))
+        .map(|(w, h)| [w, h]);
+    let values = |tag| -> Option<Vec<u32>> {
+        match &primary(exif, tag)?.value {
+            Value::Short(values) => Some(values.iter().map(|&value| u32::from(value)).collect()),
+            Value::Long(values) => Some(values.clone()),
+            _ => None,
+        }
+    };
+    let area =
+        values(Tag::SubjectArea).and_then(|values| MetadataRegion::subject_area(&values, of));
+    let location = values(Tag::SubjectLocation)
+        .filter(|values| values.len() == 2)
+        .and_then(|values| MetadataRegion::subject_area(&values, of));
+    let center = |region: &Option<MetadataRegion>| {
+        region
+            .as_ref()
+            .and_then(|region| region.shape)
+            .map(|shape| shape.center())
+    };
+    let said = area.is_some() && center(&area) == center(&location);
+    area.into_iter().chain(location.filter(|_| !said)).collect()
 }
 
 /// What `UserComment` says, which the renderer will not tell us. The field is
@@ -583,7 +986,29 @@ fn comment(exif: &exif::Exif) -> Option<String> {
 /// Where the camera was, in the degrees a map will take: the sexagesimal the
 /// file holds is exact and unusable, and the hemisphere is kept as its letter
 /// rather than as a sign, which is read wrong more often than not.
-fn coordinates(exif: &exif::Exif) -> Option<String> {
+fn coordinates(exif: &exif::Exif) -> Option<(String, String)> {
+    let [latitude, longitude] = hemispheres(exif)
+        .map(|axis| axis.map(|(degrees, hemisphere)| format!("{degrees:.5}\u{00b0} {hemisphere}")));
+    Some((latitude?, longitude?))
+}
+
+/// Where the camera was as the two signed numbers a map's address takes:
+/// the latitude, south of the equator below zero, and the longitude, west
+/// of Greenwich below zero.
+fn position(exif: &exif::Exif) -> Option<[f64; 2]> {
+    let [latitude, longitude] = hemispheres(exif).map(|axis| {
+        let (degrees, hemisphere) = axis?;
+        Some(match hemisphere.as_str() {
+            "S" | "W" => -degrees,
+            _ => degrees,
+        })
+    });
+    Some([latitude?, longitude?])
+}
+
+/// The latitude and the longitude, each as degrees and the letter of its
+/// hemisphere.
+fn hemispheres(exif: &exif::Exif) -> [Option<(f64, String)>; 2] {
     let axis = |value: Tag, reference: Tag| {
         let degrees = degrees(&primary(exif, value)?.value)?;
         let hemisphere = primary(exif, reference)?
@@ -591,11 +1016,12 @@ fn coordinates(exif: &exif::Exif) -> Option<String> {
             .to_string()
             .trim_matches('"')
             .to_string();
-        Some(format!("{degrees:.5}\u{00b0} {hemisphere}"))
+        Some((degrees, hemisphere))
     };
-    let latitude = axis(Tag::GPSLatitude, Tag::GPSLatitudeRef)?;
-    let longitude = axis(Tag::GPSLongitude, Tag::GPSLongitudeRef)?;
-    Some(format!("{latitude}, {longitude}"))
+    [
+        axis(Tag::GPSLatitude, Tag::GPSLatitudeRef),
+        axis(Tag::GPSLongitude, Tag::GPSLongitudeRef),
+    ]
 }
 
 /// Degrees, minutes and seconds as one number.
@@ -690,66 +1116,6 @@ fn join(parts: &[String]) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join(SEPARATOR))
 }
 
-/// Names for tags the metadata standard does not describe.
-///
-/// It covers what a photograph carries and no more, so the rest of TIFF 6,
-/// the tags GeoTIFF and GDAL park in the same directory, and the blocks other
-/// standards park there too all arrive as numbers. A raster is mostly these,
-/// and a column of numbered tags says what is in the file without saying what
-/// any of it is.
-const TIFF_NAMES: [(u16, &str); 26] = [
-    (266, "FillOrder"),
-    (269, "DocumentName"),
-    (285, "PageName"),
-    (316, "HostComputer"),
-    (317, "Predictor"),
-    (320, "ColorMap"),
-    (322, "TileWidth"),
-    (323, "TileLength"),
-    (324, "TileOffsets"),
-    (325, "TileByteCounts"),
-    (338, "ExtraSamples"),
-    (339, "SampleFormat"),
-    (340, "SMinSampleValue"),
-    (341, "SMaxSampleValue"),
-    (347, "JPEGTables"),
-    (700, "XMP"),
-    (33550, "ModelPixelScale"),
-    (33723, "IPTC"),
-    (33922, "ModelTiepoint"),
-    (34264, "ModelTransformation"),
-    (34675, "ICCProfile"),
-    (34735, "GeoKeyDirectory"),
-    (34736, "GeoDoubleParams"),
-    (34737, "GeoAsciiParams"),
-    (42112, "GdalMetadata"),
-    (42113, "GdalNoData"),
-];
-
-/// What a field is called, for a reader: its name where the tag is one the
-/// standards describe or one of [`TIFF_NAMES`], and otherwise the number it
-/// is filed under, which is the only honest thing to call it.
-fn tag_name(tag: Tag) -> String {
-    if tag.description().is_some() {
-        return tag.to_string();
-    }
-    if tag.context() == Context::Tiff
-        && let Some((_, name)) = TIFF_NAMES
-            .iter()
-            .find(|(number, _)| *number == tag.number())
-    {
-        return name.to_string();
-    }
-    let context = match tag.context() {
-        Context::Tiff => "TIFF",
-        Context::Exif => "Exif",
-        Context::Gps => "GPS",
-        Context::Interop => "Interop",
-        _ => "Unknown",
-    };
-    format!("{context} tag {}", tag.number())
-}
-
 /// What a compression code means, where it is one this says anything about.
 /// `None` leaves the answer to the renderer, which knows the ones a JPEG or a
 /// TIFF thumbnail uses.
@@ -773,29 +1139,6 @@ fn compression(code: u32) -> Option<&'static str> {
         50002 => "JPEG XL",
         _ => return None,
     })
-}
-
-/// Whether a value is bulk rather than a fact: a maker note, a color map, a
-/// table of strip offsets. Written out it would be pages of hexadecimal, and
-/// rendering it costs the memory of the string as well as the room.
-fn is_bulk(value: &Value) -> bool {
-    match value {
-        Value::Byte(parts) => parts.len() > MAX_COMPONENTS,
-        Value::Short(parts) => parts.len() > MAX_COMPONENTS,
-        Value::Long(parts) => parts.len() > MAX_COMPONENTS,
-        Value::Rational(parts) => parts.len() > MAX_COMPONENTS,
-        Value::SByte(parts) => parts.len() > MAX_COMPONENTS,
-        Value::SShort(parts) => parts.len() > MAX_COMPONENTS,
-        Value::SLong(parts) => parts.len() > MAX_COMPONENTS,
-        Value::SRational(parts) => parts.len() > MAX_COMPONENTS,
-        Value::Float(parts) => parts.len() > MAX_COMPONENTS,
-        Value::Double(parts) => parts.len() > MAX_COMPONENTS,
-        // The maker note lands here, and so does anything else a camera
-        // stores as a block of bytes. Short ones — the Exif version is four
-        // characters — are worth keeping.
-        Value::Undefined(bytes, _) => bytes.len() > MAX_COMPONENTS,
-        Value::Ascii(_) | Value::Unknown(..) => false,
-    }
 }
 
 /// Cuts a rendered value down to something a panel can hold, and takes the
@@ -894,30 +1237,25 @@ pub(super) fn tidy(number: &str) -> String {
 mod tests {
     use super::*;
 
-    /// A raw's panel has the sensor the library read beside what the EXIF
-    /// said, after the summaries and before the listings, and the camera
-    /// named once.
+    /// A raw's panel has what the library read beside what the EXIF said:
+    /// the camera named once, and the color temperature, in an `Exposure`
+    /// section made for it after `Camera`.
     #[test]
-    fn a_raw_gets_its_sensor_section_and_one_camera() {
+    fn a_raw_gets_one_camera_and_its_color_temperature() {
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("test_images")
             .join("dng-cfa.dng");
         let exif = Exif::read(&path);
-        let names: Vec<&str> = exif.sections.iter().map(|section| section.name).collect();
-        let camera = names.iter().position(|name| *name == "Camera").unwrap();
-        let sensor = names.iter().position(|name| *name == "Sensor").unwrap();
-        let listing = names
-            .iter()
-            .position(|name| name.ends_with(" metadata"))
-            .unwrap();
-        assert!(camera < sensor && sensor < listing, "{names:?}");
-        assert_eq!(names.iter().filter(|name| **name == "Camera").count(), 1);
-        let camera = &exif.sections[camera];
+        let names: Vec<Group> = exif.sections.iter().map(|section| section.group).collect();
+        assert_eq!(names, [Group::Camera, Group::Exposure], "{exif:?}");
         assert_eq!(
-            camera
-                .entries
+            section(&exif, Group::Exposure),
+            [Entry::new(COLOR_TEMPERATURE, "6500 K")]
+        );
+        assert_eq!(
+            section(&exif, Group::Camera)
                 .iter()
-                .filter(|entry| entry.name == "Camera")
+                .filter(|entry| entry.name == CAMERA)
                 .count(),
             1
         );
@@ -1042,20 +1380,11 @@ mod tests {
 
     /// What one group holds, and nothing where the file gave that group no
     /// fields and it was therefore never made.
-    fn section<'a>(exif: &'a Exif, name: &str) -> &'a [Entry] {
-        match exif.sections.iter().find(|section| section.name == name) {
+    fn section(exif: &Exif, group: Group) -> &[Entry] {
+        match exif.sections.iter().find(|section| section.group == group) {
             Some(section) => &section.entries,
             None => &[],
         }
-    }
-
-    /// Every field the file came back with, whichever group it landed in:
-    /// for the tests that care that a fact is there rather than where.
-    fn all(exif: &Exif) -> Vec<&Entry> {
-        exif.sections
-            .iter()
-            .flat_map(|section| section.entries.iter())
-            .collect()
     }
 
     fn written(name: &str, bytes: &[u8]) -> std::path::PathBuf {
@@ -1075,6 +1404,19 @@ mod tests {
         exif.ascii(0x9011, "+12:00"); // OffsetTimeOriginal
         exif.rational(0x920a, &[(6765, 1000)]); // FocalLength
         exif.short(0xa405, 24); // FocalLengthIn35mmFilm
+        // SubjectArea: a rectangle about the middle, in the pixels the two
+        // after it count.
+        exif.pooled(
+            0x9214,
+            3,
+            4,
+            &[2000u16, 1500, 800, 600].map(u16::to_le_bytes).concat(),
+        );
+        exif.short(0xa002, 4000); // PixelXDimension
+        exif.short(0xa003, 3000); // PixelYDimension
+        // SubjectLocation: the same subject's middle again, which is said
+        // once.
+        exif.entry(0xa214, 3, 2, [0xd0, 0x07, 0xdc, 0x05]);
         exif.ascii(0xa434, "A Lens 6.765mm f/1.78"); // LensModel
         // UserComment: eight bytes of character code, then the words.
         exif.undefined(0x9286, b"ASCII\0\0\0On a post by the jetty\0");
@@ -1086,6 +1428,12 @@ mod tests {
         gps.rational(0x0004, &[(169, 1), (9, 1), (4304, 100)]); // GPSLongitude
         gps.short(0x0005, 0); // GPSAltitudeRef, above sea level
         gps.rational(0x0006, &[(3329957, 10000)]); // GPSAltitude
+        gps.ascii(0x000c, "K"); // GPSSpeedRef
+        gps.rational(0x000d, &[(1234, 100)]); // GPSSpeed
+        gps.ascii(0x0010, "T"); // GPSImgDirectionRef, true north
+        gps.rational(0x0011, &[(21180, 100)]); // GPSImgDirection
+        gps.ascii(0x0012, "WGS-84"); // GPSMapDatum, said nowhere
+        gps.rational(0x001f, &[(47, 10)]); // GPSHPositioningError
 
         let mut ifd0 = Block::new();
         ifd0.ascii(0x010f, "Apple"); // Make
@@ -1115,6 +1463,14 @@ mod tests {
         block
     }
 
+    /// The regions as rows, at `shown` and with no turn.
+    fn regions_of(exif: &Exif, shown: [u32; 2]) -> Vec<String> {
+        exif.regions(shown, Turn::NONE)
+            .into_iter()
+            .map(|region| format!("{}: {}", region.entry.name, region.entry.value))
+            .collect()
+    }
+
     /// The panel's top sections: the fields a photograph is read by, combined
     /// into the lines they are read as, in units a reader can use, and under
     /// the headings they are looked for beneath.
@@ -1124,8 +1480,8 @@ mod tests {
         let exif = Exif::read(&path);
         let _ = std::fs::remove_file(&path);
 
-        let rows = |name: &str| -> Vec<(String, String)> {
-            section(&exif, name)
+        let rows = |group: Group| -> Vec<(String, String)> {
+            section(&exif, group)
                 .iter()
                 .map(|entry| (entry.name.clone(), entry.value.clone()))
                 .collect()
@@ -1137,48 +1493,74 @@ mod tests {
                 .collect()
         };
 
-        // The exposure is read together with the body it was set on, so the
-        // two are one section rather than two.
+        // What took it, and then how: the time it was taken first.
         assert_eq!(
-            rows("Camera"),
+            rows(Group::Camera),
             pairs(&[
                 // The maker is not said twice, though the file says it twice.
                 ("Camera", "Apple iPhone 16 Pro"),
                 ("Lens", "A Lens 6.765mm f/1.78"),
+            ])
+        );
+        assert_eq!(
+            rows(Group::Exposure),
+            pairs(&[
                 ("Taken", "2026-08-27 20:06:17 +12:00"),
+                ("Shutter speed", "1/50 s"),
                 // 89/50 is exactly 1.78, and is quoted as such.
-                ("Exposure", "1/50 s \u{00b7} f/1.78 \u{00b7} ISO 200"),
+                ("Aperture", "f/1.78"),
+                ("ISO", "200"),
                 ("Focal length", "6.765 mm (24 mm equivalent)"),
             ])
         );
         assert_eq!(
-            rows("Location"),
+            rows(Group::Location),
             pairs(&[
-                ("Coordinates", "44.68202\u{00b0} S, 169.16196\u{00b0} E"),
+                ("Latitude", "44.68202\u{00b0} S"),
+                ("Longitude", "169.16196\u{00b0} E"),
                 ("Altitude", "333 m"),
+                ("Direction", "212\u{00b0} from true north"),
+                ("Speed", "12 km/h"),
+                ("Positioning error", "\u{00b1}4.7 m"),
             ])
         );
-
-        // What a section above spoke for is not listed again; what none of
-        // them did is, under the directory it came out of. The software that
-        // wrote the file is one of the fields worth reading in words, so it
-        // is drawn out of the listing rather than left in it.
-        let listing: Vec<&str> = section(&exif, "Image metadata")
-            .iter()
-            .map(|entry| entry.name.as_str())
-            .collect();
-        assert_eq!(listing, ["Orientation"], "{listing:?}");
+        // And the same place as the signed numbers a map's address takes:
+        // south below zero.
+        let [latitude, longitude] = exif.position.expect("a position");
+        assert!((latitude + 44.68202).abs() < 1e-5, "{latitude}");
+        assert!((longitude - 169.16196).abs() < 1e-5, "{longitude}");
+        // Nothing is listed field by field: not the rest of the GPS
+        // directory, not the software that wrote the file — the camera's
+        // firmware — and not the orientation, which the `Image` section says.
+        let names: Vec<Group> = exif.sections.iter().map(|section| section.group).collect();
+        assert_eq!(
+            names,
+            [
+                Group::About,
+                Group::Camera,
+                Group::Exposure,
+                Group::Location
+            ],
+            "{names:?}"
+        );
+        assert_eq!(exif.orientation, Some(Orientation::Rotate90));
         // The comment is read out of its character code rather than written
         // out as the hex the renderer would make of an undefined type.
         assert_eq!(
-            rows("About"),
-            pairs(&[("Comment", "On a post by the jetty"), ("Software", "26.6")]),
+            rows(Group::About),
+            pairs(&[("Comment", "On a post by the jetty")]),
             "{exif:?}"
         );
-        let every: Vec<&str> = all(&exif).iter().map(|e| e.name.as_str()).collect();
-        assert!(!every.contains(&"Model"), "{every:?}");
-        assert!(!every.contains(&"FNumber"), "{every:?}");
-        assert!(!every.contains(&"GPSAltitude"), "{every:?}");
+        // The subject is a region, and is written out in the picture as
+        // shown: stood on its side by the orientation tag, and made smaller.
+        assert_eq!(
+            regions_of(&exif, [3000, 4000]),
+            ["Subject: 600 \u{00d7} 800 at 1200, 1600"]
+        );
+        assert_eq!(
+            regions_of(&exif, [1500, 2000]),
+            ["Subject: 300 \u{00d7} 400 at 600, 800"]
+        );
     }
 
     /// A file with no metadata, and one whose metadata is nonsense, are the
@@ -1217,7 +1599,7 @@ mod tests {
 </rdf:Description></rdf:RDF></x:xmpmeta>"#;
 
     fn description(exif: &Exif) -> Vec<(String, String)> {
-        section(exif, "About")
+        section(exif, Group::About)
             .iter()
             .map(|entry| (entry.name.clone(), entry.value.clone()))
             .collect()
@@ -1243,6 +1625,182 @@ mod tests {
             ]
         );
         assert_eq!(exif.sections.len(), 1, "{exif:?}");
+    }
+
+    /// A file saying every field About shows, the four EXIF has a tag for in
+    /// both blocks: all six rows, in the table's order, each of the four
+    /// read from EXIF and the comment out of UTF-16; and the program that
+    /// wrote the file and when, said nowhere.
+    #[test]
+    fn every_field_about_shows_is_read() {
+        let exif = Exif::read(&fixture("jpeg-about.jpg"));
+        assert_eq!(
+            description(&exif),
+            [
+                ("Title", "Four Quadrants"),
+                ("Caption", "Red, green, blue and white, a quadrant each"),
+                ("Comment", "Pattern \u{2014} made by generate.sh"),
+                ("Artist", "Test Pattern"),
+                (
+                    "Keywords",
+                    "red \u{00b7} green \u{00b7} blue \u{00b7} white"
+                ),
+                ("Copyright", "CC0 1.0"),
+            ]
+            .map(|(name, value)| (name.to_string(), value.to_string()))
+        );
+        assert_eq!(exif.title(), Some("Four Quadrants"));
+        let names: Vec<Group> = exif.sections.iter().map(|section| section.group).collect();
+        assert_eq!(names, [Group::About], "{exif:?}");
+    }
+
+    /// A file saying none of them has no About section, rather than an
+    /// empty one.
+    #[test]
+    fn a_file_saying_nothing_in_words_has_no_about() {
+        let exif = Exif::read(&fixture("jpeg-exif-rotated.jpg"));
+        assert!(
+            exif.sections
+                .iter()
+                .all(|section| section.group != Group::About),
+            "{exif:?}"
+        );
+    }
+
+    /// Each region is a row named by its kind, saying who is in it, what was
+    /// written about it and where it is, in the pixels of the picture as it
+    /// is shown: carried through the orientation tag and the turn in force,
+    /// and scaled to the picture's size rather than the one it was marked on.
+    #[test]
+    fn a_region_says_who_is_in_it_and_where() {
+        const PACKET: &str = r#"<x:xmpmeta xmlns:x="adobe:ns:meta/">
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+<rdf:Description rdf:about=""
+ xmlns:mwg-rs="http://www.metadataworkinggroup.com/schemas/regions/"
+ xmlns:stDim="http://ns.adobe.com/xap/1.0/sType/Dimensions#"
+ xmlns:stArea="http://ns.adobe.com/xmp/sType/Area#">
+<mwg-rs:Regions rdf:parseType="Resource">
+<mwg-rs:AppliedToDimensions stDim:w="4000" stDim:h="3000" stDim:unit="pixel"/>
+<mwg-rs:RegionList><rdf:Bag>
+<rdf:li rdf:parseType="Resource" mwg-rs:Name="Jane Doe" mwg-rs:Type="Face" mwg-rs:Rotation="0.00000">
+<mwg-rs:Area stArea:x="0.5" stArea:y="0.25" stArea:w="0.1" stArea:h="0.2"/></rdf:li>
+<rdf:li rdf:parseType="Resource" mwg-rs:Type="BarCode" mwg-rs:Description="On the ring" mwg-rs:BarCodeValue="A-1234">
+<mwg-rs:Area stArea:x="0.3" stArea:y="0.6" stArea:d="0.05"/></rdf:li>
+<rdf:li rdf:parseType="Resource" mwg-rs:Name="Rex" mwg-rs:Rotation="12.5"/>
+<rdf:li rdf:parseType="Resource" mwg-rs:Type="Focus" mwg-rs:FocusUsage="EvaluatedUsed">
+<mwg-rs:Area stArea:x="0.001" stArea:y="0.5" stArea:unit="normalized"/></rdf:li>
+<rdf:li rdf:parseType="Resource">
+<mwg-rs:Area stArea:x="2000" stArea:y="750" stArea:unit="pixel"/></rdf:li>
+</rdf:Bag></mwg-rs:RegionList></mwg-rs:Regions>
+<MP:RegionInfo xmlns:MP="http://ns.microsoft.com/photo/1.2/" rdf:parseType="Resource">
+<MPRI:Regions xmlns:MPRI="http://ns.microsoft.com/photo/1.2/t/RegionInfo#"><rdf:Bag>
+<rdf:li rdf:parseType="Resource" xmlns:MPReg="http://ns.microsoft.com/photo/1.2/t/Region#">
+<MPReg:PersonDisplayName>Jane Doe</MPReg:PersonDisplayName>
+<MPReg:Rectangle>0.45, 0.15, 0.1, 0.2</MPReg:Rectangle></rdf:li>
+<rdf:li rdf:parseType="Resource" xmlns:MPReg="http://ns.microsoft.com/photo/1.2/t/Region#">
+<MPReg:PersonDisplayName>John Doe</MPReg:PersonDisplayName>
+<MPReg:Rectangle>0, 0, 0.25, 0.5</MPReg:Rectangle></rdf:li>
+</rdf:Bag></MPRI:Regions></MP:RegionInfo>
+</rdf:Description></rdf:RDF></x:xmpmeta>"#;
+        let xmp = Xmp::parse(PACKET.as_bytes()).expect("the packet parses");
+        let mut exif = Exif::assemble(None, &xmp);
+        assert!(exif.sections.is_empty(), "{exif:?}");
+        let rows = |exif: &Exif, shown: [u32; 2], turn: Turn| -> Vec<(String, String)> {
+            exif.regions(shown, turn)
+                .into_iter()
+                .map(|region| (region.entry.name, region.entry.value))
+                .collect()
+        };
+        let owned = |rows: [(&str, &str); 6]| {
+            rows.map(|(name, value)| (name.to_string(), value.to_string()))
+        };
+
+        let upright = owned([
+            ("Face", "Jane Doe \u{00b7} 400 \u{00d7} 600 at 1800, 450"),
+            (
+                "Barcode",
+                "On the ring \u{00b7} A-1234 \u{00b7} 200 across at 1200, 1800",
+            ),
+            ("Region", "Rex \u{00b7} rotated 12.5\u{00b0}"),
+            ("Focus", "focused on \u{00b7} 4, 1500"),
+            ("Region", "2000, 750"),
+            // Microsoft's tag for Jane Doe says again what the first row
+            // says, and is left out; John Doe's is new.
+            ("Person", "John Doe \u{00b7} 1000 \u{00d7} 1500 at 0, 0"),
+        ]);
+        assert_eq!(rows(&exif, [4000, 3000], Turn::NONE), upright);
+
+        // The same picture made half the size since it was marked.
+        assert_eq!(
+            rows(&exif, [2000, 1500], Turn::NONE)[0].1,
+            "Jane Doe \u{00b7} 200 \u{00d7} 300 at 900, 225"
+        );
+
+        // Stood on its side, whether by the tag or by a turn: the top of the
+        // picture as stored is down the right.
+        let on_its_side = owned([
+            ("Face", "Jane Doe \u{00b7} 600 \u{00d7} 400 at 1950, 1800"),
+            (
+                "Barcode",
+                "On the ring \u{00b7} A-1234 \u{00b7} 200 across at 1200, 1200",
+            ),
+            ("Region", "Rex \u{00b7} rotated 12.5\u{00b0}"),
+            ("Focus", "focused on \u{00b7} 1500, 4"),
+            ("Region", "2250, 2000"),
+            ("Person", "John Doe \u{00b7} 1500 \u{00d7} 1000 at 1500, 0"),
+        ]);
+        assert_eq!(
+            rows(&exif, [3000, 4000], Turn::NONE.clockwise()),
+            on_its_side
+        );
+        exif.orientation = Some(Orientation::Rotate90);
+        assert_eq!(rows(&exif, [3000, 4000], Turn::NONE), on_its_side);
+        // And turned back by hand.
+        assert_eq!(
+            rows(&exif, [4000, 3000], Turn::NONE.counterclockwise()),
+            upright
+        );
+    }
+
+    /// A subject location somewhere other than the middle of the subject
+    /// area is a second subject, and one on its own is a point; one that is
+    /// not two numbers is no shape, and no region.
+    #[test]
+    fn a_subject_location_is_a_point() {
+        let read = |area: Option<[u16; 4]>, location: &[u16]| {
+            let mut exif = Block::new();
+            if let Some(area) = area {
+                exif.pooled(0x9214, 3, 4, &area.map(u16::to_le_bytes).concat());
+            }
+            let location: Vec<u8> = location.iter().flat_map(|v| v.to_le_bytes()).collect();
+            if location.len() <= 4 {
+                let mut inline = [0u8; 4];
+                inline[..location.len()].copy_from_slice(&location);
+                exif.entry(0xa214, 3, (location.len() / 2) as u32, inline);
+            } else {
+                exif.pooled(0xa214, 3, (location.len() / 2) as u32, &location);
+            }
+            const HEADER: usize = 8;
+            let mut ifd0 = Block::new();
+            let exif_at = HEADER + Block::length_of(1, 0);
+            ifd0.entry(0x8769, 4, 1, (exif_at as u32).to_le_bytes()); // ExifIFDPointer
+            let mut block = b"II\x2a\x00\x08\x00\x00\x00".to_vec();
+            block.extend_from_slice(&ifd0.at(HEADER));
+            block.extend_from_slice(&exif.at(exif_at));
+            let path = written("subject.jpg", &jpeg_with(block));
+            let exif = Exif::read(&path);
+            let _ = std::fs::remove_file(&path);
+            exif
+        };
+        let exif = read(Some([50, 40, 20, 10]), &[10, 20]);
+        assert_eq!(
+            regions_of(&exif, [100, 80]),
+            ["Subject: 20 \u{00d7} 10 at 40, 35", "Subject: 10, 20"]
+        );
+        let exif = read(None, &[10, 20]);
+        assert_eq!(regions_of(&exif, [100, 80]), ["Subject: 10, 20"]);
+        let exif = read(None, &[10, 20, 30]);
+        assert!(regions_of(&exif, [100, 80]).is_empty());
     }
 
     /// Where the block and the packet both describe the picture, the block's
@@ -1280,8 +1838,8 @@ mod tests {
     }
 
     /// A TIFF keeps its packet in its own directory, so it is read out of
-    /// the block rather than found in the file — and, being bulk, is not
-    /// listed raw beside what was read out of it.
+    /// the block rather than found in the file, and the directory's other
+    /// tags are not listed.
     #[test]
     fn a_tiffs_packet_is_read_out_of_its_directory() {
         let mut ifd0 = Block::new();
@@ -1297,66 +1855,174 @@ mod tests {
             Some(&("Title".to_string(), "Common Buzzard".to_string())),
             "{exif:?}"
         );
-        let every: Vec<&str> = all(&exif).iter().map(|e| e.name.as_str()).collect();
-        assert!(every.contains(&"ImageWidth"), "{every:?}");
-        assert!(!every.contains(&"XMP"), "{every:?}");
+        let names: Vec<Group> = exif.sections.iter().map(|section| section.group).collect();
+        assert_eq!(names, [Group::About], "{exif:?}");
     }
 
-    /// A real file, read through the container it arrives in: the fixture
-    /// carries an orientation and nothing else.
+    /// A block of `ifd0` and an Exif directory of `exif`, one after the
+    /// other.
+    fn with_exif(mut ifd0: Block, exif: Block) -> Vec<u8> {
+        const HEADER: usize = 8;
+        let first = Block::length_of(ifd0.entries.len() + 1, ifd0.pool.len());
+        ifd0.entry(0x8769, 4, 1, ((HEADER + first) as u32).to_le_bytes()); // ExifIFDPointer
+        let mut block = b"II\x2a\x00\x08\x00\x00\x00".to_vec();
+        block.extend_from_slice(&ifd0.at(HEADER));
+        block.extend_from_slice(&exif.at(HEADER + first));
+        block
+    }
+
+    /// The rows of `Camera`, then of `Exposure`.
+    fn camera_rows(ifd0: Block, exif: Block) -> Vec<(String, String)> {
+        let path = written("settings.jpg", &jpeg_with(with_exif(ifd0, exif)));
+        let exif = Exif::read(&path);
+        let _ = std::fs::remove_file(&path);
+        section(&exif, Group::Camera)
+            .iter()
+            .chain(section(&exif, Group::Exposure))
+            .map(|entry| (entry.name.clone(), entry.value.clone()))
+            .collect()
+    }
+
+    fn owned(rows: &[(&str, &str)]) -> Vec<(String, String)> {
+        rows.iter()
+            .map(|(name, value)| (name.to_string(), value.to_string()))
+            .collect()
+    }
+
+    /// How the exposure was decided and what else the camera was set to,
+    /// in words; a lens by another maker than the camera's named with its
+    /// maker; and whose camera it was, the padding taken off.
     #[test]
-    fn a_files_own_block_is_found_through_its_container() {
-        let exif = Exif::read(&fixture("webp-exif-rotated.webp"));
-        assert!(
-            all(&exif).iter().any(|entry| entry.name == "Orientation"),
-            "{exif:?}"
+    fn a_cameras_settings_are_read_as_words() {
+        let mut ifd0 = Block::new();
+        ifd0.ascii(0x010f, "Sony"); // Make
+        ifd0.ascii(0x0110, "ILCE-7M4"); // Model
+        let mut exif = Block::new();
+        exif.short(0x8822, 3); // ExposureProgram, aperture priority
+        exif.rational(0x920a, &[(50, 1)]); // FocalLength
+        exif.short(0x9207, 5); // MeteringMode, pattern
+        // Flash: fired, on auto, with red-eye reduction.
+        exif.short(0x9209, 0x59);
+        exif.ascii(0xa430, "Test Owner      "); // CameraOwnerName
+        exif.ascii(0xa431, "4321"); // BodySerialNumber
+        exif.ascii(0xa433, "Sigma"); // LensMake
+        exif.ascii(0xa434, "24-70mm F2.8 DG DN | Art"); // LensModel
+        exif.ascii(0xa435, "8765"); // LensSerialNumber
+        exif.short(0xa402, 2); // ExposureMode, auto bracket
+        exif.short(0xa403, 1); // WhiteBalance, manual
+        exif.rational(0xa404, &[(2, 1)]); // DigitalZoomRatio
+        exif.short(0xa460, 3); // CompositeImage, made while shooting
+        assert_eq!(
+            camera_rows(ifd0, exif),
+            owned(&[
+                ("Camera", "Sony ILCE-7M4"),
+                ("Lens", "Sigma 24-70mm F2.8 DG DN | Art"),
+                ("Owner", "Test Owner"),
+                ("Camera serial number", "4321"),
+                ("Lens serial number", "8765"),
+                ("Mode", "Aperture priority \u{00b7} Auto bracket"),
+                ("Focal length", "50 mm \u{00b7} 2\u{00d7} digital zoom"),
+                ("Metering", "Evaluative"),
+                ("White balance", "Manual"),
+                ("Flash", "Fired \u{00b7} auto \u{00b7} red-eye reduction"),
+                ("Composite", "Merged from several frames as it was taken"),
+            ])
         );
     }
 
+    /// The maker is said once: where the model starts with it, or with the
+    /// first word of a make that is a company's whole name.
+    #[test]
+    fn a_camera_is_named_once() {
+        let name = |make: &str, model: &str| {
+            camera_name(Some(make.to_string()), Some(model.to_string())).unwrap()
+        };
+        assert_eq!(name("Canon", "Canon EOS R6m2"), "Canon EOS R6m2");
+        assert_eq!(name("NIKON CORPORATION", "NIKON D100"), "NIKON D100");
+        assert_eq!(name("Sony", "ILCE-7M4"), "Sony ILCE-7M4");
+        assert_eq!(name("FUJIFILM", "X-T5"), "FUJIFILM X-T5");
+    }
+
+    /// A lens the file gives no name for is its range, a zoom's apertures
+    /// at each end; a lens by the camera's own maker is not named twice; a
+    /// camera with no flash has no flash row; and a zoom of one is none.
+    #[test]
+    fn a_lens_with_no_name_is_its_range() {
+        let mut ifd0 = Block::new();
+        ifd0.ascii(0x010f, "Canon"); // Make
+        let mut exif = Block::new();
+        exif.short(0x9209, 0x20); // Flash, no flash function
+        exif.rational(0xa404, &[(1, 1)]); // DigitalZoomRatio
+        exif.rational(0xa432, &[(18, 1), (55, 1), (35, 10), (56, 10)]); // LensSpecification
+        exif.ascii(0xa433, "Canon"); // LensMake
+        assert_eq!(
+            camera_rows(ifd0, exif),
+            owned(&[
+                ("Camera", "Canon"),
+                ("Lens", "18\u{2013}55 mm f/3.5\u{2013}5.6")
+            ])
+        );
+
+        let mut ifd0 = Block::new();
+        ifd0.ascii(0x010f, "Canon"); // Make
+        let mut exif = Block::new();
+        exif.short(0x9209, 0x10); // Flash, off and did not fire
+        exif.ascii(0xa433, "Canon"); // LensMake
+        exif.ascii(0xa434, "RF50mm F1.8 STM"); // LensModel
+        assert_eq!(
+            camera_rows(ifd0, exif),
+            owned(&[
+                ("Camera", "Canon"),
+                ("Lens", "RF50mm F1.8 STM"),
+                ("Flash", "Did not fire \u{00b7} off"),
+            ])
+        );
+    }
+
+    /// A TIFF's compression is said, for the `Image` section; a raw's, which
+    /// is its preview's, is not.
+    #[test]
+    fn a_tiffs_compression_is_said() {
+        let exif = Exif::read(&fixture("tiff-lzw.tif"));
+        assert_eq!(exif.compression.as_deref(), Some("LZW"));
+        assert_eq!(Exif::read(&fixture("dng-cfa.dng")).compression, None);
+    }
+
+    /// A real file, read through the container it arrives in: the fixture
+    /// carries an orientation and nothing else, which the `Image` section
+    /// says.
+    #[test]
+    fn a_files_own_block_is_found_through_its_container() {
+        let exif = Exif::read(&fixture("webp-exif-rotated.webp"));
+        assert_eq!(exif.orientation, Some(Orientation::Rotate180), "{exif:?}");
+        assert!(exif.sections.is_empty(), "{exif:?}");
+    }
+
     /// A BigTIFF has to go the long way round — the reader knows the
-    /// original format only — and comes back with the same fields under the
-    /// same names as the file it is a bigger version of.
+    /// original format only — and comes back saying what the file it is a
+    /// bigger version of says.
     #[test]
     fn a_bigtiff_is_read_through_its_directory() {
         let big = Exif::read(&fixture("tiff-bigtiff.tif"));
         // The same image in the ordinary form: both fixtures are the 32x24
         // float raster, one written each way.
         let ordinary = Exif::read(&fixture("tiff-nodata.tif"));
-        let named = |exif: &Exif, name: &str| {
-            all(exif)
-                .into_iter()
-                .find(|entry| entry.name == name)
-                .map(|entry| entry.value.clone())
-        };
-        for name in ["ImageWidth", "ImageLength", "SampleFormat", "BitsPerSample"] {
-            assert_eq!(named(&big, name), named(&ordinary, name), "{name}");
-            assert!(named(&big, name).is_some(), "{name} is missing");
-        }
-        assert_eq!(named(&big, "ImageWidth").as_deref(), Some("32 pixels"));
+        assert!(big.compression.is_some(), "{big:?}");
+        assert_eq!(big.compression, ordinary.compression);
     }
 
     /// A measurement raster, read out of a real TIFF: the value that stands
-    /// for nothing measured belongs to the georeference rather than to the
-    /// listing, and having been said there it is not said twice.
+    /// for nothing measured belongs to the georeference, and the rest of its
+    /// directory is not listed.
     #[test]
-    fn a_rasters_own_facts_are_taken_out_of_the_listing() {
+    fn a_rasters_own_facts_are_its_georeference() {
         let exif = Exif::read(&fixture("tiff-nodata.tif"));
         assert_eq!(
-            section(&exif, "Georeference"),
-            [Entry::new("No data", "-9999")],
-            "{exif:?}"
-        );
-        assert!(
-            !all(&exif).iter().any(|entry| entry.name.contains("42113")),
-            "{exif:?}"
-        );
-        // And the tags the standard does not describe are named rather than
-        // numbered: this one says its pixels are floating point.
-        assert!(
-            all(&exif)
-                .iter()
-                .any(|entry| entry.name == "SampleFormat" && entry.value == "3"),
-            "{exif:?}"
+            exif.sections,
+            [Section {
+                group: Group::Georeference,
+                entries: vec![Entry::new("No data", "-9999")],
+            }],
         );
     }
 

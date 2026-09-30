@@ -907,7 +907,7 @@ mod tests {
                 reader: None,
             },
             exif: Exif::default(),
-            stored: None,
+            reduced: None,
             sequence: Sequence::Still,
             page: 0,
             lift: None,

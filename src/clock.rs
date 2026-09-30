@@ -48,6 +48,73 @@ pub fn local(time: SystemTime) -> Civil {
     civil(seconds + offset_at(seconds))
 }
 
+/// The moment a date and time written `2026-08-27 20:06:17` stands for, as
+/// the camera's fields are written: in the zone given after it as
+/// `+12:00`, where there is one, and otherwise in this machine's, which is
+/// the zone LibRaw reads a raw's date in too. `None` for anything else.
+pub fn parse(text: &str) -> Option<SystemTime> {
+    let mut parts = text.split(' ');
+    let (date, time, zone) = (parts.next()?, parts.next()?, parts.next());
+    if parts.next().is_some() {
+        return None;
+    }
+    let numbers = |text: &str, separator: char| -> Option<Vec<i64>> {
+        text.split(separator)
+            .map(|number| {
+                (!number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit()))
+                    .then(|| number.parse().ok())
+                    .flatten()
+            })
+            .collect()
+    };
+    let (date, time) = (numbers(date, '-')?, numbers(time, ':')?);
+    let [year, month, day]: [i64; 3] = date[..].try_into().ok()?;
+    let [hour, minute, second]: [i64; 3] = time[..].try_into().ok()?;
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || hour > 23
+        || minute > 59
+        || second > 60
+    {
+        return None;
+    }
+    let wall = days_from_civil(year, month as u32, day as u32) * 86_400
+        + hour * 3600
+        + minute * 60
+        + second;
+    let offset = match zone {
+        Some(zone) => {
+            let (sign, rest) = match zone.as_bytes().first()? {
+                b'+' => (1, &zone[1..]),
+                b'-' => (-1, &zone[1..]),
+                _ => return None,
+            };
+            let [hours, minutes]: [i64; 2] = numbers(rest, ':')?[..].try_into().ok()?;
+            sign * (hours * 3600 + minutes * 60)
+        }
+        None => offset_at(wall),
+    };
+    let seconds = wall - offset;
+    let magnitude = std::time::Duration::from_secs(seconds.unsigned_abs());
+    if seconds >= 0 {
+        SystemTime::UNIX_EPOCH.checked_add(magnitude)
+    } else {
+        SystemTime::UNIX_EPOCH.checked_sub(magnitude)
+    }
+}
+
+/// The days from 1970-01-01 to a civil date: [`civil_from_days`] the other
+/// way round, by the same shifted calendar.
+fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = year.div_euclid(400);
+    let year_of_era = year - era * 400;
+    let shifted_month = i64::from((month + 9) % 12);
+    let day_of_year = (153 * shifted_month + 2) / 5 + i64::from(day) - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
+}
+
 /// `time` as seconds since the epoch, which is what a zone is a table of.
 fn epoch_seconds(time: SystemTime) -> i64 {
     match time.duration_since(SystemTime::UNIX_EPOCH) {
@@ -273,6 +340,42 @@ mod tests {
 
     fn at(seconds: u64) -> Civil {
         utc(SystemTime::UNIX_EPOCH + Duration::from_secs(seconds))
+    }
+
+    /// A camera's date with its zone is the moment it says; one that is not
+    /// a date is nothing rather than a guess.
+    #[test]
+    fn a_written_date_is_read_back_to_its_moment() {
+        let moment = |seconds: u64| Some(SystemTime::UNIX_EPOCH + Duration::from_secs(seconds));
+        assert_eq!(parse("2025-08-31 09:32:02 +00:00"), moment(1_756_632_722));
+        assert_eq!(parse("2025-08-31 21:32:02 +12:00"), moment(1_756_632_722));
+        assert_eq!(parse("2025-08-30 23:02:02 -10:30"), moment(1_756_632_722));
+        assert_eq!(parse("2000-02-29 00:00:00 +00:00"), moment(951_782_400));
+        for bad in [
+            "",
+            "2025-08-31",
+            "2025-13-01 00:00:00",
+            "2025-08-31 09:32",
+            "2025:08:31 09:32:02",
+            "2025-08-31 09:32:02 NZST",
+            "2025-08-31 09:32:02 +12:00 extra",
+        ] {
+            assert_eq!(parse(bad), None, "{bad:?}");
+        }
+    }
+
+    /// The two halves of the calendar agree, day by day, across leap years
+    /// and centuries either side of the epoch.
+    #[test]
+    fn the_calendar_runs_both_ways() {
+        for days in -800_000..800_000 {
+            let (year, month, day) = civil_from_days(days);
+            assert_eq!(
+                days_from_civil(year, month, day),
+                days,
+                "{year}-{month}-{day}"
+            );
+        }
     }
 
     #[test]

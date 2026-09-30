@@ -439,6 +439,24 @@ fn start(command: &mut Command) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Opens the web address `url` in the desktop's browser, through
+/// `xdg-open`, as a link clicked anywhere else on the desktop would be.
+pub fn browse(url: &str) -> Result<()> {
+    use std::os::unix::process::CommandExt as _;
+
+    let mut child = Command::new("xdg-open")
+        .arg(url)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .process_group(0)
+        .spawn()
+        .context("starting xdg-open")?;
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
 /// A desktop file id on its way to being read, and whether the entry behind
 /// it still has to prove it claims the type.
 struct Candidate {

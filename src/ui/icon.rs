@@ -204,6 +204,116 @@ pub(super) const SQUARE_MENU: &[Mark] = &[
     Mark::Line([7.0, 16.0], [17.0, 16.0]),
 ];
 
+/// Lucide's `file`: the sheet of `file-image` below with nothing on it —
+/// the mark at the head of the info panel's section about the file itself.
+pub(super) const FILE: &[Mark] = &[
+    // The sheet, from the fold's foot round to the fold's head.
+    Mark::Line([15.0, 2.0], [6.0, 2.0]),
+    Mark::arc([6.0, 4.0], 2.0, -90.0, -90.0),
+    Mark::Line([4.0, 4.0], [4.0, 20.0]),
+    Mark::arc([6.0, 20.0], 2.0, 180.0, -90.0),
+    Mark::Line([6.0, 22.0], [18.0, 22.0]),
+    Mark::arc([18.0, 20.0], 2.0, 90.0, -90.0),
+    Mark::Line([20.0, 20.0], [20.0, 7.0]),
+    Mark::Line([20.0, 7.0], [15.0, 2.0]),
+    // The fold.
+    Mark::Line([14.0, 2.0], [14.0, 6.0]),
+    Mark::arc([16.0, 6.0], 2.0, 180.0, -90.0),
+    Mark::Line([16.0, 8.0], [20.0, 8.0]),
+];
+
+/// Lucide's `map-pin`: a pin with a hole through its head — the mark at the
+/// head of the info panel's section about where the picture was taken. The
+/// head is a half circle; Lucide's two curves down to the point are each
+/// drawn as the arc that leaves the head's side straight down and meets
+/// the other at the point, which is as close to the curve as an arc comes.
+pub(super) const MAP_PIN: &[Mark] = &[
+    Mark::arc([12.0, 10.0], 8.0, 0.0, -180.0),
+    Mark::arc([7.0, 10.0], 13.0, 0.0, 67.38),
+    Mark::arc([17.0, 10.0], 13.0, 180.0, -67.38),
+    Mark::circle([12.0, 10.0], 3.0),
+];
+
+/// Lucide's `map`, in the form it was drawn before its corners were
+/// rounded: a sheet folded in three, zigzag along its top and bottom edges,
+/// with the two folds down it — the mark on the button that opens a map of
+/// where the picture was taken.
+pub(super) const MAP: &[Mark] = &[
+    Mark::Line([3.0, 6.0], [9.0, 3.0]),
+    Mark::Line([9.0, 3.0], [15.0, 6.0]),
+    Mark::Line([15.0, 6.0], [21.0, 3.0]),
+    Mark::Line([21.0, 3.0], [21.0, 18.0]),
+    Mark::Line([21.0, 18.0], [15.0, 21.0]),
+    Mark::Line([15.0, 21.0], [9.0, 18.0]),
+    Mark::Line([9.0, 18.0], [3.0, 21.0]),
+    Mark::Line([3.0, 21.0], [3.0, 6.0]),
+    Mark::Line([9.0, 3.0], [9.0, 18.0]),
+    Mark::Line([15.0, 6.0], [15.0, 21.0]),
+];
+
+/// Lucide's `square-dashed`: a square's four rounded corners and two dashes
+/// down each side — the mark at the head of the info panel's section about
+/// the regions the metadata marks out on the picture.
+pub(super) const SQUARE_DASHED: &[Mark] = &[
+    Mark::arc([5.0, 5.0], 2.0, -90.0, -90.0),
+    Mark::arc([19.0, 5.0], 2.0, -90.0, 90.0),
+    Mark::arc([19.0, 19.0], 2.0, 0.0, 90.0),
+    Mark::arc([5.0, 19.0], 2.0, 90.0, 90.0),
+    Mark::Line([9.0, 3.0], [10.0, 3.0]),
+    Mark::Line([14.0, 3.0], [15.0, 3.0]),
+    Mark::Line([9.0, 21.0], [10.0, 21.0]),
+    Mark::Line([14.0, 21.0], [15.0, 21.0]),
+    Mark::Line([3.0, 9.0], [3.0, 10.0]),
+    Mark::Line([3.0, 14.0], [3.0, 15.0]),
+    Mark::Line([21.0, 9.0], [21.0, 10.0]),
+    Mark::Line([21.0, 14.0], [21.0, 15.0]),
+];
+
+/// Lucide's `camera`: the body with its raised top and the lens — the mark
+/// at the head of the info panel's section about what took the picture, and
+/// the switch between a raw's developed picture and the camera's own JPEG
+/// of it.
+/// Written out as sides and quarter turns, since the top edge rises
+/// where the viewfinder sits.
+pub(super) const CAMERA: &[Mark] = &[
+    Mark::Line([14.5, 4.0], [9.5, 4.0]),
+    Mark::Line([9.5, 4.0], [7.0, 7.0]),
+    Mark::Line([7.0, 7.0], [4.0, 7.0]),
+    Mark::arc([4.0, 9.0], 2.0, -90.0, -90.0),
+    Mark::Line([2.0, 9.0], [2.0, 18.0]),
+    Mark::arc([4.0, 18.0], 2.0, 180.0, -90.0),
+    Mark::Line([4.0, 20.0], [20.0, 20.0]),
+    Mark::arc([20.0, 18.0], 2.0, 90.0, -90.0),
+    Mark::Line([22.0, 18.0], [22.0, 9.0]),
+    Mark::arc([20.0, 9.0], 2.0, 0.0, -90.0),
+    Mark::Line([20.0, 7.0], [17.0, 7.0]),
+    Mark::Line([17.0, 7.0], [14.5, 4.0]),
+    Mark::circle([12.0, 13.0], 3.0),
+];
+
+/// Lucide's `aperture`: an iris of six blades in a ring — the mark at the
+/// head of the info panel's section about how the picture was exposed.
+pub(super) const APERTURE: &[Mark] = &[
+    Mark::circle([12.0, 12.0], 10.0),
+    Mark::Line([14.31, 8.0], [20.05, 17.94]),
+    Mark::Line([9.69, 8.0], [21.17, 8.0]),
+    Mark::Line([7.38, 12.0], [13.12, 2.06]),
+    Mark::Line([9.69, 16.0], [3.95, 6.06]),
+    Mark::Line([14.31, 16.0], [2.83, 16.0]),
+    Mark::Line([16.62, 12.0], [10.88, 21.94]),
+];
+
+/// Lucide's `image`: a frame holding a sun and a hill — the mark at the
+/// head of the info panel's section about the picture. The hill's rounded
+/// peak is an arc about the center Lucide's path implies.
+pub(super) const IMAGE: &[Mark] = &[
+    Mark::rect([3.0, 3.0], [18.0, 18.0], 2.0),
+    Mark::circle([9.0, 9.0], 2.0),
+    Mark::Line([21.0, 15.0], [17.914, 11.914]),
+    Mark::arc([16.5, 13.328], 2.0, -45.0, -90.0),
+    Mark::Line([15.086, 11.914], [6.0, 21.0]),
+];
+
 /// Lucide's `file-image`: a sheet with its corner folded and a picture on
 /// it — the mark on the button that opens image files. The sheet is
 /// written out as `clipboard` below is, sides and quarter turns, since
@@ -418,32 +528,6 @@ pub(super) const GRID_3X3: &[Mark] = &[
     Mark::Line([15.0, 3.0], [15.0, 21.0]),
 ];
 
-/// Lucide's `camera`, as it was drawn before its corners were softened: a
-/// body with the viewfinder's hump on top, and the lens — for the switch
-/// between a raw's developed picture and the camera's own JPEG of it.
-///
-/// Written out as sides and quarter turns, as `rotate-ccw-square` is,
-/// because the body's top edge is open where the hump rises from it: a
-/// whole rounded rectangle would draw a stroke across the hump's foot.
-pub(super) const CAMERA: &[Mark] = &[
-    // The hump, from its left foot over to its right.
-    Mark::Line([7.0, 7.0], [9.5, 4.0]),
-    Mark::Line([9.5, 4.0], [14.5, 4.0]),
-    Mark::Line([14.5, 4.0], [17.0, 7.0]),
-    // The body, from the hump's right foot round clockwise to its left.
-    Mark::Line([17.0, 7.0], [20.0, 7.0]),
-    Mark::arc([20.0, 9.0], 2.0, 270.0, 90.0),
-    Mark::Line([22.0, 9.0], [22.0, 18.0]),
-    Mark::arc([20.0, 18.0], 2.0, 0.0, 90.0),
-    Mark::Line([20.0, 20.0], [4.0, 20.0]),
-    Mark::arc([4.0, 18.0], 2.0, 90.0, 90.0),
-    Mark::Line([2.0, 18.0], [2.0, 9.0]),
-    Mark::arc([4.0, 9.0], 2.0, 180.0, 90.0),
-    Mark::Line([4.0, 7.0], [7.0, 7.0]),
-    // The lens.
-    Mark::circle([12.0, 13.0], 3.0),
-];
-
 /// Lucide's `axis-3d`: two axes meeting at a rounded corner, and the third
 /// running back from it in dashes — depth, for the toggle that shows the
 /// depth map.
@@ -454,6 +538,20 @@ pub(super) const AXIS_3D: &[Mark] = &[
     Mark::Line([4.293, 19.707], [6.0, 18.0]),
     Mark::Line([9.0, 15.0], [10.5, 13.5]),
     Mark::Line([13.5, 10.5], [15.0, 9.0]),
+];
+
+/// Lucide's `eye`: an almond with the pupil in it — what is on screen, for
+/// the pill that says the depth map is shown in the picture's place.
+///
+/// The almond is Lucide's two long arcs, of radius 10.75 about points four
+/// units above and below the middle, joined at either corner by an arc of
+/// radius one.
+pub(super) const EYE: &[Mark] = &[
+    Mark::arc([12.0, 15.751], 10.75, 202.41, 135.18),
+    Mark::arc([21.0, 12.0], 1.0, 339.64, 40.72),
+    Mark::arc([12.0, 8.249], 10.75, 22.41, 135.18),
+    Mark::arc([3.0, 12.0], 1.0, 159.64, 40.72),
+    Mark::circle([12.0, 12.0], 3.0),
 ];
 
 /// Lucide's `zoom-in`: a magnifying glass with a plus in it, for the loupe,
@@ -1068,12 +1166,19 @@ mod tests {
 
     /// Every icon in the table, so that a new one is held to the same
     /// promises as the rest.
-    const ICONS: [&[Mark]; 32] = [
+    const ICONS: [&[Mark]; 41] = [
         CHART_AREA,
         INFO,
         CIRCLE_QUESTION_MARK,
         SQUARE_SQUARE,
         SQUARE_MENU,
+        FILE,
+        IMAGE,
+        CAMERA,
+        APERTURE,
+        MAP_PIN,
+        SQUARE_DASHED,
+        MAP,
         FILE_IMAGE,
         FOLDER,
         CLIPBOARD,
@@ -1101,6 +1206,8 @@ mod tests {
         ARROW_DOWN_WIDE_NARROW,
         ARROW_LEFT,
         ARROW_RIGHT,
+        AXIS_3D,
+        EYE,
     ];
 
     fn device(value: f32, scale: f32) -> f32 {

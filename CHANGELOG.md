@@ -13,6 +13,50 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   first with every setting at its default where there is none, as the Mac's
   Settings item (`⌘,`) already did.
 
+- The information panel's *Camera* section says more of how the picture was
+  made: the exposure mode and whether it was bracketed, the metering, the
+  white balance, the flash, a digital zoom beside the focal length, whether
+  the camera merged several frames, and the owner and the camera's and
+  lens's serial numbers. A lens by another maker than the camera's is named
+  with its maker, and a lens the file does not name is given as its range.
+- The information panel's *Image* section says what the file's orientation
+  turns the picture by, and for a TIFF how its pixels are compressed.
+- The information panel's *Location* section says how fast the camera was
+  moving where the file records it, in the unit the file names: km/h, mph
+  or knots.
+- A map button after the coordinates at the head of the information
+  panel's *Location* section opens where the picture was taken in the
+  browser. Where it goes is the new `open_map_link` setting, geojson.io
+  with a point at the coordinates unless it says otherwise, with `{lat}` and `{lng}` for the coordinates.
+
+- The information panel has a *Regions* section for the regions a file's
+  metadata marks out on the picture: the subject the camera found, and the
+  regions its XMP marks, as cataloging programs do for the faces they find —
+  in the Metadata Working Group's form, or as the people tags Windows Photo
+  Gallery wrote, a face tagged both ways being shown once.
+  It is headed by a dashed square, over a table of each region's subject
+  — who is in it, or its kind where nothing says — and its top left corner
+  and size, in pixels of the picture as shown, following the EXIF
+  orientation and any turn, as the pointer's position reads. What else was
+  written about it — its kind, a description, a barcode's value, whether a
+  focus point was used — is in the subject's tooltip. A row copies as a
+  line of CSV, and the heading as the table under its column heads.
+  Resting the pointer on a row outlines its region on the picture, dashed,
+  with its subject over it; resting it on the heading outlines every one.
+
+- The information panel describes a picture's gain map under *Image*: whose
+  description of it the file gives (ISO 21496-1 or Apple's), the map's size
+  and whether it is one channel or three, how many stops above SDR white it
+  lifts the picture, and how much of that lift the display is showing.
+- The information panel has a *Depth map* section for a picture carrying
+  one, after *Image*: the map's resolution and samples, and where the file
+  says what its codes stand for, whose description it is (Apple's or
+  Google's), whether the codes are spread over the distance or its inverse,
+  the distances they run between, and whether those are measured or only
+  estimated in scale — "relative", as an iPhone's dual-camera portrait says,
+  with the range marked `≈` as the pixel readout marks it. A map whose file
+  does not say what its codes stand for has its encoding given as unknown. The section describes the map whether the picture or the map is on
+  screen, and while the map is, its heading wears a *Showing* pill.
 - A **Depth** pixel format, beside Hex, Decimal and Mapped: for a picture
   carrying a depth map, the readout says how far away the pixel under the
   pointer was. An iPhone's portrait HEIC reads as a distance in meters,
@@ -37,11 +81,67 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 - Keys and gestures changed in the configuration file take effect as the
   file is saved, rather than at the next start.
 
+- The information panel's *About* section comes straight after the file's
+  own, before *Image*: what somebody wrote about the picture says what it
+  is before its size and samples say how it is stored.
+- The information panel's *Camera* section is split in two: *Camera* says
+  what took the picture — the body, the lens, the owner and the serial
+  numbers — and *Exposure*, under an aperture's mark, how this picture was
+  taken. For a raw, *Exposure* gives the color temperature the white
+  balance was set for, beside the white balance.
+- The information panel's *Sensor* and *GPS metadata* sections are gone.
+- A camera whose make is a company's whole name is no longer named twice:
+  "NIKON D100" rather than "NIKON CORPORATION NIKON D100".
+- The information panel no longer lists the *Image metadata* and *Capture
+  metadata* sections, the rest of the file's EXIF field by field. What was
+  worth reading in them is in *Camera*, *Exposure* and *Image* now.
+- The information panel's *Georeference* section is headed by a map's mark
+  over a table, as *Camera* is, and gives the ground a raster covers as
+  *Min easting*, *Max easting*, *Min northing* and *Max northing* — or the
+  same of longitude and latitude — rather than as two spans.
+- The information panel's *About* section is headed by the file's title,
+  beside the mark the panel's own button wears, or by *About* where there is
+  no title. It holds only what somebody wrote — title, caption, comment,
+  artist, keywords and copyright — and is left out where the file says none
+  of them. The program that wrote the file and when it last did are listed
+  with the rest of the file's metadata, since a camera fills both in on
+  every file.
+- The information panel opens on the file itself rather than on a column of
+  fields: its name as the heading, with a file mark, then the folder it is
+  in, then its size and how long ago it was modified — "366 bytes · 1 week
+  ago" — each exact in its tooltip. A long name is cut in its middle,
+  keeping its extension. The *Image* section is headed by the picture's size
+  and its format — "4000 × 3000 JPEG" — with the rest of what it said as a
+  table of two columns under it, which writes the layout in capitals:
+  *8-bit RGB*. The *Camera* section is headed by the camera's name, with the
+  rest in the same kind of table, the time it was taken first, said as how
+  long ago with the date in its tooltip; the exposure
+  is split into *Shutter speed*, *Aperture*, *ISO* and *Exposure
+  compensation*, each copied on its own, where it was one line. The
+  *Location* section is headed by the latitude and longitude beside a map
+  pin, over the altitude, the direction the camera faced and how far out the
+  fix may be. A click on any piece copies it, the size and the date
+  exactly.
+- Color spaces are called by their common names — *sRGB*, *Display P3*,
+  *Rec. 2100 PQ*, *Adobe RGB (1998)* — in the top bar and the information
+  panel, where they were written as primaries and curve, `BT.709/sRGB`. A
+  pairing with no name is written as the two: *BT.2020, gamma 2.40*.
+- The information panel's *Stored as* row, which named the GPU's texture
+  format, is gone. In its place, a picture the GPU cannot hold at its full
+  precision — 16-bit linear data on a GPU with no 16-bit integer textures,
+  or float data on one that cannot filter 32-bit floats — has a *Precision*
+  row saying so, and the first such picture in a run raises a warning.
 - The pixel readout's formats — the value, and for a map the coordinates
   and how a latitude is written — are remembered between runs in the state
   file, as the sort order and the loupe's magnification are, rather than set
   in the configuration file. `pixel_format`, `coordinate_format` and
   `geographic_format` lines left in a configuration file are ignored.
+
+### Fixed
+
+- A BigTIFF, or a TIFF whose directory comes after its pixels, no longer
+  loses a metadata field of more than 32 values: a GeoTIFF key directory of
+  more than eight keys was one, and took the *Georeference* section with it.
 
 ## 0.8.3 - 2026-09-29
 

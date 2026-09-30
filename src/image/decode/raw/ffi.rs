@@ -201,7 +201,6 @@ unsafe extern "C" {
     pub fn libraw_get_cam_mul(data: *mut Data, index: c_int) -> c_float;
     pub fn libraw_get_pre_mul(data: *mut Data, index: c_int) -> c_float;
     pub fn libraw_get_rgb_cam(data: *mut Data, row: c_int, column: c_int) -> c_float;
-    pub fn libraw_get_color_maximum(data: *mut Data) -> c_int;
     pub fn libraw_get_iparams(data: *mut Data) -> *mut Params;
     pub fn libraw_get_imgother(data: *mut Data) -> *mut Other;
     pub fn libraw_get_lensinfo(data: *mut Data) -> *mut Lens;

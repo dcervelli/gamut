@@ -10,8 +10,8 @@ which is its own. Neither has to exist.
 window opens every time. It is in the same place on a Mac. `gamut` only reads it: toggling a panel in the window
 lasts until the window closes and does not change the file.
 
-Each line is `name = value`, and `#` starts a comment. Anything left out keeps
-its default. To start a file with every setting, every key and every mouse
+Each line is `name = value`, and a `#` at the start of a line or after a space
+starts a comment. Anything left out keeps its default. To start a file with every setting, every key and every mouse
 gesture listed, commented out at its default, run:
 
 ```
@@ -36,6 +36,7 @@ settings are:
 | `show_info` | `false` | The file information panel |
 | `log_counts` | `false` | The histogram's bars as tall as the logarithm of their counts |
 | `browse_folder` | `true` | A single file opened by itself steps on through the other images in its folder |
+| `open_map_link` | `https://geojson.io/#data=data:application/json,%7B%22type%22%3A%22Feature%22%2C%22properties%22%3A%7B%7D%2C%22geometry%22%3A%7B%22type%22%3A%22Point%22%2C%22coordinates%22%3A%5B{lng}%2C{lat}%5D%7D%7D` | The web page the map button in the info panel's *Location* section opens. `{lat}` and `{lng}` become where the picture was taken, in degrees, negative south and west; the link must have both |
 
 `--histogram`, `--info`, `--no-minimap` and `--alone` override the file for
 that one run.

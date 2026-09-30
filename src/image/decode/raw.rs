@@ -41,7 +41,7 @@ use std::os::raw::c_int;
 
 use anyhow::{Result, anyhow, bail};
 
-use crate::image::exif::{Entry, Section};
+use crate::image::exif::Entry;
 use crate::image::{
     AlphaMode, Channels, ColorSpace, DecodedImage, Primaries, Referred, Samples, Transfer,
 };
@@ -53,7 +53,7 @@ impl super::Decoder for Raw {
         "camera raw"
     }
 
-    fn facts(&self, source: &mut dyn super::ReadSeek) -> Result<Option<(Vec<Entry>, Section)>> {
+    fn facts(&self, source: &mut dyn super::ReadSeek) -> Result<Option<Vec<Entry>>> {
         facts(source).map(Some)
     }
 
@@ -170,21 +170,22 @@ impl super::Decoder for Raw {
 }
 
 /// What LibRaw read out of the header, for the information panel: the
-/// sensor and how the file describes it, as one section, and the exposure
-/// as the library parsed it from the maker's own block, as the entries the
-/// panel's `Camera` section is made of. The second is for the files the
-/// EXIF reader gets nothing or too little out of — a CRW has no EXIF at
-/// all, and a Phase One's names the camera and stops — and the panel takes
-/// from it whatever the EXIF did not say.
-pub(super) fn facts(source: &mut dyn super::ReadSeek) -> Result<(Vec<Entry>, Section)> {
+/// camera and the exposure as the library parsed them from the maker's own
+/// block, as the rows the panel's `Camera` and `Exposure` sections are made
+/// of, for the files the EXIF reader gets nothing or too little out of — a
+/// CRW has no EXIF at all, and a Phase One's names the camera and stops —
+/// which the panel takes whatever the EXIF did not say from; and the color
+/// temperature the camera balanced for, which only the library's reading
+/// of the sensor can work out.
+pub(super) fn facts(source: &mut dyn super::ReadSeek) -> Result<Vec<Entry>> {
     let handle = Handle::open(source)?;
-    Ok((
-        handle.camera(),
-        Section {
-            name: "Sensor",
-            entries: handle.sensor(),
-        },
-    ))
+    let mut rows = handle.camera();
+    push(
+        &mut rows,
+        crate::image::exif::COLOR_TEMPERATURE,
+        handle.color_temperature(),
+    );
+    Ok(rows)
 }
 
 /// One LibRaw handle over one file's bytes. The bytes live here because the
@@ -265,20 +266,13 @@ impl Handle {
     }
 
     /// What took the picture and how, as LibRaw parsed it: the panel's
-    /// `Camera` section for a file the EXIF reader found nothing in.
+    /// `Camera` section for a file the EXIF reader found nothing in, in the
+    /// EXIF reader's order and under its names, so that either fills in
+    /// what the other left out a row at a time.
     fn camera(&self) -> Vec<Entry> {
+        use crate::image::exif::{APERTURE, CAMERA, FOCAL_LENGTH, ISO, LENS, SHUTTER, TAKEN};
         let mut rows = Vec::new();
         let params = self.params();
-        let make = text(&params.make);
-        let model = text(&params.model);
-        let camera = match (make, model) {
-            (Some(make), Some(model)) if model.starts_with(&make) => Some(model),
-            (Some(make), Some(model)) => Some(format!("{make} {model}")),
-            (some, None) | (None, some) => some,
-        };
-        push(&mut rows, "Camera", camera);
-        push(&mut rows, "Lens", text(&self.lens().lens));
-
         let other = self.other();
         if other.timestamp > 0 {
             // dcraw makes the camera's date a `time_t` as if it were in this
@@ -288,129 +282,90 @@ impl Handle {
             );
             push(
                 &mut rows,
-                "Taken",
+                TAKEN,
                 Some(format!(
                     "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
                     taken.year, taken.month, taken.day, taken.hour, taken.minute, taken.second
                 )),
             );
         }
-        let mut exposure = Vec::new();
+        push(
+            &mut rows,
+            CAMERA,
+            crate::image::exif::camera_name(text(&params.make), text(&params.model)),
+        );
+        push(&mut rows, LENS, text(&self.lens().lens));
+
         if other.shutter > 0.0 {
-            exposure.push(if other.shutter < 1.0 {
+            let shutter = if other.shutter < 1.0 {
                 format!("1/{} s", tidy((1.0 / other.shutter).round()))
             } else {
                 format!("{} s", tidy(other.shutter))
-            });
+            };
+            push(&mut rows, SHUTTER, Some(shutter));
         }
         if other.aperture > 0.0 {
             // To a tenth, which is how an f-number is spoken; the maker's
             // block holds it to more places than the lens was ever set to.
             let aperture = format!("{:.1}", other.aperture);
-            exposure.push(format!("f/{}", aperture.trim_end_matches(".0")));
+            push(
+                &mut rows,
+                APERTURE,
+                Some(format!("f/{}", aperture.trim_end_matches(".0"))),
+            );
         }
         if other.iso_speed > 0.0 {
-            exposure.push(format!("ISO {}", tidy(other.iso_speed)));
+            push(&mut rows, ISO, Some(tidy(other.iso_speed)));
         }
-        push(&mut rows, "Exposure", join(&exposure));
         if other.focal_len > 0.0 {
             push(
                 &mut rows,
-                "Focal length",
+                FOCAL_LENGTH,
                 Some(format!("{} mm", tidy(other.focal_len))),
             );
         }
         rows
     }
 
-    /// The sensor and what the file says about it: the frame's size and the
-    /// picture's inside it, the filter pattern, the white level, the
-    /// balances, the matrix.
-    fn sensor(&self) -> Vec<Entry> {
-        let mut rows = Vec::new();
-        let sizes = self.sizes();
-        let params = self.params();
-        push(
-            &mut rows,
-            "Sensor",
-            Some(format!("{} × {}", sizes.raw_width, sizes.raw_height)),
-        );
-        let (width, height) = (u32::from(sizes.width), u32::from(sizes.height));
-        if (width, height) != (u32::from(sizes.raw_width), u32::from(sizes.raw_height)) {
-            let at = match (sizes.left_margin, sizes.top_margin) {
-                (0, 0) => String::new(),
-                (left, top) => format!(" at {left}, {top}"),
-            };
-            push(
-                &mut rows,
-                "Picture",
-                Some(format!("{width} × {height}{at}")),
-            );
-        }
-        push(&mut rows, "Filter pattern", Some(pattern(params)));
-        if params.colors > 0 {
-            push(&mut rows, "Colors", Some(params.colors.to_string()));
+    /// The color temperature the camera's balance is for, to the nearest
+    /// 50 K: the light a gray surface would have been under for these
+    /// multipliers to make it gray.
+    ///
+    /// A gray surface reads, on the sensor, as the inverse of the
+    /// multipliers that balance it. LibRaw's matrix takes the sensor's
+    /// values to sRGB once they are scaled by its own daylight multipliers,
+    /// so that surface, scaled that way and put through it, is the
+    /// illuminant's color in sRGB — and from there in CIE xy, where
+    /// McCamy's cubic gives the correlated color temperature. Only for a
+    /// sensor of three colors, and only where the answer lands on the part
+    /// of the locus the cubic holds for.
+    fn color_temperature(&self) -> Option<String> {
+        if self.params().colors != 3 {
+            return None;
         }
         // SAFETY: accessors on an open handle.
-        let (maximum, camera, daylight, matrix) = unsafe {
-            let each = |get: unsafe extern "C" fn(*mut ffi::Data, c_int) -> f32| -> Vec<f32> {
-                (0..4).map(|index| get(self.data, index)).collect()
+        let (camera, daylight, matrix) = unsafe {
+            let each = |get: unsafe extern "C" fn(*mut ffi::Data, c_int) -> f32| -> [f64; 3] {
+                [0, 1, 2].map(|index| f64::from(get(self.data, index)))
             };
-            let mut matrix = [[0.0f32; 4]; 3];
+            let mut matrix = [[0.0f64; 3]; 3];
             for (row, values) in matrix.iter_mut().enumerate() {
                 for (column, value) in values.iter_mut().enumerate() {
-                    *value = ffi::libraw_get_rgb_cam(self.data, row as c_int, column as c_int);
+                    *value = f64::from(ffi::libraw_get_rgb_cam(
+                        self.data,
+                        row as c_int,
+                        column as c_int,
+                    ));
                 }
             }
             (
-                ffi::libraw_get_color_maximum(self.data),
                 each(ffi::libraw_get_cam_mul),
                 each(ffi::libraw_get_pre_mul),
                 matrix,
             )
         };
-        if maximum > 0 {
-            push(&mut rows, "White level", Some(maximum.to_string()));
-        }
-        push(&mut rows, "White balance", multipliers(&camera));
-        push(&mut rows, "Daylight balance", multipliers(&daylight));
-        // Camera to sRGB, three rows of as many columns as the sensor has
-        // colors: what the library will develop through.
-        let columns = params.colors.clamp(3, 4) as usize;
-        if matrix.iter().flatten().any(|value| *value != 0.0) {
-            let rows_text: Vec<String> = matrix
-                .iter()
-                .map(|row| {
-                    row[..columns]
-                        .iter()
-                        .map(|value| format!("{value:.4}"))
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                })
-                .collect();
-            push(&mut rows, "Matrix to sRGB", Some(rows_text.join(" / ")));
-        }
-        if params.dng_version != 0 {
-            let version = params.dng_version;
-            push(
-                &mut rows,
-                "DNG version",
-                Some(format!(
-                    "{}.{}.{}.{}",
-                    version >> 24,
-                    (version >> 16) & 0xff,
-                    (version >> 8) & 0xff,
-                    version & 0xff
-                )),
-            );
-        }
-        if params.raw_count > 1 {
-            push(&mut rows, "Frames", Some(params.raw_count.to_string()));
-        }
-        if params.is_foveon != 0 {
-            push(&mut rows, "Sensor type", Some("Foveon".to_string()));
-        }
-        rows
+        let kelvin = correlated_temperature(camera, daylight, matrix)?;
+        Some(format!("{} K", (kelvin / 50.0).round() as u32 * 50))
     }
 
     /// The developed picture's size: the cropped sensor, turned the way the
@@ -544,42 +499,45 @@ fn text(field: &[std::ffi::c_char]) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
-/// The color filter array as the letters of its repeating cell: `RGGB` for
-/// the common Bayer layouts, X-Trans by name, and none for a sensor that
-/// reads every color at every site.
-fn pattern(params: &ffi::Params) -> String {
-    match params.filters {
-        0 => "none".to_string(),
-        9 => "X-Trans".to_string(),
-        filters if params.colors > 0 => {
-            // dcraw's `FC`: two bits per site of a 2×2 cell, an index into
-            // the color names the camera lists.
-            let names: Vec<u8> = params.cdesc.iter().map(|byte| *byte as u8).collect();
-            let cell: String = (0..2)
-                .flat_map(|row| (0..2).map(move |column| (row, column)))
-                .map(|(row, column): (u32, u32)| {
-                    let index = (filters >> (((row << 1 & 14) + (column & 1)) << 1)) & 3;
-                    names.get(index as usize).copied().unwrap_or(b'?') as char
-                })
-                .collect();
-            cell
-        }
-        _ => "unknown".to_string(),
-    }
-}
-
-/// Multipliers as the panel writes them, green held at 1: what the balance
-/// does to red and blue against it, which is how a photographer reads one.
-fn multipliers(values: &[f32]) -> Option<String> {
-    let (red, green, blue) = (values[0], values[1], values[2]);
-    if red <= 0.0 || green <= 0.0 || blue <= 0.0 {
+/// The correlated color temperature of the light `camera`'s multipliers
+/// balance for, given LibRaw's `daylight` multipliers and its matrix from
+/// the sensor, scaled by them, to linear sRGB; see
+/// [`Handle::color_temperature`]. `None` where the multipliers are missing
+/// or the answer is off the stretch of the locus McCamy's cubic follows.
+fn correlated_temperature(
+    camera: [f64; 3],
+    daylight: [f64; 3],
+    matrix: [[f64; 3]; 3],
+) -> Option<f64> {
+    if camera
+        .iter()
+        .chain(&daylight)
+        .any(|value| value.is_nan() || *value <= 0.0)
+    {
         return None;
     }
-    Some(format!(
-        "R {} · G 1 · B {}",
-        tidy(red / green),
-        tidy(blue / green)
-    ))
+    let gray: [f64; 3] = std::array::from_fn(|c| daylight[c] / camera[c]);
+    let rgb: [f64; 3] = std::array::from_fn(|row| {
+        (0..3)
+            .map(|column| matrix[row][column] * gray[column])
+            .sum()
+    });
+    // Linear sRGB to CIE XYZ, under D65.
+    const XYZ: [[f64; 3]; 3] = [
+        [0.4124, 0.3576, 0.1805],
+        [0.2126, 0.7152, 0.0722],
+        [0.0193, 0.1192, 0.9505],
+    ];
+    let [x, y, z]: [f64; 3] =
+        std::array::from_fn(|row| (0..3).map(|column| XYZ[row][column] * rgb[column]).sum());
+    let sum = x + y + z;
+    if sum.is_nan() || sum <= 0.0 {
+        return None;
+    }
+    let (x, y) = (x / sum, y / sum);
+    let n = (x - 0.3320) / (0.1858 - y);
+    let kelvin = 449.0 * n.powi(3) + 3525.0 * n.powi(2) + 6823.3 * n + 5520.33;
+    (2000.0..=12500.0).contains(&kelvin).then_some(kelvin)
 }
 
 /// A number to a few decimals, without the trailing zeros.
@@ -592,10 +550,6 @@ fn push(rows: &mut Vec<Entry>, name: &str, value: Option<String>) {
     if let Some(value) = value.filter(|value| !value.is_empty()) {
         rows.push(Entry::new(name, value));
     }
-}
-
-fn join(parts: &[String]) -> Option<String> {
-    (!parts.is_empty()).then(|| parts.join(" \u{00b7} "))
 }
 
 /// What LibRaw says a code means.
@@ -1015,37 +969,25 @@ mod tests {
         assert!(tiff_holds_raw(&whole[..8 + 2 + 24]));
     }
 
-    /// The fixture's header, as the panel will read it: the sensor's size,
-    /// the filter cell the generator laid out, the white level it wrote in
-    /// twelve bits, and the balance of ones its neutral asks for. No
+    /// The fixture's header, as the panel will read it: the camera the
+    /// generator named, and the daylight its balance of ones is for; no
     /// exposure, since nothing took the picture.
     #[test]
-    fn the_fixture_reports_its_sensor() {
+    fn the_fixture_reports_its_camera() {
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("test_images")
             .join("dng-cfa.dng");
         let mut source = std::io::BufReader::new(std::fs::File::open(path).unwrap());
-        let (camera, sensor) = facts(&mut source).unwrap();
-
-        let names: Vec<&str> = camera.iter().map(|entry| entry.name.as_str()).collect();
-        assert_eq!(names, ["Camera"]);
-        assert_eq!(camera[0].value, "gamut fixture");
-
-        assert_eq!(sensor.name, "Sensor");
-        let find = |name: &str| {
-            sensor
-                .entries
-                .iter()
-                .find(|entry| entry.name == name)
-                .map(|entry| entry.value.as_str())
-        };
-        assert_eq!(find("Sensor"), Some("32 × 24"));
-        assert_eq!(find("Picture"), None, "the whole sensor is the picture");
-        assert_eq!(find("Filter pattern"), Some("RGGB"));
-        assert_eq!(find("White level"), Some("4095"));
-        assert_eq!(find("White balance"), Some("R 1 · G 1 · B 1"));
-        assert_eq!(find("DNG version"), Some("1.4.0.0"));
-        assert!(find("Matrix to sRGB").is_some());
+        let rows = facts(&mut source).unwrap();
+        let rows: Vec<(&str, &str)> = rows
+            .iter()
+            .map(|entry| (entry.name.as_str(), entry.value.as_str()))
+            .collect();
+        // Balanced for the daylight the generator's neutral stands for.
+        assert_eq!(
+            rows,
+            [("Camera", "gamut fixture"), ("Color temperature", "6500 K")]
+        );
     }
 
     /// A frame whose brightest photosite is short of the stated white level
@@ -1088,22 +1030,24 @@ mod tests {
         }
     }
 
+    /// The camera's balance at LibRaw's own daylight is daylight, D65, at
+    /// about 6500 K; a balance with more red and less blue than that is for
+    /// bluer light, a higher temperature; and multipliers that are missing
+    /// are no temperature.
     #[test]
-    fn a_filter_cell_is_spelled_from_the_bit_pattern() {
-        let mut params: ffi::Params = unsafe { std::mem::zeroed() };
-        params.colors = 3;
-        for (index, byte) in b"RGBG".iter().enumerate() {
-            params.cdesc[index] = *byte as std::ffi::c_char;
-        }
-        // dcraw's code for RGGB, and X-Trans and none by their codes.
-        params.filters = 0x94949494;
-        assert_eq!(pattern(&params), "RGGB");
-        params.filters = 0x16161616;
-        assert_eq!(pattern(&params), "BGGR");
-        params.filters = 9;
-        assert_eq!(pattern(&params), "X-Trans");
-        params.filters = 0;
-        assert_eq!(pattern(&params), "none");
+    fn multipliers_come_to_a_color_temperature() {
+        let identity = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let daylight = [2.0, 1.0, 1.5];
+        let d65 = correlated_temperature(daylight, daylight, identity).unwrap();
+        assert!((d65 - 6504.0).abs() < 10.0, "{d65}");
+        let shade = correlated_temperature([2.4, 1.0, 1.2], daylight, identity).unwrap();
+        assert!(shade > d65, "{shade}");
+        let tungsten = correlated_temperature([1.2, 1.0, 2.6], daylight, identity).unwrap();
+        assert!(tungsten < 4000.0, "{tungsten}");
+        assert_eq!(
+            correlated_temperature([0.0, 1.0, 1.0], daylight, identity),
+            None
+        );
     }
 
     /// Real cameras' files, one of each format: each has to be recognized
@@ -1191,7 +1135,7 @@ mod tests {
             let sections: Vec<String> = exif
                 .sections
                 .iter()
-                .map(|section| format!("{} ({})", section.name, section.entries.len()))
+                .map(|section| format!("{} ({})", section.group.name(), section.entries.len()))
                 .collect();
             println!(
                 "{name}: {}x{} {:?} in {} ms; preview {}x{} in {} ms; metadata: {}",
@@ -1207,7 +1151,7 @@ mod tests {
             for section in exif
                 .sections
                 .iter()
-                .filter(|section| ["Camera", "Sensor"].contains(&section.name))
+                .filter(|section| section.group <= crate::image::exif::Group::Exposure)
             {
                 for entry in &section.entries {
                     println!("    {}: {}", entry.name, entry.value);

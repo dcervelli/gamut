@@ -786,11 +786,23 @@ fn local_time(time: SystemTime) -> String {
 /// fit `room` in `font` — `example-long-…-0.png` — keeping its extension
 /// and a few characters before it.
 fn titled(ui: &egui::Ui, index: usize, name: &str, font: &egui::FontId, room: f32) -> String {
+    cut_name(ui, &format!("{index}  "), name, font, room)
+}
+
+/// `prefix` and then a file's `name`, the name cut in its middle to fit
+/// `room` in `font`, keeping its extension and a few characters before it.
+pub(super) fn cut_name(
+    ui: &egui::Ui,
+    prefix: &str,
+    name: &str,
+    font: &egui::FontId,
+    room: f32,
+) -> String {
     let tail_min = match name.rfind('.') {
         Some(dot) if dot > 0 => name[dot..].chars().count() + TAIL_KEPT,
         _ => TAIL_KEPT,
     };
-    cut_middle(ui, &format!("{index}  "), name, tail_min, font, room)
+    cut_middle(ui, prefix, name, tail_min, font, room)
 }
 
 /// `prefix` and then `text`, with `text` cut in its middle by
