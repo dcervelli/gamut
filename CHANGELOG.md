@@ -78,8 +78,9 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   terminal of its own where the editor's desktop entry asks for one. A
   default text editor that runs in a terminal, such as `nvim`, no longer
   starts with no terminal to run in.
-- Keys and gestures changed in the configuration file take effect as the
-  file is saved, rather than at the next start.
+- Keys, gestures and the `open_map_link` setting changed in the
+  configuration file take effect as the file is saved, rather than at the
+  next start.
 
 - The information panel's *About* section comes straight after the file's
   own, before *Image*: what somebody wrote about the picture says what it

@@ -179,8 +179,9 @@ or Finder never sees it.
 
 ### While `gamut` is running
 
-Saving the file puts the keys and gestures in it in force at once, and the
-window says it was reloaded, or names the first line it could not use.
+Saving the file puts the keys, the gestures and `open_map_link` in it in
+force at once, and the window says it was reloaded, or names the first line
+it could not use.
 Everything else in it is how the window opens: the panels stay as you have
 them, and `browse_folder` waits for the next start.
 

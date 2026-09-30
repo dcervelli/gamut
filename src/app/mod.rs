@@ -1978,7 +1978,8 @@ impl App {
 
     /// Puts in force what can change in `config` while the window is up:
     /// the keys and the gestures, and with them everything that names them —
-    /// the tooltips, the help popup, and a Mac's menu bar. The panels it
+    /// the tooltips, the help popup, and a Mac's menu bar — and the web
+    /// address the map button opens. The panels it
     /// sets are how the window opens, and toggling one since is not undone;
     /// whether a file named alone browses its folder was settled when the
     /// command line was read. `complaint` is what the file got wrong, said
@@ -1986,6 +1987,7 @@ impl App {
     pub(super) fn reconfigure(&mut self, config: Config, complaint: Option<String>) -> Effect {
         self.keys = Rc::new(config.keys);
         self.gestures = Rc::new(config.gestures);
+        self.open_map_link = config.open_map_link;
         #[cfg(target_os = "macos")]
         self.rekey_menubar();
         match complaint {
@@ -3309,8 +3311,8 @@ mod tests {
         )
     }
 
-    /// The configuration read again puts its keys and gestures in force,
-    /// and says so — or says what it got wrong. The panels it sets are left
+    /// The configuration read again puts its keys, its gestures and its map
+    /// link in force, and says so — or says what it got wrong. The panels it sets are left
     /// as the window has them.
     #[test]
     fn a_configuration_read_again_rebinds_the_keys() {
@@ -3322,14 +3324,17 @@ mod tests {
             .bind("interface.help", vec![keymap::Chord::read("F1").unwrap()])
             .unwrap();
         config.show_histogram = false;
+        config.open_map_link = "https://example.com/?{lat},{lng}".to_string();
         let _ = app.reconfigure(config, None);
         assert_eq!(app.keys.spelled("interface.help"), "F1");
+        assert_eq!(app.open_map_link, "https://example.com/?{lat},{lng}");
         assert!(app.panels.show_histogram);
         let toast = app.toasts.showing().expect("the reload is said");
         assert_eq!(toast.message, RECONFIGURED);
 
         let _ = app.reconfigure(options().config, Some("Configuration line 3: no".into()));
         assert_eq!(app.keys.spelled("interface.help"), "?, /");
+        assert_eq!(app.open_map_link, crate::settings::OPEN_MAP_LINK);
         let toast = app.toasts.showing().expect("the problem is said");
         assert_eq!(toast.message, "Configuration line 3: no");
     }

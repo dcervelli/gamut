@@ -1541,7 +1541,8 @@ gestures — so nothing else has to be told, except a Mac's menu bar, whose key
 equivalents are set on its items: `App::rekey_menubar` builds the same tree
 again from the new keymap, and `menubar::Bar::rekey` sets each tagged item's
 key, the tags being the same items' since the tree depends on the keymap only
-for its keys.
+for its keys. `App::open_map_link` is replaced as well; the map button reads
+it only when pressed, so there is nothing else to tell.
 
 The panels the file sets are not applied again. They say how the window
 opens, and a save that reset every panel the user had toggled since would

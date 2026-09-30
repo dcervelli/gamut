@@ -521,8 +521,8 @@ fn complaint(problems: &[(usize, String)]) -> Option<String> {
 /// Opens the configuration file in the user's editor — see
 /// `openers::edit` — writing the template to it first where there is no
 /// file: `Ctrl+,`, the button under the help popup's table, and the Mac's
-/// Settings item. The keys and gestures changed there are read as the file
-/// is saved — see `App::reconfigure`.
+/// Settings item. The keys, the gestures and the map link changed there are
+/// read as the file is saved — see `App::reconfigure`.
 pub fn edit() -> Result<()> {
     let path = config_path().context("no configuration directory: HOME is unset")?;
     if let Some(directory) = path.parent() {
