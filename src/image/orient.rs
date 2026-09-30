@@ -100,6 +100,21 @@ fn turn_map(map: &GainMap, orientation: Orientation) -> Arc<GainMap> {
     })
 }
 
+/// What `orientation` does to the picture as stored, in words; `None` for
+/// the orientation that does nothing.
+pub fn words(orientation: Orientation) -> Option<&'static str> {
+    Some(match orientation {
+        Orientation::NoTransforms => return None,
+        Orientation::Rotate90 => "turned 90\u{00b0} clockwise",
+        Orientation::Rotate180 => "turned 180\u{00b0}",
+        Orientation::Rotate270 => "turned 90\u{00b0} counterclockwise",
+        Orientation::FlipHorizontal => "mirrored left to right",
+        Orientation::FlipVertical => "mirrored top to bottom",
+        Orientation::Rotate90FlipH => "turned 90\u{00b0} clockwise and mirrored",
+        Orientation::Rotate270FlipH => "turned 90\u{00b0} counterclockwise and mirrored",
+    })
+}
+
 /// Whether the turn puts the picture on its side.
 pub fn quarter_turn(orientation: Orientation) -> bool {
     matches!(

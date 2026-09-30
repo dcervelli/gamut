@@ -8,6 +8,17 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Added
 
+- The information panel's *Camera* section says more of how the picture was
+  made: the exposure mode and whether it was bracketed, the metering, the
+  white balance, the flash, a digital zoom beside the focal length, whether
+  the camera merged several frames, and the owner and the camera's and
+  lens's serial numbers. A lens by another maker than the camera's is named
+  with its maker, and a lens the file does not name is given as its range.
+- The information panel's *Image* section says what the file's orientation
+  turns the picture by, and for a TIFF how its pixels are compressed.
+- The information panel's *Location* section says how fast the camera was
+  moving where the file records it, in the unit the file names: km/h, mph
+  or knots.
 - A map button after the coordinates at the head of the information
   panel's *Location* section opens where the picture was taken in the
   browser. Where it goes is the new `open_map_link` setting, Google Maps
@@ -35,6 +46,10 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Changed
 
+- The information panel's *Georeference* section is headed by a map's mark
+  over a table, as *Camera* is, and gives the ground a raster covers as
+  *Min easting*, *Max easting*, *Min northing* and *Max northing* — or the
+  same of longitude and latitude — rather than as two spans.
 - The information panel's *About* section is headed by the file's title,
   beside the mark the panel's own button wears, or by *About* where there is
   no title. It holds only what somebody wrote — title, caption, comment,

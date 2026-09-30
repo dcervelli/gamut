@@ -116,6 +116,11 @@ pub struct Exif {
     /// The turn the EXIF orientation tag asks for, which the regions were
     /// marked out before. `None` where the file does not say.
     pub orientation: Option<Orientation>,
+    /// How the pixels are compressed, for a TIFF: its own directory says,
+    /// and the info panel's `Image` section shows it. `None` for every other
+    /// file — a raw's directory is about the preview in front of it, and
+    /// any other container's EXIF block has no pixels of its own.
+    pub compression: Option<String>,
 }
 
 impl Exif {
@@ -158,6 +163,14 @@ impl Exif {
                 .position(|section| section.name.ends_with(" metadata"))
                 .unwrap_or(exif.sections.len());
             exif.sections.insert(at, sensor);
+            exif.compression = None;
+        } else if exif.compression.is_some() {
+            // Said in the `Image` section, so not listed again.
+            let name = tag_name(Tag::Compression);
+            for section in &mut exif.sections {
+                section.entries.retain(|entry| entry.name != name);
+            }
+            exif.sections.retain(|section| !section.entries.is_empty());
         }
         exif
     }
@@ -329,6 +342,7 @@ impl Exif {
                 position: None,
                 regions,
                 orientation: None,
+                compression: None,
             };
         };
 
@@ -340,6 +354,9 @@ impl Exif {
         // came to something — a directory nothing could be read out of is
         // better listed raw than dropped.
         let mut told: Vec<Tag> = SUMMARIZED.to_vec();
+        // The turn the orientation asks for is said in the `Image` section,
+        // which is about the picture it turns.
+        told.push(Tag::Orientation);
         told.extend(DESCRIBED.iter().filter_map(|described| described.tag));
         if !geo.is_empty() {
             told.extend(GEOREFERENCED.map(|number| Tag(Context::Tiff, number)));
@@ -407,16 +424,31 @@ impl Exif {
             position: position(exif),
             regions,
             orientation,
+            compression: primary(exif, Tag::Compression)
+                .map(|field| display(exif, field))
+                .filter(|value| !value.is_empty()),
         }
     }
 }
 
 /// The tags `Camera` and `Location` speak for, and so the ones the listing
 /// leaves out.
-const SUMMARIZED: [Tag; 20] = [
+const SUMMARIZED: &[Tag] = &[
     Tag::Make,
     Tag::Model,
     Tag::LensModel,
+    Tag::LensMake,
+    Tag::LensSpecification,
+    Tag::ExposureProgram,
+    Tag::ExposureMode,
+    Tag::MeteringMode,
+    Tag::WhiteBalance,
+    Tag::Flash,
+    Tag::DigitalZoomRatio,
+    Tag::CompositeImage,
+    Tag::CameraOwnerName,
+    Tag::BodySerialNumber,
+    Tag::LensSerialNumber,
     Tag::DateTimeOriginal,
     Tag::OffsetTimeOriginal,
     Tag::ExposureTime,
@@ -433,6 +465,8 @@ const SUMMARIZED: [Tag; 20] = [
     Tag::GPSAltitudeRef,
     Tag::GPSImgDirection,
     Tag::GPSImgDirectionRef,
+    Tag::GPSSpeed,
+    Tag::GPSSpeedRef,
     Tag::GPSHPositioningError,
 ];
 
@@ -595,10 +629,12 @@ fn camera(exif: &exif::Exif) -> Vec<Entry> {
         (some, None) | (None, some) => some.clone(),
     };
     push(&mut rows, CAMERA, camera);
-    push(&mut rows, LENS, text(Tag::LensModel));
+    push(&mut rows, LENS, lens(exif, make.as_deref()));
 
-    // The exposure that was made. A compensation of zero is what every
-    // camera not being pushed reports, and says nothing.
+    // How the exposure was decided, then the exposure that was made. A
+    // compensation of zero is what every camera not being pushed reports,
+    // and says nothing.
+    push(&mut rows, "Mode", mode(exif));
     push(&mut rows, SHUTTER, text(Tag::ExposureTime));
     push(&mut rows, APERTURE, text(Tag::FNumber));
     push(&mut rows, ISO, text(Tag::PhotographicSensitivity));
@@ -617,9 +653,176 @@ fn camera(exif: &exif::Exif) -> Vec<Entry> {
         (Some(actual), _) => Some(actual),
         (None, equivalent) => equivalent.map(|shown| format!("{shown} equivalent")),
     };
+    // A zoom the camera made by cropping rather than with the lens: only
+    // where it made one.
+    let zoom = rational(exif, Tag::DigitalZoomRatio)
+        .filter(|ratio| *ratio > 1.0)
+        .map(|ratio| format!("{}\u{00d7} digital zoom", number(ratio)));
+    let focal = match (focal, zoom) {
+        (Some(focal), Some(zoom)) => Some(format!("{focal}{SEPARATOR}{zoom}")),
+        (focal, zoom) => focal.or(zoom),
+    };
     push(&mut rows, FOCAL_LENGTH, focal);
 
+    push(&mut rows, "Metering", metering(exif));
+    push(
+        &mut rows,
+        "White balance",
+        match uint(exif, Tag::WhiteBalance) {
+            Some(0) => Some("Auto".to_string()),
+            Some(1) => Some("Manual".to_string()),
+            _ => None,
+        },
+    );
+    push(&mut rows, "Flash", flash(exif));
+    push(
+        &mut rows,
+        "Composite",
+        match uint(exif, Tag::CompositeImage) {
+            Some(2) => Some("Merged from several images".to_string()),
+            Some(3) => Some("Merged from several frames as it was taken".to_string()),
+            _ => None,
+        },
+    );
+
+    // Whose camera it is, and which camera and lens: set in the camera's
+    // menu, and padded with spaces where they were not.
+    let named = |tag| text(tag).map(|value| value.trim().to_string());
+    push(&mut rows, "Owner", named(Tag::CameraOwnerName));
+    push(
+        &mut rows,
+        "Camera serial number",
+        named(Tag::BodySerialNumber),
+    );
+    push(
+        &mut rows,
+        "Lens serial number",
+        named(Tag::LensSerialNumber),
+    );
+
     rows
+}
+
+/// A tag holding one whole number.
+fn uint(exif: &exif::Exif, tag: Tag) -> Option<u32> {
+    primary(exif, tag)?.value.get_uint(0)
+}
+
+/// The lens, by its name where the file gives one, with its maker's in
+/// front where that is not the camera's and the name does not already say
+/// it — a Sigma on a Sony. Where the file gives no name, the range of focal
+/// lengths and apertures it says the lens has stands in for one: the name
+/// nearly always says the same, so the two are never shown together.
+fn lens(exif: &exif::Exif, camera_make: Option<&str>) -> Option<String> {
+    let text = |tag| {
+        primary(exif, tag)
+            .map(|field| tidy_numbers(&display(exif, field)).trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
+    if let Some(model) = text(Tag::LensModel) {
+        return Some(match text(Tag::LensMake) {
+            Some(make)
+                if !model.starts_with(&make)
+                    && camera_make.is_none_or(|camera| !camera.eq_ignore_ascii_case(&make)) =>
+            {
+                format!("{make} {model}")
+            }
+            _ => model,
+        });
+    }
+    let Value::Rational(parts) = &primary(exif, Tag::LensSpecification)?.value else {
+        return None;
+    };
+    let known = |at: usize| {
+        parts
+            .get(at)
+            .map(Rational::to_f64)
+            .filter(|value| value.is_finite() && *value > 0.0)
+    };
+    let range = |low: Option<f64>, high: Option<f64>| match (low, high) {
+        (Some(low), Some(high)) if low != high => {
+            Some(format!("{}\u{2013}{}", number(low), number(high)))
+        }
+        (Some(one), _) | (None, Some(one)) => Some(number(one)),
+        (None, None) => None,
+    };
+    let focal = range(known(0), known(1)).map(|focal| format!("{focal} mm"));
+    let aperture = range(known(2), known(3)).map(|aperture| format!("f/{aperture}"));
+    match (focal, aperture) {
+        (Some(focal), Some(aperture)) => Some(format!("{focal} {aperture}")),
+        (focal, aperture) => focal.or(aperture),
+    }
+}
+
+/// A number from a rational, to two places at most and no more than it
+/// has: 18, 3.5, 1.25.
+fn number(value: f64) -> String {
+    let text = format!("{value:.2}");
+    text.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// How the exposure was decided: which of its settings the camera chose and
+/// which were chosen for it, and whether it was one of a bracket.
+fn mode(exif: &exif::Exif) -> Option<String> {
+    let program = match uint(exif, Tag::ExposureProgram) {
+        Some(1) => Some("Manual"),
+        Some(2) => Some("Program"),
+        Some(3) => Some("Aperture priority"),
+        Some(4) => Some("Shutter priority"),
+        Some(5) => Some("Creative"),
+        Some(6) => Some("Action"),
+        Some(7) => Some("Portrait"),
+        Some(8) => Some("Landscape"),
+        _ => None,
+    };
+    let bracket = (uint(exif, Tag::ExposureMode) == Some(2)).then_some("Auto bracket");
+    let parts: Vec<String> = program
+        .into_iter()
+        .chain(bracket)
+        .map(str::to_string)
+        .collect();
+    join(&parts)
+}
+
+/// How the camera measured the light it set the exposure by.
+fn metering(exif: &exif::Exif) -> Option<String> {
+    Some(
+        match uint(exif, Tag::MeteringMode)? {
+            1 => "Average",
+            2 => "Center-weighted",
+            3 => "Spot",
+            4 => "Multi-spot",
+            5 => "Evaluative",
+            6 => "Partial",
+            _ => return None,
+        }
+        .to_string(),
+    )
+}
+
+/// Whether the flash fired, and what it was set to: the tag is a set of
+/// bits, and a camera with no flash says so in one of them, which is no row.
+fn flash(exif: &exif::Exif) -> Option<String> {
+    let bits = uint(exif, Tag::Flash)?;
+    if bits & 0x20 != 0 {
+        return None;
+    }
+    let fired = bits & 0x01 != 0;
+    let mut parts = vec![if fired { "Fired" } else { "Did not fire" }];
+    match (bits >> 3) & 0x03 {
+        1 => parts.push("forced on"),
+        2 => parts.push("off"),
+        3 => parts.push("auto"),
+        _ => {}
+    }
+    if bits & 0x40 != 0 {
+        parts.push("red-eye reduction");
+    }
+    if fired && (bits >> 1) & 0x03 == 2 {
+        parts.push("no return light");
+    }
+    let parts: Vec<String> = parts.into_iter().map(str::to_string).collect();
+    join(&parts)
 }
 
 /// The names of the camera section's rows, which LibRaw's rows for a raw
@@ -644,6 +847,7 @@ fn location(exif: &exif::Exif) -> Vec<Entry> {
     }
     push(&mut rows, "Altitude", altitude(exif));
     push(&mut rows, "Direction", direction(exif));
+    push(&mut rows, "Speed", speed(exif));
     push(&mut rows, "Positioning error", positioning_error(exif));
     rows
 }
@@ -669,6 +873,26 @@ fn direction(exif: &exif::Exif) -> Option<String> {
     Some(match north {
         Some(north) => format!("{degrees:.0}\u{00b0} from {north} north"),
         None => format!("{degrees:.0}\u{00b0}"),
+    })
+}
+
+/// How fast the camera was moving, in the unit the file names — kilometers,
+/// miles or knots an hour, kilometers where it names none, as the standard
+/// says — to a tenth under ten, and to the whole unit above.
+fn speed(exif: &exif::Exif) -> Option<String> {
+    let value = rational(exif, Tag::GPSSpeed)?;
+    let unit = match &primary(exif, Tag::GPSSpeedRef).map(|field| &field.value) {
+        Some(Value::Ascii(parts)) => match parts.first().map(Vec::as_slice) {
+            Some(b"M") => "mph",
+            Some(b"N") => "knots",
+            _ => "km/h",
+        },
+        _ => "km/h",
+    };
+    Some(if value < 10.0 {
+        format!("{} {unit}", tidy_numbers(&format!("{value:.1}")))
+    } else {
+        format!("{value:.0} {unit}")
     })
 }
 
@@ -1341,9 +1565,11 @@ mod tests {
         gps.rational(0x0004, &[(169, 1), (9, 1), (4304, 100)]); // GPSLongitude
         gps.short(0x0005, 0); // GPSAltitudeRef, above sea level
         gps.rational(0x0006, &[(3329957, 10000)]); // GPSAltitude
-        gps.ascii(0x000c, "K"); // GPSSpeedRef, left to the listing
+        gps.ascii(0x000c, "K"); // GPSSpeedRef
+        gps.rational(0x000d, &[(1234, 100)]); // GPSSpeed
         gps.ascii(0x0010, "T"); // GPSImgDirectionRef, true north
         gps.rational(0x0011, &[(21180, 100)]); // GPSImgDirection
+        gps.ascii(0x0012, "WGS-84"); // GPSMapDatum, left to the listing
         gps.rational(0x001f, &[(47, 10)]); // GPSHPositioningError
 
         let mut ifd0 = Block::new();
@@ -1427,6 +1653,7 @@ mod tests {
                 ("Longitude", "169.16196\u{00b0} E"),
                 ("Altitude", "333 m"),
                 ("Direction", "212\u{00b0} from true north"),
+                ("Speed", "12 km/h"),
                 ("Positioning error", "\u{00b1}4.7 m"),
             ])
         );
@@ -1442,18 +1669,20 @@ mod tests {
                 .iter()
                 .map(|(name, _)| name.as_str())
                 .collect::<Vec<_>>(),
-            ["GPSSpeedRef"]
+            ["GPSMapDatum"]
         );
 
         // What a section above spoke for is not listed again; what none of
         // them did is, under the directory it came out of. The software that
         // wrote the file is the camera's firmware, not something said about
-        // the picture, so it stays in the listing.
+        // the picture, so it stays in the listing; the orientation is said
+        // in the `Image` section.
         let listing: Vec<&str> = section(&exif, "Image metadata")
             .iter()
             .map(|entry| entry.name.as_str())
             .collect();
-        assert_eq!(listing, ["Orientation", "Software"], "{listing:?}");
+        assert_eq!(listing, ["Software"], "{listing:?}");
+        assert_eq!(exif.orientation, Some(Orientation::Rotate90));
         // The comment is read out of its character code rather than written
         // out as the hex the renderer would make of an undefined type.
         assert_eq!(
@@ -1802,15 +2031,132 @@ mod tests {
         assert!(!every.contains(&"XMP"), "{every:?}");
     }
 
+    /// A block of `ifd0` and an Exif directory of `exif`, one after the
+    /// other.
+    fn with_exif(mut ifd0: Block, exif: Block) -> Vec<u8> {
+        const HEADER: usize = 8;
+        let first = Block::length_of(ifd0.entries.len() + 1, ifd0.pool.len());
+        ifd0.entry(0x8769, 4, 1, ((HEADER + first) as u32).to_le_bytes()); // ExifIFDPointer
+        let mut block = b"II\x2a\x00\x08\x00\x00\x00".to_vec();
+        block.extend_from_slice(&ifd0.at(HEADER));
+        block.extend_from_slice(&exif.at(HEADER + first));
+        block
+    }
+
+    fn camera_rows(ifd0: Block, exif: Block) -> Vec<(String, String)> {
+        let path = written("settings.jpg", &jpeg_with(with_exif(ifd0, exif)));
+        let exif = Exif::read(&path);
+        let _ = std::fs::remove_file(&path);
+        section(&exif, "Camera")
+            .iter()
+            .map(|entry| (entry.name.clone(), entry.value.clone()))
+            .collect()
+    }
+
+    fn owned(rows: &[(&str, &str)]) -> Vec<(String, String)> {
+        rows.iter()
+            .map(|(name, value)| (name.to_string(), value.to_string()))
+            .collect()
+    }
+
+    /// How the exposure was decided and what else the camera was set to,
+    /// in words; a lens by another maker than the camera's named with its
+    /// maker; and whose camera it was, the padding taken off.
+    #[test]
+    fn a_cameras_settings_are_read_as_words() {
+        let mut ifd0 = Block::new();
+        ifd0.ascii(0x010f, "Sony"); // Make
+        ifd0.ascii(0x0110, "ILCE-7M4"); // Model
+        let mut exif = Block::new();
+        exif.short(0x8822, 3); // ExposureProgram, aperture priority
+        exif.rational(0x920a, &[(50, 1)]); // FocalLength
+        exif.short(0x9207, 5); // MeteringMode, pattern
+        // Flash: fired, on auto, with red-eye reduction.
+        exif.short(0x9209, 0x59);
+        exif.ascii(0xa430, "Test Owner      "); // CameraOwnerName
+        exif.ascii(0xa431, "4321"); // BodySerialNumber
+        exif.ascii(0xa433, "Sigma"); // LensMake
+        exif.ascii(0xa434, "24-70mm F2.8 DG DN | Art"); // LensModel
+        exif.ascii(0xa435, "8765"); // LensSerialNumber
+        exif.short(0xa402, 2); // ExposureMode, auto bracket
+        exif.short(0xa403, 1); // WhiteBalance, manual
+        exif.rational(0xa404, &[(2, 1)]); // DigitalZoomRatio
+        exif.short(0xa460, 3); // CompositeImage, made while shooting
+        assert_eq!(
+            camera_rows(ifd0, exif),
+            owned(&[
+                ("Camera", "Sony ILCE-7M4"),
+                ("Lens", "Sigma 24-70mm F2.8 DG DN | Art"),
+                ("Mode", "Aperture priority \u{00b7} Auto bracket"),
+                ("Focal length", "50 mm \u{00b7} 2\u{00d7} digital zoom"),
+                ("Metering", "Evaluative"),
+                ("White balance", "Manual"),
+                ("Flash", "Fired \u{00b7} auto \u{00b7} red-eye reduction"),
+                ("Composite", "Merged from several frames as it was taken"),
+                ("Owner", "Test Owner"),
+                ("Camera serial number", "4321"),
+                ("Lens serial number", "8765"),
+            ])
+        );
+    }
+
+    /// A lens the file gives no name for is its range, a zoom's apertures
+    /// at each end; a lens by the camera's own maker is not named twice; a
+    /// camera with no flash has no flash row; and a zoom of one is none.
+    #[test]
+    fn a_lens_with_no_name_is_its_range() {
+        let mut ifd0 = Block::new();
+        ifd0.ascii(0x010f, "Canon"); // Make
+        let mut exif = Block::new();
+        exif.short(0x9209, 0x20); // Flash, no flash function
+        exif.rational(0xa404, &[(1, 1)]); // DigitalZoomRatio
+        exif.rational(0xa432, &[(18, 1), (55, 1), (35, 10), (56, 10)]); // LensSpecification
+        exif.ascii(0xa433, "Canon"); // LensMake
+        assert_eq!(
+            camera_rows(ifd0, exif),
+            owned(&[
+                ("Camera", "Canon"),
+                ("Lens", "18\u{2013}55 mm f/3.5\u{2013}5.6")
+            ])
+        );
+
+        let mut ifd0 = Block::new();
+        ifd0.ascii(0x010f, "Canon"); // Make
+        let mut exif = Block::new();
+        exif.short(0x9209, 0x10); // Flash, off and did not fire
+        exif.ascii(0xa433, "Canon"); // LensMake
+        exif.ascii(0xa434, "RF50mm F1.8 STM"); // LensModel
+        assert_eq!(
+            camera_rows(ifd0, exif),
+            owned(&[
+                ("Camera", "Canon"),
+                ("Lens", "RF50mm F1.8 STM"),
+                ("Flash", "Did not fire \u{00b7} off"),
+            ])
+        );
+    }
+
+    /// A TIFF's compression is said in the `Image` section, not listed; a
+    /// raw's, which is its preview's, is left in the listing.
+    #[test]
+    fn a_tiffs_compression_is_taken_out_of_the_listing() {
+        let exif = Exif::read(&fixture("tiff-lzw.tif"));
+        assert_eq!(exif.compression.as_deref(), Some("LZW"));
+        assert!(
+            !all(&exif).iter().any(|entry| entry.name == "Compression"),
+            "{exif:?}"
+        );
+        assert_eq!(Exif::read(&fixture("dng-cfa.dng")).compression, None);
+    }
+
     /// A real file, read through the container it arrives in: the fixture
-    /// carries an orientation and nothing else.
+    /// carries an orientation and nothing else, which the `Image` section
+    /// says rather than the listing.
     #[test]
     fn a_files_own_block_is_found_through_its_container() {
         let exif = Exif::read(&fixture("webp-exif-rotated.webp"));
-        assert!(
-            all(&exif).iter().any(|entry| entry.name == "Orientation"),
-            "{exif:?}"
-        );
+        assert_eq!(exif.orientation, Some(Orientation::Rotate180), "{exif:?}");
+        assert!(exif.sections.is_empty(), "{exif:?}");
     }
 
     /// A BigTIFF has to go the long way round — the reader knows the

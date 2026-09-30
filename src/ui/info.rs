@@ -25,6 +25,7 @@ use crate::image::decode::Rendering;
 use crate::image::exif::{self, ShownRegion};
 use crate::image::gain_map::Lift;
 use crate::image::metadata_region::Placed;
+use crate::image::orient;
 use crate::image::sequence::{Loops, Sequence};
 use crate::render::Color;
 
@@ -1207,8 +1208,9 @@ fn contents(current: &Current) -> Contents {
             .map(|entry| (entry.name.as_str(), entry.value.clone()));
         // The camera's own section is headed by the camera's name, the
         // location's by where it is, and the words by the title, under the
-        // mark the panel's own button wears; every other the metadata reads
-        // out is a column of fields.
+        // mark the panel's own button wears; the georeference by its own
+        // name, under a map's mark. Every other the metadata reads out is a
+        // column of fields.
         let face = match section.name {
             "Camera" => Face::Headed {
                 mark: icon::CAMERA,
@@ -1220,6 +1222,11 @@ fn contents(current: &Current) -> Contents {
                 head: &[exif::LATITUDE, exif::LONGITUDE],
                 // Only where the file gave numbers a map can take.
                 button: exif.position.map(|_| (icon::MAP, Control::OpenMap)),
+            },
+            "Georeference" => Face::Headed {
+                mark: icon::MAP,
+                head: &[],
+                button: None,
             },
             "About" => Face::Headed {
                 mark: icon::INFO,
@@ -1370,6 +1377,21 @@ fn image_facts(current: &Current) -> Vec<(&'static str, String)> {
         (
             RESOLUTION,
             format!("{} \u{00d7} {}", image.width, image.height),
+        ),
+        // What the file asks to be done to its pixels to stand them up,
+        // the turn the resolution above is after; and for a TIFF, how they are packed.
+        (
+            "Orientation",
+            current
+                .exif
+                .orientation
+                .and_then(orient::words)
+                .unwrap_or_default()
+                .to_string(),
+        ),
+        (
+            "Compression",
+            current.exif.compression.clone().unwrap_or_default(),
         ),
         (
             "Samples",

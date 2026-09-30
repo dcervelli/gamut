@@ -936,14 +936,21 @@ own are what the decoder already said: its size, what each pixel holds, the
 color space those numbers are meant in, and what the GPU stored them as. The
 bars say some of that as well, but they say it in passing and drop it when the
 window narrows, and a fact worth reading is a fact worth being able to go back
-to.
+to. Two of the picture's facts come out of the EXIF block rather than the
+decoder: the turn its orientation tag asks for, which is why the resolution
+can be the stored picture's on its side, and a TIFF's compression — only a
+TIFF's, since a raw's first directory describes the preview in front of it
+and every other container's block has no pixels of its own. Both are taken
+out of the listing below, where they would otherwise be said again.
 
 The rest is its EXIF, read by `src/image/exif.rs` on the loader thread beside
 the decode, because it is one more parse of a file somebody else chose the
 bytes of and that is the thread with the panic guard around it. What comes
 back is already words, and already grouped: the fields a photograph is read by
-— camera, lens, when, the exposure as one line, the focal length with its
-equivalent — then where it was taken, the coordinates in degrees a map will
+— camera, lens, when, the exposure and how it was decided, the focal length
+with its equivalent and any digital zoom, the metering, white balance and
+flash, whether the picture was merged from several frames, and the owner and
+serial numbers the camera was given — then where it was taken, the coordinates in degrees a map will
 take with the rest of the GPS directory under them, then whatever somebody
 wrote in words, and last everything left over. That last split is had for
 nothing: TIFF's own tags describe the file and the Exif directory describes
@@ -1003,6 +1010,12 @@ heading is "About" and not
 shares a word with a row under it reads as a mistake; the row in turn is
 "Caption", the word the programs that write the field use for it, and what it
 holds — a sentence about the picture, not a description of the file.
+
+A lens is named by `LensModel`, with `LensMake` in front only where it is not
+the camera's maker and the name does not already say it — the case of a
+lens by another maker, which is where it tells the reader something. Where
+there is no name, `LensSpecification`'s range stands in for one; the two are
+never shown together, since the name nearly always carries the range.
 The program that wrote the file (`Software`, `xmp:CreatorTool`) and when it
 last did (`DateTime`) are said in words too, and are not in the table: a
 camera writes both into every file, its firmware and the moment of the shot,

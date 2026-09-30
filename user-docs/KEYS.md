@@ -748,7 +748,9 @@ color space those numbers are meant in, and whether it carries transparency.
 
 After those comes what the file's own metadata says, for a file that carries
 any: the camera and lens, when the photograph was taken, the exposure it was
-made at and the focal length; then where the camera stood, in degrees a map
+made at and how it was decided, the focal length, the metering, the white
+balance and the flash, and whose camera it was and its serial numbers where
+the camera recorded them; then where the camera stood, in degrees a map
 will take, with whatever else it recorded about the place. A georeferenced
 raster — a scanned map, an elevation model — gets a section of its own: the
 coordinate system it names, the size of a pixel on the ground, where its
