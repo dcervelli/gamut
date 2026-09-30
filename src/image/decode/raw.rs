@@ -640,8 +640,17 @@ impl Developed {
     fn bytes(&self) -> &[u8] {
         let header = self.header();
         // SAFETY: `data_size` bytes follow `data` in the allocation, which
-        // is what the library says it allocated.
-        unsafe { std::slice::from_raw_parts(header.data.as_ptr(), header.data_size as usize) }
+        // is what the library says it allocated. The pointer is taken from
+        // the allocation's own, by the field's offset, rather than from a
+        // reference to the one-byte field, whose provenance would reach no
+        // further than that byte.
+        unsafe {
+            let data = self
+                .image
+                .cast::<u8>()
+                .add(std::mem::offset_of!(ffi::Processed, data));
+            std::slice::from_raw_parts(data, header.data_size as usize)
+        }
     }
 
     /// The pixels of a bitmap, as `width`, `height`, channels and the

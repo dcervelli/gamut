@@ -27,6 +27,7 @@
 //! `area` of `shaders/image.wgsl`, the growth its `bicubic`; nearest is
 //! not offered, since a file enlarged by nearest is a file of blocks.
 
+use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::sync::OnceLock;
 
@@ -35,7 +36,8 @@ use super::{Component, DecodedImage, Rebuild, Transfer};
 
 /// `image` fitted inside `side` pixels on its longer side, its aspect kept,
 /// each output pixel the mean of the block of source pixels it stands for.
-/// An image already within `side` comes back as it is.
+/// An image already within `side` comes back as it is — borrowed, since
+/// there is nothing to make of it.
 ///
 /// Output pixel `(ox, oy)` averages the source columns `ox·w/ow ..
 /// (ox+1)·w/ow` and rows likewise, in integer division, so that the blocks
@@ -44,9 +46,9 @@ use super::{Component, DecodedImage, Rebuild, Transfer};
 /// with nothing else in it writes the sentinel back, so that a masked sea
 /// stays masked rather than bleeding its sentinel into the coast. Alpha is
 /// averaged like any other channel, unweighted by itself.
-pub fn downscale(image: &DecodedImage, side: u32) -> DecodedImage {
+pub fn downscale(image: &DecodedImage, side: u32) -> Cow<'_, DecodedImage> {
     let Some((width, height)) = fitted([image.width, image.height], side) else {
-        return image.clone();
+        return Cow::Borrowed(image);
     };
     let shrink = Shrink {
         channels: image.channels().count(),
@@ -54,14 +56,14 @@ pub fn downscale(image: &DecodedImage, side: u32) -> DecodedImage {
         to: (width as usize, height as usize),
         nodata: image.nodata,
     };
-    DecodedImage {
+    Cow::Owned(DecodedImage {
         width,
         height,
         samples: image.samples.rebuilt(&shrink),
         gain_map: None,
         depth: None,
         ..*image
-    }
+    })
 }
 
 /// One shrink of a buffer of `channels` components a pixel, `from` a size
@@ -292,23 +294,30 @@ impl Plan<'_> {
     ///
     /// Each source row is decoded and resampled across once, into a cache
     /// of rows the output rows still to come will read; a row no output
-    /// row below it reads is let go. The rows an output row reads run
-    /// upward with it, so the cache is a short contiguous run, four rows
-    /// deep for a growth and a span's worth for a shrink, never the
-    /// picture.
+    /// row below it reads is let go — kept as scratch, and filled again by
+    /// the next row decoded, so that the walk allocates a row only while
+    /// the cache is growing. The rows an output row reads run upward with
+    /// it, so the cache is a short contiguous run, four rows deep for a
+    /// growth and a span's worth for a shrink, never the picture.
     fn fill(&self, band: &mut [u8], first: usize) {
         let count = self.raster.channels.count();
         let stride = self.columns.len() * count;
         let mut cache: VecDeque<(usize, Vec<f32>)> = VecDeque::new();
+        let mut spare: Vec<Vec<f32>> = Vec::new();
+        let mut decoded = vec![0.0f32; self.raster.width as usize * count];
         let mut summed = vec![0.0f32; stride];
         for (offset, row) in band.chunks_exact_mut(stride).enumerate() {
             let taps = &self.rows[first + offset];
             while cache.front().is_some_and(|(y, _)| *y < taps.start) {
-                cache.pop_front();
+                if let Some((_, row)) = cache.pop_front() {
+                    spare.push(row);
+                }
             }
             let next = cache.back().map_or(taps.start, |(y, _)| y + 1);
             for y in next..taps.start + taps.weights.len() {
-                cache.push_back((y, self.across(y)));
+                let mut across = spare.pop().unwrap_or_else(|| vec![0.0f32; stride]);
+                self.across(y, &mut decoded, &mut across);
+                cache.push_back((y, across));
             }
             summed.fill(0.0);
             for (k, weight) in taps.weights.iter().enumerate() {
@@ -322,14 +331,14 @@ impl Plan<'_> {
     }
 
     /// Source row `y` in linear light, premultiplied, resampled across to
-    /// the output width.
-    fn across(&self, y: usize) -> Vec<f32> {
+    /// the output width, into `out`. `decoded` is scratch a source row
+    /// long; both are written whole.
+    fn across(&self, y: usize, decoded: &mut [f32], out: &mut [f32]) {
         let count = self.raster.channels.count();
         let alpha = self.raster.channels.alpha_index();
         let width = self.raster.width as usize;
         let linear = linear_of_code();
         let source = &self.raster.data[y * width * count..(y + 1) * width * count];
-        let mut decoded = vec![0.0f32; width * count];
         for (pixel, out) in source
             .chunks_exact(count)
             .zip(decoded.chunks_exact_mut(count))
@@ -343,7 +352,7 @@ impl Plan<'_> {
                 };
             }
         }
-        let mut out = vec![0.0f32; self.columns.len() * count];
+        out.fill(0.0);
         for (taps, pixel) in self.columns.iter().zip(out.chunks_exact_mut(count)) {
             for (k, weight) in taps.weights.iter().enumerate() {
                 let x = taps.start + k;
@@ -352,7 +361,6 @@ impl Plan<'_> {
                 }
             }
         }
-        out
     }
 
     /// One resampled row, premultiplied and linear, as the bytes the
@@ -387,6 +395,10 @@ fn block(at: usize, full: usize, out: usize) -> std::ops::Range<usize> {
 /// The mean of every block, channel by channel. Sums are doubles, which
 /// hold an integer sum exactly up to 2⁵³ — more than any block of 16-bit
 /// samples this program will ever hold comes to.
+///
+/// Whether there is a sentinel to leave out is decided once, ahead of the
+/// walk, rather than at every sample: [`blocks`] is made twice, once with
+/// the test and once without.
 fn reduce<T: Component>(
     data: &[T],
     channels: usize,
@@ -396,7 +408,29 @@ fn reduce<T: Component>(
     oh: usize,
     nodata: Option<f32>,
 ) -> Vec<T> {
-    let nodata = nodata.map(f64::from);
+    let size = (w, h, ow, oh);
+    match nodata.map(f64::from) {
+        Some(sentinel) => blocks(
+            data,
+            channels,
+            size,
+            |value| value != sentinel,
+            T::from_f64(sentinel),
+        ),
+        None => blocks(data, channels, size, |_| true, T::from_f64(0.0)),
+    }
+}
+
+/// [`reduce`]'s walk: the mean of the samples `is_data` keeps in every
+/// block of the source `(w, h)` becoming `(ow, oh)`, and `empty` for a
+/// block with none.
+fn blocks<T: Component>(
+    data: &[T],
+    channels: usize,
+    (w, h, ow, oh): (usize, usize, usize, usize),
+    is_data: impl Fn(f64) -> bool,
+    empty: T,
+) -> Vec<T> {
     let mut out = Vec::with_capacity(ow * oh * channels);
     let mut sums = vec![0.0f64; channels];
     let mut counts = vec![0usize; channels];
@@ -412,7 +446,7 @@ fn reduce<T: Component>(
                 for pixel in row.chunks_exact(channels) {
                     for (channel, sample) in pixel.iter().enumerate() {
                         let value = sample.to_f64();
-                        if nodata.is_some_and(|sentinel| value == sentinel) {
+                        if !is_data(value) {
                             continue;
                         }
                         sums[channel] += value;
@@ -421,10 +455,9 @@ fn reduce<T: Component>(
                 }
             }
             for channel in 0..channels {
-                out.push(match (counts[channel], nodata) {
-                    (0, Some(sentinel)) => T::from_f64(sentinel),
-                    (0, None) => T::from_f64(0.0),
-                    (count, _) => T::from_f64(sums[channel] / count as f64),
+                out.push(match counts[channel] {
+                    0 => empty,
+                    count => T::from_f64(sums[channel] / count as f64),
                 });
             }
         }
@@ -616,7 +649,7 @@ mod tests {
                 220, 230, 60, 70,
             ],
         );
-        let small = downscale(&image, 2);
+        let small = downscale(&image, 2).into_owned();
         assert_eq!((small.width, small.height), (2, 2));
         assert_eq!(small.color, image.color);
         assert_eq!(small.referred, Referred::Display);
@@ -650,7 +683,7 @@ mod tests {
             AlphaMode::Opaque,
         );
         image.nodata = Some(-9999.0);
-        let small = downscale(&image, 2);
+        let small = downscale(&image, 2).into_owned();
         assert_eq!((small.width, small.height), (2, 1));
         assert_eq!(small.nodata, Some(-9999.0));
         match small.samples {
@@ -659,11 +692,13 @@ mod tests {
         }
     }
 
-    /// An image that already fits is handed back as it is, never enlarged.
+    /// An image that already fits is handed back as it is — borrowed, not
+    /// copied — and never enlarged.
     #[test]
     fn a_small_image_is_left_alone() {
         let image = gray_u8(3, 2, vec![1, 2, 3, 4, 5, 6]);
         let same = downscale(&image, 512);
+        assert!(matches!(same, Cow::Borrowed(_)));
         assert_eq!((same.width, same.height), (3, 2));
         assert_eq!(same.samples.len(), 6);
         assert_eq!(fitted([3, 2], 512), None);
@@ -701,7 +736,7 @@ mod tests {
             ColorSpace::SRGB,
             AlphaMode::Straight,
         );
-        let small = downscale(&image, 1);
+        let small = downscale(&image, 1).into_owned();
         match small.samples {
             Samples::U16 { data, .. } => assert_eq!(data, vec![1001, 32768]),
             other => panic!("{other:?}"),
