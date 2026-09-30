@@ -75,12 +75,21 @@ pub(crate) fn shown_path(path: &Path) -> String {
     escape_controls(&path.display().to_string())
 }
 
+/// Says on the terminal that something could not be done, with the whole
+/// chain of why, defused as everything printed is. What the window says
+/// about the same failure is one line — see `App::toast` and
+/// `input::briefly` — since a message at the foot of a picture is read at
+/// a glance and a cause worth following is worth following at leisure.
+pub(crate) fn report(error: &anyhow::Error) {
+    eprintln!("gamut: {}", escape_controls(&format!("{error:#}")));
+}
+
 fn main() -> ExitCode {
     timing::begin();
     match run() {
         Ok(code) => code,
         Err(error) => {
-            eprintln!("gamut: {}", escape_controls(&format!("{error:#}")));
+            report(&error);
             ExitCode::FAILURE
         }
     }

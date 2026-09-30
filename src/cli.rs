@@ -270,7 +270,7 @@ pub fn first_readable(files: &[PathBuf]) -> Result<(usize, Option<[f32; 2]>)> {
                 // return is reported by `main`, and saying it here as well
                 // would print it twice.
                 for problem in &skipped {
-                    eprintln!("gamut: {}", crate::escape_controls(&format!("{problem:#}")));
+                    crate::report(problem);
                 }
                 return Ok((index, size.map(|(w, h)| [w as f32, h as f32])));
             }
@@ -476,7 +476,7 @@ pub fn parse_args() -> Result<Option<Args>> {
         // worth the word it would get beside a path that could be read.
         Err(error) if paste => {
             if !named.is_empty() {
-                eprintln!("gamut: {}", crate::escape_controls(&format!("{error:#}")));
+                crate::report(&error);
             }
             Vec::new()
         }

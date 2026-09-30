@@ -1299,7 +1299,7 @@ impl App {
                     reduced = lost;
                 }
                 Err(error) => {
-                    eprintln!("gamut: {}", crate::escape_controls(&format!("{error:#}")));
+                    crate::report(&error);
                     current.show(was, |_| None);
                     return Effect::Nothing;
                 }
@@ -2101,7 +2101,7 @@ impl App {
         let mut renderer = match Renderer::new(window.clone(), self.hdr) {
             Ok(renderer) => renderer,
             Err(error) => {
-                eprintln!("gamut: {}", crate::escape_controls(&format!("{error:#}")));
+                crate::report(&error);
                 event_loop.exit();
                 return;
             }
@@ -2119,7 +2119,7 @@ impl App {
                     current.reduced = reduced;
                 }
                 Err(error) => {
-                    eprintln!("gamut: {}", crate::escape_controls(&format!("{error:#}")));
+                    crate::report(&error);
                     event_loop.exit();
                     return;
                 }
@@ -2147,7 +2147,7 @@ impl App {
         let gui = match Gui::new(&window, &self.theme, renderer.max_texture_side()) {
             Ok(gui) => gui,
             Err(error) => {
-                eprintln!("gamut: {}", crate::escape_controls(&format!("{error:#}")));
+                crate::report(&error);
                 event_loop.exit();
                 return;
             }
@@ -2361,7 +2361,7 @@ impl App {
                 None => match upload_here(renderer, &file.path, &image) {
                     Ok(uploaded) => uploaded,
                     Err(error) => {
-                        eprintln!("gamut: {}", crate::escape_controls(&format!("{error:#}")));
+                        crate::report(&error);
                         return false;
                     }
                 },
@@ -2574,7 +2574,7 @@ impl App {
             match renderer.refill_image(&frame.image) {
                 Ok(lost) => reduced = lost,
                 Err(error) => {
-                    eprintln!("gamut: {}", crate::escape_controls(&format!("{error:#}")));
+                    crate::report(&error);
                     return;
                 }
             }
@@ -2826,7 +2826,7 @@ impl App {
             Ok(()) => self.reported_error = false,
             Err(error) => {
                 if !self.reported_error {
-                    eprintln!("gamut: {}", crate::escape_controls(&format!("{error:#}")));
+                    crate::report(&error);
                     self.reported_error = true;
                 }
             }

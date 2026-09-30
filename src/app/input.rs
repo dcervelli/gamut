@@ -1916,13 +1916,7 @@ pub(super) struct FitKey {
     pub(super) drawn: bool,
 }
 
-/// Says on the terminal that something could not be done, with the whole
-/// chain of why. What the window says about the same failure is one line —
-/// see [`App::toast`] — since a message at the foot of a picture is read at a
-/// glance and a cause worth following is worth following at leisure.
-pub(super) fn report(error: &anyhow::Error) {
-    eprintln!("gamut: {}", crate::escape_controls(&format!("{error:#}")));
-}
+pub(super) use crate::report;
 
 /// The one line about it that goes in the window: the failure itself, without
 /// the chain under it, begun with a capital as every message in the window
