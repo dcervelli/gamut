@@ -303,20 +303,13 @@ impl Reducer {
         buffer.unmap();
         let params_group = gpu::buffer_group(device, "reduce params", &self.params_layout, &buffer);
 
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("coarse level"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
+        let texture = gpu::texture_2d(
+            device,
+            "coarse level",
+            [width, height],
             format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        );
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let input_group = self.input_group(device, &input);
 

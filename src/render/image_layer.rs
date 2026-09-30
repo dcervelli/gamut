@@ -181,20 +181,16 @@ impl Marks {
         size: [u32; 2],
         key: MarksKey,
     ) -> Self {
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("marks"),
-            size: wgpu::Extent3d {
-                width: size[0].div_ceil(reduce::STEP).max(1),
-                height: size[1].div_ceil(reduce::STEP).max(1),
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: MARKS_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        let texture = gpu::texture_2d(
+            device,
+            "marks",
+            [
+                size[0].div_ceil(reduce::STEP).max(1),
+                size[1].div_ceil(reduce::STEP).max(1),
+            ],
+            MARKS_FORMAT,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        );
         let first = texture.create_view(&wgpu::TextureViewDescriptor::default());
         Self {
             _first_texture: texture,
@@ -741,36 +737,22 @@ impl Lift {
         // A byte a component, as the map holds it: the shader reads each
         // through the table, so no curve comes off on the way in.
         let plan = upload::Plan::unorm8(&map.data, channels, map.width);
-        let map_texture = upload.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("gain map"),
-            size: wgpu::Extent3d {
-                width: map.width,
-                height: map.height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: plan.format(),
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        let map_texture = gpu::texture_2d(
+            &upload.device,
+            "gain map",
+            [map.width, map.height],
+            plan.format(),
+            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        );
         upload.fill(&map_texture, &plan, map.width, map.height)?;
 
-        let lut = upload.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("gain table"),
-            size: wgpu::Extent3d {
-                width: 256,
-                height: 1,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba32Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        let lut = gpu::texture_2d(
+            &upload.device,
+            "gain table",
+            [256, 1],
+            wgpu::TextureFormat::Rgba32Float,
+            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        );
         let group = gpu::texture_group(
             &upload.device,
             "gain map",
@@ -847,16 +829,13 @@ fn ramps(
         height: rows,
         depth_or_array_layers: 1,
     };
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("ramps"),
-        size,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba32Float,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
+    let texture = gpu::texture_2d(
+        device,
+        "ramps",
+        [RAMP_LENGTH, rows],
+        wgpu::TextureFormat::Rgba32Float,
+        wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+    );
     queue.write_texture(
         wgpu::TexelCopyTextureInfo {
             texture: &texture,
@@ -883,43 +862,27 @@ fn ramps(
 /// A texel of marks, for the frames the marks are off: zeros, as the device
 /// leaves a fresh texture, and never read.
 fn blank_marks(device: &wgpu::Device) -> wgpu::TextureView {
-    device
-        .create_texture(&wgpu::TextureDescriptor {
-            label: Some("no marks"),
-            size: wgpu::Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: MARKS_FORMAT,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        })
-        .create_view(&wgpu::TextureViewDescriptor::default())
+    gpu::texture_2d(
+        device,
+        "no marks",
+        [1, 1],
+        MARKS_FORMAT,
+        wgpu::TextureUsages::TEXTURE_BINDING,
+    )
+    .create_view(&wgpu::TextureViewDescriptor::default())
 }
 
 /// A texel of map and a texel of table, for the pictures that have neither.
 fn blank_lift(device: &wgpu::Device, layout: &wgpu::BindGroupLayout) -> wgpu::BindGroup {
     let texel = |label: &str, format: wgpu::TextureFormat| {
-        device
-            .create_texture(&wgpu::TextureDescriptor {
-                label: Some(label),
-                size: wgpu::Extent3d {
-                    width: 1,
-                    height: 1,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            })
-            .create_view(&wgpu::TextureViewDescriptor::default())
+        gpu::texture_2d(
+            device,
+            label,
+            [1, 1],
+            format,
+            wgpu::TextureUsages::TEXTURE_BINDING,
+        )
+        .create_view(&wgpu::TextureViewDescriptor::default())
     };
     gpu::texture_group(
         device,
@@ -966,21 +929,13 @@ impl Upload {
 
         let plan = upload::plan(image, self.capabilities);
 
-        let size = wgpu::Extent3d {
-            width: image.width,
-            height: image.height,
-            depth_or_array_layers: 1,
-        };
-        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("image"),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: plan.format(),
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        let texture = gpu::texture_2d(
+            &self.device,
+            "image",
+            [image.width, image.height],
+            plan.format(),
+            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        );
 
         self.fill(&texture, &plan, image.width, image.height)?;
 

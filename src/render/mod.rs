@@ -553,23 +553,14 @@ impl Renderer {
 impl Targets {
     fn new(device: &wgpu::Device, width: u32, height: u32) -> Self {
         let make = |label: &str, format: wgpu::TextureFormat| {
-            device
-                .create_texture(&wgpu::TextureDescriptor {
-                    label: Some(label),
-                    size: wgpu::Extent3d {
-                        width,
-                        height,
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                        | wgpu::TextureUsages::TEXTURE_BINDING,
-                    view_formats: &[],
-                })
-                .create_view(&wgpu::TextureViewDescriptor::default())
+            gpu::texture_2d(
+                device,
+                label,
+                [width, height],
+                format,
+                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            )
+            .create_view(&wgpu::TextureViewDescriptor::default())
         };
 
         Self {

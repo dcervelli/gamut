@@ -95,20 +95,13 @@ fn render_to(
     target: [u32; 2],
     frame: impl FnOnce(&mut wgpu::CommandEncoder, &wgpu::TextureView),
 ) -> Vec<[f32; 4]> {
-    let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("filter test target"),
-        size: wgpu::Extent3d {
-            width: target[0],
-            height: target[1],
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: WORKING_FORMAT,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
-    });
+    let texture = gpu::texture_2d(
+        &gpu.device,
+        "filter test target",
+        target,
+        WORKING_FORMAT,
+        wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+    );
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
     // Readback rows are padded to the copy alignment, and trimmed below.
@@ -1359,16 +1352,13 @@ fn row_texture(
         height: 1,
         depth_or_array_layers: 1,
     };
-    let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("composite test source"),
-        size,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
+    let texture = gpu::texture_2d(
+        &gpu.device,
+        "composite test source",
+        [width, 1],
         format,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
+        wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+    );
     gpu.queue.write_texture(
         wgpu::TexelCopyTextureInfo {
             texture: &texture,

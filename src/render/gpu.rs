@@ -64,6 +64,31 @@ pub fn pipeline_layout(
     })
 }
 
+/// A texture of `size` texels of `format`, as every texture here is: two
+/// dimensions, one mip level, one sample, viewed as its own format.
+pub fn texture_2d(
+    device: &wgpu::Device,
+    label: &str,
+    size: [u32; 2],
+    format: wgpu::TextureFormat,
+    usage: wgpu::TextureUsages,
+) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d {
+            width: size[0],
+            height: size[1],
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage,
+        view_formats: &[],
+    })
+}
+
 /// A uniform buffer sized for one `T`, to be written with `Queue::write_buffer`.
 pub fn uniform_buffer<T>(device: &wgpu::Device, label: &str) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
